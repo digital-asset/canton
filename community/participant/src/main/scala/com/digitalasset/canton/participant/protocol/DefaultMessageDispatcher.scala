@@ -45,6 +45,7 @@ import scala.util.{Failure, Success}
 
 class DefaultMessageDispatcher(
     override protected val protocolVersion: ProtocolVersion,
+    override protected val uniqueContractKeys: Boolean,
     override protected val domainId: DomainId,
     override protected val participantId: ParticipantId,
     override protected val requestTracker: RequestTracker,

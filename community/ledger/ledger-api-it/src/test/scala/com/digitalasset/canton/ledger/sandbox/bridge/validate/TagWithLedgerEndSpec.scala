@@ -11,19 +11,23 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.IndexService
 import com.digitalasset.canton.ledger.sandbox.bridge.BridgeMetrics
 import com.digitalasset.canton.ledger.sandbox.domain.{Rejection, Submission}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.mockito.MockitoSugar
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
 import scala.util.chaining.*
 
-class TagWithLedgerEndSpec extends AnyFlatSpec with Matchers with MockitoSugar {
+class TagWithLedgerEndSpec
+    extends AnyFlatSpec
+    with Matchers
+    with MockitoSugar
+    with BaseTest
+    with HasExecutionContext {
+
   behavior of classOf[TagWithLedgerEndImpl].getSimpleName
 
-  // TODO(#13019) Avoid the global execution context
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
-  private implicit val ec: ExecutionContext = scala.concurrent.ExecutionContext.global
   private implicit val loggingContext: LoggingContextWithTrace = LoggingContextWithTrace.ForTesting
 
   private val indexServiceMock = mock[IndexService]

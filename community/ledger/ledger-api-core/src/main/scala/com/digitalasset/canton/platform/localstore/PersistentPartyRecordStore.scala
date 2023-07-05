@@ -8,6 +8,7 @@ import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.Party
 import com.daml.metrics.{DatabaseMetrics, Metrics}
 import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.IdentityProviderId
 import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator
@@ -40,7 +41,6 @@ object PersistentPartyRecordStore {
       extends RuntimeException
 
   final case class MaxAnnotationsSizeExceededException(party: Ref.Party) extends RuntimeException
-
 }
 
 class PersistentPartyRecordStore(
@@ -54,11 +54,11 @@ class PersistentPartyRecordStore(
 
   private implicit val ec: ExecutionContext = executionContext
 
+  private val directEc = DirectExecutionContext(logger)
+
   private val backend = dbSupport.storageBackendFactory.createPartyRecordStorageBackend
   private val dbDispatcher = dbSupport.dbDispatcher
 
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   override def createPartyRecord(partyRecord: PartyRecord)(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Result[PartyRecord]] = {
@@ -73,7 +73,7 @@ class PersistentPartyRecordStore(
       logger.info(
         s"Created new party record in participant local store: ${partyRecord}"
       )
-    })(scala.concurrent.ExecutionContext.parasitic)
+    })(directEc)
   }
 
   override def updatePartyRecord(
@@ -319,8 +319,6 @@ class PersistentPartyRecordStore(
     }
   }
 
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   private def inTransaction[T](
       dbMetric: metrics.daml.partyRecordStore.type => DatabaseMetrics
   )(
@@ -332,7 +330,7 @@ class PersistentPartyRecordStore(
         case ConcurrentPartyRecordUpdateDetectedRuntimeException(userId) =>
           Left(ConcurrentPartyUpdate(userId))
         case MaxAnnotationsSizeExceededException(userId) => Left(MaxAnnotationsSizeExceeded(userId))
-      }(ExecutionContext.parasitic)
+      }(directEc)
   }
 
   private def tapSuccess[T](f: T => Unit)(r: Result[T]): Result[T] = {

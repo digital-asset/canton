@@ -9,12 +9,13 @@ import com.daml.error.{
   DamlErrorWithDefiniteAnswer,
   ErrorCategory,
   ErrorCode,
+  ErrorGroup,
   ErrorResource,
   Explanation,
   Resolution,
 }
 
-object PartyManagementServiceErrorGroup extends AdminServices.PartyManagementServiceErrorGroup {
+object PartyManagementServiceErrorGroup extends ErrorGroup()(AdminServices.errorClass) {
 
   @Explanation("There was an attempt to update a party using an invalid update request.")
   @Resolution(

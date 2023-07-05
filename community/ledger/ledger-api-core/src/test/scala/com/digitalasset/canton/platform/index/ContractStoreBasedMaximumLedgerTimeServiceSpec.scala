@@ -8,6 +8,7 @@ import com.daml.lf.data.Ref.Party
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.transaction.GlobalKey
 import com.daml.lf.value.Value.{ContractId, VersionedContractInstance}
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
   ContractState,
   ContractStore,
@@ -15,14 +16,17 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
   MaximumLedgerTimeService,
 }
 import com.digitalasset.canton.logging.LoggingContextWithTrace
-import org.scalatest.Inside.inside
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.time.Instant
 import scala.concurrent.Future
 
-class ContractStoreBasedMaximumLedgerTimeServiceSpec extends AsyncFlatSpec with Matchers {
+class ContractStoreBasedMaximumLedgerTimeServiceSpec
+    extends AsyncFlatSpec
+    with Matchers
+    with BaseTest {
+
   import ContractState.*
   import com.digitalasset.canton.ledger.participant.state.index.v2.MaximumLedgerTime.*
 
@@ -239,21 +243,24 @@ class ContractStoreBasedMaximumLedgerTimeServiceSpec extends AsyncFlatSpec with 
 
   private def testeeWithFixture(fixture: (ContractId, ContractState)*): MaximumLedgerTimeService = {
     val fixtureMap = fixture.toMap
-    new ContractStoreBasedMaximumLedgerTimeService(new ContractStore {
-      override def lookupActiveContract(readers: Set[Party], contractId: ContractId)(implicit
-          loggingContext: LoggingContextWithTrace
-      ): Future[Option[VersionedContractInstance]] =
-        throw new UnsupportedOperationException
+    new ContractStoreBasedMaximumLedgerTimeService(
+      new ContractStore {
+        override def lookupActiveContract(readers: Set[Party], contractId: ContractId)(implicit
+            loggingContext: LoggingContextWithTrace
+        ): Future[Option[VersionedContractInstance]] =
+          throw new UnsupportedOperationException
 
-      override def lookupContractKey(readers: Set[Party], key: GlobalKey)(implicit
-          loggingContext: LoggingContextWithTrace
-      ): Future[Option[ContractId]] =
-        throw new UnsupportedOperationException
+        override def lookupContractKey(readers: Set[Party], key: GlobalKey)(implicit
+            loggingContext: LoggingContextWithTrace
+        ): Future[Option[ContractId]] =
+          throw new UnsupportedOperationException
 
-      override def lookupContractStateWithoutDivulgence(contractId: ContractId)(implicit
-          loggingContext: LoggingContextWithTrace
-      ): Future[ContractState] =
-        Future.successful(fixtureMap(contractId))
-    })
+        override def lookupContractStateWithoutDivulgence(contractId: ContractId)(implicit
+            loggingContext: LoggingContextWithTrace
+        ): Future[ContractState] =
+          Future.successful(fixtureMap(contractId))
+      },
+      loggerFactory,
+    )
   }
 }

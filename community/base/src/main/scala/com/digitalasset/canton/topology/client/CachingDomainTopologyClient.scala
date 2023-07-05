@@ -373,6 +373,11 @@ private class ForwardingTopologySnapshotClient(
   /** returns the sequencer group if known */
   override def sequencerGroup(): Future[Option[SequencerGroup]] = parent.sequencerGroup()
 
+  override def allMembers(): Future[Set[Member]] = parent.allMembers()
+
+  override def isMemberKnown(member: Member): Future[Boolean] =
+    parent.isMemberKnown(member)
+
   override def findDynamicDomainParameters()(implicit
       traceContext: TraceContext
   ): Future[Either[String, DynamicDomainParametersWithValidity]] =
@@ -440,6 +445,11 @@ class CachingTopologySnapshot(
 
   private val sequencerGroupCache =
     new AtomicReference[Option[Future[Option[SequencerGroup]]]](None)
+
+  private val allMembersCache = new AtomicReference[Option[Future[Set[Member]]]](None)
+  private val memberCache = cachingConfigs.memberCache
+    .buildScaffeine()
+    .buildAsyncFuture[Member, Boolean](parent.isMemberKnown)
 
   private val domainParametersCache =
     new AtomicReference[Option[Future[Either[String, DynamicDomainParametersWithValidity]]]](None)
@@ -537,6 +547,12 @@ class CachingTopologySnapshot(
   /** returns the sequencer group if known */
   override def sequencerGroup(): Future[Option[SequencerGroup]] =
     getAndCache(sequencerGroupCache, parent.sequencerGroup())
+
+  /** returns the set of all known members */
+  override def allMembers(): Future[Set[Member]] = getAndCache(allMembersCache, parent.allMembers())
+
+  override def isMemberKnown(member: Member): Future[Boolean] =
+    memberCache.get(member)
 
   /** Returns the value if it is present in the cache. Otherwise, use the
     * `getter` to fetch it and cache the result.

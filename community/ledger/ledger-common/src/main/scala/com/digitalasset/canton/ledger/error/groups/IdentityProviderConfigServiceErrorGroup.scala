@@ -5,8 +5,7 @@ package com.digitalasset.canton.ledger.error.groups
 
 import com.daml.error.{DamlError, DamlErrorWithDefiniteAnswer, *}
 
-object IdentityProviderConfigServiceErrorGroup
-    extends AdminServices.IdentityProviderConfigServiceErrorGroup {
+object IdentityProviderConfigServiceErrorGroup extends ErrorGroup()(AdminServices.errorClass) {
 
   @Explanation(
     "There was an attempt to update an identity provider config using an invalid update request."

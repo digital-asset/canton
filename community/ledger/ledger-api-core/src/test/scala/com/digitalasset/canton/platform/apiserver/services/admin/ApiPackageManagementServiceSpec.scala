@@ -23,7 +23,6 @@ import com.daml.lf.engine.Engine
 import com.daml.lf.language.Ast.Expr
 import com.daml.lf.language.{Ast, LanguageVersion}
 import com.daml.lf.testing.parser.Implicits.defaultParserParameters
-import com.daml.logging.LoggingContext
 import com.daml.tracing.TelemetrySpecBase.*
 import com.daml.tracing.{DefaultOpenTelemetry, NoOpTelemetry}
 import com.digitalasset.canton.ledger.api.domain.LedgerOffset.Absolute
@@ -67,8 +66,6 @@ class ApiPackageManagementServiceSpec
     with BeforeAndAfterEach {
 
   import ApiPackageManagementServiceSpec.*
-
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
 
   var testTelemetrySetup: TestTelemetrySetup = _
 

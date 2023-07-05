@@ -6,14 +6,15 @@ package com.digitalasset.canton.platform.apiserver.execution
 import com.daml.lf.data.ImmArray
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.value.Value.ContractId
+import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
   MaximumLedgerTime,
   MaximumLedgerTimeService,
 }
-import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
 
 /** Computes the maximum ledger time of all used contracts in a submission by:
   * * Using the client-provided disclosed contracts `createdAt` timestamp
@@ -22,9 +23,13 @@ import scala.concurrent.{ExecutionContext, Future}
   *
   * @param maximumLedgerTimeService The MaximumLedgerTimeService.
   */
-class ResolveMaximumLedgerTime(maximumLedgerTimeService: MaximumLedgerTimeService) {
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
+class ResolveMaximumLedgerTime(
+    maximumLedgerTimeService: MaximumLedgerTimeService,
+    override protected val loggerFactory: NamedLoggerFactory,
+) extends NamedLogging {
+
+  private val directEc = DirectExecutionContext(logger)
+
   def apply(
       processedDisclosedContracts: ImmArray[ProcessedDisclosedContract],
       usedContractIds: Set[ContractId],
@@ -35,9 +40,7 @@ class ResolveMaximumLedgerTime(maximumLedgerTimeService: MaximumLedgerTimeServic
 
     maximumLedgerTimeService
       .lookupMaximumLedgerTimeAfterInterpretation(contractIdsToBeLookedUp)
-      .map(adjustTimeForDisclosedContracts(_, processedDisclosedContracts))(
-        ExecutionContext.parasitic
-      )
+      .map(adjustTimeForDisclosedContracts(_, processedDisclosedContracts))(directEc)
   }
 
   private def adjustTimeForDisclosedContracts(

@@ -795,7 +795,19 @@ class StoreBasedTopologySnapshot(
     */
   override def sequencerGroup(): Future[Option[SequencerGroup]] = Future.failed(
     new UnsupportedOperationException(
-      s"SequencerGroup lookup not supported by StoreBasedDomainTopologyClient. This is a coding bug."
+      "SequencerGroup lookup not supported by StoreBasedDomainTopologyClient. This is a coding bug."
+    )
+  )
+
+  override def allMembers(): Future[Set[Member]] = Future.failed(
+    new UnsupportedOperationException(
+      "Lookup of all members is not supported by StoredBasedDomainTopologyClient. This is a coding bug."
+    )
+  )
+
+  override def isMemberKnown(member: Member): Future[Boolean] = Future.failed(
+    new UnsupportedOperationException(
+      "Lookup of members via isMemberKnown is not supported by StoredBasedDomainTopologyClient. This is a coding bug."
     )
   )
 

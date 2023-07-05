@@ -8,6 +8,7 @@ import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{
   AuthenticatedContractIdVersion,
+  AuthenticatedContractIdVersionV2,
   CantonContractIdVersion,
   NonAuthenticatedContractIdVersion,
 }
@@ -91,7 +92,7 @@ final case class Salt private (private val salt: ByteString, private val algorit
         // For the unlikely case that a future protobuf library upgrade changes the serialization, we have to inline
         // the serializer code to produce the same serialization.
         toProtoV0.toByteString
-      case AuthenticatedContractIdVersion =>
+      case AuthenticatedContractIdVersion | AuthenticatedContractIdVersionV2 =>
         salt
     }
 

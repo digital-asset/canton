@@ -1,13 +1,12 @@
 // Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.ledger.api.grpc
+package com.digitalasset.canton.platform.apiserver.services
 
 import com.daml.ledger.api.testing.utils.MockMessages.*
 import com.daml.ledger.api.v1.commands.{Command, CreateCommand, DisclosedContract}
 import com.daml.ledger.api.v1.value.{Identifier, Record, RecordField, Value}
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.daml.tracing.{DefaultOpenTelemetry, SpanAttribute}
 import com.digitalasset.canton.BaseTest
@@ -27,14 +26,13 @@ import java.time.{Duration, Instant}
 import scala.concurrent.Future
 import scala.util.{Failure, Success}
 
-class GrpcCommandSubmissionServiceSpec
+class ApiCommandSubmissionServiceSpec
     extends AsyncWordSpec
     with MockitoSugar
     with Matchers
     with ArgumentMatchersSugar
     with BaseTest
     with BeforeAndAfterEach {
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
   private val generatedSubmissionId = "generated-submission-id"
 
   var testTelemetrySetup: TestTelemetrySetup = _
@@ -45,8 +43,8 @@ class GrpcCommandSubmissionServiceSpec
     testTelemetrySetup.close()
   }
 
-  import GrpcCommandSubmissionServiceSpec.*
-  "GrpcCommandSubmissionService" should {
+  import ApiCommandSubmissionServiceSpec.*
+  "ApiCommandSubmissionService" should {
     "propagate trace context" in {
       val span = testTelemetrySetup.anEmptySpan()
       val scope = span.makeCurrent()
@@ -78,7 +76,7 @@ class GrpcCommandSubmissionServiceSpec
       val requestWithSubmissionId =
         aSubmitRequest.update(_.commands.submissionId := expectedSubmissionId)
       val requestCaptor =
-        ArgCaptor[com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequest]
+        ArgCaptor[SubmitRequest]
       val mockCommandSubmissionService = mock[CommandSubmissionService & AutoCloseable]
       when(
         mockCommandSubmissionService
@@ -97,7 +95,7 @@ class GrpcCommandSubmissionServiceSpec
 
     "set submission id if empty" in {
       val requestCaptor =
-        ArgCaptor[com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequest]
+        ArgCaptor[SubmitRequest]
 
       val mockCommandSubmissionService = mock[CommandSubmissionService & AutoCloseable]
       when(
@@ -141,7 +139,7 @@ class GrpcCommandSubmissionServiceSpec
   private def grpcCommandSubmissionService(
       commandSubmissionService: CommandSubmissionService & AutoCloseable
   ) =
-    new GrpcCommandSubmissionService(
+    new ApiCommandSubmissionService(
       commandSubmissionService,
       ledgerId = LedgerId(ledgerId),
       currentLedgerTime = () => Instant.EPOCH,
@@ -155,7 +153,7 @@ class GrpcCommandSubmissionServiceSpec
     )
 }
 
-object GrpcCommandSubmissionServiceSpec {
+object ApiCommandSubmissionServiceSpec {
   private val aCommand = Command.of(
     Command.Command.Create(
       CreateCommand(

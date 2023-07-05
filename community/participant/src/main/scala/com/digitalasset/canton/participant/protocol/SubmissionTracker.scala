@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.protocol
 
 import com.daml.nameof.NameOf.functionFullName
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
@@ -20,8 +21,10 @@ import com.digitalasset.canton.participant.store.SubmissionTrackerStore
 import com.digitalasset.canton.protocol.{RequestId, RootHash}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.ExecutionContext
@@ -40,13 +43,17 @@ import scala.concurrent.ExecutionContext
   *   request.
   *
   * - Further during processing of Phase 3, when further information about the request is obtained, the participant
-  *   must either call `cancelRegistration()` when a request is deemed invalid and rejected immediately, or call
-  *   `provideSubmissionData()` with information about the submission when a request proceeds normally.
+  *   must either:
+  *   - call `cancelRegistration()` when a request is deemed invalid or does not contain root views (and
+  *   therefore was not submitted by this participant), or
+  *   - call `provideSubmissionData()` with information about the submission.
   *
   * - During phase 7, when finalizing the request, the participant must use the result of the `Future` returned during
   *   registration to determine whether the request requires a command completion.
   *
   * Calling the methods in a different order than described above will result in undefined behavior.
+  * Failure to call either `cancelRegistration()` or `provideSubmissionData()` after calling `register()` for a request
+  * may result in a deadlock.
   */
 trait SubmissionTracker extends AutoCloseable {
 
@@ -108,53 +115,187 @@ class SubmissionTrackerImpl private[protocol] (protocolVersion: ProtocolVersion)
     extends SubmissionTracker
     with FlagCloseableAsync
     with NamedLogging {
-  // Used to order the observed requests. Only the first occurrence is considered for further processing,
-  // the following ones are already known non-fresh.
-  private val ongoingRequests = TrieMap[RootHash, (RequestId, PromiseUnlessShutdown[Boolean])]()
+  // The incoming requests are stored in a map keyed by root hash and request ID when registered, so their associated
+  // data can be retrieved in the later calls.
+  //
+  // The main replay detection relies on a store that keeps track of which request ID was actually associated to a
+  // given root hash. When replays (or at least requests sharing the same root hash) come concurrently (that is, there
+  // is more than one between phases 3 and 7), the situation becomes more complicated. The following describes the
+  // mechanism to handle them.
+  //
+  // Requests that have the same root hash (potential replays) are linked together in a list following registration
+  // order. This order represents the priority for each request sharing the same root hash to become the "real" request
+  // that can effect the emission of a command completion.
+  //
+  // When a request is cancelled, it gives the opportunity to other requests registered later but sharing the same root
+  // hash to be selected.
+  //
+  // When a request is provided with its submission data, and it is the "first in line" (that is either the first in the
+  // linked list, or all the previous ones have been cancelled), the actual replay evaluation takes place for this
+  // request. The slot is effectively taken, and all other requests registered later (for the same root hash) will be
+  // denied the opportunity to be selected, whether they are cancelled or provided submission data.
+  //
+  // In other words: given a list of requests for a given root hash, ordered by sequencing time, only the first of these
+  // which has not been cancelled will be evaluated and possibly result in the emission of a command completion.
+  //
+  // Behavior in relation to crash recovery:
+  //
+  //  * Crash recovery does not clean up the submission tracker store. Therefore, if a request with ID `ts` was marked
+  //    as a fresh submission, it will be in the tracker store even if it is being reprocessed after crash recovery.
+  //    The idempotence of the store ensures that the resulting `requestIsValidFUS` nevertheless returns `true`.
+  //
+  //  * Suppose that, after a crash, the store may contain a request with a later request ID than the current request
+  //    (for the same root hash). This contradicts our deterministic reprocessing assumption: if the current request
+  //    attempts to be entered into the store in the current crash epoch, then it also would have attempted to do so
+  //    in the previous crash epoch and therefore the later request would not have gotten in.
+  //
+  //  * Repair requests do not modify request IDs or root hashes, only request counters. Therefore they cannot interfere
+  //    with this logic here.
+
+  /** Information about a registered request. These entries are linked together in order of registration on
+    * the same root hash.
+    *
+    * @param prevFUS   Future that results in the availability status from the previous request
+    * @param nextPUS   Promise that gives availability status for the next request when completed
+    * @param resultPUS Promise that says whether this request requires a command completion when completed
+    */
+  private case class Entry(
+      prevFUS: FutureUnlessShutdown[Boolean],
+      nextPUS: PromiseUnlessShutdown[Boolean],
+      resultPUS: PromiseUnlessShutdown[Boolean],
+  )
+
+  /** Data structure associated to a given root hash.
+    *
+    * @param tailFUS Future that results in the availability status from the tail request, i.e. the latest request
+    *                that was registered. This is NOT equivalent to the request in `reqMap` with the highest
+    *                request ID, because the tail request could already have been completed and been removed from `reqMap`.
+    * @param reqMap  Map of request entries currently registered with this root hash (for quick retrieval)
+    */
+  private case class RequestList(
+      tailFUS: FutureUnlessShutdown[Boolean],
+      reqMap: NonEmpty[Map[RequestId, Entry]],
+  )
+
+  private val pendingRequests = TrieMap[RootHash, RequestList]()
+
+  @VisibleForTesting
+  private[protocol] def internalSize: Int = pendingRequests.size
+
+  //   -----------------      -----------------      -----------------
+  //   |     Req 1     |      |     Req 2     |      |     Req 3     |
+  //   | prevF | nextP |----->| prevF | nextP |----->| prevF | nextP |
+  //   -----------------      -----------------      ------------^----
+  //                                                             |
+  //                                                             |
+  //             tail for the root hash H: ----(future of)-------/
+  //
+  // When a new request is registered for root hash H, it gets its `prevF` from the tail,
+  // creates a new `nextP` and its future becomes the new tail.
+  //
+  // `prevF` tells a request whether the slot is available.
+  // `nextP` is used by a request to tell the next in line whether the slot is available.
 
   override def register(rootHash: RootHash, requestId: RequestId)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Boolean] =
     performUnlessClosing(functionFullName) {
-      val resultPUS = new PromiseUnlessShutdown[Boolean](
-        s"submission-tracker-result-$rootHash-$requestId",
+      val nextPUS = new PromiseUnlessShutdown[Boolean](
+        s"available-for-next-$rootHash-$requestId",
         futureSupervisor,
       )
+      val resultPUS =
+        new PromiseUnlessShutdown[Boolean](s"result-$rootHash-$requestId", futureSupervisor)
 
-      ongoingRequests.putIfAbsent(rootHash, (requestId, resultPUS)) match {
-        case Some((_requestId, _resultP)) =>
-          // A previous request has already been observed for this transaction
-          resultPUS.outcome(false)
+      pendingRequests
+        .updateWith(rootHash) {
+          case Some(RequestList(tailFUS, reqMap)) =>
+            val newEntry = Entry(tailFUS, nextPUS, resultPUS)
+            Some(RequestList(nextPUS.futureUS, reqMap.updated(requestId, newEntry)))
 
-        case None =>
-        // No previous request has been observed for this transaction
-      }
+          case None => // We are the first request for this root hash
+            val newEntry = Entry(FutureUnlessShutdown.pure(true), nextPUS, resultPUS)
+            Some(RequestList(nextPUS.futureUS, NonEmpty(Map, requestId -> newEntry)))
+        }
+        .discard
 
       resultPUS.futureUS
     }.onShutdown(FutureUnlessShutdown.abortedDueToShutdown)
 
-  override def cancelRegistration(rootHash: RootHash, requestId: RequestId)(implicit
+  private def tryGetEntry(rootHash: RootHash, requestId: RequestId)(implicit
       traceContext: TraceContext
-  ): Unit =
-    ongoingRequests
+  ): Entry = {
+    val RequestList(_, reqMap) = pendingRequests.getOrElse(
+      rootHash,
+      ErrorUtil.internalError(new InternalError(s"Unknown rootHash: $rootHash")),
+    )
+    reqMap.getOrElse(
+      requestId,
+      ErrorUtil.internalError(new InternalError(s"Unknown requestId: $requestId")),
+    )
+  }
+
+  private def cleanup(rootHash: RootHash, requestId: RequestId)(implicit
+      traceContext: TraceContext
+  ): Unit = {
+    pendingRequests
       .updateWith(rootHash) {
-        case Some((`requestId`, resultPUS)) =>
-          // It is an ongoing request, complete it negatively and remove it
-          resultPUS.completeWith(FutureUnlessShutdown.pure(false))
+        case Some(RequestList(_, reqMap)) if reqMap.size == 1 =>
+          // We are the last request for this root hash
+          // Consistency check
+          if (!reqMap.contains(requestId)) {
+            ErrorUtil.internalError(
+              new InternalError(
+                s"Invalid state: requestId = $requestId, reqMap.keys = ${reqMap.keys}"
+              )
+            )
+          }
           None
 
-        case v => v // Ignore
+        case Some(RequestList(tailFUS, reqMap)) => // reqMap.size >= 2
+          // Consistency check
+          if (!reqMap.contains(requestId)) {
+            ErrorUtil.internalError(
+              new InternalError(
+                s"Invalid state: requestId = $requestId, reqMap.keys = ${reqMap.keys}"
+              )
+            )
+          }
+          // We can use `fromUnsafe` as the size is guaranteed >= 2
+          Some(RequestList(tailFUS, NonEmptyUtil.fromUnsafe(reqMap.removed(requestId))))
+
+        case None =>
+          ErrorUtil.internalError(new InternalError(s"Unknown rootHash: $rootHash"))
       }
       .discard
+  }
+
+  override def cancelRegistration(rootHash: RootHash, requestId: RequestId)(implicit
+      traceContext: TraceContext
+  ): Unit = {
+    val Entry(prevFUS, nextPUS, resultPUS) = tryGetEntry(rootHash, requestId)
+
+    // Fail this request
+    resultPUS.outcome(false)
+
+    // Propagate current availability
+    nextPUS.completeWith(prevFUS.thereafter(_ => cleanup(rootHash, requestId)))
+  }
 
   override def provideSubmissionData(
       rootHash: RootHash,
       requestId: RequestId,
       submissionData: SubmissionData,
-  )(implicit traceContext: TraceContext): Unit =
-    ongoingRequests
-      .updateWith(rootHash) {
-        case Some((`requestId`, resultPUS)) =>
+  )(implicit traceContext: TraceContext): Unit = {
+    val Entry(prevFUS, nextPUS, resultPUS) = tryGetEntry(rootHash, requestId)
+
+    // No matter what, the slot is no longer available for further requests
+    nextPUS.outcome(false)
+
+    FutureUtil.doNotAwait(
+      prevFUS.map { isAvailable =>
+        if (isAvailable) {
+          // The slot is available to us -- yay!
           val amParticipant = submissionData.submitterParticipant == participantId
 
           val requestIsValidFUS = if (protocolVersion <= ProtocolVersion.v4) {
@@ -175,31 +316,31 @@ class SubmissionTrackerImpl private[protocol] (protocolVersion: ProtocolVersion)
             }
           }
 
-          resultPUS.completeWith(requestIsValidFUS)
+          resultPUS.completeWith(requestIsValidFUS.thereafter { _ =>
+            // We can remove the tail of the chain if we are the last request, because at this point it
+            // is guaranteed that the store has been updated. All further requests on this root hash which
+            // are not cancelled will be blocked by the maxSequencingTime or the store.
+            cleanup(rootHash, requestId)
+          })
+        } else {
+          // The slot was already taken -- fail the request
+          resultPUS.outcome(false)
+          cleanup(rootHash, requestId)
+        }
+      }.unwrap,
+      s"Propagating availability when validating $requestId failed",
+    )
+  }
 
-          // The entry can be removed
-          None
-
-        case value @ Some(_) =>
-          // The root hash is associated to a different request, which is still ongoing.
-          // The caller's request was not inserted during registration, and its future has
-          // already been resolved with `false`.
-          // We keep the original entry.
-          value
-
-        case None =>
-          // The root hash is not associated to any request, the one that was associated to this
-          // root hash has already been completed.
-          // The caller's request was not inserted during registration, and its future has
-          // already been resolved with `false`.
-          // We keep the entry unassigned.
-          None
+  private def shutdown(): Unit = {
+    pendingRequests.values.foreach { case RequestList(_, reqMap) =>
+      reqMap.values.foreach { case Entry(_, nextPUS, resultPUS) =>
+        nextPUS.shutdown()
+        resultPUS.shutdown()
       }
-      .discard
-
-  private def shutdown(): Unit =
-    ongoingRequests.values.foreach { case (_requestId, resultPUS) => resultPUS.shutdown() }
+    }
+  }
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] =
-    Seq(SyncCloseable("submission-tracker-result-promises", shutdown()))
+    Seq(SyncCloseable("submission-tracker-promises", shutdown()))
 }

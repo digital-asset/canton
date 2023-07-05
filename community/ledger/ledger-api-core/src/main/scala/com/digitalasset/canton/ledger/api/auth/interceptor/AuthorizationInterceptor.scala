@@ -5,7 +5,6 @@ package com.digitalasset.canton.ledger.api.auth.interceptor
 
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.UserId
-import com.daml.logging.LoggingContext
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.auth.*
 import com.digitalasset.canton.ledger.api.domain
@@ -30,15 +29,14 @@ import scala.util.{Failure, Success, Try}
   *
   * @param userManagementStoreO - use None if user management is disabled
   */
-final class AuthorizationInterceptor(
+final case class AuthorizationInterceptor(
     authService: AuthService,
     userManagementStoreO: Option[UserManagementStore],
     identityProviderAwareAuthService: IdentityProviderAwareAuthService,
     telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
     implicit val ec: ExecutionContext,
-)(implicit loggingContext: LoggingContext)
-    extends ServerInterceptor
+) extends ServerInterceptor
     with NamedLogging {
 
   override def interceptCall[ReqT, RespT](
@@ -50,7 +48,7 @@ final class AuthorizationInterceptor(
     // Contexts are immutable and safe to pass around.
     val prevCtx = Context.current
 
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(telemetry)
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
     implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
 
     // The method interceptCall() must return a Listener.
@@ -235,25 +233,6 @@ object AuthorizationInterceptor {
     else
       Success(claimSet)
   }
-
-  def apply(
-      authService: AuthService,
-      userManagementStoreO: Option[UserManagementStore],
-      identityProviderAwareAuthService: IdentityProviderAwareAuthService,
-      telemetry: Telemetry,
-      loggerFactory: NamedLoggerFactory,
-      ec: ExecutionContext,
-  ): AuthorizationInterceptor =
-    LoggingContext.newLoggingContext { implicit loggingContext: LoggingContext =>
-      new AuthorizationInterceptor(
-        authService,
-        userManagementStoreO,
-        identityProviderAwareAuthService,
-        telemetry,
-        loggerFactory,
-        ec,
-      )
-    }
 
   def convertUserRightsToClaims(userRights: Set[UserRight]): Seq[Claim] = {
     userRights.view.map(userRightToClaim).toList.prepended(ClaimPublic)

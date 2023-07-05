@@ -6,10 +6,9 @@ package com.digitalasset.canton.platform.store.cache
 import com.daml.metrics.CacheMetrics
 import com.daml.metrics.api.MetricName
 import com.daml.metrics.api.noop.{NoOpMetricsFactory, NoOpTimer}
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.caching.{CaffeineCache, ConcurrentCache, SizedCache}
 import com.digitalasset.canton.ledger.offset.Offset
-import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.github.benmanes.caffeine.cache.Caffeine
 import org.mockito.MockitoSugar
 import org.scalatest.Assertion
@@ -19,7 +18,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.{FiniteDuration, *}
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.{Future, Promise}
 import scala.math.BigInt.long2bigInt
 import scala.util.Success
 
@@ -28,15 +27,10 @@ class StateCacheSpec
     with Matchers
     with MockitoSugar
     with Eventually
-    with BaseTest {
-  private val className = classOf[StateCache[_, _]].getSimpleName
+    with BaseTest
+    with HasExecutionContext {
 
-  private implicit val loggingContext: LoggingContextWithTrace = LoggingContextWithTrace.ForTesting
-
-  // TODO(#13019) Avoid the global execution context
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
-  override implicit def executionContext: ExecutionContext =
-    scala.concurrent.ExecutionContext.global
+  private val className = classOf[StateCache[?, ?]].getSimpleName
 
   private val cacheUpdateTimer = NoOpTimer("state_update")
 
@@ -159,9 +153,19 @@ class StateCacheSpec
     val stateCache = StateCache[String, String](offset(0L), cache, cacheUpdateTimer, loggerFactory)
 
     stateCache.putBatch(offset(2L), Map("key" -> "value"))
-    // `Put` at a decreasing validAt
-    stateCache.putBatch(offset(1L), Map("key" -> "earlier value"))
-    stateCache.putBatch(offset(2L), Map("key" -> "value at same validAt"))
+    loggerFactory.assertLogs(
+      within = {
+        // `Put` at a decreasing validAt
+        stateCache.putBatch(offset(1L), Map("key" -> "earlier value"))
+        stateCache.putBatch(offset(2L), Map("key" -> "value at same validAt"))
+      },
+      assertions = _.warningMessage should include(
+        "Ignoring incoming synchronous update at an index (Offset(Bytes(0100000001))) equal to or before the cache index (Offset(Bytes(0100000002)))"
+      ),
+      _.warningMessage should include(
+        "Ignoring incoming synchronous update at an index (Offset(Bytes(0100000002))) equal to or before the cache index (Offset(Bytes(0100000002)))"
+      ),
+    )
 
     verify(cache).putAll(Map("key" -> "value"))
     verifyNoMoreInteractions(cache)
@@ -195,7 +199,12 @@ class StateCacheSpec
     // Register async update to the cache
     val asyncUpdatePromise = Promise[String]()
     val putAsyncF =
-      stateCache.putAsync(asyncUpdateKey, Map(offset(2L) -> asyncUpdatePromise.future))
+      loggerFactory.assertLogs(
+        within = stateCache.putAsync(asyncUpdateKey, Map(offset(2L) -> asyncUpdatePromise.future)),
+        assertions = _.warningMessage should include(
+          "Pending updates tracker for other_key not registered. This could be due to a transient error causing a restart in the index service."
+        ),
+      )
 
     // Reset the cache
     stateCache.reset(offset(1L))
@@ -210,8 +219,6 @@ class StateCacheSpec
     }
   }
 
-  // TODO(#13019) Avoid the global execution context
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   private def buildStateCache(cacheSize: Long): StateCache[String, String] =
     StateCache[String, String](
       initialCacheIndex = Offset.beforeBegin,
@@ -223,7 +230,7 @@ class StateCacheSpec
       ),
       registerUpdateTimer = cacheUpdateTimer,
       loggerFactory = loggerFactory,
-    )(scala.concurrent.ExecutionContext.global)
+    )
 
   private def prepare(
       `number of competing updates`: Long,
@@ -250,8 +257,6 @@ class StateCacheSpec
     stateCache.pendingUpdates shouldBe empty
   }
 
-  // TODO(#13019) Avoid the global execution context
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   private def insertTimed(stateCache: StateCache[String, String])(
       insertions: Seq[(String, (Promise[String], String))]
   ): (Seq[Future[Unit]], FiniteDuration) =
@@ -269,7 +274,7 @@ class StateCacheSpec
               case _ => fail()
             },
           )
-          .map(_ => ())(scala.concurrent.ExecutionContext.global)
+          .map(_ => ())
       }
     }
 

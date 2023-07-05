@@ -67,8 +67,13 @@ case object NonAuthenticatedContractIdVersion extends CantonContractIdVersion {
 }
 
 case object AuthenticatedContractIdVersion extends CantonContractIdVersion {
-  // The prefix for the suffix of Canton contract IDs for contracts that can be authenticated (created in Protocol V4+)
+  // The prefix for the suffix of Canton contract IDs for contracts that can be authenticated (created in Protocol V4)
   lazy val versionPrefixBytes: Bytes = Bytes.fromByteArray(Array(0xca.toByte, 0x01.toByte))
+}
+
+case object AuthenticatedContractIdVersionV2 extends CantonContractIdVersion {
+  // The prefix for the suffix of Canton contract IDs for contracts that can be authenticated (created in Protocol V5+)
+  lazy val versionPrefixBytes: Bytes = Bytes.fromByteArray(Array(0xca.toByte, 0x02.toByte))
 }
 
 object ContractIdSyntax {

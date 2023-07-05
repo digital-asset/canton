@@ -9,6 +9,7 @@ import com.daml.error.{
   ErrorCategory,
   ErrorCategoryRetry,
   ErrorCode,
+  ErrorGroup,
   Explanation,
   Resolution,
 }
@@ -17,7 +18,7 @@ import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import scala.concurrent.duration.*
 
 @Explanation("Authentication and authorization errors.")
-object AuthorizationChecks extends LedgerApiErrors.AuthorizationChecks {
+object AuthorizationChecks extends ErrorGroup()(LedgerApiErrors.errorClass) {
 
   @Explanation("""The stream was aborted because the authenticated user's rights changed,
                  |and the user might thus no longer be authorized to this stream.

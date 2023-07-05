@@ -7,6 +7,7 @@ import com.daml.ledger.resources.ResourceOwner
 import com.daml.lf.data.Time.Timestamp
 import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
+import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.ParticipantMetering
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
@@ -25,7 +26,7 @@ import java.time.temporal.ChronoUnit
 import java.time.{OffsetDateTime, ZoneOffset}
 import java.util.{Timer, TimerTask}
 import scala.concurrent.duration.*
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.{Await, Future}
 import scala.util.{Failure, Success, Try}
 
 object MeteringAggregator {
@@ -37,8 +38,8 @@ object MeteringAggregator {
       metrics: Metrics,
       period: FiniteDuration = 6.minutes,
       maxTaskDuration: FiniteDuration = 6.hours,
-      loggerFactory: NamedLoggerFactory,
-  ) {
+      override protected val loggerFactory: NamedLoggerFactory,
+  ) extends NamedLogging {
 
     private[platform] def apply(
         dbDispatcher: DbDispatcher
@@ -62,7 +63,7 @@ object MeteringAggregator {
                 } match {
                   case Success(_) => ()
                   case Failure(e) =>
-                    aggregator.logger.error(s"Metering not aggregated after $maxTaskDuration", e)(
+                    logger.error(s"Metering not aggregated after $maxTaskDuration", e)(
                       TraceContext.empty
                     )
                 }
@@ -90,15 +91,14 @@ class MeteringAggregator(
     metrics: Metrics,
     dbDispatcher: DbDispatcher,
     clock: () => Timestamp = () => Timestamp.now(),
-    val loggerFactory: NamedLoggerFactory,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit traceContext: TraceContext)
     extends NamedLogging {
-  implicit val loggingContext: LoggingContextWithTrace = LoggingContextWithTrace(traceContext)(
-    LoggingContext.empty
-  )
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
-  private val parasitic: ExecutionContext = ExecutionContext.parasitic
+
+  private val directEc = DirectExecutionContext(logger)
+
+  private implicit val loggingContext: LoggingContextWithTrace =
+    LoggingContextWithTrace(traceContext)(LoggingContext.empty)
 
   private[platform] def initialize(): Future[Unit] = {
     val initTimestamp = toOffsetDateTime(clock()).truncatedTo(ChronoUnit.HOURS).minusHours(1)
@@ -155,9 +155,9 @@ class MeteringAggregator(
       case Success(Some(lme)) =>
         logger.info(s"Aggregating transaction metering completed up to $lme")
       case Failure(e) => logger.error("Failed to aggregate transaction metering", e)
-    })(parasitic)
+    })(directEc)
 
-    future.map(_ => ())(parasitic)
+    future.map(_ => ())(directEc)
   }
 
   private def aggregate(

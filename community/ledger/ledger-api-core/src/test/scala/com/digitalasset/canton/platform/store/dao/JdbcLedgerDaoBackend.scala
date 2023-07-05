@@ -12,6 +12,7 @@ import com.daml.metrics.Metrics
 import com.daml.metrics.api.dropwizard.DropwizardMetricsFactory
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.resources.PureResource
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.domain.{LedgerId, ParticipantId}
 import com.digitalasset.canton.logging.LoggingContextWithTrace.withNewLoggingContext
 import com.digitalasset.canton.logging.SuppressingLogger
@@ -51,7 +52,7 @@ object JdbcLedgerDaoBackend {
 
 }
 
-private[dao] trait JdbcLedgerDaoBackend extends AkkaBeforeAndAfterAll {
+private[dao] trait JdbcLedgerDaoBackend extends AkkaBeforeAndAfterAll with BaseTest {
   this: AsyncTestSuite =>
 
   protected def dbType: DbType
@@ -149,7 +150,7 @@ private[dao] trait JdbcLedgerDaoBackend extends AkkaBeforeAndAfterAll {
     // We use the dispatcher here because the default Scalatest execution context is too slow.
     implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
     ledgerEndCache = MutableLedgerEndCache()
-    stringInterningView = new StringInterningView()
+    stringInterningView = new StringInterningView(loggerFactory)
     resource = withNewLoggingContext() { implicit loggingContext =>
       for {
         dao <- daoOwner(

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.platform.store.backend
 
 import com.daml.ledger.resources.ResourceContext
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.platform.store.FlywayMigrations
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach, TestSuite}
@@ -23,8 +22,6 @@ trait StorageBackendSpec
     with BeforeAndAfterEach
     with BeforeAndAfterAll {
   this: TestSuite =>
-
-  implicit protected val loggingContext: LoggingContext = LoggingContext.ForTesting
 
   // Data source (initialized once)
   private var dataSource: DataSource = _

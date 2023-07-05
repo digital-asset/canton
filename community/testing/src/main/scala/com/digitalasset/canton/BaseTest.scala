@@ -76,7 +76,7 @@ trait TestEssentials
     SignedTopologyTransaction.protocolVersionRepresentativeFor(testedProtocolVersion)
 
   // default to providing an empty trace context to all tests
-  protected implicit def traceContext = TraceContext.empty
+  protected implicit def traceContext: TraceContext = TraceContext.empty
   // default to providing no reporting tracer to all tests
   protected implicit lazy val tracer: Tracer = NoReportingTracerProvider.tracer
 
@@ -86,11 +86,11 @@ trait TestEssentials
     W3CTraceContext("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01").toTraceContext
 
   // increase default patience from 5s to 20s to account for noisy CI neighbours
-  implicit override val defaultPatience =
+  implicit override val defaultPatience: PatienceConfig =
     PatienceConfig(timeout = Span(20, Seconds), interval = Span(25, Millis))
 
   // when mocking methods touching transactions it's very common to need to mock the traceContext as a an additional argument list
-  def anyTraceContext = ArgumentMatchers.any[TraceContext]()
+  def anyTraceContext: TraceContext = ArgumentMatchers.any[TraceContext]()
 
   override val loggerFactory: SuppressingLogger = SuppressingLogger(getClass)
 
@@ -110,7 +110,7 @@ trait TestEssentials
   lazy val directExecutionContext: ExecutionContext = DirectExecutionContext(logger)
 }
 
-/** Base traits for tests. Makes syntactic sugar available.
+/** Base traits for tests. Makes syntactic sugar and logging available.
   */
 trait BaseTest
     extends TestEssentials
@@ -127,7 +127,7 @@ trait BaseTest
   import scala.language.implicitConversions
 
   // TODO(#12373) Adapt when releasing BFT
-  protected val testTrafficState = testedProtocolVersion >= ProtocolVersion.dev
+  protected val testTrafficState: Boolean = testedProtocolVersion >= ProtocolVersion.dev
 
   protected def whenTestTrafficState[K, V](m: Map[K, V]): Map[K, V] =
     if (testTrafficState) m else Map.empty
@@ -140,13 +140,13 @@ trait BaseTest
     eitherTFuture.valueOr(err => fail(s"Unexpected left value $err"))
 
   def clue[T](message: String)(expr: => T): T = {
-    logger.debug(s"Running clue: ${message}")
+    logger.debug(s"Running clue: $message")
     Try(expr) match {
       case Success(value) =>
-        logger.debug(s"Finished clue: ${message}")
+        logger.debug(s"Finished clue: $message")
         value
       case Failure(ex) =>
-        logger.error(s"Failed clue: ${message}", ex)
+        logger.error(s"Failed clue: $message", ex)
         throw ex
     }
   }
@@ -359,11 +359,12 @@ object BaseTest {
   lazy val defaultStaticDomainParameters: StaticDomainParameters =
     defaultStaticDomainParametersWith()
 
-  lazy val defaultMaxRatePerParticipant =
+  lazy val defaultMaxRatePerParticipant: NonNegativeInt =
     defaultStaticDomainParameters.maxRatePerParticipant: @nowarn("msg=deprecated")
-  lazy val defaultMaxRequestSize = defaultStaticDomainParameters.maxRequestSize: @nowarn(
-    "msg=deprecated"
-  )
+  lazy val defaultMaxRequestSize: MaxRequestSize =
+    defaultStaticDomainParameters.maxRequestSize: @nowarn(
+      "msg=deprecated"
+    )
 
   def defaultStaticDomainParametersWith(
       maxRatePerParticipant: Int = StaticDomainParameters.defaultMaxRatePerParticipant.unwrap,

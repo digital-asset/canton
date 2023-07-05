@@ -95,6 +95,12 @@ object LoggingContextWithTrace {
     }
   }
 
+  def enriched[A](
+      entry: LoggingEntry,
+      entries: LoggingEntry*
+  )(implicit loggingContextWithTrace: LoggingContextWithTrace): LoggingContextWithTrace =
+    withEnrichedLoggingContext(entry, entries: _*)(identity)
+
   def withNewLoggingContext[A](entries: LoggingEntry*)(
       f: LoggingContextWithTrace => A
   )(implicit traceContext: TraceContext): A = {

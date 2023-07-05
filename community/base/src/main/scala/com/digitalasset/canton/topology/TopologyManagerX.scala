@@ -91,7 +91,9 @@ class TopologyManagerX(
   ): EitherT[FutureUnlessShutdown, TopologyManagerError, GenericSignedTopologyTransactionX] = {
     logger.debug(show"Attempting to build, sign, and ${op} ${mapping} with serial $serial")
     for {
-      tx <- build(op, mapping, serial, protocolVersion).mapK(FutureUnlessShutdown.outcomeK)
+      tx <- build(op, mapping, serial, protocolVersion, signingKeys).mapK(
+        FutureUnlessShutdown.outcomeK
+      )
       signedTx <- signTransaction(tx, signingKeys, isProposal = !expectFullAuthorization)
         .mapK(FutureUnlessShutdown.outcomeK)
       _ <- add(Seq(signedTx), force = force, expectFullAuthorization)
@@ -148,6 +150,7 @@ class TopologyManagerX(
       mapping: M,
       serial: Option[PositiveInt],
       protocolVersion: ProtocolVersion,
+      newSigningKeys: Seq[Fingerprint],
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TopologyManagerError, TopologyTransactionX[Op, M]] = {
@@ -162,7 +165,20 @@ class TopologyManagerX(
       existingTransaction = existingTransactions
         .sortBy(_.transaction.serial)
         .lastOption
-        .map(t => (t.transaction.op, t.transaction.mapping, t.transaction.serial))
+        .map(t => (t.transaction.op, t.transaction.mapping, t.transaction.serial, t.signatures))
+
+      // If the same operation and mapping is proposed repeatedly, insist that
+      // new keys are being added. Otherwise reject consistently with daml 2.x-based topology management.
+      _ <- existingTransaction match {
+        case Some((`op`, `mapping`, _, existingSignatures)) if op == TopologyChangeOpX.Replace =>
+          EitherT.cond[Future][TopologyManagerError, Unit](
+            (newSigningKeys.toSet -- existingSignatures.map(_.signedBy).toSet).nonEmpty,
+            (),
+            TopologyManagerError.MappingAlreadyExists
+              .FailureX(mapping, existingSignatures.map(_.signedBy)),
+          )
+        case _ => EitherT.rightT[Future, TopologyManagerError](())
+      }
 
       theSerial <- ((existingTransaction, serial) match {
         case (None, None) =>
@@ -179,20 +195,20 @@ class TopologyManagerX(
         // TODO(#11255) existing mapping and the proposed mapping are the same. does this only add a (superfluous) signature?
         //              maybe we should reject this proposal, but for now we need this to pass through successfully, because we don't
         //              support proper topology transaction validation yet, especially not for multi-sig transactions.
-        case (Some((`op`, `mapping`, existingSerial)), None) =>
+        case (Some((`op`, `mapping`, existingSerial, _)), None) =>
           // auto-select existing
           EitherT.rightT(existingSerial)
-        case (Some((`op`, `mapping`, existingSerial)), Some(proposed)) =>
+        case (Some((`op`, `mapping`, existingSerial, _)), Some(proposed)) =>
           EitherT.cond[Future](
             existingSerial == proposed,
             existingSerial,
             TopologyManagerError.SerialMismatch.Failure(existingSerial, proposed),
           )
 
-        case (Some((_, _, existingSerial)), None) =>
+        case (Some((_, _, existingSerial, _)), None) =>
           // auto-select existing+1
           EitherT.rightT(existingSerial + PositiveInt.one)
-        case (Some((_, _, existingSerial)), Some(proposed)) =>
+        case (Some((_, _, existingSerial, _)), Some(proposed)) =>
           // check that the proposed serial matches existing+1
           val next = existingSerial + PositiveInt.one
           EitherT.cond[Future](

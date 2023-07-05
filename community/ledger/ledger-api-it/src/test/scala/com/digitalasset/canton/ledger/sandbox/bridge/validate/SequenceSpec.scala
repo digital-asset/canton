@@ -62,14 +62,20 @@ class SequenceSpec extends AnyFlatSpec with BaseTest {
       )
     )
 
-    // Assert duplicate party allocation is rejected
-    sequence(partyUploadInput) shouldBe Iterable(
-      toOffset(2L) -> Update.PartyAllocationRejected(
-        submissionId = submissionId,
-        participantId = Ref.ParticipantId.assertFromString(participantName),
-        recordTime = currentRecordTime,
-        rejectionReason = "Party already exists",
-      )
+    loggerFactory.assertLogs(
+      within =
+        // Assert duplicate party allocation is rejected
+        sequence(partyUploadInput) shouldBe Iterable(
+          toOffset(2L) -> Update.PartyAllocationRejected(
+            submissionId = submissionId,
+            participantId = Ref.ParticipantId.assertFromString(participantName),
+            recordTime = currentRecordTime,
+            rejectionReason = "Party already exists",
+          )
+        ),
+      assertions = _.warningMessage should include(
+        "Found duplicate party 'some-party' for submissionId some-submission-id"
+      ),
     )
   }
 
@@ -361,6 +367,7 @@ class SequenceSpec extends AnyFlatSpec with BaseTest {
       None,
       Time.Timestamp.Epoch,
       Hash.hashPrivateKey("a key"),
+      None,
       None,
       None,
       None,

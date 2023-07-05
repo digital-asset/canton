@@ -20,13 +20,7 @@ import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.{
   AuthorityOfResponse,
   PartyInfo,
 }
-import com.digitalasset.canton.topology.store.{
-  StoredTopologyTransactionX,
-  StoredTopologyTransactionsX,
-  TimeQueryX,
-  TopologyStoreId,
-  TopologyStoreX,
-}
+import com.digitalasset.canton.topology.store.*
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
@@ -609,7 +603,6 @@ class StoreBasedTopologySnapshotX(
         s"Participants lookup not supported by StoreBasedDomainTopologyClientX. This is a coding bug."
       )
     )
-
   override def findParticipantCertificate(participantId: ParticipantId)(implicit
       traceContext: TraceContext
   ): Future[Option[LegalIdentityClaimEvidence.X509Cert]] =
@@ -634,6 +627,67 @@ class StoreBasedTopologySnapshotX(
       ).fold(keys)(_.keys.foldLeft(keys) { case (keys, key) => keys.addTo(key) })
     }
 
+  override def allMembers(): Future[Set[Member]] = {
+    findTransactions(
+      asOfInclusive = false,
+      types = Seq(
+        DomainTrustCertificateX.code,
+        MediatorDomainStateX.code,
+        SequencerDomainStateX.code,
+      ),
+      filterUid = None,
+      filterNamespace = None,
+    ).map(
+      _.result.view
+        .map(_.transaction.transaction.mapping)
+        .flatMap {
+          case dtc: DomainTrustCertificateX => Seq(dtc.participantId)
+          case mds: MediatorDomainStateX => mds.active ++ mds.observers
+          case sds: SequencerDomainStateX => sds.active ++ sds.observers
+          case _ => Seq.empty
+        }
+        .toSet
+    )
+  }
+
+  override def isMemberKnown(member: Member): Future[Boolean] = {
+    member match {
+      case ParticipantId(pid) =>
+        findTransactions(
+          asOfInclusive = false,
+          types = Seq(DomainTrustCertificateX.code),
+          filterUid = Some(Seq(pid)),
+          filterNamespace = None,
+        ).map(_.result.nonEmpty)
+      case mediatorId @ MediatorId(_) =>
+        findTransactions(
+          asOfInclusive = false,
+          types = Seq(MediatorDomainStateX.code),
+          filterUid = None,
+          filterNamespace = None,
+        ).map(
+          _.collectOfMapping[MediatorDomainStateX].result
+            .exists(_.transaction.transaction.mapping.allMediatorsInGroup.contains(mediatorId))
+        )
+      case sequencerId @ SequencerId(_) =>
+        findTransactions(
+          asOfInclusive = false,
+          types = Seq(SequencerDomainStateX.code),
+          filterUid = None,
+          filterNamespace = None,
+        ).map(
+          _.collectOfMapping[SequencerDomainStateX].result
+            .exists(_.transaction.transaction.mapping.allSequencers.contains(sequencerId))
+        )
+      case _ =>
+        Future.failed(
+          new IllegalArgumentException(
+            s"Checking whether member is known for an unexpected member type: $member"
+          )
+        )
+    }
+  }
+
   private def collectLatestMapping[T <: TopologyMappingX](
       typ: TopologyMappingX.Code,
       transactions: Seq[StoredTopologyTransactionX[TopologyChangeOpX.Replace, T]],
@@ -643,7 +697,7 @@ class StoreBasedTopologySnapshotX(
       typ: TopologyMappingX.Code,
       transactions: Seq[StoredTopologyTransactionX[TopologyChangeOpX.Replace, T]],
   ): Option[StoredTopologyTransactionX[TopologyChangeOpX.Replace, T]] = {
-    if (transactions.size > 1) {
+    if (transactions.sizeCompare(1) > 0) {
       logger.warn(s"Expected unique \"${typ.code}\", but found multiple instances")
       transactions
         .foldLeft(CantonTimestamp.Epoch) { case (previous, tx) =>

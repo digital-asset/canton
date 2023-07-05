@@ -114,12 +114,12 @@ object SignedContent
   override protected def name: String = "SignedContent"
 
   override def supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.SignedContent)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.SignedContent)(
       supportedProtoVersion(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
     // TODO(#12373) Adapt when releasing BFT
-    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.dev)(v1.SignedContent)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.dev)(v1.SignedContent)(
       supportedProtoVersion(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),

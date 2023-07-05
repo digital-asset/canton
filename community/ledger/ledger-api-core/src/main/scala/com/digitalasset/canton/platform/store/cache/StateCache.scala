@@ -30,7 +30,7 @@ private[platform] case class StateCache[K, V](
     initialCacheIndex: Offset,
     cache: Cache[K, V],
     registerUpdateTimer: Timer,
-    val loggerFactory: NamedLoggerFactory,
+    loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
   private[cache] val pendingUpdates = mutable.Map.empty[K, PendingUpdatesState]

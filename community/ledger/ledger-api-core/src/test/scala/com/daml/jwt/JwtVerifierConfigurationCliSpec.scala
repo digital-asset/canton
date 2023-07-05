@@ -15,6 +15,7 @@ import com.digitalasset.canton.ledger.api.auth.{
   AuthServiceWildcard,
   ClaimPublic,
 }
+import com.digitalasset.canton.logging.SuppressingLogger
 import io.grpc.Metadata
 import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.cert.jcajce.{JcaX509CertificateConverter, JcaX509v3CertificateBuilder}
@@ -37,8 +38,11 @@ import scala.jdk.FutureConverters.*
 class JwtVerifierConfigurationCliSpec extends AsyncWordSpec with OptionValues with Matchers {
   Security.addProvider(new BouncyCastleProvider)
 
+  val loggerFactory = SuppressingLogger(getClass)
+
   "auth command-line parsers" should {
     "parse and configure the authorisation mechanism correctly when `--auth-jwt-hs256-unsafe <secret>` is passed" in {
+
       val secret = "someSecret"
       val authService = parseConfig(Array("--auth-jwt-hs256-unsafe", secret)).value
       val token = JWT.create().sign(Algorithm.HMAC256(secret))

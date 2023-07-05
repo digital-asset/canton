@@ -325,12 +325,53 @@ abstract class TransactionTreeFactoryImpl(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionTreeConversionError, Seq[TransactionView]] = {
-    // Creating the views sequentially
-    MonadUtil.sequentialTraverse(
-      decompositions.zip(MerkleSeq.indicesFromSeq(decompositions.size))
-    ) { case (rootView, index) =>
-      createView(rootView, index +: ViewPosition.root, state, contractOfId)
+
+    // collect all contract ids referenced
+    val preloadCids = Set.newBuilder[LfContractId]
+    def go(view: TransactionViewDecomposition.NewView): Unit = {
+      preloadCids.addAll(
+        LfTransactionUtil.usedContractId(view.rootNode).toList
+      )
+      preloadCids.addAll(
+        view.tailNodes
+          .flatMap(x => LfTransactionUtil.usedContractId(x.lfNode))
+          .toList
+      )
+      view.childViews.foreach(go)
     }
+    decompositions.foreach(go)
+
+    // prefetch contracts using resolver. while we execute this on each contract individually,
+    // we know that the contract loader will batch these requests together at the level of the contract
+    // store
+    EitherT
+      .right(
+        preloadCids
+          .result()
+          .toList
+          .parTraverse(cid => contractOfId(cid).value.map((cid, _)))
+          .map(_.toMap)
+      )
+      .flatMap { preloaded =>
+        def fromPreloaded(
+            cid: LfContractId
+        ): EitherT[Future, ContractLookupError, SerializableContract] = {
+          preloaded.get(cid) match {
+            case Some(value) => EitherT.fromEither(value)
+            case None =>
+              // if we ever missed a contract during prefetching due to mistake, then we can
+              // fallback to the original loader
+              logger.warn(s"Prefetch missed ${cid}")
+              contractOfId(cid)
+          }
+        }
+        // Creating the views sequentially
+        MonadUtil.sequentialTraverse(
+          decompositions.zip(MerkleSeq.indicesFromSeq(decompositions.size))
+        ) { case (rootView, index) =>
+          createView(rootView, index +: ViewPosition.root, state, fromPreloaded)
+        }
+      }
   }
 
   protected def createView(

@@ -4,9 +4,10 @@
 package com.digitalasset.canton.ledger.api.auth
 
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
-import com.daml.logging.LoggingContext
+import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.auth.interceptor.AuthorizationInterceptor
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore
 import io.grpc.{Status, StatusRuntimeException}
 import org.mockito.MockitoSugar
@@ -24,6 +25,9 @@ class AuthorizerSpec
     with Matchers
     with MockitoSugar
     with AkkaBeforeAndAfterAll {
+
+  private implicit val loggingContext: LoggingContextWithTrace = LoggingContextWithTrace.ForTesting
+
   private val className = classOf[Authorizer].getSimpleName
   private val dummyRequest = 1337L
   private val expectedSuccessfulResponse = "expectedSuccessfulResponse"
@@ -79,6 +83,7 @@ class AuthorizerSpec
     mock[ExecutionContext],
     userRightsCheckIntervalInSeconds = 1,
     akkaScheduler = system.scheduler,
+    telemetry = NoOpTelemetry,
     loggerFactory = loggerFactory,
-  )(LoggingContext.ForTesting)
+  )
 }

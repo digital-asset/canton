@@ -306,6 +306,10 @@ object LedgerSyncEvent {
     def kind: String
     def isTransferringParticipant: Boolean
     def workflowId: Option[LfWorkflowId]
+    def contractId: LfContractId
+
+    override def description: String =
+      s"transferred-$kind $contractId from $sourceDomain to $targetDomain"
   }
 
   // TODO(#12373) Adapt when releasing BFT
@@ -349,9 +353,6 @@ object LedgerSyncEvent {
 
     def updateRecordTime(newRecordTime: LfTimestamp): TransferredOut =
       this.focus(_.transferId.transferOutTimestamp).replace(CantonTimestamp(newRecordTime))
-
-    override def description: String =
-      s"transferred-out ${contractId} from $sourceDomain to $targetDomain"
 
     override def kind: String = "out"
 
@@ -436,8 +437,6 @@ object LedgerSyncEvent {
       transferCounter: TransferCounter,
   ) extends TransferEvent {
 
-    override def description: String =
-      s"transferred-in ${createNode.coid} from $targetDomain to ${sourceDomain}"
     override def pretty: Pretty[TransferredIn] = prettyOfClass(
       param("updateId", _.updateId),
       param("ledgerCreateTime", _.ledgerCreateTime),
@@ -455,6 +454,8 @@ object LedgerSyncEvent {
 
     override def kind: String = "in"
 
+    override def contractId: LfContractId = createNode.coid
+
     override def domainId: Option[DomainId] = Option(targetDomain.id)
 
     private lazy val transactionMeta: TransactionMeta = TransactionMeta(
@@ -465,6 +466,7 @@ object LedgerSyncEvent {
       optUsedPackages = None,
       optNodeSeeds = None,
       optByKeyNodes = None,
+      optDomainId = Some(targetDomain.unwrap),
     )
 
     /** Workaround to create an update for informing the ledger API server about a transferred-in contract.

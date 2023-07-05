@@ -77,6 +77,8 @@ object Recipient {
                 .create(groupInt)
                 .leftMap(e => InvariantViolation(e.message))
             } yield MediatorsOfDomain(group)
+          case AllMembersOfDomain.Code =>
+            Right(AllMembersOfDomain)
         }
       } yield groupRecipient
   }
@@ -95,6 +97,7 @@ object GroupRecipientCode {
       case ParticipantsOfParty.Code.threeLetterId => Right(ParticipantsOfParty.Code)
       case SequencersOfDomain.Code.threeLetterId => Right(SequencersOfDomain.Code)
       case MediatorsOfDomain.Code.threeLetterId => Right(MediatorsOfDomain.Code)
+      case AllMembersOfDomain.Code.threeLetterId => Right(AllMembersOfDomain.Code)
       case _ => Left(s"Unknown three letter type $code")
     }
 
@@ -175,4 +178,16 @@ object MediatorsOfDomain {
   val TopologyTransactionMediatorGroup: MediatorsOfDomain = MediatorsOfDomain(
     NonNegativeInt.zero
   )
+}
+
+case object AllMembersOfDomain extends GroupRecipient {
+  override def pretty: Pretty[AllMembersOfDomain.type] =
+    prettyOfString(_ => suffix)
+
+  override def code: GroupRecipientCode = Code
+
+  override def suffix: String = "All"
+  object Code extends GroupRecipientCode {
+    val threeLetterId: String3 = String3.tryCreate("ALL")
+  }
 }

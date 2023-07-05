@@ -5,12 +5,10 @@ package com.digitalasset.canton.ledger.error
 
 import com.daml.error.*
 
-import ErrorGroups.ParticipantErrorGroup.CommonErrorGroup
-
 @Explanation(
   "Common errors raised in Daml services and components."
 )
-object CommonErrors extends CommonErrorGroup {
+object CommonErrors extends ErrorGroup()(ParticipantErrorGroup.errorClass) {
 
   @Explanation(
     """This error category is used to signal that an unimplemented code-path has been triggered by a client or participant operator request."""

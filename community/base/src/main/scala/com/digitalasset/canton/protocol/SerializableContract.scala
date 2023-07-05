@@ -156,7 +156,7 @@ object SerializableContract
           Left(
             s"Disclosed contract with non-authenticated contract id: ${disclosedContract.contractId.toString}"
           )
-        case AuthenticatedContractIdVersion => Right(())
+        case AuthenticatedContractIdVersion | AuthenticatedContractIdVersionV2 => Right(())
       }
       salt <- {
         if (driverContractMetadataBytes.isEmpty)

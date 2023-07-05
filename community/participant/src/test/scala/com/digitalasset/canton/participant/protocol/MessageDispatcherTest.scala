@@ -8,6 +8,7 @@ import cats.syntax.option.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{Encrypted, HashPurpose, TestHash}
+import com.digitalasset.canton.data.ViewType.{TransferInViewType, TransferOutViewType}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
@@ -75,7 +76,8 @@ import org.scalatest.wordspec.AnyWordSpec
 import java.util.UUID
 import scala.concurrent.{ExecutionContext, Future}
 
-trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorService =>
+trait MessageDispatcherTest {
+  this: AnyWordSpec with BaseTest with HasExecutorService =>
 
   implicit lazy val executionContext: ExecutionContext = executorService
 
@@ -110,6 +112,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
     def mk(
         mkMd: (
             ProtocolVersion,
+            Boolean,
             DomainId,
             ParticipantId,
             RequestTracker,
@@ -129,6 +132,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
           FutureUnlessShutdown.unit,
         processingRequestHandlerF: => HandlerResult = HandlerResult.done,
         processingResultHandlerF: => HandlerResult = HandlerResult.done,
+        uck: Option[Boolean] = None,
     ): Fixture = {
       val requestTracker = mock[RequestTracker]
 
@@ -244,6 +248,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
 
       val messageDispatcher = mkMd(
         testedProtocolVersion,
+        uck.getOrElse(defaultStaticDomainParameters.uniqueContractKeys),
         domainId,
         participantId,
         requestTracker,
@@ -293,6 +298,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
 
   private def emptyEncryptedViewTree =
     Encrypted.fromByteString[CompressedView[MockViewTree]](ByteString.EMPTY).value
+
   private val encryptedTestView = EncryptedView(TestViewType)(emptyEncryptedViewTree)
   private val encryptedTestViewMessage =
     EncryptedViewMessageV0(
@@ -340,6 +346,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
   protected def messageDispatcher(
       mkMd: (
           ProtocolVersion,
+          Boolean,
           DomainId,
           ParticipantId,
           RequestTracker,
@@ -361,8 +368,9 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
     def mk(
         initRc: RequestCounter = RequestCounter(0),
         cleanReplaySequencerCounter: SequencerCounter = SequencerCounter(0),
+        uck: Option[Boolean] = None,
     ): Fixture =
-      Fixture.mk(mkMd, initRc, cleanReplaySequencerCounter)
+      Fixture.mk(mkMd, initRc, cleanReplaySequencerCounter, uck = uck)
 
     val idTx = DomainTopologyTransactionMessage
       .tryCreate(
@@ -505,7 +513,9 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
           .handleAll(signAndTrace(event))
           .onShutdown(fail(s"Encountered shutdown while handling $event"))
         _ <- sut.messageDispatcher.flush()
-      } yield { checks }
+      } yield {
+        checks
+      }
     }
 
     "handling a deliver event" should {
@@ -543,6 +553,71 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
           verify(sut.recordOrderPublisher).scheduleEmptyAcsChangePublication(isEq(sc), isEq(ts))
           checkTicks(sut, sc, ts)
         }.futureValue
+      }
+    }
+
+    List(
+      DisabledTransferTestData(
+        "in",
+        TransferInViewType,
+        EncryptedView(TransferInViewType)(
+          Encrypted.fromByteString[CompressedView[FullTransferInTree]](ByteString.EMPTY).value
+        ),
+      ),
+      DisabledTransferTestData(
+        "out",
+        TransferOutViewType,
+        EncryptedView(TransferOutViewType)(
+          Encrypted.fromByteString[CompressedView[FullTransferOutTree]](ByteString.EMPTY).value
+        ),
+      ),
+    ).foreach { case DisabledTransferTestData(inOut, viewType, transferView) =>
+      s"transfer $inOut requests" should {
+        "not be let through if UCK is enabled" in {
+          val sut = mk(initRc = RequestCounter(-12), uck = Some(true))
+          val encryptedTransferViewMessage =
+            EncryptedViewMessageV0(
+              None,
+              ViewHash(TestHash.digest(9002)),
+              Map.empty,
+              transferView,
+              domainId,
+            )
+          val rootHashMessage =
+            RootHashMessage(
+              rootHash(1),
+              domainId,
+              testedProtocolVersion,
+              viewType,
+              SerializedRootHashMessagePayload.empty,
+            )
+          val event = mkDeliver(
+            Batch.of[ProtocolMessage](
+              testedProtocolVersion,
+              encryptedTransferViewMessage -> Recipients.cc(participantId),
+              rootHashMessage -> Recipients.cc(participantId, mediatorId),
+            ),
+            SequencerCounter(11),
+            CantonTimestamp.ofEpochSecond(11),
+          )
+
+          val error = loggerFactory
+            .assertLogs(
+              sut.messageDispatcher.handleAll(signAndTrace(event)).failed,
+              loggerFactory.checkLogsInternalError[IllegalArgumentException](
+                _.getMessage should include(
+                  "Domain transfers are not supported with unique contract keys"
+                )
+              ),
+              _.errorMessage should include("event processing failed."),
+            )
+            .futureValue
+
+          error shouldBe a[IllegalArgumentException]
+          error.getMessage should include(
+            "Domain transfers are not supported with unique contract keys"
+          )
+        }
       }
     }
 
@@ -1205,6 +1280,12 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
 }
 
 private[protocol] object MessageDispatcherTest {
+
+  final case class DisabledTransferTestData[A <: ViewType](
+      inOut: String,
+      viewType: ViewType.TransferViewType,
+      view: EncryptedView[A],
+  )
 
   // The message dispatcher only sees encrypted view trees, so there's no point in implementing the methods.
   sealed trait MockViewTree extends ViewTree with HasVersionedToByteString

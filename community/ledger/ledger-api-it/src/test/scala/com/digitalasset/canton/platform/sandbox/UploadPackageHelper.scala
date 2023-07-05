@@ -15,6 +15,7 @@ import com.digitalasset.canton.ledger.client.services.admin.PackageManagementCli
 import com.digitalasset.canton.ledger.client.withoutledgerid.LedgerClient
 import com.digitalasset.canton.ledger.runner.common.Config
 import com.digitalasset.canton.ledger.sandbox.SandboxOnXForTest
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.google.protobuf
 
 import java.io.File
@@ -23,14 +24,29 @@ import scala.concurrent.{ExecutionContext, Future}
 
 object UploadPackageHelper extends SandboxRequiringAuthorizationFuns {
 
-  def adminLedgerClient(port: Port, config: Config, jwtSecret: String)(implicit
+  def adminLedgerClient(
+      port: Port,
+      config: Config,
+      jwtSecret: String,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
       ec: ExecutionContext,
       esf: ExecutionSequencerFactory,
   ): LedgerClient = {
-    adminLedgerClient(port, config, Some(toHeader(adminTokenStandardJWT, secret = jwtSecret)))
+    adminLedgerClient(
+      port,
+      config,
+      Some(toHeader(adminTokenStandardJWT, secret = jwtSecret)),
+      loggerFactory,
+    )
   }
 
-  def adminLedgerClient(port: Port, config: Config, token: Option[String])(implicit
+  def adminLedgerClient(
+      port: Port,
+      config: Config,
+      token: Option[String],
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
       ec: ExecutionContext,
       esf: ExecutionSequencerFactory,
   ): LedgerClient = {
@@ -47,6 +63,7 @@ object UploadPackageHelper extends SandboxRequiringAuthorizationFuns {
       port = port.value,
       configuration = clientConfig,
       channelConfig = LedgerClientChannelConfiguration(sslContext),
+      loggerFactory,
     )
   }
 
@@ -72,5 +89,4 @@ object UploadPackageHelper extends SandboxRequiringAuthorizationFuns {
       ec: ExecutionContext
   ): Future[List[Unit]] =
     uploadDarFiles(client.packageManagementClient, files)
-
 }

@@ -6,37 +6,33 @@ package com.digitalasset.canton.platform.apiserver.services.tracking
 import com.daml.error.{ContextualizedErrorLogger, ErrorsAssertions}
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.api.v2.completion.Completion
-import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.error.{CommonErrors, LedgerApiErrors}
 import com.digitalasset.canton.logging.LedgerErrorLoggingContext
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker.{
   SubmissionKey,
   SubmissionTrackerImpl,
 }
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.google.rpc.status.Status
 import io.grpc.StatusRuntimeException
-import org.mockito.MockitoSugar
 import org.scalatest.concurrent.{Eventually, IntegrationPatience, ScalaFutures}
 import org.scalatest.flatspec.AnyFlatSpec
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.{Assertion, Inside, Succeeded}
 
 import java.time.Duration
 import java.util.Timer
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
 
 class SubmissionTrackerSpec
     extends AnyFlatSpec
-    with Matchers
-    with MockitoSugar
     with ScalaFutures
     with Inside
     with ErrorsAssertions
     with IntegrationPatience
-    with Eventually {
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
+    with Eventually
+    with BaseTest
+    with HasExecutionContext {
 
   behavior of classOf[SubmissionTracker].getSimpleName
 
@@ -174,22 +170,32 @@ class SubmissionTrackerSpec
 
   it should "fail on a submission with a command missing the submission id" in new SubmissionTrackerFixture {
     override def run: Future[Assertion] =
-      submissionTracker
-        .track(
-          submissionKey = submissionKey.copy(submissionId = ""),
-          timeout = `1 day timeout`,
-          submit = submitSucceeds,
-        )
-        .failed
-        .map(inside(_) { case actualStatusRuntimeException: StatusRuntimeException =>
-          assertError(
-            actual = actualStatusRuntimeException,
-            expected = CommonErrors.ServiceInternalError
-              .Generic("Missing submission id in submission tracker")
-              .asGrpcError,
-          )
-          succeed
-        })
+      loggerFactory.assertLogs(
+        within = {
+          submissionTracker
+            .track(
+              submissionKey = submissionKey.copy(submissionId = ""),
+              timeout = `1 day timeout`,
+              submit = submitSucceeds,
+            )
+            .failed
+            .map(inside(_) { case actualStatusRuntimeException: StatusRuntimeException =>
+              assertError(
+                actual = actualStatusRuntimeException,
+                expected = CommonErrors.ServiceInternalError
+                  .Generic("Missing submission id in submission tracker")
+                  .asGrpcError,
+              )
+              succeed
+            })
+        },
+        assertions = _.errorMessage should include(
+          "SERVICE_INTERNAL_ERROR(4,0): Missing submission id in submission tracker"
+        ),
+        _.errorMessage should include(
+          "SERVICE_INTERNAL_ERROR(4,0): Missing submission id in submission tracker"
+        ),
+      )
   }
 
   it should "fail after exceeding the max-commands-in-flight" in new SubmissionTrackerFixture {
@@ -233,28 +239,30 @@ class SubmissionTrackerSpec
   }
 
   it should "fail if a command completion is missing its completion status" in new SubmissionTrackerFixture {
-    override def run: Future[Assertion] = for {
-      _ <- Future.unit
-      // Track new submission
-      trackedSubmissionF = submissionTracker.track(submissionKey, `1 day timeout`, submitSucceeds)
+    override def run: Future[Assertion] = loggerFactory.suppressErrors {
+      for {
+        _ <- Future.unit
+        // Track new submission
+        trackedSubmissionF = submissionTracker.track(submissionKey, `1 day timeout`, submitSucceeds)
 
-      // Complete the submission with completion response
-      _ = submissionTracker.onCompletion(
-        CompletionStreamResponse(
-          completion = Some(completionOk.copy(status = None)),
-          checkpoint = None,
-        ) -> submitters
-      )
+        // Complete the submission with completion response
+        _ = submissionTracker.onCompletion(
+          CompletionStreamResponse(
+            completion = Some(completionOk.copy(status = None)),
+            checkpoint = None,
+          ) -> submitters
+        )
 
-      failure <- trackedSubmissionF.failed
-    } yield inside(failure) { case ex: StatusRuntimeException =>
-      assertError(
-        actual = ex,
-        expected = CommonErrors.ServiceInternalError
-          .Generic("Command completion is missing completion status")
-          .asGrpcError,
-      )
-      succeed
+        failure <- trackedSubmissionF.failed
+      } yield inside(failure) { case ex: StatusRuntimeException =>
+        assertError(
+          actual = ex,
+          expected = CommonErrors.ServiceInternalError
+            .Generic("Command completion is missing completion status")
+            .asGrpcError,
+        )
+        succeed
+      }
     }
   }
 
@@ -304,7 +312,7 @@ class SubmissionTrackerSpec
     val submissionId = "sId_1"
     val commandId = "cId_1"
     val applicationId = "apId_1"
-    val actAs = Seq("p1", "p2")
+    val actAs: Seq[String] = Seq("p1", "p2")
     val party = "p3"
     val submissionKey: SubmissionKey = SubmissionKey(
       submissionId = submissionId,
@@ -336,10 +344,6 @@ class SubmissionTrackerSpec
         Status(code = completionFailedGrpcCode.value(), message = completionFailedMessage)
       )
     )
-
-    // TODO(#13019) Avoid the global execution context
-    @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
-    implicit val ec: ExecutionContext = scala.concurrent.ExecutionContext.global
 
     def run: Future[Assertion]
 

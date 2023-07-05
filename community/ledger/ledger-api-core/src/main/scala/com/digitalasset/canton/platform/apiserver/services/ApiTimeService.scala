@@ -6,7 +6,6 @@ package com.digitalasset.canton.platform.apiserver.services
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import com.daml.api.util.TimestampConversion.*
-import com.daml.error.ContextualizedErrorLogger
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v1.testing.time_service.TimeServiceGrpc.TimeService
 import com.daml.ledger.api.v1.testing.time_service.*
@@ -47,12 +46,6 @@ private[apiserver] final class ApiTimeService private (
     with StreamingServiceLifecycleManagement
     with GrpcApiService
     with NamedLogging {
-
-  // TODO(#13269) remove the contextualizedErrorLogger
-  protected val contextualizedErrorLogger: ContextualizedErrorLogger =
-    errorLoggingContext(
-      TraceContext.empty
-    )
 
   private val dispatcher = SignalDispatcher[Instant]()
 

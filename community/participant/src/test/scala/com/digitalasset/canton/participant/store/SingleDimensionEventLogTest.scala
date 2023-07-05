@@ -50,6 +50,7 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
         optUsedPackages = None,
         optNodeSeeds = None,
         optByKeyNodes = None,
+        optDomainId = None,
       )
     val transactionId = LedgerTransactionId.assertFromString(idString)
 

@@ -14,6 +14,7 @@ import com.daml.ledger.api.testing.utils.SuiteResourceManagementAroundAll
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.client.binding
 import com.daml.scalautil.Statement.discard
+import com.digitalasset.canton.BaseTest
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.{AppendedClues, Checkpoints}
@@ -26,7 +27,8 @@ class FooCommandSubmitterITSpec
     with SuiteResourceManagementAroundAll
     with Matchers
     with AppendedClues
-    with Checkpoints {
+    with Checkpoints
+    with BaseTest {
 
   it should "populate participant with create, consuming and non consuming exercises" in {
 
@@ -73,7 +75,7 @@ class FooCommandSubmitterITSpec
       )
       observerResult_observer0: ObservedEvents <- treeEventsObserver(
         apiServices = apiServices,
-        party = allocatedParties.observers(0),
+        party = allocatedParties.observers.head,
       )
       observerResult_observer1: ObservedEvents <- treeEventsObserver(
         apiServices = apiServices,
@@ -83,21 +85,21 @@ class FooCommandSubmitterITSpec
       val cp = new Checkpoint
       cp(
         discard(
-          observerResult_signatory.createEvents.size shouldBe config.numberOfInstances withClue ("number of create events")
+          observerResult_signatory.createEvents.size shouldBe config.numberOfInstances withClue "number of create events"
         )
       )
       cp(
         discard(
           observerResult_signatory.avgSizeOfCreateEventPerTemplateName(
             "Foo1"
-          ) shouldBe 162 +- 20 withClue ("payload size of create Foo1")
+          ) shouldBe 162 +- 20 withClue "payload size of create Foo1"
         )
       )
       cp(
         discard(
           observerResult_signatory.avgSizeOfCreateEventPerTemplateName(
             "Foo2"
-          ) shouldBe 162 +- 20 withClue ("payload size of create Foo2")
+          ) shouldBe 162 +- 20 withClue "payload size of create Foo2"
         )
       )
       cp(
@@ -112,26 +114,26 @@ class FooCommandSubmitterITSpec
       )
       cp(
         discard(
-          observerResult_signatory.consumingExercises.size.toDouble shouldBe (config.numberOfInstances * consumingExercisesConfig.probability) withClue ("number of consuming exercises")
+          observerResult_signatory.consumingExercises.size.toDouble shouldBe (config.numberOfInstances * consumingExercisesConfig.probability) withClue "number of consuming exercises"
         )
       )
       val expectedNumberOfNonConsumingExercises =
         config.numberOfInstances * nonConsumingExercisesConfig.probability.toInt
       cp(
         discard(
-          observerResult_signatory.nonConsumingExercises.size shouldBe expectedNumberOfNonConsumingExercises withClue ("number of non consuming exercises visible to signatory")
+          observerResult_signatory.nonConsumingExercises.size shouldBe expectedNumberOfNonConsumingExercises withClue "number of non consuming exercises visible to signatory"
         )
       )
       // First observer can see all non-consuming events
       cp(
         discard(
-          observerResult_observer0.nonConsumingExercises.size shouldBe expectedNumberOfNonConsumingExercises withClue ("number of non consuming exercises visible to Obs-0")
+          observerResult_observer0.nonConsumingExercises.size shouldBe expectedNumberOfNonConsumingExercises withClue "number of non consuming exercises visible to Obs-0"
         )
       )
       // Second observer can see ~10% of all non-consuming events
       cp(
         discard(
-          observerResult_observer1.nonConsumingExercises.size shouldBe 14 withClue ("number of non consuming exercises visible to Obs-1")
+          observerResult_observer1.nonConsumingExercises.size shouldBe 14 withClue "number of non consuming exercises visible to Obs-1"
         )
       )
       cp.reportAll()

@@ -1,7 +1,7 @@
 // Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.platform.apiserver.services
+package com.digitalasset.canton.platform.apiserver.services.command
 
 import com.daml.api.util.TimeProvider
 import com.daml.error.ContextualizedErrorLogger
@@ -13,7 +13,7 @@ import com.daml.timer.Delayed
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.api.domain.{Commands as ApiCommands, LedgerId, SubmissionId}
-import com.digitalasset.canton.ledger.api.grpc.{GrpcApiService, GrpcCommandSubmissionService}
+import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequest
 import com.digitalasset.canton.ledger.api.services.CommandSubmissionService
 import com.digitalasset.canton.ledger.configuration.Configuration
@@ -36,6 +36,12 @@ import com.digitalasset.canton.platform.apiserver.execution.{
   CommandExecutionResult,
   CommandExecutor,
 }
+import com.digitalasset.canton.platform.apiserver.services.{
+  ApiCommandSubmissionService,
+  ErrorCause,
+  RejectionGenerators,
+  logging,
+}
 import com.digitalasset.canton.platform.services.time.TimeProviderType
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -43,9 +49,9 @@ import java.time.{Duration, Instant}
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 
-private[apiserver] object ApiSubmissionService {
+private[apiserver] object CommandSubmissionServiceImpl {
 
-  def create(
+  def createApiService(
       ledgerId: LedgerId,
       writeService: state.WriteService,
       timeProvider: TimeProvider,
@@ -60,8 +66,8 @@ private[apiserver] object ApiSubmissionService {
       loggerFactory: NamedLoggerFactory,
   )(implicit
       executionContext: ExecutionContext
-  ): (GrpcCommandSubmissionService with GrpcApiService, CommandSubmissionService) = {
-    val apiSubmissionService = new ApiSubmissionService(
+  ): (ApiCommandSubmissionService with GrpcApiService, CommandSubmissionService) = {
+    val apiSubmissionService = new CommandSubmissionServiceImpl(
       writeService,
       timeProvider,
       timeProviderType,
@@ -72,7 +78,7 @@ private[apiserver] object ApiSubmissionService {
       metrics,
       loggerFactory,
     )
-    new GrpcCommandSubmissionService(
+    new ApiCommandSubmissionService(
       service = apiSubmissionService,
       ledgerId = ledgerId,
       currentLedgerTime = () => timeProvider.getCurrentTime,
@@ -88,7 +94,7 @@ private[apiserver] object ApiSubmissionService {
   }
 }
 
-private[apiserver] final class ApiSubmissionService private[services] (
+private[apiserver] final class CommandSubmissionServiceImpl private[services] (
     writeService: state.WriteService,
     timeProvider: TimeProvider,
     timeProviderType: TimeProviderType,

@@ -34,6 +34,7 @@ import com.digitalasset.canton.ledger.client.services.pkg.withoutledgerid.Packag
 import com.digitalasset.canton.ledger.client.services.transactions.withoutledgerid.TransactionClient
 import com.digitalasset.canton.ledger.client.services.version.withoutledgerid.VersionClient
 import com.digitalasset.canton.ledger.client.{GrpcChannel, LedgerClient as ClassicLedgerClient}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import io.grpc.Channel
 import io.grpc.netty.NettyChannelBuilder
 
@@ -44,8 +45,10 @@ import scala.concurrent.ExecutionContext
 class LedgerClient private (
     val channel: Channel,
     config: LedgerClientConfiguration,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, esf: ExecutionSequencerFactory)
-    extends Closeable {
+    extends Closeable
+    with NamedLogging {
 
   val activeContractSetClient =
     new ActiveContractSetClient(
@@ -58,6 +61,7 @@ class LedgerClient private (
       ClassicLedgerClient.stub(CommandCompletionServiceGrpc.stub(channel), config.token),
       config.applicationId,
       config.commandClient,
+      loggerFactory,
     )
 
   val commandServiceClient: SynchronousCommandClient =
@@ -116,8 +120,9 @@ object LedgerClient {
   def apply(
       channel: Channel,
       config: LedgerClientConfiguration,
+      loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext, esf: ExecutionSequencerFactory): LedgerClient =
-    new LedgerClient(channel, config)
+    new LedgerClient(channel, config, loggerFactory)
 
   /** Takes a [[io.grpc.netty.NettyChannelBuilder]], possibly set up with some relevant extra options
     * that cannot be specified though the [[com.digitalasset.canton.ledger.client.configuration.LedgerClientConfiguration]] (e.g. a set of
@@ -130,8 +135,9 @@ object LedgerClient {
   def fromBuilder(
       builder: NettyChannelBuilder,
       configuration: LedgerClientConfiguration,
+      loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext, esf: ExecutionSequencerFactory): LedgerClient =
-    LedgerClient(GrpcChannel.withShutdownHook(builder), configuration)
+    LedgerClient(GrpcChannel.withShutdownHook(builder), configuration, loggerFactory)
 
   /** A convenient shortcut to build a [[LedgerClient]], use [[fromBuilder]] for a more
     * flexible alternative.
@@ -141,10 +147,11 @@ object LedgerClient {
       port: Int,
       configuration: LedgerClientConfiguration,
       channelConfig: LedgerClientChannelConfiguration,
+      loggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContext,
       esf: ExecutionSequencerFactory,
   ): LedgerClient =
-    fromBuilder(channelConfig.builderFor(hostIp, port), configuration)
+    fromBuilder(channelConfig.builderFor(hostIp, port), configuration, loggerFactory)
 
 }

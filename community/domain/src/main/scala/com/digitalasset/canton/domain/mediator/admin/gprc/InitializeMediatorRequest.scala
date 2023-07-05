@@ -77,6 +77,7 @@ final case class InitializeMediatorRequestX(
       domainId.toProtoPrimitive,
       Some(domainParameters.toProtoV1),
       sequencerConnections.toProtoV0,
+      sequencerConnections.sequencerTrustThreshold.unwrap,
     )
 }
 
@@ -88,13 +89,17 @@ object InitializeMediatorRequestX {
       domainIdP,
       domainParametersP,
       sequencerConnectionP,
+      sequencerTrustThreshold,
     ) = requestP
     for {
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain_id")
       domainParameters <- ProtoConverter
         .required("domain_parameters", domainParametersP)
         .flatMap(StaticDomainParameters.fromProtoV1)
-      sequencerConnections <- SequencerConnections.fromProtoV0(sequencerConnectionP)
+      sequencerConnections <- SequencerConnections.fromProtoV0(
+        sequencerConnectionP,
+        sequencerTrustThreshold,
+      )
     } yield InitializeMediatorRequestX(
       domainId,
       domainParameters,

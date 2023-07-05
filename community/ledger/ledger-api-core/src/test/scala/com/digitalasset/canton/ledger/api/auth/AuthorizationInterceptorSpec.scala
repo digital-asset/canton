@@ -4,13 +4,13 @@
 package com.digitalasset.canton.ledger.api.auth
 
 import com.daml.tracing.NoOpTelemetry
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.auth.interceptor.{
   AuthorizationInterceptor,
   IdentityProviderAwareAuthService,
 }
-import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, SuppressionRule}
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import io.grpc.protobuf.StatusProto
 import io.grpc.{Metadata, ServerCall, Status}
 import org.mockito.captor.ArgCaptor
@@ -18,9 +18,9 @@ import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.Assertion
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.slf4j.event.Level
 
 import java.util.concurrent.CompletableFuture
-import scala.concurrent.ExecutionContext.global
 import scala.concurrent.{Future, Promise}
 import scala.util.Success
 
@@ -29,22 +29,31 @@ class AuthorizationInterceptorSpec
     with MockitoSugar
     with Matchers
     with ArgumentMatchersSugar
-    with BaseTest {
+    with BaseTest
+    with HasExecutionContext {
+
   private val className = classOf[AuthorizationInterceptor].getSimpleName
 
   behavior of s"$className.interceptCall"
 
   it should "close the ServerCall with a V2 status code on decoding failure" in {
-    testServerCloseError { case (actualStatus, actualMetadata) =>
-      actualStatus.getCode shouldBe Status.Code.INTERNAL
-      actualStatus.getDescription shouldBe "An error occurred. Please contact the operator and inquire about the request <no-correlation-id> with tid <no-tid>"
+    loggerFactory.assertLogs(AuthorizationInterceptorSuppressionRule)(
+      within = testServerCloseError { case (actualStatus, actualMetadata) =>
+        actualStatus.getCode shouldBe Status.Code.INTERNAL
+        actualStatus.getDescription shouldBe "An error occurred. Please contact the operator and inquire about the request <no-correlation-id> with tid <no-tid>"
 
-      val actualRpcStatus = StatusProto.fromStatusAndTrailers(actualStatus, actualMetadata)
-      actualRpcStatus.getDetailsList.size() shouldBe 0
-    }
+        val actualRpcStatus = StatusProto.fromStatusAndTrailers(actualStatus, actualMetadata)
+        actualRpcStatus.getDetailsList.size() shouldBe 0
+      },
+      assertions = _.errorMessage should include(
+        "INTERNAL_AUTHORIZATION_ERROR(4,0): Failed to get claims from request metadata"
+      ),
+    )
   }
 
-  private def testServerCloseError(assertRpcStatus: (Status, Metadata) => Assertion) = {
+  private def testServerCloseError(
+      assertRpcStatus: (Status, Metadata) => Assertion
+  ): Future[Assertion] = {
     val authService = mock[AuthService]
     val identityProviderAwareAuthService = mock[IdentityProviderAwareAuthService]
     val userManagementService = mock[UserManagementStore]
@@ -60,8 +69,6 @@ class AuthorizationInterceptorSpec
       ()
     }
 
-    // TODO(#13019) Avoid the global execution context
-    @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     val authorizationInterceptor =
       AuthorizationInterceptor(
         authService,
@@ -69,7 +76,7 @@ class AuthorizationInterceptorSpec
         identityProviderAwareAuthService,
         NoOpTelemetry,
         loggerFactory,
-        global,
+        executionContext,
       )
 
     val statusCaptor = ArgCaptor[Status]
@@ -87,4 +94,14 @@ class AuthorizationInterceptorSpec
       assertRpcStatus(statusCaptor.value, metadataCaptor.value)
     }
   }
+
+  object AuthorizationInterceptorSuppressionRule extends SuppressionRule {
+    private val logLevel = Level.ERROR
+    private val authorizationInterceptor = classOf[AuthorizationInterceptor].getName
+
+    override def isSuppressed(loggerName: String, eventLevel: Level): Boolean =
+      (loggerName contains authorizationInterceptor)
+        && eventLevel.toInt == logLevel.toInt
+  }
+
 }

@@ -20,60 +20,73 @@ private[backend] trait StorageBackendTestsInitialization extends Matchers with S
     val otherLedgerId = LedgerId("otherLedger")
     val otherParticipantId = ParticipantId(Ref.ParticipantId.assertFromString("otherParticipant"))
 
-    executeSql(
-      backend.parameter.initializeParameters(
-        ParameterStorageBackend.IdentityParams(
-          ledgerId = ledgerId,
-          participantId = participantId,
-        ),
-        loggerFactory,
-      )
-    )
-    val error1 = intercept[RuntimeException](
-      executeSql(
-        backend.parameter.initializeParameters(
-          ParameterStorageBackend.IdentityParams(
-            ledgerId = otherLedgerId,
-            participantId = participantId,
-          ),
-          loggerFactory,
+    loggerFactory.assertLogs(
+      within = {
+        executeSql(
+          backend.parameter.initializeParameters(
+            ParameterStorageBackend.IdentityParams(
+              ledgerId = ledgerId,
+              participantId = participantId,
+            ),
+            loggerFactory,
+          )
         )
-      )
-    )
-    val error2 = intercept[RuntimeException](
-      executeSql(
-        backend.parameter.initializeParameters(
-          ParameterStorageBackend.IdentityParams(
-            ledgerId = ledgerId,
-            participantId = otherParticipantId,
-          ),
-          loggerFactory,
+        val error1 = intercept[RuntimeException](
+          executeSql(
+            backend.parameter.initializeParameters(
+              ParameterStorageBackend.IdentityParams(
+                ledgerId = otherLedgerId,
+                participantId = participantId,
+              ),
+              loggerFactory,
+            )
+          )
         )
-      )
-    )
-    val error3 = intercept[RuntimeException](
-      executeSql(
-        backend.parameter.initializeParameters(
-          ParameterStorageBackend.IdentityParams(
-            ledgerId = otherLedgerId,
-            participantId = otherParticipantId,
-          ),
-          loggerFactory,
+        val error2 = intercept[RuntimeException](
+          executeSql(
+            backend.parameter.initializeParameters(
+              ParameterStorageBackend.IdentityParams(
+                ledgerId = ledgerId,
+                participantId = otherParticipantId,
+              ),
+              loggerFactory,
+            )
+          )
         )
-      )
-    )
-    executeSql(
-      backend.parameter.initializeParameters(
-        ParameterStorageBackend.IdentityParams(
-          ledgerId = ledgerId,
-          participantId = participantId,
-        ),
-        loggerFactory,
-      )
-    )
+        val error3 = intercept[RuntimeException](
+          executeSql(
+            backend.parameter.initializeParameters(
+              ParameterStorageBackend.IdentityParams(
+                ledgerId = otherLedgerId,
+                participantId = otherParticipantId,
+              ),
+              loggerFactory,
+            )
+          )
+        )
+        executeSql(
+          backend.parameter.initializeParameters(
+            ParameterStorageBackend.IdentityParams(
+              ledgerId = ledgerId,
+              participantId = participantId,
+            ),
+            loggerFactory,
+          )
+        )
 
-    error1 shouldBe MismatchException.LedgerId(ledgerId, otherLedgerId)
-    error2 shouldBe MismatchException.ParticipantId(participantId, otherParticipantId)
-    error3 shouldBe MismatchException.LedgerId(ledgerId, otherLedgerId)
+        error1 shouldBe MismatchException.LedgerId(ledgerId, otherLedgerId)
+        error2 shouldBe MismatchException.ParticipantId(participantId, otherParticipantId)
+        error3 shouldBe MismatchException.LedgerId(ledgerId, otherLedgerId)
+      },
+      assertions = _.errorMessage should include(
+        "Found existing database with mismatching ledgerId: existing 'ledger', provided 'otherLedger'"
+      ),
+      _.errorMessage should include(
+        "Found existing database with mismatching participantId: existing 'participant', provided 'otherParticipant'"
+      ),
+      _.errorMessage should include(
+        "Found existing database with mismatching ledgerId: existing 'ledger', provided 'otherLedger'"
+      ),
+    )
   }
 }

@@ -5,13 +5,11 @@ package com.digitalasset.canton.platform.apiserver.services
 
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
-import com.daml.error.ContextualizedErrorLogger
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v1.transaction_filter.TransactionFilter
 import com.daml.ledger.api.v1.transaction_service.GetTransactionsRequest
 import com.daml.ledger.api.v2.update_service.*
 import com.daml.lf.ledger.EventId
-import com.daml.logging.LoggingContext
 import com.daml.logging.entries.LoggingEntries
 import com.daml.metrics.Metrics
 import com.daml.tracing.Telemetry
@@ -33,7 +31,6 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
 }
-import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.stub.StreamObserver
 import scalaz.syntax.tag.*
 
@@ -53,12 +50,6 @@ final class ApiUpdateService(
     with NamedLogging {
 
   import ApiConversions.*
-
-  // TODO(#13269) remove the contextualizedErrorLogger
-  protected val contextualizedErrorLogger: ContextualizedErrorLogger =
-    errorLoggingContext(
-      TraceContext.empty
-    )
 
   private val validator =
     new TransactionServiceRequestValidator(
@@ -180,12 +171,10 @@ final class ApiUpdateService(
         t => Future.failed(ValidationLogger.logFailureWithTrace(logger, req, t)),
         request => {
           implicit val enrichedLoggingContext: LoggingContextWithTrace =
-            LoggingContextWithTrace(loggingContextWithTrace.traceContext)(
-              LoggingContext.enriched(
-                logging.eventId(request.eventId),
-                logging.parties(request.requestingParties),
-              )(loggingContextWithTrace)
-            )
+            LoggingContextWithTrace.enriched(
+              logging.eventId(request.eventId),
+              logging.parties(request.requestingParties),
+            )(loggingContextWithTrace)
           logger.info(s"Received request for transaction tree by event ID, ${enrichedLoggingContext
               .serializeFiltered("eventId", "parties")}.")(loggingContextWithTrace.traceContext)
           logger.trace(s"Transaction tree by event ID request: $request")(
@@ -234,12 +223,10 @@ final class ApiUpdateService(
         t => Future.failed(ValidationLogger.logFailureWithTrace(logger, req, t)),
         request => {
           implicit val enrichedLoggingContext: LoggingContextWithTrace =
-            LoggingContextWithTrace(loggingContextWithTrace.traceContext)(
-              LoggingContext.enriched(
-                logging.transactionId(request.transactionId),
-                logging.parties(request.requestingParties),
-              )(loggingContextWithTrace)
-            )
+            LoggingContextWithTrace.enriched(
+              logging.transactionId(request.transactionId),
+              logging.parties(request.requestingParties),
+            )(loggingContextWithTrace)
           logger.info(s"Received request for transaction tree by ID, ${enrichedLoggingContext
               .serializeFiltered("eventId", "parties")}.")(loggingContextWithTrace.traceContext)
           logger.trace(s"Transaction tree by ID request: $request")(
@@ -279,12 +266,10 @@ final class ApiUpdateService(
         t => Future.failed(ValidationLogger.logFailureWithTrace(logger, req, t)),
         request => {
           implicit val enrichedLoggingContext: LoggingContextWithTrace =
-            LoggingContextWithTrace(loggingContextWithTrace.traceContext)(
-              LoggingContext.enriched(
-                logging.eventId(request.eventId),
-                logging.parties(request.requestingParties),
-              )(loggingContextWithTrace)
-            )
+            LoggingContextWithTrace.enriched(
+              logging.eventId(request.eventId),
+              logging.parties(request.requestingParties),
+            )(loggingContextWithTrace)
           logger.info(s"Received request for transaction by event ID, ${enrichedLoggingContext
               .serializeFiltered("eventId", "parties")}.")(loggingContextWithTrace.traceContext)
           logger.trace(s"Transaction by event ID request: $request")(
@@ -332,12 +317,10 @@ final class ApiUpdateService(
         t => Future.failed(ValidationLogger.logFailureWithTrace(logger, req, t)),
         request => {
           implicit val enrichedLoggingContext: LoggingContextWithTrace =
-            LoggingContextWithTrace(loggingContextWithTrace.traceContext)(
-              LoggingContext.enriched(
-                logging.transactionId(request.transactionId),
-                logging.parties(request.requestingParties),
-              )(loggingContextWithTrace)
-            )
+            LoggingContextWithTrace.enriched(
+              logging.transactionId(request.transactionId),
+              logging.parties(request.requestingParties),
+            )(loggingContextWithTrace)
           logger.info(s"Received request for transaction by ID, ${enrichedLoggingContext
               .serializeFiltered("eventId", "parties")}.")(loggingContextWithTrace.traceContext)
           logger.trace(s"Transaction by ID request: $request")(loggingContextWithTrace.traceContext)

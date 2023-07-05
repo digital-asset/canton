@@ -5,9 +5,11 @@ package com.digitalasset.canton.platform.apiserver.ratelimiting
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.apiserver.ratelimiting.MemoryCheck.*
 import org.scalatest.flatspec.AnyFlatSpec
+import org.slf4j.event.Level
 
 import java.lang.management.{MemoryMXBean, MemoryPoolMXBean, MemoryType, MemoryUsage}
 import scala.concurrent.duration.DurationInt
@@ -45,7 +47,12 @@ class MemoryCheckSpec extends AnyFlatSpec with BaseTest {
   it should "use largest tenured pool as rate limiting pool" in {
     val expected = underLimitMemoryPoolMXBean()
     when(expected.getCollectionUsage).thenReturn(new MemoryUsage(0, 0, 0, 100))
-    findTenuredMemoryPool(config, Nil, errorLoggingContext) shouldBe None
+    loggerFactory.assertLogs(MemoryCheckSpecSuppressionRule)(
+      within = {
+        findTenuredMemoryPool(config, Nil, errorLoggingContext) shouldBe None
+      },
+      assertions = _.errorMessage should include("Could not find tenured memory pool"),
+    )
     findTenuredMemoryPool(
       config,
       List(
@@ -55,6 +62,15 @@ class MemoryCheckSpec extends AnyFlatSpec with BaseTest {
       ),
       errorLoggingContext,
     ) shouldBe Some(expected)
+  }
+
+  object MemoryCheckSpecSuppressionRule extends SuppressionRule {
+    private val logLevel = Level.ERROR
+    private val className = classOf[MemoryCheckSpec].getName
+
+    override def isSuppressed(loggerName: String, eventLevel: Level): Boolean =
+      (loggerName contains className)
+        && eventLevel.toInt == logLevel.toInt
   }
 
 }

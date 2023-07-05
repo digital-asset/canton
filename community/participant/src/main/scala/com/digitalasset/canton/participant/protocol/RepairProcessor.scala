@@ -32,9 +32,11 @@ class RepairProcessor(
       throw new IllegalStateException("Cannot replace outstanding repair requests")
   }
 
-  def wedgeRepairRequests(timestamp: CantonTimestamp)(implicit traceContext: TraceContext): Unit = {
+  def wedgeRepairRequests(
+      upToExclusive: CantonTimestamp
+  )(implicit traceContext: TraceContext): Unit = {
     val remaining = remainingRepairRequests.get()
-    val (current, rest) = remaining.span(_.requestTimestamp <= timestamp)
+    val (current, rest) = remaining.span(_.requestTimestamp < upToExclusive)
 
     NonEmpty.from(current).foreach { currentNE =>
       val firstRc = currentNE.head1

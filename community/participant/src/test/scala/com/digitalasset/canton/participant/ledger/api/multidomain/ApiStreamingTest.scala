@@ -24,11 +24,13 @@ class ApiStreamingTest
     with BeforeAndAfterAll
     with BaseTest {
 
+  private val apiStreaming = new ApiStreaming(loggerFactory)
+
   "asyncIndexPoller" should {
 
     "work correctly in the happy path" in {
       val poller = new PollerFixture(List(1, 2, 3, 3, 3, 3, 3, 7, 7, 8, 10, 10, 10, 11, 11, 11))
-      ApiStreaming
+      apiStreaming
         .asyncIndexPoller()(poller)
         .takeWhile(_ < 9)
         .runWith(Sink.collection)
@@ -37,7 +39,7 @@ class ApiStreamingTest
 
     "poll only if there is demand" in {
       val poller = new PollerFixture(List(1, 2, 3, 3, 3, 3, 3, 7, 7, 8, 10))
-      ApiStreaming
+      apiStreaming
         .asyncIndexPoller()(poller)
         .throttle(
           elements = 1,
@@ -64,7 +66,7 @@ class ApiStreamingTest
     "poll without delay if no backpressure, and all elements are distinct" in {
       val poller = new PollerFixture(Range.Long.inclusive(1, 10, 1).toList)
       val start = System.nanoTime()
-      ApiStreaming
+      apiStreaming
         .asyncIndexPoller()(poller)
         .takeWhile(_ < 10)
         .runWith(Sink.collection)
@@ -91,7 +93,7 @@ class ApiStreamingTest
         )
       )
       val start = System.nanoTime()
-      ApiStreaming
+      apiStreaming
         .asyncIndexPoller()(poller)
         .takeWhile(_ < 2)
         .runWith(Sink.collection)
@@ -117,7 +119,7 @@ class ApiStreamingTest
           2,
         ) // 7575 millis if runs to the end
       )
-      val (killSwitch, streamCompletedF) = ApiStreaming
+      val (killSwitch, streamCompletedF) = apiStreaming
         .asyncIndexPoller()(poller)
         .takeWhile(_ < 2)
         .viaMat(KillSwitches.single)(Keep.right)
@@ -158,14 +160,14 @@ class ApiStreamingTest
   "tailingInclusiveIndexRanges" should {
 
     "work correctly for past ranges" in {
-      ApiStreaming
+      apiStreaming
         .tailingInclusiveIndexRanges(IndexRange(10, 100))(Source(List(1000, 1100)))
         .runWith(Sink.collection)
         .map(_ shouldBe List(IndexRange(10, 100)))
     }
 
     "work correctly if end of range is in the future" in {
-      ApiStreaming
+      apiStreaming
         .tailingInclusiveIndexRanges(IndexRange(10, 1500))(
           Source(List(1000, 1100, 1200, 1300, 1700))
         )
@@ -182,7 +184,7 @@ class ApiStreamingTest
     }
 
     "work correctly if start and end of range is in the future" in {
-      ApiStreaming
+      apiStreaming
         .tailingInclusiveIndexRanges(IndexRange(1250, 1500))(
           Source(List(1000, 1100, 1200, 1300, 1700))
         )
@@ -196,7 +198,7 @@ class ApiStreamingTest
     }
 
     "work correctly on boundaries around end (exactly that)" in {
-      ApiStreaming
+      apiStreaming
         .tailingInclusiveIndexRanges(IndexRange(1250, 1500))(
           Source(List(1000, 1100, 1200, 1500, 1700))
         )
@@ -209,7 +211,7 @@ class ApiStreamingTest
     }
 
     "work correctly on boundaries around end (+1)" in {
-      ApiStreaming
+      apiStreaming
         .tailingInclusiveIndexRanges(IndexRange(1250, 1500))(
           Source(List(1000, 1100, 1200, 1501, 1700))
         )
@@ -222,7 +224,7 @@ class ApiStreamingTest
     }
 
     "work correctly on boundaries around end (-1)" in {
-      ApiStreaming
+      apiStreaming
         .tailingInclusiveIndexRanges(IndexRange(1250, 1500))(
           Source(List(1000, 1100, 1200, 1499, 1700))
         )
@@ -236,7 +238,7 @@ class ApiStreamingTest
     }
 
     "work correctly on boundaries around start (exactly that)" in {
-      ApiStreaming
+      apiStreaming
         .tailingInclusiveIndexRanges(IndexRange(1250, 1500))(Source(List(1250, 1300, 1700)))
         .runWith(Sink.collection)
         .map(
@@ -249,7 +251,7 @@ class ApiStreamingTest
     }
 
     "work correctly on boundaries around start (-1)" in {
-      ApiStreaming
+      apiStreaming
         .tailingInclusiveIndexRanges(IndexRange(1250, 1500))(Source(List(1249, 1300, 1700)))
         .runWith(Sink.collection)
         .map(
@@ -261,7 +263,7 @@ class ApiStreamingTest
     }
 
     "work correctly on boundaries around start (+1)" in {
-      ApiStreaming
+      apiStreaming
         .tailingInclusiveIndexRanges(IndexRange(1250, 1500))(Source(List(1251, 1300, 1700)))
         .runWith(Sink.collection)
         .map(
@@ -278,7 +280,7 @@ class ApiStreamingTest
 
     "work correctly for the happy path" in {
       val rangeQuery = new RangeQueryFixture(4)
-      ApiStreaming
+      apiStreaming
         .pagedRangeQueryStream(rangeQuery)(_.toLong)(IndexRange(10L, 20L))
         .runWith(Sink.collection)
         .map { result =>
@@ -293,7 +295,7 @@ class ApiStreamingTest
 
     "work correctly for the happy path if end falls on a full window" in {
       val rangeQuery = new RangeQueryFixture(4)
-      ApiStreaming
+      apiStreaming
         .pagedRangeQueryStream(rangeQuery)(_.toLong)(IndexRange(10L, 22L))
         .runWith(Sink.collection)
         .map { result =>
@@ -309,7 +311,7 @@ class ApiStreamingTest
 
     "work correctly for the happy path if end falls almost on a full window (-1)" in {
       val rangeQuery = new RangeQueryFixture(4)
-      ApiStreaming
+      apiStreaming
         .pagedRangeQueryStream(rangeQuery)(_.toLong)(IndexRange(10L, 21L))
         .runWith(Sink.collection)
         .map { result =>
@@ -324,7 +326,7 @@ class ApiStreamingTest
 
     "work correctly for the happy path if end falls almost on a full window (+1)" in {
       val rangeQuery = new RangeQueryFixture(4)
-      ApiStreaming
+      apiStreaming
         .pagedRangeQueryStream(rangeQuery)(_.toLong)(IndexRange(10L, 23L))
         .runWith(Sink.collection)
         .map { result =>
@@ -340,7 +342,7 @@ class ApiStreamingTest
 
     "work correctly for every third number if end falls on a full window" in {
       val rangeQuery = new RangeQueryFixture(4, _ % 3 == 0)
-      ApiStreaming
+      apiStreaming
         .pagedRangeQueryStream(rangeQuery)(_.toLong)(IndexRange(10L, 21L))
         .runWith(Sink.collection)
         .map { result =>
@@ -353,7 +355,7 @@ class ApiStreamingTest
 
     "work correctly for every third number if end falls almost on a full window (-1)" in {
       val rangeQuery = new RangeQueryFixture(4, _ % 3 == 0)
-      ApiStreaming
+      apiStreaming
         .pagedRangeQueryStream(rangeQuery)(_.toLong)(IndexRange(10L, 20L))
         .runWith(Sink.collection)
         .map { result =>
@@ -367,7 +369,7 @@ class ApiStreamingTest
 
     "work correctly for every third number if end falls almost on a full window (+1)" in {
       val rangeQuery = new RangeQueryFixture(4, _ % 3 == 0)
-      ApiStreaming
+      apiStreaming
         .pagedRangeQueryStream(rangeQuery)(_.toLong)(IndexRange(10L, 22L))
         .runWith(Sink.collection)
         .map { result =>
@@ -383,15 +385,15 @@ class ApiStreamingTest
   "running asyncIndexPoller, tailingInclusiveIndexRanges and pagedRangeQueryStream in concert" should {
 
     "work for the happy path case" in {
-      ApiStreaming
+      apiStreaming
         .asyncIndexPoller()(
           new PollerFixture(
             List(40, 40, 40, 40, 50, 50, 50, 60, 70, 70, 70, 70, 110)
           )
         )
-        .pipe(ApiStreaming.tailingInclusiveIndexRanges(IndexRange(55, 100)))
+        .pipe(apiStreaming.tailingInclusiveIndexRanges(IndexRange(55, 100)))
         .flatMapConcat(
-          ApiStreaming.pagedRangeQueryStream(
+          apiStreaming.pagedRangeQueryStream(
             rangeQueryWithLimit = new RangeQueryFixture(
               limit = 3,
               filter = _ % 2 == 1,
@@ -433,7 +435,7 @@ class ApiStreamingTest
     val pollingSeq = new AtomicReference(sequence)
     def apply(): Future[Long] =
       pollingSeq.getAndUpdate(_.drop(1)) match {
-        case head :: tail =>
+        case head :: _ =>
           logger.debug(s"polling $head")
           Future.successful(head)
         case Nil =>

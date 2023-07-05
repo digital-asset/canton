@@ -110,15 +110,19 @@ private[console] object ParticipantCommands {
         alias: Option[DomainAlias] = None,
         maxRetryDelay: Option[NonNegativeFiniteDuration] = None,
         priority: Int = 0,
+        sequencerTrustThreshold: PositiveInt = PositiveInt.tryCreate(1),
     ): DomainConnectionConfig = {
       val domainAlias = alias.getOrElse(
         DomainAlias.tryCreate(domain.head1._2.name)
       ) // TODO(i11255): Come up with a good way of giving it a good alias
       DomainConnectionConfig(
         domainAlias,
-        SequencerConnections.many(domain.toSeq.map { case (alias, domain) =>
-          domain.sequencerConnection.withAlias(alias)
-        }),
+        SequencerConnections.many(
+          domain.toSeq.map { case (alias, domain) =>
+            domain.sequencerConnection.withAlias(alias)
+          },
+          sequencerTrustThreshold,
+        ),
         manualConnect = manualConnect,
         None,
         priority,
@@ -710,9 +714,9 @@ class ParticipantReplicationAdministrationGroup(
   */
 trait ParticipantAdministration extends FeatureFlagFilter {
   this: AdminCommandRunner
-    with LedgerApiCommandRunner
-    with LedgerApiAdministration
-    with NamedLogging =>
+    & LedgerApiCommandRunner
+    & LedgerApiAdministration
+    & NamedLogging =>
 
   import ConsoleEnvironment.Implicits.*
   implicit protected val consoleEnvironment: ConsoleEnvironment

@@ -65,6 +65,8 @@ class TransactionsTreeStreamReader(
   private val orderBySequentialEventId =
     Ordering.by[EventStorageBackend.Entry[Raw.TreeEvent], Long](_.eventSequentialId)
 
+  private val paginatingAsyncStream = new PaginatingAsyncStream(loggerFactory)
+
   def streamTreeTransaction(
       queryRange: EventsRange,
       requestingParties: Set[Party],
@@ -147,7 +149,7 @@ class TransactionsTreeStreamReader(
         maxParallelIdQueriesLimiter: QueueBasedConcurrencyLimiter,
         metric: DatabaseMetrics,
     ): Source[Long, NotUsed] = {
-      PaginatingAsyncStream.streamIdsFromSeekPagination(
+      paginatingAsyncStream.streamIdsFromSeekPagination(
         idPageSizing = idPageSizing,
         idPageBufferSize = maxPagesPerIdPagesBuffer,
         initialFromIdExclusive = queryRange.startExclusiveEventSeqId,

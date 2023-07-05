@@ -11,7 +11,7 @@ import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.{ContractId, ValueTrue, VersionedContractInstance}
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.HasExecutorServiceGeneric
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
 import com.digitalasset.canton.ledger.offset.Offset
@@ -25,7 +25,7 @@ import com.digitalasset.canton.ledger.sandbox.bridge.BridgeMetrics
 import com.digitalasset.canton.ledger.sandbox.bridge.validate.ConflictCheckWithCommittedSpec.*
 import com.digitalasset.canton.ledger.sandbox.domain.Rejection.*
 import com.digitalasset.canton.ledger.sandbox.domain.Submission
-import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLogging, SuppressingLogger}
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.FixtureContext
 import org.scalatest.concurrent.{IntegrationPatience, ScalaFutures}
@@ -42,7 +42,13 @@ class ConflictCheckWithCommittedSpec
     with MockitoSugar
     with ScalaFutures
     with IntegrationPatience
-    with ArgumentMatchersSugar {
+    with ArgumentMatchersSugar
+    with HasExecutorServiceGeneric
+    with NamedLogging {
+
+  override protected val loggerFactory: SuppressingLogger = SuppressingLogger(getClass)
+
+  override def handleFailure(message: String): Nothing = fail(message)
 
   behavior of classOf[ConflictCheckWithCommittedImpl].getSimpleName
 
@@ -256,20 +262,19 @@ class ConflictCheckWithCommittedSpec
     }
   }
 
-  private class TestContext extends FixtureContext with BaseTest {
+  private class TestContext extends FixtureContext {
+
     implicit val loggingContext: LoggingContextWithTrace =
       LoggingContextWithTrace.ForTesting
 
     val indexServiceMock: IndexService = mock[IndexService]
 
-    // TODO(#13019) Avoid the global execution context
-    @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     val conflictCheckWithCommitted: ConflictCheckWithCommittedImpl =
       new ConflictCheckWithCommittedImpl(
         indexService = indexServiceMock,
         bridgeMetrics = new BridgeMetrics(NoOpMetricsFactory),
         loggerFactory = loggerFactory,
-      )(scala.concurrent.ExecutionContext.global)
+      )(executorService)
 
     val inputContract: ContractId = cid(1)
     val anotherInputContract: ContractId = cid(2)
@@ -386,6 +391,7 @@ object ConflictCheckWithCommittedSpec {
       None,
       Time.Timestamp.Epoch,
       Hash.hashPrivateKey("dummy"),
+      None,
       None,
       None,
       None,

@@ -19,7 +19,6 @@ import com.daml.ledger.api.v1.admin.config_management_service.{
 }
 import com.daml.lf.data.Ref.SubmissionId
 import com.daml.lf.data.{Ref, Time}
-import com.daml.logging.LoggingContext
 import com.daml.tracing.TelemetrySpecBase.*
 import com.daml.tracing.{DefaultOpenTelemetry, NoOpTelemetry}
 import com.digitalasset.canton.ledger.api.domain.{ConfigurationEntry, LedgerOffset}
@@ -65,8 +64,6 @@ class ApiConfigManagementServiceSpec
     with ErrorsAssertions
     with BaseTest
     with BeforeAndAfterEach {
-
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
 
   var testTelemetrySetup: TestTelemetrySetup = _
 
@@ -208,27 +205,33 @@ class ApiConfigManagementServiceSpec
         loggerFactory = loggerFactory,
       )
 
-      apiConfigManagementService
-        .setTimeModel(
-          SetTimeModelRequest.of(
-            "a submission ID",
-            maximumRecordTime = Some(Timestamp.of(maximumRecordTime.getEpochSecond, 0)),
-            configurationGeneration = initialGeneration,
-            newTimeModel = Some(
-              TimeModel(
-                avgTransactionLatency = Some(DurationProto.of(10, 0)),
-                minSkew = Some(DurationProto.of(20, 0)),
-                maxSkew = Some(DurationProto.of(40, 0)),
+      loggerFactory.assertLogs(
+        within = {
+          apiConfigManagementService
+            .setTimeModel(
+              SetTimeModelRequest.of(
+                "a submission ID",
+                maximumRecordTime = Some(Timestamp.of(maximumRecordTime.getEpochSecond, 0)),
+                configurationGeneration = initialGeneration,
+                newTimeModel = Some(
+                  TimeModel(
+                    avgTransactionLatency = Some(DurationProto.of(10, 0)),
+                    minSkew = Some(DurationProto.of(20, 0)),
+                    maxSkew = Some(DurationProto.of(40, 0)),
+                  )
+                ),
               )
-            ),
-          )
-        )
-        .transform(Success.apply)
-        .map { response =>
-          verifyZeroInteractions(writeService)
-          response should matchPattern { case Failure(GrpcException(GrpcStatus.NOT_FOUND(), _)) =>
-          }
-        }
+            )
+            .transform(Success.apply)
+            .map { response =>
+              verifyZeroInteractions(writeService)
+              response should matchPattern {
+                case Failure(GrpcException(GrpcStatus.NOT_FOUND(), _)) =>
+              }
+            }
+        },
+        assertions = _.warningMessage should include("Could not get the current time model."),
+      )
     }
 
     "propagate trace context" in {

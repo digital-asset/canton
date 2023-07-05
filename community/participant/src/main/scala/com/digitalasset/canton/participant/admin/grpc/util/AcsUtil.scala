@@ -4,9 +4,10 @@
 package com.digitalasset.canton.participant.admin.grpc.util
 
 import better.files.File
+import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.participant.admin.SyncStateInspection.SerializableContractWithDomainId
-import com.digitalasset.canton.util.ResourceUtil
+import com.digitalasset.canton.util.{ByteStringUtil, ResourceUtil}
 import com.google.protobuf.ByteString
 
 import java.io.ByteArrayInputStream
@@ -14,12 +15,23 @@ import scala.io.Source
 
 object AcsUtil {
   def loadFromByteString(
-      bytes: ByteString
-  ): Either[String, LazyList[SerializableContractWithDomainId]] =
-    ResourceUtil.withResource(Source.fromInputStream(new ByteArrayInputStream(bytes.toByteArray))) {
-      inputSource =>
+      bytes: ByteString,
+      gzip: Boolean,
+  ): Either[String, LazyList[SerializableContractWithDomainId]] = {
+    for {
+      decompressedBytes <-
+        if (gzip)
+          ByteStringUtil
+            .decompressGzip(bytes, None)
+            .leftMap(err => s"Failed to decompress bytes: $err")
+        else Right(bytes)
+      contracts <- ResourceUtil.withResource(
+        Source.fromInputStream(new ByteArrayInputStream(decompressedBytes.toByteArray))
+      ) { inputSource =>
         loadFromSource(inputSource)
-    }
+      }
+    } yield contracts
+  }
 
   def loadFromFile(fileInput: File): Iterator[SerializableContractWithDomainId] = {
     val decompressedInput = if (fileInput.toJava.getName.endsWith(".gz")) {

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.pruning
 
 import cats.Eval
+import cats.syntax.foldable.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
@@ -14,6 +15,7 @@ import com.digitalasset.canton.store.SequencerCounterTrackerStore
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureUtil
 
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
@@ -46,7 +48,7 @@ private[participant] class PruneObserver(
     * to pruning, which is not a big deal since the pruning operation is idempotent.
     */
   private val lastPrune: AtomicReference[(CantonTimestamp, Future[Unit])] =
-    new AtomicReference(CantonTimestamp.MinValue -> Future.unit)
+    new AtomicReference(CantonTimestamp.Epoch -> Future.unit)
 
   def observer(implicit
       ec: ExecutionContext,
@@ -101,18 +103,22 @@ private[participant] class PruneObserver(
     if (oldTs < localTs) {
       logger.debug(s"Starting periodic background pruning at ${pruneTs}")
       // Clean unused entries from the ACS
-      val acsF = acs.prune(pruneTs.forgetRefinement)
+      val acsF = FutureUtil.logOnFailure(
+        acs.prune(pruneTs.forgetRefinement),
+        s"Periodic ACS prune at $pruneTs:",
+      )
       // clean unused contract key journal entries
-      val journalF = keyJournal.prune(pruneTs.forgetRefinement)
+      val journalF = FutureUtil.logOnFailure(
+        keyJournal.prune(pruneTs.forgetRefinement),
+        s"Periodic contract key journal prune at $pruneTs: ",
+      )
       // Clean unused entries from the submission tracker store
-      val submissionTrackerStoreF = submissionTrackerStore.prune(pruneTs.forgetRefinement)
+      val submissionTrackerStoreF = FutureUtil.logOnFailure(
+        submissionTrackerStore.prune(pruneTs.forgetRefinement),
+        s"Periodic submission tracker store prune at $pruneTs: ",
+      )
 
-      val pruneF = for {
-        _ <- acsF
-        _ <- journalF
-        _ <- submissionTrackerStoreF
-      } yield ()
-
+      val pruneF = Seq(acsF, journalF, submissionTrackerStoreF).sequence_
       promise.completeWith(pruneF)
       pruneF
     } else {

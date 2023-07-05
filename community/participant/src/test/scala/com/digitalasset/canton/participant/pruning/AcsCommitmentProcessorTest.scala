@@ -1024,7 +1024,7 @@ class AcsCommitmentProcessorTest
       rc.update(rt(1, 0), ch1)
       rc.watermark shouldBe rt(1, 0)
       val snap1 = rc.snapshot()
-      snap1.rt shouldBe rt(1, 0)
+      snap1.recordTime shouldBe rt(1, 0)
       snap1.active.keySet shouldBe Set(SortedSet(alice, bob), SortedSet(bob, carol))
       snap1.delta.keySet shouldBe Set(SortedSet(alice, bob), SortedSet(bob, carol))
       snap1.deleted shouldBe Set.empty
@@ -1038,7 +1038,7 @@ class AcsCommitmentProcessorTest
       rc.update(rt(1, 1), ch2)
       rc.watermark shouldBe rt(1, 1)
       val snap2 = rc.snapshot()
-      snap2.rt shouldBe rt(1, 1)
+      snap2.recordTime shouldBe rt(1, 1)
       snap2.active.keySet shouldBe Set(SortedSet(alice, carol), SortedSet(bob, carol))
       snap2.delta.keySet shouldBe Set(SortedSet(alice, carol))
       snap2.deleted shouldBe Set(SortedSet(alice, bob))
@@ -1051,7 +1051,7 @@ class AcsCommitmentProcessorTest
       )
       rc.update(rt(3, 0), ch3)
       val snap3 = rc.snapshot()
-      snap3.rt shouldBe (rt(3, 0))
+      snap3.recordTime shouldBe (rt(3, 0))
       snap3.active.keySet shouldBe Set(SortedSet(alice, carol), SortedSet(bob, carol))
       snap3.delta.keySet shouldBe Set(SortedSet(alice, carol))
       snap3.deleted shouldBe Set.empty
@@ -1091,7 +1091,7 @@ class AcsCommitmentProcessorTest
         rc.update(rt(1, 0), ch1)
         rc.watermark shouldBe rt(1, 0)
         val snapshot = rc.snapshot()
-        snapshot.rt shouldBe rt(1, 0)
+        snapshot.recordTime shouldBe rt(1, 0)
         snapshot.active.keySet shouldBe Set(SortedSet(alice, bob))
         snapshot.delta.keySet shouldBe Set(SortedSet(alice, bob))
         snapshot.deleted shouldBe Set.empty

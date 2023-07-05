@@ -62,7 +62,6 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
         )
       ),
       Some(SerializableTraceContext.empty.toProtoV0),
-      None,
     )
 
   val RequestDescription = "request description"
@@ -76,8 +75,8 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
       handler: v0domain.SubscriptionResponse => Future[Either[String, Unit]] = _ =>
         Future.successful(Right(())),
       context: CancellableContext = Context.ROOT.withCancellation(),
-  ): GrpcSequencerSubscription[String] =
-    new GrpcSequencerSubscription[String](
+  ): GrpcSequencerSubscription[String, v0domain.SubscriptionResponse] =
+    new GrpcSequencerSubscription[String, v0domain.SubscriptionResponse](
       context,
       tracedEvent => handler(tracedEvent.value), // ignore Traced[..] wrapper
       CommonMockMetrics.sequencerClient,

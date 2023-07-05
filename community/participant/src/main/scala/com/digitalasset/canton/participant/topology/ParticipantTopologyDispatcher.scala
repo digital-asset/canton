@@ -34,13 +34,10 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.participant.sync.SyncDomainPersistentStateManagerImpl
 import com.digitalasset.canton.protocol.StaticDomainParameters
-import com.digitalasset.canton.protocol.messages.{
-  DefaultOpenEnvelope,
-  RegisterTopologyTransactionResponseResult,
-}
+import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
 import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerClientFactory}
 import com.digitalasset.canton.sequencing.protocol.Batch
-import com.digitalasset.canton.sequencing.{EnvelopeHandler, HandlerResult, SequencerConnections}
+import com.digitalasset.canton.sequencing.{EnvelopeHandler, SequencerConnections}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId, TopologyStoreX}
@@ -55,7 +52,7 @@ import com.digitalasset.canton.topology.{
   TopologyManagerX,
   *,
 }
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.ProtocolVersion
@@ -82,7 +79,7 @@ trait ParticipantTopologyDispatcherHandle {
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, Unit]
 
-  def processor: Traced[Seq[DefaultOpenEnvelope]] => HandlerResult
+  def processor: EnvelopeHandler
 
 }
 
@@ -266,7 +263,7 @@ class ParticipantTopologyDispatcher(
             .leftMap(DomainRegistryError.DomainRegistryInternalError.InitialOnboardingError(_))
         }
 
-    override def processor: Traced[Seq[DefaultOpenEnvelope]] => HandlerResult = handle.processor
+    override def processor: EnvelopeHandler = handle.processor
 
   }
 

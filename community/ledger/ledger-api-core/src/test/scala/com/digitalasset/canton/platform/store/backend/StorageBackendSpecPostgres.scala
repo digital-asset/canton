@@ -44,8 +44,14 @@ final class StorageBackendSpecPostgres
         minMajorVersionSupported = currentlyUsedMajorVersion + 1,
         loggerFactory = loggerFactory,
       )
-    an[PostgresDataSourceStorageBackend.UnsupportedPostgresVersion] should be thrownBy executeSql(
-      backend.checkCompatibility
+
+    loggerFactory.assertThrowsAndLogs[PostgresDataSourceStorageBackend.UnsupportedPostgresVersion](
+      within = executeSql(
+        backend.checkCompatibility
+      ),
+      assertions = _.errorMessage should include(
+        "Deprecated Postgres version."
+      ),
     )
   }
 }

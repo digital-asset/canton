@@ -18,7 +18,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import scala.concurrent.duration.*
 import scala.concurrent.{Await, ExecutionContext}
 
-private[transfer] object TransferResultHelpers {
+object TransferResultHelpers {
 
   def transferOutResult(
       sourceDomain: SourceDomainId,

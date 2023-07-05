@@ -542,7 +542,6 @@ abstract class ProtocolProcessor[
       sc: SequencerCounter,
       batch: steps.RequestBatch,
   )(implicit traceContext: TraceContext): HandlerResult = {
-
     val RequestAndRootHashMessage(viewMessages, rootHashMessage, mediatorId) = batch
     val requestId = RequestId(ts)
 

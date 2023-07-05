@@ -18,7 +18,7 @@ import com.daml.ledger.api.v1.package_service.GetPackageStatusResponse
 import com.daml.ledger.api.v1.transaction.{Transaction, TransactionTree}
 import com.daml.ledger.api.v1.transaction_filter.{Filters, InclusiveFilters, TransactionFilter}
 import com.daml.ledger.api.v1.value.Identifier
-import com.daml.ledger.client.binding.{Primitive as P}
+import com.daml.ledger.client.binding.Primitive as P
 import com.digitalasset.canton.config.{ClientConfig, ProcessingTimeout}
 import com.digitalasset.canton.ledger.client.LedgerClient
 import com.digitalasset.canton.ledger.client.configuration.{
@@ -128,6 +128,7 @@ object LedgerConnection {
       config: ClientConfig,
       commandClientConfiguration: CommandClientConfiguration,
       tracerProvider: TracerProvider,
+      loggerFactory: NamedLoggerFactory,
       token: Option[String] = None,
   )(implicit
       ec: ExecutionContextExecutor,
@@ -153,7 +154,7 @@ object LedgerConnection {
       .intercept(
         GrpcTracing.builder(tracerProvider.openTelemetry).build().newClientInterceptor()
       )
-    LedgerClient(builder.build(), clientConfig)
+    LedgerClient(builder.build(), clientConfig, loggerFactory)
   }
 
   def apply(
@@ -199,6 +200,7 @@ object LedgerConnection {
             clientConfig,
             commandClientConfiguration,
             tracerProvider,
+            loggerFactory,
             token,
           )
         )

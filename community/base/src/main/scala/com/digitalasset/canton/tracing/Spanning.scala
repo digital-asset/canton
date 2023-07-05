@@ -101,6 +101,8 @@ object Spanning {
     def recordException(exception: Throwable, attributes: Map[String, String] = Map()): Unit = {
       val _ = span.recordException(exception, mapToAttributes(attributes))
     }
+
+    def getSpanId: String = span.getSpanContext.getSpanId
   }
   private def mapToAttributes(map: Map[String, String]): Attributes =
     map

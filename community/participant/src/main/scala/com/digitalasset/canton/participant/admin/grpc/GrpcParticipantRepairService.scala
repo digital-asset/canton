@@ -24,7 +24,7 @@ import com.google.protobuf.ByteString
 import io.grpc.stub.StreamObserver
 
 import java.io.ByteArrayOutputStream
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 
@@ -133,9 +133,12 @@ class GrpcParticipantRepairService(
   ): StreamObserver[UploadRequest] = {
     // TODO(i12481): This buffer will contain the whole ACS snapshot.
     val outputStream = new ByteArrayOutputStream()
+    val gzip = new AtomicBoolean(false)
 
     new StreamObserver[UploadRequest] {
       override def onNext(value: UploadRequest): Unit = {
+        if (value.gzipFormat && !gzip.get())
+          gzip.set(true)
         Try(outputStream.write(value.acsSnapshot.toByteArray)) match {
           case Failure(exception) =>
             outputStream.close()
@@ -151,7 +154,8 @@ class GrpcParticipantRepairService(
 
       // TODO(i12481): implement a solution to prevent the client from sending infinite streams
       override def onCompleted(): Unit = {
-        val res = convertAndAddContractsToStore(ByteString.copyFrom(outputStream.toByteArray))
+        val res =
+          convertAndAddContractsToStore(ByteString.copyFrom(outputStream.toByteArray), gzip.get())
         Try(Await.result(res, processingTimeout.unbounded.duration)) match {
           case Failure(exception) => responseObserver.onError(exception)
           case Success(_) =>
@@ -206,10 +210,13 @@ class GrpcParticipantRepairService(
     }
   }
 
-  private def convertAndAddContractsToStore(content: ByteString): Future[UploadResponse] = {
+  private def convertAndAddContractsToStore(
+      content: ByteString,
+      gzip: Boolean,
+  ): Future[UploadResponse] = {
     TraceContext.withNewTraceContext { implicit traceContext =>
       val resultE = for {
-        lazyContracts <- AcsUtil.loadFromByteString(content)
+        lazyContracts <- AcsUtil.loadFromByteString(content, gzip)
         grouped = lazyContracts
           .grouped(GrpcParticipantRepairService.groupBy)
           .map(_.groupMap(_.domainId)(_.contract))

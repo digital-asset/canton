@@ -7,15 +7,14 @@ import akka.NotUsed
 import cats.data.EitherT
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.SequencerSubscription
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
-import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.util.ShowUtil.*
 import io.grpc.Status
 import io.grpc.stub.ServerCallStreamObserver
@@ -41,17 +40,18 @@ trait ManagedSubscription extends FlagCloseable with CloseNotification {
   * to allow external users to perform any administrative tasks.
   * Any exception thrown by the call to `observer.onNext` will cause the subscription to close.
   */
-private[service] class GrpcManagedSubscription(
+private[service] class GrpcManagedSubscription[T](
     createSubscription: SerializedEventHandler[NotUsed] => EitherT[
       Future,
       CreateSubscriptionError,
       SequencerSubscription[NotUsed],
     ],
-    observer: ServerCallStreamObserver[v0.SubscriptionResponse],
+    observer: ServerCallStreamObserver[T],
     val member: Member,
     val expireAt: Option[CantonTimestamp],
     override protected val timeouts: ProcessingTimeout,
     baseLoggerFactory: NamedLoggerFactory,
+    toSubscriptionResponse: OrdinarySerializedEvent => T,
 )(implicit ec: ExecutionContext)
     extends ManagedSubscription
     with NamedLogging {
@@ -87,14 +87,8 @@ private[service] class GrpcManagedSubscription(
   private val handler: SerializedEventHandler[NotUsed] = event => {
     implicit val traceContext: TraceContext = event.traceContext
     Future {
-      val response =
-        v0.SubscriptionResponse(
-          signedSequencedEvent = Some(event.signedEvent.toProtoV0),
-          Some(SerializableTraceContext(event.traceContext).toProtoV0),
-          event.trafficState.map(_.toProtoV0),
-        )
       Right(performUnlessClosing("grpc-managed-subscription-handler") {
-        observer.onNext(response)
+        observer.onNext(toSubscriptionResponse(event))
       }.onShutdown(()))
     }.recover { case NonFatal(e) =>
       logger.warn(

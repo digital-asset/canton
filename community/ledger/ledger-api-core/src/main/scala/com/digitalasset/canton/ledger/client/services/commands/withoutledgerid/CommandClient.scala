@@ -32,8 +32,8 @@ import com.digitalasset.canton.ledger.client.services.commands.tracker.Completio
   CompletionSuccess,
 }
 import com.digitalasset.canton.ledger.client.services.commands.tracker.TrackedCommandKey
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.google.protobuf.empty.Empty
-import org.slf4j.{Logger, LoggerFactory}
 import scalaz.syntax.tag.*
 
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
@@ -51,8 +51,9 @@ final class CommandClient(
     commandCompletionService: CommandCompletionServiceStub,
     applicationId: String,
     config: CommandClientConfiguration,
-    logger: Logger = LoggerFactory.getLogger(getClass),
-)(implicit esf: ExecutionSequencerFactory) {
+    override protected val loggerFactory: NamedLoggerFactory,
+)(implicit esf: ExecutionSequencerFactory)
+    extends NamedLogging {
 
   type TrackCommandFlow[Context] =
     Flow[
@@ -76,7 +77,7 @@ final class CommandClient(
     submit(token)(submitRequest)
 
   private def submit(token: Option[String])(submitRequest: SubmitRequest): Future[Empty] = {
-    logger.debug(
+    noTracingLogger.debug(
       "Invoking grpc-submission on commandId={}",
       submitRequest.commands.map(_.commandId).getOrElse("no-command-id"),
     )
@@ -161,6 +162,7 @@ final class CommandClient(
             commandSubmissionFlow = CommandSubmissionFlow[(Context, TrackedCommandKey)](
               submit(token),
               config.maxParallelSubmissions,
+              loggerFactory,
             ),
             createCommandCompletionSource =
               offset => completionSource(parties, offset, ledgerIdToUse, token),
@@ -187,7 +189,7 @@ final class CommandClient(
       ledgerIdToUse: LedgerId,
       token: Option[String] = None,
   ): Source[CompletionStreamElement, NotUsed] = {
-    logger.debug(
+    noTracingLogger.debug(
       "Connecting to completion service with parties '{}' from offset: '{}'",
       parties,
       offset: Any,
@@ -204,7 +206,9 @@ final class CommandClient(
   ): Flow[Ctx[Context, CommandSubmission], Ctx[Context, Try[Empty]], NotUsed] = {
     Flow[Ctx[Context, CommandSubmission]]
       .via(CommandUpdaterFlow[Context](config, submissionIdGenerator, applicationId, ledgerIdToUse))
-      .via(CommandSubmissionFlow[Context](submit(token), config.maxParallelSubmissions))
+      .via(
+        CommandSubmissionFlow[Context](submit(token), config.maxParallelSubmissions, loggerFactory)
+      )
   }
 
   def getCompletionEnd(

@@ -102,8 +102,9 @@ object ApiServiceOwner {
       userRightsCheckIntervalInSeconds = config.userManagement.cacheExpiryAfterWriteInSeconds,
       akkaScheduler = actorSystem.scheduler,
       jwtTimestampLeeway = jwtTimestampLeeway,
+      telemetry = telemetry,
       loggerFactory = loggerFactory,
-    )(LoggingContextWithTrace(loggerFactory))
+    )
     // TODO(i12283) LLP: Consider fusing the index health check with the indexer health check
     val healthChecksWithIndexService = healthChecks + ("index" -> indexService)
 

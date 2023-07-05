@@ -154,6 +154,7 @@ object Signature
       ByteString.EMPTY,
       Fingerprint.tryCreate("no-fingerprint"),
     )
+  val noSignatures = NonEmpty(Set, noSignature)
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(

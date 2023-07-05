@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.sequencing.client
 
-import cats.data.EitherT
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.lifecycle.AsyncOrSyncCloseable
@@ -196,26 +195,36 @@ class ResilientSequencerSubscriptionTest
     }
 
     "close underlying subscription even if created after we close" in {
-      val askedForSubscriptionPromise = Promise[Unit]()
-      val underlyingSubscriptionPromise =
-        Promise[
-          Either[SequencerSubscriptionCreationError, SequencerSubscription[TestHandlerError]]
-        ]()
+      val resilientSequencerSubscriptionRef
+          : AtomicReference[ResilientSequencerSubscription[TestHandlerError]] =
+        new AtomicReference[ResilientSequencerSubscription[TestHandlerError]]()
+      val closePromise = Promise[Unit]()
+
+      val subscription = new SequencerSubscription[TestHandlerError] {
+        override protected def timeouts = ResilientSequencerSubscriptionTest.this.timeouts
+        override protected def loggerFactory: NamedLoggerFactory =
+          ResilientSequencerSubscriptionTest.this.loggerFactory
+        override private[canton] def complete(reason: SubscriptionCloseReason[TestHandlerError])(
+            implicit traceContext: TraceContext
+        ): Unit = ()
+      }
 
       val subscriptionFactory =
         new SequencerSubscriptionFactory[TestHandlerError] {
           override def create(
               startingCounter: SequencerCounter,
               handler: SerializedEventHandler[TestHandlerError],
-          )(implicit traceContext: TraceContext): EitherT[
-            Future,
+          )(implicit traceContext: TraceContext): Either[
             SequencerSubscriptionCreationError,
             (SequencerSubscription[TestHandlerError], SubscriptionErrorRetryPolicy),
           ] = {
-            askedForSubscriptionPromise.success(())
-            EitherT(
-              underlyingSubscriptionPromise.future.map(_.map(_ -> TestSubscriptionError.retryRule))
-            )
+            // Close the resilient sequencer subscription while it is creating the subscription
+            // close will block waiting for the subscription request, so start in a future but defer waiting for its completion until after its resolved
+            closePromise.completeWith(Future { resilientSequencerSubscriptionRef.get().close() })
+            eventually() {
+              resilientSequencerSubscriptionRef.get().isClosing shouldBe true
+            }
+            Right(subscription -> TestSubscriptionError.retryRule)
           }
         }
 
@@ -228,25 +237,13 @@ class ResilientSequencerSubscriptionTest
         timeouts,
         loggerFactory,
       )
-
-      val subscription = new SequencerSubscription[TestHandlerError] {
-        override protected def timeouts = ResilientSequencerSubscriptionTest.this.timeouts
-        override protected def loggerFactory: NamedLoggerFactory =
-          ResilientSequencerSubscriptionTest.this.loggerFactory
-        override private[canton] def complete(reason: SubscriptionCloseReason[TestHandlerError])(
-            implicit traceContext: TraceContext
-        ): Unit = ()
-      }
+      resilientSequencerSubscriptionRef.set(resilientSequencerSubscription)
 
       // kick off
       resilientSequencerSubscription.start
 
       for {
-        _ <- askedForSubscriptionPromise.future
-        // close will block waiting for the subscription request, so start in a future but defer waiting for its completion until after its resolved
-        closeF = Future { resilientSequencerSubscription.close() }
-        _ = underlyingSubscriptionPromise.success(Right(subscription))
-        _ <- closeF
+        _ <- closePromise.future
       } yield subscription.isClosing shouldBe true // should have called close on underlying subscription
     }
   }
@@ -334,12 +331,11 @@ trait ResilientSequencerSubscriptionTestUtils {
     override def create(
         startingCounter: SequencerCounter,
         handler: SerializedEventHandler[TestHandlerError],
-    )(implicit traceContext: TraceContext): EitherT[
-      Future,
+    )(implicit traceContext: TraceContext): Either[
       SequencerSubscriptionCreationError,
       (SequencerSubscription[TestHandlerError], SubscriptionErrorRetryPolicy),
     ] =
-      EitherT.pure[Future, SequencerSubscriptionCreationError](
+      Right(
         (createInternal(startingCounter, handler), TestSubscriptionError.retryRule)
       )
   }

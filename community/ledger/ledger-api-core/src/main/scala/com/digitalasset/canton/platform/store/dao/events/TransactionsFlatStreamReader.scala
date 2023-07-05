@@ -66,6 +66,8 @@ class TransactionsFlatStreamReader(
   private val orderBySequentialEventId =
     Ordering.by[EventStorageBackend.Entry[Raw.FlatEvent], Long](_.eventSequentialId)
 
+  private val paginatingAsyncStream = new PaginatingAsyncStream(loggerFactory)
+
   def streamFlatTransactions(
       queryRange: EventsRange,
       filteringConstraints: TemplatePartiesFilter,
@@ -145,7 +147,7 @@ class TransactionsFlatStreamReader(
     ): Source[ArrayBuffer[Long], NotUsed] = {
       decomposedFilters
         .map { filter =>
-          PaginatingAsyncStream.streamIdsFromSeekPagination(
+          paginatingAsyncStream.streamIdsFromSeekPagination(
             idPageSizing = idPageSizing,
             idPageBufferSize = maxPagesPerIdPagesBuffer,
             initialFromIdExclusive = queryRange.startExclusiveEventSeqId,

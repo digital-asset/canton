@@ -19,8 +19,6 @@ import com.daml.ledger.api.v1.experimental_features.*
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.lf.data.Ref
 import com.daml.lf.engine.Engine
-import com.daml.logging.LoggingContext
-import com.daml.logging.LoggingContext.newLoggingContext
 import com.daml.metrics.Metrics
 import com.daml.metrics.api.MetricHandle.MetricsFactory
 import com.daml.ports.Port
@@ -73,7 +71,7 @@ object SandboxOnXRunner {
       configAdaptor: BridgeConfigAdaptor,
       registerGlobalOpenTelemetry: Boolean,
       loggerFactory: NamedLoggerFactory,
-  ): ResourceOwner[Port] = newLoggingContext { implicit loggingContext =>
+  ): ResourceOwner[Port] = {
     implicit val actorSystem: ActorSystem = ActorSystem(RunnerName)
     implicit val materializer: Materializer = Materializer(actorSystem)
     implicit val traceContext: TraceContext = TraceContext.empty
@@ -103,7 +101,6 @@ object SandboxOnXRunner {
         feedSink = stateUpdatesFeedSink,
         bridgeConfig = bridgeConfig,
         materializer = materializer,
-        loggingContext = loggingContext,
         metricsFactory = {
           metrics.defaultMetricsFactory: @nowarn("cat=deprecation")
         },
@@ -228,7 +225,6 @@ object SandboxOnXRunner {
       feedSink: Sink[(Offset, Traced[Update]), NotUsed],
       bridgeConfig: BridgeConfig,
       materializer: Materializer,
-      loggingContext: LoggingContext,
       @nowarn("cat=deprecation") metricsFactory: MetricsFactory,
       servicesThreadPoolSize: Int,
       servicesExecutionContext: ExecutionContextExecutorService,
@@ -247,7 +243,7 @@ object SandboxOnXRunner {
         timeServiceBackendO.getOrElse(TimeProvider.UTC),
         stageBufferSize,
         loggerFactory,
-      )(loggingContext, servicesExecutionContext)
+      )(servicesExecutionContext)
       writeService <- ResourceOwner.forCloseable(() =>
         new BridgeWriteService(
           feedSink = feedSink,

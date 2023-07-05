@@ -27,3 +27,10 @@ CREATE TABLE fresh_submitted_transaction_pruning (
     ts bigint not null,
     primary key (domain_id)
 );
+
+-- Store metadata information about KMS keys
+CREATE TABLE kms_metadata_store (
+    fingerprint varchar(300) not null,
+    kms_key_id varchar(300) not null,
+    primary key (fingerprint)
+);

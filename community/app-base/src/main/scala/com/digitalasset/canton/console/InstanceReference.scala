@@ -34,6 +34,7 @@ import com.digitalasset.canton.topology.{DomainId, NodeIdentity, ParticipantId}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ErrorUtil
 
+import scala.concurrent.ExecutionContext
 import scala.util.hashing.MurmurHash3
 
 trait InstanceReferenceCommon
@@ -46,6 +47,8 @@ trait InstanceReferenceCommon
 
   val name: String
   protected val instanceType: String
+
+  protected[canton] def executionContext: ExecutionContext
 
   override def pretty: Pretty[InstanceReferenceCommon] =
     prettyOfString(inst => show"${inst.instanceType.unquoted} ${inst.name.singleQuoted}")
@@ -139,6 +142,7 @@ trait LocalInstanceReferenceCommon extends InstanceReferenceCommon with NoTracin
       consoleEnvironment.run(repairMigrationCommand(force))
 
   }
+
   @Help.Summary("Start the instance")
   def start(): Unit = consoleEnvironment.run(startCommand())
 
@@ -159,7 +163,9 @@ trait LocalInstanceReferenceCommon extends InstanceReferenceCommon with NoTracin
   override def keys: LocalKeyAdministrationGroup = _keys
 
   private val _keys =
-    new LocalKeyAdministrationGroup(this, this, consoleEnvironment, crypto, loggerFactory)
+    new LocalKeyAdministrationGroup(this, this, consoleEnvironment, crypto, loggerFactory)(
+      executionContext
+    )
 
   private[console] def migrateDbCommand(): ConsoleCommandResult[Unit] =
     migrateInstanceDb().toResult(_.message, _ => ())
@@ -342,7 +348,11 @@ trait CommunityDomainReference {
 class CommunityRemoteDomainReference(val consoleEnvironment: ConsoleEnvironment, val name: String)
     extends DomainReference
     with CommunityDomainReference
-    with RemoteDomainReference
+    with RemoteDomainReference {
+
+  override protected[canton] def executionContext: ExecutionContext =
+    consoleEnvironment.environment.executionContext
+}
 
 trait InstanceReferenceWithSequencerConnection extends InstanceReferenceCommon {
   def sequencerConnection: SequencerConnection
@@ -378,6 +388,7 @@ trait LocalDomainReference
 class CommunityLocalDomainReference(
     override val consoleEnvironment: ConsoleEnvironment,
     val name: String,
+    override protected[canton] val executionContext: ExecutionContext,
 ) extends DomainReference
     with CommunityDomainReference
     with LocalDomainReference

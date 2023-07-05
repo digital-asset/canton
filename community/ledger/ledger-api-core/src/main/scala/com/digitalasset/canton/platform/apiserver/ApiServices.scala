@@ -15,7 +15,7 @@ import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.api.auth.Authorizer
 import com.digitalasset.canton.ledger.api.auth.services.*
 import com.digitalasset.canton.ledger.api.domain.LedgerId
-import com.digitalasset.canton.ledger.api.grpc.{GrpcHealthService, GrpcTransactionService}
+import com.digitalasset.canton.ledger.api.grpc.GrpcHealthService
 import com.digitalasset.canton.ledger.api.health.HealthChecks
 import com.digitalasset.canton.ledger.participant.state.index.v2.*
 import com.digitalasset.canton.ledger.participant.state.v2.ReadService
@@ -29,10 +29,15 @@ import com.digitalasset.canton.platform.apiserver.execution.*
 import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportKey
 import com.digitalasset.canton.platform.apiserver.services.*
 import com.digitalasset.canton.platform.apiserver.services.admin.*
+import com.digitalasset.canton.platform.apiserver.services.command.{
+  CommandCompletionServiceImpl,
+  CommandServiceImpl,
+  CommandSubmissionServiceImpl,
+}
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.apiserver.services.transaction.{
-  ApiEventQueryService,
-  ApiTransactionService,
+  EventQueryServiceImpl,
+  TransactionServiceImpl,
 }
 import com.digitalasset.canton.platform.configuration.{
   CommandConfiguration,
@@ -164,7 +169,7 @@ object ApiServices {
     ): List[BindableService] = {
 
       val apiTransactionService =
-        ApiTransactionService.create(
+        TransactionServiceImpl.create(
           ledgerId,
           transactionsService,
           metrics,
@@ -173,7 +178,7 @@ object ApiServices {
         )
 
       val apiEventQueryService =
-        ApiEventQueryService.create(ledgerId, eventQueryService, telemetry, loggerFactory)
+        EventQueryServiceImpl.create(ledgerId, eventQueryService, telemetry, loggerFactory)
 
       val apiLedgerIdentityService =
         ApiLedgerIdentityService.create(ledgerId, telemetry, loggerFactory)
@@ -198,7 +203,7 @@ object ApiServices {
         )
 
       val apiCompletionService =
-        ApiCommandCompletionService.create(
+        CommandCompletionServiceImpl.createApiService(
           ledgerId,
           completionsService,
           metrics,
@@ -342,7 +347,7 @@ object ApiServices {
     private def intitializeWriteServiceBackedApiServices(
         ledgerId: LedgerId,
         ledgerConfigurationSubscription: LedgerConfigurationSubscription,
-        apiTransactionService: GrpcTransactionService,
+        apiTransactionService: ApiTransactionService,
         ledgerApiV2Enabled: Option[ApiUpdateService],
         checkOverloaded: TraceContext => Option[state.SubmissionResult],
     )(implicit
@@ -360,7 +365,7 @@ object ApiServices {
               metrics,
               loggerFactory,
             ),
-            new ResolveMaximumLedgerTime(maximumLedgerTimeService),
+            new ResolveMaximumLedgerTime(maximumLedgerTimeService, loggerFactory),
             maxRetries = 3,
             metrics,
             loggerFactory,
@@ -368,33 +373,34 @@ object ApiServices {
           metrics,
         )
 
-        val (apiSubmissionService, commandSubmissionService) = ApiSubmissionService.create(
-          ledgerId,
-          writeService,
-          timeProvider,
-          timeProviderType,
-          ledgerConfigurationSubscription,
-          seedService,
-          commandExecutor,
-          checkOverloaded,
-          metrics,
-          explicitDisclosureUnsafeEnabled,
-          telemetry,
-          loggerFactory,
-        )
+        val (apiSubmissionService, commandSubmissionService) =
+          CommandSubmissionServiceImpl.createApiService(
+            ledgerId,
+            writeService,
+            timeProvider,
+            timeProviderType,
+            ledgerConfigurationSubscription,
+            seedService,
+            commandExecutor,
+            checkOverloaded,
+            metrics,
+            explicitDisclosureUnsafeEnabled,
+            telemetry,
+            loggerFactory,
+          )
 
         // Note: the command service uses the command submission, command completion, and transaction
         // services internally. These connections do not use authorization, authorization wrappers are
         // only added here to all exposed services.
-        val apiCommandService = ApiCommandService.create(
+        val apiCommandService = CommandServiceImpl.createApiService(
           submissionTracker = submissionTracker,
           // Using local services skips the gRPC layer, improving performance.
           submit = apiSubmissionService.submit,
-          configuration = ApiCommandService.Configuration(
+          configuration = CommandServiceImpl.Configuration(
             ledgerId,
             commandConfig.defaultTrackingTimeout,
           ),
-          transactionServices = new ApiCommandService.TransactionServices(
+          transactionServices = new CommandServiceImpl.TransactionServices(
             getTransactionById = apiTransactionService.getTransactionById,
             getFlatTransactionById = apiTransactionService.getFlatTransactionById,
           ),
@@ -450,7 +456,7 @@ object ApiServices {
           .toList
 
         val ledgerApiV2Services = ledgerApiV2Enabled.toList.flatMap { apiUpdateService =>
-          val apiSubmissionServiceV2 = new ApiSubmissionServiceV2(
+          val apiSubmissionServiceV2 = new ApiCommandSubmissionServiceV2(
             commandSubmissionService = commandSubmissionService,
             writeService = writeService,
             explicitDisclosureUnsafeEnabled = explicitDisclosureUnsafeEnabled,

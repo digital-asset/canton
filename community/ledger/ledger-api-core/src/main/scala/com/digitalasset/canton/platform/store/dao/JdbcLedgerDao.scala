@@ -35,6 +35,7 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
 }
+import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.configuration.{
   AcsStreamsConfig,
   TransactionFlatStreamsConfig,
@@ -52,14 +53,6 @@ import com.digitalasset.canton.platform.store.entries.{
 }
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.platform.store.utils.QueueBasedConcurrencyLimiter
-import com.digitalasset.canton.platform.{
-  ApplicationId,
-  PackageId,
-  Party,
-  SubmissionId,
-  TransactionId,
-  WorkflowId,
-}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import io.opentelemetry.api.trace.Tracer
 
@@ -67,7 +60,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
 private class JdbcLedgerDao(
-    dbDispatcher: DbDispatcher with ReportsHealth,
+    dbDispatcher: DbDispatcher & ReportsHealth,
     servicesExecutionContext: ExecutionContext,
     metrics: Metrics,
     engine: Option[Engine],
@@ -87,6 +80,8 @@ private class JdbcLedgerDao(
     incompleteOffsets: (Offset, Set[Ref.Party], TraceContext) => Future[Vector[Offset]],
 ) extends LedgerDao
     with NamedLogging {
+
+  private val paginatingAsyncStream = new PaginatingAsyncStream(loggerFactory)
 
   import JdbcLedgerDao.*
 
@@ -146,8 +141,8 @@ private class JdbcLedgerDao(
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, ConfigurationEntry), NotUsed] =
-    PaginatingAsyncStream.streamFromLimitOffsetPagination(PageSize) { queryOffset =>
-      withEnrichedLoggingContext(("queryOffset" -> queryOffset): LoggingEntry) {
+    paginatingAsyncStream.streamFromLimitOffsetPagination(PageSize) { queryOffset =>
+      withEnrichedLoggingContext("queryOffset" -> queryOffset: LoggingEntry) {
         implicit loggingContext =>
           dbDispatcher.executeSql(metrics.daml.index.db.loadConfigurationEntries) {
             readStorageBackend.configurationStorageBackend.configurationEntries(
@@ -252,8 +247,8 @@ private class JdbcLedgerDao(
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, PartyLedgerEntry), NotUsed] = {
-    PaginatingAsyncStream.streamFromLimitOffsetPagination(PageSize) { queryOffset =>
-      withEnrichedLoggingContext(("queryOffset" -> queryOffset): LoggingEntry) {
+    paginatingAsyncStream.streamFromLimitOffsetPagination(PageSize) { queryOffset =>
+      withEnrichedLoggingContext("queryOffset" -> queryOffset: LoggingEntry) {
         implicit loggingContext =>
           dbDispatcher.executeSql(metrics.daml.index.db.loadPartyEntries)(
             readStorageBackend.partyStorageBackend.partyEntries(
@@ -401,8 +396,8 @@ private class JdbcLedgerDao(
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, PackageLedgerEntry), NotUsed] =
-    PaginatingAsyncStream.streamFromLimitOffsetPagination(PageSize) { queryOffset =>
-      withEnrichedLoggingContext(("queryOffset" -> queryOffset): LoggingEntry) {
+    paginatingAsyncStream.streamFromLimitOffsetPagination(PageSize) { queryOffset =>
+      withEnrichedLoggingContext("queryOffset" -> queryOffset: LoggingEntry) {
         implicit loggingContext =>
           dbDispatcher.executeSql(metrics.daml.index.db.loadPackageEntries)(
             readStorageBackend.packageStorageBackend.packageEntries(
@@ -648,6 +643,7 @@ private class JdbcLedgerDao(
       queryNonPruned,
       metrics,
       pageSize = completionsPageSize,
+      loggerFactory,
     )
 
   /** This is a combined store transaction method to support sandbox-classic and tests
@@ -686,6 +682,7 @@ private class JdbcLedgerDao(
                   optUsedPackages = None, // not used for DbDto generation
                   optNodeSeeds = None, // not used for DbDto generation
                   optByKeyNodes = None, // not used for DbDto generation
+                  optDomainId = None,
                 ),
                 transaction = transaction,
                 transactionId = transactionId,

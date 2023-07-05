@@ -10,14 +10,15 @@ import com.daml.ledger.api.benchtool.submission.*
 import com.daml.lf.language.LanguageVersion
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.testing.utils.{TestModels, TestResourceUtils}
+import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.ledger.runner.common.Config
 import com.digitalasset.canton.platform.sandbox.fixture.SandboxFixture
 import org.scalatest.Suite
 
 import java.io.File
 import scala.concurrent.{ExecutionContext, Future}
 
-trait BenchtoolSandboxFixture extends SandboxFixture {
-  self: Suite =>
+trait BenchtoolSandboxFixture extends SandboxFixture { self: Suite & BaseTest =>
 
   override protected def packageFiles: List[File] = List(
     TestResourceUtils.resourceFileFromJar(
@@ -25,7 +26,7 @@ trait BenchtoolSandboxFixture extends SandboxFixture {
     )
   )
 
-  override def config = super.config.copy(
+  override def config: Config = super.config.copy(
     engine = super.config.engine.copy(allowedLanguageVersions = LanguageVersion.EarlyAccessVersions)
   )
 
@@ -78,5 +79,4 @@ trait BenchtoolSandboxFixture extends SandboxFixture {
       )
     } yield (apiServices, allocatedParties, foo)
   }
-
 }

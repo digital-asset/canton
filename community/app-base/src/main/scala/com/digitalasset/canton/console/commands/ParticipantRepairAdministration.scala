@@ -156,7 +156,8 @@ class ParticipantRepairAdministration(
     consoleEnvironment.run {
       runner.adminCommand(
         ParticipantAdminCommands.ParticipantRepairManagement.Upload(
-          ByteString.copyFrom(file.loadBytes)
+          ByteString.copyFrom(file.loadBytes),
+          file.extension().contains(".gz"),
         )
       )
     }

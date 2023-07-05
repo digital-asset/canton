@@ -270,21 +270,60 @@ class GrpcSequencerClientTransport(
     // we intentionally don't use `Context.current()` as we don't want to inherit the
     // cancellation scope from upstream requests
     val context: CancellableContext = Context.ROOT.withCancellation()
-    val subscription = GrpcSequencerSubscription(context, handler, metrics, timeouts, loggerFactory)
 
-    context.run(() =>
-      TraceContextGrpc.withGrpcContext(traceContext) {
-        if (requiresAuthentication)
-          sequencerServiceClient.subscribe(subscriptionRequest.toProtoV0, subscription.observer)
-        else
-          sequencerServiceClient.subscribeUnauthenticated(
-            subscriptionRequest.toProtoV0,
-            subscription.observer,
-          )
-      }
-    )
+    if (protocolVersion >= ProtocolVersion.v5) {
+      val subscription = GrpcSequencerSubscription.fromVersionedSubscriptionResponse(
+        context,
+        handler,
+        metrics,
+        timeouts,
+        loggerFactory,
+      )
 
-    subscription
+      context.run(() =>
+        TraceContextGrpc.withGrpcContext(traceContext) {
+          if (requiresAuthentication) {
+            sequencerServiceClient.subscribeVersioned(
+              subscriptionRequest.toProtoV0,
+              subscription.observer,
+            )
+          } else {
+            sequencerServiceClient.subscribeUnauthenticatedVersioned(
+              subscriptionRequest.toProtoV0,
+              subscription.observer,
+            )
+          }
+        }
+      )
+
+      subscription
+    } else {
+      val subscription = GrpcSequencerSubscription.fromSubscriptionResponse(
+        context,
+        handler,
+        metrics,
+        timeouts,
+        loggerFactory,
+      )
+
+      context.run(() =>
+        TraceContextGrpc.withGrpcContext(traceContext) {
+          if (requiresAuthentication) {
+            sequencerServiceClient.subscribe(
+              subscriptionRequest.toProtoV0,
+              subscription.observer,
+            )
+          } else {
+            sequencerServiceClient.subscribeUnauthenticated(
+              subscriptionRequest.toProtoV0,
+              subscription.observer,
+            )
+          }
+        }
+      )
+
+      subscription
+    }
   }
 
   override def subscribeUnauthenticated[E](

@@ -492,6 +492,14 @@ trait DomainGovernanceSnapshotClient {
   ): Future[Seq[DynamicDomainParametersWithValidity]]
 }
 
+trait MembersTopologySnapshotClient {
+  this: BaseTopologySnapshotClient =>
+
+  def allMembers(): Future[Set[Member]]
+
+  def isMemberKnown(member: Member): Future[Boolean]
+}
+
 trait TopologySnapshot
     extends PartyTopologySnapshotClient
     with BaseTopologySnapshotClient
@@ -502,7 +510,8 @@ trait TopologySnapshot
     with MediatorDomainStateClient
     with SequencerDomainStateClient
     with DomainTrafficControlStateClient
-    with DomainGovernanceSnapshotClient { this: BaseTopologySnapshotClient with NamedLogging => }
+    with DomainGovernanceSnapshotClient
+    with MembersTopologySnapshotClient { this: BaseTopologySnapshotClient with NamedLogging => }
 
 // architecture-handbook-entry-end: IdentityProvidingServiceClient
 

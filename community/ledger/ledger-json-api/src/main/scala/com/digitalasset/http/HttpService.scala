@@ -30,6 +30,7 @@ import com.daml.ledger.service.LedgerReader.PackageStore
 import com.daml.logging.LoggingContextOf
 import com.daml.metrics.akkahttp.HttpMetricsInterceptor
 import com.daml.ports.{Port, PortFiles}
+import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.ledger.api.domain as LedgerApiDomain
 import com.digitalasset.canton.ledger.client.configuration.{
   CommandClientConfiguration,
@@ -65,6 +66,8 @@ class HttpService(
 
   private type ET[A] = EitherT[Future, HttpService.Error, A]
 
+  private val directEc = DirectExecutionContext(logger)
+
   private def isLogLevelEqualOrBelowDebug(logLevel: Option[LogLevel]) =
     logLevel.exists(!_.isGreaterOrEqual(LogLevel.INFO))
 
@@ -82,7 +85,7 @@ class HttpService(
       commandClient = CommandClientConfiguration.default,
     )
 
-    val ledgerClient: DamlLedgerClient = DamlLedgerClient(channel, clientConfig)
+    val ledgerClient: DamlLedgerClient = DamlLedgerClient(channel, clientConfig, loggerFactory)
     import akka.http.scaladsl.server.Directives.*
     val bindingEt: EitherT[Future, HttpService.Error, ServerBinding] = for {
       _ <- eitherT(Future.successful(\/-(ledgerClient)))
@@ -123,7 +126,7 @@ class HttpService(
         { case (jwt, ledgerId, byteString) =>
           implicit lc =>
             ledgerClientJwt
-              .uploadDar(ledgerClient)(ExecutionContext.parasitic)(
+              .uploadDar(ledgerClient)(directEc)(
                 jwt,
                 ledgerId,
                 byteString,
@@ -137,7 +140,7 @@ class HttpService(
         { case (jwt, request) =>
           implicit lc =>
             ledgerClientJwt
-              .getMeteringReport(ledgerClient)(ExecutionContext.parasitic)(jwt, request)(
+              .getMeteringReport(ledgerClient)(directEc)(jwt, request)(
                 lc
               )
         }

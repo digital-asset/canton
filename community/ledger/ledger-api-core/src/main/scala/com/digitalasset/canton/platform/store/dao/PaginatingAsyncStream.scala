@@ -6,11 +6,19 @@ package com.digitalasset.canton.platform.store.dao
 import akka.NotUsed
 import akka.stream.OverflowStrategy
 import akka.stream.scaladsl.Source
+import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.dao.events.IdPageSizing
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
 
-private[platform] object PaginatingAsyncStream {
+private[platform] class PaginatingAsyncStream(
+    override protected val loggerFactory: NamedLoggerFactory
+) extends NamedLogging {
+
+  import PaginatingAsyncStream.*
+
+  private val directEc = DirectExecutionContext(logger)
 
   /** Concatenates the results of multiple asynchronous calls into
     * a single [[Source]], injecting the offset of the next page to
@@ -31,8 +39,6 @@ private[platform] object PaginatingAsyncStream {
     * @param queryPage takes the offset from which to start the next page and returns that page
     * @tparam T the type of the items returned in each call
     */
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   def streamFromLimitOffsetPagination[T](
       pageSize: Int
   )(queryPage: Long => Future[Vector[T]]): Source[T, NotUsed] = {
@@ -44,7 +50,7 @@ private[platform] object PaginatingAsyncStream {
             val resultSize = result.size.toLong
             val newQueryOffset = if (resultSize < pageSize) None else Some(queryOffset + pageSize)
             Some(newQueryOffset -> result)
-          }(ExecutionContext.parasitic)
+          }(directEc)
       }
       .flatMapConcat(Source(_))
   }
@@ -67,8 +73,6 @@ private[platform] object PaginatingAsyncStream {
     * @tparam Off the type of the offset
     * @tparam T   the type of the items returned in each call
     */
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   def streamFromSeekPagination[Off, T](startFromOffset: Off, getOffset: T => Off)(
       query: Off => Future[Vector[T]]
   ): Source[T, NotUsed] = {
@@ -80,15 +84,11 @@ private[platform] object PaginatingAsyncStream {
           query(offset).map { result =>
             val nextPageOffset: Option[Off] = result.lastOption.map(getOffset)
             Some((nextPageOffset, result))
-          }(ExecutionContext.parasitic)
+          }(directEc)
       }
       .flatMapConcat(Source(_))
   }
 
-  final case class IdPaginationState(fromIdExclusive: Long, pageSize: Int)
-
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   def streamIdsFromSeekPagination(
       idPageSizing: IdPageSizing,
       idPageBufferSize: Int,
@@ -111,10 +111,14 @@ private[platform] object PaginatingAsyncStream {
             )
             nextState -> ids
           })
-        }(ExecutionContext.parasitic)
+        }(directEc)
       }
       .buffer(idPageBufferSize, OverflowStrategy.backpressure)
       .mapConcat(identity)
   }
+}
 
+object PaginatingAsyncStream {
+
+  final case class IdPaginationState(fromIdExclusive: Long, pageSize: Int)
 }

@@ -4,6 +4,6 @@
 
 create table blocks (
     id bigint primary key,
-    event binary large object not null,
+    request binary large object not null,
     uuid varchar(36) unique not null
 );

@@ -120,7 +120,7 @@ final case class LedgerClientJwt(loggerFactory: NamedLoggerFactory)
   }
 
   // TODO(#13303): Replace all occurrences of EC for logging purposes in this file
-  //  (preferrably with ExecutionContext.parasitic)
+  //  (preferrably with DirectExecutionContext)
   def listKnownParties(client: DamlLedgerClient)(implicit
       ec: EC
   ): ListKnownParties =

@@ -6,22 +6,12 @@ package com.digitalasset.canton.sequencing.protocol
 import cats.syntax.traverse.*
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, required}
-import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, Traced}
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 
 final case class SubscriptionResponse(
     signedSequencedEvent: Traced[SignedContent[SequencedEvent[ClosedEnvelope]]],
     trafficState: Option[SequencedEventTrafficState],
-) {
-
-  // We don't introduce a `VersionedSubscriptionResponse` because we assume that the subscription endpoint will also be
-  // bumped if a V1 SubscriptionResponse is ever introduced
-  def toProtoV0: v0.SubscriptionResponse =
-    v0.SubscriptionResponse(
-      signedSequencedEvent = Some(signedSequencedEvent.value.toProtoV0),
-      traceContext = Some(SerializableTraceContext(signedSequencedEvent.traceContext).toProtoV0),
-      trafficState = trafficState.map(_.toProtoV0),
-    )
-}
+)
 
 object SubscriptionResponse {
 
@@ -34,7 +24,6 @@ object SubscriptionResponse {
     val v0.SubscriptionResponse(
       maybeSignedSequencedEventP,
       _ignoredTraceContext,
-      trafficStateP,
     ) = responseP
     for {
       signedSequencedEventP <- required(
@@ -43,7 +32,22 @@ object SubscriptionResponse {
       )
       signedContent <- SignedContent.fromProtoV0(signedSequencedEventP)
       signedSequencedEvent <- signedContent.deserializeContent(SequencedEvent.fromByteString)
+    } yield SubscriptionResponse(Traced(signedSequencedEvent)(traceContext), None)
+  }
+
+  def fromVersionedProtoV0(responseP: v0.VersionedSubscriptionResponse)(implicit
+      traceContext: TraceContext
+  ): ParsingResult[SubscriptionResponse] = {
+    val v0.VersionedSubscriptionResponse(
+      signedSequencedEvent,
+      _ignoredTraceContext,
+      trafficStateP,
+    ) = responseP
+    for {
+      signedContent <- SignedContent.fromByteString(signedSequencedEvent)
+      signedSequencedEvent <- signedContent.deserializeContent(SequencedEvent.fromByteString)
       trafficState <- trafficStateP.traverse(SequencedEventTrafficState.fromProtoV0)
     } yield SubscriptionResponse(Traced(signedSequencedEvent)(traceContext), trafficState)
+
   }
 }

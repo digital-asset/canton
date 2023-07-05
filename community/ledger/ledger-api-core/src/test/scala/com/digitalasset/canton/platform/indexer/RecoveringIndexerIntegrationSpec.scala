@@ -11,7 +11,7 @@ import com.daml.ledger.resources.{ResourceOwner, TestResourceContext}
 import com.daml.lf.data.Ref.{Party, SubmissionId}
 import com.daml.lf.data.{Ref, Time}
 import com.daml.metrics.Metrics
-import com.daml.tracing.{NoOpTelemetryContext, TelemetryContext}
+import com.digitalasset.canton.HasExecutionContext
 import com.digitalasset.canton.ledger.api.health.HealthStatus
 import com.digitalasset.canton.ledger.configuration.{
   Configuration,
@@ -45,7 +45,6 @@ import com.digitalasset.canton.platform.store.DbSupport.{
   ParticipantDataSourceConfig,
 }
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
-import com.digitalasset.canton.testing.{LoggingAssertions, TestingLogCollector}
 import com.digitalasset.canton.tracing.TraceContext.{withNewTraceContext, wrapWithNewTraceContext}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import org.mockito.Mockito.*
@@ -70,16 +69,15 @@ class RecoveringIndexerIntegrationSpec
     extends AsyncWordSpec
     with Matchers
     with TestResourceContext
-    with LoggingAssertions
     with Eventually
     with IntegrationPatience
     with BeforeAndAfterEach
     with MockitoSugar
-    with NamedLogging {
+    with NamedLogging
+    with HasExecutionContext {
 
   private[this] var testId: UUID = _
-  private implicit val telemetryContext: TelemetryContext = NoOpTelemetryContext
-  private implicit val loggingContext =
+  private implicit val loggingContext: LoggingContextWithTrace =
     LoggingContextWithTrace.ForTesting
 
   override val loggerFactory: SuppressingLogger = SuppressingLogger(getClass)
@@ -87,7 +85,6 @@ class RecoveringIndexerIntegrationSpec
   override def beforeEach(): Unit = {
     super.beforeEach()
     testId = UUID.randomUUID()
-    TestingLogCollector.clear[this.type]
   }
 
   object RecoveringIndexerSuppressionRule extends SuppressionRule {
@@ -231,8 +228,6 @@ class RecoveringIndexerIntegrationSpec
     }
   }
 
-  // TODO(#13019) Avoid the global execution context
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   private def participantServer(
       newParticipantState: ParticipantStateFactory,
       restartDelay: FiniteDuration = 100.millis,
@@ -256,7 +251,7 @@ class RecoveringIndexerIntegrationSpec
             IndexServiceConfig(),
             CommandConfiguration.DefaultMaxCommandsInFlight,
             metrics,
-            ExecutionContext.global,
+            parallelExecutionContext,
             loggerFactory,
             multiDomainEnabled = false,
           )

@@ -56,7 +56,8 @@ package object sequencing {
   type UnsignedApplicationHandler[-E <: Envelope[_]] = ApplicationHandler[UnsignedEnvelopeBox, E]
   type UnsignedProtocolEventHandler = UnsignedApplicationHandler[DefaultOpenEnvelope]
 
-  type EnvelopeHandler = Traced[Seq[DefaultOpenEnvelope]] => HandlerResult
+  type NoEnvelopeBox[+E <: Envelope[_]] = Traced[Seq[E]]
+  type EnvelopeHandler = ApplicationHandler[NoEnvelopeBox, DefaultOpenEnvelope]
 
   /** Default box for `PossiblyIgnoredProtocolEvents`.
     * The outer `Traced` contains a trace context for the entire batch.
@@ -75,8 +76,6 @@ package object sequencing {
   type OrdinarySerializedEvent = BoxedEnvelope[OrdinarySequencedEvent, ClosedEnvelope]
 
   type PossiblyIgnoredSerializedEvent = BoxedEnvelope[PossiblyIgnoredSequencedEvent, ClosedEnvelope]
-
-  type RawSignedContentSerializedEvent = BoxedEnvelope[RawSignedContentEnvelopeBox, ClosedEnvelope]
 
   /////////////////////////////////
   // Protocol events (deserialized)

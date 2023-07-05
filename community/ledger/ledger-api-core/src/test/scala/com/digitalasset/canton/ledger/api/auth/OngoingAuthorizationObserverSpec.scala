@@ -12,7 +12,6 @@ import com.digitalasset.canton.ledger.api.auth.AuthorizationError.Expired
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore
-import com.digitalasset.canton.testing.ErrorAssertionsWithLogCollectorAssertions
 import io.grpc.StatusRuntimeException
 import io.grpc.stub.ServerCallStreamObserver
 import org.mockito.{ArgumentCaptor, ArgumentMatchersSugar, MockitoSugar}
@@ -32,8 +31,13 @@ class OngoingAuthorizationObserverSpec
     with IntegrationPatience
     with MockitoSugar
     with ArgumentMatchersSugar
-    with ErrorsAssertions
-    with ErrorAssertionsWithLogCollectorAssertions {
+    with ErrorsAssertions {
+
+  private implicit val errorLogger = ErrorLoggingContext(
+    loggerFactory.getTracedLogger(getClass),
+    loggerFactory.properties,
+    traceContext,
+  )
 
   it should "signal onError aborting the stream when user rights state hasn't been refreshed in a timely manner" in {
     val clock = AdjustableClock(
@@ -83,13 +87,7 @@ class OngoingAuthorizationObserverSpec
     assertError(
       actual = captor.getValue,
       expected = LedgerApiErrors.AuthorizationChecks.StaleUserManagementBasedStreamClaims
-        .Reject()(
-          ErrorLoggingContext(
-            loggerFactory.getTracedLogger(getClass),
-            loggerFactory.properties,
-            traceContext,
-          )
-        )
+        .Reject()
         .asGrpcError,
     )
 
@@ -188,13 +186,19 @@ class OngoingAuthorizationObserverSpec
     order.verify(delegate, times(1)).onError(captor.capture())
     order.verifyNoMoreInteractions()
 
-    // Scheduled task is cancelled
-    verify(cancellableMock, times(1)).cancel()
-    assertError(
-      actual = captor.getValue,
-      expected = LedgerApiErrors.AuthorizationChecks.PermissionDenied
-        .Reject(Expired(expiration, clock.instant).reason)
-        .asGrpcError,
+    loggerFactory.assertLogs(
+      within = {
+        // Scheduled task is cancelled
+        verify(cancellableMock, times(1)).cancel()
+        assertError(
+          actual = captor.getValue,
+          expected = LedgerApiErrors.AuthorizationChecks.PermissionDenied
+            .Reject(Expired(expiration, clock.instant).reason)
+            .asGrpcError,
+        )
+      },
+      assertions =
+        _.warningMessage should include("PERMISSION_DENIED(7,0): Claims were valid until "),
     )
 
     // onError has already been called by tested implementation so subsequent onNext, onError and onComplete

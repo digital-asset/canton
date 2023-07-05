@@ -13,7 +13,6 @@ import com.daml.ledger.api.v1.admin.party_management_service.{
   PartyDetails as ProtoPartyDetails,
 }
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext
 import com.daml.tracing.TelemetrySpecBase.*
 import com.daml.tracing.{DefaultOpenTelemetry, NoOpTelemetry}
 import com.digitalasset.canton.ledger.api.domain.LedgerOffset.Absolute
@@ -56,8 +55,6 @@ class ApiPartyManagementServiceSpec
     with ErrorsAssertions
     with BaseTest
     with BeforeAndAfterEach {
-
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
 
   var testTelemetrySetup: TestTelemetrySetup = _
 

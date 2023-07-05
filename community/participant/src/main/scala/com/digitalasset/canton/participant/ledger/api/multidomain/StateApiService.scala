@@ -8,7 +8,7 @@ import cats.instances.future.*
 import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
-import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
+import com.daml.error.{ErrorCategory, ErrorCode, ErrorGroup, Explanation, Resolution}
 import com.digitalasset.canton.error.TransactionErrorImpl
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.participant.state.v2.ReadService.{
@@ -93,7 +93,7 @@ object StateApiService {
     )
   }
 
-  object Error extends LedgerApiErrors.RequestValidation {
+  object Error extends ErrorGroup()(LedgerApiErrors.RequestValidation.errorClass) {
     @Explanation("This error results if a state request failed validation.")
     @Resolution("Check the request.")
     object StateRequestValidation

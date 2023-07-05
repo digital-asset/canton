@@ -19,18 +19,11 @@ import com.daml.lf.ledger.EventId
 import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.transaction.{CommittedTransaction, NodeId}
 import com.daml.lf.value.Value
-import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.Update.CommandRejected.FinalReason
-import com.digitalasset.canton.ledger.participant.state.v2.{
-  CompletionInfo,
-  Reassignment,
-  ReassignmentInfo,
-  TransactionMeta,
-  Update,
-}
+import com.digitalasset.canton.ledger.participant.state.v2.*
 import com.digitalasset.canton.platform.akkastreams.dispatcher.Dispatcher
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater.PrepareResult
@@ -50,7 +43,7 @@ import com.digitalasset.canton.platform.{DispatcherState, InMemoryState}
 import com.digitalasset.canton.protocol.{SourceDomainId, TargetDomainId}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.{BaseTest, TestEssentials}
+import com.digitalasset.canton.{BaseTest, HasExecutorServiceGeneric, TestEssentials}
 import com.google.protobuf.ByteString
 import com.google.rpc.status.Status
 import org.mockito.{InOrder, MockitoSugar}
@@ -59,7 +52,6 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
 import scala.util.chaining.*
 
@@ -218,19 +210,25 @@ class InMemoryStateUpdaterSpec
 object InMemoryStateUpdaterSpec {
 
   import TraceContext.Implicits.Empty.*
-  trait Scope extends Matchers with ScalaFutures with MockitoSugar with TestEssentials {
+
+  trait Scope
+      extends Matchers
+      with ScalaFutures
+      with MockitoSugar
+      with TestEssentials
+      with HasExecutorServiceGeneric {
+
+    override def handleFailure(message: String) = fail(message)
 
     val emptyArchiveToMetadata: DamlLf.Archive => PackageMetadata = _ => PackageMetadata()
     val cacheUpdates = ArrayBuffer.empty[PrepareResult]
     val cachesUpdateCaptor =
       (v: PrepareResult) => cacheUpdates.addOne(v).pipe(_ => ())
 
-    // TODO(#13019) Avoid the global execution context
-    @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     val inMemoryStateUpdater = InMemoryStateUpdaterFlow(
       2,
-      scala.concurrent.ExecutionContext.global,
-      scala.concurrent.ExecutionContext.global,
+      executorService,
+      executorService,
       FiniteDuration(10, "seconds"),
       Metrics.ForTesting,
       logger,
@@ -343,8 +341,6 @@ object InMemoryStateUpdaterSpec {
 
     when(dispatcherState.getDispatcher).thenReturn(dispatcher)
 
-    // TODO(#13019) Avoid the global execution context
-    @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     val inMemoryState = new InMemoryState(
       ledgerEndCache = ledgerEndCache,
       contractStateCaches = contractStateCaches,
@@ -354,9 +350,8 @@ object InMemoryStateUpdaterSpec {
       packageMetadataView = packageMetadataView,
       submissionTracker = submissionTracker,
       loggerFactory = loggerFactory,
-    )(ExecutionContext.global)
+    )(executorService)
 
-    val loggingContext: LoggingContext = LoggingContext.ForTesting
     val tx_accepted_commandId = "cAccepted"
     val tx_accepted_transactionId = "tAccepted"
     val tx_accepted_submitters: Set[String] = Set("p1", "p2")
@@ -500,6 +495,7 @@ object InMemoryStateUpdaterSpec {
     optUsedPackages = None,
     optNodeSeeds = None,
     optByKeyNodes = None,
+    optDomainId = None,
   )
 
   private val update1 = offset(1L) -> Traced(

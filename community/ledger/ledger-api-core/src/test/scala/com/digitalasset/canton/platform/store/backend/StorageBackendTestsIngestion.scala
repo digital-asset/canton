@@ -4,23 +4,22 @@
 package com.digitalasset.canton.platform.store.backend
 
 import com.daml.lf.data.Ref
+import com.digitalasset.canton.HasExecutionContext
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import org.scalatest.{Inside, OptionValues}
+import org.scalatest.{Assertion, Inside, OptionValues}
 
 import java.sql.Connection
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Future}
 import scala.util.Random
 
-// TODO(#13019) Avoid the global execution context
-@SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
 private[backend] trait StorageBackendTestsIngestion
     extends Matchers
     with Inside
     with OptionValues
-    with StorageBackendSpec {
-  this: AnyFlatSpec =>
+    with StorageBackendSpec
+    with HasExecutionContext { this: AnyFlatSpec =>
 
   behavior of "StorageBackend (ingestion)"
 
@@ -36,7 +35,7 @@ private[backend] trait StorageBackendTestsIngestion
     executeSql(ingest(dtos, _))
     val configBeforeLedgerEndUpdate = executeSql(backend.configuration.ledgerConfiguration)
     executeSql(
-      updateLedgerEnd(someOffset, 0)
+      updateLedgerEnd(someOffset, ledgerEndSequentialId = 0)
     )
     val configAfterLedgerEndUpdate = executeSql(backend.configuration.ledgerConfiguration)
 
@@ -63,7 +62,7 @@ private[backend] trait StorageBackendTestsIngestion
     executeSql(ingest(dtos, _))
     val packagesBeforeLedgerEndUpdate = executeSql(backend.packageBackend.lfPackages)
     executeSql(
-      updateLedgerEnd(someOffset, 0)
+      updateLedgerEnd(someOffset, ledgerEndSequentialId = 0)
     )
     val packagesAfterLedgerEndUpdate = executeSql(backend.packageBackend.lfPackages)
 
@@ -85,7 +84,7 @@ private[backend] trait StorageBackendTestsIngestion
     executeSql(ingest(dtos, _))
     val partiesBeforeLedgerEndUpdate = executeSql(backend.party.knownParties)
     executeSql(
-      updateLedgerEnd(someOffset, 0)
+      updateLedgerEnd(someOffset, ledgerEndSequentialId = 0)
     )
     val partiesAfterLedgerEndUpdate = executeSql(backend.party.knownParties)
 
@@ -110,14 +109,14 @@ private[backend] trait StorageBackendTestsIngestion
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     executeSql(
-      updateLedgerEnd(offset(3), 0)
+      updateLedgerEnd(offset(3), ledgerEndSequentialId = 0)
     )
 
     {
       val knownParties = executeSql(backend.party.knownParties)
-      val party1 = knownParties.find(_.party.toString == "party1").value
-      val party2 = knownParties.find(_.party.toString == "party2").value
-      val party3 = knownParties.find(_.party.toString == "party3").value
+      val party1 = knownParties.find(_.party == "party1").value
+      val party2 = knownParties.find(_.party == "party2").value
+      val party3 = knownParties.find(_.party == "party3").value
       party1.displayName shouldBe None
       party2.displayName shouldBe Some("nonEmptyDisplayName")
       party3.displayName shouldBe None
@@ -142,8 +141,6 @@ private[backend] trait StorageBackendTestsIngestion
   it should s"safely upsert packages concurrently ($NumberOfUpsertPackagesTests)" in withConnections(
     2
   ) { connections =>
-    import scala.concurrent.ExecutionContext.Implicits.global
-
     inside(connections) { case List(connection1, connection2) =>
       def packageFor(n: Int): DbDto.Package =
         dtoPackage(offset(n.toLong))
@@ -156,7 +153,7 @@ private[backend] trait StorageBackendTestsIngestion
       val packages1 = 21 to 30 map packageFor
       val packages2 = 31 to 40 map packageFor
 
-      def test() = {
+      def test(): Assertion = {
 
         executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
 
@@ -176,9 +173,9 @@ private[backend] trait StorageBackendTestsIngestion
         Await.result(ingestF1, Duration(10, "seconds"))
         Await.result(ingestF2, Duration(10, "seconds"))
 
-        executeSql(updateLedgerEnd(offset(50), 0))
+        executeSql(updateLedgerEnd(offset(50), ledgerEndSequentialId = 0))
 
-        executeSql(backend.packageBackend.lfPackages).keySet.map(_.toString) shouldBe (
+        executeSql(backend.packageBackend.lfPackages).keySet shouldBe (
           conflictingPackageDtos ++ packages1 ++ packages2
         ).map(_.package_id).toSet
       }

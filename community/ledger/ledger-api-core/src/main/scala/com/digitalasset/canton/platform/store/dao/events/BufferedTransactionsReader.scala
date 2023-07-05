@@ -15,7 +15,7 @@ import com.daml.ledger.api.v2.update_service.{
 import com.daml.lf.data.Ref.TransactionId
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.offset.Offset
-import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
 import com.digitalasset.canton.platform
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReader.FetchFromPersistence
@@ -148,6 +148,7 @@ private[platform] object BufferedTransactionsReader {
       eventProcessingParallelism: Int,
       lfValueTranslation: LfValueTranslation,
       metrics: Metrics,
+      loggerFactory: NamedLoggerFactory,
   )(implicit
       executionContext: ExecutionContext
   ): BufferedTransactionsReader = {
@@ -182,6 +183,7 @@ private[platform] object BufferedTransactionsReader {
         bufferedStreamEventsProcessingParallelism = eventProcessingParallelism,
         metrics = metrics,
         streamName = "transactions",
+        loggerFactory,
       )
 
     val transactionTreesStreamReader =
@@ -215,6 +217,7 @@ private[platform] object BufferedTransactionsReader {
         bufferedStreamEventsProcessingParallelism = eventProcessingParallelism,
         metrics = metrics,
         streamName = "transaction_trees",
+        loggerFactory,
       )
 
     val bufferedFlatTransactionByIdReader =

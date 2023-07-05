@@ -1,7 +1,7 @@
 {
   "canton_log" : {
     "title" : "Canton Log",
-    "description" : "A custom format for the lnav log file viewer for Canton logs. Register this format with `lnav -i canton.lnav.json`. See canton.io/docs/dev/user-manual/usermanual/monitoring.html#lnav for more information",
+    "description" : "A custom format for the lnav log file viewer for Canton logs. Register this format with `lnav -i canton.lnav.json`. See https://docs.daml.com/canton/usermanual/monitoring.html#lnav for more information",
     "regex" : {
       "std" : {
         "pattern" : "^(?<timestamp>\\d{4}-\\d{2}-\\d{2}\\s\\d{2}:\\d{2}:\\d{2},\\d{3})\\s+\\[(?<thread>[^\\]]*)\\]\\s+(?<level>[A-Z]+)\\s+(?<classname>[^:\\s]*)(:(?<testname>[^\\/]*?)(\\/(?<log_context>.*?))?)?(\\s+tid:(?<trace_id>[^- ]+)(-(?<trace_subid>\\S+))?)?\\s+-\\s+(?<body>(?s:.*))$"

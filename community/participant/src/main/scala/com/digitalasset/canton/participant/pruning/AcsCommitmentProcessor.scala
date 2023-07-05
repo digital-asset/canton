@@ -22,6 +22,7 @@ import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.Acs
 import com.digitalasset.canton.error.{Alarm, AlarmErrorCode, CantonError}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.*
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.event.{AcsChange, AcsChangeListener, RecordTime}
 import com.digitalasset.canton.participant.metrics.PruningMetrics
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Errors.MismatchError.AcsCommitmentAlarm
@@ -42,6 +43,7 @@ import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.retry.Policy
 import com.digitalasset.canton.version.ProtocolVersion
@@ -334,8 +336,12 @@ class AcsCommitmentProcessor(
         snapshot: RunningCommitments
     )(completedPeriod: CommitmentPeriod, cryptoSnapshot: SyncCryptoApi): Future[Unit] = {
       val snapshotRes = snapshot.snapshot()
+      logger.debug(show"Commitment snapshot for completed period $completedPeriod: $snapshotRes")
       for {
         msgs <- commitmentMessages(completedPeriod, snapshotRes.active, cryptoSnapshot)
+        _ = logger.debug(
+          show"Commitment messages for $completedPeriod: ${msgs.fmap(_.message.commitment)}"
+        )
         _ <- storeAndSendCommitmentMessages(completedPeriod, msgs)
         _ <- store.markOutstanding(completedPeriod, msgs.keySet)
         _ <- persistRunningCommitments(snapshotRes)
@@ -473,10 +479,6 @@ class AcsCommitmentProcessor(
           .flatMap { reconciliationIntervals =>
             validateEnvelope(timestamp, envelope, reconciliationIntervals) match {
               case Right(()) =>
-                val payload = envelope.protocolMessage.message
-                logger.debug(
-                  s"Checking commitment (purportedly by) ${payload.sender} for period ${payload.period}"
-                )
                 checkSignedMessage(timestamp, envelope.protocolMessage)
 
               case Left(errors) =>
@@ -543,8 +545,8 @@ class AcsCommitmentProcessor(
       res: CommitmentSnapshot
   )(implicit traceContext: TraceContext): Future[Unit] = {
     store.runningCommitments
-      .update(res.rt, res.delta, res.deleted)
-      .map(_ => logger.debug(s"Persisted ACS commitments at ${res.rt}"))
+      .update(res.recordTime, res.delta, res.deleted)
+      .map(_ => logger.debug(s"Persisted ACS commitments at ${res.recordTime}"))
   }
 
   private def updateSnapshot(rt: RecordTime, acsChange: AcsChange)(implicit
@@ -579,7 +581,10 @@ class AcsCommitmentProcessor(
   private def checkSignedMessage(
       timestamp: CantonTimestamp,
       message: SignedProtocolMessage[AcsCommitment],
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    logger.debug(
+      s"Checking commitment (purportedly by) ${message.message.sender} for period ${message.message.period}"
+    )
     for {
       validSig <- FutureUnlessShutdown.outcomeF(checkCommitmentSignature(message))
 
@@ -601,6 +606,7 @@ class AcsCommitmentProcessor(
           .report()
       }
     }
+  }
 
   private def checkCommitmentSignature(
       message: SignedProtocolMessage[AcsCommitment]
@@ -648,6 +654,7 @@ class AcsCommitmentProcessor(
   private def processBuffered(
       timestamp: CantonTimestampSecond
   )(implicit traceContext: TraceContext): Future[Unit] = {
+    logger.debug(s"Processing buffered commitments until $timestamp")
     for {
       toProcess <- store.queue.peekThrough(timestamp.forgetRefinement)
       _ <- checkMatchAndMarkSafe(toProcess)
@@ -691,6 +698,7 @@ class AcsCommitmentProcessor(
   private def checkMatchAndMarkSafe(
       remote: List[AcsCommitment]
   )(implicit traceContext: TraceContext): Future[Unit] = {
+    logger.debug(s"Processing ${remote.size} remote commitments")
     remote.parTraverse_ { cmt =>
       for {
         commitments <- store.getComputed(cmt.period, cmt.sender)
@@ -815,17 +823,24 @@ object AcsCommitmentProcessor extends HasLoggerName {
 
   /** A snapshot of ACS commitments per set of stakeholders
     *
-    * @param rt           The timestamp and tie-breaker of the snapshot
+    * @param recordTime           The timestamp and tie-breaker of the snapshot
     * @param active       Maps stakeholders to the commitment to their shared ACS, if the shared ACS is not empty
     * @param delta        A sub-map of active with those stakeholders whose commitments have changed since the last snapshot
     * @param deleted      Stakeholder sets whose ACS has gone to empty since the last snapshot (no longer active)
     */
   final case class CommitmentSnapshot(
-      rt: RecordTime,
+      recordTime: RecordTime,
       active: Map[SortedSet[LfPartyId], AcsCommitment.CommitmentType],
       delta: Map[SortedSet[LfPartyId], AcsCommitment.CommitmentType],
       deleted: Set[SortedSet[LfPartyId]],
-  )
+  ) extends PrettyPrinting {
+    override def pretty: Pretty[CommitmentSnapshot] = prettyOfClass(
+      param("record time", _.recordTime),
+      param("active", _.active),
+      param("delta (parties)", _.delta.keySet),
+      param("deleted", _.deleted),
+    )
+  }
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   class RunningCommitments(
@@ -863,14 +878,12 @@ object AcsCommitmentProcessor extends HasLoggerName {
           val activeDelta = (delta -- deleted).fmap(_.getByteString())
           // Note that it's crucial to eagerly (via fmap, as opposed to, say mapValues) snapshot the LtHash16 values,
           // since they're mutable
-          val res =
-            CommitmentSnapshot(
-              rt,
-              commitments.readOnlySnapshot().toMap.fmap(_.getByteString()),
-              activeDelta,
-              deleted,
-            )
-          res
+          CommitmentSnapshot(
+            rt,
+            commitments.readOnlySnapshot().toMap.fmap(_.getByteString()),
+            activeDelta,
+            deleted,
+          )
         }
       }
     }

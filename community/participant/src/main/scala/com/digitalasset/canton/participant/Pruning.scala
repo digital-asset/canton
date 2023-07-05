@@ -39,7 +39,4 @@ object Pruning {
   }
 
   final case class LedgerPruningOffsetNonCantonFormat(message: String) extends LedgerPruningError
-
-  final case class LedgerPruningUnknownMaxDeduplicationDuration(override val message: String)
-      extends LedgerPruningError
 }

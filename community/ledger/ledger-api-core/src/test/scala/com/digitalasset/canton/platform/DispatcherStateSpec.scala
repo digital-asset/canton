@@ -15,16 +15,14 @@ import io.grpc.StatusRuntimeException
 import org.mockito.MockitoSugar
 import org.scalatest.Assertion
 import org.scalatest.flatspec.AsyncFlatSpec
-import org.scalatest.matchers.should.Matchers
 
 import scala.concurrent.Future
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration.{Duration, DurationInt}
 import scala.util.{Failure, Success}
 
 class DispatcherStateSpec
     extends AsyncFlatSpec
     with MockitoSugar
-    with Matchers
     with AkkaBeforeAndAfterAll
     with BaseTest {
   private val className = classOf[DispatcherState].getSimpleName
@@ -78,7 +76,7 @@ class DispatcherStateSpec
   s"$className.shutdown" should "shutdown the DispatcherState" in {
     for {
       _ <- Future.unit
-      dispatcherState = new DispatcherState(Duration.Zero, loggerFactory)
+      dispatcherState = new DispatcherState(1.second, loggerFactory)
       // Start the initial Dispatcher
       _ = dispatcherState.startDispatcher(initialInitializationOffset)
 

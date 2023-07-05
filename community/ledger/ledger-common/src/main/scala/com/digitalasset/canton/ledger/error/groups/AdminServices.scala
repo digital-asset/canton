@@ -8,13 +8,14 @@ import com.daml.error.{
   DamlErrorWithDefiniteAnswer,
   ErrorCategory,
   ErrorCode,
+  ErrorGroup,
   Explanation,
   Resolution,
 }
 import com.digitalasset.canton.ledger.error.{LedgerApiErrors, groups}
 
 @Explanation("Errors raised by Ledger API admin services.")
-object AdminServices extends LedgerApiErrors.AdminServicesErrorGroup {
+object AdminServices extends ErrorGroup()(LedgerApiErrors.errorClass) {
 
   val UserManagement: UserManagementServiceErrorGroup.type =
     groups.UserManagementServiceErrorGroup

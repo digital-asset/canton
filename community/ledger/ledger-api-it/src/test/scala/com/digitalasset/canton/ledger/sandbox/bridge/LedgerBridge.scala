@@ -11,7 +11,6 @@ import com.daml.lf.data.Ref.ParticipantId
 import com.daml.lf.data.{Bytes, Ref, Time}
 import com.daml.lf.transaction.{CommittedTransaction, TransactionNodeStatistics}
 import com.daml.lf.value.Value.ContractId
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexService
 import com.digitalasset.canton.ledger.participant.state.v2.Update
@@ -40,8 +39,7 @@ object LedgerBridge {
       stageBufferSize: Int,
       loggerFactory: NamedLoggerFactory,
   )(implicit
-      loggingContext: LoggingContext,
-      servicesExecutionContext: ExecutionContext,
+      servicesExecutionContext: ExecutionContext
   ): ResourceOwner[LedgerBridge] =
     if (bridgeConfig.conflictCheckingEnabled)
       buildConfigCheckingLedgerBridge(
@@ -65,10 +63,10 @@ object LedgerBridge {
       stageBufferSize: Int,
       loggerFactory: NamedLoggerFactory,
   )(implicit
-      loggingContext: LoggingContext,
-      servicesExecutionContext: ExecutionContext,
+      servicesExecutionContext: ExecutionContext
   ) = {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(TraceContext.empty)
+    implicit val loggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContext.empty)
 
     for {
       initialLedgerEnd <- ResourceOwner.forFuture(() => indexService.currentLedgerEnd())

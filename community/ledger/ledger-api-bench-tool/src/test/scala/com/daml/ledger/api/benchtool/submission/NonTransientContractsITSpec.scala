@@ -10,6 +10,7 @@ import com.daml.ledger.api.testing.utils.SuiteResourceManagementAroundAll
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.client.binding
 import com.daml.scalautil.Statement.discard
+import com.digitalasset.canton.BaseTest
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.{AppendedClues, Checkpoints, EitherValues, OptionValues}
@@ -24,7 +25,8 @@ class NonTransientContractsITSpec
     with AppendedClues
     with EitherValues
     with OptionValues
-    with Checkpoints {
+    with Checkpoints
+    with BaseTest {
 
   it should "submit non-transient contracts" in {
     val totalContractsCount = 100
@@ -57,7 +59,7 @@ class NonTransientContractsITSpec
       _ <- submission.performSubmission(submissionConfig)
       txEvents: ObservedEvents <- txTreeObserver(
         apiServices = apiServices,
-        party = allocatedParties.observers(0),
+        party = allocatedParties.observers.head,
       )
     } yield {
       val createAndConsumeOffsetPairs = for {

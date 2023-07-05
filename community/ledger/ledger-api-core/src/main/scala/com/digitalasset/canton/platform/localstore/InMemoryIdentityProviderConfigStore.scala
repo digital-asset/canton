@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.localstore
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderConfig, IdentityProviderId}
-import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.localstore.api.IdentityProviderConfigStore.*
 import com.digitalasset.canton.platform.localstore.api.{
   IdentityProviderConfigStore,
@@ -16,8 +16,12 @@ import com.digitalasset.canton.platform.localstore.api.{
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{Future, blocking}
 
-class InMemoryIdentityProviderConfigStore(maxIdentityProviderConfigs: Int = 10)
-    extends IdentityProviderConfigStore {
+class InMemoryIdentityProviderConfigStore(
+    override protected val loggerFactory: NamedLoggerFactory,
+    maxIdentityProviderConfigs: Int = 10,
+) extends IdentityProviderConfigStore
+    with NamedLogging {
+
   private val state: TrieMap[IdentityProviderId.Id, IdentityProviderConfig] =
     TrieMap[IdentityProviderId.Id, IdentityProviderConfig]()
 

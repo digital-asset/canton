@@ -4,14 +4,15 @@
 package com.digitalasset.canton.data
 
 import cats.data.State
-import com.daml.concurrent.ExecutionContext
 import com.daml.lf.data.{Bytes, ImmArray}
 import com.daml.lf.transaction.{Node, NodeId, TransactionVersion}
 import com.digitalasset.canton.*
+import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.data.TransactionViewDecomposition.{NewView, SameView}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.RollbackContext.{RollbackScope, RollbackSibling}
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
-import com.digitalasset.canton.protocol.{LfContractId, *}
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.util.LfTransactionUtil
 
 import scala.collection.immutable.Seq
@@ -21,18 +22,13 @@ import scala.collection.immutable.Seq
   *
   * Its primary purpose is in building transactions that contain rollback nodes.
   */
-object RollbackTransactionBuilder {
+class RollbackTransactionBuilder(override protected val loggerFactory: NamedLoggerFactory)
+    extends NamedLogging {
 
-  private val exampleTxFactory = new ExampleTransactionFactory()()(ExecutionContext.parasitic)
+  import RollbackTransactionBuilder.*
 
-  final case class TxBuildState(i: Int, nodes: Map[NodeId, Node]) {
-    def withInc(): TxBuildState = this.copy(i + 1)
-    def withNode(n: (NodeId, Node)): TxBuildState = this.copy(nodes = nodes + n)
-  }
-
-  object TxBuildState {
-    def empty: TxBuildState = TxBuildState(0, Map.empty)
-  }
+  private val directEc = DirectExecutionContext(logger)
+  private val exampleTxFactory = new ExampleTransactionFactory()()(directEc)
 
   val unit: State[TxBuildState, Unit] = State.pure(())
   val nextInt: State[TxBuildState, Int] = State(s => (s.withInc(), s.i))
@@ -42,8 +38,6 @@ object RollbackTransactionBuilder {
   val nextSuffixedContractId: State[TxBuildState, LfContractId] = nextInt.map { i =>
     LfContractId.V1(DefaultDamlValues.lfhash(i), Bytes.assertFromString(f"$i%04x"))
   }
-
-  final case class CreateIds(nodeId: NodeId, contractId: LfContractId)
 
   def nextCreateIds(
       create: LfContractId => LfNodeCreate
@@ -128,14 +122,6 @@ object RollbackTransactionBuilder {
       WithoutSuffixes,
     )
 
-  sealed trait RollbackDecomposition
-  final case class RbNewTree(
-      rb: RollbackScope,
-      informees: Set[LfPartyId],
-      children: Seq[RollbackDecomposition] = Seq.empty,
-  ) extends RollbackDecomposition
-  final case class RbSameTree(rb: RollbackScope) extends RollbackDecomposition
-
   /** The purpose of this method is to map a tree [[TransactionViewDecomposition]] onto a [[RollbackDecomposition]]
     * hierarchy aid comparison. The [[RollbackContext.nextChild]] value is significant but is not available
     * for inspection or construction. For this reason we use trick of entering a rollback context and then converting
@@ -159,5 +145,29 @@ object RollbackTransactionBuilder {
   }
 
   def rbScope(rollbackScope: RollbackSibling*): RollbackScope = rollbackScope.toList
+}
 
+object RollbackTransactionBuilder {
+
+  final case class TxBuildState(i: Int, nodes: Map[NodeId, Node]) {
+    def withInc(): TxBuildState = this.copy(i + 1)
+
+    def withNode(n: (NodeId, Node)): TxBuildState = this.copy(nodes = nodes + n)
+  }
+
+  object TxBuildState {
+    def empty: TxBuildState = TxBuildState(0, Map.empty)
+  }
+
+  final case class CreateIds(nodeId: NodeId, contractId: LfContractId)
+
+  sealed trait RollbackDecomposition
+
+  final case class RbNewTree(
+      rb: RollbackScope,
+      informees: Set[LfPartyId],
+      children: Seq[RollbackDecomposition] = Seq.empty,
+  ) extends RollbackDecomposition
+
+  final case class RbSameTree(rb: RollbackScope) extends RollbackDecomposition
 }

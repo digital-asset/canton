@@ -21,6 +21,7 @@ class RecipientTest extends AnyWordSpec with BaseTest {
   val participantsOfParty = ParticipantsOfParty(alice)
   val sequencersOfDomain = SequencersOfDomain
   val mediatorsOfDomain = MediatorsOfDomain(NonNegativeInt.tryCreate(99312312))
+  val allRecipients = AllMembersOfDomain
 
   "recipient test serialization" should {
     "be able to convert back and forth" in {
@@ -43,6 +44,11 @@ class RecipientTest extends AnyWordSpec with BaseTest {
         mediatorsOfDomain.toProtoPrimitive,
         "recipient",
       ) shouldBe Right(mediatorsOfDomain)
+
+      Recipient.fromProtoPrimitive(
+        allRecipients.toProtoPrimitive,
+        "recipient",
+      ) shouldBe Right(allRecipients)
     }
 
     "act sanely on invalid inputs" in {

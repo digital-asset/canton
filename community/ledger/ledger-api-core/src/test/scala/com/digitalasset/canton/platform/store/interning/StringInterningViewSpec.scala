@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform.store.interning
 
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.topology.DomainId
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -12,13 +12,12 @@ import org.scalatest.matchers.should.Matchers
 import scala.concurrent.Future
 import scala.util.Try
 
-class StringInterningViewSpec extends AsyncFlatSpec with Matchers {
-  private implicit val lc: LoggingContext = LoggingContext.ForTesting
+class StringInterningViewSpec extends AsyncFlatSpec with Matchers with BaseTest {
 
   behavior of "StringInterningView"
 
   it should "provide working cache by extending" in {
-    val testee = new StringInterningView()
+    val testee = new StringInterningView(loggerFactory)
     partyAbsent(testee, "p1")
     partyAbsent(testee, "p2")
     partyAbsent(testee, "22:same:name")
@@ -55,7 +54,7 @@ class StringInterningViewSpec extends AsyncFlatSpec with Matchers {
   }
 
   it should "extend working view correctly" in {
-    val testee = new StringInterningView()
+    val testee = new StringInterningView(loggerFactory)
     partyAbsent(testee, "p1")
     partyAbsent(testee, "p2")
     partyAbsent(testee, "22:same:name")
@@ -115,7 +114,7 @@ class StringInterningViewSpec extends AsyncFlatSpec with Matchers {
   }
 
   it should "correctly load prefixing entries in the view on `update`" in {
-    val testee = new StringInterningView()
+    val testee = new StringInterningView(loggerFactory)
     partyAbsent(testee, "p1")
     partyAbsent(testee, "p2")
     partyAbsent(testee, "22:same:name")
@@ -150,7 +149,7 @@ class StringInterningViewSpec extends AsyncFlatSpec with Matchers {
   }
 
   it should "be able to update working view correctly" in {
-    val testee = new StringInterningView()
+    val testee = new StringInterningView(loggerFactory)
     partyAbsent(testee, "p1")
     partyAbsent(testee, "p2")
     partyAbsent(testee, "22:same:name")
@@ -196,7 +195,7 @@ class StringInterningViewSpec extends AsyncFlatSpec with Matchers {
   }
 
   it should "remove entries if lastStringInterningId is greater than lastId" in {
-    val testee = new StringInterningView()
+    val testee = new StringInterningView(loggerFactory)
     testee.internize(
       new DomainStringIterators(
         parties = List("p1", "p2", "22:same:name").iterator,

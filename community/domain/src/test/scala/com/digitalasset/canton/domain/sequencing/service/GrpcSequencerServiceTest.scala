@@ -59,19 +59,17 @@ class GrpcSequencerServiceTest
     extends FixtureAsyncWordSpec
     with BaseTest
     with ProtocolVersionChecksFixtureAsyncWordSpec {
-  type Subscription = GrpcManagedSubscription
+  type Subscription = GrpcManagedSubscription[_]
 
   sealed trait StreamItem
   case class StreamNext[A](value: A) extends StreamItem
   case class StreamError(t: Throwable) extends StreamItem
   object StreamComplete extends StreamItem
 
-  class MockStreamObserver
-      extends StreamObserver[v0.SubscriptionResponse]
-      with RecordStreamObserverItems
-  class MockServerStreamObserver
-      extends ServerCallStreamObserver[v0.SubscriptionResponse]
-      with RecordStreamObserverItems {
+  class MockStreamObserver[T] extends StreamObserver[T] with RecordStreamObserverItems[T]
+  class MockServerStreamObserver[T]
+      extends ServerCallStreamObserver[T]
+      with RecordStreamObserverItems[T] {
     override def isCancelled: Boolean = ???
     override def setOnCancelHandler(onCancelHandler: Runnable): Unit = ???
     override def setCompression(compression: String): Unit = ???
@@ -82,12 +80,12 @@ class GrpcSequencerServiceTest
     override def setMessageCompression(enable: Boolean): Unit = ???
   }
 
-  trait RecordStreamObserverItems {
-    this: StreamObserver[v0.SubscriptionResponse] =>
+  trait RecordStreamObserverItems[T] {
+    this: StreamObserver[T] =>
 
     val items: mutable.Buffer[StreamItem] = mutable.Buffer[StreamItem]()
 
-    override def onNext(value: v0.SubscriptionResponse): Unit = items += StreamNext(value)
+    override def onNext(value: T): Unit = items += StreamNext(value)
     override def onError(t: Throwable): Unit = items += StreamError(t)
     override def onCompleted(): Unit = items += StreamComplete
   }
@@ -114,7 +112,7 @@ class GrpcSequencerServiceTest
     val cryptoApi: DomainSyncCryptoClient =
       TestingIdentityFactory(loggerFactory).forOwnerAndDomain(member)
     val subscriptionPool: SubscriptionPool[Subscription] =
-      mock[SubscriptionPool[GrpcManagedSubscription]]
+      mock[SubscriptionPool[GrpcManagedSubscription[_]]]
 
     private val maxRatePerParticipant = NonNegativeInt.tryCreate(5)
     private val maxRequestSize = NonNegativeInt.tryCreate(1000)
@@ -866,106 +864,331 @@ class GrpcSequencerServiceTest
     }
   }
 
+  "versionedSubscribe" should {
+    "return error if called with observer not capable of observing server calls" onlyRunWithOrGreaterThan ProtocolVersion.v5 in {
+      env =>
+        val observer = new MockStreamObserver[v0.VersionedSubscriptionResponse]()
+        loggerFactory.suppressWarningsAndErrors {
+          env.service.subscribeVersioned(
+            v0.SubscriptionRequest(member = "", counter = 0L),
+            observer,
+          )
+        }
+
+        observer.items.toSeq should matchPattern {
+          case Seq(StreamError(err: StatusException)) if err.getStatus.getCode == INTERNAL =>
+        }
+    }
+
+    "return error if request cannot be deserialized" onlyRunWithOrGreaterThan ProtocolVersion.v5 in {
+      env =>
+        val observer = new MockServerStreamObserver[v0.VersionedSubscriptionResponse]()
+        env.service.subscribeVersioned(v0.SubscriptionRequest(member = "", counter = 0L), observer)
+
+        observer.items.toSeq should matchPattern {
+          case Seq(StreamError(err: StatusException))
+              if err.getStatus.getCode == INVALID_ARGUMENT =>
+        }
+    }
+
+    "return error if pool registration fails" onlyRunWithOrGreaterThan ProtocolVersion.v5 in {
+      env =>
+        val observer = new MockServerStreamObserver[v0.VersionedSubscriptionResponse]()
+        val requestP =
+          SubscriptionRequest(
+            participant,
+            SequencerCounter.Genesis,
+            testedProtocolVersion,
+          ).toProtoV0
+
+        Mockito
+          .when(
+            env.subscriptionPool.create(
+              ArgumentMatchers.any[() => Subscription](),
+              ArgumentMatchers.any[Member](),
+            )(anyTraceContext)
+          )
+          .thenReturn(Left(PoolClosed))
+
+        env.service.subscribeVersioned(requestP, observer)
+
+        inside(observer.items.loneElement) { case StreamError(ex: StatusException) =>
+          ex.getStatus.getCode shouldBe UNAVAILABLE
+          ex.getStatus.getDescription shouldBe "Subscription pool is closed."
+        }
+    }
+
+    "return error if sending request with member that is not authenticated" onlyRunWithOrGreaterThan ProtocolVersion.v5 in {
+      env =>
+        val observer = new MockServerStreamObserver[v0.VersionedSubscriptionResponse]()
+        val requestP =
+          SubscriptionRequest(
+            ParticipantId("Wrong participant"),
+            SequencerCounter.Genesis,
+            testedProtocolVersion,
+          ).toProtoV0
+
+        loggerFactory.suppressWarningsAndErrors {
+          env.service.subscribeVersioned(requestP, observer)
+        }
+
+        observer.items.toSeq should matchPattern {
+          case Seq(StreamError(err: StatusException))
+              if err.getStatus.getCode == PERMISSION_DENIED =>
+        }
+    }
+
+    "return error if authenticated member sending request unauthenticated endpoint" onlyRunWithOrGreaterThan ProtocolVersion.v5 in {
+      env =>
+        val observer = new MockServerStreamObserver[v0.VersionedSubscriptionResponse]()
+        val requestP =
+          SubscriptionRequest(
+            participant,
+            SequencerCounter.Genesis,
+            testedProtocolVersion,
+          ).toProtoV0
+
+        loggerFactory.suppressWarningsAndErrors {
+          env.service.subscribeUnauthenticatedVersioned(requestP, observer)
+        }
+
+        observer.items.toSeq should matchPattern {
+          case Seq(StreamError(err: StatusException))
+              if err.getStatus.getCode == PERMISSION_DENIED =>
+        }
+    }
+
+    "return error if unauthenticated member sending request authenticated endpoint" onlyRunWithOrGreaterThan ProtocolVersion.v5 in {
+      env =>
+        val observer = new MockServerStreamObserver[v0.VersionedSubscriptionResponse]()
+        val requestP =
+          SubscriptionRequest(
+            unauthenticatedMember,
+            SequencerCounter.Genesis,
+            testedProtocolVersion,
+          ).toProtoV0
+
+        loggerFactory.suppressWarningsAndErrors {
+          env.service.subscribeVersioned(requestP, observer)
+        }
+
+        observer.items.toSeq should matchPattern {
+          case Seq(StreamError(err: StatusException))
+              if err.getStatus.getCode == PERMISSION_DENIED =>
+        }
+    }
+
+    "return protocol version error if protocol version < v5 is used for subscribeVersioned" onlyRunWhen
+      (testedProtocolVersion < ProtocolVersion.v5) in { env =>
+        val observer = new MockServerStreamObserver[v0.VersionedSubscriptionResponse]()
+        val requestP =
+          SubscriptionRequest(
+            participant,
+            SequencerCounter.Genesis,
+            testedProtocolVersion,
+          ).toProtoV0
+
+        loggerFactory.suppressWarningsAndErrors {
+          env.service.subscribeVersioned(requestP, observer)
+        }
+
+        val expectedMessage =
+          "The unversioned subscribe endpoints must be used with protocol version"
+
+        observer.items.toSeq should matchPattern {
+          case Seq(StreamError(err: StatusException))
+              if err.getStatus.getCode == UNIMPLEMENTED && err.getMessage.contains(
+                expectedMessage
+              ) =>
+        }
+      }
+
+    "return protocol version error if protocol version < v5 is used for subscribeUnauthenticatedVersioned" onlyRunWhen
+      (testedProtocolVersion < ProtocolVersion.v5) in { env =>
+        val observer = new MockServerStreamObserver[v0.VersionedSubscriptionResponse]()
+        val requestP =
+          SubscriptionRequest(
+            unauthenticatedMember,
+            SequencerCounter.Genesis,
+            testedProtocolVersion,
+          ).toProtoV0
+
+        loggerFactory.suppressWarningsAndErrors {
+          env.service.subscribeUnauthenticatedVersioned(requestP, observer)
+        }
+
+        val expectedMessage =
+          "The unversioned subscribe endpoints must be used with protocol version"
+
+        observer.items.toSeq should matchPattern {
+          case Seq(StreamError(err: StatusException))
+              if err.getStatus.getCode == UNIMPLEMENTED && err.getMessage.contains(
+                expectedMessage
+              ) =>
+        }
+      }
+  }
+
   "subscribe" should {
-    "return error if called with observer not capable of observing server calls" in { env =>
-      val observer = new MockStreamObserver()
-      loggerFactory.suppressWarningsAndErrors {
+    "return error if called with observer not capable of observing server calls" onlyRunWhen (testedProtocolVersion < ProtocolVersion.v5) in {
+      env =>
+        val observer = new MockStreamObserver[v0.SubscriptionResponse]()
+        loggerFactory.suppressWarningsAndErrors {
+          env.service.subscribe(v0.SubscriptionRequest(member = "", counter = 0L), observer)
+        }
+
+        observer.items.toSeq should matchPattern {
+          case Seq(StreamError(err: StatusException)) if err.getStatus.getCode == INTERNAL =>
+        }
+    }
+
+    "return error if request cannot be deserialized" onlyRunWhen (testedProtocolVersion < ProtocolVersion.v5) in {
+      env =>
+        val observer = new MockServerStreamObserver[v0.SubscriptionResponse]()
         env.service.subscribe(v0.SubscriptionRequest(member = "", counter = 0L), observer)
-      }
 
-      observer.items.toSeq should matchPattern {
-        case Seq(StreamError(err: StatusException)) if err.getStatus.getCode == INTERNAL =>
-      }
+        observer.items.toSeq should matchPattern {
+          case Seq(StreamError(err: StatusException))
+              if err.getStatus.getCode == INVALID_ARGUMENT =>
+        }
     }
 
-    "return error if request cannot be deserialized" in { env =>
-      val observer = new MockServerStreamObserver()
-      env.service.subscribe(v0.SubscriptionRequest(member = "", counter = 0L), observer)
+    "return error if pool registration fails" onlyRunWhen (testedProtocolVersion < ProtocolVersion.v5) in {
+      env =>
+        val observer = new MockServerStreamObserver[v0.SubscriptionResponse]()
+        val requestP =
+          SubscriptionRequest(
+            participant,
+            SequencerCounter.Genesis,
+            testedProtocolVersion,
+          ).toProtoV0
 
-      observer.items.toSeq should matchPattern {
-        case Seq(StreamError(err: StatusException)) if err.getStatus.getCode == INVALID_ARGUMENT =>
-      }
-    }
+        Mockito
+          .when(
+            env.subscriptionPool.create(
+              ArgumentMatchers.any[() => Subscription](),
+              ArgumentMatchers.any[Member](),
+            )(anyTraceContext)
+          )
+          .thenReturn(Left(PoolClosed))
 
-    "return error if pool registration fails" in { env =>
-      val observer = new MockServerStreamObserver()
-      val requestP =
-        SubscriptionRequest(
-          participant,
-          SequencerCounter.Genesis,
-          testedProtocolVersion,
-        ).toProtoV0
-
-      Mockito
-        .when(
-          env.subscriptionPool.create(
-            ArgumentMatchers.any[() => Subscription](),
-            ArgumentMatchers.any[Member](),
-          )(anyTraceContext)
-        )
-        .thenReturn(Left(PoolClosed))
-
-      env.service.subscribe(requestP, observer)
-
-      inside(observer.items.loneElement) { case StreamError(ex: StatusException) =>
-        ex.getStatus.getCode shouldBe UNAVAILABLE
-        ex.getStatus.getDescription shouldBe "Subscription pool is closed."
-      }
-    }
-
-    "return error if sending request with member that is not authenticated" in { env =>
-      val observer = new MockServerStreamObserver()
-      val requestP =
-        SubscriptionRequest(
-          ParticipantId("Wrong participant"),
-          SequencerCounter.Genesis,
-          testedProtocolVersion,
-        ).toProtoV0
-
-      loggerFactory.suppressWarningsAndErrors {
         env.service.subscribe(requestP, observer)
-      }
 
-      observer.items.toSeq should matchPattern {
-        case Seq(StreamError(err: StatusException)) if err.getStatus.getCode == PERMISSION_DENIED =>
-      }
+        inside(observer.items.loneElement) { case StreamError(ex: StatusException) =>
+          ex.getStatus.getCode shouldBe UNAVAILABLE
+          ex.getStatus.getDescription shouldBe "Subscription pool is closed."
+        }
     }
 
-    "return error if authenticated member sending request unauthenticated endpoint" in { env =>
-      val observer = new MockServerStreamObserver()
-      val requestP =
-        SubscriptionRequest(
-          participant,
-          SequencerCounter.Genesis,
-          testedProtocolVersion,
-        ).toProtoV0
+    "return error if sending request with member that is not authenticated" onlyRunWhen (testedProtocolVersion < ProtocolVersion.v5) in {
+      env =>
+        val observer = new MockServerStreamObserver[v0.SubscriptionResponse]()
+        val requestP =
+          SubscriptionRequest(
+            ParticipantId("Wrong participant"),
+            SequencerCounter.Genesis,
+            testedProtocolVersion,
+          ).toProtoV0
 
-      loggerFactory.suppressWarningsAndErrors {
-        env.service.subscribeUnauthenticated(requestP, observer)
-      }
+        loggerFactory.suppressWarningsAndErrors {
+          env.service.subscribe(requestP, observer)
+        }
 
-      observer.items.toSeq should matchPattern {
-        case Seq(StreamError(err: StatusException)) if err.getStatus.getCode == PERMISSION_DENIED =>
-      }
+        observer.items.toSeq should matchPattern {
+          case Seq(StreamError(err: StatusException))
+              if err.getStatus.getCode == PERMISSION_DENIED =>
+        }
     }
 
-    "return error if unauthenticated member sending request authenticated endpoint" in { env =>
-      val observer = new MockServerStreamObserver()
-      val requestP =
-        SubscriptionRequest(
-          unauthenticatedMember,
-          SequencerCounter.Genesis,
-          testedProtocolVersion,
-        ).toProtoV0
+    "return error if authenticated member sending request unauthenticated endpoint" onlyRunWhen (testedProtocolVersion < ProtocolVersion.v5) in {
+      env =>
+        val observer = new MockServerStreamObserver[v0.SubscriptionResponse]()
+        val requestP =
+          SubscriptionRequest(
+            participant,
+            SequencerCounter.Genesis,
+            testedProtocolVersion,
+          ).toProtoV0
 
-      loggerFactory.suppressWarningsAndErrors {
-        env.service.subscribe(requestP, observer)
-      }
+        loggerFactory.suppressWarningsAndErrors {
+          env.service.subscribeUnauthenticated(requestP, observer)
+        }
 
-      observer.items.toSeq should matchPattern {
-        case Seq(StreamError(err: StatusException)) if err.getStatus.getCode == PERMISSION_DENIED =>
-      }
+        observer.items.toSeq should matchPattern {
+          case Seq(StreamError(err: StatusException))
+              if err.getStatus.getCode == PERMISSION_DENIED =>
+        }
     }
+
+    "return error if unauthenticated member sending request authenticated endpoint" onlyRunWhen (testedProtocolVersion < ProtocolVersion.v5) in {
+      env =>
+        val observer = new MockServerStreamObserver[v0.SubscriptionResponse]()
+        val requestP =
+          SubscriptionRequest(
+            unauthenticatedMember,
+            SequencerCounter.Genesis,
+            testedProtocolVersion,
+          ).toProtoV0
+
+        loggerFactory.suppressWarningsAndErrors {
+          env.service.subscribe(requestP, observer)
+        }
+
+        observer.items.toSeq should matchPattern {
+          case Seq(StreamError(err: StatusException))
+              if err.getStatus.getCode == PERMISSION_DENIED =>
+        }
+    }
+
+    "return protocol version error if protocol version >= v5 is used for subscribe" onlyRunWhen
+      (testedProtocolVersion >= ProtocolVersion.v5) in { env =>
+        val observer = new MockServerStreamObserver[v0.SubscriptionResponse]()
+        val requestP =
+          SubscriptionRequest(
+            participant,
+            SequencerCounter.Genesis,
+            testedProtocolVersion,
+          ).toProtoV0
+
+        loggerFactory.suppressWarningsAndErrors {
+          env.service.subscribe(requestP, observer)
+        }
+
+        val expectedMessage =
+          "The versioned subscribe endpoints must be used with protocol version"
+
+        observer.items.toSeq should matchPattern {
+          case Seq(StreamError(err: StatusException))
+              if err.getStatus.getCode == UNIMPLEMENTED && err.getMessage.contains(
+                expectedMessage
+              ) =>
+        }
+      }
+
+    "return protocol version error if protocol version >= v5 is used for subscribeUnauthenticated" onlyRunWhen
+      (testedProtocolVersion >= ProtocolVersion.v5) in { env =>
+        val observer = new MockServerStreamObserver[v0.SubscriptionResponse]()
+        val requestP =
+          SubscriptionRequest(
+            unauthenticatedMember,
+            SequencerCounter.Genesis,
+            testedProtocolVersion,
+          ).toProtoV0
+
+        loggerFactory.suppressWarningsAndErrors {
+          env.service.subscribeUnauthenticated(requestP, observer)
+        }
+
+        val expectedMessage =
+          "The versioned subscribe endpoints must be used with protocol version"
+
+        observer.items.toSeq should matchPattern {
+          case Seq(StreamError(err: StatusException))
+              if err.getStatus.getCode == UNIMPLEMENTED && err.getMessage.contains(
+                expectedMessage
+              ) =>
+        }
+      }
   }
 
   Seq(("acknowledge", false), ("acknowledgeSigned", true)).foreach { case (name, useSignedAck) =>

@@ -6,6 +6,7 @@ package com.daml.ledger.api.benchtool.submission
 import com.daml.ledger.api.benchtool.BenchtoolSandboxFixture
 import com.daml.ledger.api.benchtool.config.WorkflowConfig
 import com.daml.ledger.api.testing.utils.SuiteResourceManagementAroundAll
+import com.digitalasset.canton.BaseTest
 import org.scalatest.AppendedClues
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -15,7 +16,8 @@ class PartyAllocationITSpec
     with BenchtoolSandboxFixture
     with SuiteResourceManagementAroundAll
     with Matchers
-    with AppendedClues {
+    with AppendedClues
+    with BaseTest {
 
   it should "allow parties to be reused" in {
 

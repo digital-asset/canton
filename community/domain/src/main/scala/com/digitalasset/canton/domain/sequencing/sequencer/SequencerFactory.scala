@@ -34,12 +34,13 @@ trait SequencerFactory extends AutoCloseable {
       domainSyncCryptoApi: DomainSyncCryptoClient,
       futureSupervisor: FutureSupervisor,
       rateLimitManager: Option[SequencerRateLimitManager],
+      implicitMemberRegistration: Boolean,
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
       tracer: Tracer,
       actorMaterializer: Materializer,
-  ): Sequencer
+  ): Future[Sequencer]
 }
 
 abstract class DatabaseSequencerFactory extends SequencerFactory {
@@ -72,12 +73,13 @@ class CommunityDatabaseSequencerFactory(
       domainSyncCryptoApi: DomainSyncCryptoClient,
       futureSupervisor: FutureSupervisor,
       rateLimitManager: Option[SequencerRateLimitManager],
+      implicitMemberRegistration: Boolean,
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
       tracer: Tracer,
       actorMaterializer: Materializer,
-  ): Sequencer = {
+  ): Future[Sequencer] = {
     val sequencer = DatabaseSequencer.single(
       config,
       nodeParameters.processingTimeouts,
@@ -90,7 +92,8 @@ class CommunityDatabaseSequencerFactory(
       metrics,
       loggerFactory,
     )
-    config.testingInterceptor.map(_(clock)(sequencer)(ec)).getOrElse(sequencer)
+
+    Future.successful(config.testingInterceptor.map(_(clock)(sequencer)(ec)).getOrElse(sequencer))
   }
 
   override def close(): Unit = ()

@@ -9,7 +9,6 @@ import com.daml.ledger.api.v1.event_query_service.{
 }
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.domain.LedgerId
-import com.digitalasset.canton.ledger.api.grpc.GrpcEventQueryService
 import com.digitalasset.canton.ledger.api.messages.event.{
   GetEventsByContractIdRequest,
   GetEventsByContractKeyRequest,
@@ -23,12 +22,16 @@ import com.digitalasset.canton.logging.LoggingContextWithTrace.{
 }
 import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.platform.apiserver.services.{ApiConversions, logging}
+import com.digitalasset.canton.platform.apiserver.services.{
+  ApiConversions,
+  ApiEventQueryService,
+  logging,
+}
 import io.grpc.*
 
 import scala.concurrent.{ExecutionContext, Future}
 
-private[apiserver] object ApiEventQueryService {
+private[apiserver] object EventQueryServiceImpl {
   def create(
       ledgerId: LedgerId,
       eventQueryService: IndexEventQueryService,
@@ -36,9 +39,9 @@ private[apiserver] object ApiEventQueryService {
       loggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContext
-  ): GrpcEventQueryService with BindableService =
-    new GrpcEventQueryService(
-      new ApiEventQueryService(eventQueryService, loggerFactory),
+  ): ApiEventQueryService with BindableService =
+    new ApiEventQueryService(
+      new EventQueryServiceImpl(eventQueryService, loggerFactory),
       ledgerId,
       PartyNameChecker.AllowAllParties,
       telemetry,
@@ -46,7 +49,7 @@ private[apiserver] object ApiEventQueryService {
     )
 }
 
-private[apiserver] final class ApiEventQueryService private (
+private[apiserver] final class EventQueryServiceImpl private (
     eventQueryService: IndexEventQueryService,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)

@@ -252,6 +252,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers with Nam
       optUsedPackages = None,
       optNodeSeeds = None,
       optByKeyNodes = None,
+      optDomainId = None,
     )
 
     val someTransactionAccepted = state.Update.TransactionAccepted(

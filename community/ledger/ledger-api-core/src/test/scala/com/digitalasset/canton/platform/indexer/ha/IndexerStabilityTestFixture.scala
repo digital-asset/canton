@@ -10,7 +10,7 @@ import com.daml.metrics.Metrics
 import com.daml.metrics.api.dropwizard.DropwizardMetricsFactory
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.ledger.api.health.ReportsHealth
-import com.digitalasset.canton.logging.{SuppressingLogger, TracedLogger}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.platform.LedgerApiServer
 import com.digitalasset.canton.platform.configuration.{CommandConfiguration, IndexServiceConfig}
 import com.digitalasset.canton.platform.indexer.{
@@ -40,9 +40,8 @@ final case class Indexers(indexers: List[ReadServiceAndIndexer]) {
   def resetAll(): Unit = indexers.foreach(_.readService.reset())
 }
 
-object IndexerStabilityTestFixture {
+final class IndexerStabilityTestFixture(loggerFactory: NamedLoggerFactory) {
 
-  private val loggerFactory: SuppressingLogger = SuppressingLogger(getClass)
   private val logger: TracedLogger = TracedLogger(loggerFactory.getLogger(getClass))
 
   def owner(

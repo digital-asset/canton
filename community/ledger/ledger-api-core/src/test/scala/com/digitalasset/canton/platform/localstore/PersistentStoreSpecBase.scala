@@ -4,7 +4,6 @@
 package com.digitalasset.canton.platform.localstore
 
 import com.daml.ledger.resources.ResourceContext
-import com.daml.logging.LoggingContext
 import com.daml.metrics.{DatabaseMetrics, Metrics}
 import com.daml.resources.Resource
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, SuppressingLogger}
@@ -31,7 +30,7 @@ trait PersistentStoreSpecBase extends BaseTest with BeforeAndAfterEach with Befo
   this: Suite & StorageBackendProvider =>
 
   implicit protected val loggingContext: LoggingContextWithTrace =
-    LoggingContextWithTrace(traceContext)(LoggingContext.ForTesting)
+    LoggingContextWithTrace.ForTesting
 
   override val loggerFactory: SuppressingLogger = SuppressingLogger(getClass)
   private val runningTests = new AtomicInteger(0)
@@ -94,9 +93,9 @@ trait PersistentStoreSpecBase extends BaseTest with BeforeAndAfterEach with Befo
       .acquire()
     val initializeDbAndGetDbSupportFuture: Future[DbSupport] = for {
       dbSupport <- dbSupportResource.asFuture
-      _ = logger.warn(s"$thisSimpleName About to do Flyway migrations")
+      _ = logger.info(s"$thisSimpleName About to do Flyway migrations")
       _ <- new FlywayMigrations(jdbcUrl, loggerFactory = loggerFactory).migrate()
-      _ = logger.warn(s"$thisSimpleName Completed Flyway migrations")
+      _ = logger.info(s"$thisSimpleName Completed Flyway migrations")
     } yield dbSupport
     dbSupport = Await.result(initializeDbAndGetDbSupportFuture, 2.minutes)
   }

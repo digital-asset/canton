@@ -13,7 +13,7 @@ import com.daml.lf.{VersionRange, language, validation}
 @Explanation(
   "Errors raised by the Package Management Service on package uploads."
 )
-object PackageServiceError extends LedgerApiErrors.PackageServiceErrorGroup {
+object PackageServiceError extends ErrorGroup()(LedgerApiErrors.errorClass) {
   @Explanation("Package parsing errors raised during package upload.")
   object Reading extends ErrorGroup {
     @Explanation(

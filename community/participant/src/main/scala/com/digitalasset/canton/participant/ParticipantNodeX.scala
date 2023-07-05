@@ -426,9 +426,9 @@ object ParticipantNodeBootstrapX {
         executionContext: ExecutionContext,
         actorSystem: ActorSystem,
     ): (CantonSyncService, Eval[ParticipantNodePersistentState]) => List[BindableService] =
-      AdditionalMultiDomainServices.get(arguments)
+      (_, _) => Nil
 
-    override protected def multiDomainEnabledForLedgerApiServer: Boolean = false
+    override protected def multiDomainEnabledForLedgerApiServer: Boolean = true
   }
 }
 

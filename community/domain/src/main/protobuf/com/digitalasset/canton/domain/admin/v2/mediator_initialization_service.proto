@@ -23,6 +23,9 @@ message InitializeMediatorRequest {
   com.digitalasset.canton.protocol.v1.StaticDomainParameters domain_parameters = 2;
   // how should the member connect to the domain sequencer
   repeated com.digitalasset.canton.domain.api.v0.SequencerConnection sequencer_connections = 3;
+  // This field determines the minimum level of agreement, or consensus, required among the sequencers before a message
+  // is considered reliable and accepted by the system.
+  uint32 sequencerTrustThreshold = 4;
 }
 
 message InitializeMediatorResponse {}

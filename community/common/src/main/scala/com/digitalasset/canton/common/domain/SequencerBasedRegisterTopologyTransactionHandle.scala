@@ -11,12 +11,18 @@ import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.Top
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.{ProcessingTimeout, TopologyXConfig}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.mapErr
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.{MediatorsOfDomain, OpenEnvelope, Recipients}
-import com.digitalasset.canton.sequencing.{EnvelopeHandler, HandlerResult}
+import com.digitalasset.canton.sequencing.{
+  ApplicationHandler,
+  EnvelopeHandler,
+  HandlerResult,
+  NoEnvelopeBox,
+}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
@@ -99,9 +105,9 @@ class SequencerBasedRegisterTopologyTransactionHandleX(
         TraceContext,
         OpenEnvelope[ProtocolMessage],
     ) => EitherT[Future, SendAsyncClientError, Unit],
-    domainId: DomainId,
-    requestedFor: Member,
-    requestedBy: Member,
+    val domainId: DomainId,
+    val requestedFor: Member,
+    val requestedBy: Member,
     maybeClockForRetries: Option[Clock],
     topologyXConfig: TopologyXConfig,
     protocolVersion: ProtocolVersion,
@@ -111,7 +117,8 @@ class SequencerBasedRegisterTopologyTransactionHandleX(
     extends RegisterTopologyTransactionHandleWithProcessor[
       GenericSignedTopologyTransactionX
     ]
-    with NamedLogging {
+    with NamedLogging
+    with PrettyPrinting {
 
   private val service =
     new DomainTopologyServiceX(
@@ -144,6 +151,13 @@ class SequencerBasedRegisterTopologyTransactionHandleX(
   }
 
   override def onClosed(): Unit = service.close()
+
+  override def pretty: Pretty[SequencerBasedRegisterTopologyTransactionHandleX.this.type] =
+    prettyOfClass(
+      param("domainId", _.domainId),
+      param("requestedBy", _.requestedBy),
+      param("requestedFor", _.requestedFor),
+    )
 }
 
 abstract class DomainTopologyServiceCommon[
@@ -249,19 +263,23 @@ abstract class DomainTopologyServiceCommon[
       )
     }
 
-  val processor: EnvelopeHandler = envs =>
-    envs.withTraceContext { implicit traceContext => envs =>
-      HandlerResult.asynchronous(performUnlessClosingF(s"${getClass.getSimpleName}-processor") {
-        Future {
-          envs.mapFilter(env => protocolMessageToResponse(env.protocolMessage)).foreach {
-            response =>
-              responsePromiseMap
-                .remove(responseToIndex(response))
-                .foreach(_.trySuccess(UnlessShutdown.Outcome(responseToResult(response))))
+  val processor: EnvelopeHandler =
+    ApplicationHandler.create[NoEnvelopeBox, DefaultOpenEnvelope](
+      "handle-topology-request-responses"
+    )(envs =>
+      envs.withTraceContext { implicit traceContext => envs =>
+        HandlerResult.asynchronous(performUnlessClosingF(s"${getClass.getSimpleName}-processor") {
+          Future {
+            envs.mapFilter(env => protocolMessageToResponse(env.protocolMessage)).foreach {
+              response =>
+                responsePromiseMap
+                  .remove(responseToIndex(response))
+                  .foreach(_.trySuccess(UnlessShutdown.Outcome(responseToResult(response))))
+            }
           }
-        }
-      })
-    }
+        })
+      }
+    )
 
   override def onClosed(): Unit = {
     responsePromiseMap.values.foreach(

@@ -61,7 +61,7 @@ object CreatedContract {
       .leftMap(err => s"Encountered invalid Canton contract id: ${err.toString}")
       .flatMap(checkContractIdVersion)
       .flatMap {
-        case AuthenticatedContractIdVersion =>
+        case AuthenticatedContractIdVersion | AuthenticatedContractIdVersionV2 =>
           // Contracts created with the "authenticated" contract id prefix-of-suffix
           // must have contract_salt present in order to be properly authenticated (and used for explicit disclosure)
           ProtoConverter
@@ -93,7 +93,7 @@ object CreatedContract {
     val ensureNonAuthenticatedContractId: EnsureContractIdVersion =
       contractId => {
         case NonAuthenticatedContractIdVersion => Right(NonAuthenticatedContractIdVersion)
-        case AuthenticatedContractIdVersion =>
+        case AuthenticatedContractIdVersion | AuthenticatedContractIdVersionV2 =>
           Left(s"Unexpected authenticated contract id version (contract id: $contractId)")
       }
 
@@ -120,6 +120,7 @@ object CreatedContract {
     val ensureAuthenticatedContractId: EnsureContractIdVersion =
       contractId => {
         case AuthenticatedContractIdVersion => Right(AuthenticatedContractIdVersion)
+        case AuthenticatedContractIdVersionV2 => Right(AuthenticatedContractIdVersionV2)
         case NonAuthenticatedContractIdVersion =>
           Left(s"Unexpected un-authenticated contract id version (contract id: $contractId)")
       }

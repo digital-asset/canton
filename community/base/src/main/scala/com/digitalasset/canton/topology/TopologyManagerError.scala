@@ -4,6 +4,7 @@
 package com.digitalasset.canton.topology
 
 import com.daml.error.*
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.{CryptoPrivateStoreError, CryptoPublicStoreError}
@@ -15,6 +16,7 @@ import com.digitalasset.canton.topology.store.ValidatedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
   TopologyMapping,
+  TopologyMappingX,
   TopologyStateElement,
   TopologyTransaction,
 }
@@ -192,6 +194,14 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
     ) extends CantonError.Impl(
           cause =
             "A matching topology mapping authorized with the same key already exists in this state"
+        )
+        with TopologyManagerError
+
+    final case class FailureX(existing: TopologyMappingX, keys: NonEmpty[Set[Fingerprint]])(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause =
+            "A matching topology mapping x authorized with the same keys already exists in this state"
         )
         with TopologyManagerError
   }

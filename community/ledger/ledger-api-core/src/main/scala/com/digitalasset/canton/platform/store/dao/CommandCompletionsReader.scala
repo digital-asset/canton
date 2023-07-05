@@ -8,7 +8,7 @@ import akka.stream.scaladsl.Source
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.offset.Offset
-import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.backend.CompletionStorageBackend
 import com.digitalasset.canton.platform.store.dao.events.QueryNonPruned
 import com.digitalasset.canton.platform.{ApiOffset, ApplicationId, Party}
@@ -23,7 +23,11 @@ private[dao] final class CommandCompletionsReader(
     queryNonPruned: QueryNonPruned,
     metrics: Metrics,
     pageSize: Int,
-) extends LedgerDaoCommandCompletionsReader {
+    override protected val loggerFactory: NamedLoggerFactory,
+) extends LedgerDaoCommandCompletionsReader
+    with NamedLogging {
+
+  private val paginatingAsyncStream = new PaginatingAsyncStream(loggerFactory)
 
   @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
   private def offsetFor(response: CompletionStreamResponse): Offset = {
@@ -59,7 +63,7 @@ private[dao] final class CommandCompletionsReader(
       startExclusive = startExclusive,
       endInclusive = endInclusive,
     )
-    val source: Source[CompletionStreamResponse, NotUsed] = PaginatingAsyncStream
+    val source: Source[CompletionStreamResponse, NotUsed] = paginatingAsyncStream
       .streamFromSeekPagination[QueryRange[Offset], CompletionStreamResponse](
         startFromOffset = initialRange,
         getOffset = (previousCompletion: CompletionStreamResponse) => {
@@ -71,5 +75,4 @@ private[dao] final class CommandCompletionsReader(
       }
     source.map(response => offsetFor(response) -> response)
   }
-
 }

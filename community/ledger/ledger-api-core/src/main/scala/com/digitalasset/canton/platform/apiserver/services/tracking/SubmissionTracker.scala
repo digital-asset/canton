@@ -8,6 +8,7 @@ import com.daml.ledger.api.v2.command_completion_service.CompletionStreamRespons
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.metrics.Metrics
 import com.daml.metrics.api.MetricsContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.ledger.error.{CommonErrors, LedgerApiErrors}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker.{
@@ -18,7 +19,7 @@ import com.digitalasset.canton.tracing.TraceContext
 
 import java.time.Duration
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.{Future, Promise}
 import scala.util.{Failure, Success, Try}
 
 trait SubmissionTracker extends AutoCloseable {
@@ -68,14 +69,15 @@ object SubmissionTracker {
       val loggerFactory: NamedLoggerFactory,
   ) extends SubmissionTracker
       with NamedLogging {
+
+    private val directEc = DirectExecutionContext(logger)
+
     private[tracking] val pending =
       TrieMap.empty[SubmissionKey, (ContextualizedErrorLogger, Promise[CompletionResponse])]
 
     // Set max-in-flight capacity
     metrics.daml.commands.maxInFlightCapacity.inc(maxCommandsInFlight.toLong)(MetricsContext.Empty)
 
-    // TODO(#13019) Replace parasitic with DirectExecutionContext
-    @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     override def track(
         submissionKey: SubmissionKey,
         timeout: Duration,
@@ -111,13 +113,13 @@ object SubmissionTracker {
                   case Failure(throwable) =>
                     // Submitting command failed, finishing entry with the very same error
                     promise.tryComplete(Failure(throwable))
-                }(ExecutionContext.parasitic)
+                }(directEc)
 
               promise.future.onComplete { _ =>
                 // register timeout cancellation and removal from map
                 cancelTimeout.close()
                 pending.remove(submissionKey)
-              }(ExecutionContext.parasitic)
+              }(directEc)
           }
           promise.future
         }(errorLogger)
@@ -141,8 +143,6 @@ object SubmissionTracker {
     ): Unit =
       pending.get(submissionKey).foreach(p => p._2.complete(result(p._1)))
 
-    // TODO(#13019) Replace parasitic with DirectExecutionContext
-    @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     private def ensuringMaximumInFlight[T](
         f: => Future[T]
     )(implicit errorLogger: ContextualizedErrorLogger): Future[T] =
@@ -151,7 +151,7 @@ object SubmissionTracker {
         val ret = f
         ret.onComplete { _ =>
           metrics.daml.commands.maxInFlightLength.dec()
-        }(ExecutionContext.parasitic)
+        }(directEc)
         ret
       } else {
         Future.failed(

@@ -20,6 +20,10 @@ import com.daml.ledger.api.v1.ledger_configuration_service.LedgerConfiguration
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.transaction.{Transaction, TransactionTree}
 import com.daml.ledger.api.v1.transaction_filter.{Filters, TransactionFilter}
+import com.daml.ledger.api.v2.transaction.{
+  Transaction as TransactionV2,
+  TransactionTree as TransactionTreeV2,
+}
 import com.daml.ledger.client.binding.{Contract, TemplateCompanion}
 import com.daml.lf.data.Ref
 import com.daml.metrics.api.MetricHandle.{Histogram, Meter}
@@ -27,6 +31,7 @@ import com.daml.metrics.api.{MetricHandle, MetricName, MetricsContext}
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.WrappedCreatedEvent
 import com.digitalasset.canton.admin.api.client.commands.{
   LedgerApiCommands,
+  LedgerApiV2Commands,
   ParticipantAdminCommands,
 }
 import com.digitalasset.canton.admin.api.client.data.TemplateId.templateIds
@@ -64,7 +69,7 @@ import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ResourceUtil
-import com.digitalasset.canton.{LedgerTransactionId, LfPartyId}
+import com.digitalasset.canton.{LedgerTransactionId, LfPartyId, config}
 import com.google.protobuf.field_mask.FieldMask
 import io.grpc.StatusRuntimeException
 import io.grpc.stub.StreamObserver
@@ -76,22 +81,162 @@ import scala.annotation.nowarn
 import scala.concurrent.{Await, ExecutionContext}
 
 trait BaseLedgerApiAdministration extends NoTracing {
+  this: LedgerApiCommandRunner & NamedLogging & FeatureFlagFilter =>
 
-  this: LedgerApiCommandRunner with NamedLogging with FeatureFlagFilter =>
-  implicit protected val consoleEnvironment: ConsoleEnvironment
-  protected implicit lazy val executionContext: ExecutionContext =
+  implicit protected[canton] lazy val executionContext: ExecutionContext =
     consoleEnvironment.environment.executionContext
+
+  implicit protected val consoleEnvironment: ConsoleEnvironment
+
   protected val name: String
 
   protected def domainOfTransaction(transactionId: String): DomainId
   protected def optionallyAwait[Tx](
       tx: Tx,
       txId: String,
-      optTimeout: Option[NonNegativeDuration],
+      optTimeout: Option[config.NonNegativeDuration],
   ): Tx
   private def timeouts: ConsoleCommandTimeout = consoleEnvironment.commandTimeouts
   protected def defaultLimit: PositiveInt =
     consoleEnvironment.environment.config.parameters.console.defaultLimit
+
+  @Help.Summary("Group of commands that access the ledger-api V2", FeatureFlag.Testing)
+  @Help.Group("Ledger Api")
+  object ledger_api_v2 extends Helpful {
+    @Help.Summary("Submit commands", FeatureFlag.Testing)
+    @Help.Group("Command Submission")
+    object commands extends Helpful {
+
+      @Help.Summary(
+        "Submit command and wait for the resulting transaction, returning the transaction tree or failing otherwise",
+        FeatureFlag.Testing,
+      )
+      @Help.Description(
+        """Submits a command on behalf of the `actAs` parties, waits for the resulting transaction to commit and returns it.
+          | If the timeout is set, it also waits for the transaction to appear at all other configured
+          | participants who were involved in the transaction. The call blocks until the transaction commits or fails;
+          | the timeout only specifies how long to wait at the other participants.
+          | Fails if the transaction doesn't commit, or if it doesn't become visible to the involved participants in
+          | the allotted time.
+          | Note that if the optTimeout is set and the involved parties are concurrently enabled/disabled or their
+          | participants are connected/disconnected, the command may currently result in spurious timeouts or may
+          | return before the transaction appears at all the involved participants."""
+      )
+      def submit(
+          actAs: Seq[PartyId],
+          commands: Seq[Command],
+          domainId: DomainId,
+          workflowId: String = "",
+          commandId: String = "",
+          optTimeout: Option[NonNegativeDuration] = Some(timeouts.ledgerCommand),
+          deduplicationPeriod: Option[DeduplicationPeriod] = None,
+          submissionId: String = "",
+          minLedgerTimeAbs: Option[Instant] = None,
+          readAs: Seq[PartyId] = Seq.empty,
+          disclosedContracts: Seq[DisclosedContract] = Seq.empty,
+      ): TransactionTreeV2 = check(FeatureFlag.Testing) {
+        val tx = consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiV2Commands.CommandService.SubmitAndWaitTransactionTree(
+              actAs.map(_.toLf),
+              readAs.map(_.toLf),
+              commands,
+              workflowId,
+              commandId,
+              deduplicationPeriod,
+              submissionId,
+              minLedgerTimeAbs,
+              disclosedContracts,
+              domainId,
+            )
+          )
+        }
+        optionallyAwait(tx, tx.updateId, optTimeout)
+      }
+
+      @Help.Summary(
+        "Submit command and wait for the resulting transaction, returning the flattened transaction or failing otherwise",
+        FeatureFlag.Testing,
+      )
+      @Help.Description(
+        """Submits a command on behalf of the `actAs` parties, waits for the resulting transaction to commit, and returns the "flattened" transaction.
+          | If the timeout is set, it also waits for the transaction to appear at all other configured
+          | participants who were involved in the transaction. The call blocks until the transaction commits or fails;
+          | the timeout only specifies how long to wait at the other participants.
+          | Fails if the transaction doesn't commit, or if it doesn't become visible to the involved participants in
+          | the allotted time.
+          | Note that if the optTimeout is set and the involved parties are concurrently enabled/disabled or their
+          | participants are connected/disconnected, the command may currently result in spurious timeouts or may
+          | return before the transaction appears at all the involved participants."""
+      )
+      def submit_flat(
+          actAs: Seq[PartyId],
+          commands: Seq[Command],
+          domainId: DomainId,
+          workflowId: String = "",
+          commandId: String = "",
+          optTimeout: Option[NonNegativeDuration] = Some(timeouts.ledgerCommand),
+          deduplicationPeriod: Option[DeduplicationPeriod] = None,
+          submissionId: String = "",
+          minLedgerTimeAbs: Option[Instant] = None,
+          readAs: Seq[PartyId] = Seq.empty,
+          disclosedContracts: Seq[DisclosedContract] = Seq.empty,
+      ): TransactionV2 = check(FeatureFlag.Testing) {
+        val tx = consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiV2Commands.CommandService.SubmitAndWaitTransaction(
+              actAs.map(_.toLf),
+              readAs.map(_.toLf),
+              commands,
+              workflowId,
+              commandId,
+              deduplicationPeriod,
+              submissionId,
+              minLedgerTimeAbs,
+              disclosedContracts,
+              domainId,
+            )
+          )
+        }
+        optionallyAwait(tx, tx.updateId, optTimeout)
+      }
+
+      @Help.Summary("Submit command asynchronously", FeatureFlag.Testing)
+      @Help.Description(
+        """Provides access to the command submission service of the Ledger API.
+          |See https://docs.daml.com/app-dev/services.html for documentation of the parameters."""
+      )
+      def submit_async(
+          actAs: Seq[PartyId],
+          commands: Seq[Command],
+          domainId: DomainId,
+          workflowId: String = "",
+          commandId: String = "",
+          deduplicationPeriod: Option[DeduplicationPeriod] = None,
+          submissionId: String = "",
+          minLedgerTimeAbs: Option[Instant] = None,
+          readAs: Seq[PartyId] = Seq.empty,
+          disclosedContracts: Seq[DisclosedContract] = Seq.empty,
+      ): Unit = check(FeatureFlag.Testing) {
+        consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiV2Commands.CommandSubmissionService.Submit(
+              actAs.map(_.toLf),
+              readAs.map(_.toLf),
+              commands,
+              workflowId,
+              commandId,
+              deduplicationPeriod,
+              submissionId,
+              minLedgerTimeAbs,
+              disclosedContracts,
+              domainId,
+            )
+          )
+        }
+      }
+    }
+  }
 
   @Help.Summary("Group of commands that access the ledger-api", FeatureFlag.Testing)
   @Help.Group("Ledger Api")
@@ -122,7 +267,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
             new LedgerOffset().withBoundary(LedgerOffset.LedgerBoundary.LEDGER_BEGIN),
           endOffset: Option[LedgerOffset] = None,
           verbose: Boolean = true,
-          timeout: NonNegativeDuration = timeouts.ledgerCommand,
+          timeout: config.NonNegativeDuration = timeouts.ledgerCommand,
       ): Seq[TransactionTree] = check(FeatureFlag.Testing)({
         val observer = new RecordingStreamObserver[TransactionTree](completeAfter)
         val filter = TransactionFilter(partyIds.map(_.toLf -> Filters()).toMap)
@@ -138,7 +283,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           call: => AutoCloseable,
           requestDescription: String,
           observer: RecordingStreamObserver[Res],
-          timeout: NonNegativeDuration,
+          timeout: config.NonNegativeDuration,
       ): Seq[Res] = consoleEnvironment.run {
         try {
           ResourceUtil.withResource(call) { _ =>
@@ -200,7 +345,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
             new LedgerOffset().withBoundary(LedgerOffset.LedgerBoundary.LEDGER_BEGIN),
           endOffset: Option[LedgerOffset] = None,
           verbose: Boolean = true,
-          timeout: NonNegativeDuration = timeouts.ledgerCommand,
+          timeout: config.NonNegativeDuration = timeouts.ledgerCommand,
       ): Seq[Transaction] = check(FeatureFlag.Testing)({
         val observer = new RecordingStreamObserver[Transaction](completeAfter)
         val filter = TransactionFilter(partyIds.map(_.toLf -> Filters()).toMap)
@@ -401,7 +546,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           commands: Seq[Command],
           workflowId: String = "",
           commandId: String = "",
-          optTimeout: Option[NonNegativeDuration] = Some(timeouts.ledgerCommand),
+          optTimeout: Option[config.NonNegativeDuration] = Some(timeouts.ledgerCommand),
           deduplicationPeriod: Option[DeduplicationPeriod] = None,
           submissionId: String = "",
           minLedgerTimeAbs: Option[Instant] = None,
@@ -428,7 +573,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
 
       @Help.Summary("Submit command asynchronously", FeatureFlag.Testing)
       @Help.Description(
-        """Provides access to the command submission service of the Ledger APi.
+        """Provides access to the command submission service of the Ledger API.
           |See https://docs.daml.com/app-dev/services.html for documentation of the parameters."""
       )
       def submit_async(
@@ -479,7 +624,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           limit: PositiveInt = defaultLimit,
           verbose: Boolean = true,
           filterTemplates: Seq[TemplateId] = Seq.empty,
-          timeout: NonNegativeDuration = timeouts.unbounded,
+          timeout: config.NonNegativeDuration = timeouts.unbounded,
       ): Seq[WrappedCreatedEvent] =
         check(FeatureFlag.Testing)(consoleEnvironment.run {
           ledgerApiCommand(
@@ -505,7 +650,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           limit: PositiveInt = defaultLimit,
           verbose: Boolean = true,
           filterTemplates: Seq[TemplateId] = Seq.empty,
-          timeout: NonNegativeDuration = timeouts.unbounded,
+          timeout: config.NonNegativeDuration = timeouts.unbounded,
           identityProviderId: String = "",
       ): Seq[WrappedCreatedEvent] = check(FeatureFlag.Testing)(
         consoleEnvironment.run {
@@ -544,7 +689,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
       def await_active_contract(
           party: PartyId,
           contractId: LfContractId,
-          timeout: NonNegativeDuration = timeouts.ledgerCommand,
+          timeout: config.NonNegativeDuration = timeouts.ledgerCommand,
       ): Unit = check(FeatureFlag.Testing) {
         ConsoleMacros.utils.retry_until_true(timeout) {
           of_party(party, verbose = false)
@@ -561,8 +706,8 @@ trait BaseLedgerApiAdministration extends NoTracing {
       def await[T](
           partyId: PartyId,
           companion: TemplateCompanion[T],
-          predicate: Contract[T] => Boolean = (x: Contract[T]) => true,
-          timeout: NonNegativeDuration = timeouts.ledgerCommand,
+          predicate: Contract[T] => Boolean = (_: Contract[T]) => true,
+          timeout: config.NonNegativeDuration = timeouts.ledgerCommand,
       ): Contract[T] = check(FeatureFlag.Testing)({
         val result = new AtomicReference[Option[Contract[T]]](None)
         ConsoleMacros.utils.retry_until_true(timeout) {
@@ -574,7 +719,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           ConsoleCommandResult.fromEither(
             result
               .get()
-              .toRight(s"Failed to find contract of type ${companion.id} after ${timeout}")
+              .toRight(s"Failed to find contract of type ${companion.id} after $timeout")
           )
         }
       })
@@ -590,7 +735,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
       def filter[T](
           partyId: PartyId,
           templateCompanion: TemplateCompanion[T],
-          predicate: Contract[T] => Boolean = (x: Contract[T]) => true,
+          predicate: Contract[T] => Boolean = (_: Contract[T]) => true,
       ): Seq[Contract[T]] = check(FeatureFlag.Testing)(
         of_party(partyId, filterTemplates = templateIds(templateCompanion.id))
           .map(_.event)
@@ -606,14 +751,14 @@ trait BaseLedgerApiAdministration extends NoTracing {
       def find_generic(
           partyId: PartyId,
           filter: WrappedCreatedEvent => Boolean,
-          timeout: NonNegativeDuration = timeouts.ledgerCommand,
+          timeout: config.NonNegativeDuration = timeouts.ledgerCommand,
       ): WrappedCreatedEvent = check(FeatureFlag.Testing) {
         def scan: Option[WrappedCreatedEvent] = of_party(partyId).find(filter(_))
 
         ConsoleMacros.utils.retry_until_true(timeout)(scan.isDefined)
 
         consoleEnvironment.run {
-          ConsoleCommandResult.fromEither(scan.toRight(s"Failed to find contract for ${partyId}."))
+          ConsoleCommandResult.fromEither(scan.toRight(s"Failed to find contract for $partyId."))
         }
       }
     }
@@ -874,7 +1019,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
            the expected number of configs was retrieved or the timeout is over.""")
       def list(
           expectedConfigs: Int = 1,
-          timeout: NonNegativeDuration = timeouts.ledgerCommand,
+          timeout: config.NonNegativeDuration = timeouts.ledgerCommand,
       ): Seq[LedgerConfiguration] =
         check(FeatureFlag.Testing)(consoleEnvironment.run {
           ledgerApiCommand(
@@ -1142,7 +1287,10 @@ trait BaseLedgerApiAdministration extends NoTracing {
           )
         })
 
-      def verifyOnlyModifiableFieldsWhereModified(srcUser: User, modifiedUser: User): Unit = {
+      private def verifyOnlyModifiableFieldsWhereModified(
+          srcUser: User,
+          modifiedUser: User,
+      ): Unit = {
         val withAllowedUpdatesReverted = modifiedUser.copy(
           primaryParty = srcUser.primaryParty,
           isActive = srcUser.isActive,
@@ -1346,7 +1494,8 @@ trait BaseLedgerApiAdministration extends NoTracing {
 }
 
 trait LedgerApiAdministration extends BaseLedgerApiAdministration {
-  this: LedgerApiCommandRunner with AdminCommandRunner with NamedLogging with FeatureFlagFilter =>
+  this: LedgerApiCommandRunner & AdminCommandRunner & NamedLogging & FeatureFlagFilter =>
+
   implicit protected val consoleEnvironment: ConsoleEnvironment
   protected val name: String
 
@@ -1362,7 +1511,7 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
   private def awaitTransaction(
       transactionId: String,
       at: Map[ParticipantReferenceCommon, PartyId],
-      timeout: NonNegativeDuration,
+      timeout: config.NonNegativeDuration,
   ): Unit = {
     def scan() = {
       at.map { case (participant, party) =>
@@ -1393,11 +1542,11 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
     // changes during the command's execution. We'll have to live with it for the moment, as there's no convenient
     // way to get the record time of the transaction to pass to the parties.list call.
     val domainPartiesAndParticipants = {
-      val pNodes = (consoleEnvironment.participants.all.iterator)
+      val pNodes = consoleEnvironment.participants.all.iterator
         .filter(x => x.health.running() && x.health.initialized() && x.name == name)
         .flatMap(_.parties.list(filterDomain = txDomain.filterString))
         .toSet
-      val pXNodes = (consoleEnvironment.participantsX.all.iterator)
+      val pXNodes = consoleEnvironment.participantsX.all.iterator
         .filter(x => x.health.running() && x.health.initialized() && x.name == name)
         .flatMap(_.parties.list(filterDomain = txDomain.filterString))
         .toSet
@@ -1412,7 +1561,7 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
       .by_id(domainParties, transactionId)
       .getOrElse(
         throw new IllegalStateException(
-          s"Can't find transaction by ID: ${transactionId}. Queried parties: $domainParties"
+          s"Can't find transaction by ID: $transactionId. Queried parties: $domainParties"
         )
       )
     val witnesses = tree.eventsById.values
@@ -1454,7 +1603,7 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
   protected def optionallyAwait[Tx](
       tx: Tx,
       txId: String,
-      optTimeout: Option[NonNegativeDuration],
+      optTimeout: Option[config.NonNegativeDuration],
   ): Tx = {
     optTimeout match {
       case None => tx
@@ -1465,5 +1614,4 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
         tx
     }
   }
-
 }

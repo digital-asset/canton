@@ -10,6 +10,7 @@ import com.digitalasset.canton.participant.store.SubmissionTrackerStore
 import com.digitalasset.canton.protocol.{RequestId, RootHash}
 import com.digitalasset.canton.store.memory.InMemoryPrunableByTime
 import com.digitalasset.canton.tracing.TraceContext
+import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent
 import scala.collection.concurrent.TrieMap
@@ -62,4 +63,7 @@ class InMemorySubmissionTrackerStore(
       traceContext: TraceContext
   ): FutureUnlessShutdown[Int] =
     FutureUnlessShutdown.pure(freshSubmittedTransactions.size)
+
+  @VisibleForTesting
+  def clear(): Unit = freshSubmittedTransactions.clear()
 }

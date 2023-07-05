@@ -121,7 +121,11 @@ object SequencerClientFactory {
           )
 
           sequencerTransports <- EitherT.fromEither[Future](
-            SequencerTransports.from(sequencerTransportsMap, expectedSequencers)
+            SequencerTransports.from(
+              sequencerTransportsMap,
+              expectedSequencers,
+              sequencerConnections.sequencerTrustThreshold,
+            )
           )
 
           // fetch the initial set of pending sends to initialize the client with.

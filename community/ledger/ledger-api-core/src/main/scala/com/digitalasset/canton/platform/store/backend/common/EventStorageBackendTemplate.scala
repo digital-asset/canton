@@ -634,7 +634,7 @@ object EventStorageBackendTemplate {
       int("create_key_value_compression").? ~
       timestampFromMicros("ledger_effective_time") ~
       hashFromHexString("create_key_hash").? ~
-      byteArray("driver_metadata") ~ // this should be present for multi-domain deployments
+      byteArray("driver_metadata").? ~
       long("event_sequential_id")
 
   private def createActiveContractParser(
@@ -681,7 +681,7 @@ object EventStorageBackendTemplate {
             createKeyValueCompression = createKeyValueCompression,
             ledgerEffectiveTime = ledgerEffectiveTime,
             createKeyHash = createKeyHash,
-            driverMetadata = driverMetadata,
+            driverMetadata = driverMetadata.getOrElse(Array.empty),
           ),
           eventSequentialId = eventSequentialId,
         )

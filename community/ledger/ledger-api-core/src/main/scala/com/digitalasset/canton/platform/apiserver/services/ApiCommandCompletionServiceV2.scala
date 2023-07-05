@@ -5,7 +5,6 @@ package com.digitalasset.canton.platform.apiserver.services
 
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
-import com.daml.error.ContextualizedErrorLogger
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v2.command_completion_service.{
   CommandCompletionServiceGrpc,
@@ -31,7 +30,6 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
 }
-import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.stub.StreamObserver
 
 final class ApiCommandCompletionServiceV2(
@@ -46,12 +44,6 @@ final class ApiCommandCompletionServiceV2(
     with StreamingServiceLifecycleManagement
     with NamedLogging {
   import ApiConversions.*
-
-  // TODO(#13269) remove the contextualizedErrorLogger
-  protected val contextualizedErrorLogger: ContextualizedErrorLogger =
-    errorLoggingContext(
-      TraceContext.empty
-    )
 
   private val validator = new CompletionServiceRequestValidator(
     domain.LedgerId(""), // not used

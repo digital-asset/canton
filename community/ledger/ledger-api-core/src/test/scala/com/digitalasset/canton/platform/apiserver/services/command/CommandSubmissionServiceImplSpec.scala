@@ -1,7 +1,7 @@
 // Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.platform.apiserver.services
+package com.digitalasset.canton.platform.apiserver.services.command
 
 import com.daml.api.util.TimeProvider
 import com.daml.lf
@@ -17,7 +17,6 @@ import com.daml.lf.transaction.*
 import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.value.Value
 import com.daml.metrics.Metrics
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationDuration
 import com.digitalasset.canton.ledger.api.domain.{CommandId, Commands}
@@ -37,8 +36,10 @@ import com.digitalasset.canton.platform.apiserver.execution.{
   CommandExecutionResult,
   CommandExecutor,
 }
+import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 import com.digitalasset.canton.platform.services.time.TimeProviderType
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.google.rpc.status.Status as RpcStatus
 import io.grpc.{Status, StatusRuntimeException}
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
@@ -49,20 +50,18 @@ import org.scalatest.matchers.should.Matchers
 
 import java.time.{Duration, Instant}
 import java.util.concurrent.CompletableFuture
-import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 import scala.util.{Failure, Success, Try}
 
-// TODO(#13019) Avoid the global execution context
-@SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
-class ApiSubmissionServiceSpec
+class CommandSubmissionServiceImplSpec
     extends AnyFlatSpec
     with Matchers
     with Inside
     with MockitoSugar
     with ScalaFutures
     with ArgumentMatchersSugar
-    with BaseTest {
+    with BaseTest
+    with HasExecutionContext {
 
   import TransactionBuilder.Implicits.*
 
@@ -105,79 +104,87 @@ class ApiSubmissionServiceSpec
   behavior of "submit"
 
   it should "return proper gRPC status codes for DamlLf errors" in new TestContext {
-    val tmplId = toIdentifier("M:T")
+    loggerFactory.assertLogs(
+      within = {
+        val tmplId = toIdentifier("M:T")
 
-    val errorsToExpectedStatuses: Seq[(ErrorCause, Status)] = List(
-      ErrorCause.DamlLf(
-        LfError.Interpretation(
-          LfError.Interpretation.DamlException(
-            LfInterpretationError.ContractNotFound("00" + "00" * 32)
-          ),
-          None,
-        )
-      ) -> Status.NOT_FOUND,
-      ErrorCause.DamlLf(
-        LfError.Interpretation(
-          LfError.Interpretation.DamlException(
-            LfInterpretationError.DuplicateContractKey(
-              GlobalKey.assertBuild(tmplId, Value.ValueUnit)
+        val errorsToExpectedStatuses: Seq[(ErrorCause, Status)] = List(
+          ErrorCause.DamlLf(
+            LfError.Interpretation(
+              LfError.Interpretation.DamlException(
+                LfInterpretationError.ContractNotFound("00" + "00" * 32)
+              ),
+              None,
             )
-          ),
-          None,
-        )
-      ) -> Status.ALREADY_EXISTS,
-      ErrorCause.DamlLf(
-        LfError.Validation(
-          LfError.Validation.ReplayMismatch(ReplayMismatch(null, null))
-        )
-      ) -> Status.INTERNAL,
-      ErrorCause.DamlLf(
-        LfError.Preprocessing(
-          LfError.Preprocessing.Lookup(
-            LookupError.NotFound(
-              Reference.Package(defaultPackageId),
-              Reference.Package(defaultPackageId),
+          ) -> Status.NOT_FOUND,
+          ErrorCause.DamlLf(
+            LfError.Interpretation(
+              LfError.Interpretation.DamlException(
+                LfInterpretationError.DuplicateContractKey(
+                  GlobalKey.assertBuild(tmplId, Value.ValueUnit)
+                )
+              ),
+              None,
             )
-          )
-        )
-      ) -> Status.INVALID_ARGUMENT,
-      ErrorCause.DamlLf(
-        LfError.Interpretation(
-          LfError.Interpretation.DamlException(
-            LfInterpretationError.FailedAuthorization(
-              NodeId(1),
-              lf.ledger.FailedAuthorization.NoSignatories(tmplId, None),
+          ) -> Status.ALREADY_EXISTS,
+          ErrorCause.DamlLf(
+            LfError.Validation(
+              LfError.Validation.ReplayMismatch(ReplayMismatch(null, null))
             )
-          ),
-          None,
+          ) -> Status.INTERNAL,
+          ErrorCause.DamlLf(
+            LfError.Preprocessing(
+              LfError.Preprocessing.Lookup(
+                LookupError.NotFound(
+                  Reference.Package(defaultPackageId),
+                  Reference.Package(defaultPackageId),
+                )
+              )
+            )
+          ) -> Status.INVALID_ARGUMENT,
+          ErrorCause.DamlLf(
+            LfError.Interpretation(
+              LfError.Interpretation.DamlException(
+                LfInterpretationError.FailedAuthorization(
+                  NodeId(1),
+                  lf.ledger.FailedAuthorization.NoSignatories(tmplId, None),
+                )
+              ),
+              None,
+            )
+          ) -> Status.INVALID_ARGUMENT,
+          ErrorCause.LedgerTime(0) -> Status.ABORTED,
         )
-      ) -> Status.INVALID_ARGUMENT,
-      ErrorCause.LedgerTime(0) -> Status.ABORTED,
+
+        // when
+        val results = errorsToExpectedStatuses
+          .map { case (error, expectedStatus) =>
+            when(
+              commandExecutor.execute(
+                eqTo(commands),
+                any[Hash],
+                any[Configuration],
+              )(any[LoggingContextWithTrace])
+            ).thenReturn(Future.successful(Left(error)))
+
+            apiSubmissionService()
+              .submit(SubmitRequest(commands))
+              .transform(result => Success(expectedStatus -> result))
+              .futureValue
+          }
+
+        // then
+        results.foreach { case (expectedStatus: Status, result: Try[Unit]) =>
+          inside(result) { case Failure(exception) =>
+            exception.getMessage should startWith(expectedStatus.getCode.toString)
+          }
+        }
+      },
+      assertions = _.errorMessage should include(
+        "LEDGER_API_INTERNAL_ERROR(4,0): Observed un-expected replay mismatch"
+      ),
+      _.errorMessage should include("Unhandled internal error"),
     )
-
-    // when
-    private val results = errorsToExpectedStatuses
-      .map { case (error, expectedStatus) =>
-        when(
-          commandExecutor.execute(
-            eqTo(commands),
-            any[Hash],
-            any[Configuration],
-          )(any[LoggingContextWithTrace])
-        ).thenReturn(Future.successful(Left(error)))
-
-        apiSubmissionService()
-          .submit(SubmitRequest(commands))
-          .transform(result => Success(expectedStatus -> result))
-          .futureValue
-      }
-
-    // then
-    results.foreach { case (expectedStatus: Status, result: Try[Unit]) =>
-      inside(result) { case Failure(exception) =>
-        exception.getMessage should startWith(expectedStatus.getCode.toString)
-      }
-    }
   }
 
   it should "rate-limit when configured to do so" in new TestContext {
@@ -264,6 +271,7 @@ class ApiSubmissionServiceSpec
       optUsedPackages = None,
       optNodeSeeds = None,
       optByKeyNodes = None,
+      optDomainId = None,
     )
     val estimatedInterpretationCost = 5L
     val processedDisclosedContracts = ImmArray(processedDisclosedContract)
@@ -298,7 +306,7 @@ class ApiSubmissionServiceSpec
 
     def apiSubmissionService(
         checkOverloaded: TraceContext => Option[state.SubmissionResult] = _ => None
-    ) = new ApiSubmissionService(
+    ) = new CommandSubmissionServiceImpl(
       writeService = writeService,
       timeProviderType = timeProviderType,
       timeProvider = timeProvider,
