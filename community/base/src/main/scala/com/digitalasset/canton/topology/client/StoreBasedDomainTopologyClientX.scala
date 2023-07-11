@@ -698,7 +698,9 @@ class StoreBasedTopologySnapshotX(
       transactions: Seq[StoredTopologyTransactionX[TopologyChangeOpX.Replace, T]],
   ): Option[StoredTopologyTransactionX[TopologyChangeOpX.Replace, T]] = {
     if (transactions.sizeCompare(1) > 0) {
-      logger.warn(s"Expected unique \"${typ.code}\", but found multiple instances")
+      logger.warn(
+        s"Expected unique \"${typ.code}\" at $referenceTime, but found multiple instances"
+      )
       transactions
         .foldLeft(CantonTimestamp.Epoch) { case (previous, tx) =>
           val validFrom = tx.validFrom.value

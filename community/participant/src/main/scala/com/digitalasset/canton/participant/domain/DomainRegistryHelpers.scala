@@ -39,6 +39,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ResourceUtil
+import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionCompatibility}
 import io.opentelemetry.api.trace.Tracer
 
@@ -71,7 +72,6 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       packageDependencies: PackageId => EitherT[Future, PackageId, Set[PackageId]],
       metrics: DomainAlias => SyncDomainMetrics,
       agreementClient: AgreementClient,
-      sequencerConnectClient: SequencerConnectClient,
       participantSettings: Eval[ParticipantSettingsLookup],
   )(implicit
       traceContext: TraceContext
@@ -120,7 +120,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
           DomainRegistryError.ConfigurationErrors.CanNotIssueDomainTrustCertificate.Error(_)
         )
 
-      domainLoggerFactory = loggerFactory.append("domain", config.domain.unwrap)
+      domainLoggerFactory = loggerFactory.append("domainId", indexedDomainId.domainId.toString)
 
       topologyFactory <- syncDomainPersistentStateManager
         .topologyFactoryFor(sequencerAggregatedInfo.domainId)
@@ -203,7 +203,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       }
 
       // TODO(i12906): We should check for the activeness only from the honest sequencers.
-      active <- isActive(config.domain, sequencerConnectClient)
+      active <- isActive(config.domain, sequencerAggregatedInfo)
 
       // if the participant is being restarted and has completed topology initialization previously
       // then we can skip it
@@ -234,7 +234,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
             // or whether we have to stop here to wait for a asynchronous approval at the domain
             _ <- {
               logger.debug("Now waiting to become active")
-              waitForActive(config.domain, sequencerConnectClient)
+              waitForActive(config.domain, sequencerAggregatedInfo)
             }
           } yield ()
         }
@@ -343,34 +343,83 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
         )
     }
 
-  private def isActive(domainAlias: DomainAlias, sequencerConnectClient: SequencerConnectClient)(
+  private def sequencerConnectClient(
+      sequencerAggregatedInfo: SequencerAggregatedInfo
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, DomainRegistryError, SequencerConnectClient] = {
+    // TODO(i12076): Currently it takes the first available connection
+    //  here which is already checked for healthiness, but it should maybe check all of them - if they're healthy
+    val sequencerConnection = sequencerAggregatedInfo.sequencerConnections.default
+    sequencerConnectClientBuilder(sequencerConnection)
+      .leftMap(err =>
+        DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(err.message)
+      )
+      .mapK(
+        FutureUnlessShutdown.outcomeK
+      )
+      .leftWiden[DomainRegistryError]
+  }
+
+  private def isActive(domainAlias: DomainAlias, sequencerAggregatedInfo: SequencerAggregatedInfo)(
       implicit traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] =
-    sequencerConnectClient
-      .isActive(participantId, waitForActive = false)
-      .leftMap(DomainRegistryHelpers.toDomainRegistryError(domainAlias))
-      .mapK(FutureUnlessShutdown.outcomeK)
+    sequencerConnectClient(sequencerAggregatedInfo)
+      .flatMap(client =>
+        isActive(domainAlias, client, false)
+          .thereafter { _ =>
+            client.close()
+          }
+      )
 
   private def waitForActive(
       domainAlias: DomainAlias,
-      sequencerConnectClient: SequencerConnectClient,
+      sequencerAggregatedInfo: SequencerAggregatedInfo,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Unit] =
-    sequencerConnectClient
-      .isActive(participantId, waitForActive = true)
+  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Unit] = {
+    sequencerConnectClient(sequencerAggregatedInfo)
+      .flatMap(client =>
+        isActive(domainAlias, client, true)
+          .flatMap { isActive =>
+            EitherT
+              .cond[Future](
+                isActive,
+                (),
+                DomainRegistryError.ConnectionErrors.ParticipantIsNotActive
+                  .Error(s"Participant $participantId is not active"),
+              )
+              .leftWiden[DomainRegistryError]
+              .mapK(FutureUnlessShutdown.outcomeK)
+          }
+          .thereafter { _ =>
+            client.close()
+          }
+      )
+  }
+
+  private def isActive(
+      domainAlias: DomainAlias,
+      client: SequencerConnectClient,
+      waitForActive: Boolean = true,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] = {
+    client
+      .isActive(participantId, waitForActive = waitForActive)
       .leftMap(DomainRegistryHelpers.toDomainRegistryError(domainAlias))
-      .flatMap { isActive =>
-        EitherT
-          .cond[Future](
-            isActive,
-            (),
-            DomainRegistryError.ConnectionErrors.ParticipantIsNotActive
-              .Error(s"Participant $participantId is not active"),
-          )
-          .leftWiden[DomainRegistryError]
-      }
       .mapK(FutureUnlessShutdown.outcomeK)
+  }
+
+  private def sequencerConnectClientBuilder: SequencerConnectClient.Builder = {
+    (config: SequencerConnection) =>
+      SequencerConnectClient(
+        config,
+        participantNodeParameters.processingTimeouts,
+        participantNodeParameters.tracing.propagation,
+        loggerFactory,
+      )
+  }
 }
 
 object DomainRegistryHelpers {

@@ -350,7 +350,8 @@ object BuildCommon {
     case PathList("META-INF", "io.netty.versions.properties") => MergeStrategy.first
     case "reflect.properties" => MergeStrategy.first
     case PathList("org", "checkerframework", _ @_*) => MergeStrategy.first
-    case PathList("google", "protobuf", _*) => MergeStrategy.first
+    case PathList("google", _*) => MergeStrategy.first
+    case PathList("grpc", _*) => MergeStrategy.first
     case PathList("org", "apache", "logging", _*) => MergeStrategy.first
     case PathList("ch", "qos", "logback", _*) => MergeStrategy.first
     case PathList("com", "daml", "ledger", "api", "v1", "package.proto") => MergeStrategy.first
@@ -538,7 +539,6 @@ object BuildCommon {
           opentelemetry_instrumentation_grpc,
           opentelemetry_zipkin,
           opentelemetry_jaeger,
-          opentelemetry_otlp,
         ),
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
         coverageEnabled := false,
@@ -660,7 +660,7 @@ object BuildCommon {
           scalaVersion,
           sbtVersion,
           BuildInfoKey("damlLibrariesVersion" -> Dependencies.daml_libraries_version),
-          BuildInfoKey("protocolVersions" -> List("3", "4")),
+          BuildInfoKey("protocolVersions" -> List("3", "4", "5")),
         ),
         buildInfoPackage := "com.digitalasset.canton.buildinfo",
         buildInfoObject := "BuildInfo",
@@ -695,6 +695,7 @@ object BuildCommon {
       .settings(
         sharedCantonSettings,
         libraryDependencies ++= Seq(
+          janino % Test, // For conditionals it logback-test.xml
           akka_slf4j, // not used at compile time, but required by com.digitalasset.canton.util.AkkaUtil.createActorSystem
           logback_classic,
           logback_core,
@@ -736,8 +737,6 @@ object BuildCommon {
           opentelemetry_instrumentation_grpc,
           opentelemetry_zipkin,
           opentelemetry_jaeger,
-          opentelemetry_otlp,
-          aws_kms,
         ),
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
         Compile / PB.targets := Seq(

@@ -111,7 +111,7 @@ class SerializableContractTest extends AnyWordSpec with BaseTest {
             )
           )
           .left
-          .value shouldBe s"Invalid disclosed contract id: malformed contract id '${invalidFormatContractId.toString}'. Suffix 00 does not start with one of the supported prefixes: Bytes(ca01) or Bytes(ca00)"
+          .value shouldBe s"Invalid disclosed contract id: malformed contract id '${invalidFormatContractId.toString}'. Suffix 00 does not start with one of the supported prefixes: Bytes(ca02), Bytes(ca01) or Bytes(ca00)"
       }
     }
 

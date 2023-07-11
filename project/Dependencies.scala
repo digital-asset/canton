@@ -40,6 +40,7 @@ object Dependencies {
   lazy val scalatest_version = "3.2.9"
 
   lazy val aws_kms_version = "2.17.187"
+  lazy val gcp_kms_version = "2.4.0"
   lazy val netty_version = "4.1.72.Final"
 
   lazy val reflections = "org.reflections" % "reflections" % "0.9.12"
@@ -179,10 +180,6 @@ object Dependencies {
     "io.opentelemetry" % "opentelemetry-exporter-zipkin" % opentelemetry_version
   lazy val opentelemetry_jaeger =
     "io.opentelemetry" % "opentelemetry-exporter-jaeger" % opentelemetry_version
-  lazy val opentelemetry_otlp =
-    "io.opentelemetry" % "opentelemetry-exporter-otlp-trace" % opentelemetry_version
-  lazy val opentelemetry_proto =
-    "io.opentelemetry" % "opentelemetry-proto" % "1.7.1-alpha"
 
   lazy val opentelemetry_instrumentation_grpc =
     "io.opentelemetry.instrumentation" % "opentelemetry-grpc-1.6" % s"$opentelemetry_version-alpha"
@@ -228,8 +225,11 @@ object Dependencies {
 
   lazy val scala_csv = "com.github.tototoshi" %% "scala-csv" % "1.3.10"
 
-  // AWS SDK for Java API to encrypt/decrypt keys using KMS
+  // AWS SDK for Java API to encrypt/decrypt keys using AWS KMS
   lazy val aws_kms = "software.amazon.awssdk" % "kms" % aws_kms_version
+
+  // GCP SDK for Java API to encrypt/decrypt keys using GCP KMS
+  lazy val gcp_kms = "com.google.cloud" % "google-cloud-kms" % gcp_kms_version
 
   lazy val damlDependencyMap = {
     import io.circe._, io.circe.parser._, io.circe.generic.auto._, io.circe.syntax._

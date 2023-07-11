@@ -129,7 +129,7 @@ object PartyMetadataStore {
 
 }
 
-sealed trait TopologyStoreId {
+sealed trait TopologyStoreId extends PrettyPrinting {
   def filterName: String = dbString.unwrap
   def dbString: LengthLimitedString
   def dbStringWithDaml2xUniquifier(uniquifier: String): LengthLimitedString
@@ -154,6 +154,16 @@ object TopologyStoreId {
           .tryConcatenate(dbStringWithoutDiscriminator)
     }
 
+    override def pretty: Pretty[this.type] = {
+      if (discriminator.nonEmpty) {
+        prettyOfString(storeId =>
+          show"${storeId.discriminator}${SafeSimpleString.delimiter}${storeId.domainId}"
+        )
+      } else {
+        prettyOfParam(_.domainId)
+      }
+    }
+
     // The reason for this somewhat awkward method is backward compat with uniquifier inserted in the middle of
     // discriminator and domain id. Can be removed once fully on daml 3.0:
     override def dbStringWithDaml2xUniquifier(uniquifier: String): LengthLimitedString = {
@@ -174,6 +184,10 @@ object TopologyStoreId {
         .tryCreate(uniquifier + "::", uniquifier.length + 2)
         .tryConcatenate(dbString)
     }
+
+    override def pretty: Pretty[AuthorizedStore.this.type] = prettyOfString(
+      _.dbString.unwrap
+    )
   }
 
   def apply(fName: String): TopologyStoreId = fName match {

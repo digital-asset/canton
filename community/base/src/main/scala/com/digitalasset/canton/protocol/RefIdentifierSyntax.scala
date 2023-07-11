@@ -4,17 +4,18 @@
 package com.digitalasset.canton.protocol
 
 import cats.syntax.either.*
-import com.digitalasset.canton.LfInterfaceId
+import com.daml.lf.data.Ref
+import com.daml.lf.data.Ref.Identifier
 import com.digitalasset.canton.ProtoDeserializationError.ValueDeserializationError
 
-object InterfaceIdSyntax {
-  implicit class LfInterfaceIdSyntax(private val interfaceId: LfInterfaceId) extends AnyVal {
-    def toProtoPrimitive: String = interfaceId.toString()
+object RefIdentifierSyntax {
+  implicit class RefIdentifierSyntax(private val identifier: Ref.Identifier) extends AnyVal {
+    def toProtoPrimitive: String = identifier.toString()
   }
 
   def fromProtoPrimitive(
       interfaceIdP: String
-  ): Either[ValueDeserializationError, LfInterfaceId] = LfInterfaceId
+  ): Either[ValueDeserializationError, Identifier] = Ref.Identifier
     .fromString(interfaceIdP)
-    .leftMap(err => ValueDeserializationError("interface", err))
+    .leftMap(err => ValueDeserializationError("identifier", err))
 }

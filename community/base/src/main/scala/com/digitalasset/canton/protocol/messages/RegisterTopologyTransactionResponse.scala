@@ -12,9 +12,8 @@ import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessage
 import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult.V2
 import com.digitalasset.canton.protocol.v0.RegisterTopologyTransactionResponse.Result.State as ProtoStateV0
 import com.digitalasset.canton.protocol.v1.RegisterTopologyTransactionResponse.Result.State as ProtoStateV1
-import com.digitalasset.canton.protocol.v2.EnvelopeContent
 import com.digitalasset.canton.protocol.v2.RegisterTopologyTransactionResponseX.Result.State as ProtoStateV2
-import com.digitalasset.canton.protocol.{v0, v1, v2}
+import com.digitalasset.canton.protocol.{v0, v1, v2, v3}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, Member, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.version.{
@@ -39,7 +38,8 @@ final case class RegisterTopologyTransactionResponse[
 ) extends UnsignedProtocolMessage
     with ProtocolMessageV0
     with ProtocolMessageV1
-    with UnsignedProtocolMessageV2 {
+    with ProtocolMessageV2
+    with UnsignedProtocolMessageV3 {
 
   override def toProtoEnvelopeContentV0: v0.EnvelopeContent =
     v0.EnvelopeContent(
@@ -51,8 +51,13 @@ final case class RegisterTopologyTransactionResponse[
       v1.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionResponse(toProtoV1)
     )
 
-  override def toProtoSomeEnvelopeContentV2: v2.EnvelopeContent.SomeEnvelopeContent =
-    v2.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionResponse(toProtoV1)
+  override def toProtoEnvelopeContentV2: v2.EnvelopeContent =
+    v2.EnvelopeContent(
+      v2.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionResponse(toProtoV1)
+    )
+
+  override def toProtoSomeEnvelopeContentV3: v3.EnvelopeContent.SomeEnvelopeContent =
+    v3.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionResponse(toProtoV1)
 
   def toProtoV0: v0.RegisterTopologyTransactionResponse =
     v0.RegisterTopologyTransactionResponse(
@@ -438,14 +443,14 @@ final case class RegisterTopologyTransactionResponseX(
     ]
 ) extends UnsignedProtocolMessage
     // TODO(#11255) make me a SignedProtocolMessageContent
-    with UnsignedProtocolMessageV2 {
+    with UnsignedProtocolMessageV3 {
 
   @transient override protected lazy val companionObj: RegisterTopologyTransactionResponseX.type =
     RegisterTopologyTransactionResponseX
 
-  override protected[messages] def toProtoSomeEnvelopeContentV2
-      : EnvelopeContent.SomeEnvelopeContent =
-    v2.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionResponseX(toProtoV2)
+  override protected[messages] def toProtoSomeEnvelopeContentV3
+      : v3.EnvelopeContent.SomeEnvelopeContent =
+    v3.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionResponseX(toProtoV2)
 
   def toProtoV2: v2.RegisterTopologyTransactionResponseX =
     v2.RegisterTopologyTransactionResponseX(

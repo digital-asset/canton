@@ -64,7 +64,7 @@ final case class ClosedEnvelope private (
   def openEnvelope(
       hashOps: HashOps,
       protocolVersion: ProtocolVersion,
-  ): ParsingResult[DefaultOpenEnvelope] =
+  ): ParsingResult[DefaultOpenEnvelope] = {
     NonEmpty.from(signatures) match {
       case None =>
         EnvelopeContent.fromByteString(protocolVersion)(hashOps)(bytes).map { envelopeContent =>
@@ -78,6 +78,7 @@ final case class ClosedEnvelope private (
           )(protocolVersion)
         }
     }
+  }
 
   override def pretty: Pretty[ClosedEnvelope] = prettyOfClass(param("recipients", _.recipients))
 

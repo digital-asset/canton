@@ -45,11 +45,6 @@ service TopologyManagerWriteService {
   rpc AuthorizeDomainParametersChange(DomainParametersChangeAuthorization) returns (AuthorizationSuccess);
 
   /**
-   * Authorizes a new signed legal identity
-   */
-  rpc AuthorizeSignedLegalIdentityClaim(SignedLegalIdentityClaimAuthorization) returns (AuthorizationSuccess);
-
-  /**
    * Authorizes a participant domain state
    */
   rpc AuthorizeParticipantDomainState(ParticipantDomainStateAuthorization) returns (AuthorizationSuccess);
@@ -63,11 +58,6 @@ service TopologyManagerWriteService {
    * Adds a signed topology transaction to the Authorized store
    */
   rpc AddSignedTopologyTransaction(SignedTopologyTransactionAddition) returns (AdditionSuccess);
-
-  /**
-   * Generates a legal identity claim
-   */
-  rpc GenerateSignedLegalIdentityClaim(SignedLegalIdentityClaimGeneration) returns (com.digitalasset.canton.protocol.v0.SignedLegalIdentityClaim);
 }
 
 message AuthorizationSuccess {
@@ -175,23 +165,6 @@ message OwnerToKeyMappingAuthorization {
    * Purpose of the key
    */
   com.digitalasset.canton.crypto.v0.KeyPurpose key_purpose = 4;
-}
-
-message SignedLegalIdentityClaimAuthorization {
-  AuthorizationData authorization = 1;
-  com.digitalasset.canton.protocol.v0.SignedLegalIdentityClaim claim = 2;
-}
-
-message SignedLegalIdentityClaimGeneration {
-  message X509CertificateClaim {
-    string unique_identifier = 1;
-    string certificate_id = 2;
-  }
-  oneof request {
-    // Serialized LegalIdentityClaim
-    bytes legal_identity_claim = 1;
-    X509CertificateClaim certificate = 2;
-  }
 }
 
 message ParticipantDomainStateAuthorization {

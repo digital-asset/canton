@@ -415,6 +415,7 @@ abstract class TransactionTreeFactoryImpl(
           s"Invalid contract id for created contract ${createNode.coid}"
         )
     }
+    val contractMetadata = LfTransactionUtil.metadataFromCreate(createNode)
     val (contractSalt, unicum) = unicumGenerator.generateSaltAndUnicum(
       domainId,
       state.mediator,
@@ -423,6 +424,7 @@ abstract class TransactionTreeFactoryImpl(
       viewParticipantDataSalt,
       createIndex,
       state.ledgerTime,
+      contractMetadata,
       serializedCantonContractInst,
       cantonContractIdVersion,
     )
@@ -434,7 +436,7 @@ abstract class TransactionTreeFactoryImpl(
     val createdInfo = SerializableContract(
       contractId = contractId,
       rawContractInstance = serializedCantonContractInst,
-      metadata = LfTransactionUtil.metadataFromCreate(createNode),
+      metadata = contractMetadata,
       ledgerCreateTime = state.ledgerTime,
       contractSalt = Option.when(protocolVersion >= ProtocolVersion.v4)(contractSalt.unwrap),
     )

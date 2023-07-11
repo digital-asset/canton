@@ -270,6 +270,8 @@ class TransferOutProcessingSteps(
 
   override protected def decryptTree(sourceSnapshot: DomainSnapshotSyncCryptoApi)(
       envelope: OpenEnvelope[EncryptedViewMessage[TransferOutViewType]]
+  )(implicit
+      tc: TraceContext
   ): EitherT[Future, EncryptedViewMessageDecryptionError[TransferOutViewType], WithRecipients[
     FullTransferOutTree
   ]] = {
@@ -354,7 +356,7 @@ class TransferOutProcessingSteps(
     * so event emission to the event log blocks, too.
     *
     * No deadlocks can arise under normal behaviour though.
-    * For a deadlock, we would need cyclic waiting, i.e., a transfer out request on one domain D1 references
+    * For a deadlock, we would need cyclic waiting, i.e., a transfer-out request on one domain D1 references
     * a time proof on another domain D2 and a earlier transfer-out request on D2 references a time proof on D3
     * and so on to domain Dn and an earlier transfer-out request on Dn references a later time proof on D1.
     * This, however, violates temporal causality of events.

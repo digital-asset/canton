@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.protocol.submission
 
-import com.daml.lf.language.LanguageVersion
 import com.daml.lf.transaction.TransactionVersion
 import com.daml.lf.transaction.test.TransactionBuilder.Implicits.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -23,7 +22,10 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
   "DomainsFilter (simple create)" should {
     import SimpleTopology.*
 
-    val filter = DomainsFilterForTx(Transactions.Create.tx(languageVersion), testedProtocolVersion)
+    val filter = DomainsFilterForTx(
+      Transactions.Create.tx(fixtureTransactionVersion),
+      testedProtocolVersion,
+    )
     val correctPackages = Transactions.Create.correctPackages
 
     "keep domains that satisfy all the constraints" in {
@@ -75,7 +77,7 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
       // LanguageVersion.v1_15 needs pv=4 so we use pv=3
       val currentDomainPV = ProtocolVersion.v3
       val filter =
-        DomainsFilterForTx(Transactions.Create.tx(LanguageVersion.v1_15), currentDomainPV)
+        DomainsFilterForTx(Transactions.Create.tx(TransactionVersion.V15), currentDomainPV)
 
       val (unusableDomains, usableDomains) =
         filter
@@ -95,7 +97,7 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
 
   "DomainsFilter (simple exercise by interface)" should {
     import SimpleTopology.*
-    val exerciseByInterface = Transactions.ExerciseByInterface(languageVersion)
+    val exerciseByInterface = Transactions.ExerciseByInterface(fixtureTransactionVersion)
 
     val filter = DomainsFilterForTx(exerciseByInterface.tx, testedProtocolVersion)
     val correctPackages = ExerciseByInterface.correctPackages

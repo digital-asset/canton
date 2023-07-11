@@ -400,7 +400,13 @@ class CantonSyncService(
         keyResolver,
         disclosedContracts,
       )
-    }.asJava
+    }.map(result =>
+      result.map { _asyncResult =>
+        // It's OK to throw away the asynchronous result because its errors were already logged in `submitTransactionF`.
+        // We merely retain it until here so that the span ends only after the asynchronous computation
+        SubmissionResult.Acknowledged
+      }.merge
+    ).asJava
   }
 
   lazy val stateInspection = new SyncStateInspection(
@@ -489,19 +495,21 @@ class CantonSyncService(
       transaction: LfSubmittedTransaction,
       keyResolver: LfKeyResolver,
       explicitlyDisclosedContracts: ImmArray[ProcessedDisclosedContract],
-  )(implicit traceContext: TraceContext): Future[SubmissionResult] = {
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Either[SubmissionResult, FutureUnlessShutdown[_]]] = {
 
-    val ack = SubmissionResult.Acknowledged
-
-    def processSubmissionError(error: TransactionError): Future[SubmissionResult] = {
+    def processSubmissionError(
+        error: TransactionError
+    ): Either[SubmissionResult, FutureUnlessShutdown[_]] = {
       error.logWithContext(
         Map("commandId" -> submitterInfo.commandId, "applicationId" -> submitterInfo.applicationId)
       )
-      Future.successful(SubmissionResult.SynchronousError(error.rpcStatus()))
+      Left(SubmissionResult.SynchronousError(error.rpcStatus()))
     }
 
     if (isClosing) {
-      processSubmissionError(SubmissionDuringShutdown.Rejection())
+      Future.successful(processSubmissionError(SubmissionDuringShutdown.Rejection()))
     } else if (!isActive()) {
       // this is the only error we can not really return with a rejection, as this is the passive replica ...
       val err = SyncServiceInjectionError.PassiveReplica.Error(
@@ -511,9 +519,11 @@ class CantonSyncService(
       err.logWithContext(
         Map("commandId" -> submitterInfo.commandId, "applicationId" -> submitterInfo.applicationId)
       )
-      Future.successful(SubmissionResult.SynchronousError(err.rpcStatus()))
+      Future.successful(Left(SubmissionResult.SynchronousError(err.rpcStatus())))
     } else if (!existsReadyDomain) {
-      processSubmissionError(SyncServiceInjectionError.NotConnectedToAnyDomain.Error())
+      Future.successful(
+        processSubmissionError(SyncServiceInjectionError.NotConnectedToAnyDomain.Error())
+      )
     } else {
       val submittedFF = domainRouter.submitTransaction(
         submitterInfo,
@@ -523,34 +533,40 @@ class CantonSyncService(
         explicitlyDisclosedContracts,
       )
       // TODO(i2794) retry command if token expired
-      submittedFF.value.transformWith {
-        case Success(Right(sequencedF)) =>
-          // Reply with ACK as soon as the submission has been registered as in-flight,
-          // and asynchronously send it to the sequencer.
-          logger.debug(s"Command ${submitterInfo.commandId} is now in flight.")
-          sequencedF.onComplete {
-            case Success(UnlessShutdown.Outcome(_)) =>
-              logger.debug(s"Successfully submitted transaction ${submitterInfo.commandId}.")
-            case Success(UnlessShutdown.AbortedDueToShutdown) =>
-              logger.debug(
-                s"Transaction submission aborted due to shutdown ${submitterInfo.commandId}."
-              )
-            case Failure(ex) =>
-              logger.error(s"Command submission for ${submitterInfo.commandId} failed", ex)
-          }
-          Future.successful(ack)
-        case Success(Left(submissionError)) =>
-          processSubmissionError(submissionError)
-        case Failure(PassiveInstanceException(_reason)) =>
-          val err = SyncServiceInjectionError.PassiveReplica.Error(
-            submitterInfo.applicationId,
-            submitterInfo.commandId,
-          )
-          Future.successful(SubmissionResult.SynchronousError(err.rpcStatus()))
-        case Failure(exception) =>
-          val err = SyncServiceInjectionError.InjectionFailure.Failure(exception)
-          err.logWithContext()
-          Future.successful(SubmissionResult.SynchronousError(err.rpcStatus()))
+      submittedFF.value.transform { result =>
+        val loggedResult = result match {
+          case Success(Right(sequencedF)) =>
+            // Reply with ACK as soon as the submission has been registered as in-flight,
+            // and asynchronously send it to the sequencer.
+            logger.debug(s"Command ${submitterInfo.commandId} is now in flight.")
+            val loggedF = sequencedF.transform {
+              case Success(UnlessShutdown.Outcome(_)) =>
+                logger.debug(s"Successfully submitted transaction ${submitterInfo.commandId}.")
+                Success(UnlessShutdown.Outcome(()))
+              case Success(UnlessShutdown.AbortedDueToShutdown) =>
+                logger.debug(
+                  s"Transaction submission aborted due to shutdown ${submitterInfo.commandId}."
+                )
+                Success(UnlessShutdown.Outcome(()))
+              case Failure(ex) =>
+                logger.error(s"Command submission for ${submitterInfo.commandId} failed", ex)
+                Success(UnlessShutdown.Outcome(()))
+            }
+            Right(loggedF)
+          case Success(Left(submissionError)) =>
+            processSubmissionError(submissionError)
+          case Failure(PassiveInstanceException(_reason)) =>
+            val err = SyncServiceInjectionError.PassiveReplica.Error(
+              submitterInfo.applicationId,
+              submitterInfo.commandId,
+            )
+            Left(SubmissionResult.SynchronousError(err.rpcStatus()))
+          case Failure(exception) =>
+            val err = SyncServiceInjectionError.InjectionFailure.Failure(exception)
+            err.logWithContext()
+            Left(SubmissionResult.SynchronousError(err.rpcStatus()))
+        }
+        Success(loggedResult)
       }
     }
   }
@@ -1187,7 +1203,7 @@ class CantonSyncService(
               )
           )
         )
-        domainLoggerFactory = loggerFactory.append("domain", domainAlias.unwrap)
+        domainLoggerFactory = loggerFactory.append("domainId", domainId.toString)
 
         domainCrypto = syncCrypto.tryForDomain(domainId, Some(domainAlias))
         missingKeysAlerter = new MissingKeysAlerter(
@@ -1445,10 +1461,22 @@ class CantonSyncService(
     acc + syncDomain.numberOfDirtyRequests()
   }
 
+  private val emitWarningOnDetailLoggingAndHighLoad =
+    (parameters.general.loggingConfig.eventDetails || parameters.general.loggingConfig.api.logMessagePayloads) && parameters.general.loggingConfig.api.warnBeyondLoad.nonEmpty
+
   def checkOverloaded(traceContext: TraceContext): Option[state.v2.SubmissionResult] = {
     implicit val errorLogger: ErrorLoggingContext =
       ErrorLoggingContext.fromTracedLogger(logger)(traceContext)
     val load = computeTotalLoad
+    if (emitWarningOnDetailLoggingAndHighLoad) {
+      parameters.general.loggingConfig.api.warnBeyondLoad match {
+        case Some(warnBeyondLoad) if load > warnBeyondLoad =>
+          logger.warn(
+            "Your detailed API event logging is turned on but you are doing quite a few concurrent requests. Please note that detailed event logging comes with a performance penalty."
+          )(traceContext)
+        case _ =>
+      }
+    }
     resourceManagementService.checkOverloaded(load)
   }
 

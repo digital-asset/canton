@@ -3,27 +3,16 @@
 
 package com.digitalasset.canton
 
-import com.daml.ledger.api.v1.value.{Identifier as ApiIdentifier}
+import com.daml.ledger.api.v1.value.Identifier as ApiIdentifier
 import com.daml.ledger.client.binding
 import com.daml.lf.data.{FrontStack, ImmArray}
-import com.daml.lf.transaction.test.TransactionBuilder
+import com.daml.lf.transaction.NodeId
+import com.daml.lf.transaction.test.NodeIdTransactionBuilder
 import com.daml.lf.transaction.test.TransactionBuilder.Implicits.{toIdentifier, toPackageId}
-import com.digitalasset.canton.ComparesLfTransactions.{TbContext, TxTree}
+import com.digitalasset.canton.ComparesLfTransactions.TxTree
 import com.digitalasset.canton.logging.pretty.PrettyTestInstances.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.{
-  LfContractId,
-  LfLeafOnlyActionNode,
-  LfNode,
-  LfNodeCreate,
-  LfNodeExercises,
-  LfNodeFetch,
-  LfNodeId,
-  LfNodeLookupByKey,
-  LfNodeRollback,
-  LfTransaction,
-  LfVersionedTransaction,
-}
+import com.digitalasset.canton.protocol.*
 import org.scalatest.{Assertion, Suite}
 
 /** Test utility to compare actual and expected lf transactions using a human-readable, hierarchical serialization of lf
@@ -60,49 +49,20 @@ trait ComparesLfTransactions {
     assert(actualNested == expectedNested)
   }
 
-  /** Helper to initialize an lf transaction builder along with a preorder sequence of contract ids of a provided
-    * lf transaction.
-    */
-  def txBuilderContextFrom[A](tx: LfVersionedTransaction)(code: TbContext => A): A =
-    code(TbContext(new TransactionBuilder(_ => tx.version), contractIdsInPreorder(tx)))
-
-  def txBuilderContextFromEmpty[A](code: TbContext => A): A =
-    code(TbContext(TransactionBuilder(), Seq.empty))
-
-  /** Helper to extract the contract-ids of a transaction in pre-order.
-    *
-    * Useful to build expected transaction in terms of "expect the second contract id of the actual transaction in this
-    * create node".
-    */
-  private def contractIdsInPreorder(tx: LfVersionedTransaction): Seq[LfContractId] = {
-    val contractIds = scala.collection.mutable.ListBuffer.empty[LfContractId]
-
-    def add(coid: LfContractId): Unit = if (!contractIds.contains(coid)) contractIds += coid
-
-    tx.foldInExecutionOrder(())(
-      exerciseBegin = (_, _, en) => (add(en.targetCoid), LfTransaction.ChildrenRecursion.DoRecurse),
-      rollbackBegin = (_, _, _) => ((), LfTransaction.ChildrenRecursion.DoRecurse),
-      leaf = {
-        case (_, _, cn: LfNodeCreate) => add(cn.coid)
-        case (_, _, fn: LfNodeFetch) => add(fn.coid)
-        case (_, _, ln: LfNodeLookupByKey) => ln.result.foreach(add)
-      },
-      exerciseEnd = (_, _, _) => (),
-      rollbackEnd = (_, _, _) => (),
-    )
-
-    contractIds.result()
-  }
-
   // Various helpers that help "hide" lf value boilerplate from transaction representations for improved readability.
   def args(values: LfValue*): LfValue.ValueRecord =
     LfValue.ValueRecord(None, values.map(None -> _).to(ImmArray))
 
-  def seq(values: LfValue*): LfValue.ValueList = LfValue.ValueList(FrontStack.from(values))
+  def seq(values: LfValue*): LfValue.ValueList = valueList(values)
+
+  def valueList(values: IterableOnce[LfValue]): LfValue.ValueList =
+    LfValue.ValueList(FrontStack.from(values))
 
   val notUsed: LfValue = LfValue.ValueUnit
 
-  protected def templateIdFromTemplate[T](template: binding.Primitive.TemplateId[T]) = {
+  protected def templateIdFromTemplate[T](
+      template: binding.Primitive.TemplateId[T]
+  ): LfInterfaceId = {
     import scalaz.syntax.tag.*
     template.unwrap match {
       case ApiIdentifier(packageId, moduleName, entityName) =>
@@ -122,19 +82,25 @@ object ComparesLfTransactions {
       unnamedParamIfNonEmpty(_.childNodes),
     )
 
-    def addToBuilder(parentNodeId: Option[LfNodeId] = None)(implicit tbContext: TbContext): Unit = {
-      val nid = parentNodeId.fold(tbContext.tb.add(lfNode))(tbContext.tb.add(lfNode, _))
-      childNodes.foreach(_.addToBuilder(Some(nid)))
-    }
-
-    def lfTransaction(implicit tbContext: TbContext): LfVersionedTransaction = {
-      addToBuilder()
-      tbContext.tb.build()
+    def lfTransaction: LfVersionedTransaction = {
+      buildLfTransaction(this)
     }
   }
 
-  /** TransactionBuilder context combines multiple implicits: transaction builder and contract ids
-    */
-  final case class TbContext(tb: TransactionBuilder, contractIds: Seq[LfContractId])
+  def buildLfTransaction(trees: TxTree*): LfVersionedTransaction = {
+    val builder = new NodeIdTransactionBuilder
+
+    def addChild(parentNid: NodeId)(child: TxTree): Unit = {
+      val nid = builder.add(child.lfNode, parentNid)
+      child.childNodes.foreach(addChild(nid))
+    }
+
+    trees.foreach { tree =>
+      val nid = builder.add(tree.lfNode)
+      tree.childNodes.foreach(addChild(nid))
+    }
+
+    builder.build()
+  }
 
 }

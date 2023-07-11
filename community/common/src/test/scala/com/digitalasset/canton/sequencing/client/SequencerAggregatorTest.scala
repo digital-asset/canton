@@ -30,7 +30,12 @@ class SequencerAggregatorTest
   override type FixtureParam = SequencedEventTestFixture
 
   override def withFixture(test: OneArgTest): Outcome = {
-    val env = new SequencedEventTestFixture(loggerFactory, testedProtocolVersion, timeouts)
+    val env = new SequencedEventTestFixture(
+      loggerFactory,
+      testedProtocolVersion,
+      timeouts,
+      futureSupervisor,
+    )
     withFixture(test.toNoArgTest(env))
   }
 
@@ -45,7 +50,7 @@ class SequencerAggregatorTest
 
       aggregator
         .combineAndMergeEvent(sequencerAlice, event)
-        .futureValue shouldBe Right(true)
+        .futureValueUS shouldBe Right(true)
 
       aggregator.eventQueue.take() shouldBe event
     }
@@ -61,7 +66,7 @@ class SequencerAggregatorTest
       events.foreach { event =>
         aggregator
           .combineAndMergeEvent(sequencerAlice, event)
-          .futureValue shouldBe Right(true)
+          .futureValueUS shouldBe Right(true)
         aggregator.eventQueue.take() shouldBe event
       }
     }
@@ -79,7 +84,7 @@ class SequencerAggregatorTest
       events.foreach { event =>
         aggregator
           .combineAndMergeEvent(sequencerAlice, event)
-          .futureValue shouldBe Right(true)
+          .futureValueUS shouldBe Right(true)
       }
 
       val blockingEvent = createEvent(timestamp = CantonTimestamp.Epoch.plusSeconds(3L)).futureValue
@@ -89,6 +94,7 @@ class SequencerAggregatorTest
         Future(
           aggregator
             .combineAndMergeEvent(sequencerAlice, blockingEvent)
+            .failOnShutdown
         )
       )
       always() {
@@ -110,13 +116,13 @@ class SequencerAggregatorTest
 
         aggregator
           .combineAndMergeEvent(sequencerAlice, aliceEvents(0))
-          .futureValue shouldBe Right(true)
+          .futureValueUS shouldBe Right(true)
 
         assertDownstreamMessage(aggregator, aliceEvents(0))
 
         aggregator
           .combineAndMergeEvent(sequencerAlice, aliceEvents(1))
-          .futureValue shouldBe Right(true)
+          .futureValueUS shouldBe Right(true)
 
         assertDownstreamMessage(aggregator, aliceEvents(1))
 
@@ -126,12 +132,13 @@ class SequencerAggregatorTest
 
         val f1 = aggregator
           .combineAndMergeEvent(sequencerAlice, aliceEvents(2))
+
         f1.isCompleted shouldBe false
 
         val f2 = aggregator
           .combineAndMergeEvent(sequencerBob, bobEvents(2))
-        f2.futureValue shouldBe Right(false)
-        f1.futureValue shouldBe Right(true)
+        f2.futureValueUS shouldBe Right(false)
+        f1.futureValueUS shouldBe Right(true)
 
         aggregator.eventQueue.size() shouldBe 1
         aggregator.eventQueue.take() shouldBe aggregator
@@ -150,7 +157,7 @@ class SequencerAggregatorTest
 
       aggregator
         .combineAndMergeEvent(sequencerAlice, aliceEvents(0))
-        .futureValue shouldBe Right(true)
+        .futureValueUS shouldBe Right(true)
 
       assertDownstreamMessage(aggregator, aliceEvents(0))
 
@@ -160,10 +167,12 @@ class SequencerAggregatorTest
 
       aggregator
         .combineAndMergeEvent(sequencerBob, bobEvents(0)) // arrived late event which we ignore
-        .futureValue shouldBe Right(false)
+        .futureValueUS shouldBe Right(false)
       assertNoMessageDownstream(aggregator)
 
-      aggregator.combineAndMergeEvent(sequencerBob, bobEvents(1)).futureValue shouldBe Right(true)
+      aggregator
+        .combineAndMergeEvent(sequencerBob, bobEvents(1))
+        .futureValueUS shouldBe Right(true)
       assertDownstreamMessage(aggregator, bobEvents(1))
     }
   }
@@ -191,14 +200,15 @@ class SequencerAggregatorTest
         val f2 = aggregator
           .combineAndMergeEvent(sequencerBob, event2)
 
-        f2.futureValue.discard
+        f1.futureValueUS.discard
+        f2.futureValueUS.discard
 
         f1.isCompleted shouldBe true
         f2.isCompleted shouldBe true
 
         assertCombinedDownstreamMessage(aggregator, event1, event2)
-        f1.futureValue shouldBe Right(true)
-        f2.futureValue shouldBe Right(false)
+        f1.futureValueUS shouldBe Right(true)
+        f2.futureValueUS shouldBe Right(false)
     }
 
     "fail if events share timestamp but timestampOfSigningKey is different" in { fixture =>
@@ -217,7 +227,7 @@ class SequencerAggregatorTest
 
       aggregator
         .combineAndMergeEvent(sequencerBob, event2)
-        .futureValue shouldBe Left(
+        .futureValueUS shouldBe Left(
         SequencerAggregatorError.NotTheSameTimestampOfSigningKey(
           NonEmpty(Set, Some(CantonTimestamp.Epoch), None)
         )
@@ -246,7 +256,7 @@ class SequencerAggregatorTest
 
       aggregator
         .combineAndMergeEvent(sequencerBob, event2)
-        .futureValue shouldBe Left(SequencerAggregatorError.NotTheSameContentHash(hashes))
+        .futureValueUS shouldBe Left(SequencerAggregatorError.NotTheSameContentHash(hashes))
     }
 
     "emit events in order when all sequencers confirmed" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
@@ -267,16 +277,16 @@ class SequencerAggregatorTest
 
         aggregator
           .combineAndMergeEvent(sequencerBob, events(0))
-          .futureValue shouldBe Right(false)
+          .futureValueUS shouldBe Right(false)
 
-        futures(0).futureValue shouldBe Right(true)
+        futures(0).futureValueUS shouldBe Right(true)
         futures(1).isCompleted shouldBe false
 
         aggregator
           .combineAndMergeEvent(sequencerBob, events(1))
-          .futureValue shouldBe Right(false)
+          .futureValueUS shouldBe Right(false)
 
-        futures(1).futureValue shouldBe Right(true)
+        futures(1).futureValueUS shouldBe Right(true)
     }
 
     "support reconfiguration to another sequencer" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
@@ -305,7 +315,7 @@ class SequencerAggregatorTest
 
         aggregator
           .combineAndMergeEvent(sequencerCarlos, carlosEvents(1))
-          .futureValue shouldBe Right(true)
+          .futureValueUS shouldBe Right(true)
 
         assertDownstreamMessage(aggregator, carlosEvents(1))
     }
@@ -332,7 +342,7 @@ class SequencerAggregatorTest
         val f2 = aggregator
           .combineAndMergeEvent(sequencerBob, bobEvents(0))
 
-        f2.futureValue.discard
+        f2.futureValueUS.discard
 
         f1.isCompleted shouldBe true
         f2.isCompleted shouldBe true
@@ -342,13 +352,13 @@ class SequencerAggregatorTest
           aliceEvents(0),
           bobEvents(0),
         )
-        f1.futureValue shouldBe Right(true)
-        f2.futureValue shouldBe Right(false)
+        f1.futureValueUS shouldBe Right(true)
+        f2.futureValueUS shouldBe Right(false)
 
         val f3 = aggregator
           .combineAndMergeEvent(sequencerCarlos, carlosEvents(0)) // late event
         f3.isCompleted shouldBe true // should be immediately resolved
-        f3.futureValue shouldBe Right(false)
+        f3.futureValueUS shouldBe Right(false)
     }
 
     "recover after skipping an event" onlyRunWithOrGreaterThan ProtocolVersion.dev in { fixture =>
@@ -449,7 +459,7 @@ class SequencerAggregatorTest
         // consensus requirement is changed which is enough to push the message out
 
         assertDownstreamMessage(aggregator, aliceEvents(0))
-        f.futureValue shouldBe Right(true)
+        f.futureValueUS shouldBe Right(true)
     }
   }
 

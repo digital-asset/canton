@@ -28,7 +28,12 @@ class SequencedEventValidatorTest
   override type FixtureParam = SequencedEventTestFixture
 
   override def withFixture(test: OneArgTest): Outcome = {
-    val env = new SequencedEventTestFixture(loggerFactory, testedProtocolVersion, timeouts)
+    val env = new SequencedEventTestFixture(
+      loggerFactory,
+      testedProtocolVersion,
+      timeouts,
+      futureSupervisor,
+    )
     withFixture(test.toNoArgTest(env))
   }
   private implicit val errorLoggingContext: ErrorLoggingContext =

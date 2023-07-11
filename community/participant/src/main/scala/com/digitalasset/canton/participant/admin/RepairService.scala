@@ -1434,6 +1434,7 @@ object RepairService {
         templateId: Identifier,
         createArguments: Record,
         signatories: Set[String],
+        observers: Set[String],
         lfContractId: LfContractId,
         ledgerTime: Instant,
         contractSalt: Option[Salt],
@@ -1461,13 +1462,17 @@ object RepairService {
           .leftMap(_.errorMessage)
 
         signatoriesAsParties <- signatories.toList.traverse(LfPartyId.fromString).map(_.toSet)
+        observersAsParties <- observers.toList.traverse(LfPartyId.fromString).map(_.toSet)
 
         time <- CantonTimestamp.fromInstant(ledgerTime)
       } yield SerializableContract(
         contractId = lfContractId,
         rawContractInstance = serializableRawContractInst,
-        metadata =
-          checked(ContractMetadata.tryCreate(signatoriesAsParties, signatoriesAsParties, None)),
+        // TODO(#13870): Calculate contract keys from the serializable contract
+        metadata = checked(
+          ContractMetadata
+            .tryCreate(signatoriesAsParties, signatoriesAsParties ++ observersAsParties, None)
+        ),
         ledgerCreateTime = time,
         contractSalt = contractSalt,
       )
@@ -1477,7 +1482,7 @@ object RepairService {
         contract: SerializableContract
     ): Either[
       String,
-      (Identifier, Record, Set[String], LfContractId, Option[Salt], CantonTimestamp),
+      (Identifier, Record, Set[String], Set[String], LfContractId, Option[Salt], CantonTimestamp),
     ] = {
       val contractInstance = contract.rawContractInstance.contractInstance
       LfEngineToApi
@@ -1485,15 +1490,19 @@ object RepairService {
         .bimap(
           e =>
             s"Failed to convert contract instance to data due to issue with create-arguments: ${e}",
-          record =>
+          record => {
+            val signatories = contract.metadata.signatories.map(_.toString)
+            val stakeholders = contract.metadata.stakeholders.map(_.toString)
             (
               LfEngineToApi.toApiIdentifier(contractInstance.unversioned.template),
               record,
-              contract.metadata.signatories.map(_.toString),
+              signatories,
+              stakeholders -- signatories,
               contract.contractId,
               contract.contractSalt,
               contract.ledgerCreateTime,
-            ),
+            )
+          },
         )
     }
   }

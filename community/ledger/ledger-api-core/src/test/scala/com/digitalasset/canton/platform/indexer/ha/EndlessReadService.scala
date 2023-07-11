@@ -10,7 +10,7 @@ import cats.syntax.bifunctor.toBifunctorOps
 import com.daml.lf.crypto
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Time.Timestamp
-import com.daml.lf.transaction.test.TransactionBuilder
+import com.daml.lf.transaction.test.{TestNodeBuilder, TreeTransactionBuilder}
 import com.daml.lf.transaction.{CommittedTransaction, TransactionNodeStatistics}
 import com.daml.lf.value.Value
 import com.digitalasset.canton.ledger.api.health.HealthStatus
@@ -206,30 +206,25 @@ object EndlessReadService {
   )
   // Creates contract #i
   private def createTransaction(i: Int): CommittedTransaction = {
-    val builder = TransactionBuilder()
-    val createNode = builder.create(
+    val createNode = TestNodeBuilder.create(
       id = cid(i),
       templateId = templateId,
       argument = Value.ValueUnit,
       signatories = Set(party),
       observers = Set.empty,
-      key = None,
     )
-    builder.add(createNode)
-    builder.buildCommitted()
+    TreeTransactionBuilder.toCommittedTransaction(createNode)
   }
   // Archives contract #(i-1)
   private def exerciseTransaction(i: Int): CommittedTransaction = {
-    val builder = TransactionBuilder()
-    val createNode = builder.create(
+    val createNode = TestNodeBuilder.create(
       id = cid(i - 1),
       templateId = templateId,
       argument = Value.ValueUnit,
       signatories = Set(party),
       observers = Set.empty,
-      key = None,
     )
-    val exerciseNode = builder.exercise(
+    val exerciseNode = TestNodeBuilder.exercise(
       contract = createNode,
       choice = choiceName,
       consuming = true,
@@ -239,7 +234,6 @@ object EndlessReadService {
       choiceObservers = Set.empty,
       byKey = false,
     )
-    builder.add(exerciseNode)
-    builder.buildCommitted()
+    TreeTransactionBuilder.toCommittedTransaction(exerciseNode)
   }
 }

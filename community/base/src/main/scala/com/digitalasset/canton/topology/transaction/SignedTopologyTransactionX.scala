@@ -16,6 +16,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbSerializationException
 import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.*
 import com.google.common.annotations.VisibleForTesting
@@ -139,7 +140,8 @@ object SignedTopologyTransactionX
       crypto: CryptoPrivateApi,
       protocolVersion: ProtocolVersion,
   )(implicit
-      ec: ExecutionContext
+      ec: ExecutionContext,
+      tc: TraceContext,
   ): EitherT[Future, SigningError, SignedTopologyTransactionX[Op, M]] =
     for {
       signaturesNE <- signingKeys.toSeq.toNEF.parTraverse(
@@ -157,7 +159,10 @@ object SignedTopologyTransactionX
       protocolVersion: ProtocolVersion,
   )(
       crypto: Crypto
-  )(implicit ec: ExecutionContext): EitherT[Future, String, SignedTopologyTransactionX[Op, M]] = {
+  )(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): EitherT[Future, String, SignedTopologyTransactionX[Op, M]] = {
     val originTx = signedTx.transaction
 
     // Convert and resign the transaction if the topology transaction version does not match the expected version

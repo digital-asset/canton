@@ -7,6 +7,7 @@ import com.daml.lf.value.Value
 import com.digitalasset.canton.data.ActionDescription.*
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.util.LfTransactionBuilder
+import com.digitalasset.canton.util.LfTransactionBuilder.defaultTemplateId
 import com.digitalasset.canton.version.{ProtocolVersion, RepresentativeProtocolVersion}
 import com.digitalasset.canton.{BaseTest, LfInterfaceId}
 import org.scalatest.wordspec.AnyWordSpec
@@ -26,19 +27,25 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
 
   "An action description" should {
     def tryCreateExerciseActionDescription(
-        interface: Option[LfInterfaceId],
+        interfaceId: Option[LfInterfaceId],
+        templateId: Option[LfTemplateId],
         protocolVersion: ProtocolVersion,
     ): ExerciseActionDescription =
-      createExerciseActionDescription(interface, protocolVersion).fold(err => throw err, identity)
+      createExerciseActionDescription(interfaceId, templateId, protocolVersion).fold(
+        err => throw err,
+        identity,
+      )
 
     def createExerciseActionDescription(
-        interface: Option[LfInterfaceId],
+        interfaceId: Option[LfInterfaceId],
+        templateId: Option[LfTemplateId],
         protocolVersion: ProtocolVersion,
     ): Either[InvalidActionDescription, ExerciseActionDescription] =
       ExerciseActionDescription.create(
         suffixedId,
+        templateId,
         LfChoiceName.assertFromString("choice"),
-        interface,
+        interfaceId,
         Value.ValueUnit,
         Set(ExampleTransactionFactory.submitter),
         byKey = false,
@@ -58,7 +65,11 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
     "deserialize to the same value (V0)" in {
       val tests = Seq(
         CreateActionDescription(unsuffixedId, seed, dummyVersion)(representativePV),
-        tryCreateExerciseActionDescription(interface = None, ProtocolVersion.v3),
+        tryCreateExerciseActionDescription(
+          interfaceId = None,
+          templateId = None,
+          ProtocolVersion.v3,
+        ),
         fetchAction,
         LookupByKeyActionDescription.tryCreate(globalKey, dummyVersion, representativePV),
       )
@@ -73,6 +84,7 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
         CreateActionDescription(unsuffixedId, seed, dummyVersion)(representativePV),
         tryCreateExerciseActionDescription(
           Some(LfTransactionBuilder.defaultInterfaceId),
+          templateId = None,
           ProtocolVersion.v4,
         ),
         fetchAction,
@@ -84,6 +96,23 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
       }
     }
 
+    "deserialize to the same value (V2)" in {
+      val tests = Seq(
+        CreateActionDescription(unsuffixedId, seed, dummyVersion)(representativePV),
+        tryCreateExerciseActionDescription(
+          Some(LfTransactionBuilder.defaultInterfaceId),
+          Some(LfTransactionBuilder.defaultTemplateId),
+          ProtocolVersion.v5,
+        ),
+        fetchAction,
+        LookupByKeyActionDescription.tryCreate(globalKey, dummyVersion, representativePV),
+      )
+
+      forEvery(tests) { actionDescription =>
+        ActionDescription.fromProtoV2(actionDescription.toProtoV2) shouldBe Right(actionDescription)
+      }
+    }
+
     "reject creation" when {
       "interfaceId is set and the protocol version is too old" in {
         def create(
@@ -91,6 +120,7 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
         ): Either[InvalidActionDescription, ExerciseActionDescription] =
           createExerciseActionDescription(
             Some(LfTransactionBuilder.defaultInterfaceId),
+            templateId = Option.when(protocolVersion >= ProtocolVersion.v5)(defaultTemplateId),
             protocolVersion,
           )
 
@@ -104,9 +134,20 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
         create(ProtocolVersion.v4).value shouldBe a[ExerciseActionDescription]
       }
 
+      "templateId should only allowed after ProtocolVersion.v5" in {
+        val create = createExerciseActionDescription(interfaceId = None, _, _)
+
+        assert(create(None, ProtocolVersion.v4).isRight)
+        assert(create(Some(defaultTemplateId), ProtocolVersion.v4).isLeft)
+        assert(create(None, ProtocolVersion.v5).isRight)
+        assert(create(Some(defaultTemplateId), ProtocolVersion.v5).isRight)
+      }
+
       "the choice argument cannot be serialized" in {
         ExerciseActionDescription.create(
           suffixedId,
+          templateId =
+            Option.when(representativePV.representative >= ProtocolVersion.v5)(defaultTemplateId),
           choiceName,
           None,
           ExampleTransactionFactory.veryDeepValue,

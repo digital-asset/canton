@@ -246,13 +246,15 @@ object TopologyStoreX {
       loggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContext
-  ): TopologyStoreX[StoreID] =
+  ): TopologyStoreX[StoreID] = {
+    val storeLoggerFactory = loggerFactory.append("store", storeId.toString)
     storage match {
       case _: MemoryStorage =>
-        new InMemoryTopologyStoreX(storeId, loggerFactory)
+        new InMemoryTopologyStoreX(storeId, storeLoggerFactory)
       case dbStorage: DbStorage =>
-        new DbTopologyStoreX(dbStorage, storeId, timeouts, loggerFactory)
+        new DbTopologyStoreX(dbStorage, storeId, timeouts, storeLoggerFactory)
     }
+  }
 
   lazy val initialParticipantDispatchingSet = Set(
     TopologyMappingX.Code.DomainTrustCertificateX,

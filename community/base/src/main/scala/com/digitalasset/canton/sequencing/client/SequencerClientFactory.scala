@@ -179,6 +179,7 @@ object SequencerClientFactory {
           syncCryptoApi.pureCrypto,
           loggingConfig,
           loggerFactory,
+          futureSupervisor,
         )
       }
 

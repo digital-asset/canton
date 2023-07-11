@@ -14,7 +14,8 @@ import com.daml.lf.engine.Error as LfError
 import com.daml.lf.interpretation.Error as LfInterpretationError
 import com.daml.lf.language.{LookupError, Reference}
 import com.daml.lf.transaction.*
-import com.daml.lf.transaction.test.TransactionBuilder
+import com.daml.lf.transaction.test.TreeTransactionBuilder.*
+import com.daml.lf.transaction.test.{TestNodeBuilder, TransactionBuilder, TreeTransactionBuilder}
 import com.daml.lf.value.Value
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
@@ -68,28 +69,28 @@ class CommandSubmissionServiceImplSpec
   private implicit val loggingContextWithTrace: LoggingContextWithTrace =
     LoggingContextWithTrace.ForTesting
 
-  private val builder = TransactionBuilder()
   private val knownParties = (1 to 100).map(idx => s"party-$idx").toArray
   private val missingParties = (101 to 200).map(idx => s"party-$idx").toArray
   private val allInformeesInTransaction = knownParties ++ missingParties
-  for {
+
+  private val nodes: Seq[NodeWrapper] = for {
     i <- 0 until 100
-  } {
+  } yield {
     // Ensure 100 % overlap by having 4 informees per each of the 100 nodes
     val informeesOfNode = allInformeesInTransaction.slice(i * 4, (i + 1) * 4)
     val (signatories, observers) = informeesOfNode.splitAt(2)
-    builder.add(
-      builder.create(
-        Value.ContractId.V1(Hash.hashPrivateKey(i.toString)).coid,
-        "test:test",
-        Value.ValueNil,
-        signatories.toSeq,
-        observers.toSeq,
-        Option.empty,
-      )
+    TestNodeBuilder.create(
+      id = Value.ContractId.V1(Hash.hashPrivateKey(i.toString)).coid,
+      templateId = "test:test",
+      argument = Value.ValueNil,
+      signatories = signatories.toSeq,
+      observers = observers.toSeq,
     )
   }
-  private val transaction = builder.buildSubmitted()
+
+  private val transaction = SubmittedTransaction(
+    TreeTransactionBuilder.toVersionedTransaction(nodes *)
+  )
 
   behavior of "submit"
 

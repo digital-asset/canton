@@ -39,6 +39,20 @@ final case class LogEntry(
     message
   }
 
+  def infoMessage(implicit pos: source.Position): String = {
+    if (level != INFO) {
+      fail(s"Incorrect log level $level. Expected: INFO\n$this")
+    }
+    message
+  }
+
+  def debugMessage(implicit pos: source.Position): String = {
+    if (level != DEBUG) {
+      fail(s"Incorrect log level $level. Expected: DEBUG\n$this")
+    }
+    message
+  }
+
   /** test if the message contains a specific error code */
   def shouldBeCantonErrorCode(code: ErrorCode)(implicit pos: source.Position): Assertion = {
     this.message should include(code.id)

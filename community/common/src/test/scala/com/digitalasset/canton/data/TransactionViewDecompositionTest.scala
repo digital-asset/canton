@@ -3,15 +3,18 @@
 
 package com.digitalasset.canton.data
 
-import com.daml.lf.data.ImmArray
-import com.daml.lf.transaction.test.TransactionBuilder
+import com.daml.lf.transaction.test.TestNodeBuilder.CreateKey
+import com.daml.lf.transaction.test.TreeTransactionBuilder.NodeWrapper
+import com.daml.lf.transaction.test.{TestIdFactory, TestNodeBuilder, TreeTransactionBuilder}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.TransactionViewDecomposition.*
+import com.digitalasset.canton.protocol.RollbackContext.{RollbackScope, RollbackSibling}
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.TrustLevel
 import com.digitalasset.canton.topology.{PartyId, UniqueIdentifier}
+import com.digitalasset.canton.util.LfTransactionUtil
 import com.digitalasset.canton.{
   BaseTest,
   ComparesLfTransactions,
@@ -28,8 +31,6 @@ class TransactionViewDecompositionTest
     with HasExecutionContext
     with ComparesLfTransactions
     with NeedsNewLfContractIds {
-
-  import RollbackTransactionBuilder.*
 
   lazy val factory: TransactionViewDecompositionFactory = TransactionViewDecompositionFactory(
     testedProtocolVersion
@@ -143,7 +144,7 @@ class TransactionViewDecompositionTest
           TransactionViewDecompositionFactory.V2.fromTransaction(
             ConfirmationPolicy.Signatory,
             mock[TopologySnapshot],
-            createWellFormedTransaction(flatTransactionSize),
+            wftWithCreateNodes(flatTransactionSize),
             RollbackContext.empty,
             None,
           )
@@ -153,37 +154,29 @@ class TransactionViewDecompositionTest
       }
     }
 
-    val rollbackTransactionBuilder = new RollbackTransactionBuilder(loggerFactory)
-
     "a transaction with nested rollbacks" can {
 
-      import rollbackTransactionBuilder.*
+      import RollbackDecomposition.*
+      import com.daml.lf.transaction.test.TreeTransactionBuilder.*
+
+      object tif extends TestIdFactory
 
       val alice: LfPartyId = LfPartyId.assertFromString("alice::default")
       val bob: LfPartyId = LfPartyId.assertFromString("bob::default")
       val carol: LfPartyId = LfPartyId.assertFromString("carol::default")
 
-      val embeddedRollbackExample: LfTransaction = {
-        rollbackTransactionBuilder.run(for {
-          rootId <- nextExerciseWithChildren( // NewView
-            n => c => exerciseNode(n, signatories = Set(alice), children = c.toList), // SameView
-            Seq(
-              nextExerciseWithChildren(
-                n => c => exerciseNode(n, signatories = Set(alice), children = c.toList),
-                Seq(
-                  nextRollbackFromChildren(
-                    Seq(
-                      nextExercise(exerciseNode(_, signatories = Set(alice, carol)))
-                    )
-                  )
-                ),
-              ),
-              nextExercise(exerciseNode(_, signatories = Set(alice, bob))),
-            ),
-          )
-          tx <- buildAndReset(rootNodeIds = Seq(rootId))
-        } yield tx)
-      }
+      val embeddedRollbackExample: LfVersionedTransaction = toVersionedTransaction(
+        exerciseNode(tif.newCid, signatories = Set(alice)).withChildren(
+          exerciseNode(tif.newCid, signatories = Set(alice)).withChildren(
+            TestNodeBuilder
+              .rollback()
+              .withChildren(
+                exerciseNode(tif.newCid, signatories = Set(alice, carol))
+              )
+          ),
+          exerciseNode(tif.newCid, signatories = Set(alice, bob)),
+        )
+      )
 
       val expected = List(
         RbNewTree(
@@ -203,13 +196,13 @@ class TransactionViewDecompositionTest
           .fromTransaction(
             ConfirmationPolicy.Signatory,
             defaultTopologySnapshot,
-            wellFormedUnsuffixedTransaction(embeddedRollbackExample),
+            toWellFormedUnsuffixedTransaction(embeddedRollbackExample),
             RollbackContext.empty,
             None,
           )
           .futureValue
 
-        val actual = rollbackDecomposition(decomposition)
+        val actual = RollbackDecomposition.rollbackDecomposition(decomposition)
 
         actual shouldBe expected
       }
@@ -217,38 +210,84 @@ class TransactionViewDecompositionTest
 
   }
 
-  private def createWellFormedTransaction(size: Int): WellFormedTransaction[WithoutSuffixes] = {
+  private def wftWithCreateNodes(size: Int): WellFormedTransaction[WithoutSuffixes] = {
     val alice = PartyId(UniqueIdentifier.tryFromProtoPrimitive(s"alice::party")).toLf
     val bob = PartyId(UniqueIdentifier.tryFromProtoPrimitive(s"bob::party")).toLf
-    val tb = TransactionBuilder()
-    val lfNodes = (0 until size).map { nodeId =>
-      val lfNode = tb.create(
-        id = newLfContractIdUnsuffixed(),
-        templateId = ExampleTransactionFactory.templateId,
-        argument = args(
-          LfValue.ValueParty(alice),
-          LfValue.ValueParty(bob),
-          args(notUsed),
-          seq(LfValue.ValueParty(bob)),
-        ),
-        signatories = Set(alice),
-        observers = Set(bob),
-        key = None,
-      )
 
-      LfNodeId(nodeId) -> lfNode
-    }.toMap
+    val tx = TreeTransactionBuilder.toVersionedTransaction(
+      (0 until size)
+        .map[NodeWrapper] { _ =>
+          TestNodeBuilder.create(
+            id = newLfContractIdUnsuffixed(),
+            templateId = ExampleTransactionFactory.templateId,
+            argument = args(
+              LfValue.ValueParty(alice),
+              LfValue.ValueParty(bob),
+              args(notUsed),
+              seq(LfValue.ValueParty(bob)),
+            ),
+            signatories = Set(alice),
+            observers = Set(bob),
+            key = CreateKey.NoKey,
+          )
+        } *
+    )
 
+    toWellFormedUnsuffixedTransaction(tx)
+
+  }
+
+  private def toWellFormedUnsuffixedTransaction(
+      tx: LfVersionedTransaction
+  ): WellFormedTransaction[WithoutSuffixes] = {
     WellFormedTransaction
       .normalizeAndCheck(
-        LfVersionedTransaction(LfTransactionVersion.VDev, lfNodes, ImmArray.from(lfNodes.keys)),
+        tx,
         TransactionMetadata(
           CantonTimestamp.Epoch,
           CantonTimestamp.Epoch,
-          lfNodes.map { case (nid, _) => nid -> hasher() },
+          tx.nodes.collect { case (nid, n) if LfTransactionUtil.nodeHasSeed(n) => nid -> hasher() },
         ),
         WithoutSuffixes,
       )
       .value
   }
+
+}
+
+sealed trait RollbackDecomposition
+object RollbackDecomposition {
+
+  final case class RbNewTree(
+      rb: RollbackScope,
+      informees: Set[LfPartyId],
+      children: Seq[RollbackDecomposition] = Seq.empty,
+  ) extends RollbackDecomposition
+
+  final case class RbSameTree(rb: RollbackScope) extends RollbackDecomposition
+
+  /** The purpose of this method is to map a tree [[TransactionViewDecomposition]] onto a [[RollbackDecomposition]]
+    * hierarchy aid comparison. The [[RollbackContext.nextChild]] value is significant but is not available
+    * for inspection or construction. For this reason we use trick of entering a rollback context and then converting
+    * to a rollback scope that has as its last sibling the nextChild value.
+    */
+  def rollbackDecomposition(
+      decompositions: Seq[TransactionViewDecomposition]
+  ): List[RollbackDecomposition] = {
+    decompositions
+      .map[RollbackDecomposition] {
+        case view: NewView =>
+          RbNewTree(
+            view.rbContext.enterRollback.rollbackScope.toList,
+            view.informees.map(_.party),
+            rollbackDecomposition(view.tailNodes),
+          )
+        case view: SameView =>
+          RbSameTree(view.rbContext.enterRollback.rollbackScope.toList)
+      }
+      .toList
+  }
+
+  def rbScope(rollbackScope: RollbackSibling*): RollbackScope = rollbackScope.toList
+
 }

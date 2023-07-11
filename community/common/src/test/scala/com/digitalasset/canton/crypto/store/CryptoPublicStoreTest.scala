@@ -4,14 +4,9 @@
 package com.digitalasset.canton.crypto.store
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.CommunityCryptoConfig
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
-import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CommunityCryptoPrivateStoreFactory
-import com.digitalasset.canton.resource.MemoryStorage
 import org.scalatest.wordspec.AsyncWordSpec
-
-import scala.concurrent.Future
 
 trait CryptoPublicStoreTest extends BaseTest { this: AsyncWordSpec =>
 
@@ -28,22 +23,6 @@ trait CryptoPublicStoreTest extends BaseTest { this: AsyncWordSpec =>
       EncryptionPublicKeyWithName(encKey1, Some(KeyName.tryCreate("encKey1")))
     val encKey2: EncryptionPublicKey = SymbolicCrypto.encryptionPublicKey("encKey2")
     val encKey2WithName: EncryptionPublicKeyWithName = EncryptionPublicKeyWithName(encKey2, None)
-
-    def newCrypto(): Future[Crypto] = {
-      new CommunityCryptoFactory()
-        .create(
-          CommunityCryptoConfig(),
-          new MemoryStorage(loggerFactory, timeouts),
-          new CommunityCryptoPrivateStoreFactory,
-          testedReleaseProtocolVersion,
-          timeouts,
-          loggerFactory,
-        )
-        .valueOrFail("create crypto")
-    }
-
-    def certificateGenerator(crypto: Crypto) =
-      new X509CertificateGenerator(crypto, loggerFactory)
 
     "save encryption keys correctly when added incrementally" in {
       val store = newStore
@@ -139,39 +118,5 @@ trait CryptoPublicStoreTest extends BaseTest { this: AsyncWordSpec =>
       }
     }
 
-    "generate and store X509 certificate" in {
-      val store = newStore
-      for {
-        // Need a tink crypto module to generate certificates
-        crypto <- newCrypto()
-        certSigningKey <- crypto
-          .generateSigningKey(SigningKeyScheme.EcDsaP384)
-          .valueOrFail("generate signing key")
-        cert <- certificateGenerator(crypto)
-          .generate("test", certSigningKey.id)
-          .valueOrFail("generate certificate")
-        res <- store.storeCertificate(cert).valueOrFail("store certificate")
-      } yield res shouldBe (())
-    }
-
-    "list stored certificates" in {
-      val store = newStore
-
-      for {
-        crypto <- newCrypto()
-        generator = certificateGenerator(crypto)
-        certSigningKey <- crypto
-          .generateSigningKey(SigningKeyScheme.EcDsaP384)
-          .valueOrFail("create signing key 1")
-        certSigningKey2 <- crypto
-          .generateSigningKey(SigningKeyScheme.EcDsaP384)
-          .valueOrFail("create signing key 2")
-        cert1 <- generator.generate("test", certSigningKey.id).valueOrFail("generate cert 1")
-        cert2 <- generator.generate("test2", certSigningKey2.id).valueOrFail("generate cert 2")
-        _ <- store.storeCertificate(cert1).valueOrFail("store cert 1")
-        _ <- store.storeCertificate(cert2).valueOrFail("store cert 2")
-        certs <- store.listCertificates().valueOrFail("list certificates")
-      } yield certs should have size (2)
-    }
   }
 }

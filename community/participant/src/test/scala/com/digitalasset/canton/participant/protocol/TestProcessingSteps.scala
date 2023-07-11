@@ -311,12 +311,11 @@ object TestProcessingSteps {
       viewHash: ViewHash,
       rootHash: RootHash,
       informees: Set[Informee] = Set.empty,
+      viewPosition: ViewPosition = ViewPosition(List(MerkleSeqIndex(List.empty))),
       domainId: DomainId = DefaultTestIdentities.domainId,
       mediator: MediatorRef = MediatorRef(DefaultTestIdentities.mediator),
   ) extends ViewTree
       with HasVersionedToByteString {
-
-    override def viewPosition: ViewPosition = ViewPosition(List(MerkleSeqIndex(List.empty)))
 
     def toBeSigned: Option[RootHash] = None
     override def pretty: Pretty[TestViewTree] = adHocPrettyInstance

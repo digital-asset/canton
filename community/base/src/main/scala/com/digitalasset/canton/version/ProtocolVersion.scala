@@ -180,7 +180,7 @@ object ProtocolVersion {
   val deleted: Seq[ProtocolVersion] = Seq(ProtocolVersion(2))
 
   val unstable: NonEmpty[List[ProtocolVersionWithStatus[Unstable]]] =
-    NonEmpty.mk(List, ProtocolVersion.v5, ProtocolVersion.dev)
+    NonEmpty.mk(List, ProtocolVersion.dev)
 
   val latest: ProtocolVersion = supported.max1
 
@@ -195,7 +195,7 @@ object ProtocolVersion {
 
   lazy val v3: ProtocolVersionWithStatus[Stable] = ProtocolVersion.stable(3)
   lazy val v4: ProtocolVersionWithStatus[Stable] = ProtocolVersion.stable(4)
-  lazy val v5: ProtocolVersionWithStatus[Unstable] = ProtocolVersion.unstable(5)
+  lazy val v5: ProtocolVersionWithStatus[Stable] = ProtocolVersion.stable(5)
 
   // Minimum stable protocol version introduced
   lazy val minimum: ProtocolVersion = v3

@@ -27,7 +27,10 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.DomainTopologyTransactionMessage
-import com.digitalasset.canton.sequencing.client.SendAsyncClientError.RequestRefused
+import com.digitalasset.canton.sequencing.client.SendAsyncClientError.{
+  RequestInvalid,
+  RequestRefused,
+}
 import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
@@ -564,7 +567,6 @@ private[domain] object DomainTopologyDispatcher {
       retryInterval = 10.seconds,
       parameters.processingTimeouts,
       loggerFactory,
-      futureSupervisor,
     )
 
     val dispatcher = new DomainTopologyDispatcher(
@@ -632,7 +634,6 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
       retryInterval: FiniteDuration,
       val timeouts: ProcessingTimeout,
       val loggerFactory: NamedLoggerFactory,
-      futureSupervisor: FutureSupervisor,
   )(implicit executionContext: ExecutionContext)
       extends DomainTopologySender {
 
@@ -646,7 +647,23 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
         snapshot: DomainSnapshotSyncCryptoApi,
         transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
         recipients: Set[Member],
-    )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
+    )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
+      def genBatch(
+          batch: Seq[SignedTopologyTransaction[TopologyChangeOp]],
+          recipients: Recipients,
+      )(maxSequencingTime: CantonTimestamp) =
+        DomainTopologyTransactionMessage
+          .create(batch.toList, snapshot, domainId, maxSequencingTime, protocolVersion)
+          .leftMap(_.toString)
+          .map(batchMessage =>
+            Batch(
+              List(
+                OpenEnvelope(batchMessage, recipients)(protocolVersion)
+              ),
+              protocolVersion,
+            )
+          )
+
       for {
         nonEmptyRecipients <- EitherT.fromOption[FutureUnlessShutdown](
           Recipients.ofSet(recipients),
@@ -657,24 +674,15 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
           .foldLeft(EitherT.pure[FutureUnlessShutdown, String](())) { case (res, batch) =>
             res.flatMap(_ =>
               for {
-                message <-
-                  DomainTopologyTransactionMessage
-                    .create(batch.toList, snapshot, domainId, protocolVersion)
-                    .leftMap(_.toString)
-                    .mapK(FutureUnlessShutdown.outcomeK)
                 _ <- ensureDelivery(
-                  Batch(
-                    List(
-                      OpenEnvelope(message, nonEmptyRecipients)(protocolVersion)
-                    ),
-                    protocolVersion,
-                  ),
+                  ts => genBatch(batch, nonEmptyRecipients)(ts),
                   s"${transactions.size} topology transactions for ${recipients.size} recipients",
                 )
               } yield ()
             )
           }
       } yield ()
+    }
 
     private def finalizeCurrentJob(outcome: UnlessShutdown[Either[String, Unit]]): Unit = {
       currentJob.getAndSet(None).foreach { promise =>
@@ -690,19 +698,27 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
     }
 
     protected def send(
-        batch: Batch[OpenEnvelope[DomainTopologyTransactionMessage]],
+        batch: CantonTimestamp => EitherT[Future, String, Batch[
+          OpenEnvelope[DomainTopologyTransactionMessage]
+        ]],
         callback: SendCallback,
     )(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[Either[SendAsyncClientError, Unit]] =
       performUnlessClosingF(functionFullName)(
-        client
-          .sendAsync(batch, SendType.Other, callback = callback)
-          .value
+        (for {
+          // add max-sequencing time to message to prevent replay attacks.
+          // on the recipient side, we'll check for validity and monotonicity of these timestamp
+          // as the domain manager will only ever send one transaction at the time, this can be guaranteed
+          message <- batch(client.generateMaxSequencingTime).leftMap(RequestInvalid)
+          _ <- client.sendAsync(message, SendType.Other, callback = callback)
+        } yield ()).value
       )
 
     private def ensureDelivery(
-        batch: Batch[OpenEnvelope[DomainTopologyTransactionMessage]],
+        batch: CantonTimestamp => EitherT[Future, String, Batch[
+          OpenEnvelope[DomainTopologyTransactionMessage]
+        ]],
         message: String,
     )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
 

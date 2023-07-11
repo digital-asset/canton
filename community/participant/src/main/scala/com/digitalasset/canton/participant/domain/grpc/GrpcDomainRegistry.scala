@@ -9,7 +9,6 @@ import cats.data.EitherT
 import cats.instances.future.*
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.*
-import com.digitalasset.canton.common.domain.SequencerConnectClient
 import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.{FutureSupervisor, HasFutureSupervision}
 import com.digitalasset.canton.config.{CryptoConfig, ProcessingTimeout, TestingConfigInternal}
@@ -29,13 +28,12 @@ import com.digitalasset.canton.participant.topology.{
   TopologyComponentFactory,
 }
 import com.digitalasset.canton.protocol.StaticDomainParameters
+import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig, SequencerClient}
-import com.digitalasset.canton.sequencing.{SequencerConnection, SequencerConnections}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import io.opentelemetry.api.trace.Tracer
 
 import java.util.concurrent.atomic.AtomicReference
@@ -108,16 +106,6 @@ class GrpcDomainRegistry(
     }
   }
 
-  def sequencerConnectClientBuilder: SequencerConnectClient.Builder = {
-    (config: SequencerConnection) =>
-      SequencerConnectClient(
-        config,
-        participantNodeParameters.processingTimeouts,
-        participantNodeParameters.tracing.propagation,
-        loggerFactory,
-      )
-  }
-
   override def connect(
       config: DomainConnectionConfig
   )(implicit
@@ -134,15 +122,6 @@ class GrpcDomainRegistry(
     )
 
     val runE = for {
-      sequencerConnectClient <- sequencerConnectClientBuilder(sequencerConnections.default)
-        // TODO(i12076): Multiple sequencers should be used rather than `default` one
-        .leftMap(err =>
-          DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(err.message)
-        )
-        .mapK(
-          FutureUnlessShutdown.outcomeK
-        )
-
       info <- sequencerInfoLoader
         .loadSequencerEndpoints(config.domain, sequencerConnections)
         .leftMap(DomainRegistryError.fromSequencerInfoLoaderError)
@@ -172,9 +151,8 @@ class GrpcDomainRegistry(
         packageDependencies,
         metrics,
         agreementClient,
-        sequencerConnectClient,
         participantSettings,
-      ).thereafter(_ => sequencerConnectClient.close())
+      )
     } yield new GrpcDomainHandle(
       domainHandle.domainId,
       domainHandle.alias,

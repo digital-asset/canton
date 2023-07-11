@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE configuration [
-<!ENTITY entityCorrelationIdTrailingSpaceReplace "&#x0025;replace(tid:&#x0025;mdc{trace-id} ){'tid: ', ''}- &#x0025;msg&#x0025;replace(, context: &#x0025;marker){', context: $', ''}&#x0025;replace( err-context:&#x0025;mdc{err-context} ){' err-context: ', ''}&#x0025;n">
-]>
+        <!ENTITY entityCorrelationIdTrailingSpaceReplace "&#x0025;replace(tid:&#x0025;mdc{trace-id} ){'tid: ', ''}- &#x0025;msg&#x0025;replace(, context: &#x0025;marker){', context: $', ''}&#x0025;replace( err-context:&#x0025;mdc{err-context} ){' err-context: ', ''}&#x0025;n">
+        ]>
 <configuration debug="false">
   <!-- propagate logback changes to jul handlers -->
   <contextListener class="ch.qos.logback.classic.jul.LevelChangePropagator">
@@ -61,6 +61,15 @@
             <encoder class="com.digitalasset.canton.logging.CantonJsonEncoder"/>
             <filter class="${log_last_errors_filter}" />
           </appender>
+
+          <!-- Appender for KMS logs -->
+          <appender name="KMS-FILE" class="ch.qos.logback.core.FileAppender">
+            <file>${KMS_LOG_FILE_NAME:-log/canton_kms.log}</file>
+            <append>${KMS_LOG_FILE_APPEND:-true}</append>
+            <!-- Allow for disabling flush on each log-line (faster, but may miss logs when crashing) -->
+            <immediateFlush>${KMS_LOG_IMMEDIATE_FLUSH:-true}</immediateFlush>
+            <encoder class="com.digitalasset.canton.logging.CantonJsonEncoder"/>
+          </appender>
         </then>
         <else>
           <appender name="FILE" class="ch.qos.logback.core.FileAppender">
@@ -73,6 +82,18 @@
               <pattern>%date [%thread] %-5level %logger{10} &entityCorrelationIdTrailingSpaceReplace;</pattern>
             </encoder>
             <filter class="${log_last_errors_filter}" />
+          </appender>
+
+          <!-- Appender for KMS logs -->
+          <appender name="KMS-FILE" class="ch.qos.logback.core.FileAppender">
+            <file>${KMS_LOG_FILE_NAME:-log/canton_kms.log}</file>
+            <append>${KMS_LOG_FILE_APPEND:-true}</append>
+            <!-- Allow for disabling flush on each log-line (faster, but may miss logs when crashing) -->
+            <immediateFlush>${KMS_LOG_IMMEDIATE_FLUSH:-true}</immediateFlush>
+            <encoder>
+              <!-- attempt to place the correlation-id with a trailing space, however replace with an empty string if it's empty -->
+              <pattern>%date [%thread] %-5level %logger{10} &entityCorrelationIdTrailingSpaceReplace;</pattern>
+            </encoder>
           </appender>
         </else>
       </if>
@@ -96,6 +117,21 @@
                 <encoder class="com.digitalasset.canton.logging.CantonJsonEncoder"/>
                 <filter class="${log_last_errors_filter}" />
               </appender>
+
+              <!-- Appender for KMS logs -->
+              <appender name="KMS-FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+                <file>${KMS_LOG_FILE_NAME:-log/canton_kms.log}</file>
+                <append>true</append>
+                <!-- Allow for disabling flush on each log-line (faster, but may miss logs when crashing) -->
+                <immediateFlush>${KMS_LOG_IMMEDIATE_FLUSH:-true}</immediateFlush>
+                <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                  <!-- hourly rollover and compress (gz), change pattern if you want different roll-overs -->
+                  <fileNamePattern>${KMS_LOG_FILE_NAME:-log/canton_kms.log}.%d{${KMS_LOG_FILE_ROLLING_PATTERN:-yyyy-MM-dd}}.gz</fileNamePattern>
+                  <!-- keep all archived log files by default -->
+                  <maxHistory>${KMS_LOG_FILE_HISTORY:-0}</maxHistory>
+                </rollingPolicy>
+                <encoder class="com.digitalasset.canton.logging.CantonJsonEncoder"/>
+              </appender>
             </then>
             <else>
               <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
@@ -115,6 +151,25 @@
                 </encoder>
                 <filter class="${log_last_errors_filter}" />
               </appender>
+
+
+              <!-- Appender for KMS logs -->
+              <appender name="KMS-FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+                <file>${KMS_LOG_FILE_NAME:-log/canton_kms.log}</file>
+                <append>true</append>
+                <!-- Allow for disabling flush on each log-line (faster, but may miss logs when crashing) -->
+                <immediateFlush>${KMS_LOG_IMMEDIATE_FLUSH:-true}</immediateFlush>
+                <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                  <!-- hourly rollover and compress (gz), change pattern if you want different roll-overs -->
+                  <fileNamePattern>${KMS_LOG_FILE_NAME:-log/canton_kms.log}.%d{${KMS_LOG_FILE_ROLLING_PATTERN:-yyyy-MM-dd}}.gz</fileNamePattern>
+                  <!-- keep all archived log files by default -->
+                  <maxHistory>${KMS_LOG_FILE_HISTORY:-0}</maxHistory>
+                </rollingPolicy>
+                <encoder>
+                  <!-- attempt to place the correlation-id with a trailing space, however replace with an empty string if it's empty -->
+                  <pattern>%date [%thread] %-5level %logger{35} &entityCorrelationIdTrailingSpaceReplace;</pattern>
+                </encoder>
+              </appender>
             </else>
           </if>
         </then>
@@ -123,6 +178,15 @@
         </else>
       </if>
     </else>
+  </if>
+
+  <!-- By default, AWS logs will go to the KMS-FILE appender. To change this behavior set the MERGE_KMS_LOG env variable to true -->
+  <if condition='!isDefined("MERGE_KMS_LOG")'>
+    <then>
+      <logger name="com.digitalasset.canton.crypto.kms" level="${LOG_LEVEL_CANTON:-INFO}" additivity="false">
+        <appender-ref ref="KMS-FILE"/>
+      </logger>
+    </then>
   </if>
 
   <!-- include the rewrite appender to rewrite certain log levels of certain messages -->

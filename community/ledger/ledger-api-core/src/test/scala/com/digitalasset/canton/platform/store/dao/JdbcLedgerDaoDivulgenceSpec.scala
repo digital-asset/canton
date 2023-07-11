@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.store.dao
 
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.data.{ImmArray, Ref}
-import com.daml.lf.transaction.test.TransactionBuilder
+import com.daml.lf.transaction.test.{TransactionBuilder, TreeTransactionBuilder}
 import com.daml.lf.transaction.{GlobalKeyWithMaintainers, Node, TransactionVersion}
 import com.daml.lf.value.Value.{ValueParty, VersionedContractInstance}
 import com.digitalasset.canton.platform.store.entries.LedgerEntry
@@ -15,6 +15,8 @@ import org.scalatest.{Inside, LoneElement}
 
 import java.util.UUID
 
+import TreeTransactionBuilder.*
+
 private[dao] trait JdbcLedgerDaoDivulgenceSpec extends LoneElement with Inside {
   this: AsyncFlatSpec with Matchers with JdbcLedgerDaoSuite =>
 
@@ -22,9 +24,8 @@ private[dao] trait JdbcLedgerDaoDivulgenceSpec extends LoneElement with Inside {
 
   it should "preserve divulged contracts" in {
     val (create1, tx1) = {
-      val builder = TransactionBuilder()
-      val contractId = builder.newCid
-      builder.add(
+      val contractId = TransactionBuilder.newCid
+      val create =
         Node.Create(
           coid = contractId,
           templateId = someTemplateId,
@@ -35,13 +36,11 @@ private[dao] trait JdbcLedgerDaoDivulgenceSpec extends LoneElement with Inside {
           keyOpt = None,
           version = TransactionVersion.minVersion,
         )
-      )
-      contractId -> builder.buildCommitted()
+      contractId -> TreeTransactionBuilder.toCommittedTransaction(create)
     }
-    val (create2, tx2) = {
-      val builder = TransactionBuilder()
-      val contractId = builder.newCid
-      builder.add(
+    val (create2Cid, tx2) = {
+      val contractId = TransactionBuilder.newCid
+      val create =
         Node.Create(
           coid = contractId,
           someTemplateId,
@@ -55,87 +54,85 @@ private[dao] trait JdbcLedgerDaoDivulgenceSpec extends LoneElement with Inside {
           ),
           version = TransactionVersion.minVersion,
         )
-      )
-      contractId -> builder.buildCommitted()
+      contractId -> TreeTransactionBuilder.toCommittedTransaction(create)
     }
     val tx3 = {
-      val builder = TransactionBuilder()
-      val rootExercise = builder.add(
-        Node.Exercise(
-          targetCoid = create1,
-          templateId = someTemplateId,
-          interfaceId = None,
-          choiceId = someChoiceName,
-          consuming = true,
-          actingParties = Set(bob),
-          chosenValue = someChoiceArgument,
-          stakeholders = Set(alice, bob),
-          signatories = Set(alice),
-          choiceObservers = Set.empty,
-          choiceAuthorizers = None,
-          children = ImmArray.Empty,
-          exerciseResult = Some(someChoiceResult),
-          keyOpt = None,
-          byKey = false,
-          version = TransactionVersion.minVersion,
+      val exercise3a = Node.Exercise(
+        targetCoid = create1,
+        templateId = someTemplateId,
+        interfaceId = None,
+        choiceId = someChoiceName,
+        consuming = true,
+        actingParties = Set(bob),
+        chosenValue = someChoiceArgument,
+        stakeholders = Set(alice, bob),
+        signatories = Set(alice),
+        choiceObservers = Set.empty,
+        choiceAuthorizers = None,
+        children = ImmArray.Empty,
+        exerciseResult = Some(someChoiceResult),
+        keyOpt = None,
+        byKey = false,
+        version = TransactionVersion.minVersion,
+      )
+
+      val fetch3b = Node.Fetch(
+        coid = create2Cid,
+        templateId = someTemplateId,
+        actingParties = Set(bob),
+        signatories = Set(bob),
+        stakeholders = Set(bob),
+        keyOpt = Some(
+          GlobalKeyWithMaintainers.assertBuild(someTemplateId, ValueParty(bob), Set(bob))
+        ),
+        byKey = false,
+        version = TransactionVersion.minVersion,
+      )
+
+      val exercise3c = Node.Exercise(
+        targetCoid = create2Cid,
+        templateId = someTemplateId,
+        interfaceId = None,
+        choiceId = someChoiceName,
+        consuming = true,
+        actingParties = Set(bob),
+        chosenValue = someChoiceArgument,
+        stakeholders = Set(bob),
+        signatories = Set(bob),
+        choiceObservers = Set.empty,
+        choiceAuthorizers = None,
+        children = ImmArray.Empty,
+        exerciseResult = Some(someChoiceResult),
+        keyOpt = Some(
+          GlobalKeyWithMaintainers
+            .assertBuild(someTemplateId, someContractKey(bob, "some key"), Set(bob))
+        ),
+        byKey = false,
+        version = TransactionVersion.minVersion,
+      )
+
+      val create3d = Node.Create(
+        coid = TransactionBuilder.newCid,
+        someTemplateId,
+        someContractArgument,
+        someAgreement,
+        signatories = Set(bob),
+        stakeholders = Set(alice, bob),
+        keyOpt = Some(
+          GlobalKeyWithMaintainers
+            .assertBuild(someTemplateId, someContractKey(bob, "some key"), Set(bob))
+        ),
+        version = TransactionVersion.minVersion,
+      )
+
+      TreeTransactionBuilder.toCommittedTransaction(
+        exercise3a.withChildren(
+          fetch3b,
+          exercise3c.withChildren(
+            create3d
+          ),
         )
       )
-      builder.add(
-        Node.Fetch(
-          coid = create2,
-          templateId = someTemplateId,
-          actingParties = Set(bob),
-          signatories = Set(bob),
-          stakeholders = Set(bob),
-          keyOpt = Some(
-            GlobalKeyWithMaintainers.assertBuild(someTemplateId, ValueParty(bob), Set(bob))
-          ),
-          byKey = false,
-          version = TransactionVersion.minVersion,
-        ),
-        parentId = rootExercise,
-      )
-      val nestedExercise = builder.add(
-        Node.Exercise(
-          targetCoid = create2,
-          templateId = someTemplateId,
-          interfaceId = None,
-          choiceId = someChoiceName,
-          consuming = true,
-          actingParties = Set(bob),
-          chosenValue = someChoiceArgument,
-          stakeholders = Set(bob),
-          signatories = Set(bob),
-          choiceObservers = Set.empty,
-          choiceAuthorizers = None,
-          children = ImmArray.Empty,
-          exerciseResult = Some(someChoiceResult),
-          keyOpt = Some(
-            GlobalKeyWithMaintainers
-              .assertBuild(someTemplateId, someContractKey(bob, "some key"), Set(bob))
-          ),
-          byKey = false,
-          version = TransactionVersion.minVersion,
-        ),
-        parentId = rootExercise,
-      )
-      builder.add(
-        Node.Create(
-          coid = builder.newCid,
-          someTemplateId,
-          someContractArgument,
-          someAgreement,
-          signatories = Set(bob),
-          stakeholders = Set(alice, bob),
-          keyOpt = Some(
-            GlobalKeyWithMaintainers
-              .assertBuild(someTemplateId, someContractKey(bob, "some key"), Set(bob))
-          ),
-          version = TransactionVersion.minVersion,
-        ),
-        parentId = nestedExercise,
-      )
-      builder.buildCommitted()
     }
 
     val someVersionedContractInstance =
@@ -179,7 +176,7 @@ private[dao] trait JdbcLedgerDaoDivulgenceSpec extends LoneElement with Inside {
         )
       )
       _ <- store(
-        divulgedContracts = Map((create2, someVersionedContractInstance) -> Set(alice)),
+        divulgedContracts = Map((create2Cid, someVersionedContractInstance) -> Set(alice)),
         blindingInfo = None,
         offsetAndTx = nextOffset() -> LedgerEntry.Transaction(
           commandId = Some(UUID.randomUUID().toString),

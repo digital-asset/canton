@@ -21,6 +21,7 @@ import com.daml.http.domain.{
   SearchForeverRequest,
   StartingOffset,
 }
+import com.daml.http.domain.ResolvedQuery
 import com.daml.http.json.{DomainJsonDecoder, JsonProtocol, SprayJson}
 import com.daml.http.LedgerClientJwt.Terminates
 import util.ApiValueToLfValueConverter.apiValueToLfValue
@@ -41,9 +42,8 @@ import scalaz.syntax.traverse.*
 import scalaz.std.list.*
 import scalaz.{-\/, Foldable, Liskov, NonEmptyList, Tag, \/, \/-}
 import Liskov.<~<
-import com.daml.fetchcontracts.domain.ResolvedQuery
-import ResolvedQuery.Unsupported
-import com.daml.fetchcontracts.domain.ContractTypeId.OptionalPkg
+import com.daml.http.domain.ContractTypeId.OptionalPkg
+import com.daml.http.domain.ResolvedQuery.Unsupported
 import com.daml.http.metrics.HttpApiMetrics
 import com.daml.http.util.FlowUtil.allowOnlyFirstInput
 import com.daml.http.util.Logging.{InstanceUUID, RequestID, extendWithRequestIdLogCtx}

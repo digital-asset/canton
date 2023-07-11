@@ -12,6 +12,7 @@ import com.digitalasset.canton.*
 import com.digitalasset.canton.common.domain.SequencerConnectClient
 import com.digitalasset.canton.common.domain.SequencerConnectClient.DomainClientBootstrapInfo
 import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader.{
+  LoadSequencerEndpointInformationResult,
   SequencerAggregatedInfo,
   SequencerInfoLoaderError,
 }
@@ -27,6 +28,7 @@ import com.digitalasset.canton.sequencing.{
 }
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import com.digitalasset.canton.version.ProtocolVersion
@@ -59,47 +61,72 @@ class SequencerInfoLoader(
   }
 
   private def extractSingleError(
-      errors: Seq[SequencerInfoLoaderError]
+      errors: Seq[LoadSequencerEndpointInformationResult.NotValid]
   ): SequencerInfoLoaderError = {
     require(errors.nonEmpty, "Non-empty list of errors is expected")
     val nonEmptyResult = NonEmptyUtil.fromUnsafe(errors)
-    if (nonEmptyResult.size == 1) nonEmptyResult.head1
+    if (nonEmptyResult.size == 1) nonEmptyResult.head1.error
     else {
-      val message = nonEmptyResult.map(_.cause).mkString(",")
+      val message = nonEmptyResult.map(_.error.cause).mkString(",")
       SequencerInfoLoaderError.FailedToConnectToSequencers(message)
     }
   }
 
   private def aggregateBootstrapInfo(sequencerConnections: SequencerConnections)(
-      result: Seq[(SequencerAlias, (DomainClientBootstrapInfo, StaticDomainParameters))]
+      result: Seq[LoadSequencerEndpointInformationResult]
+  )(implicit
+      traceContext: TraceContext
   ): Either[SequencerInfoLoaderError, SequencerAggregatedInfo] = {
     require(result.nonEmpty, "Non-empty list of sequencerId-to-endpoint pair is expected")
-    val nonEmptyResult = NonEmptyUtil.fromUnsafe(result)
-    val infoResult = nonEmptyResult.map(_._2)
-    val domainIds = infoResult.map(_._1).map(_.domainId).toSet
-    val staticDomainParameters = infoResult.map(_._2).toSet
-    val expectedSequencers = NonEmptyUtil.fromUnsafe(
-      nonEmptyResult.groupBy(_._1).view.mapValues(_.map(_._2._1.sequencerId).head1).toMap
-    )
-    if (domainIds.sizeIs > 1) {
-      SequencerInfoLoaderError
-        .SequencersFromDifferentDomainsAreConfigured(
-          s"Non-unique domain ids received by connecting to sequencers: [${domainIds.mkString(",")}]"
-        )
-        .asLeft
-    } else if (staticDomainParameters.sizeIs > 1) {
-      SequencerInfoLoaderError
-        .MisconfiguredStaticDomainParameters(
-          s"Non-unique static domain parameters received by connecting to sequencers"
-        )
-        .asLeft
-    } else
-      SequencerAggregatedInfo(
-        domainId = domainIds.head1,
-        staticDomainParameters = staticDomainParameters.head1,
-        expectedSequencers = expectedSequencers,
-        sequencerConnections = sequencerConnections,
-      ).asRight
+    val validSequencerConnections = result.collect {
+      case valid: LoadSequencerEndpointInformationResult.Valid =>
+        valid
+    }
+    if (validSequencerConnections.sizeIs >= sequencerConnections.sequencerTrustThreshold.unwrap) {
+      result.collect {
+        case LoadSequencerEndpointInformationResult.NotValid(sequencerConnection, error) =>
+          logger.warn(
+            s"Unable to connect to sequencer $sequencerConnection because of ${error.cause}"
+          )
+      }.discard
+      val nonEmptyResult = NonEmptyUtil.fromUnsafe(validSequencerConnections)
+      val domainIds = nonEmptyResult.map(_.domainClientBootstrapInfo.domainId).toSet
+      val staticDomainParameters = nonEmptyResult.map(_.staticDomainParameters).toSet
+      val expectedSequencers = NonEmptyUtil.fromUnsafe(
+        nonEmptyResult
+          .groupBy(_.sequencerAlias)
+          .view
+          .mapValues(_.map(_.domainClientBootstrapInfo.sequencerId).head1)
+          .toMap
+      )
+      if (domainIds.sizeIs > 1) {
+        SequencerInfoLoaderError
+          .SequencersFromDifferentDomainsAreConfigured(
+            s"Non-unique domain ids received by connecting to sequencers: [${domainIds.mkString(",")}]"
+          )
+          .asLeft
+      } else if (staticDomainParameters.sizeIs > 1) {
+        SequencerInfoLoaderError
+          .MisconfiguredStaticDomainParameters(
+            s"Non-unique static domain parameters received by connecting to sequencers"
+          )
+          .asLeft
+      } else
+        SequencerAggregatedInfo(
+          domainId = domainIds.head1,
+          staticDomainParameters = staticDomainParameters.head1,
+          expectedSequencers = expectedSequencers,
+          sequencerConnections = SequencerConnections.many(
+            nonEmptyResult.map(_.connection),
+            sequencerConnections.sequencerTrustThreshold,
+          ),
+        ).asRight
+    } else {
+      val invalidSequencerConnections = result.collect {
+        case nonValid: LoadSequencerEndpointInformationResult.NotValid => nonValid
+      }
+      extractSingleError(invalidSequencerConnections).asLeft
+    }
   }
 
   private def getBootstrapInfoDomainParameters(
@@ -130,12 +157,14 @@ class SequencerInfoLoader(
       domainAlias: DomainAlias
   )(connection: SequencerConnection)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, Seq[
-    SequencerInfoLoaderError
-  ], (SequencerAlias, (DomainClientBootstrapInfo, StaticDomainParameters))] =
+  ): EitherT[
+    Future,
+    SequencerInfoLoaderError,
+    (SequencerAlias, (DomainClientBootstrapInfo, StaticDomainParameters)),
+  ] =
     connection match {
       case grpc: GrpcSequencerConnection =>
-        (for {
+        for {
           client <- sequencerConnectClientBuilder(grpc).leftMap(
             SequencerInfoLoader.fromSequencerConnectClientError(domainAlias)
           )
@@ -145,7 +174,7 @@ class SequencerInfoLoader(
             client,
           )
             .thereafter(_ => client.close())
-        } yield connection.sequencerAlias -> bootstrapInfoDomainParameters).leftMap(x => Seq(x))
+        } yield connection.sequencerAlias -> bootstrapInfoDomainParameters
     }
 
   private def performHandshake(
@@ -183,17 +212,46 @@ class SequencerInfoLoader(
       sequencerConnections: SequencerConnections,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, SequencerInfoLoaderError, SequencerAggregatedInfo] =
+  ): EitherT[Future, SequencerInfoLoaderError, SequencerAggregatedInfo] = EitherT(
     MonadUtil
       .parTraverseWithLimit(
         parallelism = sequencerInfoLoadParallelism.unwrap
-      )(sequencerConnections.connections)(getBootstrapInfoDomainParameters(domainAlias))
-      .leftMap(extractSingleError)
-      .subflatMap(aggregateBootstrapInfo(sequencerConnections))
+      )(sequencerConnections.connections) { connection =>
+        getBootstrapInfoDomainParameters(domainAlias)(connection).value
+          .map {
+            case Right((sequencerAlias, (domainClientBootstrapInfo, staticDomainParameters))) =>
+              LoadSequencerEndpointInformationResult.Valid(
+                connection,
+                sequencerAlias,
+                domainClientBootstrapInfo,
+                staticDomainParameters,
+              )
+            case Left(error) =>
+              LoadSequencerEndpointInformationResult.NotValid(connection, error)
+          }
+      }
+      .map(aggregateBootstrapInfo(sequencerConnections))
+  )
 
 }
 
 object SequencerInfoLoader {
+
+  sealed trait LoadSequencerEndpointInformationResult extends Product with Serializable
+
+  object LoadSequencerEndpointInformationResult {
+    final case class Valid(
+        connection: SequencerConnection,
+        sequencerAlias: SequencerAlias,
+        domainClientBootstrapInfo: DomainClientBootstrapInfo,
+        staticDomainParameters: StaticDomainParameters,
+    ) extends LoadSequencerEndpointInformationResult
+    final case class NotValid(
+        sequencerConnection: SequencerConnection,
+        error: SequencerInfoLoaderError,
+    ) extends LoadSequencerEndpointInformationResult
+  }
+
   final case class SequencerAggregatedInfo(
       domainId: DomainId,
       staticDomainParameters: StaticDomainParameters,

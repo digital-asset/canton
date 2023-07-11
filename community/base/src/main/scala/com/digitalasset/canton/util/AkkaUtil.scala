@@ -23,14 +23,21 @@ object AkkaUtil extends HasLoggerName {
     *
     * By default, an Akka flow will discard exceptions. Use this method to avoid discarding exceptions.
     */
-  def runSupervised[T](reporter: Throwable => Unit, graph: RunnableGraph[T])(implicit
+  def runSupervised[T](
+      reporter: Throwable => Unit,
+      graph: RunnableGraph[T],
+      debugLogging: Boolean = false,
+  )(implicit
       mat: Materializer
   ): T = {
-    graph
-      .withAttributes(ActorAttributes.withSupervisionStrategy { ex =>
+    val tmp = graph
+      .addAttributes(ActorAttributes.withSupervisionStrategy { ex =>
         reporter(ex)
         Supervision.Stop
       })
+    (if (debugLogging)
+       tmp.addAttributes(ActorAttributes.debugLogging(true))
+     else tmp)
       .run()
   }
 

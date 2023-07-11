@@ -5,7 +5,8 @@ package com.digitalasset.canton.ledger.sandbox.bridge.validate
 
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.{ImmArray, Ref, Time}
-import com.daml.lf.transaction.test.TransactionBuilder
+import com.daml.lf.transaction.test.TestNodeBuilder.CreateKey
+import com.daml.lf.transaction.test.{TestNodeBuilder, TreeTransactionBuilder}
 import com.daml.lf.transaction.{GlobalKey, SubmittedTransaction}
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.{ContractId, ValueNil}
@@ -39,47 +40,45 @@ class PrepareSubmissionSpec extends AsyncFlatSpec with BaseTest {
   behavior of classOf[PrepareSubmissionImpl].getSimpleName
 
   it should "forward the correct failure on inconsistent keys" in {
-    val txBuilder = TransactionBuilder()
 
     val templateId = Ref.Identifier.assertFromString("pkg:mod:template")
     val keyValue = Value.ValueText("key-1")
 
-    val createNode = txBuilder.create(
+    val createNode = TestNodeBuilder.create(
       id = cid("#1"),
       templateId = templateId,
       argument = Value.ValueInt64(1),
       signatories = Set.empty,
       observers = Set.empty,
-      key = Some(keyValue),
+      key = CreateKey.SignatoryMaintainerKey(keyValue),
     )
 
-    txBuilder.add(createNode)
-
     val contractKey = GlobalKey.assertBuild(templateId, keyValue)
-    val otherCreateNode = txBuilder.create(
+    val otherCreateNode = TestNodeBuilder.create(
       id = cid("#2"),
       templateId = templateId,
       argument = Value.ValueInt64(1),
       signatories = Set.empty,
       observers = Set.empty,
-      key = Some(keyValue),
+      key = CreateKey.SignatoryMaintainerKey(keyValue),
     )
     val exerciseNode =
-      txBuilder.exercise(
+      TestNodeBuilder.exercise(
         contract = otherCreateNode,
         choice = Ref.Name.assertFromString("choice"),
         consuming = false,
         actingParties = Set.empty,
         argument = ValueNil,
+        byKey = false,
       )
 
-    txBuilder.add(exerciseNode)
+    val tx = TreeTransactionBuilder.toVersionedTransaction(createNode, exerciseNode)
 
     val validationResult = prepareSubmission(
       Submission.Transaction(
         submitterInfo = submitterInfo,
         transactionMeta = txMeta,
-        transaction = SubmittedTransaction(txBuilder.build()),
+        transaction = SubmittedTransaction(tx),
         estimatedInterpretationCost = 0L,
         processedDisclosedContracts = ImmArray.empty,
       )
@@ -92,30 +91,28 @@ class PrepareSubmissionSpec extends AsyncFlatSpec with BaseTest {
   }
 
   it should "forward the correct failure on duplicate keys" in {
-    val txBuilder = TransactionBuilder()
 
     val templateId = Ref.Identifier.assertFromString("pkg:mod:template")
     val keyValue = Value.ValueText("key-1")
 
-    val createNode = txBuilder.create(
+    val createNode = TestNodeBuilder.create(
       id = cid("#1"),
       templateId = templateId,
       argument = Value.ValueInt64(1),
       signatories = Set.empty,
       observers = Set.empty,
-      key = Some(keyValue),
+      key = CreateKey.SignatoryMaintainerKey(keyValue),
     )
 
-    txBuilder.add(createNode)
-    txBuilder.add(createNode)
-
     val contractKey = GlobalKey.assertBuild(templateId, keyValue)
+
+    val tx = TreeTransactionBuilder.toVersionedTransaction(createNode, createNode)
 
     val validationResult = prepareSubmission(
       Submission.Transaction(
         submitterInfo = submitterInfo,
         transactionMeta = txMeta,
-        transaction = SubmittedTransaction(txBuilder.build()),
+        transaction = SubmittedTransaction(tx),
         estimatedInterpretationCost = 0L,
         processedDisclosedContracts = ImmArray.empty,
       )

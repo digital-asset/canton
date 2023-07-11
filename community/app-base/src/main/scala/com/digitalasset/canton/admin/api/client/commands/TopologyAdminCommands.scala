@@ -12,11 +12,8 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
 }
 import com.digitalasset.canton.admin.api.client.data.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.crypto.{CertificateId, Fingerprint, KeyPurpose}
-import com.digitalasset.canton.protocol.{
-  DynamicDomainParameters as DynamicDomainParametersInternal,
-  v0 as idProto,
-}
+import com.digitalasset.canton.crypto.{Fingerprint, KeyPurpose}
+import com.digitalasset.canton.protocol.{DynamicDomainParameters as DynamicDomainParametersInternal}
 import com.digitalasset.canton.topology.admin.grpc.BaseQuery
 import com.digitalasset.canton.topology.admin.v0
 import com.digitalasset.canton.topology.admin.v0.AuthorizationSuccess
@@ -315,28 +312,6 @@ object TopologyAdminCommands {
 
     }
 
-    final case class AuthorizeSignedLegalIdentityClaim(
-        ops: TopologyChangeOp,
-        signedBy: Option[Fingerprint],
-        claim: SignedLegalIdentityClaim,
-    ) extends BaseCommand[v0.SignedLegalIdentityClaimAuthorization] {
-
-      override def createRequest(): Either[String, v0.SignedLegalIdentityClaimAuthorization] =
-        Right(
-          v0.SignedLegalIdentityClaimAuthorization(
-            authData(ops, signedBy, replaceExisting = false, force = false),
-            claim = Some(claim.toProtoV0),
-          )
-        )
-
-      override def submitRequest(
-          service: TopologyManagerWriteServiceStub,
-          request: v0.SignedLegalIdentityClaimAuthorization,
-      ): Future[v0.AuthorizationSuccess] =
-        service.authorizeSignedLegalIdentityClaim(request)
-
-    }
-
     final case class AuthorizeVettedPackages(
         ops: TopologyChangeOp,
         signedBy: Option[Fingerprint],
@@ -440,52 +415,6 @@ object TopologyAdminCommands {
 
       override def handleResponse(response: v0.AdditionSuccess): Either[String, Unit] =
         Right(())
-    }
-
-    sealed trait BaseClaimCommand
-        extends BaseWriteCommand[
-          v0.SignedLegalIdentityClaimGeneration,
-          idProto.SignedLegalIdentityClaim,
-          SignedLegalIdentityClaim,
-        ] {
-
-      override def submitRequest(
-          service: TopologyManagerWriteServiceStub,
-          request: v0.SignedLegalIdentityClaimGeneration,
-      ): Future[idProto.SignedLegalIdentityClaim] =
-        service.generateSignedLegalIdentityClaim(request)
-      override def handleResponse(
-          response: idProto.SignedLegalIdentityClaim
-      ): Either[String, SignedLegalIdentityClaim] =
-        SignedLegalIdentityClaim.fromProtoV0(response).leftMap(_.toString)
-
-    }
-
-    final case class GenerateSignedLegalIdentityClaim(claim: LegalIdentityClaim)
-        extends BaseClaimCommand {
-
-      override def createRequest(): Either[String, v0.SignedLegalIdentityClaimGeneration] =
-        Right(
-          v0.SignedLegalIdentityClaimGeneration(request =
-            v0.SignedLegalIdentityClaimGeneration.Request
-              .LegalIdentityClaim(value = claim.getCryptographicEvidence)
-          )
-        )
-
-    }
-
-    final case class GenerateX509IdentityClaim(uid: UniqueIdentifier, certificateId: CertificateId)
-        extends BaseClaimCommand {
-
-      override def createRequest(): Either[String, v0.SignedLegalIdentityClaimGeneration] =
-        Right(
-          v0.SignedLegalIdentityClaimGeneration(
-            request = v0.SignedLegalIdentityClaimGeneration.Request.Certificate(
-              v0.SignedLegalIdentityClaimGeneration
-                .X509CertificateClaim(uid.toProtoPrimitive, certificateId.unwrap)
-            )
-          )
-        )
     }
 
   }

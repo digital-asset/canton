@@ -3,7 +3,7 @@
 
 package com.daml.http
 
-import com.daml.fetchcontracts.domain.ContractTypeId
+import com.daml.http.domain.ContractTypeId
 import com.daml.ledger.api.{v1 => lav1}
 import org.scalacheck.Gen
 import scalaz.{-\/, \/, \/-}

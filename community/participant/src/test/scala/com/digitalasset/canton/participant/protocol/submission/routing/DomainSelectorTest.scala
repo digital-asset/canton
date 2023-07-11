@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.protocol.submission.routing
 
 import cats.data.EitherT
 import com.daml.lf.data.Ref
-import com.daml.lf.language.LanguageVersion
+import com.daml.lf.transaction.TransactionVersion
 import com.daml.lf.transaction.test.TransactionBuilder.Implicits.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.logging.{NamedLoggerFactory, SuppressingLogger}
@@ -147,7 +147,7 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
       val transactionVersion = LfTransactionVersion.VDev
 
       val selectorOldPV = selectorForExerciseByInterface(
-        languageVersion = LanguageVersion.v1_dev, // requires protocol version dev
+        transactionVersion = TransactionVersion.VDev, // requires protocol version dev
         domainProtocolVersion = _ => oldPV,
       )
 
@@ -170,7 +170,7 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
 
       // Happy path
       val selectorNewPV = selectorForExerciseByInterface(
-        languageVersion = LanguageVersion.v1_dev, // requires protocol version dev
+        transactionVersion = TransactionVersion.VDev, // requires protocol version dev
         domainProtocolVersion = _ => newPV,
       )
 
@@ -312,7 +312,7 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
     import SimpleTopology.*
 
     "minimize the number of transfers" in {
-      val threeExercises = ThreeExercises(languageVersion)
+      val threeExercises = ThreeExercises(fixtureTransactionVersion)
 
       val domains = NonEmpty.mk(Set, acme, da, repair)
 
@@ -397,8 +397,6 @@ private[routing] object DomainSelectorTest {
     private val defaultDomainProtocolVersion: DomainId => ProtocolVersion = _ =>
       BaseTest.testedProtocolVersion
 
-    private val defaultLanguageVersion: LanguageVersion = languageVersion
-
     def selectorForExerciseByInterface(
         priorityOfDomain: DomainId => Int = defaultPriorityOfDomain,
         domainOfContracts: Seq[LfContractId] => Map[LfContractId, DomainId] =
@@ -409,7 +407,7 @@ private[routing] object DomainSelectorTest {
         prescribedDomainId: Option[DomainId] = defaultPrescribedDomainId,
         prescribedSubmitterDomainId: Option[DomainId] = defaultPrescribedSubmitterDomainId,
         domainProtocolVersion: DomainId => ProtocolVersion = defaultDomainProtocolVersion,
-        languageVersion: LanguageVersion = defaultLanguageVersion,
+        transactionVersion: TransactionVersion = fixtureTransactionVersion,
         vettedPackages: Seq[LfPackageId] = ExerciseByInterface.correctPackages,
     )(implicit
         ec: ExecutionContext,
@@ -417,7 +415,7 @@ private[routing] object DomainSelectorTest {
         loggerFactory: NamedLoggerFactory,
     ): Selector = {
 
-      val exerciseByInterface = ExerciseByInterface(languageVersion)
+      val exerciseByInterface = ExerciseByInterface(transactionVersion)
 
       val inputContractStakeholders = Map(
         exerciseByInterface.inputContractId -> Set(signatory, observer)

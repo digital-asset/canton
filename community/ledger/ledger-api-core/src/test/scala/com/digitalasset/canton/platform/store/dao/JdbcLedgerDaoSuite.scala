@@ -11,7 +11,7 @@ import com.daml.lf.data.Ref.{Identifier, Party}
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.data.{FrontStack, ImmArray, Ref, Time}
 import com.daml.lf.transaction.*
-import com.daml.lf.transaction.test.TransactionBuilder
+import com.daml.lf.transaction.test.{NodeIdTransactionBuilder, TransactionBuilder}
 import com.daml.lf.value.Value.{ContractId, ContractInstance, ValueText, VersionedContractInstance}
 import com.daml.lf.value.Value as LfValue
 import com.daml.testing.utils.{TestModels, TestResourceUtils}
@@ -148,11 +148,10 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
     )
 
   private[this] val txVersion = TransactionVersion.StableVersions.min
-  private[this] def newBuilder() = new TransactionBuilder(_ => txVersion)
+  private[this] def newBuilder(): NodeIdTransactionBuilder = new NodeIdTransactionBuilder
 
   protected final val someContractInstance = ContractInstance(someTemplateId, someContractArgument)
-  protected final val someVersionedContractInstance =
-    newBuilder().versionContract(someContractInstance)
+  protected final val someVersionedContractInstance = Versioned(txVersion, someContractInstance)
 
   protected final val otherTemplateId = testIdentifier("Dummy")
   protected final val otherContractArgument = LfValue.ValueRecord(

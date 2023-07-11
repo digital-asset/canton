@@ -27,6 +27,7 @@ import com.digitalasset.canton.protocol.messages.DomainTopologyTransactionMessag
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencing.client.{
   RequestSigner,
+  SendAsyncClientError,
   SendType,
   SequencerClient,
   SequencerClientFactory,
@@ -91,18 +92,36 @@ object TopologyManagementInitialization {
   ): Future[Unit] = {
     implicit val traceContext = loggingContext.traceContext
     val logger = loggerFactory.getLogger(getClass)
+
     for {
-      content <- DomainTopologyTransactionMessage
-        .tryCreate(transactions.toList, recentSnapshot, id, protocolVersion)
-      batch = domainMembers.map(member =>
-        OpenEnvelope(content, Recipients.cc(member))(protocolVersion)
-      )
-      _ = logger.debug(s"Sending initial topology transactions to domain members $domainMembers")
       _ <- SequencerClient
         .sendWithRetries(
-          callback =>
-            client
-              .sendAsync(Batch(batch.toList, protocolVersion), SendType.Other, callback = callback),
+          callback => {
+            val maxSequencingTime = client.generateMaxSequencingTime
+            logger.debug(s"Sending initial topology transactions to domain members $domainMembers")
+            for {
+              content <-
+                DomainTopologyTransactionMessage
+                  .create(
+                    transactions.toList,
+                    recentSnapshot,
+                    id,
+                    maxSequencingTime,
+                    protocolVersion,
+                  )
+                  .leftMap(err => SendAsyncClientError.RequestInvalid(err.toString))
+              batch = domainMembers.map(member =>
+                OpenEnvelope(content, Recipients.cc(member))(protocolVersion)
+              )
+              res <- client
+                .sendAsync(
+                  Batch(batch.toList, protocolVersion),
+                  SendType.Other,
+                  callback = callback,
+                  maxSequencingTime = maxSequencingTime,
+                )
+            } yield res
+          },
           maxRetries = 600,
           delay = 1.second,
           sendDescription = "Send initial topology transaction to domain members",

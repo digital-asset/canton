@@ -17,36 +17,44 @@ object CantonContractIdVersion {
   val versionPrefixBytesSize = 2
 
   def fromProtocolVersion(protocolVersion: ProtocolVersion): CantonContractIdVersion =
-    if (protocolVersion >= ProtocolVersion.v4) AuthenticatedContractIdVersion
+    if (protocolVersion >= ProtocolVersion.v5) AuthenticatedContractIdVersionV2
+    else if (protocolVersion == ProtocolVersion.v4) AuthenticatedContractIdVersion
     else NonAuthenticatedContractIdVersion
 
   def ensureCantonContractId(
       contractId: LfContractId
-  ): Either[MalformedContractId, CantonContractIdVersion] =
-    contractId match {
-      case LfContractId.V1(_discriminator, suffix) =>
-        for {
-          versionedContractId <- suffix match {
-            case s if s.startsWith(AuthenticatedContractIdVersion.versionPrefixBytes) =>
-              Right(AuthenticatedContractIdVersion)
-            case s if s.startsWith(NonAuthenticatedContractIdVersion.versionPrefixBytes) =>
-              Right(NonAuthenticatedContractIdVersion)
-            case invalidSuffix =>
-              Left(
-                MalformedContractId(
-                  contractId.toString,
-                  s"Suffix ${invalidSuffix.toHexString} does not start with one of the supported prefixes: ${AuthenticatedContractIdVersion.versionPrefixBytes} or ${NonAuthenticatedContractIdVersion.versionPrefixBytes}",
-                )
-              )
-          }
+  ): Either[MalformedContractId, CantonContractIdVersion] = {
+    val LfContractId.V1(_discriminator, suffix) = contractId
+    for {
+      versionedContractId <- CantonContractIdVersion
+        .fromContractSuffix(suffix)
+        .leftMap(error => MalformedContractId(contractId.toString, error))
 
-          unprefixedSuffix = suffix.slice(versionPrefixBytesSize, suffix.length)
+      unprefixedSuffix = suffix.slice(versionPrefixBytesSize, suffix.length)
 
-          _ <- Hash
-            .fromByteString(unprefixedSuffix.toByteString)
-            .leftMap(err => MalformedContractId(contractId.toString, err.message))
-        } yield versionedContractId
+      _ <- Hash
+        .fromByteString(unprefixedSuffix.toByteString)
+        .leftMap(err => MalformedContractId(contractId.toString, err.message))
+    } yield versionedContractId
+  }
+
+  def fromContractSuffix(contractSuffix: Bytes): Either[String, CantonContractIdVersion] = {
+    if (contractSuffix.startsWith(AuthenticatedContractIdVersionV2.versionPrefixBytes)) {
+      Right(AuthenticatedContractIdVersionV2)
+    } else if (contractSuffix.startsWith(AuthenticatedContractIdVersion.versionPrefixBytes)) {
+      Right(AuthenticatedContractIdVersion)
+    } else if (contractSuffix.startsWith(NonAuthenticatedContractIdVersion.versionPrefixBytes)) {
+      Right(NonAuthenticatedContractIdVersion)
+    } else {
+      Left(
+        s"""Suffix ${contractSuffix.toHexString} does not start with one of the supported prefixes:
+            | ${AuthenticatedContractIdVersionV2.versionPrefixBytes},
+            | ${AuthenticatedContractIdVersion.versionPrefixBytes}
+            | or ${NonAuthenticatedContractIdVersion.versionPrefixBytes}
+            |""".stripMargin.replaceAll("\r|\n", "")
+      )
     }
+  }
 }
 
 sealed trait CantonContractIdVersion extends Serializable with Product {

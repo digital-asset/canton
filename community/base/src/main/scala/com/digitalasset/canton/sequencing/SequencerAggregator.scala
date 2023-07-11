@@ -4,9 +4,16 @@
 package com.digitalasset.canton.sequencing
 
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
+import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{CryptoPureApi, Hash, HashPurpose, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.{
+  FlagCloseable,
+  FutureUnlessShutdown,
+  PromiseUnlessShutdown,
+}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.SequencerAggregator.{
@@ -22,14 +29,17 @@ import com.google.common.annotations.VisibleForTesting
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{ArrayBlockingQueue, BlockingQueue}
 import scala.collection.mutable
-import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
+import scala.concurrent.{ExecutionContext, blocking}
 
 class SequencerAggregator(
     cryptoPureApi: CryptoPureApi,
     eventInboxSize: PositiveInt,
     val loggerFactory: NamedLoggerFactory,
     initialConfig: MessageAggregationConfig,
-) extends NamedLogging {
+    override val timeouts: ProcessingTimeout,
+    futureSupervisor: FutureSupervisor,
+) extends NamedLogging
+    with FlagCloseable {
 
   private val configRef: AtomicReference[MessageAggregationConfig] =
     new AtomicReference[MessageAggregationConfig](initialConfig)
@@ -39,7 +49,7 @@ class SequencerAggregator(
 
   private case class SequencerMessageData(
       eventBySequencer: Map[SequencerId, OrdinarySerializedEvent],
-      promise: Promise[Either[SequencerAggregatorError, SequencerId]],
+      promise: PromiseUnlessShutdown[Either[SequencerAggregatorError, SequencerId]],
   )
 
   /** Queue containing received and not yet handled events.
@@ -122,7 +132,9 @@ class SequencerAggregator(
   def combineAndMergeEvent(
       sequencerId: SequencerId,
       message: OrdinarySerializedEvent,
-  )(implicit ec: ExecutionContext): Future[Either[SequencerAggregatorError, Boolean]] = {
+  )(implicit
+      ec: ExecutionContext
+  ): FutureUnlessShutdown[Either[SequencerAggregatorError, Boolean]] = {
     if (!expectedSequencers.contains(sequencerId)) {
       throw new IllegalArgumentException(s"Unexpected sequencerId: $sequencerId")
     }
@@ -139,9 +151,9 @@ class SequencerAggregator(
 
           pushDownstreamIfConsensusIsReached(nextMinimumTimestamp, nextData)
 
-          sequencerMessageData.promise.future.map(_.map(_ == sequencerId))
+          sequencerMessageData.promise.futureUS.map(_.map(_ == sequencerId))
         } else
-          Future.successful(Right(false))
+          FutureUnlessShutdown.pure(Right(false))
       }
     }
   }
@@ -163,21 +175,27 @@ class SequencerAggregator(
       val (sequencerIdToNotify, _) = nonEmptyMessages.head1
 
       nextData.promise
-        .success(
+        .outcome(
           addEventToQueue(messagesToCombine).map(_ => sequencerIdToNotify)
         )
-        .discard
     }
   }
 
   private def updatedSequencerMessageData(
       sequencerId: SequencerId,
       message: OrdinarySerializedEvent,
+  )(implicit
+      ec: ExecutionContext
   ): SequencerMessageData = {
+    implicit val traceContext = message.traceContext
+    val promise = new PromiseUnlessShutdown[Either[SequencerAggregatorError, SequencerId]](
+      "replica-manager-sync-service",
+      futureSupervisor,
+    )
     val data =
       sequenceData.getOrElse(
         message.timestamp,
-        SequencerMessageData(Map(), Promise[Either[SequencerAggregatorError, SequencerId]]()),
+        SequencerMessageData(Map(), promise),
       )
     data.copy(eventBySequencer = data.eventBySequencer.updated(sequencerId, message))
   }
@@ -196,6 +214,14 @@ class SequencerAggregator(
     }
   }
 
+  @SuppressWarnings(Array("NonUnitForEach"))
+  override protected def onClosed(): Unit =
+    blocking {
+      this.synchronized {
+        sequenceData.view.values
+          .foreach(_.promise.shutdown())
+      }
+    }
 }
 object SequencerAggregator {
   final case class MessageAggregationConfig(

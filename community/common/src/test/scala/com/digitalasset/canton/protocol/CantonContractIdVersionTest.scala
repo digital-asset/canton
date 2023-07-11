@@ -11,7 +11,11 @@ import org.scalatest.wordspec.AnyWordSpec
 
 class CantonContractIdVersionTest extends AnyWordSpec with BaseTest {
   private val cantonContractIdVersions =
-    Seq(AuthenticatedContractIdVersion, NonAuthenticatedContractIdVersion)
+    Seq(
+      AuthenticatedContractIdVersionV2,
+      AuthenticatedContractIdVersion,
+      NonAuthenticatedContractIdVersion,
+    )
 
   cantonContractIdVersions.foreach { cantonContractIdVersion =>
     s"${cantonContractIdVersion}" when {
@@ -63,8 +67,9 @@ class CantonContractIdVersionTest extends AnyWordSpec with BaseTest {
     "fromProtocolVersion" should {
       "return the correct canton contract id version" in {
         val nonAuthenticatedContractIdVersion = Seq(ProtocolVersion.v3)
-        val authenticatedContractIdVersion =
-          Seq(ProtocolVersion.v4, ProtocolVersion.v5, ProtocolVersion.dev)
+        val authenticatedContractIdVersion = Seq(ProtocolVersion.v4)
+        val authenticatedContractIdVersionV2 =
+          Seq(ProtocolVersion.v5, ProtocolVersion.dev)
 
         forAll(nonAuthenticatedContractIdVersion) { pv =>
           CantonContractIdVersion.fromProtocolVersion(pv) shouldBe NonAuthenticatedContractIdVersion
@@ -72,6 +77,10 @@ class CantonContractIdVersionTest extends AnyWordSpec with BaseTest {
 
         forAll(authenticatedContractIdVersion) { pv =>
           CantonContractIdVersion.fromProtocolVersion(pv) shouldBe AuthenticatedContractIdVersion
+        }
+
+        forAll(authenticatedContractIdVersionV2) { pv =>
+          CantonContractIdVersion.fromProtocolVersion(pv) shouldBe AuthenticatedContractIdVersionV2
         }
       }
     }

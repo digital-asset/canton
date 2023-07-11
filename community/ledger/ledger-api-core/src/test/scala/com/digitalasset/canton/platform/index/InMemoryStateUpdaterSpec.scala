@@ -16,7 +16,7 @@ import com.daml.lf.data.Ref.Identifier
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.data.{Bytes, Ref, Time}
 import com.daml.lf.ledger.EventId
-import com.daml.lf.transaction.test.TransactionBuilder
+import com.daml.lf.transaction.test.{TestNodeBuilder, TransactionBuilder}
 import com.daml.lf.transaction.{CommittedTransaction, NodeId}
 import com.daml.lf.value.Value
 import com.daml.metrics.Metrics
@@ -468,18 +468,16 @@ object InMemoryStateUpdaterSpec {
   private val templateId2 = Identifier.assertFromString("noPkgId:Mod:I2")
 
   private val someCreateNode = {
-    val builder = TransactionBuilder()
-    val contractId = builder.newCid
-    builder
+    val contractId = TransactionBuilder.newCid
+    TestNodeBuilder
       .create(
         id = contractId,
         templateId = templateId,
         argument = Value.ValueUnit,
         signatories = Set(party1),
         observers = Set(party2),
-        key = None,
+        agreementText = "agreement text",
       )
-      .copy(agreementText = "agreement text")
   }
 
   private val someContractMetadataBytes = Bytes.assertFromString("00aabb")

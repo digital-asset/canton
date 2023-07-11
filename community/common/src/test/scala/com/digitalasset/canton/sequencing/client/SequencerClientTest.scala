@@ -1082,6 +1082,7 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
         mock[CryptoPureApi],
         LoggingConfig(),
         loggerFactory,
+        futureSupervisor,
       )(executionContext, tracer)
       val signedEvents = storedEvents.map(SequencerTestUtils.sign)
 

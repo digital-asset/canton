@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing.client
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.SequencerCounter
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.*
@@ -36,6 +37,7 @@ class SequencedEventTestFixture(
     loggerFactory: NamedLoggerFactory,
     testedProtocolVersion: ProtocolVersion,
     timeouts: ProcessingTimeout,
+    futureSupervisor: FutureSupervisor,
 )(implicit val traceContext: TraceContext, executionContext: ExecutionContext) {
   import ScalaFutures.*
   lazy val defaultDomainId: DomainId = DefaultTestIdentities.domainId
@@ -98,6 +100,8 @@ class SequencedEventTestFixture(
       eventInboxSize = PositiveInt.tryCreate(2),
       loggerFactory = loggerFactory,
       initialConfig = config,
+      timeouts = timeouts,
+      futureSupervisor = futureSupervisor,
     )
 
   def config(

@@ -9,8 +9,7 @@ import akka.stream.scaladsl.Source
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.{Ref, Time}
-import com.daml.lf.transaction.GlobalKey
-import com.daml.lf.transaction.test.TransactionBuilder
+import com.daml.lf.transaction.{GlobalKey, TransactionVersion, Versioned}
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.{ContractInstance, ValueInt64, VersionedValue}
 import com.daml.metrics.Metrics
@@ -304,7 +303,7 @@ private object MutableCacheBackedContractStoreRaceTests {
     val templateId = Identifier.assertFromString(s"somePackage:someModule:someEntity")
     val contractArgument = Value.ValueInt64(idx)
     val contractInstance = ContractInstance(templateId, contractArgument)
-    TransactionBuilder().versionContract(contractInstance)
+    Versioned(TransactionVersion.StableVersions.max, contractInstance)
   }
 
   private def buildContractStore(

@@ -13,6 +13,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.store.db.DbSerializationException
 import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWrapperCompanion,
   HasProtocolVersionedWrapper,
@@ -100,7 +101,10 @@ object SignedTopologyTransaction
       hashOps: HashOps,
       crypto: CryptoPrivateApi,
       protocolVersion: ProtocolVersion,
-  )(implicit ec: ExecutionContext): EitherT[Future, SigningError, SignedTopologyTransaction[Op]] =
+  )(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): EitherT[Future, SigningError, SignedTopologyTransaction[Op]] =
     for {
       signature <- crypto.sign(transaction.hashToSign(hashOps), signingKey.id)
       representativeProtocolVersion = supportedProtoVersions.protocolVersionRepresentativeFor(
@@ -116,7 +120,10 @@ object SignedTopologyTransaction
       protocolVersion: ProtocolVersion,
   )(
       crypto: Crypto
-  )(implicit ec: ExecutionContext): EitherT[Future, String, SignedTopologyTransaction[Op]] = {
+  )(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): EitherT[Future, String, SignedTopologyTransaction[Op]] = {
     val originTx = signedTx.transaction
 
     // Convert and resign the transaction if the topology transaction version does not match the expected version

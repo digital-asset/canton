@@ -4,9 +4,10 @@
 package com.digitalasset.canton.protocol
 
 import com.daml.ledger.client.binding
-import com.daml.lf.transaction.test.TransactionBuilder
+import com.daml.lf.transaction.test.TestNodeBuilder.CreateKey
+import com.daml.lf.transaction.test.{TestNodeBuilder, TransactionBuilder}
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.ComparesLfTransactions.TxTree
+import com.digitalasset.canton.ComparesLfTransactions.{TxTree, buildLfTransaction}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.Iou
 import com.digitalasset.canton.protocol.RollbackContext.RollbackScope
@@ -36,16 +37,18 @@ class WellFormedTransactionMergeTest
   private val carol = PartyId(UniqueIdentifier.tryFromProtoPrimitive(s"bob::party"))
 
   // Top-level lf transaction builder for "state-less" lf node creations.
-  private implicit val tb = TransactionBuilder()
+  private implicit val tb: TestNodeBuilder = TestNodeBuilder
 
   import TransactionBuilder.Implicits.*
 
-  private val subTxTree0 = TxTree(tb.fetch(create(newLfContractId(), Iou.Iou.id, alice, bob)))
+  private val subTxTree0 = TxTree(
+    tb.fetch(create(newLfContractId(), Iou.Iou.id, alice, bob), byKey = false)
+  )
   private val subTxTree1 = TxTree(create(newLfContractId(), Iou.Iou.id, alice, bob))
   private val contractCreate = create(newLfContractId(), Iou.Iou.id, alice, alice)
   private val subTxTree2 = Seq(
     TxTree(contractCreate),
-    TxTree(tb.fetch(contractCreate)),
+    TxTree(tb.fetch(contractCreate, byKey = false)),
     TxTree(
       tb.exercise(
         contract = contractCreate,
@@ -250,16 +253,9 @@ class WellFormedTransactionMergeTest
     }
   }
 
-  private def transactionHelper[T](
-      txTrees: TxTree*
-  )(f: LfVersionedTransaction => T): T = {
-    txBuilderContextFromEmpty { implicit ctx =>
-      require(txTrees.nonEmpty)
-      txTrees.dropRight(1).foreach(_.addToBuilder())
-      val lfTx = txTrees.lastOption.value.lfTransaction
-      f(lfTx)
-    }
-  }
+  private def transactionHelper[T](txTrees: TxTree*)(f: LfVersionedTransaction => T): T = f(
+    buildLfTransaction(txTrees *)
+  )
 
   private def inputTransaction(
       rbScope: RollbackScope,
@@ -282,9 +278,9 @@ class WellFormedTransactionMergeTest
       )
     )
 
-  private def expectedTransaction(
-      txTrees: TxTree*
-  ): LfVersionedTransaction = transactionHelper(txTrees: _*)(identity[LfVersionedTransaction])
+  private def expectedTransaction(txTrees: TxTree*): LfVersionedTransaction = buildLfTransaction(
+    txTrees *
+  )
 
   private def merge(
       transactions: WithRollbackScope[WellFormedTransaction[WithSuffixes]]*
@@ -303,7 +299,7 @@ class WellFormedTransactionMergeTest
       owner: PartyId,
       viewers: Seq[PartyId] = Seq.empty,
       arg: LfValue = notUsed,
-  )(implicit tb: TransactionBuilder) = {
+  )(implicit tb: TestNodeBuilder) = {
     val lfPayer = payer.toLf
     val lfOwner = owner.toLf
     val lfViewers = viewers.map(_.toLf)
@@ -324,13 +320,13 @@ class WellFormedTransactionMergeTest
             LfValue.ValueParty(lfPayer),
             LfValue.ValueParty(lfOwner),
             args(LfValue.ValueNumeric(com.daml.lf.data.Numeric.assertFromString("0.0"))),
-            seq(lfObservers.map(LfValue.ValueParty).toSeq: _*),
+            valueList(lfObservers.map(LfValue.ValueParty)),
           )
         case _ => arg
       },
       signatories = Set(lfPayer),
       observers = lfObservers,
-      key = None,
+      key = CreateKey.NoKey,
     )
   }
 

@@ -40,6 +40,7 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.TimeProofTestUtil
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{Checked, FutureUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -231,7 +232,9 @@ trait TransferStoreTest {
             Some(LfPartyId.assertFromString("party2")),
             10,
           )
-        } yield { assert(lookup.toList == List(transfer4)) }
+        } yield {
+          assert(lookup.toList == List(transfer4))
+        }
 
       }
     }
@@ -1254,7 +1257,7 @@ trait TransferStoreTest {
   }
 }
 
-object TransferStoreTest extends EitherValues {
+object TransferStoreTest extends EitherValues with NoTracing {
 
   val alice = LfPartyId.assertFromString("alice")
   val bob = LfPartyId.assertFromString("bob")

@@ -206,20 +206,6 @@ class ParticipantNodeBootstrap(
           protocolVersion,
         )
 
-        // initialize certificate if enabled
-        _ <-
-          if (config.init.identity.exists(_.generateLegalIdentityCertificate)) {
-            (new LegalIdentityInit(certificateGenerator, crypto.value))
-              .checkOrInitializeCertificate(
-                uid,
-                Seq(participantId),
-                namespaceKey,
-                protocolVersion,
-              )(topologyManager, authorizedTopologyStore)
-          } else {
-            EitherT.rightT[FutureUnlessShutdown, String](())
-          }
-
         // finally, we store the node id, which means that the node will not be auto-initialised next time when we start
         _ <- storeId(nodeId).mapK(FutureUnlessShutdown.outcomeK)
       } yield ()

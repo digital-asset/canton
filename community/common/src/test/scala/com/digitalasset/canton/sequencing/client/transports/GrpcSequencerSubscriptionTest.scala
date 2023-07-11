@@ -166,7 +166,7 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
       onNextF.futureValue
     }
 
-    "complete only after termination of the handler" in {
+    "not wait for the handler to complete on shutdown" in {
       val handlerInvoked = Promise[Unit]()
       val handlerCompleted = Promise[Either[String, Unit]]()
 
@@ -182,21 +182,8 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
       // Make sure that the handler has been invoked before doing the next step.
       handlerInvoked.future.futureValue
 
-      loggerFactory.assertLogs(
-        sut.close(),
-        _.warningMessage shouldBe "Timeout 1 second expired, but tasks still running. Shutting down forcibly",
-      )
-
-      // Make sure the subscription isn't closed
-      eventuallyForever(timeUntilSuccess = 0.seconds, durationOfSuccess = 100.milliseconds) {
-        !sut.closeReason.isCompleted
-      }
-
-      // Stop processing the message
-      handlerCompleted.success(Right(()))
-
-      // now it should be closed
-      sut.closeReason.futureValue shouldBe SubscriptionCloseReason.Closed
+      sut.close()
+      sut.closeReason.futureValue shouldBe SubscriptionCloseReason.Shutdown
     }
 
     "not invoke the handler after closing" in {

@@ -21,9 +21,10 @@ import com.digitalasset.canton.protocol.messages.{
   ProtocolMessage,
   ProtocolMessageV0,
   ProtocolMessageV1,
-  UnsignedProtocolMessageV2,
+  ProtocolMessageV2,
+  UnsignedProtocolMessageV3,
 }
-import com.digitalasset.canton.protocol.{v0, v1, v2}
+import com.digitalasset.canton.protocol.{v0, v1, v2, v3}
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.sequencing.protocol.*
@@ -135,7 +136,8 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
       extends ProtocolMessage
       with ProtocolMessageV0
       with ProtocolMessageV1
-      with UnsignedProtocolMessageV2 {
+      with ProtocolMessageV2
+      with UnsignedProtocolMessageV3 {
     private val payload =
       v0.SignedProtocolMessage(
         None,
@@ -156,8 +158,11 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
     override def toProtoEnvelopeContentV1: v1.EnvelopeContent =
       v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.SignedMessage(payload))
 
-    override def toProtoSomeEnvelopeContentV2: v2.EnvelopeContent.SomeEnvelopeContent =
-      v2.EnvelopeContent.SomeEnvelopeContent.Empty
+    override def toProtoEnvelopeContentV2: v2.EnvelopeContent =
+      v2.EnvelopeContent(v2.EnvelopeContent.SomeEnvelopeContent.SignedMessage(payload))
+
+    override def toProtoSomeEnvelopeContentV3: v3.EnvelopeContent.SomeEnvelopeContent =
+      v3.EnvelopeContent.SomeEnvelopeContent.Empty
 
     override def productElement(n: Int): Any = ???
     override def productArity: Int = ???

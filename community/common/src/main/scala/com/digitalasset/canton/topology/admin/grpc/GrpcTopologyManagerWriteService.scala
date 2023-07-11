@@ -9,22 +9,19 @@ import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.crypto.store.{CryptoPublicStore, CryptoPublicStoreError}
-import com.digitalasset.canton.crypto.{CertificateId, Fingerprint, PublicKey, SigningPublicKey}
+import com.digitalasset.canton.crypto.{Fingerprint, PublicKey, SigningPublicKey}
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
-import com.digitalasset.canton.protocol.{DynamicDomainParameters, v0}
+import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.v0.DomainParametersChangeAuthorization.Parameters
-import com.digitalasset.canton.topology.admin.v0.SignedLegalIdentityClaimGeneration.X509CertificateClaim
 import com.digitalasset.canton.topology.admin.v0.*
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
-import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
-import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPackageId, ProtoDeserializationError}
 
@@ -178,62 +175,6 @@ class GrpcTopologyManagerWriteService[T <: CantonError](
         manager.add(parsed, force = true, replaceExisting = true, allowDuplicateMappings = true)
       )
     } yield AdditionSuccess()
-  }
-
-  /** Authorizes a new signed legal identity
-    */
-  override def authorizeSignedLegalIdentityClaim(
-      request: SignedLegalIdentityClaimAuthorization
-  ): Future[AuthorizationSuccess] = {
-    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val item = for {
-      claimP <- ProtoConverter
-        .required("claim", request.claim)
-        .leftMap(ProtoDeserializationFailure.Wrap(_))
-      signedClaim <- SignedLegalIdentityClaim
-        .fromProtoV0(claimP)
-        .leftMap(ProtoDeserializationFailure.Wrap(_))
-    } yield signedClaim
-    process(request.authorization, item)
-  }
-
-  /** Generates a legal identity claim
-    */
-  override def generateSignedLegalIdentityClaim(
-      request: SignedLegalIdentityClaimGeneration
-  ): Future[v0.SignedLegalIdentityClaim] = {
-    import SignedLegalIdentityClaimGeneration.Request
-    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    request.request match {
-      case Request.LegalIdentityClaim(bytes) =>
-        for {
-          parsed <- EitherTUtil.toFuture(
-            mapErrNew(
-              LegalIdentityClaim.fromByteString(bytes).leftMap(ProtoDeserializationFailure.Wrap(_))
-            )
-          )
-          generated <- mapErrNew(manager.generate(parsed))
-        } yield generated.toProtoV0
-
-      case Request.Certificate(X509CertificateClaim(uniqueIdentifier, certificateIdProto)) =>
-        val result = for {
-          uid <- mapErr(UniqueIdentifier.fromProtoPrimitive(uniqueIdentifier, "unique_identifier"))
-          certs <- mapErr(cryptoPublicStore.listCertificates())
-          certificateId <- mapErr(CertificateId.fromProtoPrimitive(certificateIdProto))
-          certificate <- mapErr(
-            certs
-              .find(_.id == certificateId)
-              .toRight(s"Can not find certificate with id ${certificateId}")
-          )
-          pem <- mapErr(certificate.toPem)
-          generated <- mapErr(
-            manager.generate(LegalIdentityClaim.create(uid, X509Cert(pem), protocolVersion))
-          )
-        } yield generated.toProtoV0
-        EitherTUtil.toFuture(result)
-
-      case Request.Empty => Future.failed(CantonGrpcUtil.invalidArgument("request is empty"))
-    }
   }
 
   override def authorizeParticipantDomainState(

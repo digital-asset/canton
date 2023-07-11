@@ -12,12 +12,7 @@ import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.error.CantonErrorGroups.SequencerSubscriptionErrorGroup
 import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.health.HealthReporting.HealthComponent
-import com.digitalasset.canton.lifecycle.{
-  AsyncOrSyncCloseable,
-  FlagCloseableAsync,
-  SyncCloseable,
-  UnlessShutdown,
-}
+import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.SerializedEventHandler
 import com.digitalasset.canton.sequencing.client.ResilientSequencerSubscription.LostSequencerSubscription

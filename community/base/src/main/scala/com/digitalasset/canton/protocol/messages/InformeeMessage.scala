@@ -9,7 +9,6 @@ import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.{FullInformeeTree, Informee, ViewType}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
-import com.digitalasset.canton.protocol.v2.EnvelopeContent
 import com.digitalasset.canton.protocol.{
   ConfirmationPolicy,
   RequestId,
@@ -18,6 +17,7 @@ import com.digitalasset.canton.protocol.{
   v0,
   v1,
   v2,
+  v3,
 }
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -45,7 +45,8 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(
     // If the corresponding Protobuf message of a class has multiple versions (e.g. `v0.InformeeMessage` and `v1.InformeeMessage`),
     with ProtocolMessageV0
     with ProtocolMessageV1
-    with UnsignedProtocolMessageV2 {
+    with ProtocolMessageV2
+    with UnsignedProtocolMessageV3 {
 
   override val representativeProtocolVersion: RepresentativeProtocolVersion[InformeeMessage.type] =
     InformeeMessage.protocolVersionRepresentativeFor(protocolVersion)
@@ -116,8 +117,11 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(
   override def toProtoEnvelopeContentV1: v1.EnvelopeContent =
     v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.InformeeMessage(toProtoV1))
 
-  override def toProtoSomeEnvelopeContentV2: EnvelopeContent.SomeEnvelopeContent =
-    v2.EnvelopeContent.SomeEnvelopeContent.InformeeMessage(toProtoV1)
+  override def toProtoEnvelopeContentV2: v2.EnvelopeContent =
+    v2.EnvelopeContent(v2.EnvelopeContent.SomeEnvelopeContent.InformeeMessage(toProtoV1))
+
+  override def toProtoSomeEnvelopeContentV3: v3.EnvelopeContent.SomeEnvelopeContent =
+    v3.EnvelopeContent.SomeEnvelopeContent.InformeeMessage(toProtoV1)
 
   override def confirmationPolicy: ConfirmationPolicy = fullInformeeTree.confirmationPolicy
 

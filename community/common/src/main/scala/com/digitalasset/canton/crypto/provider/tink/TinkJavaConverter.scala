@@ -17,7 +17,7 @@ import org.bouncycastle.asn1.x509.AlgorithmIdentifier
 import org.bouncycastle.asn1.x9.X9ObjectIdentifiers
 
 import java.security.interfaces.ECPublicKey
-import java.security.{PrivateKey as JPrivateKey, PublicKey as JPublicKey}
+import java.security.PublicKey as JPublicKey
 
 /** Converter methods from Tink to Java security keys and vice versa. */
 class TinkJavaConverter(hashAlgorithm: HashAlgorithm) extends JavaKeyConverter {
@@ -69,43 +69,6 @@ class TinkJavaConverter(hashAlgorithm: HashAlgorithm) extends JavaKeyConverter {
       ),
     )
   }
-
-  /** Converts a Tink private key to a [[java.security.PrivateKey]].
-    *
-    * The conversion has to go via protobuf serialization of the Tink key as Tink does not provide access to the key
-    * directly.
-    */
-  override def toJava(privateKey: PrivateKey): Either[JavaKeyConversionError, JPrivateKey] =
-    for {
-      keysetHandle <- TinkKeyFormat
-        .deserializeHandle(privateKey.key)
-        .leftMap(err => JavaKeyConversionError.InvalidKey(s"Failed to deserialize keyset: $err"))
-      keyset0 <- getFirstKey(keysetHandle)
-      keyData = keyset0.getKeyData
-
-      // Sanity check that the key is a asymmetric private key and of type EC DSA
-      _ <- verifyKeyType(keyData, KeyMaterialType.ASYMMETRIC_PRIVATE_VALUE)
-
-      privateKey <- keyData.getTypeUrl match {
-        case "type.googleapis.com/google.crypto.tink.EcdsaPrivateKey" =>
-          for {
-            protoPrivateKey <- ProtoConverter
-              .protoParser(tinkproto.EcdsaPrivateKey.parseFrom)(keyData.getValue)
-              .leftMap(err =>
-                JavaKeyConversionError.InvalidKey(
-                  s"Failed to parse key proto from keyset as EC-DSA: $err"
-                )
-              )
-            curve <- getCurve(protoPrivateKey.getPublicKey)
-            // Get the EC private key
-            privKey = EllipticCurves.getEcPrivateKey(curve, protoPrivateKey.getKeyValue.toByteArray)
-          } yield privKey
-        case unsupportedKeyTypeUrl =>
-          Left(
-            JavaKeyConversionError.InvalidKey(s"Unsupported key type url: $unsupportedKeyTypeUrl")
-          )
-      }
-    } yield privateKey
 
   /** Converts a Tink public key to a [[java.security.PublicKey]] with an X509 [[org.bouncycastle.asn1.x509.AlgorithmIdentifier]] for the curve.
     *

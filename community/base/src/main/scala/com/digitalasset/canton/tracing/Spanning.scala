@@ -5,7 +5,10 @@ package com.digitalasset.canton.tracing
 
 import cats.data.{EitherT, OptionT}
 import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.lifecycle.UnlessShutdown
+import com.digitalasset.canton.sequencing.AsyncResult
 import com.digitalasset.canton.tracing.Spanning.{SpanEndingExecutionContext, SpanWrapper}
+import com.digitalasset.canton.util.{Checked, CheckedT}
 import io.opentelemetry.api.common.Attributes
 import io.opentelemetry.api.trace.{Span, StatusCode, Tracer}
 
@@ -32,20 +35,30 @@ trait Spanning {
     val currentSpan = startSpan(description)
 
     def closeSpan(value: Any): Unit = value match {
-      case asyncResult: Future[_] =>
-        closeOnComplete(asyncResult)
+      case future: Future[_] =>
+        closeOnComplete(future)
       case eitherT: EitherT[_, _, _] =>
         closeSpan(eitherT.value)
+      case Right(x) => closeSpan(x) // Look into the result of an EitherT
       case optionT: OptionT[_, _] =>
         closeSpan(optionT.value)
+      case Some(x) => closeSpan(x) // Look into the result of an OptionT
+      case checkedT: CheckedT[_, _, _, _] =>
+        closeSpan(checkedT.value)
+      case Checked.Result(_, x) => closeSpan(x) // Look into the result of a CheckedT
+      case unlessShutdown: UnlessShutdown.Outcome[_] =>
+        // Look into the result of a FutureUnlessShutdown
+        closeSpan(unlessShutdown.result)
+      case asyncResult: AsyncResult =>
+        closeSpan(asyncResult.unwrap)
       case _ =>
         currentSpan.end()
     }
 
     def closeOnComplete(f: Future[_]): Unit =
       f.onComplete {
-        case Success(_) =>
-          currentSpan.end()
+        case Success(x) =>
+          closeSpan(x)
         case Failure(exception) =>
           recordException(exception).discard
           currentSpan.end()
@@ -101,8 +114,6 @@ object Spanning {
     def recordException(exception: Throwable, attributes: Map[String, String] = Map()): Unit = {
       val _ = span.recordException(exception, mapToAttributes(attributes))
     }
-
-    def getSpanId: String = span.getSpanContext.getSpanId
   }
   private def mapToAttributes(map: Map[String, String]): Attributes =
     map
