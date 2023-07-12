@@ -13,7 +13,7 @@ import "scalapb/scalapb.proto";
 
 // Messages sent by a participant as part of the transfer protocol
 message TransferOutView {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
   com.digitalasset.canton.crypto.v0.Salt salt = 1;
   string submitter = 2;
@@ -30,7 +30,7 @@ message TransferOutView {
 }
 
 message TransferInView {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
   com.digitalasset.canton.crypto.v0.Salt salt = 1;
   string submitter = 2;

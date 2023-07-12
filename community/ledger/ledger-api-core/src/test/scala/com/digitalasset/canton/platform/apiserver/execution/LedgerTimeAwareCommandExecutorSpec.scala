@@ -8,7 +8,7 @@ import com.daml.lf.crypto.Hash
 import com.daml.lf.data.Ref.Identifier
 import com.daml.lf.data.{Bytes, ImmArray, Ref, Time}
 import com.daml.lf.transaction.TransactionVersion
-import com.daml.lf.transaction.test.TransactionBuilder
+import com.daml.lf.transaction.test.{TestNodeBuilder, TransactionBuilder}
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.ContractId
 import com.daml.metrics.Metrics
@@ -51,18 +51,20 @@ class LedgerTimeAwareCommandExecutorSpec
   )
 
   private val cid = TransactionBuilder.newCid
+
   private val transaction = TransactionBuilder.justSubmitted(
-    TransactionBuilder().fetch(
-      TransactionBuilder().create(
-        cid,
-        Ref.Identifier(
+    TestNodeBuilder.fetch(
+      TestNodeBuilder.create(
+        id = cid,
+        templateId = Ref.Identifier(
           Ref.PackageId.assertFromString("abc"),
           Ref.QualifiedName.assertFromString("Main:Template"),
         ),
-        Value.ValueUnit,
-        Set.empty,
-        Set.empty,
-      )
+        argument = Value.ValueUnit,
+        signatories = Set.empty,
+        observers = Set.empty,
+      ),
+      byKey = false,
     )
   )
 

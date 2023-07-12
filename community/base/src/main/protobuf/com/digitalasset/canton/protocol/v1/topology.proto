@@ -5,8 +5,10 @@ syntax = "proto3";
 
 package com.digitalasset.canton.protocol.v1;
 
+import "com/digitalasset/canton/crypto/v0/crypto.proto";
 import "com/digitalasset/canton/protocol/v0/topology.proto";
 import "com/digitalasset/canton/protocol/v1/sequencing.proto";
+import "google/protobuf/timestamp.proto";
 import "scalapb/scalapb.proto";
 
 message TopologyStateUpdate {
@@ -78,4 +80,17 @@ message RegisterTopologyTransactionResponse {
   string request_id = 3;
   repeated Result results = 4;
   string domain_id = 5;
+}
+
+// used by synchronization.v2
+message DomainTopologyTransactionMessage {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
+
+  // signature of the domain topology manager
+  com.digitalasset.canton.crypto.v0.Signature signature = 1;
+  string domain_id = 2;
+  /** latest acceptable timestamp for sequencing */
+  google.protobuf.Timestamp not_sequenced_after = 3;
+  /** versioned signed topology transactions serialized as byte-strings such that we can compute the signature here */
+  repeated bytes transactions = 4;
 }

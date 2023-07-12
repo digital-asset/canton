@@ -75,9 +75,7 @@ private[http] final class ContractList(
           _ = logger.debug(s"/v1/fetch fr: $fr, ${lc.makeString}")
 
           _ <- either(ensureReadAsAllowedByJwt(fr.readAs, jwtPayload))
-          ac <- eitherT(
-            handleFutureFailure(contractsService.lookup(jwt, jwtPayload, fr))
-          ): ET[Option[domain.ActiveContract.ResolvedCtTyId[JsValue]]]
+          ac <- contractsService.lookup(jwt, jwtPayload, fr)
 
           jsVal <- either(
             ac.cata(x => toJsValue(x), \/-(JsNull))

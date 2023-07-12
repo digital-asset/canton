@@ -197,6 +197,7 @@ class ClockTest extends AnyWordSpec with BaseTest with HasExecutionContext {
           val _ = tasks.add(queue)
         }
 
+        override protected def warnIfClockRunsBackwards: Boolean = true
         override def now: CantonTimestamp = nowR.get()
 
         override def close(): Unit = {}

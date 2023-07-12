@@ -21,7 +21,7 @@ object LedgerApiTypeWrappers {
    * We don't use an `implicit class` because it makes the use of pretty
        instances difficult (e.g. for `ledger_api.acs.of_all`).
 
-   * Also, the name of some methods of `WrappedCreatedEvent`, such as `templataId`,
+   * Also, the name of some methods of `WrappedCreatedEvent`, such as `templateId`,
        collides with one of the underlying event.
    */
   final case class WrappedCreatedEvent(event: CreatedEvent) {
@@ -91,6 +91,7 @@ object LedgerApiTypeWrappers {
         templateId = templateId,
         createArguments = createArguments,
         signatories = event.signatories.toSet,
+        observers = event.observers.toSet,
         inheritedContractId = lfContractId,
         contractSalt = contractSaltO,
         ledgerCreateTime = ledgerCreateTimeO,
@@ -102,7 +103,9 @@ object LedgerApiTypeWrappers {
   final case class ContractData(
       templateId: TemplateId,
       createArguments: Record,
-      signatories: Set[String], // track signatories for use as auth validation by daml engine
+      // track signatories and observers for use as auth validation by daml engine
+      signatories: Set[String],
+      observers: Set[String],
       inheritedContractId: LfContractId,
       contractSalt: Option[Salt],
       ledgerCreateTime: Option[Time.Timestamp],

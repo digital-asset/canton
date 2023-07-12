@@ -120,4 +120,7 @@ object IterableUtil {
   def minList[A](xs: Iterable[A])(implicit order: Ordering[A]): List[A] = {
     maxList[A](xs)(order.reverse)
   }
+
+  def zipAllOption[A, B](xs: Seq[A], ys: Iterable[B]): Seq[(Option[A], Option[B])] =
+    xs.map(Some(_)).zipAll(ys.map(Some(_)), None, None)
 }

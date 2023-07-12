@@ -18,8 +18,8 @@ object ReleaseVersionToProtocolVersions {
     ReleaseVersions.v2_3_0 -> List(v2, v3),
     ReleaseVersions.v2_4_0 -> List(v2, v3),
     ReleaseVersions.v2_5_0 -> List(v2, v3, v4),
-    ReleaseVersions.v2_6_0_snapshot -> List(v3, v4),
-    ReleaseVersions.v2_7_0_snapshot -> List(v3, v4),
+    ReleaseVersions.v2_6_0 -> List(v3, v4),
+    ReleaseVersions.v2_7_0_snapshot -> List(v3, v4, v5),
   ).map { case (release, pvs) => (release.majorMinor, NonEmptyUtil.fromUnsafe(pvs)) }
 
   def get(

@@ -9,7 +9,8 @@ import com.daml.lf.crypto
 import com.daml.lf.data.{Bytes, Ref, Time}
 import com.daml.lf.ledger.EventId
 import com.daml.lf.transaction.BlindingInfo
-import com.daml.lf.transaction.test.TransactionBuilder
+import com.daml.lf.transaction.test.TestNodeBuilder.CreateKey
+import com.daml.lf.transaction.test.{NodeIdTransactionBuilder, TestNodeBuilder, TransactionBuilder}
 import com.daml.lf.value.Value
 import com.daml.metrics.Metrics
 import com.daml.metrics.api.MetricsContext
@@ -54,6 +55,11 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
   import TraceContext.Implicits.Empty.*
   import TransactionBuilder.Implicits.*
   import UpdateToDbDtoSpec.*
+
+  object TxBuilder {
+    def apply(): NodeIdTransactionBuilder & TestNodeBuilder = new NodeIdTransactionBuilder
+      with TestNodeBuilder
+  }
 
   "UpdateToDbDto" should {
 
@@ -302,7 +308,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
     "handle TransactionAccepted (single create node) single-domain" in {
       val completionInfo = someCompletionInfo
       val transactionMeta = someTransactionMeta
-      val builder = TransactionBuilder()
+      val builder = TxBuilder()
       val contractId = builder.newCid
       val createNode = builder
         .create(
@@ -311,7 +317,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           argument = Value.ValueUnit,
           signatories = Set("signatory"),
           observers = Set("observer"),
-          key = None,
         )
         .copy(agreementText = "agreement text")
       val createNodeId = builder.add(createNode)
@@ -386,7 +391,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
     "handle TransactionAccepted (single create node)" in {
       val completionInfo = someCompletionInfo
       val transactionMeta = someTransactionMeta
-      val builder = TransactionBuilder()
+      val builder = TxBuilder()
       val contractId = builder.newCid
       val createNode = builder
         .create(
@@ -395,7 +400,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           argument = Value.ValueUnit,
           signatories = Set("signatory"),
           observers = Set("observer"),
-          key = None,
         )
         .copy(agreementText = "agreement text")
       val createNodeId = builder.add(createNode)
@@ -472,7 +476,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
     "handle TransactionAccepted (single consuming exercise node) single-domain" in {
       val completionInfo = someCompletionInfo
       val transactionMeta = someTransactionMeta
-      val builder = TransactionBuilder()
+      val builder = TxBuilder()
       val exerciseNode = {
         val createNode = builder.create(
           id = builder.newCid,
@@ -480,7 +484,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           argument = Value.ValueUnit,
           signatories = List("signatory"),
           observers = List("observer"),
-          key = None,
         )
         builder.exercise(
           contract = createNode,
@@ -573,7 +576,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
     "handle TransactionAccepted (single consuming exercise node)" in {
       val completionInfo = someCompletionInfo
       val transactionMeta = someTransactionMeta
-      val builder = TransactionBuilder()
+      val builder = TxBuilder()
       val exerciseNode = {
         val createNode = builder.create(
           id = builder.newCid,
@@ -581,7 +584,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           argument = Value.ValueUnit,
           signatories = List("signatory"),
           observers = List("observer"),
-          key = None,
         )
         builder.exercise(
           contract = createNode,
@@ -676,7 +678,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
     "handle TransactionAccepted (single non-consuming exercise node) single-domain" in {
       val completionInfo = someCompletionInfo
       val transactionMeta = someTransactionMeta
-      val builder = TransactionBuilder()
+      val builder = TxBuilder()
       val exerciseNode = {
         val createNode = builder.create(
           id = builder.newCid,
@@ -684,7 +686,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           argument = Value.ValueUnit,
           signatories = List("signatory"),
           observers = List("observer"),
-          key = None,
         )
         builder.exercise(
           contract = createNode,
@@ -771,7 +772,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
     "handle TransactionAccepted (single non-consuming exercise node)" in {
       val completionInfo = someCompletionInfo
       val transactionMeta = someTransactionMeta
-      val builder = TransactionBuilder()
+      val builder = TxBuilder()
       val exerciseNode = {
         val createNode = builder.create(
           id = builder.newCid,
@@ -779,7 +780,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           argument = Value.ValueUnit,
           signatories = List("signatory"),
           observers = List("observer"),
-          key = None,
         )
         builder.exercise(
           contract = createNode,
@@ -874,14 +874,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       //    └─ #4 Exercise (choice C)
       val completionInfo = someCompletionInfo
       val transactionMeta = someTransactionMeta
-      val builder = TransactionBuilder()
+      val builder = TxBuilder()
       val createNode = builder.create(
         id = builder.newCid,
         templateId = "M:T",
         argument = Value.ValueUnit,
         signatories = List("signatory"),
         observers = List("observer"),
-        key = None,
       )
       val exerciseNodeA = builder.exercise(
         contract = createNode,
@@ -1060,14 +1059,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       //    └─ #4 Exercise (choice C)
       val completionInfo = someCompletionInfo
       val transactionMeta = someTransactionMeta
-      val builder = TransactionBuilder()
+      val builder = TxBuilder()
       val createNode = builder.create(
         id = builder.newCid,
         templateId = "M:T",
         argument = Value.ValueUnit,
         signatories = List("signatory"),
         observers = List("observer"),
-        key = None,
       )
       val exerciseNodeA = builder.exercise(
         contract = createNode,
@@ -1250,14 +1248,14 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       // └─ #3 Lookup by key
       val completionInfo = someCompletionInfo
       val transactionMeta = someTransactionMeta
-      val builder = TransactionBuilder()
+      val builder = TxBuilder()
       val createNode = builder.create(
         id = builder.newCid,
         templateId = "M:T",
         argument = Value.ValueUnit,
         signatories = List("signatory"),
         observers = List("observer"),
-        key = Some(Value.ValueUnit),
+        key = CreateKey.SignatoryMaintainerKey(Value.ValueUnit),
       )
       val fetchNode = builder.fetch(
         contract = createNode,
@@ -1268,8 +1266,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         byKey = true,
       )
       val lookupByKeyNode = builder.lookupByKey(
-        contract = createNode,
-        found = true,
+        contract = createNode
       )
       builder.add(fetchNode)
       builder.add(fetchByKeyNode)
@@ -1322,14 +1319,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       // └─ #2 Exercise (divulges #1 to 'divulgee')
       val completionInfo = someCompletionInfo
       val transactionMeta = someTransactionMeta
-      val builder = TransactionBuilder()
+      val builder = TxBuilder()
       val createNode = builder.create(
         id = builder.newCid,
         templateId = "M:T",
         argument = Value.ValueUnit,
         signatories = List("signatory"),
         observers = List("observer"),
-        key = None,
       )
       val exerciseNode = builder.exercise(
         contract = createNode,
@@ -1443,7 +1439,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       // └─ #2 Exercise (divulges #1 to 'divulgee')
       val completionInfo = someCompletionInfo
       val transactionMeta = someTransactionMeta
-      val builder = TransactionBuilder()
+      val builder = TxBuilder()
       val contractId = builder.newCid
       val createNode = builder.create(
         id = contractId,
@@ -1451,7 +1447,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         argument = Value.ValueUnit,
         signatories = List("signatory"),
         observers = List("observer"),
-        key = None,
       )
       val exerciseNode = builder.exercise(
         contract = createNode,
@@ -1591,14 +1586,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
     "handle TransactionAccepted (explicit blinding info)" in {
       val completionInfo = someCompletionInfo
       val transactionMeta = someTransactionMeta
-      val builder = TransactionBuilder()
+      val builder = TxBuilder()
       val createNode = builder.create(
         id = builder.newCid,
         templateId = "M:T",
         argument = Value.ValueUnit,
         signatories = List("signatory"),
         observers = List("observer"),
-        key = None,
       )
       val exerciseNode = builder.exercise(
         contract = createNode,
@@ -1718,7 +1712,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       // - Divulgence events from rolled back Exercise/Fetch nodes must be visible
       val completionInfo = someCompletionInfo
       val transactionMeta = someTransactionMeta
-      val builder = TransactionBuilder()
+      val builder = TxBuilder()
       val rollbackNode = builder.rollback()
       val createNode = builder.create(
         id = builder.newCid,
@@ -1726,7 +1720,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         argument = Value.ValueUnit,
         signatories = List("signatory"),
         observers = List("observer"),
-        key = None,
       )
       val exerciseNode = builder.exercise(
         contract = createNode,
@@ -1801,7 +1794,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       // Transaction that is missing a SubmitterInfo
       // This happens if a transaction was submitted through a different participant
       val transactionMeta = someTransactionMeta
-      val builder = TransactionBuilder()
+      val builder = TxBuilder()
       val contractId = builder.newCid
       val createNode = builder.create(
         id = contractId,
@@ -1809,7 +1802,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         argument = Value.ValueUnit,
         signatories = List("signatory"),
         observers = List("observer"),
-        key = None,
       )
       val createNodeId = builder.add(createNode)
       val transaction = builder.buildCommitted()
@@ -1863,7 +1855,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       // This can happen if the submitting participant is running an older version
       // predating the introduction of the contract driver metadata
       val transactionMeta = someTransactionMeta
-      val builder = TransactionBuilder()
+      val builder = TxBuilder()
       val contractId = builder.newCid
       val createNode = builder.create(
         id = contractId,
@@ -1871,7 +1863,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         argument = Value.ValueUnit,
         signatories = List("signatory"),
         observers = List("observer"),
-        key = None,
       )
       val createNodeId = builder.add(createNode)
       val transaction = builder.buildCommitted()
@@ -1989,7 +1980,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
 
     "handle TransactionAccepted (all deduplication data)" in {
       val transactionMeta = someTransactionMeta
-      val builder = TransactionBuilder()
+      val builder = TxBuilder()
       val contractId = builder.newCid
       val createNode = builder.create(
         id = contractId,
@@ -1997,7 +1988,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         argument = Value.ValueUnit,
         signatories = List("signatory"),
         observers = List("observer"),
-        key = None,
       )
       val createNodeId = builder.add(createNode)
       val transaction = builder.buildCommitted()
@@ -2080,7 +2070,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
 
     "handle ReassignmentAccepted - Assign" in {
       val completionInfo = someCompletionInfo
-      val builder = TransactionBuilder()
+      val builder = TxBuilder()
       val contractId = builder.newCid
       val createNode = builder
         .create(
@@ -2089,7 +2079,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           argument = Value.ValueUnit,
           signatories = Set("signatory"),
           observers = Set("observer", "observer2"),
-          key = None,
         )
         .copy(agreementText = "agreement text")
 
@@ -2178,7 +2167,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
 
     "handle ReassignmentAccepted - Unassign" in {
       val completionInfo = someCompletionInfo
-      val builder = TransactionBuilder()
+      val builder = TxBuilder()
       val contractId = builder.newCid
       val createNode = builder
         .create(
@@ -2187,7 +2176,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           argument = Value.ValueUnit,
           signatories = Set("signatory"),
           observers = Set("observer"),
-          key = None,
         )
         .copy(agreementText = "agreement text")
 

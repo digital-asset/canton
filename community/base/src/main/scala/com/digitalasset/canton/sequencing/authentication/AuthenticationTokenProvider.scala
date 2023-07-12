@@ -119,7 +119,7 @@ class AuthenticationTokenProvider(
       authenticationClient: SequencerAuthenticationServiceStub,
       nonce: Nonce,
       fingerprintsP: Seq[String],
-  ): EitherT[Future, Status, AuthenticationTokenWithExpiry] =
+  )(implicit tc: TraceContext): EitherT[Future, Status, AuthenticationTokenWithExpiry] =
     for {
       fingerprintsValid <- fingerprintsP
         .traverse(Fingerprint.fromProtoPrimitive)

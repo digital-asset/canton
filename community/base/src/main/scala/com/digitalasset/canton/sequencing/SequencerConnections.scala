@@ -35,6 +35,17 @@ final case class SequencerConnections private (
     with HasRepresentativeProtocolVersion
     with HasProtocolVersionedWrapper[SequencerConnections] {
 
+  require(
+    sequencerTrustThreshold.unwrap <= aliasToConnection.size,
+    "sequencerTrustThreshold cannot be greater than number of sequencer connections",
+  )
+
+  def withSequencerTrustThreshold(sequencerTrustThreshold: PositiveInt): SequencerConnections = {
+    copy(
+      sequencerTrustThreshold = sequencerTrustThreshold
+    )(representativeProtocolVersion)
+  }
+
   aliasToConnection.foreach { case (alias, connection) =>
     require(
       alias == connection.sequencerAlias,

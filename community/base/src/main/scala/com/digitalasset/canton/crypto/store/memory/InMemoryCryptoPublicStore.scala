@@ -4,7 +4,6 @@
 package com.digitalasset.canton.crypto.store.memory
 
 import cats.data.EitherT
-import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import com.digitalasset.canton.crypto.store.{CryptoPublicStore, CryptoPublicStoreError}
 import com.digitalasset.canton.crypto.{KeyName, *}
@@ -20,7 +19,6 @@ class InMemoryCryptoPublicStore(override implicit val ec: ExecutionContext)
   private val storedSigningKeyMap: TrieMap[Fingerprint, SigningPublicKeyWithName] = TrieMap.empty
   private val storedEncryptionKeyMap: TrieMap[Fingerprint, EncryptionPublicKeyWithName] =
     TrieMap.empty
-  private val certificateKeyMap: TrieMap[CertificateId, X509Certificate] = TrieMap.empty
 
   private def errorKeyDuplicate[K <: PublicKeyWithName](
       keyId: Fingerprint,
@@ -74,25 +72,6 @@ class InMemoryCryptoPublicStore(override implicit val ec: ExecutionContext)
       traceContext: TraceContext
   ): EitherT[Future, CryptoPublicStoreError, Set[EncryptionPublicKeyWithName]] =
     EitherT.rightT(storedEncryptionKeyMap.values.toSet)
-
-  override def storeCertificate(
-      cert: X509Certificate
-  )(implicit traceContext: TraceContext): EitherT[Future, CryptoPublicStoreError, Unit] = {
-    TrieMapUtil
-      .insertIfAbsent(
-        certificateKeyMap,
-        cert.id,
-        cert,
-        CryptoPublicStoreError.CertificateAlreadyExists(cert.id),
-      )
-      .toEitherT[Future]
-      .leftWiden[CryptoPublicStoreError]
-  }
-
-  override def listCertificates()(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, CryptoPublicStoreError, Set[X509Certificate]] =
-    EitherT.rightT(certificateKeyMap.values.toSet)
 
   override def close(): Unit = ()
 }

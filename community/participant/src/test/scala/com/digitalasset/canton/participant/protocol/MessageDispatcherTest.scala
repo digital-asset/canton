@@ -383,6 +383,7 @@ trait MessageDispatcherTest {
           .currentSnapshotApproximation,
         domainId = domainId,
         protocolVersion = testedProtocolVersion,
+        notSequencedAfter = CantonTimestamp.Epoch,
       )
       .futureValue
 

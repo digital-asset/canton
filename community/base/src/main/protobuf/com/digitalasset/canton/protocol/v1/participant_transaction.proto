@@ -51,7 +51,7 @@ message ViewNode {
 }
 
 message ViewCommonData {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
   com.digitalasset.canton.crypto.v0.Salt salt = 1;
   repeated Informee informees = 2;
@@ -144,7 +144,7 @@ message CommonMetadata {
 
 // Compared to v0: added max_sequencing_time
 message SubmitterMetadata {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
   com.digitalasset.canton.crypto.v0.Salt salt = 1;
   repeated string act_as = 2;

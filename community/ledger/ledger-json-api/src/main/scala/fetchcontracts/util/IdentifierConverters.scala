@@ -4,8 +4,9 @@
 package com.daml.fetchcontracts
 package util
 
+import com.daml.http.domain.ContractTypeId
 import com.daml.lf
-import com.daml.ledger.api.{v1 => lav1}
+import com.daml.ledger.api.v1 as lav1
 
  object IdentifierConverters {
   def apiIdentifier(a: lf.data.Ref.Identifier): lav1.value.Identifier =
@@ -15,7 +16,7 @@ import com.daml.ledger.api.{v1 => lav1}
       entityName = a.qualifiedName.name.dottedName,
     )
 
-  def apiIdentifier(a: domain.ContractTypeId.RequiredPkg): lav1.value.Identifier =
+  def apiIdentifier(a: ContractTypeId.RequiredPkg): lav1.value.Identifier =
     lav1.value.Identifier(
       packageId = a.packageId,
       moduleName = a.moduleName,

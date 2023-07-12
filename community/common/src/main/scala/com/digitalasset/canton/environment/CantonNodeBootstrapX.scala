@@ -159,13 +159,11 @@ abstract class CantonNodeBootstrapX[
           )
           .map { crypto =>
             addCloseable(crypto)
-            val certificateGenerator = new X509CertificateGenerator(crypto, loggerFactory)
             adminServerRegistry.addServiceU(
               VaultServiceGrpc.bindService(
                 arguments.grpcVaultServiceFactory
                   .create(
                     crypto,
-                    certificateGenerator,
                     parameterConfig.enablePreviewFeatures,
                     timeouts,
                     loggerFactory,

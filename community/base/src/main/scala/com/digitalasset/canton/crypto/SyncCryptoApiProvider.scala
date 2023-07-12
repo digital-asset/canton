@@ -77,7 +77,7 @@ class SyncCryptoApiProvider(
       cachingConfigs,
       timeouts,
       futureSupervisor,
-      alias.fold(loggerFactory)(alias => loggerFactory.append("domain", alias.unwrap)),
+      loggerFactory.append("domainId", domain.toString),
     )
 
   def forDomain(domain: DomainId): Option[DomainSyncCryptoClient] =
@@ -581,7 +581,7 @@ class DomainSnapshotSyncCryptoApi(
 
   override def decrypt[M](encryptedMessage: Encrypted[M])(
       deserialize: ByteString => Either[DeserializationError, M]
-  ): EitherT[Future, SyncCryptoError, M] = {
+  )(implicit traceContext: TraceContext): EitherT[Future, SyncCryptoError, M] = {
     EitherT(
       ipsSnapshot
         .encryptionKey(owner)
@@ -608,7 +608,7 @@ class DomainSnapshotSyncCryptoApi(
 
   override def decrypt[M](encryptedMessage: AsymmetricEncrypted[M])(
       deserialize: ByteString => Either[DeserializationError, M]
-  ): EitherT[Future, SyncCryptoError, M] = {
+  )(implicit traceContext: TraceContext): EitherT[Future, SyncCryptoError, M] = {
     crypto.privateCrypto
       .decrypt(encryptedMessage)(deserialize)
       .leftMap[SyncCryptoError](err => SyncCryptoError.SyncCryptoDecryptionError(err))

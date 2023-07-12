@@ -19,7 +19,6 @@ class TinkCryptoTest
     with PrivateKeySerializationTest
     with HkdfTest
     with RandomTest
-    with JavaPrivateKeyConverterTest
     with JavaPublicKeyConverterTest {
 
   "TinkCrypto" can {
@@ -53,11 +52,6 @@ class TinkCryptoTest
 
     // Tink provider does not support Java conversion of Ed25519 or Hybrid encryption keys
     behave like javaPublicKeyConverterProvider(
-      Tink.signing.supported.filter(_ != SigningKeyScheme.Ed25519),
-      Set.empty,
-      tinkCrypto(),
-    )
-    behave like javaPrivateKeyConverterProvider(
       Tink.signing.supported.filter(_ != SigningKeyScheme.Ed25519),
       Set.empty,
       tinkCrypto(),

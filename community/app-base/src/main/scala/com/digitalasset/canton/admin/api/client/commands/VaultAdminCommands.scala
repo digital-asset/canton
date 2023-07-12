@@ -9,12 +9,10 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultUnboundedTimeout,
   TimeoutType,
 }
-import com.digitalasset.canton.admin.api.client.data.CertificateResult
 import com.digitalasset.canton.crypto.admin.grpc.PrivateKeyMetadata
 import com.digitalasset.canton.crypto.admin.v0
 import com.digitalasset.canton.crypto.admin.v0.VaultServiceGrpc.VaultServiceStub
 import com.digitalasset.canton.crypto.{PublicKeyWithName, v0 as cryptoproto, *}
-import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.util.{EitherUtil, OptionUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
@@ -302,81 +300,6 @@ object VaultAdminCommands {
     ): Either[String, String] =
       Right(response.wrapperKeyId)
 
-  }
-
-  final case class GenerateCertificate(
-      uid: UniqueIdentifier,
-      certificateKey: Fingerprint,
-      additionalSubject: String,
-      subjectAlternativeNames: Seq[String],
-  ) extends BaseVaultAdminCommand[
-        v0.GenerateCertificateRequest,
-        v0.GenerateCertificateResponse,
-        CertificateResult,
-      ] {
-
-    override def createRequest(): Either[String, v0.GenerateCertificateRequest] =
-      Right(
-        v0.GenerateCertificateRequest(
-          uniqueIdentifier = uid.toProtoPrimitive,
-          certificateKey = certificateKey.toProtoPrimitive,
-          additionalSubject = additionalSubject,
-          subjectAlternativeNames = subjectAlternativeNames,
-        )
-      )
-
-    override def submitRequest(
-        service: VaultServiceStub,
-        request: v0.GenerateCertificateRequest,
-    ): Future[v0.GenerateCertificateResponse] =
-      service.generateCertificate(request)
-
-    override def handleResponse(
-        response: v0.GenerateCertificateResponse
-    ): Either[String, CertificateResult] =
-      CertificateResult.fromPem(response.x509Cert).leftMap(_.toString)
-  }
-
-  final case class ImportCertificate(x509Pem: String)
-      extends BaseVaultAdminCommand[
-        v0.ImportCertificateRequest,
-        v0.ImportCertificateResponse,
-        String,
-      ] {
-
-    override def createRequest(): Either[String, v0.ImportCertificateRequest] =
-      Right(v0.ImportCertificateRequest(x509Cert = x509Pem))
-
-    override def submitRequest(
-        service: VaultServiceStub,
-        request: v0.ImportCertificateRequest,
-    ): Future[v0.ImportCertificateResponse] =
-      service.importCertificate(request)
-
-    override def handleResponse(response: v0.ImportCertificateResponse): Either[String, String] =
-      Right(response.certificateId)
-  }
-
-  final case class ListCertificates(filterUid: String)
-      extends BaseVaultAdminCommand[v0.ListCertificateRequest, v0.ListCertificateResponse, List[
-        CertificateResult
-      ]] {
-
-    override def createRequest(): Either[String, v0.ListCertificateRequest] =
-      Right(v0.ListCertificateRequest(filterUid = filterUid))
-
-    override def submitRequest(
-        service: VaultServiceStub,
-        request: v0.ListCertificateRequest,
-    ): Future[v0.ListCertificateResponse] =
-      service.listCertificates(request)
-
-    override def handleResponse(
-        response: v0.ListCertificateResponse
-    ): Either[String, List[CertificateResult]] =
-      response.results.toList.traverse(x =>
-        CertificateResult.fromPem(x.x509Cert).leftMap(_.toString)
-      )
   }
 
   final case class ImportKeyPair(keyPair: ByteString, name: Option[String])

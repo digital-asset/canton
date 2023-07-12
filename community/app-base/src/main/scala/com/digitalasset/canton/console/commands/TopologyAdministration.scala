@@ -3,9 +3,7 @@
 
 package com.digitalasset.canton.console.commands
 
-import cats.syntax.either.*
 import cats.syntax.option.*
-import cats.syntax.traverseFilter.*
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.admin.api.client.commands.TopologyAdminCommands
@@ -29,7 +27,6 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.BaseQuery
 import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
 import com.digitalasset.canton.topology.store.{StoredTopologyTransactions, TimeQuery}
-import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
@@ -753,17 +750,7 @@ class TopologyAdministrationGroup(
                   renewOwnerToKeyMapping(TopologyChangeOp.Remove, filterAuthorizedKey)
 
                 case signedClaim: SignedLegalIdentityClaim =>
-                  def renewSignedClaim(op: TopologyChangeOp, key: Fingerprint): Unit =
-                    legal_identities
-                      .authorize(
-                        op,
-                        signedClaim,
-                        key.some,
-                      )
-                      .discard
-
-                  renewSignedClaim(TopologyChangeOp.Add, authorizeWith)
-                  renewSignedClaim(TopologyChangeOp.Remove, filterAuthorizedKey)
+                  ()
 
                 case ParticipantState(side, domain, participant, permission, trustLevel) =>
                   def renewParticipantState(op: TopologyChangeOp, key: Fingerprint): Unit =
@@ -1064,141 +1051,6 @@ class TopologyAdministrationGroup(
           )
         )
       })
-  }
-
-  @Help.Summary("Inspect legal identities", FeatureFlag.Preview)
-  @Help.Group("Legal Identities")
-  object legal_identities {
-
-    @Help.Summary("List legal identities", FeatureFlag.Preview)
-    @Help.Description(
-      """List the legal identities associated with a unique identifier. A legal identity allows to establish a link between
-        |an unique identifier and some external evidence of legal identity. Currently, the only type of evidence supported
-        |are X509 certificates. Except for the CCF integration that requires participants to possess a valid X509 certificate,
-        |legal identities have no functional use within the system. They are purely informational.
-        |
-        filterStore: Filter for topology stores starting with the given filter string (Authorized, <domain-id>, Requested)
-        useStateStore: If true (default), only properly authorized transactions that are part of the state will be selected.
-        timeQuery: The time query allows to customize the query by time. The following options are supported:
-                   TimeQuery.HeadState (default): The most recent known state.
-                   TimeQuery.Snapshot(ts): The state at a certain point in time.
-                   TimeQuery.Range(fromO, toO): Time-range of when the transaction was added to the store
-        operation: Optionally, what type of operation the transaction should have. State store only has "Add".
-        filterSigningKey: Filter for transactions that are authorized with a key that starts with the given filter string.
-        filterUid: Filter for unique identifiers starting with the given filter string.
-        protocolVersion: Export the topology transactions in the optional protocol version.
-        |"""
-    )
-    def list(
-        filterStore: String = "",
-        useStateStore: Boolean = true,
-        timeQuery: TimeQuery = TimeQuery.HeadState,
-        operation: Option[TopologyChangeOp] = None,
-        filterUid: String = "",
-        filterSigningKey: String = "",
-        protocolVersion: Option[String] = None,
-    ): Seq[ListSignedLegalIdentityClaimResult] =
-      check(FeatureFlag.Preview) {
-        consoleEnvironment.run {
-          adminCommand(
-            TopologyAdminCommands.Read
-              .ListSignedLegalIdentityClaim(
-                BaseQuery(
-                  filterStore,
-                  useStateStore,
-                  timeQuery,
-                  operation,
-                  filterSigningKey,
-                  protocolVersion.map(ProtocolVersion.tryCreate),
-                ),
-                filterUid,
-              )
-          )
-        }
-      }
-
-    @Help.Summary("List legal identities with X509 certificates", FeatureFlag.Preview)
-    @Help.Description("""List the X509 certificates used as legal identities associated with a unique identifier.
-        |A legal identity allows to establish a link between an unique identifier and some external
-        |evidence of legal identity. Currently, the only X509 certificate are supported as evidence.
-        |Except for the CCF integration that requires participants to possess a valid X509 certificate,
-        |legal identities have no functional use within the system. They are purely informational.
-        |
-        filterStore: Filter for topology stores starting with the given filter string (Authorized, <domain-id>, Requested)
-        useStateStore: If true (default), only properly authorized transactions that are part of the state will be selected.
-        timeQuery: The time query allows to customize the query by time. The following options are supported:
-                   TimeQuery.HeadState (default): The most recent known state.
-                   TimeQuery.Snapshot(ts): The state at a certain point in time.
-                   TimeQuery.Range(fromO, toO): Time-range of when the transaction was added to the store
-        operation: Optionally, what type of operation the transaction should have. State store only has "Add".
-        filterSigningKey: Filter for transactions that are authorized with a key that starts with the given filter string.
-        filterUid: Filter for unique identifiers starting with the given filter string.
-        |""")
-    def list_x509(
-        filterStore: String = "",
-        useStateStore: Boolean = true,
-        timeQuery: TimeQuery = TimeQuery.HeadState,
-        operation: Option[TopologyChangeOp] = None,
-        filterUid: String = "",
-        filterSigningKey: String = "",
-    ): Seq[(UniqueIdentifier, X509Certificate)] =
-      check(FeatureFlag.Preview) {
-
-        val lst =
-          list(filterStore, useStateStore, timeQuery, operation, filterUid, filterSigningKey)
-        val res = lst.traverseFilter { claim =>
-          claim.item.evidence match {
-            case X509Cert(cert) => X509Certificate.fromPem(cert).map(x => Some((claim.item.uid, x)))
-            case _ => Right(None)
-          }
-        }
-        consoleEnvironment.run {
-          ConsoleCommandResult.fromEither(res.leftMap(_.toString))
-        }
-      }
-
-    @Help.Summary("Generate a signed legal identity claim", FeatureFlag.Preview)
-    def generate(claim: LegalIdentityClaim): SignedLegalIdentityClaim =
-      check(FeatureFlag.Preview) {
-        consoleEnvironment.run {
-          adminCommand(
-            TopologyAdminCommands.Write.GenerateSignedLegalIdentityClaim(claim)
-          )
-        }
-      }
-
-    @Help.Summary(
-      "Generate a signed legal identity claim for a specific X509 certificate",
-      FeatureFlag.Preview,
-    )
-    def generate_x509(
-        uid: UniqueIdentifier,
-        certificateId: CertificateId,
-    ): SignedLegalIdentityClaim =
-      check(FeatureFlag.Preview) {
-        consoleEnvironment.run {
-          adminCommand(
-            TopologyAdminCommands.Write.GenerateX509IdentityClaim(uid, certificateId)
-          )
-        }
-      }
-
-    @Help.Summary("Authorize a legal identity claim transaction", FeatureFlag.Preview)
-    def authorize(
-        ops: TopologyChangeOp,
-        claim: SignedLegalIdentityClaim,
-        signedBy: Option[Fingerprint] = None,
-        synchronize: Option[NonNegativeDuration] = Some(
-          consoleEnvironment.commandTimeouts.bounded
-        ),
-    ): ByteString = check(FeatureFlag.Preview) {
-      synchronisation.run(synchronize)(consoleEnvironment.run {
-        adminCommand(
-          TopologyAdminCommands.Write.AuthorizeSignedLegalIdentityClaim(ops, signedBy, claim)
-        )
-      })
-    }
-
   }
 
   @Help.Summary("Manage package vettings")

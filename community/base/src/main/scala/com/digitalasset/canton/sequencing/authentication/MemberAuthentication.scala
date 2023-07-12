@@ -37,7 +37,10 @@ sealed trait MemberAuthentication {
       possibleSigningKeys: NonEmpty[Seq[Fingerprint]],
       agreementId: Option[ServiceAgreementId],
       crypto: Crypto,
-  )(implicit ec: ExecutionContext): EitherT[Future, AuthenticationError, Signature] = {
+  )(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): EitherT[Future, AuthenticationError, Signature] = {
     val hash = hashDomainNonce(nonce, domainId, agreementId, crypto.pureCrypto)
 
     for {

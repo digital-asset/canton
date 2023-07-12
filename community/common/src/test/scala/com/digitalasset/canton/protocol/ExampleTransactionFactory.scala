@@ -503,6 +503,7 @@ class ExampleTransactionFactory(
       createIndex: Int,
       suffixedContractInstance: LfContractInst,
       agreementText: String,
+      metadata: ContractMetadata,
   ): (Salt, Unicum) = {
     val viewParticipantDataSalt = participantDataSalt(viewIndex)
     val (contractSalt, unicum) = unicumGenerator
@@ -514,6 +515,7 @@ class ExampleTransactionFactory(
         viewParticipantDataSalt,
         createIndex,
         ledgerTime,
+        metadata,
         asSerializableRaw(suffixedContractInstance, agreementText),
         cantonContractIdVersion,
       )
@@ -528,9 +530,24 @@ class ExampleTransactionFactory(
       suffixedContractInstance: LfContractInst,
       agreementText: String,
       discriminator: LfHash,
+      signatories: Set[LfPartyId] = Set.empty,
+      observers: Set[LfPartyId] = Set.empty,
+      maybeKeyWithMaintainers: Option[protocol.LfGlobalKeyWithMaintainers] = None,
   ): (Salt, LfContractId) = {
+    val metadata = ContractMetadata.tryCreate(
+      signatories,
+      signatories ++ observers,
+      maybeKeyWithMaintainers.map(LfVersioned(transactionVersion, _)),
+    )
     val (salt, unicum) =
-      saltAndUnicum(viewPosition, viewIndex, createIndex, suffixedContractInstance, agreementText)
+      saltAndUnicum(
+        viewPosition,
+        viewIndex,
+        createIndex,
+        suffixedContractInstance,
+        agreementText,
+        metadata,
+      )
     salt -> cantonContractIdVersion.fromDiscriminator(discriminator, unicum)
   }
 
@@ -932,7 +949,17 @@ class ExampleTransactionFactory(
     val lfContractId: LfContractId = LfContractId.V1(discriminator, Bytes.Empty)
 
     val (salt, contractId) =
-      fromDiscriminator(viewPosition, viewIndex, 0, contractInstance, agreementText, discriminator)
+      fromDiscriminator(
+        viewPosition,
+        viewIndex,
+        0,
+        contractInstance,
+        agreementText,
+        discriminator,
+        signatories,
+        observers,
+        key,
+      )
 
     val saltO: Option[Salt] = saltConditionally(salt)
 
@@ -1414,7 +1441,16 @@ class ExampleTransactionFactory(
     val create0SerInst: SerializableRawContractInstance =
       asSerializableRaw(create0Inst, create0Agreement)
     val (salt0Id, create0Id): (Salt, LfContractId) =
-      fromDiscriminator(rootViewPosition(0, 2), 0, 0, create0Inst, create0Agreement, create0disc)
+      fromDiscriminator(
+        rootViewPosition(0, 2),
+        0,
+        0,
+        create0Inst,
+        create0Agreement,
+        create0disc,
+        signatories = Set(submitter),
+        observers = Set(observer),
+      )
     val create0: LfNodeCreate = genCreate0(create0Id)
 
     val exercise1Agreement = "exercise1"
@@ -1425,7 +1461,15 @@ class ExampleTransactionFactory(
     val create10SerInst: SerializableRawContractInstance =
       asSerializableRaw(create10Inst, create10Agreement)
     val (salt10Id, create10Id): (Salt, LfContractId) =
-      fromDiscriminator(rootViewPosition(1, 2), 1, 0, create10Inst, create10Agreement, create10disc)
+      fromDiscriminator(
+        rootViewPosition(1, 2),
+        1,
+        0,
+        create10Inst,
+        create10Agreement,
+        create10disc,
+        signatories = Set(submitter, signatory),
+      )
     val create10: LfNodeCreate = genCreate1x(create10Id, create10Inst, create10Agreement)
 
     val fetch11: LfNodeFetch = lfFetch11
@@ -1433,7 +1477,15 @@ class ExampleTransactionFactory(
     val create12SerInst: SerializableRawContractInstance =
       asSerializableRaw(create12Inst, create12Agreement)
     val (salt12Id, create12Id): (Salt, LfContractId) =
-      fromDiscriminator(rootViewPosition(1, 2), 1, 1, create12Inst, create12Agreement, create12disc)
+      fromDiscriminator(
+        rootViewPosition(1, 2),
+        1,
+        1,
+        create12Inst,
+        create12Agreement,
+        create12disc,
+        signatories = Set(submitter, signatory),
+      )
     val create12: LfNodeCreate = genCreate1x(create12Id, create12Inst, create12Agreement)
 
     val create130SerInst: SerializableRawContractInstance =
@@ -1446,6 +1498,7 @@ class ExampleTransactionFactory(
         create130Inst,
         create130Agreement,
         create130disc,
+        signatories = Set(signatory),
       )
     val create130: LfNodeCreate = genCreate130(create130Id)
 
@@ -1464,6 +1517,7 @@ class ExampleTransactionFactory(
         create1310Inst,
         create1310Agreement,
         create1310disc,
+        signatories = Set(submitter),
       )
     val create1310: LfNodeCreate = genCreate1310(create1310Id)
 
@@ -1950,7 +2004,16 @@ class ExampleTransactionFactory(
     val create0SerInst: SerializableRawContractInstance =
       asSerializableRaw(create0Inst, create0Agreement)
     val (salt0Id, create0Id): (Salt, LfContractId) =
-      fromDiscriminator(rootViewPosition(0, 3), 0, 0, create0Inst, create0Agreement, create0disc)
+      fromDiscriminator(
+        rootViewPosition(0, 3),
+        0,
+        0,
+        create0Inst,
+        create0Agreement,
+        create0disc,
+        signatories = Set(submitter),
+        observers = Set(observer),
+      )
     val create0: LfNodeCreate = genCreateX(create0Id, create0Inst, create0Agreement)
 
     val exercise1Agreement = "exercise1"
@@ -1973,6 +2036,8 @@ class ExampleTransactionFactory(
         create100Inst,
         create100Agreement,
         create100disc,
+        signatories = Set(signatory),
+        observers = Set(observer),
       )
     val create100: LfNodeCreate = genCreate3X(create100Id, create100Inst, create100Agreement)
 
@@ -1980,7 +2045,15 @@ class ExampleTransactionFactory(
     val create11SerInst: SerializableRawContractInstance =
       asSerializableRaw(create11Inst, create11Agreement)
     val (salt11Id, create11Id): (Salt, LfContractId) =
-      fromDiscriminator(rootViewPosition(1, 3), 1, 0, create11Inst, create11Agreement, create11disc)
+      fromDiscriminator(
+        rootViewPosition(1, 3),
+        1,
+        0,
+        create11Inst,
+        create11Agreement,
+        create11disc,
+        signatories = stakeholdersXX,
+      )
     val create11: LfNodeCreate = genCreateXX(create11Id, create11Inst, create11Agreement)
 
     val exercise12Agreement = "exercise12"
@@ -1999,6 +2072,8 @@ class ExampleTransactionFactory(
         create120Inst,
         create120Agreement,
         create120disc,
+        signatories = Set(signatory),
+        observers = Set(observer),
       )
     val create120: LfNodeCreate = genCreate3X(create120Id, create120Inst, create120Agreement)
 
@@ -2006,13 +2081,30 @@ class ExampleTransactionFactory(
     val create13SerInst: SerializableRawContractInstance =
       asSerializableRaw(create13Inst, create13Agreement)
     val (salt13Id, create13Id): (Salt, LfContractId) =
-      fromDiscriminator(rootViewPosition(1, 3), 1, 1, create13Inst, create13Agreement, create13disc)
+      fromDiscriminator(
+        rootViewPosition(1, 3),
+        1,
+        1,
+        create13Inst,
+        create13Agreement,
+        create13disc,
+        signatories = stakeholdersXX,
+      )
     val create13: LfNodeCreate = genCreateXX(create13Id, create13Inst, create13Agreement)
 
     val create2SerInst: SerializableRawContractInstance =
       asSerializableRaw(create2Inst, create2Agreement)
     val (salt2Id, create2Id): (Salt, LfContractId) =
-      fromDiscriminator(rootViewPosition(2, 3), 6, 0, create2Inst, create2Agreement, create2disc)
+      fromDiscriminator(
+        rootViewPosition(2, 3),
+        6,
+        0,
+        create2Inst,
+        create2Agreement,
+        create2disc,
+        signatories = Set(submitter),
+        observers = Set(observer),
+      )
     val create2: LfNodeCreate = genCreateX(create2Id, create2Inst, create2Agreement)
 
     val view0: TransactionView =
@@ -2479,7 +2571,16 @@ class ExampleTransactionFactory(
     val create0SerInst: SerializableRawContractInstance =
       asSerializableRaw(create0Inst, create0Agreement)
     val (salt0Id, create0Id): (Salt, LfContractId) =
-      fromDiscriminator(rootViewPosition(0, 2), 0, 0, create0Inst, create0Agreement, create0disc)
+      fromDiscriminator(
+        rootViewPosition(0, 2),
+        0,
+        0,
+        create0Inst,
+        create0Agreement,
+        create0disc,
+        signatories = Set(submitter),
+        observers = Set(observer),
+      )
     val create0: LfNodeCreate = genCreate(create0Id, create0Inst, create0Agreement)
 
     val exercise1: LfNodeExercises = genExercise(create0Id, List(2, 3, 5, 6))
@@ -2487,7 +2588,16 @@ class ExampleTransactionFactory(
     val create10SerInst: SerializableRawContractInstance =
       asSerializableRaw(create10Inst, create10Agreement)
     val (salt10Id, create10Id): (Salt, LfContractId) =
-      fromDiscriminator(rootViewPosition(1, 2), 1, 0, create10Inst, create10Agreement, create10disc)
+      fromDiscriminator(
+        rootViewPosition(1, 2),
+        1,
+        0,
+        create10Inst,
+        create10Agreement,
+        create10disc,
+        signatories = Set(submitter),
+        observers = Set(observer),
+      )
     val create10: LfNodeCreate = genCreate(create10Id, create10Inst, create10Agreement)
 
     val exercise11: LfNodeExercises = genExerciseN(create10Id, 4)
@@ -2502,6 +2612,7 @@ class ExampleTransactionFactory(
         create110Inst,
         create110Agreement,
         create110disc,
+        signatories = Set(submitter),
       )
     val create110: LfNodeCreate = genCreate110(create110Id, create110Inst, create110Agreement)
 

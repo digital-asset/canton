@@ -112,7 +112,6 @@ object SyncDomainPersistentState {
 
   def createX(
       storage: Storage,
-      domainAlias: DomainAlias,
       domainId: IndexedDomain,
       protocolVersion: ProtocolVersion,
       pureCryptoApi: CryptoPureApi,
@@ -125,7 +124,7 @@ object SyncDomainPersistentState {
       loggerFactory: NamedLoggerFactory,
       futureSupervisor: FutureSupervisor,
   )(implicit ec: ExecutionContext): SyncDomainPersistentStateX = {
-    val domainLoggerFactory = loggerFactory.append("domain-alias", domainAlias.unwrap)
+    val domainLoggerFactory = loggerFactory.append("domainId", domainId.domainId.toString)
     storage match {
       case _: MemoryStorage =>
         new InMemorySyncDomainPersistentStateX(

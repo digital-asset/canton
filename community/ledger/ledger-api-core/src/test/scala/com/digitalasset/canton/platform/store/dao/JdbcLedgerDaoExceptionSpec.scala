@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.platform.store.dao
 
-import com.daml.lf.transaction.test.TransactionBuilder
+import com.daml.lf.transaction.test.TreeTransactionBuilder.*
+import com.daml.lf.transaction.test.{TestIdFactory, TestNodeBuilder, TreeTransactionBuilder}
 import com.daml.lf.value.Value.{ContractId, VersionedContractInstance}
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -13,7 +14,11 @@ import org.scalatest.{Inside, LoneElement, OptionValues}
   * - Create and exercise nodes under rollback nodes should not be indexed
   * - Lookup and fetch nodes under rollback nodes may lead to divulgence
   */
-private[dao] trait JdbcLedgerDaoExceptionSpec extends LoneElement with Inside with OptionValues {
+private[dao] trait JdbcLedgerDaoExceptionSpec
+    extends LoneElement
+    with Inside
+    with OptionValues
+    with TestIdFactory {
   this: AsyncFlatSpec with Matchers with JdbcLedgerDaoSuite =>
 
   private def contractsReader = ledgerDao.contractsReader
@@ -21,16 +26,19 @@ private[dao] trait JdbcLedgerDaoExceptionSpec extends LoneElement with Inside wi
   behavior of "JdbcLedgerDao (exceptions)"
 
   it should "not find contracts created under rollback nodes" in {
-    val builder = TransactionBuilder()
-    val rollback = builder.add(builder.rollback())
-    val cid1 = builder.newCid
-    val cid2 = builder.newCid
-    builder.add(
-      createNode(absCid = cid1, signatories = Set(alice), stakeholders = Set(alice)),
-      rollback,
+
+    val cid1 = newCid
+    val cid2 = newCid
+
+    val tx = TreeTransactionBuilder.toCommittedTransaction(
+      TestNodeBuilder
+        .rollback()
+        .withChildren(
+          createNode(absCid = cid1, signatories = Set(alice), stakeholders = Set(alice))
+        ),
+      createNode(absCid = cid2, signatories = Set(alice), stakeholders = Set(alice)),
     )
-    builder.add(createNode(absCid = cid2, signatories = Set(alice), stakeholders = Set(alice)))
-    val offsetAndEntry = fromTransaction(builder.buildCommitted())
+    val offsetAndEntry = fromTransaction(tx)
 
     for {
       _ <- store(offsetAndEntry)
@@ -48,24 +56,31 @@ private[dao] trait JdbcLedgerDaoExceptionSpec extends LoneElement with Inside wi
 
     // A transaction that fetches a contract under a rollback node
     def rolledBackFetch(createCid: ContractId, fetcherCid: ContractId) = {
-      val builder = TransactionBuilder()
+
       val exercise1 = exerciseNode(fetcherCid).copy(
         consuming = false,
         actingParties = stakeholders,
         signatories = divulgees,
         stakeholders = stakeholders.union(divulgees),
       )
-      val rollback = builder.rollback()
+
       val fetch1 = fetchNode(createCid).copy(
         actingParties = stakeholders,
         signatories = stakeholders,
         stakeholders = stakeholders,
       )
 
-      val exercise1Nid = builder.add(exercise1)
-      val rollbackNid = builder.add(rollback, exercise1Nid)
-      builder.add(fetch1, rollbackNid)
-      fromTransaction(builder.buildCommitted()).copy()
+      val tx = TreeTransactionBuilder.toCommittedTransaction(
+        exercise1.withChildren(
+          TestNodeBuilder
+            .rollback()
+            .withChildren(
+              fetch1
+            )
+        )
+      )
+
+      fromTransaction(tx).copy()
     }
 
     for {
@@ -115,30 +130,39 @@ private[dao] trait JdbcLedgerDaoExceptionSpec extends LoneElement with Inside wi
     val stakeholders = Set(alice)
     val divulgees = Set(bob)
 
-    val builder = TransactionBuilder()
-    val createCid = builder.newCid
-    val fetcherCid = builder.newCid
+    val createCid = newCid
+    val fetcherCid = newCid
+
     val create1 = createNode(createCid, stakeholders, stakeholders)
+
     val create2 = createNode(fetcherCid, divulgees, stakeholders.union(divulgees))
+
     val exercise1 = exerciseNode(fetcherCid).copy(
       consuming = false,
       actingParties = stakeholders,
       signatories = divulgees,
       stakeholders = stakeholders.union(divulgees),
     )
-    val rollback = builder.rollback()
+
     val fetch1 = fetchNode(createCid).copy(
       actingParties = stakeholders,
       signatories = stakeholders,
       stakeholders = stakeholders,
     )
 
-    builder.add(create1)
-    builder.add(create2)
-    val exercise1Nid = builder.add(exercise1)
-    val rollbackNid = builder.add(rollback, exercise1Nid)
-    builder.add(fetch1, rollbackNid)
-    val offsetAndEntry = fromTransaction(builder.buildCommitted()).copy()
+    val tx = TreeTransactionBuilder.toCommittedTransaction(
+      create1,
+      create2,
+      exercise1.withChildren(
+        TestNodeBuilder
+          .rollback()
+          .withChildren(
+            fetch1
+          )
+      ),
+    )
+
+    val offsetAndEntry = fromTransaction(tx).copy()
 
     for {
       _ <- store(

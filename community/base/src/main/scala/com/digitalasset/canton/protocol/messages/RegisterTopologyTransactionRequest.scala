@@ -8,8 +8,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.Top
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
-import com.digitalasset.canton.protocol.v2.EnvelopeContent
-import com.digitalasset.canton.protocol.{v0, v1, v2}
+import com.digitalasset.canton.protocol.{v0, v1, v2, v3}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{DomainId, Member, ParticipantId, UniqueIdentifier}
@@ -36,7 +35,8 @@ final case class RegisterTopologyTransactionRequest private (
 ) extends UnsignedProtocolMessage
     with ProtocolMessageV0
     with ProtocolMessageV1
-    with UnsignedProtocolMessageV2
+    with ProtocolMessageV2
+    with UnsignedProtocolMessageV3
     with PrettyPrinting {
 
   override def toProtoEnvelopeContentV0: v0.EnvelopeContent =
@@ -49,8 +49,13 @@ final case class RegisterTopologyTransactionRequest private (
       v1.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionRequest(toProtoV0)
     )
 
-  override def toProtoSomeEnvelopeContentV2: v2.EnvelopeContent.SomeEnvelopeContent =
-    v2.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionRequest(toProtoV0)
+  override def toProtoEnvelopeContentV2: v2.EnvelopeContent =
+    v2.EnvelopeContent(
+      v2.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionRequest(toProtoV0)
+    )
+
+  override def toProtoSomeEnvelopeContentV3: v3.EnvelopeContent.SomeEnvelopeContent =
+    v3.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionRequest(toProtoV0)
 
   def toProtoV0: v0.RegisterTopologyTransactionRequest =
     v0.RegisterTopologyTransactionRequest(
@@ -150,7 +155,7 @@ final case class RegisterTopologyTransactionRequestX private (
       RegisterTopologyTransactionRequestX.type
     ]
 ) extends UnsignedProtocolMessage
-    with UnsignedProtocolMessageV2
+    with UnsignedProtocolMessageV3
     with PrettyPrinting {
   @transient override protected lazy val companionObj: RegisterTopologyTransactionRequestX.type =
     RegisterTopologyTransactionRequestX
@@ -164,9 +169,9 @@ final case class RegisterTopologyTransactionRequestX private (
       domain = domainId.toProtoPrimitive,
     )
 
-  override protected[messages] def toProtoSomeEnvelopeContentV2
-      : EnvelopeContent.SomeEnvelopeContent =
-    v2.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionRequestX(toProtoV2)
+  override protected[messages] def toProtoSomeEnvelopeContentV3
+      : v3.EnvelopeContent.SomeEnvelopeContent =
+    v3.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionRequestX(toProtoV2)
 
   override def pretty: Pretty[RegisterTopologyTransactionRequestX] = prettyOfClass(
     param("requestBy", _.requestedBy),

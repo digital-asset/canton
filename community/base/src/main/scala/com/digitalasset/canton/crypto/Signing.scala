@@ -63,14 +63,16 @@ trait SigningPrivateOps {
   def defaultSigningKeyScheme: SigningKeyScheme
 
   /** Signs the given hash using the referenced private signing key. */
-  def sign(hash: Hash, signingKeyId: Fingerprint): EitherT[Future, SigningError, Signature] =
+  def sign(hash: Hash, signingKeyId: Fingerprint)(implicit
+      tc: TraceContext
+  ): EitherT[Future, SigningError, Signature] =
     sign(hash.getCryptographicEvidence, signingKeyId)
 
   /** Signs the byte string directly, however it is encouraged to sign a hash. */
   protected[crypto] def sign(
       bytes: ByteString,
       signingKeyId: Fingerprint,
-  ): EitherT[Future, SigningError, Signature]
+  )(implicit tc: TraceContext): EitherT[Future, SigningError, Signature]
 
   /** Generates a new signing key pair with the given scheme and optional name, stores the private key and returns the public key. */
   def generateSigningKey(
@@ -94,7 +96,7 @@ trait SigningPrivateStoreOps extends SigningPrivateOps {
   protected[crypto] def sign(
       bytes: ByteString,
       signingKeyId: Fingerprint,
-  ): EitherT[Future, SigningError, Signature] =
+  )(implicit tc: TraceContext): EitherT[Future, SigningError, Signature] =
     store
       .signingKey(signingKeyId)(TraceContext.todo)
       .leftMap(storeError => SigningError.KeyStoreError(storeError.show))

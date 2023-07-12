@@ -8,8 +8,7 @@ import com.daml.lf.crypto.Hash
 import com.daml.lf.data.ImmArray
 import com.daml.lf.data.Ref.IdString
 import com.daml.lf.data.Time.Timestamp
-import com.daml.lf.transaction.GlobalKey
-import com.daml.lf.transaction.test.TransactionBuilder
+import com.daml.lf.transaction.{GlobalKey, TransactionVersion, Versioned}
 import com.daml.lf.value.Value.{ContractInstance, ValueRecord, ValueText}
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.offset.Offset
@@ -387,7 +386,7 @@ object MutableCacheBackedContractStoreSpec {
       ImmArray.Empty,
     )
     val contractInstance = ContractInstance(templateId, contractArgument)
-    TransactionBuilder().versionContract(contractInstance)
+    Versioned(TransactionVersion.StableVersions.max, contractInstance)
   }
 
   private def contractId(id: Int): ContractId =

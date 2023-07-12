@@ -118,8 +118,6 @@ abstract class CantonNodeBootstrapBase[
         .valueOr(err => throw new RuntimeException(s"Failed to initialize crypto: $err"))
     )
   )
-  val certificateGenerator = new X509CertificateGenerator(crypto.value, loggerFactory)
-
   locally {
     registerHealthGauge()
   }
@@ -129,7 +127,6 @@ abstract class CantonNodeBootstrapBase[
       arguments.grpcVaultServiceFactory
         .create(
           crypto.value,
-          certificateGenerator,
           parameterConfig.enablePreviewFeatures,
           timeouts,
           loggerFactory,

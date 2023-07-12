@@ -106,6 +106,8 @@ trait EncryptionPrivateOps {
   /** Decrypts an encrypted message using the referenced private encryption key */
   def decrypt[M](encrypted: AsymmetricEncrypted[M])(
       deserialize: ByteString => Either[DeserializationError, M]
+  )(implicit
+      traceContext: TraceContext
   ): EitherT[Future, DecryptionError, M]
 
   /** Generates a new encryption key pair with the given scheme and optional name, stores the private key and returns the public key. */
@@ -129,7 +131,7 @@ trait EncryptionPrivateStoreOps extends EncryptionPrivateOps {
   /** Decrypts an encrypted message using the referenced private encryption key */
   def decrypt[M](encryptedMessage: AsymmetricEncrypted[M])(
       deserialize: ByteString => Either[DeserializationError, M]
-  ): EitherT[Future, DecryptionError, M] =
+  )(implicit tc: TraceContext): EitherT[Future, DecryptionError, M] =
     store
       .decryptionKey(encryptedMessage.encryptedFor)(TraceContext.todo)
       .leftMap(storeError => DecryptionError.KeyStoreError(storeError.show))

@@ -388,7 +388,6 @@ class SyncDomainPersistentStateManagerX(
   ): SyncDomainPersistentStateX = SyncDomainPersistentState
     .createX(
       storage,
-      alias,
       domainId,
       protocolVersion,
       pureCrypto,
@@ -412,7 +411,7 @@ class SyncDomainPersistentStateManagerX(
         futureSupervisor,
         parameters.cachingConfigs,
         state.topologyStore,
-        loggerFactory,
+        loggerFactory.append("domainId", domainId.toString),
       )
     )
   }

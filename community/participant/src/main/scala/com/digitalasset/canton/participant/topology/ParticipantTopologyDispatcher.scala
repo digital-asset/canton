@@ -232,7 +232,7 @@ class ParticipantTopologyDispatcher(
       participantId,
       protocolVersion,
       timeouts,
-      loggerFactory,
+      loggerFactory.append("domainId", domainId.toString),
     )
 
     override def domainConnected()(implicit
@@ -250,7 +250,7 @@ class ParticipantTopologyDispatcher(
             manager.store,
             state.topologyStore,
             timeouts,
-            loggerFactory.appendUnnamedKey("domain", domain.unwrap),
+            loggerFactory.append("domainId", domainId.toString),
             crypto,
           )
           ErrorUtil.requireState(
@@ -296,7 +296,7 @@ class ParticipantTopologyDispatcher(
         clock,
         timeTrackerConfig,
         timeouts,
-        loggerFactory.appendUnnamedKey("onboarding", alias.unwrap),
+        loggerFactory.append("domainId", domainId.toString),
         sequencerClientFactory,
         sequencerConnection,
         crypto,
@@ -418,7 +418,7 @@ class ParticipantTopologyDispatcherX(
         clock,
         timeTrackerConfig,
         timeouts,
-        loggerFactory.appendUnnamedKey("onboarding", alias.unwrap),
+        loggerFactory.append("domainId", domainId.toString),
         sequencerClientFactory,
         sequencerConnections,
         crypto,
@@ -436,6 +436,7 @@ class ParticipantTopologyDispatcherX(
       client: DomainTopologyClientWithInit,
       sequencerClient: SequencerClient,
   ): ParticipantTopologyDispatcherHandle = {
+    val domainLoggerFactory = loggerFactory.append("domainId", domainId.toString)
     new ParticipantTopologyDispatcherHandle {
       val handle = new SequencerBasedRegisterTopologyTransactionHandleX(
         (traceContext, env) =>
@@ -449,7 +450,7 @@ class ParticipantTopologyDispatcherX(
         config.topologyX,
         protocolVersion,
         timeouts,
-        loggerFactory,
+        domainLoggerFactory,
       )
 
       override def domainConnected()(implicit
@@ -467,7 +468,7 @@ class ParticipantTopologyDispatcherX(
               manager.store,
               state.topologyStore,
               timeouts,
-              loggerFactory.appendUnnamedKey("domain", domain.unwrap),
+              domainLoggerFactory,
               crypto,
             )
             ErrorUtil.requireState(
@@ -609,7 +610,7 @@ object DomainOnboardingOutbox {
       authorizedStore,
       targetStore,
       timeouts,
-      loggerFactory.append("domain", domain.unwrap),
+      loggerFactory.append("domainId", domainId.toString),
       crypto,
     )
     outbox.run().transform { res =>
@@ -743,7 +744,7 @@ object DomainOnboardingOutboxX {
       authorizedStore,
       targetStore,
       timeouts,
-      loggerFactory.append("domain", domain.unwrap),
+      loggerFactory,
       crypto,
     )
     outbox.run().transform { res =>

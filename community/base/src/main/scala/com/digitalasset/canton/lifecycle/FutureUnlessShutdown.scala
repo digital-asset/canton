@@ -157,6 +157,10 @@ object FutureUnlessShutdownImpl {
       }
     }
 
+    def isCompleted: Boolean = {
+      unwrap.isCompleted
+    }
+
     /** Evaluates `f` on shutdown but retains the result of the future. */
     def tapOnShutdown(f: => Unit)(implicit
         ec: ExecutionContext,

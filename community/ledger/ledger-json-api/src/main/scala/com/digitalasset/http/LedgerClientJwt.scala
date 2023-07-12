@@ -27,6 +27,17 @@ import com.daml.lf.data.Ref
 import com.daml.logging.LoggingContextOf
 import com.digitalasset.canton.ledger.api.domain as LedgerApiDomain
 import com.digitalasset.canton.ledger.api.domain.PartyDetails as domainPartyDetails
+import com.digitalasset.canton.ledger.client.withoutledgerid.LedgerClient as DamlLedgerClient
+import com.google.protobuf
+import scalaz.{-\/, OneAnd, \/}
+import scalaz.syntax.tag.*
+
+import scala.concurrent.{Future, ExecutionContext as EC}
+import com.daml.ledger.api.v1.event_query_service.{
+  GetEventsByContractIdResponse,
+  GetEventsByContractKeyResponse,
+}
+import com.daml.ledger.api.v1.value.Identifier
 import com.digitalasset.canton.ledger.client.services.acs.ActiveContractSetClient
 import com.digitalasset.canton.ledger.client.services.admin.{
   MeteringReportClient,
@@ -36,14 +47,10 @@ import com.digitalasset.canton.ledger.client.services.admin.{
 import com.digitalasset.canton.ledger.client.services.commands.SynchronousCommandClient
 import com.digitalasset.canton.ledger.client.services.pkg.withoutledgerid.PackageClient
 import com.digitalasset.canton.ledger.client.services.transactions.withoutledgerid.TransactionClient
-import com.digitalasset.canton.ledger.client.withoutledgerid.LedgerClient as DamlLedgerClient
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.NoTracing
-import com.google.protobuf
 import com.google.rpc.Code
-import scalaz.{-\/, OneAnd, \/}
-
-import scala.concurrent.{Future, ExecutionContext as EC}
+import com.digitalasset.canton.ledger.client.services.EventQueryServiceClient
 
 final case class LedgerClientJwt(loggerFactory: NamedLoggerFactory)
     extends NamedLogging
@@ -109,6 +116,40 @@ final case class LedgerClientJwt(loggerFactory: NamedLoggerFactory)
         }
       }
     }
+
+  def getByContractId(client: DamlLedgerClient)(implicit ec: EC): GetContractByContractId = {
+    (jwt, contractId, requestingParties) =>
+      { implicit lc =>
+        logFuture(GetContractByContractIdLog) {
+          client.eventQueryServiceClient.getEventsByContractId(
+            contractId = contractId.unwrap,
+            requestingParties = requestingParties.view.map(_.unwrap).toSeq,
+            token = bearer(jwt),
+          )
+        }
+          .requireHandling { case Code.PERMISSION_DENIED =>
+            PermissionDenied
+          }
+      }
+  }
+
+  def getByContractKey(client: DamlLedgerClient)(implicit ec: EC): GetContractByContractKey = {
+    (jwt, key, templateId, requestingParties, continuationToken) =>
+      { implicit lc =>
+        logFuture(GetContractByContractKeyLog) {
+          client.eventQueryServiceClient.getEventsByContractKey(
+            token = bearer(jwt),
+            contractKey = key,
+            templateId = templateId,
+            requestingParties = requestingParties.view.map(_.unwrap).toSeq,
+            continuationToken = continuationToken,
+          )
+        }
+          .requireHandling { case Code.PERMISSION_DENIED =>
+            PermissionDenied
+          }
+      }
+  }
 
   private def skipRequest(start: LedgerOffset, end: Option[LedgerOffset]): Boolean = {
     import com.daml.http.util.LedgerOffsetUtil.AbsoluteOffsetOrdering
@@ -272,6 +313,23 @@ object LedgerClientJwt {
         Terminates,
     ) => LoggingContextOf[InstanceUUID] => Source[Transaction, NotUsed]
 
+  type GetContractByContractId =
+    (
+        Jwt,
+        domain.ContractId,
+        Set[domain.Party],
+    ) => LoggingContextOf[InstanceUUID] => EFuture[PermissionDenied, GetEventsByContractIdResponse]
+
+  type ContinuationToken = String
+  type GetContractByContractKey =
+    (
+        Jwt,
+        com.daml.ledger.api.v1.value.Value,
+        Identifier,
+        Set[domain.Party],
+        ContinuationToken,
+    ) => LoggingContextOf[InstanceUUID] => EFuture[PermissionDenied, GetEventsByContractKeyResponse]
+
   type ListKnownParties =
     Jwt => LoggingContextOf[InstanceUUID with RequestID] => EFuture[PermissionDenied, List[
       domainPartyDetails
@@ -405,6 +463,10 @@ object LedgerClientJwt {
     case object GetActiveContractsLog
         extends RequestLog(classOf[ActiveContractSetClient], "getActiveContracts")
     case object GetTransactionsLog extends RequestLog(classOf[TransactionClient], "getTransactions")
+    case object GetContractByContractIdLog
+        extends RequestLog(classOf[EventQueryServiceClient], "getContractByContractId")
+    case object GetContractByContractKeyLog
+        extends RequestLog(classOf[EventQueryServiceClient], "getContractByContractKey")
 
     private[LedgerClientJwt] def logMessage(startTime: Long, requestLog: RequestLog): String = {
       s"Ledger client request ${requestLog.className} ${requestLog.requestName} executed, elapsed time: " +

@@ -54,6 +54,7 @@ abstract class Clock() extends TimeProvider with AutoCloseable with NamedLogging
     case _: SimClock => true
     case _ => false
   }
+  protected def warnIfClockRunsBackwards: Boolean = false
 
   protected case class Queued(action: CantonTimestamp => Unit, timestamp: CantonTimestamp) {
 
@@ -85,6 +86,7 @@ abstract class Clock() extends TimeProvider with AutoCloseable with NamedLogging
       else {
         // emit warning if clock is running backwards
         if (
+          warnIfClockRunsBackwards && // turn of warning for simclock, as access to now and last might be racy
           oldTs.isAfter(nowSnapshot.plusSeconds(1L)) && backwardsClockAlerted
             .get()
             .isBefore(nowSnapshot.minusSeconds(30))
@@ -255,6 +257,7 @@ class WallClock(
   last.set(CantonTimestamp.assertFromInstant(tickTock.now))
 
   def now: CantonTimestamp = CantonTimestamp.assertFromInstant(tickTock.now)
+  override protected def warnIfClockRunsBackwards: Boolean = true
 
   // Keeping a dedicated scheduler, as it may have to run long running tasks.
   // Once all tasks are guaranteed to be "light", the environment scheduler can be used.

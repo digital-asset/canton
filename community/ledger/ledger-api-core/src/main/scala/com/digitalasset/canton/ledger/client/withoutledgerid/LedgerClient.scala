@@ -12,6 +12,7 @@ import com.daml.ledger.api.v1.admin.user_management_service.UserManagementServic
 import com.daml.ledger.api.v1.command_completion_service.CommandCompletionServiceGrpc
 import com.daml.ledger.api.v1.command_service.CommandServiceGrpc
 import com.daml.ledger.api.v1.command_submission_service.CommandSubmissionServiceGrpc
+import com.daml.ledger.api.v1.event_query_service.EventQueryServiceGrpc
 import com.daml.ledger.api.v1.ledger_identity_service.LedgerIdentityServiceGrpc
 import com.daml.ledger.api.v1.package_service.PackageServiceGrpc
 import com.daml.ledger.api.v1.transaction_service.TransactionServiceGrpc
@@ -20,6 +21,7 @@ import com.digitalasset.canton.ledger.client.configuration.{
   LedgerClientChannelConfiguration,
   LedgerClientConfiguration,
 }
+import com.digitalasset.canton.ledger.client.services.EventQueryServiceClient
 import com.digitalasset.canton.ledger.client.services.acs.withoutledgerid.ActiveContractSetClient
 import com.digitalasset.canton.ledger.client.services.admin.{
   MeteringReportClient,
@@ -112,6 +114,10 @@ class LedgerClient private (
         config.token,
       )
     )
+
+  val eventQueryServiceClient = new EventQueryServiceClient(
+    ClassicLedgerClient.stub(EventQueryServiceGrpc.stub(channel), config.token)
+  )
 
   override def close(): Unit = GrpcChannel.close(channel)
 }

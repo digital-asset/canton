@@ -6,8 +6,6 @@ package com.daml.fetchcontracts
 import akka.NotUsed
 import akka.stream.scaladsl.{Broadcast, Concat, Flow, GraphDSL, Source}
 import akka.stream.{FanOutShape2, Graph}
-import com.daml.fetchcontracts.domain.ContractTypeId
-import com.daml.fetchcontracts.util.*
 import com.daml.fetchcontracts.util.GraphExtensions.*
 import com.daml.fetchcontracts.util.IdentifierConverters.apiIdentifier
 import com.daml.ledger.api.v1 as lav1
@@ -15,6 +13,8 @@ import com.daml.ledger.api.v1.transaction.Transaction
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.tracing.NoTracing
+import com.daml.http.domain.{ContractTypeId, ResolvedQuery}
+import util.{AbsoluteBookmark, BeginBookmark, ContractStreamStep, InsertDeleteStep, LedgerBegin}
 
 object AcsTxStreams extends NoTracing {
   import util.AkkaStreamsUtils.{last, max, project2}
@@ -145,7 +145,7 @@ object AcsTxStreams extends NoTracing {
   ): lav1.transaction_filter.TransactionFilter = {
     import lav1.transaction_filter.*
 
-    val (templateIds, interfaceIds) = domain.ResolvedQuery.partition(contractTypeIds)
+    val (templateIds, interfaceIds) = ResolvedQuery.partition(contractTypeIds)
     val filters = Filters(
       Some(
         lav1.transaction_filter.InclusiveFilters(

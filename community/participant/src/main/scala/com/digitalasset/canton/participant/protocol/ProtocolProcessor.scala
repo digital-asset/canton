@@ -16,7 +16,6 @@ import com.digitalasset.canton.crypto.{
   DomainSyncCryptoClient,
   Signature,
 }
-import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.data.{CantonTimestamp, ViewTree, ViewType}
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
@@ -42,7 +41,10 @@ import com.digitalasset.canton.participant.protocol.submission.{
   InFlightSubmissionTracker,
   UnsequencedSubmission,
 }
-import com.digitalasset.canton.participant.protocol.validation.PendingTransaction
+import com.digitalasset.canton.participant.protocol.validation.{
+  PendingTransaction,
+  RecipientsValidator,
+}
 import com.digitalasset.canton.participant.store
 import com.digitalasset.canton.participant.store.{StoredContract, SyncDomainEphemeralState}
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
@@ -55,20 +57,19 @@ import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{AsyncResult, HandlerResult}
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
-import com.digitalasset.canton.topology.client.{PartyTopologySnapshotClient, TopologySnapshot}
-import com.digitalasset.canton.topology.{DomainId, MediatorRef, ParticipantId, PartyId}
+import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.{DomainId, MediatorRef, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.{condUnitET, ifThenET}
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, FutureUtil, MonadUtil}
+import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, RequestCounter, SequencerCounter, checked}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
-import scala.annotation.tailrec
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
@@ -120,6 +121,10 @@ abstract class ProtocolProcessor[
   import com.digitalasset.canton.util.ShowUtil.*
 
   def participantId: ParticipantId
+
+  private val recipientsValidator
+      : RecipientsValidator[(WithRecipients[steps.DecryptedView], Option[Signature])] =
+    new RecipientsValidator(_._1.unwrap, _._1.recipients, loggerFactory)
 
   private[this] def withKind(message: String): String = s"${steps.requestKind}: $message"
 
@@ -649,21 +654,28 @@ abstract class ProtocolProcessor[
         }
         (snapshot, decisionTime, decryptedViews) = preliminaryChecks
 
-        (malformedPayloads, viewsWithCorrectRootHash) = checkRootHash(decryptedViews)
-        _ = malformedPayloads.foreach { mp =>
-          logger.warn(s"Request $rc: Found malformed payload: $mp")
+        (incorrectRootHashes, viewsWithCorrectRootHash) = checkRootHash(decryptedViews)
+        _ = incorrectRootHashes.foreach { incorrectRootHash =>
+          logger.warn(s"Request $rc: Found malformed payload: $incorrectRootHash")
         }
 
         // TODO(i12643): Remove this flag when no longer needed
-        _ <- EitherT.right(
-          if (skipRecipientsCheck) FutureUnlessShutdown.unit
+        checkRecipientsResult <- EitherT.right(
+          if (skipRecipientsCheck) FutureUnlessShutdown.pure((Seq.empty, viewsWithCorrectRootHash))
           else
             FutureUnlessShutdown.outcomeF(
-              checkRecipients(requestId, viewsWithCorrectRootHash, snapshot.ipsSnapshot)
+              recipientsValidator.retainInputsWithValidRecipients(
+                requestId,
+                viewsWithCorrectRootHash,
+                snapshot.ipsSnapshot,
+              )
             )
         )
+        (incorrectRecipients, viewsWithCorrectRootHashAndRecipients) = checkRecipientsResult
 
-        _ <- NonEmpty.from(viewsWithCorrectRootHash) match {
+        malformedPayloads = incorrectRootHashes ++ incorrectRecipients
+
+        _ <- NonEmpty.from(viewsWithCorrectRootHashAndRecipients) match {
           case None =>
             ephemeral.submissionTracker.cancelRegistration(rootHash, requestId)
             trackAndSendResponsesMalformed(
@@ -1018,132 +1030,6 @@ abstract class ProtocolProcessor[
       } yield ()
     }
   }
-
-  private def checkRecipients(
-      requestId: RequestId,
-      viewsWithRecipientsAndSignature: Seq[
-        (WithRecipients[steps.DecryptedView], Option[Signature])
-      ],
-      snapshot: PartyTopologySnapshotClient,
-  )(implicit
-      traceContext: TraceContext
-  ): Future[Unit] =
-    for {
-      informeesWithGroupAddressing <- snapshot.partiesWithGroupAddressing(parties =
-        viewsWithRecipientsAndSignature.flatMap(_._1.unwrap.informees.map(_.party)).distinct.toList
-      )
-      informeeParticipantsOfPosition <- viewsWithRecipientsAndSignature
-        .parTraverse { case (WithRecipients(view, _recipients), _) =>
-          snapshot
-            .activeParticipantsOfParties(
-              view.informees.map(_.party).toList
-            )
-            .map(expectedRecipients => view.viewPosition.position -> expectedRecipients)
-        }
-        // It is ok to remove duplicates, as
-        // the expectedRecipients depend on view.informees
-        // and view.informees depends on view.viewPosition (as the root hash check has already succeeded).
-        .map(_.toMap)
-
-    } yield {
-      viewsWithRecipientsAndSignature.foreach { case (WithRecipients(view, recipients), _) =>
-        val allRecipientPathsViewToRoot = recipients.allPaths.map(_.reverse)
-
-        // TODO(i11908): Check all recipientPaths. Treat the view as well-formed, if it is well-formed for at least one path.
-        if (allRecipientPathsViewToRoot.sizeCompare(1) > 0) {
-          ErrorUtil.internalError(
-            new IllegalArgumentException(
-              s"Received a request with $requestId where the view at position ${view.viewPosition} has invalid recipients. Crashing. $recipients"
-            )
-          )
-        }
-
-        val recipientPathViewToRoot = allRecipientPathsViewToRoot.head1
-
-        /* Checks the recipients of the view at position `viewPosition`.
-         * @param recipientGroups the recipient groups of the view. The order is view, parent view, grand parent view, and so on.
-         *                        So the elements of `viewPosition` and `recipientGroups` have the same order.
-         */
-        @tailrec
-        def check(
-            viewPosition: List[MerklePathElement],
-            recipientPathViewToRoot: Seq[Set[Recipient]],
-        ): Unit =
-          (recipientPathViewToRoot: Seq[Set[Recipient]] @unchecked) match {
-            case Seq() => ()
-            case Seq(recipientGroup, parentGroups @ _*) =>
-              // TODO(i11908): Gracefully reject instead of throwing exceptions.
-
-              val informeePartiesToParticipants =
-                informeeParticipantsOfPosition.getOrElse(
-                  viewPosition,
-                  ErrorUtil.internalError(
-                    new IllegalArgumentException(
-                      s"Received a request with id $requestId where the view at position ${view.viewPosition} has unexpected recipient groups. Crashing...\n$recipients"
-                    )
-                  ),
-                )
-
-              {
-                val inactiveParties =
-                  informeePartiesToParticipants.collect {
-                    case (party, participants) if participants.isEmpty => party
-                  }.toSet
-                if (inactiveParties.nonEmpty)
-                  ErrorUtil.internalError(
-                    new IllegalArgumentException(
-                      s"Received a request with id $requestId where the view at position ${view.viewPosition} has informees without an active participant: $inactiveParties. Crashing..."
-                    )
-                  )
-              }
-
-              val informeeRecipients = informeePartiesToParticipants.toList.flatMap {
-                case (party, participants) =>
-                  if (informeesWithGroupAddressing.contains(party))
-                    Seq(ParticipantsOfParty(PartyId.tryFromLfParty(party)))
-                  else
-                    participants.map(MemberRecipient)
-              }.toSet
-
-              val missingRecipients = informeeRecipients -- recipientGroup
-              ErrorUtil.requireArgument(
-                missingRecipients.isEmpty,
-                s"Received a request with id $requestId where the view at position ${view.viewPosition} has missing recipients $missingRecipients. Crashing...",
-              )
-
-              val extraRecipients = recipientGroup -- informeeRecipients
-              ErrorUtil.requireArgument(
-                extraRecipients.isEmpty,
-                s"Received a request with id $requestId where the view at position ${view.viewPosition} has extra recipients $extraRecipients. Crashing...",
-              )
-
-              lazy val participantsAddressed = recipientGroup.flatMap {
-                case MemberRecipient(participantId: ParticipantId) => Set(participantId)
-                case ParticipantsOfParty(party) =>
-                  informeePartiesToParticipants.getOrElse(party.toLf, Seq())
-                case _ => Set.empty
-              }
-
-              ErrorUtil.requireArgument(
-                parentGroups.nonEmpty || participantsAddressed.contains(participantId),
-                // The sequencer should prevent this situation.
-                // Throwing, because it indicates that the participant has received a view it is not supposed to receive.
-                s"Received a request with id $requestId with a root view at ${view.viewPosition} that this participant is not allowed to receive.\n$recipients",
-              )
-
-              viewPosition match {
-                case Nil =>
-                  ErrorUtil.requireArgument(
-                    parentGroups.isEmpty,
-                    s"Received a request with id $requestId where the view at ${view.viewPosition} has too many levels of recipients.\n$recipients",
-                  )
-                case _ :: parentPosition => check(parentPosition, parentGroups)
-              }
-          }
-
-        check(view.viewPosition.position, recipientPathViewToRoot)
-      }
-    }
 
   override def processMalformedMediatorRequestResult(
       timestamp: CantonTimestamp,
@@ -1963,11 +1849,14 @@ object ProtocolProcessor {
     )
   }
 
-  final case class WrongRecipients(viewTree: ViewTree, cause: String) extends MalformedPayload {
+  final case class WrongRecipients(viewTree: ViewTree) extends MalformedPayload {
 
     override def viewHash: ViewHash = viewTree.viewHash
 
     override def pretty: Pretty[WrongRecipients] =
-      prettyOfClass(param("cause", _.cause.unquoted), param("viewTree", _.viewTree))
+      prettyOfClass(
+        param("viewHash", _.viewTree.viewHash),
+        param("viewPosition", _.viewTree.viewPosition),
+      )
   }
 }

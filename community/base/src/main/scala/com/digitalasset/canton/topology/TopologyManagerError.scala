@@ -226,23 +226,6 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
   }
 
   @Explanation(
-    """This error indicates that the desired certificate could not be created."""
-  )
-  @Resolution("""Inspect the underlying error for details.""")
-  object CertificateGenerationError
-      extends ErrorCode(
-        id = "CERTIFICATE_GENERATION_ERROR",
-        ErrorCategory.SystemInternalAssumptionViolated,
-      ) {
-    final case class Failure(error: X509CertificateError)(implicit
-        val loggingContext: ErrorLoggingContext
-    ) extends CantonError.Impl(
-          cause = "Failed to generate the certificate"
-        )
-        with TopologyManagerError
-  }
-
-  @Explanation(
     """This error indicates that the attempt to add a transaction was rejected, as the signing key is not authorized within the current state."""
   )
   @Resolution(

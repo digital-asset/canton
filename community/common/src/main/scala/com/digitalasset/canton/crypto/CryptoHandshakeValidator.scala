@@ -22,7 +22,7 @@ object CryptoHandshakeValidator {
       _ <- Either.cond(
         unsupported.isEmpty,
         (),
-        s"Required schemes $unsupported are not supported/allowed",
+        s"Required schemes $unsupported are not supported/allowed (${scheme.allowed})",
       )
 
       // The default scheme must be a required scheme, otherwise another node may not allow and support our default scheme.
@@ -57,11 +57,12 @@ object CryptoHandshakeValidator {
         selectSchemes(config.hash, config.provider.hash),
       )
       requiredFormats = parameters.requiredCryptoKeyFormats
-      unsupportedFormats = requiredFormats.diff(config.provider.supportedCryptoKeyFormats)
+      supportedFormats = config.provider.supportedCryptoKeyFormats
+      unsupportedFormats = requiredFormats.diff(supportedFormats)
       _ <- Either.cond(
         unsupportedFormats.isEmpty,
         (),
-        s"Required schemes $requiredFormats are not supported/allowed: $unsupportedFormats",
+        s"Required schemes $unsupportedFormats are not supported/allowed ($supportedFormats)",
       )
     } yield ()
 

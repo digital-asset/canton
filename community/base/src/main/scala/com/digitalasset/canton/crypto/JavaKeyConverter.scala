@@ -3,127 +3,26 @@
 
 package com.digitalasset.canton.crypto
 
-import cats.data.EitherT
-import cats.syntax.either.*
-import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.Password
-import com.digitalasset.canton.crypto.store.{CryptoPrivateStoreExtended, CryptoPublicStore}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.util.ErrorUtil
+import com.google.protobuf.ByteString
 import org.bouncycastle.asn1.edec.EdECObjectIdentifiers
 import org.bouncycastle.asn1.gm.GMObjectIdentifiers
 import org.bouncycastle.asn1.sec.SECObjectIdentifiers
-import org.bouncycastle.asn1.x509.AlgorithmIdentifier
+import org.bouncycastle.asn1.x509.{AlgorithmIdentifier, SubjectPublicKeyInfo}
 import org.bouncycastle.asn1.x9.X9ObjectIdentifiers
+import org.bouncycastle.openssl.PEMParser
 
-import java.security.{
-  KeyStore as JKeyStore,
-  KeyStoreException,
-  PrivateKey as JPrivateKey,
-  PublicKey as JPublicKey,
-}
-import scala.concurrent.{ExecutionContext, Future}
+import java.io.{IOException, StringReader}
+import java.security.PublicKey as JPublicKey
 
 trait JavaKeyConverter {
-
-  import com.digitalasset.canton.util.ShowUtil.*
-
-  /** Convert to Java private key */
-  def toJava(privateKey: PrivateKey): Either[JavaKeyConversionError, JPrivateKey]
 
   /** Convert to Java public key */
   def toJava(
       publicKey: PublicKey
   ): Either[JavaKeyConversionError, (AlgorithmIdentifier, JPublicKey)]
-
-  /** Export certificates and corresponding signing private keys to a Java key store */
-  @SuppressWarnings(Array("org.wartremover.warts.Null"))
-  def toJava(
-      cryptoPrivateStore: CryptoPrivateStoreExtended,
-      cryptoPublicStore: CryptoPublicStore,
-      keyStorePass: Password,
-  )(implicit
-      ec: ExecutionContext,
-      traceContext: TraceContext,
-  ): EitherT[Future, JavaKeyConversionError, JKeyStore] = {
-
-    def exportCertificate(
-        keystore: JKeyStore,
-        cert: X509Certificate,
-    ): EitherT[Future, JavaKeyConversionError, Unit] =
-      for {
-        _ <- Either
-          .catchOnly[KeyStoreException](keystore.setCertificateEntry(cert.id.unwrap, cert.unwrap))
-          .leftMap(err =>
-            JavaKeyConversionError.KeyStoreError(
-              show"Failed to set certificate entry in keystore: $err"
-            )
-          )
-          .toEitherT[Future]
-        keyId <- cert
-          .publicKey(this)
-          .bimap(
-            err =>
-              JavaKeyConversionError.KeyStoreError(
-                s"Failed to get public key id from certificate: $err"
-              ),
-            _.fingerprint,
-          )
-          .toEitherT[Future]
-        privateKey <- cryptoPrivateStore
-          .signingKey(keyId)
-          .leftMap(storeError =>
-            JavaKeyConversionError.KeyStoreError(
-              show"Error retrieving private signing key $keyId: $storeError"
-            )
-          )
-          .subflatMap(
-            _.toRight(
-              JavaKeyConversionError.KeyStoreError(show"Unknown private signing key $keyId")
-            )
-          )
-        javaPrivateKey <- toJava(privateKey).toEitherT[Future]
-        _ <- Either
-          .catchOnly[KeyStoreException](
-            keystore.setKeyEntry(
-              cert.id.unwrap,
-              javaPrivateKey,
-              keyStorePass.toCharArray,
-              Array(cert.unwrap),
-            )
-          )
-          .leftMap[JavaKeyConversionError](err =>
-            JavaKeyConversionError.KeyStoreError(show"Failed to set key in keystore: $err")
-          )
-          .toEitherT[Future]
-      } yield ()
-
-    for {
-      keystore <- Either
-        .catchOnly[KeyStoreException](JKeyStore.getInstance("PKCS12"))
-        .leftMap(err =>
-          JavaKeyConversionError.KeyStoreError(show"Failed to create keystore instance: $err")
-        )
-        .toEitherT[Future]
-
-      _ <- Either
-        .catchNonFatal(keystore.load(null, keyStorePass.toCharArray))
-        .leftMap(err =>
-          JavaKeyConversionError.KeyStoreError(show"Failed to initialize keystore: $err")
-        )
-        .toEitherT[Future]
-
-      certs <- cryptoPublicStore
-        .listCertificates()
-        .leftMap(err =>
-          JavaKeyConversionError.KeyStoreError(show"Failed to list certificates: $err")
-        )
-
-      _ <- certs.toList.parTraverse_(cert => exportCertificate(keystore, cert))
-    } yield keystore
-  }
 
   def fromJavaSigningKey(
       publicKey: JPublicKey,
@@ -147,6 +46,27 @@ object JavaKeyConverter {
         Left(JavaKeyConversionError.UnsupportedAlgorithm(algoId))
     }
 
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+  def convertPublicKeyFromPemToDer(pubKeyPEM: String): Either[String, ByteString] = {
+    val pemParser: PEMParser = new PEMParser(new StringReader(pubKeyPEM))
+    try {
+      Option(pemParser.readObject) match {
+        case Some(spki: SubjectPublicKeyInfo) =>
+          Right(ByteString.copyFrom(spki.getEncoded))
+        case Some(_) =>
+          Left("unexpected type conversion")
+        case None =>
+          Left("could not parse public key info from PEM format")
+      }
+    } catch {
+      case e: IOException =>
+        Left(
+          s"failed to convert public key from PEM to DER format: ${ErrorUtil.messageWithStacktrace(e)}"
+        )
+    } finally {
+      pemParser.close()
+    }
+  }
 }
 
 sealed trait JavaKeyConversionError extends Product with Serializable with PrettyPrinting

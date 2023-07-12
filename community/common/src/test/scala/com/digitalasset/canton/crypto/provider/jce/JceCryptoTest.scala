@@ -20,7 +20,6 @@ class JceCryptoTest
     with PrivateKeySerializationTest
     with HkdfTest
     with RandomTest
-    with JavaPrivateKeyConverterTest
     with JavaPublicKeyConverterTest {
 
   "JceCrypto" can {
@@ -86,11 +85,6 @@ class JceCryptoTest
     behave like hkdfProvider(jceCrypto().map(_.pureCrypto))
     behave like randomnessProvider(jceCrypto().map(_.pureCrypto))
     behave like javaPublicKeyConverterProvider(
-      Jce.signing.supported,
-      Jce.encryption.supported,
-      jceCrypto(),
-    )
-    behave like javaPrivateKeyConverterProvider(
       Jce.signing.supported,
       Jce.encryption.supported,
       jceCrypto(),

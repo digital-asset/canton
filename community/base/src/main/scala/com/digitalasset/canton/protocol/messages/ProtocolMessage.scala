@@ -4,7 +4,7 @@
 package com.digitalasset.canton.protocol.messages
 
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.{v0, v1, v2}
+import com.digitalasset.canton.protocol.{v0, v1, v2, v3}
 import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.version.{
@@ -46,8 +46,13 @@ trait ProtocolMessageV1 extends ProtocolMessage {
 }
 
 /** Trait for [[ProtocolMessage]]s that can be serialized as a v2 [[EnvelopeContent]] */
-trait UnsignedProtocolMessageV2 extends ProtocolMessage {
-  protected[messages] def toProtoSomeEnvelopeContentV2: v2.EnvelopeContent.SomeEnvelopeContent
+trait ProtocolMessageV2 extends ProtocolMessage {
+  protected[messages] def toProtoEnvelopeContentV2: v2.EnvelopeContent
+}
+
+/** Trait for [[ProtocolMessage]]s that can be serialized as a v3 [[EnvelopeContent]] */
+trait UnsignedProtocolMessageV3 extends ProtocolMessage {
+  protected[messages] def toProtoSomeEnvelopeContentV3: v3.EnvelopeContent.SomeEnvelopeContent
 }
 
 object ProtocolMessage {

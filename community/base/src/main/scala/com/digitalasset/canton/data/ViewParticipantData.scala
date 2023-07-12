@@ -174,6 +174,7 @@ final case class ViewParticipantData private (
 
       case ExerciseActionDescription(
             inputContractId,
+            _templateId,
             choice,
             interfaceId,
             chosenValue,
@@ -279,6 +280,16 @@ final case class ViewParticipantData private (
     salt = Some(salt.toProtoV0),
   )
 
+  private[ViewParticipantData] def toProtoV3: v3.ViewParticipantData = v3.ViewParticipantData(
+    coreInputs = coreInputs.values.map(_.toProtoV1).toSeq,
+    createdCore = createdCore.map(_.toProtoV1),
+    createdInSubviewArchivedInCore = createdInSubviewArchivedInCore.toSeq.map(_.toProtoPrimitive),
+    resolvedKeys = resolvedKeys.toList.map { case (k, res) => ResolvedKey(k, res).toProtoV0 },
+    actionDescription = Some(actionDescription.toProtoV2),
+    rollbackContext = if (rollbackContext.isEmpty) None else Some(rollbackContext.toProtoV0),
+    salt = Some(salt.toProtoV0),
+  )
+
   override protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
 
@@ -337,7 +348,7 @@ object ViewParticipantData
     extends HasMemoizedProtocolVersionedWithContextCompanion[ViewParticipantData, HashOps] {
   override val name: String = "ViewParticipantData"
 
-  val supportedProtoVersions = SupportedProtoVersions(
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     // Proto version 1 uses the same message format as version 0,
     // but interprets resolvedKeys differently. See ViewParticipantData's scaladoc for details
     ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.ViewParticipantData)(
@@ -347,6 +358,10 @@ object ViewParticipantData
     ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v4)(v2.ViewParticipantData)(
       supportedProtoVersionMemoized(_)(fromProtoV2),
       _.toProtoV2.toByteString,
+    ),
+    ProtoVersion(3) -> VersionedProtoConverter(ProtocolVersion.v5)(v3.ViewParticipantData)(
+      supportedProtoVersionMemoized(_)(fromProtoV3),
+      _.toProtoV3.toByteString,
     ),
   )
 
@@ -449,7 +464,7 @@ object ViewParticipantData
       rbContextP,
     ) = dataP
 
-    fromProtoV1V2(hashOps, protoVersion)(
+    fromProtoV1V2V3(hashOps, protoVersion)(
       saltP,
       coreInputsP,
       createdCoreP,
@@ -476,7 +491,7 @@ object ViewParticipantData
       rbContextP,
     ) = dataP
 
-    fromProtoV1V2(hashOps, ProtoVersion(2))(
+    fromProtoV1V2V3(hashOps, ProtoVersion(2))(
       saltP,
       coreInputsP,
       createdCoreP,
@@ -490,7 +505,34 @@ object ViewParticipantData
     )(bytes)
   }
 
-  private def fromProtoV1V2[ActionDescriptionProto, CreatedContractProto, InputContractProto](
+  private def fromProtoV3(hashOps: HashOps, dataP: v3.ViewParticipantData)(
+      bytes: ByteString
+  ): ParsingResult[ViewParticipantData] = {
+    val v3.ViewParticipantData(
+      saltP,
+      coreInputsP,
+      createdCoreP,
+      createdInSubviewArchivedInCoreP,
+      resolvedKeysP,
+      actionDescriptionP,
+      rbContextP,
+    ) = dataP
+
+    fromProtoV1V2V3(hashOps, ProtoVersion(3))(
+      saltP,
+      coreInputsP,
+      createdCoreP,
+      createdInSubviewArchivedInCoreP,
+      resolvedKeysP,
+      actionDescriptionP,
+      ActionDescription.fromProtoV2,
+      CreatedContract.fromProtoV1,
+      InputContract.fromProtoV1,
+      rbContextP,
+    )(bytes)
+  }
+
+  private def fromProtoV1V2V3[ActionDescriptionProto, CreatedContractProto, InputContractProto](
       hashOps: HashOps,
       protoVersion: ProtoVersion,
   )(

@@ -154,6 +154,8 @@ trait TransferProcessingSteps[
 
   protected def decryptTree(snapshot: DomainSnapshotSyncCryptoApi)(
       envelope: OpenEnvelope[EncryptedViewMessage[RequestViewType]]
+  )(implicit
+      tc: TraceContext
   ): EitherT[Future, EncryptedViewMessageDecryptionError[RequestViewType], WithRecipients[
     DecryptedView
   ]]

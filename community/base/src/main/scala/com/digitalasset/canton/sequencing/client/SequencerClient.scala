@@ -9,6 +9,7 @@ import cats.syntax.either.*
 import com.daml.metrics.Timed
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.crypto.{CryptoPureApi, HashPurpose}
@@ -198,6 +199,7 @@ class SequencerClientImpl(
     cryptoPureApi: CryptoPureApi,
     loggingConfig: LoggingConfig,
     val loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
     initialCounterLowerBound: SequencerCounter = SequencerCounter.Genesis,
 )(implicit executionContext: ExecutionContext, tracer: Tracer)
     extends SequencerClient
@@ -221,6 +223,8 @@ class SequencerClientImpl(
         sequencerTransports.expectedSequencers,
         sequencerTransports.sequencerTrustThreshold,
       ),
+      timeouts,
+      futureSupervisor,
     )
 
   private val sequencersTransportState =
@@ -913,7 +917,6 @@ class SequencerClientImpl(
                 )
             )
               .leftMap[SequencerClientSubscriptionError](EventAggregationError)
-              .mapK(FutureUnlessShutdown.outcomeK)
           } yield
             if (toSignalHandler) {
               signalHandler(applicationHandler)
@@ -1166,6 +1169,7 @@ class SequencerClientImpl(
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
     Seq(
+      SyncCloseable("sequencer-aggregator", sequencerAggregator.close()),
       SyncCloseable("sequencer-send-tracker", sendTracker.close()),
       // see comments above why we need two flushes
       flushCloseable("sequencer-client-flush-sync", timeouts.shutdownProcessing),

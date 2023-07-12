@@ -18,7 +18,7 @@ import com.google.protobuf.ByteString
 import com.typesafe.scalalogging.LazyLogging
 import org.bouncycastle.asn1.x509.AlgorithmIdentifier
 
-import java.security.{PrivateKey as JPrivateKey, PublicKey as JPublicKey}
+import java.security.{PublicKey as JPublicKey}
 import scala.concurrent.{ExecutionContext, Future}
 
 object SymbolicCrypto extends LazyLogging {
@@ -90,11 +90,6 @@ object SymbolicCrypto extends LazyLogging {
 
     // Conversion to java keys is not supported by symbolic crypto
     val javaKeyConverter = new JavaKeyConverter {
-      override def toJava(privateKey: PrivateKey): Either[JavaKeyConversionError, JPrivateKey] =
-        throw new UnsupportedOperationException(
-          "Symbolic crypto does not support conversion to java keys"
-        )
-
       override def toJava(
           publicKey: PublicKey
       ): Either[JavaKeyConversionError, (AlgorithmIdentifier, JPublicKey)] =

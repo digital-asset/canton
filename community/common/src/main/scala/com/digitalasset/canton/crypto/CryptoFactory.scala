@@ -69,7 +69,7 @@ trait CryptoFactory {
         case _: CryptoProvider.TinkCryptoProvider =>
           TinkPureCrypto.create(symmetricKeyScheme, hashAlgorithm)
         case _: CryptoProvider.JceCryptoProvider =>
-          val javaKeyConverter = new JceJavaConverter(hashAlgorithm, requiredSigningKeySchemes)
+          val javaKeyConverter = new JceJavaConverter(requiredSigningKeySchemes)
           Right(
             new JcePureCrypto(javaKeyConverter, symmetricKeyScheme, hashAlgorithm, loggerFactory)
           )
@@ -94,7 +94,7 @@ trait CryptoFactory {
         CryptoPublicStore.create(storage, releaseProtocolVersion, timeouts, loggerFactory)
       )
       cryptoPrivateStore <- cryptoPrivateStoreFactory
-        .create(cryptoPublicStore, storage, releaseProtocolVersion, timeouts, loggerFactory)
+        .create(storage, releaseProtocolVersion, timeouts, loggerFactory)
         .leftMap(err => show"Failed to create crypto private store: $err")
       symmetricKeyScheme <- selectSchemes(config.symmetric, config.provider.symmetric)
         .map(_.default)
@@ -265,8 +265,7 @@ object JceCrypto {
       _ = Security.addProvider(new BouncyCastleProvider)
       requiredSigningKeySchemes <- selectAllowedSigningKeyScheme(config).toEitherT[Future]
       javaKeyConverter = new JceJavaConverter(
-        storesAndSchemes.hashAlgorithm,
-        requiredSigningKeySchemes,
+        requiredSigningKeySchemes
       )
       pureCrypto =
         new JcePureCrypto(

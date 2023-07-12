@@ -1174,6 +1174,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
+        sequencerTrustThreshold: PositiveInt = PositiveInt.tryCreate(1),
     ): Unit = {
       val config = ParticipantCommands.domains.referenceToConfig(
         domain,
@@ -1181,6 +1182,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         alias,
         maxRetryDelayMillis.map(NonNegativeFiniteDuration.tryOfMillis),
         priority,
+        sequencerTrustThreshold,
       )
       connectFromConfig(config, synchronize)
     }

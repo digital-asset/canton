@@ -28,9 +28,12 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class TopologyStateProcessorX(
     val store: TopologyStoreX[TopologyStoreId],
-    val loggerFactory: NamedLoggerFactory,
+    loggerFactoryParent: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
+
+  override protected val loggerFactory: NamedLoggerFactory =
+    loggerFactoryParent.append("store", store.storeId.toString)
 
   // small container to store potentially pending data
   private case class MaybePending(originalTx: GenericSignedTopologyTransactionX) {

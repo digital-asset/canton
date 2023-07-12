@@ -15,7 +15,7 @@ import "scalapb/scalapb.proto";
 // Removed field notification_tree
 // Added fields root_hash, domain_id
 message TransactionResultMessage {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
   google.protobuf.Timestamp request_id = 1;
   Verdict verdict = 2;
@@ -24,7 +24,7 @@ message TransactionResultMessage {
 }
 
 message Verdict {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
   oneof some_verdict {
     google.protobuf.Empty approve = 1;

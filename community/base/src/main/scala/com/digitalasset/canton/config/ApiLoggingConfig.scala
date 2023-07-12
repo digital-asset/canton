@@ -18,6 +18,7 @@ import com.digitalasset.canton.logging.pretty.CantonPrettyPrinter
   * @param maxMessageLines maximum number of lines to log for a message
   * @param maxStringLength maximum number of characters to log for a string within a message
   * @param maxMetadataSize maximum size of metadata
+  * @param warnBeyondLoad If API logging is turned on, emit a warning on each request if the load exceeds this threshold.
   */
 final case class ApiLoggingConfig(
     // TODO(i9014) change to boolean (breaking change)
@@ -26,6 +27,7 @@ final case class ApiLoggingConfig(
     maxMessageLines: Int = ApiLoggingConfig.defaultMaxMessageLines,
     maxStringLength: Int = ApiLoggingConfig.defaultMaxStringLength,
     maxMetadataSize: Int = ApiLoggingConfig.defaultMaxMetadataSize,
+    warnBeyondLoad: Option[Int] = ApiLoggingConfig.defaultWarnBeyondLoad,
 ) {
 
   def logMessagePayloads: Boolean = messagePayloads.getOrElse(false)
@@ -40,4 +42,5 @@ object ApiLoggingConfig {
   val defaultMaxMessageLines: Int = 20
   val defaultMaxStringLength: Int = 250
   val defaultMaxMetadataSize: Int = 200
+  val defaultWarnBeyondLoad: Option[Int] = Some(5)
 }

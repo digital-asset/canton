@@ -12,23 +12,26 @@ import java.io.File
 import scala.annotation.nowarn
 
 sealed trait LogFileAppender
+
 object LogFileAppender {
   object Rolling extends LogFileAppender
+
   object Flat extends LogFileAppender
+
   object Off extends LogFileAppender
 }
 
 sealed trait LogEncoder
+
 object LogEncoder {
   object Plain extends LogEncoder
+
   object Json extends LogEncoder
 }
 
 /** CLI Options
-  * @param configFiles Configuration files to load
-  * @param command Command specification to perform a particular action
-  * @param noTty Do we know the process does not have access to a tty?
-  *              Used for disabling rich REPL input for environments where it may not be available (e.g. docker, IntelliJ)
+  *
+  * See the description for each argument in the CLI builder below.
   */
 final case class Cli(
     configFiles: Seq[File] = Seq(),
@@ -40,16 +43,21 @@ final case class Cli(
     levelStdout: Level = Level.WARN,
     logFileAppender: LogFileAppender = LogFileAppender.Rolling,
     logFileRollingPattern: Option[String] = None,
+    kmsLogFileRollingPattern: Option[String] = None,
     logFileHistory: Option[Int] = None,
+    kmsLogFileHistory: Option[Int] = None,
     logTruncate: Boolean = false,
     logFileName: Option[String] = None,
+    kmsLogFileName: Option[String] = None,
     logEncoder: LogEncoder = LogEncoder.Plain,
     logLastErrors: Boolean = true,
     logLastErrorsFileName: Option[String] = None,
     logImmediateFlush: Option[Boolean] = None,
+    kmsLogImmediateFlush: Option[Boolean] = None,
     bootstrapScriptPath: Option[File] = None,
     manualStart: Boolean = false,
     autoConnectLocal: Boolean = false,
+    mergeAwsLogs: Option[Boolean] = None,
 ) {
 
   /** sets the properties our logback.xml is looking for */
@@ -80,17 +88,25 @@ final case class Cli(
       "LOG_FILE_FLAT",
       "LOG_FILE_ROLLING",
       "LOG_FILE_NAME",
+      "KMS_LOG_FILE_NAME",
       "LOG_FILE_ROLLING_PATTERN",
+      "KMS_LOG_FILE_ROLLING_PATTERN",
       "LOG_FILE_HISTORY",
+      "KMS_LOG_FILE_HISTORY",
       "LOG_LAST_ERRORS",
       "LOG_LAST_ERRORS_FILE_NAME",
       "LOG_FORMAT_JSON",
       "LOG_IMMEDIATE_FLUSH",
+      "KMS_LOG_IMMEDIATE_FLUSH",
+      "MERGE_KMS_LOG",
     ).foreach(System.clearProperty(_).discard[String])
     logFileName.foreach(System.setProperty("LOG_FILE_NAME", _))
+    kmsLogFileName.foreach(System.setProperty("KMS_LOG_FILE_NAME", _))
     logLastErrorsFileName.foreach(System.setProperty("LOG_LAST_ERRORS_FILE_NAME", _))
     logFileHistory.foreach(x => System.setProperty("LOG_FILE_HISTORY", x.toString))
+    kmsLogFileHistory.foreach(x => System.setProperty("KMS_LOG_FILE_HISTORY", x.toString))
     logFileRollingPattern.foreach(System.setProperty("LOG_FILE_ROLLING_PATTERN", _))
+    kmsLogFileRollingPattern.foreach(System.setProperty("KMS_LOG_FILE_ROLLING_PATTERN", _))
     logFileAppender match {
       case LogFileAppender.Rolling =>
         System.setProperty("LOG_FILE_ROLLING", "true").discard
@@ -108,6 +124,8 @@ final case class Cli(
     }
 
     logImmediateFlush.foreach(f => System.setProperty("LOG_IMMEDIATE_FLUSH", f.toString))
+    kmsLogImmediateFlush.foreach(f => System.setProperty("KMS_LOG_IMMEDIATE_FLUSH", f.toString))
+    mergeAwsLogs.foreach(f => System.setProperty("MERGE_KMS_LOG", f.toString))
   }
 
   private def setLevel(levelO: Option[Level], name: String): Unit = {
@@ -239,13 +257,25 @@ object Cli {
         .text("Name and location of log-file, default is log/canton.log")
         .action((name, cli) => cli.copy(logFileName = Some(name)))
 
+      opt[String]("kms-log-file-name")
+        .text("Name and location of KMS log-file, default is log/canton_kms.log")
+        .action((name, cli) => cli.copy(kmsLogFileName = Some(name)))
+
       opt[Int]("log-file-rolling-history")
         .text("Number of history files to keep when using rolling log file appender.")
         .action((history, cli) => cli.copy(logFileHistory = Some(history)))
 
+      opt[Int]("kms-log-file-rolling-history")
+        .text("Number of history KMS files to keep when using rolling log file appender.")
+        .action((history, cli) => cli.copy(kmsLogFileHistory = Some(history)))
+
       opt[String]("log-file-rolling-pattern")
         .text("Log file suffix pattern of rolling file appender. Default is 'yyyy-MM-dd'.")
         .action((pattern, cli) => cli.copy(logFileRollingPattern = Some(pattern)))
+
+      opt[String]("kms-log-file-rolling-pattern")
+        .text("KMS log file suffix pattern of rolling file appender. Default is 'yyyy-MM-dd'.")
+        .action((pattern, cli) => cli.copy(kmsLogFileRollingPattern = Some(pattern)))
 
       opt[String]("log-encoder")
         .text("Log encoder: plain|json")
@@ -259,11 +289,29 @@ object Cli {
       opt[Boolean]("log-immediate-flush")
         .text(
           """Determines whether to immediately flush log output to the log file.
-          |Enable to avoid an incomplete log file in case of a crash.
-          |Disable to reduce the load on the disk caused by logging.""".stripMargin
+            |Enable to avoid an incomplete log file in case of a crash.
+            |Disable to reduce the load on the disk caused by logging.""".stripMargin
         )
         .valueName("true(default)|false")
         .action((enabled, cli) => cli.copy(logImmediateFlush = Some(enabled)))
+
+      opt[Boolean]("kms-log-immediate-flush")
+        .text(
+          """Determines whether to immediately flush KMS log output to the KMS log file.
+            |Enable to avoid an incomplete log file in case of a crash.
+            |Disable to reduce the load on the disk caused by logging.""".stripMargin
+        )
+        .valueName("true(default)|false")
+        .action((enabled, cli) => cli.copy(kmsLogImmediateFlush = Some(enabled)))
+
+      opt[Boolean]("merge-kms-log")
+        .text(
+          """When true, KMS call logs will be merged into the main canton log file instead of being logged
+            | to a separate log file.
+            |""".stripMargin
+        )
+        .valueName("false(default)|true")
+        .action((enabled, cli) => cli.copy(mergeAwsLogs = Some(enabled)))
 
       opt[String]("log-profile")
         .text("Preconfigured logging profiles: (container)")

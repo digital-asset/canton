@@ -597,10 +597,11 @@ class DomainTopologySenderTest
       retryInterval = 100.millis,
       DefaultProcessingTimeouts.testing,
       loggerFactory,
-      FutureSupervisor.Noop,
     ) {
       override def send(
-          batch: Batch[OpenEnvelope[DomainTopologyTransactionMessage]],
+          batch: CantonTimestamp => EitherT[Future, String, Batch[
+            OpenEnvelope[DomainTopologyTransactionMessage]
+          ]],
           callback: SendCallback,
       )(implicit
           traceContext: TraceContext
@@ -611,7 +612,7 @@ class DomainTopologySenderTest
             logger.error("Unexpected send!!!")
             FutureUnlessShutdown.pure(Left(RequestInvalid("unexpected send")))
           case one :: _ =>
-            one.sendNotification.success(batch)
+            one.sendNotification.success(batch(CantonTimestamp.Epoch).futureValue)
             one.await.foreach { _ =>
               one.async.map(UnlessShutdown.Outcome(_)).foreach(callback)
             }
@@ -741,8 +742,14 @@ class DomainTopologySenderTest
           res2 <- resp2F
           sub <- submF
         } yield {
-          // we retried
-          res1 shouldBe res2
+          // we retried so we should have the same message content, but the signature might differ
+          // as we are re-creating the message with the new max-sequencing-timeout
+          // and signature generation is not deterministic
+          def comp(m: DomainTopologyTransactionMessage) =
+            (m.notSequencedAfter, m.domainId, m.transactions)
+          res1.envelopes.map(x => comp(x.protocolMessage)) shouldBe res2.envelopes.map(x =>
+            comp(x.protocolMessage)
+          )
           assert(sub.isRight)
         }
 

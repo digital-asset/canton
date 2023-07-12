@@ -5,8 +5,7 @@ package com.digitalasset.canton.platform.store.cache
 
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.{ImmArray, Ref, Time}
-import com.daml.lf.transaction.GlobalKey
-import com.daml.lf.transaction.test.TransactionBuilder
+import com.daml.lf.transaction.{GlobalKey, TransactionVersion, Versioned}
 import com.daml.lf.value.Value.{ContractInstance, ValueInt64, ValueRecord}
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.offset.Offset
@@ -171,7 +170,7 @@ class ContractStateCachesSpec
       ImmArray(None -> ValueInt64(id.toLong)),
     )
     val contractInstance = ContractInstance(templateId, contractArgument)
-    TransactionBuilder().versionContract(contractInstance)
+    Versioned(TransactionVersion.StableVersions.max, contractInstance)
   }
 
   private def offset(idx: Int) = Offset.fromByteArray(BigInt(idx.toLong).toByteArray)

@@ -90,19 +90,8 @@ trait DomainTopologyManagerIdentityInitialization[StoredNodeConfig] {
         staticDomainParametersFromConfig.protocolVersion,
       )
 
-      // Setup the legal identity of the domain nodes
       domainTopologyManagerId = DomainTopologyManagerId(uid)
-      _ <-
-        if (initConfig.identity.exists(_.generateLegalIdentityCertificate)) {
-          (new LegalIdentityInit(certificateGenerator, crypto.value))
-            .getOrGenerateCertificate(
-              uid,
-              Seq(MediatorId(uid), domainTopologyManagerId),
-            )
-            .mapK(FutureUnlessShutdown.outcomeK)
-        } else {
-          EitherT.rightT[FutureUnlessShutdown, String](())
-        }
+
       // now, we assign the topology manager key with the domain topology manager
       _ <- authorizeStateUpdate(
         topologyManager,

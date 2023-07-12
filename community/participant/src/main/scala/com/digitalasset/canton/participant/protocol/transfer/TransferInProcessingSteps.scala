@@ -249,6 +249,8 @@ private[transfer] class TransferInProcessingSteps(
 
   override protected def decryptTree(snapshot: DomainSnapshotSyncCryptoApi)(
       envelope: OpenEnvelope[EncryptedViewMessage[TransferInViewType]]
+  )(implicit
+      tc: TraceContext
   ): EitherT[Future, EncryptedViewMessageDecryptionError[TransferInViewType], WithRecipients[
     FullTransferInTree
   ]] =

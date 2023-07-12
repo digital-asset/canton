@@ -4,26 +4,25 @@
 package com.daml.http
 package endpoints
 
-import akka.http.scaladsl.model._
-import com.daml.lf.value.{Value => LfValue}
-import EndpointsCompanion._
+import akka.http.scaladsl.model.*
+import com.daml.lf.value.{Value as LfValue}
+import EndpointsCompanion.*
 import Endpoints.ET
 import domain.{ContractTypeId, JwtPayloadTag, JwtWritePayload}
-import json._
+import json.*
 import util.FutureUtil.{either, eitherT}
 import util.Logging.{InstanceUUID, RequestID}
 import util.toLedgerId
-import util.JwtParties._
+import util.JwtParties.*
 import com.daml.jwt.domain.Jwt
-import com.daml.ledger.api.{v1 => lav1}
-import lav1.value.{Value => ApiValue, Record => ApiRecord}
-import scalaz.std.scalaFuture._
-import scalaz.syntax.traverse._
-import scalaz.syntax.std.option._
+import com.daml.ledger.api.{v1 as lav1}
+import lav1.value.{Value as ApiValue, Record as ApiRecord}
+import scalaz.std.scalaFuture.*
+import scalaz.syntax.traverse.*
 import scalaz.{-\/, EitherT, \/, \/-}
-import spray.json._
+import spray.json.*
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 import com.daml.http.metrics.HttpApiMetrics
 import com.daml.logging.LoggingContextOf
 import com.daml.metrics.Timed
@@ -34,15 +33,15 @@ private[http] final class CreateAndExercise(
     commandService: CommandService,
     contractsService: ContractsService,
 )(implicit ec: ExecutionContext) {
-  import CreateAndExercise._
-  import routeSetup._, RouteSetup._
-  import json.JsonProtocol._
-  import util.ErrorOps._
+  import CreateAndExercise.*
+  import routeSetup.*, RouteSetup.*
+  import json.JsonProtocol.*
+  import util.ErrorOps.*
 
   def create(req: HttpRequest)(implicit
-                               lc: LoggingContextOf[InstanceUUID with RequestID],
-                               ec: ExecutionContext,
-                               metrics: HttpApiMetrics,
+      lc: LoggingContextOf[InstanceUUID with RequestID],
+      ec: ExecutionContext,
+      metrics: HttpApiMetrics,
   ): ET[domain.SyncResponse[JsValue]] =
     handleCommand(req) { (jwt, jwtPayload, reqBody, parseAndDecodeTimer) => implicit lc =>
       for {
@@ -64,9 +63,9 @@ private[http] final class CreateAndExercise(
     }
 
   def exercise(req: HttpRequest)(implicit
-                                 lc: LoggingContextOf[InstanceUUID with RequestID],
-                                 ec: ExecutionContext,
-                                 metrics: HttpApiMetrics,
+      lc: LoggingContextOf[InstanceUUID with RequestID],
+      ec: ExecutionContext,
+      metrics: HttpApiMetrics,
   ): ET[domain.SyncResponse[JsValue]] =
     handleCommand(req) { (jwt, jwtPayload, reqBody, parseAndDecodeTimer) => implicit lc =>
       for {
@@ -77,14 +76,12 @@ private[http] final class CreateAndExercise(
             domain.ExerciseCommand.RequiredPkg[LfValue, domain.ContractLocator[LfValue]]
           ]
         _ <- EitherT.pure(parseAndDecodeTimer.stop())
-        resolvedRef <- eitherT(
-          resolveReference(jwt, jwtPayload, cmd.meta, cmd.reference)
-        ): ET[domain.ResolvedContractRef[ApiValue]]
+        resolvedRef <- resolveReference(jwt, jwtPayload, cmd.meta, cmd.reference)
 
         apiArg <- either(lfValueToApiValue(cmd.argument)): ET[ApiValue]
 
         apiMeta <- either {
-          import scalaz.std.option._
+          import scalaz.std.option.*
           cmd.meta traverse (_ traverse lfValueToApiValue)
         }
 
@@ -103,8 +100,8 @@ private[http] final class CreateAndExercise(
     }
 
   def createAndExercise(req: HttpRequest)(implicit
-                                          lc: LoggingContextOf[InstanceUUID with RequestID],
-                                          metrics: HttpApiMetrics,
+      lc: LoggingContextOf[InstanceUUID with RequestID],
+      metrics: HttpApiMetrics,
   ): ET[domain.SyncResponse[JsValue]] =
     handleCommand(req) { (jwt, jwtPayload, reqBody, parseAndDecodeTimer) => implicit lc =>
       for {
@@ -133,9 +130,9 @@ private[http] final class CreateAndExercise(
       meta: Option[domain.CommandMeta.IgnoreDisclosed],
       reference: domain.ContractLocator[LfValue],
   )(implicit
-    lc: LoggingContextOf[JwtPayloadTag with InstanceUUID with RequestID],
-    metrics: HttpApiMetrics,
-  ): Future[Error \/ domain.ResolvedContractRef[ApiValue]] =
+      lc: LoggingContextOf[JwtPayloadTag with InstanceUUID with RequestID],
+      metrics: HttpApiMetrics,
+  ): ET[domain.ResolvedContractRef[ApiValue]] =
     contractsService
       .resolveContractReference(
         jwt,
@@ -143,18 +140,14 @@ private[http] final class CreateAndExercise(
         reference,
         toLedgerId(jwtPayload.ledgerId),
       )
-      .map { o: Option[domain.ResolvedContractRef[LfValue]] =>
-        val a: Error \/ domain.ResolvedContractRef[LfValue] =
-          o.toRightDisjunction(InvalidUserInput(ErrorMessages.cannotResolveTemplateId(reference)))
-        a.flatMap {
-          case -\/((tpId, key)) => lfValueToApiValue(key).map(k => -\/((tpId, k)))
-          case a @ \/-((_, _)) => \/-(a)
-        }
+      .flatMap {
+        case -\/((tpId, key)) => EitherT.either(lfValueToApiValue(key).map(k => -\/(tpId -> k)))
+        case a @ \/-((_, _)) => EitherT.pure(a)
       }
 }
 
- object CreateAndExercise {
-  import util.ErrorOps._
+object CreateAndExercise {
+  import util.ErrorOps.*
 
   private def lfValueToApiValue(a: LfValue): Error \/ ApiValue =
     JsValueToApiValueConverter.lfValueToApiValue(a).liftErr(ServerError.fromMsg)

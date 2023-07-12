@@ -18,11 +18,9 @@ import scalaz.{@@, Applicative, Order, Semigroup, Show, Tag, Tags, Traverse, \/}
 package object domain {
   type LfValue = lf.value.Value
 
-  type ContractIdTag = lar.ContractIdTag
   type ContractId = lar.ContractId
   val ContractId = lar.ContractId
 
-  type PartyTag = lar.PartyTag
   type Party = lar.Party
   val Party = lar.Party
 
@@ -39,6 +37,7 @@ package object domain {
 
 package domain {
 
+  import com.daml.http.domain.{ContractTypeId, ResolvedQuery}
   import scalaz.\/-
 
   final case class Error(id: Symbol, message: String)
@@ -145,7 +144,7 @@ package domain {
       )
     }
 
-    /** Either a [[ResolvedQuery]] or [[IgnoreInterface]].  Enables well-founded
+    /** Either a [[com.daml.http.domain.ResolvedQuery]] or [[IgnoreInterface]]. Enables well-founded
       * overloading of `fromLedgerApi` on these contexts.
       */
     sealed abstract class ForQuery[-RQ, CtTyId] extends Product with Serializable

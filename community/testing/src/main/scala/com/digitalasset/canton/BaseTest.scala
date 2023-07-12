@@ -303,6 +303,8 @@ trait BaseTest
       fut.onShutdown(fail(s"Shutdown during $clue"))
     def failOnShutdown(implicit ec: ExecutionContext, pos: Position): Future[A] =
       fut.onShutdown(fail(s"Unexpected shutdown"))
+    def futureValueUS(implicit ec: ExecutionContext, pos: Position): A =
+      fut.failOnShutdown.futureValue
   }
 
   def forEveryParallel[A](inputs: Seq[A])(

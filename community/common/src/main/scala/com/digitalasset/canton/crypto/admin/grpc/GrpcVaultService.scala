@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
-import cats.syntax.traverseFilter.*
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.admin.v0
@@ -18,20 +17,17 @@ import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
 import com.digitalasset.canton.networking.grpc.StaticGrpcServices
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{EitherTUtil, OptionUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import com.google.protobuf.empty.Empty
-import org.bouncycastle.asn1.x500.X500Name
 
 import scala.concurrent.{ExecutionContext, Future}
 
 class GrpcVaultService(
     crypto: Crypto,
-    certificateGenerator: X509CertificateGenerator,
     enablePreviewFeatures: Boolean,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
@@ -175,62 +171,6 @@ class GrpcVaultService(
       StaticGrpcServices.notSupportedByCommunityStatus.asRuntimeException()
     )
 
-  override def importCertificate(
-      request: v0.ImportCertificateRequest
-  ): Future[v0.ImportCertificateResponse] = {
-    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val res = for {
-      pem <- mapErr(X509CertificatePem.fromString(request.x509Cert))
-      certificate <- mapErr(X509Certificate.fromPem(pem))
-      _ <- mapErr(crypto.cryptoPublicStore.storeCertificate(certificate))
-    } yield v0.ImportCertificateResponse(certificateId = certificate.id.unwrap)
-    EitherTUtil.toFuture(res)
-  }
-
-  override def generateCertificate(
-      request: v0.GenerateCertificateRequest
-  ): Future[v0.GenerateCertificateResponse] = {
-    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val res = for {
-      uid <- mapErr(
-        UniqueIdentifier.fromProtoPrimitive(request.uniqueIdentifier, "unique_identifier")
-      )
-      signingKeyId <- mapErr(Fingerprint.fromProtoPrimitive(request.certificateKey))
-      commonName = s"CN=${uid.toProtoPrimitive}"
-      additionalSubject = OptionUtil.emptyStringAsNone(request.additionalSubject).toList
-      subject = new X500Name((commonName +: additionalSubject).mkString(","))
-      certificate <- mapErr(
-        certificateGenerator
-          .generate(subject, signingKeyId, request.subjectAlternativeNames)
-      )
-      _ <- mapErr(crypto.cryptoPublicStore.storeCertificate(certificate))
-      pem <- mapErr(certificate.toPem)
-    } yield v0.GenerateCertificateResponse(x509Cert = pem.toString)
-    EitherTUtil.toFuture(res)
-  }
-
-  override def listCertificates(
-      request: v0.ListCertificateRequest
-  ): Future[v0.ListCertificateResponse] = {
-    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val res = for {
-      certs <- mapErr(crypto.cryptoPublicStore.listCertificates())
-      converted <- mapErr(certs.toList.traverseFilter { certificate =>
-        for {
-          pem <- certificate.toPem
-          cn <- certificate.subjectCommonName
-        } yield {
-          if (cn.startsWith(request.filterUid))
-            Some(pem)
-          else None
-        }
-      })
-    } yield v0.ListCertificateResponse(
-      results = converted.map(pem => v0.ListCertificateResponse.Result(x509Cert = pem.toString))
-    )
-    EitherTUtil.toFuture(res)
-  }
-
   override def rotateWrapperKey(
       request: v0.RotateWrapperKeyRequest
   ): Future[Empty] =
@@ -371,7 +311,6 @@ object GrpcVaultService {
   trait GrpcVaultServiceFactory {
     def create(
         crypto: Crypto,
-        certificateGenerator: X509CertificateGenerator,
         enablePreviewFeatures: Boolean,
         timeouts: ProcessingTimeout,
         loggerFactory: NamedLoggerFactory,
@@ -381,12 +320,11 @@ object GrpcVaultService {
   class CommunityGrpcVaultServiceFactory extends GrpcVaultServiceFactory {
     override def create(
         crypto: Crypto,
-        certificateGenerator: X509CertificateGenerator,
         enablePreviewFeatures: Boolean,
         timeouts: ProcessingTimeout,
         loggerFactory: NamedLoggerFactory,
     )(implicit ec: ExecutionContext): GrpcVaultService =
-      new GrpcVaultService(crypto, certificateGenerator, enablePreviewFeatures, loggerFactory)
+      new GrpcVaultService(crypto, enablePreviewFeatures, loggerFactory)
   }
 }
 

@@ -7,12 +7,8 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.api.v0
-import com.digitalasset.canton.lifecycle.{
-  AsyncCloseable,
-  AsyncOrSyncCloseable,
-  SyncCloseable,
-  UnlessShutdown,
-}
+import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
+import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.NamedLogging.loggerWithoutTracing
 import com.digitalasset.canton.metrics.SequencerClientMetrics
@@ -79,6 +75,15 @@ class GrpcSequencerSubscription[E, R: HasProtoTraceContext] private[transports] 
     * The contained future is completed whenever these methods are not busy.
     */
   private val currentProcessing = new AtomicReference[Future[Unit]](Future.unit)
+  private val currentAwaitOnNext = new AtomicReference[Promise[UnlessShutdown[Either[E, Unit]]]](
+    Promise.successful(Outcome(Right(())))
+  )
+
+  runOnShutdown(new RunOnShutdown {
+    override def name: String = "cancel-current-await-in-onNext"
+    override def done: Boolean = currentAwaitOnNext.get.isCompleted
+    override def run(): Unit = currentAwaitOnNext.get.trySuccess(AbortedDueToShutdown).discard
+  })
 
   private val cancelledByClient = new AtomicBoolean(false)
 
@@ -162,21 +167,26 @@ class GrpcSequencerSubscription[E, R: HasProtoTraceContext] private[transports] 
             // as we're responsible for calling the handler we block onNext from processing further items
             // calls to onNext are guaranteed to happen in order
 
-            val handlerResult = Try(
+            val handlerResult = Try {
+              val cancelableAwait = Promise[UnlessShutdown[Either[E, Unit]]]()
+              currentAwaitOnNext.set(cancelableAwait)
+              cancelableAwait.completeWith(callHandler(Traced(value)).map(Outcome(_)))
               timeouts.unbounded
                 .await(s"${this.getClass}: Blocking processing of further items")(
-                  callHandler(Traced(value))
+                  cancelableAwait.future
                 )
-            )
+            }
 
             handlerResult.fold[Option[SubscriptionCloseReason[E]]](
               ex => Some(SubscriptionCloseReason.HandlerException(ex)),
               {
-                case Left(err) =>
+                case Outcome(Left(err)) =>
                   Some(SubscriptionCloseReason.HandlerError(err))
-                case Right(_) =>
+                case Outcome(Right(_)) =>
                   // we'll continue
                   None
+                case AbortedDueToShutdown =>
+                  Some(SubscriptionCloseReason.Shutdown)
               },
             )
           } finally current.success(())

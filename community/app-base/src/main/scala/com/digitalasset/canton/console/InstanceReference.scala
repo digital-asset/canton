@@ -42,8 +42,7 @@ trait InstanceReferenceCommon
     with Helpful
     with NamedLogging
     with FeatureFlagFilter
-    with PrettyPrinting
-    with CertificateAdministration {
+    with PrettyPrinting {
 
   val name: String
   protected val instanceType: String

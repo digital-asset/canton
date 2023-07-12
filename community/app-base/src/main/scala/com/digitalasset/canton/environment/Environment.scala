@@ -80,7 +80,6 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
       isPrometheusEnabled,
       config.monitoring.tracing.tracer,
       config.monitoring.metrics.histograms,
-      loggerFactory,
     )
   }
 

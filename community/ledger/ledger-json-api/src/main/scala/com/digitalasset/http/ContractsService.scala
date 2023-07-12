@@ -6,52 +6,68 @@ package com.daml.http
 import akka.NotUsed
 import akka.http.scaladsl.model.StatusCodes
 import akka.stream.scaladsl.*
-import akka.stream.Materializer
 import com.daml.lf
 import com.daml.http.LedgerClientJwt.Terminates
-import com.daml.http.domain.{ContractTypeId, GetActiveContractsRequest, JwtPayload}
+import com.daml.http.domain.{ActiveContract, ContractTypeId, GetActiveContractsRequest, JwtPayload}
 import com.daml.http.json.JsonProtocol.LfValueCodec
 import com.daml.http.query.ValuePredicate
-import com.daml.fetchcontracts.util.{AbsoluteBookmark, ContractStreamStep, InsertDeleteStep}
+import com.daml.fetchcontracts.util.{
+  AbsoluteBookmark,
+  ContractStreamStep,
+  IdentifierConverters,
+  InsertDeleteStep,
+}
 import util.{ApiValueToLfValueConverter, toLedgerId}
 import com.daml.fetchcontracts.AcsTxStreams.transactionFilter
 import com.daml.fetchcontracts.util.ContractStreamStep.{Acs, LiveBegin}
 import com.daml.fetchcontracts.util.GraphExtensions.*
+import com.daml.http.Endpoints.ET
+import com.daml.http.PackageService.ResolveContractTypeId.Overload
 import com.daml.http.metrics.HttpApiMetrics
-import com.daml.http.util.FutureUtil.toFuture
+import com.daml.http.util.FutureUtil.eitherT
 import com.daml.http.util.Logging.{InstanceUUID, RequestID}
 import com.daml.jwt.domain.Jwt
 import com.daml.ledger.api.v1.active_contracts_service.GetActiveContractsResponse
 import com.daml.ledger.api.v1 as api
+import com.daml.ledger.api.v1.event_query_service.{
+  GetEventsByContractIdResponse,
+  GetEventsByContractKeyResponse,
+}
 import com.daml.logging.LoggingContextOf
 import com.daml.metrics.Timed
+import com.daml.metrics.api.MetricHandle
 import com.daml.nonempty.NonEmpty
 import com.daml.scalautil.ExceptionOps.*
 import com.daml.nonempty.NonEmptyReturningOps.*
-import scalaz.std.option.*
 import scalaz.syntax.show.*
 import scalaz.syntax.std.option.*
 import scalaz.syntax.traverse.*
-import scalaz.{-\/, OptionT, Show, \/, \/-}
+import scalaz.{-\/, EitherT, Show, \/, \/-}
 import spray.json.JsValue
 
 import scala.concurrent.{ExecutionContext, Future}
 import com.digitalasset.canton.ledger.api.domain as LedgerApiDomain
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.NoTracing
+import com.digitalasset.canton.ledger.api.domain.LedgerId
+import com.digitalasset.canton.platform.participant.util.LfEngineToApi
 import scalaz.std.scalaFuture.*
 
 class ContractsService(
     resolveContractTypeId: PackageService.ResolveContractTypeId,
     allTemplateIds: PackageService.AllTemplateIds,
+    getContractByContractId: LedgerClientJwt.GetContractByContractId,
+    getContractByContractKey: LedgerClientJwt.GetContractByContractKey,
     getActiveContracts: LedgerClientJwt.GetActiveContracts,
     getCreatesAndArchivesSince: LedgerClientJwt.GetCreatesAndArchivesSince,
     lookupType: query.ValuePredicate.TypeLookup,
     val loggerFactory: NamedLoggerFactory,
-)(implicit ec: ExecutionContext, mat: Materializer)
+)(implicit ec: ExecutionContext)
     extends NamedLogging
     with NoTracing {
   import ContractsService.*
+
+  private type ActiveContractO = Option[domain.ActiveContract.ResolvedCtTyId[JsValue]]
 
   def resolveContractReference(
       jwt: Jwt,
@@ -61,20 +77,30 @@ class ContractsService(
   )(implicit
       lc: LoggingContextOf[InstanceUUID with RequestID],
       metrics: HttpApiMetrics,
-  ): Future[Option[domain.ResolvedContractRef[LfValue]]] =
+  ): ET[domain.ResolvedContractRef[LfValue]] = {
+    import Overload.Template
     contractLocator match {
       case domain.EnrichedContractKey(templateId, key) =>
-        resolveContractTypeId(jwt, ledgerId)(templateId).map(
-          _.toOption.flatten.map(x => -\/(x -> key))
-        )
+        _resolveContractTypeId(jwt, templateId, ledgerId).map(x => -\/(x -> key))
       case domain.EnrichedContractId(Some(templateId), contractId) =>
-        resolveContractTypeId(jwt, ledgerId)(templateId).map(
-          _.toOption.flatten.map(x => \/-(x -> contractId))
-        )
+        _resolveContractTypeId(jwt, templateId, ledgerId).map(x => \/-(x -> contractId))
       case domain.EnrichedContractId(None, contractId) =>
-        findByContractId(jwt, parties, None, ledgerId, contractId)
-          .map(_.map(a => \/-(a.templateId -> a.contractId)))
+        findByContractId(jwt, parties, contractId)
+          .flatMap {
+            case Some(value) =>
+              EitherT.pure(value): ET[domain.ActiveContract.ResolvedCtTyId[JsValue]]
+            case None =>
+              EitherT.pureLeft(
+                invalidUserInput(
+                  s"Could not resolve contract reference for contract id $contractId"
+                )
+              ): ET[
+                domain.ActiveContract.ResolvedCtTyId[JsValue]
+              ]
+          }
+          .map(a => \/-(a.templateId -> a.contractId))
     }
+  }
 
   def lookup(
       jwt: Jwt,
@@ -83,20 +109,14 @@ class ContractsService(
   )(implicit
       lc: LoggingContextOf[InstanceUUID with RequestID],
       metrics: HttpApiMetrics,
-  ): Future[Option[domain.ActiveContract.ResolvedCtTyId[JsValue]]] = {
+  ): ET[ActiveContractO] = {
     val ledgerId = toLedgerId(jwtPayload.ledgerId)
     val readAs = req.readAs.cata(_.toSet1, jwtPayload.parties)
     req.locator match {
       case domain.EnrichedContractKey(templateId, contractKey) =>
         findByContractKey(jwt, readAs, templateId, ledgerId, contractKey)
-      case domain.EnrichedContractId(templateId, contractId) =>
-        findByContractId(
-          jwt,
-          readAs,
-          templateId,
-          ledgerId,
-          contractId,
-        )
+      case domain.EnrichedContractId(_templateId, contractId) =>
+        findByContractId(jwt, readAs, contractId)
     }
   }
 
@@ -109,32 +129,148 @@ class ContractsService(
   )(implicit
       lc: LoggingContextOf[InstanceUUID with RequestID],
       metrics: HttpApiMetrics,
-  ): Future[Option[domain.ActiveContract.ResolvedCtTyId[JsValue]]] = {
-    Timed.future(
-      metrics.dbFindByContractKey,
-      search.toFinal
-        .findByContractKey(
-          SearchContext(jwt, parties, templateId, ledgerId),
-          contractKey,
-        ),
+  ): ET[ActiveContractO] =
+    timedETFuture(metrics.dbFindByContractKey)(
+      for {
+        resolvedTemplateId <- _resolveContractTypeId(
+          jwt,
+          templateId,
+          ledgerId,
+        )
+        keyApiValue <-
+          EitherT(
+            Future.successful(
+              \/.fromEither(
+                LfEngineToApi.lfValueToApiValue(verbose = true, contractKey)
+              ).leftMap { err =>
+                serverError(s"Cannot convert key $contractKey from LF value to API value: $err")
+              }
+            )
+          )
+        response <- EitherT(
+          getContractByContractKey(
+            jwt,
+            keyApiValue,
+            IdentifierConverters.apiIdentifier(resolvedTemplateId),
+            parties,
+            "",
+          )(lc).map(_.leftMap { err =>
+            unauthorized(
+              s"Unauthorized access for fetching contract with key $contractKey for parties $parties: $err"
+            )
+          })
+        )
+        result <- response match {
+          case GetEventsByContractKeyResponse(None, Some(_), _) =>
+            EitherT.pureLeft(
+              serverError(
+                s"Found archived event in response without a matching create for key $contractKey"
+              )
+            ): ET[ActiveContractO]
+          case GetEventsByContractKeyResponse(_, Some(_), _) |
+              GetEventsByContractKeyResponse(None, None, _) =>
+            logger.debug(s"Contract archived for contract key $contractKey")
+            EitherT.pure(None): ET[ActiveContractO]
+          case GetEventsByContractKeyResponse(Some(createdEvent), None, _) =>
+            EitherT.either(
+              ActiveContract
+                .fromLedgerApi(domain.ActiveContract.IgnoreInterface, createdEvent)
+                .leftMap(_.shows)
+                .flatMap(apiAcToLfAc(_).leftMap(_.shows))
+                .flatMap(_.traverse(lfValueToJsValue(_).leftMap(_.shows)))
+                .leftMap { err =>
+                  serverError(s"Error processing create event for active contract: $err")
+                }
+                .map(Some(_))
+            ): ET[ActiveContractO]
+        }
+      } yield result
     )
-  }
 
   private[this] def findByContractId(
       jwt: Jwt,
       parties: domain.PartySet,
-      templateId: Option[domain.ContractTypeId.OptionalPkg],
-      ledgerId: LedgerApiDomain.LedgerId,
       contractId: domain.ContractId,
   )(implicit
       lc: LoggingContextOf[InstanceUUID with RequestID],
       metrics: HttpApiMetrics,
-  ): Future[Option[domain.ActiveContract.ResolvedCtTyId[JsValue]]] = {
-    Timed.future(
-      metrics.dbFindByContractId,
-      search.toFinal.findByContractId(SearchContext(jwt, parties, templateId, ledgerId), contractId),
+  ): ET[ActiveContractO] =
+    timedETFuture(metrics.dbFindByContractId)(
+      eitherT(
+        getContractByContractId(jwt, contractId, parties: Set[domain.Party])(lc)
+          .map(_.leftMap { err =>
+            unauthorized(
+              s"Unauthorized access for fetching contract with id $contractId for parties $parties: $err"
+            )
+          })
+          .map(_.flatMap {
+            case GetEventsByContractIdResponse(_, Some(_)) =>
+              logger.debug(s"Contract archived for contract id $contractId")
+              \/-(Option.empty)
+            case GetEventsByContractIdResponse(Some(created), None) =>
+              ActiveContract
+                .fromLedgerApi(domain.ActiveContract.IgnoreInterface, created)
+                .leftMap(_.shows)
+                .flatMap(apiAcToLfAc(_).leftMap(_.shows))
+                .flatMap(_.traverse(lfValueToJsValue(_).leftMap(_.shows)))
+                .leftMap { err =>
+                  serverError(s"Error processing create event for active contract: $err")
+                }
+                .map(Some(_))
+            case GetEventsByContractIdResponse(None, None) =>
+              logger.debug(s"Contract with id $contractId not found")
+              \/-(Option.empty)
+          })
+      )
     )
+
+  private def serverError(
+      errorMessage: String
+  )(implicit lc: LoggingContextOf[InstanceUUID with RequestID]): EndpointsCompanion.Error = {
+    logger.error(s"$errorMessage, ${lc.makeString}")
+    EndpointsCompanion.ServerError(new RuntimeException(errorMessage))
   }
+
+  private def invalidUserInput(
+      message: String
+  )(implicit lc: LoggingContextOf[InstanceUUID with RequestID]): EndpointsCompanion.Error = {
+    logger.info(s"$message, ${lc.makeString}")
+    EndpointsCompanion.InvalidUserInput(message)
+  }
+
+  private def unauthorized(
+      message: String
+  )(implicit lc: LoggingContextOf[InstanceUUID with RequestID]): EndpointsCompanion.Error = {
+    logger.info(s"$message, ${lc.makeString}")
+    EndpointsCompanion.Unauthorized(message)
+  }
+
+  private def _resolveContractTypeId[U, R](
+      jwt: Jwt,
+      templateId: U with ContractTypeId.OptionalPkg,
+      ledgerId: LedgerId,
+  )(implicit
+      lc: LoggingContextOf[InstanceUUID with RequestID],
+      overload: Overload[U, R],
+  ): ET[R] =
+    eitherT(
+      resolveContractTypeId[U, R](jwt, ledgerId)(templateId)
+        .map(_.leftMap {
+          case PackageService.InputError(message) =>
+            invalidUserInput(
+              s"Invalid user input detected when resolving contract type id for templateId $templateId: $message"
+            )
+          case PackageService.ServerError(message) =>
+            serverError(
+              s"Error encountered when resolving contract type id for templateId $templateId: $message"
+            )
+        }.flatMap(_.toRightDisjunction {
+          invalidUserInput(s"Template for id $templateId not found")
+        }))
+    )
+
+  private def timedETFuture[R](timer: MetricHandle.Timer)(f: ET[R]): ET[R] =
+    EitherT.eitherT(Timed.future(timer, f.run))
 
   private[this] def search: Search = SearchInMemory
 
@@ -142,79 +278,11 @@ class ContractsService(
     type LfV = LfValue
     override val lfvToJsValue = SearchValueFormat(lfValueToJsValue)
 
-    override def findByContractKey(
-        ctx: SearchContext.Key,
-        contractKey: LfValue,
-    )(implicit
-        lc: LoggingContextOf[InstanceUUID with RequestID],
-        metrics: HttpApiMetrics,
-    ): Future[Option[domain.ActiveContract.ResolvedCtTyId[LfValue]]] = {
-      import ctx.{jwt, parties, templateIds as templateId, ledgerId}
-      for {
-        resolvedTemplateId <- OptionT(
-          resolveContractTypeId(jwt, ledgerId)(templateId)
-            .map(
-              _.toOption.flatten
-            )
-        )
-
-        predicate = domain.ActiveContract.matchesKey(contractKey) _
-
-        result <- OptionT(
-          searchInMemoryOneTpId(jwt, ledgerId, parties, resolvedTemplateId, predicate)
-            .runWith(Sink.headOption)
-            .flatMap(lookupResult)
-        )
-
-      } yield result
-    }.run
-
-    override def findByContractId(
-        ctx: SearchContext.ById,
-        contractId: domain.ContractId,
-    )(implicit
-        lc: LoggingContextOf[InstanceUUID with RequestID],
-        metrics: HttpApiMetrics,
-    ): Future[Option[domain.ActiveContract.ResolvedCtTyId[LfValue]]] = {
-      import ctx.{jwt, parties, templateIds as templateId, ledgerId}
-      for {
-
-        resolvedTemplateIds <- OptionT(
-          templateId.cata(
-            x =>
-              resolveContractTypeId(jwt, ledgerId)(x)
-                .map(_.toOption.flatten.map(Set(_))),
-            // ignoring interface IDs for all-templates query
-            allTemplateIds(lc)(jwt, ledgerId).map(_.toSet[domain.ContractTypeId.Resolved].some),
-          )
-        )
-        resolvedQuery <- OptionT(
-          Future.successful(
-            domain
-              .ResolvedQuery(resolvedTemplateIds)
-              .toOption
-          )
-        )
-        result <- OptionT(
-          searchInMemory(
-            jwt,
-            ledgerId,
-            parties,
-            resolvedQuery,
-            InMemoryQuery.Filter(isContractId(contractId)),
-          )
-            .runWith(Sink.headOption)
-            .flatMap(lookupResult)
-        )
-
-      } yield result
-    }.run
-
     override def search(ctx: SearchContext.QueryLang, queryParams: Map[String, JsValue])(implicit
         lc: LoggingContextOf[InstanceUUID with RequestID],
         metrics: HttpApiMetrics,
     ) = {
-      import ctx.{jwt, parties, templateIds, ledgerId}
+      import ctx.{jwt, ledgerId, parties, templateIds}
       searchInMemory(
         jwt,
         ledgerId,
@@ -224,16 +292,6 @@ class ContractsService(
       )
     }
   }
-
-  private def lookupResult(
-      errorOrAc: Option[Error \/ domain.ActiveContract.ResolvedCtTyId[LfValue]]
-  ): Future[Option[domain.ActiveContract.ResolvedCtTyId[LfValue]]] =
-    errorOrAc traverse (toFuture(_))
-
-  private def isContractId(k: domain.ContractId)(
-      a: domain.ActiveContract.ResolvedCtTyId[LfValue]
-  ): Boolean =
-    (a.contractId: domain.ContractId) == k
 
   def retrieveAll(
       jwt: Jwt,
@@ -432,7 +490,8 @@ class ContractsService(
     import com.daml.fetchcontracts.AcsTxStreams.{
       acsFollowingAndBoundary,
       transactionsFollowingBoundary,
-    }, com.daml.fetchcontracts.util.GraphExtensions.*
+    }
+    import com.daml.fetchcontracts.util.GraphExtensions.*
     val contractsAndBoundary = startOffset
       .cata(
         so =>
@@ -523,35 +582,11 @@ object ContractsService {
     type LfV
     val lfvToJsValue: SearchValueFormat[LfV]
 
-    final def toFinal(implicit
-        ec: ExecutionContext
-    ): Search { type LfV = JsValue } = {
+    final def toFinal: Search { type LfV = JsValue } = {
       val SearchValueFormat(convert) = lfvToJsValue
       new Search {
         type LfV = JsValue
         override val lfvToJsValue = SearchValueFormat(\/.right)
-
-        override def findByContractId(
-            ctx: SearchContext.ById,
-            contractId: domain.ContractId,
-        )(implicit
-            lc: LoggingContextOf[InstanceUUID with RequestID],
-            metrics: HttpApiMetrics,
-        ): Future[Option[domain.ActiveContract.ResolvedCtTyId[LfV]]] =
-          self
-            .findByContractId(ctx, contractId)
-            .flatMap(oac => toFuture(oac traverse (_ traverse convert)))
-
-        override def findByContractKey(
-            ctx: SearchContext.Key,
-            contractKey: LfValue,
-        )(implicit
-            lc: LoggingContextOf[InstanceUUID with RequestID],
-            metrics: HttpApiMetrics,
-        ): Future[Option[domain.ActiveContract.ResolvedCtTyId[LfV]]] =
-          self
-            .findByContractKey(ctx, contractKey)
-            .flatMap(oac => toFuture(oac traverse (_ traverse convert)))
 
         override def search(
             ctx: SearchContext.QueryLang,
@@ -563,22 +598,6 @@ object ContractsService {
           self.search(ctx, queryParams) map (_ flatMap (_ traverse convert))
       }
     }
-
-    def findByContractId(
-        ctx: SearchContext.ById,
-        contractId: domain.ContractId,
-    )(implicit
-        lc: LoggingContextOf[InstanceUUID with RequestID],
-        metrics: HttpApiMetrics,
-    ): Future[Option[domain.ActiveContract.ResolvedCtTyId[LfV]]]
-
-    def findByContractKey(
-        ctx: SearchContext.Key,
-        contractKey: LfValue,
-    )(implicit
-        lc: LoggingContextOf[InstanceUUID with RequestID],
-        metrics: HttpApiMetrics,
-    ): Future[Option[domain.ActiveContract.ResolvedCtTyId[LfV]]]
 
     def search(
         ctx: SearchContext.QueryLang,

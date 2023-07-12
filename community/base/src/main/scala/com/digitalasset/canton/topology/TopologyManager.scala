@@ -602,31 +602,6 @@ abstract class TopologyManager[E <: CantonError](
 
   protected def wrapError(error: TopologyManagerError)(implicit traceContext: TraceContext): E
 
-  /** Generates a signed legal identity claim of the given claim */
-  def generate(
-      claim: LegalIdentityClaim
-  )(implicit traceContext: TraceContext): EitherT[Future, E, SignedLegalIdentityClaim] = {
-    claim.evidence match {
-      case LegalIdentityClaimEvidence.X509Cert(pem) =>
-        for {
-          pubKey <- (for {
-            cert <- X509Certificate.fromPem(pem)
-            key <- cert.publicKey(crypto.javaKeyConverter)
-          } yield key)
-            .leftMap(x => wrapError(TopologyManagerError.CertificateGenerationError.Failure(x)))
-            .toEitherT[Future]
-          claimHash = claim.hash(crypto.pureCrypto)
-          // Sign the legal identity claim with the legal entity key as specified in the evidence
-          signed <- crypto.privateCrypto
-            .sign(claimHash, pubKey.fingerprint)
-            .leftMap(err => wrapError(TopologyManagerError.InternalError.TopologySigningError(err)))
-            .map(signature =>
-              SignedLegalIdentityClaim(claim.uid, claim.getCryptographicEvidence, signature)
-            )
-        } yield signed
-    }
-  }
-
   def genTransaction(
       op: TopologyChangeOp,
       mapping: TopologyMapping,

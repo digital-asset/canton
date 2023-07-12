@@ -594,8 +594,6 @@ object CantonConfig {
     implicit val tracingConfigZipkinSpanExporterReader
         : ConfigReader[TracingConfig.Exporter.Zipkin] =
       deriveReader[TracingConfig.Exporter.Zipkin]
-    implicit val tracingConfigOtlpSpanExporterReader: ConfigReader[TracingConfig.Exporter.Otlp] =
-      deriveReader[TracingConfig.Exporter.Otlp]
     implicit val tracingConfigSpanExporterReader: ConfigReader[TracingConfig.Exporter] =
       deriveReader[TracingConfig.Exporter]
     implicit val tracingConfigAlwaysOnSamplerReader: ConfigReader[TracingConfig.Sampler.AlwaysOn] =
@@ -608,9 +606,6 @@ object CantonConfig {
       deriveReader[TracingConfig.Sampler.TraceIdRatio]
     implicit val tracingConfigSamplerReader: ConfigReader[TracingConfig.Sampler] =
       deriveReader[TracingConfig.Sampler]
-    implicit val tracingConfigBatchSpanProcessorReader
-        : ConfigReader[TracingConfig.BatchSpanProcessor] =
-      deriveReader[TracingConfig.BatchSpanProcessor]
     implicit val tracingConfigTracerReader: ConfigReader[TracingConfig.Tracer] =
       deriveReader[TracingConfig.Tracer]
     // treat TracingConfig.Propagation as an enum as we currently only have case object types in the sealed family
@@ -1013,8 +1008,6 @@ object CantonConfig {
     implicit val tracingConfigZipkinSpanExporterWriter
         : ConfigWriter[TracingConfig.Exporter.Zipkin] =
       deriveWriter[TracingConfig.Exporter.Zipkin]
-    implicit val tracingConfigOtlpSpanExporterWriter: ConfigWriter[TracingConfig.Exporter.Otlp] =
-      deriveWriter[TracingConfig.Exporter.Otlp]
     implicit val tracingConfigSpanExporterWriter: ConfigWriter[TracingConfig.Exporter] =
       deriveWriter[TracingConfig.Exporter]
     implicit val tracingConfigAlwaysOnSamplerWriter: ConfigWriter[TracingConfig.Sampler.AlwaysOn] =
@@ -1027,9 +1020,6 @@ object CantonConfig {
       deriveWriter[TracingConfig.Sampler.TraceIdRatio]
     implicit val tracingConfigSamplerWriter: ConfigWriter[TracingConfig.Sampler] =
       deriveWriter[TracingConfig.Sampler]
-    implicit val tracingConfigBatchSpanProcessorWriter
-        : ConfigWriter[TracingConfig.BatchSpanProcessor] =
-      deriveWriter[TracingConfig.BatchSpanProcessor]
     implicit val tracingConfigTracerWriter: ConfigWriter[TracingConfig.Tracer] =
       deriveWriter[TracingConfig.Tracer]
     // treat TracingConfig.Propagation as an enum as we currently only have case object types in the sealed family

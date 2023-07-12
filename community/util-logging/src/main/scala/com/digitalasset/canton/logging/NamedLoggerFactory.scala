@@ -76,25 +76,25 @@ private[logging] final class SimpleNamedLoggerFactory(
   import NamedLoggerFactory.nameFromKv
 
   override def append(key: String, value: String): NamedLoggerFactory = {
-    validateKey(key)
+    validateKey(key, value)
     new SimpleNamedLoggerFactory(concat(name, nameFromKv(key, value)), properties.+((key, value)))
   }
 
   override def appendUnnamedKey(key: String, value: String): NamedLoggerFactory = {
-    validateKey(key)
+    validateKey(key, value)
     new SimpleNamedLoggerFactory(concat(name, value), properties.+((key, value)))
   }
 
-  private def validateKey(key: String): Unit = {
+  private def validateKey(key: String, value: String): Unit = {
     // If the key contains a dot, a formatter may abbreviate everything preceding the dot, including the name of the logging class.
     // E.g. "com.digitalasset.canton.logging.NamedLoggerFactory:first.name=john" may get abbreviated to "c.d.c.l.N.name=john".
     if (key.contains("."))
       throw new IllegalArgumentException(
         s"Refusing to use key '$key' containing '.', as that would confuse the log formatters."
       )
-    if (properties.contains(key))
+    if (properties.get(key).exists(_ != value))
       throw new IllegalArgumentException(
-        s"Duplicate adding of key '$key' to named logger factory properties $properties"
+        s"Duplicate adding of key '$key' with value $value to named logger factory properties $properties"
       )
     if (key.isEmpty)
       throw new IllegalArgumentException(

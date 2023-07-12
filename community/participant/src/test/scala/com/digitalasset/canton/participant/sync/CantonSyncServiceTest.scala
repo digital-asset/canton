@@ -8,8 +8,8 @@ import cats.data.EitherT
 import cats.implicits.*
 import cats.{Eval, Id}
 import com.daml.lf.data.{ImmArray, Ref}
-import com.daml.lf.transaction.CommittedTransaction
-import com.daml.lf.transaction.test.TransactionBuilder
+import com.daml.lf.transaction.test.{TestNodeBuilder, TransactionBuilder, TreeTransactionBuilder}
+import com.daml.lf.transaction.{CommittedTransaction, VersionedTransaction}
 import com.daml.lf.value.Value.ValueRecord
 import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -238,21 +238,20 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
 
       import TransactionBuilder.Implicits.*
 
-      val builder = TransactionBuilder()
-      val createNode = builder.create(
-        id = builder.newCid,
+      val createNode = TestNodeBuilder.create(
+        id = TransactionBuilder.newCid,
         templateId = Ref.Identifier(packageId, Ref.QualifiedName("M", "D")),
         argument = ValueRecord(None, ImmArray.Empty),
         signatories = Seq("Alice"),
         observers = Seq.empty,
-        key = None,
       )
-      builder.add(createNode)
+
+      val tx: VersionedTransaction = TreeTransactionBuilder.toVersionedTransaction(createNode)
 
       lazy val event = TransactionAccepted(
         completionInfoO = DefaultParticipantStateValues.completionInfo(List.empty).some,
         transactionMeta = DefaultParticipantStateValues.transactionMeta(),
-        transaction = CommittedTransaction.subst[Id](builder.build()),
+        transaction = CommittedTransaction.subst[Id](tx),
         transactionId = DefaultDamlValues.lfTransactionId(1),
         recordTime = CantonTimestamp.Epoch.toLf,
         divulgedContracts = List.empty,

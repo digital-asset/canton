@@ -81,21 +81,6 @@ service VaultService {
   rpc ListPublicKeys(ListKeysRequest) returns (ListKeysResponse);
 
   /**
-   * Import a X509 certificate into the local vault.
-   */
-  rpc ImportCertificate(ImportCertificateRequest) returns (ImportCertificateResponse);
-
-  /**
-   * Create a new, self-signed certificate with CN=unique_identifier
-   */
-  rpc GenerateCertificate(GenerateCertificateRequest) returns (GenerateCertificateResponse);
-
-  /**
-   * List certificates stored in the local vault
-   */
-  rpc ListCertificates(ListCertificateRequest) returns (ListCertificateResponse);
-
-  /**
    * Changes the wrapper key that is used to encrypt private keys when stored
    */
   rpc RotateWrapperKey(RotateWrapperKeyRequest) returns (google.protobuf.Empty);

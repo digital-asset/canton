@@ -70,9 +70,8 @@ private[indexer] final class RecoveringIndexer(
         if (subscription.get() == null) {
           logger.info("Indexer Server was stopped; cancelling the restart")
           complete.trySuccess(()).discard
-          complete.future.map(_ => false).discard
-        }
-        if (clock.instant().isAfter(delayUntil)) {
+          complete.future.map(_ => false)
+        } else if (clock.instant().isAfter(delayUntil)) {
           Future.successful(true)
         } else {
           waitForRestart(delayUntil)

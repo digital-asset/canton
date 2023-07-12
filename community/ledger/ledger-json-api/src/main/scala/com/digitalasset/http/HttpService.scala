@@ -108,8 +108,10 @@ class HttpService(
       contractsService = new ContractsService(
         packageService.resolveContractTypeId,
         packageService.allTemplateIds,
-        ledgerClientJwt.getActiveContracts(ledgerClient),
-        ledgerClientJwt.getCreatesAndArchivesSince(ledgerClient),
+        ledgerClientJwt.getByContractId(ledgerClient),
+        ledgerClientJwt.getByContractKey(ledgerClient),
+      ledgerClientJwt.getActiveContracts(ledgerClient),
+      ledgerClientJwt.getCreatesAndArchivesSince(ledgerClient),
         LedgerReader.damlLfTypeLookup(() => packageService.packageStore),
         loggerFactory,
       )

@@ -11,7 +11,7 @@ function adjust_startup_scripts() {
   REPLACE_VERSION=$(cat version.sbt | sed -E 's/.*= \"(.*)\"/\1/')
   REPLACE_REVISION=$(git rev-parse HEAD)
   REPLACE_JVM_OPTS="-XX:+CrashOnOutOfMemoryError"
-  REPLACE_JAR="lib\/$JAR"
+  REPLACE_JAR="lib\/$RELEASE.jar"
   REPLACE_MAIN_CLASS="$MAIN_CLASS"
   REPLACE_MAC_ICON_FILE="lib\/canton.ico"
   for ff in "bin/canton" "bin/canton.bat"
@@ -29,6 +29,17 @@ function adjust_startup_scripts() {
   done
 }
 
+function get_release_name() {
+  if [ -z "${RELEASE_SUFFIX}" ]; then
+    RELEASE=$(echo $JAR | sed -e 's/\.jar$//')
+    echo "$RELEASE"
+  else
+    TMP=$(echo $JAR | grep -Eo "canton-([^[:digit:]]+)")
+    RELEASE="$TMP$RELEASE_SUFFIX"
+    echo "$RELEASE"
+  fi
+}
+
 set -e
 
 JARFILE=$1
@@ -38,7 +49,7 @@ shift
 PACKS=$@
 
 JAR=$(basename $JARFILE)
-RELEASE=$(echo $JAR | sed -e 's/\.jar$//')
+RELEASE=$(get_release_name)
 echo $RELEASE
 
 TARGET=$(dirname $JARFILE)/../release
@@ -49,7 +60,7 @@ mkdir -p $RELEASE_DIR/lib
 
 echo "assembling release in $RELEASE_DIR"
 
-cp -v $JARFILE $RELEASE_DIR/lib
+cp -v $JARFILE $RELEASE_DIR/lib/$RELEASE.jar
 
 state="scan"
 

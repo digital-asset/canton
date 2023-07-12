@@ -14,7 +14,12 @@ import com.digitalasset.canton.config.{ProcessingTimeout, TopologyXConfig}
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.*
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  LoggingContextWithTrace,
+  NamedLoggerFactory,
+  NamedLogging,
+}
 import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
 import com.digitalasset.canton.sequencing.EnvelopeHandler
 import com.digitalasset.canton.sequencing.client.SequencerClientSend
@@ -463,12 +468,18 @@ class DomainOutboxXFactory(
       targetTopologyClient: DomainTopologyClientWithInit,
       sequencerClient: SequencerClientSend,
       clock: Clock,
+      domainLoggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
   ): (DomainOutboxCommon[?, ?, ?], EnvelopeHandler) = {
     outboxRef.get.foreach { outbox =>
-      ErrorUtil.invalidState(s"DomainOutbox was already created. This is a bug.")
+      ErrorUtil.invalidState(s"DomainOutbox was already created. This is a bug.")(
+        ErrorLoggingContext(
+          domainLoggerFactory.getTracedLogger(getClass),
+          LoggingContextWithTrace(domainLoggerFactory),
+        )
+      )
     }
     val handle = new SequencerBasedRegisterTopologyTransactionHandleX(
       (traceContext, env) =>
@@ -480,7 +491,7 @@ class DomainOutboxXFactory(
       topologyXConfig,
       protocolVersion,
       timeouts,
-      loggerFactory,
+      domainLoggerFactory,
     )
     val outbox =
       new DomainOutboxX(
@@ -493,7 +504,7 @@ class DomainOutboxXFactory(
         authorizedStore = manager.store,
         targetStore = domainTopologyStore,
         timeouts = timeouts,
-        loggerFactory = loggerFactory,
+        loggerFactory = domainLoggerFactory,
         crypto = crypto,
       )
     outboxRef.putIfAbsent(outbox).discard
