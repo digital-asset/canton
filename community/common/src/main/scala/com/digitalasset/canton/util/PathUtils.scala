@@ -13,7 +13,7 @@ object PathUtils {
     */
   def getFilenameWithoutExtension(path: Path): String = {
     val fileName = path.getFileName.toString
-    if (fileName.indexOf(".") > 0) fileName.substring(0, fileName.lastIndexOf(".")) else fileName
+    if (fileName.indexOf(".") >= 0) fileName.substring(0, fileName.lastIndexOf(".")) else fileName
   }
 
 }

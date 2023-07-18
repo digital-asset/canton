@@ -18,9 +18,11 @@ import com.digitalasset.canton.config.{
 }
 import com.digitalasset.canton.crypto.CryptoFactory.{
   CryptoStoresAndSchemes,
+  selectAllowedEncryptionKeyScheme,
   selectAllowedSigningKeyScheme,
   selectSchemes,
 }
+import com.digitalasset.canton.crypto.provider.CryptoKeyConverter
 import com.digitalasset.canton.crypto.provider.jce.{
   JceJavaConverter,
   JcePrivateCrypto,
@@ -65,13 +67,18 @@ trait CryptoFactory {
         .map(_.default)
       hashAlgorithm <- selectSchemes(config.hash, config.provider.hash).map(_.default)
       requiredSigningKeySchemes <- selectAllowedSigningKeyScheme(config)
+      requiredEncryptionKeySchemes <- selectAllowedEncryptionKeyScheme(config)
+      jceJavaConverter = new JceJavaConverter(
+        requiredSigningKeySchemes,
+        requiredEncryptionKeySchemes,
+      )
       crypto <- config.provider match {
         case _: CryptoProvider.TinkCryptoProvider =>
-          TinkPureCrypto.create(symmetricKeyScheme, hashAlgorithm)
+          val cryptoKeyConverter = new CryptoKeyConverter(new TinkJavaConverter, jceJavaConverter)
+          TinkPureCrypto.create(cryptoKeyConverter, symmetricKeyScheme, hashAlgorithm)
         case _: CryptoProvider.JceCryptoProvider =>
-          val javaKeyConverter = new JceJavaConverter(requiredSigningKeySchemes)
           Right(
-            new JcePureCrypto(javaKeyConverter, symmetricKeyScheme, hashAlgorithm, loggerFactory)
+            new JcePureCrypto(jceJavaConverter, symmetricKeyScheme, hashAlgorithm, loggerFactory)
           )
         case prov =>
           Left(s"Unsupported crypto provider: $prov")
@@ -223,8 +230,19 @@ object TinkCrypto {
             s"for the chosen provider ${config.provider}"
         )
         .toEitherT[Future]
+      requiredSigningKeySchemes <- selectAllowedSigningKeyScheme(config).toEitherT[Future]
+      requiredEncryptionKeySchemes <- selectAllowedEncryptionKeyScheme(config).toEitherT[Future]
+      jceKeyConverter = new JceJavaConverter(
+        requiredSigningKeySchemes,
+        requiredEncryptionKeySchemes,
+      )
+      cryptoKeyConverter = new CryptoKeyConverter(new TinkJavaConverter, jceKeyConverter)
       pureCrypto <- TinkPureCrypto
-        .create(storesAndSchemes.symmetricKeyScheme, storesAndSchemes.hashAlgorithm)
+        .create(
+          cryptoKeyConverter,
+          storesAndSchemes.symmetricKeyScheme,
+          storesAndSchemes.hashAlgorithm,
+        )
         .toEitherT
       privateCrypto = TinkPrivateCrypto.create(
         pureCrypto,
@@ -232,13 +250,12 @@ object TinkCrypto {
         storesAndSchemes.encryptionKeyScheme,
         cryptoPrivateStoreExtended,
       )
-      javaKeyConverter = new TinkJavaConverter(pureCrypto.defaultHashAlgorithm)
       crypto = new Crypto(
         pureCrypto,
         privateCrypto,
         storesAndSchemes.cryptoPrivateStore,
         storesAndSchemes.cryptoPublicStore,
-        javaKeyConverter,
+        new TinkJavaConverter,
         timeouts,
         loggerFactory,
       )
@@ -264,8 +281,10 @@ object JceCrypto {
         .toEitherT[Future]
       _ = Security.addProvider(new BouncyCastleProvider)
       requiredSigningKeySchemes <- selectAllowedSigningKeyScheme(config).toEitherT[Future]
+      requiredEncryptionKeySchemes <- selectAllowedEncryptionKeyScheme(config).toEitherT[Future]
       javaKeyConverter = new JceJavaConverter(
-        requiredSigningKeySchemes
+        requiredSigningKeySchemes,
+        requiredEncryptionKeySchemes,
       )
       pureCrypto =
         new JcePureCrypto(

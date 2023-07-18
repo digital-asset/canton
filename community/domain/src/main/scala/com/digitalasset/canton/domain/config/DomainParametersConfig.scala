@@ -106,7 +106,7 @@ final case class DomainParametersConfig(
         selectAllowedHashAlgorithms,
       )
       newCryptoKeyFormats = requiredCryptoKeyFormats.getOrElse(
-        cryptoConfig.provider.supportedCryptoKeyFormats
+        cryptoConfig.provider.supportedCryptoKeyFormatsForProtocol(protocolVersion.unwrap)
       )
     } yield {
       StaticDomainParameters.create(

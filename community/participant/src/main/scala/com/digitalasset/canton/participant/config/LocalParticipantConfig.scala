@@ -941,6 +941,7 @@ object TestingTimeServiceConfig {
   * @param warnIfOverloadedFor If all incoming commands have been rejected due to PARTICIPANT_BACKPRESSURE during this interval, the participant will log a warning.
   * @param excludeInfrastructureTransactions If set, infrastructure transactions (i.e. ping, bong and dar distribution) will be excluded from participant metering.
   * @param enableEngineStackTraces If true, DAMLe stack traces will be enabled
+  * @param enableContractUpgrading If true contracts may be automatically upgraded or downgraded as needed.
   */
 final case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
@@ -964,6 +965,7 @@ final case class ParticipantNodeParameterConfig(
     ledgerApiServerParameters: LedgerApiServerParametersConfig = LedgerApiServerParametersConfig(),
     excludeInfrastructureTransactions: Boolean = true,
     enableEngineStackTraces: Boolean = false,
+    enableContractUpgrading: Boolean = false,
 )
 
 /** Parameters for the participant node's stores
@@ -1004,4 +1006,23 @@ final case class LedgerApiServerParametersConfig(
     contractIdSeeding: Seeding = Seeding.Strong,
     indexer: IndexerConfig = IndexerConfig(),
     jwtTimestampLeeway: Option[JwtTimestampLeeway] = None,
+    contractLoader: ContractLoaderConfig = ContractLoaderConfig(),
 )
+
+/** Parameters to control batch loading during phase 1 / interpretation
+  *
+  * @param maxQueueSize how many parallel lookups can be queued before we start to backpressure loading
+  * @param maxBatchSize how many contract lookups to batch together
+  * @param parallelism  how many parallel contract lookup requests should be sent to the db when prepopulating the cache
+  */
+final case class ContractLoaderConfig(
+    maxQueueSize: PositiveInt = ContractLoaderConfig.defaultMaxQueueSize,
+    maxBatchSize: PositiveInt = ContractLoaderConfig.defaultMaxBatchSize,
+    parallelism: PositiveInt = ContractLoaderConfig.defaultMaxParallelism,
+)
+
+object ContractLoaderConfig {
+  val defaultMaxQueueSize = PositiveInt.tryCreate(10000)
+  val defaultMaxBatchSize = PositiveInt.tryCreate(50)
+  val defaultMaxParallelism = PositiveInt.tryCreate(5)
+}

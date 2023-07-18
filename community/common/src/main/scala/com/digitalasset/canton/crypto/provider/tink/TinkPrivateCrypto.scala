@@ -10,6 +10,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtended
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.crypto.tink.KeysetHandle
+import com.google.crypto.tink.aead.AeadKeyTemplates
 import com.google.crypto.tink.hybrid.HybridKeyTemplates
 import com.google.crypto.tink.proto.*
 import com.google.crypto.tink.signature.SignatureKeyTemplates
@@ -42,7 +43,29 @@ class TinkPrivateCrypto private (
     for {
       keyTemplate <- scheme match {
         case EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm =>
-          EitherT.rightT(HybridKeyTemplates.ECIES_P256_HKDF_HMAC_SHA256_AES128_GCM)
+          val eciesParams =
+            HybridKeyTemplates.createEciesAeadHkdfParams(
+              EllipticCurveType.NIST_P256,
+              HashType.SHA256,
+              EcPointFormat.UNCOMPRESSED,
+              AeadKeyTemplates.AES128_GCM,
+              Array[Byte](),
+            )
+
+          val format = EciesAeadHkdfKeyFormat
+            .newBuilder()
+            .setParams(eciesParams)
+            .build()
+
+          val keyTemplate = KeyTemplate
+            .newBuilder()
+            .setTypeUrl("type.googleapis.com/google.crypto.tink.EciesAeadHkdfPrivateKey")
+            // Need to use RAW to allow conversion to/from java when we don't have the key id anymore
+            .setOutputPrefixType(OutputPrefixType.RAW)
+            .setValue(format.toByteString)
+            .build()
+
+          EitherT.rightT(keyTemplate)
         case EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc =>
           EitherT.leftT(
             EncryptionKeyGenerationError.UnsupportedKeyScheme(
@@ -94,8 +117,6 @@ class TinkPrivateCrypto private (
                 OutputPrefixType.RAW,
               )
             )
-          case SigningKeyScheme.Sm2 =>
-            EitherT.leftT(SigningKeyGenerationError.UnsupportedKeyScheme(scheme))
         }
       } yield {
         // Uses RAW key templates such that the signatures are not prefixed with a Tink prefix.

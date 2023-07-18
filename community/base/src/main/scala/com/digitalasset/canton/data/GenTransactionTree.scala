@@ -156,7 +156,9 @@ final case class GenTransactionTree private (
     */
   def transactionViewTree(viewHash: RootHash): TransactionViewTree =
     viewPosition(viewHash)
-      .map(viewPos => TransactionViewTree(tryBlindForTransactionViewTree(viewPos.reverse)))
+      .map(viewPos =>
+        TransactionViewTree.tryCreate(tryBlindForTransactionViewTree(viewPos.reverse))
+      )
       .getOrElse(
         throw new IllegalArgumentException(s"No transaction view found with hash $viewHash")
       )
@@ -165,7 +167,7 @@ final case class GenTransactionTree private (
     (rootView, index) <- rootViews.unblindedElementsWithIndex
     (_view, viewPos) <- rootView.allSubviewsWithPosition(index +: ViewPosition.root)
     genTransactionTree = tryBlindForTransactionViewTree(viewPos.reverse)
-  } yield TransactionViewTree(genTransactionTree)
+  } yield TransactionViewTree.tryCreate(genTransactionTree)
 
   def allLightTransactionViewTrees(
       protocolVersion: ProtocolVersion

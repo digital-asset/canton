@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import cats.syntax.option.*
+import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.DefaultParticipantStateValues
 import com.digitalasset.canton.participant.protocol.TransactionProcessor
@@ -13,6 +14,7 @@ import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
   InFlightBySequencingInfo,
 }
 import com.digitalasset.canton.participant.sync.LedgerSyncEvent
+import com.digitalasset.canton.protocol.RootHash
 import com.digitalasset.canton.sequencing.protocol.{DeliverErrorReason, MessageId}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
@@ -65,6 +67,7 @@ trait InFlightSubmissionStoreTest extends AsyncWordSpec with BaseTest {
     submissionId1,
     domainId1,
     messageId1,
+    None,
     UnsequencedSubmission(CantonTimestamp.Epoch, trackingData1),
     traceContext1,
   )
@@ -73,6 +76,7 @@ trait InFlightSubmissionStoreTest extends AsyncWordSpec with BaseTest {
     submissionId2,
     domainId1,
     messageId2,
+    None,
     UnsequencedSubmission(
       CantonTimestamp.Epoch.plusSeconds(20),
       TestSubmissionTrackingData.default,
@@ -84,6 +88,7 @@ trait InFlightSubmissionStoreTest extends AsyncWordSpec with BaseTest {
     submissionId1,
     domainId2,
     messageId3,
+    None,
     UnsequencedSubmission(CantonTimestamp.Epoch.plusSeconds(30), trackingData3),
     TraceContext.empty,
   )
@@ -156,6 +161,112 @@ trait InFlightSubmissionStoreTest extends AsyncWordSpec with BaseTest {
           lookup <- valueOrFail(store.lookup(submission1.changeIdHash))("lookup submission")
         } yield {
           lookup shouldBe submission1
+        }
+      }
+    }
+
+    "updateRegistration" should {
+      "update the given root hash only for the provided submission" in {
+        val store = mk()
+        val rootHash = RootHash(TestHash.digest(1))
+
+        for {
+          () <- store.register(submission1).valueOrFailShutdown("register submission1")
+          () <- store.register(submission2).valueOrFailShutdown("register submission2")
+
+          lookupBefore <- store.lookupUnsequencedUptoUnordered(
+            submission1.submissionDomain,
+            CantonTimestamp.MaxValue,
+          )
+
+          () <- store.updateRegistration(
+            submission1,
+            rootHash,
+          )
+
+          lookupAfter <- store.lookupUnsequencedUptoUnordered(
+            submission1.submissionDomain,
+            CantonTimestamp.MaxValue,
+          )
+        } yield {
+          lookupBefore.toSet shouldBe Set(submission1, submission2)
+          lookupAfter.toSet shouldBe Set(submission1.copy(rootHashO = Some(rootHash)), submission2)
+        }
+      }
+
+      "update the given root hash only for unsequenced submissions" in {
+        val store = mk()
+        val rootHash = RootHash(TestHash.digest(1))
+
+        for {
+          () <- store.register(submission1).valueOrFailShutdown("register submission1")
+
+          lookupUnseqBefore <- store.lookupUnsequencedUptoUnordered(
+            submission1.submissionDomain,
+            CantonTimestamp.MaxValue,
+          )
+          lookupSeqBefore <- store.lookupSequencedUptoUnordered(
+            submission1.submissionDomain,
+            CantonTimestamp.MaxValue,
+          )
+
+          () <- store.observeSequencing(
+            domainId1,
+            Map(submission1.messageId -> sequencedSubmission1),
+          )
+
+          () <- store.updateRegistration(
+            submission1,
+            rootHash,
+          )
+
+          lookupUnseqAfter <- store.lookupUnsequencedUptoUnordered(
+            submission1.submissionDomain,
+            CantonTimestamp.MaxValue,
+          )
+          lookupSeqAfter <- store.lookupSequencedUptoUnordered(
+            submission1.submissionDomain,
+            CantonTimestamp.MaxValue,
+          )
+        } yield {
+          lookupUnseqBefore.loneElement shouldBe submission1
+          lookupSeqBefore shouldBe empty
+          lookupUnseqAfter shouldBe empty
+          lookupSeqAfter.loneElement shouldBe submission1.copy(sequencingInfo =
+            sequencedSubmission1
+          )
+        }
+      }
+
+      "update the given root hash only if it is not yet set" in {
+        val store = mk()
+        val rootHash1 = RootHash(TestHash.digest(1))
+        val rootHash2 = RootHash(TestHash.digest(2))
+
+        for {
+          () <- store.register(submission1).valueOrFailShutdown("register submission1")
+
+          lookupBefore <- store.lookupUnsequencedUptoUnordered(
+            submission1.submissionDomain,
+            CantonTimestamp.MaxValue,
+          )
+
+          () <- store.updateRegistration(
+            submission1,
+            rootHash1,
+          )
+          () <- store.updateRegistration(
+            submission1,
+            rootHash2,
+          )
+
+          lookupAfter <- store.lookupUnsequencedUptoUnordered(
+            submission1.submissionDomain,
+            CantonTimestamp.MaxValue,
+          )
+        } yield {
+          lookupBefore.loneElement shouldBe submission1
+          lookupAfter.loneElement shouldBe submission1.copy(rootHashO = Some(rootHash1))
         }
       }
     }
@@ -286,6 +397,139 @@ trait InFlightSubmissionStoreTest extends AsyncWordSpec with BaseTest {
             Some(sequenced3a)
           ))
           lookupMsgId2 shouldBe None
+        }
+      }
+    }
+
+    "observeSequencedRootHash" should {
+      "update the submission with the given root hash" in {
+        val store = mk()
+        val rootHash1 = RootHash(TestHash.digest(1))
+        val rootHash2 = RootHash(TestHash.digest(2))
+
+        def lookups = for {
+          unsequenced <- store.lookupUnsequencedUptoUnordered(
+            submission1.submissionDomain,
+            CantonTimestamp.MaxValue,
+          )
+          sequenced <- store.lookupSequencedUptoUnordered(
+            submission1.submissionDomain,
+            CantonTimestamp.MaxValue,
+          )
+        } yield (unsequenced, sequenced)
+
+        for {
+          () <- store.register(submission1).valueOrFailShutdown("register submission1")
+          () <- store.updateRegistration(
+            submission1,
+            rootHash1,
+          )
+          // Also test register() with an already provided root hash.
+          // Currently this is not used, but the functionality is implemented.
+          () <- store
+            .register(submission2.copy(rootHashO = Some(rootHash2)))
+            .valueOrFailShutdown("register submission2")
+
+          lookups1 <- lookups
+          (lookupUnsequenced1, lookupSequenced1) = lookups1
+
+          () <- store.observeSequencedRootHash(
+            rootHash1,
+            sequencedSubmission1,
+          )
+
+          lookups2 <- lookups
+          (lookupUnsequenced2, lookupSequenced2) = lookups2
+
+          () <- store.observeSequencedRootHash(
+            rootHash2,
+            sequencedSubmission2,
+          )
+
+          lookups3 <- lookups
+          (lookupUnsequenced3, lookupSequenced3) = lookups3
+        } yield {
+          val unsequenced1 = submission1.copy(rootHashO = Some(rootHash1))
+          val sequenced1 = unsequenced1.copy(sequencingInfo = sequencedSubmission1)
+          val unsequenced2 = submission2.copy(rootHashO = Some(rootHash2))
+          val sequenced2 = unsequenced2.copy(sequencingInfo = sequencedSubmission2)
+
+          lookupSequenced1 shouldBe empty
+          lookupUnsequenced1.toSet shouldBe Set(unsequenced1, unsequenced2)
+
+          lookupSequenced2.loneElement shouldBe sequenced1
+          lookupUnsequenced2.loneElement shouldBe unsequenced2
+
+          lookupSequenced3.toSet shouldBe Set(sequenced1, sequenced2)
+          lookupUnsequenced3 shouldBe empty
+        }
+      }
+
+      "not update sequenced submissions" in {
+        val store = mk()
+        val rootHash = RootHash(TestHash.digest(1))
+
+        for {
+          () <- store.register(submission1).valueOrFailShutdown("register submission1")
+          () <- store.updateRegistration(
+            submission1,
+            rootHash,
+          )
+
+          () <- store.observeSequencedRootHash(
+            rootHash,
+            sequencedSubmission1,
+          )
+          () <- store.observeSequencedRootHash(
+            rootHash,
+            sequencedSubmission2,
+          )
+
+          sequenced1 <- valueOrFail(store.lookup(submission1.changeIdHash))("lookup submission1")
+          earliest <- store.lookupEarliest(domainId1)
+        } yield {
+          sequenced1 shouldBe submission1.copy(
+            sequencingInfo = sequencedSubmission1,
+            rootHashO = Some(rootHash),
+          )
+          earliest shouldBe Some(sequencedSubmission1.sequencingTime)
+        }
+      }
+
+      "update all unsequenced submissions if there are several for the same root hash" in {
+        // This shouldn't happen in practice,
+        // but we nevertheless include the test to ensure that all store implementations behave the same
+        val store = mk()
+        val rootHash = RootHash(TestHash.digest(1))
+
+        for {
+          () <- store.register(submission1).valueOrFailShutdown("register submission1")
+          () <- store.updateRegistration(
+            submission1,
+            rootHash,
+          )
+          () <- store.register(submission2).valueOrFailShutdown("register submission2")
+          () <- store.updateRegistration(
+            submission2,
+            rootHash,
+          )
+
+          () <- store.observeSequencedRootHash(
+            rootHash,
+            sequencedSubmission1,
+          )
+
+          sequenced1 <- valueOrFail(store.lookup(submission1.changeIdHash))("lookup submission1")
+          sequenced2 <- valueOrFail(store.lookup(submission2.changeIdHash))("lookup submission2")
+        } yield {
+          sequenced1 shouldBe submission1.copy(
+            sequencingInfo = sequencedSubmission1,
+            rootHashO = Some(rootHash),
+          )
+          sequenced2 shouldBe submission2.copy(
+            sequencingInfo = sequencedSubmission1,
+            rootHashO = Some(rootHash),
+          )
         }
       }
     }

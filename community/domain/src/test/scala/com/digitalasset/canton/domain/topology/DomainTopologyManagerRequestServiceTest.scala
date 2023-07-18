@@ -48,11 +48,11 @@ class DomainTopologyManagerRequestServiceTest
     with SecurityTestSuite
     with HasExecutionContext {
 
-  lazy val factory = new TopologyTransactionTestFactory(
+  private lazy val factory = new TopologyTransactionTestFactory(
     loggerFactory,
     parallelExecutionContext,
   )
-  lazy val unauthenticatedMember = UnauthenticatedMemberId(DefaultTestIdentities.uid)
+  private lazy val unauthenticatedMember = UnauthenticatedMemberId(DefaultTestIdentities.uid)
   class Fixture {
 
     val authorizedStore =

@@ -21,7 +21,7 @@ object UpstreamOffsetConvert {
   private val longBasedByteLength: Int = 9 // One byte for the version plus 8 bytes for Long
 
   def fromGlobalOffset(offset: GlobalOffset): LedgerSyncOffset = {
-    // Ensure we don't get negative values as the 2s-complement of Long/math.BigInt would violate lexographic
+    // Ensure we don't get negative values as the 2s-complement of Long/math.BigInt would violate lexicographic
     // ordering required upstream.
     if (offset <= 0L) {
       throw new IllegalArgumentException(s"Offset has to be positive and not $offset")

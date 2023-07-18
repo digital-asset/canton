@@ -90,6 +90,7 @@ class ParticipantRepairAdministration(
         - timestamp: optionally a timestamp for which we should take the state (useful to reconcile states of a domain)
         - protocolVersion: optional the protocol version to use for the serialization. Defaults to the one of the domains.
         - chunkSize: size of the byte chunks to stream back: default 1024 * 1024 * 2 = (2MB)
+        - contractDomainRenames: As part of the export, allow to rename the associated domain id of contracts from one domain to another based on the mapping.
         """
   )
   def download(
@@ -99,67 +100,73 @@ class ParticipantRepairAdministration(
       timestamp: Option[Instant] = None,
       protocolVersion: Option[ProtocolVersion] = None,
       chunkSize: Option[PositiveInt] = None,
+      contractDomainRenames: Map[DomainId, DomainId] = Map.empty,
   ): Unit = {
-    consoleEnvironment.run {
-      val target = File(outputFile)
-      val requestComplete = Promise[String]()
-      val observer = new GrpcByteChunksToFileObserver[AcsSnapshotChunk](
-        target,
-        requestComplete,
-      )
-      val timeout = consoleEnvironment.commandTimeouts.ledgerCommand
-
-      def call = consoleEnvironment.run {
-        runner.adminCommand(
-          ParticipantAdminCommands.ParticipantRepairManagement
-            .Download(
-              parties,
-              filterDomainId,
-              timestamp,
-              protocolVersion,
-              chunkSize,
-              observer,
-              target.toJava.getName.endsWith(".gz"),
-            )
+    check(FeatureFlag.Repair) {
+      consoleEnvironment.run {
+        val target = File(outputFile)
+        val requestComplete = Promise[String]()
+        val observer = new GrpcByteChunksToFileObserver[AcsSnapshotChunk](
+          target,
+          requestComplete,
         )
-      }
+        val timeout = consoleEnvironment.commandTimeouts.ledgerCommand
 
-      try {
-        ResourceUtil.withResource(call) { _ =>
-          CommandSuccessful(
-            Await
-              .result(
-                requestComplete.future,
-                timeout.duration,
+        def call = consoleEnvironment.run {
+          runner.adminCommand(
+            ParticipantAdminCommands.ParticipantRepairManagement
+              .Download(
+                parties,
+                filterDomainId,
+                timestamp,
+                protocolVersion,
+                chunkSize,
+                observer,
+                target.toJava.getName.endsWith(".gz"),
+                contractDomainRenames,
               )
-              .discard
           )
         }
-      } catch {
-        case sre: StatusRuntimeException =>
-          GenericCommandError(
-            GrpcError("Generating acs snapshot file", "download_acs_snapshot", sre).toString
-          )
-        case _: TimeoutException =>
-          target.delete(swallowIOExceptions = true)
-          CommandErrors.ConsoleTimeout.Error(timeout.asJavaApproximation)
+
+        try {
+          ResourceUtil.withResource(call) { _ =>
+            CommandSuccessful(
+              Await
+                .result(
+                  requestComplete.future,
+                  timeout.duration,
+                )
+                .discard
+            )
+          }
+        } catch {
+          case sre: StatusRuntimeException =>
+            GenericCommandError(
+              GrpcError("Generating acs snapshot file", "download_acs_snapshot", sre).toString
+            )
+          case _: TimeoutException =>
+            target.delete(swallowIOExceptions = true)
+            CommandErrors.ConsoleTimeout.Error(timeout.asJavaApproximation)
+        }
       }
     }
   }
 
-  @Help.Summary("Import ACS snapshot", FeatureFlag.Preview)
+  @Help.Summary("Import ACS snapshot")
   @Help.Description("""Uploads a binary into the participant's ACS""")
   def upload(
       inputFile: String = ParticipantRepairAdministration.defaultFile
   ): Unit = {
-    val file = File(inputFile)
-    consoleEnvironment.run {
-      runner.adminCommand(
-        ParticipantAdminCommands.ParticipantRepairManagement.Upload(
-          ByteString.copyFrom(file.loadBytes),
-          file.extension().contains(".gz"),
+    check(FeatureFlag.Repair) {
+      val file = File(inputFile)
+      consoleEnvironment.run {
+        runner.adminCommand(
+          ParticipantAdminCommands.ParticipantRepairManagement.Upload(
+            ByteString.copyFrom(file.loadBytes),
+            file.extension().contains(".gz"),
+          )
         )
-      )
+      }
     }
   }
 }

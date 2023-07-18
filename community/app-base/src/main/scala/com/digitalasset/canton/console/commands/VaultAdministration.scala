@@ -130,6 +130,66 @@ class SecretKeyAdministration(
     }
   }
 
+  private def findPublicKey(
+      fingerprint: String,
+      topologyAdmin: TopologyAdministrationGroupCommon,
+      owner: KeyOwner,
+  ): PublicKey =
+    findPublicKeys(topologyAdmin, owner).find(_.fingerprint.unwrap == fingerprint) match {
+      case Some(key) => key
+      case None =>
+        throw new IllegalStateException(
+          s"The key $fingerprint does not exist"
+        )
+    }
+
+  @Help.Summary("Rotate a given node's keypair with a new pre-generated KMS keypair")
+  @Help.Description(
+    """Rotates an existing encryption or signing key stored externally in a KMS with a pre-generated
+      key.
+      |The fingerprint of the key we want to rotate.
+      |The id of the new KMS key (e.g. Resource Name)."""
+  )
+  def rotate_kms_node_key(fingerprint: String, newKmsKeyId: String): PublicKey = {
+
+    val owner = instance.id.keyOwner
+
+    val currentKey = findPublicKey(fingerprint, instance.topology, owner)
+    val newKey = currentKey.purpose match {
+      case KeyPurpose.Signing => instance.keys.secret.register_kms_signing_key(newKmsKeyId)
+      case KeyPurpose.Encryption => instance.keys.secret.register_kms_encryption_key(newKmsKeyId)
+    }
+
+    // Rotate the key for the node in the topology management
+    instance.topology.owner_to_key_mappings.rotate_key(
+      owner,
+      currentKey,
+      newKey,
+    )
+    newKey
+  }
+
+  @Help.Summary("Rotate a node's public/private key pair")
+  @Help.Description(
+    """Rotates an existing encryption or signing key. NOTE: A namespace root or intermediate
+      signing key CANNOT be rotated by this command.
+      |The fingerprint of the key we want to rotate."""
+  )
+  def rotate_node_key(fingerprint: String): PublicKey = {
+    val owner = instance.id.keyOwner
+
+    val currentKey = findPublicKey(fingerprint, instance.topology, owner)
+    val newKey = regenerateKey(currentKey)
+
+    // Rotate the key for the node in the topology management
+    instance.topology.owner_to_key_mappings.rotate_key(
+      owner,
+      currentKey,
+      newKey,
+    )
+    newKey
+  }
+
   @Help.Summary("Rotate the node's public/private key pairs")
   @Help.Description(
     """
@@ -162,7 +222,7 @@ class SecretKeyAdministration(
   protected def findPublicKeys(
       topologyAdmin: TopologyAdministrationGroupCommon,
       owner: KeyOwner,
-  ): Seq[PublicKey] = {
+  ): Seq[PublicKey] =
     topologyAdmin match {
       case t: TopologyAdministrationGroup =>
         t.owner_to_key_mappings
@@ -177,7 +237,6 @@ class SecretKeyAdministration(
           "Impossible to encounter topology admin group besides X and non-X"
         )
     }
-  }
 
   @Help.Summary("Change the wrapper key for encrypted private keys store")
   @Help.Description(

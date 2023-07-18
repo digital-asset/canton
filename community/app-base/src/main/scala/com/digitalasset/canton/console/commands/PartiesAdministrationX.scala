@@ -159,6 +159,7 @@ class ParticipantPartiesAdministrationGroupX(
       // TODO(i10809) replace wait for domain for a clean topology synchronisation using the dispatcher info
       waitForDomain: DomainChoice = DomainChoice.Only(Seq()),
       synchronizeParticipants: Seq[ParticipantReferenceX] = Seq(),
+      groupAddressing: Boolean = false,
   ): PartyId = {
 
     def registered(lst: => Seq[ListPartiesResult]): Set[DomainId] = {
@@ -241,7 +242,7 @@ class ParticipantPartiesAdministrationGroupX(
             )
               .map(domains => (p, domains intersect domainIds))
           }
-          _ <- runPartyCommand(partyId, participants, threshold).toEither
+          _ <- runPartyCommand(partyId, participants, threshold, groupAddressing).toEither
           _ <- validDisplayName match {
             case None => Right(())
             case Some(name) =>
@@ -284,6 +285,7 @@ class ParticipantPartiesAdministrationGroupX(
       partyId: PartyId,
       participants: Seq[ParticipantId],
       threshold: PositiveInt,
+      groupAddressing: Boolean,
       force: Boolean = false,
   ): ConsoleCommandResult[SignedTopologyTransactionX[TopologyChangeOpX, PartyToParticipantX]] = {
 
@@ -303,7 +305,7 @@ class ParticipantPartiesAdministrationGroupX(
                 else ParticipantPermissionX.Submission,
               )
             ),
-            groupAddressing = false,
+            groupAddressing,
           ),
           signedBy = Seq(this.participantId.uid.namespace.fingerprint),
           serial = None,

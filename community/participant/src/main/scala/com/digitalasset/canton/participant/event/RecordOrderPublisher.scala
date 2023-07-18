@@ -24,6 +24,7 @@ import com.digitalasset.canton.lifecycle.{
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher.PendingPublish
+import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet
 import com.digitalasset.canton.participant.protocol.submission.{
   InFlightSubmissionTracker,
   SequencedSubmission,
@@ -35,6 +36,7 @@ import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
 }
 import com.digitalasset.canton.participant.store.MultiDomainEventLog.PublicationData
 import com.digitalasset.canton.participant.store.{
+  ActiveContractSnapshot,
   EventLogId,
   MultiDomainEventLog,
   SingleDimensionEventLog,
@@ -79,6 +81,7 @@ class RecordOrderPublisher(
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
+    activeContractSnapshot: ActiveContractSnapshot,
 )(implicit val executionContextForPublishing: ExecutionContext, elc: ErrorLoggingContext)
     extends NamedLogging
     with FlagCloseableAsync {
@@ -169,10 +172,10 @@ class RecordOrderPublisher(
       recordSequencerCounter: SequencerCounter,
       timestamp: CantonTimestamp,
       requestCounter: RequestCounter,
-      acsChange: AcsChange,
+      commitSet: CommitSet,
   ): Unit = TraceContext.withNewTraceContext { implicit traceContext =>
     taskScheduler.scheduleTask(
-      AcsChangePublicationTask(recordSequencerCounter, timestamp, requestCounter.some)(acsChange)
+      AcsChangePublicationTask(recordSequencerCounter, timestamp)(Some((requestCounter, commitSet)))
     )
   }
 
@@ -184,9 +187,7 @@ class RecordOrderPublisher(
   ): Unit = TraceContext.withNewTraceContext { implicit traceContext =>
     if (sequencerCounter >= initSc) {
       taskScheduler.scheduleTask(
-        AcsChangePublicationTask(sequencerCounter, timestamp, requestCounterO = None)(
-          AcsChange.empty
-        )
+        AcsChangePublicationTask(sequencerCounter, timestamp)(None)
       )
     }
   }
@@ -240,7 +241,7 @@ class RecordOrderPublisher(
             task.requestCounter.some,
             0, // EventPublicationTask comes before AcsChangePublicationTask if they have the same tie breaker. This is an arbitrary decision.
           ).some
-        case task: AcsChangePublicationTask => (task.requestCounterO, 1).some
+        case task: AcsChangePublicationTask => (task.requestCounterCommitSetPairO.map(_._1), 1).some
       }
   }
 
@@ -335,18 +336,48 @@ class RecordOrderPublisher(
     }
 
   // tieBreaker is used to order tasks with the same timestamp
+  /*
+  Note that we put requestCounter in the second argument list, because it is used together with the commit set.
+  This means that the case class's generated equality method compares only timestamp, sequencerCounter.
+  However,
+  publicationTasks are ordered by
+  [[com.digitalasset.canton.participant.event.RecordOrderPublisher.PublicationTask.orderingSameTimestamp]]
+  which looks at timestamp, sequencerCounter and requestCounter.
+  Thus, the equals method considers more AcsChangePublicationTasks equal than the orderingSameTimestamp.
+  However, orderingSameTimestamp is used only for the TaskScheduler, which should not care about equality of tasks.
+   */
   private case class AcsChangePublicationTask(
       override val sequencerCounter: SequencerCounter,
       override val timestamp: CantonTimestamp,
-      requestCounterO: Option[RequestCounter],
-  )(val acsChange: AcsChange)(implicit val traceContext: TraceContext)
-      extends PublicationTask {
+  )(val requestCounterCommitSetPairO: Option[(RequestCounter, CommitSet)])(implicit
+      val traceContext: TraceContext
+  ) extends PublicationTask {
 
     def recordTime: RecordTime =
-      RecordTime(timestamp, requestCounterO.map(_.unwrap).getOrElse(RecordTime.lowestTiebreaker))
+      RecordTime(
+        timestamp,
+        requestCounterCommitSetPairO.map(_._1.unwrap).getOrElse(RecordTime.lowestTiebreaker),
+      )
 
     override def perform(): FutureUnlessShutdown[Unit] = {
-      FutureUnlessShutdown.pure(acsChangeListener.get.foreach(_.publish(recordTime, acsChange)))
+      // If the requestCounterCommitSetPairO is not set, then by default the commit set is empty, and
+      // the request counter is the smallest possible value that it does not throw an exception in
+      // ActiveContractStore.bulkContractsTransferCounterSnapshot, i.e., lowerBound + 1
+      val (requestCounter, commitSet) =
+        requestCounterCommitSetPairO.getOrElse((RequestCounter.LowerBound + 1, CommitSet.empty))
+      // Augments the commit set with the updated transfer counters for archive events,
+      // computes the acs change and publishes it
+      val acsChangePublish =
+        for {
+          // Retrieves the transfer counters of the archived contracts from the latest state in the active contract store
+          archivalsWithTransferCountersOnly <- activeContractSnapshot
+            .bulkContractsTransferCounterSnapshot(commitSet.archivals.keySet, requestCounter)
+        } yield {
+          // Computes the ACS change by decorating the archive events in the commit set with their transfer counters
+          val acsChange = AcsChange.fromCommitSet(commitSet, archivalsWithTransferCountersOnly)
+          acsChangeListener.get.foreach(_.publish(recordTime, acsChange))
+        }
+      FutureUnlessShutdown.outcomeF(acsChangePublish)
     }
 
     override def pretty: Pretty[this.type] =

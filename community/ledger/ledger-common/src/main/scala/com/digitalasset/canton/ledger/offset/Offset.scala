@@ -12,7 +12,7 @@ import java.io.InputStream
 /** Offsets into streams with hierarchical addressing.
   *
   * We use these [[Offset]]'s to address changes to the participant state.
-  * Offsets are opaque values that must be must be strictly
+  * Offsets are opaque values that must be strictly
   * increasing according to lexicographical ordering.
   *
   * Ledger implementations are advised to future proof their design

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol.validation
 
 import cats.syntax.functor.*
-import com.digitalasset.canton.data.SubmitterMetadata
+import com.digitalasset.canton.data.{SubmitterMetadata, ViewPosition}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet
 import com.digitalasset.canton.participant.protocol.validation.ContractConsistencyChecker.ReferenceToFutureContractError
@@ -22,8 +22,8 @@ final case class TransactionValidationResult(
     submitterMetadataO: Option[SubmitterMetadata],
     workflowIdO: Option[WorkflowId],
     contractConsistencyResultE: Either[List[ReferenceToFutureContractError], Unit],
-    authenticationResult: Map[ViewHash, String],
-    authorizationResult: Map[ViewHash, String],
+    authenticationResult: Map[ViewPosition, String],
+    authorizationResult: Map[ViewPosition, String],
     modelConformanceResultE: Either[
       ModelConformanceChecker.ErrorWithSubviewsCheck,
       ModelConformanceChecker.Result,
@@ -35,7 +35,7 @@ final case class TransactionValidationResult(
     transient: Map[LfContractId, WithContractHash[Set[LfPartyId]]],
     keyUpdates: Map[LfGlobalKey, ContractKeyJournal.Status],
     successfulActivenessCheck: Boolean,
-    viewValidationResults: Map[ViewHash, ViewValidationResult],
+    viewValidationResults: Map[ViewPosition, ViewValidationResult],
     timeValidationResultE: Either[TimeCheckFailure, Unit],
     hostedWitnesses: Set[LfPartyId],
     replayCheckResult: Option[String],
@@ -44,8 +44,18 @@ final case class TransactionValidationResult(
   def commitSet(
       requestId: RequestId
   )(protocolVersion: ProtocolVersion)(implicit loggingContext: ErrorLoggingContext): CommitSet = {
+
     if (successfulActivenessCheck) {
-      val archivals = consumedInputsOfHostedParties ++ transient
+      val archivals = (consumedInputsOfHostedParties ++ transient).map {
+        case (cid, hostedStakeholders) =>
+          (
+            cid,
+            WithContractHash(
+              CommitSet.ArchivalCommit(hostedStakeholders.unwrap),
+              hostedStakeholders.contractHash,
+            ),
+          )
+      }
       val transferCounter = TransferCounter.forCreatedContract(protocolVersion)
       val creations = createdContracts.fmap(c =>
         WithContractHash.fromContract(c, CommitSet.CreationCommit(c.metadata, transferCounter))

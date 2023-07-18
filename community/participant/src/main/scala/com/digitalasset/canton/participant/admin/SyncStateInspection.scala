@@ -26,6 +26,7 @@ import com.digitalasset.canton.participant.sync.{
   TimestampedEvent,
   UpstreamOffsetConvert,
 }
+import com.digitalasset.canton.participant.{GlobalOffset, Pruning}
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
   CommitmentPeriod,
@@ -66,7 +67,6 @@ class SyncStateInspection(
     participantNodePersistentState: Eval[ParticipantNodePersistentState],
     pruningProcessor: PruningProcessor,
     timeouts: ProcessingTimeout,
-    maxDbConnections: Int,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
@@ -150,6 +150,7 @@ class SyncStateInspection(
       filterDomain: DomainId => Boolean,
       timestamp: Option[CantonTimestamp],
       protocolVersion: Option[ProtocolVersion],
+      contractDomainRenames: Map[DomainId, DomainId],
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, RepairServiceError, File] = {
@@ -174,6 +175,7 @@ class SyncStateInspection(
           filterDomain,
           timestamp,
           protocolVersion,
+          contractDomainRenames,
         ).map(_ => outputFile)
       }
     }
@@ -185,6 +187,7 @@ class SyncStateInspection(
       filterDomain: DomainId => Boolean,
       timestamp: Option[CantonTimestamp],
       protocolVersion: Option[ProtocolVersion],
+      contractDomainRenames: Map[DomainId, DomainId],
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, RepairServiceError, List[(DomainId, Long)]] =
@@ -199,6 +202,7 @@ class SyncStateInspection(
           SyncStateInspection.batchSize,
           protocolVersion,
           writer,
+          contractDomainRenames,
         )
       }
 
@@ -211,6 +215,7 @@ class SyncStateInspection(
       batchSize: PositiveInt,
       protocolVersion: Option[ProtocolVersion],
       writer: OutputStreamWriter,
+      contractDomainRenames: Map[DomainId, DomainId],
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, RepairServiceError, Option[(DomainId, Long)]] = {
@@ -271,12 +276,16 @@ class SyncStateInspection(
         grouped = acs.toList
           .sortBy { case (contractId, _) => contractId.coid }
           .grouped(batchSize.value)
+
+        // Try to map the domain id based on the contract domain renames, or keep the current one when no mapping is present
+        mappedDomainId = contractDomainRenames.getOrElse(domainId, domainId)
+
         // fetch contracts
         numberOfContracts <- EitherT.right(MonadUtil.sequentialTraverse(grouped.toSeq) { batch =>
           state.contractStore
             .lookupManyUncached(batch.map { case (cid, _) => cid })
             .map(_.flatten)
-            .map(writeToStream(writer, domainId, _, lfParties, useProtocolVersion))
+            .map(writeToStream(writer, mappedDomainId, _, lfParties, useProtocolVersion))
 
         })
       } yield Some(domainId -> numberOfContracts.sum.toLong)
@@ -446,22 +455,10 @@ class SyncStateInspection(
     closed.map(opener.tryOpen)
   }
 
-  def safeToPrune(beforeOrAt: CantonTimestamp, ledgerEnd: LedgerOffset)(implicit
+  def safeToPrune(beforeOrAt: CantonTimestamp, ledgerEndOffset: GlobalOffset)(implicit
       traceContext: TraceContext
-  ): Either[String, Option[LedgerOffset]] = {
-    for {
-      ledgerEndOffset <- UpstreamOffsetConvert
-        .toLedgerSyncOffset(ledgerEnd)
-        .flatMap(UpstreamOffsetConvert.toGlobalOffset)
-      pruningOffsetO <- timeouts.inspection
-        .await(
-          s"checking whether timestamp $beforeOrAt with ledgerEnd $ledgerEnd is safe to prune"
-        )(
-          pruningProcessor.safeToPrune(beforeOrAt, ledgerEndOffset).value
-        )
-        .leftMap(_.message)
-    } yield pruningOffsetO.map(UpstreamOffsetConvert.toLedgerOffset)
-  }
+  ): EitherT[Future, Pruning.LedgerPruningError, Option[GlobalOffset]] = pruningProcessor
+    .safeToPrune(beforeOrAt, ledgerEndOffset)
 
   def findComputedCommitments(
       domain: DomainAlias,

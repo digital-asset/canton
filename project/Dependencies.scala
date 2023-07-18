@@ -21,8 +21,8 @@ object Dependencies {
 
   // TODO(#10617) We have cloned akka's BroadcastHub implementation in community/lib/akka/src/main/scala/akka/stream/scaladsl/BroadcastHub.scala
   //  When updating akka, make sure to update the clone as well, including the tests in community/lib/akka/src/main/scala/akka
-  lazy val akka_version = "2.6.18"
-  lazy val akka_http_version = "10.2.8"
+  lazy val akka_version = "2.6.21"
+  lazy val akka_http_version = "10.2.10"
   lazy val grpc_version = "1.44.0"
   lazy val logback_version = "1.4.5"
   lazy val slf4j_version = "2.0.6"

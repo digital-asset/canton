@@ -540,6 +540,23 @@ class ParticipantPruningAdministrationGroup(
     )
 
   @Help.Summary(
+    "Return the highest participant ledger offset whose record time is before or at the given one (if any) at which pruning is safely possible",
+    FeatureFlag.Preview,
+  )
+  def find_safe_offset(beforeOrAt: Instant = Instant.now()): Option[LedgerOffset] = {
+    check(FeatureFlag.Preview) {
+      val ledgerEnd = consoleEnvironment.run(
+        ledgerApiCommand(LedgerApiCommands.TransactionService.GetLedgerEnd())
+      )
+      consoleEnvironment.run(
+        adminCommand(
+          ParticipantAdminCommands.Pruning.GetSafePruningOffsetCommand(beforeOrAt, ledgerEnd)
+        )
+      )
+    }
+  }
+
+  @Help.Summary(
     "Prune only internal ledger state up to the specified offset inclusively.",
     FeatureFlag.Preview,
   )
@@ -596,29 +613,6 @@ class ParticipantPruningAdministrationGroup(
       )
       LedgerOffset(LedgerOffset.Value.Absolute(rawOffset))
     }
-
-}
-
-class LocalParticipantPruningAdministrationGroup(
-    runner: AdminCommandRunner with LedgerApiCommandRunner with BaseInspection[ParticipantNode],
-    consoleEnvironment: ConsoleEnvironment,
-    loggerFactory: NamedLoggerFactory,
-) extends ParticipantPruningAdministrationGroup(runner, consoleEnvironment, loggerFactory)
-    with NoTracing {
-
-  import runner.*
-
-  @Help.Summary(
-    "Return the highest participant ledger offset whose record time is before or at the given one (if any) at which pruning is safely possible",
-    FeatureFlag.Preview,
-  )
-  def find_safe_offset(beforeOrAt: Instant = Instant.now()): Option[LedgerOffset] =
-    check(FeatureFlag.Preview)(consoleEnvironment.run(access { node =>
-      ConsoleCommandResult.fromEither(for {
-        ledgerEnd <- ledgerApiCommand(LedgerApiCommands.TransactionService.GetLedgerEnd()).toEither
-        offset <- node.sync.stateInspection.safeToPrune(timestampFromInstant(beforeOrAt), ledgerEnd)
-      } yield offset)
-    }))
 
 }
 

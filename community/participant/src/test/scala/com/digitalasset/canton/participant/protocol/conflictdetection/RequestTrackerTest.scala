@@ -307,16 +307,16 @@ private[conflictdetection] trait RequestTrackerTest {
           acs,
           tsCR0.addMicros(1),
           Map(
-            coid00 -> (tsCR0, TransferCounter.Genesis),
-            coid01 -> (tsCR0, TransferCounter.Genesis),
+            coid00 -> (tsCR0, initialTransferCounter),
+            coid01 -> (tsCR0, initialTransferCounter),
           ),
         )
         _ <- checkSnapshot(
           acs,
           tsCR1.addMicros(1),
           Map(
-            coid01 -> (tsCR0, TransferCounter.Genesis),
-            coid10 -> (tsCR1, TransferCounter.Genesis),
+            coid01 -> (tsCR0, initialTransferCounter),
+            coid10 -> (tsCR1, initialTransferCounter),
           ),
         )
       } yield succeed
@@ -1257,7 +1257,7 @@ private[conflictdetection] trait RequestTrackerTest {
   protected def checkSnapshot(
       acs: ActiveContractStore,
       ts: CantonTimestamp,
-      expected: Map[LfContractId, (CantonTimestamp, TransferCounter)],
+      expected: Map[LfContractId, (CantonTimestamp, TransferCounterO)],
   ): Future[Assertion] =
     acs
       .snapshot(ts)

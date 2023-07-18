@@ -78,6 +78,7 @@ private class JdbcLedgerDao(
     tracer: Tracer,
     val loggerFactory: NamedLoggerFactory,
     incompleteOffsets: (Offset, Set[Ref.Party], TraceContext) => Future[Vector[Offset]],
+    contractLoader: ContractLoader,
 ) extends LedgerDao
     with NamedLogging {
 
@@ -616,6 +617,7 @@ private class JdbcLedgerDao(
 
   override val contractsReader: ContractsReader =
     ContractsReader(
+      contractLoader,
       dbDispatcher,
       metrics,
       readStorageBackend.contractStorageBackend,
@@ -738,6 +740,7 @@ private[platform] object JdbcLedgerDao {
       tracer: Tracer,
       loggerFactory: NamedLoggerFactory,
       incompleteOffsets: (Offset, Set[Ref.Party], TraceContext) => Future[Vector[Offset]],
+      contractLoader: ContractLoader = ContractLoader.dummyLoader,
   ): LedgerReadDao =
     new JdbcLedgerDao(
       dbDispatcher = dbSupport.dbDispatcher,
@@ -759,6 +762,7 @@ private[platform] object JdbcLedgerDao {
       tracer = tracer,
       loggerFactory = loggerFactory,
       incompleteOffsets = incompleteOffsets,
+      contractLoader = contractLoader,
     )
 
   def write(
@@ -778,6 +782,7 @@ private[platform] object JdbcLedgerDao {
       globalMaxEventPayloadQueries: Int,
       tracer: Tracer,
       loggerFactory: NamedLoggerFactory,
+      contractLoader: ContractLoader = ContractLoader.dummyLoader,
   ): LedgerDao =
     new JdbcLedgerDao(
       dbDispatcher = dbSupport.dbDispatcher,
@@ -799,6 +804,7 @@ private[platform] object JdbcLedgerDao {
       tracer = tracer,
       loggerFactory = loggerFactory,
       incompleteOffsets = (_, _, _) => Future.successful(Vector.empty),
+      contractLoader = contractLoader,
     )
 
   val acceptType = "accept"

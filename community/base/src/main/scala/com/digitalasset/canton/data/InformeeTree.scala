@@ -31,8 +31,8 @@ final case class InformeeTree private (tree: GenTransactionTree)(
 
   lazy val transactionId: TransactionId = TransactionId.fromRootHash(tree.rootHash)
 
-  lazy val informeesByView: Map[ViewHash, Set[Informee]] =
-    InformeeTree.viewCommonDataByView(tree).map { case (hash, viewCommonData) =>
+  lazy val informeesByViewHash: Map[ViewHash, Set[Informee]] =
+    InformeeTree.viewCommonDataByViewHash(tree).map { case (hash, viewCommonData) =>
       hash -> viewCommonData.informees
     }
 
@@ -145,11 +145,25 @@ object InformeeTree extends HasProtocolVersionedWithContextCompanion[InformeeTre
       oldInformeeTree => InformeeTree(newTree)(oldInformeeTree.representativeProtocolVersion)
     )
 
-  private[data] def viewCommonDataByView(tree: GenTransactionTree): Map[ViewHash, ViewCommonData] =
+  private[data] def viewCommonDataByViewHash(
+      tree: GenTransactionTree
+  ): Map[ViewHash, ViewCommonData] =
     tree.rootViews.unblindedElements
       .flatMap(_.flatten)
       .map(view => view.viewHash -> view.viewCommonData.unwrap)
       .collect { case (hash, Right(viewCommonData)) => hash -> viewCommonData }
+      .toMap
+
+  private[data] def viewCommonDataByViewPosition(
+      tree: GenTransactionTree
+  ): Map[ViewPosition, ViewCommonData] =
+    tree.rootViews.unblindedElementsWithIndex
+      .flatMap { case (view, index) =>
+        view.allSubviewsWithPosition(ViewPosition(List(index))).map { case (subview, position) =>
+          position -> subview.viewCommonData.unwrap
+        }
+      }
+      .collect { case (position, Right(viewCommonData)) => position -> viewCommonData }
       .toMap
 
   /** Indicates an attempt to create an invalid [[InformeeTree]] or [[FullInformeeTree]]. */

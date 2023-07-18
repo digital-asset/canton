@@ -11,6 +11,7 @@ import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
   InFlightBySequencingInfo,
 }
 import com.digitalasset.canton.participant.sync.TimestampedEvent.TimelyRejectionEventId
+import com.digitalasset.canton.protocol.RootHash
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.store.db.DbSerializationException
 import com.digitalasset.canton.topology.DomainId
@@ -33,6 +34,11 @@ import java.util.UUID
   * @param submissionDomain The domain to which the submission is supposed to be/was sent.
   * @param messageUuid The message UUID that will be/has been used for the
   *                  [[com.digitalasset.canton.sequencing.protocol.SubmissionRequest]]
+  * @param rootHashO The root hash contained in the [[com.digitalasset.canton.sequencing.protocol.SubmissionRequest]].
+  *                  Optional because:
+  *                  - currently, the root hash is not available when creating an entry for registration, and is
+  *                    added as a second step;
+  *                  - it can be an older entry for which the root hash was never added.
   * @param sequencingInfo Information about when the request will be/was sequenced
   * @param submissionTraceContext The [[com.digitalasset.canton.tracing.TraceContext]] of the submission.
   */
@@ -42,6 +48,7 @@ final case class InFlightSubmission[+SequencingInfo <: SubmissionSequencingInfo]
     submissionId: Option[LedgerSubmissionId],
     submissionDomain: DomainId,
     messageUuid: UUID,
+    rootHashO: Option[RootHash],
     sequencingInfo: SequencingInfo,
     submissionTraceContext: TraceContext,
 ) extends PrettyPrinting {
@@ -80,6 +87,7 @@ final case class InFlightSubmission[+SequencingInfo <: SubmissionSequencingInfo]
     paramIfDefined("submissionid", _.submissionId),
     param("submission domain", _.submissionDomain),
     param("message UUID", _.messageUuid),
+    paramIfDefined("root hash", _.rootHashO),
     param("sequencing info", _.sequencingInfo),
     param("submission trace context", _.submissionTraceContext),
   )
@@ -108,6 +116,7 @@ object InFlightSubmission {
     val submissionId = r.<<[Option[SerializableSubmissionId]].map(_.submissionId)
     val submissionDomain = r.<<[DomainId]
     val messageId = r.<<[UUID]
+    val rootHashO = r.<<[Option[RootHash]]
     val sequencingInfo = r.<<[SequencingInfo]
     val submissionTraceContext = r.<<[SerializableTraceContext]
     InFlightSubmission(
@@ -115,6 +124,7 @@ object InFlightSubmission {
       submissionId,
       submissionDomain,
       messageId,
+      rootHashO,
       sequencingInfo,
       submissionTraceContext.unwrap,
     )

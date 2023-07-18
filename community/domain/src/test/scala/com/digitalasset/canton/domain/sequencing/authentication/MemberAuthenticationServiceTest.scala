@@ -6,20 +6,20 @@ package com.digitalasset.canton.domain.sequencing.authentication
 import cats.implicits.*
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
-import com.digitalasset.canton.crypto.Nonce
+import com.digitalasset.canton.crypto.{Nonce, Signature}
 import com.digitalasset.canton.domain.governance.ParticipantAuditor
-import com.digitalasset.canton.sequencing.authentication.MemberAuthentication
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
   MissingToken,
   NonMatchingDomainId,
   ParticipantDisabled,
 }
+import com.digitalasset.canton.sequencing.authentication.{AuthenticationToken, MemberAuthentication}
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.wordspec.AsyncWordSpec
 
-import java.time.{Duration as JDuration}
+import java.time.Duration as JDuration
 import scala.concurrent.Future
 
 @SuppressWarnings(Array("org.wartremover.warts.Null"))
@@ -39,11 +39,12 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest {
       nonceDuration: JDuration = JDuration.ofMinutes(1),
       tokenDuration: JDuration = JDuration.ofHours(1),
       invalidateMemberCallback: Member => Unit = _ => (),
+      store: MemberAuthenticationStore = new InMemoryMemberAuthenticationStore(),
   ): MemberAuthenticationService =
     new MemberAuthenticationService(
       domainId,
       syncCrypto,
-      new InMemoryMemberAuthenticationStore(),
+      store,
       None,
       clock,
       nonceDuration,
@@ -111,6 +112,34 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest {
       for {
         error <- leftOrFail(sut.validateToken(wrongDomainId, p1, null))("should fail domain check")
       } yield error shouldBe NonMatchingDomainId(p1, wrongDomainId)
+    }
+
+    "properly handle becoming a passive node" in {
+      val sut = service(true, store = new PassiveSequencerMemberAuthenticationStore())
+
+      for {
+        generateNonceError <- leftOrFail(sut.generateNonce(p1))("generateNonce should fail")
+        validateTokenError <-
+          leftOrFail(
+            sut.validateToken(
+              domainId,
+              p1,
+              AuthenticationToken.generate(syncCrypto.crypto.pureCrypto),
+            )
+          )("validateToken should fail")
+
+        validateSignatureError <- leftOrFail(
+          sut.validateSignature(
+            p1,
+            Signature.noSignature,
+            Nonce.generate(syncCrypto.crypto.pureCrypto),
+          )
+        )("validateSignature should fail")
+      } yield {
+        generateNonceError shouldBe MemberAuthentication.PassiveSequencer
+        validateTokenError shouldBe MemberAuthentication.PassiveSequencer
+        validateSignatureError shouldBe MemberAuthentication.PassiveSequencer
+      }
     }
   }
 }

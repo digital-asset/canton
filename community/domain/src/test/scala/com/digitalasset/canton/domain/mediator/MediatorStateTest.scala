@@ -88,7 +88,6 @@ class MediatorStateTest
           informeeMessage,
           testedProtocolVersion,
           mockTopologySnapshot,
-          sendVerdict = true,
         )(
           loggerFactory
         )(anyTraceContext, executorService)
@@ -142,7 +141,7 @@ class MediatorStateTest
     "updating items" should {
       val sut = mediatorState
       val newVersionTs = currentVersion.version.plusSeconds(1)
-      val newVersion = currentVersion.copy(version = newVersionTs)
+      val newVersion = currentVersion.withVersion(newVersionTs)
 
       // this should be handled by the processor that shouldn't be requesting the replacement
       "prevent updating to the same version" in {

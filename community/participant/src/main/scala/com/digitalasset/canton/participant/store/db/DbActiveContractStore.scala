@@ -170,13 +170,13 @@ class DbActiveContractStore(
       } yield ()
     }
 
-  def archiveContracts(contractIds: Seq[LfContractId], toc: TimeOfChange)(implicit
+  def archiveContracts(contracts: Seq[LfContractId], toc: TimeOfChange)(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
     processingTime.checkedTEvent {
       for {
         _ <- bulkInsert(
-          contractIds.map(_ -> None).toMap,
+          contracts.map(cid => (cid, None: TransferCounterO)).toMap,
           toc,
           ChangeType.Deactivation,
           remoteDomain = None,
@@ -191,7 +191,7 @@ class DbActiveContractStore(
                 )
               ),
             ) {
-              contractIds.parTraverse_ { contractId =>
+              contracts.parTraverse_ { contractId =>
                 for {
                   _ <- checkCreateArchiveAtUnique(contractId, toc, ChangeType.Deactivation)
                   _ <- checkChangesAfterArchival(contractId, toc)
@@ -378,7 +378,7 @@ class DbActiveContractStore(
 
   override def snapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LfContractId, (CantonTimestamp, TransferCounter)]] =
+  ): Future[SortedMap[LfContractId, (CantonTimestamp, TransferCounterO)]] =
     processingTime.event {
       logger.debug(s"Obtaining ACS snapshot at $timestamp")
       storage
@@ -395,7 +395,7 @@ class DbActiveContractStore(
 
   override def snapshot(rc: RequestCounter)(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LfContractId, (RequestCounter, TransferCounter)]] = processingTime.event {
+  ): Future[SortedMap[LfContractId, (RequestCounter, TransferCounterO)]] = processingTime.event {
     logger.debug(s"Obtaining ACS snapshot at $rc")
     storage
       .query(
@@ -424,10 +424,39 @@ class DbActiveContractStore(
     }
   }
 
+  override def bulkContractsTransferCounterSnapshot(
+      contractIds: Set[LfContractId],
+      requestCounter: RequestCounter,
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Map[LfContractId, TransferCounterO]] = processingTime.event {
+    logger.debug(
+      s"Looking up transfer counters for contracts $contractIds up to but not including $requestCounter"
+    )
+    if (requestCounter == RequestCounter.MinValue)
+      ErrorUtil.internalError(
+        new IllegalArgumentException(
+          s"The request counter $requestCounter should not be equal to ${RequestCounter.MinValue}"
+        )
+      )
+    if (contractIds.isEmpty) Future.successful(Map.empty)
+    else
+      storage
+        .query(
+          snapshotQuery(SnapshotQueryParameter.Rc(requestCounter - 1), Some(contractIds)),
+          functionFullName,
+        )
+        .map { snapshot =>
+          Map.from(snapshot.map { case (cid, _, transferCounter) =>
+            cid -> transferCounter
+          })
+        }
+  }
+
   private[this] def snapshotQuery[T](
       p: SnapshotQueryParameter[T],
       contractIds: Option[Set[LfContractId]],
-  ): DbAction.ReadOnly[Seq[(LfContractId, T, TransferCounter)]] = {
+  ): DbAction.ReadOnly[Seq[(LfContractId, T, TransferCounterO)]] = {
     import DbStorage.Implicits.BuilderChain.*
 
     val idsO = contractIds.map { ids =>
@@ -452,7 +481,7 @@ class DbActiveContractStore(
               or (AC.ts = AC2.ts and AC.request_counter = AC2.request_counter and AC2.change = ${ChangeType.Deactivation})))
            and AC.#${p.attribute} <= ${p.bound} and domain_id = $domainId""" ++
           idsO.fold(sql"")(ids => sql" and AC.contract_id in " ++ ids) ++ ordering)
-          .as[(LfContractId, T, TransferCounter)]
+          .as[(LfContractId, T, TransferCounterO)]
       case _: DbStorage.Profile.Postgres =>
         (sql"""
           select distinct(contract_id), AC3.#${p.attribute}, AC3.transfer_counter from active_contracts AC1
@@ -462,7 +491,7 @@ class DbActiveContractStore(
             .limit(1)}) as AC3 on true
           where AC1.domain_id = $domainId and AC3.change = CAST(${ChangeType.Activation} as change_type)""" ++
           idsO.fold(sql"")(ids => sql" and AC1.contract_id in " ++ ids) ++ ordering)
-          .as[(LfContractId, T, TransferCounter)]
+          .as[(LfContractId, T, TransferCounterO)]
       case _: DbStorage.Profile.Oracle =>
         (sql"""select distinct(contract_id), AC3.#${p.attribute}, AC3.transfer_counter from active_contracts AC1, lateral
           (select #${p.attribute}, change, transfer_counter from active_contracts AC2 where domain_id = $domainId
@@ -471,7 +500,7 @@ class DbActiveContractStore(
              fetch first 1 row only) AC3
           where AC1.domain_id = $domainId and AC3.change = 'activation'""" ++
           idsO.fold(sql"")(ids => sql" and AC1.contract_id in " ++ ids) ++ ordering)
-          .as[(LfContractId, T, TransferCounter)]
+          .as[(LfContractId, T, TransferCounterO)]
     }
   }
 
@@ -737,7 +766,7 @@ class DbActiveContractStore(
       contractId: LfContractId,
       toc: TimeOfChange,
       transferCounter: TransferCounter,
-      operationType: TransferOperationType,
+      transferType: TransferOperationType,
   )(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] = CheckedT {
@@ -766,14 +795,14 @@ class DbActiveContractStore(
           toc,
           transferCounter,
           latestBeforeO.map(_.toTransferCounterAtChangeInfo),
-          operationType.toTransferType,
+          transferType.toTransferType,
         )
         _ <- ActiveContractStore.checkTransferCounterAgainstEarliestAfter(
           contractId,
           toc,
           transferCounter,
           earliestAfterO.map(_.toTransferCounterAtChangeInfo),
-          operationType.toTransferType,
+          transferType.toTransferType,
         )
       } yield ()
     }

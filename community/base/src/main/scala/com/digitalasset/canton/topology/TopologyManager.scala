@@ -460,24 +460,10 @@ abstract class TopologyManager[E <: CantonError](
         case Some(
               ValidatedTopologyTransaction(
                 `transaction`,
-                Some(TopologyTransactionRejection.NotAuthorized),
+                Some(rejection),
               )
             ) =>
-          Left(TopologyManagerError.UnauthorizedTransaction.Failure(): TopologyManagerError)
-        case Some(
-              ValidatedTopologyTransaction(
-                `transaction`,
-                Some(TopologyTransactionRejection.SignatureCheckFailed(err)),
-              )
-            ) =>
-          Left(TopologyManagerError.InvalidSignatureError.Failure(err): TopologyManagerError)
-        case Some(
-              ValidatedTopologyTransaction(
-                `transaction`,
-                Some(TopologyTransactionRejection.SerialMismatch(expected, actual)),
-              )
-            ) =>
-          Left(TopologyManagerError.SerialMismatch.Failure(expected, actual): TopologyManagerError)
+          Left(rejection.toTopologyManagerError)
         case Some(tx: ValidatedTopologyTransaction) =>
           Left(TopologyManagerError.InternalError.ReplaceExistingFailed(tx))
         case None => Right(())

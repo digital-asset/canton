@@ -112,7 +112,12 @@ sealed trait AcsCommitmentProcessorBaseTest
       .parTraverse_ { case (cid, (createdTs, archivedTs)) =>
         for {
           _ <- acs.createContract(cid, TimeOfChange(RequestCounter(0), createdTs)).value
-          _ <- acs.archiveContract(cid, TimeOfChange(RequestCounter(0), archivedTs)).value
+          _ <- acs
+            .archiveContract(
+              cid,
+              TimeOfChange(RequestCounter(0), archivedTs),
+            )
+            .value
         } yield ()
       }
       .map(_ => acs)
@@ -931,6 +936,7 @@ class AcsCommitmentProcessorTest
         submissionId,
         domainId,
         new UUID(0, 1),
+        None,
         UnsequencedSubmission(ts1, TestSubmissionTrackingData.default),
         traceContext,
       )
@@ -939,6 +945,7 @@ class AcsCommitmentProcessorTest
         submissionId,
         domainId,
         new UUID(0, 2),
+        None,
         UnsequencedSubmission(CantonTimestamp.MaxValue, TestSubmissionTrackingData.default),
         traceContext,
       )

@@ -35,6 +35,7 @@ import com.digitalasset.canton.platform.indexer.IndexerServiceOwner
 import com.digitalasset.canton.platform.localstore.*
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
+import com.digitalasset.canton.platform.store.dao.events.ContractLoader
 import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.trace.Tracer
 
@@ -112,6 +113,20 @@ class LedgerApiServer(
           loggerFactory = loggerFactory,
         )
 
+      contractLoader <- ContractLoader.create(
+        contractStorageBackend = readDbSupport.storageBackendFactory.createContractStorageBackend(
+          inMemoryState.ledgerEndCache,
+          inMemoryState.stringInterningView,
+        ),
+        dbDispatcher = readDbSupport.dbDispatcher,
+        metrics = metrics,
+        // not making these configuration is only needed in canton. here we populating with sensible defaults
+        maxQueueSize = 100000,
+        maxBatchSize = 50,
+        parallelism = 10,
+        loggerFactory = loggerFactory,
+      )(materializer, servicesExecutionContext)
+
       // TODO(i12284): Add test asserting that the indexService retries until IndexDB persistence comes up
       indexService <- new IndexServiceOwner(
         config = participantConfig.indexService,
@@ -125,6 +140,7 @@ class LedgerApiServer(
         tracer = tracer,
         loggerFactory = loggerFactory,
         incompleteOffsets = readService.incompleteReassignmentOffsets(_, _)(_),
+        contractLoader = contractLoader,
       )
 
       writeService <- buildWriteService(indexService)

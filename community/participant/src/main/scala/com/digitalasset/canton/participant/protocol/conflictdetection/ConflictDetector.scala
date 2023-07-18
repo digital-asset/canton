@@ -143,7 +143,9 @@ private[participant] class ConflictDetector(
 
     for {
       handle <- pendingActivenessCheckGuarded(rc, activenessSet)
-      prefetched <- FutureUnlessShutdown.outcomeF(prefetch(rc, handle))
+      prefetched <- FutureUnlessShutdown.outcomeF(
+        prefetch(rc, handle)
+      )
       _ <- runSequentially(s"prefetch states for request $rc")(
         providePrefetchedStatesUnguarded(rc, prefetched)
       )
@@ -424,10 +426,7 @@ private[participant] class ConflictDetector(
             } else {
               logger.trace(withRC(rc, s"Deactivating contract $coid."))
             }
-            val transferCounter = transferOuts.get(coid) match {
-              case Some(value) => value.unwrap.transferCounter
-              case None => None // TODO(i12286): Add transferCounter to Archived
-            }
+            val transferCounter = transferOuts.get(coid).flatMap(_.unwrap.transferCounter)
             val newStatus = optTargetDomain.fold[Status](Archived) { targetDomain =>
               TransferredAway(targetDomain, transferCounter)
             }

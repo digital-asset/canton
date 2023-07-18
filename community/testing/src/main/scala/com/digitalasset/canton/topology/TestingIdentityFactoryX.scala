@@ -88,7 +88,14 @@ import scala.concurrent.{Await, ExecutionContext, Future}
 final case class TestingTopologyX(
     domains: Set[DomainId] = Set(DefaultTestIdentities.domainId),
     topology: Map[LfPartyId, Map[ParticipantId, ParticipantPermission]] = Map.empty,
-    mediators: Set[MediatorId] = Set(DefaultTestIdentities.mediatorIdX),
+    mediatorGroups: Set[MediatorGroup] = Set(
+      MediatorGroup(
+        NonNegativeInt.zero,
+        Seq(DefaultTestIdentities.mediatorIdX),
+        Seq(),
+        PositiveInt.one,
+      )
+    ),
     participants: Map[ParticipantId, ParticipantAttributes] = Map.empty,
     packages: Seq[LfPackageId] = Seq.empty,
     keyPurposes: Set[KeyPurpose] = KeyPurpose.all,
@@ -100,6 +107,7 @@ final case class TestingTopologyX(
       )
     ),
 ) {
+  def mediators: Seq[MediatorId] = mediatorGroups.toSeq.flatMap(_.all)
 
   /** Define for which domains the topology should apply.
     *
@@ -176,7 +184,8 @@ class TestingIdentityFactoryX(
     topology: TestingTopologyX,
     override protected val loggerFactory: NamedLoggerFactory,
     dynamicDomainParameters: List[DomainParameters.WithValidity[DynamicDomainParameters]],
-) extends NamedLogging {
+) extends TestingIdentityFactoryBase
+    with NamedLogging {
 
   private implicit val directExecutionContext: ExecutionContext = DirectExecutionContext(logger)
   private val defaultProtocolVersion = BaseTest.testedProtocolVersion
@@ -285,20 +294,19 @@ class TestingIdentityFactoryX(
       ) ++ topology.mediators.toSeq)
         .flatMap(m => genKeyCollection(m))
 
-    val mediatorOnboarding =
-      topology.mediators.toSeq.map { mediator =>
-        mkAdd(
-          MediatorDomainStateX
-            .create(
-              domainId,
-              group = NonNegativeInt.zero,
-              threshold = PositiveInt.one,
-              active = Seq(mediator),
-              observers = Seq.empty,
-            )
-            .getOrElse(sys.error("creating MediatorDomainStateX should not have failed"))
-        )
-      }
+    val mediatorOnboarding = topology.mediatorGroups.map(group =>
+      mkAdd(
+        MediatorDomainStateX
+          .create(
+            domainId,
+            group = group.index,
+            threshold = group.threshold,
+            active = group.active,
+            observers = group.passive,
+          )
+          .getOrElse(sys.error("creating MediatorDomainStateX should not have failed"))
+      )
+    )
 
     val partyDataTx = partyToParticipantTxs()
 

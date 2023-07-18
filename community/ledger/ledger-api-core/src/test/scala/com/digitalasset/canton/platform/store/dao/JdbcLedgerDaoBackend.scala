@@ -29,15 +29,15 @@ import com.digitalasset.canton.platform.store.dao.JdbcLedgerDaoBackend.{
   TestLedgerId,
   TestParticipantId,
 }
-import com.digitalasset.canton.platform.store.dao.events.CompressionStrategy
+import com.digitalasset.canton.platform.store.dao.events.{CompressionStrategy, ContractLoader}
 import com.digitalasset.canton.platform.store.interning.StringInterningView
 import com.digitalasset.canton.platform.store.{DbSupport, DbType, FlywayMigrations}
 import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.OpenTelemetry
-import org.scalatest.AsyncTestSuite
+import org.scalatest.Suite
 
-import scala.concurrent.Await
 import scala.concurrent.duration.DurationInt
+import scala.concurrent.{Await, ExecutionContext}
 
 object JdbcLedgerDaoBackend {
 
@@ -53,7 +53,10 @@ object JdbcLedgerDaoBackend {
 }
 
 private[dao] trait JdbcLedgerDaoBackend extends AkkaBeforeAndAfterAll with BaseTest {
-  this: AsyncTestSuite =>
+  self: Suite =>
+
+  // AsyncFlatSpec is with serial execution context
+  private implicit val ec: ExecutionContext = system.dispatcher
 
   protected def dbType: DbType
 
@@ -85,57 +88,68 @@ private[dao] trait JdbcLedgerDaoBackend extends AkkaBeforeAndAfterAll with BaseT
         connectionTimeout = 250.millis,
       ),
     )
-    new ResourceOwner[Unit] {
-      override def acquire()(implicit context: ResourceContext): Resource[Unit] =
-        PureResource(
-          new FlywayMigrations(dbConfig.jdbcUrl, loggerFactory = loggerFactory).migrate()
-        )
-    }
-      .flatMap(_ =>
-        DbSupport.owner(
-          serverRole = ServerRole.Testing(getClass),
-          metrics = metrics,
-          dbConfig = dbConfig,
-          loggerFactory = loggerFactory,
-        )
-      )
-      .map { dbSupport =>
-        JdbcLedgerDao.write(
-          dbSupport = dbSupport,
-          sequentialWriteDao = SequentialWriteDao(
-            participantId = JdbcLedgerDaoBackend.TestParticipantIdRef,
-            metrics = metrics,
-            compressionStrategy = CompressionStrategy.none(metrics),
-            ledgerEndCache = ledgerEndCache,
-            stringInterningView = stringInterningView,
-            ingestionStorageBackend = storageBackendFactory.createIngestionStorageBackend,
-            parameterStorageBackend = storageBackendFactory.createParameterStorageBackend,
-            loggerFactory = loggerFactory,
-          ),
-          servicesExecutionContext = executionContext,
-          metrics = metrics,
-          engine = Some(new Engine()),
-          participantId = JdbcLedgerDaoBackend.TestParticipantIdRef,
-          ledgerEndCache = ledgerEndCache,
-          stringInterning = stringInterningView,
-          completionsPageSize = 1000,
-          acsStreamsConfig = AcsStreamsConfig(
-            maxPayloadsPerPayloadsPage = eventsPageSize,
-            maxIdsPerIdPage = acsIdPageSize,
-            maxPagesPerIdPagesBuffer = 1,
-            maxWorkingMemoryInBytesForIdPages = 100 * 1024 * 1024,
-            maxParallelIdCreateQueries = acsIdFetchingParallelism,
-            maxParallelPayloadCreateQueries = acsContractFetchingParallelism,
-            contractProcessingParallelism = eventsProcessingParallelism,
-          ),
-          transactionFlatStreamsConfig = TransactionFlatStreamsConfig.default,
-          transactionTreeStreamsConfig = TransactionTreeStreamsConfig.default,
-          globalMaxEventIdQueries = 20,
-          globalMaxEventPayloadQueries = 10,
-          tracer = OpenTelemetry.noop().getTracer("test"),
-          loggerFactory = loggerFactory,
-        )
+    for {
+      _ <- new ResourceOwner[Unit] {
+        override def acquire()(implicit context: ResourceContext): Resource[Unit] =
+          PureResource(
+            new FlywayMigrations(dbConfig.jdbcUrl, loggerFactory = loggerFactory).migrate()
+          )
       }
+      dbSupport <- DbSupport.owner(
+        serverRole = ServerRole.Testing(getClass),
+        metrics = metrics,
+        dbConfig = dbConfig,
+        loggerFactory = loggerFactory,
+      )
+      contractLoader <- ContractLoader.create(
+        contractStorageBackend = dbSupport.storageBackendFactory.createContractStorageBackend(
+          ledgerEndCache,
+          stringInterningView,
+        ),
+        dbDispatcher = dbSupport.dbDispatcher,
+        metrics = metrics,
+        // not making these configuration is only needed in canton. here we populating with sensible defaults
+        maxQueueSize = 10000,
+        maxBatchSize = 50,
+        parallelism = 5,
+        loggerFactory = loggerFactory,
+      )
+    } yield JdbcLedgerDao.write(
+      dbSupport = dbSupport,
+      sequentialWriteDao = SequentialWriteDao(
+        participantId = JdbcLedgerDaoBackend.TestParticipantIdRef,
+        metrics = metrics,
+        compressionStrategy = CompressionStrategy.none(metrics),
+        ledgerEndCache = ledgerEndCache,
+        stringInterningView = stringInterningView,
+        ingestionStorageBackend = storageBackendFactory.createIngestionStorageBackend,
+        parameterStorageBackend = storageBackendFactory.createParameterStorageBackend,
+        loggerFactory = loggerFactory,
+      ),
+      servicesExecutionContext = ec,
+      metrics = metrics,
+      engine = Some(new Engine()),
+      participantId = JdbcLedgerDaoBackend.TestParticipantIdRef,
+      ledgerEndCache = ledgerEndCache,
+      stringInterning = stringInterningView,
+      completionsPageSize = 1000,
+      acsStreamsConfig = AcsStreamsConfig(
+        maxPayloadsPerPayloadsPage = eventsPageSize,
+        maxIdsPerIdPage = acsIdPageSize,
+        maxPagesPerIdPagesBuffer = 1,
+        maxWorkingMemoryInBytesForIdPages = 100 * 1024 * 1024,
+        maxParallelIdCreateQueries = acsIdFetchingParallelism,
+        maxParallelPayloadCreateQueries = acsContractFetchingParallelism,
+        contractProcessingParallelism = eventsProcessingParallelism,
+      ),
+      transactionFlatStreamsConfig = TransactionFlatStreamsConfig.default,
+      transactionTreeStreamsConfig = TransactionTreeStreamsConfig.default,
+      globalMaxEventIdQueries = 20,
+      globalMaxEventPayloadQueries = 10,
+      tracer = OpenTelemetry.noop().getTracer("test"),
+      loggerFactory = loggerFactory,
+      contractLoader = contractLoader,
+    )
   }
 
   protected final var ledgerDao: LedgerDao = _

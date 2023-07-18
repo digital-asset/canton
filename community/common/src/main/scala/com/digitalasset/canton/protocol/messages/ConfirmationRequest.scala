@@ -3,15 +3,9 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.ViewType
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.sequencing.protocol.{
-  Batch,
-  MemberRecipient,
-  OpenEnvelope,
-  Recipients,
-}
+import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, Recipients}
 import com.digitalasset.canton.topology.MediatorRef
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -25,19 +19,21 @@ final case class ConfirmationRequest(
 
   def mediator: MediatorRef = informeeMessage.mediator
 
+  lazy val rootHashMessage: RootHashMessage[EmptyRootHashMessagePayload.type] = RootHashMessage(
+    rootHash = informeeMessage.fullInformeeTree.transactionId.toRootHash,
+    domainId = informeeMessage.domainId,
+    viewType = ViewType.TransactionViewType,
+    payload = EmptyRootHashMessagePayload,
+    protocolVersion = protocolVersion,
+  )
+
   def asBatch: Batch[DefaultOpenEnvelope] = {
     val mediatorEnvelope: DefaultOpenEnvelope =
       OpenEnvelope(informeeMessage, Recipients.cc(mediator.toRecipient))(protocolVersion)
 
-    val rootHashMessage = RootHashMessage(
-      rootHash = informeeMessage.fullInformeeTree.transactionId.toRootHash,
-      domainId = informeeMessage.domainId,
-      viewType = ViewType.TransactionViewType,
-      payload = EmptyRootHashMessagePayload,
-      protocolVersion = protocolVersion,
-    )
-    val participants = viewEnvelopes.flatMap { envelope =>
-      envelope.protocolMessage.participants
+    val recipientInfos = viewEnvelopes.map { envelope =>
+      val recipientsInfoOption = envelope.protocolMessage.recipientsInfo
+      recipientsInfoOption
         .getOrElse {
           // NOTE: We do not serialize the original informee participants as part of a serialized encrypted view message.
           // Due to sharing of a key a fingerprint may map to multiple participants.
@@ -46,21 +42,22 @@ final case class ConfirmationRequest(
             s"Obtaining informee participants on deserialized encrypted view message"
           )
         }
-    }.distinct
+    }
 
-    val rootHashMessages = NonEmpty
-      .from(participants)
-      .map { participantsNE =>
-        OpenEnvelope(
-          rootHashMessage,
-          Recipients.recipientGroups(
-            participantsNE.map(x => NonEmpty.mk(Set, MemberRecipient(x), mediator.toRecipient))
-          ),
-        )(
-          protocolVersion
-        )
-      }
-      .toList
+    val rootHashMessagesRecipients =
+      RootHashMessageRecipients.confirmationRequestRootHashMessagesRecipients(
+        recipientInfos,
+        mediator,
+      )
+
+    val rootHashMessages = rootHashMessagesRecipients.map { recipients =>
+      OpenEnvelope(
+        rootHashMessage,
+        recipients,
+      )(
+        protocolVersion
+      )
+    }
 
     val envelopes: List[DefaultOpenEnvelope] =
       rootHashMessages ++ (viewEnvelopes: Seq[DefaultOpenEnvelope])

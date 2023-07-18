@@ -5,6 +5,7 @@ package com.digitalasset.canton.sequencing.client
 
 import akka.stream.AbruptStageTerminationException
 import cats.syntax.functor.*
+import cats.syntax.option.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -80,12 +81,6 @@ class ResilientSequencerSubscription[HandlerError](
       delayOnRestart: FiniteDuration = retryDelayRule.initialDelay
   )(implicit traceContext: TraceContext): Unit =
     performUnlessClosing(functionFullName) {
-      def failed(err: SequencerSubscriptionCreationError): Unit = err match {
-        case fatal: Fatal =>
-          // success as we're shutting down the subscription intentionally
-          giveUp(Success(fatal))
-      }
-
       def started(
           hasReceivedEvent: HasReceivedEvent,
           newSubscription: SequencerSubscription[HandlerError],
@@ -153,12 +148,17 @@ class ResilientSequencerSubscription[HandlerError](
         }
       }
 
-      createSubscription match {
-        case Left(err) => failed(err)
-        case Right((hasReceivedEvent, subscription, retryPolicy)) =>
-          started(hasReceivedEvent, subscription, retryPolicy)
-      }
-    }.onShutdown(())
+      createSubscription.map((started _).tupled)
+    }.map(
+      // the inner UnlessShutdown is the signal from the SequencerSubscriptionFactory that it is being shut down.
+      // (really it is about the SequencerTransportState being shutdown)
+      // if we call this inside within the performUnlessClosing block above, it will call close on this ResilientSequencerSubscription,
+      // which in turn will not be able to proceed, because it will wait for that same performUnlessClosing task to complete, which can't happen,
+      // because it contains the call to close
+      _.onShutdown(giveUp(Success(SubscriptionCloseReason.Shutdown)))
+    )
+      // the outer UnlessShutdown is about detecting that ResilientSequencerSubscription is being closed
+      .onShutdown(())
 
   private def delayAndRestartSubscription(hasReceivedEvent: Boolean, delay: FiniteDuration)(implicit
       traceContext: TraceContext
@@ -187,9 +187,8 @@ class ResilientSequencerSubscription[HandlerError](
     )
   }
 
-  private def createSubscription(implicit traceContext: TraceContext): Either[
-    SequencerSubscriptionCreationError,
-    (HasReceivedEvent, SequencerSubscription[HandlerError], SubscriptionErrorRetryPolicy),
+  private def createSubscription(implicit traceContext: TraceContext): UnlessShutdown[
+    (HasReceivedEvent, SequencerSubscription[HandlerError], SubscriptionErrorRetryPolicy)
   ] = {
     // we are subscribing from the last event we've already received (this way we are sure that we
     // successfully resubscribed). the event will subsequently be ignored by the sequencer client.
@@ -200,9 +199,7 @@ class ResilientSequencerSubscription[HandlerError](
     logger.debug(s"Starting new sequencer subscription from $nextCounter")
 
     val subscriptionE = subscriptionFactory.create(nextCounter, wrappedHandler)(traceContext)
-    nextSubscriptionRef.set(subscriptionE.toOption.map { case (subscription, _retryPolicy) =>
-      subscription
-    })
+    nextSubscriptionRef.set(subscriptionE.map(_._1.some).onShutdown(None))
 
     subscriptionE.map { case (subscription, retryPolicy) =>
       (hasReceivedEvent, subscription, retryPolicy)
@@ -325,10 +322,6 @@ object ResilientSequencerSubscription extends SequencerSubscriptionErrorGroup {
     )
   }
 
-  val SubscriptionCreationShutdownError: Fatal = Fatal(
-    "Failed to create subscription due to an ongoing shutdown."
-  )
-
   /** Creates a simpler handler subscription function for the underlying class */
   private def createSubscription[E](
       member: Member,
@@ -339,21 +332,15 @@ object ResilientSequencerSubscription extends SequencerSubscriptionErrorGroup {
     new SequencerSubscriptionFactory[E] {
       override def create(startingCounter: SequencerCounter, handler: SerializedEventHandler[E])(
           implicit traceContext: TraceContext
-      ): Either[
-        SequencerSubscriptionCreationError,
-        (SequencerSubscription[E], SubscriptionErrorRetryPolicy),
-      ] = {
+      ): UnlessShutdown[(SequencerSubscription[E], SubscriptionErrorRetryPolicy)] = {
         val request = SubscriptionRequest(member, startingCounter, protocolVersion)
         getTransport
           .map { transport =>
             val subscription =
               if (requiresAuthentication) transport.subscribe(request, handler)(traceContext)
               else transport.subscribeUnauthenticated(request, handler)(traceContext)
-            Right(
-              (subscription, transport.subscriptionRetryPolicy)
-            )
+            (subscription, transport.subscriptionRetryPolicy)
           }
-          .onShutdown(Left(SubscriptionCreationShutdownError))
       }
     }
 
@@ -417,8 +404,5 @@ trait SequencerSubscriptionFactory[HandlerError] {
       handler: SerializedEventHandler[HandlerError],
   )(implicit
       traceContext: TraceContext
-  ): Either[
-    SequencerSubscriptionCreationError,
-    (SequencerSubscription[HandlerError], SubscriptionErrorRetryPolicy),
-  ]
+  ): UnlessShutdown[(SequencerSubscription[HandlerError], SubscriptionErrorRetryPolicy)]
 }

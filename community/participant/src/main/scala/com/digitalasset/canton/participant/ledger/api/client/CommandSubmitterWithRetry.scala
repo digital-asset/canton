@@ -29,6 +29,7 @@ import com.google.rpc.code.Code
 import com.google.rpc.status.Status
 import io.opentelemetry.api.trace.Tracer
 
+import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future, Promise}
 
 /** Wraps a command tracker with the ability to retry timed out commands up to a given max number of retries
@@ -43,6 +44,7 @@ class CommandSubmitterWithRetry(
     extends NamedLogging
     with FlagCloseableAsync {
   private val retryFlow = retryCommandFlow(maxRetries, cmdTracker, logger, overrideRetryable)
+  @nowarn("msg=method dropNew in object OverflowStrategy is deprecated")
   private val source =
     Source.queue[Ctx[CommandsCtx, CommandSubmission]](
       bufferSize = 10000,

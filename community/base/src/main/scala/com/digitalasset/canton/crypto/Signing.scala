@@ -235,13 +235,8 @@ object SigningKeyScheme {
     override def toProtoEnum: v0.SigningKeyScheme = v0.SigningKeyScheme.EcDsaP384
   }
 
-  case object Sm2 extends SigningKeyScheme {
-    override def name: String = "SM2"
-    override def toProtoEnum: v0.SigningKeyScheme = v0.SigningKeyScheme.Sm2
-  }
-
-  val EcDsaSchemes: NonEmpty[Set[SigningKeyScheme]] = NonEmpty(Set, EcDsaP256, EcDsaP384)
-  val EcSchemes: NonEmpty[Set[SigningKeyScheme]] = EcDsaSchemes.incl(Sm2)
+  val EdDsaSchemes: NonEmpty[Set[SigningKeyScheme]] = NonEmpty.mk(Set, Ed25519)
+  val EcDsaSchemes: NonEmpty[Set[SigningKeyScheme]] = NonEmpty.mk(Set, EcDsaP256, EcDsaP384)
 
   def fromProtoEnum(
       field: String,
@@ -255,8 +250,8 @@ object SigningKeyScheme {
       case v0.SigningKeyScheme.Ed25519 => Right(SigningKeyScheme.Ed25519)
       case v0.SigningKeyScheme.EcDsaP256 => Right(SigningKeyScheme.EcDsaP256)
       case v0.SigningKeyScheme.EcDsaP384 => Right(SigningKeyScheme.EcDsaP384)
-      case v0.SigningKeyScheme.Sm2 => Right(SigningKeyScheme.Sm2)
-
+      case v0.SigningKeyScheme.Sm2 =>
+        Left(ProtoDeserializationError.OtherError("Support for SM2 has been removed since v2.7"))
     }
 }
 

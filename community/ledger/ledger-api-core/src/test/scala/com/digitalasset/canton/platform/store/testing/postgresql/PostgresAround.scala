@@ -73,12 +73,17 @@ trait PostgresAround {
     executeAdminStatement(server.get()) { statement =>
       val databaseName = UUID.randomUUID().toString
       statement.execute(s"CREATE DATABASE \"$databaseName\"")
-      PostgresDatabase(server.get(), databaseName)
+      statement.execute(s"CREATE USER \"$databaseName-user\" WITH PASSWORD 'user'")
+      statement.execute(
+        s"GRANT ALL PRIVILEGES ON DATABASE \"$databaseName\" TO \"$databaseName-user\""
+      )
+      PostgresDatabase(server.get(), databaseName, s"$databaseName-user", "user")
     }
 
   protected def dropDatabase(database: PostgresDatabase): Unit =
     executeAdminStatement(server.get()) { statement =>
       statement.execute(s"DROP DATABASE \"${database.databaseName}\"")
+      statement.execute(s"DROP USER \"${database.databaseName}-user\"")
     }
 
 }
@@ -90,7 +95,12 @@ object PostgresAround {
       connectedPostgresServer: PostgresServer
   )(body: Statement => T): T = {
     val baseDatabase =
-      PostgresDatabase(connectedPostgresServer, connectedPostgresServer.baseDatabase)
+      PostgresDatabase(
+        connectedPostgresServer,
+        connectedPostgresServer.baseDatabase,
+        connectedPostgresServer.userName,
+        connectedPostgresServer.password,
+      )
     Using.resource {
       val dataSource = new PGSimpleDataSource()
       dataSource.setUrl(baseDatabase.url)

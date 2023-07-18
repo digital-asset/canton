@@ -4,8 +4,9 @@
 package com.digitalasset.canton.crypto.provider.tink
 
 import com.digitalasset.canton.config.CommunityCryptoConfig
-import com.digitalasset.canton.config.CommunityCryptoProvider.Tink
+import com.digitalasset.canton.config.CommunityCryptoProvider.{Jce, Tink}
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.crypto.provider.jce.JceJavaConverter
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CommunityCryptoPrivateStoreFactory
 import com.digitalasset.canton.resource.MemoryStorage
 import org.scalatest.wordspec.AsyncWordSpec
@@ -50,11 +51,19 @@ class TinkCryptoTest
     behave like hkdfProvider(tinkCrypto().map(_.pureCrypto))
     behave like randomnessProvider(tinkCrypto().map(_.pureCrypto))
 
-    // Tink provider does not support Java conversion of Ed25519 or Hybrid encryption keys
     behave like javaPublicKeyConverterProvider(
-      Tink.signing.supported.filter(_ != SigningKeyScheme.Ed25519),
-      Set.empty,
+      Tink.signing.supported,
+      Tink.encryption.supported,
       tinkCrypto(),
+      "Tink",
+    )
+
+    behave like javaPublicKeyConverterProviderOther(
+      Tink.signing.supported,
+      Tink.encryption.supported,
+      tinkCrypto(),
+      "JCE",
+      new JceJavaConverter(Jce.signing.supported, Jce.encryption.supported),
     )
   }
 

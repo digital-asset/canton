@@ -40,9 +40,7 @@ object NoOpPruningProcessor extends PruningProcessor {
   override def close(): Unit = ()
 
   private val pruningNotSupported: LedgerPruningError =
-    LedgerPruningOnlySupportedInEnterpriseEdition(
-      "Pruning of internal participant data only available in the Enterprise Edition."
-    )
+    LedgerPruningOnlySupportedInEnterpriseEdition
   private def pruningNotSupportedET[A]: EitherT[Future, LedgerPruningError, A] =
     EitherT(Future.successful(Either.left(pruningNotSupported)))
 

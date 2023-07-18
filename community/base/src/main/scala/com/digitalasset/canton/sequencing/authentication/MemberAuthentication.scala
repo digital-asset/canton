@@ -147,5 +147,11 @@ object MemberAuthentication {
         reason = s"Authentication for member type is not supported: $member",
         code = "UnsupportedMember",
       )
+  final object PassiveSequencer
+      extends AuthenticationError(
+        reason =
+          "Sequencer is currently passive. Connect to a different sequencer and retry the request or wait for the sequencer to become active again.",
+        code = "PassiveSequencer",
+      )
 
 }

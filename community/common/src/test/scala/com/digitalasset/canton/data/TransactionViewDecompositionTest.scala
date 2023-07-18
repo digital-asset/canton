@@ -43,9 +43,7 @@ class TransactionViewDecompositionTest
         val exampleTransactionFactory =
           new ExampleTransactionFactory()(confirmationPolicy = confirmationPolicy)
 
-        exampleTransactionFactory.standardHappyCases.filter(
-          _.supportedConfirmationPolicies.contains(confirmationPolicy)
-        ) foreach { example =>
+        exampleTransactionFactory.standardHappyCases foreach { example =>
           s"decomposing $example into views" must {
             "yield the correct views" in {
               factory
@@ -94,45 +92,6 @@ class TransactionViewDecompositionTest
             Seq(child),
             RollbackContext.empty,
           )
-      }
-    }
-
-    "the nodes in a view have different informees or thresholds" can {
-
-      "fails validation" in {
-
-        val createWithSignatory = createNode(unsuffixedId(0), signatories = Set(signatory))
-        val createWithSubmitter = createNode(unsuffixedId(0), signatories = Set(submitter))
-
-        val (viewInformees, viewThreshold) = ConfirmationPolicy.Signatory
-          .informeesAndThreshold(
-            createWithSignatory,
-            None,
-            defaultTopologySnapshot,
-            testedProtocolVersion,
-          )
-          .futureValue
-
-        val viewWithInconsistentInformees = NewView(
-          createWithSignatory,
-          viewInformees,
-          viewThreshold,
-          Some(ExampleTransactionFactory.lfHash(-1)),
-          LfNodeId(0),
-          Seq(SameView(createWithSubmitter, LfNodeId(1), RollbackContext.empty)),
-          RollbackContext.empty,
-        )
-
-        val actual = viewWithInconsistentInformees
-          .compliesWith(
-            ConfirmationPolicy.Signatory,
-            None,
-            defaultTopologySnapshot,
-            testedProtocolVersion,
-          )
-          .value
-          .futureValue
-        actual.isLeft shouldBe true
       }
     }
 

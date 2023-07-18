@@ -21,7 +21,7 @@ import scala.annotation.tailrec
   * @throws TransactionViewTree$.InvalidTransactionViewTree if [[tree]] is not a transaction view tree
   *                                    (i.e. the wrong set of nodes is blinded)
   */
-final case class TransactionViewTree(tree: GenTransactionTree)
+final case class TransactionViewTree private (tree: GenTransactionTree)
     extends ViewTree
     with PrettyPrinting {
 
@@ -130,6 +130,8 @@ final case class TransactionViewTree(tree: GenTransactionTree)
 }
 
 object TransactionViewTree {
+  def tryCreate(tree: GenTransactionTree): TransactionViewTree = TransactionViewTree(tree)
+
   def create(tree: GenTransactionTree): Either[String, TransactionViewTree] =
     Either.catchOnly[InvalidTransactionViewTree](TransactionViewTree(tree)).leftMap(_.message)
 

@@ -58,6 +58,7 @@ import com.digitalasset.canton.platform.localstore.api.UserManagementStore
 import com.digitalasset.canton.platform.services.time.TimeProviderType
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
+import com.digitalasset.canton.platform.store.dao.events.ContractLoader
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{FutureUtil, SimpleExecutionQueue}
 import io.grpc.{BindableService, ServerInterceptor}
@@ -262,6 +263,21 @@ class StartableStoppableLedgerApiServer(
           dbConfig = dbConfig,
           loggerFactory = loggerFactory,
         )
+      contractLoader <- {
+        import config.cantonParameterConfig.ledgerApiServerParameters.contractLoader.*
+        ContractLoader.create(
+          contractStorageBackend = dbSupport.storageBackendFactory.createContractStorageBackend(
+            inMemoryState.ledgerEndCache,
+            inMemoryState.stringInterningView,
+          ),
+          dbDispatcher = dbSupport.dbDispatcher,
+          metrics = config.metrics,
+          maxQueueSize = maxQueueSize.value,
+          maxBatchSize = maxBatchSize.value,
+          parallelism = parallelism.value,
+          loggerFactory = loggerFactory,
+        )
+      }
       indexService <- new IndexServiceOwner(
         dbSupport = dbSupport,
         initialLedgerId = domain.LedgerId(config.ledgerId),
@@ -274,6 +290,7 @@ class StartableStoppableLedgerApiServer(
         tracer = config.tracerProvider.tracer,
         loggerFactory = loggerFactory,
         incompleteOffsets = timedReadService.incompleteReassignmentOffsets(_, _)(_),
+        contractLoader = contractLoader,
       )
       userManagementStore = getUserManagementStore(dbSupport, loggerFactory)
       partyRecordStore = new PersistentPartyRecordStore(

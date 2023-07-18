@@ -26,8 +26,4 @@ object SigningKeyScheme {
   case object EcDsaP384 extends SigningKeyScheme {
     override def name: String = "ECDSA-P384"
   }
-
-  case object Sm2 extends SigningKeyScheme {
-    override def name: String = "SM2"
-  }
 }

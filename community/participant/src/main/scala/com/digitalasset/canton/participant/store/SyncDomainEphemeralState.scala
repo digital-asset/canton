@@ -128,6 +128,7 @@ class SyncDomainEphemeralState(
       timeouts,
       loggerFactory,
       futureSupervisor,
+      persistentState.activeContractStore,
     )
   }
 

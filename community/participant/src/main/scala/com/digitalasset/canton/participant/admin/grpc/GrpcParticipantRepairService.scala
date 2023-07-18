@@ -78,6 +78,17 @@ class GrpcParticipantRepairService(
             .traverse(ProtocolVersion.create)
             .leftMap(error => RepairServiceError.InvalidArgument.Error(error))
         )
+        contractDomainRenamesList <-
+          request.contractDomainRenames.toList
+            .traverse { case (source, target) =>
+              for {
+                sourceId <- DomainId.fromString(source)
+                targetId <- DomainId.fromString(target)
+              } yield (sourceId, targetId)
+            }
+            .leftMap(err => RepairServiceError.InvalidArgument.Error(err))
+            .toEitherT[Future]
+
         acs <-
           sync.stateInspection
             .storeActiveContractsToFile(
@@ -86,6 +97,7 @@ class GrpcParticipantRepairService(
               _.filterString.startsWith(request.filterDomainId),
               timestamp,
               pv,
+              contractDomainRenamesList.toMap,
             )
       } yield acs
 

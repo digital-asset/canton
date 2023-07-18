@@ -6,14 +6,12 @@ package com.digitalasset.canton.platform.store.testing.postgresql
 final case class PostgresDatabase private[postgresql] (
     private val server: PostgresServer,
     databaseName: String,
+    userName: String,
+    password: String,
 ) {
   def hostName: String = server.hostName
 
   def port: Int = server.port
-
-  def userName: String = server.userName
-
-  def password: String = server.password
 
   def urlWithoutCredentials: String =
     s"jdbc:postgresql://$hostName:$port/$databaseName"

@@ -157,6 +157,16 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         with TopologyManagerError
   }
 
+  object WrongDomain
+      extends ErrorCode(id = "INVALID_DOMAIN", ErrorCategory.InvalidIndependentOfSystemState) {
+    final case class Failure(wrong: DomainId)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause = s"Wrong domain $wrong"
+        )
+        with TopologyManagerError
+  }
+
   @Explanation(
     """This error indicates that a transaction has already been added previously."""
   )

@@ -3,18 +3,11 @@
 
 package com.digitalasset.canton.data
 
-import cats.data.EitherT
-import cats.syntax.either.*
-import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.version.ProtocolVersion
-
-import scala.concurrent.{ExecutionContext, Future}
 
 /** Wrapper type for elements of a view decomposition
   */
@@ -62,59 +55,17 @@ object TransactionViewDecomposition {
 
     def childViews: Seq[NewView] = tailNodes.collect { case v: NewView => v }
 
-    def coreTailNodes: Seq[LfActionNode] =
-      tailNodes.collect { case sameView: SameView => sameView.lfNode }
-
-    /** Checks whether the core nodes of this view have informees [[informees]] and threshold [[threshold]] under
-      * the given confirmation policy and identity snapshot.
-      *
-      * @param submittingAdminPartyO the admin party of the submitting participant; should only be defined for top-level views
-      *
-      * @return `()` or an error messages
+    /** This view with the submittingAdminParty (if defined) added as extra confirming party.
+      * This needs to be called on root views to guarantee proper authorization.
       */
-    def compliesWith(
-        confirmationPolicy: ConfirmationPolicy,
+    def withSubmittingAdminParty(
         submittingAdminPartyO: Option[LfPartyId],
-        topologySnapshot: TopologySnapshot,
-        protocolVersion: ProtocolVersion,
-    )(implicit
-        ec: ExecutionContext
-    ): EitherT[Future, String, Unit] = {
+        confirmationPolicy: ConfirmationPolicy,
+    ): NewView = {
+      val (newInformees, newThreshold) =
+        confirmationPolicy.withSubmittingAdminParty(submittingAdminPartyO)(informees, threshold)
 
-      val rootNodeInformeesAndThresholdF = confirmationPolicy
-        .informeesAndThreshold(rootNode, submittingAdminPartyO, topologySnapshot, protocolVersion)
-      val coreNodesInformeesAndThresholdF = coreTailNodes
-        .map(coreNode =>
-          confirmationPolicy
-            .informeesAndThreshold(
-              coreNode,
-              submittingAdminPartyO = None,
-              topologySnapshot,
-              protocolVersion,
-            )
-        )
-
-      EitherT(
-        (rootNodeInformeesAndThresholdF +: coreNodesInformeesAndThresholdF).sequence
-          .map { nodes =>
-            nodes
-              .traverse { case (nodeInformees, nodeThreshold) =>
-                Either.cond(
-                  (nodeInformees, nodeThreshold) == ((informees, threshold)),
-                  (),
-                  (nodeInformees, nodeThreshold),
-                )
-              }
-              .bimap(
-                { case (nodeInformees, nodeThreshold) =>
-                  "The nodes in the core of the view have different informees or thresholds.\n" +
-                    s"The view has informees $informees and threshold $threshold.\n" +
-                    s"Some core node has informees $nodeInformees and threshold $nodeThreshold."
-                },
-                _ => (),
-              )
-          }
-      )
+      copy(informees = newInformees, threshold = newThreshold)
     }
 
     override def pretty: Pretty[NewView] = prettyOfClass(

@@ -7,7 +7,7 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.HashOps
-import com.digitalasset.canton.data.{Informee, TransferOutViewTree, ViewType}
+import com.digitalasset.canton.data.{Informee, TransferOutViewTree, ViewPosition, ViewType}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -52,10 +52,17 @@ final case class TransferOutMediatorMessage(
 
   override def requestUuid: UUID = commonData.uuid
 
-  override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
+  override def informeesAndThresholdByViewHash: Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
     val confirmingParties = commonData.confirmingParties
     val threshold = NonNegativeInt.tryCreate(confirmingParties.size)
     Map(tree.viewHash -> ((confirmingParties, threshold)))
+  }
+
+  override def informeesAndThresholdByViewPosition
+      : Map[ViewPosition, (Set[Informee], NonNegativeInt)] = {
+    val confirmingParties = commonData.confirmingParties
+    val threshold = NonNegativeInt.tryCreate(confirmingParties.size)
+    Map(tree.viewPosition -> ((confirmingParties, threshold)))
   }
 
   override def confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.Full

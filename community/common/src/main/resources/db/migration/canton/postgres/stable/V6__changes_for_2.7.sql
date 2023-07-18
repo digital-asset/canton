@@ -12,6 +12,7 @@ ALTER TABLE transfers ADD COLUMN transfer_in_global_offset bigint;
 
 ALTER TABLE active_contracts ADD COLUMN transfer_counter bigint default null;
 
+-- Tables for new submission tracker
 CREATE TABLE fresh_submitted_transaction (
     domain_id integer not null,
     root_hash_hex varchar(300) collate "C" not null,
@@ -27,6 +28,11 @@ CREATE TABLE fresh_submitted_transaction_pruning (
     ts bigint not null,
     primary key (domain_id)
 );
+
+-- Add root hash to in-flight submission tracker store
+ALTER TABLE in_flight_submission ADD COLUMN root_hash_hex varchar(300) collate "C" DEFAULT NULL;
+
+CREATE INDEX idx_in_flight_submission_root_hash ON in_flight_submission (root_hash_hex);
 
 -- Store metadata information about KMS keys
 CREATE TABLE kms_metadata_store (

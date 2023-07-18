@@ -6,7 +6,9 @@ package com.digitalasset.canton.participant.admin.grpc
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.admin.grpc.{GrpcPruningScheduler, HasPruningScheduler}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.PruningServiceErrorGroup
 import com.digitalasset.canton.ledger.error.LedgerApiErrors.RequestValidation.NonHexOffset
@@ -14,9 +16,13 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory,
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.participant.admin.v0.*
 import com.digitalasset.canton.participant.sync.{CantonSyncService, UpstreamOffsetConvert}
+import com.digitalasset.canton.participant.{GlobalOffset, Pruning}
 import com.digitalasset.canton.scheduler.PruningScheduler
+import com.digitalasset.canton.serialization.ProtoConverter
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
+import io.grpc.Status
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -47,6 +53,62 @@ class GrpcPruningService(
         } yield PruneResponse()
       }
     }
+
+  override def getSafePruningOffset(
+      request: GetSafePruningOffsetRequest
+  ): Future[GetSafePruningOffsetResponse] = TraceContext.withNewTraceContext {
+    implicit traceContext =>
+      val validatedRequestE: ParsingResult[(CantonTimestamp, GlobalOffset)] = for {
+        beforeOrAt <-
+          ProtoConverter.parseRequired(
+            CantonTimestamp.fromProtoPrimitive,
+            "before_or_at",
+            request.beforeOrAt,
+          )
+
+        ledgerEndOffset <- UpstreamOffsetConvert
+          .toLedgerSyncOffset(request.ledgerEnd)
+          .flatMap(UpstreamOffsetConvert.toGlobalOffset)
+          .leftMap(err => ProtoDeserializationError.ValueConversionError("ledger_end", err))
+      } yield (beforeOrAt, ledgerEndOffset)
+
+      val res = for {
+        validatedRequest <- EitherT.fromEither[Future](
+          validatedRequestE.leftMap(err =>
+            Status.INVALID_ARGUMENT
+              .withDescription(s"Invalid GetSafePruningOffsetRequest: $err")
+              .asRuntimeException()
+          )
+        )
+
+        (beforeOrAt, ledgerEndOffset) = validatedRequest
+
+        safeOffsetO <- sync.stateInspection
+          .safeToPrune(beforeOrAt, ledgerEndOffset)
+          .leftMap {
+            case Pruning.LedgerPruningOnlySupportedInEnterpriseEdition =>
+              PruningServiceError.PruningNotSupportedInCommunityEdition.Error().asGrpcError
+            case error => PruningServiceError.InternalServerError.Error(error.message).asGrpcError
+          }
+
+      } yield toProtoResponse(safeOffsetO)
+
+      EitherTUtil.toFuture(res)
+  }
+
+  private def toProtoResponse(safeOffsetO: Option[GlobalOffset]): GetSafePruningOffsetResponse = {
+
+    val response = safeOffsetO
+      .fold[GetSafePruningOffsetResponse.Response](
+        GetSafePruningOffsetResponse.Response
+          .NoSafePruningOffset(GetSafePruningOffsetResponse.NoSafePruningOffset())
+      )(offset =>
+        GetSafePruningOffsetResponse.Response
+          .SafePruningOffset(UpstreamOffsetConvert.fromGlobalOffset(offset).toHexString)
+      )
+
+    GetSafePruningOffsetResponse(response)
+  }
 
   private lazy val maybeScheduleAccessor: Option[PruningScheduler] =
     scheduleAccessorBuilder()

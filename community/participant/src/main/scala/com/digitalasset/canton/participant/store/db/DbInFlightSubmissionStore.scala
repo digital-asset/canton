@@ -13,7 +13,7 @@ import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown, UnlessShutdown}
-import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.protocol.submission.*
@@ -23,6 +23,7 @@ import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
   InFlightBySequencingInfo,
   InFlightReference,
 }
+import com.digitalasset.canton.protocol.RootHash
 import com.digitalasset.canton.resource.DbStorage.DbAction
 import com.digitalasset.canton.resource.DbStorage.DbAction.ReadOnly
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
@@ -35,7 +36,7 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
 import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil, OptionUtil, SingleUseCell, retry}
 import com.digitalasset.canton.version.ReleaseProtocolVersion
-import slick.jdbc.SetParameter
+import slick.jdbc.{PositionedParameters, SetParameter}
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable
@@ -76,7 +77,7 @@ class DbInFlightSubmissionStore(
     processingTime.event {
       val query =
         sql"""
-        select change_id_hash, submission_id, submission_domain, message_id, sequencing_timeout, tracking_data, trace_context
+        select change_id_hash, submission_id, submission_domain, message_id, root_hash_hex, sequencing_timeout, tracking_data, trace_context
         from in_flight_submission where submission_domain = $domainId and sequencing_timeout <= $observedSequencingTime
         """.as[InFlightSubmission[UnsequencedSubmission]]
       storage.query(query, "lookup unsequenced in-flight submission")
@@ -89,7 +90,7 @@ class DbInFlightSubmissionStore(
     processingTime.event {
       val query =
         sql"""
-        select change_id_hash, submission_id, submission_domain, message_id, sequencer_counter, sequencing_time, trace_context
+        select change_id_hash, submission_id, submission_domain, message_id, root_hash_hex, sequencer_counter, sequencing_time, trace_context
         from in_flight_submission where submission_domain = $domainId and sequencing_time <= $sequencingTimeInclusive
         """.as[InFlightSubmission[SequencedSubmission]]
       storage.query(query, "lookup sequenced in-flight submission")
@@ -101,7 +102,7 @@ class DbInFlightSubmissionStore(
     processingTime.event {
       val query =
         sql"""
-        select change_id_hash, submission_id, submission_domain, message_id, sequencing_timeout, sequencer_counter, sequencing_time, tracking_data, trace_context
+        select change_id_hash, submission_id, submission_domain, message_id, root_hash_hex, sequencing_timeout, sequencer_counter, sequencing_time, tracking_data, trace_context
         from in_flight_submission where submission_domain = $domainId and message_id = $messageId
         #${storage.limit(1)}
         """.as[InFlightSubmission[SubmissionSequencingInfo]].headOption
@@ -150,6 +151,20 @@ class DbInFlightSubmissionStore(
     BatchAggregator(processor, registerBatchAggregatorConfig, processingTime.some)
   }
 
+  override def updateRegistration(
+      submission: InFlightSubmission[UnsequencedSubmission],
+      rootHash: RootHash,
+  )(implicit traceContext: TraceContext): Future[Unit] = processingTime.event {
+    val updateQuery =
+      sqlu"""update in_flight_submission
+             set root_hash_hex = $rootHash
+             where submission_domain = ${submission.submissionDomain} and change_id_hash = ${submission.changeIdHash}
+               and sequencing_timeout is not null and root_hash_hex is null
+          """
+
+    storage.update_(updateQuery, "update registration")
+  }
+
   override def observeSequencing(
       domainId: DomainId,
       submissions: Map[MessageId, SequencedSubmission],
@@ -170,6 +185,64 @@ class DbInFlightSubmissionStore(
     // No need for synchronous commit because this method is driven by the event stream from the sequencer,
     // which is the same across all replicas of the participant
     storage.queryAndUpdate(batchUpdate, "observe sequencing")
+  }
+
+  override def observeSequencedRootHash(
+      rootHash: RootHash,
+      submission: SequencedSubmission,
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Unit] =
+    sequencedRootHashBatchAggregator.run(SequencedRootHash(rootHash, submission))
+
+  private val sequencedRootHashBatchAggregator = {
+    val processor: BatchAggregator.Processor[SequencedRootHash, Unit] =
+      new BatchAggregator.Processor[SequencedRootHash, Unit] {
+        override def kind: String = "sequenced root hash"
+
+        override def logger: TracedLogger = DbInFlightSubmissionStore.this.logger
+
+        override def executeBatch(items: NonEmpty[Seq[Traced[SequencedRootHash]]])(implicit
+            traceContext: TraceContext
+        ): Future[Iterable[Unit]] = processingTime.event {
+          def setParams(pp: PositionedParameters)(data: Traced[SequencedRootHash]): Unit = {
+            val Traced(SequencedRootHash(rootHash, submission)) = data
+            val SequencedSubmission(sc, ts) = submission
+
+            pp >> sc
+            pp >> ts
+            pp >> rootHash
+          }
+
+          val action = DbStorage.bulkOperation_(
+            """update in_flight_submission
+               set sequencing_timeout = null, tracking_data = null, sequencer_counter = ?, sequencing_time = ?
+               where root_hash_hex = ? and sequencing_timeout is not null
+            """,
+            items,
+            storage.profile,
+          )(setParams)
+
+          storage.queryAndUpdate(action, functionFullName).map(_ => Seq.fill(items.size)(()))
+        }
+
+        override def prettyItem: Pretty[SequencedRootHash] = implicitly
+      }
+
+    BatchAggregator(
+      processor,
+      registerBatchAggregatorConfig,
+      processingTime.some,
+    )
+  }
+
+  case class SequencedRootHash(rootHash: RootHash, submission: SequencedSubmission)
+      extends PrettyPrinting {
+    override def pretty: Pretty[SequencedRootHash] =
+      prettyOfClass(
+        param("rootHash", _.rootHash),
+        param("submission", _.submission),
+      )
   }
 
   override def delete(
@@ -279,7 +352,7 @@ class DbInFlightSubmissionStore(
       changeIdHash: ChangeIdHash
   ): DbAction.ReadTransactional[Option[InFlightSubmission[SubmissionSequencingInfo]]] =
     sql"""
-        select change_id_hash, submission_id, submission_domain, message_id, sequencing_timeout, sequencer_counter, sequencing_time, tracking_data, trace_context
+        select change_id_hash, submission_id, submission_domain, message_id, root_hash_hex, sequencing_timeout, sequencer_counter, sequencing_time, tracking_data, trace_context
         from in_flight_submission where change_id_hash = $changeIdHash
         """.as[InFlightSubmission[SubmissionSequencingInfo]].headOption
 }
@@ -386,11 +459,11 @@ object DbInFlightSubmissionStore {
         case _: DbStorage.Profile.H2 | _: DbStorage.Profile.Postgres =>
           """insert into in_flight_submission(
                change_id_hash, submission_id,
-               submission_domain, message_id,
+               submission_domain, message_id, root_hash_hex,
                sequencing_timeout, sequencer_counter, sequencing_time, tracking_data,
                trace_context)
              values (?, ?,
-                     ?, ?,
+                     ?, ?, ?,
                      ?, NULL, NULL, ?,
                      ?)
              on conflict do nothing"""
@@ -399,7 +472,7 @@ object DbInFlightSubmissionStore {
                using (
                  select
                    ? change_id_hash, ? submission_id,
-                   ? submission_domain, ? message_id,
+                   ? submission_domain, ? message_id, ? root_hash_hex,
                    ? sequencing_timeout, ? tracking_data,
                    ? trace_context
                  from dual
@@ -408,12 +481,12 @@ object DbInFlightSubmissionStore {
                when not matched then
                  insert (
                    change_id_hash, submission_id,
-                   submission_domain, message_id,
+                   submission_domain, message_id, root_hash_hex,
                    sequencing_timeout, sequencer_counter, sequencing_time, tracking_data,
                    trace_context
                  ) values (
                    to_insert.change_id_hash, to_insert.submission_id,
-                   to_insert.submission_domain, to_insert.message_id,
+                   to_insert.submission_domain, to_insert.message_id, to_insert.root_hash_hex,
                    to_insert.sequencing_timeout, NULL, NULL, to_insert.tracking_data,
                    to_insert.trace_context
                  )
@@ -431,6 +504,7 @@ object DbInFlightSubmissionStore {
         pp >> submission.submissionId.map(SerializableSubmissionId(_))
         pp >> submission.submissionDomain
         pp >> submission.messageUuid
+        pp >> submission.rootHashO
         pp >> submission.sequencingInfo.timeout
         pp >> submission.sequencingInfo.trackingData
         pp >> SerializableTraceContext(submission.submissionTraceContext)
@@ -464,7 +538,7 @@ object DbInFlightSubmissionStore {
         inClause =>
           import DbStorage.Implicits.BuilderChain.*
           val query = sql"""
-              select change_id_hash, submission_id, submission_domain, message_id, sequencing_timeout, sequencer_counter, sequencing_time, tracking_data, trace_context
+              select change_id_hash, submission_id, submission_domain, message_id, root_hash_hex, sequencing_timeout, sequencer_counter, sequencing_time, tracking_data, trace_context
               from in_flight_submission where """ ++ inClause
           query.as[InFlightSubmission[SubmissionSequencingInfo]]
       }

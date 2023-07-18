@@ -18,7 +18,7 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.ByteStringUtil
 import com.digitalasset.canton.{LedgerTransactionId, ProtoDeserializationError}
 import com.google.protobuf.ByteString
-import com.google.protobuf.timestamp.{Timestamp as ProtoTimestamp}
+import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
 import slick.jdbc.{GetResult, SetParameter}
 
 /** The root hash of a Merkle tree used as an identifier for requests.
@@ -54,6 +54,20 @@ case class RootHash(private val hash: Hash) extends PrettyPrinting with HasCrypt
 }
 
 object RootHash {
+  implicit val setParameterRootHash: SetParameter[RootHash] = (rh, pp) =>
+    pp >> rh.unwrap.toLengthLimitedHexString
+
+  implicit val getResultRootHash: GetResult[RootHash] = GetResult { r =>
+    RootHash(Hash.tryFromHexString(r.<<))
+  }
+
+  implicit val setParameterRootHashO: SetParameter[Option[RootHash]] = (rh, pp) =>
+    pp >> rh.map(_.unwrap.toLengthLimitedHexString)
+
+  implicit val getResultRootHashO: GetResult[Option[RootHash]] = { r =>
+    r.<<[Option[String]].map(Hash.tryFromHexString).map(RootHash(_))
+  }
+
   def fromByteString(bytes: ByteString): Either[DeserializationError, RootHash] =
     Hash.fromByteString(bytes).map(RootHash(_))
 

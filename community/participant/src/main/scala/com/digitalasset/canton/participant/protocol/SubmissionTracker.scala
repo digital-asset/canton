@@ -296,11 +296,11 @@ class SubmissionTrackerImpl private[protocol] (protocolVersion: ProtocolVersion)
       prevFUS.map { isAvailable =>
         if (isAvailable) {
           // The slot is available to us -- yay!
-          val amParticipant = submissionData.submitterParticipant == participantId
+          val amSubmitter = submissionData.submitterParticipant == participantId
 
           val requestIsValidFUS = if (protocolVersion <= ProtocolVersion.v4) {
             // Replay mitigation was introduced in PV=5; before that, we fall back on the previous behavior
-            FutureUnlessShutdown.pure(amParticipant)
+            FutureUnlessShutdown.pure(amSubmitter)
           } else {
             val maxSequencingTime = submissionData.maxSequencingTimeO.getOrElse(
               ErrorUtil.internalError(
@@ -309,7 +309,7 @@ class SubmissionTrackerImpl private[protocol] (protocolVersion: ProtocolVersion)
                 )
               )
             )
-            if (amParticipant && requestId.unwrap <= maxSequencingTime) {
+            if (amSubmitter && requestId.unwrap <= maxSequencingTime) {
               store.registerFreshRequest(rootHash, requestId, maxSequencingTime)
             } else {
               FutureUnlessShutdown.pure(false)

@@ -6,7 +6,7 @@ package com.digitalasset.canton.protocol.messages
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.HashOps
-import com.digitalasset.canton.data.{FullInformeeTree, Informee, ViewType}
+import com.digitalasset.canton.data.{FullInformeeTree, Informee, ViewPosition, ViewType}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.{
@@ -60,8 +60,12 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(
 
   override def mediator: MediatorRef = fullInformeeTree.mediator
 
-  override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] =
-    fullInformeeTree.informeesAndThresholdByView
+  override def informeesAndThresholdByViewHash: Map[ViewHash, (Set[Informee], NonNegativeInt)] =
+    fullInformeeTree.informeesAndThresholdByViewHash
+
+  override def informeesAndThresholdByViewPosition
+      : Map[ViewPosition, (Set[Informee], NonNegativeInt)] =
+    fullInformeeTree.informeesAndThresholdByViewPosition
 
   override def createMediatorResult(
       requestId: RequestId,

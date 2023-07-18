@@ -8,7 +8,7 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.crypto.HashPurpose
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, ViewPosition}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.MediatorResponse.InvalidMediatorResponse
@@ -22,12 +22,18 @@ import com.google.protobuf.ByteString
 import monocle.Lens
 import monocle.macros.GenLens
 
+import scala.math.Ordering.Implicits.infixOrderingOps
+
 /** Payload of a response sent to the mediator in reaction to a request.
   *
   * @param requestId The unique identifier of the request.
   * @param sender The identity of the sender.
-  * @param viewHash The value of the field "view hash" in the corresponding view message.
-  *                 May be empty if the [[localVerdict]] is [[com.digitalasset.canton.protocol.messages.LocalReject.Malformed]].
+  * @param viewHashO The value of the field "view hash" in the corresponding view message.
+  *                  May be empty if the [[localVerdict]] is [[com.digitalasset.canton.protocol.messages.LocalReject.Malformed]].
+  *                  Must be empty if the protoVersion is 3 or higher.
+  * @param viewPositionO the view position of the underlying view.
+  *                      May be empty if the [[localVerdict]] is [[com.digitalasset.canton.protocol.messages.LocalReject.Malformed]].
+  *                      Must be empty if the protoVersion is strictly lower than 2.
   * @param localVerdict The participant's verdict on the request's view.
   * @param rootHash The root hash of the request if the local verdict is [[com.digitalasset.canton.protocol.messages.LocalApprove]]
   *                 or [[com.digitalasset.canton.protocol.messages.LocalReject]]. [[scala.None$]] otherwise.
@@ -53,7 +59,8 @@ Optional parameters are strongly discouraged, as each parameter needs to be cons
 case class MediatorResponse private (
     requestId: RequestId,
     sender: ParticipantId,
-    viewHash: Option[ViewHash],
+    viewHashO: Option[ViewHash],
+    viewPositionO: Option[ViewPosition],
     localVerdict: LocalVerdict,
     rootHash: Option[RootHash],
     confirmingParties: Set[LfPartyId],
@@ -72,7 +79,8 @@ case class MediatorResponse private (
   private def copy(
       requestId: RequestId = requestId,
       sender: ParticipantId = sender,
-      viewHash: Option[ViewHash] = viewHash,
+      viewHashO: Option[ViewHash] = viewHashO,
+      viewPositionO: Option[ViewPosition] = viewPositionO,
       localVerdict: LocalVerdict = localVerdict,
       rootHash: Option[RootHash] = rootHash,
       confirmingParties: Set[LfPartyId] = confirmingParties,
@@ -80,7 +88,8 @@ case class MediatorResponse private (
   ): MediatorResponse = MediatorResponse(
     requestId,
     sender,
-    viewHash,
+    viewHashO,
+    viewPositionO,
     localVerdict,
     rootHash,
     confirmingParties,
@@ -100,9 +109,23 @@ case class MediatorResponse private (
         )
       if (rootHash.isEmpty)
         throw InvalidMediatorResponse(show"Root hash must not be empty for verdict $localVerdict")
-      if (viewHash.isEmpty)
+      if (protoVersion < ProtoVersion(2) && viewHashO.isEmpty)
         throw InvalidMediatorResponse(show"View mash must not be empty for verdict $localVerdict")
+      if (protoVersion >= ProtoVersion(2) && viewPositionO.isEmpty)
+        throw InvalidMediatorResponse(
+          show"View position must not be empty for verdict $localVerdict"
+        )
   }
+
+  if (protoVersion >= ProtoVersion(2) && viewHashO.nonEmpty)
+    throw InvalidMediatorResponse(
+      s"View hash must be empty for protoVersion $protoVersion."
+    )
+
+  if (protoVersion < ProtoVersion(2) && viewPositionO.nonEmpty)
+    throw InvalidMediatorResponse(
+      s"View position must be empty for protoVersion $protoVersion."
+    )
 
   override def signingTimestamp: CantonTimestamp = requestId.unwrap
 
@@ -115,7 +138,7 @@ case class MediatorResponse private (
     v0.MediatorResponse(
       requestId = Some(requestId.unwrap.toProtoPrimitive),
       sender = sender.toProtoPrimitive,
-      viewHash = viewHash.fold(ByteString.EMPTY)(_.toProtoPrimitive),
+      viewHash = viewHashO.fold(ByteString.EMPTY)(_.toProtoPrimitive),
       localVerdict = Some(localVerdict.toProtoV0),
       rootHash = rootHash.fold(ByteString.EMPTY)(_.toProtoPrimitive),
       confirmingParties = confirmingParties.toList,
@@ -126,7 +149,18 @@ case class MediatorResponse private (
     v1.MediatorResponse(
       requestId = Some(requestId.toProtoPrimitive),
       sender = sender.toProtoPrimitive,
-      viewHash = viewHash.fold(ByteString.EMPTY)(_.toProtoPrimitive),
+      viewHash = viewHashO.fold(ByteString.EMPTY)(_.toProtoPrimitive),
+      localVerdict = Some(localVerdict.toProtoV1),
+      rootHash = rootHash.fold(ByteString.EMPTY)(_.toProtoPrimitive),
+      confirmingParties = confirmingParties.toList,
+      domainId = domainId.toProtoPrimitive,
+    )
+
+  protected def toProtoV2: v2.MediatorResponse =
+    v2.MediatorResponse(
+      requestId = Some(requestId.toProtoPrimitive),
+      sender = sender.toProtoPrimitive,
+      viewPosition = viewPositionO.map(_.toProtoV2),
       localVerdict = Some(localVerdict.toProtoV1),
       rootHash = rootHash.fold(ByteString.EMPTY)(_.toProtoPrimitive),
       confirmingParties = confirmingParties.toList,
@@ -152,7 +186,8 @@ case class MediatorResponse private (
       param("confirmingParties", _.confirmingParties),
       param("domainId", _.domainId),
       param("requestId", _.requestId),
-      paramIfDefined("viewHash", _.viewHash),
+      paramIfDefined("viewHash", _.viewHashO),
+      paramIfDefined("viewPosition", _.viewPositionO),
       paramIfDefined("rootHash", _.rootHash),
       param("representativeProtocolVersion", _.representativeProtocolVersion),
     )
@@ -170,6 +205,10 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
       supportedProtoVersionMemoized(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v5)(v2.MediatorResponse)(
+      supportedProtoVersionMemoized(_)(fromProtoV2),
+      _.toProtoV2.toByteString,
+    ),
   )
 
   final case class InvalidMediatorResponse(msg: String) extends RuntimeException(msg)
@@ -181,7 +220,8 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
   def create(
       requestId: RequestId,
       sender: ParticipantId,
-      viewHash: Option[ViewHash],
+      viewHashO: Option[ViewHash],
+      viewPositionO: Option[ViewPosition],
       localVerdict: LocalVerdict,
       rootHash: Option[RootHash],
       confirmingParties: Set[LfPartyId],
@@ -192,7 +232,8 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
       tryCreate(
         requestId,
         sender,
-        viewHash,
+        viewHashO,
+        viewPositionO,
         localVerdict,
         rootHash,
         confirmingParties,
@@ -217,7 +258,8 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
   def tryCreate(
       requestId: RequestId,
       sender: ParticipantId,
-      viewHash: Option[ViewHash],
+      viewHashO: Option[ViewHash],
+      viewPositionO: Option[ViewPosition],
       localVerdict: LocalVerdict,
       rootHash: Option[RootHash],
       confirmingParties: Set[LfPartyId],
@@ -227,7 +269,8 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
     MediatorResponse(
       requestId,
       sender,
-      viewHash,
+      viewHashO.filter(_ => protocolVersion < ProtocolVersion.v5),
+      viewPositionO.filter(_ => protocolVersion >= ProtocolVersion.v5),
       localVerdict,
       rootHash,
       confirmingParties,
@@ -244,8 +287,13 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
 
   /** DO NOT USE IN PRODUCTION, as this does not necessarily check object invariants. */
   @VisibleForTesting
-  val viewHashUnsafe: Lens[MediatorResponse, Option[ViewHash]] =
-    GenLens[MediatorResponse](_.viewHash)
+  val viewHashOUnsafe: Lens[MediatorResponse, Option[ViewHash]] =
+    GenLens[MediatorResponse](_.viewHashO)
+
+  /** DO NOT USE IN PRODUCTION, as this does not necessarily check object invariants. */
+  @VisibleForTesting
+  val viewPositionOUnsafe: Lens[MediatorResponse, Option[ViewPosition]] =
+    GenLens[MediatorResponse](_.viewPositionO)
 
   /** DO NOT USE IN PRODUCTION, as this does not necessarily check object invariants. */
   @VisibleForTesting
@@ -285,7 +333,7 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
         .flatMap(CantonTimestamp.fromProtoPrimitive)
         .map(RequestId(_))
       sender <- ParticipantId.fromProtoPrimitive(senderP, "MediatorResponse.sender")
-      viewHash <- ViewHash.fromProtoPrimitiveOption(viewHashP)
+      viewHashO <- ViewHash.fromProtoPrimitiveOption(viewHashP)
       localVerdict <- ProtoConverter
         .required("MediatorResponse.local_verdict", localVerdictP)
         .flatMap(LocalVerdict.fromProtoV0)
@@ -297,7 +345,8 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
           MediatorResponse(
             requestId,
             sender,
-            viewHash,
+            viewHashO,
+            None,
             localVerdict,
             rootHashO,
             confirmingParties.toSet,
@@ -329,7 +378,7 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
         .required("MediatorResponse.request_id", requestIdPO)
         .flatMap(RequestId.fromProtoPrimitive)
       sender <- ParticipantId.fromProtoPrimitive(senderP, "MediatorResponse.sender")
-      viewHash <- ViewHash.fromProtoPrimitiveOption(viewHashP)
+      viewHashO <- ViewHash.fromProtoPrimitiveOption(viewHashP)
       localVerdict <- ProtoConverter
         .required("MediatorResponse.local_verdict", localVerdictPO)
         .flatMap(LocalVerdict.fromProtoV1)
@@ -341,13 +390,59 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
           MediatorResponse(
             requestId,
             sender,
-            viewHash,
+            viewHashO,
+            None,
             localVerdict,
             rootHashO,
             confirmingParties.toSet,
             domainId,
           )(
             supportedProtoVersions.protocolVersionRepresentativeFor(ProtoVersion(1)),
+            Some(bytes),
+          )
+        )
+        .leftMap(err => InvariantViolation(err.toString))
+    } yield response
+  }
+
+  private def fromProtoV2(mediatorResponseP: v2.MediatorResponse)(
+      bytes: ByteString
+  ): ParsingResult[MediatorResponse] = {
+    val v2.MediatorResponse(
+      requestIdPO,
+      senderP,
+      localVerdictPO,
+      rootHashP,
+      confirmingPartiesP,
+      domainIdP,
+      viewPositionPO,
+    ) =
+      mediatorResponseP
+    for {
+      requestId <- ProtoConverter
+        .required("MediatorResponse.request_id", requestIdPO)
+        .flatMap(RequestId.fromProtoPrimitive)
+      sender <- ParticipantId.fromProtoPrimitive(senderP, "MediatorResponse.sender")
+      localVerdict <- ProtoConverter
+        .required("MediatorResponse.local_verdict", localVerdictPO)
+        .flatMap(LocalVerdict.fromProtoV1)
+      rootHashO <- RootHash.fromProtoPrimitiveOption(rootHashP)
+      confirmingParties <- confirmingPartiesP.traverse(ProtoConverter.parseLfPartyId)
+      domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain_id")
+      viewPositionO = viewPositionPO.map(ViewPosition.fromProtoV2)
+      response <- Either
+        .catchOnly[InvalidMediatorResponse](
+          MediatorResponse(
+            requestId,
+            sender,
+            None,
+            viewPositionO,
+            localVerdict,
+            rootHashO,
+            confirmingParties.toSet,
+            domainId,
+          )(
+            supportedProtoVersions.protocolVersionRepresentativeFor(ProtoVersion(2)),
             Some(bytes),
           )
         )

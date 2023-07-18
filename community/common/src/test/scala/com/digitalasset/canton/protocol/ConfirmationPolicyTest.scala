@@ -4,6 +4,8 @@
 package com.digitalasset.canton.protocol
 
 import com.daml.lf.value.Value
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.data.{ConfirmingParty, PlainInformee}
 import com.digitalasset.canton.protocol.ConfirmationPolicy.{Signatory, Vip}
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   signatoryParticipant,
@@ -21,7 +23,12 @@ import scala.concurrent.Future
 
 class ConfirmationPolicyTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
-  val gen = new ExampleTransactionFactory()(confirmationPolicy = Vip)
+  private lazy val gen = new ExampleTransactionFactory()(confirmationPolicy = Vip)
+
+  private lazy val alice: LfPartyId = LfPartyId.assertFromString("alice")
+  private lazy val bob: LfPartyId = LfPartyId.assertFromString("bob")
+  private lazy val charlie: LfPartyId = LfPartyId.assertFromString("charlie")
+  private lazy val david: LfPartyId = LfPartyId.assertFromString("david")
 
   "Choice of a confirmation policy" when {
     "all views have at least one Vip participant" should {
@@ -156,6 +163,82 @@ class ConfirmationPolicyTest extends AnyWordSpec with BaseTest with HasExecution
           )
         val policies = ConfirmationPolicy.choose(txCreateWithKey, topologySnapshot).futureValue
         assert(policies == Seq(Vip, Signatory))
+      }
+    }
+  }
+
+  "The signatory policy" when {
+    "adding a submitting admin party" should {
+      "correctly update informees and thresholds" in {
+        val oldInformees = Set(
+          PlainInformee(alice),
+          ConfirmingParty(bob, 1, TrustLevel.Ordinary),
+          ConfirmingParty(charlie, 1, TrustLevel.Vip),
+        )
+        val oldThreshold = NonNegativeInt.tryCreate(2)
+
+        ConfirmationPolicy.Signatory
+          .withSubmittingAdminParty(None)(oldInformees, oldThreshold) shouldBe
+          oldInformees -> oldThreshold
+
+        ConfirmationPolicy.Signatory
+          .withSubmittingAdminParty(Some(alice))(oldInformees, oldThreshold) shouldBe
+          Set(
+            ConfirmingParty(alice, 1, TrustLevel.Ordinary),
+            ConfirmingParty(bob, 1, TrustLevel.Ordinary),
+            ConfirmingParty(charlie, 1, TrustLevel.Vip),
+          ) -> NonNegativeInt.tryCreate(3)
+
+        ConfirmationPolicy.Signatory
+          .withSubmittingAdminParty(Some(bob))(oldInformees, oldThreshold) shouldBe
+          oldInformees -> oldThreshold
+
+        ConfirmationPolicy.Signatory
+          .withSubmittingAdminParty(Some(charlie))(oldInformees, oldThreshold) shouldBe
+          oldInformees -> oldThreshold
+
+        ConfirmationPolicy.Signatory
+          .withSubmittingAdminParty(Some(david))(oldInformees, oldThreshold) shouldBe
+          oldInformees + ConfirmingParty(david, 1, TrustLevel.Ordinary) ->
+          NonNegativeInt.tryCreate(3)
+      }
+    }
+  }
+
+  "The VIP policy" when {
+    "adding a submitting admin party" should {
+      "correctly update informees and thresholds" in {
+        val oldInformees = Set(
+          PlainInformee(alice),
+          ConfirmingParty(bob, 1, TrustLevel.Vip),
+          ConfirmingParty(charlie, 1, TrustLevel.Vip),
+        )
+        val oldThreshold = NonNegativeInt.one
+
+        ConfirmationPolicy.Vip
+          .withSubmittingAdminParty(None)(oldInformees, oldThreshold) shouldBe
+          oldInformees -> oldThreshold
+
+        ConfirmationPolicy.Vip
+          .withSubmittingAdminParty(Some(alice))(oldInformees, oldThreshold) shouldBe
+          Set(
+            ConfirmingParty(alice, 3, TrustLevel.Ordinary),
+            ConfirmingParty(bob, 1, TrustLevel.Vip),
+            ConfirmingParty(charlie, 1, TrustLevel.Vip),
+          ) -> NonNegativeInt.tryCreate(4)
+
+        ConfirmationPolicy.Vip
+          .withSubmittingAdminParty(Some(bob))(oldInformees, oldThreshold) shouldBe
+          Set(
+            PlainInformee(alice),
+            ConfirmingParty(bob, 4, TrustLevel.Vip),
+            ConfirmingParty(charlie, 1, TrustLevel.Vip),
+          ) -> NonNegativeInt.tryCreate(4)
+
+        ConfirmationPolicy.Vip
+          .withSubmittingAdminParty(Some(david))(oldInformees, oldThreshold) shouldBe
+          oldInformees + ConfirmingParty(david, 3, TrustLevel.Ordinary) ->
+          NonNegativeInt.tryCreate(4)
       }
     }
   }

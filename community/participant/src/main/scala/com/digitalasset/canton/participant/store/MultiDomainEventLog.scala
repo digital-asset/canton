@@ -428,15 +428,15 @@ object MultiDomainEventLog {
     final case class Publication(
         globalOffset: GlobalOffset,
         publicationTime: CantonTimestamp,
-        inFlightReference: Option[InFlightReference],
-        deduplicationInfo: Option[DeduplicationInfo],
+        inFlightReferenceO: Option[InFlightReference],
+        deduplicationInfoO: Option[DeduplicationInfo],
         event: LedgerSyncEvent,
     ) extends PrettyPrinting {
 
       override def pretty: Pretty[Publication] = prettyOfClass(
         param("global offset", _.globalOffset),
-        paramIfDefined("in-flight reference", _.inFlightReference),
-        paramIfDefined("deduplication info", _.deduplicationInfo),
+        paramIfDefined("in-flight reference", _.inFlightReferenceO),
+        paramIfDefined("deduplication info", _.deduplicationInfoO),
         param("event", _.event),
       )
     }

@@ -282,7 +282,7 @@ trait MultiDomainEventLogTest
       override def notify(
           published: Seq[OnPublish.Publication]
       )(implicit batchTraceContext: TraceContext): Unit = {
-        val eventReferences = published.map(_.inFlightReference)
+        val eventReferences = published.map(_.inFlightReferenceO)
         outstanding.getAndUpdate {
           case Right(old) =>
             if (old.startsWith(eventReferences)) {

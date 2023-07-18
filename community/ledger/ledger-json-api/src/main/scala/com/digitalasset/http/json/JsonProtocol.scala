@@ -474,9 +474,11 @@ object JsonProtocol extends JsonProtocolLow {
 
   implicit val SubmissionIdFormat: JsonFormat[domain.SubmissionId] = taggedJsonFormat
 
+  implicit val WorkflowIdFormat: JsonFormat[domain.WorkflowId] = taggedJsonFormat
+
   implicit def CommandMetaFormat[TmplId: JsonFormat, LfV: JsonFormat]
       : JsonFormat[domain.CommandMeta[TmplId, LfV]] =
-    jsonFormat6(domain.CommandMeta.apply[TmplId, LfV])
+    jsonFormat7(domain.CommandMeta.apply[TmplId, LfV])
 
   // exposed for testing
   private[json] implicit val CommandMetaNoDisclosedFormat
@@ -491,7 +493,7 @@ object JsonProtocol extends JsonProtocolLow {
       override def read(json: JsValue): Option[List[NeverDC]] = None
       override def readSome(value: JsValue): Some[List[NeverDC]] = Some(List.empty)
     }
-    jsonFormat6(domain.CommandMeta.apply)
+    jsonFormat7(domain.CommandMeta.apply)
   }
 
   implicit val CreateCommandFormat: RootJsonFormat[

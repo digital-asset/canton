@@ -6,8 +6,8 @@ package com.digitalasset.canton.participant.protocol
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, Signature}
-import com.digitalasset.canton.data.{SubmitterMetadata, TransactionViewTree}
-import com.digitalasset.canton.protocol.{RequestId, ViewHash}
+import com.digitalasset.canton.data.{SubmitterMetadata, TransactionViewTree, ViewPosition}
+import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 
@@ -21,11 +21,11 @@ class AuthenticationValidator()(implicit
       requestId: RequestId,
       rootViews: NonEmpty[Seq[(TransactionViewTree, Option[Signature])]],
       snapshot: DomainSnapshotSyncCryptoApi,
-  ): Future[Map[ViewHash, String]] = {
+  ): Future[Map[ViewPosition, String]] = {
 
     def verifySignature(
         viewWithSignature: (TransactionViewTree, Option[Signature])
-    ): Future[Option[(ViewHash, String)]] = {
+    ): Future[Option[(ViewPosition, String)]] = {
 
       val (view, signatureO) = viewWithSignature
 
@@ -49,8 +49,8 @@ class AuthenticationValidator()(implicit
               } yield ()).value.map {
                 _.swap.toOption.map(cause =>
                   (
-                    view.viewHash,
-                    err(s"View ${view.viewHash} has an invalid signature: ${cause.show}."),
+                    view.viewPosition,
+                    err(s"View ${view.viewPosition} has an invalid signature: ${cause.show}."),
                   )
                 )
               }
@@ -60,8 +60,8 @@ class AuthenticationValidator()(implicit
               Future(
                 Some(
                   (
-                    view.viewHash,
-                    err(s"View ${view.viewHash} is missing a signature."),
+                    view.viewPosition,
+                    err(s"View ${view.viewPosition} is missing a signature."),
                   )
                 )
               )

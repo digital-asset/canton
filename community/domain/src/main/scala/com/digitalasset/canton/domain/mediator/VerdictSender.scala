@@ -4,22 +4,19 @@
 package com.digitalasset.canton.domain.mediator
 
 import cats.data.EitherT
+import cats.implicits.toFunctorFilterOps
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, SyncCryptoError}
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.domain.mediator.MediatorMessageId.VerdictMessageId
 import com.digitalasset.canton.lifecycle.UnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.protocol.RequestId
-import com.digitalasset.canton.protocol.messages.{
-  DefaultOpenEnvelope,
-  MediatorRequest,
-  SignedProtocolMessage,
-  Verdict,
-}
+import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
+import com.digitalasset.canton.protocol.messages.*
+import com.digitalasset.canton.protocol.{RequestId, SourceDomainId, TargetDomainId}
 import com.digitalasset.canton.sequencing.client.{
   SendCallback,
   SendResult,
@@ -30,11 +27,15 @@ import com.digitalasset.canton.sequencing.protocol.{
   AggregationRule,
   Batch,
   DeliverErrorReason,
+  MediatorsOfDomain,
+  MemberRecipient,
   OpenEnvelope,
+  ParticipantsOfParty,
+  Recipient,
   Recipients,
 }
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.{Member, ParticipantId}
+import com.digitalasset.canton.topology.{MediatorId, MediatorRef, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
@@ -48,7 +49,6 @@ private[mediator] trait VerdictSender {
       request: MediatorRequest,
       verdict: Verdict,
       decisionTime: CantonTimestamp,
-      aggregationRule: Option[AggregationRule],
   )(implicit traceContext: TraceContext): Future[Unit]
 
   def sendResultBatch(
@@ -56,6 +56,20 @@ private[mediator] trait VerdictSender {
       batch: Batch[DefaultOpenEnvelope],
       decisionTime: CantonTimestamp,
       aggregationRule: Option[AggregationRule],
+      sendVerdict: Boolean,
+  )(implicit traceContext: TraceContext): Future[Unit]
+
+  /** Mediator rejects are important for situations where malformed mediator request or RHMs can have valid state
+    * and thus consume resources on the participant side. A prompt rejection will allow to free these resources.
+    * RHMs are used in this method to identify the affected participants that may have received them and to whom
+    * the rejects will be addressed to.
+    */
+  def sendReject(
+      requestId: RequestId,
+      requestO: Option[MediatorRequest],
+      rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
+      rejectionReason: MediatorReject,
+      decisionTime: CantonTimestamp,
   )(implicit traceContext: TraceContext): Future[Unit]
 }
 
@@ -63,15 +77,17 @@ private[mediator] object VerdictSender {
   def apply(
       sequencerSend: SequencerClientSend,
       crypto: DomainSyncCryptoClient,
+      mediatorId: MediatorId,
       protocolVersion: ProtocolVersion,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): VerdictSender =
-    new DefaultVerdictSender(sequencerSend, crypto, protocolVersion, loggerFactory)
+    new DefaultVerdictSender(sequencerSend, crypto, mediatorId, protocolVersion, loggerFactory)
 }
 
 private[mediator] class DefaultVerdictSender(
     sequencerSend: SequencerClientSend,
     crypto: DomainSyncCryptoClient,
+    mediatorId: MediatorId,
     protocolVersion: ProtocolVersion,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -82,12 +98,25 @@ private[mediator] class DefaultVerdictSender(
       request: MediatorRequest,
       verdict: Verdict,
       decisionTime: CantonTimestamp,
-      aggregationRule: Option[AggregationRule],
   )(implicit traceContext: TraceContext): Future[Unit] = {
     val resultET = for {
+      snapshot <- EitherT.right(crypto.ips.awaitSnapshot(requestId.unwrap))
+      aggregationRule <- EitherT.right(
+        groupAggregationRule(
+          snapshot,
+          request.mediator,
+          protocolVersion,
+        )
+          .valueOr(err =>
+            ErrorUtil.invalidState(
+              s"Mediator rule should not fail at this point, the error was: $err"
+            )
+          )
+      )
+      sendVerdict <- EitherT.right(shouldSendVerdict(request.mediator, snapshot))
       batch <- createResults(requestId, request, verdict)
       _ <- EitherT.right[SyncCryptoError](
-        sendResultBatch(requestId, batch, decisionTime, aggregationRule)
+        sendResultBatch(requestId, batch, decisionTime, aggregationRule, sendVerdict)
       )
     } yield ()
 
@@ -103,6 +132,7 @@ private[mediator] class DefaultVerdictSender(
       batch: Batch[DefaultOpenEnvelope],
       decisionTime: CantonTimestamp,
       aggregationRule: Option[AggregationRule],
+      sendVerdict: Boolean,
   )(implicit traceContext: TraceContext): Future[Unit] = {
     val callback: SendCallback = {
       case UnlessShutdown.Outcome(SendResult.Success(_)) =>
@@ -132,20 +162,27 @@ private[mediator] class DefaultVerdictSender(
         logger.debug("Sequencing result processing was aborted due to shutdown")
     }
 
-    // the result of send request will be logged within the returned future however any error is effectively
-    // discarded. Any error logged by the eventual callback will most likely occur after the returned future has
-    // completed.
-    // we use decision-time for max-sequencing-time as recipients will simply ignore the message if received after
-    // that point.
-    val sendET = sequencerSend.sendAsync(
-      batch,
-      SendType.Other,
-      Some(requestId.unwrap),
-      callback = callback,
-      maxSequencingTime = decisionTime,
-      messageId = VerdictMessageId(requestId).toMessageId,
-      aggregationRule = aggregationRule,
-    )
+    val sendET = if (sendVerdict) {
+      // the result of send request will be logged within the returned future however any error is effectively
+      // discarded. Any error logged by the eventual callback will most likely occur after the returned future has
+      // completed.
+      // we use decision-time for max-sequencing-time as recipients will simply ignore the message if received after
+      // that point.
+      sequencerSend.sendAsync(
+        batch,
+        SendType.Other,
+        Some(requestId.unwrap),
+        callback = callback,
+        maxSequencingTime = decisionTime,
+        messageId = VerdictMessageId(requestId).toMessageId,
+        aggregationRule = aggregationRule,
+      )
+    } else {
+      logger.info(
+        s"Not sending the message batch of size ${batch.envelopes.size} for request $requestId as this mediator is passive in the request's mediator group."
+      )
+      EitherT.pure[Future, String](())
+    }
 
     EitherTUtil
       .logOnError(sendET, s"Failed to send result to sequencer for request ${requestId.unwrap}")
@@ -162,16 +199,23 @@ private[mediator] class DefaultVerdictSender(
   ): EitherT[Future, SyncCryptoError, Batch[DefaultOpenEnvelope]] =
     for {
       snapshot <- EitherT.right(crypto.awaitSnapshot(requestId.unwrap))
-      informeesMap <- EitherT.right(
-        informeesByParticipant(request.allInformees.toList, snapshot.ipsSnapshot)
+      result <- EitherT.right(
+        informeesByParticipantAndWithGroupAddressing(
+          request.allInformees.toList,
+          snapshot.ipsSnapshot,
+        )
       )
+      (informeesMap, informeesWithGroupAddressing) = result
       envelopes <- {
         if (protocolVersion >= ProtocolVersion.v5) {
           val result = request.createMediatorResult(requestId, verdict, request.allInformees)
+          val recipientSeq =
+            informeesMap.keys.toSeq.map(MemberRecipient) ++ informeesWithGroupAddressing.toSeq
+              .map(p => ParticipantsOfParty(PartyId.tryFromLfParty(p)))
           val recipients =
             NonEmpty
-              .from(informeesMap.keysIterator.toSeq.map { (r: Member) => NonEmpty(Set, r).toSet })
-              .map(Recipients.groups)
+              .from(recipientSeq.map { (r: Recipient) => NonEmpty(Set, r).toSet })
+              .map(Recipients.recipientGroups)
               .getOrElse(
                 // Should never happen as the topology (same snapshot) is checked in
                 // `ConfirmationResponseProcessor.validateRequest`
@@ -196,17 +240,212 @@ private[mediator] class DefaultVerdictSender(
       }
     } yield Batch(envelopes, protocolVersion)
 
-  private def informeesByParticipant(
+  private def informeesByParticipantAndWithGroupAddressing(
       informees: List[LfPartyId],
       topologySnapshot: TopologySnapshot,
-  ): Future[Map[ParticipantId, Set[LfPartyId]]] =
+  ): Future[(Map[ParticipantId, Set[LfPartyId]], Set[LfPartyId])] =
     for {
+      partiesWithGroupAddressing <- topologySnapshot.partiesWithGroupAddressing(informees)
       participantsByParty <- topologySnapshot.activeParticipantsOfParties(informees)
-    } yield participantsByParty.foldLeft(Map.empty[ParticipantId, Set[LfPartyId]]) {
-      case (acc, (party, participants)) =>
-        participants.foldLeft(acc) { case (acc, participant) =>
-          val parties = acc.getOrElse(participant, Set.empty) + party
-          acc.updated(participant, parties)
+    } yield {
+      val byParticipant = participantsByParty
+        .foldLeft(Map.empty[ParticipantId, Set[LfPartyId]]) { case (acc, (party, participants)) =>
+          participants.foldLeft(acc) { case (acc, participant) =>
+            val parties = acc.getOrElse(participant, Set.empty) + party
+            acc.updated(participant, parties)
+          }
         }
+        .filter(
+          _._2.intersect(partiesWithGroupAddressing).isEmpty
+        ) // remove participants that are already addressed by some group address
+      (byParticipant, partiesWithGroupAddressing)
     }
+
+  private def shouldSendVerdict(
+      mediatorRef: MediatorRef,
+      topologySnapshot: TopologySnapshot,
+  )(implicit traceContext: TraceContext): Future[Boolean] = mediatorRef match {
+    case MediatorRef.Single(_) => Future.successful(true)
+    case MediatorRef.Group(MediatorsOfDomain(mediatorGroupIndex)) =>
+      topologySnapshot.mediatorGroup(mediatorGroupIndex).map { groupO =>
+        groupO
+          .getOrElse(
+            // This has been checked in the `validateRequest`
+            ErrorUtil.invalidState(
+              s"Unexpected absent mediator group $mediatorGroupIndex."
+            )
+          )
+          .active
+          .contains(mediatorId)
+      }
+  }
+
+  private def groupAggregationRule(
+      topologySnapshot: TopologySnapshot,
+      mediatorRef: MediatorRef,
+      protocolVersion: ProtocolVersion,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, Option[AggregationRule]] = {
+    // TODO(#12373) Adapt when releasing BFT
+    if (protocolVersion >= ProtocolVersion.dev) {
+      mediatorRef match {
+        case MediatorRef.Group(MediatorsOfDomain(index)) =>
+          for {
+            mediatorGroup <- EitherT(
+              topologySnapshot
+                .mediatorGroup(index)
+                .map(
+                  _.toRight(
+                    s"Mediator group $index does not exist in topology at ${topologySnapshot.timestamp}"
+                  )
+                )
+            )
+            activeNE = NonEmpty
+              .from(mediatorGroup.active)
+              .getOrElse(
+                ErrorUtil.invalidState(
+                  "MediatorGroup is expected to have at least 1 active member at this point"
+                )
+              )
+          } yield {
+            Some(AggregationRule(activeNE, mediatorGroup.threshold, protocolVersion))
+          }
+        case MediatorRef.Single(_) =>
+          EitherT.right[String](Future.successful(Option.empty[AggregationRule]))
+      }
+    } else {
+      EitherT.right[String](Future.successful(Option.empty[AggregationRule]))
+    }
+  }
+
+  override def sendReject(
+      requestId: RequestId,
+      requestO: Option[MediatorRequest],
+      rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
+      rejectionReason: MediatorReject,
+      decisionTime: CantonTimestamp,
+  )(implicit traceContext: TraceContext): Future[Unit] = {
+    // For each view type among the root hash messages,
+    // we send one rejection message to all participants, where each participant is in its own recipient group.
+    // This ensures that participants do not learn from the list of recipients who else is involved in the transaction.
+    // This can happen without a malicious submitter, e.g., if the topology has changed.
+    val recipientsByViewType =
+      rootHashMessages.groupBy(_.protocolMessage.viewType).mapFilter { rhms =>
+        val recipients = rhms
+          .flatMap(_.recipients.allRecipients.collect[Recipient] {
+            case p @ MemberRecipient(_: ParticipantId) => p
+            case participantsOfParty: ParticipantsOfParty => participantsOfParty
+          })
+          .toSet
+        NonEmpty.from(recipients.toSeq)
+      }
+    if (recipientsByViewType.nonEmpty) {
+      for {
+        snapshot <- crypto.awaitSnapshot(requestId.unwrap)
+        envs <- recipientsByViewType.toSeq
+          .parTraverse { case (viewType, flatRecipients) =>
+            // This is currently a bit messy. We need to a TransactionResultMessage or TransferXResult whenever possible,
+            // because that allows us to easily intercept and change the verdict in tests.
+            // However, in some cases, the required information is not available, so we fall back to MalformedMediatorRequestResult.
+            // TODO(i11326): Remove unnecessary fields from the result message types, so we can get rid of MalformedMediatorRequestResult and simplify this code.
+            val rejection = (viewType match {
+              case ViewType.TransactionViewType =>
+                requestO match {
+                  case Some(request @ InformeeMessage(_)) =>
+                    request.createMediatorResult(
+                      requestId,
+                      rejectionReason,
+                      Set.empty,
+                    )
+                  // For other kinds of request, or if the request is unknown, we send a generic result
+                  case _ =>
+                    MalformedMediatorRequestResult(
+                      requestId,
+                      crypto.domainId,
+                      viewType,
+                      rejectionReason,
+                      protocolVersion,
+                    )
+                }
+
+              case ViewType.TransferInViewType =>
+                TransferInResult.create(
+                  requestId,
+                  Set.empty,
+                  TargetDomainId(crypto.domainId),
+                  rejectionReason,
+                  protocolVersion,
+                )
+              case ViewType.TransferOutViewType =>
+                TransferOutResult.create(
+                  requestId,
+                  Set.empty,
+                  SourceDomainId(crypto.domainId),
+                  rejectionReason,
+                  protocolVersion,
+                )
+              case _: ViewType =>
+                MalformedMediatorRequestResult(
+                  requestId,
+                  crypto.domainId,
+                  viewType,
+                  rejectionReason,
+                  protocolVersion,
+                )
+            }): MediatorResult
+
+            val recipients = Recipients.recipientGroups(flatRecipients.map(r => NonEmpty(Set, r)))
+
+            SignedProtocolMessage
+              .trySignAndCreate(rejection, snapshot, protocolVersion)
+              .map(_ -> recipients)
+          }
+        batch = Batch.of(protocolVersion, envs *)
+        // TODO(i13849): Review the case below: the check in sequencer has to be made stricter (not to allow rhms with inconsistent mediators from other than participant domain nodes)
+        mediatorRefO = // we always use RHMs to figure out mediator ref, to address rejections from a correct mediator that participants that received the RHMs expect
+          rootHashMessages.headOption // one RHM is enough because sequencer checks that all RHMs specify the same mediator recipient
+            .map { rhm =>
+              rhm.recipients.allRecipients
+                .collectFirst {
+                  case MemberRecipient(mediatorId: MediatorId) => MediatorRef(mediatorId)
+                  case mediatorsOfDomain: MediatorsOfDomain => MediatorRef(mediatorsOfDomain)
+                }
+                .getOrElse {
+                  ErrorUtil.invalidState(
+                    "Root hash messages without a mediator recipient are not expected here (should not have been delivered by the sequencer)"
+                  )
+                }
+            }
+        _ <- {
+          mediatorRefO match {
+            case Some(mediatorRef) =>
+              for {
+                aggregationRuleO <- groupAggregationRule(
+                  snapshot.ipsSnapshot,
+                  mediatorRef,
+                  protocolVersion,
+                )
+                  .valueOr(reason =>
+                    ErrorUtil.invalidState(
+                      s"MediatorReject not sent. Failed to determine group aggregation rule for mediator $mediatorRef due to: $reason"
+                    )
+                  )
+                sendVerdict <- shouldSendVerdict(mediatorRef, snapshot.ipsSnapshot)
+              } yield {
+                sendResultBatch(
+                  requestId,
+                  batch,
+                  decisionTime,
+                  aggregationRule = aggregationRuleO,
+                  sendVerdict,
+                )
+              }
+            case None => // if no mediator could be detected from RHMs, participants will also detect this and there's not need to send a reject
+              Future.unit
+          }
+        }
+      } yield ()
+    } else Future.unit
+  }
 }

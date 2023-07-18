@@ -17,6 +17,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
+import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.*
 import com.digitalasset.canton.sequencing.authentication.grpc.AuthenticationTokenWithExpiry
 import com.digitalasset.canton.sequencing.authentication.{AuthenticationToken, MemberAuthentication}
@@ -86,7 +87,7 @@ class MemberAuthenticationService(
       )
       nonce = Nonce.generate(cryptoApi.pureCrypto)
       storedNonce = StoredNonce(member, nonce, clock.now, nonceExpirationTime)
-      _ <- EitherT.right(store.saveNonce(storedNonce))
+      _ <- handlePassiveInstanceException(store.saveNonce(storedNonce))
     } yield {
       scheduleExpirations(storedNonce.expireAt)
       (nonce, fingerprints)
@@ -105,6 +106,17 @@ class MemberAuthenticationService(
     }
   }
 
+  private def handlePassiveInstanceException[A](
+      future: Future[A]
+  ): EitherT[Future, AuthenticationError, A] =
+    EitherT(
+      future
+        .map(Right(_))
+        .recover { case _: PassiveInstanceException =>
+          Left(PassiveSequencer: AuthenticationError)
+        }
+    )
+
   /** Domain checks that the signature given by the member matches and returns a token if it does (step 4)
     * Al
     */
@@ -114,12 +126,10 @@ class MemberAuthenticationService(
     for {
       _ <- EitherT.right(waitForInitialized)
       _ <- isActive(member)
-      value <- EitherT(
-        store
-          .fetchAndRemoveNonce(member, providedNonce)
+      value <-
+        handlePassiveInstanceException(store.fetchAndRemoveNonce(member, providedNonce))
           .map(ignoreExpired)
-          .map(_.toRight(MissingNonce(member): AuthenticationError))
-      )
+          .subflatMap(_.toRight(MissingNonce(member): AuthenticationError))
       StoredNonce(_, nonce, generatedAt, _expireAt) = value
       agreementId = agreementManager.map(_.agreement.id)
       authentication <- EitherT.fromEither(MemberAuthentication(member))
@@ -137,7 +147,7 @@ class MemberAuthenticationService(
       token = AuthenticationToken.generate(cryptoApi.pureCrypto)
       tokenExpiry = clock.now.add(tokenExpirationTime)
       storedToken = StoredAuthenticationToken(member, tokenExpiry, token)
-      _ <- EitherT.right(tokenCache.saveToken(storedToken))
+      _ <- handlePassiveInstanceException(tokenCache.saveToken(storedToken))
     } yield {
       auditLogger.info(
         s"$member authenticated new token based on agreement $agreementId on $domain"
@@ -155,7 +165,7 @@ class MemberAuthenticationService(
   ): EitherT[Future, AuthenticationError, StoredAuthenticationToken] =
     for {
       _ <- EitherT.fromEither[Future](correctDomain(member, intendedDomain))
-      validTokenO <- EitherT.right(tokenCache.lookupMatchingToken(member, token))
+      validTokenO <- handlePassiveInstanceException(tokenCache.lookupMatchingToken(member, token))
       validToken <- EitherT
         .fromEither[Future](validTokenO.toRight(MissingToken(member)))
         .leftWiden[AuthenticationError]
@@ -171,7 +181,7 @@ class MemberAuthenticationService(
       performUnlessClosingF(functionFullName) {
         val now = clock.now
         logger.debug(s"Expiring nonces and tokens up to $now")
-        store.expireNoncesAndTokens(now)
+        handlePassiveInstanceException(store.expireNoncesAndTokens(now)).value
       }.unwrap,
       "Expiring nonces and tokens failed",
     )

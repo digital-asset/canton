@@ -34,7 +34,7 @@ final case class AuthorizationInterceptor(
     userManagementStoreO: Option[UserManagementStore],
     identityProviderAwareAuthService: IdentityProviderAwareAuthService,
     telemetry: Telemetry,
-    val loggerFactory: NamedLoggerFactory,
+    loggerFactory: NamedLoggerFactory,
     implicit val ec: ExecutionContext,
 ) extends ServerInterceptor
     with NamedLogging {

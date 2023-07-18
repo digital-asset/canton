@@ -7,8 +7,10 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import com.digitalasset.canton.crypto.HkdfError.{HkdfHmacError, HkdfInternalError}
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.crypto.provider.CryptoKeyConverter
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.google.crypto.tink
@@ -23,6 +25,7 @@ import scala.collection.concurrent.TrieMap
 import scala.reflect.{ClassTag, classTag}
 
 class TinkPureCrypto private (
+    keyConverter: CryptoKeyConverter,
     override val defaultSymmetricKeyScheme: SymmetricKeyScheme,
     override val defaultHashAlgorithm: HashAlgorithm,
 ) extends CryptoPureApi {
@@ -43,7 +46,7 @@ class TinkPureCrypto private (
     Either
       .catchOnly[GeneralSecurityException](encrypt(bytes))
       .bimap(
-        err => EncryptionError.FailedToEncrypt(err.toString),
+        err => EncryptionError.FailedToEncrypt(ErrorUtil.messageWithStacktrace(err)),
         enc => new Encrypted[M](ByteString.copyFrom(enc)),
       )
   }
@@ -72,13 +75,16 @@ class TinkPureCrypto private (
   ): Either[DecryptionError, M] =
     Either
       .catchOnly[GeneralSecurityException](decrypt(ciphertext.toByteArray))
-      .leftMap(err => DecryptionError.FailedToDecrypt(err.toString))
+      .leftMap(err => DecryptionError.FailedToDecrypt(ErrorUtil.messageWithStacktrace(err)))
       .flatMap(plain =>
         deserialize(ByteString.copyFrom(plain)).leftMap(DecryptionError.FailedToDeserialize)
       )
 
   private def ensureTinkFormat[E](format: CryptoKeyFormat, errFn: String => E): Either[E, Unit] =
     Either.cond(format == CryptoKeyFormat.Tink, (), errFn(s"Key format must be Tink"))
+
+  private def convertPublicKey[E](publicKey: PublicKey, errFn: String => E): Either[E, PublicKey] =
+    keyConverter.convert(publicKey, CryptoKeyFormat.Tink).leftMap(errFn)
 
   private def keysetNonCached[E](key: CryptoKey, errFn: String => E): Either[E, KeysetHandle] =
     for {
@@ -106,7 +112,7 @@ class TinkPureCrypto private (
       .catchOnly[GeneralSecurityException](
         keysetHandle.getPrimitive(classTag[P].runtimeClass.asInstanceOf[Class[P]])
       )
-      .leftMap(err => errFn(s"Failed to get primitive: $err"))
+      .leftMap(err => errFn(show"Failed to get primitive: $err"))
 
   /** Generates a random symmetric key */
   override def generateSymmetricKey(
@@ -206,7 +212,8 @@ class TinkPureCrypto private (
       version: ProtocolVersion,
   ): Either[EncryptionError, AsymmetricEncrypted[M]] =
     for {
-      keysetHandle <- keysetCached(publicKey, EncryptionError.InvalidEncryptionKey)
+      tinkPublicKey <- convertPublicKey(publicKey, EncryptionError.InvalidEncryptionKey)
+      keysetHandle <- keysetCached(tinkPublicKey, EncryptionError.InvalidEncryptionKey)
       hybrid <- getPrimitive[tink.HybridEncrypt, EncryptionError](
         keysetHandle,
         EncryptionError.InvalidEncryptionKey,
@@ -241,7 +248,7 @@ class TinkPureCrypto private (
       )
       signatureBytes <- Either
         .catchOnly[GeneralSecurityException](verify.sign(bytes.toByteArray))
-        .leftMap(err => SigningError.FailedToSign(err.toString))
+        .leftMap(err => SigningError.FailedToSign(ErrorUtil.messageWithStacktrace(err)))
       signature = new Signature(
         SignatureFormat.Raw,
         ByteString.copyFrom(signatureBytes),
@@ -258,7 +265,8 @@ class TinkPureCrypto private (
       signature: Signature,
   ): Either[SignatureCheckError, Unit] =
     for {
-      keysetHandle <- keysetCached(publicKey, SignatureCheckError.InvalidKeyError)
+      tinkPublicKey <- convertPublicKey(publicKey, SignatureCheckError.InvalidKeyError)
+      keysetHandle <- keysetCached(tinkPublicKey, SignatureCheckError.InvalidKeyError)
       _ <- Either.cond(
         signature.signedBy == publicKey.id,
         (),
@@ -276,7 +284,7 @@ class TinkPureCrypto private (
         )
         .leftMap(err =>
           SignatureCheckError
-            .InvalidSignature(signature, bytes, s"Failed to verify signature: $err")
+            .InvalidSignature(signature, bytes, show"Failed to verify signature: $err")
         )
     } yield ()
 
@@ -333,14 +341,15 @@ class TinkPureCrypto private (
 object TinkPureCrypto {
 
   def create(
+      cryptoKeyConverter: CryptoKeyConverter,
       defaultSymmetricKeyScheme: SymmetricKeyScheme,
       defaultHashAlgorithm: HashAlgorithm,
   ): Either[String, TinkPureCrypto] =
     Either
       .catchOnly[GeneralSecurityException](TinkConfig.register())
       .bimap(
-        err => s"Failed to initialize tink: $err",
-        _ => new TinkPureCrypto(defaultSymmetricKeyScheme, defaultHashAlgorithm),
+        err => show"Failed to initialize tink: $err",
+        _ => new TinkPureCrypto(cryptoKeyConverter, defaultSymmetricKeyScheme, defaultHashAlgorithm),
       )
 
 }

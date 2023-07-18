@@ -66,13 +66,18 @@ final case class FullInformeeTree private (tree: GenTransactionTree)(
     InformeeTree.tryCreate(rawResult, protocolVersion)
   }
 
-  lazy val informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] =
-    InformeeTree.viewCommonDataByView(tree).map { case (hash, viewCommonData) =>
+  lazy val informeesAndThresholdByViewHash: Map[ViewHash, (Set[Informee], NonNegativeInt)] =
+    InformeeTree.viewCommonDataByViewHash(tree).map { case (hash, viewCommonData) =>
       hash -> ((viewCommonData.informees, viewCommonData.threshold))
     }
 
+  lazy val informeesAndThresholdByViewPosition: Map[ViewPosition, (Set[Informee], NonNegativeInt)] =
+    InformeeTree.viewCommonDataByViewPosition(tree).map { case (position, viewCommonData) =>
+      position -> ((viewCommonData.informees, viewCommonData.threshold))
+    }
+
   lazy val allInformees: Set[LfPartyId] = InformeeTree
-    .viewCommonDataByView(tree)
+    .viewCommonDataByViewPosition(tree)
     .flatMap { case (_, viewCommonData) => viewCommonData.informees }
     .map(_.party)
     .toSet

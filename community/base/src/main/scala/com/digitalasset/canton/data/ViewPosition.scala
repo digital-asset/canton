@@ -3,10 +3,13 @@
 
 package com.digitalasset.canton.data
 
+import cats.Order
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndex.Direction
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.protocol.v2
 import com.digitalasset.canton.serialization.DeterministicEncoding
+import com.digitalasset.canton.util.ByteStringUtil
 import com.google.protobuf.ByteString
 
 /** A position encodes the path from a view in a transaction tree to its root.
@@ -16,7 +19,7 @@ import com.google.protobuf.ByteString
   *                 The path starts at the view rather than the root so that paths to the root can
   *                 be shared.
   */
-final case class ViewPosition(position: List[MerklePathElement]) extends AnyVal {
+final case class ViewPosition(position: List[MerklePathElement]) extends PrettyPrinting {
 
   /** Adds a [[ViewPosition.MerklePathElement]] at the start of the path. */
   def +:(index: MerklePathElement): ViewPosition = new ViewPosition(index :: position)
@@ -26,6 +29,10 @@ final case class ViewPosition(position: List[MerklePathElement]) extends AnyVal 
 
   /** Reverse the position, as well as all contained MerkleSeqIndex path elements */
   def reverse: ViewPositionFromRoot = ViewPositionFromRoot(position.reverse.map(_.reverse))
+
+  def toProtoV2: v2.ViewPosition = v2.ViewPosition(position = position.map(_.toProtoV2))
+
+  override def pretty: Pretty[ViewPosition] = prettyOfClass(unnamedParam(_.position.mkShow()))
 }
 
 /** Same as [[ViewPosition]], with the position directed from the root to the leaf */
@@ -44,10 +51,21 @@ object ViewPosition {
     prettyOfClass(unnamedParam(_.position))
   }
 
+  implicit val orderViewPosition: Order[ViewPosition] =
+    Order.by[ViewPosition, ByteString](_.encodeDeterministically)(ByteStringUtil.orderByteString)
+
+  def fromProtoV2(viewPositionP: v2.ViewPosition): ViewPosition = {
+    val v2.ViewPosition(positionP) = viewPositionP
+    val position = positionP.map(MerkleSeqIndex.fromProtoV2).toList
+    ViewPosition(position)
+  }
+
   /** A single element on a path through a Merkle tree. */
   sealed trait MerklePathElement extends Product with Serializable with PrettyPrinting {
     def encodeDeterministically: ByteString
     def reverse: MerklePathElement
+
+    def toProtoV2: v2.MerkleSeqIndex
   }
 
   /** For [[MerkleTreeInnerNode]]s which branch to a list of subviews,
@@ -62,6 +80,11 @@ object ViewPosition {
     override def pretty: Pretty[ListIndex] = prettyOfString(_.index.toString)
 
     override lazy val reverse: ListIndex = this
+
+    override def toProtoV2: v2.MerkleSeqIndex =
+      throw new UnsupportedOperationException(
+        "ListIndex is for legacy use only and should not be serialized"
+      )
   }
 
   /** A leaf position in a [[MerkleSeq]], encodes as a path of directions from the leaf to the root.
@@ -77,6 +100,9 @@ object ViewPosition {
       prettyOfString(_ => index.reverse.map(_.show).mkString(""))
 
     override lazy val reverse: MerkleSeqIndexFromRoot = MerkleSeqIndexFromRoot(index.reverse)
+
+    override def toProtoV2: v2.MerkleSeqIndex =
+      v2.MerkleSeqIndex(isRight = index.map(_ == Direction.Right))
   }
 
   /** Same as [[MerkleSeqIndex]], with the position directed from the root to the leaf */
@@ -90,6 +116,10 @@ object ViewPosition {
       prettyOfString(_ => index.map(_.show).mkString(""))
 
     override lazy val reverse: MerkleSeqIndex = MerkleSeqIndex(index.reverse)
+
+    def toProtoV2: v2.MerkleSeqIndex = throw new UnsupportedOperationException(
+      "MerkleSeqIndexFromRoot is for internal use only and should not be serialized"
+    )
   }
 
   object MerklePathElement {
@@ -116,6 +146,11 @@ object ViewPosition {
 
         override def pretty: Pretty[Right.type] = prettyOfString(_ => "R")
       }
+    }
+
+    def fromProtoV2(merkleSeqIndexP: v2.MerkleSeqIndex): MerkleSeqIndex = {
+      val v2.MerkleSeqIndex(isRightP) = merkleSeqIndexP
+      MerkleSeqIndex(isRightP.map(if (_) Direction.Right else Direction.Left).toList)
     }
   }
 

@@ -228,9 +228,9 @@ trait CompletionStorageBackend {
 
 trait ContractStorageBackend {
   def keyState(key: Key, validAt: Offset)(connection: Connection): KeyState
-  def contractState(contractId: ContractId, before: Offset)(
+  def contractStates(contractIds: Seq[ContractId], before: Offset)(
       connection: Connection
-  ): Option[ContractStorageBackend.RawContractState]
+  ): Map[ContractId, ContractStorageBackend.RawContractState]
   def activeContractWithArgument(readers: Set[Party], contractId: ContractId)(
       connection: Connection
   ): Option[ContractStorageBackend.RawContract]

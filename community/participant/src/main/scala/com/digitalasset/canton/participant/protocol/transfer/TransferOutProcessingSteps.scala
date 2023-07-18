@@ -14,6 +14,7 @@ import com.digitalasset.canton.data.{
   CantonTimestamp,
   FullTransferOutTree,
   TransferSubmitterMetadata,
+  ViewPosition,
   ViewType,
 }
 import com.digitalasset.canton.ledger.participant.state.v2.CompletionInfo
@@ -80,6 +81,8 @@ class TransferOutProcessingSteps(
       PendingTransferOut,
     ]
     with NamedLogging {
+
+  override type DecryptedView = FullTransferOutTree
 
   override type SubmissionResultArgs = PendingTransferSubmission
 
@@ -272,7 +275,7 @@ class TransferOutProcessingSteps(
       envelope: OpenEnvelope[EncryptedViewMessage[TransferOutViewType]]
   )(implicit
       tc: TraceContext
-  ): EitherT[Future, EncryptedViewMessageDecryptionError[TransferOutViewType], WithRecipients[
+  ): EitherT[Future, EncryptedViewMessageError[TransferOutViewType], WithRecipients[
     FullTransferOutTree
   ]] = {
     EncryptedViewMessage
@@ -743,6 +746,7 @@ class TransferOutProcessingSteps(
           requestId,
           participantId,
           Some(viewHash),
+          Some(ViewPosition.root),
           localVerdict,
           Some(rootHash),
           confirmingParties,

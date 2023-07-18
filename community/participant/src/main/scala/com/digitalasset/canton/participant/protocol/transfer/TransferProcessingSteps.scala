@@ -12,7 +12,12 @@ import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.crypto.DomainSnapshotSyncCryptoApi
 import com.digitalasset.canton.data.ViewType.TransferViewType
-import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata, ViewType}
+import com.digitalasset.canton.data.{
+  CantonTimestamp,
+  TransferSubmitterMetadata,
+  TransferViewTree,
+  ViewType,
+}
 import com.digitalasset.canton.ledger.participant.state.v2.CompletionInfo
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
@@ -69,6 +74,8 @@ trait TransferProcessingSteps[
       TransferProcessorError,
     ]
     with NamedLogging {
+
+  override type DecryptedView <: TransferViewTree
 
   val participantId: ParticipantId
 
@@ -156,7 +163,7 @@ trait TransferProcessingSteps[
       envelope: OpenEnvelope[EncryptedViewMessage[RequestViewType]]
   )(implicit
       tc: TraceContext
-  ): EitherT[Future, EncryptedViewMessageDecryptionError[RequestViewType], WithRecipients[
+  ): EitherT[Future, EncryptedViewMessageError[RequestViewType], WithRecipients[
     DecryptedView
   ]]
 
@@ -468,7 +475,7 @@ object TransferProcessingSteps {
 
   final case class DecryptionError[VT <: ViewType](
       transferId: TransferId,
-      error: EncryptedViewMessageDecryptionError[VT],
+      error: EncryptedViewMessageError[VT],
   ) extends TransferProcessorError {
     override def message: String = s"Cannot transfer `$transferId`: decryption error"
   }

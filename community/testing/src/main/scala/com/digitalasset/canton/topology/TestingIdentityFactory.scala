@@ -182,7 +182,8 @@ class TestingIdentityFactory(
     topology: TestingTopology,
     override protected val loggerFactory: NamedLoggerFactory,
     dynamicDomainParameters: List[DomainParameters.WithValidity[DynamicDomainParameters]],
-) extends NamedLogging {
+) extends TestingIdentityFactoryBase
+    with NamedLogging {
 
   private implicit val directExecutionContext: ExecutionContext = DirectExecutionContext(logger)
   private val defaultProtocolVersion = BaseTest.testedProtocolVersion

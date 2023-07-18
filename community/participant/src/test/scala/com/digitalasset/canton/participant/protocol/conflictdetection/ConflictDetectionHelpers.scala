@@ -112,7 +112,8 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
           acs
             .createContract(coid, toc)
             .value
-        case (coid, toc, Archived) => acs.archiveContract(coid, toc).value
+        case (coid, toc, Archived) =>
+          acs.archiveContract(coid, toc).value
         case (coid, toc, TransferredAway(targetDomain, transferCounter)) =>
           acs.transferOutContract(coid, toc, targetDomain, transferCounter).value
       }
@@ -227,7 +228,14 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
   ): CommitSet = {
     val contractHash = ExampleTransactionFactory.lfHash(0)
     CommitSet(
-      archivals = arch.map(_ -> WithContractHash(Set.empty[LfPartyId], contractHash)).toMap,
+      archivals = arch
+        .map(
+          _ -> WithContractHash(
+            CommitSet.ArchivalCommit(Set.empty[LfPartyId]),
+            contractHash,
+          )
+        )
+        .toMap,
       creations = create
         .map(
           _ -> WithContractHash(

@@ -79,9 +79,7 @@ class EnterpriseFeatureInCommunityIntegrationTest
     loggerFactory.assertThrowsAndLogs[CommandFailure](
       participant1.pruning.find_safe_offset(),
       // TODO(#5990) find_safe_offset uses sync inspection and doesn't go through a gRPC error with an error code
-      _.errorMessage should include(
-        "Pruning of internal participant data only available in the Enterprise Edition."
-      ),
+      _.errorMessage should include(PruningNotSupportedInCommunityEdition.Error().cause),
     )
   }
 
