@@ -24,6 +24,7 @@ import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.platform.store.cache.*
 import com.digitalasset.canton.platform.store.dao.events.{
   BufferedTransactionsReader,
+  ContractLoader,
   LfValueTranslation,
 }
 import com.digitalasset.canton.platform.store.dao.{
@@ -51,6 +52,7 @@ final class IndexServiceOwner(
     tracer: Tracer,
     val loggerFactory: NamedLoggerFactory,
     incompleteOffsets: (Offset, Set[Ref.Party], TraceContext) => Future[Vector[Offset]],
+    contractLoader: ContractLoader,
 ) extends ResourceOwner[IndexService]
     with NamedLogging {
   private val initializationRetryDelay = 100.millis
@@ -60,6 +62,7 @@ final class IndexServiceOwner(
     val ledgerDao = createLedgerReadDao(
       ledgerEndCache = inMemoryState.ledgerEndCache,
       stringInterning = inMemoryState.stringInterningView,
+      contractLoader = contractLoader,
     )
 
     for {
@@ -178,6 +181,7 @@ final class IndexServiceOwner(
   private def createLedgerReadDao(
       ledgerEndCache: LedgerEndCache,
       stringInterning: StringInterning,
+      contractLoader: ContractLoader,
   ): LedgerReadDao =
     JdbcLedgerDao.read(
       dbSupport = dbSupport,
@@ -196,6 +200,7 @@ final class IndexServiceOwner(
       tracer = tracer,
       loggerFactory = loggerFactory,
       incompleteOffsets = incompleteOffsets,
+      contractLoader = contractLoader,
     )
 
   private def buildInMemoryFanOutExecutionContext(

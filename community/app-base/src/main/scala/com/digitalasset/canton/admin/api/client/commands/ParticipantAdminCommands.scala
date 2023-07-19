@@ -5,6 +5,7 @@ package com.digitalasset.canton.admin.api.client.commands
 
 import cats.implicits.*
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
+import com.daml.ledger.api.v1.ledger_offset.LedgerOffset.Value
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultUnboundedTimeout,
   ServerEnforcedTimeout,
@@ -12,6 +13,7 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
 }
 import com.digitalasset.canton.admin.api.client.data.{DarMetadata, ListConnectedDomainsResult}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.participant.admin.grpc.{
   GrpcParticipantRepairService,
@@ -30,6 +32,7 @@ import com.digitalasset.canton.participant.admin.v0.TransferServiceGrpc.Transfer
 import com.digitalasset.canton.participant.admin.v0.{ResourceLimits as _, *}
 import com.digitalasset.canton.participant.admin.{ResourceLimits, v0}
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig as CDomainConnectionConfig
+import com.digitalasset.canton.participant.sync.UpstreamOffsetConvert
 import com.digitalasset.canton.protocol.{LfContractId, TransferId, v0 as v0proto}
 import com.digitalasset.canton.serialization.ProtoConverter.InstantConverter
 import com.digitalasset.canton.topology.{DomainId, PartyId}
@@ -424,6 +427,7 @@ object ParticipantAdminCommands {
         chunkSize: Option[PositiveInt],
         observer: StreamObserver[AcsSnapshotChunk],
         gzipFormat: Boolean,
+        contractDomainRenames: Map[DomainId, DomainId],
     ) extends GrpcAdminCommand[
           DownloadRequest,
           CancellableContext,
@@ -444,6 +448,9 @@ object ParticipantAdminCommands {
             protocolVersion.map(_.toString).getOrElse(""),
             chunkSize.map(_.value),
             gzipFormat,
+            contractDomainRenames.map { case (source, target) =>
+              (source.toProtoPrimitive, target.toProtoPrimitive)
+            },
           )
         )
       }
@@ -1070,8 +1077,39 @@ object ParticipantAdminCommands {
         PruningServiceGrpc.stub(channel)
     }
 
+    final case class GetSafePruningOffsetCommand(beforeOrAt: Instant, ledgerEnd: LedgerOffset)
+        extends Base[v0.GetSafePruningOffsetRequest, v0.GetSafePruningOffsetResponse, Option[
+          LedgerOffset
+        ]] {
+
+      override def createRequest(): Either[String, v0.GetSafePruningOffsetRequest] =
+        for {
+          beforeOrAt <- CantonTimestamp.fromInstant(beforeOrAt)
+          ledgerEnd <- ledgerEnd.value match {
+            case Value.Absolute(value) => Right(value)
+            case other => Left(s"Unable to convert ledger_end `$other` to absolute value")
+          }
+        } yield v0.GetSafePruningOffsetRequest(Some(beforeOrAt.toProtoPrimitive), ledgerEnd)
+
+      override def submitRequest(
+          service: PruningServiceStub,
+          request: v0.GetSafePruningOffsetRequest,
+      ): Future[v0.GetSafePruningOffsetResponse] = service.getSafePruningOffset(request)
+
+      override def handleResponse(
+          response: v0.GetSafePruningOffsetResponse
+      ): Either[String, Option[LedgerOffset]] = response.response match {
+        case v0.GetSafePruningOffsetResponse.Response.Empty => Left("Unexpected empty response")
+
+        case v0.GetSafePruningOffsetResponse.Response.SafePruningOffset(offset) =>
+          Right(Some(UpstreamOffsetConvert.toLedgerOffset(offset)))
+
+        case v0.GetSafePruningOffsetResponse.Response.NoSafePruningOffset(_) => Right(None)
+      }
+    }
+
     final case class PruneInternallyCommand(pruneUpTo: LedgerOffset)
-        extends Base[PruneRequest, PruneResponse, Unit] {
+        extends Base[v0.PruneRequest, v0.PruneResponse, Unit] {
       override def createRequest() =
         pruneUpTo.value.absolute
           .toRight("The pruneUpTo ledger offset needs to be absolute")

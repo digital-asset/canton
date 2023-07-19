@@ -14,6 +14,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
   AuthenticationError,
+  PassiveSequencer,
   TokenVerificationException,
 }
 import com.digitalasset.canton.sequencing.authentication.grpc.Constant
@@ -93,6 +94,17 @@ class SequencerAuthenticationServerInterceptor(
           listenerET.value.onComplete {
             case Success(Right(listener)) =>
               setNextListener(listener)
+            case Success(Left(VerifyTokenError.AuthError(PassiveSequencer))) =>
+              logger.debug("Authentication not possible with passive sequencer.")
+              setNextListener(
+                failVerification(
+                  s"Verification failed for member $memberId: ${PassiveSequencer.reason}",
+                  serverCall,
+                  headers,
+                  Some(PassiveSequencer.code),
+                  Status.UNAVAILABLE,
+                )
+              )
             case Success(Left(err)) =>
               logger.debug(s"Authentication token verification failed: $err")
               setNextListener(
@@ -135,9 +147,10 @@ class SequencerAuthenticationServerInterceptor(
       serverCall: ServerCall[ReqT, RespT],
       headers: Metadata,
       authErrorCode: Option[String] = None,
+      status: Status = Status.UNAUTHENTICATED,
   ): ServerCall.Listener[ReqT] = {
     authErrorCode.foreach(code => headers.put(Constant.AUTHENTICATION_ERROR_CODE, code))
-    serverCall.close(Status.UNAUTHENTICATED.withDescription(msg), headers)
+    serverCall.close(status.withDescription(msg), headers)
     new ServerCall.Listener[ReqT]() {}
   }
 }

@@ -13,37 +13,36 @@ object PostgresResetStorageBackend extends ResetStorageBackend {
 
   override def resetAll(connection: Connection): Unit = {
     SQL"""
-      truncate table configuration_entries cascade;
-      truncate table packages cascade;
-      truncate table package_entries cascade;
-      truncate table parameters cascade;
-      truncate table participant_command_completions cascade;
-      truncate table participant_events_divulgence cascade;
-      truncate table participant_events_create cascade;
-      truncate table participant_events_consuming_exercise cascade;
-      truncate table participant_events_non_consuming_exercise cascade;
-      truncate table participant_events_assign cascade;
-      truncate table participant_events_unassign cascade;
-      truncate table party_entries cascade;
-      truncate table participant_party_records cascade;
-      truncate table participant_party_record_annotations cascade;
-      truncate table string_interning cascade;
-      truncate table pe_create_id_filter_stakeholder cascade;
-      truncate table pe_create_id_filter_non_stakeholder_informee cascade;
-      truncate table pe_consuming_id_filter_stakeholder cascade;
-      truncate table pe_consuming_id_filter_non_stakeholder_informee cascade;
-      truncate table pe_non_consuming_id_filter_informee cascade;
-      truncate table pe_assign_id_filter_stakeholder cascade;
-      truncate table pe_unassign_id_filter_stakeholder cascade;
-      truncate table participant_transaction_meta cascade;
-      truncate table participant_users cascade;
-      truncate table participant_users cascade;
-      truncate table participant_user_annotations cascade;
-      truncate table participant_user_rights cascade;
-      truncate table participant_identity_provider_config cascade;
-      truncate table transaction_metering cascade;
-      truncate table participant_metering cascade;
-      truncate table metering_parameters cascade;
+      delete from configuration_entries cascade;
+      delete from packages cascade;
+      delete from package_entries cascade;
+      delete from parameters cascade;
+      delete from participant_command_completions cascade;
+      delete from participant_events_divulgence cascade;
+      delete from participant_events_create cascade;
+      delete from participant_events_consuming_exercise cascade;
+      delete from participant_events_non_consuming_exercise cascade;
+      delete from participant_events_assign cascade;
+      delete from participant_events_unassign cascade;
+      delete from party_entries cascade;
+      delete from participant_party_records cascade;
+      delete from participant_party_record_annotations cascade;
+      delete from string_interning cascade;
+      delete from pe_create_id_filter_stakeholder cascade;
+      delete from pe_create_id_filter_non_stakeholder_informee cascade;
+      delete from pe_consuming_id_filter_stakeholder cascade;
+      delete from pe_consuming_id_filter_non_stakeholder_informee cascade;
+      delete from pe_non_consuming_id_filter_informee cascade;
+      delete from pe_assign_id_filter_stakeholder cascade;
+      delete from pe_unassign_id_filter_stakeholder cascade;
+      delete from participant_transaction_meta cascade;
+      delete from participant_users cascade;
+      delete from participant_user_annotations cascade;
+      delete from participant_user_rights cascade;
+      delete from participant_identity_provider_config cascade;
+      delete from transaction_metering cascade;
+      delete from participant_metering cascade;
+      delete from metering_parameters cascade;
     """
       .execute()(connection)
       .discard

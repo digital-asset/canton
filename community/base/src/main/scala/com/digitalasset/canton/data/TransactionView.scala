@@ -118,15 +118,8 @@ final case class TransactionView private (
   lazy val flatten: Seq[TransactionView] =
     foldLeft(Seq.newBuilder[TransactionView])((acc, v) => acc += v).result()
 
-  lazy val tryFlattenToParticipantViews: Seq[ParticipantTransactionView] = flatten.map(sv =>
-    ParticipantTransactionView
-      .create(sv)
-      .valueOr(e =>
-        throw new IllegalStateException(
-          s"Transaction view has a descendant view (hash ${sv.viewHash}) that doesn't contain a participant view: $e"
-        )
-      )
-  )
+  lazy val tryFlattenToParticipantViews: Seq[ParticipantTransactionView] =
+    flatten.map(ParticipantTransactionView.tryCreate)
 
   /** Yields all (direct and indirect) subviews of this view in pre-order, along with the subview position
     * under the root view position `rootPos`. The first element is this view.

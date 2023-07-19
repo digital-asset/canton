@@ -51,7 +51,7 @@ trait CommandDeduplicator {
     * @return The [[com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationOffset]]
     *         to be included in the command completion's [[com.digitalasset.canton.ledger.participant.state.v2.CompletionInfo]].
     *         Canton always returns a [[com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationOffset]]
-    *         because it cannot meet the the record time requirements for the other kinds of
+    *         because it cannot meet the record time requirements for the other kinds of
     *         [[com.digitalasset.canton.ledger.api.DeduplicationPeriod]]s.
     */
   def checkDuplication(changeIdHash: ChangeIdHash, deduplicationPeriod: DeduplicationPeriod)(
@@ -88,15 +88,15 @@ class CommandDeduplicatorImpl(
   override def processPublications(
       publications: Seq[MultiDomainEventLog.OnPublish.Publication]
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    val offsetsAndComletionInfos = publications.mapFilter {
+    val offsetsAndCompletionInfos = publications.mapFilter {
       case MultiDomainEventLog.OnPublish.Publication(
             globalOffset,
             publicationTime,
-            _inFlightReference,
-            deduplicationInfo,
+            _inFlightReferenceO,
+            deduplicationInfoO,
             _event,
           ) =>
-        deduplicationInfo.map { dedupInfo =>
+        deduplicationInfoO.map { dedupInfo =>
           (
             dedupInfo.changeId,
             DefiniteAnswerEvent(
@@ -109,7 +109,7 @@ class CommandDeduplicatorImpl(
           )
         }
     }
-    store.value.storeDefiniteAnswers(offsetsAndComletionInfos)
+    store.value.storeDefiniteAnswers(offsetsAndCompletionInfos)
   }
 
   override def checkDuplication(

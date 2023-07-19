@@ -27,7 +27,7 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
 import com.digitalasset.canton.topology.{DomainId, DomainTopologyManagerId, Member, ParticipantId}
-import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc, Traced}
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{EitherTUtil, FutureUtil}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -42,7 +42,7 @@ import scala.jdk.CollectionConverters.*
 trait RegisterTopologyTransactionHandleCommon[TX] extends FlagCloseable {
   def submit(
       transactions: Seq[TX]
-  ): FutureUnlessShutdown[Seq[
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Seq[
     // TODO(#11255): Switch to RegisterTopologyTransactionResponseResultX once non-proto version exists
     RegisterTopologyTransactionResponseResult.State
   ]]
@@ -82,6 +82,8 @@ class SequencerBasedRegisterTopologyTransactionHandle(
 
   override def submit(
       transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]]
+  )(implicit
+      traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[RegisterTopologyTransactionResponseResult.State]] = {
     RegisterTopologyTransactionRequest
       .create(
@@ -136,6 +138,8 @@ class SequencerBasedRegisterTopologyTransactionHandleX(
 
   override def submit(
       transactions: Seq[GenericSignedTopologyTransactionX]
+  )(implicit
+      traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[RegisterTopologyTransactionResponseResult.State]] = {
     service.registerTopologyTransaction(
       RegisterTopologyTransactionRequestX
@@ -189,8 +193,7 @@ abstract class DomainTopologyServiceCommon[
 
   def registerTopologyTransaction(
       request: Request
-  ): FutureUnlessShutdown[Result] = {
-    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Result] = {
     val responseF = getResponse(request)
     for {
       _ <- performUnlessClosingF(functionFullName)(

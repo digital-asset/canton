@@ -58,12 +58,12 @@ class InMemoryActiveContractStore(
       }
     })
 
-  override def archiveContracts(contractIds: Seq[LfContractId], toc: TimeOfChange)(implicit
+  override def archiveContracts(archivals: Seq[LfContractId], toc: TimeOfChange)(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
     CheckedT(Future.successful {
-      logger.trace(show"Archiving contracts at $toc: $contractIds")
-      contractIds.to(LazyList).traverse_ { contractId =>
+      logger.trace(show"Archiving contracts at $toc: $archivals")
+      archivals.to(LazyList).traverse_ { case contractId =>
         updateTable(contractId, _.addArchival(contractId, toc))
       }
     })
@@ -83,12 +83,11 @@ class InMemoryActiveContractStore(
 
   override def snapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LfContractId, (CantonTimestamp, TransferCounter)]] = Future.successful {
-    val snapshot = SortedMap.newBuilder[LfContractId, (CantonTimestamp, TransferCounter)]
+  ): Future[SortedMap[LfContractId, (CantonTimestamp, TransferCounterO)]] = Future.successful {
+    val snapshot = SortedMap.newBuilder[LfContractId, (CantonTimestamp, TransferCounterO)]
     table.foreach { case (contractId, contractStatus) =>
       contractStatus.activeBy(timestamp).foreach { case (activationTimestamp, transferCounterO) =>
-        snapshot += (contractId -> (activationTimestamp, transferCounterO
-          .getOrElse(TransferCounter.Genesis)))
+        snapshot += (contractId -> (activationTimestamp, transferCounterO))
       }
     }
     snapshot.result()
@@ -96,12 +95,11 @@ class InMemoryActiveContractStore(
 
   override def snapshot(rc: RequestCounter)(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LfContractId, (RequestCounter, TransferCounter)]] = Future.successful {
-    val snapshot = SortedMap.newBuilder[LfContractId, (RequestCounter, TransferCounter)]
+  ): Future[SortedMap[LfContractId, (RequestCounter, TransferCounterO)]] = Future.successful {
+    val snapshot = SortedMap.newBuilder[LfContractId, (RequestCounter, TransferCounterO)]
     table.foreach { case (contractId, contractStatus) =>
       contractStatus.activeBy(rc).foreach { case (activationRc, transferCounterO) =>
-        snapshot += (contractId -> (activationRc, transferCounterO
-          .getOrElse(TransferCounter.Genesis)))
+        snapshot += (contractId -> (activationRc, transferCounterO))
       }
     }
     snapshot.result()
@@ -120,6 +118,36 @@ class InMemoryActiveContractStore(
         )
         .toMap
     }
+
+  override def bulkContractsTransferCounterSnapshot(
+      contractIds: Set[LfContractId],
+      requestCounter: RequestCounter,
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Map[LfContractId, TransferCounterO]] = {
+    logger.debug(
+      s"Looking up transfer counters for contracts $contractIds up to but not including $requestCounter"
+    )
+    if (requestCounter == RequestCounter.MinValue)
+      ErrorUtil.internalError(
+        new IllegalArgumentException(
+          s"The request counter $requestCounter should not be equal to ${RequestCounter.MinValue}"
+        )
+      )
+    Future.successful {
+      contractIds
+        .to(LazyList)
+        .mapFilter(contractId =>
+          table
+            .get(contractId)
+            .flatMap(_.activeBy(requestCounter - 1))
+            .map { case (_, transferCounter) =>
+              contractId -> transferCounter
+            }
+        )
+        .toMap
+    }
+  }
 
   override def transferInContracts(
       transferIns: Seq[(LfContractId, SourceDomainId, TransferCounterO)],
@@ -269,7 +297,7 @@ object InMemoryActiveContractStore {
     def create(toc: TimeOfChange, transferCounter: TransferCounterO): IndividualChange =
       Activation(toc) -> CreationArchivalDetail(transferCounter)
     def archive(toc: TimeOfChange): IndividualChange =
-      Deactivation(toc) -> CreationArchivalDetail(transferCounter = None)
+      Deactivation(toc) -> CreationArchivalDetail(None)
     def transferIn(
         toc: TimeOfChange,
         remoteDomain: DomainId,
@@ -589,7 +617,7 @@ object InMemoryActiveContractStore {
             detail match {
               case TransferDetails(targetDomain, transferCounter) =>
                 TransferredAway(TargetDomainId(targetDomain), transferCounter)
-              case CreationArchivalDetail(_) => Archived
+              case CreationArchivalDetail(transferCounter) => Archived
             }
         ContractState(status, change.toc)
       }

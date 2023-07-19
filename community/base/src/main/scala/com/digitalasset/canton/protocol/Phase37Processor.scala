@@ -61,9 +61,12 @@ trait Phase37Processor[RequestBatch] {
   ): HandlerResult
 }
 
-/** Request messages, along with the root hash message and the mediator ID that received the root hash message */
+/** Request messages, along with the root hash message, the mediator ID that received the root hash message,
+  * and whether the delivery was a receipt or not (i.e. contained a message ID).
+  */
 final case class RequestAndRootHashMessage[RequestEnvelope](
     requestEnvelopes: NonEmpty[Seq[RequestEnvelope]],
     rootHashMessage: RootHashMessage[SerializedRootHashMessagePayload],
     mediator: MediatorRef,
+    isReceipt: Boolean,
 )

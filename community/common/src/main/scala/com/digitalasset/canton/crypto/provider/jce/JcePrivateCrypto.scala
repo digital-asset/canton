@@ -12,17 +12,9 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.google.crypto.tink.subtle.EllipticCurves.CurveType
 import com.google.crypto.tink.subtle.{Ed25519Sign, EllipticCurves}
 import com.google.protobuf.ByteString
-import org.bouncycastle.asn1.gm.{GMNamedCurves, GMObjectIdentifiers}
-import org.bouncycastle.jce.spec.ECNamedCurveParameterSpec
 
 import java.security.spec.{ECGenParameterSpec, RSAKeyGenParameterSpec}
-import java.security.{
-  GeneralSecurityException,
-  InvalidAlgorithmParameterException,
-  KeyPair as JKeyPair,
-  KeyPairGenerator,
-  NoSuchAlgorithmException,
-}
+import java.security.{GeneralSecurityException, KeyPair as JKeyPair, KeyPairGenerator}
 import scala.concurrent.{ExecutionContext, Future}
 
 class JcePrivateCrypto(
@@ -149,33 +141,14 @@ class JcePrivateCrypto(
           )
       } yield keyPair
 
-    case SigningKeyScheme.Sm2 =>
-      for {
-        keyGen <- Either
-          .catchOnly[NoSuchAlgorithmException](KeyPairGenerator.getInstance("EC", "BC"))
-          .leftMap(SigningKeyGenerationError.GeneralError)
-          .toEitherT
-
-        params = GMNamedCurves.getByOID(GMObjectIdentifiers.sm2p256v1)
-        spec = new ECNamedCurveParameterSpec(
-          GMObjectIdentifiers.sm2p256v1.toString,
-          params.getCurve,
-          params.getG,
-          params.getN,
-        )
-        _ <- Either
-          .catchOnly[InvalidAlgorithmParameterException](keyGen.initialize(spec))
-          .leftMap[SigningKeyGenerationError](SigningKeyGenerationError.GeneralError)
-          .toEitherT
-
-        javaKeyPair = keyGen.generateKeyPair()
-      } yield fromJavaSigningKeyPair(javaKeyPair, scheme)
-
     case SigningKeyScheme.EcDsaP256 =>
       generateEcDsaSigningKeyPair(EllipticCurves.CurveType.NIST_P256, scheme).toEitherT
 
     case SigningKeyScheme.EcDsaP384 =>
       generateEcDsaSigningKeyPair(EllipticCurves.CurveType.NIST_P384, scheme).toEitherT
+
+    case unsupported =>
+      EitherT.leftT(SigningKeyGenerationError.UnsupportedKeyScheme(unsupported))
 
   }
 

@@ -382,6 +382,8 @@ final case class MediatorGroup(
     threshold: PositiveInt,
 ) {
   def isActive: Boolean = active.size >= threshold.value
+
+  def all: Seq[MediatorId] = active ++ passive
 }
 
 object MediatorGroup {

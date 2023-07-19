@@ -18,7 +18,6 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, TrustLevel}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.LfTransactionUtil
-import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -29,31 +28,7 @@ sealed trait ConfirmationPolicy extends Product with Serializable with PrettyPri
 
   def toProtoPrimitive: ByteString = DeterministicEncoding.encodeString(name)
 
-  /** @param submittingAdminPartyO admin party of the submitting participant; defined only for top-level views
-    */
-  def informeesAndThreshold(
-      actionNode: LfActionNode,
-      submittingAdminPartyO: Option[LfPartyId],
-      topologySnapshot: TopologySnapshot,
-      protocolVersion: ProtocolVersion,
-  )(implicit
-      ec: ExecutionContext
-  ): Future[(Set[Informee], NonNegativeInt)] = if (protocolVersion < ProtocolVersion.v5)
-    informeesAndThresholdV0(actionNode, topologySnapshot)
-  else informeesAndThresholdV5(actionNode, submittingAdminPartyO, topologySnapshot)
-
-  def informeesAndThresholdV0(
-      actionNode: LfActionNode,
-      topologySnapshot: TopologySnapshot,
-  )(implicit
-      ec: ExecutionContext
-  ): Future[(Set[Informee], NonNegativeInt)]
-
-  def informeesAndThresholdV5(
-      actionNode: LfActionNode,
-      submittingAdminPartyO: Option[LfPartyId],
-      topologySnapshot: TopologySnapshot,
-  )(implicit
+  def informeesAndThreshold(actionNode: LfActionNode, topologySnapshot: TopologySnapshot)(implicit
       ec: ExecutionContext
   ): Future[(Set[Informee], NonNegativeInt)]
 
@@ -64,6 +39,38 @@ sealed trait ConfirmationPolicy extends Product with Serializable with PrettyPri
     * The mediator checks that all views have at least the given threshold.
     */
   def minimumThreshold(informees: Set[Informee]): NonNegativeInt = NonNegativeInt.one
+
+  protected def additionalWeightOfSubmittingAdminParty(
+      informees: Set[Informee],
+      adminParty: LfPartyId,
+  ): NonNegativeInt =
+    informees
+      .collectFirst { case ConfirmingParty(`adminParty`, _, _) => NonNegativeInt.zero }
+      .getOrElse(NonNegativeInt.one)
+
+  def withSubmittingAdminParty(
+      submittingAdminPartyO: Option[LfPartyId]
+  )(informees: Set[Informee], threshold: NonNegativeInt): (Set[Informee], NonNegativeInt) =
+    submittingAdminPartyO match {
+      case Some(submittingAdminParty) =>
+        val oldSubmittingInformee = informees
+          .find(_.party == submittingAdminParty)
+          .getOrElse(PlainInformee(submittingAdminParty))
+        val additionalWeight =
+          additionalWeightOfSubmittingAdminParty(
+            informees,
+            submittingAdminParty,
+          )
+        val newSubmittingInformee =
+          oldSubmittingInformee.withAdditionalWeight(additionalWeight.unwrap)
+
+        val newInformees = informees - oldSubmittingInformee + newSubmittingInformee
+        val newThreshold = threshold + additionalWeight
+
+        newInformees -> newThreshold
+
+      case None => informees -> threshold
+    }
 
   override def pretty: Pretty[ConfirmationPolicy] = prettyOfObject[ConfirmationPolicy]
 }
@@ -90,7 +97,7 @@ object ConfirmationPolicy {
     override val name = "Vip"
     protected override val index: Int = 0
 
-    override def informeesAndThresholdV0(node: LfActionNode, topologySnapshot: TopologySnapshot)(
+    override def informeesAndThreshold(node: LfActionNode, topologySnapshot: TopologySnapshot)(
         implicit ec: ExecutionContext
     ): Future[(Set[Informee], NonNegativeInt)] = {
       val stateVerifiers = LfTransactionUtil.stateKnownTo(node)
@@ -111,73 +118,29 @@ object ConfirmationPolicy {
       }
     }
 
-    override def informeesAndThresholdV5(
-        node: LfActionNode,
-        submittingAdminPartyO: Option[LfPartyId],
-        topologySnapshot: TopologySnapshot,
-    )(implicit
-        ec: ExecutionContext
-    ): Future[(Set[Informee], NonNegativeInt)] = {
-      val stateVerifiers = LfTransactionUtil.stateKnownTo(node)
-
-      for {
-        vipParties <- stateVerifiers.toList
-          .parTraverseFilter { partyId =>
-            topologySnapshot
-              .activeParticipantsOf(partyId)
-              .map(_.values.find(havingVip).map(_ => partyId))
-          }
-          .map(_.toSet)
-      } yield {
-        val plainInformees =
-          (node.informeesOfNode -- vipParties -- submittingAdminPartyO)
-            .map(PlainInformee)
-
-        val vipConfirmingParties =
-          (vipParties -- submittingAdminPartyO).map(ConfirmingParty(_, 1, TrustLevel.Vip))
-
-        val submittingConfirmingPartyO = submittingAdminPartyO
-          .map { submittingAdminParty =>
-            // Choose the highest possible required trust level.
-            val requiredTrustLevel =
-              if (vipParties.contains(submittingAdminParty)) TrustLevel.Vip else TrustLevel.Ordinary
-
-            // Choose the weight of the submitting admin party so high that
-            // 1. it is part of every quorum.
-            // 2. it is always positive.
-            //
-            // Add one, if the submitting participant has VIP status so that it can attain the threshold alone.
-            val weight =
-              (vipParties.size + 1) + (if (requiredTrustLevel == TrustLevel.Vip) 1 else 0)
-            ConfirmingParty(submittingAdminParty, weight, requiredTrustLevel)
-          }
-
-        val informees = plainInformees ++ vipConfirmingParties ++ submittingConfirmingPartyO
-
-        // At least one VIP party and the submitting participant (if defined) need to approve.
-        val threshold = 1 + submittingConfirmingPartyO.fold(0)(_ => vipParties.size + 1)
-
-        (informees, NonNegativeInt.tryCreate(threshold))
-      }
-    }
-
     override def requiredTrustLevel: TrustLevel = TrustLevel.Vip
 
     override def minimumThreshold(informees: Set[Informee]): NonNegativeInt = {
       // Make sure that at least one VIP needs to approve.
 
-      val weightOfOrdinary = informees.collect {
+      val weightOfOrdinary = informees.toSeq.collect {
         case ConfirmingParty(_, weight, TrustLevel.Ordinary) => weight
       }.sum
       NonNegativeInt.tryCreate(weightOfOrdinary + 1)
     }
+
+    override protected def additionalWeightOfSubmittingAdminParty(
+        informees: Set[Informee],
+        adminParty: LfPartyId,
+    ): NonNegativeInt =
+      NonNegativeInt.tryCreate(informees.toSeq.map(_.weight).sum + 1)
   }
 
   case object Signatory extends ConfirmationPolicy {
     override val name = "Signatory"
     protected override val index: Int = 1
 
-    override def informeesAndThresholdV0(node: LfActionNode, topologySnapshot: TopologySnapshot)(
+    override def informeesAndThreshold(node: LfActionNode, topologySnapshot: TopologySnapshot)(
         implicit ec: ExecutionContext
     ): Future[(Set[Informee], NonNegativeInt)] = {
       val confirmingParties =
@@ -192,25 +155,6 @@ object ConfirmationPolicy {
       )
     }
 
-    override def informeesAndThresholdV5(
-        node: LfActionNode,
-        submittingAdminPartyO: Option[LfPartyId],
-        topologySnapshot: TopologySnapshot,
-    )(implicit
-        ec: ExecutionContext
-    ): Future[(Set[Informee], NonNegativeInt)] = {
-      val confirmingParties =
-        LfTransactionUtil.signatoriesOrMaintainers(node) ++
-          LfTransactionUtil.actingParties(node) ++ submittingAdminPartyO
-      require(
-        confirmingParties.nonEmpty,
-        "There must be at least one confirming party, as every node must have at least one signatory.",
-      )
-      val plainInformees = node.informeesOfNode -- confirmingParties
-      Future.successful(
-        toInformeesAndThreshold(confirmingParties, plainInformees, TrustLevel.Ordinary)
-      )
-    }
     override def requiredTrustLevel: TrustLevel = TrustLevel.Ordinary
   }
 
@@ -218,7 +162,7 @@ object ConfirmationPolicy {
     override val name = "Full"
     protected override val index: Int = 2
 
-    override def informeesAndThresholdV0(node: LfActionNode, topologySnapshot: TopologySnapshot)(
+    override def informeesAndThreshold(node: LfActionNode, topologySnapshot: TopologySnapshot)(
         implicit ec: ExecutionContext
     ): Future[(Set[Informee], NonNegativeInt)] = {
       val informees = node.informeesOfNode
@@ -229,20 +173,6 @@ object ConfirmationPolicy {
       Future.successful(toInformeesAndThreshold(informees, Set.empty, TrustLevel.Ordinary))
     }
 
-    override def informeesAndThresholdV5(
-        node: LfActionNode,
-        submittingAdminPartyO: Option[LfPartyId],
-        topologySnapshot: TopologySnapshot,
-    )(implicit
-        ec: ExecutionContext
-    ): Future[(Set[Informee], NonNegativeInt)] = {
-      val informees = node.informeesOfNode ++ submittingAdminPartyO
-      require(
-        informees.nonEmpty,
-        "There must be at least one informee as every node must have at least one signatory.",
-      )
-      Future.successful(toInformeesAndThreshold(informees, Set.empty, TrustLevel.Ordinary))
-    }
     override def requiredTrustLevel: TrustLevel = TrustLevel.Ordinary
   }
 
@@ -287,7 +217,9 @@ object ConfirmationPolicy {
         .map(_.toMap)
 
     eligibleParticipantsF.map { eligibleParticipants =>
-      val hasVipForEachNode = vipCheckPartiesPerNode.forall { _.exists(eligibleParticipants(_)._1) }
+      val hasVipForEachNode = vipCheckPartiesPerNode.forall {
+        _.exists(eligibleParticipants(_)._1)
+      }
       val hasConfirmersForEachNode = signatoriesCheckPartiesPerNode.forall {
         _.exists(eligibleParticipants(_)._2)
       }

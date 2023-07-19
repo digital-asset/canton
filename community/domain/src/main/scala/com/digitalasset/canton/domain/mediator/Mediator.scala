@@ -101,7 +101,7 @@ private[mediator] class Mediator(
   )
 
   private val verdictSender =
-    VerdictSender(sequencerClient, syncCrypto, protocolVersion, loggerFactory)
+    VerdictSender(sequencerClient, syncCrypto, mediatorId, protocolVersion, loggerFactory)
 
   private val processor = new ConfirmationResponseProcessor(
     domain,
@@ -266,7 +266,7 @@ private[mediator] class Mediator(
             .flatMap(_.toFuture(new RuntimeException(_)))
 
           decisionTime <- domainParameters.decisionTimeForF(timestamp)
-          _ <- processor.sendMalformedRejection(
+          _ <- verdictSender.sendReject(
             requestId,
             None,
             rootHashMessages,

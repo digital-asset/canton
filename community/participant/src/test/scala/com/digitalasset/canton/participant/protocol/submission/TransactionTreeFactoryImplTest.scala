@@ -15,7 +15,6 @@ import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
 }
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.topology.MediatorRef
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -66,7 +65,7 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
       submitterInfo,
       factory.confirmationPolicy,
       Some(WorkflowId.assertFromString("testWorkflowId")),
-      MediatorRef(factory.mediatorId),
+      factory.mediatorRef,
       factory.transactionSeed,
       factory.transactionUuid,
       snapshot,

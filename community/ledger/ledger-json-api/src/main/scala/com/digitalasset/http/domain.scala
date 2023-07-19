@@ -71,6 +71,10 @@ package object domain {
   type SubmissionId = String @@ SubmissionIdTag
   val SubmissionId = Tag.of[SubmissionIdTag]
 
+  type WorkflowIdTag = lar.WorkflowIdTag
+  type WorkflowId = String @@ WorkflowIdTag
+  val WorkflowId = Tag.of[WorkflowIdTag]
+
   type LfType = typesig.Type
 
   type RetryInfoDetailDuration = scala.concurrent.duration.Duration @@ RetryInfoDetailDurationTag
@@ -390,6 +394,7 @@ package domain {
       actAs: Option[NonEmptyList[Party]],
       readAs: Option[List[Party]],
       submissionId: Option[SubmissionId],
+      workflowId: Option[WorkflowId],
       deduplicationPeriod: Option[domain.DeduplicationPeriod],
       disclosedContracts: Option[List[DisclosedContract[TmplId, LfV]]],
   )

@@ -11,7 +11,6 @@ import com.google.crypto.tink.subtle.EllipticCurves
 import com.google.crypto.tink.subtle.EllipticCurves.CurveType
 import com.google.protobuf.ByteString
 import org.bouncycastle.asn1.edec.EdECObjectIdentifiers
-import org.bouncycastle.asn1.gm.GMObjectIdentifiers
 import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers
 import org.bouncycastle.asn1.sec.SECObjectIdentifiers
 import org.bouncycastle.asn1.x509.{AlgorithmIdentifier, SubjectPublicKeyInfo}
@@ -27,7 +26,8 @@ import java.security.{
 }
 
 class JceJavaConverter(
-    supportedSigningSchemes: NonEmpty[Set[SigningKeyScheme]]
+    supportedSigningSchemes: NonEmpty[Set[SigningKeyScheme]],
+    supportedEncryptionSchemes: NonEmpty[Set[EncryptionKeyScheme]],
 ) extends JavaKeyConverter {
 
   import com.digitalasset.canton.util.ShowUtil.*
@@ -73,7 +73,9 @@ class JceJavaConverter(
         _ <- ensureFormat(publicKey, format)
         x509KeySpec = new X509EncodedKeySpec(x509PublicKey)
         keyFactory <- Either
-          .catchOnly[NoSuchAlgorithmException](KeyFactory.getInstance(keyInstance, "BC"))
+          .catchOnly[NoSuchAlgorithmException](
+            KeyFactory.getInstance(keyInstance, JceSecurityProvider.bouncyCastleProvider)
+          )
           .leftMap(JavaKeyConversionError.GeneralError)
         javaPublicKey <- Either
           .catchOnly[InvalidKeySpecException](keyFactory.generatePublic(x509KeySpec))
@@ -89,11 +91,6 @@ class JceJavaConverter(
             convert(CryptoKeyFormat.Raw, x509PublicKey.getEncoded, "Ed25519").map(pk =>
               (algoId, pk)
             )
-
-          case SigningKeyScheme.Sm2 =>
-            val algoId = new AlgorithmIdentifier(GMObjectIdentifiers.sm2p256v1)
-            convert(CryptoKeyFormat.Der, publicKey.key.toByteArray, "EC").map(pk => (algoId, pk))
-
           case SigningKeyScheme.EcDsaP256 => toJavaEcDsa(publicKey, CurveType.NIST_P256)
           case SigningKeyScheme.EcDsaP384 => toJavaEcDsa(publicKey, CurveType.NIST_P384)
         }
@@ -114,13 +111,14 @@ class JceJavaConverter(
   override def fromJavaSigningKey(
       javaPublicKey: JPublicKey,
       algorithmIdentifier: AlgorithmIdentifier,
+      fingerprint: Fingerprint,
   ): Either[JavaKeyConversionError, SigningPublicKey] = {
 
     def ensureJceSupportedScheme(scheme: SigningKeyScheme): Either[JavaKeyConversionError, Unit] = {
       Either.cond(
         supportedSigningSchemes.contains(scheme),
         (),
-        JavaKeyConversionError.UnsupportedKeyScheme(scheme, supportedSigningSchemes),
+        JavaKeyConversionError.UnsupportedSigningKeyScheme(scheme, supportedSigningSchemes),
       )
     }
 
@@ -129,16 +127,18 @@ class JceJavaConverter(
         for {
           scheme <- JavaKeyConverter.toSigningKeyScheme(algorithmIdentifier)
           _ <- Either.cond(
-            SigningKeyScheme.EcSchemes.contains(scheme),
+            SigningKeyScheme.EcDsaSchemes.contains(scheme),
             (),
-            JavaKeyConversionError.UnsupportedKeyScheme(scheme, SigningKeyScheme.EcSchemes),
+            JavaKeyConversionError.UnsupportedSigningKeyScheme(
+              scheme,
+              SigningKeyScheme.EcDsaSchemes,
+            ),
           )
           _ <- ensureJceSupportedScheme(scheme)
 
           publicKeyBytes = ByteString.copyFrom(javaPublicKey.getEncoded)
-          id = Fingerprint.create(publicKeyBytes)
           publicKey = new SigningPublicKey(
-            id = id,
+            id = fingerprint,
             format = CryptoKeyFormat.Der,
             key = publicKeyBytes,
             scheme = scheme,
@@ -153,7 +153,7 @@ class JceJavaConverter(
           _ <- Either.cond(
             scheme == SigningKeyScheme.Ed25519,
             (),
-            JavaKeyConversionError.UnsupportedKeyScheme(
+            JavaKeyConversionError.UnsupportedSigningKeyScheme(
               scheme,
               NonEmpty.mk(Set, SigningKeyScheme.Ed25519),
             ),
@@ -168,10 +168,49 @@ class JceJavaConverter(
             .catchOnly[IOException](new Ed25519PublicKeyParameters(publicKeyEncoded.newInput()))
             .leftMap(JavaKeyConversionError.GeneralError)
           publicKeyBytes = ByteString.copyFrom(publicKeyParams.getEncoded)
-          id = Fingerprint.create(publicKeyBytes)
           publicKey = new SigningPublicKey(
-            id = id,
+            id = fingerprint,
             format = CryptoKeyFormat.Raw,
+            key = publicKeyBytes,
+            scheme = scheme,
+          )
+        } yield publicKey
+
+      case unsupportedAlgo =>
+        Left(
+          JavaKeyConversionError.InvalidKey(
+            s"Java public key of kind $unsupportedAlgo not supported."
+          )
+        )
+    }
+  }
+
+  override def fromJavaEncryptionKey(
+      javaPublicKey: JPublicKey,
+      algorithmIdentifier: AlgorithmIdentifier,
+      fingerprint: Fingerprint,
+  ): Either[JavaKeyConversionError, EncryptionPublicKey] = {
+
+    def ensureJceSupportedScheme(
+        scheme: EncryptionKeyScheme
+    ): Either[JavaKeyConversionError, Unit] = {
+      Either.cond(
+        supportedEncryptionSchemes.contains(scheme),
+        (),
+        JavaKeyConversionError.UnsupportedEncryptionKeyScheme(scheme, supportedEncryptionSchemes),
+      )
+    }
+
+    javaPublicKey.getAlgorithm match {
+      case "EC" | "RSA" =>
+        for {
+          scheme <- JavaKeyConverter.toEncryptionKeyScheme(algorithmIdentifier)
+          _ <- ensureJceSupportedScheme(scheme)
+
+          publicKeyBytes = ByteString.copyFrom(javaPublicKey.getEncoded)
+          publicKey = new EncryptionPublicKey(
+            id = fingerprint,
+            format = CryptoKeyFormat.Der,
             key = publicKeyBytes,
             scheme = scheme,
           )

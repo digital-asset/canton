@@ -19,8 +19,9 @@ object Pruning {
 
   final case class LedgerPruningInternalError(message: String) extends LedgerPruningError
 
-  final case class LedgerPruningOnlySupportedInEnterpriseEdition(message: String)
-      extends LedgerPruningError
+  case object LedgerPruningOnlySupportedInEnterpriseEdition extends LedgerPruningError {
+    val message = "Pruning of internal participant data only available in the Enterprise Edition."
+  }
 
   final case class LedgerPruningOffsetUnsafeDomain(domain: DomainId) extends LedgerPruningError {
     override def message =

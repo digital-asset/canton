@@ -22,6 +22,7 @@ import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
   DomainParametersError,
   NoMediatorError,
 }
+import com.digitalasset.canton.participant.protocol.SubmissionTracker.SubmissionData
 import com.digitalasset.canton.participant.protocol.TestProcessingSteps.{
   TestPendingRequestData,
   TestPendingRequestDataType,
@@ -41,7 +42,7 @@ import com.digitalasset.canton.participant.store.{
   TransferLookup,
 }
 import com.digitalasset.canton.participant.sync.TimestampedEvent
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessageDecryptionError.SyncCryptoDecryptError
+import com.digitalasset.canton.protocol.messages.EncryptedViewMessageError.SyncCryptoDecryptError
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{
   DynamicDomainParametersWithValidity,
@@ -70,6 +71,7 @@ class TestProcessingSteps(
     pendingSubmissionMap: concurrent.Map[Int, Unit],
     pendingRequestData: Option[TestPendingRequestData],
     informeesOfView: ViewHash => Set[Informee] = _ => Set.empty,
+    submissionDataForTrackerO: Option[SubmissionData] = None,
 )(implicit val ec: ExecutionContext)
     extends ProcessingSteps[
       Int,
@@ -91,6 +93,8 @@ class TestProcessingSteps(
 
   override type RequestType = TestPendingRequestDataType
   override val requestType = TestPendingRequestDataType
+
+  override type DecryptedView = TestViewTree
 
   override def embedRequestError(
       err: ProtocolProcessor.RequestProcessingError
@@ -127,7 +131,7 @@ class TestProcessingSteps(
 
   override def getSubmissionDataForTracker(
       views: Seq[DecryptedView]
-  ): Option[SubmissionTracker.SubmissionData] = None
+  ): Option[SubmissionTracker.SubmissionData] = submissionDataForTrackerO
 
   override def participantResponseDeadlineFor(
       parameters: DynamicDomainParametersWithValidity,
@@ -191,8 +195,7 @@ class TestProcessingSteps(
         .bimap(
           err =>
             SyncCryptoDecryptError(
-              SyncCryptoDecryptionError(FailedToDecrypt(err.toString)),
-              envelope.protocolMessage,
+              SyncCryptoDecryptionError(FailedToDecrypt(err.toString))
             ),
           hash =>
             WithRecipients(treeFor(envelope.protocolMessage.viewHash, hash), envelope.recipients),

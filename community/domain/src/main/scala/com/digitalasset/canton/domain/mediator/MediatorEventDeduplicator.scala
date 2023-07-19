@@ -15,6 +15,8 @@ import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
   MediatorRequest,
   ProtocolMessage,
+  RootHashMessage,
+  SerializedRootHashMessagePayload,
 }
 import com.digitalasset.canton.protocol.{DynamicDomainParametersWithValidity, RequestId, v0}
 import com.digitalasset.canton.sequencing.TracedProtocolEvent
@@ -127,7 +129,7 @@ class DefaultMediatorEventDeduplicator(
       .sequentialTraverse(envelopes) { envelope =>
         envelope.protocolMessage match {
           case request: MediatorRequest =>
-            processUuid(requestTimestamp, request).map { case (hasUniqueUuid, storeF) =>
+            processUuid(requestTimestamp, request, envelopes).map { case (hasUniqueUuid, storeF) =>
               Option.when(hasUniqueUuid)(envelope) -> storeF
             }
           case _: ProtocolMessage => Future.successful(Some(envelope) -> Future.unit)
@@ -138,7 +140,11 @@ class DefaultMediatorEventDeduplicator(
         (uniqueEnvelopeOs.flattenOption, storeFs.sequence_)
       }
 
-  private def processUuid(requestTimestamp: CantonTimestamp, request: MediatorRequest)(implicit
+  private def processUuid(
+      requestTimestamp: CantonTimestamp,
+      request: MediatorRequest,
+      envelopes: Seq[DefaultOpenEnvelope],
+  )(implicit
       traceContext: TraceContext
   ): Future[(Boolean, Future[Unit])] = {
     val uuid = request.requestUuid
@@ -164,16 +170,19 @@ class DefaultMediatorEventDeduplicator(
         )
         verdict.report()
 
+        val rootHashMessages = envelopes.mapFilter(
+          ProtocolMessage.select[RootHashMessage[SerializedRootHashMessagePayload]]
+        )
+
         for {
           decisionTime <- getDecisionTime(Traced(requestTimestamp))
         } yield {
-          val sendF = verdictSender.sendResult(
+          val sendF = verdictSender.sendReject(
             RequestId(requestTimestamp),
-            request,
+            Some(request),
+            rootHashMessages,
             verdict,
             decisionTime,
-            // TODO(i13205): Enable aggregation rule for BFT mediator rejects
-            aggregationRule = None,
           )
           (false, sendF)
         }

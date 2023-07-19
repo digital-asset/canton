@@ -110,7 +110,7 @@ private[mediator] class InMemoryFinalizedResponseStore(
       overrideCloseContext: CloseContext,
   ): OptionT[Future, ResponseAggregation] =
     OptionT.fromOption[Future](
-      finalizedRequests.get(requestId.unwrap).map(_.copy(sendVerdict = false))
+      finalizedRequests.get(requestId.unwrap)
     )
 
   override def prune(
@@ -235,16 +235,15 @@ private[mediator] class DbFinalizedResponseStore(
               .map {
                 _.headOption.map {
                   case (reqId, mediatorRequest, version, verdict, requestTraceContext) =>
-                    ResponseAggregation(
+                    ResponseAggregation.fromVerdict(
                       reqId,
                       mediatorRequest,
                       version,
-                      Left(verdict),
-                      sendVerdict = false,
-                    )( // sendVerdict = false is OK to use because the finalized verdict should not be sent out again
+                      verdict,
+                    )(
                       protocolVersion,
-                      requestTraceContext.unwrap,
-                    )(loggerFactory)
+                      loggerFactory,
+                    )(requestTraceContext.unwrap)
                 }
               },
             operationName = s"${this.getClass}: fetch request $requestId",

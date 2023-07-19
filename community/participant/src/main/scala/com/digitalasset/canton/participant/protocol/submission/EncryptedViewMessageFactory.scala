@@ -17,6 +17,7 @@ import com.digitalasset.canton.protocol.messages.{
   EncryptedViewMessage,
   EncryptedViewMessageV0,
   EncryptedViewMessageV1,
+  RootHashMessageRecipients,
 }
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -63,16 +64,17 @@ object EncryptedViewMessageFactory {
           .createSymmetricKey(symmetricViewKeyRandomness, viewEncryptionScheme)
           .leftMap(FailedToCreateEncryptionKey)
       )
-      informeeParticipants <- cryptoSnapshot.ipsSnapshot
-        .activeParticipantsOfAll(informeeParties)
+      recipientsInfo <- RootHashMessageRecipients
+        .encryptedViewMessageRecipientsInfo(
+          cryptoSnapshot.ipsSnapshot,
+          informeeParties,
+        )
         .leftMap(UnableToDetermineParticipant(_, cryptoSnapshot.domainId))
-      usingGroupAddressing <- EitherT.right(
-        cryptoSnapshot.ipsSnapshot.partiesWithGroupAddressing(informeeParties).map(_.nonEmpty)
-      )
+      usingGroupAddressing = recipientsInfo.partiesWithGroupAddressing.nonEmpty
       randomnessMap <-
         if (!usingGroupAddressing)
           createRandomnessMap(
-            informeeParticipants.to(LazyList),
+            recipientsInfo.informeeParticipants.to(LazyList),
             randomness,
             cryptoSnapshot,
             protocolVersion,
@@ -109,7 +111,9 @@ object EncryptedViewMessageFactory {
             encryptedView,
             viewTree.domainId,
             viewEncryptionScheme,
-          )(Some(informeeParticipants))
+          )(
+            Some(recipientsInfo)
+          )
         } else {
           val randomnessMapV0 = randomnessMap.fmap(_.encrypted)
           EncryptedViewMessageV0[VT](

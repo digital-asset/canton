@@ -82,10 +82,9 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
     ResponseAggregation.fromVerdict(
       requestId,
       informeeMessage,
+      requestId.unwrap,
       MediatorError.Timeout.Reject.create(testedProtocolVersion),
-      testedProtocolVersion,
-      sendVerdict = true,
-    )(loggerFactory)
+    )(testedProtocolVersion, loggerFactory)
 
   private[mediator] def finalizedResponseStore(mk: () => FinalizedResponseStore): Unit = {
     implicit val closeContext: CloseContext = HasTestCloseContext.makeTestCloseContext(self.logger)
@@ -102,8 +101,7 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
         for {
           _ <- sut.store(currentVersion)
           result <- sut.fetch(requestId).value
-          expected = currentVersion.copy(sendVerdict = false)
-        } yield result shouldBe Some(expected)
+        } yield result shouldBe Some(currentVersion)
       }
       "should allow the same response to be stored more than once" in {
         // can happen after a crash and event replay
@@ -119,7 +117,7 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
       "remove all responses up and including timestamp" in {
         val sut = mk()
 
-        val requests = (1 to 3).map(n => currentVersion.copy(requestId = requestIdTs(n)))
+        val requests = (1 to 3).map(n => currentVersion.withRequestId(requestIdTs(n)))
 
         for {
           _ <- requests.toList.parTraverse(sut.store)

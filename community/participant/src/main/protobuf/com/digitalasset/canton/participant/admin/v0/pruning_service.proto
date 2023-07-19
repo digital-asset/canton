@@ -6,6 +6,7 @@ syntax = "proto3";
 package com.digitalasset.canton.participant.admin.v0;
 
 import "com/digitalasset/canton/pruning/admin/v0/pruning.proto";
+import "google/protobuf/timestamp.proto";
 
 // Canton-internal pruning service that prunes only canton state, but leaves the ledger-api
 // state unpruned.
@@ -21,6 +22,9 @@ service PruningService {
   // - ``FAILED_PRECONDITION``: if the participant is not yet able to prune at the specified
   //   offset or if pruning is invoked on a participant running the Community Edition.
   rpc Prune(PruneRequest) returns (PruneResponse);
+
+  // Retrieve the safe pruning offset
+  rpc GetSafePruningOffset(GetSafePruningOffsetRequest) returns (GetSafePruningOffsetResponse);
 
   // Enable automatic pruning using the specified schedule parameters
   // The following errors may occur on the SetSchedule or Update commands:
@@ -50,4 +54,18 @@ message PruneRequest {
 
 message PruneResponse {
   // Empty for now, but may contain fields in the future
+}
+
+message GetSafePruningOffsetRequest {
+  google.protobuf.Timestamp before_or_at = 1;
+  string ledger_end = 2;
+}
+
+message GetSafePruningOffsetResponse {
+  message NoSafePruningOffset {}
+
+  oneof response {
+    string safe_pruning_offset = 1;
+    NoSafePruningOffset no_safe_pruning_offset = 2;
+  }
 }

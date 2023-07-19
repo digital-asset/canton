@@ -36,7 +36,11 @@ final case class ActivenessResult(
 
 object ActivenessResult {
   val success: ActivenessResult =
-    ActivenessResult(ActivenessCheckResult.success, Set.empty, ActivenessCheckResult.success)
+    ActivenessResult(
+      ActivenessCheckResult.success,
+      Set.empty,
+      ActivenessCheckResult.success,
+    )
 
   private def paramIfNotSuccessful[K, A <: PrettyPrinting](
       name: String,

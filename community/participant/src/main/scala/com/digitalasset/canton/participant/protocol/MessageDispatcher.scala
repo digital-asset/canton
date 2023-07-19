@@ -38,7 +38,7 @@ import com.digitalasset.canton.topology.processing.TopologyTransactionProcessorC
 import com.digitalasset.canton.topology.{DomainId, MediatorId, MediatorRef, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{Checked, ErrorUtil}
+import com.digitalasset.canton.util.{Checked, CheckedT, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{RequestCounter, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
@@ -299,7 +299,14 @@ trait MessageDispatcher { this: NamedLogging =>
         }
         alarmIfNonEmptySigned(MalformedMediatorRequestMessage, malformedMediatorRequestResults)
 
-        processEncryptedViewsAndRootHashMessages(encryptedViews, rootHashMessages, sc, ts)
+        val isReceipt = eventE.fold(_.content, _.content).messageIdO.isDefined
+        processEncryptedViewsAndRootHashMessages(
+          encryptedViews,
+          rootHashMessages,
+          sc,
+          ts,
+          isReceipt,
+        )
     }
   }
 
@@ -308,6 +315,7 @@ trait MessageDispatcher { this: NamedLogging =>
       rootHashMessages: List[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
       sc: SequencerCounter,
       ts: CantonTimestamp,
+      isReceipt: Boolean,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[ProcessingResult] = {
     def withNewRequestCounter(
         body: RequestCounter => FutureUnlessShutdown[ProcessingResult]
@@ -317,93 +325,111 @@ trait MessageDispatcher { this: NamedLogging =>
         case None => FutureUnlessShutdown.pure(processingResultMonoid.empty)
       }
     }
+    for {
+      checkedRootHashMessagesC <- checkRootHashMessageAndViews(ts, rootHashMessages, encryptedViews)
+      _ = checkedRootHashMessagesC.nonaborts.iterator.foreach { alarmMsg =>
+        alarm(sc, ts, alarmMsg)
+      }
+      result <- checkedRootHashMessagesC.toEither match {
+        case Right(goodRequest) =>
+          withNewRequestCounter { rc =>
+            val rootHashMessage: goodRequest.rootHashMessage.type = goodRequest.rootHashMessage
+            val viewType: rootHashMessage.viewType.type = rootHashMessage.viewType
 
-    val checkedRootHashMessages = checkRootHashMessageAndViews(rootHashMessages, encryptedViews)
-    checkedRootHashMessages.nonaborts.iterator.foreach { alarmMsg =>
-      alarm(sc, ts, alarmMsg)
-    }
-
-    checkedRootHashMessages.toEither match {
-      case Right(goodRequest) =>
-        withNewRequestCounter { rc =>
-          val rootHashMessage: goodRequest.rootHashMessage.type = goodRequest.rootHashMessage
-          val viewType: rootHashMessage.viewType.type = rootHashMessage.viewType
-
-          viewType match {
-            case TransferInViewType | TransferOutViewType if uniqueContractKeys =>
-              ErrorUtil.internalError(
-                new IllegalArgumentException(
-                  "Domain transfers are not supported with unique contract keys"
+            viewType match {
+              case TransferInViewType | TransferOutViewType if uniqueContractKeys =>
+                ErrorUtil.internalError(
+                  new IllegalArgumentException(
+                    "Domain transfers are not supported with unique contract keys"
+                  )
                 )
-              )
-            case _ =>
-              val processor = tryProtocolProcessor(viewType)
-              val batch = RequestAndRootHashMessage(
-                goodRequest.requestEnvelopes,
-                rootHashMessage,
-                goodRequest.mediator,
-              )
-              doProcess(
-                RequestKind(goodRequest.rootHashMessage.viewType),
-                processor.processRequest(ts, rc, sc, batch),
-              )
+              case _ =>
+                val processor = tryProtocolProcessor(viewType)
+                val batch = RequestAndRootHashMessage(
+                  goodRequest.requestEnvelopes,
+                  rootHashMessage,
+                  goodRequest.mediator,
+                  isReceipt,
+                )
+                doProcess(
+                  RequestKind(goodRequest.rootHashMessage.viewType),
+                  processor.processRequest(ts, rc, sc, batch),
+                )
+            }
           }
-        }
-      case Left(DoNotExpectMediatorResult) => tickRecordOrderPublisher(sc, ts)
-      case Left(ExpectMalformedMediatorRequestResult(mediator)) =>
-        // The request is malformed from this participant's and the mediator's point of view if the sequencer is honest.
-        // An honest mediator will therefore try to send a `MalformedMediatorRequestResult`.
-        withNewRequestCounter { rc =>
-          doProcess(
-            UnspecifiedMessageKind,
-            badRootHashMessagesRequestProcessor
-              .handleBadRequestWithExpectedMalformedMediatorRequest(rc, sc, ts, mediator),
-          )
-        }
-      case Left(SendMalformedAndExpectMediatorResult(rootHash, mediator, reason)) =>
-        // The request is malformed from this participant's point of view, but not necessarily from the mediator's.
-        withNewRequestCounter { rc =>
-          doProcess(
-            UnspecifiedMessageKind,
-            badRootHashMessagesRequestProcessor.sendRejectionAndExpectMediatorResult(
-              rc,
-              sc,
-              ts,
-              rootHash,
-              mediator,
-              LocalReject.MalformedRejects.BadRootHashMessages
-                .Reject(reason, protocolVersion),
-            ),
-          )
-        }
-    }
+        case Left(DoNotExpectMediatorResult) => tickRecordOrderPublisher(sc, ts)
+        case Left(ExpectMalformedMediatorRequestResult(mediator)) =>
+          // The request is malformed from this participant's and the mediator's point of view if the sequencer is honest.
+          // An honest mediator will therefore try to send a `MalformedMediatorRequestResult`.
+          withNewRequestCounter { rc =>
+            doProcess(
+              UnspecifiedMessageKind,
+              badRootHashMessagesRequestProcessor
+                .handleBadRequestWithExpectedMalformedMediatorRequest(rc, sc, ts, mediator),
+            )
+          }
+        case Left(SendMalformedAndExpectMediatorResult(rootHash, mediator, reason)) =>
+          // The request is malformed from this participant's point of view, but not necessarily from the mediator's.
+          withNewRequestCounter { rc =>
+            doProcess(
+              UnspecifiedMessageKind,
+              badRootHashMessagesRequestProcessor.sendRejectionAndExpectMediatorResult(
+                rc,
+                sc,
+                ts,
+                rootHash,
+                mediator,
+                LocalReject.MalformedRejects.BadRootHashMessages
+                  .Reject(reason, protocolVersion),
+              ),
+            )
+          }
+      }
+    } yield result
   }
 
   /** Checks the root hash messages and extracts the views with the correct view type.
     * @return [[com.digitalasset.canton.util.Checked.Abort]] indicates a really malformed request and the appropriate reaction
     */
   private def checkRootHashMessageAndViews(
+      ts: CantonTimestamp,
       rootHashMessages: List[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
       encryptedViews: List[OpenEnvelope[EncryptedViewMessage[ViewType]]],
   )(implicit
       traceContext: TraceContext
-  ): Checked[FailedRootHashMessageCheck, String, GoodRequest] =
-    filterRootHashMessages(rootHashMessages, encryptedViews).flatMap {
-      case (rootHashMessagesSentToAMediator, allMediators) =>
-        (rootHashMessagesSentToAMediator: @unchecked) match {
-          case Seq(rootHashMessage, furtherRHMs @ _*) =>
-            val mediator: MediatorRef = allMediators.headOption.getOrElse {
-              ErrorUtil.internalError(
-                new RuntimeException(
-                  "The previous checks ensure that there is exactly one mediator ID"
-                )
+  ): FutureUnlessShutdown[Checked[FailedRootHashMessageCheck, String, GoodRequest]] = {
+    def checkedT(
+        value: FutureUnlessShutdown[Checked[FailedRootHashMessageCheck, String, GoodRequest]]
+    ) = CheckedT(value)
+    (for {
+      filtered <- CheckedT.fromChecked[FutureUnlessShutdown](
+        filterRootHashMessages(rootHashMessages, encryptedViews)
+      )
+      (rootHashMessagesSentToAMediator, allMediators) = filtered
+      result <- (rootHashMessagesSentToAMediator: @unchecked) match {
+        case Seq(rootHashMessage, furtherRHMs @ _*) =>
+          val mediator: MediatorRef = allMediators.headOption.getOrElse {
+            ErrorUtil.internalError(
+              new RuntimeException(
+                "The previous checks ensure that there is exactly one mediator ID"
               )
-            }
+            )
+          }
 
-            if (furtherRHMs.isEmpty) {
-              val recipientsAreValid = rootHashMessage.recipients.asSingleGroup.contains(
-                NonEmpty.mk(Set, MemberRecipient(participantId), mediator.toRecipient)
+          if (furtherRHMs.isEmpty) {
+            val recipientsAreValid: FutureUnlessShutdown[Boolean] =
+              RootHashMessageRecipients.recipientsAreValid(
+                rootHashMessage.recipients,
+                participantId,
+                mediator,
+                badRootHashMessagesRequestProcessor
+                  .participantIsAddressByPartyGroupAddress(
+                    ts,
+                    _,
+                    _,
+                  ),
               )
+            checkedT(recipientsAreValid.map { recipientsAreValid =>
               if (recipientsAreValid) {
                 checkEncryptedViewsForRootHashMessage(
                   encryptedViews,
@@ -413,35 +439,47 @@ trait MessageDispatcher { this: NamedLogging =>
               } else {
                 // We assume that the participant receives only envelopes of which it is a recipient
                 Checked.Abort(
-                  ExpectMalformedMediatorRequestResult(mediator),
+                  ExpectMalformedMediatorRequestResult(mediator): FailedRootHashMessageCheck,
                   Chain(
                     show"Received root hash message with invalid recipients: ${rootHashMessage.recipients}"
                   ),
                 )
               }
-            } else {
-              // Since all messages in `rootHashMessagesSentToAMediator` are addressed to a mediator
-              // and there is at most one mediator recipient for all the envelopes in the batch,
-              // all these messages must have been sent to the same mediator.
-              // This mediator will therefore reject the request as malformed.
-              Checked.Abort(
-                ExpectMalformedMediatorRequestResult(mediator),
-                Chain(show"Multiple root hash messages in batch: $rootHashMessagesSentToAMediator"),
+            })
+          } else {
+            // Since all messages in `rootHashMessagesSentToAMediator` are addressed to a mediator
+            // and there is at most one mediator recipient for all the envelopes in the batch,
+            // all these messages must have been sent to the same mediator.
+            // This mediator will therefore reject the request as malformed.
+            checkedT(
+              FutureUnlessShutdown.pure(
+                Checked.Abort(
+                  ExpectMalformedMediatorRequestResult(mediator): FailedRootHashMessageCheck,
+                  Chain(
+                    show"Multiple root hash messages in batch: $rootHashMessagesSentToAMediator"
+                  ),
+                )
               )
-            }
-          case Seq() =>
-            // The batch may have contained a message that doesn't require a root hash message, e.g., an ACS commitment
-            // So raise an alarm only if there are views
-            val alarms =
-              if (encryptedViews.nonEmpty) Chain(show"No valid root hash message in batch")
-              else Chain.empty
-            // The participant hasn't received a root hash message that was sent to the mediator.
-            // The mediator sends a MalformedMediatorRequest only to the recipients of the root hash messages which it has received.
-            // It sends a RegularMediatorResult only to the informee participants
-            // and it checks that all the informee participants have received a root hash message.
-            Checked.Abort(DoNotExpectMediatorResult, alarms)
-        }
-    }
+            )
+          }
+        case Seq() =>
+          // The batch may have contained a message that doesn't require a root hash message, e.g., an ACS commitment
+          // So raise an alarm only if there are views
+          val alarms =
+            if (encryptedViews.nonEmpty) Chain(show"No valid root hash message in batch")
+            else Chain.empty
+          // The participant hasn't received a root hash message that was sent to the mediator.
+          // The mediator sends a MalformedMediatorRequest only to the recipients of the root hash messages which it has received.
+          // It sends a RegularMediatorResult only to the informee participants
+          // and it checks that all the informee participants have received a root hash message.
+          checkedT(
+            FutureUnlessShutdown.pure(
+              Checked.Abort(DoNotExpectMediatorResult: FailedRootHashMessageCheck, alarms)
+            )
+          )
+      }
+    } yield result).value
+  }
 
   /** Return only the root hash messages sent to a mediator, along with the set of all mediator recipients */
   private def filterRootHashMessages(

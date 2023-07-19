@@ -728,7 +728,7 @@ class RepairService(
               s"Contract ${cid} does not exist in domain ${repair.domainAlias} and cannot be purged. Set ignoreAlreadyPurged = true to skip non-existing contracts."
             ),
           )
-        case Some(ActiveContractStore.Active(_)) =>
+        case Some(ActiveContractStore.Active(transferCounter)) =>
           for {
             contract <- EitherT
               .fromOption[Future](
@@ -1049,6 +1049,12 @@ class RepairService(
       .toEitherTWithNonaborts
       .leftMap(e => log(s"Failed to transfer in contract ${cid} in ActiveContractStore: ${e}"))
 
+  /*
+  We do not store transfer counters for archivals in the repair service,
+  given that we do not store them as part of normal transaction processing either.
+  The latter is due to the fact that we do not know the correct transfer counters
+  at the time we persist the deactivation in the ACS.
+   */
   private def persistArchival(
       repair: RepairRequest
   )(cid: LfContractId)(implicit traceContext: TraceContext): EitherT[Future, String, Unit] =

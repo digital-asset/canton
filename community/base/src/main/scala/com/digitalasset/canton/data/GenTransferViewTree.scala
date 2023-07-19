@@ -30,6 +30,9 @@ abstract class GenTransferViewTree[
     hashOps: HashOps
 ) extends MerkleTreeInnerNode[Tree](hashOps) { this: Tree =>
 
+  val viewPosition: ViewPosition =
+    ViewPosition.root // Use a dummy value, as there is only one view.
+
   override def subtrees: Seq[MerkleTree[_]] = Seq(commonData, participantData)
 
   /*

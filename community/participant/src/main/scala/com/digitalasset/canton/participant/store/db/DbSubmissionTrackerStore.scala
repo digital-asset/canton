@@ -36,10 +36,7 @@ class DbSubmissionTrackerStore(
   ): FutureUnlessShutdown[Boolean] = {
     // TODO(i13492): use batching to optimize processing
 
-    val dbDomainId = domainId
-    val dbRootHash = rootHash.unwrap.toLengthLimitedHexString
     val dbRequestId = requestId.unwrap
-    val dbMaxSeqTime = maxSequencingTime
 
     val insertQuery = storage.profile match {
       case _: DbStorage.Profile.H2 | _: DbStorage.Profile.Postgres =>
@@ -48,17 +45,17 @@ class DbSubmissionTrackerStore(
                  root_hash_hex,
                  request_id,
                  max_sequencing_time)
-               values ($dbDomainId, $dbRootHash, $dbRequestId, $dbMaxSeqTime)
+               values ($domainId, $rootHash, $dbRequestId, $maxSequencingTime)
                on conflict do nothing"""
 
       case _: DbStorage.Profile.Oracle =>
         sqlu"""merge into fresh_submitted_transaction
                  using (
                    select
-                     $dbDomainId domain_id,
-                     $dbRootHash root_hash_hex,
+                     $domainId domain_id,
+                     $rootHash root_hash_hex,
                      $dbRequestId request_id,
-                     $dbMaxSeqTime max_sequencing_time
+                     $maxSequencingTime max_sequencing_time
                    from dual
                  ) to_insert
                  on (fresh_submitted_transaction.domain_id = to_insert.domain_id
@@ -81,7 +78,7 @@ class DbSubmissionTrackerStore(
     val selectQuery =
       sql"""select count(*)
               from fresh_submitted_transaction
-              where domain_id=$dbDomainId and root_hash_hex=$dbRootHash and request_id=$dbRequestId"""
+              where domain_id=$domainId and root_hash_hex=$rootHash and request_id=$dbRequestId"""
         .as[Int]
         .headOption
 
@@ -101,13 +98,10 @@ class DbSubmissionTrackerStore(
   override protected[canton] def doPrune(
       beforeAndIncluding: CantonTimestamp
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    val dbDomainId = domainId
-    val dbBeforeAndIncluding = beforeAndIncluding
-
     processingTime.event {
       val deleteQuery =
         sqlu"""delete from fresh_submitted_transaction
-           where domain_id = $dbDomainId and max_sequencing_time <= $dbBeforeAndIncluding"""
+           where domain_id = $domainId and max_sequencing_time <= $beforeAndIncluding"""
 
       storage.update_(deleteQuery, "prune fresh_submitted_transaction")
     }

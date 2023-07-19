@@ -27,6 +27,7 @@ import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFa
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.{WithSuffixes, WithoutSuffixes}
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.protocol.messages.EncryptedViewMessageV1.RecipientsInfo
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.OpenEnvelope
 import com.digitalasset.canton.topology.*
@@ -271,7 +272,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
               encryptedView,
               transactionFactory.domainId,
               SymmetricKeyScheme.Aes128Gcm,
-            )(Some(participants))
+            )(Some(RecipientsInfo(participants, Set.empty, Set.empty)))
           else
             EncryptedViewMessageV0(
               signature,

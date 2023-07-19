@@ -149,7 +149,7 @@ class RecipientsValidatorTest extends BaseTestWordSpec with HasExecutionContext 
             .futureValue,
           _.shouldBeCantonError(
             SyncServiceAlarm,
-            _ shouldBe s"""Received a request with id $requestId where the view at ViewPosition(List("")) has informees without an active participant: Set(inactive::default). Discarding ViewPosition(List(""))...""",
+            _ shouldBe s"""Received a request with id $requestId where the view at ViewPosition("") has informees without an active participant: Set(inactive::default). Discarding ViewPosition("")...""",
           ),
         )
 
@@ -193,7 +193,7 @@ class RecipientsValidatorTest extends BaseTestWordSpec with HasExecutionContext 
             .futureValue,
           _.shouldBeCantonError(
             SyncServiceAlarm,
-            _ shouldBe s"""Received a request with id $requestId where the view at ViewPosition(List("", "")) has informees without an active participant: Set(inactive::default). Discarding ViewPosition(List("", ""))...""",
+            _ shouldBe s"""Received a request with id $requestId where the view at ViewPosition("", "") has informees without an active participant: Set(inactive::default). Discarding ViewPosition("", "")...""",
           ),
         )
 
@@ -419,7 +419,7 @@ class RecipientsValidatorTest extends BaseTestWordSpec with HasExecutionContext 
             _.shouldBeCantonError(
               SyncServiceAlarm,
               _ should startWith(
-                s"""Received a request with id $requestId where the view at ViewPosition(List("", "")) has a non-linear recipients tree. Processing all paths of the tree.
+                s"""Received a request with id $requestId where the view at ViewPosition("", "") has a non-linear recipients tree. Processing all paths of the tree.
                    |Recipients""".stripMargin
               ),
             ),
@@ -468,7 +468,7 @@ class RecipientsValidatorTest extends BaseTestWordSpec with HasExecutionContext 
             _.shouldBeCantonError(
               SyncServiceAlarm,
               _ should startWith(
-                s"""Received a request with id $requestId where the view at ViewPosition(List("", "")) has a non-linear recipients tree. Processing all paths of the tree.
+                s"""Received a request with id $requestId where the view at ViewPosition("", "") has a non-linear recipients tree. Processing all paths of the tree.
                    |Recipients""".stripMargin
               ),
             ),

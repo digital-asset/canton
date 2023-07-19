@@ -16,8 +16,12 @@ final case class ParticipantTransactionView private (view: TransactionView) {
 }
 
 object ParticipantTransactionView {
-  def create(view: TransactionView): Either[String, ParticipantTransactionView] = {
-    val validated = view.viewCommonData.unwrap
+
+  final case class InvalidParticipantTransactionView(message: String)
+      extends RuntimeException(message)
+
+  def tryCreate(view: TransactionView): ParticipantTransactionView =
+    view.viewCommonData.unwrap
       .leftMap(rh => s"Common data blinded (hash $rh)")
       .toValidatedNec
       .product(
@@ -25,9 +29,13 @@ object ParticipantTransactionView {
           .leftMap(rh => s"Participant data blinded (hash $rh)")
           .toValidatedNec
       )
-    validated
       .map(_ => new ParticipantTransactionView(view))
-      .toEither
-      .leftMap(_.toString)
-  }
+      .valueOr(err =>
+        throw InvalidParticipantTransactionView(
+          s"Unable to convert view (hash ${view.viewHash}) to a participant view: $err"
+        )
+      )
+
+  def create(view: TransactionView): Either[String, ParticipantTransactionView] =
+    Either.catchOnly[InvalidParticipantTransactionView](tryCreate(view)).leftMap(_.message)
 }

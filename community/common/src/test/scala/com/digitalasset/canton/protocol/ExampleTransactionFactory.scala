@@ -365,8 +365,8 @@ class ExampleTransactionFactory(
     val transactionUuid: UUID = UUID.fromString("11111111-2222-3333-4444-555555555555"),
     val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.Signatory,
     val domainId: DomainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("example::default")),
-    val mediatorId: MediatorId = MediatorId(
-      UniqueIdentifier.tryFromProtoPrimitive("mediator::default")
+    val mediatorRef: MediatorRef = MediatorRef(
+      MediatorId(UniqueIdentifier.tryFromProtoPrimitive("mediator::default"))
     ),
     val ledgerTime: CantonTimestamp = CantonTimestamp.Epoch,
     val ledgerTimeUsed: CantonTimestamp = CantonTimestamp.Epoch.minusSeconds(1),
@@ -398,8 +398,8 @@ class ExampleTransactionFactory(
     val submittingAdminPartyO =
       Option.when(isRoot)(submitterMetadata.submitterParticipant.adminParty.toLf)
     confirmationPolicy
-      .informeesAndThreshold(rootNode, submittingAdminPartyO, topologySnapshot, protocolVersion)
-      .flatMap { case (viewInformees, viewThreshold) =>
+      .informeesAndThreshold(rootNode, topologySnapshot)
+      .map { case (viewInformees, viewThreshold) =>
         val result = NewView(
           rootNode,
           viewInformees,
@@ -409,15 +409,10 @@ class ExampleTransactionFactory(
           tailNodes,
           rootRbContext,
         )
-        result
-          .compliesWith(
-            confirmationPolicy,
-            submittingAdminPartyO,
-            topologySnapshot,
-            protocolVersion,
-          )
-          .map(_ => result)
-          .valueOr(err => throw new IllegalArgumentException(err))
+
+        if (protocolVersion >= ProtocolVersion.v5)
+          result.withSubmittingAdminParty(submittingAdminPartyO, confirmationPolicy)
+        else result
       }
   }
 
@@ -509,7 +504,7 @@ class ExampleTransactionFactory(
     val (contractSalt, unicum) = unicumGenerator
       .generateSaltAndUnicum(
         domainId,
-        MediatorRef(mediatorId),
+        mediatorRef,
         transactionUuid,
         viewPosition,
         viewParticipantDataSalt,
@@ -571,12 +566,19 @@ class ExampleTransactionFactory(
 
     val submittingAdminPartyO =
       Option.when(isRoot)(submitterMetadata.submitterParticipant.adminParty.toLf)
-    val (informees, threshold) =
+    val (rawInformees, rawThreshold) =
       Await.result(
-        confirmationPolicy
-          .informeesAndThreshold(node, submittingAdminPartyO, topologySnapshot, protocolVersion),
+        confirmationPolicy.informeesAndThreshold(node, topologySnapshot),
         10.seconds,
       )
+    val (informees, threshold) =
+      if (protocolVersion >= ProtocolVersion.v5)
+        confirmationPolicy.withSubmittingAdminParty(submittingAdminPartyO)(
+          rawInformees,
+          rawThreshold,
+        )
+      else (rawInformees, rawThreshold)
+
     val viewCommonData =
       ViewCommonData.create(cryptoOps)(
         informees,
@@ -660,7 +662,7 @@ class ExampleTransactionFactory(
     CommonMetadata(cryptoOps)(
       confirmationPolicy,
       domainId,
-      MediatorRef(mediatorId),
+      mediatorRef,
       Salt.tryDeriveSalt(transactionSeed, 1, cryptoOps),
       transactionUuid,
       protocolVersion,
@@ -714,7 +716,7 @@ class ExampleTransactionFactory(
     )
 
   def rootTransactionViewTree(rootViews: MerkleTree[TransactionView]*): TransactionViewTree =
-    TransactionViewTree(
+    TransactionViewTree.tryCreate(
       GenTransactionTree.tryCreate(cryptoOps)(
         submitterMetadata,
         commonMetadata,
@@ -740,7 +742,7 @@ class ExampleTransactionFactory(
     }
 
   def nonRootTransactionViewTree(rootViews: MerkleTree[TransactionView]*): TransactionViewTree =
-    TransactionViewTree(
+    TransactionViewTree.tryCreate(
       GenTransactionTree.tryCreate(cryptoOps)(
         blinded(submitterMetadata),
         commonMetadata,
@@ -1225,9 +1227,6 @@ class ExampleTransactionFactory(
     * 1.3.1.0 View110
     */
   case object MultipleRootsAndViewNestings extends ExampleTransaction {
-
-    override def supportedConfirmationPolicies: Set[ConfirmationPolicy] =
-      Set(ConfirmationPolicy.Signatory, ConfirmationPolicy.Full)
 
     override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
 
@@ -1761,9 +1760,6 @@ class ExampleTransactionFactory(
     * 2. View2
     */
   case object ViewInterleavings extends ExampleTransaction {
-
-    override def supportedConfirmationPolicies: Set[ConfirmationPolicy] =
-      Set(ConfirmationPolicy.Signatory, ConfirmationPolicy.Full)
 
     override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
 
@@ -2417,9 +2413,6 @@ class ExampleTransactionFactory(
     * 1.1. view10
     */
   case object TransientContracts extends ExampleTransaction {
-
-    override def supportedConfirmationPolicies: Set[ConfirmationPolicy] =
-      Set(ConfirmationPolicy.Signatory, ConfirmationPolicy.Full)
 
     override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
 

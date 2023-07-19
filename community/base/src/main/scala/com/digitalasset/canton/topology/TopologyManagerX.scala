@@ -317,9 +317,12 @@ class TopologyManagerX(
               expectFullAuthorization,
             )
             .leftMap { res =>
-              // TODO(#11255) fix error handling
-              TopologyManagerError.InternalError
-                .Other(res.flatMap(_.rejectionReason).map(_.asString).mkString("[", ", ", "]"))
+              res.flatMap(_.rejectionReason).headOption match {
+                case Some(rejection) => rejection.toTopologyManagerError
+                case None =>
+                  TopologyManagerError.InternalError
+                    .Other("Topology transaction validation failed but there are no rejections")
+              }
             }
           _ <- EitherT.right(notifyObservers(ts, transactions))
         } yield ()

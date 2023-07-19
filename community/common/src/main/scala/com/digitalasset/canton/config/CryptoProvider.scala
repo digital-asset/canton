@@ -12,6 +12,7 @@ import com.digitalasset.canton.crypto.{
   SymmetricKeyScheme,
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.version.ProtocolVersion
 
 trait CryptoProvider extends PrettyPrinting {
 
@@ -23,6 +24,10 @@ trait CryptoProvider extends PrettyPrinting {
   def hash: CryptoProviderScheme[HashAlgorithm]
 
   def supportedCryptoKeyFormats: NonEmpty[Set[CryptoKeyFormat]]
+
+  def supportedCryptoKeyFormatsForProtocol(
+      protocolVersion: ProtocolVersion
+  ): NonEmpty[Set[CryptoKeyFormat]]
 
   override def pretty: Pretty[CryptoProvider.this.type] = prettyOfString(_.name)
 }
@@ -61,7 +66,17 @@ object CryptoProvider {
       CryptoProviderScheme(HashAlgorithm.Sha256, NonEmpty.mk(Set, HashAlgorithm.Sha256))
 
     override def supportedCryptoKeyFormats: NonEmpty[Set[CryptoKeyFormat]] =
-      NonEmpty.mk(Set, CryptoKeyFormat.Tink)
+      NonEmpty(Set, CryptoKeyFormat.Tink, CryptoKeyFormat.Raw, CryptoKeyFormat.Der)
+
+    override def supportedCryptoKeyFormatsForProtocol(
+        protocolVersion: ProtocolVersion
+    ): NonEmpty[Set[CryptoKeyFormat]] =
+      // Since Canton v2.7/PV5 we support Raw/DER through conversion
+      if (protocolVersion >= ProtocolVersion.v5)
+        NonEmpty(Set, CryptoKeyFormat.Tink, CryptoKeyFormat.Raw, CryptoKeyFormat.Der)
+      else
+        NonEmpty.mk(Set, CryptoKeyFormat.Tink)
+
   }
 
   trait JceCryptoProvider extends CryptoProvider {
@@ -75,7 +90,6 @@ object CryptoProvider {
           SigningKeyScheme.Ed25519,
           SigningKeyScheme.EcDsaP256,
           SigningKeyScheme.EcDsaP384,
-          SigningKeyScheme.Sm2,
         ),
       )
 
@@ -100,7 +114,16 @@ object CryptoProvider {
       CryptoProviderScheme(HashAlgorithm.Sha256, NonEmpty.mk(Set, HashAlgorithm.Sha256))
 
     override def supportedCryptoKeyFormats: NonEmpty[Set[CryptoKeyFormat]] =
-      NonEmpty(Set, CryptoKeyFormat.Raw, CryptoKeyFormat.Der)
+      NonEmpty(Set, CryptoKeyFormat.Raw, CryptoKeyFormat.Der, CryptoKeyFormat.Tink)
+
+    override def supportedCryptoKeyFormatsForProtocol(
+        protocolVersion: ProtocolVersion
+    ): NonEmpty[Set[CryptoKeyFormat]] =
+      // Since Canton v2.7/PV5 we support Tink through conversion
+      if (protocolVersion >= ProtocolVersion.v5)
+        NonEmpty(Set, CryptoKeyFormat.Raw, CryptoKeyFormat.Der, CryptoKeyFormat.Tink)
+      else
+        NonEmpty(Set, CryptoKeyFormat.Raw, CryptoKeyFormat.Der)
   }
 
 }

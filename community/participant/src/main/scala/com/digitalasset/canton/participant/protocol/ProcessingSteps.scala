@@ -7,7 +7,7 @@ import cats.data.{EitherT, OptionT}
 import cats.syntax.alternative.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps, Signature}
-import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
+import com.digitalasset.canton.data.{CantonTimestamp, ViewTree, ViewType}
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -87,7 +87,7 @@ trait ProcessingSteps[
   type SubmissionResultArgs
 
   /** The type of decrypted view trees */
-  type DecryptedView = RequestViewType#View
+  type DecryptedView <: ViewTree
 
   /** The type of data needed to generate the pending data and response in [[constructPendingDataAndResponse]].
     * The data is created by [[decryptViews]]
@@ -260,6 +260,9 @@ trait ProcessingSteps[
     /** The envelopes to be sent */
     def batch: Batch[DefaultOpenEnvelope]
 
+    /** The root hash contained in the batch's root hash message */
+    def rootHash: RootHash
+
     def pendingSubmissionId: PendingSubmissionId
 
     def embedSequencerRequestError(error: SequencerRequestError): SubmissionSendError
@@ -324,12 +327,12 @@ trait ProcessingSteps[
     */
   case class DecryptedViews(
       views: Seq[(WithRecipients[DecryptedView], Option[Signature])],
-      decryptionErrors: Seq[EncryptedViewMessageDecryptionError[RequestViewType]],
+      decryptionErrors: Seq[EncryptedViewMessageError[RequestViewType]],
   )
 
   object DecryptedViews {
     def apply(
-        all: Seq[Either[EncryptedViewMessageDecryptionError[
+        all: Seq[Either[EncryptedViewMessageError[
           RequestViewType
         ], (WithRecipients[DecryptedView], Option[Signature])]]
     ): DecryptedViews = {

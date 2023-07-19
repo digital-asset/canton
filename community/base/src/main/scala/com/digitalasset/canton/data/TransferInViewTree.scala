@@ -717,9 +717,6 @@ final case class FullTransferInTree(tree: TransferInViewTree)
   private[this] val commonData = tree.commonData.tryUnwrap
   private[this] val view = tree.view.tryUnwrap
 
-  override val viewPosition: ViewPosition =
-    ViewPosition.root // Use a dummy value, as there is only one view.
-
   def submitter: LfPartyId = view.submitter
 
   def submitterMetadata: TransferSubmitterMetadata = view.submitterMetadata

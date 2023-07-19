@@ -99,6 +99,8 @@ class DomainOutboxXTest
     val expect = new AtomicInteger(expectI)
     override def submit(
         transactions: Seq[GenericSignedTopologyTransactionX]
+    )(implicit
+        traceContext: TraceContext
     ): FutureUnlessShutdown[Seq[RegisterTopologyTransactionResponseResult.State]] =
       FutureUnlessShutdown.outcomeF {
         logger.debug(s"Observed ${transactions.length} transactions")

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.admin.grpc
 
 import cats.data.EitherT
+import cats.syntax.either.*
 import com.daml.ledger.api.refinements.ApiTypes
 import com.daml.ledger.client.binding.{Contract, Primitive as P}
 import com.digitalasset.canton.crypto.Hash
@@ -95,8 +96,7 @@ class GrpcPackageService(
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val hashE = Hash
       .fromHexString(request.darHash)
-      .left
-      .map(err =>
+      .leftMap(err =>
         Status.INVALID_ARGUMENT
           .withDescription(s"Invalid dar hash: ${request.darHash} [$err]")
           .asRuntimeException()

@@ -54,13 +54,13 @@ object TinkKeyFormat {
       .flatMap(_ => printVar.toRight("Fingerprint not available for reading"))
   }
 
-  private[tink] def serializeHandle(handle: KeysetHandle): ByteString = {
+  private[crypto] def serializeHandle(handle: KeysetHandle): ByteString = {
     val out = ByteString.newOutput()
     CleartextKeysetHandle.write(handle, BinaryKeysetWriter.withOutputStream(out))
     out.toByteString
   }
 
-  private[tink] def deserializeHandle(
+  private[crypto] def deserializeHandle(
       bytes: ByteString
   ): Either[DeserializationError, KeysetHandle] =
     Either

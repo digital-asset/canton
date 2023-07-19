@@ -95,6 +95,8 @@ class DomainOutboxTest extends AsyncWordSpec with BaseTest {
     val expect = new AtomicInteger(expectI)
     override def submit(
         transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]]
+    )(implicit
+        traceContext: TraceContext
     ): FutureUnlessShutdown[Seq[RegisterTopologyTransactionResponseResult.State]] =
       FutureUnlessShutdown.outcomeF {
         logger.debug(s"Observed ${transactions.length} transactions")

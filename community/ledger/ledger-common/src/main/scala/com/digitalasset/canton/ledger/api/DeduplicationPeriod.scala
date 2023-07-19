@@ -43,7 +43,7 @@ object DeduplicationPeriod {
     * When used in [[com.digitalasset.canton.ledger.participant.state.v2.SubmitterInfo]], the window is measured on some unspecified clock on the participant or the Daml ledger.
     * When used in [[com.digitalasset.canton.ledger.participant.state.v2.CompletionInfo]], the window is measured in record time.
     *
-    * @throws java.lang.IllegalArgumentException if the `duration` is negative
+    * @throws java.lang.IllegalArgumentException if the `duration` is negative or uses finer than microsecond precision
     */
   final case class DeduplicationDuration(duration: Duration) extends DeduplicationPeriod {
     require(!duration.isNegative, s"The deduplication window must not be negative: $duration")

@@ -54,7 +54,7 @@ object TransactionViewDecompositionFactory {
       def createNewView: ((LfNodeId, LfActionNode, RollbackContext)) => Future[NewView] = {
         case (rootNodeId, rootNode, rbContext) =>
           confirmationPolicy
-            .informeesAndThresholdV0(rootNode, topologySnapshot)
+            .informeesAndThreshold(rootNode, topologySnapshot)
             .flatMap { case (informees, threshold) =>
               val rootSeed = transaction.seedFor(rootNodeId)
               val tailNodesF = collectTailNodes(rootNode, informees, threshold, rbContext)
@@ -83,7 +83,7 @@ object TransactionViewDecompositionFactory {
         val actionNodeChildren = peelAwayTopLevelRollbackNodes(children, rbContext)
         actionNodeChildren
           .parTraverse { case (childNodeId, childNode, childRbContext) =>
-            confirmationPolicy.informeesAndThresholdV0(childNode, topologySnapshot).flatMap {
+            confirmationPolicy.informeesAndThreshold(childNode, topologySnapshot).flatMap {
               case (childInformees, childThreshold) =>
                 if (childInformees == viewInformees && childThreshold == viewThreshold) {
                   // childNode belongs to the core of the view, as informees and threshold are the same
@@ -269,7 +269,6 @@ object TransactionViewDecompositionFactory {
               .exitRollback()
         }
       }
-
     }
 
     override def fromTransaction(
@@ -281,17 +280,9 @@ object TransactionViewDecompositionFactory {
     )(implicit ec: ExecutionContext): Future[Seq[NewView]] = {
 
       val tx: LfVersionedTransaction = transaction.unwrap
-      val rootIds = tx.roots.toSeq.toSet
 
       val policyMapF = tx.nodes.collect({ case (nodeId, node: LfActionNode) =>
-        val submittingAdminPartyIfRoot =
-          Option.when(rootIds.contains(nodeId))(submittingAdminPartyO).flatten
-        val itF =
-          confirmationPolicy.informeesAndThresholdV5(
-            node,
-            submittingAdminPartyIfRoot,
-            topologySnapshot,
-          )
+        val itF = confirmationPolicy.informeesAndThreshold(node, topologySnapshot)
         val childNodeIds = node match {
           case e: LfNodeExercises => e.children.toSeq
           case _ => Seq.empty
@@ -305,6 +296,7 @@ object TransactionViewDecompositionFactory {
         Builder(tx.nodes, policyMap)
           .builds(tx.roots.toSeq, BuildState[NewView](rollbackContext = viewRbContext))
           .views
+          .map(_.withSubmittingAdminParty(submittingAdminPartyO, confirmationPolicy))
           .toList
       }
     }

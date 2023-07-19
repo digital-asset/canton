@@ -14,6 +14,7 @@ import com.digitalasset.canton.participant.protocol.submission.*
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore.InFlightReference
 import com.digitalasset.canton.participant.store.db.DbInFlightSubmissionStore
 import com.digitalasset.canton.participant.store.memory.InMemoryInFlightSubmissionStore
+import com.digitalasset.canton.protocol.RootHash
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.topology.DomainId
@@ -90,6 +91,22 @@ trait InFlightSubmissionStore extends AutoCloseable {
       submission: InFlightSubmission[UnsequencedSubmission]
   ): EitherT[FutureUnlessShutdown, InFlightSubmission[SubmissionSequencingInfo], Unit]
 
+  /** Updates the registration of the given unsequenced submission with its root hash information.
+    *
+    * If the root hash for the given submission has already been set by a previous call to this method,
+    * the new update will be ignored.
+    * If the given submission is not found in the store, the update will be ignored. We don't report
+    * an error because it can happen e.g. if the max sequencing time has already elapsed and the timely
+    * rejection published.
+    *
+    * This is done as a separate operation from [[register]] because the root hash is currently
+    * not known at registration time.
+    */
+  def updateRegistration(
+      submission: InFlightSubmission[UnsequencedSubmission],
+      rootHash: RootHash,
+  )(implicit traceContext: TraceContext): Future[Unit]
+
   /** Moves the submissions to the given domain
     * with the given [[com.digitalasset.canton.sequencing.protocol.MessageId]]s
     * from [[com.digitalasset.canton.participant.protocol.submission.UnsequencedSubmission]]
@@ -97,6 +114,19 @@ trait InFlightSubmissionStore extends AutoCloseable {
     */
   def observeSequencing(domainId: DomainId, submissions: Map[MessageId, SequencedSubmission])(
       implicit traceContext: TraceContext
+  ): Future[Unit]
+
+  /** Moves the submission with the given [[com.digitalasset.canton.protocol.RootHash]]
+    * from [[com.digitalasset.canton.participant.protocol.submission.UnsequencedSubmission]]
+    * to [[com.digitalasset.canton.participant.protocol.submission.SequencedSubmission]].
+    *
+    * If the submission is already sequenced, this call will be ignored.
+    */
+  def observeSequencedRootHash(
+      rootHash: RootHash,
+      submission: SequencedSubmission,
+  )(implicit
+      traceContext: TraceContext
   ): Future[Unit]
 
   /** Deletes the referred to in-flight submissions if there are any.

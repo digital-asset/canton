@@ -26,7 +26,6 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.participant.event.AcsChange
 import com.digitalasset.canton.participant.protocol.Phase37Synchronizer.RequestOutcome
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
   PendingRequestData,
@@ -39,6 +38,7 @@ import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicat
 import com.digitalasset.canton.participant.protocol.submission.{
   InFlightSubmission,
   InFlightSubmissionTracker,
+  SequencedSubmission,
   UnsequencedSubmission,
 }
 import com.digitalasset.canton.participant.protocol.validation.{
@@ -269,6 +269,7 @@ abstract class ProtocolProcessor[
       submissionId = tracked.submissionId,
       submissionDomain = domainId,
       messageUuid = messageUuid,
+      rootHashO = None,
       sequencingInfo =
         UnsequencedSubmission(maxSequencingTime, tracked.submissionTimeoutTrackingData),
       submissionTraceContext = traceContext,
@@ -365,11 +366,16 @@ abstract class ProtocolProcessor[
           }
         }
 
-        unlessError(
-          tracked
-            .prepareBatch(actualDeduplicationOffset, maxSequencingTime)
-            .mapK(FutureUnlessShutdown.outcomeK)
-        )(sendBatch)
+        unlessError {
+          val batchF = for {
+            batch <- tracked.prepareBatch(actualDeduplicationOffset, maxSequencingTime)
+            _ <- EitherT.right[UnsequencedSubmission](
+              inFlightSubmissionTracker.updateRegistration(inFlightSubmission, batch.rootHash)
+            )
+          } yield batch
+
+          batchF.mapK(FutureUnlessShutdown.outcomeK)
+        }(sendBatch)
     }
 
     registeredF.mapK(FutureUnlessShutdown.outcomeK).map(afterRegistration)
@@ -547,7 +553,7 @@ abstract class ProtocolProcessor[
       sc: SequencerCounter,
       batch: steps.RequestBatch,
   )(implicit traceContext: TraceContext): HandlerResult = {
-    val RequestAndRootHashMessage(viewMessages, rootHashMessage, mediatorId) = batch
+    val RequestAndRootHashMessage(viewMessages, rootHashMessage, mediatorId, _isReceipt) = batch
     val requestId = RequestId(ts)
 
     if (precedesCleanReplay(requestId)) {
@@ -596,25 +602,37 @@ abstract class ProtocolProcessor[
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, steps.RequestError, Unit] = {
-    val RequestAndRootHashMessage(viewMessages, rootHashMessage, mediator) = batch
+    val RequestAndRootHashMessage(viewMessages, rootHashMessage, mediator, isReceipt) = batch
     val requestId = RequestId(ts)
     val rootHash = rootHashMessage.rootHash
 
     def checkRootHash(
-        decryptedViews: steps.DecryptedViews
+        decryptedViews: Seq[(WithRecipients[steps.DecryptedView], Option[Signature])]
     ): (Seq[MalformedPayload], Seq[(WithRecipients[steps.DecryptedView], Option[Signature])]) = {
 
       val correctRootHash = rootHashMessage.rootHash
       val (viewsWithCorrectRootHash, viewsWithWrongRootHash) =
-        decryptedViews.views.partition { case (view, _) => view.unwrap.rootHash == correctRootHash }
+        decryptedViews.partition { case (view, _) => view.unwrap.rootHash == correctRootHash }
       val malformedPayloads: Seq[MalformedPayload] =
-        decryptedViews.decryptionErrors.map(ProtocolProcessor.ViewMessageDecryptionError(_)) ++
-          viewsWithWrongRootHash.map { case (viewTree, _) =>
-            ProtocolProcessor.WrongRootHash(viewTree.unwrap, correctRootHash)
-          }
+        viewsWithWrongRootHash.map { case (viewTree, _) =>
+          ProtocolProcessor.WrongRootHash(viewTree.unwrap, correctRootHash)
+        }
 
       (malformedPayloads, viewsWithCorrectRootHash)
     }
+
+    def observeSequencedRootHash(rootHash: RootHash, amSubmitter: Boolean): Future[Unit] =
+      if (amSubmitter && !isReceipt) {
+        // We are the submitting participant and yet the request does not have a message ID.
+        // This looks like a preplay attack, and we mark the request as sequenced in the in-flight
+        // submission tracker to avoid the situation that our original submission never gets sequenced
+        // and gets picked up by a timely rejection, which would emit a duplicate command completion.
+        val sequenced = SequencedSubmission(sc, ts)
+        inFlightSubmissionTracker.observeSequencedRootHash(
+          rootHashMessage.rootHash,
+          sequenced,
+        )
+      } else Future.unit
 
     performUnlessClosingEitherUSF(
       s"$functionFullName(rc=$rc, sc=$sc, traceId=${traceContext.traceId})"
@@ -654,7 +672,15 @@ abstract class ProtocolProcessor[
         }
         (snapshot, decisionTime, decryptedViews) = preliminaryChecks
 
-        (incorrectRootHashes, viewsWithCorrectRootHash) = checkRootHash(decryptedViews)
+        steps.DecryptedViews(decryptedViewsWithSignatures, rawDecryptionErrors) = decryptedViews
+        _ = rawDecryptionErrors.foreach { decryptionError =>
+          logger.warn(s"Request $rc: Decryption error: $decryptionError")
+        }
+        decryptionErrors = rawDecryptionErrors.map(ViewMessageError(_))
+
+        (incorrectRootHashes, viewsWithCorrectRootHash) = checkRootHash(
+          decryptedViewsWithSignatures
+        )
         _ = incorrectRootHashes.foreach { incorrectRootHash =>
           logger.warn(s"Request $rc: Found malformed payload: $incorrectRootHash")
         }
@@ -673,7 +699,7 @@ abstract class ProtocolProcessor[
         )
         (incorrectRecipients, viewsWithCorrectRootHashAndRecipients) = checkRecipientsResult
 
-        malformedPayloads = incorrectRootHashes ++ incorrectRecipients
+        malformedPayloads = decryptionErrors ++ incorrectRootHashes ++ incorrectRecipients
 
         _ <- NonEmpty.from(viewsWithCorrectRootHashAndRecipients) match {
           case None =>
@@ -695,12 +721,17 @@ abstract class ProtocolProcessor[
 
             val views = goodViewsWithSignatures.forgetNE.map { case (v, _) => v.unwrap }
 
-            steps.getSubmissionDataForTracker(views) match {
+            val observeF = steps.getSubmissionDataForTracker(views) match {
               case Some(submissionData) =>
                 ephemeral.submissionTracker.provideSubmissionData(
                   rootHash,
                   requestId,
                   submissionData,
+                )
+
+                observeSequencedRootHash(
+                  rootHash,
+                  submissionData.submitterParticipant == participantId,
                 )
               case None =>
                 // There are no root views
@@ -708,10 +739,13 @@ abstract class ProtocolProcessor[
                   rootHash,
                   requestId,
                 )
+
+                Future.unit
             }
 
             val declaredMediator = firstView.unwrap.mediator
-            if (declaredMediator == mediator) {
+            // Lazy so as to prevent this running concurrently with `observeF`
+            lazy val processF = if (declaredMediator == mediator) {
               processRequestWithGoodViews(
                 ts,
                 rc,
@@ -736,6 +770,11 @@ abstract class ProtocolProcessor[
                 prepareForMediatorResultOfBadRequest(rc, sc, ts)
               )
             }
+
+            for {
+              _ <- EitherT.right(observeF).mapK(FutureUnlessShutdown.outcomeK)
+              _ <- processF
+            } yield ()
         }
       } yield ()
     }
@@ -1481,7 +1520,7 @@ abstract class ProtocolProcessor[
             requestSequencerCounter,
             requestId.unwrap,
             requestCounter,
-            AcsChange.fromCommitSet(commitSet),
+            commitSet,
           )
           requestTimestamp = requestId.unwrap
           _unit <- EitherT.right[steps.ResultError](
@@ -1827,22 +1866,16 @@ object ProtocolProcessor {
     )
   }
 
-  sealed trait MalformedPayload extends Product with Serializable with PrettyPrinting {
-    def viewHash: ViewHash
-  }
+  sealed trait MalformedPayload extends Product with Serializable with PrettyPrinting
 
-  final case class ViewMessageDecryptionError[VT <: ViewType](
-      error: EncryptedViewMessageDecryptionError[VT]
+  final case class ViewMessageError[VT <: ViewType](
+      error: EncryptedViewMessageError[VT]
   ) extends MalformedPayload {
-    override def viewHash: ViewHash = error.message.viewHash
-
-    override def pretty: Pretty[ViewMessageDecryptionError.this.type] = prettyOfParam(_.error)
+    override def pretty: Pretty[ViewMessageError.this.type] = prettyOfParam(_.error)
   }
 
   final case class WrongRootHash(viewTree: ViewTree, expectedRootHash: RootHash)
       extends MalformedPayload {
-    override def viewHash: ViewHash = viewTree.viewHash
-
     override def pretty: Pretty[WrongRootHash] = prettyOfClass(
       param("view tree", _.viewTree),
       param("expected root hash", _.expectedRootHash),
@@ -1850,8 +1883,6 @@ object ProtocolProcessor {
   }
 
   final case class WrongRecipients(viewTree: ViewTree) extends MalformedPayload {
-
-    override def viewHash: ViewHash = viewTree.viewHash
 
     override def pretty: Pretty[WrongRecipients] =
       prettyOfClass(

@@ -4,6 +4,9 @@
 package com.digitalasset.canton.crypto
 
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.serialization.DefaultDeserializationError
+import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
+import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpecLike
 
 import scala.concurrent.Future
@@ -64,4 +67,16 @@ trait CryptoTestHelper extends BaseTest {
       pubKey2 <- getSigningPublicKey(crypto, scheme)
     } yield (pubKey1, pubKey2)
 
+}
+
+object CryptoTestHelper {
+  case class TestMessage(bytes: ByteString) extends HasVersionedToByteString {
+    override def toByteString(version: ProtocolVersion): ByteString = bytes
+  }
+
+  object TestMessage {
+    def fromByteString(bytes: ByteString): Either[DefaultDeserializationError, TestMessage] = Right(
+      TestMessage(bytes)
+    )
+  }
 }

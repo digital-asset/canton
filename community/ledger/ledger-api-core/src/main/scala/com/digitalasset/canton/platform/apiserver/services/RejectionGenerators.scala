@@ -71,73 +71,59 @@ object RejectionGenerators {
         case e: LfInterpretationError.ContractNotActive =>
           LedgerApiErrors.CommandExecution.Interpreter.ContractNotActive
             .Reject(renderedMessage, e)
-        case _: LfInterpretationError.DisclosedContractKeyHashingError =>
-          LedgerApiErrors.CommandExecution.Interpreter.GenericInterpretationError
-            .Error(renderedMessage)
-        case _: LfInterpretationError.ContractKeyNotVisible =>
-          LedgerApiErrors.CommandExecution.Interpreter.GenericInterpretationError
-            .Error(renderedMessage)
+        case e: LfInterpretationError.DisclosedContractKeyHashingError =>
+          LedgerApiErrors.CommandExecution.Interpreter.DisclosedContractKeyHashingError
+            .Reject(renderedMessage, e)
+        // Transform ContractKeyNotVisible into ContractKeyNotFound, to avoid leaking information
+        case LfInterpretationError.ContractKeyNotVisible(_, key, _, _, _) =>
+          val newRenderedMessage =
+            Interpretation.DamlException(LfInterpretationError.ContractKeyNotFound(key)).message
+          LedgerApiErrors.CommandExecution.Interpreter.LookupErrors.ContractKeyNotFound
+            .Reject(newRenderedMessage, key)
         case LfInterpretationError.DuplicateContractKey(key) =>
           LedgerApiErrors.ConsistencyErrors.DuplicateContractKey
             .RejectWithContractKeyArg(renderedMessage, key)
         case LfInterpretationError.InconsistentContractKey(key) =>
           LedgerApiErrors.ConsistencyErrors.InconsistentContractKey
             .RejectWithContractKeyArg(renderedMessage, key)
-        case _: LfInterpretationError.UnhandledException =>
-          LedgerApiErrors.CommandExecution.Interpreter.GenericInterpretationError.Error(
-            renderedMessage + detailMessage.fold("")(x => ". Details: " + x)
+        case e: LfInterpretationError.UnhandledException =>
+          LedgerApiErrors.CommandExecution.Interpreter.UnhandledException.Reject(
+            renderedMessage + detailMessage.fold("")(x => ". Details: " + x),
+            e,
           )
-        case _: LfInterpretationError.UserError =>
-          LedgerApiErrors.CommandExecution.Interpreter.GenericInterpretationError
-            .Error(renderedMessage)
+        case e: LfInterpretationError.UserError =>
+          LedgerApiErrors.CommandExecution.Interpreter.UserError
+            .Reject(renderedMessage, e)
         case _: LfInterpretationError.TemplatePreconditionViolated =>
-          LedgerApiErrors.CommandExecution.Interpreter.GenericInterpretationError
-            .Error(renderedMessage)
-        case _: LfInterpretationError.CreateEmptyContractKeyMaintainers =>
-          LedgerApiErrors.CommandExecution.Interpreter.InvalidArgumentInterpretationError
-            .Error(
-              renderedMessage
-            )
-        case _: LfInterpretationError.FetchEmptyContractKeyMaintainers =>
-          LedgerApiErrors.CommandExecution.Interpreter.InvalidArgumentInterpretationError
-            .Error(
-              renderedMessage
-            )
-        case _: LfInterpretationError.WronglyTypedContract =>
-          LedgerApiErrors.CommandExecution.Interpreter.InvalidArgumentInterpretationError
-            .Error(
-              renderedMessage
-            )
-        case _: LfInterpretationError.ContractDoesNotImplementInterface =>
-          LedgerApiErrors.CommandExecution.Interpreter.InvalidArgumentInterpretationError
-            .Error(
-              renderedMessage
-            )
-        case _: LfInterpretationError.ContractDoesNotImplementRequiringInterface =>
-          LedgerApiErrors.CommandExecution.Interpreter.InvalidArgumentInterpretationError
-            .Error(
-              renderedMessage
-            )
+          LedgerApiErrors.CommandExecution.Interpreter.TemplatePreconditionViolated
+            .Reject(renderedMessage)
+        case e: LfInterpretationError.CreateEmptyContractKeyMaintainers =>
+          LedgerApiErrors.CommandExecution.Interpreter.CreateEmptyContractKeyMaintainers
+            .Reject(renderedMessage, e)
+        case e: LfInterpretationError.FetchEmptyContractKeyMaintainers =>
+          LedgerApiErrors.CommandExecution.Interpreter.FetchEmptyContractKeyMaintainers
+            .Reject(renderedMessage, e)
+        case e: LfInterpretationError.WronglyTypedContract =>
+          LedgerApiErrors.CommandExecution.Interpreter.WronglyTypedContract
+            .Reject(renderedMessage, e)
+        case e: LfInterpretationError.ContractDoesNotImplementInterface =>
+          LedgerApiErrors.CommandExecution.Interpreter.ContractDoesNotImplementInterface
+            .Reject(renderedMessage, e)
+        case e: LfInterpretationError.ContractDoesNotImplementRequiringInterface =>
+          LedgerApiErrors.CommandExecution.Interpreter.ContractDoesNotImplementRequiringInterface
+            .Reject(renderedMessage, e)
         case LfInterpretationError.NonComparableValues =>
-          LedgerApiErrors.CommandExecution.Interpreter.InvalidArgumentInterpretationError
-            .Error(
-              renderedMessage
-            )
+          LedgerApiErrors.CommandExecution.Interpreter.NonComparableValues
+            .Reject(renderedMessage)
         case _: LfInterpretationError.ContractIdInContractKey =>
-          LedgerApiErrors.CommandExecution.Interpreter.InvalidArgumentInterpretationError
-            .Error(
-              renderedMessage
-            )
-        case _: LfInterpretationError.ContractIdComparability =>
-          LedgerApiErrors.CommandExecution.Interpreter.InvalidArgumentInterpretationError
-            .Error(
-              renderedMessage
-            )
-        case LfInterpretationError.Dev(_, _) =>
-          LedgerApiErrors.CommandExecution.Interpreter.InvalidArgumentInterpretationError
-            .Error(
-              renderedMessage
-            )
+          LedgerApiErrors.CommandExecution.Interpreter.ContractIdInContractKey
+            .Reject(renderedMessage)
+        case e: LfInterpretationError.ContractIdComparability =>
+          LedgerApiErrors.CommandExecution.Interpreter.ContractIdComparability
+            .Reject(renderedMessage, e)
+        case LfInterpretationError.Dev(_, err) =>
+          LedgerApiErrors.CommandExecution.Interpreter.DevError
+            .Reject(renderedMessage, err)
       }
     }
 

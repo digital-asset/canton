@@ -111,8 +111,7 @@ enum SigningKeyScheme {
   EcDsaP256 = 2;
   EcDsaP384 = 3;
 
-  // SM2 signature scheme
-  // https://tools.ietf.org/html/draft-shen-sm2-ecdsa-02
+  // SM2 signature scheme, support dropped in >=2.7
   Sm2 = 4;
 }
 

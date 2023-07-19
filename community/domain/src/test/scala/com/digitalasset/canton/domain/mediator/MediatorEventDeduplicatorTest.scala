@@ -48,7 +48,8 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
       new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts)
     store.initialize(CantonTimestamp.MinValue).futureValue
 
-    val verdictSender = new TestVerdictSender
+    val verdictSender =
+      new TestVerdictSender(null, mediator, null, testedProtocolVersion, loggerFactory)
 
     val deduplicator = new DefaultMediatorEventDeduplicator(
       store,
@@ -128,7 +129,6 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
           testedProtocolVersion,
         )
       ),
-      None,
     )
   }
 
@@ -363,7 +363,6 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
           request: MediatorRequest,
           verdict: Verdict,
           decisionTime: CantonTimestamp,
-          aggregationRule: Option[AggregationRule],
       )(implicit traceContext: TraceContext): Future[Unit] =
         Future.never
 
@@ -372,6 +371,16 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
           batch: Batch[DefaultOpenEnvelope],
           decisionTime: CantonTimestamp,
           aggregationRule: Option[AggregationRule],
+          sendVerdict: Boolean,
+      )(implicit traceContext: TraceContext): Future[Unit] =
+        Future.never
+
+      override def sendReject(
+          requestId: RequestId,
+          requestO: Option[MediatorRequest],
+          rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
+          rejectionReason: Verdict.MediatorReject,
+          decisionTime: CantonTimestamp,
       )(implicit traceContext: TraceContext): Future[Unit] =
         Future.never
     }

@@ -93,6 +93,17 @@ trait ActiveContractStore
   /** Marks the given contracts as archived from `toc`'s timestamp (inclusive) onwards.
     *
     * @param contractIds The contract IDs of the contracts to be archived
+    *                    Note: this method should not take as parameter the transfer counter
+    *                    for the archived contract IDs, because one cannot know the correct
+    *                    transfer counter for an archival at request finalization time, which
+    *                    is when this method is called.
+    *                    The [[com.digitalasset.canton.participant.event.RecordOrderPublisher]]
+    *                    determines the correct transfer counter for an archival only when
+    *                    all requests preceding the archival (i.e., with a lower request
+    *                    counter than the archival transaction) were processed. Therefore, we determine
+    *                    the transfer counter for archivals in the
+    *                    [[com.digitalasset.canton.participant.event.RecordOrderPublisher]], when
+    *                    the record order publisher triggers an acs change event.
     * @param toc The time of change consisting of
     *            <ul>
     *              <li>The request counter of the confirmation request that archives the contracts.</li>
@@ -114,10 +125,10 @@ trait ActiveContractStore
   ): CheckedT[Future, AcsError, AcsWarning, Unit]
 
   /** Shorthand for `archiveContracts(Seq(contractId), toc)` */
-  def archiveContract(contractId: LfContractId, toc: TimeOfChange)(implicit
+  def archiveContract(cid: LfContractId, toc: TimeOfChange)(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
-    archiveContracts(Seq(contractId), toc)
+    archiveContracts(Seq(cid), toc)
 
   /** Returns the latest [[com.digitalasset.canton.participant.store.ActiveContractStore.Status]]
     * for the given contract IDs along with its [[com.digitalasset.canton.participant.util.TimeOfChange]].
@@ -285,8 +296,12 @@ object ActiveContractStore {
   // TODO(#12373) Adapt when releasing BFT
   /** Starting protocol version [[com.digitalasset.canton.version.ProtocolVersion.dev]],
     * transfer counter should be defined for creations.
+    *
+    * The transfer counter for archivals stored in the acs is always None, because we cannot
+    * determine the correct transfer counter when the contract is archived.
+    * We only determine the transfer counter later, when the record order publisher triggers the
+    * computation of acs commitments, but we never store it in the acs.
     */
-  // TODO(i12286): add transfer Counters to archivals too.
   final case class CreationArchivalDetail(transferCounter: TransferCounterO)
       extends ActivenessChangeDetail {
     override def unwrap: None.type = None
@@ -384,13 +399,12 @@ object ActiveContractStore {
     )
   }
 
-  /** The contract has been archive and it is not active. */
+  /** The contract has been archived and it is not active. */
   case object Archived extends Status {
     override def prunable: Boolean = true
     override def pretty: Pretty[Archived.type] = prettyOfObject[Archived.type]
-
     override val transferCounter: TransferCounterO =
-      None // TODO(i12286): add transferCounter to Archived state
+      None // transfer counters remain None, because we do not write them back to the acs
   }
 
   /** The contract has been transferred out to the given `targetDomain` after it had resided on this domain.
@@ -508,7 +522,7 @@ trait ActiveContractSnapshot {
     */
   def snapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LfContractId, (CantonTimestamp, TransferCounter)]]
+  ): Future[SortedMap[LfContractId, (CantonTimestamp, TransferCounterO)]]
 
   /** Returns all contracts that were active right after the given request counter,
     * and when the contract became active for the last time before or at the given request counter.
@@ -530,7 +544,7 @@ trait ActiveContractSnapshot {
     */
   def snapshot(rc: RequestCounter)(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LfContractId, (RequestCounter, TransferCounter)]]
+  ): Future[SortedMap[LfContractId, (RequestCounter, TransferCounterO)]]
 
   /** Returns Some(contractId) if an active contract belonging to package `pkg` exists, otherwise returns None.
     * The returned contractId may be any active contract from package `pkg`.
@@ -555,6 +569,20 @@ trait ActiveContractSnapshot {
   def contractSnapshot(contractIds: Set[LfContractId], timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Future[Map[LfContractId, CantonTimestamp]]
+
+  /** Returns a map to the latest transfer counter of the contract before the given request counter.
+    * If the contract does not exist in the ACS, it returns a None.
+    *
+    * @param requestCounter The request counter *immediately before* which the state of the contracts shall be determined.
+    *
+    * @throws java.lang.IllegalArgumentException if `requestCounter` is equal to RequestCounter.MinValue`.
+    */
+  def bulkContractsTransferCounterSnapshot(
+      contractIds: Set[LfContractId],
+      requestCounter: RequestCounter,
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Map[LfContractId, TransferCounterO]]
 
   /** Returns all changes to the active contract set between the two timestamps (both inclusive)
     * in the order of their changes.

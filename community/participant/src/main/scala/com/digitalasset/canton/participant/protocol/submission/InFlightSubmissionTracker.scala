@@ -26,6 +26,7 @@ import com.digitalasset.canton.participant.store.MultiDomainEventLog.{Deduplicat
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.TimestampedEvent.TimelyRejectionEventId
 import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, ParticipantEventPublisher}
+import com.digitalasset.canton.protocol.RootHash
 import com.digitalasset.canton.sequencing.protocol.{DeliverError, MessageId}
 import com.digitalasset.canton.time.DomainTimeTracker
 import com.digitalasset.canton.topology.DomainId
@@ -113,11 +114,39 @@ class InFlightSubmissionTracker(
     } yield deduplicationResult
   }
 
+  /** @see com.digitalasset.canton.participant.store.InFlightSubmissionStore.updateRegistration */
+  def updateRegistration(
+      submission: InFlightSubmission[UnsequencedSubmission],
+      rootHash: RootHash,
+  ): Future[Unit] = {
+    implicit val traceContext: TraceContext = submission.submissionTraceContext
+
+    store.value.updateRegistration(submission, rootHash)
+  }
+
   /** @see com.digitalasset.canton.participant.store.InFlightSubmissionStore.observeSequencing */
   def observeSequencing(domainId: DomainId, sequenceds: Map[MessageId, SequencedSubmission])(
       implicit traceContext: TraceContext
   ): Future[Unit] =
     store.value.observeSequencing(domainId, sequenceds)
+
+  /** @see com.digitalasset.canton.participant.store.InFlightSubmissionStore.observeSequencedRootHash
+    *
+    * This will only update submissions that are marked as unsequenced. The reasoning is:
+    *
+    * - If the request has already been marked as sequenced by [[observeSequencing]], then we don't need to mark it again.
+    * - If it has **not** been sequenced by [[observeSequencing]], this is a preplay attack scenario and we must mark
+    *   it as sequenced to prevent multiple command completions.
+    * - Further requests coming with the same root hash do not need to update the sequencing info; the submission
+    *   tracker ensures that only the first one will be handled.
+    */
+  def observeSequencedRootHash(
+      rootHash: RootHash,
+      submission: SequencedSubmission,
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Unit] =
+    store.value.observeSequencedRootHash(rootHash, submission)
 
   /** @see com.digitalasset.canton.participant.store.InFlightSubmissionStore.updateUnsequenced */
   def observeSubmissionError(

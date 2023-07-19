@@ -29,6 +29,10 @@ message DownloadRequest {
   // Defaults to 2MB (half of the default gRPC max message size)
   google.protobuf.UInt32Value chunkSize = 5;
   bool gzip_format = 6;
+
+  // Optional mapping from one domain id to another to rename the associated domain of contracts in the export
+  // NOTE: This is not a proper domain migration of contracts.
+  map<string, string> contract_domain_renames = 7;
 }
 
 message AcsSnapshotChunk {

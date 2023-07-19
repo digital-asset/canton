@@ -4,10 +4,10 @@
 package com.digitalasset.canton.participant.event
 
 import cats.syntax.functor.*
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet
 import com.digitalasset.canton.protocol.{ContractMetadata, LfContractId, WithContractHash}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{LfPartyId, TransferCounterO}
 
 /** Components that need to keep a running snapshot of ACS.
   */
@@ -43,12 +43,18 @@ object AcsChange {
   //    2. archival followed by a create
   //    3. if we have a double archive as in "create -> archive -> archive",
   //  We should define a sensible semantics for non-repudation in all such cases.
-  def fromCommitSet(commitSet: CommitSet): AcsChange = {
+  def fromCommitSet(
+      commitSet: CommitSet,
+      transferCounterOfArchival: Map[LfContractId, TransferCounterO],
+  ): AcsChange = {
     val activations =
       commitSet.creations.fmap(_.map(_.contractMetadata)) ++ commitSet.transferIns.fmap(
         _.map(_.contractMetadata)
       )
-    val deactivations = commitSet.archivals ++ commitSet.transferOuts.fmap(_.map(_.stakeholders))
+    val deactivations =
+      commitSet.archivals.fmap(_.map(_.stakeholders)) ++ commitSet.transferOuts.fmap(
+        _.map(_.stakeholders)
+      )
     val transient = activations.keySet.intersect(deactivations.keySet)
     AcsChange(
       activations = activations -- transient,

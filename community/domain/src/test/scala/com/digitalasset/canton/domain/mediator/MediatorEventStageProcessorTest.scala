@@ -322,7 +322,6 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
         InformeeMessage(fullInformeeTree)(testedProtocolVersion),
         testedProtocolVersion,
         mockTopologySnapshot,
-        sendVerdict = true,
       )(loggerFactory) // without explicit ec it deadlocks on AnyTestSuite.serialExecutionContext
   }
 }

@@ -8,7 +8,9 @@ import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.crypto.HkdfError.HkdfInternalError
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.deterministic.encryption.DeterministicRandom
+import com.digitalasset.canton.crypto.provider.CryptoKeyConverter
 import com.digitalasset.canton.crypto.provider.jce.JceSecurityProvider.bouncyCastleProvider
+import com.digitalasset.canton.crypto.provider.tink.TinkJavaConverter
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.serialization.{
   DefaultDeserializationError,
@@ -25,7 +27,6 @@ import com.google.crypto.tink.{Aead, PublicKeySign, PublicKeyVerify}
 import com.google.protobuf.ByteString
 import org.bouncycastle.asn1.DEROctetString
 import org.bouncycastle.asn1.edec.EdECObjectIdentifiers
-import org.bouncycastle.asn1.gm.GMObjectIdentifiers
 import org.bouncycastle.asn1.pkcs.PrivateKeyInfo
 import org.bouncycastle.asn1.x509.AlgorithmIdentifier
 import org.bouncycastle.crypto.DataLengthException
@@ -35,25 +36,15 @@ import org.bouncycastle.crypto.params.HKDFParameters
 import org.bouncycastle.jce.spec.IESParameterSpec
 import sun.security.ec.ECPrivateKeyImpl
 
-import java.security.interfaces.{
-  ECKey,
-  ECPrivateKey,
-  ECPublicKey,
-  RSAKey,
-  RSAPrivateKey,
-  RSAPublicKey,
-}
+import java.security.interfaces.*
 import java.security.spec.{InvalidKeySpecException, PKCS8EncodedKeySpec}
 import java.security.{
   GeneralSecurityException,
-  InvalidKeyException,
   KeyFactory,
   NoSuchAlgorithmException,
   PrivateKey as JPrivateKey,
   PublicKey as JPublicKey,
   SecureRandom,
-  Signature as JSignature,
-  SignatureException,
 }
 import javax.crypto.Cipher
 import scala.collection.concurrent.TrieMap
@@ -94,6 +85,9 @@ class JcePureCrypto(
   private val javaPrivateKeyCache
       : TrieMap[Fingerprint, Either[JavaKeyConversionError, JPrivateKey]] = TrieMap.empty
 
+  private lazy val tinkJavaConverter = new TinkJavaConverter
+  private lazy val keyConverter = new CryptoKeyConverter(tinkJavaConverter, javaKeyConverter)
+
   /* security parameters for EciesP256HmacSha256Aes128Cbc encryption scheme,
     in particular for the HMAC and symmetric crypto algorithms.
    */
@@ -130,6 +124,13 @@ class JcePureCrypto(
       errFn: String => E,
   ): Either[E, Unit] =
     Either.cond(expected == actual, (), errFn(s"Expected key format $expected, but got $actual"))
+
+  private def convertKey[E](
+      publicKey: PublicKey,
+      expected: CryptoKeyFormat,
+      errFn: String => E,
+  ): Either[E, PublicKey] =
+    keyConverter.convert(publicKey, expected).leftMap(errFn)
 
   private def encryptAes128Gcm(
       plaintext: ByteString,
@@ -246,9 +247,6 @@ class JcePureCrypto(
             )
             convert(CryptoKeyFormat.Raw, privateKeyInfo.getEncoded, "Ed25519")
 
-          case SigningKeyScheme.Sm2 =>
-            convert(CryptoKeyFormat.Der, privateKey.key.toByteArray, "EC")
-
           case SigningKeyScheme.EcDsaP256 => toJavaEcDsa(privateKey, CurveType.NIST_P256)
           case SigningKeyScheme.EcDsaP384 => toJavaEcDsa(privateKey, CurveType.NIST_P384)
         }
@@ -270,7 +268,6 @@ class JcePureCrypto(
   ): Either[SigningError, PublicKeySign] =
     for {
       _ <- checkKeyFormat(CryptoKeyFormat.Der, signingKey.format, SigningError.InvalidSigningKey)
-
       javaPrivateKey <- javaPrivateKeyCache
         .getOrElseUpdate(
           signingKey.id,
@@ -298,17 +295,16 @@ class JcePureCrypto(
       hashType: HashType,
   ): Either[SignatureCheckError, PublicKeyVerify] =
     for {
-      _ <- checkKeyFormat(
+      pubKey <- convertKey(
+        publicKey,
         CryptoKeyFormat.Der,
-        publicKey.format,
         SignatureCheckError.InvalidKeyError,
       )
-
       javaPublicKey <- javaPublicKeyCache
         .getOrElseUpdate(
-          publicKey.id,
+          pubKey.id,
           javaKeyConverter
-            .toJava(publicKey)
+            .toJava(pubKey)
             .map(_._2),
         )
         .leftMap(err =>
@@ -393,33 +389,6 @@ class JcePureCrypto(
         ecDsaSigner(signingKey, HashType.SHA256).flatMap(signWithSigner)
       case SigningKeyScheme.EcDsaP384 =>
         ecDsaSigner(signingKey, HashType.SHA384).flatMap(signWithSigner)
-
-      case SigningKeyScheme.Sm2 =>
-        for {
-          signer <- Either
-            .catchOnly[NoSuchAlgorithmException](
-              JSignature.getInstance(GMObjectIdentifiers.sm2sign_with_sm3.toString)
-            )
-            .leftMap(SigningError.GeneralError)
-          javaPrivateKey <- javaPrivateKeyCache
-            .getOrElseUpdate(
-              signingKey.id,
-              toJava(signingKey),
-            )
-            .leftMap(err =>
-              SigningError.InvalidSigningKey(s"Failed to convert signing private key: $err")
-            )
-          _ <- Either
-            .catchOnly[InvalidKeyException](signer.initSign(javaPrivateKey))
-            .leftMap(err => SigningError.InvalidSigningKey(show"$err"))
-          _ <- Either
-            .catchOnly[SignatureException](signer.update(bytes.toByteArray))
-            .leftMap(err => SigningError.FailedToSign(show"$err"))
-          signatureBytes <- Either
-            .catchOnly[SignatureException](signer.sign())
-            .map(ByteString.copyFrom)
-            .leftMap(err => SigningError.FailedToSign(show"$err"))
-        } yield new Signature(SignatureFormat.Raw, signatureBytes, signingKey.id)
     }
   }
 
@@ -451,13 +420,13 @@ class JcePureCrypto(
       _ <- publicKey.scheme match {
         case SigningKeyScheme.Ed25519 =>
           for {
-            _ <- checkKeyFormat(
+            pubKey <- convertKey(
+              publicKey,
               CryptoKeyFormat.Raw,
-              publicKey.format,
               SignatureCheckError.InvalidKeyError,
             )
             verifier <- Either
-              .catchOnly[GeneralSecurityException](new Ed25519Verify(publicKey.key.toByteArray))
+              .catchOnly[GeneralSecurityException](new Ed25519Verify(pubKey.key.toByteArray))
               .leftMap(err =>
                 SignatureCheckError.InvalidKeyError(show"Failed to get signer for Ed25519: $err")
               )
@@ -466,39 +435,6 @@ class JcePureCrypto(
 
         case SigningKeyScheme.EcDsaP256 => ecDsaVerifier(publicKey, HashType.SHA256).flatMap(verify)
         case SigningKeyScheme.EcDsaP384 => ecDsaVerifier(publicKey, HashType.SHA384).flatMap(verify)
-
-        case SigningKeyScheme.Sm2 =>
-          for {
-            signer <- Either
-              .catchOnly[NoSuchAlgorithmException](
-                JSignature.getInstance(GMObjectIdentifiers.sm2sign_with_sm3.toString)
-              )
-              .leftMap(SignatureCheckError.GeneralError)
-            javaPublicKey <- javaPublicKeyCache
-              .getOrElseUpdate(
-                publicKey.id,
-                javaKeyConverter
-                  .toJava(publicKey)
-                  .map(_._2),
-              )
-              .leftMap(err =>
-                SignatureCheckError.InvalidKeyError(s"Failed to convert signing public key: $err")
-              )
-            _ <- Either
-              .catchOnly[InvalidKeyException](signer.initVerify(javaPublicKey))
-              .leftMap(err => SignatureCheckError.InvalidKeyError(show"$err"))
-            _ <- Either
-              .catchOnly[SignatureException](signer.update(bytes.toByteArray))
-              .leftMap(SignatureCheckError.GeneralError)
-            result <- Either
-              .catchOnly[SignatureException](signer.verify(signature.unwrap.toByteArray))
-              .leftMap(err => SignatureCheckError.InvalidSignature(signature, bytes, show"$err"))
-            _ <- Either.cond(
-              result,
-              (),
-              SignatureCheckError.InvalidSignature(signature, bytes, "signature verification false"),
-            )
-          } yield ()
       }
     } yield ()
   }
@@ -527,16 +463,16 @@ class JcePureCrypto(
       checker: PartialFunction[JPublicKey, Either[EncryptionError, T]],
   ): Either[EncryptionError, T] = {
     for {
-      _ <- checkKeyFormat(
+      pubKey <- convertKey(
+        encPubKey,
         CryptoKeyFormat.Der,
-        encPubKey.format,
         EncryptionError.InvalidEncryptionKey,
       )
       javaPublicKey <- javaPublicKeyCache
         .getOrElseUpdate(
-          encPubKey.id,
+          pubKey.id,
           javaKeyConverter
-            .toJava(encPubKey)
+            .toJava(pubKey)
             .map(_._2),
         )
         .leftMap(err => EncryptionError.InvalidEncryptionKey(err.toString))

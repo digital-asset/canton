@@ -38,12 +38,8 @@ class ConfirmationResponseFactory(
       topologySnapshot: TopologySnapshot,
   )(implicit traceContext: TraceContext, ec: ExecutionContext): Future[Seq[MediatorResponse]] = {
 
-    val wellformedViewHashes: Seq[ViewHash] =
-      transactionValidationResult.viewValidationResults.keys.toSeq
-
     def hostedConfirmingPartiesOfView(
-        viewValidationResult: ViewValidationResult,
-        confirmationPolicy: ConfirmationPolicy,
+        viewValidationResult: ViewValidationResult
     ): Future[Set[LfPartyId]] = {
       viewValidationResult.view.viewCommonData.informees.toList
         .parTraverseFilter {
@@ -177,16 +173,12 @@ class ConfirmationResponseFactory(
     }
 
     def responsesForWellformedPayloads(
-        transactionValidationResult: TransactionValidationResult,
-        confirmationPolicy: ConfirmationPolicy,
+        transactionValidationResult: TransactionValidationResult
     ): Future[Seq[MediatorResponse]] =
       transactionValidationResult.viewValidationResults.toSeq.parTraverseFilter {
-        case (viewHash, viewValidationResult) =>
+        case (viewPosition, viewValidationResult) =>
           for {
-            hostedConfirmingParties <- hostedConfirmingPartiesOfView(
-              viewValidationResult,
-              confirmationPolicy,
-            )
+            hostedConfirmingParties <- hostedConfirmingPartiesOfView(viewValidationResult)
           } yield {
 
             // Rejections due to a failed model conformance check
@@ -214,7 +206,7 @@ class ConfirmationResponseFactory(
             // Rejections due to a failed authentication check
             val authenticationRejections =
               transactionValidationResult.authenticationResult
-                .get(viewHash)
+                .get(viewPosition)
                 .map(err =>
                   logged(
                     requestId,
@@ -231,7 +223,7 @@ class ConfirmationResponseFactory(
                   logged(
                     requestId,
                     // TODO(i13513): Check whether a `Malformed` code is appropriate
-                    LocalReject.MalformedRejects.MalformedRequest.Reject(err.format(viewHash))(
+                    LocalReject.MalformedRejects.MalformedRequest.Reject(err.format(viewPosition))(
                       verdictProtocolVersion
                     ),
                   )
@@ -240,7 +232,7 @@ class ConfirmationResponseFactory(
             // Rejections due to a failed authorization check
             val authorizationRejections =
               transactionValidationResult.authorizationResult
-                .get(viewHash)
+                .get(viewPosition)
                 .map(cause =>
                   logged(
                     requestId,
@@ -298,7 +290,8 @@ class ConfirmationResponseFactory(
                   .tryCreate(
                     requestId,
                     participantId,
-                    Some(viewHash),
+                    Some(viewValidationResult.view.view.viewHash),
+                    Some(viewPosition),
                     localVerdict,
                     Some(transactionValidationResult.transactionId.toRootHash),
                     parties,
@@ -312,17 +305,15 @@ class ConfirmationResponseFactory(
 
     if (malformedPayloads.nonEmpty) {
       Future.successful(
-        createConfirmationResponsesForMalformedPayloads(
-          requestId,
-          malformedPayloads,
-          wellformedViewHashes,
+        Seq(
+          createConfirmationResponsesForMalformedPayloads(
+            requestId,
+            malformedPayloads,
+          )
         )
       )
     } else {
-      responsesForWellformedPayloads(
-        transactionValidationResult,
-        transactionValidationResult.confirmationPolicy,
-      )
+      responsesForWellformedPayloads(transactionValidationResult)
     }
   }
 
@@ -336,38 +327,26 @@ class ConfirmationResponseFactory(
   def createConfirmationResponsesForMalformedPayloads(
       requestId: RequestId,
       malformedPayloads: Seq[MalformedPayload],
-      wellformedViewHashes: Seq[ViewHash],
-  )(implicit traceContext: TraceContext): Seq[MediatorResponse] =
-    malformed(
-      requestId,
-      malformedPayloads,
-      wellformedViewHashes,
-      LocalReject.MalformedRejects.Payloads
-        .Reject(malformedPayloads.toString)(verdictProtocolVersion),
-    )
-
-  private def malformed(
-      requestId: RequestId,
-      malformedPayloads: Seq[MalformedPayload],
-      wellformedViewHashes: Seq[ViewHash],
-      msg: Malformed,
-  )(implicit traceContext: TraceContext): Seq[MediatorResponse] = {
-    val malformedViewHashes = malformedPayloads.map(_.viewHash)
-
-    (malformedViewHashes ++ wellformedViewHashes).map { viewHash =>
-      checked(
-        MediatorResponse
-          .tryCreate(
+  )(implicit traceContext: TraceContext): MediatorResponse =
+    checked(
+      MediatorResponse
+        .tryCreate(
+          requestId,
+          participantId,
+          // We don't have to specify a viewHash or viewPosition.
+          // The mediator will interpret this as a rejection
+          // for all views and on behalf of all declared confirming parties hosted by the participant.
+          None,
+          None,
+          logged(
             requestId,
-            participantId,
-            Some(viewHash),
-            logged(requestId, msg),
-            None,
-            Set.empty,
-            domainId,
-            protocolVersion,
-          )
-      )
-    }
-  }
+            LocalReject.MalformedRejects.Payloads
+              .Reject(malformedPayloads.toString)(verdictProtocolVersion),
+          ),
+          None,
+          Set.empty,
+          domainId,
+          protocolVersion,
+        )
+    )
 }

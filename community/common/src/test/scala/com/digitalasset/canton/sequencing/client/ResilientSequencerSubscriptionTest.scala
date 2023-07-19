@@ -5,7 +5,8 @@ package com.digitalasset.canton.sequencing.client
 
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
-import com.digitalasset.canton.lifecycle.AsyncOrSyncCloseable
+import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
+import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.sequencing.client.ResilientSequencerSubscription.LostSequencerSubscription
 import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason.SubscriptionError
@@ -214,9 +215,8 @@ class ResilientSequencerSubscriptionTest
           override def create(
               startingCounter: SequencerCounter,
               handler: SerializedEventHandler[TestHandlerError],
-          )(implicit traceContext: TraceContext): Either[
-            SequencerSubscriptionCreationError,
-            (SequencerSubscription[TestHandlerError], SubscriptionErrorRetryPolicy),
+          )(implicit traceContext: TraceContext): UnlessShutdown[
+            (SequencerSubscription[TestHandlerError], SubscriptionErrorRetryPolicy)
           ] = {
             // Close the resilient sequencer subscription while it is creating the subscription
             // close will block waiting for the subscription request, so start in a future but defer waiting for its completion until after its resolved
@@ -224,7 +224,7 @@ class ResilientSequencerSubscriptionTest
             eventually() {
               resilientSequencerSubscriptionRef.get().isClosing shouldBe true
             }
-            Right(subscription -> TestSubscriptionError.retryRule)
+            Outcome(subscription -> TestSubscriptionError.retryRule)
           }
         }
 
@@ -246,6 +246,39 @@ class ResilientSequencerSubscriptionTest
         _ <- closePromise.future
       } yield subscription.isClosing shouldBe true // should have called close on underlying subscription
     }
+
+    "not create a subscription when the subscription factory returns AbortedDueToShutdown" in {
+
+      val subscriptionFactory =
+        new SequencerSubscriptionFactory[TestHandlerError] {
+          override def create(
+              startingCounter: SequencerCounter,
+              handler: SerializedEventHandler[TestHandlerError],
+          )(implicit traceContext: TraceContext): UnlessShutdown[
+            (SequencerSubscription[TestHandlerError], SubscriptionErrorRetryPolicy)
+          ] = AbortedDueToShutdown
+        }
+
+      val resilientSequencerSubscription = new ResilientSequencerSubscription[TestHandlerError](
+        domainId,
+        SequencerCounter(0),
+        _ => Future.successful[Either[TestHandlerError, Unit]](Right(())),
+        subscriptionFactory,
+        retryDelay(),
+        timeouts,
+        loggerFactory,
+      )
+      // kick off
+      resilientSequencerSubscription.start
+
+      for {
+        closeReason <- resilientSequencerSubscription.closeReason
+      } yield {
+        closeReason shouldBe SubscriptionCloseReason.Shutdown
+        resilientSequencerSubscription.isClosing shouldBe true
+      }
+    }
+
   }
 }
 
@@ -331,11 +364,10 @@ trait ResilientSequencerSubscriptionTestUtils {
     override def create(
         startingCounter: SequencerCounter,
         handler: SerializedEventHandler[TestHandlerError],
-    )(implicit traceContext: TraceContext): Either[
-      SequencerSubscriptionCreationError,
-      (SequencerSubscription[TestHandlerError], SubscriptionErrorRetryPolicy),
-    ] =
-      Right(
+    )(implicit
+        traceContext: TraceContext
+    ): UnlessShutdown[(SequencerSubscription[TestHandlerError], SubscriptionErrorRetryPolicy)] =
+      Outcome(
         (createInternal(startingCounter, handler), TestSubscriptionError.retryRule)
       )
   }

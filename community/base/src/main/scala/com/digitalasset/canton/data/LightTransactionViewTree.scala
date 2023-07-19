@@ -4,10 +4,8 @@
 package com.digitalasset.canton.data
 
 import cats.syntax.either.*
-import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.LightTransactionViewTree.InvalidLightTransactionViewTree
@@ -17,9 +15,10 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.version.*
+import monocle.PLens
 
 import java.util.UUID
-import scala.annotation.tailrec
+import scala.collection.mutable
 
 /** Wraps a `GenTransactionTree` where exactly one view (not including subviews) is unblinded.
   * The `commonMetadata` and `participantMetadata` are also unblinded.
@@ -248,120 +247,76 @@ object LightTransactionViewTree
         )
     } yield result
 
-  /** Converts the prefix of a sequence of lightweight transaction view trees into a full tree, returning the unused suffix.
+  /** Converts a sequence of light transaction view trees to the corresponding full view trees.
+    * The light view trees need to be passed in some sort of preorder; that means:
+    * given a non-empty suffix `tvs` of `lightViewTreesInPreorder`,
+    * the first element `tv` of `tvs` can be converted to a full view tree,
+    * if all descendants of `tv` are contained in `tvs`
+    * and can be converted to full view trees as well.
     *
-    * The unused suffix normally describes other full transaction view trees, and the function may be called again on the
-    * suffix.
-    * Errors on an empty sequence, or a sequence whose prefix doesn't describe a full transaction view tree.
-    * A valid full transaction view tree results from traversing a forest of views in preorder.
-    */
-  private def toFullViewTree(protocolVersion: ProtocolVersion, hashOps: HashOps)(
-      trees: NonEmpty[Seq[LightTransactionViewTree]]
-  ): Either[
-    InvalidLightTransactionViewTreeSequence,
-    (TransactionViewTree, Seq[LightTransactionViewTree]),
-  ] = {
-    def toFullView(trees: NonEmpty[Seq[LightTransactionViewTree]]): Either[
-      InvalidLightTransactionViewTreeSequence,
-      (TransactionView, Seq[LightTransactionViewTree]),
-    ] = {
-      val headView = trees.head1.view
-      // We cannot get the number of subviews from the `subviews` member, because in case it is a MerkleSeq,
-      // it can be partly blinded and won't know the actual number
-      val nbOfSubViews = trees.head1.subviewHashes.length
-      if (nbOfSubViews == 0)
-        Right(headView -> trees.tail1)
-      else {
-        for {
-          subViewsAndRemaining <- ((1 to nbOfSubViews): Seq[Int])
-            .foldM(Seq.empty[TransactionView] -> trees.tail1) {
-              case ((leftSiblings, remaining), _) =>
-                NonEmpty.from(remaining) match {
-                  case None =>
-                    Left(
-                      InvalidLightTransactionViewTreeSequence(
-                        "Can't extract a transaction view from an empty sequence of lightweight transaction view trees"
-                      )
-                    )
-                  case Some(remainingNE) =>
-                    // TODO(i12900): the recursion may blow the stack here
-                    toFullView(remainingNE).map { case (fv, newRemaining) =>
-                      (fv +: leftSiblings) -> newRemaining
-                    }
-                }
-            }
-          (subViewsReversed, remaining) = subViewsAndRemaining
-          subViews = subViewsReversed.reverse
-
-          newSubViews = TransactionSubviews(subViews)(protocolVersion, hashOps)
-          newView = headView.copy(subviews = newSubViews)
-
-          // Check that the new view still has the same hash
-          // (which implicitly validates the ordering of the reconstructed subviews)
-          _ <- Either.cond(
-            newView.viewHash == headView.viewHash,
-            (),
-            InvalidLightTransactionViewTreeSequence(
-              s"Mismatch in expected hashes of old and new view"
-            ),
-          )
-        } yield (newView, remaining)
-      }
-    }
-    val t = trees.head1
-    toFullView(trees).flatMap { case (tv, remaining) =>
-      val wrappedEnrichedTree = t.tree.mapUnblindedRootViews(_.replace(tv.viewHash, tv))
-      TransactionViewTree
-        .create(checked(wrappedEnrichedTree.tryUnwrap))
-        .bimap(InvalidLightTransactionViewTreeSequence, tvt => tvt -> remaining)
-    }
-  }
-
-  /** Get all the full transaction view trees described by a sequence of lightweight trees.
+    * To make the method more generic, light view trees are represented as `A` and full view trees as `B` and the
+    * `lens` parameter is used to convert between these types, as needed.
     *
-    * Note that this repeats subtrees. More precisely, the following holds:
-    * [[toAllFullViewTrees]]([[GenTransactionTree.allLightTransactionViewTrees]]) ==
-    * ([[GenTransactionTree.allTransactionViewTrees]])
+    * @param topLevelOnly whether to return only top-level full view trees
+    * @param lightViewTreesInPreorder the light transaction view trees to convert
+    * @return A tuple consisting of the full view trees that could be converted and
+    *         the light view trees that could not be converted.
+    *         The view trees in the output occur in the same order as in the input.
     */
-  def toAllFullViewTrees(protocolVersion: ProtocolVersion, hashOps: HashOps)(
-      trees: NonEmpty[Seq[LightTransactionViewTree]]
-  ): Either[InvalidLightTransactionViewTreeSequence, NonEmpty[Seq[TransactionViewTree]]] =
-    sequenceConsumer(protocolVersion, hashOps)(trees, repeats = true)
-
-  /** Returns the top-level full transaction view trees described by a sequence of lightweight ones */
-  def toToplevelFullViewTrees(protocolVersion: ProtocolVersion, hashOps: HashOps)(
-      trees: NonEmpty[Seq[LightTransactionViewTree]]
-  ): Either[InvalidLightTransactionViewTreeSequence, NonEmpty[Seq[TransactionViewTree]]] =
-    sequenceConsumer(protocolVersion, hashOps)(trees, repeats = false)
-
-  // Extracts the common logic behind extracting all full trees and just top-level ones
-  private def sequenceConsumer(
+  def toFullViewTrees[A, B](
+      lens: PLens[A, B, LightTransactionViewTree, TransactionViewTree],
       protocolVersion: ProtocolVersion,
       hashOps: HashOps,
+      topLevelOnly: Boolean,
   )(
-      trees: NonEmpty[Seq[LightTransactionViewTree]],
-      repeats: Boolean,
-  ): Either[InvalidLightTransactionViewTreeSequence, NonEmpty[Seq[TransactionViewTree]]] = {
-    val resBuilder = List.newBuilder[TransactionViewTree]
-    @tailrec
-    def go(
-        ts: NonEmpty[Seq[LightTransactionViewTree]]
-    ): Option[InvalidLightTransactionViewTreeSequence] = {
-      toFullViewTree(protocolVersion, hashOps)(ts) match {
-        case Right((fvt, rest)) =>
-          resBuilder += fvt
-          NonEmpty.from(if (repeats) ts.tail1 else rest) match {
-            case None => None
-            case Some(next) => go(next)
-          }
-        case Left(err) =>
-          Some(err)
+      lightViewTreesInPreorder: Seq[A]
+  ): (Seq[B], Seq[A]) = {
+
+    val lightViewTreesInPostOrder = lightViewTreesInPreorder.view.reverse
+
+    // All reconstructed full views
+    val fullViewByHash = mutable.Map.empty[ViewHash, TransactionView]
+    // All reconstructed full view trees, boxed, paired with their view hashes.
+    val allFullViewTreesInPreorderB = mutable.ListBuffer.empty[(ViewHash, B)]
+    // All light view trees, boxed, that could not be reconstructed to full view trees, due to missing descendants
+    val invalidLightViewTreesB = Seq.newBuilder[A]
+    // All hashes of non-toplevel full view trees that could be reconstructed
+    val subviewHashesB = Set.newBuilder[ViewHash]
+
+    for (lightViewTreeBoxed <- lightViewTreesInPostOrder) {
+      val lightViewTree = lens.get(lightViewTreeBoxed)
+      val subviewHashes = lightViewTree.subviewHashes.toSet
+      val missingSubviews = subviewHashes -- fullViewByHash.keys
+
+      if (missingSubviews.isEmpty) {
+        val fullSubviewsSeq = lightViewTree.subviewHashes.map(fullViewByHash)
+        val fullSubviews = TransactionSubviews(fullSubviewsSeq)(protocolVersion, hashOps)
+        val fullView = lightViewTree.view.copy(subviews = fullSubviews)
+        val fullViewTree = TransactionViewTree.tryCreate(
+          lightViewTree.tree.mapUnblindedRootViews(_.replace(fullView.viewHash, fullView))
+        )
+        val fullViewTreeBoxed = lens.replace(fullViewTree)(lightViewTreeBoxed)
+
+        if (topLevelOnly)
+          subviewHashesB ++= subviewHashes
+        (fullViewTree.viewHash -> fullViewTreeBoxed) +=: allFullViewTreesInPreorderB
+        fullViewByHash += fullView.viewHash -> fullView
+      } else {
+        invalidLightViewTreesB += lightViewTreeBoxed
       }
     }
-    go(trees) match {
-      case None => Right(NonEmptyUtil.fromUnsafe(resBuilder.result()))
-      case Some(err) => Left(err)
-    }
+
+    val allSubviewHashes = subviewHashesB.result()
+    val allFullViewTreesInPreorder =
+      allFullViewTreesInPreorderB
+        .result()
+        .collect {
+          case (viewHash, fullViewTreeBoxed)
+              if !topLevelOnly || !allSubviewHashes.contains(viewHash) =>
+            fullViewTreeBoxed
+        }
+
+    (allFullViewTreesInPreorder, invalidLightViewTreesB.result().reverse)
   }
 
   /** Turns a full transaction view tree into a lightweight one. Not stack-safe. */

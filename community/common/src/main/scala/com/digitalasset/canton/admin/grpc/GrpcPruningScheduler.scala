@@ -4,6 +4,9 @@
 package com.digitalasset.canton.admin.grpc
 
 import cats.data.EitherT
+import cats.syntax.bifunctor.*
+import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
+import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.pruning.admin.v0
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.scheduler.{Cron, PruningSchedule, PruningScheduler}
@@ -17,7 +20,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Failure
 
 trait GrpcPruningScheduler {
-  this: HasPruningScheduler =>
+  this: HasPruningScheduler & NamedLogging =>
 
   def setSchedule(request: v0.SetSchedule.Request): Future[v0.SetSchedule.Response] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
@@ -97,31 +100,18 @@ trait GrpcPruningScheduler {
     } yield v0.GetSchedule.Response(scheduleWithRetention.map(_.toProtoV0))
   }
 
-  private def ensureValid[T](f: => ProtoConverter.ParsingResult[T]): Future[T] = f.fold(
-    err =>
-      Future.failed(
-        Status.INVALID_ARGUMENT
-          .withDescription(err.message)
-          .asException()
-      ),
-    Future(_),
-  )
+  private def ensureValid[T](f: => ProtoConverter.ParsingResult[T])(implicit
+      traceContext: TraceContext
+  ): Future[T] = f
+    .leftMap(err => ProtoDeserializationFailure.Wrap(err).asGrpcError)
+    .fold(Future.failed, Future.successful)
 
   private def ensureValidO[P, T](
       field: String,
       value: Option[P],
       f: P => ProtoConverter.ParsingResult[T],
-  ): Future[T] = (for {
-    requiredValue <- ProtoConverter.required(field, value)
-    convertedValue <- f(requiredValue)
-  } yield convertedValue).fold(
-    err =>
-      Future.failed(
-        Status.INVALID_ARGUMENT
-          .withDescription(err.message)
-          .asException()
-      ),
-    Future(_),
+  )(implicit traceContext: TraceContext): Future[T] = ensureValid(
+    ProtoConverter.required(field, value).flatMap(f)
   )
 
   private def handleUserError(update: EitherT[Future, String, Unit]): Future[Unit] =
@@ -140,7 +130,7 @@ trait GrpcPruningScheduler {
     update.transform {
       case Failure(PassiveInstanceException(_internalMessage)) =>
         Failure(
-          Status.FAILED_PRECONDITION
+          Status.UNAVAILABLE
             .withDescription(
               s"Command ${commandName} sent to passive replica: cannot modify the pruning schedule. Try to submit the command to another replica."
             )

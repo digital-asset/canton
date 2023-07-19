@@ -25,6 +25,13 @@ sealed trait Informee extends Product with Serializable with PrettyPrinting {
 
   def requiredTrustLevel: TrustLevel
 
+  /** Yields an informee resulting from adding `delta` to `weight`.
+    *
+    * If the new weight is zero, the resulting informee will be a plain informee;
+    * in thise case, the resulting informee will have trust level ORDINARY irrespective of the trust level of this.
+    */
+  def withAdditionalWeight(delta: Int): Informee
+
   /** Creates the v0-proto version of an informee.
     *
     * Plain informees get weight 0.
@@ -97,6 +104,9 @@ final case class ConfirmingParty(party: LfPartyId, weight: Int, requiredTrustLev
     extends Informee {
   if (weight <= 0)
     throw InvalidInformee(s"Unable to create a confirming party with non-positive weight $weight.")
+
+  def withAdditionalWeight(delta: Int): Informee =
+    if (weight + delta == 0) PlainInformee(party) else copy(weight = weight + delta)
 }
 
 /** An informee that is not a confirming party
@@ -105,4 +115,7 @@ final case class PlainInformee(party: LfPartyId) extends Informee {
   override val weight = 0
 
   override val requiredTrustLevel: TrustLevel = TrustLevel.Ordinary
+
+  def withAdditionalWeight(delta: Int): Informee =
+    if (delta == 0) this else ConfirmingParty(party, delta, requiredTrustLevel)
 }

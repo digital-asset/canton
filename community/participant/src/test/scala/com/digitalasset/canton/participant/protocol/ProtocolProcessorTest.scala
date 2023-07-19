@@ -30,6 +30,7 @@ import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissio
 import com.digitalasset.canton.participant.protocol.submission.{
   InFlightSubmissionTracker,
   NoCommandDeduplicator,
+  SequencedSubmission,
 }
 import com.digitalasset.canton.participant.store.memory.*
 import com.digitalasset.canton.participant.store.{
@@ -62,6 +63,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.{ParticipantPermission, TrustLevel}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, RequestCounter, SequencerCounter}
 import com.google.protobuf.ByteString
+import org.mockito.ArgumentMatchers.eq as isEq
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.time.Duration
@@ -73,6 +75,9 @@ import scala.concurrent.{ExecutionContext, Future}
 class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionContext {
   private val participant = ParticipantId(
     UniqueIdentifier.tryFromProtoPrimitive("participant::participant")
+  )
+  private val otherParticipant = ParticipantId(
+    UniqueIdentifier.tryFromProtoPrimitive("participant::other-participant")
   )
   private val party = PartyId(UniqueIdentifier.tryFromProtoPrimitive("party::participant"))
   private val domain = DefaultTestIdentities.domainId
@@ -127,6 +132,14 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       }
     )
 
+  private val mockInFlightSubmissionTracker = mock[InFlightSubmissionTracker]
+  when(
+    mockInFlightSubmissionTracker.observeSequencedRootHash(
+      any[RootHash],
+      any[SequencedSubmission],
+    )(anyTraceContext)
+  ).thenAnswer(Future.unit)
+
   private val trm = mock[TransactionResultMessage]
   when(trm.pretty).thenAnswer(Pretty.adHocPrettyInstance[TransactionResultMessage])
   when(trm.verdict).thenAnswer(Verdict.Approve(testedProtocolVersion))
@@ -156,11 +169,13 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
   private def waitForAsyncResult(asyncResult: AsyncResult) = asyncResult.unwrap.unwrap.futureValue
 
   private def testProcessingSteps(
-      overrideConstructedPendingRequestData: Option[TestPendingRequestData] = None,
+      overrideConstructedPendingRequestDataO: Option[TestPendingRequestData] = None,
       startingPoints: ProcessingStartingPoints = ProcessingStartingPoints.default,
       pendingSubmissionMap: concurrent.Map[Int, Unit] = TrieMap[Int, Unit](),
       sequencerClient: SequencerClient = mockSequencerClient,
       crypto: DomainSyncCryptoClient = crypto,
+      overrideInFlightSubmissionTrackerO: Option[InFlightSubmissionTracker] = None,
+      submissionDataForTrackerO: Option[SubmissionTracker.SubmissionData] = None,
   ): (TestInstance, SyncDomainPersistentState, SyncDomainEphemeralState) = {
 
     val multiDomainEventLog = mock[MultiDomainEventLog]
@@ -226,16 +241,18 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       futureSupervisor,
       loggerFactory,
     )
-    val inFlightSubmissionTracker = new InFlightSubmissionTracker(
-      Eval.now(nodePersistentState.inFlightSubmissionStore),
-      eventPublisher,
-      new NoCommandDeduplicator(),
-      Eval.now(mdel),
-      _ =>
-        Option(ephemeralState.get())
-          .map(InFlightSubmissionTrackerDomainState.fromSyncDomainState(persistentState, _)),
-      DefaultProcessingTimeouts.testing,
-      loggerFactory,
+    val inFlightSubmissionTracker = overrideInFlightSubmissionTrackerO.getOrElse(
+      new InFlightSubmissionTracker(
+        Eval.now(nodePersistentState.inFlightSubmissionStore),
+        eventPublisher,
+        new NoCommandDeduplicator(),
+        Eval.now(mdel),
+        _ =>
+          Option(ephemeralState.get())
+            .map(InFlightSubmissionTrackerDomainState.fromSyncDomainState(persistentState, _)),
+        DefaultProcessingTimeouts.testing,
+        loggerFactory,
+      )
     )
     val timeTracker = mock[DomainTimeTracker]
 
@@ -256,8 +273,9 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
 
     val steps = new TestProcessingSteps(
       pendingSubmissionMap = pendingSubmissionMap,
-      overrideConstructedPendingRequestData,
+      overrideConstructedPendingRequestDataO,
       informeesOfView = _ => Set(ConfirmingParty(party.toLf, 1, TrustLevel.Ordinary)),
+      submissionDataForTrackerO = submissionDataForTrackerO,
     )
 
     val sut: ProtocolProcessor[
@@ -314,6 +332,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
     NonEmpty(Seq, OpenEnvelope(viewMessage, someRecipients)(testedProtocolVersion)),
     rootHashMessage,
     MediatorRef(DefaultTestIdentities.mediator),
+    isReceipt = false,
   )
 
   "submit" should {
@@ -410,7 +429,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         MediatorRef(MediatorId(UniqueIdentifier.tryCreate("another", "mediator"))),
       )
       val (sut, _persistent, ephemeral) =
-        testProcessingSteps(overrideConstructedPendingRequestData = Some(pd))
+        testProcessingSteps(overrideConstructedPendingRequestDataO = Some(pd))
       val before = ephemeral.requestJournal.query(rc).value.futureValue
       before shouldEqual None
 
@@ -432,7 +451,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       )
       val (sut, _persistent, ephemeral) =
         testProcessingSteps(
-          overrideConstructedPendingRequestData = Some(pendingData),
+          overrideConstructedPendingRequestDataO = Some(pendingData),
           startingPoints = ProcessingStartingPoints.tryCreate(
             MessageProcessingStartingPoint(rc, requestSc, CantonTimestamp.Epoch.minusSeconds(20)),
             MessageProcessingStartingPoint(
@@ -465,7 +484,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         MediatorRef(MediatorId(UniqueIdentifier.tryCreate("another", "mediator"))),
       )
       val (sut, _persistent, ephemeral) =
-        testProcessingSteps(overrideConstructedPendingRequestData = Some(pd))
+        testProcessingSteps(overrideConstructedPendingRequestDataO = Some(pd))
 
       val journal = ephemeral.requestJournal
 
@@ -520,6 +539,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         ),
         rootHashMessage,
         MediatorRef(DefaultTestIdentities.mediator),
+        isReceipt = false,
       )
 
       val (sut, _persistent, _ephemeral) = testProcessingSteps()
@@ -552,6 +572,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         ),
         rootHashMessage,
         MediatorRef(DefaultTestIdentities.mediator),
+        isReceipt = false,
       )
 
       val (sut, _persistent, _ephemeral) = testProcessingSteps()
@@ -561,7 +582,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
             .processRequest(requestId.unwrap, rc, requestSc, requestBatchDecryptError)
             .onShutdown(fail()),
           _.warningMessage should include(
-            s"Request ${rc}: Found malformed payload: SyncCryptoDecryptError("
+            s"Request ${rc}: Decryption error: SyncCryptoDecryptError("
           ),
         )
         .futureValue
@@ -575,6 +596,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         NonEmpty(Seq, OpenEnvelope(viewMessage, someRecipients)(testedProtocolVersion)),
         rootHashMessage,
         MediatorRef(otherMediatorId),
+        isReceipt = false,
       )
 
       val (sut, _persistent, _ephemeral) = testProcessingSteps()
@@ -589,6 +611,72 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         )
         .futureValue
 
+    }
+
+    "notify the in-flight submission tracker with the root hash when necessary" in {
+      val (sut, _persistent, _ephemeral) =
+        testProcessingSteps(
+          overrideInFlightSubmissionTrackerO = Some(mockInFlightSubmissionTracker),
+          submissionDataForTrackerO = Some(
+            SubmissionTracker.SubmissionData(
+              submitterParticipant = participant,
+              maxSequencingTimeO = Some(requestId.unwrap.plusSeconds(10)),
+            )
+          ),
+        )
+
+      val asyncRes = sut
+        .processRequest(requestId.unwrap, rc, requestSc, someRequestBatch)
+        .onShutdown(fail())
+        .futureValue
+      waitForAsyncResult(asyncRes)
+
+      verify(mockInFlightSubmissionTracker).observeSequencedRootHash(
+        isEq(someRequestBatch.rootHashMessage.rootHash),
+        isEq(SequencedSubmission(requestSc, requestId.unwrap)),
+      )(anyTraceContext)
+    }
+
+    "not notify the in-flight submission tracker when the message is a receipt" in {
+      val (sut, _persistent, _ephemeral) =
+        testProcessingSteps(
+          overrideInFlightSubmissionTrackerO = Some(mockInFlightSubmissionTracker),
+          submissionDataForTrackerO = Some(
+            SubmissionTracker.SubmissionData(
+              submitterParticipant = participant,
+              maxSequencingTimeO = Some(requestId.unwrap.plusSeconds(10)),
+            )
+          ),
+        )
+
+      val asyncRes = sut
+        .processRequest(requestId.unwrap, rc, requestSc, someRequestBatch.copy(isReceipt = true))
+        .onShutdown(fail())
+        .futureValue
+      waitForAsyncResult(asyncRes)
+
+      verifyZeroInteractions(mockInFlightSubmissionTracker)
+    }
+
+    "not notify the in-flight submission tracker when not submitter participant" in {
+      val (sut, _persistent, _ephemeral) =
+        testProcessingSteps(
+          overrideInFlightSubmissionTrackerO = Some(mockInFlightSubmissionTracker),
+          submissionDataForTrackerO = Some(
+            SubmissionTracker.SubmissionData(
+              submitterParticipant = otherParticipant,
+              maxSequencingTimeO = Some(requestId.unwrap.plusSeconds(10)),
+            )
+          ),
+        )
+
+      val asyncRes = sut
+        .processRequest(requestId.unwrap, rc, requestSc, someRequestBatch)
+        .onShutdown(fail())
+        .futureValue
+      waitForAsyncResult(asyncRes)
+
+      verifyZeroInteractions(mockInFlightSubmissionTracker)
     }
   }
 

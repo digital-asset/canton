@@ -164,6 +164,8 @@ class GrpcSequencerAuthenticationService(
         Status.FAILED_PRECONDITION.withDescription(err.reason)
       case MemberAuthentication.NonMatchingDomainId(_, _) =>
         Status.FAILED_PRECONDITION.withDescription(err.reason)
+      case MemberAuthentication.PassiveSequencer =>
+        Status.UNAVAILABLE.withDescription(err.reason)
       case MemberAuthentication.NoKeysRegistered(_) => maliciousOrFaulty()
       case MemberAuthentication.FailedToSign(_, _) => maliciousOrFaulty()
       case MemberAuthentication.MissingNonce(_) => maliciousOrFaulty()

@@ -148,7 +148,10 @@ object TimestampedEvent {
   /** The transaction ID of a `TransactionAccepted` event */
   final case class TransactionEventId(transactionId: LedgerTransactionId) extends EventId {
     override def asString300: String300 = checked(
-      String300.tryCreate("T" + transactionId, "TransactionEventId".some)
+      String300.tryCreate(
+        EventId.transactionEventIdPrefix + transactionId,
+        "TransactionEventId".some,
+      )
     )
 
     override def associatedDomain: Option[DomainId] = None

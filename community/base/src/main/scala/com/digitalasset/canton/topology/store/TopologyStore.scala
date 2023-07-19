@@ -226,20 +226,31 @@ sealed trait TopologyTransactionRejection extends PrettyPrinting {
   def asString: String
   def asString1GB: String256M =
     String256M.tryCreate(asString, Some("topology transaction rejection"))
+
+  def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError
 }
 object TopologyTransactionRejection {
   object NotAuthorized extends TopologyTransactionRejection {
     def asString: String = "Not authorized"
     override def pretty: Pretty[NotAuthorized.type] = prettyOfString(_ => asString)
+
+    override def toTopologyManagerError(implicit elc: ErrorLoggingContext) =
+      TopologyManagerError.UnauthorizedTransaction.Failure()
   }
   final case class SignatureCheckFailed(err: SignatureCheckError)
       extends TopologyTransactionRejection {
     def asString: String = err.toString
     override def pretty: Pretty[SignatureCheckFailed] = prettyOfClass(param("err", _.err))
+
+    override def toTopologyManagerError(implicit elc: ErrorLoggingContext) =
+      TopologyManagerError.InvalidSignatureError.Failure(err)
   }
   final case class WrongDomain(wrong: DomainId) extends TopologyTransactionRejection {
     def asString: String = show"Wrong domain $wrong"
     override def pretty: Pretty[WrongDomain] = prettyOfClass(param("wrong", _.wrong))
+
+    override def toTopologyManagerError(implicit elc: ErrorLoggingContext) =
+      TopologyManagerError.WrongDomain.Failure(wrong)
   }
   final case class SerialMismatch(expected: PositiveInt, actual: PositiveInt)
       extends TopologyTransactionRejection {
@@ -247,10 +258,15 @@ object TopologyTransactionRejection {
       show"The given serial $actual does not match the expected serial $expected"
     override def pretty: Pretty[SerialMismatch] =
       prettyOfClass(param("expected", _.expected), param("actual", _.actual))
+    override def toTopologyManagerError(implicit elc: ErrorLoggingContext) =
+      TopologyManagerError.SerialMismatch.Failure(expected, actual)
   }
   final case class Other(str: String) extends TopologyTransactionRejection {
     def asString: String = str
     override def pretty: Pretty[Other] = prettyOfString(_ => asString)
+
+    override def toTopologyManagerError(implicit elc: ErrorLoggingContext) =
+      TopologyManagerError.InternalError.Other(str)
   }
 }
 

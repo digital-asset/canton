@@ -22,7 +22,7 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.CheckedT
-import com.digitalasset.canton.{RequestCounter, TransferCounter, TransferCounterO}
+import com.digitalasset.canton.{RequestCounter, TransferCounterO}
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable.SortedMap
@@ -73,13 +73,17 @@ private[participant] class HookedAcs(private val acs: ActiveContractStore)(impli
     }
   }
 
-  override def archiveContracts(contractIds: Seq[LfContractId], toc: TimeOfChange)(implicit
+  override def archiveContracts(
+      contracts: Seq[LfContractId],
+      toc: TimeOfChange,
+  )(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] = CheckedT {
     val preArchive = nextArchiveHook.getAndSet(noAction)
-    preArchive(contractIds, toc).flatMap { _ =>
-      acs.archiveContracts(contractIds, toc).value
-    }
+    preArchive(contracts, toc)
+      .flatMap { _ =>
+        acs.archiveContracts(contracts, toc).value
+      }
   }
 
   override def transferInContracts(
@@ -124,18 +128,26 @@ private[participant] class HookedAcs(private val acs: ActiveContractStore)(impli
 
   override def snapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LfContractId, (CantonTimestamp, TransferCounter)]] =
+  ): Future[SortedMap[LfContractId, (CantonTimestamp, TransferCounterO)]] =
     acs.snapshot(timestamp)
 
   override def snapshot(rc: RequestCounter)(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LfContractId, (RequestCounter, TransferCounter)]] =
+  ): Future[SortedMap[LfContractId, (RequestCounter, TransferCounterO)]] =
     acs.snapshot(rc)
 
   override def contractSnapshot(contractIds: Set[LfContractId], timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Future[Map[LfContractId, CantonTimestamp]] =
     acs.contractSnapshot(contractIds, timestamp)
+
+  override def bulkContractsTransferCounterSnapshot(
+      contractIds: Set[LfContractId],
+      requestCounter: RequestCounter,
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Map[LfContractId, TransferCounterO]] =
+    acs.bulkContractsTransferCounterSnapshot(contractIds, requestCounter)
 
   override def doPrune(beforeAndIncluding: CantonTimestamp)(implicit
       traceContext: TraceContext

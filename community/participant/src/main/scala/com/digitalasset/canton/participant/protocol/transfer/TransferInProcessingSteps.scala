@@ -81,6 +81,8 @@ private[transfer] class TransferInProcessingSteps(
 
   import TransferInProcessingSteps.*
 
+  override type DecryptedView = FullTransferInTree
+
   override def requestKind: String = "TransferIn"
 
   override def submissionDescription(param: SubmissionParam): String =
@@ -251,7 +253,7 @@ private[transfer] class TransferInProcessingSteps(
       envelope: OpenEnvelope[EncryptedViewMessage[TransferInViewType]]
   )(implicit
       tc: TraceContext
-  ): EitherT[Future, EncryptedViewMessageDecryptionError[TransferInViewType], WithRecipients[
+  ): EitherT[Future, EncryptedViewMessageError[TransferInViewType], WithRecipients[
     FullTransferInTree
   ]] =
     EncryptedViewMessage
@@ -418,15 +420,14 @@ private[transfer] class TransferInProcessingSteps(
               LocalApprove(targetProtocolVersion.v)
             else if (contractResult.notFree.nonEmpty) {
               contractResult.notFree.toSeq match {
+                case Seq(coid, archived) =>
+                  LocalReject.TransferInRejects.ContractAlreadyArchived.Reject(show"coid=$coid")(
+                    localVerdictProtocolVersion
+                  )
                 case Seq((coid, state)) =>
-                  if (state == ActiveContractStore.Archived)
-                    LocalReject.TransferInRejects.ContractAlreadyArchived.Reject(show"coid=$coid")(
-                      localVerdictProtocolVersion
-                    )
-                  else
-                    LocalReject.TransferInRejects.ContractAlreadyActive.Reject(show"coid=$coid")(
-                      localVerdictProtocolVersion
-                    )
+                  LocalReject.TransferInRejects.ContractAlreadyActive.Reject(show"coid=$coid")(
+                    localVerdictProtocolVersion
+                  )
                 case coids =>
                   throw new RuntimeException(
                     s"Activeness result for a transfer-in fails for multiple contract IDs $coids"
@@ -448,6 +449,7 @@ private[transfer] class TransferInProcessingSteps(
                   requestId,
                   participantId,
                   Some(txInRequest.viewHash),
+                  Some(ViewPosition.root),
                   localVerdict,
                   txInRequest.toBeSigned,
                   validationResult.confirmingParties,
@@ -511,7 +513,11 @@ private[transfer] class TransferInProcessingSteps(
             contract.contractId -> WithContractHash
               .fromContract(
                 contract,
-                CommitSet.TransferInCommit(transferId, contract.metadata, transferCounter),
+                CommitSet.TransferInCommit(
+                  transferId,
+                  contract.metadata,
+                  transferCounter,
+                ),
               )
           ),
           keyUpdates = Map.empty,

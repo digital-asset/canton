@@ -274,6 +274,8 @@ class StateApiServiceImpl(
 
     } yield localOffsetO
 
+  /** @throws java.lang.RuntimeException if there are active contracts that do not have transfer counters defined.
+    */
   private def getActiveContractsForLocalOffset(
       syncDomainPersistentState: SyncDomainPersistentState,
       filters: RequestInclusiveFilter,
@@ -310,7 +312,15 @@ class StateApiServiceImpl(
         .snapshot(
           RequestCounter(localOffset)
         )
-        .map(_.toSeq.map { case (cid, (_, transferCounter)) => (cid, transferCounter) })
+        .map(_.toSeq.map { case (cid, (_, transferCounter)) =>
+          transferCounter
+            .map(cid -> _)
+            .getOrElse(
+              ErrorUtil.internalError(
+                new RuntimeException(s"Transfer counter not defined in a multidomain setting.")
+              )
+            )
+        })
 
       contracts <- MonadUtil.batchedSequentialTraverse(
         parallelism = StateApiServiceImpl.dbBatchParallelism,

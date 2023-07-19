@@ -81,6 +81,10 @@ trait ProtocolVersionChecksFixtureAnyWordSpec {
     )(implicit pos: source.Position): Unit = {
       verb.ignore(testFun)
     }
+
+    def when(testFun: => Unit /* Assertion */ )(implicit pos: source.Position): Unit = {
+      if (condition) verb.when(testFun) else verb.ignore(() => testFun)
+    }
   }
 }
 

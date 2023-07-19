@@ -414,7 +414,6 @@ class CantonSyncService(
     participantNodePersistentState,
     pruningProcessor,
     parameters.processingTimeouts,
-    parameters.maxDbConnections,
     loggerFactory,
   )
 
@@ -454,9 +453,9 @@ class CantonSyncService(
           s"Could not locate pruning point: ${message}. Considering success for idempotency"
         )
         Right(())
-      case Left(LedgerPruningOnlySupportedInEnterpriseEdition(message)) =>
+      case Left(err @ LedgerPruningOnlySupportedInEnterpriseEdition) =>
         logger.warn(
-          s"Canton participant pruning not supported in canton-open-source edition: ${message}"
+          s"Canton participant pruning not supported in canton-open-source edition: ${err.message}"
         )
         Left(PruningServiceError.PruningNotSupportedInCommunityEdition.Error())
       case Left(err: LedgerPruningOffsetNonCantonFormat) =>

@@ -17,6 +17,7 @@ import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
   InFlightBySequencingInfo,
   InFlightReference,
 }
+import com.digitalasset.canton.protocol.RootHash
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
@@ -67,6 +68,21 @@ class InMemoryInFlightSubmissionStore(override protected val loggerFactory: Name
       }
       .toEitherT[FutureUnlessShutdown]
 
+  override def updateRegistration(
+      submission: InFlightSubmission[UnsequencedSubmission],
+      rootHash: RootHash,
+  )(implicit traceContext: TraceContext): Future[Unit] = {
+    inFlight.mapValuesInPlace { (_changeId, info) =>
+      if (
+        !info.isSequenced && info.submissionDomain == submission.submissionDomain
+        && info.changeIdHash == submission.changeIdHash && info.rootHashO.isEmpty
+      ) {
+        info.copy(rootHashO = Some(rootHash))
+      } else info
+    }
+    Future.unit
+  }
+
   override def observeSequencing(
       domainId: DomainId,
       submissions: Map[MessageId, SequencedSubmission],
@@ -76,6 +92,20 @@ class InMemoryInFlightSubmissionStore(override protected val loggerFactory: Name
         submissions.get(info.messageId).fold(info) { sequencedInfo =>
           info.copy(sequencingInfo = sequencedInfo)
         }
+      } else info
+    }
+    Future.unit
+  }
+
+  override def observeSequencedRootHash(
+      rootHash: RootHash,
+      submission: SequencedSubmission,
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Unit] = {
+    inFlight.mapValuesInPlace { (_changeId, info) =>
+      if (!info.isSequenced && info.rootHashO.contains(rootHash)) {
+        info.copy(sequencingInfo = submission)
       } else info
     }
     Future.unit

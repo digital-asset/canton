@@ -18,6 +18,7 @@ import com.daml.lf.engine.{
   ResultNeedPackage,
 }
 import com.daml.lf.transaction.{Node, SubmittedTransaction, Transaction}
+import com.daml.lf.value.Value
 import com.daml.metrics.{Metrics, Timed, Tracked}
 import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.api.domain.Commands as ApiCommands
@@ -63,7 +64,13 @@ private[apiserver] final class StoreBackedCommandExecutor(
   ): Future[Either[ErrorCause, CommandExecutionResult]] = {
     val interpretationTimeNanos = new AtomicLong(0L)
     val start = System.nanoTime()
+    val coids = commands.commands.commands.toSeq.foldLeft(Set.empty[Value.ContractId]) {
+      case (acc, com.daml.lf.command.ApiCommand.Exercise(_, coid, _, argument)) =>
+        argument.collectCids(acc) + coid
+      case (acc, _) => acc
+    }
     for {
+      _ <- Future.sequence(coids.map(contractStore.lookupContractStateWithoutDivulgence))
       submissionResult <- submitToEngine(commands, submissionSeed, interpretationTimeNanos)
       submission <- consume(
         commands.actAs,

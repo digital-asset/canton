@@ -8,7 +8,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.util.ErrorUtil
 import com.google.protobuf.ByteString
 import org.bouncycastle.asn1.edec.EdECObjectIdentifiers
-import org.bouncycastle.asn1.gm.GMObjectIdentifiers
+import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers
 import org.bouncycastle.asn1.sec.SECObjectIdentifiers
 import org.bouncycastle.asn1.x509.{AlgorithmIdentifier, SubjectPublicKeyInfo}
 import org.bouncycastle.asn1.x9.X9ObjectIdentifiers
@@ -24,10 +24,24 @@ trait JavaKeyConverter {
       publicKey: PublicKey
   ): Either[JavaKeyConversionError, (AlgorithmIdentifier, JPublicKey)]
 
+  /** Convert a Java public key into a Canton signing public key.
+    *
+    * We take the fingerprint as an argument instead of computing it again, because if we convert between public keys of
+    * different crypto providers their fingerprint computation is different and can result in the converted key not
+    * having the same fingerprint as the original key.
+    */
+  // TODO(i4612): Remove fingerprint once Tink provider is removed and we have a consistent fingerprint computation.
   def fromJavaSigningKey(
       publicKey: JPublicKey,
       algorithmIdentifier: AlgorithmIdentifier,
+      fingerprint: Fingerprint,
   ): Either[JavaKeyConversionError, SigningPublicKey]
+
+  def fromJavaEncryptionKey(
+      publicKey: JPublicKey,
+      algorithmIdentifier: AlgorithmIdentifier,
+      fingerprint: Fingerprint,
+  ): Either[JavaKeyConversionError, EncryptionPublicKey]
 }
 
 object JavaKeyConverter {
@@ -41,7 +55,6 @@ object JavaKeyConverter {
       case X9ObjectIdentifiers.ecdsa_with_SHA384 | SECObjectIdentifiers.secp384r1 =>
         Right(SigningKeyScheme.EcDsaP384)
       case EdECObjectIdentifiers.id_Ed25519 => Right(SigningKeyScheme.Ed25519)
-      case GMObjectIdentifiers.sm2p256v1 => Right(SigningKeyScheme.Sm2)
       case unsupportedIdentifier =>
         Left(JavaKeyConversionError.UnsupportedAlgorithm(algoId))
     }
@@ -67,6 +80,20 @@ object JavaKeyConverter {
       pemParser.close()
     }
   }
+
+  def toEncryptionKeyScheme(
+      algoId: AlgorithmIdentifier
+  ): Either[JavaKeyConversionError, EncryptionKeyScheme] =
+    algoId.getAlgorithm match {
+      case X9ObjectIdentifiers.ecdsa_with_SHA256 | SECObjectIdentifiers.secp256r1 =>
+        // TODO(i12757): It maps to two ECIES schemes right now, need to disentangle key scheme from algorithm
+        Right(EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm)
+      case PKCSObjectIdentifiers.id_RSAES_OAEP =>
+        Right(EncryptionKeyScheme.Rsa2048OaepSha256)
+      case unsupportedIdentifier =>
+        Left(JavaKeyConversionError.UnsupportedAlgorithm(algoId))
+    }
+
 }
 
 sealed trait JavaKeyConversionError extends Product with Serializable with PrettyPrinting
@@ -90,11 +117,22 @@ object JavaKeyConversionError {
       prettyOfClass(param("format", _.format), param("expected format", _.expectedFormat))
   }
 
-  final case class UnsupportedKeyScheme(
+  final case class UnsupportedSigningKeyScheme(
       scheme: SigningKeyScheme,
       supportedSchemes: NonEmpty[Set[SigningKeyScheme]],
   ) extends JavaKeyConversionError {
-    override def pretty: Pretty[UnsupportedKeyScheme] =
+    override def pretty: Pretty[UnsupportedSigningKeyScheme] =
+      prettyOfClass(
+        param("scheme", _.scheme),
+        param("supported schemes", _.supportedSchemes),
+      )
+  }
+
+  final case class UnsupportedEncryptionKeyScheme(
+      scheme: EncryptionKeyScheme,
+      supportedSchemes: NonEmpty[Set[EncryptionKeyScheme]],
+  ) extends JavaKeyConversionError {
+    override def pretty: Pretty[UnsupportedEncryptionKeyScheme] =
       prettyOfClass(
         param("scheme", _.scheme),
         param("supported schemes", _.supportedSchemes),

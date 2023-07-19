@@ -5,7 +5,7 @@ package com.digitalasset.canton.protocol.messages
 
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.data.{Informee, ViewType}
+import com.digitalasset.canton.data.{Informee, ViewPosition, ViewType}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash, ViewHash}
 import com.digitalasset.canton.topology.MediatorRef
@@ -17,10 +17,12 @@ trait MediatorRequest extends ProtocolMessage with UnsignedProtocolMessage {
 
   def mediator: MediatorRef
 
-  def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)]
+  def informeesAndThresholdByViewHash: Map[ViewHash, (Set[Informee], NonNegativeInt)]
+
+  def informeesAndThresholdByViewPosition: Map[ViewPosition, (Set[Informee], NonNegativeInt)]
 
   def allInformees: Set[LfPartyId] =
-    informeesAndThresholdByView
+    informeesAndThresholdByViewPosition
       .flatMap { case (_, (informees, _)) =>
         informees
       }

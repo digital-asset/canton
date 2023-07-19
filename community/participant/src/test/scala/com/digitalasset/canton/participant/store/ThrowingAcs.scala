@@ -16,7 +16,7 @@ import com.digitalasset.canton.protocol.{LfContractId, SourceDomainId, TargetDom
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT}
-import com.digitalasset.canton.{RequestCounter, TransferCounter, TransferCounterO}
+import com.digitalasset.canton.{RequestCounter, TransferCounterO}
 
 import scala.collection.immutable.SortedMap
 import scala.concurrent.{ExecutionContext, Future}
@@ -30,10 +30,13 @@ class ThrowingAcs[T <: Throwable](mk: String => T)(override implicit val ec: Exe
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
     CheckedT(Future.failed[M](mk(s"createContracts for $contractIds at $toc")))
 
-  override def archiveContracts(contractIds: Seq[LfContractId], toc: TimeOfChange)(implicit
+  override def archiveContracts(
+      contracts: Seq[LfContractId],
+      toc: TimeOfChange,
+  )(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
-    CheckedT(Future.failed[M](mk(s"archiveContracts for $contractIds at $toc")))
+    CheckedT(Future.failed[M](mk(s"archiveContracts for $contracts at $toc")))
 
   override def transferInContracts(
       transferIns: Seq[(LfContractId, SourceDomainId, TransferCounterO)],
@@ -64,12 +67,12 @@ class ThrowingAcs[T <: Throwable](mk: String => T)(override implicit val ec: Exe
 
   override def snapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LfContractId, (CantonTimestamp, TransferCounter)]] =
+  ): Future[SortedMap[LfContractId, (CantonTimestamp, TransferCounterO)]] =
     Future.failed(mk(s"snapshot at $timestamp"))
 
   override def snapshot(rc: RequestCounter)(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LfContractId, (RequestCounter, TransferCounter)]] =
+  ): Future[SortedMap[LfContractId, (RequestCounter, TransferCounterO)]] =
     Future.failed(mk(s"snapshot at $rc"))
 
   override def contractSnapshot(contractIds: Set[LfContractId], timestamp: CantonTimestamp)(implicit
@@ -77,6 +80,18 @@ class ThrowingAcs[T <: Throwable](mk: String => T)(override implicit val ec: Exe
   ): Future[Map[LfContractId, CantonTimestamp]] =
     Future.failed[Map[LfContractId, CantonTimestamp]](
       mk(s"contractSnapshot for $contractIds at $timestamp")
+    )
+
+  override def bulkContractsTransferCounterSnapshot(
+      contractIds: Set[LfContractId],
+      requestCounter: RequestCounter,
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Map[LfContractId, TransferCounterO]] =
+    Future.failed[Map[LfContractId, TransferCounterO]](
+      mk(
+        s"bulkContractsTransferCounterSnapshot for $contractIds up to but not including $requestCounter"
+      )
     )
 
   override protected[canton] def doPrune(beforeAndIncluding: CantonTimestamp)(implicit

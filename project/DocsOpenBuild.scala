@@ -24,40 +24,34 @@ object DocsOpenBuild {
     def docsVersionDirectory(docsOpenDir: File, cantonVersion: String, log: ManagedLogger): File = {
       val cantonRoot = repositoryRoot(docsOpenDir)
       val version = extractVersion(cantonVersion)
-      val majorMinor = extractMajorMinor(version)
       val docsDirectory = cantonRoot / "docs.daml.com" / "docs"
-      val pathFinder = docsDirectory * s"$majorMinor.*" filter (_.isDirectory)
+      val pathFinder = docsDirectory * version.majorMinorWildcard() filter (_.isDirectory)
 
       val directoryCandidates = pathFinder.get()
-      if (directoryCandidates.size == 1) {
+      if (directoryCandidates.lengthCompare(1) == 0) {
         val selectedDirectory = directoryCandidates.head
         log.info(
-          s"[versionDirectorySelection] Using '$selectedDirectory' for '$majorMinor' of '$cantonVersion'"
+          s"[versionDirectorySelection] Using '$selectedDirectory' for '${version.majorMinor()}' of '$cantonVersion'"
         )
         selectedDirectory
       } else {
         throw new NoSuchElementException(
-          s"Expect single path matching major and minor version '$majorMinor' but there are " +
+          s"Expect single path matching major and minor version '${version.majorMinor()}' but there are " +
             s"${directoryCandidates.size}:\n${directoryCandidates.mkString(",\n")}"
         )
       }
     }
 
-    private def extractVersion(version: String): String = {
-      val versionPattern: Regex = raw"\d+\.\d+\.\d+".r
-      versionPattern
-        .findFirstIn(version)
-        .getOrElse(throw new IllegalArgumentException(s"No version number found in '$version'"))
+    private final case class Version(major: Int, minor: Int, patch: Int) {
+      def majorMinor(): String = s"$major.$minor"
+      def majorMinorWildcard(): String = s"$major.$minor.*"
     }
 
-    private def extractMajorMinor(version: String): String = {
-      val versionPattern: Regex = """^(\d+)\.(\d+)(\.\d+.*)$""".r
+    private def extractVersion(version: String): Version = {
+      val versionPattern: Regex = """.*(\d+)\.(\d+)\.(\d+).*""".r
       version match {
-        case versionPattern(major, minor, _) => s"$major.$minor"
-        case _ =>
-          throw new IllegalArgumentException(
-            s"No major and minor version number found in '$version'"
-          )
+        case versionPattern(major, minor, patch) => Version(major.toInt, minor.toInt, patch.toInt)
+        case _ => throw new IllegalArgumentException(s"No version number found in '$version'")
       }
     }
 
