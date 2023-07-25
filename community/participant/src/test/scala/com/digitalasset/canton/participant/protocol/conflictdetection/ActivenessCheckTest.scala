@@ -27,5 +27,11 @@ class ActivenessCheckTest extends AnyWordSpec with BaseTest {
       assertThrows[IllegalArgumentException](mkActivenessCheck(fresh = set1, active = set2))
       assertThrows[IllegalArgumentException](mkActivenessCheck(free = set1, active = set2))
     }
+
+    "not allow prior states without checking activeness" in {
+      assertThrows[IllegalArgumentException](
+        mkActivenessCheck[LfContractId](fresh = set1, prior = set2)
+      )
+    }
   }
 }

@@ -98,7 +98,9 @@ object TopologyManagementInitialization {
         .sendWithRetries(
           callback => {
             val maxSequencingTime = client.generateMaxSequencingTime
-            logger.debug(s"Sending initial topology transactions to domain members $domainMembers")
+            logger.info(
+              s"Sending initial topology transactions to domain members $domainMembers as ${recentSnapshot.owner}"
+            )
             for {
               content <-
                 DomainTopologyTransactionMessage

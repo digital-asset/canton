@@ -75,19 +75,42 @@ trait SubmissionTrackerStoreTest
       val expectedCountAfterPrune = maxSeqTimes.count(_ > pruningTs)
 
       for {
-        initialCount <- store.size().unwrap
+        initialCount <- store.size.unwrap
 
         _ <- Future.sequence(rootHashes.indices.map { i =>
           store.registerFreshRequest(rootHashes(i), requestIds(i), maxSeqTimes(i)).unwrap
         })
-        finalCount <- store.size().unwrap
+        finalCount <- store.size.unwrap
 
         _ <- store.prune(pruningTs)
-        countAfterPrune <- store.size().unwrap
+        countAfterPrune <- store.size.unwrap
       } yield {
         initialCount shouldBe Outcome(0)
         finalCount shouldBe Outcome(rootHashes.size)
         countAfterPrune shouldBe Outcome(expectedCountAfterPrune)
+      }
+    }
+
+    "delete entries when cleaning up" in {
+      val store = mkStore()
+
+      val cleanupTs = requestIds(3).unwrap
+      val expectedCountAfterDelete = requestIds.count(_.unwrap < cleanupTs)
+
+      for {
+        initialCount <- store.size.unwrap
+
+        _ <- Future.sequence(rootHashes.indices.map { i =>
+          store.registerFreshRequest(rootHashes(i), requestIds(i), maxSeqTimes(i)).unwrap
+        })
+        finalCount <- store.size.unwrap
+
+        _ <- store.deleteSince(cleanupTs)
+        countAfterDelete <- store.size.unwrap
+      } yield {
+        initialCount shouldBe Outcome(0)
+        finalCount shouldBe Outcome(rootHashes.size)
+        countAfterDelete shouldBe Outcome(expectedCountAfterDelete)
       }
     }
   }

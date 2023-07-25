@@ -592,7 +592,7 @@ object EncryptedViewMessage extends HasProtocolVersionedCompanion[EncryptedViewM
       case _ => None
     }
 
-  override protected def name: String = "EncryptedViewMessage"
+  override def name: String = "EncryptedViewMessage"
 }
 
 sealed trait EncryptedViewMessageError[+VT <: ViewType]

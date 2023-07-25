@@ -148,7 +148,7 @@ final case class ViewParticipantData private (
     }
   }
 
-  val rootAction: RootAction =
+  def rootAction(enableContractUpgrading: Boolean): RootAction =
     actionDescription match {
       case CreateActionDescription(contractId, _seed, _version) =>
         val createdContract = createdCore.headOption.getOrElse(
@@ -174,7 +174,7 @@ final case class ViewParticipantData private (
 
       case ExerciseActionDescription(
             inputContractId,
-            _templateId,
+            commandTemplateId,
             choice,
             interfaceId,
             chosenValue,
@@ -190,7 +190,13 @@ final case class ViewParticipantData private (
             show"Input contract $inputContractId of the Exercise root action is not declared as core input."
           ),
         )
-        val templateId = inputContract.contract.contractInstance.unversioned.template
+
+        // commandTemplateId is not populated prior to ProtocolVersion.v5
+        val templateId = commandTemplateId match {
+          case Some(templateId) if enableContractUpgrading => templateId
+          case _ => inputContract.contract.contractInstance.unversioned.template
+        }
+
         val cmd = if (byKey) {
           val key = inputContract.contract.metadata.maybeKey
             .map(_.key)

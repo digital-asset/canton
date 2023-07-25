@@ -4,6 +4,7 @@
 package com.digitalasset.canton.version
 
 import cats.syntax.either.*
+import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -102,6 +103,27 @@ trait HasProtocolVersionedWrapper[ValueClass] extends HasRepresentativeProtocolV
     )
   }
 
+  /** Will check that default value rules defined in `companionObj.defaultValues` hold.
+    */
+  def validateInstance(): Either[String, Unit] =
+    companionObj.defaultValues.traverse_ { defaultValue =>
+      val value = defaultValue.attribute(this)
+
+      val shouldHaveDefaultValue = defaultValue match {
+        case from: companionObj.DefaultValueFrom[_] =>
+          representativeProtocolVersion >= from.startInclusive
+
+        case until: companionObj.DefaultValueUntil[_] =>
+          representativeProtocolVersion <= until.untilInclusive
+      }
+
+      Either.cond(
+        !shouldHaveDefaultValue || value == defaultValue.defaultValue,
+        (),
+        s"expected default value for ${defaultValue.name} in ${companionObj.name} but found $value",
+      )
+    }
+
   /** Yields the proto representation of the class inside an `UntypedVersionedMessage` wrapper.
     *
     * Subclasses should make this method public by default, as this supports composing proto serializations.
@@ -174,7 +196,7 @@ trait HasProtocolVersionedWrapper[ValueClass] extends HasRepresentativeProtocolV
 trait HasSupportedProtoVersions[ValueClass] {
 
   /** The name of the class as used for pretty-printing and error reporting */
-  protected def name: String
+  def name: String
 
   // Deserializer: (Proto => ValueClass)
   type Deserializer
@@ -465,8 +487,57 @@ trait HasProtocolVersionedWrapperCompanion[
 ] extends HasSupportedProtoVersions[ValueClass]
     with Serializable {
 
+  private type ThisRepresentativeProtocolVersion = RepresentativeProtocolVersion[this.type]
+
+  /*
+    This trait encodes a default value starting (or ending) at a specific protocol version.
+   */
+  private[version] sealed trait DefaultValue[T] {
+    def attribute: ValueClass => T
+
+    def name: String
+
+    def defaultValue: T
+
+    /** Returns `v` or the default value, depending on the `protocolVersion`.
+      */
+    def orValue(v: T, protocolVersion: ProtocolVersion): T
+
+    /** Returns `v` or the default value, depending on the `protocolVersion`.
+      */
+    def orValue(v: T, protocolVersion: ThisRepresentativeProtocolVersion): T
+  }
+
+  case class DefaultValueFrom[T](
+      attribute: ValueClass => T,
+      name: String,
+      startInclusive: ThisRepresentativeProtocolVersion,
+      defaultValue: T,
+  ) extends DefaultValue[T] {
+    def orValue(v: T, protocolVersion: ProtocolVersion): T =
+      if (protocolVersion >= startInclusive.representative) defaultValue else v
+
+    def orValue(v: T, protocolVersion: ThisRepresentativeProtocolVersion): T =
+      if (protocolVersion >= startInclusive) defaultValue else v
+  }
+
+  case class DefaultValueUntil[T](
+      attribute: ValueClass => T,
+      name: String,
+      untilInclusive: ThisRepresentativeProtocolVersion,
+      defaultValue: T,
+  ) extends DefaultValue[T] {
+    def orValue(v: T, protocolVersion: ProtocolVersion): T =
+      if (protocolVersion <= untilInclusive.representative) defaultValue else v
+
+    def orValue(v: T, protocolVersion: ThisRepresentativeProtocolVersion): T =
+      if (protocolVersion <= untilInclusive) defaultValue else v
+  }
+
+  def defaultValues: Seq[DefaultValue[_]] = Nil
+
   /** The name of the class as used for pretty-printing and error reporting */
-  protected def name: String
+  def name: String
 
   type OriginalByteString = ByteString // What is passed to the fromByteString method
   type DataByteString = ByteString // What is inside the parsed UntypedVersionedMessage message

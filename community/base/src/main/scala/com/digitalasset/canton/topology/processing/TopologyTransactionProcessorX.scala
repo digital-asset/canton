@@ -14,9 +14,9 @@ import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.messages.{
-  AcceptedTopologyTransactionsX,
   DefaultOpenEnvelope,
   ProtocolMessage,
+  TopologyTransactionsBroadcastX,
 }
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.client.{
@@ -43,7 +43,7 @@ class TopologyTransactionProcessorX(
     timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
-    extends TopologyTransactionProcessorCommonImpl[AcceptedTopologyTransactionsX](
+    extends TopologyTransactionProcessorCommonImpl[TopologyTransactionsBroadcastX](
       domainId,
       futureSupervisor,
       store,
@@ -70,25 +70,31 @@ class TopologyTransactionProcessorX(
   ): Future[Option[(SequencedTime, EffectiveTime)]] = store.maxTimestamp()
 
   override protected def initializeTopologyTimestampPlusEpsilonTracker(
-      processorTs: CantonTimestamp
+      processorTs: CantonTimestamp,
+      maxStored: Option[SequencedTime],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[EffectiveTime] =
     TopologyTimestampPlusEpsilonTracker.initializeX(timeAdjuster, store, processorTs)
 
-  override protected def extractTopologyUpdates(
-      envelopes: List[DefaultOpenEnvelope]
-  ): List[AcceptedTopologyTransactionsX] = {
-    envelopes
-      .mapFilter(ProtocolMessage.select[AcceptedTopologyTransactionsX])
-      .map(_.protocolMessage)
+  override protected def extractTopologyUpdatesAndValidateEnvelope(
+      ts: SequencedTime,
+      envelopes: List[DefaultOpenEnvelope],
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[List[TopologyTransactionsBroadcastX]] = {
+    FutureUnlessShutdown.pure(
+      envelopes
+        .mapFilter(ProtocolMessage.select[TopologyTransactionsBroadcastX])
+        .map(_.protocolMessage)
+    )
   }
 
   override private[processing] def process(
       sequencingTimestamp: SequencedTime,
       effectiveTimestamp: EffectiveTime,
       sc: SequencerCounter,
-      messages: List[AcceptedTopologyTransactionsX],
+      messages: List[TopologyTransactionsBroadcastX],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    val tx = messages.flatMap(_.accepted).flatMap(_.transactions)
+    val tx = messages.flatMap(_.broadcasts).flatMap(_.transactions)
     performUnlessClosingEitherU("process-topology-transaction")(
       stateProcessor
         .validateAndApplyAuthorization(

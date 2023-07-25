@@ -550,6 +550,10 @@ object ParticipantAdminCommands {
         )
 
       override def handleResponse(response: MigrateDomainResponse): Either[String, Unit] = Right(())
+
+      // migration command will potentially take a long time
+      override def timeoutType: TimeoutType = DefaultUnboundedTimeout
+
     }
   }
 

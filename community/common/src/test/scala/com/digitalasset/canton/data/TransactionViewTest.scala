@@ -3,8 +3,10 @@
 
 package com.digitalasset.canton.data
 
+import cats.syntax.either.*
 import com.daml.lf.value.Value
 import com.digitalasset.canton.crypto.{HashOps, Salt, TestSalt}
+import com.digitalasset.canton.data.ViewParticipantData.InvalidViewParticipantData
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.transaction.TrustLevel
 import com.digitalasset.canton.util.LfTransactionBuilder
@@ -19,8 +21,9 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
 
   val hashOps: HashOps = factory.cryptoOps
 
-  val contractInst = ExampleTransactionFactory.contractInstance()
-  val serContractInst = ExampleTransactionFactory.asSerializableRaw(contractInst, "")
+  val contractInst: LfContractInst = ExampleTransactionFactory.contractInstance()
+  val serContractInst: SerializableRawContractInstance =
+    ExampleTransactionFactory.asSerializableRaw(contractInst, "")
 
   val cantonContractIdVersion: CantonContractIdVersion =
     CantonContractIdVersion.fromProtocolVersion(testedProtocolVersion)
@@ -32,11 +35,11 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
   val absoluteId: LfContractId = ExampleTransactionFactory.suffixedId(0, 0)
   val otherAbsoluteId: LfContractId = ExampleTransactionFactory.suffixedId(1, 1)
   val salt: Salt = factory.transactionSalt
-  val nodeSeed = ExampleTransactionFactory.lfHash(1)
+  val nodeSeed: LfHash = ExampleTransactionFactory.lfHash(1)
   val globalKey: LfGlobalKey =
     LfGlobalKey.build(LfTransactionBuilder.defaultTemplateId, Value.ValueInt64(100L)).value
 
-  val defaultActionDescription =
+  val defaultActionDescription: ActionDescription =
     ActionDescription.tryFromLfActionNode(
       ExampleTransactionFactory.createNode(createdId, contractInst),
       Some(ExampleTransactionFactory.lfHash(5)),
@@ -119,16 +122,23 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
         InputContract(contract, consumed.contains(id))
       }
 
-      ViewParticipantData.create(hashOps)(
-        coreInputs2,
-        created,
-        archivedInSubviews,
-        resolvedKeys,
-        actionDescription,
-        RollbackContext.empty,
-        salt,
-        testedProtocolVersion,
-      )
+      ViewParticipantData
+        .create(hashOps)(
+          coreInputs2,
+          created,
+          archivedInSubviews,
+          resolvedKeys,
+          actionDescription,
+          RollbackContext.empty,
+          salt,
+          testedProtocolVersion,
+        )
+        .flatMap { data =>
+          // Return error message if root action is not valid
+          Either
+            .catchOnly[InvalidViewParticipantData](data.rootAction(false))
+            .bimap(ex => ex.message, _ => data)
+        }
     }
 
     "a contract is created twice" must {
@@ -176,7 +186,8 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
         create(createdIds = Seq.empty).left.value should startWith(
           "No created core contracts declared for a view that creates contract"
         )
-
+      }
+      "reject creation with other contract ids" in {
         val otherCantonId =
           cantonContractIdVersion.fromDiscriminator(
             ExampleTransactionFactory.lfHash(3),
@@ -188,7 +199,8 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
       }
     }
     "the used contract of the root action is not declared" must {
-      "reject creation" in {
+
+      "reject creation with exercise action" in {
         create(
           actionDescription = ActionDescription.tryFromLfActionNode(
             ExampleTransactionFactory.exerciseNodeWithoutChildren(absoluteId),
@@ -198,6 +210,9 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
         ).left.value should startWith(
           show"Input contract $absoluteId of the Exercise root action is not declared as core input."
         )
+      }
+
+      "reject creation with fetch action" in {
 
         create(
           actionDescription = ActionDescription.tryFromLfActionNode(
@@ -211,7 +226,9 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
         ).left.value should startWith(
           show"Input contract $absoluteId of the Fetch root action is not declared as core input."
         )
+      }
 
+      "reject creation with lookup action" in {
         create(
           actionDescription = ActionDescription.tryFromLfActionNode(
             ExampleTransactionFactory.lookupByKeyNode(

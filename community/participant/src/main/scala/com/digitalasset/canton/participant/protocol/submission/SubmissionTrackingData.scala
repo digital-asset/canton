@@ -78,7 +78,7 @@ object SubmissionTrackingData
       )
   )
 
-  override protected def name: String = "submission tracking data"
+  override def name: String = "submission tracking data"
 
   def fromProtoV0(
       submissionTrackingP: v0.SubmissionTrackingData

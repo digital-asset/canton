@@ -127,7 +127,7 @@ object DomainConnectionConfig
       _.toProtoV0.toByteString,
     )
   )
-  override protected def name: String = "domain connection config"
+  override def name: String = "domain connection config"
 
   def grpc(
       sequencerAlias: SequencerAlias,

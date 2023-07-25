@@ -163,13 +163,13 @@ class TopologyAdministrationGroupX(
         )
       }
 
-      // TODO(#11255): implement write service
+      // TODO(#12200): implement write service
     }
   }
 
   object domain_bootstrap {
 
-    // TODO(#11255) break individual bits out into separate admin functions, and have this only be the default wrapper
+    // TODO(#14048) break individual bits out into separate admin functions, and have this only be the default wrapper
     def generate_genesis_topology(
         name: String,
         domainOwners: Seq[Member],
@@ -268,7 +268,7 @@ class TopologyAdministrationGroupX(
     def propose(
         owners: Set[Fingerprint],
         threshold: PositiveInt,
-        // TODO(#11255) don't use the instance's root namespace key by default.
+        // TODO(#14056) don't use the instance's root namespace key by default.
         //  let the grpc service figure out the right key to use, once that's implemented
         signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
         serial: Option[PositiveInt] = None,
@@ -375,8 +375,8 @@ class TopologyAdministrationGroupX(
     }
   }
 
-  // TODO(#11255) add topology commands for v2 service
-  // TODO(#11255) complete @Help.Description's (by adapting TopologyAdministrationGroup-non-X descriptions)
+  // TODO(#12200) add topology commands for v2 service
+  // TODO(#14057) complete @Help.Description's (by adapting TopologyAdministrationGroup-non-X descriptions)
   @Help.Summary("Manage owner to key mappings")
   @Help.Group("Owner to key mappings")
   object owner_to_key_mappings
@@ -412,6 +412,7 @@ class TopologyAdministrationGroupX(
       }
 
     @Help.Summary("Rotate the key for an owner to key mapping")
+    // TODO(#12200): Implement write service
     def rotate_key(
         owner: KeyOwner,
         currentKey: PublicKey,
@@ -422,7 +423,7 @@ class TopologyAdministrationGroupX(
   @Help.Summary("Manage party to participant mappings")
   @Help.Group("Party to participant mappings")
   object party_to_participant_mappings extends Helpful {
-    // TODO(#11255): implement properly
+    // TODO(#12200): implement properly
     def proposeDelta(
         party: PartyId,
         adds: List[(ParticipantId, ParticipantPermissionX)] = Nil,
@@ -465,7 +466,7 @@ class TopologyAdministrationGroupX(
       )
     }
 
-    // TODO(#11255): implement write service properly
+    // TODO(#12200): implement write service properly
     def propose(
         party: PartyId,
         newParticipants: Seq[(ParticipantId, ParticipantPermissionX)],
@@ -523,14 +524,14 @@ class TopologyAdministrationGroupX(
   @Help.Summary("Manage domain trust certificates")
   @Help.Group("Domain trust certificates")
   object domain_trust_certificates extends Helpful {
-    // TODO(#11255): implement write service
+    // TODO(#12200): implement write service
 
     def list(
         filterStore: String = "",
         includeProposals: Boolean = false,
         timeQuery: TimeQueryX = TimeQueryX.HeadState,
         operation: Option[TopologyChangeOpX] = None,
-        // TODO(#11255) should be filterDomain and filterParticipant
+        // TODO(#14048) should be filterDomain and filterParticipant
         filterUid: String = "",
         filterSigningKey: String = "",
         protocolVersion: Option[String] = None,
@@ -550,7 +551,7 @@ class TopologyAdministrationGroupX(
       )
     }
 
-    // TODO(#11255) document console command
+    // TODO(#14057) document console command
     def active(domainId: DomainId, participantId: ParticipantId): Boolean =
       list(filterStore = domainId.filterString).exists { x =>
         x.item.domainId == domainId && x.item.participantId == participantId
@@ -561,7 +562,7 @@ class TopologyAdministrationGroupX(
   @Help.Summary("Inspect participant domain states")
   @Help.Group("Participant Domain States")
   object participant_domain_permissions extends Helpful {
-    // TODO(#11255): implement write service properly
+    // TODO(#12200): implement write service properly
     def authorize(
         domainId: DomainId,
         participant: ParticipantId,
@@ -623,7 +624,7 @@ class TopologyAdministrationGroupX(
          |and that the participant has registered a domain trust certificate"""
     )
     def active(domainId: DomainId, participantId: ParticipantId): Boolean = {
-      // TODO(#11255) Should we check the other side (domain accepts participant)?
+      // TODO(#14048) Should we check the other side (domain accepts participant)?
       domain_trust_certificates.active(domainId, participantId)
     }
   }
@@ -691,7 +692,7 @@ class TopologyAdministrationGroupX(
   @Help.Summary("Manage party hosting limits")
   @Help.Group("Party hosting limits")
   object party_hosting_limits extends Helpful {
-    // TODO(#11255): implement write service
+    // TODO(#12200): implement write service
 
     def list(
         filterStore: String = "",
@@ -721,7 +722,7 @@ class TopologyAdministrationGroupX(
   @Help.Summary("Manage package vettings")
   @Help.Group("Vetted Packages")
   object vetted_packages extends Helpful {
-    // TODO(#11255): implement write service
+    // TODO(#12200): implement write service
 
     def list(
         filterStore: String = "",
@@ -756,7 +757,7 @@ class TopologyAdministrationGroupX(
         threshold: Int,
         parties: Seq[PartyId],
         domainId: Option[DomainId] = None,
-        // TODO(#11255) don't use the instance's root namespace key by default.
+        // TODO(#14056) don't use the instance's root namespace key by default.
         //  let the grpc service figure out the right key to use, once that's implemented
         signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
         serial: Option[PositiveInt] = None,
@@ -834,7 +835,7 @@ class TopologyAdministrationGroupX(
         active: Seq[MediatorId],
         passive: Seq[MediatorId] = Seq.empty,
         group: NonNegativeInt = NonNegativeInt.zero,
-        // TODO(#11255) don't use the instance's root namespace key by default.
+        // TODO(#14056) don't use the instance's root namespace key by default.
         //  let the grpc service figure out the right key to use, once that's implemented
         signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
         serial: Option[PositiveInt] = None,
@@ -885,7 +886,7 @@ class TopologyAdministrationGroupX(
         threshold: PositiveInt,
         active: Seq[SequencerId],
         passive: Seq[SequencerId] = Seq.empty,
-        // TODO(#11255) don't use the instance's root namespace key by default.
+        // TODO(#14056) don't use the instance's root namespace key by default.
         //  let the grpc service figure out the right key to use, once that's implemented
         signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
         serial: Option[PositiveInt] = None,
@@ -933,7 +934,7 @@ class TopologyAdministrationGroupX(
     def propose(
         domain: DomainId,
         parameters: DynamicDomainParameters,
-        // TODO(#11255) don't use the instance's root namespace key by default.
+        // TODO(#14056) don't use the instance's root namespace key by default.
         //  let the grpc service figure out the right key to use, once that's implemented
         signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
         serial: Option[PositiveInt] = None,
@@ -941,7 +942,7 @@ class TopologyAdministrationGroupX(
       consoleEnvironment.run {
         adminCommand(
           TopologyAdminCommandsX.Write.Propose(
-            // TODO(#11255) maybe don't just take default values for dynamic parameters
+            // TODO(#14058) maybe don't just take default values for dynamic parameters
             DomainParametersStateX(
               domain,
               parameters,

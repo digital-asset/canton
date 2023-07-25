@@ -11,20 +11,15 @@ import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.NonEmptyColl.*
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.PackageService
-import com.digitalasset.canton.participant.protocol.submission.{
-  DomainUsabilityCheckerFull,
-  DomainsFilter,
-}
+import com.digitalasset.canton.participant.protocol.submission.{DomainsFilter, UsableDomain}
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.RoutingInternalError
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.TopologyErrors.NoDomainForSubmission
 import com.digitalasset.canton.participant.sync.{
   TransactionRoutingError,
   TransactionRoutingErrorWithDomain,
 }
-import com.digitalasset.canton.protocol.PackageInfoService
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.FutureInstances.*
@@ -33,11 +28,9 @@ import com.digitalasset.canton.version.ProtocolVersion
 import scala.concurrent.{ExecutionContext, Future}
 
 private[routing] class DomainSelectorFactory(
-    participantId: ParticipantId,
     admissibleDomains: AdmissibleDomains,
     priorityOfDomain: DomainId => Int,
     domainRankComputation: DomainRankComputation,
-    packageService: PackageService,
     domainStateProvider: DomainId => Either[
       TransactionRoutingErrorWithDomain,
       (TopologySnapshot, ProtocolVersion),
@@ -55,12 +48,10 @@ private[routing] class DomainSelectorFactory(
         informees = transactionData.informees,
       )
     } yield new DomainSelector(
-      participantId,
       transactionData,
       admissibleDomains,
       priorityOfDomain,
       domainRankComputation,
-      packageService,
       domainStateProvider,
       loggerFactory,
     )
@@ -79,12 +70,10 @@ private[routing] class DomainSelectorFactory(
   *                            domains and we assume the participant to be connected to all domains in `connectedDomains`
   */
 private[routing] class DomainSelector(
-    participantId: ParticipantId,
     val transactionData: TransactionData,
     admissibleDomains: NonEmpty[Set[DomainId]],
     priorityOfDomain: DomainId => Int,
     domainRankComputation: DomainRankComputation,
-    packageService: PackageInfoService,
     domainStateProvider: DomainId => Either[
       TransactionRoutingErrorWithDomain,
       (TopologySnapshot, ProtocolVersion),
@@ -167,8 +156,6 @@ private[routing] class DomainSelector(
     } yield DomainRank(Map.empty, priorityOfDomain(domainId), domainId)
   }
 
-  /** Filter domains using the [[com.digitalasset.canton.participant.protocol.submission.DomainUsabilityCheckerFull]]
-    */
   private def filterDomains(
       admissibleDomains: NonEmpty[Set[DomainId]]
   )(implicit
@@ -178,12 +165,11 @@ private[routing] class DomainSelector(
     val (unableToFetchStateDomains, domainStates) = admissibleDomains.forgetNE.toList.map {
       domainId =>
         domainStateProvider(domainId).map { case (snapshot, protocolVersion) =>
-          (domainId, protocolVersion, snapshot, packageService)
+          (domainId, protocolVersion, snapshot)
         }
     }.separate
 
     val domainsFilter = DomainsFilter(
-      localParticipantId = participantId,
       submittedTransaction = transactionData.transaction,
       domains = domainStates,
       loggerFactory = loggerFactory,
@@ -212,8 +198,6 @@ private[routing] class DomainSelector(
       domainId: DomainId,
       transactionVersion: TransactionVersion,
       inputContractsDomainIdO: Option[DomainId],
-  )(implicit
-      traceContext: TraceContext
   ): EitherT[Future, TransactionRoutingError, Unit] = {
     /*
       If there are input contracts, then they should be on domain `domainId`
@@ -244,13 +228,11 @@ private[routing] class DomainSelector(
     * - Participant is connected to `domainId`
     *
     * - List `domainsOfSubmittersAndInformees` contains `domainId`
-    *
-    * - Checks in [[com.digitalasset.canton.participant.protocol.submission.DomainUsabilityCheckerFull]]
     */
   private def validatePrescribedDomain(
       domainId: DomainId,
       transactionVersion: TransactionVersion,
-  )(implicit traceContext: TraceContext): EitherT[Future, TransactionRoutingError, Unit] = {
+  ): EitherT[Future, TransactionRoutingError, Unit] = {
 
     for {
       domainState <- EitherT.fromEither[Future](domainStateProvider(domainId))
@@ -267,20 +249,19 @@ private[routing] class DomainSelector(
       )
 
       // Further validations
-      domainUsabilityChecker = new DomainUsabilityCheckerFull(
-        domainId = domainId,
-        protocolVersion = protocolVersion,
-        snapshot = snapshot,
-        requiredPackagesByParty = transactionData.requiredPackagesPerParty,
-        packageInfoService = packageService,
-        localParticipantId = participantId,
-        transactionVersion = transactionVersion,
-      )
+      _ <- UsableDomain
+        .check(
+          domainId = domainId,
+          protocolVersion = protocolVersion,
+          snapshot = snapshot,
+          requiredPackagesByParty = transactionData.requiredPackagesPerParty,
+          transactionVersion = transactionVersion,
+        )
+        .leftMap[TransactionRoutingError] { err =>
+          TransactionRoutingError.ConfigurationErrors.InvalidPrescribedDomainId
+            .Generic(domainId, err.toString)
+        }
 
-      _ <- domainUsabilityChecker.isUsable.leftMap[TransactionRoutingError] { err =>
-        TransactionRoutingError.ConfigurationErrors.InvalidPrescribedDomainId
-          .Generic(domainId, err.toString)
-      }
     } yield ()
   }
 

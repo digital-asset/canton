@@ -77,7 +77,11 @@ class NaiveRequestTrackerTest
       )
       _ = assert(rt.requestInFlight(RequestCounter(0)), "Request present immediately after adding")
       _ = enterTick(rt, SequencerCounter(0), CantonTimestamp.Epoch)
-      _ <- checkConflictResult(RequestCounter(0), cdF, ActivenessResult.success)
+      _ <- checkConflictResult(
+        RequestCounter(0),
+        cdF,
+        ConflictDetectionHelpers.mkActivenessResult(),
+      )
       _ = assert(
         rt.requestInFlight(RequestCounter(0)),
         "Request present immediately after conflict detection",
@@ -117,7 +121,11 @@ class NaiveRequestTrackerTest
         CantonTimestamp.ofEpochMilli(10),
         ActivenessSet.empty,
       )
-      _ <- checkConflictResult(RequestCounter(0), cdF, ActivenessResult.success)
+      _ <- checkConflictResult(
+        RequestCounter(0),
+        cdF,
+        ConflictDetectionHelpers.mkActivenessResult(),
+      )
       _ = enterTick(rt, SequencerCounter(1), CantonTimestamp.ofEpochMilli(10))
       _ <- toF.map(timeout => assert(timeout.timedOut))
       _ = assert(

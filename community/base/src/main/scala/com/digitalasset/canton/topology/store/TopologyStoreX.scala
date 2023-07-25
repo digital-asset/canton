@@ -139,7 +139,7 @@ abstract class TopologyStoreX[+StoreID <: TopologyStoreId](implicit
       traceContext: TraceContext
   ): Future[Unit]
 
-  // TODO(#11255) only a temporary crutch to inspect the topology state
+  // TODO(#14048) only a temporary crutch to inspect the topology state
   def dumpStoreContent()(implicit traceContext: TraceContext): Unit
 
   /** store an initial set of topology transactions as given into the store */
@@ -155,7 +155,7 @@ abstract class TopologyStoreX[+StoreID <: TopologyStoreId](implicit
   def inspect(
       proposals: Boolean,
       timeQuery: TimeQueryX,
-      // TODO(#11255) - consider removing `recentTimestampO` and moving callers to TimeQueryX.Snapshot
+      // TODO(#14048) - consider removing `recentTimestampO` and moving callers to TimeQueryX.Snapshot
       recentTimestampO: Option[CantonTimestamp],
       op: Option[TopologyChangeOpX],
       typ: Option[TopologyMappingX.Code],
@@ -259,7 +259,7 @@ object TopologyStoreX {
   lazy val initialParticipantDispatchingSet = Set(
     TopologyMappingX.Code.DomainTrustCertificateX,
     TopologyMappingX.Code.OwnerToKeyMappingX,
-    // TODO(#11255) - potentially revisit this once we implement TopologyStoreX.filterInitialParticipantDispatchingTransactions
+    // TODO(#14060) - potentially revisit this once we implement TopologyStoreX.filterInitialParticipantDispatchingTransactions
     TopologyMappingX.Code.NamespaceDelegationX,
     TopologyMappingX.Code.IdentifierDelegationX,
     TopologyMappingX.Code.UnionspaceDefinitionX,
@@ -270,7 +270,7 @@ object TopologyStoreX {
       domainId: DomainId,
       transactions: Seq[GenericStoredTopologyTransactionX],
   ): Seq[GenericSignedTopologyTransactionX] = {
-    // TODO(#11255): Extend filtering along the lines of:
+    // TODO(#14060): Extend filtering along the lines of:
     //  TopologyStore.filterInitialParticipantDispatchingTransactions
     transactions.map(_.transaction).collect {
       case tx @ SignedTopologyTransactionX(

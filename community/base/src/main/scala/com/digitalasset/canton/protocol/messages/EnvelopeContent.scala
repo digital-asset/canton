@@ -10,13 +10,7 @@ import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.{v0, v1, v2, v3}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.{
-  HasProtocolVersionedWithContextCompanion,
-  HasProtocolVersionedWrapper,
-  ProtoVersion,
-  ProtocolVersion,
-  RepresentativeProtocolVersion,
-}
+import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 
 sealed trait EnvelopeContent
@@ -128,7 +122,7 @@ object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[Envelope
       hashOps: HashOps,
       envelopeContent: v0.EnvelopeContent,
   ): ParsingResult[EnvelopeContent] = {
-    import v0.EnvelopeContent.{SomeEnvelopeContent as Content}
+    import v0.EnvelopeContent.SomeEnvelopeContent as Content
     val messageE = (envelopeContent.someEnvelopeContent match {
       case Content.InformeeMessage(messageP) =>
         InformeeMessage.fromProtoV0(hashOps)(messageP)
@@ -158,7 +152,7 @@ object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[Envelope
       hashOps: HashOps,
       envelopeContent: v1.EnvelopeContent,
   ): ParsingResult[EnvelopeContent] = {
-    import v1.EnvelopeContent.{SomeEnvelopeContent as Content}
+    import v1.EnvelopeContent.SomeEnvelopeContent as Content
     val messageE = (envelopeContent.someEnvelopeContent match {
       case Content.InformeeMessage(messageP) =>
         InformeeMessage.fromProtoV1(hashOps)(messageP)
@@ -188,7 +182,7 @@ object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[Envelope
       hashOps: HashOps,
       envelopeContent: v2.EnvelopeContent,
   ): ParsingResult[EnvelopeContent] = {
-    import v2.EnvelopeContent.{SomeEnvelopeContent as Content}
+    import v2.EnvelopeContent.SomeEnvelopeContent as Content
     val messageE = (envelopeContent.someEnvelopeContent match {
       case Content.InformeeMessage(messageP) =>
         InformeeMessage.fromProtoV1(hashOps)(messageP)
@@ -217,7 +211,7 @@ object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[Envelope
       hashOps: HashOps,
       contentP: v3.EnvelopeContent,
   ): ParsingResult[EnvelopeContent] = {
-    import v3.EnvelopeContent.{SomeEnvelopeContent as Content}
+    import v3.EnvelopeContent.SomeEnvelopeContent as Content
     for {
       content <- (contentP.someEnvelopeContent match {
         case Content.InformeeMessage(messageP) =>
@@ -236,18 +230,14 @@ object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[Envelope
           RegisterTopologyTransactionRequest.fromProtoV0(messageP)
         case Content.RegisterTopologyTransactionResponse(messageP) =>
           RegisterTopologyTransactionResponse.fromProtoV1(messageP)
-        case Content.RegisterTopologyTransactionRequestX(messageP) =>
-          RegisterTopologyTransactionRequestX.fromProtoV2(messageP)
-        case Content.RegisterTopologyTransactionResponseX(messageP) =>
-          RegisterTopologyTransactionResponseX.fromProtoV2(messageP)
-        case Content.AcceptedTopologyTransactions(messageP) =>
-          AcceptedTopologyTransactionsX.fromProtoV2(messageP)
+        case Content.TopologyTransactionsBroadcast(messageP) =>
+          TopologyTransactionsBroadcastX.fromProtoV2(messageP)
         case Content.Empty => Left(OtherError("Cannot deserialize an empty message content"))
       }): ParsingResult[UnsignedProtocolMessageV3]
     } yield new EnvelopeContentV3(content) {}
   }
 
-  override protected def name: String = "EnvelopeContent"
+  override def name: String = "EnvelopeContent"
 
   def messageFromByteArray[M <: UnsignedProtocolMessage](
       protocolVersion: ProtocolVersion,

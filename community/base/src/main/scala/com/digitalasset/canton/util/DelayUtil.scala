@@ -74,7 +74,7 @@ object DelayUtil extends NamedLogging {
     val future = promise.future
 
     import com.digitalasset.canton.lifecycle.RunOnShutdown
-    flagCloseable.runOnShutdown(new RunOnShutdown() {
+    val cancelToken = flagCloseable.runOnShutdown(new RunOnShutdown() {
       val name = s"$functionFullName-shutdown"
       def done = promise.isCompleted
       def run(): Unit = {
@@ -84,6 +84,9 @@ object DelayUtil extends NamedLogging {
 
     val trySuccess: Runnable = { () =>
       promise.trySuccess(UnlessShutdown.Outcome(())).discard
+      // No need to complete the promise on shutdown with an AbortedDueToShutdown since we succeeded, and also
+      // keeps the list of shutdown tasks from growing indefinitely with each retry
+      flagCloseable.cancelShutdownTask(cancelToken)
     }
 
     // TODO(i4245): Use Clock instead

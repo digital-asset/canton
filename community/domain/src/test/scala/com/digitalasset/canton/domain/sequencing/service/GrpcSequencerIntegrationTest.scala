@@ -170,7 +170,7 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
       params,
       None,
       BaseTest.testedProtocolVersion,
-      enableMediatorUnauthenticatedMessages = false,
+      enableBroadcastOfUnauthenticatedMessages = false,
     )
   private val connectService = new GrpcSequencerConnectService(
     domainId = domainId,

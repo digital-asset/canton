@@ -248,6 +248,7 @@ class ParticipantNodeBootstrap(
             indexedStringStore: IndexedStringStore,
         ): (SyncDomainPersistentStateManager, ParticipantTopologyDispatcherCommon) = {
           val manager = new SyncDomainPersistentStateManagerOld(
+            participantId,
             aliasResolution,
             storage,
             indexedStringStore,
@@ -382,7 +383,7 @@ class ParticipantNodeBootstrap(
   override protected def sequencedTopologyStores: Seq[TopologyStore[TopologyStoreId]] =
     this.getNode.toList.flatMap(_.sync.syncDomainPersistentStateManager.getAll.map {
       case (_, state) =>
-        // TODO(#11255) chicken and egg issue: we create the manager after we create the topology manager read service
+        // TODO(#14048) chicken and egg issue: we create the manager after we create the topology manager read service
         //   we should make the "stores" getter a mutable atomic reference
         state.topologyStore.asInstanceOf[TopologyStore[TopologyStoreId]]
     })
@@ -428,9 +429,10 @@ object ParticipantNodeBootstrap {
 
     override protected def createEngine(arguments: Arguments): Engine =
       DAMLe.newEngine(
-        arguments.parameterConfig.uniqueContractKeys,
-        arguments.parameterConfig.devVersionSupport,
-        arguments.parameterConfig.enableEngineStackTrace,
+        uniqueContractKeys = arguments.parameterConfig.uniqueContractKeys,
+        enableLfDev = arguments.parameterConfig.devVersionSupport,
+        enableStackTraces = arguments.parameterConfig.enableEngineStackTrace,
+        enableContractUpgrading = arguments.parameterConfig.enableContractUpgrading,
       )
 
     override protected def createResourceService(

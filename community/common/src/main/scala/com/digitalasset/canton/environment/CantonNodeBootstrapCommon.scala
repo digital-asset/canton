@@ -123,7 +123,7 @@ abstract class CantonNodeBootstrapCommon[
   override def clock: Clock = arguments.clock
   def config: NodeConfig = arguments.config
   def parameterConfig: ParameterConfig = arguments.parameterConfig
-  // TODO(#11255) unify
+  // TODO(#14048) unify parameters and parameterConfig
   def parameters: ParameterConfig = parameterConfig
   override def timeouts: ProcessingTimeout = arguments.parameterConfig.processingTimeouts
   override def loggerFactory: NamedLoggerFactory = arguments.loggerFactory

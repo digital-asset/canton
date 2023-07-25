@@ -92,6 +92,30 @@ class IncomingTopologyTransactionAuthorizationValidator(
     identifierDelegationCache.clear()
   }
 
+  /** determine whether one of the txs got already added earlier */
+  private def findDuplicates(
+      timestamp: CantonTimestamp,
+      transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
+  )(implicit traceContext: TraceContext): Future[Seq[Option[EffectiveTime]]] = {
+    Future.sequence(
+      transactions.map { tx =>
+        // skip duplication check for non-adds
+        if (tx.transaction.op != TopologyChangeOp.Add)
+          Future.successful(None)
+        else {
+          // check that the transaction has not been added before (but allow it if it has a different version ...)
+          store
+            .findStored(tx)
+            .map(
+              _.filter(x =>
+                x.validFrom.value < timestamp && x.transaction.protoVersion == tx.protoVersion && x.transaction == tx
+              ).map(_.validFrom)
+            )
+        }
+      }
+    )
+  }
+
   /** Validates the provided domain topology transactions and applies the certificates to the auth state
     *
     * When receiving topology transactions we have to evaluate them and continuously apply any
@@ -107,6 +131,7 @@ class IncomingTopologyTransactionAuthorizationValidator(
   ): Future[(UpdateAggregation, Seq[ValidatedTopologyTransaction])] = {
 
     val (updateAggregation, signaturesChecked) = validateSignaturesAndGrabAuthChecks(transactions)
+    val validateDuplicatesF = findDuplicates(timestamp, transactions)
 
     val loadGraphsF = loadAuthorizationGraphs(timestamp, updateAggregation.authNamespaces)
     val loadUidsF =
@@ -117,16 +142,26 @@ class IncomingTopologyTransactionAuthorizationValidator(
     for {
       _ <- loadGraphsF
       cascadingUidsFromNamespace <- loadUidsF
+      validateDuplicates <- validateDuplicatesF
     } yield {
-      val validated = signaturesChecked.map {
-        case ValidatedTopologyTransaction(elem: SignedTopologyTransaction[_], None) =>
+      val validated = signaturesChecked.zip(validateDuplicates).map {
+        // two times None means the tx has a valid signature and hasn't been added before
+        case (ValidatedTopologyTransaction(elem: SignedTopologyTransaction[_], None), None) =>
           val res = if (processTransaction(elem)) {
             None
           } else {
             Some(TopologyTransactionRejection.NotAuthorized)
           }
           ValidatedTopologyTransaction(elem, res)
-        case v => v
+        case (
+              ValidatedTopologyTransaction(elem: SignedTopologyTransaction[_], None),
+              Some(knownBefore),
+            ) =>
+          ValidatedTopologyTransaction(
+            elem,
+            Some(TopologyTransactionRejection.Duplicate(knownBefore.value)),
+          )
+        case (v, _) => v
       }
       // add any uid for which we have a valid identifier delegation to the cascading set (as a new namespace
       // certificate might activate an identifier delegation)

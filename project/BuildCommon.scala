@@ -579,7 +579,11 @@ object BuildCommon {
           scala_logging,
         ),
         // core packaging commands
-        bundlePack := sharedAppPack,
+        bundlePack := sharedAppPack ++ Seq(
+          "-r",
+          "community/LICENSE-open-source-bundle.txt",
+          "LICENSE.txt",
+        ),
         additionalBundleSources := Seq.empty,
         assembly / mainClass := Some("com.digitalasset.canton.CantonCommunityApp"),
         assembly / assemblyJarName := s"canton-open-source-${version.value}.jar",
@@ -695,7 +699,6 @@ object BuildCommon {
       .settings(
         sharedCantonSettings,
         libraryDependencies ++= Seq(
-          janino % Test, // For conditionals it logback-test.xml
           akka_slf4j, // not used at compile time, but required by com.digitalasset.canton.util.AkkaUtil.createActorSystem
           logback_classic,
           logback_core,
@@ -707,6 +710,9 @@ object BuildCommon {
           cats_scalacheck % Test,
           mockito_scala % Test,
           scalatestMockito % Test,
+          magnolia % Test,
+          magnolifyScalacheck % Test,
+          magnolifyShared % Test,
           cats_law % Test,
           circe_generic_extras,
           jul_to_slf4j % Test,

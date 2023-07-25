@@ -9,10 +9,12 @@ import com.digitalasset.canton.data.FullTransferOutTree
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.*
+import com.digitalasset.canton.protocol.LfTemplateId
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.SourceProtocolVersion
 
 import scala.concurrent.ExecutionContext
@@ -22,6 +24,7 @@ import scala.concurrent.ExecutionContext
 private[transfer] final case class TransferOutValidation(
     request: FullTransferOutTree,
     expectedStakeholders: Set[LfPartyId],
+    expectedTemplateId: LfTemplateId,
     sourceProtocolVersion: SourceProtocolVersion,
     sourceTopology: TopologySnapshot,
     targetTopology: Option[TopologySnapshot],
@@ -50,6 +53,7 @@ private[transfer] final case class TransferOutValidation(
         TransferOutValidationTransferringParticipant(
           request,
           expectedStakeholders,
+          expectedTemplateId,
           sourceProtocolVersion,
           sourceTopology,
           targetTopology,
@@ -60,6 +64,19 @@ private[transfer] final case class TransferOutValidation(
         TransferOutValidationNonTransferringParticipant(request, sourceTopology, logger)
     }
 
+  private def checkTemplateId()(implicit
+      executionContext: ExecutionContext
+  ): EitherT[FutureUnlessShutdown, TransferProcessorError, Unit] =
+    EitherT.cond[FutureUnlessShutdown](
+      // TODO(#12373) Adapt when releasing BFT
+      sourceProtocolVersion.v < ProtocolVersion.dev || expectedTemplateId == request.templateId,
+      (),
+      TemplateIdMismatch(
+        declaredTemplateId = request.templateId,
+        expectedTemplateId = expectedTemplateId,
+      ),
+    )
+
 }
 
 private[transfer] object TransferOutValidation {
@@ -67,6 +84,7 @@ private[transfer] object TransferOutValidation {
   def apply(
       request: FullTransferOutTree,
       expectedStakeholders: Set[LfPartyId],
+      expectedTemplateId: LfTemplateId,
       sourceProtocolVersion: SourceProtocolVersion,
       sourceTopology: TopologySnapshot,
       targetTopology: Option[TopologySnapshot],
@@ -80,6 +98,7 @@ private[transfer] object TransferOutValidation {
     val validation = TransferOutValidation(
       request,
       expectedStakeholders,
+      expectedTemplateId,
       sourceProtocolVersion,
       sourceTopology,
       targetTopology,
@@ -89,6 +108,7 @@ private[transfer] object TransferOutValidation {
     for {
       _ <- validation.checkStakeholders
       _ <- validation.checkParticipants(logger)
+      _ <- validation.checkTemplateId()
     } yield ()
 
   }

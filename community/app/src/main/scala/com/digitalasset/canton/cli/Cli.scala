@@ -57,7 +57,6 @@ final case class Cli(
     bootstrapScriptPath: Option[File] = None,
     manualStart: Boolean = false,
     autoConnectLocal: Boolean = false,
-    mergeAwsLogs: Option[Boolean] = None,
 ) {
 
   /** sets the properties our logback.xml is looking for */
@@ -98,7 +97,6 @@ final case class Cli(
       "LOG_FORMAT_JSON",
       "LOG_IMMEDIATE_FLUSH",
       "KMS_LOG_IMMEDIATE_FLUSH",
-      "MERGE_KMS_LOG",
     ).foreach(System.clearProperty(_).discard[String])
     logFileName.foreach(System.setProperty("LOG_FILE_NAME", _))
     kmsLogFileName.foreach(System.setProperty("KMS_LOG_FILE_NAME", _))
@@ -125,7 +123,6 @@ final case class Cli(
 
     logImmediateFlush.foreach(f => System.setProperty("LOG_IMMEDIATE_FLUSH", f.toString))
     kmsLogImmediateFlush.foreach(f => System.setProperty("KMS_LOG_IMMEDIATE_FLUSH", f.toString))
-    mergeAwsLogs.foreach(f => System.setProperty("MERGE_KMS_LOG", f.toString))
   }
 
   private def setLevel(levelO: Option[Level], name: String): Unit = {
@@ -303,15 +300,6 @@ object Cli {
         )
         .valueName("true(default)|false")
         .action((enabled, cli) => cli.copy(kmsLogImmediateFlush = Some(enabled)))
-
-      opt[Boolean]("merge-kms-log")
-        .text(
-          """When true, KMS call logs will be merged into the main canton log file instead of being logged
-            | to a separate log file.
-            |""".stripMargin
-        )
-        .valueName("false(default)|true")
-        .action((enabled, cli) => cli.copy(mergeAwsLogs = Some(enabled)))
 
       opt[String]("log-profile")
         .text("Preconfigured logging profiles: (container)")

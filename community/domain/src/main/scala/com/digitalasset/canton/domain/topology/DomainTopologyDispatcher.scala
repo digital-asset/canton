@@ -25,7 +25,12 @@ import com.digitalasset.canton.lifecycle.{
   Lifecycle,
   UnlessShutdown,
 }
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  NamedLoggerFactory,
+  NamedLogging,
+  TracedLogger,
+}
 import com.digitalasset.canton.protocol.messages.DomainTopologyTransactionMessage
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError.{
   RequestInvalid,
@@ -34,7 +39,7 @@ import com.digitalasset.canton.sequencing.client.SendAsyncClientError.{
 import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
-import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
+import com.digitalasset.canton.time.{Clock, DomainTimeTracker, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{
   DomainTopologyClient,
@@ -49,15 +54,17 @@ import com.digitalasset.canton.topology.store.{
   TopologyStore,
   TopologyStoreId,
 }
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{BatchTracing, TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, FutureUtil}
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, FutureUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, SequencerCounter, checked}
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
+import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
@@ -152,6 +159,8 @@ private[domain] class DomainTopologyDispatcher(
   private case object Last extends DispatchStrategy
 
   private def dispatchStrategy(mapping: TopologyMapping): DispatchStrategy = mapping match {
+    // participant state changes, domain parameters changes and mediator domain states need
+    // to be sent separately
     case _: ParticipantState | _: DomainParametersChange => Last
     case _: MediatorDomainState => Alone
     case _: IdentifierDelegation | _: NamespaceDelegation | _: OwnerToKeyMapping |
@@ -210,7 +219,7 @@ private[domain] class DomainTopologyDispatcher(
 
   override def addedSignedTopologyTransaction(
       timestamp: CantonTimestamp,
-      transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
+      transactions: Seq[GenericSignedTopologyTransaction],
   )(implicit traceContext: TraceContext): Unit = performUnlessClosing(functionFullName) {
     val last = lastTs.getAndSet(timestamp)
     // we assume that we get txs in strict ascending timestamp order
@@ -250,7 +259,7 @@ private[domain] class DomainTopologyDispatcher(
         sequencedTimestamp: SequencedTime,
         effectiveTimestamp: EffectiveTime,
         sc: SequencerCounter,
-        transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
+        transactions: Seq[GenericSignedTopologyTransaction],
     )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.pure {
       transactions.foreach { tx =>
         logger.debug(
@@ -299,23 +308,26 @@ private[domain] class DomainTopologyDispatcher(
     */
   private def determineBatchFromQueue()
       : Seq[Traced[StoredTopologyTransaction[TopologyChangeOp]]] = {
-
-    val items =
-      queue.dequeueWhile(tx =>
-        dispatchStrategy(tx.value.transaction.transaction.element.mapping) == Batched
-      )
-
-    val includeNext = queue.headOption
-      .map(tx => dispatchStrategy(tx.value.transaction.transaction.element.mapping))
-      .exists {
-        case Alone => items.isEmpty
-        case Batched => true // shouldn't actually happen ...
-        case Last => true
+    val builder = mutable.ListBuffer.newBuilder[Traced[StoredTopologyTransaction[TopologyChangeOp]]]
+    @tailrec
+    def go(size: Int): Unit = {
+      queue.headOption.map { tx =>
+        dispatchStrategy(tx.value.transaction.transaction.element.mapping)
+      } match {
+        // if batched, keep on batching
+        case Some(Batched) =>
+          builder.addOne(queue.dequeue())
+          if (size < sender.maxBatchSize) go(size + 1)
+        // if last, abort batching
+        case Some(Last) =>
+          builder.addOne(queue.dequeue())
+        // if alone, only add if it is alone, else terminate
+        case Some(Alone) if size == 0 => builder.addOne(queue.dequeue())
+        case _ => // done
       }
-
-    (if (includeNext)
-       items :+ queue.dequeue()
-     else items).toSeq
+    }
+    go(0)
+    builder.result().toSeq
   }
 
   /** wait an epsilon if the effective time is reduced with this change */
@@ -352,6 +364,43 @@ private[domain] class DomainTopologyDispatcher(
 
         case _ => empty
       }
+  }
+
+  private def waitIfTopologyManagerKeyWasRolled(
+      transactions: NonEmpty[Seq[StoredTopologyTransaction[TopologyChangeOp]]]
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
+    val owner = domainId.keyOwner
+    // we need to wait for the new key to become effective, as the next domain topology
+    // transaction will be signed with that key ...
+    val mustWait = transactions
+      .map(x => (x.transaction.transaction.op, x.transaction.transaction.element.mapping))
+      .exists {
+        case (TopologyChangeOp.Add, OwnerToKeyMapping(`owner`, _)) => true
+        case _ => false
+      }
+    if (!mustWait) EitherT.pure(())
+    else {
+      for {
+        param <- EitherT
+          .right(
+            authorizedStoreSnapshot(transactions.head1.validFrom.value)
+              .findDynamicDomainParameters()
+              .map(_.toOption)
+          )
+          .mapK(FutureUnlessShutdown.outcomeK)
+        delay = param.map(_.topologyChangeDelay).getOrElse(NonNegativeFiniteDuration.Zero)
+        _ = logger.debug(
+          s"Waiting $delay due to domain manager key rolling before resuming dispatching"
+        )
+        _ <- EitherT.right(
+          clock.scheduleAfter(_ => (), delay.duration)
+        )
+      } yield {
+        logger.debug(
+          s"Resuming dispatching after key roll"
+        )
+      }
+    }
   }
 
   def flush()(implicit traceContext: TraceContext): Unit = {
@@ -418,6 +467,66 @@ private[domain] class DomainTopologyDispatcher(
     checked(topologyClient.trySnapshot(safeTimestamp(timestamp)))
   }
 
+  /** re-order and split into three buckets to ensure that the participant gets
+    * the right keys and certificates first, such that it can then subsequently
+    * validate the signature on the domain topology manager message
+    */
+  private def splitCatchupTransactionsForParticipant(
+      participant: ParticipantId,
+      txs: NonEmpty[Seq[StoredTopologyTransaction[TopologyChangeOp]]],
+  ): (
+      Seq[GenericSignedTopologyTransaction],
+      Seq[GenericSignedTopologyTransaction],
+      Seq[GenericSignedTopologyTransaction],
+  ) = {
+    // in order to allow participants validating the topology transaction message
+    // with the right signature, we rearrange the batch such that we get:
+    // - add namespace delegation, add-tx of owner to key mapping of domain and sequencer, domain trust certificate in a first batch
+    // then we forward the rest of the tx. any key rolls for domain members are moved to the back
+    def empty() = Seq.empty[GenericSignedTopologyTransaction]
+    def special(mapping: TopologyMapping): Boolean = mapping match {
+      // include domain keys
+      case OwnerToKeyMapping(owner, _) => owner.uid == domainId.uid
+      // include certs
+      case NamespaceDelegation(namespace, _, _) =>
+        namespace == domainId.uid.namespace || namespace == participant.uid.namespace
+      case IdentifierDelegation(uid, _) => uid == domainId.uid || uid == participant.uid
+      case _ => false
+    }
+    txs
+      .map(x =>
+        (x.transaction, x.transaction.transaction.op, x.transaction.transaction.element.mapping)
+      )
+      // the tuple represents the three buckets (head, mid, tail)
+      .foldLeft((empty(), empty(), empty())) {
+        // when sending the catchup, we need to use the last key the participant knows.
+        // so we move a possible key removal of domain members to the end.
+        // as the txs still need to be authorized, we also move the cert removals to the end
+        case (
+              (head, mid, tail),
+              (tx, TopologyChangeOp.Remove, mapping),
+            ) if special(mapping) =>
+          (head, mid, tail :+ tx)
+        // filter out head cases
+        case ((head, mid, tail), (tx, TopologyChangeOp.Add, mapping)) if special(mapping) =>
+          (head :+ tx, mid, tail)
+        // always include domain trust participant certs (preserve their order)
+        case (
+              (head, mid, tail),
+              (tx, _anyOpIsGood, ParticipantState(side, dId, `participant`, _, _)),
+            ) if domainId == dId && side != RequestSide.To =>
+          (head :+ tx, mid, tail)
+        // rest goes to mid
+        case ((head, mid, tail), (tx, _, _)) => (head, mid :+ tx, tail)
+      } match {
+      case (head, mid, tail) if (head.size + mid.size + tail.size) < sender.maxBatchSize =>
+        // send as one tx to save some startup time in our tests
+        (head ++ mid ++ tail, Seq.empty, Seq.empty)
+      // if the size of the batch is too large, keep the split
+      case x => x
+    }
+  }
+
   private def bootstrapAndDispatch(
       tracedTransaction: Traced[
         NonEmpty[Seq[StoredTopologyTransaction[TopologyChangeOp]]]
@@ -428,30 +537,67 @@ private[domain] class DomainTopologyDispatcher(
         transactions.last1.transaction.transaction.element.mapping match {
           case ParticipantState(_, _, participant, _, _) =>
             for {
-              catchupForParticipant <- EitherT.right(
+              catchupForParticipantO <- EitherT.right(
                 performUnlessClosingF(functionFullName)(
                   catchup
                     .determineCatchupForParticipant(
                       transactions.head1.validFrom.value,
                       transactions.last1.validFrom.value,
                       participant,
+                      protocolVersion,
                     )
                 )
               )
               // if we crash during dispatching, we will resend all these transactions again
               // to the participant. this will for now produce some ugly warnings, but the
               // bootstrapping transactions will just be deduplicated at the transaction processor
-              // once we move to topology privacy, the participant will take care of this as
-              // rather than pushing the initial state, the participants will pull it on demand
-              _ <- catchupForParticipant.fold(EitherT.rightT[FutureUnlessShutdown, String](())) {
-                txs =>
-                  sender.sendTransactions(
-                    authorizedCryptoSnapshot(transactions.head1.validFrom.value),
-                    txs.toDomainTopologyTransactions,
-                    Set(participant),
-                  )
+              // with 3.x, the catchup / bootstrapping will not be necessary as participants
+              // will download it directly from the sequencers
+              catchupNE = catchupForParticipantO.flatMap { case (initial, txs) =>
+                NonEmpty.from(txs.result).map(NE => (initial, NE))
               }
-            } yield catchupForParticipant.map(_ => participant)
+              _ <- catchupNE.fold(EitherT.rightT[FutureUnlessShutdown, String](())) {
+                case (initial, txs) =>
+                  // determine correct snapshot to sign this batch
+                  // if the node is new, then the batch must be signed with the current key, as the snapshot will not contain
+                  // old keys. if the participant has been there before, we need to use the last key the participant has known
+                  val sp =
+                    if (initial) {
+                      logger.debug(
+                        s"Using current authorized snapshot from=${transactions.head1.validFrom.value} for signing messages"
+                      )
+                      authorizedCryptoSnapshot(transactions.head1.validFrom.value)
+                    } else {
+                      logger.debug(
+                        s"Using catchup authorized snapshot from=${txs.head1.validFrom.value} for signing messages"
+                      )
+                      authorizedCryptoSnapshot(txs.head1.validFrom.value)
+                    }
+                  // split the topology transactions such that the first message is self-consistent
+                  val (head, mid, tail) = splitCatchupTransactionsForParticipant(
+                    participant,
+                    txs,
+                  )
+                  // send the catchup packs sequentially
+                  val sentET: EitherT[FutureUnlessShutdown, String, Unit] =
+                    MonadUtil.sequentialTraverse_(Seq((head, false), (mid, true), (tail, false))) {
+                      case (txs, batching) if txs.nonEmpty =>
+                        sender.sendTransactions(
+                          sp,
+                          txs,
+                          Set(participant),
+                          s"catchup-${if (batching) "tail" else "head"}",
+                          batching,
+                        )
+                      case _ => EitherT.pure(())
+                    }
+                  sentET.flatMap { _ =>
+                    // if the catchup contained a topology manager key change, we actuallly need to wait for it
+                    // to become effective on the participant before we can proceed
+                    waitIfTopologyManagerKeyWasRolled(txs)
+                  }
+              }
+            } yield catchupForParticipantO.map(_ => participant)
           case _ =>
             EitherT.rightT(None)
         }
@@ -495,6 +641,7 @@ private[domain] class DomainTopologyDispatcher(
             targetStore.updateDispatchingWatermark(transactions.last1.validFrom.value)
           )
         )
+        _ <- waitIfTopologyManagerKeyWasRolled(transactions)
       } yield ()
     }
   }
@@ -503,12 +650,20 @@ private[domain] class DomainTopologyDispatcher(
       transactions: NonEmpty[Seq[StoredTopologyTransaction[TopologyChangeOp]]],
       add: Seq[Member],
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
+    require(transactions.size <= sender.maxBatchSize)
     val headSnapshot = authorizedStoreSnapshot(transactions.head1.validFrom.value)
     val receivingParticipantsF = performUnlessClosingF(functionFullName)(
       headSnapshot
         .participants()
         .map(_.collect {
-          case (participantId, perm) if perm.isActive => participantId
+          case (participantId, perm)
+              if perm.isActive ||
+                // with protocol version v5, we also dispatch topology transactions to disabled participants
+                // which avoids the "catchup" tx computation.
+                // but beware, there is a difference between "Disabled" and "None". with disabled, you are
+                // explicitly disabled, with None, we are back at the behaviour of < v5
+                protocolVersion >= ProtocolVersion.v5 =>
+            participantId
         })
     )
     val mediatorsF = performUnlessClosingF(functionFullName)(
@@ -521,6 +676,7 @@ private[domain] class DomainTopologyDispatcher(
         authorizedCryptoSnapshot(transactions.head1.validFrom.value),
         transactions.map(_.transaction).toList,
         (receivingParticipants ++ staticDomainMembers ++ mediators ++ add).toSet,
+        "normal",
       )
     } yield ()
   }
@@ -563,12 +719,11 @@ private[domain] object DomainTopologyDispatcher {
       client,
       timeTracker,
       clock,
-      maxBatchSize = 1000,
+      maxBatchSize = 100,
       retryInterval = 10.seconds,
       parameters.processingTimeouts,
       loggerFactory,
     )
-
     val dispatcher = new DomainTopologyDispatcher(
       domainId,
       domainTopologyManager.protocolVersion,
@@ -587,17 +742,45 @@ private[domain] object DomainTopologyDispatcher {
     )
 
     domainTopologyManager.addObserver(dispatcher)
-    dispatcher.init(flushSequencerWithTimeProof(timeTracker, targetClient)).map { _ => dispatcher }
+    dispatcher
+      .init(
+        flushSequencerWithTimeProof(
+          clock,
+          timeTracker,
+          targetClient,
+          loggerFactory.getTracedLogger(DomainTopologyDispatcher.getClass),
+        )
+      )
+      .map { _ =>
+        dispatcher
+      }
 
   }
 
   private def flushSequencerWithTimeProof(
+      clock: Clock,
       timeTracker: DomainTimeTracker,
       targetClient: DomainTopologyClient,
+      logger: TracedLogger,
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
   ): FutureUnlessShutdown[Unit] = {
+    val now = clock.now
+    def go(target: CantonTimestamp): Unit = {
+      timeTracker
+        .fetchTimeProof()
+        .map { proof =>
+          if (proof.timestamp < target) {
+            if (clock.isSimClock) {
+              go(target)
+            } else {
+              clock.scheduleAfter(_ => go(target), java.time.Duration.ofMillis(500))
+            }
+          }
+        }
+        .discard
+    }
     for {
       // flush the sequencer client with a time-proof. this should ensure that we give the
       // topology processor time to catch up with any pending submissions
@@ -605,9 +788,14 @@ private[domain] object DomainTopologyDispatcher {
       // This is not fool-proof as the time proof may be processed by a different sequencer replica
       // than where earlier transactions have been submitted and therefore overtake them.
       timestamp <- timeTracker.fetchTimeProof().map(_.timestamp)
-      // wait until the topology client has seen this timestamp
+      targetTimestamp = now.max(timestamp)
+      // kick off background polling to ensure we don't get stuck
+      _ = go(targetTimestamp)
+      // wait until the topology client has seen this timestamp or our current clock
+      // we need our current clock if we are lagging behind a lot (e.g. replaying after backup)
+      _ = logger.info(s"Waiting for sequencer ts=${targetTimestamp} with current=$timestamp")
       _ <- targetClient
-        .awaitTimestampUS(timestamp, waitForEffectiveTime = false)
+        .awaitTimestampUS(targetTimestamp, waitForEffectiveTime = false)
         .getOrElse(FutureUnlessShutdown.unit)
     } yield ()
   }
@@ -615,10 +803,13 @@ private[domain] object DomainTopologyDispatcher {
 }
 
 trait DomainTopologySender extends FlagCloseable with HealthComponent with NamedLogging {
+  def maxBatchSize: Int
   def sendTransactions(
       snapshot: DomainSnapshotSyncCryptoApi,
-      transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
+      transactions: Seq[GenericSignedTopologyTransaction],
       recipients: Set[Member],
+      name: String,
+      batching: Boolean = true,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit]
 }
 
@@ -630,7 +821,7 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
       client: SequencerClient,
       timeTracker: DomainTimeTracker,
       clock: Clock,
-      maxBatchSize: Int,
+      val maxBatchSize: Int,
       retryInterval: FiniteDuration,
       val timeouts: ProcessingTimeout,
       val loggerFactory: NamedLoggerFactory,
@@ -645,11 +836,16 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
 
     def sendTransactions(
         snapshot: DomainSnapshotSyncCryptoApi,
-        transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
+        transactions: Seq[GenericSignedTopologyTransaction],
         recipients: Set[Member],
+        name: String,
+        batching: Boolean,
     )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
+      val nonEmptyGroup: Option[NonEmpty[Seq[NonEmpty[Set[Member]]]]] = NonEmpty
+        .from(recipients.toSeq.map(rec => NonEmpty.mk(Set, rec)))
+      val recipientGroup = nonEmptyGroup.map(x => Recipients.groups(x))
       def genBatch(
-          batch: Seq[SignedTopologyTransaction[TopologyChangeOp]],
+          batch: Seq[GenericSignedTopologyTransaction],
           recipients: Recipients,
       )(maxSequencingTime: CantonTimestamp) =
         DomainTopologyTransactionMessage
@@ -666,17 +862,19 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
 
       for {
         nonEmptyRecipients <- EitherT.fromOption[FutureUnlessShutdown](
-          Recipients.ofSet(recipients),
+          recipientGroup,
           show"Empty set of recipients for ${transactions}",
         )
         _ <- transactions
-          .grouped(maxBatchSize)
-          .foldLeft(EitherT.pure[FutureUnlessShutdown, String](())) { case (res, batch) =>
+          .grouped(if (batching) maxBatchSize else transactions.size + 1)
+          .zipWithIndex
+          .foldLeft(EitherT.pure[FutureUnlessShutdown, String](())) { case (res, (batch, idx)) =>
+            val offset = idx * maxBatchSize
             res.flatMap(_ =>
               for {
                 _ <- ensureDelivery(
                   ts => genBatch(batch, nonEmptyRecipients)(ts),
-                  s"${transactions.size} topology transactions for ${recipients.size} recipients",
+                  s"${offset + 1} to ${offset + batch.size} out of ${transactions.size} ${name} topology transactions for ${recipients.size} recipients",
                 )
               } yield ()
             )
@@ -708,9 +906,9 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
       performUnlessClosingF(functionFullName)(
         (for {
           // add max-sequencing time to message to prevent replay attacks.
-          // on the recipient side, we'll check for validity and monotonicity of these timestamp
-          // as the domain manager will only ever send one transaction at the time, this can be guaranteed
-          message <- batch(client.generateMaxSequencingTime).leftMap(RequestInvalid)
+          // on the recipient side, we'll check for validity of these timestamp
+          message <- batch(client.generateMaxSequencingTime)
+            .leftMap(RequestInvalid)
           _ <- client.sendAsync(message, SendType.Other, callback = callback)
         } yield ()).value
       )
@@ -874,19 +1072,34 @@ class MemberTopologyCatchup(
       upToExclusive: CantonTimestamp,
       asOf: CantonTimestamp,
       participantId: ParticipantId,
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
-  ): Future[Option[StoredTopologyTransactions[TopologyChangeOp]]] = {
+  ): Future[Option[(Boolean, StoredTopologyTransactions[TopologyChangeOp])]] = {
+    def isActivation(
+        from: Option[ParticipantPermission],
+        to: Option[ParticipantPermission],
+    ): Boolean =
+      if (protocolVersion < ProtocolVersion.v5) {
+        // before protocol version 5, we would not dispatch topology changes to disabled participants.
+        // starting with v5, we do, which changes the transition logic here
+        !from.getOrElse(ParticipantPermission.Disabled).isActive && to
+          .getOrElse(ParticipantPermission.Disabled)
+          .isActive
+      } else {
+        from.isEmpty && to.nonEmpty
+      }
     determinePermissionChange(asOf, participantId).flatMap {
-      case (from, to) if !from.isActive && to.isActive =>
+      case (from, to) if isActivation(from, to) =>
         for {
           participantInactiveSince <- findDeactivationTsOfParticipantBefore(
             asOf,
             participantId,
+            protocolVersion,
           )
           participantCatchupTxs <- store.findTransactionsInRange(
             // exclusive, as last message a participant will receive is the one that is deactivating it
-            asOfExclusive = participantInactiveSince,
+            asOfExclusive = participantInactiveSince.getOrElse(CantonTimestamp.MinValue),
             // exclusive as the participant will receive the rest subsequently
             upToExclusive = upToExclusive,
           )
@@ -895,7 +1108,7 @@ class MemberTopologyCatchup(
           logger.info(
             s"Participant $participantId is changing from ${from} to ${to}, requires to catch up ${cleanedTxs.result.size}"
           )
-          Option.when(cleanedTxs.result.nonEmpty)(cleanedTxs)
+          Option.when(cleanedTxs.result.nonEmpty)((participantInactiveSince.isEmpty, cleanedTxs))
         }
       case _ => Future.successful(None)
     }
@@ -927,9 +1140,24 @@ class MemberTopologyCatchup(
   private def findDeactivationTsOfParticipantBefore(
       ts: CantonTimestamp,
       participantId: ParticipantId,
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
-  ): Future[CantonTimestamp] = {
+  ): Future[Option[CantonTimestamp]] = {
+    def isDeactivation(
+        from: Option[ParticipantPermission],
+        to: Option[ParticipantPermission],
+    ): Boolean = {
+      // same as above: different logic depending on protocol version
+      if (protocolVersion < ProtocolVersion.v5) {
+        from.getOrElse(ParticipantPermission.Disabled).isActive && !to
+          .getOrElse(ParticipantPermission.Disabled)
+          .isActive
+      } else {
+        from.nonEmpty && to.isEmpty
+      }
+    }
+
     val limit = 1000
     // let's find the last time this node got deactivated. note, we assume that the participant is
     // not active as of ts
@@ -937,19 +1165,17 @@ class MemberTopologyCatchup(
       .findTsOfParticipantStateChangesBefore(ts, participantId, limit)
       .flatMap {
         // if there is no participant state change, then just return min value
-        case Nil => Future.successful(CantonTimestamp.MinValue)
+        case Nil => Future.successful(None)
         case some =>
           // list is ordered desc
           some.toList
             .findM { ts =>
               determinePermissionChange(ts, participantId)
-                .map { case (pre, post) =>
-                  pre.isActive && !post.isActive
-                }
+                .map { case (pre, post) => isDeactivation(pre, post) }
             }
             .flatMap {
               // found last point in time
-              case Some(resTs) => Future.successful(resTs)
+              case Some(resTs) => Future.successful(Some(resTs))
               // we found many transactions but no deactivation, keep on looking
               // this should only happen if we had 1000 times a participant state update that never deactivated
               // a node. unlikely but could happen
@@ -958,8 +1184,9 @@ class MemberTopologyCatchup(
                   // continue from lowest ts here
                   some.lastOption.getOrElse(CantonTimestamp.MinValue), // is never empty
                   participantId,
+                  protocolVersion,
                 )
-              case None => Future.successful(CantonTimestamp.MinValue)
+              case None => Future.successful(None)
             }
       }
   }
@@ -967,11 +1194,11 @@ class MemberTopologyCatchup(
   private def determinePermissionChange(
       timestamp: CantonTimestamp,
       participant: ParticipantId,
-  ): Future[(ParticipantPermission, ParticipantPermission)] =
+  ): Future[(Option[ParticipantPermission], Option[ParticipantPermission])] =
     determineChange(
       timestamp,
       _.findParticipantState(participant)
-        .map(_.map(_.permission).getOrElse(ParticipantPermission.Disabled)),
+        .map(_.map(_.permission)),
     )
 
   private def determineChange[T](

@@ -16,15 +16,8 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.*
+import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.protocol.*
-import com.digitalasset.canton.sequencing.{
-  ApplicationHandler,
-  AsyncResult,
-  EnvelopeHandler,
-  HandlerResult,
-  TracedProtocolEvent,
-  UnsignedProtocolEventHandler,
-}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.MonadUtil
@@ -89,8 +82,6 @@ private[mediator] class MediatorEventsProcessor(
     state: MediatorState,
     crypto: DomainSyncCryptoClient,
     identityClientEventHandler: UnsignedProtocolEventHandler,
-    maybeTopologyRequestProcessor: Option[UnsignedProtocolEventHandler],
-    maybeTopologyResponseHandler: Option[EnvelopeHandler],
     handleMediatorEvents: (
         RequestId,
         Seq[Traced[MediatorEvent]],
@@ -107,17 +98,10 @@ private[mediator] class MediatorEventsProcessor(
   ): HandlerResult =
     NonEmpty.from(events).fold(HandlerResult.done)(handle)
 
-  private val topologyRequestProcessor =
-    maybeTopologyRequestProcessor.getOrElse(ApplicationHandler.success())
-  private val topologyEnvelopeHandler =
-    maybeTopologyResponseHandler.getOrElse(ApplicationHandler.success())
-
   private def handle(
       events: NonEmpty[Seq[TracedProtocolEvent]]
   )(implicit traceContext: TraceContext): HandlerResult = {
     val identityF = identityClientEventHandler(Traced(events))
-    val topologyRequestF =
-      topologyRequestProcessor((Traced(events)))
 
     val envelopesByEvent = envelopesGroupedByEvent(events)
 
@@ -130,20 +114,9 @@ private[mediator] class MediatorEventsProcessor(
       determinedStages <- FutureUnlessShutdown.outcomeF(determineStages(uniqueEnvelopesByEvent))
       _ <- MonadUtil.sequentialTraverseMonoid(determinedStages)(executeStage(traceContext))
 
-      _ <- MonadUtil.sequentialTraverseMonoid(events.forgetNE) {
-        _.withTraceContext { implicit traceContext =>
-          {
-            case Deliver(_, _, _, _, batch) => topologyEnvelopeHandler(Traced(batch.envelopes))
-            case _ => HandlerResult.done
-          }
-        }
-      }
-
       resultIdentity <- identityF
-      resultTopologyRequest <- topologyRequestF
     } yield {
-      Monoid[AsyncResult]
-        .combine(resultIdentity, resultTopologyRequest)
+      resultIdentity
         .andThenF(_ => FutureUnlessShutdown.outcomeF(storeF))
     }
   }
@@ -331,8 +304,6 @@ private[mediator] object MediatorEventsProcessor {
       state: MediatorState,
       crypto: DomainSyncCryptoClient,
       identityClientEventHandler: UnsignedProtocolEventHandler,
-      topologyRequestProcessor: Option[UnsignedProtocolEventHandler],
-      topologyResponseHandler: Option[EnvelopeHandler],
       confirmationResponseProcessor: ConfirmationResponseProcessor,
       mediatorEventDeduplicator: MediatorEventDeduplicator,
       protocolVersion: ProtocolVersion,
@@ -342,8 +313,6 @@ private[mediator] object MediatorEventsProcessor {
       state,
       crypto,
       identityClientEventHandler,
-      topologyRequestProcessor,
-      topologyResponseHandler,
       confirmationResponseProcessor.handleRequestEvents,
       protocolVersion,
       mediatorEventDeduplicator,

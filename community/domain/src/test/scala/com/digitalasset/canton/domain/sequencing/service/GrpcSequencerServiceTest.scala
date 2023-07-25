@@ -165,7 +165,7 @@ class GrpcSequencerServiceTest
         params,
         None,
         BaseTest.testedProtocolVersion,
-        enableMediatorUnauthenticatedMessages = false,
+        enableBroadcastOfUnauthenticatedMessages = false,
       )
   }
 
@@ -747,16 +747,20 @@ class GrpcSequencerServiceTest
         val request = defaultRequest
           .focus(_.sender)
           .replace(unauthenticatedMember)
+
+        // TODO(#12373) Adapt when releasing BFT
+        val errorMsg =
+          if (testedProtocolVersion >= ProtocolVersion.dev)
+            "Unauthenticated member is trying to send message to members other than the topology broadcast address All"
+          else
+            "Unauthenticated member is trying to send message to members other than the domain manager"
+
         loggerFactory.assertLogs(
           sendAndCheckError(request, authenticated = false) {
             case SendAsyncError.RequestRefused(message) =>
-              message should include(
-                "Unauthenticated member is trying to send message to members other than the domain manager"
-              )
+              message should include(errorMsg)
           }(new Environment(unauthenticatedMember)),
-          _.warningMessage should include(
-            "Unauthenticated member is trying to send message to members other than the domain manager"
-          ),
+          _.warningMessage should include(errorMsg),
         )
       }
 

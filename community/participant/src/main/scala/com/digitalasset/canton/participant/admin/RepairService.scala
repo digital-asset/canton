@@ -30,7 +30,12 @@ import com.digitalasset.canton.ledger.api.validation.{
   StricterValueValidator as LedgerApiValueValidator,
 }
 import com.digitalasset.canton.ledger.participant.state.v2.TransactionMeta
-import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext, Lifecycle}
+import com.digitalasset.canton.lifecycle.{
+  FlagCloseable,
+  FutureUnlessShutdown,
+  HasCloseContext,
+  Lifecycle,
+}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{
   HasLoggerName,
@@ -66,10 +71,12 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
+import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 
 import java.time.Instant
 import scala.Ordered.orderingToOrdered
 import scala.collection.immutable.HashMap
+import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Implements the repair commands.
@@ -1177,16 +1184,80 @@ class RepairService(
     } yield ()
   }
 
-  /** Repair commands are inserted where processing starts again upon reconnection. */
-  private def initRepairRequestAndVerifyPreconditions(
+  /** Allows to wait until clean head has progressed up to a certain timestamp */
+  def awaitCleanHeadForTimestamp(
+      domainId: DomainId,
+      timestamp: CantonTimestamp,
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
+    def check(
+        persistentState: SyncDomainPersistentState,
+        indexedDomain: IndexedDomain,
+    ): Future[Either[String, Unit]] = {
+      SyncDomainEphemeralStateFactory
+        .startingPoints(
+          indexedDomain,
+          persistentState.requestJournalStore,
+          persistentState.sequencerCounterTrackerStore,
+          persistentState.sequencedEventStore,
+          multiDomainEventLog.value,
+        )
+        .map { startingPoints =>
+          if (startingPoints.processing.prenextTimestamp >= timestamp) {
+            logger.debug(
+              s"Clean head reached ${startingPoints.processing.prenextTimestamp}, clearing ${timestamp}"
+            )
+            Right(())
+          } else {
+            logger.debug(
+              s"Clean head is still at ${startingPoints.processing.prenextTimestamp} which is not yet ${timestamp}"
+            )
+            Left(
+              s"Clean head is still at ${startingPoints.processing.prenextTimestamp} which is not yet ${timestamp}"
+            )
+          }
+        }
+    }
+    getPersistentState(domainId)
+      .mapK(FutureUnlessShutdown.outcomeK)
+      .flatMap { case (persistentState, _, indexedDomain) =>
+        EitherT(
+          retry
+            .Pause(
+              logger,
+              this,
+              retry.Forever,
+              50.milliseconds,
+              s"awaiting clean-head for=${domainId} at ts=${timestamp}",
+            )
+            .unlessShutdown(
+              FutureUnlessShutdown.outcomeF(check(persistentState, indexedDomain)),
+              AllExnRetryable,
+            )
+        )
+      }
+  }
+
+  private def getPersistentState(
       domainId: DomainId
-  )(implicit traceContext: TraceContext): EitherT[Future, String, RepairRequest] = {
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, (SyncDomainPersistentState, String, IndexedDomain)] = {
     val domainAlias = aliasManager.aliasForDomainId(domainId).fold(domainId.filterString)(_.unwrap)
     for {
       persistentState <- EitherT.fromEither[Future](
         lookUpDomainPersistence(domainId, s"domain ${domainAlias}")
       )
       indexedDomain <- EitherT.right(IndexedDomain.indexed(indexedStringStore)(domainId))
+    } yield (persistentState, domainAlias, indexedDomain)
+  }
+
+  /** Repair commands are inserted where processing starts again upon reconnection. */
+  private def initRepairRequestAndVerifyPreconditions(
+      domainId: DomainId
+  )(implicit traceContext: TraceContext): EitherT[Future, String, RepairRequest] = {
+    for {
+      obtainedPersistentState <- getPersistentState(domainId)
+      (persistentState, domainAlias, indexedDomain) = obtainedPersistentState
       startingPoints <- EitherTUtil.fromFuture(
         SyncDomainEphemeralStateFactory.startingPoints(
           indexedDomain,

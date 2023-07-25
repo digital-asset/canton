@@ -144,7 +144,7 @@ trait DomainOutboxDispatchHelperX
     def notAlien(tx: GenericSignedTopologyTransactionX): Boolean = {
       val mapping = tx.transaction.mapping
       mapping match {
-        // TODO(#11255) add filter criteria here
+        // TODO(#14048) add filter criteria here
         case _ => true
       }
     }
@@ -196,7 +196,7 @@ trait DomainOutboxDispatch[
 
   // register handle close task
   // this will ensure that the handle is closed before the outbox, aborting any retries
-  runOnShutdown(new RunOnShutdown {
+  runOnShutdown_(new RunOnShutdown {
     override def name: String = "close-handle"
     override def done: Boolean = handle.isClosing
     override def run(): Unit = Lifecycle.close(handle)(logger)

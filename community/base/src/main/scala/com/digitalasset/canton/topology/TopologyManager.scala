@@ -47,7 +47,8 @@ abstract class TopologyManager[E <: CantonError](
     protected val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
 )(implicit ec: ExecutionContext)
-    extends NamedLogging
+    extends TopologyManagerStatus
+    with NamedLogging
     with FlagCloseableAsync {
 
   protected val validator =
@@ -59,7 +60,7 @@ abstract class TopologyManager[E <: CantonError](
     )
 
   /** returns the current queue size (how many changes are being processed) */
-  def queueSize: Int = sequentialQueue.queueSize
+  override def queueSize: Int = sequentialQueue.queueSize
 
   protected def checkTransactionNotAddedBefore(
       transaction: SignedTopologyTransaction[TopologyChangeOp]

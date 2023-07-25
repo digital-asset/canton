@@ -282,11 +282,14 @@ final case class CantonParameters(
   * @param enablePreviewCommands         Feature flag to enable the set of commands that use functionality which we don't deem stable.
   * @param enableTestingCommands         Feature flag to enable the set of commands used by Canton developers for testing purposes.
   * @param enableRepairCommands          Feature flag to enable the set of commands used by Canton operators for manual repair purposes.
+  * @param skipTopologyManagerSignatureValidation If true, the signature validation of the domain topology transaction messages (2.x) will be skipped
   */
 final case class CantonFeatures(
     enablePreviewCommands: Boolean = false,
     enableTestingCommands: Boolean = false,
     enableRepairCommands: Boolean = false,
+    // TODO(#9014) remove for x-nodes
+    skipTopologyManagerSignatureValidation: Boolean = false,
 ) {
   def featureFlags: Set[FeatureFlag] = {
     (Seq(FeatureFlag.Stable)
@@ -405,22 +408,24 @@ trait CantonConfig {
       val participantParameters = participantConfig.parameters
       ParticipantNodeParameters(
         general = CantonNodeParameterConverter.general(this, participantConfig),
-        participantParameters.partyChangeNotification,
-        participantParameters.adminWorkflow,
-        participantParameters.maxUnzippedDarSize,
-        participantParameters.stores,
-        participantParameters.transferTimeProofFreshnessProportion,
+        partyChangeNotification = participantParameters.partyChangeNotification,
+        adminWorkflow = participantParameters.adminWorkflow,
+        maxUnzippedDarSize = participantParameters.maxUnzippedDarSize,
+        stores = participantParameters.stores,
+        transferTimeProofFreshnessProportion =
+          participantParameters.transferTimeProofFreshnessProportion,
         protocolConfig = ParticipantProtocolConfig(
           minimumProtocolVersion = participantParameters.minimumProtocolVersion.map(_.unwrap),
           devVersionSupport = participantParameters.devVersionSupport,
           dontWarnOnDeprecatedPV = participantParameters.dontWarnOnDeprecatedPV,
           initialProtocolVersion = participantParameters.initialProtocolVersion.unwrap,
         ),
-        participantConfig.init.parameters.uniqueContractKeys,
-        participantParameters.ledgerApiServerParameters,
+        uniqueContractKeys = participantConfig.init.parameters.uniqueContractKeys,
+        ledgerApiServerParameters = participantParameters.ledgerApiServerParameters,
         maxDbConnections = participantConfig.storage.maxConnectionsCanton(true, false, false).value,
-        participantParameters.excludeInfrastructureTransactions,
-        participantParameters.enableEngineStackTraces,
+        excludeInfrastructureTransactions = participantParameters.excludeInfrastructureTransactions,
+        enableEngineStackTrace = participantParameters.enableEngineStackTraces,
+        enableContractUpgrading = participantParameters.enableContractUpgrading,
       )
     }
 
@@ -505,6 +510,7 @@ private[config] object CantonNodeParameterConverter {
       node.caching,
       parent.parameters.nonStandardConfig,
       node.storage.parameters.migrateAndStart,
+      parent.features.skipTopologyManagerSignatureValidation,
     )
   }
 

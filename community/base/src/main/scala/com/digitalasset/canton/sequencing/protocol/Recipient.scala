@@ -118,6 +118,10 @@ sealed trait GroupRecipient extends Recipient {
     )
 }
 
+object TopologyBroadcastAddress {
+  val recipient: Recipient = AllMembersOfDomain
+}
+
 final case class MemberRecipient(member: Member) extends Recipient {
   override def pretty: Pretty[MemberRecipient] =
     prettyOfClass(
@@ -172,12 +176,6 @@ object MediatorsOfDomain {
   object Code extends GroupRecipientCode {
     val threeLetterId: String3 = String3.tryCreate("MOD")
   }
-
-  // Mediator group with index zero is responsible for handling topology transactions.
-  // Never change this.
-  val TopologyTransactionMediatorGroup: MediatorsOfDomain = MediatorsOfDomain(
-    NonNegativeInt.zero
-  )
 }
 
 case object AllMembersOfDomain extends GroupRecipient {

@@ -24,22 +24,28 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
 
   override type FixtureParam = BufferedProcessLogger
 
-  val cantonDir = "enterprise/app/target/release/canton"
-  val cantonBin = s"$cantonDir/bin/canton"
-  val resourceDir = "community/app/src/test/resources"
-  val simpleConf = "community/app/src/pack/examples/01-simple-topology/simple-topology.conf"
-  val unsupportedProtocolVersionConfig =
+  lazy val cantonDir = "enterprise/app/target/release/canton"
+  lazy val repositoryRootFromCantonDir = "../../../../.."
+  lazy val cantonBin = s"$cantonDir/bin/canton"
+  lazy val resourceDir = "community/app/src/test/resources"
+
+  // turn off cache-dir to avoid compilation errors due to concurrent cache access
+  private lazy val cacheTurnOff =
+    s"$resourceDir/config-snippets/disable-ammonite-cache.conf"
+
+  lazy val simpleConf = "community/app/src/pack/examples/01-simple-topology/simple-topology.conf"
+  lazy val unsupportedProtocolVersionConfig =
     "enterprise/app/src/test/resources/unsupported-protocol-version.conf"
   // this warning is potentially thrown when starting Canton with --no-tty
-  val ttyWarning =
+  lazy val ttyWarning =
     "WARN  org.jline - Unable to create a system terminal, creating a dumb terminal (enable debug logging for more information)"
-  val jsonTtyWarning =
+  lazy val jsonTtyWarning =
     "\"message\":\"Unable to create a system terminal, creating a dumb terminal (enable debug logging for more information)\",\"logger_name\":\"org.jline\",\"thread_name\":\"main\",\"level\":\"WARN\""
 
   // Message printed out by the bootstrap script if Canton is started successfully
-  val successMsg = "The last emperor is always the worst."
-  val cantonShouldStartFlags =
-    s"--verbose --no-tty --bootstrap $resourceDir/scripts/bootstrap.canton"
+  lazy val successMsg = "The last emperor is always the worst."
+  lazy val cantonShouldStartFlags =
+    s"--verbose --no-tty --config $cacheTurnOff --bootstrap $resourceDir/scripts/bootstrap.canton"
 
   "Calling Canton" should {
 
@@ -67,6 +73,7 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
 
     "successfully start and auto-connect to local domains" in { processLogger =>
       s"""$cantonBin daemon
+           |--config $cacheTurnOff
            |--bootstrap $resourceDir/scripts/startup.canton
            |-C canton.parameters.manual-start=no
            |--auto-connect-local
@@ -107,14 +114,14 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
 
     "not shadow bootstrap script variables with the bootstrap script file name" in {
       processLogger =>
-        s"$cantonBin --config $simpleConf --no-tty --bootstrap $resourceDir/scripts/participant1.canton " ! processLogger
+        s"$cantonBin --config $cacheTurnOff --config $simpleConf --no-tty --bootstrap $resourceDir/scripts/participant1.canton " ! processLogger
 
         checkOutput(processLogger, shouldContain = Seq(successMsg))
     }
 
     "change logging directory, log level and log format when using the appropriate CLI flags" in {
       processLogger =>
-        s"$cantonBin --log-truncate --log-file-appender flat --config $simpleConf --no-tty --bootstrap $resourceDir/scripts/bootstrap.canton --log-file-name log/new-name.log --log-level-canton DEBUG --log-encoder json" ! processLogger
+        s"$cantonBin --config $cacheTurnOff --log-truncate --log-file-appender flat --config $simpleConf --no-tty --bootstrap $resourceDir/scripts/bootstrap.canton --log-file-name log/new-name.log --log-level-canton DEBUG --log-encoder json" ! processLogger
 
         checkOutput(processLogger, shouldContain = Seq(successMsg))
         val logFile = File("log/new-name.log")
@@ -133,7 +140,7 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
     }
 
     "log last errors in separate file" in { processLogger =>
-      s"$cantonBin --log-truncate --log-file-appender flat --config $simpleConf --no-tty --bootstrap $resourceDir/scripts/bootstrap-with-error.canton --log-file-name log/canton-without-debug.log" ! processLogger
+      s"$cantonBin --config $cacheTurnOff --log-truncate --log-file-appender flat --config $simpleConf --no-tty --bootstrap $resourceDir/scripts/bootstrap-with-error.canton --log-file-name log/canton-without-debug.log" ! processLogger
 
       // Make sure the main log file does not contain debug-level log entries
       val logFile = File("log/canton-without-debug.log")
@@ -149,7 +156,7 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
     }
 
     "dynamically set log level with log last errors enabled" in { processLogger =>
-      s"$cantonBin --log-truncate --log-file-appender flat --config $simpleConf --no-tty --bootstrap $resourceDir/scripts/bootstrap-with-error-dynamic.canton --log-file-name log/canton-partial-debug.log" ! processLogger
+      s"$cantonBin --config $cacheTurnOff --log-truncate --log-file-appender flat --config $simpleConf --no-tty --bootstrap $resourceDir/scripts/bootstrap-with-error-dynamic.canton --log-file-name log/canton-partial-debug.log" ! processLogger
 
       val logFile = File("log/canton-partial-debug.log")
       val logContents = logFile.contentAsString
@@ -225,6 +232,8 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
           "--debug",
           "--log-file-name=log/demo.log",
           "-c",
+          s"$repositoryRootFromCantonDir/$cacheTurnOff",
+          "-c",
           "demo/demo.conf",
         ),
         Some(new java.io.File(cantonDir)),
@@ -255,6 +264,9 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
 
           val exitCode = Process(
             Seq("bin/canton") ++ runModeArgs ++ Seq(
+              // turn off cache-dir to avoid compilation errors due to concurrent cache access
+              "--config",
+              s"$repositoryRootFromCantonDir/$cacheTurnOff",
               "--debug",
               "--log-file-name",
               "log/" + logFileName,

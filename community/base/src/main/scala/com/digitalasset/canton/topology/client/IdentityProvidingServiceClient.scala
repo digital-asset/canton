@@ -295,7 +295,7 @@ trait PartyTopologySnapshotClient {
       limit: Int,
   ): Future[
     Set[PartyId]
-  ] // TODO(#11255): Decide on whether to standarize APIs on LfPartyId or PartyId and unify interfaces
+  ] // TODO(#14048): Decide on whether to standarize APIs on LfPartyId or PartyId and unify interfaces
 
 }
 

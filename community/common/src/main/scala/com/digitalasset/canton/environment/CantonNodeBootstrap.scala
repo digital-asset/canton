@@ -171,7 +171,7 @@ abstract class CantonNodeBootstrapBase[
       canton.topology.admin.v0.TopologyAggregationServiceGrpc
         .bindService(
           new GrpcTopologyAggregationService(
-            // TODO(#11255) remove map filter
+            // TODO(#14048) remove map filter
             sequencedTopologyStores.mapFilter(TopologyStoreId.select[TopologyStoreId.DomainStore]),
             ips,
             loggerFactory,

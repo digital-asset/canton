@@ -85,7 +85,7 @@ object ContractMetadata
     )
   )
 
-  override protected def name: String = "contract metadata"
+  override def name: String = "contract metadata"
 
   final case class InvalidContractMetadata(message: String) extends RuntimeException(message)
 

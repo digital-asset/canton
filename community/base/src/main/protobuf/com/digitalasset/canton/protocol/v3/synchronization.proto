@@ -33,8 +33,6 @@ message EnvelopeContent {
     v0.RegisterTopologyTransactionRequest register_topology_transaction_request = 9;
     v1.RegisterTopologyTransactionResponse register_topology_transaction_response = 10;
     // Removed field causality_update in v2
-    v2.RegisterTopologyTransactionRequestX register_topology_transaction_request_x = 12;
-    v2.RegisterTopologyTransactionResponseX register_topology_transaction_response_x = 13;
-    v2.AcceptedTopologyTransactionsX accepted_topology_transactions = 14;
+    v2.TopologyTransactionsBroadcastX topology_transactions_broadcast = 12;
   }
 }

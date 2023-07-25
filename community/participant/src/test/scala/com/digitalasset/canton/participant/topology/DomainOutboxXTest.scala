@@ -46,7 +46,7 @@ class DomainOutboxXTest
   import DefaultTestIdentities.*
 
   private val clock = new WallClock(timeouts, loggerFactory)
-  private val crypto = TestingIdentityFactory(loggerFactory).newCrypto(participant1)
+  private val crypto = TestingIdentityFactory.newCrypto(loggerFactory)(participant1)
   private val publicKey =
     FutureUtil
       .noisyAwaitResult(crypto.cryptoPublicStore.signingKeys.value, "get public key", 10.seconds)

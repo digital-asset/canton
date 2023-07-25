@@ -137,7 +137,7 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
       }
     }
 
-  // TODO(#11255) only a temporary crutch to inspect the topology state
+  // TODO(#14048) only a temporary crutch to inspect the topology state
   override def dumpStoreContent()(implicit traceContext: TraceContext): Unit = {
     blocking {
       synchronized {

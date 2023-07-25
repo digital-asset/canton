@@ -14,9 +14,9 @@ import com.digitalasset.canton.participant.protocol.submission.DomainSelectionFi
   ThreeExercises,
 }
 import com.digitalasset.canton.participant.protocol.submission.DomainSelectionFixture.*
-import com.digitalasset.canton.participant.protocol.submission.DomainUsabilityChecker.{
-  DomainNotSupportingMinimumProtocolVersion,
+import com.digitalasset.canton.participant.protocol.submission.UsableDomain.{
   UnknownPackage,
+  UnsupportedMinimumProtocolVersion,
 }
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.ConfigurationErrors.InvalidPrescribedDomainId
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.TopologyErrors.NoDomainForSubmission
@@ -25,12 +25,7 @@ import com.digitalasset.canton.participant.sync.{
   TransactionRoutingError,
   TransactionRoutingErrorWithDomain,
 }
-import com.digitalasset.canton.protocol.{
-  ExampleTransactionFactory,
-  LfContractId,
-  LfTransactionVersion,
-  LfVersionedTransaction,
-}
+import com.digitalasset.canton.protocol.{LfContractId, LfTransactionVersion, LfVersionedTransaction}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
@@ -152,7 +147,7 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
       )
 
       // Domain protocol version is too low
-      val expectedError = DomainNotSupportingMinimumProtocolVersion(
+      val expectedError = UnsupportedMinimumProtocolVersion(
         domainId = da,
         currentPV = oldPV,
         requiredPV = newPV,
@@ -187,7 +182,7 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
 
       val expectedError = UnknownPackage(
         da,
-        Set(
+        List(
           unknownPackageFor(submitterParticipantId, missingPackage),
           unknownPackageFor(observerParticipantId, missingPackage),
         ),
@@ -539,12 +534,10 @@ private[routing] object DomainSelectorTest {
       private val domainSelector: EitherT[Future, TransactionRoutingError, DomainSelector] =
         transactionDataET.map { transactionData =>
           new DomainSelector(
-            participantId = submitterParticipantId,
             transactionData = transactionData,
             admissibleDomains = admissibleDomains,
             priorityOfDomain = priorityOfDomain,
             domainRankComputation = domainRankComputation,
-            packageService = ExampleTransactionFactory.defaultPackageInfoService,
             domainStateProvider = domainStateProvider,
             loggerFactory = loggerFactory,
           )

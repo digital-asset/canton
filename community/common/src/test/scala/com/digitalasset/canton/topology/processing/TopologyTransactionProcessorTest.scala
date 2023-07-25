@@ -36,8 +36,10 @@ class TopologyTransactionProcessorTest
   private def mk(
       store: TopologyStore[TopologyStoreId.DomainStore] = mkStore
   ): (TopologyTransactionProcessor, TopologyStore[TopologyStoreId.DomainStore]) = {
+
     val proc = new TopologyTransactionProcessor(
       DefaultTestIdentities.domainId,
+      DomainTopologyTransactionMessageValidator.NoValidation,
       crypto,
       store,
       _ => (),
@@ -96,7 +98,10 @@ class TopologyTransactionProcessorTest
 
         _ <- process(proc, ts(0), 0, block1Adds ++ block1Replaces)
         st0 <- fetch(store, ts(0).immediateSuccessor)
-        _ <- process(proc, ts(1), 1, block2)
+        _ <- loggerFactory.assertLogs(
+          process(proc, ts(1), 1, block2),
+          _.warningMessage should include("Duplicate"),
+        )
         st1 <- fetch(store, ts(1).immediateSuccessor)
 
       } yield {

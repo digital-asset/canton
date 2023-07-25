@@ -19,8 +19,10 @@ import com.digitalasset.canton.data.{
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.protocol.ProcessingStartingPoints
-import com.digitalasset.canton.participant.protocol.conflictdetection.ActivenessResult
-import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetectionHelpers.mkActivenessSet
+import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetectionHelpers.{
+  mkActivenessResult,
+  mkActivenessSet,
+}
 import com.digitalasset.canton.participant.protocol.submission.{
   EncryptedViewMessageFactory,
   InFlightSubmissionTracker,
@@ -42,12 +44,12 @@ import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.time.{DomainTimeTracker, TimeProofTestUtil}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Confirmation,
   Observation,
   Submission,
 }
+import com.digitalasset.canton.topology.transaction.{ParticipantPermission, VettedPackages}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
@@ -104,7 +106,8 @@ final class TransferOutProcessingStepsTest
     UniqueIdentifier.tryFromProtoPrimitive("submitting::participant")
   )
 
-  private val templateId = LfTemplateId.assertFromString("unknown:package:id")
+  private val templateId =
+    LfTemplateId.assertFromString("transferoutprocessingstepstestpackage:template:id")
 
   private val initialTransferCounter: TransferCounterO =
     TransferCounter.forCreatedContract(testedProtocolVersion)
@@ -157,7 +160,7 @@ final class TransferOutProcessingStepsTest
 
   private def createTestingIdentityFactory(
       topology: Map[ParticipantId, Map[LfPartyId, ParticipantPermission]],
-      packages: Seq[LfPackageId] = Seq.empty,
+      packages: Seq[VettedPackages] = Seq.empty,
       domains: Set[DomainId] = Set(DefaultTestIdentities.domainId),
   ) =
     TestingTopology(domains)
@@ -165,23 +168,31 @@ final class TransferOutProcessingStepsTest
       .withPackages(packages)
       .build(loggerFactory)
 
+  private def vet(
+      participants: Iterable[ParticipantId],
+      packages: Seq[LfPackageId],
+  ): Seq[VettedPackages] =
+    participants.view.map(VettedPackages(_, packages)).toSeq
+
   private def createTestingTopologySnapshot(
       topology: Map[ParticipantId, Map[LfPartyId, ParticipantPermission]],
       packages: Seq[LfPackageId] = Seq.empty,
   ): TopologySnapshot =
-    createTestingIdentityFactory(topology, packages).topologySnapshot()
+    createTestingIdentityFactory(topology, vet(topology.keys, packages)).topologySnapshot()
 
-  private def createCryptoFactory(packages: Seq[LfPackageId] = Seq(templateId.packageId)) =
+  private def createCryptoFactory(packages: Seq[LfPackageId] = Seq(templateId.packageId)) = {
+    val topology = Map(
+      submittingParticipant -> Map(
+        party1 -> ParticipantPermission.Submission,
+        submittingParticipant.adminParty.toLf -> ParticipantPermission.Submission,
+      )
+    )
     createTestingIdentityFactory(
-      topology = Map(
-        submittingParticipant -> Map(
-          party1 -> ParticipantPermission.Submission,
-          submittingParticipant.adminParty.toLf -> ParticipantPermission.Submission,
-        )
-      ),
-      packages = packages,
+      topology = topology,
+      packages = vet(topology.keys, packages),
       domains = Set(sourceDomain.unwrap, targetDomain.unwrap),
     )
+  }
 
   private val cryptoFactory = createCryptoFactory()
 
@@ -387,6 +398,45 @@ final class TransferOutProcessingStepsTest
         )
 
       result.left.value shouldBe a[PackageIdUnknownOrUnvetted]
+    }
+
+    "fail if the package for the contract being transferred is unvetted on one non-transferring participant connected to the target domain" in {
+
+      val sourceDomainTopology =
+        createTestingIdentityFactory(
+          topology = Map(
+            submittingParticipant -> Map(submitter -> Submission),
+            participant1 -> Map(party1 -> Submission),
+          ),
+          // On the source domain, the package is vetted on all participants
+          packages = Seq(
+            VettedPackages(submittingParticipant, Seq(templateId.packageId)),
+            VettedPackages(participant1, Seq(templateId.packageId)),
+          ),
+        ).topologySnapshot()
+
+      val targetDomainTopology =
+        createTestingIdentityFactory(
+          topology = Map(
+            submittingParticipant -> Map(submitter -> Submission),
+            participant1 -> Map(party1 -> Submission),
+          ),
+          // On the target domain, the package is not vetted on `participant1`
+          packages = Seq(
+            VettedPackages(submittingParticipant, Seq(templateId.packageId))
+          ),
+        ).topologySnapshot()
+
+      // `party1` is a stakeholder hosted on `participant1`, but it has not vetted `templateId.packageId` on the target domain
+      val result =
+        mkTxOutRes(
+          stakeholders = Set(submitter, party1, adminSubmitter, admin1),
+          sourceTopologySnapshot = sourceDomainTopology,
+          targetTopologySnapshot = targetDomainTopology,
+        )
+
+      result.left.value shouldBe a[PackageIdUnknownOrUnvetted]
+
     }
 
     "pick the active confirming admin party" in {
@@ -597,7 +647,7 @@ final class TransferOutProcessingStepsTest
               pendingContracts,
               _,
             ) =>
-          activenessSet shouldBe mkActivenessSet(deact = Set(contractId))
+          activenessSet shouldBe mkActivenessSet(deact = Set(contractId), prior = Set(contractId))
           pendingContracts shouldBe Seq.empty
         case _ => fail()
       }
@@ -641,7 +691,7 @@ final class TransferOutProcessingStepsTest
       val metadata = ContractMetadata.tryCreate(Set.empty, Set(party1), None)
       val contract = ExampleTransactionFactory.asSerializable(
         contractId,
-        contractInstance = ExampleTransactionFactory.contractInstance(),
+        contractInstance = ExampleTransactionFactory.contractInstance(templateId = templateId),
         metadata = metadata,
       )
       val transactionId = ExampleTransactionFactory.transactionId(1)
@@ -682,7 +732,7 @@ final class TransferOutProcessingStepsTest
           dataAndResponseArgs,
           state.transferCache,
           state.storedContractManager,
-          FutureUnlessShutdown.pure(ActivenessResult.success),
+          FutureUnlessShutdown.pure(mkActivenessResult()),
           Future.unit,
           sourceMediator,
           freshOwnTimelyTx = true,

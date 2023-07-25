@@ -15,8 +15,8 @@ import com.digitalasset.canton.util.ShowUtil.*
 
 import scala.concurrent.{ExecutionContext, Future}
 
-class AuthorizationValidator(participantId: ParticipantId)(implicit
-    executionContext: ExecutionContext
+class AuthorizationValidator(participantId: ParticipantId, enableContractUpgrading: Boolean)(
+    implicit executionContext: ExecutionContext
 ) {
 
   def checkAuthorization(
@@ -26,7 +26,8 @@ class AuthorizationValidator(participantId: ParticipantId)(implicit
   ): Future[Map[ViewPosition, String]] =
     rootViews.forgetNE
       .parTraverseFilter { rootView =>
-        val authorizers = rootView.viewParticipantData.rootAction.authorizers
+        val authorizers =
+          rootView.viewParticipantData.rootAction(enableContractUpgrading).authorizers
 
         def err(details: String): String =
           show"Received a request with id $requestId with a view that is not correctly authorized. Rejecting request...\n$details"

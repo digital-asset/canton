@@ -16,8 +16,10 @@ import com.digitalasset.canton.data.{CantonTimestamp, FullTransferInTree, Transf
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.protocol.ProcessingStartingPoints
-import com.digitalasset.canton.participant.protocol.conflictdetection.ActivenessResult
-import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetectionHelpers.mkActivenessSet
+import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetectionHelpers.{
+  mkActivenessResult,
+  mkActivenessSet,
+}
 import com.digitalasset.canton.participant.protocol.submission.{
   EncryptedViewMessageFactory,
   InFlightSubmissionTracker,
@@ -411,7 +413,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
               pendingContracts,
               _,
             ) =>
-          assert(activenessSet == mkActivenessSet(txIn = Set(contractId)))
+          assert(activenessSet == mkActivenessSet(tfIn = Set(contractId)))
           assert(pendingContracts == Seq(WithTransactionId(contract, transactionId1)))
         case _ => fail()
       }
@@ -551,7 +553,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
               pendingDataAndResponseArgs2,
               transferLookup,
               contractLookup,
-              FutureUnlessShutdown.pure(ActivenessResult.success),
+              FutureUnlessShutdown.pure(mkActivenessResult()),
               Future.unit,
               targetMediator,
               freshOwnTimelyTx = true,
@@ -597,7 +599,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
               pendingDataAndResponseArgs,
               transferLookup,
               contractLookup,
-              FutureUnlessShutdown.pure(ActivenessResult.success),
+              FutureUnlessShutdown.pure(mkActivenessResult()),
               Future.unit,
               targetMediator,
               freshOwnTimelyTx = true,

@@ -21,16 +21,18 @@ class FlagCloseableTest extends AnyWordSpec with Matchers with NoTracing {
       var shutdownTasks: Seq[String] = Seq.empty
 
       val closeable = new TestResource()
-      closeable.runOnShutdown(new RunOnShutdown {
+      closeable.runOnShutdown_(new RunOnShutdown {
         override val name = "first"
         override val done = false
+
         override def run() = {
           shutdownTasks = shutdownTasks :+ "first"
         }
       })
-      closeable.runOnShutdown(new RunOnShutdown {
+      closeable.runOnShutdown_(new RunOnShutdown {
         override val name = "second"
         override val done = false
+
         override def run() = {
           shutdownTasks = shutdownTasks :+ "second"
         }
@@ -38,6 +40,41 @@ class FlagCloseableTest extends AnyWordSpec with Matchers with NoTracing {
       closeable.close()
 
       shutdownTasks shouldBe Seq("first", "second")
+    }
+
+    "allow to cancel shutdown tasks" in {
+      var shutdownTasks: Seq[String] = Seq.empty
+
+      val closeable = new TestResource()
+      closeable.runOnShutdown_(new RunOnShutdown {
+        override val name = "first"
+        override val done = false
+
+        override def run() = {
+          shutdownTasks = shutdownTasks :+ "first"
+        }
+      })
+      val token = closeable.runOnShutdown(new RunOnShutdown {
+        override val name = "second"
+        override val done = false
+
+        override def run() = {
+          shutdownTasks = shutdownTasks :+ "second"
+        }
+      })
+      closeable.runOnShutdown_(new RunOnShutdown {
+        override val name = "third"
+        override val done = false
+
+        override def run() = {
+          shutdownTasks = shutdownTasks :+ "third"
+        }
+      })
+      closeable.cancelShutdownTask(token)
+
+      closeable.close()
+
+      shutdownTasks shouldBe Seq("first", "third")
     }
   }
 }

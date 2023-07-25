@@ -5,6 +5,7 @@ package com.digitalasset.canton.lifecycle
 
 import cats.data.{EitherT, OptionT}
 import cats.syntax.traverse.*
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FlagCloseable.forceShutdownStr
@@ -14,7 +15,8 @@ import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{Checked, CheckedT}
 import com.google.common.annotations.VisibleForTesting
 
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong, AtomicReference}
+import scala.collection.concurrent.TrieMap
 import scala.collection.immutable.MultiSet
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
@@ -57,8 +59,8 @@ trait FlagCloseable extends AutoCloseable {
   // count on acquires and releases happening on the same thread, since we support the synchronization of futures.
   private val readerState = new AtomicReference(ReaderState.empty)
 
-  private val onShutdownTasks =
-    new AtomicReference[List[RunOnShutdown]](List())
+  private val incrementor = new AtomicLong(0L)
+  private val onShutdownTasks = TrieMap.empty[Long, RunOnShutdown]
 
   protected def logger: TracedLogger
 
@@ -73,19 +75,37 @@ trait FlagCloseable extends AutoCloseable {
     * You can use this for example to register tasks that cancel long-running computations,
     * whose termination you can then wait for in "closeAsync".
     */
-  def runOnShutdown[T](
+  def runOnShutdown_[T](
       task: RunOnShutdown
   )(implicit traceContext: TraceContext): Unit = {
-    // TODO(#8774) improve shutdown task merging (use thread safe linked list to avoid O(N) filter)
-    onShutdownTasks.updateAndGet { seq => task +: seq.filterNot(_.done) }.discard
-    if (isClosing) runOnShutdownTasks()
+    runOnShutdown(task).discard
   }
 
+  /** Same as [[runOnShutdown_]] but returns a token that allows you to remove the task explicitly from being run
+    * using [[cancelShutdownTask]]
+    */
+  def runOnShutdown[T](
+      task: RunOnShutdown
+  )(implicit traceContext: TraceContext): Long = {
+    val token = incrementor.getAndIncrement()
+    onShutdownTasks
+      // First remove the tasks that are done
+      .filterInPlace { case (_, run) =>
+        !run.done
+      }
+      // Then add the new one
+      .put(token, task)
+      .discard
+    if (isClosing) runOnShutdownTasks()
+    token
+  }
+
+  /** Removes a shutdown task from the list using a token returned by [[runOnShutdown]]
+    */
+  def cancelShutdownTask(token: Long): Unit = onShutdownTasks.remove(token).discard
+
   private def runOnShutdownTasks()(implicit traceContext: TraceContext): Unit = {
-    val tasks = onShutdownTasks.getAndSet(List())
-    // We reverse here to not pay the costs of the linear append
-    // on each call to runOnShutdown, while still running the tasks in the order they were added.
-    tasks.reverse.foreach { task =>
+    onShutdownTasks.values.toList.foreach { task =>
       if (!task.done) {
         Try { task.run() }.fold(
           t => logger.warn(s"Task ${task.name} failed on shutdown!", t),
@@ -93,6 +113,7 @@ trait FlagCloseable extends AutoCloseable {
         )
       }
     }
+    onShutdownTasks.clear()
   }
 
   /** Check whether we're closing.
@@ -366,12 +387,12 @@ object CloseContext {
       override protected def timeouts: ProcessingTimeout = processingTimeout
       override protected def logger: TracedLogger = tracedLogger
     }
-    closeContext1.flagCloseable.runOnShutdown(new RunOnShutdown {
+    closeContext1.flagCloseable.runOnShutdown_(new RunOnShutdown {
       override def name: String = s"combined-close-ctx1"
       override def done: Boolean = flagCloseable.isClosing
       override def run(): Unit = flagCloseable.close()
     })
-    closeContext2.flagCloseable.runOnShutdown(new RunOnShutdown {
+    closeContext2.flagCloseable.runOnShutdown_(new RunOnShutdown {
       override def name: String = s"combined-close-ctx2"
       override def done: Boolean = flagCloseable.isClosing
       override def run(): Unit = flagCloseable.close()

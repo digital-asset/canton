@@ -107,7 +107,7 @@ class DbSubmissionTrackerStore(
     }
   }
 
-  override def size()(implicit
+  override def size(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Int] = {
     val selectQuery =
@@ -121,5 +121,15 @@ class DbSubmissionTrackerStore(
     } yield count.getOrElse(0)
 
     FutureUnlessShutdown.outcomeF(f)
+  }
+
+  override def deleteSince(
+      including: CantonTimestamp
+  )(implicit traceContext: TraceContext): Future[Unit] = {
+    val deleteQuery =
+      sqlu"""delete from fresh_submitted_transaction
+         where domain_id = $domainId and request_id >= $including"""
+
+    storage.update_(deleteQuery, "cleanup fresh_submitted_transaction")
   }
 }

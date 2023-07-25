@@ -125,7 +125,7 @@ object ClosedEnvelope extends HasSupportedProtoVersions[ClosedEnvelope] {
 
   override type Deserializer = ByteString => ParsingResult[ClosedEnvelope]
 
-  override protected def name: String = "ClosedEnvelope"
+  override def name: String = "ClosedEnvelope"
 
   override def supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.Envelope)(

@@ -91,7 +91,7 @@ final case class Batch[+Env <: Envelope[_]] private (envelopes: List[Env])(
 }
 
 object Batch extends HasProtocolVersionedCompanion2[Batch[Envelope[_]], Batch[ClosedEnvelope]] {
-  override protected def name: String = "Batch"
+  override def name: String = "Batch"
 
   override val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.CompressedBatch)(

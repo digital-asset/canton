@@ -169,4 +169,26 @@ object AkkaUtil extends HasLoggerName {
       killSwitch2.abort(ex)
     }
   }
+
+  object syntax {
+
+    /** Defines extension methods for [[akka.stream.scaladsl.Source]] that map to the methods defined in this class */
+    implicit class AkkaUtilSyntaxForSource[A, Mat](private val source: Source[A, Mat])
+        extends AnyVal {
+      def statefulMapAsync[S, T](initial: S)(
+          f: (S, A) => Future[(S, T)]
+      )(implicit loggingContext: NamedLoggingContext): Source[T, Mat] =
+        AkkaUtil.statefulMapAsync(source, initial)(f)
+
+      def mapAsyncUS[B](parallelism: Int)(f: A => FutureUnlessShutdown[B])(implicit
+          loggingContext: NamedLoggingContext
+      ): Source[UnlessShutdown[B], Mat] =
+        AkkaUtil.mapAsyncUS(source, parallelism)(f)
+
+      def mapAsyncAndDrainUS[B](parallelism: Int)(
+          f: A => FutureUnlessShutdown[B]
+      )(implicit loggingContext: NamedLoggingContext): Source[B, Mat] =
+        AkkaUtil.mapAsyncAndDrainUS(source, parallelism)(f)
+    }
+  }
 }

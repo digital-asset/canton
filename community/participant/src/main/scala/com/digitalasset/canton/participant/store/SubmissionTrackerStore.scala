@@ -9,6 +9,8 @@ import com.digitalasset.canton.protocol.{RequestId, RootHash}
 import com.digitalasset.canton.store.PrunableByTime
 import com.digitalasset.canton.tracing.TraceContext
 
+import scala.concurrent.Future
+
 trait SubmissionTrackerStore extends PrunableByTime with AutoCloseable {
 
   /** Register a fresh request in the store.
@@ -24,7 +26,10 @@ trait SubmissionTrackerStore extends PrunableByTime with AutoCloseable {
   ): FutureUnlessShutdown[Boolean]
 
   /** Return the number of entries currently in the store. */
-  def size()(implicit
+  def size(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Int]
+
+  /** Delete all entries whose sequencing time is at least `inclusive`. */
+  def deleteSince(including: CantonTimestamp)(implicit traceContext: TraceContext): Future[Unit]
 }

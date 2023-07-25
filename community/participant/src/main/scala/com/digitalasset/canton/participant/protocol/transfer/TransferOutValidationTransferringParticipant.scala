@@ -10,10 +10,12 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessorError.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.TransferProcessorError
+import com.digitalasset.canton.protocol.LfTemplateId
 import com.digitalasset.canton.sequencing.protocol.Recipients
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.SourceProtocolVersion
@@ -59,14 +61,19 @@ private[transfer] sealed abstract case class TransferOutValidationTransferringPa
     )
   }
 
-  private def checkVetted(recipients: Set[ParticipantId])(implicit
+  private def checkVetted(stakeholders: Set[LfPartyId], templateId: LfTemplateId)(implicit
       ec: ExecutionContext
   ): EitherT[FutureUnlessShutdown, TransferProcessorError, Unit] =
     // Before version 5 the transfer-out request did not include the template ID, so this check can't be done
-    if (sourceProtocolVersion.v < ProtocolVersion.v5)
-      EitherT.right(FutureUnlessShutdown.pure(()))
-    else
-      TransferKnownAndVetted(recipients, targetTopology, request.contractId, request.templateId)
+    EitherTUtil.ifThenET(sourceProtocolVersion.v >= ProtocolVersion.v5) {
+      TransferKnownAndVetted(
+        stakeholders,
+        targetTopology,
+        request.contractId,
+        templateId.packageId,
+        request.targetDomain,
+      )
+    }
 
 }
 
@@ -75,6 +82,7 @@ private[transfer] object TransferOutValidationTransferringParticipant {
   def apply(
       request: FullTransferOutTree,
       expectedStakeholders: Set[LfPartyId],
+      expectedTemplateId: LfTemplateId,
       sourceProtocolVersion: SourceProtocolVersion,
       sourceTopology: TopologySnapshot,
       targetTopology: TopologySnapshot,
@@ -103,7 +111,7 @@ private[transfer] object TransferOutValidationTransferringParticipant {
       )
       _ <- validation.checkAdminParties(adminPartiesAndParticipants.adminParties)
       _ <- validation.checkParticipants(adminPartiesAndParticipants.participants)
-      _ <- validation.checkVetted(adminPartiesAndParticipants.participants)
+      _ <- validation.checkVetted(expectedStakeholders, expectedTemplateId)
     } yield ()
   }
 

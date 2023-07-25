@@ -157,7 +157,7 @@ abstract class SyncDomainPersistentStateManagerImpl[S <: SyncDomainPersistentSta
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, DomainRegistryError, SyncDomainPersistentState] = {
-    // TODO(#11255) does this method need to be synchronized?
+    // TODO(#14048) does this method need to be synchronized?
     val persistentState =
       createPersistentState(domainAlias, domainId, domainParameters.protocolVersion)
     for {
@@ -173,7 +173,7 @@ abstract class SyncDomainPersistentStateManagerImpl[S <: SyncDomainPersistentSta
         participantSettings,
       )
     } yield {
-      // TODO(#11255) potentially delete putIfAbsent
+      // TODO(#14048) potentially delete putIfAbsent
       putIfAbsent(persistentState)
       persistentState
     }
@@ -261,7 +261,7 @@ abstract class SyncDomainPersistentStateManagerImpl[S <: SyncDomainPersistentSta
   def protocolVersionFor(
       domainId: DomainId
   ): Future[Option[ProtocolVersion]] = {
-    // TODO(#11255) remove future
+    // TODO(#14048) remove future
     Future.successful(get(domainId).map(_.protocolVersion))
   }
 
@@ -302,6 +302,7 @@ abstract class SyncDomainPersistentStateManagerImpl[S <: SyncDomainPersistentSta
 }
 
 class SyncDomainPersistentStateManagerOld(
+    participantId: ParticipantId,
     aliasResolution: DomainAliasResolution,
     storage: Storage,
     indexedStringStore: IndexedStringStore,
@@ -342,9 +343,10 @@ class SyncDomainPersistentStateManagerOld(
   override def topologyFactoryFor(domainId: DomainId): Option[TopologyComponentFactory] = {
     get(domainId).map(state =>
       new TopologyComponentFactoryOld(
+        participantId,
         domainId,
-        pureCrypto,
         clock,
+        parameters.skipTopologyManagerSignatureValidation,
         parameters.processingTimeouts,
         futureSupervisor,
         parameters.cachingConfigs,
@@ -440,7 +442,7 @@ class SyncDomainPersistentStateManagerX(
               Option.when(trustCert.isEmpty)(
                 new StoreBasedDomainTopologyInitializationCallback(
                   participantId,
-                  Seq(state.topologyStore),
+                  state.topologyStore,
                 )
               )
             )

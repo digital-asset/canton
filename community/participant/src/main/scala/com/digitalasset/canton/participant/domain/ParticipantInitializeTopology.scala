@@ -310,14 +310,10 @@ class ParticipantInitializeTopologyX(
       ec: ExecutionContext
   ): RegisterTopologyTransactionHandleWithProcessor[GenericSignedTopologyTransactionX] =
     new SequencerBasedRegisterTopologyTransactionHandleX(
-      (traceContext, env) =>
-        client.sendAsyncUnauthenticated(
-          Batch(List(env), protocolVersion)
-        )(traceContext),
+      client,
       domainId,
       participantId,
-      member,
-      maybeClockForRetries = None,
+      clock,
       config,
       protocolVersion,
       processingTimeout,

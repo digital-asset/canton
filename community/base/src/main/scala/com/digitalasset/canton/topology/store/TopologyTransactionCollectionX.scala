@@ -164,5 +164,5 @@ object StoredTopologyTransactionsX
   def empty: GenericStoredTopologyTransactionsX =
     StoredTopologyTransactionsX[TopologyChangeOpX, TopologyMappingX](Seq())
 
-  override protected def name: String = "topology transactions"
+  override def name: String = "topology transactions"
 }

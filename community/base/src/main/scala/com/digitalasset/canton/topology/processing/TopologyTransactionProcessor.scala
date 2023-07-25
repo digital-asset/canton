@@ -3,24 +3,26 @@
 
 package com.digitalasset.canton.topology.processing
 
+import cats.instances.list.*
 import cats.syntax.functor.*
-import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto.{CryptoPureApi, PublicKey, SigningPublicKey}
+import com.digitalasset.canton.crypto.{
+  Crypto,
+  CryptoPureApi,
+  DomainSyncCryptoClient,
+  PublicKey,
+  SigningPublicKey,
+}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.environment.CantonNodeParameters
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, Lifecycle}
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.protocol.messages.{
-  DefaultOpenEnvelope,
-  DomainTopologyTransactionMessage,
-  ProtocolMessage,
-}
+import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.Clock
@@ -32,7 +34,7 @@ import com.digitalasset.canton.topology.client.{
 import com.digitalasset.canton.topology.store.*
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Positive
 import com.digitalasset.canton.topology.transaction.*
-import com.digitalasset.canton.topology.{DomainId, KeyOwner}
+import com.digitalasset.canton.topology.{DomainId, KeyOwner, Member}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
@@ -80,14 +82,15 @@ object SequencedTime {
   */
 class TopologyTransactionProcessor(
     domainId: DomainId,
-    cryptoPureApi: CryptoPureApi,
+    validator: DomainTopologyTransactionMessageValidator,
+    pureCrypto: CryptoPureApi,
     store: TopologyStore[TopologyStoreId.DomainStore],
     acsCommitmentScheduleEffectiveTime: Traced[CantonTimestamp] => Unit,
     futureSupervisor: FutureSupervisor,
     timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
-// TODO(#11255) gerolf: changed this back to SignedTopologyTransaction to make the existing test work again.
+// TODO(#14051) gerolf: changed this back to SignedTopologyTransaction to make the existing test work again.
 //                      creating a DomainTopologyTransactionMessage seems more involved than what I want to get into now
     extends TopologyTransactionProcessorCommonImpl[SignedTopologyTransaction[TopologyChangeOp]](
       domainId,
@@ -96,11 +99,12 @@ class TopologyTransactionProcessor(
       acsCommitmentScheduleEffectiveTime,
       timeouts,
       loggerFactory,
-    ) {
+    )
+    with HasCloseContext {
 
   private val authValidator =
     new IncomingTopologyTransactionAuthorizationValidator(
-      cryptoPureApi,
+      pureCrypto,
       store,
       Some(domainId),
       loggerFactory.append("role", "incoming"),
@@ -123,11 +127,24 @@ class TopologyTransactionProcessor(
   ): Future[Option[(SequencedTime, EffectiveTime)]] = store.timestamp(useStateStore = true)
 
   override protected def initializeTopologyTimestampPlusEpsilonTracker(
-      processorTs: CantonTimestamp
+      processorTs: CantonTimestamp,
+      maxStored: Option[SequencedTime],
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[EffectiveTime] =
+  ): FutureUnlessShutdown[EffectiveTime] = {
+
+    // remember the timestamp of the last message in order to validate the signatures
+    // of the domain topology transaction message. we use the minimum of the two timestamps given,
+    // should give us the latest state that is valid at the point of the new transaction
+    // this means that if we validate the transaction, we validate it against the
+    // as-of-inclusive state of the previous transaction
+    val latestMsg = processorTs.min(maxStored.map(_.value).getOrElse(processorTs))
+    if (latestMsg > CantonTimestamp.MinValue) {
+      validator.initLastMessageTimestamp(Some(latestMsg))
+    }
+
     TopologyTimestampPlusEpsilonTracker.initialize(timeAdjuster, store, processorTs)
+  }
 
   @VisibleForTesting
   override private[processing] def process(
@@ -136,7 +153,6 @@ class TopologyTransactionProcessor(
       sc: SequencerCounter,
       transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    // TODO(i4933) check signature of domain idm and don't accept any transaction other than domain uid tx until we are bootstrapped
     // start validation and change delay advancing
     val validatedF = performUnlessClosingF(functionFullName)(
       authValidator.validateAndUpdateHeadAuthState(effectiveTimestamp.value, transactions).map {
@@ -208,7 +224,7 @@ class TopologyTransactionProcessor(
           filtered,
         )
       )
-    } yield {}
+    } yield ()
   }
 
   private def inspectAndAdvanceTopologyTransactionDelay(
@@ -277,7 +293,6 @@ class TopologyTransactionProcessor(
       transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val (deactivate, positive) = SignedTopologyTransactions(transactions).splitForStateUpdate
-
     performUnlessClosingF(functionFullName)(
       store.updateState(
         sequenced,
@@ -413,13 +428,14 @@ class TopologyTransactionProcessor(
       } yield ()
     }
 
-  override protected def extractTopologyUpdates(
-      envelopes: List[DefaultOpenEnvelope]
-  ): List[SignedTopologyTransaction[TopologyChangeOp]] =
-    envelopes
-      .mapFilter(ProtocolMessage.select[DomainTopologyTransactionMessage])
-      .map(_.protocolMessage)
-      .flatMap(_.transactions)
+  override protected def extractTopologyUpdatesAndValidateEnvelope(
+      ts: SequencedTime,
+      envelopes: List[DefaultOpenEnvelope],
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[List[SignedTopologyTransaction[TopologyChangeOp]]] = {
+    validator.extractTopologyUpdatesAndValidateEnvelope(ts, envelopes)
+  }
 
   override def onClosed(): Unit = {
     super.onClosed()
@@ -434,9 +450,10 @@ object TopologyTransactionProcessor {
 
   def createProcessorAndClientForDomain(
       topologyStore: TopologyStore[TopologyStoreId.DomainStore],
+      owner: Member,
       domainId: DomainId,
       protocolVersion: ProtocolVersion,
-      pureCrypto: CryptoPureApi,
+      crypto: Crypto,
       initKeys: Map[KeyOwner, Seq[PublicKey]],
       parameters: CantonNodeParameters,
       clock: Clock,
@@ -445,16 +462,9 @@ object TopologyTransactionProcessor {
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
-  ): Future[(TopologyTransactionProcessor, BaseCachingDomainTopologyClient)] = {
-    val topologyProcessor = new TopologyTransactionProcessor(
-      domainId,
-      pureCrypto,
-      topologyStore,
-      acsCommitmentScheduleEffectiveTime = _ => (),
-      futureSupervisor,
-      parameters.processingTimeouts,
-      loggerFactory,
-    )
+  ): Future[
+    (TopologyTransactionProcessor, BaseCachingDomainTopologyClient)
+  ] = {
     val topologyClientF =
       CachingDomainTopologyClient
         .create(
@@ -470,6 +480,35 @@ object TopologyTransactionProcessor {
           loggerFactory,
         )
     topologyClientF.map { topologyClient =>
+      val cryptoClient = new DomainSyncCryptoClient(
+        owner,
+        domainId,
+        topologyClient,
+        crypto,
+        parameters.cachingConfigs,
+        parameters.processingTimeouts,
+        futureSupervisor,
+        loggerFactory,
+      )
+
+      val topologyProcessor = new TopologyTransactionProcessor(
+        domainId,
+        DomainTopologyTransactionMessageValidator.create(
+          parameters.skipTopologyManagerSignatureValidation,
+          cryptoClient,
+          owner,
+          protocolVersion,
+          parameters.processingTimeouts,
+          futureSupervisor,
+          loggerFactory,
+        ),
+        cryptoClient.pureCrypto,
+        topologyStore,
+        acsCommitmentScheduleEffectiveTime = _ => (),
+        futureSupervisor,
+        parameters.processingTimeouts,
+        loggerFactory,
+      )
       topologyProcessor.subscribe(topologyClient)
       (topologyProcessor, topologyClient)
     }

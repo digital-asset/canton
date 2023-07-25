@@ -62,9 +62,6 @@ trait ActiveContractStoreTest extends PrunableByTimeTest {
 
   lazy val active = Active(initialTransferCounter)
 
-  private def valueOf(transferCounter: TransferCounterO): TransferCounter =
-    transferCounter.getOrElse(TransferCounter.Genesis)
-
   @SuppressWarnings(Array("org.wartremover.warts.IsInstanceOf"))
   protected def activeContractStore(
       mkAcs: ExecutionContext => ActiveContractStore,

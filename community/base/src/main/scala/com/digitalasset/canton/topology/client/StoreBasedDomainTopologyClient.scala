@@ -24,6 +24,7 @@ import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.{
   nonConsortiumPartyDelegation,
 }
 import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime, SequencedTime}
+import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransactions,
   TimeQuery,
@@ -789,7 +790,7 @@ class StoreBasedTopologySnapshot(
   }
 
   /** returns the current sequencer group if known
-    * TODO(#11255): Decide whether it is advantageous e.g. for testing to expose a sequencer-group on daml 2.*
+    * TODO(#14048): Decide whether it is advantageous e.g. for testing to expose a sequencer-group on daml 2.*
     *   perhaps we cook up a SequencerId based on the domainId assuming that the sequencer (or sequencers all with the
     *   same sequencerId) is/are active
     */
@@ -900,4 +901,20 @@ class StoreBasedTopologySnapshot(
         parties.map(partyId => partyId -> nonConsortiumPartyDelegation(partyId)).toMap
       )
     )
+}
+
+object StoreBasedTopologySnapshot {
+  def headstateOfAuthorizedStore(
+      topologyStore: TopologyStore[AuthorizedStore],
+      loggerFactory: NamedLoggerFactory,
+  )(implicit executionContext: ExecutionContext): StoreBasedTopologySnapshot = {
+    new StoreBasedTopologySnapshot(
+      CantonTimestamp.MaxValue, // we use a max value here, as this will give us the "head snapshot" transactions (valid_from < t && until.isNone)
+      topologyStore,
+      Map(),
+      useStateTxs = false,
+      packageDependencies = StoreBasedDomainTopologyClient.NoPackageDependencies,
+      loggerFactory,
+    )
+  }
 }

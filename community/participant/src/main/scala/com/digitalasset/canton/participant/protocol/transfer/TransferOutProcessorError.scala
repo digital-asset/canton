@@ -5,16 +5,14 @@ package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.NonEmptyChain
 import cats.implicits.catsSyntaxFoldableOps0
-import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.PackageUnknownTo
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.TransferProcessorError
 import com.digitalasset.canton.participant.store.ActiveContractStore.Status
 import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
 import com.digitalasset.canton.protocol.{LfContractId, TransferId}
 import com.digitalasset.canton.sequencing.protocol.Recipients
-import com.digitalasset.canton.topology.{DomainId, ParticipantId}
-import com.digitalasset.canton.{LfPackageId, LfPartyId}
-
-import scala.collection.View
+import com.digitalasset.canton.topology.DomainId
 
 trait TransferOutProcessorError extends TransferProcessorError
 
@@ -102,15 +100,10 @@ object TransferOutProcessorError {
 
   final case class PackageIdUnknownOrUnvetted(
       contractId: LfContractId,
-      unknownOrUnvetted: Map[ParticipantId, NonEmpty[Set[LfPackageId]]],
+      unknownTo: List[PackageUnknownTo],
   ) extends TransferOutProcessorError {
-    private def unknownOrUnvettedMessage: View[String] =
-      for ((participant, missing) <- unknownOrUnvetted.view) yield {
-        s"package(s) ${missing.mkString(", ")} are unknown or unvetted on $participant"
-      }
-
     override def message: String =
-      s"Cannot transfer out contract `$contractId`: ${unknownOrUnvettedMessage.mkString(", ")}"
+      s"Cannot transfer out contract `$contractId`: ${unknownTo.mkString(", ")}"
   }
 
 }

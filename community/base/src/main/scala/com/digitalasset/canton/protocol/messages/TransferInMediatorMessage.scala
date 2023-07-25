@@ -173,5 +173,5 @@ object TransferInMediatorMessage
       )
     } yield TransferInMediatorMessage(tree)
 
-  override protected def name: String = "TransferInMediatorMessage"
+  override def name: String = "TransferInMediatorMessage"
 }

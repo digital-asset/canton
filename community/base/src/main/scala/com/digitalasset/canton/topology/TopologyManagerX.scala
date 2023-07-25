@@ -46,7 +46,8 @@ class TopologyManagerX(
     futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
-    extends NamedLogging
+    extends TopologyManagerStatus
+    with NamedLogging
     with FlagCloseable {
 
   // sequential queue to run all the processing that does operate on the state
@@ -59,7 +60,7 @@ class TopologyManagerX(
 
   private val processor = new TopologyStateProcessorX(store, loggerFactory)
 
-  def queueSize: Int = sequentialQueue.queueSize
+  override def queueSize: Int = sequentialQueue.queueSize
 
   private val observers = new AtomicReference[Seq[TopologyManagerObserver]](Seq.empty)
   def addObserver(observer: TopologyManagerObserver): Unit =
@@ -119,7 +120,7 @@ class TopologyManagerX(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TopologyManagerError, GenericSignedTopologyTransactionX] = {
-    // TODO(#11255): check that there is an existing topology transaction with the hash of the unique key
+    // TODO(#12390): check that there is an existing topology transaction with the hash of the unique key
     for {
       proposals <- EitherT
         .right[TopologyManagerError](
@@ -128,9 +129,9 @@ class TopologyManagerX(
         .mapK(FutureUnlessShutdown.outcomeK)
       existingTransaction =
         (proposals match {
-          case Seq() => ??? // TODO(#11255) proper error
+          case Seq() => ??? // TODO(#12390) proper error
           case Seq(tx) => tx
-          case _otherwise => ??? // TODO(#11255) proper error
+          case _otherwise => ??? // TODO(#12390) proper error
         })
       extendedTransaction <- extendSignature(existingTransaction, signingKeys).mapK(
         FutureUnlessShutdown.outcomeK
@@ -192,7 +193,7 @@ class TopologyManagerX(
             TopologyManagerError.SerialMismatch.Failure(PositiveInt.one, proposed),
           )
 
-        // TODO(#11255) existing mapping and the proposed mapping are the same. does this only add a (superfluous) signature?
+        // TODO(#12390) existing mapping and the proposed mapping are the same. does this only add a (superfluous) signature?
         //              maybe we should reject this proposal, but for now we need this to pass through successfully, because we don't
         //              support proper topology transaction validation yet, especially not for multi-sig transactions.
         case (Some((`op`, `mapping`, existingSerial, _)), None) =>
@@ -231,10 +232,10 @@ class TopologyManagerX(
       // find signing keys.
       keys <- (signingKeys match {
         case first +: rest =>
-          // TODO(#11255) should we check whether this node could sign with keys that are required in addition to the ones provided in signingKeys, and fetch those keys?
+          // TODO(#12390) should we check whether this node could sign with keys that are required in addition to the ones provided in signingKeys, and fetch those keys?
           EitherT.pure(NonEmpty.mk(Set, first, rest: _*))
         case _empty =>
-          // TODO(#11255) get signing keys for transaction.
+          // TODO(#12390) get signing keys for transaction.
           EitherT.leftT(
             TopologyManagerError.InternalError.ImplementMe(
               "Automatic signing key lookup not yet implemented. Please specify a signing explicitly."
@@ -249,7 +250,7 @@ class TopologyManagerX(
           isProposal,
           crypto.pureCrypto,
           crypto.privateCrypto,
-          // TODO(#11255) The `SignedTopologyTransactionX` may use a different versioning scheme than the contained transaction. Use the right protocol version here
+          // TODO(#14048) The `SignedTopologyTransactionX` may use a different versioning scheme than the contained transaction. Use the right protocol version here
           transaction.representativeProtocolVersion.representative,
         )
         .leftMap {
@@ -270,10 +271,10 @@ class TopologyManagerX(
       // find signing keys
       keys <- (signingKey match {
         case keys @ (_first +: _rest) =>
-          // TODO(#11255) filter signing keys relevant for the required authorization for this transaction
+          // TODO(#12390) filter signing keys relevant for the required authorization for this transaction
           EitherT.rightT(keys.toSet)
         case _ =>
-          // TODO(#11255) fetch signing keys that are relevant for the required authorization for this transaction
+          // TODO(#12390) fetch signing keys that are relevant for the required authorization for this transaction
           EitherT.leftT(
             TopologyManagerError.InternalError.ImplementMe(
               "Automatic signing key lookup not yet implemented. Please specify a signing explicitly."

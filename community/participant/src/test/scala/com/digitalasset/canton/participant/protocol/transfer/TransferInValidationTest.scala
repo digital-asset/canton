@@ -16,13 +16,17 @@ import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.time.TimeProofTestUtil
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
 import scala.concurrent.{Future, Promise}
 
-class TransferInValidationTest extends AsyncWordSpec with BaseTest {
+class TransferInValidationTest
+    extends AsyncWordSpec
+    with BaseTest
+    with ProtocolVersionChecksAsyncWordSpec {
   private val sourceDomain = SourceDomainId(
     DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::source"))
   )
@@ -210,6 +214,44 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
         _ <- inValidated
       } yield { succeed }
     }
+
+    "complain about inconsistent transfer counters" in {
+      val inRequestWithWrongCounter = makeFullTransferInTree(
+        party1,
+        Set(party1),
+        contract,
+        transactionId1,
+        targetDomain,
+        targetMediator,
+        transferOutResult,
+        transferCounter = transferData.transferCounter.map(_ + 1),
+      )
+      for {
+        result <-
+          transferInValidation
+            .validateTransferInRequest(
+              CantonTimestamp.Epoch,
+              inRequestWithWrongCounter,
+              Some(transferData),
+              cryptoSnapshot,
+              transferringParticipant = true,
+            )
+            .value
+      } yield {
+        // TODO(#12373) Adapt when releasing BFT
+        if (testedProtocolVersion < ProtocolVersion.dev) {
+          result shouldBe Right(Some(TransferInValidationResult(Set(party1))))
+        } else {
+          result shouldBe Left(
+            InconsistentTransferCounter(
+              transferId,
+              inRequestWithWrongCounter.transferCounter,
+              transferData.transferCounter,
+            )
+          )
+        }
+      }
+    }
   }
 
   private def testInstance(
@@ -246,6 +288,7 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
       targetMediator: MediatorId,
       transferOutResult: DeliveredTransferOutResult,
       uuid: UUID = new UUID(4L, 5L),
+      transferCounter: TransferCounterO = initialTransferCounter,
   ): FullTransferInTree = {
     val seed = seedGenerator.generateSaltSeed()
     valueOrFail(
@@ -255,7 +298,7 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
         submitterInfo(submitter),
         stakeholders,
         contract,
-        initialTransferCounter,
+        transferCounter,
         creatingTransactionId,
         targetDomain,
         MediatorRef(targetMediator),

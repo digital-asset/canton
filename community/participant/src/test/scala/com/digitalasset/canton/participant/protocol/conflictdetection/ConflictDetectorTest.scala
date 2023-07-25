@@ -105,6 +105,8 @@ class ConflictDetectorTest
 
   private val initialTransferCounter: TransferCounterO =
     TransferCounter.forCreatedContract(testedProtocolVersion)
+  private val transferCounter1 = initialTransferCounter.map(_ + 1)
+  private val transferCounter2 = initialTransferCounter.map(_ + 2)
 
   private val active = Active(initialTransferCounter)
   private def defaultTransferCache: TransferCache =
@@ -135,7 +137,7 @@ class ConflictDetectorTest
           cd,
           RequestCounter(0),
           ActivenessSet.empty,
-          ActivenessResult.success,
+          mkActivenessResult(),
           CommitSet.empty,
           Epoch,
         )
@@ -165,8 +167,9 @@ class ConflictDetectorTest
           freeKeys = Set(key3),
           assignKeys = Set(key2),
           unassignKeys = Set(key1),
+          prior = Set(coid00, coid10),
         )
-        actRes = ActivenessResult.success
+        actRes = mkActivenessResult(prior = Map(coid00 -> Some(active), coid10 -> None))
         commitSet = mkCommitSet(
           arch = Set(coid00),
           create = Set(coid10),
@@ -269,8 +272,8 @@ class ConflictDetectorTest
           .flatten
           .failOnShutdown
       } yield {
-        assert(cr == ActivenessResult.success)
-        assert(fin == Right(()))
+        cr shouldBe mkActivenessResult()
+        fin shouldBe Right(())
       }
     }
 
@@ -315,8 +318,8 @@ class ConflictDetectorTest
           .flatten
           .failOnShutdown
       } yield {
-        assert(cr == ActivenessResult.success)
-        assert(fin == Right(()))
+        cr shouldBe mkActivenessResult()
+        fin shouldBe Right(())
       }
     }
 
@@ -426,12 +429,13 @@ class ConflictDetectorTest
         mkActivenessSet(create = Set(coid00, coid01), assignKeys = Set(key1, key2))
       val commitSet0 =
         mkCommitSet(create = Set(coid00, coid01), keys = Map(key1 -> Assigned, key2 -> Assigned))
-      val actSet1 = mkActivenessSet(deact = Set(coid00), unassignKeys = Set(key1))
+      val actSet1 =
+        mkActivenessSet(deact = Set(coid00), unassignKeys = Set(key1), prior = Set(coid00))
       for {
         cr0 <- prefetchAndCheck(cd, rc, actSet0)
-        _ = assert(cr0 == ActivenessResult.success)
+        _ = cr0 shouldBe mkActivenessResult()
         cr1 <- prefetchAndCheck(cd, rc + 1L, actSet1)
-        _ = assert(cr1 == mkActivenessResult(locked = Set(coid00), lockedKeys = Set(key1)))
+        _ = cr1 shouldBe mkActivenessResult(locked = Set(coid00), lockedKeys = Set(key1))
         _ = checkContractState(cd, coid00, 0, 1 + 1, 0)(
           s"Nonexistent contract $coid00 is locked for activation and deactivation"
         )
@@ -448,7 +452,7 @@ class ConflictDetectorTest
         _ = checkKeyState(cd, key1, 0, 1, 0)(show"Rollback of request ${rc + 1} releases key lock.")
 
         fin0 <- cd.finalizeRequest(commitSet0, toc).flatten.failOnShutdown
-        _ = assert(fin0 == Right(()))
+        _ = fin0 shouldBe Right(())
         _ = forEvery(Seq(coid00, coid01)) { coid =>
           checkContractStateAbsent(cd, coid)(s"created contract $coid is evicted")
         }
@@ -491,7 +495,7 @@ class ConflictDetectorTest
           unassignKeys = Set(key1),
         )
         cr1 <- prefetchAndCheck(cd, rc, actSet1)
-        _ = assert(cr1 == ActivenessResult.success)
+        _ = cr1 shouldBe mkActivenessResult()
         _ = checkContractState(cd, coid00, active, toc0, 0, 1, 0)(
           s"locked consumed contract $coid00"
         )
@@ -510,11 +514,13 @@ class ConflictDetectorTest
           useOnly = Set(coid01, coid10, coid21),
           freeKeys = Set(key1),
           assignKeys = Set(key2, key4),
+          prior = Set(coid01, coid21),
         )
         actRes3 = mkActivenessResult(
           locked = Set(coid00, coid10, coid21),
           notActive = Map(coid01 -> Archived, coid11 -> Archived),
           lockedKeys = Set(key1),
+          prior = Map(coid01 -> Some(Archived)),
         )
         _ <- cd.registerActivenessSet(rc + 2, actSet3).failOnShutdown
 
@@ -526,11 +532,13 @@ class ConflictDetectorTest
           freeKeys = Set(key2),
           unassignKeys = Set(key3),
           assignKeys = Set(key1),
+          prior = Set(coid00, coid10, coid20),
         )
         actRes2 = mkActivenessResult(
           locked = Set(coid00, coid11, coid20, coid21),
           notActive = Map(coid01 -> Archived),
           lockedKeys = Set(key1, key2, key3),
+          prior = Map(coid10 -> Some(active)),
         )
         cr2 <- prefetchAndCheck(cd, rc2, actSet2)
         _ = assert(cr2 == actRes2)
@@ -709,13 +717,15 @@ class ConflictDetectorTest
         actSet = mkActivenessSet(
           create = Set(coid00, coid01, coid10, coid11),
           assignKeys = Set(key1, key2),
+          prior = Set(coid00),
         )
+        actRes = mkActivenessResult(prior = Map(coid00 -> None))
         commitSet = mkCommitSet(
           arch = Set(coid00, coid10),
           create = Set(coid01, coid00),
           keys = Map(key1 -> Assigned, key2 -> Unassigned),
         )
-        _ <- singleCRwithTR(cd, rc, actSet, ActivenessResult.success, commitSet, ts)
+        _ <- singleCRwithTR(cd, rc, actSet, actRes, commitSet, ts)
 
         _ <- checkContractState(acs, coid00, (Archived, toc))(
           s"transient contract $coid00 is archived"
@@ -771,7 +781,7 @@ class ConflictDetectorTest
 
         // Activeness check for first request
         cr0 <- cd.checkActivenessAndLock(rc).failOnShutdown
-        _ = assert(cr0 == ActivenessResult.success)
+        _ = cr0 shouldBe mkActivenessResult()
 
         // Activeness check for second request
         cr1 <- cd.checkActivenessAndLock(rc + 1).failOnShutdown
@@ -924,7 +934,7 @@ class ConflictDetectorTest
       )(clue: String): Future[Assertion] =
         for {
           cr <- prefetchAndCheck(cd, rc, activenessSet)
-          _ = assert(cr == ActivenessResult.success, clue)
+          _ = assert(cr == mkActivenessResult(), clue)
           error <- loggerFactory.suppressWarningsAndErrors {
             cd.finalizeRequest(commitSet, TimeOfChange(rc, ts)).flatten.failOnShutdown.transform {
               case Failure(t) => Success(t)
@@ -956,13 +966,13 @@ class ConflictDetectorTest
         _ <- checkContractState(acs, coid01, None)(s"contract $coid01 remains non-existent")
 
         _ <- checkInvalidCommitSet(cd, RequestCounter(3), ofEpochMilli(3))(
-          mkActivenessSet(txIn = Set(coid01), transferIds = Set(transfer1, transfer2)),
-          mkCommitSet(txIn = Map(coid00 -> transfer1, coid01 -> transfer2)),
+          mkActivenessSet(tfIn = Set(coid01), transferIds = Set(transfer1, transfer2)),
+          mkCommitSet(tfIn = Map(coid00 -> transfer1, coid01 -> transfer2)),
         )("Transferred-in contract not locked.")
 
         _ <- checkInvalidCommitSet(cd, RequestCounter(4), ofEpochMilli(4))(
           mkActivenessSet(useOnly = Set(coid00)),
-          mkCommitSet(txOut = Map(coid00 -> sourceDomain1.unwrap)),
+          mkCommitSet(tfOut = Map(coid00 -> (sourceDomain1.unwrap -> transferCounter1))),
         )("Transfer-out contract only used, not locked.")
 
         _ <- checkInvalidCommitSet(cd, RequestCounter(5), ofEpochMilli(5))(
@@ -986,11 +996,15 @@ class ConflictDetectorTest
         // Activeness check of first request
         actSet0 = mkActivenessSet(create = Set(coid00, coid01, coid10))
         cr0 <- prefetchAndCheck(cd, rc, actSet0)
-        _ = assert(cr0 == ActivenessResult.success)
+        _ = cr0 shouldBe mkActivenessResult()
 
         // Activeness check of second request
-        cr1 <- prefetchAndCheck(cd, rc + 1, mkActivenessSet(deact = Set(coid00, coid10)))
-        _ = assert(cr1 == mkActivenessResult(locked = Set(coid00, coid10)))
+        cr1 <- prefetchAndCheck(
+          cd,
+          rc + 1,
+          mkActivenessSet(deact = Set(coid00, coid10), prior = Set(coid00, coid10)),
+        )
+        _ = cr1 shouldBe mkActivenessResult(locked = Set(coid00, coid10))
         _ = Seq(coid00 -> 1, coid01 -> 0, coid10 -> 1).foreach { case (coid, deactivations) =>
           checkContractState(cd, coid, 0, 1 + deactivations, 0)(
             s"Contract $coid in creation is locked $deactivations times"
@@ -1002,7 +1016,7 @@ class ConflictDetectorTest
           .finalizeRequest(mkCommitSet(arch = Set(coid00, coid10)), toc1)
           .flatten
           .failOnShutdown
-        _ = assert(fin1 == Right(()))
+        _ = fin1 shouldBe Right(())
         _ <- List(coid00 -> 0, coid10 -> 0).parTraverse_ { case (coid, deactivationLocks) =>
           checkContractState(cd, coid, Archived, toc1, 0, 1 + deactivationLocks, 0)(
             s"contract $coid archived by opportunistic follow-up still locked"
@@ -1026,9 +1040,7 @@ class ConflictDetectorTest
         }
         commitSet0 = mkCommitSet(create = Set(coid00, coid01, coid10), arch = Set(coid10))
         fin0 <- cd.finalizeRequest(commitSet0, toc0).flatten.failOnShutdown
-        _ = assert(
-          fin0 == Left(NonEmptyChain(AcsError(DoubleContractArchival(coid10, toc1, toc0))))
-        )
+        _ = fin0 shouldBe Left(NonEmptyChain(AcsError(DoubleContractArchival(coid10, toc1, toc0))))
         _ <- checkContractState(acs, coid00, (Archived, toc1))(s"contract $coid00 remains archived")
         _ <- checkContractState(acs, coid01, (active, toc0))(s"contract $coid01 is active")
         _ <- checkContractState(acs, coid10, (Archived, toc1))(
@@ -1044,7 +1056,7 @@ class ConflictDetectorTest
         cd = mkCd(acs)
 
         cr0 <- prefetchAndCheck(cd, RequestCounter(0), mkActivenessSet(create = Set(coid00)))
-        _ = assert(cr0 == ActivenessResult.success)
+        _ = cr0 shouldBe mkActivenessResult()
         fin0 <- cd
           .finalizeRequest(CommitSet.empty, TimeOfChange(RequestCounter(0), Epoch))
           .flatten
@@ -1052,10 +1064,11 @@ class ConflictDetectorTest
         _ = assert(fin0 == Right(()))
         _ = checkContractStateAbsent(cd, coid00)(s"Rolled back contract $coid00 is evicted")
 
+        // Re-creating rolled-back contract coid00
         cr1 <- prefetchAndCheck(cd, RequestCounter(1), mkActivenessSet(create = Set(coid00)))
-        _ = assert(cr1 == ActivenessResult.success, s"Re-creating rolled-back contract $coid00")
+        _ = cr1 shouldBe mkActivenessResult()
         fin1 <- cd.finalizeRequest(mkCommitSet(create = Set(coid00)), toc1).flatten.failOnShutdown
-        _ = assert(fin1 == Right(()))
+        _ = fin1 shouldBe Right(())
         _ <- checkContractState(acs, coid00, (active, toc1))(s"Contract $coid00 created")
       } yield succeed
     }
@@ -1064,7 +1077,7 @@ class ConflictDetectorTest
       val cd = mkCd()
       for {
         cr0 <- prefetchAndCheck(cd, RequestCounter(0), mkActivenessSet(create = Set(coid00)))
-        _ = assert(cr0 == ActivenessResult.success)
+        _ = cr0 shouldBe mkActivenessResult()
 
         cr1 <- prefetchAndCheck(cd, RequestCounter(1), mkActivenessSet(deact = Set(coid00)))
         _ = assert(cr1 == mkActivenessResult(locked = Set(coid00)))
@@ -1100,12 +1113,19 @@ class ConflictDetectorTest
         create = Set(coid10, coid20, coid22),
       )
 
-      val commitSet1 = mkCommitSet(arch = Set(coid00, coid20, coid11))
       val actSet1 = mkActivenessSet(deact = Set(coid20, coid11, coid10, coid00))
+      val commitSet1 = mkCommitSet(arch = Set(coid00, coid20, coid11))
 
-      val actSet2 =
-        mkActivenessSet(create = Set(coid10), deact = Set(coid00, coid21, coid20, coid11, coid22))
-      val actRes2 = mkActivenessResult(locked = Set(coid00, coid11, coid20), notFresh = Set(coid10))
+      val actSet2 = mkActivenessSet(
+        create = Set(coid10),
+        deact = Set(coid00, coid21, coid20, coid11, coid22),
+        prior = Set(coid21, coid22),
+      )
+      val actRes2 = mkActivenessResult(
+        locked = Set(coid00, coid11, coid20),
+        notFresh = Set(coid10),
+        prior = Map(coid21 -> Some(active), coid22 -> Some(active)),
+      )
 
       val actSet3 = mkActivenessSet(deact = Set(coid20))
 
@@ -1207,11 +1227,11 @@ class ConflictDetectorTest
 
         // Activeness check for first request
         cr0 <- prefetchAndCheck(cd, RequestCounter(0), actSet0)
-        _ = assert(cr0 == ActivenessResult.success)
+        _ = cr0 shouldBe mkActivenessResult()
 
         // Activeness check for second request
         cr1 <- prefetchAndCheck(cd, RequestCounter(1), actSet1)
-        _ = assert(cr1 == actRes0)
+        _ = cr1 shouldBe actRes0
 
         _ = Seq(
           (coid00, Some((active, tocN1)), 0, 2),
@@ -1234,22 +1254,21 @@ class ConflictDetectorTest
 
         // Activeness check for fourth request
         cr3 <- prefetchAndCheck(cd, RequestCounter(3), actSet3)
-        _ = assert(cr3 == actRes3)
+        _ = cr3 shouldBe actRes3
 
         // Finalize the first request and do a lot of stuff while the updates are being written
         _ = acs.setArchiveHook((_, _) => storeHookRequest0(cd, acs))
         finF0 <- cd.finalizeRequest(commitSet0, toc0).failOnShutdown
         _ = finF0Complete.success(())
         fin0 <- finF0.failOnShutdown
-        _ = assert(
-          fin0.leftMap(_.toList.toSet) == Left(
+        _ =
+          fin0.leftMap(_.toList.toSet) shouldBe Left(
             Set(
               AcsError(DoubleContractArchival(coid00, toc1, toc0)),
               AcsError(DoubleContractArchival(coid11, toc1, toc0)),
               AcsError(DoubleContractArchival(coid20, toc1, toc0)),
             )
           )
-        )
         _ = checkContractState(cd, coid00, Archived, toc1, 0, 1, 0)(
           s"Contract $coid00 remains locked."
         )
@@ -1379,7 +1398,7 @@ class ConflictDetectorTest
 
         // Activeness check for the first request
         cr1 <- prefetchAndCheck(cd, toc1.rc, actSet1)
-        _ = assert(cr1 == ActivenessResult.success)
+        _ = cr1 shouldBe mkActivenessResult()
 
         // Activeness check for the second request
         cr2 <- prefetchAndCheck(cd, toc2.rc, actSet2)
@@ -1425,15 +1444,15 @@ class ConflictDetectorTest
         cd = mkCd(acs, ckj, transferCache)
         ts = ofEpochMilli(1)
         actSet = mkActivenessSet(
-          txIn = Set(coid00, coid01, coid10),
+          tfIn = Set(coid00, coid01, coid10),
           transferIds = Set(transfer1),
         ) // omit transfer2 to mimick a non-transferring participant
-        txIn <- prefetchAndCheck(cd, RequestCounter(0), actSet)
-        _ = assert(txIn == ActivenessResult.success)
+        tfIn <- prefetchAndCheck(cd, RequestCounter(0), actSet)
+        _ = tfIn shouldBe mkActivenessResult()
         _ = Seq(coid00, coid01, coid10).foreach { coid =>
           checkContractState(cd, coid00, 0, 1, 0)(s"Contract $coid is locked for activation.")
         }
-        commitSet = mkCommitSet(txIn = Map(coid00 -> transfer1, coid01 -> transfer2))
+        commitSet = mkCommitSet(tfIn = Map(coid00 -> transfer1, coid01 -> transfer2))
         toc = TimeOfChange(RequestCounter(0), ts)
         finTxIn <- cd.finalizeRequest(commitSet, toc).flatten.failOnShutdown
         _ = assert(finTxIn == Right(()))
@@ -1474,8 +1493,12 @@ class ConflictDetectorTest
         cd = mkCd(acs, ckj, transferCache)
         ts = ofEpochMilli(1)
         toc1 = TimeOfChange(RequestCounter(1), ts)
-        actSet = mkActivenessSet(txIn = Set(coid00, coid01), transferIds = Set(transfer1))
-        commitSet = mkCommitSet(txIn = Map(coid00 -> transfer1, coid01 -> transfer2))
+        actSet = mkActivenessSet(
+          tfIn = Set(coid00, coid01),
+          transferIds = Set(transfer1),
+          prior = Set(coid00, coid01),
+        )
+        commitSet = mkCommitSet(tfIn = Map(coid00 -> transfer1, coid01 -> transfer2))
         actRes <- prefetchAndCheck(cd, RequestCounter(1), actSet)
         fin <- cd.finalizeRequest(commitSet, toc1).flatten.failOnShutdown
         fetch00 <- acs.fetchState(coid00)
@@ -1484,7 +1507,13 @@ class ConflictDetectorTest
         lookup2 <- transferCache.lookup(transfer2).value
       } yield {
         assert(
-          actRes == mkActivenessResult(notFree = Map(coid00 -> Archived)),
+          actRes == mkActivenessResult(
+            notFree = Map(coid00 -> Archived),
+            prior = Map(
+              coid00 -> Some(Archived),
+              coid01 -> Some(TransferredAway(targetDomain1, initialTransferCounter)),
+            ),
+          ),
           s"Report that $coid00 was already archived.",
         )
         assert(
@@ -1510,24 +1539,20 @@ class ConflictDetectorTest
         acs <- mkAcs((coid00, toc0, active), (coid01, toc0, active))
         ckj <- mkCkj()
         cd = mkCd(acs, ckj)
-        activenessSet = mkActivenessSet(deact = Set(coid00, coid01))
-        commitSet = mkCommitSet(txOut = Map(coid00 -> domain1, coid01 -> domain2))
-        ts = ofEpochMilli(1)
-        _ <- singleCRwithTR(
-          cd,
-          RequestCounter(1),
-          activenessSet,
-          ActivenessResult.success,
-          commitSet,
-          ts,
+        activenessSet = mkActivenessSet(deact = Set(coid00, coid01), prior = Set(coid00, coid01))
+        actRes = mkActivenessResult(prior = Map(coid00 -> Some(active), coid01 -> Some(active)))
+        commitSet = mkCommitSet(tfOut =
+          Map(coid00 -> (domain1 -> transferCounter1), coid01 -> (domain2 -> transferCounter2))
         )
+        ts = ofEpochMilli(1)
+        _ <- singleCRwithTR(cd, RequestCounter(1), activenessSet, actRes, commitSet, ts)
         fetch00 <- acs.fetchState(coid00)
         fetch01 <- acs.fetchState(coid01)
       } yield {
         assert(
           fetch00.contains(
             AcsContractState(
-              TransferredAway(targetDomain1, initialTransferCounter),
+              TransferredAway(targetDomain1, transferCounter1),
               RequestCounter(1),
               ts,
             )
@@ -1537,7 +1562,7 @@ class ConflictDetectorTest
         assert(
           fetch01.contains(
             AcsContractState(
-              TransferredAway(targetDomain2, initialTransferCounter),
+              TransferredAway(targetDomain2, transferCounter2),
               RequestCounter(1),
               ts,
             )
@@ -1552,34 +1577,35 @@ class ConflictDetectorTest
       for {
         acs <- mkAcs(
           (coid00, toc0, active),
-          (coid01, toc0, active),
           (coid11, toc0, active),
         )
+        _ <- acs.transferInContract(coid01, toc0, sourceDomain1, transferCounter1).value
         ckj <- mkCkj()
         transferCache <- mkTransferCache(loggerFactory)(transfer2 -> mediator2)
         cd = mkCd(acs, ckj, transferCache)
         activenessSet = mkActivenessSet(
           deact = Set(coid00, coid01),
           create = Set(coid10),
-          txIn = Set(coid20),
+          tfIn = Set(coid20),
           transferIds = Set(transfer2),
           useOnly = Set(coid11),
+          prior = Set(coid01, coid00, coid11),
+        )
+        actRes = mkActivenessResult(prior =
+          Map(
+            coid00 -> Some(active),
+            coid01 -> Some(Active(transferCounter1)),
+            coid11 -> Some(active),
+          )
         )
         commitSet = mkCommitSet(
           arch = Set(coid00),
-          txOut = Map(coid01 -> domain1),
-          txIn = Map(coid20 -> transfer2),
+          tfOut = Map(coid01 -> (domain1 -> transferCounter2)),
+          tfIn = Map(coid20 -> transfer2),
           create = Set(coid10),
         )
         ts = ofEpochMilli(1)
-        _ <- singleCRwithTR(
-          cd,
-          RequestCounter(1),
-          activenessSet,
-          ActivenessResult.success,
-          commitSet,
-          ts,
-        )
+        _ <- singleCRwithTR(cd, RequestCounter(1), activenessSet, actRes, commitSet, ts)
         fetch00 <- acs.fetchState(coid00)
         fetch01 <- acs.fetchState(coid01)
         fetch10 <- acs.fetchState(coid10)
@@ -1594,7 +1620,7 @@ class ConflictDetectorTest
         assert(
           fetch01.contains(
             AcsContractState(
-              TransferredAway(targetDomain1, initialTransferCounter),
+              TransferredAway(targetDomain1, transferCounter2),
               RequestCounter(1),
               ts,
             )
@@ -1628,15 +1654,15 @@ class ConflictDetectorTest
         cd = mkCd(acs, ckj, transferCache)
         activenessSet = mkActivenessSet(
           create = Set(coid00),
-          txIn = Set(coid01),
+          tfIn = Set(coid01),
           transferIds = Set(transfer1),
         )
-        commitSet = mkCommitSet(create = Set(coid01), txIn = Map(coid00 -> transfer1))
+        commitSet = mkCommitSet(create = Set(coid01), tfIn = Map(coid00 -> transfer1))
         _ <- singleCRwithTR(
           cd,
           RequestCounter(0),
           activenessSet,
-          ActivenessResult.success,
+          mkActivenessResult(),
           commitSet,
           Epoch,
         )
@@ -1664,21 +1690,22 @@ class ConflictDetectorTest
         ckj <- mkCkj()
         cd = mkCd(acs, ckj, transferCache)
         activenessSet = mkActivenessSet(
-          txIn = Set(coid10, coid11),
+          tfIn = Set(coid10, coid11),
           transferIds = Set(transfer1, transfer2),
           create = Set(coid20),
         )
         commitSet = mkCommitSet(
           create = Set(coid20),
-          txIn = Map(coid10 -> transfer2, coid11 -> transfer1),
-          txOut = Map(coid20 -> domain1, coid11 -> domain2),
+          tfIn = Map(coid10 -> transfer2, coid11 -> transfer1),
+          tfOut =
+            Map(coid20 -> (domain1 -> transferCounter1), coid11 -> (domain2 -> transferCounter2)),
           arch = Set(coid10),
         )
         _ <- singleCRwithTR(
           cd,
           RequestCounter(0),
           activenessSet,
-          ActivenessResult.success,
+          mkActivenessResult(),
           commitSet,
           Epoch,
         )
@@ -1693,7 +1720,7 @@ class ConflictDetectorTest
         assert(
           fetch11.contains(
             AcsContractState(
-              TransferredAway(targetDomain2, initialTransferCounter),
+              TransferredAway(targetDomain2, transferCounter2),
               RequestCounter(0),
               Epoch,
             )
@@ -1703,7 +1730,7 @@ class ConflictDetectorTest
         assert(
           fetch20.contains(
             AcsContractState(
-              TransferredAway(targetDomain1, initialTransferCounter),
+              TransferredAway(targetDomain1, transferCounter1),
               RequestCounter(0),
               Epoch,
             )
@@ -1716,13 +1743,17 @@ class ConflictDetectorTest
     "double spend a transferred-away contract" in {
       val toc0 = TimeOfChange(RequestCounter(0), Epoch)
       for {
-        acs <- mkAcs((coid00, toc0, TransferredAway(targetDomain1, initialTransferCounter)))
+        acs <- mkAcs((coid00, toc0, TransferredAway(targetDomain1, transferCounter1)))
         ckj <- mkCkj()
         cd = mkCd(acs, ckj)
-        actRes1 <- prefetchAndCheck(cd, RequestCounter(1), mkActivenessSet(deact = Set(coid00)))
+        actRes1 <- prefetchAndCheck(
+          cd,
+          RequestCounter(1),
+          mkActivenessSet(deact = Set(coid00), prior = Set(coid00)),
+        )
         fin1 <- cd
           .finalizeRequest(
-            mkCommitSet(txOut = Map(coid00 -> domain2)),
+            mkCommitSet(tfOut = Map(coid00 -> (domain2 -> transferCounter2))),
             TimeOfChange(RequestCounter(1), ofEpochMilli(1)),
           )
           .flatten
@@ -1730,15 +1761,16 @@ class ConflictDetectorTest
         fetch00 <- acs.fetchState(coid00)
       } yield {
         assert(
-          actRes1 == mkActivenessResult(notActive =
-            Map(coid00 -> TransferredAway(targetDomain1, initialTransferCounter))
+          actRes1 == mkActivenessResult(
+            notActive = Map(coid00 -> TransferredAway(targetDomain1, transferCounter1)),
+            prior = Map(coid00 -> Some(TransferredAway(targetDomain1, transferCounter1))),
           )
         )
         assert(fin1 == Right(()))
         assert(
           fetch00.contains(
             AcsContractState(
-              TransferredAway(targetDomain2, initialTransferCounter),
+              TransferredAway(targetDomain2, transferCounter2),
               RequestCounter(1),
               ofEpochMilli(1),
             )
@@ -1756,15 +1788,15 @@ class ConflictDetectorTest
           transfer2 -> mediator2,
         )
         cd = mkCd(acs, ckj, transferCache)
-        actSet1 = mkActivenessSet(txIn = Set(coid00), transferIds = Set(transfer1))
-        actSet2 = mkActivenessSet(txIn = Set(coid00), transferIds = Set(transfer2))
-        commitSet1 = mkCommitSet(txIn = Map(coid00 -> transfer1))
-        commitSet2 = mkCommitSet(txIn = Map(coid00 -> transfer2))
+        actSet1 = mkActivenessSet(tfIn = Set(coid00), transferIds = Set(transfer1))
+        actSet2 = mkActivenessSet(tfIn = Set(coid00), transferIds = Set(transfer2))
+        commitSet1 = mkCommitSet(tfIn = Map(coid00 -> transfer1))
+        commitSet2 = mkCommitSet(tfIn = Map(coid00 -> transfer2))
         _ <- singleCRwithTR(
           cd,
           RequestCounter(0),
           actSet1,
-          ActivenessResult.success,
+          mkActivenessResult(),
           commitSet1,
           Epoch,
         )
@@ -1795,22 +1827,23 @@ class ConflictDetectorTest
         commitSet1 = mkCommitSet(
           create = Set(coid10),
           arch = Set(coid00),
-          txOut = Map(coid01 -> domain1),
+          tfOut = Map(coid01 -> (domain1 -> transferCounter1)),
         )
         actSet2 = mkActivenessSet(
-          txIn = Set(coid10),
+          tfIn = Set(coid10),
           deact = Set(coid00, coid01),
           transferIds = Set(transfer2),
         )
         commitSet2 = mkCommitSet(
-          txIn = Map(coid10 -> transfer2),
-          txOut = Map(coid00 -> domain2, coid01 -> domain2),
+          tfIn = Map(coid10 -> transfer2),
+          tfOut =
+            Map(coid00 -> (domain2 -> transferCounter1), coid01 -> (domain2 -> transferCounter2)),
         )
         ts = ofEpochMilli(1000)
         toc2 = TimeOfChange(RequestCounter(2), ts)
         toc1 = TimeOfChange(RequestCounter(1), ts)
         actRes1 <- prefetchAndCheck(cd, RequestCounter(1), actSet1)
-        _ = assert(actRes1 == ActivenessResult.success)
+        _ = assert(actRes1 == mkActivenessResult())
         actRes2 <- prefetchAndCheck(cd, RequestCounter(2), actSet2)
         _ = assert(actRes2 == mkActivenessResult(locked = Set(coid00, coid01, coid10)))
         fin2 <- cd.finalizeRequest(commitSet2, toc2).flatten.failOnShutdown
@@ -1834,15 +1867,15 @@ class ConflictDetectorTest
         actRes1 <- prefetchAndCheck(
           cd,
           RequestCounter(0),
-          mkActivenessSet(txIn = Set(coid00), transferIds = Set(transfer1)),
+          mkActivenessSet(tfIn = Set(coid00), transferIds = Set(transfer1)),
         )
         actRes2 <- prefetchAndCheck(
           cd,
           RequestCounter(1),
-          mkActivenessSet(txIn = Set(coid00), transferIds = Set(transfer2)),
+          mkActivenessSet(tfIn = Set(coid00), transferIds = Set(transfer2)),
         )
       } yield {
-        assert(actRes1 == ActivenessResult.success)
+        assert(actRes1 == mkActivenessResult())
         assert(actRes2 == mkActivenessResult(locked = Set(coid00)))
         checkContractState(cd, coid00, 0, 2, 0)(s"activation lock held twice")
       }
@@ -1856,19 +1889,19 @@ class ConflictDetectorTest
         )
         cd = mkCd(transferCache = transferCache)
         actSet1 = mkActivenessSet(
-          txIn = Set(coid00),
+          tfIn = Set(coid00),
           create = Set(coid01),
           transferIds = Set(transfer1),
         )
         actRes1 <- prefetchAndCheck(cd, RequestCounter(0), actSet1)
         actSet2 = mkActivenessSet(
-          txIn = Set(coid01),
+          tfIn = Set(coid01),
           create = Set(coid00),
           transferIds = Set(transfer2),
         )
         actRes2 <- prefetchAndCheck(cd, RequestCounter(1), actSet2)
       } yield {
-        assert(actRes1 == ActivenessResult.success)
+        assert(actRes1 == mkActivenessResult())
         assert(actRes2 == mkActivenessResult(locked = Set(coid01, coid00)))
       }
     }
@@ -1879,22 +1912,22 @@ class ConflictDetectorTest
       for {
         transferCache <- mkTransferCache(loggerFactory, hookedStore)(transfer1 -> mediator1)
         cd = mkCd(transferCache = transferCache)
-        actSet = mkActivenessSet(txIn = Set(coid00), transferIds = Set(transfer1))
+        actSet = mkActivenessSet(tfIn = Set(coid00), transferIds = Set(transfer1))
         _actRes <- prefetchAndCheck(cd, RequestCounter(0), actSet)
-        commitSet = mkCommitSet(txIn = Map(coid00 -> transfer1))
+        commitSet = mkCommitSet(tfIn = Map(coid00 -> transfer1))
         toc = TimeOfChange(RequestCounter(0), ofEpochMilli(1))
         toc2 = TimeOfChange(RequestCounter(2), ofEpochMilli(3))
         promise = Promise[Either[NonEmptyChain[RequestTracker.RequestTrackerStoreError], Unit]]()
         _ = hookedStore.preComplete { (_transferId, _toc) =>
           // This runs after committing the request, but before the transfer store is updated
           val actSetOut = mkActivenessSet(deact = Set(coid00))
-          val commitSetOut = mkCommitSet(txOut = Map(coid00 -> domain1))
+          val commitSetOut = mkCommitSet(tfOut = Map(coid00 -> (domain1 -> transferCounter1)))
           CheckedT(for {
             _ <- singleCRwithTR(
               cd,
               RequestCounter(1),
               actSetOut,
-              ActivenessResult.success,
+              mkActivenessResult(),
               commitSetOut,
               ofEpochMilli(2),
             )
@@ -1930,7 +1963,7 @@ class ConflictDetectorTest
 
         actSet1 = mkActivenessSet(deact = Set(coid00, coid01), unassignKeys = Set(key1, key2))
         cr1 <- prefetchAndCheck(cd, RequestCounter(1), actSet1)
-        _ = assert(cr1 == ActivenessResult.success)
+        _ = assert(cr1 == mkActivenessResult())
 
         actSet2 = mkActivenessSet(deact = Set(coid00, coid01), unassignKeys = Set(key1, key2))
         cr2 <- prefetchAndCheck(cd, RequestCounter(2), actSet2)
@@ -1946,7 +1979,7 @@ class ConflictDetectorTest
 
         commitSet1 = mkCommitSet(
           arch = Set(coid00),
-          txOut = Map(coid01 -> domain1),
+          tfOut = Map(coid01 -> (domain1 -> transferCounter1)),
           keys = Map(key1 -> Unassigned, key2 -> Assigned),
         )
         fin1 <- cd.finalizeRequest(commitSet1, toc1).flatten.failOnShutdown
@@ -2001,11 +2034,11 @@ class ConflictDetectorTest
 
         // Activeness check for the first request
         cr0 <- cd.checkActivenessAndLock(RequestCounter(0)).failOnShutdown
-        _ = assert(cr0 == ActivenessResult.success)
+        _ = assert(cr0 == mkActivenessResult())
 
         // Activeness check for second request
         cr1 <- cd.checkActivenessAndLock(RequestCounter(1)).failOnShutdown
-        _ = assert(cr1 == ActivenessResult.success)
+        _ = assert(cr1 == mkActivenessResult())
 
         _ = Seq(
           (coid00, Some((active, tocN1)), 0, 1),

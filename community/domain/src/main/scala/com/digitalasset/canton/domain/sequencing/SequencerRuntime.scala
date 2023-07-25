@@ -81,6 +81,7 @@ class SequencerRuntime(
     val domainId: DomainId,
     protected val syncCrypto: DomainSyncCryptoClient,
     topologyClient: DomainTopologyClientWithInit,
+    topologyManagerStatusO: Option[TopologyManagerStatus],
     storage: Storage,
     clock: Clock,
     auditLogger: TracedLogger,
@@ -102,6 +103,8 @@ class SequencerRuntime(
   override protected def timeouts: ProcessingTimeout = localNodeParameters.processingTimeouts
 
   protected val isTopologyInitializedPromise = Promise[Unit]()
+
+  protected def domainOutboxO: Option[DomainOutboxCommon[?, ?, ?]] = None
 
   def initialize(
       topologyInitIsCompleted: Boolean = true
@@ -230,8 +233,8 @@ class SequencerRuntime(
     Future.successful(sequencer.getState)
 
   def topologyQueue: TopologyQueueStatus = TopologyQueueStatus(
-    manager = 0,
-    dispatcher = 0,
+    manager = topologyManagerStatusO.map(_.queueSize).getOrElse(0),
+    dispatcher = domainOutboxO.map(_.queueSize).getOrElse(0),
     clients = topologyClient.numPendingChanges,
   )
 

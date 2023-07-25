@@ -73,7 +73,7 @@ private[conflictdetection] trait RequestTrackerTest {
           ts,
           ts1,
           ActivenessSet.empty,
-          ActivenessResult.success,
+          mkActivenessResult(),
           CommitSet.empty,
           1,
         )
@@ -94,7 +94,7 @@ private[conflictdetection] trait RequestTrackerTest {
           ts.plusMillis(1),
           ActivenessSet.empty,
         )
-        _ <- checkConflictResult(rc, conflictCheckFuture, ActivenessResult.success)
+        _ <- checkConflictResult(rc, conflictCheckFuture, mkActivenessResult())
         _ = enterTick(rt, sc + 1, ts.plusMillis(2))
 
         timeout <- timeoutFuture
@@ -194,7 +194,7 @@ private[conflictdetection] trait RequestTrackerTest {
           "complain that the request does not exist at the given time",
         )
         _ = enterTick(rt, SequencerCounter(2), ofEpochMilli(10)) // timeout everything
-        _ <- checkConflictResult(RequestCounter(1), cdF, ActivenessResult.success)
+        _ <- checkConflictResult(RequestCounter(1), cdF, mkActivenessResult())
         timeout <- toF
         _ = assert(timeout.timedOut, "timeout happened")
       } yield succeed
@@ -265,7 +265,7 @@ private[conflictdetection] trait RequestTrackerTest {
         _ = assert(!toF0.isCompleted, "timeout for request 0 not completed")
         _ = enterTick(rt, SequencerCounter(0), ts.minusMillis(1))
         cd0 <- cdF0
-        _ = assert(cd0 == ActivenessResult.success, "validation of request 0 succeeded")
+        _ = assert(cd0 == mkActivenessResult(), "validation of request 0 succeeded")
         _ = assert(!cdF1.isCompleted, "request 1 is still pending")
 
         finalize0 <- enterTR(
@@ -288,7 +288,7 @@ private[conflictdetection] trait RequestTrackerTest {
 
         _ = enterTick(rt, SequencerCounter(3), tsCommit0.addMicros(1))
 
-        _ <- checkConflictResult(rc1, cdF1, ActivenessResult.success)
+        _ <- checkConflictResult(rc1, cdF1, mkActivenessResult())
 
         finalize1 <- enterTR(
           rt,
@@ -348,7 +348,7 @@ private[conflictdetection] trait RequestTrackerTest {
           timeout,
           mkActivenessSet(deact = Set(coid00, coid10)),
         )
-        _ <- checkConflictResult(rc, cdF0, ActivenessResult.success)
+        _ <- checkConflictResult(rc, cdF0, mkActivenessResult())
         _ <- checkConflictResult(rc, cdF1, mkActivenessResult(locked = Set(coid10)))
         finalize0 <- enterTR(
           rt,
@@ -396,7 +396,7 @@ private[conflictdetection] trait RequestTrackerTest {
         rt = mk(rc, sc, ts.addMicros(-1), acs, ckj)
         activenessSet0 = mkActivenessSet(deact = Set(coid00, coid11), useOnly = Set(coid10))
         (cdF0, toF0) <- enterCR(rt, rc, sc, ts, ts.plusMillis(100), activenessSet0)
-        _ <- checkConflictResult(rc, cdF0, ActivenessResult.success)
+        _ <- checkConflictResult(rc, cdF0, mkActivenessResult())
         activenessSet1 = mkActivenessSet(deact = Set(coid00, coid10), useOnly = Set(coid11, coid01))
         (cdF1, toF1) <- enterCR(
           rt,
@@ -507,7 +507,7 @@ private[conflictdetection] trait RequestTrackerTest {
           ts.plusMillis(1),
           mkActivenessSet(create = Set(coid00, coid01)),
         )
-        _ <- checkConflictResult(RequestCounter(1), cdF, ActivenessResult.success)
+        _ <- checkConflictResult(RequestCounter(1), cdF, mkActivenessResult())
         commitSet = mkCommitSet(create = Set(coid00, coid11))
         resTR = rt.addResult(
           RequestCounter(1),
@@ -551,7 +551,7 @@ private[conflictdetection] trait RequestTrackerTest {
           ts.plusMillis(100),
           ActivenessSet.empty,
         )
-        _ <- checkConflictResult(RequestCounter(0), cdF, ActivenessResult.success)
+        _ <- checkConflictResult(RequestCounter(0), cdF, mkActivenessResult())
         _ = loggerFactory.assertInternalError[IllegalArgumentException](
           rt.addResult(RequestCounter(0), SequencerCounter(1), ts.plusMillis(1), ts.addMicros(1)),
           _.getMessage shouldBe "Request 0: Commit time 1970-01-01T00:00:00.010001Z before result timestamp 1970-01-01T00:00:00.011Z",
@@ -570,7 +570,7 @@ private[conflictdetection] trait RequestTrackerTest {
           ofEpochMilli(10),
           ActivenessSet.empty,
         )
-        _ <- checkConflictResult(RequestCounter(0), cdF, ActivenessResult.success)
+        _ <- checkConflictResult(RequestCounter(0), cdF, mkActivenessResult())
         _ = loggerFactory.assertInternalError[IllegalArgumentException](
           rt.addResult(RequestCounter(0), SequencerCounter(1), ofEpochMilli(11), ofEpochMilli(11)),
           _.getMessage shouldBe "Request 0: Result timestamp 1970-01-01T00:00:00.011Z after the decision time 1970-01-01T00:00:00.010Z.",
@@ -597,13 +597,13 @@ private[conflictdetection] trait RequestTrackerTest {
           to1,
           mkActivenessSet(deact = Set(coid00, coid01)),
         )
-        _ <- checkConflictResult(rc + 1, cdF0, ActivenessResult.success)
+        _ <- checkConflictResult(rc + 1, cdF0, mkActivenessResult())
         activenessSet1 = mkActivenessSet(deact = Set(coid00), useOnly = Set(coid01))
         (cdF1, toF1) <- enterCR(rt, rc + 2, sc + 1, to1, to1.plusMillis(1), activenessSet1)
         _ <- checkConflictResult(
           rc + 1,
           cdF1,
-          ActivenessResult.success,
+          mkActivenessResult(),
           "locks on 00 and 01 released before next confirmation request is processed",
         )
         timeout0 <- toF0
@@ -626,7 +626,7 @@ private[conflictdetection] trait RequestTrackerTest {
           ts.plusMillis(3),
           mkActivenessSet(create = Set(coid00, coid01)),
         )
-        _ <- checkConflictResult(rc, cdF0, ActivenessResult.success)
+        _ <- checkConflictResult(rc, cdF0, mkActivenessResult())
         finalize0 <- enterTR(
           rt,
           rc,
@@ -638,7 +638,7 @@ private[conflictdetection] trait RequestTrackerTest {
         )
         act1 = mkActivenessSet(deact = Set(coid00), useOnly = Set(coid01))
         (cdF1, _) <- enterCR(rt, rc + 1, sc + 2, ts.plusMillis(2), ts.plusMillis(4), act1)
-        _ <- checkConflictResult(rc + 1, cdF1, ActivenessResult.success)
+        _ <- checkConflictResult(rc + 1, cdF1, mkActivenessResult())
         finalizeResult0 <- finalize0
         _ = assert(finalizeResult0 == Right(()))
         _ = enterTick(rt, sc + 3, ts.plusMillis(500)) // time out everything
@@ -700,7 +700,7 @@ private[conflictdetection] trait RequestTrackerTest {
           ofEpochMilli(10),
           ActivenessSet.empty,
         )
-        _ <- checkConflictResult(RequestCounter(0), cdF, ActivenessResult.success)
+        _ <- checkConflictResult(RequestCounter(0), cdF, mkActivenessResult())
         resTR1 = rt.addResult(
           RequestCounter(0),
           SequencerCounter(1),
@@ -736,7 +736,7 @@ private[conflictdetection] trait RequestTrackerTest {
           ofEpochMilli(10),
           ActivenessSet.empty,
         )
-        _ <- checkConflictResult(RequestCounter(0), cdF, ActivenessResult.success)
+        _ <- checkConflictResult(RequestCounter(0), cdF, mkActivenessResult())
         resTR1 = rt.addResult(
           RequestCounter(0),
           SequencerCounter(1),
@@ -796,7 +796,7 @@ private[conflictdetection] trait RequestTrackerTest {
           CantonTimestamp.MaxValue,
           ActivenessSet.empty,
         )
-        _ <- checkConflictResult(RequestCounter(0), cdF, ActivenessResult.success)
+        _ <- checkConflictResult(RequestCounter(0), cdF, mkActivenessResult())
         resCS = rt.addCommitSet(RequestCounter(0), Success(CommitSet.empty))
         _ = assert(
           resCS == Left(ResultNotFound(RequestCounter(0))),
@@ -817,7 +817,7 @@ private[conflictdetection] trait RequestTrackerTest {
         rt = mk(rc, sc, CantonTimestamp.Epoch, acs, ckj)
         activenessSet0 = mkActivenessSet(deact = Set(coid00), useOnly = Set(coid01))
         (cdF0, toF0) <- enterCR(rt, rc, sc, ts, ts.plusMillis(100), activenessSet0)
-        _ <- checkConflictResult(rc, cdF0, ActivenessResult.success)
+        _ <- checkConflictResult(rc, cdF0, mkActivenessResult())
         activenessSet1 = mkActivenessSet(
           deact = Set(coid01),
           useOnly = Set(coid10),
@@ -831,7 +831,7 @@ private[conflictdetection] trait RequestTrackerTest {
           ts.plusMillis(100),
           activenessSet1,
         )
-        _ <- checkConflictResult(rc + 1, cdF1, ActivenessResult.success)
+        _ <- checkConflictResult(rc + 1, cdF1, mkActivenessResult())
         commitSet1 = mkCommitSet(arch = Set(coid01), create = Set(coid11))
         finalize1 <- enterTR(rt, rc + 1, sc + 2, ts.plusMillis(2), commitSet1, 0L, toF1)
         _ <- checkFinalize(rc + 1, finalize1)
@@ -876,7 +876,7 @@ private[conflictdetection] trait RequestTrackerTest {
       val rt = mk(rc, sc, CantonTimestamp.Epoch)
       for {
         (cdF0, toF0) <- enterCR(rt, rc, sc, ts, ts.plusMillis(100), ActivenessSet.empty)
-        _ <- checkConflictResult(rc, cdF0, ActivenessResult.success)
+        _ <- checkConflictResult(rc, cdF0, mkActivenessResult())
         (cdF1, toF1) <- enterCR(
           rt,
           rc + 1,
@@ -885,7 +885,7 @@ private[conflictdetection] trait RequestTrackerTest {
           ts.plusMillis(100),
           ActivenessSet.empty,
         )
-        _ <- checkConflictResult(rc + 1, cdF1, ActivenessResult.success)
+        _ <- checkConflictResult(rc + 1, cdF1, mkActivenessResult())
         (cdF2, toF2) <- enterCR(
           rt,
           rc + 2,
@@ -894,7 +894,7 @@ private[conflictdetection] trait RequestTrackerTest {
           ts.plusMillis(4),
           ActivenessSet.empty,
         )
-        _ <- checkConflictResult(rc + 2, cdF2, ActivenessResult.success)
+        _ <- checkConflictResult(rc + 2, cdF2, mkActivenessResult())
         resTR1 = rt.addResult(rc + 1, sc + 3, ts.plusMillis(4), ts.plusMillis(20))
         _ = assert(resTR1 == Right(()))
         timeout2 <- toF2
@@ -931,7 +931,7 @@ private[conflictdetection] trait RequestTrackerTest {
           ofEpochMilli(100),
           activenessSet0,
         )
-        _ <- checkConflictResult(RequestCounter(1), cdF0, ActivenessResult.success)
+        _ <- checkConflictResult(RequestCounter(1), cdF0, mkActivenessResult())
 
         activenessSet1 = mkActivenessSet(create = Set(coid00, coid01, coid10))
         (cdF1, toF1) <- enterCR(
@@ -998,7 +998,7 @@ private[conflictdetection] trait RequestTrackerTest {
           timeout,
           mkActivenessSet(create = Set(coid00, coid01)),
         )
-        _ <- checkConflictResult(rc, cdF0, ActivenessResult.success, "first request succeeds")
+        _ <- checkConflictResult(rc, cdF0, mkActivenessResult(), "first request succeeds")
         (cdF1, toF1) <- enterCR(
           rt,
           rc + 1,
@@ -1045,7 +1045,7 @@ private[conflictdetection] trait RequestTrackerTest {
         _ <- checkConflictResult(
           rc + 3,
           cdF3,
-          ActivenessResult.success,
+          mkActivenessResult(),
           "created contracts are active",
         )
         _ = enterTick(rt, sc + 7, timeout)
@@ -1077,8 +1077,8 @@ private[conflictdetection] trait RequestTrackerTest {
           timeout,
           mkActivenessSet(create = Set(coid10)),
         )
-        _ <- checkConflictResult(rc, cdF0, ActivenessResult.success, "first request succeeds")
-        _ <- checkConflictResult(rc, cdF1, ActivenessResult.success, "second request succeeds")
+        _ <- checkConflictResult(rc, cdF0, mkActivenessResult(), "first request succeeds")
+        _ <- checkConflictResult(rc, cdF1, mkActivenessResult(), "second request succeeds")
         finalize0 = rt.addResult(rc, sc + 2, ts.plusMillis(2), ts.plusMillis(3))
         _ = finalize0 shouldBe Right(())
         to0 <- toF0

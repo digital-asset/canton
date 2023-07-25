@@ -37,7 +37,8 @@ class TestSequencerClientSend extends SequencerClientSend {
     EitherT[Future, SendAsyncClientError, Unit](Future.successful(Right(())))
   }
 
-  override def generateMaxSequencingTime: CantonTimestamp = CantonTimestamp.MaxValue
+  override def generateMaxSequencingTime: CantonTimestamp =
+    CantonTimestamp.MaxValue
 }
 
 object TestSequencerClientSend {

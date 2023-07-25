@@ -77,7 +77,7 @@ sealed case class SignedProtocolMessage[+M <: SignedProtocolMessageContent] priv
         // TODO(#12373) Adapt when releasing BFT
         companionObj.protocolVersionRepresentativeFor(ProtocolVersion.dev)
     ) {
-      // TODO(#11255) Properly check the signatures, i.e. there shouldn't be multiple signatures from the same member on the same envelope
+      // TODO(#12390) Properly check the signatures, i.e. there shouldn't be multiple signatures from the same member on the same envelope
       ClosedEnvelope.verifySignatures(
         snapshot,
         member,

@@ -281,6 +281,17 @@ class DomainTopologyManager(
     if (transaction.operation == TopologyChangeOp.Remove) EitherT.pure(())
     else
       transaction.transaction.element.mapping match {
+        // in v5, the domain topology message validator expects to get the From before the To
+        // and no Both. so we need to ensure that at no point, a Both is added to the domain manager
+        case ParticipantState(RequestSide.Both, _, participant, _, _)
+            if protocolVersion >= ProtocolVersion.v5 =>
+          EitherT.leftT(
+            DomainTopologyManagerError.InvalidOrFaultyOnboardingRequest
+              .Failure(
+                participant,
+                reason = "RequestSide.Both is not supported for participant states",
+              )
+          )
         case ParticipantState(side, _, participant, permission, _) =>
           checkParticipantHasKeys(side, participant, permission)
         case _ => EitherT.pure(())

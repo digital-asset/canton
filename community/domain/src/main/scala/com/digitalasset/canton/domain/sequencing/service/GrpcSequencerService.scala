@@ -107,7 +107,7 @@ object GrpcSequencerService {
       parameters: SequencerParameters,
       protocolVersion: ProtocolVersion,
       topologyStateForInitializationService: Option[TopologyStateForInitializationService],
-      enableMediatorUnauthenticatedMessages: Boolean,
+      enableBroadcastOfUnauthenticatedMessages: Boolean,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext, materializer: Materializer): GrpcSequencerService =
     new GrpcSequencerService(
@@ -131,7 +131,7 @@ object GrpcSequencerService {
       parameters,
       topologyStateForInitializationService,
       protocolVersion,
-      enableMediatorUnauthenticatedMessages,
+      enableBroadcastOfUnauthenticatedMessages,
     )
 
   /** Abstracts the steps that are different in processing the submission requests coming from the various sendAsync endpoints
@@ -275,7 +275,7 @@ class GrpcSequencerService(
     parameters: SequencerParameters,
     topologyStateForInitializationService: Option[TopologyStateForInitializationService],
     protocolVersion: ProtocolVersion,
-    enableMediatorUnauthenticatedMessages: Boolean,
+    enableBroadcastOfUnauthenticatedMessages: Boolean,
 )(implicit ec: ExecutionContext)
     extends v0.SequencerServiceGrpc.SequencerService
     with NamedLogging
@@ -585,9 +585,7 @@ class GrpcSequencerService(
       request: SubmissionRequest,
       sender: AuthenticatedMember,
   )(implicit traceContext: TraceContext): Either[SendAsyncError, Unit] = sender match {
-    case _: DomainTopologyManagerId =>
-      Right(())
-    case _: MediatorId if enableMediatorUnauthenticatedMessages => Right(())
+    case _: DomainTopologyManagerId => Right(())
     case _ =>
       val unauthRecipients = request.batch.envelopes
         .toSet[ClosedEnvelope]
@@ -613,8 +611,7 @@ class GrpcSequencerService(
       .flatMap(_.recipients.allRecipients)
       .filter {
         case MemberRecipient(_: DomainTopologyManagerId) => false
-        case MediatorsOfDomain.TopologyTransactionMediatorGroup
-            if enableMediatorUnauthenticatedMessages =>
+        case TopologyBroadcastAddress.recipient if enableBroadcastOfUnauthenticatedMessages =>
           false
         case _ => true
       }
@@ -622,8 +619,12 @@ class GrpcSequencerService(
       nonIdmRecipients.isEmpty,
       (),
       refuse(request.messageId.toProtoPrimitive, unauthenticatedMember)(
-        s"Unauthenticated member is trying to send message to members other than the domain manager: ${nonIdmRecipients.toSet
-            .mkString(" ,")}."
+        // TODO(#12373) Adapt when releasing BFT
+        if (protocolVersion >= ProtocolVersion.dev)
+          s"Unauthenticated member is trying to send message to members other than the topology broadcast address ${TopologyBroadcastAddress.recipient}"
+        else
+          s"Unauthenticated member is trying to send message to members other than the domain manager: ${nonIdmRecipients.toSet
+              .mkString(" ,")}."
       ),
     )
   }

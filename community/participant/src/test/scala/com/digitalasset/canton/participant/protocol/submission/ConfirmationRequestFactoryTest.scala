@@ -164,7 +164,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
       override def saltsFromView(view: TransactionView): Iterable[Salt] = ???
     }
 
-    new ConfirmationRequestFactory(submitterParticipant, domain, LoggingConfig(), loggerFactory)(
+    new ConfirmationRequestFactory(submitterParticipant, LoggingConfig(), loggerFactory)(
       transactionTreeFactory,
       seedGenerator,
     )

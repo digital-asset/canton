@@ -107,7 +107,6 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
   )(implicit ec: ExecutionContext, traceContext: TraceContext): Future[Unit] = {
     Future
       .traverse(entries) {
-        // TODO(#12754) allow to create contracts with positive transfer counters
         case (coid, toc, Active(_transferCounter)) =>
           acs
             .createContract(coid, toc)
@@ -138,31 +137,41 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
       free: Set[Key] = Set.empty[Key],
       active: Set[Key] = Set.empty[Key],
       lock: Set[Key] = Set.empty[Key],
+      prior: Set[Key] = Set.empty[Key],
   ): ActivenessCheck[Key] =
-    ActivenessCheck(checkFresh = fresh, checkFree = free, checkActive = active, lock = lock)
+    ActivenessCheck.tryCreate(
+      checkFresh = fresh,
+      checkFree = free,
+      checkActive = active,
+      lock = lock,
+      needPriorState = prior,
+    )
 
   def mkActivenessSet(
       deact: Set[LfContractId] = Set.empty,
       useOnly: Set[LfContractId] = Set.empty,
       create: Set[LfContractId] = Set.empty,
-      txIn: Set[LfContractId] = Set.empty,
+      tfIn: Set[LfContractId] = Set.empty,
+      prior: Set[LfContractId] = Set.empty,
       transferIds: Set[TransferId] = Set.empty,
       freeKeys: Set[LfGlobalKey] = Set.empty,
       assignKeys: Set[LfGlobalKey] = Set.empty,
       unassignKeys: Set[LfGlobalKey] = Set.empty,
   ): ActivenessSet = {
-    val contracts = ActivenessCheck(
+    val contracts = ActivenessCheck.tryCreate(
       checkFresh = create,
-      checkFree = txIn,
+      checkFree = tfIn,
       checkActive = deact ++ useOnly,
-      lock = create ++ txIn ++ deact,
+      lock = create ++ tfIn ++ deact,
+      needPriorState = prior,
     )
-    val keys = ActivenessCheck(
+    val keys = ActivenessCheck.tryCreate(
       checkFresh = Set.empty,
       checkFree = freeKeys ++ assignKeys,
       checkActive =
         Set.empty, // We don't check that assigned contract keys are active during conflict detection
       lock = assignKeys ++ unassignKeys,
+      needPriorState = Set.empty,
     )
     ActivenessSet(
       contracts = contracts,
@@ -177,6 +186,7 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
       unknown: Set[Key] = Set.empty[Key],
       notFree: Map[Key, Status] = Map.empty[Key, Status],
       notActive: Map[Key, Status] = Map.empty[Key, Status],
+      prior: Map[Key, Option[Status]] = Map.empty[Key, Option[Status]],
   ): ActivenessCheckResult[Key, Status] =
     ActivenessCheckResult(
       alreadyLocked = locked,
@@ -184,6 +194,7 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
       unknown = unknown,
       notFree = notFree,
       notActive = notActive,
+      priorStates = prior,
     )
 
   def mkActivenessResult(
@@ -192,6 +203,7 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
       unknown: Set[LfContractId] = Set.empty,
       notFree: Map[LfContractId, ActiveContractStore.Status] = Map.empty,
       notActive: Map[LfContractId, ActiveContractStore.Status] = Map.empty,
+      prior: Map[LfContractId, Option[ActiveContractStore.Status]] = Map.empty,
       inactiveTransfers: Set[TransferId] = Set.empty,
       lockedKeys: Set[LfGlobalKey] = Set.empty,
       unknownKeys: Set[LfGlobalKey] = Set.empty,
@@ -204,6 +216,7 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
       unknown = unknown,
       notFree = notFree,
       notActive = notActive,
+      priorStates = prior,
     )
     val keys = ActivenessCheckResult(
       alreadyLocked = lockedKeys,
@@ -211,6 +224,7 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
       unknown = unknownKeys,
       notFree = notFreeKeys,
       notActive = notActiveKeys,
+      priorStates = Map.empty[LfGlobalKey, Option[ContractKeyJournal.Status]],
     )
     ActivenessResult(
       contracts = contracts,
@@ -222,8 +236,8 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
   def mkCommitSet(
       arch: Set[LfContractId] = Set.empty,
       create: Set[LfContractId] = Set.empty,
-      txOut: Map[LfContractId, DomainId] = Map.empty,
-      txIn: Map[LfContractId, TransferId] = Map.empty,
+      tfOut: Map[LfContractId, (DomainId, TransferCounterO)] = Map.empty,
+      tfIn: Map[LfContractId, TransferId] = Map.empty,
       keys: Map[LfGlobalKey, ContractKeyJournal.Status] = Map.empty,
   ): CommitSet = {
     val contractHash = ExampleTransactionFactory.lfHash(0)
@@ -247,17 +261,17 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
           )
         )
         .toMap,
-      transferOuts = txOut.fmap(id =>
+      transferOuts = tfOut.fmap { case (id, transferCounterO) =>
         WithContractHash(
           CommitSet.TransferOutCommit(
             TargetDomainId(id),
             Set.empty,
-            initialTransferCounter,
+            transferCounterO,
           ),
           contractHash,
         )
-      ),
-      transferIns = txIn.fmap(id =>
+      },
+      transferIns = tfIn.fmap(id =>
         WithContractHash(
           CommitSet.TransferInCommit(
             id,

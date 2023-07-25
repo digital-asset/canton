@@ -270,7 +270,6 @@ class CantonSyncService(
 
   private val domainRouter =
     DomainRouter(
-      packageService,
       connectedDomainsLookup,
       domainConnectionConfigStore,
       aliasManager,
@@ -279,7 +278,7 @@ class CantonSyncService(
       autoTransferTransaction = parameters.enablePreviewFeatures,
       parameters.processingTimeouts,
       loggerFactory,
-    )(ec, TraceContext.empty)
+    )(ec)
 
   private val transferCoordination: TransferCoordination =
     TransferCoordination(
@@ -1233,7 +1232,9 @@ class CantonSyncService(
               partyNotifier,
               missingKeysAlerter,
               domainHandle.topologyClient,
+              domainCrypto,
               trafficStateController,
+              domainHandle.staticParameters.protocolVersion,
             ),
           missingKeysAlerter,
           transferCoordination,
@@ -1430,7 +1431,14 @@ class CantonSyncService(
             syncService.timeTracker.awaitTick(tick).fold(Future.unit)(_.void)
           )
         )
-        _ = logger.debug(s"Received timestamp from $alias for migration")
+        _ <- repairService
+          .awaitCleanHeadForTimestamp(syncService.domainId, tick)
+          .leftMap(err =>
+            SyncServiceError.SyncServiceInternalError.CleanHeadAwaitFailed(alias, tick, err)
+          )
+        _ = logger.debug(
+          s"Received timestamp from $alias for migration and advanced clean-head to it"
+        )
         _ <- EitherT.fromEither[FutureUnlessShutdown](performDomainDisconnect(alias))
       } yield success)
         .leftMap[SyncDomainMigrationError](err =>
@@ -2018,7 +2026,12 @@ object SyncServiceError extends SyncServiceErrorGroup {
           cause = "Failed to await for participant becoming active due to missing domain objects"
         )
         with SyncServiceError
-
+    final case class CleanHeadAwaitFailed(domain: DomainAlias, ts: CantonTimestamp, err: String)(
+        implicit val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause = s"Failed to await for clean-head at ${ts}: $err"
+        )
+        with SyncServiceError
   }
 
   @Explanation("The participant has detected that another node is behaving maliciously.")

@@ -772,7 +772,7 @@ class LocalParticipantReferenceX(
   /** secret, not publicly documented way to get the admin token */
   def adminToken: Option[String] = underlying.map(_.adminToken.secret)
 
-  // TODO(#11255) these are "remote" groups. the normal participant node has "local" versions.
+  // TODO(#14048) these are "remote" groups. the normal participant node has "local" versions.
   //   but rather than keeping this, we should make local == remote and add local methods separately
   @Help.Summary("Inspect and manage parties")
   @Help.Group("Parties")

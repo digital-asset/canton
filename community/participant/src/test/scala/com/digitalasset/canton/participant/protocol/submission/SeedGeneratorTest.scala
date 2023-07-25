@@ -11,7 +11,7 @@ class SeedGeneratorTest extends AsyncWordSpec with BaseTest {
   "SeedGenerator" should {
     "generate fresh salts" in {
       val crypto =
-        TestingIdentityFactory(loggerFactory).newCrypto(DefaultTestIdentities.mediator)
+        TestingIdentityFactory.newCrypto(loggerFactory)(DefaultTestIdentities.mediator)
       val seedGenerator = new SeedGenerator(crypto.pureCrypto)
 
       val salt1 = seedGenerator.generateSaltSeed()

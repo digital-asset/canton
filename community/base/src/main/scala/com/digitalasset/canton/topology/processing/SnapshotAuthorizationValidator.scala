@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.topology.processing
 
+import cats.data.EitherT
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -10,15 +11,18 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.processing.TransactionAuthorizationValidator.AuthorizationChain
+import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
+import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransactions,
   TopologyStore,
   TopologyStoreId,
+  ValidatedTopologyTransaction,
 }
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{Namespace, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.SimpleExecutionQueue
+import com.digitalasset.canton.util.{MonadUtil, SimpleExecutionQueue}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -122,5 +126,67 @@ class SnapshotAuthorizationValidator(
   override protected def onClosed(): Unit = Lifecycle.close {
     sequential
   }(logger)
+
+}
+
+object SnapshotAuthorizationValidator {
+
+  def validateTransactions(
+      timeouts: ProcessingTimeout,
+      futureSupervisor: FutureSupervisor,
+      loggerFactory: NamedLoggerFactory,
+  )(
+      transactions: List[SignedTopologyTransaction[TopologyChangeOp]]
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, String, TopologyStore[AuthorizedStore]] = {
+    val store =
+      new InMemoryTopologyStore(
+        AuthorizedStore,
+        loggerFactory,
+        timeouts,
+        futureSupervisor,
+      )
+    val validator =
+      new SnapshotAuthorizationValidator(
+        CantonTimestamp.MaxValue,
+        store,
+        timeouts,
+        loggerFactory,
+        futureSupervisor,
+      )
+
+    def requiresReset(tx: SignedTopologyTransaction[TopologyChangeOp]): Boolean =
+      tx.transaction.element.mapping.dbType == DomainTopologyTransactionType.NamespaceDelegation ||
+        tx.transaction.element.mapping.dbType == DomainTopologyTransactionType.IdentifierDelegation
+
+    // check that all transactions are authorized
+    val tmp: EitherT[FutureUnlessShutdown, String, Unit] = EitherT(
+      MonadUtil.foldLeftM(Right(()): Either[String, Unit], transactions.zipWithIndex) {
+        case (Right(_), (tx, idx)) =>
+          val ts = CantonTimestamp.Epoch.plusMillis(idx.toLong)
+          // incrementally add it to the store and check the validation
+          for {
+            isValidated <- validator.authorizedBy(tx).map(_.nonEmpty)
+            _ <- FutureUnlessShutdown.outcomeF(
+              store.append(
+                SequencedTime(ts),
+                EffectiveTime(ts),
+                Seq(ValidatedTopologyTransaction(tx, None)),
+              )
+            )
+            // if the transaction was a namespace delegation, drop it
+            _ <- if (requiresReset(tx)) validator.reset() else FutureUnlessShutdown.unit
+          } yield Either.cond(
+            isValidated,
+            (),
+            s"Unauthorized topology transaction: $tx",
+          )
+        case (acc, _) => FutureUnlessShutdown.pure(acc)
+      }
+    )
+    tmp.map(_ => store)
+  }
 
 }

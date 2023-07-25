@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.protocol
 
-import cats.Order
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
@@ -12,7 +11,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
-import com.digitalasset.canton.protocol.DynamicDomainParameters.InvalidDomainParameters
+import com.digitalasset.canton.protocol.DynamicDomainParameters.InvalidDynamicDomainParameters
 import com.digitalasset.canton.protocol.{v0 as protoV0, v1 as protoV1, v2 as protoV2}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -57,7 +56,7 @@ object DomainParameters {
 }
 
 @nowarn("msg=deprecated") // TODO(#9014) Remove deprecated parameters with next breaking version
-final case class StaticDomainParameters(
+final case class StaticDomainParameters private (
     @deprecated(
       "Starting from protocol version 4, `reconciliationInterval` is a dynamic domain parameter",
       "protocol version 4",
@@ -77,14 +76,20 @@ final case class StaticDomainParameters(
     requiredHashAlgorithms: NonEmpty[Set[HashAlgorithm]],
     requiredCryptoKeyFormats: NonEmpty[Set[CryptoKeyFormat]],
     protocolVersion: ProtocolVersion,
-)(
-    override val representativeProtocolVersion: RepresentativeProtocolVersion[
-      StaticDomainParameters.type
-    ]
 ) extends HasProtocolVersionedWrapper[StaticDomainParameters] {
+
+  override val representativeProtocolVersion: RepresentativeProtocolVersion[
+    StaticDomainParameters.type
+  ] = StaticDomainParameters.protocolVersionRepresentativeFor(protocolVersion)
+
+  // Ensures the invariants related to default values hold
+  validateInstance().valueOr(err => throw new IllegalArgumentException(err))
 
   @transient override protected lazy val companionObj: StaticDomainParameters.type =
     StaticDomainParameters
+
+  def update(uniqueContractKeys: Boolean = uniqueContractKeys): StaticDomainParameters =
+    this.copy(uniqueContractKeys = uniqueContractKeys)
 
   @nowarn("msg=deprecated")
   def toProtoV0: protoV0.StaticDomainParameters =
@@ -112,7 +117,7 @@ final case class StaticDomainParameters(
       protocolVersion = protocolVersion.toProtoPrimitive,
     )
 }
-
+@nowarn("msg=deprecated")
 object StaticDomainParameters
     extends HasProtocolVersionedCompanion[StaticDomainParameters]
     with ProtocolVersionedCompanionDbHelpers[StaticDomainParameters] {
@@ -131,14 +136,42 @@ object StaticDomainParameters
     ),
   )
 
-  override protected def name: String = "static domain parameters"
+  override lazy val defaultValues = Seq(
+    defaultReconciliationIntervalFrom,
+    defaultMaxRatePerParticipantFrom,
+    defaultMaxRequestSizeFrom,
+  )
 
-  val defaultMaxRatePerParticipant: NonNegativeInt =
-    NonNegativeInt.tryCreate(1000000) // yeah, sure.
-  val defaultMaxRequestSize: MaxRequestSize = MaxRequestSize(
+  private val rpv4: RepresentativeProtocolVersion[StaticDomainParameters.this.type] =
+    protocolVersionRepresentativeFor(ProtocolVersion.v4)
+
+  lazy val defaultReconciliationInterval: PositiveSeconds = PositiveSeconds.tryOfSeconds(60)
+  lazy val defaultReconciliationIntervalFrom = DefaultValueFrom(
+    _.reconciliationInterval,
+    "reconciliationInterval",
+    rpv4,
+    defaultReconciliationInterval,
+  )
+
+  lazy val defaultMaxRatePerParticipant: NonNegativeInt = NonNegativeInt.tryCreate(1000000)
+  lazy val defaultMaxRatePerParticipantFrom = DefaultValueFrom(
+    _.maxRatePerParticipant,
+    "maxRatePerParticipant",
+    rpv4,
+    defaultMaxRatePerParticipant,
+  )
+
+  lazy val defaultMaxRequestSize: MaxRequestSize = MaxRequestSize(
     NonNegativeInt.tryCreate(10 * 1024 * 1024)
   )
-  val defaultReconciliationInterval: PositiveSeconds = PositiveSeconds.tryOfSeconds(60)
+  lazy val defaultMaxRequestSizeFrom = DefaultValueFrom(
+    _.maxRequestSize,
+    "maxRequestSize",
+    rpv4,
+    defaultMaxRequestSize,
+  )
+
+  override def name: String = "static domain parameters"
 
   def create(
       maxRequestSize: MaxRequestSize,
@@ -152,10 +185,12 @@ object StaticDomainParameters
       reconciliationInterval: PositiveSeconds =
         StaticDomainParameters.defaultReconciliationInterval,
       maxRatePerParticipant: NonNegativeInt = StaticDomainParameters.defaultMaxRatePerParticipant,
-  ) = StaticDomainParameters(
-    reconciliationInterval = reconciliationInterval,
-    maxRatePerParticipant = maxRatePerParticipant,
-    maxRequestSize = maxRequestSize,
+  ): StaticDomainParameters = StaticDomainParameters(
+    reconciliationInterval = defaultReconciliationIntervalFrom
+      .orValue(reconciliationInterval, protocolVersion),
+    maxRatePerParticipant = defaultMaxRatePerParticipantFrom
+      .orValue(maxRatePerParticipant, protocolVersion),
+    maxRequestSize = defaultMaxRequestSizeFrom.orValue(maxRequestSize, protocolVersion),
     uniqueContractKeys = uniqueContractKeys,
     requiredSigningKeySchemes = requiredSigningKeySchemes,
     requiredEncryptionKeySchemes = requiredEncryptionKeySchemes,
@@ -163,9 +198,9 @@ object StaticDomainParameters
     requiredHashAlgorithms = requiredHashAlgorithms,
     requiredCryptoKeyFormats = requiredCryptoKeyFormats,
     protocolVersion = protocolVersion,
-  )(protocolVersionRepresentativeFor(protocolVersion))
+  )
 
-  private def requiredKeySchemes[P, A: Order](
+  private def requiredKeySchemes[P, A](
       field: String,
       content: Seq[P],
       parse: (String, P) => ParsingResult[A],
@@ -240,7 +275,7 @@ object StaticDomainParameters
       requiredHashAlgorithms = requiredHashAlgorithms,
       requiredCryptoKeyFormats = requiredCryptoKeyFormats,
       protocolVersion = protocolVersion,
-    )(protocolVersionRepresentativeFor(ProtoVersion(0)))
+    )
   }
 
   def fromProtoV1(
@@ -294,7 +329,7 @@ object StaticDomainParameters
       requiredHashAlgorithms,
       requiredCryptoKeyFormats,
       protocolVersion,
-    )(protocolVersionRepresentativeFor(ProtoVersion(1)))
+    )
   }
 }
 
@@ -345,10 +380,10 @@ object StaticDomainParameters
   *                               Otherwise, ACS commitments will keep being exchanged continuously on an idle domain.
   * @param maxRatePerParticipant maximum number of messages sent per participant per second
   * @param maxRequestSize maximum size of messages (in bytes) that the domain can receive through the public API
-  * @throws DynamicDomainParameters$.InvalidDomainParameters
+  * @throws DynamicDomainParameters$.InvalidDynamicDomainParameters
   *   if `mediatorDeduplicationTimeout` is less than twice of `ledgerTimeRecordTimeTolerance`.
   */
-final case class DynamicDomainParameters(
+final case class DynamicDomainParameters private (
     participantResponseTimeout: NonNegativeFiniteDuration,
     mediatorReactionTimeout: NonNegativeFiniteDuration,
     transferExclusivityTimeout: NonNegativeFiniteDuration,
@@ -365,12 +400,15 @@ final case class DynamicDomainParameters(
 ) extends HasProtocolVersionedWrapper[DynamicDomainParameters]
     with PrettyPrinting {
 
+  // Ensures the invariants related to default values hold
+  validateInstance().valueOr(err => throw new IllegalArgumentException(err))
+
   @transient override protected lazy val companionObj: DynamicDomainParameters.type =
     DynamicDomainParameters
 
   // https://docs.google.com/document/d/1tpPbzv2s6bjbekVGBn6X5VZuw0oOTHek5c30CBo4UkI/edit#bookmark=id.jtqcu52qpf82
   if (ledgerTimeRecordTimeTolerance * NonNegativeInt.tryCreate(2) > mediatorDeduplicationTimeout)
-    throw new InvalidDomainParameters(
+    throw new InvalidDynamicDomainParameters(
       s"The ledgerTimeRecordTimeTolerance ($ledgerTimeRecordTimeTolerance) must be at most half of the " +
         s"mediatorDeduplicationTimeout ($mediatorDeduplicationTimeout)."
     )
@@ -388,6 +426,15 @@ final case class DynamicDomainParameters(
 
   def automaticTransferInEnabled: Boolean =
     transferExclusivityTimeout > NonNegativeFiniteDuration.Zero
+
+  def update(
+      transferExclusivityTimeout: NonNegativeFiniteDuration = transferExclusivityTimeout,
+      reconciliationInterval: PositiveSeconds = reconciliationInterval,
+  ): DynamicDomainParameters =
+    this.copy(
+      transferExclusivityTimeout = transferExclusivityTimeout,
+      reconciliationInterval = reconciliationInterval,
+    )(representativeProtocolVersion)
 
   def tryUpdate(
       participantResponseTimeout: NonNegativeFiniteDuration = participantResponseTimeout,
@@ -441,18 +488,18 @@ final case class DynamicDomainParameters(
     mediatorDeduplicationTimeout = Some(mediatorDeduplicationTimeout.toProtoPrimitive),
     reconciliationInterval = Some(reconciliationInterval.toProtoPrimitive),
     maxRequestSize = maxRequestSize.unwrap,
-    // TODO(#11255) add permissioned domain mode
+    // TODO(#14053) add permissioned domain mode
     permissionedDomain = false,
-    // TODO(#11255) add restricted packages mode
+    // TODO(#14054) add restricted packages mode
     requiredPackages = Seq.empty,
-    // TODO(#11255) add only restricted packages supported
+    // TODO(#14054) add only restricted packages supported
     onlyRequiredPackagesPermitted = false,
     defaultParticipantLimits = Some(v2DefaultParticipantLimits.toProto),
-    // TODO(#11255) limit number of participants that can be allocated to a given party
+    // TODO(#14050) limit number of participants that can be allocated to a given party
     defaultMaxHostingParticipantsPerParty = 0,
   )
 
-  // TODO(#11255) add topology limits
+  // TODO(#14052) add topology limits
   def v2DefaultParticipantLimits: ParticipantDomainLimits = ParticipantDomainLimits(
     maxRate = maxRatePerParticipant.unwrap,
     maxNumParties = Int.MaxValue,
@@ -460,7 +507,7 @@ final case class DynamicDomainParameters(
   )
 
   override def pretty: Pretty[DynamicDomainParameters] = {
-    // TODO(#11255) change when releasing BFT Domain
+    // TODO(#12373) change when releasing BFT Domain
     if (
       representativeProtocolVersion >= companionObj.protocolVersionRepresentativeFor(
         ProtocolVersion.dev
@@ -505,63 +552,6 @@ final case class DynamicDomainParameters(
 
 object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDomainParameters] {
 
-  /** Safely creates DynamicDomainParameters.
-    * @return `Left(...)` if `mediatorDeduplicationTimeout` is less than twice of `ledgerTimeRecordTimeTolerance`.
-    */
-  private def create(
-      participantResponseTimeout: NonNegativeFiniteDuration,
-      mediatorReactionTimeout: NonNegativeFiniteDuration,
-      transferExclusivityTimeout: NonNegativeFiniteDuration,
-      topologyChangeDelay: NonNegativeFiniteDuration,
-      ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration,
-      mediatorDeduplicationTimeout: NonNegativeFiniteDuration,
-      reconciliationInterval: PositiveSeconds,
-      maxRatePerParticipant: NonNegativeInt,
-      maxRequestSize: MaxRequestSize,
-  )(
-      representativeProtocolVersion: RepresentativeProtocolVersion[DynamicDomainParameters.type]
-  ): Either[InvalidDomainParameters, DynamicDomainParameters] =
-    Either.catchOnly[InvalidDomainParameters](
-      tryCreate(
-        participantResponseTimeout,
-        mediatorReactionTimeout,
-        transferExclusivityTimeout,
-        topologyChangeDelay,
-        ledgerTimeRecordTimeTolerance,
-        mediatorDeduplicationTimeout,
-        reconciliationInterval,
-        maxRatePerParticipant,
-        maxRequestSize,
-      )(representativeProtocolVersion)
-    )
-
-  /** Creates DynamicDomainParameters
-    * @throws InvalidDomainParameters if `mediatorDeduplicationTimeout` is less than twice of `ledgerTimeRecordTimeTolerance`.
-    */
-  def tryCreate(
-      participantResponseTimeout: NonNegativeFiniteDuration,
-      mediatorReactionTimeout: NonNegativeFiniteDuration,
-      transferExclusivityTimeout: NonNegativeFiniteDuration,
-      topologyChangeDelay: NonNegativeFiniteDuration,
-      ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration,
-      mediatorDeduplicationTimeout: NonNegativeFiniteDuration,
-      reconciliationInterval: PositiveSeconds,
-      maxRatePerParticipant: NonNegativeInt,
-      maxRequestSize: MaxRequestSize,
-  )(
-      representativeProtocolVersion: RepresentativeProtocolVersion[DynamicDomainParameters.type]
-  ): DynamicDomainParameters = DynamicDomainParameters(
-    participantResponseTimeout,
-    mediatorReactionTimeout,
-    transferExclusivityTimeout,
-    topologyChangeDelay,
-    ledgerTimeRecordTimeTolerance,
-    mediatorDeduplicationTimeout,
-    reconciliationInterval,
-    maxRatePerParticipant,
-    maxRequestSize,
-  )(representativeProtocolVersion)
-
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(
       protoV0.DynamicDomainParameters
@@ -577,14 +567,41 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
     ),
   )
 
-  override protected def name: String = "dynamic domain parameters"
+  override def name: String = "dynamic domain parameters"
+
+  private lazy val rpv3 = protocolVersionRepresentativeFor(ProtocolVersion.v3)
+
+  override lazy val defaultValues = Seq(
+    defaultReconciliationIntervalUntil,
+    defaultMaxRatePerParticipantUntil,
+    defaultMaxRequestSizeUntil,
+  )
+
+  lazy val defaultReconciliationIntervalUntil = DefaultValueUntil(
+    _.reconciliationInterval,
+    "reconciliationInterval",
+    rpv3,
+    StaticDomainParameters.defaultReconciliationInterval,
+  )
+
+  lazy val defaultMaxRatePerParticipantUntil = DefaultValueUntil(
+    _.maxRatePerParticipant,
+    "maxRatePerParticipant",
+    rpv3,
+    StaticDomainParameters.defaultMaxRatePerParticipant,
+  )
+
+  lazy val defaultMaxRequestSizeUntil = DefaultValueUntil(
+    _.maxRequestSize,
+    "maxRequestSize",
+    rpv3,
+    StaticDomainParameters.defaultMaxRequestSize,
+  )
 
   private val defaultParticipantResponseTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.tryOfSeconds(30)
   private val defaultMediatorReactionTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.tryOfSeconds(30)
-  private val defaultMediatorXReactionTimeout: NonNegativeFiniteDuration =
-    NonNegativeFiniteDuration.tryOfMinutes(5)
 
   private val defaultTransferExclusivityTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.tryOfSeconds(60)
@@ -600,16 +617,90 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
   private val defaultMediatorDeduplicationTimeout: NonNegativeFiniteDuration =
     defaultLedgerTimeRecordTimeTolerance * NonNegativeInt.tryCreate(2)
 
+  /** Safely creates DynamicDomainParameters.
+    *
+    * @return `Left(...)` if `mediatorDeduplicationTimeout` is less than twice of `ledgerTimeRecordTimeTolerance`.
+    */
+  private def create(
+      participantResponseTimeout: NonNegativeFiniteDuration,
+      mediatorReactionTimeout: NonNegativeFiniteDuration,
+      transferExclusivityTimeout: NonNegativeFiniteDuration,
+      topologyChangeDelay: NonNegativeFiniteDuration,
+      ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration,
+      mediatorDeduplicationTimeout: NonNegativeFiniteDuration,
+      reconciliationInterval: PositiveSeconds,
+      maxRatePerParticipant: NonNegativeInt,
+      maxRequestSize: MaxRequestSize,
+  )(
+      representativeProtocolVersion: RepresentativeProtocolVersion[DynamicDomainParameters.type]
+  ): Either[InvalidDynamicDomainParameters, DynamicDomainParameters] =
+    Either.catchOnly[InvalidDynamicDomainParameters](
+      tryCreate(
+        participantResponseTimeout,
+        mediatorReactionTimeout,
+        transferExclusivityTimeout,
+        topologyChangeDelay,
+        ledgerTimeRecordTimeTolerance,
+        mediatorDeduplicationTimeout,
+        reconciliationInterval,
+        maxRatePerParticipant,
+        maxRequestSize,
+      )(representativeProtocolVersion)
+    )
+
+  /** Creates DynamicDomainParameters
+    *
+    * @throws InvalidDynamicDomainParameters if `mediatorDeduplicationTimeout` is less than twice of `ledgerTimeRecordTimeTolerance`.
+    */
+  def tryCreate(
+      participantResponseTimeout: NonNegativeFiniteDuration,
+      mediatorReactionTimeout: NonNegativeFiniteDuration,
+      transferExclusivityTimeout: NonNegativeFiniteDuration,
+      topologyChangeDelay: NonNegativeFiniteDuration,
+      ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration,
+      mediatorDeduplicationTimeout: NonNegativeFiniteDuration,
+      reconciliationInterval: PositiveSeconds,
+      maxRatePerParticipant: NonNegativeInt,
+      maxRequestSize: MaxRequestSize,
+  )(
+      representativeProtocolVersion: RepresentativeProtocolVersion[DynamicDomainParameters.type]
+  ): DynamicDomainParameters =
+    DynamicDomainParameters(
+      participantResponseTimeout,
+      mediatorReactionTimeout,
+      transferExclusivityTimeout,
+      topologyChangeDelay,
+      ledgerTimeRecordTimeTolerance,
+      mediatorDeduplicationTimeout,
+      defaultReconciliationIntervalUntil
+        .orValue(
+          reconciliationInterval,
+          representativeProtocolVersion,
+        ),
+      defaultMaxRatePerParticipantUntil
+        .orValue(
+          maxRatePerParticipant,
+          representativeProtocolVersion,
+        ),
+      defaultMaxRequestSizeUntil.orValue(
+        maxRequestSize,
+        representativeProtocolVersion,
+      ),
+    )(representativeProtocolVersion)
+
   /** Default dynamic domain parameters for non-static clocks */
   def defaultValues(protocolVersion: ProtocolVersion): DynamicDomainParameters =
     initialValues(defaultTopologyChangeDelay, protocolVersion)
 
-  /** Default mediator-X dynamic parameters with more generous mediator-x timeouts for BFT-distribution */
-  def defaultXValues(protocolVersion: ProtocolVersion): DynamicDomainParameters =
+  /** Default mediator-X dynamic parameters allowing to specify more generous mediator-x timeouts for BFT-distribution */
+  def defaultXValues(
+      protocolVersion: ProtocolVersion,
+      mediatorReactionTimeout: NonNegativeFiniteDuration = defaultMediatorReactionTimeout,
+  ): DynamicDomainParameters =
     initialValues(
       defaultTopologyChangeDelay,
       protocolVersion,
-      mediatorReactionTimeout = defaultMediatorXReactionTimeout,
+      mediatorReactionTimeout = mediatorReactionTimeout,
     )
 
   def initialValues(
@@ -650,7 +741,6 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
     initialValues(
       topologyChangeDelay,
       protocolVersion,
-      mediatorReactionTimeout = defaultMediatorXReactionTimeout,
     )
   }
 
@@ -902,7 +992,7 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
     } yield domainParameters
   }
 
-  class InvalidDomainParameters(message: String) extends RuntimeException(message) {
+  class InvalidDynamicDomainParameters(message: String) extends RuntimeException(message) {
     lazy val toProtoDeserializationError: ProtoDeserializationError.InvariantViolation =
       ProtoDeserializationError.InvariantViolation(message)
   }

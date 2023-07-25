@@ -75,7 +75,7 @@ object SequencedEvent
       SequencedEvent[Envelope[_]],
       SequencedEvent[ClosedEnvelope],
     ] {
-  override protected def name: String = "SequencedEvent"
+  override def name: String = "SequencedEvent"
 
   override val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.SequencedEvent)(

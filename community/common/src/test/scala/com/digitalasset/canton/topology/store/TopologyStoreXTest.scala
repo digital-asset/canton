@@ -17,7 +17,7 @@ trait TopologyStoreXTest extends AsyncWordSpec with TopologyStoreXTestBase {
   val testData = new TopologyStoreXTestData(loggerFactory, executionContext)
   import testData.*
 
-  // TODO(#11255): Test coverage is rudimentary - enough to convince ourselves that queries basically seem to work.
+  // TODO(#14066): Test coverage is rudimentary - enough to convince ourselves that queries basically seem to work.
   //  Increase coverage.
   def topologyStore(mk: () => TopologyStoreX[TopologyStoreId]): Unit = {
 

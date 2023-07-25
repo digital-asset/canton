@@ -114,7 +114,7 @@ private[console] object ParticipantCommands {
     ): DomainConnectionConfig = {
       val domainAlias = alias.getOrElse(
         DomainAlias.tryCreate(domain.head1._2.name)
-      ) // TODO(i11255): Come up with a good way of giving it a good alias
+      ) // TODO(#14048): Come up with a good way of giving it a good alias
       DomainConnectionConfig(
         domainAlias,
         SequencerConnections.many(

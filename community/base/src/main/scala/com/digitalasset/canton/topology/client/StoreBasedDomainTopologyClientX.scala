@@ -130,7 +130,7 @@ class StoreBasedTopologySnapshotX(
         ).getOrElse(throw new IllegalStateException("Unable to locate domain parameters state"))
           .discard
 
-        // TODO(#11255) Once the non-proto DynamicDomainParametersX is available, use it
+        // TODO(#14054) Once the non-proto DynamicDomainParametersX is available, use it
         //   _.parameters.requiredPackages
         Seq.empty[PackageId]
       }
@@ -328,7 +328,7 @@ class StoreBasedTopologySnapshotX(
         }.toMap
         p2pMappings ++
           adminPartiesMap.collect {
-            // TODO(#11255) - Remove this extra caution not to add admin parties if somehow they already exist as p2p
+            // TODO(#12390) - Remove this extra caution not to add admin parties if somehow they already exist as p2p
             //  mappings once corresponding validation is in place.
             case x @ (adminPartyId, _) if !p2pMappings.contains(adminPartyId) => x
           }

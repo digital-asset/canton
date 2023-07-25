@@ -15,7 +15,6 @@ import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.PackageService
 import com.digitalasset.canton.participant.domain.DomainAliasManager
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.{
   TransactionSubmissionError,
@@ -282,7 +281,6 @@ class DomainRouter(
 
 object DomainRouter {
   def apply(
-      packageService: PackageService,
       connectedDomains: ConnectedDomainsLookup,
       domainConnectionConfigStore: DomainConnectionConfigStore,
       domainAliasManager: DomainAliasManager,
@@ -291,7 +289,7 @@ object DomainRouter {
       autoTransferTransaction: Boolean,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
-  )(implicit ec: ExecutionContext, traceContext: TraceContext): DomainRouter = {
+  )(implicit ec: ExecutionContext): DomainRouter = {
 
     val transfer =
       new ContractsTransfer(
@@ -301,9 +299,10 @@ object DomainRouter {
       )
 
     val domainIdResolver = recoveredDomainOfAlias(connectedDomains, domainAliasManager) _
-    val stateProviderWithProtocolVersion = domainStateProvider(connectedDomains) _
+    val stateProviderWithProtocolVersion = (domainId: DomainId) =>
+      domainStateProvider(connectedDomains)(domainId)(TraceContext.empty)
     val stateProvider = (domainId: DomainId) =>
-      domainStateProvider(connectedDomains)(domainId).map(_._1)
+      domainStateProvider(connectedDomains)(domainId)(TraceContext.empty).map(_._1)
 
     val domainRankComputation = new DomainRankComputation(
       participantId = participantId,
@@ -313,12 +312,10 @@ object DomainRouter {
     )
 
     val domainSelectorFactory = new DomainSelectorFactory(
-      participantId = participantId,
       admissibleDomains = new AdmissibleDomains(participantId, connectedDomains, loggerFactory),
       priorityOfDomain = priorityOfDomain(domainConnectionConfigStore, domainAliasManager),
       domainRankComputation = domainRankComputation,
       domainStateProvider = stateProviderWithProtocolVersion,
-      packageService = packageService,
       loggerFactory = loggerFactory,
     )
 
@@ -329,7 +326,7 @@ object DomainRouter {
     )
 
     new DomainRouter(
-      domainOfContract(connectedDomains),
+      domainOfContract(connectedDomains)(_)(ec, TraceContext.empty),
       domainIdResolver,
       submit(connectedDomains),
       transfer,

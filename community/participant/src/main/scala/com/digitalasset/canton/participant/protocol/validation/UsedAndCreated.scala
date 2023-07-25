@@ -42,11 +42,12 @@ final case class UsedAndCreatedContracts(
     transient: Map[LfContractId, WithContractHash[Set[LfPartyId]]],
 ) {
   def activenessCheck: ActivenessCheck[LfContractId] =
-    ActivenessCheck(
+    ActivenessCheck.tryCreate(
       checkFresh = maybeCreated.keySet,
       checkFree = Set.empty,
       checkActive = checkActivenessTxInputs,
       lock = consumedInputsOfHostedStakeholders.keySet ++ created.keySet,
+      needPriorState = Set.empty,
     )
 
   def created: Map[LfContractId, SerializableContract] = maybeCreated.collect {
@@ -70,11 +71,12 @@ trait InputAndUpdatedKeys extends PrettyPrinting {
   def uckUpdatedKeysOfHostedMaintainers: Map[LfGlobalKey, ContractKeyJournal.Status]
 
   def activenessCheck: ActivenessCheck[LfGlobalKey] =
-    ActivenessCheck(
+    ActivenessCheck.tryCreate(
       checkFresh = Set.empty,
       checkFree = uckFreeKeysOfHostedMaintainers,
       checkActive = Set.empty,
       lock = uckUpdatedKeysOfHostedMaintainers.keySet,
+      needPriorState = Set.empty,
     )
 }
 

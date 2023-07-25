@@ -166,7 +166,7 @@ object Signature
     )
   )
 
-  override protected def name: String = "signature"
+  override def name: String = "signature"
 
   private[this] def apply(
       format: SignatureFormat,
@@ -335,7 +335,7 @@ case class SigningPublicKey private[crypto] (
 object SigningPublicKey
     extends HasVersionedMessageCompanion[SigningPublicKey]
     with HasVersionedMessageCompanionDbHelpers[SigningPublicKey] {
-  override protected def name: String = "signing public key"
+  override def name: String = "signing public key"
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
@@ -418,7 +418,7 @@ object SigningPrivateKey extends HasVersionedMessageCompanion[SigningPrivateKey]
     )
   )
 
-  override protected def name: String = "signing private key"
+  override def name: String = "signing private key"
 
   private[this] def apply(
       id: Fingerprint,

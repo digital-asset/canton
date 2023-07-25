@@ -23,9 +23,8 @@ import com.digitalasset.canton.{BaseTest, LfPackageId, LfPartyId, LfValue}
 private[submission] object DomainSelectionFixture extends TestIdFactory {
 
   def unknownPackageFor(participantId: ParticipantId, missingPackage: LfPackageId) =
-    DomainUsabilityChecker.PackageUnknownTo(
+    TransactionTreeFactory.PackageUnknownTo(
       missingPackage,
-      "package does not exist on local node",
       participantId,
     )
 
@@ -66,13 +65,14 @@ private[submission] object DomainSelectionFixture extends TestIdFactory {
         topology: Map[LfPartyId, List[ParticipantId]],
         packages: Seq[LfPackageId] = Seq(),
     ): TopologySnapshot = {
+      val participants = topology.values.flatten
       val testingIdentityFactory = TestingTopology(
         topology = topology.map { case (partyId, participantIds) =>
           partyId -> participantIds.map(_ -> Submission).toMap
         },
         participants =
-          topology.values.flatten.map(_ -> ParticipantAttributes(Submission, TrustLevel.Vip)).toMap,
-        packages = packages,
+          participants.map(_ -> ParticipantAttributes(Submission, TrustLevel.Vip)).toMap,
+        packages = participants.view.map(VettedPackages(_, packages)).toSeq,
       ).build()
 
       testingIdentityFactory.topologySnapshot()

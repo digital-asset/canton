@@ -40,12 +40,6 @@ final case class SequencerConnections private (
     "sequencerTrustThreshold cannot be greater than number of sequencer connections",
   )
 
-  def withSequencerTrustThreshold(sequencerTrustThreshold: PositiveInt): SequencerConnections = {
-    copy(
-      sequencerTrustThreshold = sequencerTrustThreshold
-    )(representativeProtocolVersion)
-  }
-
   aliasToConnection.foreach { case (alias, connection) =>
     require(
       alias == connection.sequencerAlias,
@@ -215,7 +209,7 @@ object SequencerConnections
       .parsePositiveInt(sequencerConnections.sequencerTrustThreshold)
       .flatMap(fromProtoV0V1("sequencer_connections", sequencerConnections.sequencerConnections, _))
 
-  override protected def name: String = "sequencer connections"
+  override def name: String = "sequencer connections"
 
   override def supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter

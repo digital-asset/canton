@@ -292,7 +292,7 @@ class ParticipantPartiesAdministrationGroupX(
     runner
       .adminCommand(
         TopologyAdminCommandsX.Write.Propose(
-          // TODO(#11255) properly set the serial or introduce auto-detection so we don't
+          // TODO(#14048) properly set the serial or introduce auto-detection so we don't
           //              have to set it on the client side
           mapping = PartyToParticipantX(
             partyId,
@@ -315,7 +315,7 @@ class ParticipantPartiesAdministrationGroupX(
 
   @Help.Summary("Disable party on participant")
   def disable(name: Identifier, force: Boolean = false): Unit = {
-    // TODO(#11255) implement me
+    // TODO(#14068) implement me
     throw new UnsupportedOperationException("not yet implemented")
   }
 

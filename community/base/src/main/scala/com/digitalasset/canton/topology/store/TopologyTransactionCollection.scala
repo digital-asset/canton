@@ -186,7 +186,7 @@ object StoredTopologyTransactions
   def empty[Op <: TopologyChangeOp]: StoredTopologyTransactions[Op] =
     StoredTopologyTransactions(Seq())
 
-  override protected def name: String = "topology transactions"
+  override def name: String = "topology transactions"
 }
 
 final case class PositiveStoredTopologyTransactions(

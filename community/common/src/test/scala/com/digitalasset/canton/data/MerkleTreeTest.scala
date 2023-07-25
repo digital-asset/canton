@@ -205,7 +205,7 @@ object MerkleTreeTest {
   val hashOps = new SymbolicPureCrypto
 
   object AbstractLeaf extends HasProtocolVersionedCompanion[VersionedAbstractLeaf] {
-    override protected def name: String = "AbstractLeaf"
+    override def name: String = "AbstractLeaf"
     override def supportedProtoVersions: data.MerkleTreeTest.AbstractLeaf.SupportedProtoVersions =
       SupportedProtoVersions(
         ProtoVersion(0) -> LegacyProtoConverter.raw(

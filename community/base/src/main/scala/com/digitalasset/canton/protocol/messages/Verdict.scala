@@ -265,7 +265,7 @@ object Verdict
     }
   }
 
-  override protected def name: String = "verdict"
+  override def name: String = "verdict"
 
   def fromProtoV0(verdictP: v0.Verdict): ParsingResult[Verdict] = {
     val v0.Verdict(someVerdictP) = verdictP

@@ -20,6 +20,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Observation,
   Submission,
 }
+import com.digitalasset.canton.topology.transaction.VettedPackages
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, TestingTopology}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.{BaseTest, LfPackageId}
@@ -103,7 +104,7 @@ private[transfer] object TestTransferCoordination {
   ): SyncCryptoApiProvider =
     TestingTopology(domains = domains.toSet)
       .withReversedTopology(defaultTopology)
-      .withPackages(packages)
+      .withPackages(defaultTopology.keys.map(VettedPackages(_, packages)).toSeq)
       .build(loggerFactory)
       .forOwner(submitterParticipant)
 
