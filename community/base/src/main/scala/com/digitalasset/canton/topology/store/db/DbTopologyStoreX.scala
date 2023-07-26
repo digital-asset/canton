@@ -160,7 +160,7 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
     }
   }
 
-  // TODO(#11255) only a temporary crutch to inspect the topology state
+  // TODO(#14048) only a temporary crutch to inspect the topology state
   override def dumpStoreContent()(implicit traceContext: TraceContext): Unit = {
     // Helper case class to produce comparable output to the InMemoryStore
     case class TopologyStoreEntry(
@@ -292,7 +292,7 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
       .map(
         _.result.toSet
           .flatMap[PartyId](_.transaction.transaction.mapping match {
-            // TODO(#11255): post-filtering for participantId non-columns results in fewer than limit results being returned
+            // TODO(#14061): post-filtering for participantId non-columns results in fewer than limit results being returned
             //  - add indexed secondary uid and/or namespace columns for participant-ids - also to support efficient lookup
             //    of "what parties a particular participant hosts" (ParticipantId => Set[PartyId])
             case ptp: PartyToParticipantX

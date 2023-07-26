@@ -190,7 +190,7 @@ object SubmissionRequest
     ),
   )
 
-  override protected def name: String = "submission request"
+  override def name: String = "submission request"
 
   private val aggregationRuleSupportedSince = protocolVersionRepresentativeFor(ProtoVersion(1))
 

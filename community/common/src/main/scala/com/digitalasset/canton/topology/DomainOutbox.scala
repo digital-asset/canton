@@ -22,9 +22,7 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
 }
 import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
-import com.digitalasset.canton.sequencing.EnvelopeHandler
-import com.digitalasset.canton.sequencing.client.SequencerClientSend
-import com.digitalasset.canton.sequencing.protocol.Batch
+import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, DomainTopologyClientWithInit}
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
@@ -196,7 +194,7 @@ abstract class DomainOutboxCommon[
   def handle: H
   def targetStore: DTS
 
-  runOnShutdown(new RunOnShutdown {
+  runOnShutdown_(new RunOnShutdown {
     override def name: String = "close-participant-topology-outbox"
     override def done: Boolean = idleFuture.get().forall(_.isCompleted)
     override def run(): Unit =
@@ -480,17 +478,18 @@ class DomainOutboxXFactory(
   def create(
       protocolVersion: ProtocolVersion,
       targetTopologyClient: DomainTopologyClientWithInit,
-      sequencerClient: SequencerClientSend,
+      sequencerClient: SequencerClient,
       clock: Clock,
       domainLoggerFactory: NamedLoggerFactory,
-  )(implicit ec: ExecutionContext, traceContext: TraceContext): (DomainOutboxX, EnvelopeHandler) = {
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): DomainOutboxX = {
     val handle = new SequencerBasedRegisterTopologyTransactionHandleX(
-      (traceContext, env) =>
-        sequencerClient.sendAsync(Batch(List(env), protocolVersion))(traceContext),
+      sequencerClient,
       domainId,
       memberId,
-      memberId,
-      maybeClockForRetries = Some(clock),
+      clock,
       topologyXConfig,
       protocolVersion,
       timeouts,
@@ -541,7 +540,7 @@ class DomainOutboxXFactory(
       )
     observer.addObserver(outbox)
 
-    (outbox, handle.processor)
+    outbox
   }
 }
 
@@ -570,13 +569,13 @@ class DomainOutboxXFactorySingleCreate(
   def createOnlyOnce(
       protocolVersion: ProtocolVersion,
       targetTopologyClient: DomainTopologyClientWithInit,
-      sequencerClient: SequencerClientSend,
+      sequencerClient: SequencerClient,
       clock: Clock,
       domainLoggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
-  ): (DomainOutboxX, EnvelopeHandler) = {
+  ): DomainOutboxX = {
     outboxRef.get.foreach { outbox =>
       ErrorUtil.invalidState(s"DomainOutbox was already created. This is a bug.")(
         ErrorLoggingContext(
@@ -593,7 +592,7 @@ class DomainOutboxXFactorySingleCreate(
       clock,
       domainLoggerFactory,
     )
-      .tap { case (outbox, _processor) =>
+      .tap { case outbox =>
         outboxRef.putIfAbsent(outbox).discard
       }
   }

@@ -75,8 +75,8 @@ CREATE TABLE topology_transactions_x (
     unique (store_id, mapping_key_hash, serial_counter, valid_from, operation, representative_protocol_version)
 );
 CREATE INDEX topology_transactions_x_idx ON topology_transactions_x (store_id, transaction_type, namespace, identifier, valid_until, valid_from);
--- TODO(#11255): Decide whether we want additional indices by mapping_key_hash and tx_hash (e.g. for update/removal and lookups)
--- TODO(#11255): Come up with columns/indexing for efficient ParticipantId => Seq[PartyId] lookup
+-- TODO(#14061): Decide whether we want additional indices by mapping_key_hash and tx_hash (e.g. for update/removal and lookups)
+-- TODO(#14061): Come up with columns/indexing for efficient ParticipantId => Seq[PartyId] lookup
 
 -- TODO(#12373) Move this to stable when releasing BFT: END
 

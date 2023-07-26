@@ -69,7 +69,7 @@ sealed trait TopologyMappingX extends Product with Serializable with PrettyPrint
   def toProtoV2: v2.TopologyMappingX
 
   lazy val uniqueKey: MappingHash = {
-    // TODO(#11255) use different hash purpose (this one isn't used anymore)
+    // TODO(#14048) use different hash purpose (this one isn't used anymore)
     MappingHash(
       addUniqueKeyToBuilder(
         Hash.build(HashPurpose.DomainTopologyTransactionMessageSignature, HashAlgorithm.Sha256)
@@ -131,6 +131,7 @@ object TopologyMappingX {
       SequencerDomainStateX,
       OffboardParticipantX,
       PurgeTopologyTransactionX,
+      TrafficControlStateX,
     )
 
     implicit val setParameterTopologyMappingCode: SetParameter[Code] =
@@ -391,7 +392,7 @@ final case class UnionspaceDefinitionX private (
             )
           )
       case Some(topoTx) =>
-        // TODO(#11255): proper error or ignore
+        // TODO(#14048): proper error or ignore
         sys.error(s"unexpected transaction data: $previous")
     }
   }
@@ -965,7 +966,7 @@ final case class PartyToParticipantX(
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
   ): RequiredAuthX = {
-    // TODO(#11255): take into account the previous transaction and allow participants to unilaterally
+    // TODO(#12390): take into account the previous transaction and allow participants to unilaterally
     //   disassociate themselves from a party as long as the threshold can still be reached
     RequiredUids(Set(partyId.uid) ++ participants.map(_.participantId.uid))
   }
@@ -1028,7 +1029,7 @@ final case class AuthorityOfX(
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
   ): RequiredAuthX = {
-    // TODO(#11255): take the previous transaction into account
+    // TODO(#12390): take the previous transaction into account
     RequiredUids(Set(partyId.uid) ++ parties.map(_.uid))
   }
 
@@ -1203,7 +1204,7 @@ final case class MediatorDomainStateX private (
       authForAddition.and(authForRemoval).and(authForThresholdChange)
 
     case Some(_unexpectedTopologyTransaction) =>
-      // TODO(#11255): proper error or ignore
+      // TODO(#14048): proper error or ignore
       sys.error(s"unexpected transaction data: $previous")
   }
 }

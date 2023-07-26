@@ -9,8 +9,8 @@ import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.Top
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.protocol.messages.AcceptedTopologyTransactionsX.AcceptedRequest
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
+import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcastX.Broadcast
 import com.digitalasset.canton.protocol.{v0, v1, v2, v3}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -23,6 +23,7 @@ import com.digitalasset.canton.version.{
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
+import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -47,7 +48,13 @@ final case class DomainTopologyTransactionMessage private (
   )
 
   def hashToSign(hashOps: HashOps): Hash =
-    DomainTopologyTransactionMessage.hash(transactions, domainId, hashOps)
+    DomainTopologyTransactionMessage.hash(
+      transactions,
+      domainId,
+      notSequencedAfter,
+      hashOps,
+      representativeProtocolVersion.representative,
+    )
 
   def toProtoV0: v0.DomainTopologyTransactionMessage = {
     v0.DomainTopologyTransactionMessage(
@@ -86,6 +93,12 @@ final case class DomainTopologyTransactionMessage private (
 
   @transient override protected lazy val companionObj: DomainTopologyTransactionMessage.type =
     DomainTopologyTransactionMessage
+
+  @VisibleForTesting
+  def replaceSignatureForTesting(signature: Signature): DomainTopologyTransactionMessage = {
+    copy(domainTopologyManagerSignature = signature)(representativeProtocolVersion)
+  }
+
 }
 
 object DomainTopologyTransactionMessage
@@ -118,11 +131,18 @@ object DomainTopologyTransactionMessage
   private def hash(
       transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
       domainId: DomainId,
+      notSequencedAfter: Option[CantonTimestamp],
       hashOps: HashOps,
+      protocolVersion: ProtocolVersion,
   ): Hash = {
     val builder = hashOps
       .build(HashPurpose.DomainTopologyTransactionMessageSignature)
       .add(domainId.toProtoPrimitive)
+    if (protocolVersion >= ProtocolVersion.v5) {
+      notSequencedAfter.foreach { ts =>
+        builder.add(ts.toEpochMilli)
+      }
+    }
     transactions.foreach(elem => builder.add(elem.getCryptographicEvidence))
     builder.finish()
   }
@@ -137,7 +157,14 @@ object DomainTopologyTransactionMessage
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): EitherT[Future, SyncCryptoError, DomainTopologyTransactionMessage] = {
-    val hashToSign = hash(transactions, domainId, syncCrypto.crypto.pureCrypto)
+    val hashToSign =
+      hash(
+        transactions,
+        domainId,
+        Some(notSequencedAfter),
+        syncCrypto.crypto.pureCrypto,
+        protocolVersion,
+      )
     syncCrypto
       .sign(hashToSign)
       .map(signature =>
@@ -207,63 +234,63 @@ object DomainTopologyTransactionMessage
     )(protocolVersionRepresentativeFor(ProtoVersion(1)))
   }
 
-  override protected def name: String = "DomainTopologyTransactionMessage"
+  override def name: String = "DomainTopologyTransactionMessage"
 }
 
-final case class AcceptedTopologyTransactionsX private (
+final case class TopologyTransactionsBroadcastX private (
     override val domainId: DomainId,
-    accepted: Seq[AcceptedRequest],
+    broadcasts: Seq[Broadcast],
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
-      AcceptedTopologyTransactionsX.type
+      TopologyTransactionsBroadcastX.type
     ]
 ) extends UnsignedProtocolMessage
-    // TODO(#11255) make me a SignedProtocolMessageContent
+    // TODO(#14048) make me a SignedProtocolMessageContent
     with UnsignedProtocolMessageV3 {
 
-  @transient override protected lazy val companionObj: AcceptedTopologyTransactionsX.type =
-    AcceptedTopologyTransactionsX
+  @transient override protected lazy val companionObj: TopologyTransactionsBroadcastX.type =
+    TopologyTransactionsBroadcastX
 
   override protected[messages] def toProtoSomeEnvelopeContentV3
       : v3.EnvelopeContent.SomeEnvelopeContent =
-    v3.EnvelopeContent.SomeEnvelopeContent.AcceptedTopologyTransactions(toProtoV2)
+    v3.EnvelopeContent.SomeEnvelopeContent.TopologyTransactionsBroadcast(toProtoV2)
 
-  def toProtoV2: v2.AcceptedTopologyTransactionsX = v2.AcceptedTopologyTransactionsX(
+  def toProtoV2: v2.TopologyTransactionsBroadcastX = v2.TopologyTransactionsBroadcastX(
     domainId.toProtoPrimitive,
-    accepted = accepted.map(_.toProtoV2),
+    broadcasts = broadcasts.map(_.toProtoV2),
   )
 
 }
 
-object AcceptedTopologyTransactionsX
+object TopologyTransactionsBroadcastX
     extends HasProtocolVersionedCompanion[
-      AcceptedTopologyTransactionsX
+      TopologyTransactionsBroadcastX
     ] {
 
   def create(
       domainId: DomainId,
-      accepted: Seq[AcceptedRequest],
+      broadcasts: Seq[Broadcast],
       protocolVersion: ProtocolVersion,
-  ): AcceptedTopologyTransactionsX =
-    AcceptedTopologyTransactionsX(domainId = domainId, accepted = accepted)(
+  ): TopologyTransactionsBroadcastX =
+    TopologyTransactionsBroadcastX(domainId = domainId, broadcasts = broadcasts)(
       supportedProtoVersions.protocolVersionRepresentativeFor(protocolVersion)
     )
 
-  override protected def name: String = "AcceptedTopologyTransactionsX"
+  override def name: String = "TopologyTransactionsBroadcastX"
 
   implicit val acceptedTopologyTransactionXMessageCast
-      : ProtocolMessageContentCast[AcceptedTopologyTransactionsX] =
-    ProtocolMessageContentCast.create[AcceptedTopologyTransactionsX](
+      : ProtocolMessageContentCast[TopologyTransactionsBroadcastX] =
+    ProtocolMessageContentCast.create[TopologyTransactionsBroadcastX](
       name
     ) {
-      case att: AcceptedTopologyTransactionsX => Some(att)
+      case att: TopologyTransactionsBroadcastX => Some(att)
       case _ => None
     }
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.minimum),
     ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.dev)(
-      v2.AcceptedTopologyTransactionsX
+      v2.TopologyTransactionsBroadcastX
     )(
       supportedProtoVersion(_)(fromProtoV2),
       _.toProtoV2.toByteString,
@@ -271,34 +298,34 @@ object AcceptedTopologyTransactionsX
   )
 
   private[messages] def fromProtoV2(
-      message: v2.AcceptedTopologyTransactionsX
-  ): ParsingResult[AcceptedTopologyTransactionsX] = {
-    val v2.AcceptedTopologyTransactionsX(domain, accepted) = message
+      message: v2.TopologyTransactionsBroadcastX
+  ): ParsingResult[TopologyTransactionsBroadcastX] = {
+    val v2.TopologyTransactionsBroadcastX(domain, broadcasts) = message
     for {
       domainId <- DomainId.fromProtoPrimitive(domain, "domain")
-      accepted <- accepted.traverse(acceptedRequestFromProtoV2)
-    } yield AcceptedTopologyTransactionsX(domainId, accepted.toList)(
+      broadcasts <- broadcasts.traverse(broadcastFromProtoV2)
+    } yield TopologyTransactionsBroadcastX(domainId, broadcasts.toList)(
       protocolVersionRepresentativeFor(ProtoVersion(2))
     )
   }
 
-  private def acceptedRequestFromProtoV2(
-      message: v2.AcceptedTopologyTransactionsX.AcceptedRequest
-  ): ParsingResult[AcceptedRequest] = {
-    val v2.AcceptedTopologyTransactionsX.AcceptedRequest(requestId, transactions) = message
+  private def broadcastFromProtoV2(
+      message: v2.TopologyTransactionsBroadcastX.Broadcast
+  ): ParsingResult[Broadcast] = {
+    val v2.TopologyTransactionsBroadcastX.Broadcast(broadcastId, transactions) = message
     for {
-      requestId <- String255.fromProtoPrimitive(requestId, "request_id")
+      broadcastId <- String255.fromProtoPrimitive(broadcastId, "broadcast_id")
       transactions <- transactions.traverse(SignedTopologyTransactionX.fromProtoV2)
-    } yield AcceptedRequest(requestId, transactions.toList)
+    } yield Broadcast(broadcastId, transactions.toList)
   }
 
-  final case class AcceptedRequest(
-      requestId: TopologyRequestId,
+  final case class Broadcast(
+      broadcastId: TopologyRequestId,
       transactions: List[SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]],
   ) {
-    def toProtoV2: v2.AcceptedTopologyTransactionsX.AcceptedRequest =
-      v2.AcceptedTopologyTransactionsX.AcceptedRequest(
-        requestId = requestId.toProtoPrimitive,
+    def toProtoV2: v2.TopologyTransactionsBroadcastX.Broadcast =
+      v2.TopologyTransactionsBroadcastX.Broadcast(
+        broadcastId = broadcastId.toProtoPrimitive,
         transactions = transactions.map(_.toProtoV2),
       )
   }

@@ -13,8 +13,8 @@ import com.digitalasset.canton.concurrent.{
   HasFutureSupervision,
 }
 import com.digitalasset.canton.config.{CachingConfigs, DefaultProcessingTimeouts}
-import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, SymbolicPureCrypto}
+import com.digitalasset.canton.crypto.{Crypto, *}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -23,23 +23,26 @@ import com.digitalasset.canton.protocol.{
   DynamicDomainParameters,
   TestDomainParameters,
 }
-import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.DefaultTestIdentities.*
 import com.digitalasset.canton.topology.client.{
   DomainTopologyClient,
+  DomainTopologyClientWithInit,
   IdentityProvidingServiceClient,
   StoreBasedDomainTopologyClient,
   StoreBasedTopologySnapshot,
   TopologySnapshot,
 }
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
-import com.digitalasset.canton.topology.store.TopologyStoreId
+import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Add
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.MapsUtil
-import com.digitalasset.canton.{BaseTest, LfPackageId, LfPartyId}
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.mockito.MockitoSugar.mock
 
 import scala.concurrent.duration.*
@@ -96,7 +99,7 @@ final case class TestingTopology(
     topology: Map[LfPartyId, Map[ParticipantId, ParticipantPermission]] = Map.empty,
     mediators: Set[MediatorId] = Set(DefaultTestIdentities.mediator),
     participants: Map[ParticipantId, ParticipantAttributes] = Map.empty,
-    packages: Seq[LfPackageId] = Seq.empty,
+    packages: Seq[VettedPackages] = Seq.empty,
     keyPurposes: Set[KeyPurpose] = KeyPurpose.all,
     domainParameters: List[DomainParameters.WithValidity[DynamicDomainParameters]] = List(
       DomainParameters.WithValidity(
@@ -170,7 +173,8 @@ final case class TestingTopology(
     copy(topology = converted)
   }
 
-  def withPackages(packages: Seq[LfPackageId]): TestingTopology = this.copy(packages = packages)
+  def withPackages(packages: Seq[VettedPackages]): TestingTopology =
+    this.copy(packages = packages)
 
   def build(
       loggerFactory: NamedLoggerFactory = NamedLoggerFactory("test-area", "crypto")
@@ -192,7 +196,7 @@ class TestingIdentityFactory(
     new SyncCryptoApiProvider(
       owner,
       ips(),
-      newCrypto(owner),
+      TestingIdentityFactory.newCrypto(loggerFactory)(owner),
       CachingConfigs.testing,
       DefaultProcessingTimeouts.testing,
       FutureSupervisor.Noop,
@@ -286,7 +290,8 @@ class TestingIdentityFactory(
           MapsUtil.extendedMapWith(acc, permissionByParticipant)(ParticipantPermission.higherOf)
       }
 
-    val participantTxs = participantsTxs(defaultPermissionByParticipant, topology.packages)
+    val participantTxs =
+      participantsTxs(defaultPermissionByParticipant) ++ topology.packages.map(mkAdd)
 
     val domainMembers =
       (Seq[KeyOwner](
@@ -376,12 +381,20 @@ class TestingIdentityFactory(
 
     val sigKey =
       if (keyPurposes.contains(KeyPurpose.Signing))
-        Seq(SymbolicCrypto.signingPublicKey(s"sigK-${keyFingerprintForOwner(owner).unwrap}"))
+        Seq(
+          SymbolicCrypto.signingPublicKey(
+            s"sigK-${TestingIdentityFactory.keyFingerprintForOwner(owner).unwrap}"
+          )
+        )
       else Seq()
 
     val encKey =
       if (keyPurposes.contains(KeyPurpose.Encryption))
-        Seq(SymbolicCrypto.encryptionPublicKey(s"encK-${keyFingerprintForOwner(owner).unwrap}"))
+        Seq(
+          SymbolicCrypto.encryptionPublicKey(
+            s"encK-${TestingIdentityFactory.keyFingerprintForOwner(owner).unwrap}"
+          )
+        )
       else Seq()
 
     (Seq.empty[PublicKey] ++ sigKey ++ encKey).map { key =>
@@ -406,8 +419,7 @@ class TestingIdentityFactory(
     }
 
   private def participantsTxs(
-      defaultPermissionByParticipant: Map[ParticipantId, ParticipantPermission],
-      packages: Seq[PackageId],
+      defaultPermissionByParticipant: Map[ParticipantId, ParticipantPermission]
   ): Seq[SignedTopologyTransaction[Add]] = topology
     .allParticipants()
     .toSeq
@@ -421,11 +433,7 @@ class TestingIdentityFactory(
         participantId,
         ParticipantAttributes(defaultPermission, TrustLevel.Ordinary),
       )
-      val pkgs =
-        if (packages.nonEmpty)
-          Seq(mkAdd(VettedPackages(participantId, packages)))
-        else Seq()
-      pkgs ++ genKeyCollection(participantId) :+ mkAdd(
+      genKeyCollection(participantId) :+ mkAdd(
         ParticipantState(
           RequestSide.Both,
           domainId,
@@ -436,40 +444,77 @@ class TestingIdentityFactory(
       )
     }
 
-  private def keyFingerprintForOwner(owner: KeyOwner): Fingerprint =
-    // We are converting an Identity (limit of 185 characters) to a Fingerprint (limit of 68 characters) - this would be
-    // problematic if this function wasn't only used for testing
-    Fingerprint.tryCreate(owner.uid.id.toLengthLimitedString.unwrap)
-
-  def newCrypto(
-      owner: KeyOwner,
-      signingFingerprints: Seq[Fingerprint] = Seq(),
-      fingerprintSuffixes: Seq[String] = Seq(),
-  ): Crypto = {
-    val signingFingerprintsOrOwner =
-      if (signingFingerprints.isEmpty)
-        Seq(keyFingerprintForOwner(owner))
-      else
-        signingFingerprints
-
-    val fingerprintSuffixesOrOwner =
-      if (fingerprintSuffixes.isEmpty)
-        Seq(keyFingerprintForOwner(owner).unwrap)
-      else
-        fingerprintSuffixes
-
-    SymbolicCrypto.tryCreate(
-      signingFingerprintsOrOwner,
-      fingerprintSuffixesOrOwner,
-      testedReleaseProtocolVersion,
-      DefaultProcessingTimeouts.testing,
-      loggerFactory,
-    )
-  }
-
   def newSigningPublicKey(owner: KeyOwner): SigningPublicKey = {
-    SymbolicCrypto.signingPublicKey(keyFingerprintForOwner(owner))
+    SymbolicCrypto.signingPublicKey(TestingIdentityFactory.keyFingerprintForOwner(owner))
   }
+
+}
+
+trait TestingTopologyTransactionFactory extends NoTracing {
+
+  def crypto: Crypto
+  def defaultSigningKey: SigningPublicKey
+
+  def mkTrans[Op <: TopologyChangeOp](
+      trans: TopologyTransaction[Op],
+      signingKey: SigningPublicKey = defaultSigningKey,
+  )(implicit
+      ec: ExecutionContext
+  ): SignedTopologyTransaction[Op] =
+    Await
+      .result(
+        SignedTopologyTransaction
+          .create(
+            trans,
+            signingKey,
+            crypto.pureCrypto,
+            crypto.privateCrypto,
+            BaseTest.testedProtocolVersion,
+          )
+          .value,
+        10.seconds,
+      )
+      .getOrElse(sys.error("failed to create signed topology transaction"))
+
+  def mkAdd(mapping: TopologyStateUpdateMapping, signingKey: SigningPublicKey = defaultSigningKey)(
+      implicit ec: ExecutionContext
+  ): SignedTopologyTransaction[TopologyChangeOp.Add] =
+    mkTrans(TopologyStateUpdate.createAdd(mapping, BaseTest.testedProtocolVersion), signingKey)
+
+  def mkDmGov(mapping: DomainGovernanceMapping, signingKey: SigningPublicKey = defaultSigningKey)(
+      implicit ec: ExecutionContext
+  ): SignedTopologyTransaction[TopologyChangeOp.Replace] =
+    mkTrans(DomainGovernanceTransaction(mapping, BaseTest.testedProtocolVersion), signingKey)
+
+  def revert(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
+      ec: ExecutionContext
+  ): SignedTopologyTransaction[TopologyChangeOp] =
+    transaction.transaction match {
+      case topologyStateUpdate: TopologyStateUpdate[_] =>
+        mkTrans(topologyStateUpdate.reverse, transaction.key)
+      case DomainGovernanceTransaction(_) =>
+        throw new IllegalArgumentException(s"can't revert a domain gov tx $transaction")
+    }
+
+  def genSignKey(name: String): SigningPublicKey =
+    Await
+      .result(
+        crypto
+          .generateSigningKey(name = Some(KeyName.tryCreate(name)))
+          .value,
+        30.seconds,
+      )
+      .getOrElse(sys.error("key should be there"))
+
+  def genEncKey(name: String): EncryptionPublicKey =
+    Await
+      .result(
+        crypto
+          .generateEncryptionKey(name = Some(KeyName.tryCreate(name)))
+          .value,
+        30.seconds,
+      )
+      .getOrElse(sys.error("key should be there"))
 
 }
 
@@ -478,9 +523,12 @@ class TestingOwnerWithKeys(
     val keyOwner: KeyOwner,
     loggerFactory: NamedLoggerFactory,
     initEc: ExecutionContext,
-) extends NoTracing {
+) extends TestingTopologyTransactionFactory {
 
   val cryptoApi = TestingIdentityFactory(loggerFactory).forOwnerAndDomain(keyOwner)
+
+  override def crypto: Crypto = cryptoApi.crypto
+  override def defaultSigningKey: SigningPublicKey = SigningKeys.key1
 
   object SigningKeys {
 
@@ -516,6 +564,7 @@ class TestingOwnerWithKeys(
         isRootDelegation = true,
       )
     )
+
     val ns1k2 = mkAdd(
       NamespaceDelegation(Namespace(namespaceKey.fingerprint), key2, isRootDelegation = false)
     )
@@ -544,6 +593,7 @@ class TestingOwnerWithKeys(
         TrustLevel.Ordinary,
       )
     )
+
     val p2p1 = mkAdd(
       PartyToParticipant(
         RequestSide.Both,
@@ -587,66 +637,6 @@ class TestingOwnerWithKeys(
       mkDmGov(DomainParametersChange(DomainId(uid2), defaultDomainParameters), key2)
   }
 
-  def mkTrans[Op <: TopologyChangeOp](
-      trans: TopologyTransaction[Op],
-      signingKey: SigningPublicKey = SigningKeys.key1,
-  )(implicit
-      ec: ExecutionContext
-  ): SignedTopologyTransaction[Op] =
-    Await
-      .result(
-        SignedTopologyTransaction
-          .create(
-            trans,
-            signingKey,
-            cryptoApi.crypto.pureCrypto,
-            cryptoApi.crypto.privateCrypto,
-            BaseTest.testedProtocolVersion,
-          )
-          .value,
-        10.seconds,
-      )
-      .getOrElse(sys.error("failed to create signed topology transaction"))
-
-  def mkAdd(mapping: TopologyStateUpdateMapping, signingKey: SigningPublicKey = SigningKeys.key1)(
-      implicit ec: ExecutionContext
-  ): SignedTopologyTransaction[TopologyChangeOp.Add] =
-    mkTrans(TopologyStateUpdate.createAdd(mapping, BaseTest.testedProtocolVersion), signingKey)
-
-  def mkDmGov(mapping: DomainGovernanceMapping, signingKey: SigningPublicKey)(implicit
-      ec: ExecutionContext
-  ): SignedTopologyTransaction[TopologyChangeOp.Replace] =
-    mkTrans(DomainGovernanceTransaction(mapping, BaseTest.testedProtocolVersion), signingKey)
-
-  def revert(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
-      ec: ExecutionContext
-  ): SignedTopologyTransaction[TopologyChangeOp] =
-    transaction.transaction match {
-      case topologyStateUpdate: TopologyStateUpdate[_] =>
-        mkTrans(topologyStateUpdate.reverse, transaction.key)
-      case DomainGovernanceTransaction(_) => transaction
-    }
-
-  private def genSignKey(name: String): SigningPublicKey =
-    Await
-      .result(
-        cryptoApi.crypto
-          .generateSigningKey(name = Some(KeyName.tryCreate(name)))
-          .value,
-        30.seconds,
-      )
-      .getOrElse(sys.error("key should be there"))
-
-  def genEncKey(name: String): EncryptionPublicKey =
-    Await
-      .result(
-        cryptoApi.crypto
-          .generateEncryptionKey(name = Some(KeyName.tryCreate(name)))
-          .value,
-        30.seconds,
-      )
-      .getOrElse(sys.error("key should be there"))
-
 }
 
 object TestingIdentityFactory {
@@ -678,5 +668,87 @@ object TestingIdentityFactory {
   )
 
   def pureCrypto(): CryptoPureApi = new SymbolicPureCrypto
+
+  def domainClientForOwner(
+      owner: KeyOwner,
+      domainId: DomainId,
+      store: TopologyStore[DomainStore],
+      clock: Clock,
+      protocolVersion: ProtocolVersion,
+      futureSupervisor: FutureSupervisor,
+      loggerFactory: NamedLoggerFactory,
+      cryptoO: Option[Crypto] = None,
+      packageDependencies: Option[PackageId => EitherT[Future, PackageId, Set[PackageId]]] = None,
+      useStateTxs: Boolean = true,
+      initKeys: Map[KeyOwner, Seq[SigningPublicKey]] = Map(),
+  )(implicit
+      executionContext: ExecutionContext,
+      traceContext: TraceContext,
+  ): (DomainTopologyClientWithInit, DomainSyncCryptoClient) = {
+    val crypto = cryptoO.getOrElse(newCrypto(loggerFactory)(owner))
+    val topologyClient = new StoreBasedDomainTopologyClient(
+      clock,
+      domainId,
+      protocolVersion,
+      store,
+      initKeys,
+      packageDependencies.getOrElse(StoreBasedDomainTopologyClient.NoPackageDependencies),
+      DefaultProcessingTimeouts.testing,
+      futureSupervisor,
+      loggerFactory,
+      useStateTxs,
+    )
+    val cryptoClient = new DomainSyncCryptoClient(
+      owner,
+      domainId,
+      topologyClient,
+      crypto = crypto,
+      cacheConfigs = CachingConfigs.testing,
+      timeouts = DefaultProcessingTimeouts.testing,
+      futureSupervisor,
+      loggerFactory,
+    )
+    val initF = store
+      .maxTimestamp()
+      .map {
+        case Some((sequenced, effective)) =>
+          topologyClient.updateHead(effective, effective.toApproximate, false)
+
+        case None =>
+      }
+      .map(_ => (topologyClient, cryptoClient))
+    Await.result(initF, 30.seconds)
+  }
+
+  private def keyFingerprintForOwner(owner: KeyOwner): Fingerprint =
+    // We are converting an Identity (limit of 185 characters) to a Fingerprint (limit of 68 characters) - this would be
+    // problematic if this function wasn't only used for testing
+    Fingerprint.tryCreate(owner.uid.id.toLengthLimitedString.unwrap)
+
+  def newCrypto(loggerFactory: NamedLoggerFactory)(
+      owner: KeyOwner,
+      signingFingerprints: Seq[Fingerprint] = Seq(),
+      fingerprintSuffixes: Seq[String] = Seq(),
+  ): Crypto = {
+    val signingFingerprintsOrOwner =
+      if (signingFingerprints.isEmpty)
+        Seq(keyFingerprintForOwner(owner))
+      else
+        signingFingerprints
+
+    val fingerprintSuffixesOrOwner =
+      if (fingerprintSuffixes.isEmpty)
+        Seq(keyFingerprintForOwner(owner).unwrap)
+      else
+        fingerprintSuffixes
+
+    SymbolicCrypto.tryCreate(
+      signingFingerprintsOrOwner,
+      fingerprintSuffixesOrOwner,
+      testedReleaseProtocolVersion,
+      DefaultProcessingTimeouts.testing,
+      loggerFactory,
+    )
+  }
 
 }

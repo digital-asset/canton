@@ -76,7 +76,7 @@ object AggregationRule
   ): AggregationRule =
     AggregationRule(eligibleMembers, threshold)(protocolVersionRepresentativeFor(protoVersion))
 
-  override protected def name: String = "AggregationRule"
+  override def name: String = "AggregationRule"
 
   override def supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.v3),

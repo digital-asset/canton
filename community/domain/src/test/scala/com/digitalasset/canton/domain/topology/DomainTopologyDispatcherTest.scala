@@ -16,9 +16,8 @@ import com.digitalasset.canton.domain.topology.DomainTopologySender.{
 }
 import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.health.ComponentHealthState
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
-import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.protocol.messages.DomainTopologyTransactionMessage
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError.{
@@ -31,16 +30,7 @@ import com.digitalasset.canton.sequencing.client.{
   SendResult,
   SequencerClient,
 }
-import com.digitalasset.canton.sequencing.protocol.{
-  Batch,
-  Deliver,
-  DeliverError,
-  DeliverErrorReason,
-  Envelope,
-  MessageId,
-  OpenEnvelope,
-  SendAsyncError,
-}
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.memory.InMemorySequencerCounterTrackerStore
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
@@ -55,10 +45,18 @@ import com.digitalasset.canton.topology.store.{
   TopologyStoreId,
   ValidatedTopologyTransaction,
 }
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.*
-import com.digitalasset.canton.topology.{DomainId, Member, TestingOwnerWithKeys}
+import com.digitalasset.canton.topology.{
+  DefaultTestIdentities,
+  DomainId,
+  Member,
+  TestingOwnerWithKeys,
+}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.DelayUtil
 import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   HasExecutionContext,
@@ -70,7 +68,7 @@ import org.scalatest.{Assertion, FutureOutcome}
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.*
-import scala.concurrent.{Future, Promise, blocking}
+import scala.concurrent.{Future, Promise}
 import scala.util.{Failure, Success}
 
 class DomainTopologyDispatcherTest
@@ -97,50 +95,25 @@ class DomainTopologyDispatcherTest
     maxBurstFactor = PositiveDouble.tryCreate(1.0),
   )
 
-  case class Awaiter(
-      atLeast: Int,
-      observation: Seq[Long],
+  case class TopoMsg(
       current: Seq[SignedTopologyTransaction[TopologyChangeOp]],
       recipients: Set[Member],
-      promise: Promise[Awaiter] = Promise(),
-  ) extends PrettyPrinting
-      with Product
-      with Serializable {
-
-    override def pretty: Pretty[Awaiter] = prettyOfClass(
-      param("atLeast", _.atLeast),
-      param("observation", _.atLeast),
-      param("current", _.current),
-      param("recipients", _.recipients),
-    )
-
-    def add(
-        append: Seq[SignedTopologyTransaction[TopologyChangeOp]],
-        recps: Set[Member],
-    ): Awaiter = {
-      val updated = {
-        copy(
-          current = current ++ append,
-          recipients = recipients ++ recps,
-          observation = observation :+ System.nanoTime(),
-        )
-      }
-      updated.updateAtLeast(updated.atLeast)
-    }
-
-    def updateAtLeast(atLeast: Int): Awaiter =
-      if (current.length >= atLeast && atLeast > 0) {
-        // try, as might be called several times (with same result) during contention
-        promise.trySuccess(this)
-        Awaiter(0, Seq(), Seq(), Set())
-      } else copy(atLeast = atLeast)
-
+      observation: Long,
+  ) {
     def compare(expected: SignedTopologyTransaction[TopologyChangeOp]*): Assertion = {
-      current.map(_.transaction.element.mapping) shouldBe expected.map(
-        _.transaction.element.mapping
-      )
+      check(current, expected)
     }
+  }
 
+  private def check(
+      actual: Seq[SignedTopologyTransaction[TopologyChangeOp]],
+      expected: Seq[SignedTopologyTransaction[TopologyChangeOp]],
+  ): Assertion = {
+    actual
+      .map(_.transaction.element.mapping)
+      .toList shouldBe expected
+      .map(_.transaction.element.mapping)
+      .toList
   }
 
   private def toValidated(
@@ -149,7 +122,8 @@ class DomainTopologyDispatcherTest
     ValidatedTopologyTransaction(tx, None)
 
   final class Fixture
-      extends TestingOwnerWithKeys(domainManager, loggerFactory, parallelExecutionContext) {
+      extends TestingOwnerWithKeys(domainManager, loggerFactory, parallelExecutionContext)
+      with FlagCloseable {
 
     val ts0 = CantonTimestamp.Epoch
     val ts1 = ts0.plusSeconds(1)
@@ -178,20 +152,58 @@ class DomainTopologyDispatcherTest
 
     val parameters = domainNodeParameters(DefaultProcessingTimeouts.testing, CachingConfigs.testing)
 
-    val lock = new Object()
-    val awaiter = new AtomicReference[Awaiter](Awaiter(0, Seq(), Seq(), Set()))
-    def expect(atLeast: Int): Future[Awaiter] = {
-      logger.debug(s"Expecting $atLeast")
-      blocking(lock.synchronized {
-        awaiter
-          .getAndUpdate(cur => cur.updateAtLeast(atLeast))
-          .promise
-          .future
-          .thereafter {
-            case Success(cur) => logger.debug(s"Awaiter returned $cur")
-            case Failure(ex) => logger.debug("Awaiter failed with an exception", ex)
-          }
-      })
+    // the domain topology dispatcher will dispatch messages
+    // we use below atomic reference to capture the messages within the test
+    val awaiter =
+      new AtomicReference[(List[Promise[TopoMsg]], List[TopoMsg])]((List.empty, List.empty))
+
+    // the dispatcher runs asynchronously. therefore if there are multiple changes registered
+    // the distribution within a "batch" might vary. therefore in some cases
+    // we use "expect(4):Future[Awaiter]" to wait until 4 topology txs have been sent, independent on the number
+    // of messages.
+    case class Awaiter(observed: Seq[GenericSignedTopologyTransaction], recipients: Set[Member]) {
+      def compare(expected: SignedTopologyTransaction[TopologyChangeOp]*): Assertion = {
+        check(observed, expected)
+      }
+    }
+
+    def expect(num: Int): Future[Awaiter] = {
+      def go(prev: Awaiter = Awaiter(Seq(), Set())): Future[Awaiter] = {
+        nextMessage().flatMap { x =>
+          val acc = Awaiter(prev.observed ++ x.current, prev.recipients ++ x.recipients)
+          if (acc.observed.size >= num)
+            Future.successful(acc)
+          else
+            go(acc)
+        }
+      }
+      go()
+    }
+
+    def nextMessage(): Future[TopoMsg] = {
+      logger.debug(s"Expecting next message")
+      val promise = Promise[TopoMsg]()
+      val callsite = new Exception("Didn't get a next message")
+      DelayUtil.delay("awaiter", 20.seconds, this).foreach { _ =>
+        if (!promise.isCompleted) promise.tryFailure(callsite)
+      }
+      val before = awaiter
+        .getAndUpdate {
+          case (Nil, _drop :: rest) => (Nil, rest)
+          case (queue, Nil) => (queue :+ promise, Nil)
+          case (_, _) =>
+            logger.error("Should not happen")
+            fail("Should not happen")
+        }
+      before match {
+        case (_, one :: _) => promise.success(one)
+        case (_, _) =>
+      }
+      promise.future
+        .thereafter {
+          case Success(cur) => logger.debug(s"Awaiter returned $cur")
+          case Failure(ex) => logger.debug("Awaiter failed with an exception", ex)
+        }
     }
 
     val sendDelay = new AtomicReference[Future[Unit]](Future.unit)
@@ -199,17 +211,28 @@ class DomainTopologyDispatcherTest
       new AtomicReference[Option[EitherT[FutureUnlessShutdown, String, Unit]]](None)
 
     val sender = new DomainTopologySender() {
+      override val maxBatchSize = 100
       override def sendTransactions(
           snapshot: DomainSnapshotSyncCryptoApi,
           transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
           recipients: Set[Member],
+          name: String,
+          batching: Boolean,
       )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
         logger.debug(
           s"Observed ${transactions.map(_.transaction.element.mapping)}"
         )
-        blocking(lock.synchronized {
-          awaiter.updateAndGet(_.add(transactions, recipients))
-        })
+        val msg = TopoMsg(transactions, recipients, System.nanoTime())
+        awaiter.getAndUpdate {
+          case (Nil, msgs) => (Nil, msgs :+ msg)
+          case (_ :: more, Nil) => (more, Nil)
+          case (_, _) =>
+            logger.error("Should not happen observation")
+            fail("Should not happen observation")
+        } match {
+          case (recv :: _, Nil) => recv.trySuccess(msg)
+          case (_, _) => // no receiver yet ready to pickup
+        }
         val ret = EitherT.right[String](
           FutureUnlessShutdown.outcomeF(sendDelay.get())
         )
@@ -255,8 +278,6 @@ class DomainTopologyDispatcherTest
         .failOnShutdown("dispatcher initialization")
     }
 
-    def close(): Unit = {}
-
     def submit(
         ts: CantonTimestamp,
         tx: SignedTopologyTransaction[TopologyChangeOp]*
@@ -284,20 +305,23 @@ class DomainTopologyDispatcherTest
 
     def txs = this.TestingTransactions
 
-    def genPs(state: ParticipantPermission) = mkAdd(
+    def genPs(state: ParticipantPermission, side: RequestSide = RequestSide.From) = mkAdd(
       ParticipantState(
-        RequestSide.Both,
+        side,
         domainId,
         participant1,
         state,
         TrustLevel.Ordinary,
       )
     )
+    val participantTrustsDomain = genPs(ParticipantPermission.Submission, RequestSide.To)
     val mpsS = genPs(ParticipantPermission.Submission)
     val mpsO = genPs(ParticipantPermission.Observation)
     val mpsC = genPs(ParticipantPermission.Confirmation)
     val mpsD = genPs(ParticipantPermission.Disabled)
 
+    override protected def timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
+    override protected def logger: TracedLogger = DomainTopologyDispatcherTest.this.logger
   }
 
   type FixtureParam = Fixture
@@ -361,17 +385,17 @@ class DomainTopologyDispatcherTest
         for {
           _ <- f.init()
           _ <- submit(ts0, dpc2)
-          res <- expect(1)
+          res <- nextMessage()
           _ <- submit(ts1, dpc1)
-          res2 <- expect(1)
+          res2 <- nextMessage()
           _ <- submit(ts2, txs.ns1k1)
-          res3 <- expect(1)
+          res3 <- nextMessage()
         } yield {
           res.compare(dpc2)
           res2.compare(dpc1)
           res3.compare(txs.ns1k1)
-          val first = res2.observation.headOption.valueOrFail("should have observation")
-          val snd = res3.observation.headOption.valueOrFail("should have observation")
+          val first = res2.observation
+          val snd = res3.observation
           val delta = tdp.topologyChangeDelay * NonNegativeInt.tryCreate(2)
           (snd - first) should be > delta.duration.toNanos
         }
@@ -408,11 +432,11 @@ class DomainTopologyDispatcherTest
         for {
           _ <- f.init()
           _ <- submit(ts0, txs.ns1k1, txs.id1k1)
-          _ <- expect(2)
+          _ <- nextMessage()
           d2 = f.mkDispatcher
           _ <- f.initDispatcher(d2, Future.unit)
           _ <- submit(d2, ts1, txs.okm1, txs.ns1k2)
-          res <- expect(2)
+          res <- nextMessage()
         } yield {
           d2.close()
           res.compare(txs.okm1, txs.ns1k2)
@@ -431,7 +455,7 @@ class DomainTopologyDispatcherTest
           _ <- f.targetStore.updateDispatchingWatermark(ts0)
           _ <- f.append(targetStore, ts1, Seq(txs.ns1k2, txs.ns1k1))
           _ <- f.init(flusher.foo)
-          res <- f.expect(1)
+          res <- f.nextMessage()
         } yield {
           // ensure we've flushed the system
           verify(flusher, times(1)).foo
@@ -449,7 +473,7 @@ class DomainTopologyDispatcherTest
           // now add one just into the queue (so won't be picked up during init when we read from the store)
           _ = f.dispatcher.addedSignedTopologyTransaction(ts2, Seq(txs.okm1))
           _ <- f.init()
-          res <- expect(3)
+          res <- nextMessage()
         } yield {
           res.compare(txs.ns1k2, txs.ns1k1, txs.okm1)
         }
@@ -459,23 +483,37 @@ class DomainTopologyDispatcherTest
     "bootstrapping participants" when {
       "send snapshot to new participant" in { f =>
         import f.*
-        val grabF = expect(1)
+        // namespace cert of the test domain
+        val nsD = mkAdd(
+          NamespaceDelegation(
+            DefaultTestIdentities.namespace,
+            SigningKeys.key1,
+            isRootDelegation = true,
+          )
+        )
         for {
           _ <- f.init()
-          _ <- submit(ts0, txs.dpc1)
-          res1 <- grabF
-          grab2F = expect(4)
-          _ <- submit(ts1, txs.ns1k1, txs.okm1, txs.ps1)
-          _ = submit(ts2, txs.okm1)
-          res2 <- grab2F
-          res3 <- expect(1)
+          _ <- submit(ts0, nsD, txs.ns1k1, txs.okm1, txs.id2k2, mpsS)
+          res1 <- expect(5)
+          // trust certificate will cause the dispatcher to bootstrap the participant node
+          _ <- submit(ts1, participantTrustsDomain)
+          catch1 <- nextMessage()
+          rest <- nextMessage()
+          _ <- submit(ts2, participantTrustsDomain, txs.okm2)
+          res3 <- nextMessage()
         } yield {
-          res1.compare(txs.dpc1)
+          // normal dispatching to domain members
+          res1.compare(nsD, txs.ns1k1, txs.okm1, txs.id2k2, mpsS)
           res1.recipients should not contain (participant1)
-          res2.compare(txs.dpc1, txs.ns1k1, txs.okm1, txs.ps1)
-          res2.recipients should contain(participant1)
-          res3.compare(txs.okm1)
+          // onboarding tx for participant with just key data in there at the beginning (so slight reordering
+          catch1.recipients shouldBe Set(participant1)
+          catch1.compare(nsD, txs.okm1, mpsS, txs.ns1k1, txs.id2k2)
+          // actual trust cert then sent to all
+          rest.recipients should contain(participant1)
+          rest.recipients.size shouldBe 3
+          rest.compare(participantTrustsDomain)
           res3.recipients should contain(participant1)
+
         }
       }
 
@@ -484,31 +522,38 @@ class DomainTopologyDispatcherTest
         for {
           _ <- f.init()
           _ <- submit(ts0, txs.ns1k1, mpsO)
-          _ <- expect(2)
-          _ <- submit(ts1, txs.okm1)
-          res1 <- expect(1)
+          _ <- nextMessage()
+          _ <- submit(ts1, txs.okm1, participantTrustsDomain)
+          catch1 <- nextMessage()
+          res1 <- nextMessage()
           _ <- submit(ts2, mpsC)
           _ <- submit(ts2.plusMillis(1), revert(mpsO))
           res2 <- expect(2)
           _ <- submit(ts2.plusMillis(2), mpsS)
-          res3a <- expect(1)
+          res3a <- nextMessage()
           _ <- submit(ts2.plusMillis(3), revert(mpsC))
-          res3b <- expect(1)
-          grabF = expect(1)
+          res3b <- nextMessage()
           _ <- submit(ts2.plusMillis(4), mpsD)
+          res4a <- nextMessage()
           _ <- submit(ts2.plusMillis(5), revert(mpsS))
-          res4a <- grabF
-          res4b <- expect(1)
+          res4b <- nextMessage()
           _ <- submit(ts2.plusMillis(6), txs.dpc1)
-          res5 <- expect(1)
+          res5 <- nextMessage()
         } yield {
+          catch1.recipients shouldBe Set(participant1)
           res1.recipients should contain(participant1)
           res2.recipients should contain(participant1)
           res3a.recipients should contain(participant1)
           res3b.recipients should contain(participant1)
           res4a.recipients should contain(participant1)
-          res4b.recipients should not contain (participant1)
-          res5.recipients should not contain (participant1)
+          if (testedProtocolVersion < ProtocolVersion.v5) {
+            res4b.recipients should not contain (participant1)
+            res5.recipients should not contain (participant1)
+          } else {
+            // in v5, changes are also forwarded to disabled participants
+            res4b.recipients should contain(participant1)
+            res5.recipients should contain(participant1)
+          }
         }
       }
 
@@ -520,23 +565,54 @@ class DomainTopologyDispatcherTest
         for {
           _ <- f.init()
           _ <- submit(ts0, txs.ns1k1, mpsS)
-          _ <- submit(ts0.immediateSuccessor, mpsD)
-          _ <- expect(3)
-          _ <- submit(ts1.immediatePredecessor, rmpsS, txs.ns1k1)
-          res1 <- expect(2)
-          _ <- submit(ts1, mpsS2)
-          res2 <- expect(1)
-          _ <- submit(ts1.immediateSuccessor, rmpsD)
-          res3 <- expect(4)
-          _ <- submit(ts2, txs.okm1)
-          res4 <- expect(1)
+          _ <- nextMessage()
+          _ <- submit(ts0.plusMillis(1), participantTrustsDomain)
+          boot1 <- nextMessage() // catchup
+          _ <- nextMessage() // normal distro
+          // depending on protocol version, we need Some(Disabled) or None as the participant state
+          _ <-
+            if (testedProtocolVersion < ProtocolVersion.v5)
+              submit(ts0.plusMillis(2), mpsD) // disables
+            else
+              submit(ts0.plusMillis(2), revert(mpsS))
+          _ <- nextMessage()
+          _ <- submit(ts0.plusMillis(3), rmpsS, txs.ns1k1) // should not be seen by p1
+          res1 <- expect(2) // get this in two messages
+          _ <-
+            if (testedProtocolVersion < ProtocolVersion.v5)
+              submit(ts0.plusMillis(4), mpsS2) // back with observation rights but still disabled
+            else
+              submit(
+                ts0.plusMillis(4),
+                txs.id1k1,
+              ) // different scenario for v5+
+          res2 <- nextMessage()
+          // ban gets lifted
+          _ <-
+            if (testedProtocolVersion < ProtocolVersion.v5)
+              submit(ts0.plusMillis(5), rmpsD) // ban gets lifted
+            else
+              submit(ts0.plusMillis(5), mpsS2)
+          catch1 <- nextMessage() // catchup
+          res3 <- nextMessage()
+          _ <- submit(ts0.plusMillis(6), txs.okm1)
+          res4 <- nextMessage()
         } yield {
+          boot1.recipients shouldBe Set(participant1)
           res1.recipients should not contain (participant1)
           res2.recipients should not contain (participant1)
+          catch1.recipients shouldBe Set(participant1)
+          if (testedProtocolVersion < ProtocolVersion.v5) {
+            catch1.compare(rmpsS, mpsS2, txs.ns1k1)
+            res3.compare(rmpsD)
+          } else {
+            // we get the id1k1 first because in the catchup computation, it got moved
+            // to the "first batch" as it is in the namespace / uid of the domain
+            catch1.compare(rmpsS, txs.id1k1, txs.ns1k1)
+            res3.compare(mpsS2)
+          }
           res3.recipients should contain(participant1)
-          res3.compare(rmpsS, txs.ns1k1, mpsS2, rmpsD) // includes catchup
-          // catchup and dispatch
-          res3.observation should have length (2)
+          res4.compare(txs.okm1)
           res4.recipients should contain(participant1)
         }
       }
@@ -627,7 +703,7 @@ class DomainTopologySenderTest
         transactions: SignedTopologyTransaction[TopologyChangeOp]*
     ) = {
       sender
-        .sendTransactions(snapshot, transactions, recipients)
+        .sendTransactions(snapshot, transactions, recipients, "testing", batching = true)
         .value
         .onShutdown(Left(("shutdown")))
     }

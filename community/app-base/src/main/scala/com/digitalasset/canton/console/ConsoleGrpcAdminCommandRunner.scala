@@ -17,7 +17,7 @@ import com.digitalasset.canton.environment.Environment
 import com.digitalasset.canton.lifecycle.Lifecycle.CloseableChannel
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
-import com.digitalasset.canton.tracing.Spanning
+import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import io.opentelemetry.api.trace.Tracer
 
 import java.util.concurrent.TimeUnit
@@ -46,6 +46,35 @@ class GrpcAdminCommandRunner(
   )
   private val channels = TrieMap[(String, String, Port), CloseableChannel]()
 
+  def runCommandAsync[Result](
+      instanceName: String,
+      command: GrpcAdminCommand[_, _, Result],
+      clientConfig: ClientConfig,
+      token: Option[String],
+  )(implicit traceContext: TraceContext) = {
+    val awaitTimeout = command.timeoutType match {
+      case CustomClientTimeout(timeout) => timeout
+      // If a custom timeout for a console command is set, it involves some non-gRPC timeout mechanism
+      // -> we set the gRPC timeout to Inf, so gRPC never times out before the other timeout mechanism
+      case ServerEnforcedTimeout => NonNegativeDuration(Duration.Inf)
+      case DefaultBoundedTimeout => commandTimeouts.bounded
+      case DefaultUnboundedTimeout => commandTimeouts.unbounded
+    }
+    val callTimeout = awaitTimeout.duration match {
+      // Abort the command shortly before the console times out, to get a better error message
+      case x: FiniteDuration => Duration((x.toMillis * 9) / 10, TimeUnit.MILLISECONDS)
+      case x => x
+    }
+    val closeableChannel = getOrCreateChannel(instanceName, clientConfig)
+    logger.debug(s"Running on ${instanceName} command ${command} against ${clientConfig}")(
+      traceContext
+    )
+    (
+      awaitTimeout,
+      grpcRunner.run(instanceName, command, closeableChannel.channel, token, callTimeout),
+    )
+  }
+
   def runCommand[Result](
       instanceName: String,
       command: GrpcAdminCommand[_, _, Result],
@@ -54,28 +83,12 @@ class GrpcAdminCommandRunner(
   ): ConsoleCommandResult[Result] =
     withNewTrace[ConsoleCommandResult[Result]](command.fullName) { implicit traceContext => span =>
       span.setAttribute("instance_name", instanceName)
-      val awaitTimeout = command.timeoutType match {
-        case CustomClientTimeout(timeout) => timeout
-        // If a custom timeout for a console command is set, it involves some non-gRPC timeout mechanism
-        // -> we set the gRPC timeout to Inf, so gRPC never times out before the other timeout mechanism
-        case ServerEnforcedTimeout => NonNegativeDuration(Duration.Inf)
-        case DefaultBoundedTimeout => commandTimeouts.bounded
-        case DefaultUnboundedTimeout => commandTimeouts.unbounded
-      }
-      val callTimeout = awaitTimeout.duration match {
-        // Abort the command shortly before the console times out, to get a better error message
-        case x: FiniteDuration => Duration((x.toMillis * 9) / 10, TimeUnit.MILLISECONDS)
-        case x => x
-      }
-      val closeableChannel = getOrCreateChannel(instanceName, clientConfig)
-      logger.debug(s"Running on ${instanceName} command ${command} against ${clientConfig}")(
-        traceContext
-      )
+      val (awaitTimeout, commandET) = runCommandAsync(instanceName, command, clientConfig, token)
       val apiResult =
         awaitTimeout.await(
           s"Running on ${instanceName} command ${command} against ${clientConfig}"
         )(
-          grpcRunner.run(instanceName, command, closeableChannel.channel, token, callTimeout).value
+          commandET.value
         )
       // convert to a console command result
       apiResult.toResult

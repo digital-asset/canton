@@ -45,7 +45,7 @@ object SerializableTraceContext
   )
 
   /** The name of the class as used for pretty-printing */
-  override protected def name: String = "TraceContext"
+  override def name: String = "TraceContext"
 
   val empty: SerializableTraceContext = SerializableTraceContext(TraceContext.empty)
 

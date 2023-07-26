@@ -155,7 +155,7 @@ object HealthReporting extends PrettyInstances with PrettyUtil {
       // The first time a listener is registered, also register a shutdown hook to notify them on closing and clear them
       // to avoid further updates from that component
       if (listeners.get().isEmpty) {
-        runOnShutdown(new RunOnShutdown {
+        runOnShutdown_(new RunOnShutdown {
           override def name: String = "close-listeners"
           override def done: Boolean = listeners.get().isEmpty
           override def run(): Unit = {

@@ -6,7 +6,7 @@ package com.digitalasset.canton.protocol
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import com.daml.lf.data.Ref.PackageId
-import com.daml.lf.data.{Bytes, ImmArray, Ref}
+import com.daml.lf.data.{Bytes, ImmArray}
 import com.daml.lf.transaction.Versioned
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.{
@@ -17,6 +17,7 @@ import com.daml.lf.value.Value.{
   VersionedValue,
 }
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -24,14 +25,18 @@ import com.digitalasset.canton.data.TransactionViewDecomposition.{NewView, SameV
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationDuration
-import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
+import com.digitalasset.canton.protocol.ExampleTransactionFactory.{contractInstance, *}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Confirmation,
   Observation,
   Submission,
 }
-import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, TrustLevel}
+import com.digitalasset.canton.topology.transaction.{
+  ParticipantAttributes,
+  TrustLevel,
+  VettedPackages,
+}
 import com.digitalasset.canton.topology.{
   DomainId,
   MediatorId,
@@ -79,7 +84,7 @@ object ExampleTransactionFactory {
 
   def contractInstance(
       capturedIds: Seq[LfContractId] = Seq.empty,
-      templateId: Ref.Identifier = templateId,
+      templateId: LfTemplateId = templateId,
   ): LfContractInst =
     LfContractInst(templateId, versionedValueCapturing(capturedIds.toList))
 
@@ -154,6 +159,7 @@ object ExampleTransactionFactory {
       exerciseResult: Option[Value] = Some(Value.ValueNone),
       key: Option[LfGlobalKeyWithMaintainers] = None,
       byKey: Boolean = false,
+      templateId: LfTemplateId = templateId,
   ): LfNodeExercises =
     LfNodeExercises(
       targetCoid = targetCoid,
@@ -319,7 +325,7 @@ object ExampleTransactionFactory {
   val commandId: CommandId = DefaultDamlValues.commandId()
   val workflowId: WorkflowId = WorkflowId.assertFromString("testWorkflowId")
 
-  def defaultTestingTopology =
+  val defaultTestingTopology: TestingTopology =
     TestingTopology(
       topology = Map(
         submitter -> Map(submitterParticipant -> Submission),
@@ -331,7 +337,9 @@ object ExampleTransactionFactory {
         ),
       ),
       participants = Map(submitterParticipant -> ParticipantAttributes(Submission, TrustLevel.Vip)),
-      packages = Seq(ExampleTransactionFactory.packageId),
+      packages = Seq(submitterParticipant, signatoryParticipant).map(
+        VettedPackages(_, Seq(ExampleTransactionFactory.packageId))
+      ),
     )
 
   def defaultTestingIdentityFactory: TestingIdentityFactory =
@@ -1057,7 +1065,7 @@ class ExampleTransactionFactory(
 
     private def genNode(id: LfContractId): LfNodeExercises =
       exerciseNodeWithoutChildren(
-        id,
+        targetCoid = id,
         actingParties = Set(submitter),
         signatories = Set(submitter),
         observers = Set(observer),
@@ -1068,6 +1076,26 @@ class ExampleTransactionFactory(
     override def reinterpretedNode: LfNodeExercises = node
 
     override def consuming: Boolean = true
+  }
+
+  @SuppressWarnings(Array("org.wartremover.warts.IsInstanceOf"))
+  case class UpgradedSingleExercise(
+      seed: LfHash,
+      nodeId: LfNodeId = LfNodeId(0),
+      lfContractId: LfContractId = suffixedId(-1, 0),
+      contractId: LfContractId = suffixedId(-1, 0),
+      contractInstance: LfContractInst = ExampleTransactionFactory.contractInstance(),
+      agreementText: String = "",
+      saltO: Option[Salt] = saltConditionally(TestSalt.generateSalt(random.nextInt())),
+      consuming: Boolean = true,
+  ) extends SingleNode(Some(seed)) {
+    val upgradedTemplateId: canton.protocol.LfTemplateId =
+      templateId.copy(packageId = LfPackageId.assertFromString("upgraded"))
+    private def genNode(id: LfContractId): LfNodeExercises =
+      exerciseNode(targetCoid = id, templateId = upgradedTemplateId, signatories = Set(submitter))
+    override def node: LfNodeExercises = genNode(contractId)
+    override def lfNode: LfNodeExercises = genNode(lfContractId)
+    override def reinterpretedNode: LfNodeExercises = node
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.IsInstanceOf"))

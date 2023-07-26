@@ -45,7 +45,6 @@ import com.github.blemale.scaffeine.Scaffeine
 import com.google.protobuf.ByteString
 import slick.jdbc.GetResult
 
-import java.io.*
 import java.nio.file.Paths
 import java.util.UUID
 import java.util.zip.ZipInputStream
@@ -526,9 +525,6 @@ class PackageService(
 }
 object PackageService {
 
-  def getArchives(filename: String): Either[Throwable, Seq[DamlLf.Archive]] =
-    DarParser.readArchiveFromFile(new File(filename)).map(_.all)
-
   final case class DarDescriptor(hash: Hash, name: DarName)
 
   object DarDescriptor {
@@ -551,7 +547,7 @@ object PackageService {
       GetResult(r => Dar(r.<<, r.<<))
   }
 
-  def darToLf(
+  private def darToLf(
       dar: Dar
   ): Either[String, (DarDescriptor, archive.Dar[DamlLf.Archive])] = {
     val bytes = dar.bytes

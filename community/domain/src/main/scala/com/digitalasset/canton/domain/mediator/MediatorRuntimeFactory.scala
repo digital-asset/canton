@@ -20,13 +20,12 @@ import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.StaticGrpcServices
 import com.digitalasset.canton.resource.Storage
-import com.digitalasset.canton.sequencing.UnsignedProtocolEventHandler
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.store.{SequencedEventStore, SequencerCounterTrackerStore}
 import com.digitalasset.canton.time.{Clock, GrpcDomainTimeService}
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessorCommon
-import com.digitalasset.canton.topology.{DomainId, DomainOutboxX, DomainOutboxXFactory, MediatorId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.ServerServiceDefinition
@@ -96,7 +95,7 @@ trait MediatorRuntimeFactory {
       syncCrypto: DomainSyncCryptoClient,
       topologyClient: DomainTopologyClientWithInit,
       topologyTransactionProcessor: TopologyTransactionProcessorCommon,
-      topologyRequestProcessor: Option[UnsignedProtocolEventHandler],
+      topologyManagerStatusO: Option[TopologyManagerStatus],
       domainOutboxXFactory: Option[DomainOutboxXFactory],
       timeTrackerConfig: DomainTimeTrackerConfig,
       nodeParameters: CantonNodeParameters,
@@ -123,7 +122,7 @@ object CommunityMediatorRuntimeFactory extends MediatorRuntimeFactory {
       syncCrypto: DomainSyncCryptoClient,
       topologyClient: DomainTopologyClientWithInit,
       topologyTransactionProcessor: TopologyTransactionProcessorCommon,
-      topologyRequestProcessor: Option[UnsignedProtocolEventHandler],
+      topologyManagerStatusO: Option[TopologyManagerStatus],
       domainOutboxXFactory: Option[DomainOutboxXFactory],
       timeTrackerConfig: DomainTimeTrackerConfig,
       nodeParameters: CantonNodeParameters,
@@ -161,9 +160,8 @@ object CommunityMediatorRuntimeFactory extends MediatorRuntimeFactory {
         loggerFactory,
       )
 
-    val (maybeOutboxX, maybeTopologyResponseHandler) = domainOutboxXFactory
+    val maybeOutboxX = domainOutboxXFactory
       .map(_.create(protocolVersion, topologyClient, sequencerClient, clock, loggerFactory))
-      .unzip
     EitherT.pure[Future, String](
       new CommunityMediatorRuntime(
         new Mediator(
@@ -173,8 +171,8 @@ object CommunityMediatorRuntimeFactory extends MediatorRuntimeFactory {
           topologyClient,
           syncCrypto,
           topologyTransactionProcessor,
-          topologyRequestProcessor,
-          maybeTopologyResponseHandler,
+          topologyManagerStatusO,
+          maybeOutboxX,
           timeTrackerConfig,
           state,
           sequencerCounterTrackerStore,

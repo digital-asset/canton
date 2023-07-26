@@ -358,7 +358,7 @@ trait ParticipantNodeBootstrapCommon {
               loggerFactory,
             )
         }
-        // TODO(#11255) refactor package service such that we can break the cycle between manager / package service
+        // TODO(#12944) refactor package service such that we can break the cycle between manager / package service
         new PackageService(
           engine,
           packageStore,

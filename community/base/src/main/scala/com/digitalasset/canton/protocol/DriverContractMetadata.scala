@@ -34,7 +34,7 @@ final case class DriverContractMetadata(salt: Salt)
 }
 
 object DriverContractMetadata extends HasVersionedMessageCompanion[DriverContractMetadata] {
-  override protected def name: String = "driver contract metadata"
+  override def name: String = "driver contract metadata"
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(

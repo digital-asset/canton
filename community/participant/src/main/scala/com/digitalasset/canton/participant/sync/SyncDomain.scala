@@ -97,7 +97,6 @@ import scala.concurrent.{ExecutionContext, Future}
   * @param ephemeral         The ephemeral state of the sync domain.
   * @param packageService    Underlying package management service.
   * @param domainCrypto      Synchronisation crypto utility combining IPS and Crypto operations for a single domain.
-  * @param topologyProcessor Processor of topology messages from the sequencer.
   */
 class SyncDomain(
     val domainId: DomainId,
@@ -134,7 +133,7 @@ class SyncDomain(
 
   override protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
 
-  override val name = SyncDomain.healthName
+  override val name: String = SyncDomain.healthName
   override val initialHealthState: ComponentHealthState = ComponentHealthState.NotInitializedState
   override val closingState: ComponentHealthState =
     ComponentHealthState.failed("Disconnected from domain")
@@ -150,7 +149,6 @@ class SyncDomain(
     ConfirmationRequestFactory(participantId, domainId, staticDomainParameters.protocolVersion)(
       domainCrypto.crypto.pureCrypto,
       seedGenerator,
-      packageService,
       parameters.loggingConfig,
       staticDomainParameters.uniqueContractKeys,
       loggerFactory,
@@ -180,6 +178,7 @@ class SyncDomain(
     loggerFactory,
     futureSupervisor,
     skipRecipientsCheck = skipRecipientsCheck,
+    enableContractUpgrading = parameters.enableContractUpgrading,
   )
 
   private val transferOutProcessor: TransferOutProcessor = new TransferOutProcessor(

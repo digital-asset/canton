@@ -372,8 +372,11 @@ object TransferProcessingSteps {
   }
 
   final case class InvalidTransferCommonData(reason: String) extends TransferProcessorError {
-
     override def message: String = s"Invalid transfer common data: $reason"
+  }
+
+  final case class InvalidTransferView(reason: String) extends TransferProcessorError {
+    override def message: String = s"Invalid transfer common view: $reason"
   }
 
   final case class UnknownDomain(domainId: DomainId, context: String)
@@ -450,6 +453,14 @@ object TransferProcessingSteps {
       )
       NoStakeholders(contract)
     }
+  }
+
+  final case class TemplateIdMismatch(
+      declaredTemplateId: LfTemplateId,
+      expectedTemplateId: LfTemplateId,
+  ) extends TransferProcessorError {
+    override def message: String =
+      s"Template ID mismatch for transfer. Declared=$declaredTemplateId, expected=$expectedTemplateId`"
   }
 
   final case class SubmittingPartyMustBeStakeholderIn(

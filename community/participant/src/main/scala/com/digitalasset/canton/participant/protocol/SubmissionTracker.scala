@@ -33,31 +33,25 @@ import scala.concurrent.ExecutionContext
   *
   * The purpose of this tracker is to detect replayed requests, and allow the participant to emit
   * a command completion only for genuine requests that it has submitted.
-  * A request R2 is considered a replay of a request R1 if they both contain the same transaction (root hash),
-  * and R2 has been sequenced after R1 (its requestId is later).
   *
-  * The protocol to use this tracker is:
+  * A request R1 is considered fresh iff
+  * it has the minimal requestId among all requests that have the same root hash,
+  * for which SubmissionData has been provided.
+  * In particular, for a given root hash there is at most one fresh request.
   *
-  * - At the beginning of Phase 3, the participant must first call the tracker's `register()` method for every incoming
-  *   confirmation request, in sequencing order. This returns a `Future`, which must be kept until the completion of the
-  *   request.
-  *
-  * - Further during processing of Phase 3, when further information about the request is obtained, the participant
-  *   must either:
-  *   - call `cancelRegistration()` when a request is deemed invalid or does not contain root views (and
-  *   therefore was not submitted by this participant), or
-  *   - call `provideSubmissionData()` with information about the submission.
-  *
-  * - During phase 7, when finalizing the request, the participant must use the result of the `Future` returned during
-  *   registration to determine whether the request requires a command completion.
-  *
-  * Calling the methods in a different order than described above will result in undefined behavior.
+  * The ScalaDocs of the individual methods prescribe when to call the methods.
+  * Calling the methods in a different order will result in undefined behavior.
   * Failure to call either `cancelRegistration()` or `provideSubmissionData()` after calling `register()` for a request
   * may result in a deadlock.
   */
 trait SubmissionTracker extends AutoCloseable {
 
   /** Register an ongoing transaction in the tracker.
+    * This method must be called for every request id and with monotonically increasing request ids, i.e.,
+    * in the synchronous part of Phase 3.
+    * The return value should be used to determine whether to emit a command completion in Phase 7.
+    * If the return value is `false`, the submitting participant of the underlying request should reject in Phase 3.
+    *
     * @return a `Future` that represents the conditions:
     *         * the transaction is fresh, i.e. it is not a replay;
     *         * the transaction was submitted by this participant;
@@ -68,7 +62,9 @@ trait SubmissionTracker extends AutoCloseable {
   ): FutureUnlessShutdown[Boolean]
 
   /** Cancel a previously registered submission and perform the necessary cleanup.
-    * In particular, the associated `Future` returned by `register()` will be completed with `false`.
+    * This method must be called for a request if and only if `provideSubmissionData` cannot be called.
+    *
+    * As a consequence, the associated `Future` returned by `register()` will be completed with `false`.
     */
   def cancelRegistration(rootHash: RootHash, requestId: RequestId)(implicit
       traceContext: TraceContext

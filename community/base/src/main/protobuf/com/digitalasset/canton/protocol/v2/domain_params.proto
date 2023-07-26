@@ -19,11 +19,11 @@ message StaticDomainParametersX {
 
 // individual per participant limits
 message ParticipantDomainLimits {
-  // TODO(#11255) implement per participant rate limits
+  // TODO(#14052) implement per participant rate limits
   uint32 max_rate = 1;
-  // TODO(#11255) implement per participant party limits
+  // TODO(#14052) implement per participant party limits
   uint32 max_num_parties = 2;
-  // TODO(#11255) implement per participant package limits
+  // TODO(#14052) implement per participant package limits
   uint32 max_num_packages = 3;
 }
 
@@ -39,15 +39,15 @@ message DynamicDomainParametersX {
   // topology related validation parameters
   // permissioned domain: if true, only participants which have been explicitly
   // whitelisted are allowed on the domain
-  // TODO(#11255) re-enable this feature and turn on the PermissionedDomainIntegrationTest
+  // TODO(#14053) re-enable this feature and turn on the PermissionedDomainIntegrationTest
   bool permissioned_domain = 9;
   // required packages are the default packages that must be supported by all participants on a domain
-  // TODO(#11255) enable this feature (necessary for canton network such that an SVC can't do a rug-pull)
+  // TODO(#14054) enable this feature (necessary for canton network such that an SVC can't do a rug-pull)
   repeated string required_packages = 11;
   // if true, then only the required packages are supported on the given domain
-  // TODO(#11255) enable this feature (was requested by Curtis)
+  // TODO(#14055) enable this feature (was requested by Curtis)
   bool only_required_packages_permitted = 12;
   ParticipantDomainLimits default_participant_limits = 13;
-  // TODO(#11255) implement party hosting limits
+  // TODO(#14050) implement party hosting limits
   uint32 default_max_hosting_participants_per_party = 14;
 }

@@ -43,7 +43,8 @@ class GrpcTopologyManagerWriteServiceX(
     with NamedLogging {
 
   override def authorize(request: v1.AuthorizeRequest): Future[v1.AuthorizeResponse] = {
-    implicit val traceContext: TraceContext = TraceContext.todo
+    implicit val traceContext: TraceContext =
+      TraceContext.todo // TODO(#14048) replace with TraceContextGrpc.fromGrpcContext
 
     val result = request.`type` match {
       case Type.Empty =>
@@ -65,7 +66,7 @@ class GrpcTopologyManagerWriteServiceX(
               )
               .leftMap(ProtoDeserializationFailure.Wrap(_))
           signedTopoTx <-
-            // TODO(#11255) understand when and why force needs to come in effect
+            // TODO(#14067) understand when and why force needs to come in effect
             manager
               .accept(
                 txHash,
@@ -114,7 +115,7 @@ class GrpcTopologyManagerWriteServiceX(
             case Mapping.TrafficControlState(mapping) =>
               TrafficControlStateX.fromProtoV2(mapping)
             case _ =>
-              // TODO(#11255): match missing cases
+              // TODO(#14048): match missing cases
               ???
           }
         } yield {
@@ -153,7 +154,7 @@ class GrpcTopologyManagerWriteServiceX(
           .traverse(SignedTopologyTransactionX.fromProtoV2)
           .leftMap(ProtoDeserializationFailure.Wrap(_): CantonError)
       )
-      // TODO(#11255) let the caller decide whether to expect full authorization or not?
+      // TODO(#12390) let the caller decide whether to expect full authorization or not?
       _ <- manager
         .add(signedTxs, force = request.forceChange, expectFullAuthorization = false)
         .leftWiden[CantonError]

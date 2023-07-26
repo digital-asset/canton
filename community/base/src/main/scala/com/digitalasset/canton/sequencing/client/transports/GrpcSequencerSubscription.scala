@@ -79,7 +79,7 @@ class GrpcSequencerSubscription[E, R: HasProtoTraceContext] private[transports] 
     Promise.successful(Outcome(Right(())))
   )
 
-  runOnShutdown(new RunOnShutdown {
+  runOnShutdown_(new RunOnShutdown {
     override def name: String = "cancel-current-await-in-onNext"
     override def done: Boolean = currentAwaitOnNext.get.isCompleted
     override def run(): Unit = currentAwaitOnNext.get.trySuccess(AbortedDueToShutdown).discard

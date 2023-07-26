@@ -394,7 +394,7 @@ object EncryptionPublicKey
     )
   )
 
-  override protected def name: String = "encryption public key"
+  override def name: String = "encryption public key"
 
   private[this] def apply(
       id: Fingerprint,
@@ -464,7 +464,7 @@ object EncryptionPrivateKey extends HasVersionedMessageCompanion[EncryptionPriva
     )
   )
 
-  override protected def name: String = "encryption private key"
+  override def name: String = "encryption private key"
 
   private[this] def apply(
       id: Fingerprint,

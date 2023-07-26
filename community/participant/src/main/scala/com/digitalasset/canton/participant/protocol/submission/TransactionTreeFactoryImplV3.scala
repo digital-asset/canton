@@ -39,7 +39,6 @@ class TransactionTreeFactoryImplV3(
     domainId: DomainId,
     protocolVersion: ProtocolVersion,
     contractSerializer: (LfContractInst, AgreementText) => SerializableRawContractInstance,
-    packageInfoService: PackageInfoService,
     cryptoOps: HashOps & HmacOps,
     uniqueContractKeys: Boolean,
     override protected val loggerFactory: NamedLoggerFactory,
@@ -49,7 +48,6 @@ class TransactionTreeFactoryImplV3(
       domainId,
       protocolVersion,
       contractSerializer,
-      packageInfoService,
       cryptoOps,
       loggerFactory,
     ) {

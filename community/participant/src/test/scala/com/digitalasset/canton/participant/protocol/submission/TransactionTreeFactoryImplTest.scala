@@ -22,7 +22,7 @@ import org.scalatest.wordspec.AsyncWordSpec
 import scala.concurrent.Future
 
 @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
+final class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
 
   val factory: ExampleTransactionFactory = new ExampleTransactionFactory()()
 
@@ -46,7 +46,6 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
       factory.domainId,
       version,
       factory.cryptoOps,
-      ExampleTransactionFactory.defaultPackageInfoService,
       uniqueContractKeys = true,
       loggerFactory,
     )
@@ -75,17 +74,17 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
     )
   }
 
-  def transactionTreeFactory(version: ProtocolVersion): Unit = {
+  "TransactionTreeFactoryImpl@testedVersion" should {
     // Shadow default factory with the protocol version explicitly set
     val factory: ExampleTransactionFactory = new ExampleTransactionFactory(
-      versionOverride = Some(version)
+      versionOverride = Some(testedProtocolVersion)
     )()
 
     "A transaction tree factory" when {
 
       "everything is ok" must {
         forEvery(factory.standardHappyCases) { example =>
-          lazy val treeFactory = createTransactionTreeFactory(version)
+          lazy val treeFactory = createTransactionTreeFactory(testedProtocolVersion)
 
           s"create the correct views for: $example" in {
             createTransactionTree(
@@ -100,7 +99,7 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
 
       "a contract lookup fails" must {
         lazy val errorMessage = "Test error message"
-        lazy val treeFactory = createTransactionTreeFactory(version)
+        lazy val treeFactory = createTransactionTreeFactory(testedProtocolVersion)
 
         lazy val example = factory.SingleExercise(
           factory.deriveNodeSeed(0)
@@ -121,7 +120,7 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
       }
 
       "empty actAs set is empty" must {
-        lazy val treeFactory = createTransactionTreeFactory(version)
+        lazy val treeFactory = createTransactionTreeFactory(testedProtocolVersion)
 
         "reject the input" in {
           val example = factory.standardHappyCases.headOption.value
@@ -139,10 +138,9 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
       }
 
       "checking package vettings" must {
-        lazy val treeFactory = createTransactionTreeFactory(version)
+        lazy val treeFactory = createTransactionTreeFactory(testedProtocolVersion)
         lazy val banana = PackageId.assertFromString("banana")
         "fail if the main package is not vetted" in {
-
           val example = factory.standardHappyCases(2)
           createTransactionTree(
             treeFactory,
@@ -194,17 +192,10 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
               ),
             ).value
           } yield inside(err) { case Left(UnknownPackageError(unknownTo)) =>
-            forEvery(unknownTo) {
-              _.description shouldBe "package missing on local participant"
-            }
             unknownTo should not be empty
           }
         }
       }
     }
-  }
-
-  "TransactionTreeFactoryImpl@testedVersion" should {
-    behave like transactionTreeFactory(testedProtocolVersion)
   }
 }

@@ -32,8 +32,9 @@ import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.AkkaUtil.CombinedKillSwitch
+import com.digitalasset.canton.util.AkkaUtil.syntax.*
+import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{AkkaUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SequencerCounter, config}
 
@@ -387,24 +388,21 @@ class SequencerReader(
         traceContext: TraceContext
     ): Sequencer.EventSource = {
       val unvalidatedEventsSrc = unvalidatedEventsSourceFromCheckpoint(initialReadState)
-      val validatedEventSrc = AkkaUtil.statefulMapAsync(
-        unvalidatedEventsSrc,
-        initialReadState.latestTopologyClientRecipientTimestamp,
+      val validatedEventSrc = unvalidatedEventsSrc.statefulMapAsync(
+        initialReadState.latestTopologyClientRecipientTimestamp
       )(validateEvent)
       val eventsSource = validatedEventSrc.dropWhile(_.event.counter < startAt)
 
-      AkkaUtil
+      eventsSource
+        .viaMat(recordCheckpointFlow)(Keep.right)
+        .viaMat(KillSwitches.single) { case ((checkpointKillSwitch, checkpointDone), killSwitch) =>
+          (new CombinedKillSwitch(checkpointKillSwitch, killSwitch), checkpointDone)
+        }
         .mapAsyncAndDrainUS(
-          eventsSource
-            .viaMat(recordCheckpointFlow)(Keep.right)
-            .viaMat(KillSwitches.single) {
-              case ((checkpointKillSwitch, checkpointDone), killSwitch) =>
-                (new CombinedKillSwitch(checkpointKillSwitch, killSwitch), checkpointDone)
-            },
           // We technically do not need to process everything sequentially here.
           // Neither do we have evidence that parallel processing helps, as a single sequencer reader
           // will typically serve many subscriptions in parallel.
-          parallelism = 1,
+          parallelism = 1
         )(signValidatedEvent(_))
     }
 

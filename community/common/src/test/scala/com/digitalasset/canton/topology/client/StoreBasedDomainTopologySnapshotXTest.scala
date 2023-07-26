@@ -10,7 +10,7 @@ import scala.concurrent.Future
 
 class StoreBasedTopologySnapshotXTest extends AsyncWordSpec with BaseTest with HasExecutionContext {
   "implement me" in {
-    // TODO(#11255) implement me
+    // TODO(#12942) implement me
     Future.successful(succeed)
   }
 }

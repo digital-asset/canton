@@ -47,7 +47,6 @@ abstract class TransactionTreeFactoryImpl(
     domainId: DomainId,
     protocolVersion: ProtocolVersion,
     contractSerializer: (LfContractInst, AgreementText) => SerializableRawContractInstance,
-    packageInfoService: PackageInfoService,
     cryptoOps: HashOps & HmacOps,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -155,15 +154,13 @@ abstract class TransactionTreeFactoryImpl(
       )
       rootViewDecompositions <- EitherT.liftF(rootViewDecompositionsF)
 
-      checker = new DomainUsabilityCheckerVetting(
-        domainId = domainId,
-        snapshot = topologySnapshot,
-        requiredPackagesByParty = requiredPackagesByParty(rootViewDecompositions),
-        packageInfoService = packageInfoService,
-        localParticipantId = participantId,
-      )
-
-      _ <- checker.isUsable.leftMap(_.transformInto[UnknownPackageError])
+      _ <- UsableDomain
+        .resolveParticipantsAndCheckPackagesVetted(
+          domainId = domainId,
+          snapshot = topologySnapshot,
+          requiredPackagesByParty = requiredPackagesByParty(rootViewDecompositions),
+        )
+        .leftMap(_.transformInto[UnknownPackageError])
 
       rootViews <- createRootViews(rootViewDecompositions, state, contractOfId)
         .map(rootViews =>
@@ -361,7 +358,7 @@ abstract class TransactionTreeFactoryImpl(
             case None =>
               // if we ever missed a contract during prefetching due to mistake, then we can
               // fallback to the original loader
-              logger.warn(s"Prefetch missed ${cid}")
+              logger.warn(s"Prefetch missed $cid")
               contractOfId(cid)
           }
         }
@@ -570,7 +567,6 @@ object TransactionTreeFactoryImpl {
       domainId: DomainId,
       protocolVersion: ProtocolVersion,
       cryptoOps: HashOps & HmacOps,
-      packageService: PackageInfoService,
       uniqueContractKeys: Boolean,
       loggerFactory: NamedLoggerFactory,
   )(implicit ex: ExecutionContext): TransactionTreeFactoryImpl =
@@ -579,7 +575,6 @@ object TransactionTreeFactoryImpl {
       domainId,
       protocolVersion,
       contractSerializer,
-      packageService,
       cryptoOps,
       uniqueContractKeys,
       loggerFactory,

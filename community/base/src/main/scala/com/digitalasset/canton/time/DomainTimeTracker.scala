@@ -210,7 +210,6 @@ class DomainTimeTracker(
     withLock {
       def updateOne(event: OrdinarySequencedEvent[Envelope[_]]): Unit = {
         updateTimestampRef(event.timestamp)
-
         TimeProof.fromEventO(event).foreach { proof =>
           val oldTimeProof = timeProofRef.getAndSet(LatestAndNext(received(proof).some, None))
           oldTimeProof.next.foreach(_.trySuccess(UnlessShutdown.Outcome(proof)))

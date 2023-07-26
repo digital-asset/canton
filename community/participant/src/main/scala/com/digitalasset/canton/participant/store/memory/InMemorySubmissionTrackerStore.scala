@@ -51,19 +51,29 @@ class InMemorySubmissionTrackerStore(
 
   override protected[canton] def doPrune(
       beforeAndIncluding: CantonTimestamp
-  )(implicit traceContext: TraceContext): Future[Unit] = {
+  )(implicit traceContext: TraceContext): Future[Unit] =
     Future.successful {
-      freshSubmittedTransactions.filterInPlace { case (_txId, (_requestId, maxSequencingTime)) =>
-        maxSequencingTime > beforeAndIncluding
+      freshSubmittedTransactions.filterInPlace {
+        case (_rootHash, (_requestId, maxSequencingTime)) =>
+          maxSequencingTime > beforeAndIncluding
       }
     }
-  }
 
-  override def size()(implicit
+  override def size(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Int] =
     FutureUnlessShutdown.pure(freshSubmittedTransactions.size)
 
   @VisibleForTesting
   def clear(): Unit = freshSubmittedTransactions.clear()
+
+  override def deleteSince(
+      including: CantonTimestamp
+  )(implicit traceContext: TraceContext): Future[Unit] =
+    Future.successful {
+      freshSubmittedTransactions.filterInPlace {
+        case (_rootHash, (requestId, _maxSequencingTime)) =>
+          requestId.unwrap < including
+      }
+    }
 }

@@ -126,7 +126,7 @@ object SerializableContract
     ),
   )
 
-  override protected def name: String = "serializable contract"
+  override def name: String = "serializable contract"
 
   def apply(
       contractId: LfContractId,

@@ -202,5 +202,5 @@ object InformeeMessage extends HasProtocolVersionedWithContextCompanion[Informee
       case _ => None
     }
 
-  override protected def name: String = "InformeeMessage"
+  override def name: String = "InformeeMessage"
 }

@@ -13,7 +13,7 @@ final class MappedCacheSpec
     with Matchers
     with ConcurrentCacheBehaviorSpecBase
     with ConcurrentCacheCachingSpecBase {
-  override protected def name: String = "mapped cache"
+  override def name: String = "mapped cache"
 
   override protected def newCache(): ConcurrentCache[Integer, String] =
     new MapBackedCacheForTesting(new ConcurrentHashMap)

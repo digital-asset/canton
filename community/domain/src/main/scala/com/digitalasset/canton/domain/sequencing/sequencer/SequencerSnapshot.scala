@@ -91,7 +91,7 @@ object SequencerSnapshot extends HasProtocolVersionedCompanion[SequencerSnapshot
     ),
   )
 
-  override protected def name: String = "sequencer snapshot"
+  override def name: String = "sequencer snapshot"
 
   def apply(
       lastTs: CantonTimestamp,

@@ -8,6 +8,7 @@ import akka.stream.testkit.StreamSpec
 import akka.stream.testkit.scaladsl.StreamTestKit.assertAllStagesStopped
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.util.AkkaUtil.syntax.*
 import com.digitalasset.canton.{BaseTest, DiscardOps}
 import org.scalactic.source.Position
 
@@ -35,7 +36,7 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
         val currentParallelism = new AtomicInteger(0)
         val maxParallelism = new AtomicInteger(0)
 
-        val source = AkkaUtil.mapAsyncUS(Source(1 to 10), parallelism = 1) { elem =>
+        val source = Source(1 to 10).mapAsyncUS(parallelism = 1) { elem =>
           FutureUnlessShutdown(Future {
             val nextCurrent = currentParallelism.addAndGet(1)
             maxParallelism.getAndUpdate(_ max nextCurrent)
@@ -55,7 +56,7 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
 
       "emit only AbortedDueToShutdown after the first" in assertAllStagesStopped {
         val shutdownAt = 5
-        val source = AkkaUtil.mapAsyncUS(Source(1 to 10), parallelism = 1)(abortOn(shutdownAt))
+        val source = Source(1 to 10).mapAsyncUS(parallelism = 1)(abortOn(shutdownAt))
         source.runWith(Sink.seq).futureValue(defaultPatience, Position.here) should
           ===(outcomes(10, shutdownAt))
       }
@@ -63,7 +64,7 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
       "stop evaluation upon the first AbortedDueToShutdown" in assertAllStagesStopped {
         val evaluationCount = new AtomicInteger(0)
         val shutdownAt = 5
-        val source = AkkaUtil.mapAsyncUS(Source(1 to 10), parallelism = 1) { elem =>
+        val source = Source(1 to 10).mapAsyncUS(parallelism = 1) { elem =>
           evaluationCount.addAndGet(1).discard[Int]
           abortOn(shutdownAt)(elem)
         }
@@ -79,7 +80,7 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
           elem
         }
         val shutdownAt = 6
-        val mapped = AkkaUtil.mapAsyncUS(source, parallelism = 1)(abortOn(shutdownAt))
+        val mapped = source.mapAsyncUS(parallelism = 1)(abortOn(shutdownAt))
         mapped.runWith(Sink.seq).futureValue(defaultPatience, Position.here) should
           ===(outcomes(10, shutdownAt))
         evaluationCount.get shouldBe 10
@@ -96,7 +97,7 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
         val currentParallelism = new AtomicInteger(0)
         val maxParallelism = new AtomicInteger(0)
 
-        val source = AkkaUtil.mapAsyncUS(Source(1 to 10 * parallelism), parallelism) { elem =>
+        val source = Source(1 to 10 * parallelism).mapAsyncUS(parallelism) { elem =>
           FutureUnlessShutdown(Future {
             val nextCurrent = currentParallelism.addAndGet(1)
             maxParallelism.getAndUpdate(_ max nextCurrent)
@@ -122,7 +123,7 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
 
       "emit only AbortedDueToShutdown after the first" in assertAllStagesStopped {
         val shutdownAt = 4
-        val source = AkkaUtil.mapAsyncUS(Source(1 to 10), parallelism = 3) { elem =>
+        val source = Source(1 to 10).mapAsyncUS(parallelism = 3) { elem =>
           val outcome =
             if (elem == shutdownAt) UnlessShutdown.AbortedDueToShutdown
             else UnlessShutdown.Outcome(elem)
@@ -141,7 +142,7 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
           elem
         }
         val shutdownAt = 6
-        val mapped = AkkaUtil.mapAsyncUS(source, parallelism = 10)(abortOn(shutdownAt))
+        val mapped = source.mapAsyncUS(parallelism = 10)(abortOn(shutdownAt))
         mapped.runWith(Sink.seq).futureValue(defaultPatience, Position.here) should
           ===(outcomes(10, shutdownAt))
         evaluationCount.get shouldBe 10
@@ -152,8 +153,7 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
   "mapAsyncAndDrainUS" should {
     "stop upon the first AbortedDueToShutdown" in assertAllStagesStopped {
       val shutdownAt = 3
-      val source =
-        AkkaUtil.mapAsyncAndDrainUS(Source(1 to 10), parallelism = 3)(abortOn(shutdownAt))
+      val source = Source(1 to 10).mapAsyncAndDrainUS(parallelism = 3)(abortOn(shutdownAt))
       source.runWith(Sink.seq).futureValue(defaultPatience, Position.here) should
         ===(1 until shutdownAt)
     }
@@ -165,7 +165,7 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
         elem
       }
       val shutdownAt = 5
-      val mapped = AkkaUtil.mapAsyncAndDrainUS(source, parallelism = 1)(abortOn(shutdownAt))
+      val mapped = source.mapAsyncAndDrainUS(parallelism = 1)(abortOn(shutdownAt))
       mapped.runWith(Sink.seq).futureValue(defaultPatience, Position.here) should
         ===(1 until shutdownAt)
       evaluationCount.get shouldBe 10

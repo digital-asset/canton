@@ -189,7 +189,66 @@ class GenTransactionTreeTest
               allLightWeightForInf
             ) shouldBe (topLevelForInf, Seq.empty)
         }
+      }
 
+      "correctly report missing subviews" in {
+        val allLightTrees =
+          example.transactionTree.allLightTransactionViewTrees(testedProtocolVersion)
+        val removedLightTreeO = allLightTrees.find(_.viewPosition.position.size > 1)
+        val inputLightTrees = allLightTrees.filterNot(removedLightTreeO.contains)
+        val badLightTrees = inputLightTrees.filter(tree =>
+          ViewPosition.isDescendant(
+            removedLightTreeO.fold(ViewPosition.root)(_.viewPosition),
+            tree.viewPosition,
+          )
+        )
+
+        val allFullTrees = example.transactionTree.allTransactionViewTrees
+        val expectedFullTrees = allFullTrees.filter(tree =>
+          !ViewPosition.isDescendant(
+            removedLightTreeO.fold(ViewPosition.root)(_.viewPosition),
+            tree.viewPosition,
+          )
+        )
+
+        LightTransactionViewTree
+          .toFullViewTrees(PIso.id, testedProtocolVersion, factory.cryptoOps, topLevelOnly = false)(
+            inputLightTrees
+          ) shouldBe (expectedFullTrees, badLightTrees)
+      }
+
+      "correctly process duplicate views" in {
+        val allLightTrees =
+          example.transactionTree.allLightTransactionViewTrees(testedProtocolVersion)
+        val allFullTrees = example.transactionTree.allTransactionViewTrees
+
+        val inputLightTrees1 = allLightTrees.flatMap(tree => Seq(tree, tree))
+        val expectedFullTrees1 = allFullTrees.flatMap(tree => Seq(tree, tree))
+
+        LightTransactionViewTree
+          .toFullViewTrees(PIso.id, testedProtocolVersion, factory.cryptoOps, topLevelOnly = false)(
+            inputLightTrees1
+          ) shouldBe (expectedFullTrees1, Seq.empty)
+
+        val inputLightTrees2 = allLightTrees ++ allLightTrees
+        val expectedFullTrees2 = allFullTrees ++ allFullTrees
+
+        LightTransactionViewTree
+          .toFullViewTrees(PIso.id, testedProtocolVersion, factory.cryptoOps, topLevelOnly = false)(
+            inputLightTrees2
+          ) shouldBe (expectedFullTrees2, Seq.empty)
+      }
+
+      "correctly process views in an unusual order" in {
+        val allLightTrees =
+          example.transactionTree.allLightTransactionViewTrees(testedProtocolVersion)
+        val inputLightTrees = allLightTrees.sortBy(_.viewPosition.position.size)
+        val allFullTrees = example.transactionTree.allTransactionViewTrees
+        val expectedFullTrees = allFullTrees.sortBy(_.viewPosition.position.size)
+        LightTransactionViewTree
+          .toFullViewTrees(PIso.id, testedProtocolVersion, factory.cryptoOps, topLevelOnly = false)(
+            inputLightTrees
+          ) shouldBe (expectedFullTrees, Seq.empty)
       }
     }
   }

@@ -43,6 +43,9 @@ final case class GrpcHealthServerConfig(
       loggerFactory,
       grpcMetrics,
     )
+
+  def toRemoteConfig: ClientConfig =
+    ClientConfig(address, port, keepAliveClient = keepAliveServer.map(_.clientConfigFor))
 }
 
 /** Monitoring configuration for a canton node.

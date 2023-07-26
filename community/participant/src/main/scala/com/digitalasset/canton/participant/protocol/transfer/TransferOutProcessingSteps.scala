@@ -331,11 +331,12 @@ class TransferOutProcessingSteps(
         Left(TransferOutProcessorError.AbortedDueToShutdownOut(txOutRequest.contractId))
       )
       contractIdS = Set(contractId)
-      contractsCheck = ActivenessCheck(
+      contractsCheck = ActivenessCheck.tryCreate(
         checkFresh = Set.empty,
         checkFree = Set.empty,
         checkActive = contractIdS,
         lock = contractIdS,
+        needPriorState = contractIdS,
       )
       activenessSet = ActivenessSet(
         contracts = contractsCheck,
@@ -431,6 +432,7 @@ class TransferOutProcessingSteps(
       _ <- TransferOutValidation(
         fullTree,
         storedContract.contract.metadata.stakeholders,
+        storedContract.contract.rawContractInstance.contractInstance.unversioned.template,
         sourceDomainProtocolVersion,
         sourceSnapshot.ipsSnapshot,
         targetTopology,
@@ -510,6 +512,8 @@ class TransferOutProcessingSteps(
         requestId,
         transferringParticipant,
         activenessResult,
+        storedContract.contractId,
+        fullTree.transferCounter,
         confirmingStakeholders.toSet,
         fullTree.viewHash,
         fullTree.tree.rootHash,
@@ -726,17 +730,27 @@ class TransferOutProcessingSteps(
       requestId: RequestId,
       transferringParticipant: Boolean,
       activenessResult: ActivenessResult,
+      contractId: LfContractId,
+      declaredTransferCounter: TransferCounterO,
       confirmingStakeholders: Set[LfPartyId],
       viewHash: ViewHash,
       rootHash: RootHash,
-  ): Option[MediatorResponse] =
+  ): Option[MediatorResponse] = {
+    val expectedPriorTransferCounter = Map[LfContractId, Option[ActiveContractStore.Status]](
+      contractId -> Some(ActiveContractStore.Active(declaredTransferCounter.map(_ - 1)))
+    )
+
+    val successful =
+      declaredTransferCounter.forall(_ > TransferCounter.Genesis) &&
+        activenessResult.isSuccessful &&
+        activenessResult.contracts.priorStates == expectedPriorTransferCounter
     // send a response only if the participant is a transferring participant or the activeness check has failed
-    if (transferringParticipant || !activenessResult.isSuccessful) {
+    if (transferringParticipant || !successful) {
       val adminPartySet =
         if (transferringParticipant) Set(participantId.adminParty.toLf) else Set.empty[LfPartyId]
       val confirmingParties = confirmingStakeholders union adminPartySet
       val localVerdict =
-        if (activenessResult.isSuccessful) LocalApprove(sourceDomainProtocolVersion.v)
+        if (successful) LocalApprove(sourceDomainProtocolVersion.v)
         else
           LocalReject.TransferOutRejects.ActivenessCheckFailed.Reject(s"$activenessResult")(
             LocalVerdict.protocolVersionRepresentativeFor(sourceDomainProtocolVersion.v)
@@ -756,7 +770,7 @@ class TransferOutProcessingSteps(
       )
       Some(response)
     } else None
-
+  }
 }
 
 object TransferOutProcessingSteps {

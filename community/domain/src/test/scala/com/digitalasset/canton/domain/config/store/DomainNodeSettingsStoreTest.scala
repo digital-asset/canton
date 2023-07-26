@@ -16,9 +16,7 @@ trait DomainNodeSettingsStoreTest {
 
   protected def makeConfig(uniqueKeys: Boolean = false) =
     StoredDomainNodeSettings(
-      defaultStaticDomainParameters.copy(uniqueContractKeys = uniqueKeys)(
-        defaultStaticDomainParameters.representativeProtocolVersion
-      )
+      defaultStaticDomainParameters.update(uniqueContractKeys = uniqueKeys)
     )
 
   protected def domainNodeSettingsStoreTest(

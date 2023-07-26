@@ -8,6 +8,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.{CryptoPrivateStoreError, CryptoPublicStoreError}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.TopologyManagementErrorGroup.TopologyManagerErrorGroup
 import com.digitalasset.canton.error.{Alarm, AlarmErrorCode, CantonError}
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -38,14 +39,14 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
     final case class ImplementMe(msg: String = "")(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          cause = "TODO(#11255) implement me" + (if (msg.nonEmpty) s": $msg" else "")
+          cause = "TODO(#14048) implement me" + (if (msg.nonEmpty) s": $msg" else "")
         )
         with TopologyManagerError
 
     final case class Other(s: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          cause = s"TODO(#11255) other failure: ${s}"
+          cause = s"TODO(#14048) other failure: ${s}"
         )
         with TopologyManagerError
 
@@ -186,6 +187,12 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = "The given topology transaction already exists."
+        )
+        with TopologyManagerError
+    final case class ExistsAt(ts: CantonTimestamp)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause = s"The given topology transaction already exists at ${ts}."
         )
         with TopologyManagerError
   }

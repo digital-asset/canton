@@ -26,23 +26,23 @@ class LockableStatesTest extends AsyncWordSpec with BaseTest with HasExecutorSer
 
   implicit val prettyString: Pretty[String] = PrettyUtil.prettyOfString(Predef.identity)
 
-  val toc0 = TimeOfChange(RequestCounter(0), CantonTimestamp.Epoch)
-  val toc1 = TimeOfChange(RequestCounter(1), CantonTimestamp.ofEpochSecond(1))
-  val toc2 = TimeOfChange(RequestCounter(2), CantonTimestamp.ofEpochSecond(2))
-  val toc3 = TimeOfChange(RequestCounter(3), CantonTimestamp.ofEpochSecond(3))
-  val tocEarly = TimeOfChange(RequestCounter(0), CantonTimestamp.ofEpochSecond(-1))
+  private val toc0 = TimeOfChange(RequestCounter(0), CantonTimestamp.Epoch)
+  private val toc1 = TimeOfChange(RequestCounter(1), CantonTimestamp.ofEpochSecond(1))
+  private val toc2 = TimeOfChange(RequestCounter(2), CantonTimestamp.ofEpochSecond(2))
+  private val toc3 = TimeOfChange(RequestCounter(3), CantonTimestamp.ofEpochSecond(3))
+  private val tocEarly = TimeOfChange(RequestCounter(0), CantonTimestamp.ofEpochSecond(-1))
 
-  val freshId = "FRESH"
-  val fresh2Id = "FRESH2"
-  val fresh3Id = "FRESH3"
-  val neitherFreeNorActiveId = "NEITHER_FREE_NOR_ACTIVE"
-  val freeId = "FREE"
-  val free2Id = "FREE2"
-  val activeId = "ACTIVE"
-  val evictableActiveId = "EVICTABLE_ACTIVE"
-  val evictableActive2Id = "EVICTABLE_ACTIVE2"
-  val freeNotEvictableId = "FREE_NOT_EVICTABLE"
-  lazy val preload = Map(
+  private val freshId = "FRESH"
+  private val fresh2Id = "FRESH2"
+  private val fresh3Id = "FRESH3"
+  private val neitherFreeNorActiveId = "NEITHER_FREE_NOR_ACTIVE"
+  private val freeId = "FREE"
+  private val free2Id = "FREE2"
+  private val activeId = "ACTIVE"
+  private val evictableActiveId = "EVICTABLE_ACTIVE"
+  private val evictableActive2Id = "EVICTABLE_ACTIVE2"
+  private val freeNotEvictableId = "FREE_NOT_EVICTABLE"
+  private lazy val preload = Map(
     neitherFreeNorActiveId -> StateChange(Status.neitherFreeNorActive, toc0),
     freeId -> StateChange(Status.free, toc0),
     free2Id -> StateChange(Status(-1), toc1),
@@ -52,7 +52,7 @@ class LockableStatesTest extends AsyncWordSpec with BaseTest with HasExecutorSer
     freeNotEvictableId -> StateChange(Status.freeNotEvictable, toc1),
   )
 
-  def mkSut(
+  private def mkSut(
       states: Map[StateId, StateChange[Status]] = Map.empty
   ): LockableStates[StateId, Status] =
     LockableStates.empty(
@@ -62,7 +62,7 @@ class LockableStatesTest extends AsyncWordSpec with BaseTest with HasExecutorSer
       executionContext = executorService,
     )
 
-  def mkState(
+  private def mkState(
       state: Option[StateChange[Status]] = None,
       activenessChecks: Int = 0,
       locks: Int = 0,
@@ -152,7 +152,7 @@ class LockableStatesTest extends AsyncWordSpec with BaseTest with HasExecutorSer
       for {
         (result, locked) <- pendingAndCheck(sut, RequestCounter(0), ActivenessCheck.empty)
       } yield {
-        result shouldBe ActivenessCheckResult.success
+        result shouldBe mkActivenessCheckResult()
         locked shouldBe empty
       }
     }
@@ -269,7 +269,7 @@ class LockableStatesTest extends AsyncWordSpec with BaseTest with HasExecutorSer
         (result, locked) <- pendingAndCheck(sut, RequestCounter(2), check2)
       } yield {
         locked.toSet shouldBe lock
-        result shouldBe ActivenessCheckResult.success
+        result shouldBe mkActivenessCheckResult()
         forEvery(lock) { id =>
           sut.getInternalState(id) should contain(mkState(preload.get(id), locks = 1))
         }
@@ -302,6 +302,50 @@ class LockableStatesTest extends AsyncWordSpec with BaseTest with HasExecutorSer
         sut.checkAndLock(handle2),
         _.errorMessage should include("An internal error has occurred."),
       )
+    }
+
+    "return the requested prior states unless they are locked" in {
+      val sut = mkSut(preload)
+      val check1 = mkActivenessCheck(
+        fresh = Set(freshId),
+        free = Set(freeId),
+        active = Set(activeId, evictableActiveId),
+        lock = Set(freshId, free2Id, activeId),
+        prior = Set(freshId, freeId, activeId, evictableActiveId, free2Id),
+      )
+      val check2 = mkActivenessCheck(
+        fresh = Set(freshId, fresh2Id),
+        free = Set(freeId),
+        active = Set(activeId, evictableActiveId),
+        lock = Set(free2Id),
+        prior = Set(freshId, fresh2Id, freeId, free2Id, activeId, evictableActiveId),
+      )
+
+      for {
+        (result1, locked1) <- pendingAndCheck(sut, RequestCounter(2), check1)
+        (result2, locked2) <- pendingAndCheck(sut, RequestCounter(3), check2)
+      } yield {
+        locked1.toSet shouldBe Set(freshId, free2Id, activeId)
+        result1 shouldBe mkActivenessCheckResult(prior =
+          Map(
+            freshId -> None,
+            freeId -> Some(Status.free),
+            activeId -> Some(Status.active),
+            evictableActiveId -> Some(Status.evictableActive),
+            free2Id -> Some(Status(-1)),
+          )
+        )
+        locked2.toSet shouldBe Set(free2Id)
+        result2 shouldBe mkActivenessCheckResult(
+          locked = Set(freshId, activeId, free2Id),
+          prior = Map(
+            fresh2Id -> None,
+            freeId -> Some(Status.free),
+            evictableActiveId -> Some(Status.evictableActive),
+          ),
+        )
+      }
+
     }
   }
 

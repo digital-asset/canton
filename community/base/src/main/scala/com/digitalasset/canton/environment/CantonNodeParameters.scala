@@ -29,6 +29,8 @@ object CantonNodeParameters {
     def cachingConfigs: CachingConfigs
     def nonStandardConfig: Boolean
     def dbMigrateAndStart: Boolean
+    def skipTopologyManagerSignatureValidation: Boolean
+
   }
   object General {
     final case class Impl(
@@ -43,6 +45,7 @@ object CantonNodeParameters {
         cachingConfigs: CachingConfigs,
         nonStandardConfig: Boolean,
         dbMigrateAndStart: Boolean,
+        skipTopologyManagerSignatureValidation: Boolean,
     ) extends CantonNodeParameters.General
   }
   trait Protocol {
@@ -51,6 +54,7 @@ object CantonNodeParameters {
 
     /** The initial protocol version before connected to any domain, e.g., when creating the initial topology transactions. */
     def initialProtocolVersion: ProtocolVersion
+
   }
   object Protocol {
     final case class Impl(
@@ -77,9 +81,13 @@ trait HasGeneralCantonNodeParameters extends CantonNodeParameters.General {
   override def cachingConfigs: CachingConfigs = general.cachingConfigs
   override def nonStandardConfig: Boolean = general.nonStandardConfig
   override def dbMigrateAndStart: Boolean = general.dbMigrateAndStart
+  override def skipTopologyManagerSignatureValidation: Boolean =
+    general.skipTopologyManagerSignatureValidation
+
 }
 
 trait HasProtocolCantonNodeParameters extends CantonNodeParameters.Protocol {
+
   protected def protocol: CantonNodeParameters.Protocol
 
   def devVersionSupport: Boolean = protocol.devVersionSupport

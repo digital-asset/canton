@@ -28,9 +28,9 @@ import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.store.TopologyStateForInitializationService
-import com.digitalasset.canton.topology.{DomainId, DomainMember, Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.trace.Tracer
 
@@ -67,6 +67,7 @@ trait SequencerRuntimeFactory {
       futureSupervisor: FutureSupervisor,
       topologyStateForInitializationService: Option[TopologyStateForInitializationService],
       rateLimitManager: Option[SequencerRateLimitManager],
+      topologyManagerStatusO: Option[TopologyManagerStatus],
       loggerFactory: NamedLoggerFactory,
       logger: TracedLogger,
   )(implicit
@@ -102,6 +103,7 @@ object SequencerRuntimeFactory {
         futureSupervisor: FutureSupervisor,
         topologyStateForInitializationService: Option[TopologyStateForInitializationService],
         rateLimitManager: Option[SequencerRateLimitManager],
+        topologyManagerStatusO: Option[TopologyManagerStatus],
         loggerFactory: NamedLoggerFactory,
         logger: TracedLogger,
     )(implicit
@@ -157,6 +159,7 @@ object SequencerRuntimeFactory {
           domainId,
           syncCrypto,
           topologyClient,
+          topologyManagerStatusO,
           storage,
           clock,
           auditLogger,

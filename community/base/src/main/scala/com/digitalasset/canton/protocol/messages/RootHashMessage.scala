@@ -162,7 +162,7 @@ object RootHashMessage
   ): Option[RootHashMessage[Payload]] =
     message.traverse(toKind(_))
 
-  override protected def name: String = "RootHashMessage"
+  override def name: String = "RootHashMessage"
 }
 
 /** Payloads of [[RootHashMessage]] */

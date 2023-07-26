@@ -23,10 +23,10 @@ class GrpcIdentityInitializationServiceX(
     extends adminProto.IdentityInitializationServiceXGrpc.IdentityInitializationServiceX {
 
   override def initId(request: adminProto.InitIdRequest): Future[adminProto.InitIdResponse] = {
-    // TODO(#11255) propagate trace context
+    // TODO(#14048) propagate trace context
     // implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val adminProto.InitIdRequest(uidP) = request
-    // TODO(#11255) proper error reporting
+    // TODO(#14048) proper error reporting
     val res = for {
       uid <- EitherT.fromEither[Future](UniqueIdentifier.fromProtoPrimitive_(uidP))
       _ <- bootstrap.initializeWithProvidedId(uid)

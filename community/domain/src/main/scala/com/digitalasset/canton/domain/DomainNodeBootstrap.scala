@@ -444,14 +444,15 @@ class DomainNodeBootstrap(
         processorAndClient <- EitherT.right(
           TopologyTransactionProcessor.createProcessorAndClientForDomain(
             sequencedTopologyStore,
+            manager.id,
             domainId,
             protocolVersion,
-            crypto.value.pureCrypto,
+            crypto.value,
             SigningPublicKey.collect(initialKeys),
             parameters,
             clock,
             futureSupervisor,
-            loggerFactory,
+            loggerFactory.append("client", "topology-manager"),
           )
         )
         (topologyProcessor, topologyClient) = processorAndClient
@@ -543,6 +544,7 @@ class DomainNodeBootstrap(
             futureSupervisor,
             Option.empty[TopologyStateForInitializationService],
             Option.empty[SequencerRateLimitManager],
+            Option.empty[TopologyManagerStatus],
             loggerFactory,
             logger,
           )

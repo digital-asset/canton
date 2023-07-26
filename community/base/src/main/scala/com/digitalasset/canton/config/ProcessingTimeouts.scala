@@ -35,7 +35,6 @@ final case class ProcessingTimeout(
     closing: NonNegativeDuration = DefaultProcessingTimeouts.closing,
     inspection: NonNegativeDuration = DefaultProcessingTimeouts.inspection,
     storageMaxRetryInterval: NonNegativeDuration = DefaultProcessingTimeouts.maxRetryInterval,
-    kmsRetryInterval: NonNegativeDuration = DefaultProcessingTimeouts.maxRetryInterval,
     verifyActive: NonNegativeDuration = DefaultProcessingTimeouts.verifyActive,
     activeInit: NonNegativeDuration = DefaultProcessingTimeouts.activeInit,
     slowFutureWarn: NonNegativeDuration = DefaultProcessingTimeouts.slowFutureWarn,
@@ -66,7 +65,7 @@ object DefaultProcessingTimeouts {
 
   val maxRetryInterval: NonNegativeDuration = NonNegativeDuration.tryFromDuration(10.seconds)
 
-  val verifyActive: NonNegativeDuration = NonNegativeDuration.tryFromDuration(10.seconds)
+  val verifyActive: NonNegativeDuration = NonNegativeDuration.tryFromDuration(30.seconds)
 
   val activeInit: NonNegativeDuration = NonNegativeDuration.tryFromDuration(1.minute)
 

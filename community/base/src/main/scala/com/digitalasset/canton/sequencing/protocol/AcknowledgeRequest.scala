@@ -42,7 +42,7 @@ object AcknowledgeRequest extends HasMemoizedProtocolVersionedWrapperCompanion[A
   ): AcknowledgeRequest =
     AcknowledgeRequest(member, timestamp)(protocolVersionRepresentativeFor(protocolVersion))
 
-  override protected def name: String = "AcknowledgeRequest"
+  override def name: String = "AcknowledgeRequest"
 
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(

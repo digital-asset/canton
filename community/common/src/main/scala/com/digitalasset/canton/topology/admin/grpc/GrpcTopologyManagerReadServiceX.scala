@@ -142,7 +142,7 @@ class GrpcTopologyManagerReadServiceX(
   // to avoid race conditions, we want to use the approximateTimestamp of the topology client.
   // otherwise, we might read stuff from the database that isn't yet known to the node
   private def getApproximateTimestamp(storeId: TopologyStoreId): Option[CantonTimestamp] =
-    None // TODO(#11255): Address when the topology client / processor pipeline is up and running
+    None // TODO(#14048): Address when the topology client / processor pipeline is up and running
 
   /** Collects mappings of specified type from stores specified in baseQueryProto satisfying the
     * filters specified in baseQueryProto as well as separately specified filter either by

@@ -17,14 +17,7 @@ import com.digitalasset.canton.protocol.messages.{
 }
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, Recipients}
-import com.digitalasset.canton.topology.transaction.{
-  OwnerToKeyMapping,
-  SignedTopologyTransaction,
-  TopologyChangeOp,
-  TopologyElementId,
-  TopologyStateUpdate,
-  TopologyStateUpdateElement,
-}
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{DomainId, DomainTopologyManagerId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}

@@ -38,11 +38,13 @@ final case class ParticipantNodeParameters(
     maxDbConnections: Int,
     excludeInfrastructureTransactions: Boolean,
     enableEngineStackTrace: Boolean,
+    enableContractUpgrading: Boolean,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters {
   override def dontWarnOnDeprecatedPV: Boolean = protocolConfig.dontWarnOnDeprecatedPV
   override def devVersionSupport: Boolean = protocolConfig.devVersionSupport
   override def initialProtocolVersion: ProtocolVersion = protocolConfig.initialProtocolVersion
+
 }
 
 object ParticipantNodeParameters {
@@ -59,6 +61,7 @@ object ParticipantNodeParameters {
       cachingConfigs = CachingConfigs(),
       sequencerClient = SequencerClientConfig(),
       dbMigrateAndStart = false,
+      skipTopologyManagerSignatureValidation = false,
     ),
     partyChangeNotification = PartyNotificationConfig.Eager,
     adminWorkflow = AdminWorkflowConfig(
@@ -85,5 +88,6 @@ object ParticipantNodeParameters {
     maxDbConnections = 10,
     excludeInfrastructureTransactions = true,
     enableEngineStackTrace = false,
+    enableContractUpgrading = false,
   )
 }

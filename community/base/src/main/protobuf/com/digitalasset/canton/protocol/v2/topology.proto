@@ -11,7 +11,7 @@ import "google/protobuf/timestamp.proto";
 import "scalapb/scalapb.proto";
 
 enum TopologyChangeOpX {
-  // TODO(#11255) should that be REPLACE instead of Replace?
+  // TODO(#14048) should that be REPLACE instead of Replace?
   // Adds a new or replaces an existing mapping
   Replace = 0;
   // Remove an existing mapping
@@ -124,7 +124,7 @@ message ParticipantDomainPermissionX {
   ParticipantDomainLimits limits = 5;
   // optional earliest time when participant can log in (again)
   // used to temporarily disable participants
-  // TODO(#11255) implement participant deny list
+  // TODO(#14049) implement participant deny list
   google.protobuf.Timestamp login_after = 6;
 }
 
@@ -132,7 +132,7 @@ message ParticipantDomainPermissionX {
 // these limits can be used to limit the number of participants that can host a given party
 // authorization: whoever controls the domain uid
 // UNIQUE(domain,party)
-// TODO(#11255) implement me
+// TODO(#14050) implement me
 message PartyHostingLimitsX {
   string domain = 1;
   string party = 2;
@@ -240,7 +240,7 @@ message SequencerDomainStateX {
   repeated string active = 3;
   // the list of observing sequencers (uid) within the group (read messages but don't respond)
   repeated string observers = 4;
-  // TODO(#11255) should we support shipping some extra info here? i.e. tendermint configuration to be applied?
+  // TODO(#14046) add payload for BFT-configuration
   // bytes payload = 5;
 }
 
@@ -314,66 +314,27 @@ message SignedTopologyTransactionX {
   // but the signatures are insufficient to properly authorize the transaction
   // proposals are distributed via the topology channel too. proposals will be pruned automatically
   // when the nodes are pruned
-  // TODO(#11255) implement proposal and implement pruning
+  // TODO(#12945) implement proposal
+  // TODO(#14045) implement pruning
   bool proposal = 3;
 }
 
-// TODO(#11255) move below classes into v2/protocol
+// TODO(#14051) move below classes into v2/protocol
 
 /** Accepted topology transaction
  *
- * A member sends a registration request to the topology management request address.
- * The requests are validated at the mediator that provides a response and sends
- * the acceptance out. The acceptance is sent to the topology management response address
- * to which the sequencers subscribe and use to forward the messages to the participants
- * accordingly.
+ * A member sends topology transactions to the topology transaction broadcast address.
+ * The transactions are validated by all members individually against their respective domain store,
+ * including the member the submitted the broadcast.
  */
-// TODO(#11255) make this a signed protocol message
-message AcceptedTopologyTransactionsX {
+// TODO(#14051) make this a signed protocol message
+message TopologyTransactionsBroadcastX {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
-  message AcceptedRequest {
-    string request_id = 1;
+  message Broadcast {
+    string broadcast_id = 1;
     repeated SignedTopologyTransactionX transactions = 2;
   }
   string domain = 1;
-  repeated AcceptedRequest accepted = 2;
-  // TODO(#11255) include max-sequencing time (should be set to request timeout)
-}
-
-message RegisterTopologyTransactionRequestX {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
-  // the member requesting the approval of the transactions on behalf of the participant.
-  // typically this will be either an unauthenticated member (before the participant is active)
-  // or the participant or member itself (after it has become active)
-  string requested_by = 1;
-  string requested_for = 2;
-  string request_id = 3;
-  repeated SignedTopologyTransactionX transactions = 4;
-  string domain = 5;
-  // TODO(#11255) include request timeout / max sequencing time for crash recovery & at most once delivery
-}
-
-message RegisterTopologyTransactionResponseX {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
-  message Result {
-    enum State {
-      MISSING_STATE = 0;
-      // the request failed with an error message
-      FAILED = 1;
-      // the request has been rejected as it does not conform with the domain settings
-      REJECTED = 2;
-      // the request has been accepted by the domain topology manager
-      ACCEPTED = 3;
-      // the request is a duplicate (i.e. yields an topology state element that already exists)
-      DUPLICATE = 4;
-      // the request is obsolete (i.e. a Remove to a topology mapping that does not exist on the server)
-      OBSOLETE = 5;
-    }
-    State state = 1;
-  }
-  string requested_by = 1;
-  string requested_for = 2;
-  string request_id = 3;
-  repeated Result results = 4;
-  string domain = 5;
+  repeated Broadcast broadcasts = 2;
+  // TODO(#14051) include max-sequencing time (should be set to request timeout)
 }

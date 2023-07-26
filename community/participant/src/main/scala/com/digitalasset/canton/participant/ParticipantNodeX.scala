@@ -163,7 +163,7 @@ class ParticipantNodeBootstrapX(
           manager: SyncDomainPersistentStateManager,
           crypto: SyncCryptoApiProvider,
       ): PackageInspectionOps = new PackageInspectionOps() {
-        // TODO(#11255) the package inspection ops requires some serious refactoring in order to remove the circular dependency
+        // TODO(#12944) the package inspection ops requires some serious refactoring in order to remove the circular dependency
         //    however, this is just used for package removal which we can punt for the moment
         override def packageVetted(packageId: PackageId)(implicit
             tc: TraceContext
@@ -190,7 +190,7 @@ class ParticipantNodeBootstrapX(
       override def vetPackages(packages: Seq[PackageId], synchronize: Boolean)(implicit
           traceContext: TraceContext
       ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] = {
-        // TODO(#11255) this vetting extension might fail on concurrent uploads of dars
+        // TODO(#14069) this vetting extension might fail on concurrent uploads of dars
         val currentMappingF = performUnlessClosingF(functionFullName)(
           topologyManager.store
             .findPositiveTransactions(
@@ -225,7 +225,7 @@ class ParticipantNodeBootstrapX(
                     (currentPackages ++ packages).distinct,
                   ),
                   serial = nextSerial,
-                  // TODO(#11255) auto-determine signing keys
+                  // TODO(#12390) auto-determine signing keys
                   signingKeys = Seq(participantId.uid.namespace.fingerprint),
                   parameters.initialProtocolVersion,
                   expectFullAuthorization = true,
@@ -245,7 +245,7 @@ class ParticipantNodeBootstrapX(
       )(implicit
           traceContext: TraceContext
       ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] = {
-        // TODO(#11255) make this "extend" / not replace
+        // TODO(#14069) make this "extend" / not replace
         //    this will also be potentially racy!
         performUnlessClosingEitherUSF(functionFullName)(
           topologyManager
@@ -260,7 +260,7 @@ class ParticipantNodeBootstrapX(
                 groupAddressing = false,
               ),
               serial = None,
-              // TODO(#11255) auto-determine signing keys
+              // TODO(#12390) auto-determine signing keys
               signingKeys = Seq(partyId.uid.namespace.fingerprint),
               protocolVersion,
               expectFullAuthorization = true,
@@ -385,7 +385,7 @@ class ParticipantNodeBootstrapX(
       sync: CantonSyncService,
       packageService: PackageService,
   ): Unit = {
-    // TODO(#11255) implement me
+    // TODO(#14048) implement me
 
   }
 }

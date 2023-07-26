@@ -63,7 +63,7 @@ object TypedSignedProtocolMessageContent
       TypedSignedProtocolMessageContent[SignedProtocolMessageContent],
       HashOps,
     ] {
-  override protected def name: String = "TypedSignedProtocolMessageContent"
+  override def name: String = "TypedSignedProtocolMessageContent"
 
   override def supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.v3),

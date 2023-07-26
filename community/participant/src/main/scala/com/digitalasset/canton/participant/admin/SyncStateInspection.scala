@@ -13,7 +13,6 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.SyncStateInspection.SerializableContractWithDomainId
 import com.digitalasset.canton.participant.protocol.RequestJournal
@@ -625,6 +624,4 @@ object SyncStateInspection {
         case line => Either.left(s"Failed parsing line $lineNumber: $line ")
       }
   }
-
-  sealed trait AcsDownloadError extends CantonError
 }

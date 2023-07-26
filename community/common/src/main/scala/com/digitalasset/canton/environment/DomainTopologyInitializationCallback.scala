@@ -4,7 +4,6 @@
 package com.digitalasset.canton.environment
 
 import cats.data.EitherT
-import cats.syntax.parallel.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.client.transports.SequencerClientTransport
 import com.digitalasset.canton.sequencing.protocol.TopologyStateForInitRequest
@@ -14,7 +13,6 @@ import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.store.TopologyStoreX
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -32,7 +30,7 @@ trait DomainTopologyInitializationCallback {
 
 class StoreBasedDomainTopologyInitializationCallback(
     member: Member,
-    topologyStores: Seq[TopologyStoreX[DomainStore]],
+    topologyStore: TopologyStoreX[DomainStore],
 ) extends DomainTopologyInitializationCallback {
   override def callback(
       topologyClient: DomainTopologyClientWithInit,
@@ -50,7 +48,7 @@ class StoreBasedDomainTopologyInitializationCallback(
         )
       )
       _ <- EitherT.liftF(
-        topologyStores.parTraverse_(_.bootstrap(response.topologyTransactions.value))
+        topologyStore.bootstrap(response.topologyTransactions.value)
       )
       _ <- EitherT.liftF(
         response.topologyTransactions.value.lastChangeTimestamp

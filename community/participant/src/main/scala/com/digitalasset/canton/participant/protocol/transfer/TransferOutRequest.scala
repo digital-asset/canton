@@ -12,6 +12,7 @@ import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.participant.protocol.CanSubmitTransfer
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.{
   InvalidTransferCommonData,
+  InvalidTransferView,
   TransferProcessorError,
 }
 import com.digitalasset.canton.protocol.{LfContractId, LfTemplateId, SourceDomainId, TargetDomainId}
@@ -56,29 +57,30 @@ final case class TransferOutRequest(
     val commonDataSalt = Salt.tryDeriveSalt(seed, 0, hmacOps)
     val viewSalt = Salt.tryDeriveSalt(seed, 1, hmacOps)
     for {
-      commonData <-
-        TransferOutCommonData
-          .create(hashOps)(
-            commonDataSalt,
-            sourceDomain,
-            sourceMediator,
-            stakeholders,
-            adminParties,
-            uuid,
-            transferCounter,
-            sourceProtocolVersion,
-          )
-          .leftMap(reason => InvalidTransferCommonData(reason))
-      view = TransferOutView.create(hashOps)(
-        viewSalt,
-        submitterMetadata,
-        contractId,
-        templateId,
-        targetDomain,
-        targetTimeProof,
-        sourceProtocolVersion,
-        targetProtocolVersion,
-      )
+      commonData <- TransferOutCommonData
+        .create(hashOps)(
+          commonDataSalt,
+          sourceDomain,
+          sourceMediator,
+          stakeholders,
+          adminParties,
+          uuid,
+          sourceProtocolVersion,
+        )
+        .leftMap(reason => InvalidTransferCommonData(reason))
+      view <- TransferOutView
+        .create(hashOps)(
+          viewSalt,
+          submitterMetadata,
+          contractId,
+          templateId,
+          targetDomain,
+          targetTimeProof,
+          sourceProtocolVersion,
+          targetProtocolVersion,
+          transferCounter,
+        )
+        .leftMap(reason => InvalidTransferView(reason))
       tree = TransferOutViewTree(commonData, view, sourceProtocolVersion.v, hashOps)
     } yield FullTransferOutTree(tree)
   }
@@ -126,10 +128,11 @@ object TransferOutRequest {
         logger,
       )
       _ <- TransferKnownAndVetted(
-        adminPartiesAndRecipients.participants,
+        stakeholders,
         targetTopology,
         contractId,
-        templateId,
+        templateId.packageId,
+        targetDomain,
       )
     } yield {
       val transferOutRequest = TransferOutRequest(

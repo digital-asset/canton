@@ -17,7 +17,7 @@ trait AuthorityResolver {
 
 object AuthorityResolver {
   type DomainId =
-    String // TODO(i11255) Make `DomainId` available on the ledger API side of the codebase.
+    String // TODO(#14065) Make `DomainId` available on the ledger API side of the codebase.
 
   sealed trait AuthorityResponse
   object AuthorityResponse {

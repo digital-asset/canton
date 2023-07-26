@@ -7,7 +7,7 @@ import cats.data.EitherT
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout}
-import com.digitalasset.canton.crypto.CryptoPureApi
+import com.digitalasset.canton.crypto.{CryptoPureApi, DomainSyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
@@ -16,26 +16,16 @@ import com.digitalasset.canton.participant.traffic.{
   TrafficStateTopUpSubscription,
 }
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.topology.client.{
-  CachingDomainTopologyClient,
-  CachingTopologySnapshot,
-  DomainTopologyClientWithInit,
-  DomainTopologyClientWithInitOld,
-  DomainTopologyClientWithInitX,
-  StoreBasedDomainTopologyClient,
-  StoreBasedDomainTopologyClientX,
-  StoreBasedTopologySnapshot,
-  StoreBasedTopologySnapshotX,
-  TopologySnapshot,
-}
+import com.digitalasset.canton.topology.client.*
 import com.digitalasset.canton.topology.processing.{
+  DomainTopologyTransactionMessageValidator,
   TopologyTransactionProcessor,
   TopologyTransactionProcessorCommon,
   TopologyTransactionProcessorX,
 }
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreX}
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -75,15 +65,21 @@ trait TopologyComponentFactory {
       partyNotifier: LedgerServerPartyNotifier,
       missingKeysAlerter: MissingKeysAlerter,
       topologyClient: DomainTopologyClientWithInit,
+      // this is the client above, wrapped with some crypto methods, but only the base client is accessible, so we
+      // need to pass both.
+      // TODO(#9014) remove me with 3.0
+      syncCrypto: DomainSyncCryptoClient,
       trafficStateController: TrafficStateController,
+      protocolVersion: ProtocolVersion,
   ): TopologyTransactionProcessorCommon.Factory
 
 }
 
 class TopologyComponentFactoryOld(
+    participantId: ParticipantId,
     domainId: DomainId,
-    pureCryptoApi: CryptoPureApi,
     clock: Clock,
+    skipTopologyManagerSignatureValidation: Boolean,
     timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
     caching: CachingConfigs,
@@ -152,7 +148,9 @@ class TopologyComponentFactoryOld(
       partyNotifier: LedgerServerPartyNotifier,
       missingKeysAlerter: MissingKeysAlerter,
       topologyClient: DomainTopologyClientWithInit,
+      syncCrypto: DomainSyncCryptoClient,
       trafficStateController: TrafficStateController,
+      protocolVersion: ProtocolVersion,
   ): TopologyTransactionProcessorCommon.Factory =
     new TopologyTransactionProcessorCommon.Factory {
       override def create(
@@ -160,7 +158,17 @@ class TopologyComponentFactoryOld(
       )(implicit executionContext: ExecutionContext): TopologyTransactionProcessorCommon = {
         val processor = new TopologyTransactionProcessor(
           domainId,
-          pureCryptoApi,
+          DomainTopologyTransactionMessageValidator
+            .create(
+              skipTopologyManagerSignatureValidation,
+              syncCrypto,
+              participantId,
+              protocolVersion,
+              timeouts,
+              futureSupervisor,
+              loggerFactory,
+            ),
+          syncCrypto.pureCrypto,
           topologyStore,
           acsCommitmentScheduleEffectiveTime,
           futureSupervisor,
@@ -170,7 +178,7 @@ class TopologyComponentFactoryOld(
         // subscribe party notifier to topology processor
         processor.subscribe(partyNotifier.attachToTopologyProcessorOld())
         processor.subscribe(missingKeysAlerter.attachToTopologyProcessorOld())
-        // TODO(#11255) this is an ugly hack, but I don't know where we could create the individual components
+        // TODO(#14048) this is an ugly hack, but I don't know where we could create the individual components
         //              and have the types align :(
         topologyClient match {
           case old: DomainTopologyClientWithInitOld =>
@@ -199,7 +207,9 @@ class TopologyComponentFactoryX(
       partyNotifier: LedgerServerPartyNotifier,
       missingKeysAlerter: MissingKeysAlerter,
       topologyClient: DomainTopologyClientWithInit,
+      syncCrypto: DomainSyncCryptoClient,
       trafficStateController: TrafficStateController,
+      protocolVersion: ProtocolVersion,
   ): TopologyTransactionProcessorCommon.Factory = new TopologyTransactionProcessorCommon.Factory {
     override def create(
         acsCommitmentScheduleEffectiveTime: Traced[CantonTimestamp] => Unit
@@ -216,7 +226,7 @@ class TopologyComponentFactoryX(
       // subscribe party notifier to topology processor
       processor.subscribe(partyNotifier.attachToTopologyProcessorX())
       processor.subscribe(missingKeysAlerter.attachToTopologyProcessorX())
-      // TODO(#11255) this is an ugly hack, but I don't know where we could create the individual components
+      // TODO(#14048) this is an ugly hack, but I don't know where we could create the individual components
       //              and have the types align :(
       topologyClient match {
         case x: DomainTopologyClientWithInitX =>

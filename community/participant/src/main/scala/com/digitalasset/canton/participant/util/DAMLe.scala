@@ -35,6 +35,7 @@ object DAMLe {
       enableLfDev: Boolean,
       enableStackTraces: Boolean,
       profileDir: Option[Path] = None,
+      enableContractUpgrading: Boolean = true,
   ): Engine =
     new Engine(
       EngineConfig(
@@ -50,6 +51,7 @@ object DAMLe {
         contractKeyUniqueness =
           if (uniqueContractKeys) ContractKeyUniquenessMode.Strict
           else ContractKeyUniquenessMode.Off,
+        enableContractUpgrading = enableContractUpgrading,
       )
     )
 

@@ -98,7 +98,7 @@ object RegisterTopologyTransactionRequest
       domainId: DomainId,
       protocolVersion: ProtocolVersion,
   ): Iterable[RegisterTopologyTransactionRequest] = {
-    // TODO(#11255) this isn't a good idea. txs shouldn't be regrouped. agreed with raf: we should remove this
+    // TODO(#14051) this isn't a good idea. txs shouldn't be regrouped. agreed with raf: we should remove this
     //   the topology txs are serialized as bytestrings individually, which means the version differences don't matter
     transactions.groupBy(_.representativeProtocolVersion).map {
       case (_transactionRepresentativeProtocolVersion, transactions) =>
@@ -132,7 +132,7 @@ object RegisterTopologyTransactionRequest
     )(protocolVersionRepresentativeFor(ProtoVersion(0)))
   }
 
-  override protected def name: String = "RegisterTopologyTransactionRequest"
+  override def name: String = "RegisterTopologyTransactionRequest"
 
   implicit val registerTopologyTransactionRequestCast
       : ProtocolMessageContentCast[RegisterTopologyTransactionRequest] =
@@ -142,99 +142,4 @@ object RegisterTopologyTransactionRequest
       case rttr: RegisterTopologyTransactionRequest => Some(rttr)
       case _ => None
     }
-}
-
-final case class RegisterTopologyTransactionRequestX private (
-    requestedBy: Member,
-    requestedFor: Member,
-    requestId: TopologyRequestId,
-    transactions: List[SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]],
-    override val domainId: DomainId,
-)(
-    override val representativeProtocolVersion: RepresentativeProtocolVersion[
-      RegisterTopologyTransactionRequestX.type
-    ]
-) extends UnsignedProtocolMessage
-    with UnsignedProtocolMessageV3
-    with PrettyPrinting {
-  @transient override protected lazy val companionObj: RegisterTopologyTransactionRequestX.type =
-    RegisterTopologyTransactionRequestX
-
-  def toProtoV2: v2.RegisterTopologyTransactionRequestX =
-    v2.RegisterTopologyTransactionRequestX(
-      requestedBy = requestedBy.toProtoPrimitive,
-      requestedFor = requestedFor.toProtoPrimitive,
-      requestId = requestId.toProtoPrimitive,
-      transactions = transactions.map(_.toProtoV2),
-      domain = domainId.toProtoPrimitive,
-    )
-
-  override protected[messages] def toProtoSomeEnvelopeContentV3
-      : v3.EnvelopeContent.SomeEnvelopeContent =
-    v3.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionRequestX(toProtoV2)
-
-  override def pretty: Pretty[RegisterTopologyTransactionRequestX] = prettyOfClass(
-    param("requestBy", _.requestedBy),
-    param("requestedFor", _.requestedFor),
-    param("requestId", _.requestId.unwrap.doubleQuoted),
-    param("numTx", _.transactions.length),
-  )
-
-}
-
-object RegisterTopologyTransactionRequestX
-    extends HasProtocolVersionedCompanion[RegisterTopologyTransactionRequestX] {
-
-  override protected def name: String = "RegisterTopologyTransactionRequestX"
-
-  def create(
-      requestedBy: Member,
-      requestedFor: Member,
-      requestId: TopologyRequestId,
-      transactions: List[SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]],
-      domainId: DomainId,
-      protocolVersion: ProtocolVersion,
-  ): RegisterTopologyTransactionRequestX = RegisterTopologyTransactionRequestX(
-    requestedBy,
-    requestedFor,
-    requestId,
-    transactions,
-    domainId,
-  )((RegisterTopologyTransactionRequestX.protocolVersionRepresentativeFor(protocolVersion)))
-
-  val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.minimum),
-    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.dev)(
-      v2.RegisterTopologyTransactionRequestX
-    )(
-      supportedProtoVersion(_)(fromProtoV2),
-      _.toProtoV2.toByteString,
-    ),
-  )
-
-  def fromProtoV2(
-      message: v2.RegisterTopologyTransactionRequestX
-  ): ParsingResult[RegisterTopologyTransactionRequestX] = {
-    val v2.RegisterTopologyTransactionRequestX(
-      requestedBy,
-      requestedFor,
-      requestId,
-      transactions,
-      domain,
-    ) = message
-    for {
-      requestedBy <- Member.fromProtoPrimitive(requestedBy, "requested_by")
-      requestedFor <- Member.fromProtoPrimitive(requestedFor, "requested_for")
-      requestId <- String255.fromProtoPrimitive(requestId, "request_id")
-      transactions <- transactions.toList.traverse(SignedTopologyTransactionX.fromProtoV2)
-      domainId <- DomainId.fromProtoPrimitive(domain, "domain")
-    } yield RegisterTopologyTransactionRequestX(
-      requestedBy,
-      requestedFor,
-      requestId,
-      transactions,
-      domainId,
-    )(protocolVersionRepresentativeFor(ProtoVersion(2)))
-  }
-
 }

@@ -71,7 +71,7 @@ private[conflictdetection] class LockableStates[
       state
     }
 
-    val ActivenessCheck(fresh, free, active, lock) = check
+    val ActivenessCheck(fresh, free, active, lock, needPriorState) = check
     val toBeFetchedM = mutable.Map.empty[Key, MutableLockableState[Status]]
 
     // always holds a fresh mutable state object that we insert into `states`
@@ -85,6 +85,9 @@ private[conflictdetection] class LockableStates[
       implicit val ec = directExecutionContext
       otherStatesAvailable = otherStatesAvailable.zip(f).void
     }
+
+    val priorStates = ArraySeq.newBuilder[KeyStateLock[Key, Status]]
+    priorStates.sizeHint(needPriorState.size)
 
     def markPending(
         keys: Set[Key],
@@ -112,7 +115,10 @@ private[conflictdetection] class LockableStates[
             )(joinFuture)
             oldState
         }
-        mutableStates += mk(id, state)
+        val keyState = mk(id, state)
+        mutableStates += keyState
+        // No need to deduplicate prior states here because markPending is called only once for each id
+        if (needPriorState.contains(id)) priorStates.addOne(keyState)
       }
 
       mutableStates.result()
@@ -136,6 +142,7 @@ private[conflictdetection] class LockableStates[
       activeStates,
       lockOnly,
       toBeFetchedM,
+      priorStates.result(),
     )(check.prettyK)
   }
 
@@ -200,6 +207,27 @@ private[conflictdetection] class LockableStates[
     val obtainedLocks = ArraySeq.newBuilder[Key]
     obtainedLocks.sizeHint(handle.lockCount)
 
+    val priorStates = Map.newBuilder[Key, Option[Status]]
+    priorStates.sizeHint(handle.priorStates.size)
+
+    def throwOnNotPrefetched(id: Key): Nothing =
+      ErrorUtil.internalError(
+        IllegalConflictDetectionStateException(
+          s"State for ${lockableStatus.kind} $id was not prefetched."
+        )
+      )
+
+    // Add the prior state of all unlocked items before locking.
+    handle.priorStates.foreach { ksl =>
+      val id = ksl.id
+
+      if (!ksl.state.locked) {
+        val priorState = ksl.state.versionedState.getOrElse(throwOnNotPrefetched(id)).map(_.status)
+        logger.trace(s"Returning prior state for ${lockableStatus.kind} $id: $priorState")
+        priorStates += (id -> priorState)
+      }
+    }
+
     def checkLockAnd(
         ksl: KeyStateLock[Key, Status],
         ifUnlocked: Key => Option[StateChange[Status]] => Unit,
@@ -208,13 +236,6 @@ private[conflictdetection] class LockableStates[
         },
     ): Unit = {
       val KeyStateLock(id, state, doLock) = ksl
-
-      def notPrefetched: Nothing =
-        ErrorUtil.internalError(
-          IllegalConflictDetectionStateException(
-            s"State for ${lockableStatus.kind} $id was not prefetched."
-          )
-        )
 
       state.completeActivenessCheck()
       val wasUnlocked = if (doLock) {
@@ -227,11 +248,11 @@ private[conflictdetection] class LockableStates[
       } else !state.locked
 
       if (wasUnlocked) {
-        ifUnlocked(id)(state.versionedState.getOrElse(notPrefetched))
+        ifUnlocked(id)(state.versionedState.getOrElse(throwOnNotPrefetched(id)))
         if (!doLock) tryEvict(rc, id, state)
       } else {
         logger.trace(withRC(rc, s"${lockableStatus.kind} $id was already locked"))
-        ifLocked(id)(state.versionedState.getOrElse(notPrefetched))
+        ifLocked(id)(state.versionedState.getOrElse(throwOnNotPrefetched(id)))
       }
     }
 
@@ -293,6 +314,7 @@ private[conflictdetection] class LockableStates[
       unknown = unknown.result(),
       notFree = notFree.result(),
       notActive = notActive.result(),
+      priorStates = priorStates.result(),
     )(handle.prettyK)
 
     (obtainedLocks.result(), result)
@@ -602,6 +624,7 @@ private[conflictdetection] object LockableStates {
     * @param active The list of items and their [[MutableLockableState]]s in [[LockableStates.states]] that are checked for being active.
     * @param lockOnly The list of items and their [[MutableLockableState]]s in [[LockableStates.states]] that are to be locked.
     * @param toBeFetchedM The items that must be fetched from the store for this request and their corresponding [[MutableLockableState]] in [[LockableStates.states]].
+    * @param priorStates The items whose state prior to the activeness check shall be returned in the [[ActivenessCheckResult]].
     */
   class LockableStatesCheckHandle[Key, Status <: PrettyPrinting] private[LockableStates] (
       val requestCounter: RequestCounter,
@@ -612,6 +635,7 @@ private[conflictdetection] object LockableStates {
       private[LockableStates] val active: Seq[KeyStateLock[Key, Status]],
       private[LockableStates] val lockOnly: Seq[KeyStateLock[Key, Status]],
       private[LockableStates] val toBeFetchedM: mutable.Map[Key, MutableLockableState[Status]],
+      private[LockableStates] val priorStates: Seq[KeyStateLock[Key, Status]],
   )(implicit
       val prettyK: Pretty[Key]
   ) extends PrettyPrinting {

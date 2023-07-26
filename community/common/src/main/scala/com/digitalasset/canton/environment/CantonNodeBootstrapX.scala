@@ -82,14 +82,14 @@ abstract class CantonNodeBootstrapX[
     * topology stores which are only available in a later startup stage (domain nodes) or
     * in the node runtime itself (participant sync domain)
     */
-  // TODO(#11255) implement me!
+  // TODO(#14048) implement me!
   protected def sequencedTopologyStores: Seq[TopologyStoreX[TopologyStoreId]] = Seq()
 
   protected val bootstrapStageCallback = new BootstrapStage.Callback {
     override def loggerFactory: NamedLoggerFactory = CantonNodeBootstrapX.this.loggerFactory
     override def timeouts: ProcessingTimeout = CantonNodeBootstrapX.this.timeouts
     override def abortThisNodeOnStartupFailure(): Unit = {
-      // TODO(#11255) bubble this up into env ensuring that the node is properly deregistered from env if we fail during
+      // TODO(#14048) bubble this up into env ensuring that the node is properly deregistered from env if we fail during
       //   async startup. (node should be removed from running nodes)
       //   we can't call node.close() here as this thing is executed within a performUnlessClosing, so we'd deadlock
       logger.error("Should be closing node due to startup failure")
@@ -427,7 +427,7 @@ abstract class CantonNodeBootstrapX[
           protocolVersion,
           expectFullAuthorization = true,
         )
-        // TODO(#11255) error handling
+        // TODO(#14048) error handling
         .leftMap(_.toString)
         .map(_ => ())
     }

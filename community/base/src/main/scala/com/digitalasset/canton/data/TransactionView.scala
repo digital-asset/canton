@@ -411,7 +411,7 @@ object TransactionView
       TransactionView,
       (HashOps, ConfirmationPolicy),
     ] {
-  override protected def name: String = "TransactionView"
+  override def name: String = "TransactionView"
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(0) -> LegacyProtoConverter(ProtocolVersion.v3)(v0.ViewNode)(

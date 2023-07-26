@@ -9,7 +9,7 @@ import com.digitalasset.canton.admin.api.client.data.crypto.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{NonNegativeFiniteDuration, PositiveDurationSeconds}
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
-import com.digitalasset.canton.protocol.DynamicDomainParameters.InvalidDomainParameters
+import com.digitalasset.canton.protocol.DynamicDomainParameters.InvalidDynamicDomainParameters
 import com.digitalasset.canton.protocol.{
   DynamicDomainParameters as DynamicDomainParametersInternal,
   StaticDomainParameters as StaticDomainParametersInternal,
@@ -270,7 +270,7 @@ final case class DynamicDomainParametersV1(
   override def maxRequestSizeV1: Option[NonNegativeInt] = Some(maxRequestSize)
 
   if (ledgerTimeRecordTimeTolerance * 2 > mediatorDeduplicationTimeout)
-    throw new InvalidDomainParameters(
+    throw new InvalidDynamicDomainParameters(
       s"The ledgerTimeRecordTimeTolerance ($ledgerTimeRecordTimeTolerance) must be at most half of the " +
         s"mediatorDeduplicationTimeout ($mediatorDeduplicationTimeout)."
     )

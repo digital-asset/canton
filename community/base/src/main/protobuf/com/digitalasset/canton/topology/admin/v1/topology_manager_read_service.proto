@@ -61,7 +61,7 @@ message BaseQuery {
   // whether to query only for proposals instead of approved topology mappings
   bool proposals = 2;
   com.digitalasset.canton.protocol.v2.TopologyChangeOpX operation = 3;
-  // TODO(#11255) is that necessary????
+  // TODO(#14048) Decide whether the filter_operation flag is necessary on top of the optional operation field, if not remove
   /** if true, then we'll filter the results according to above defined operation */
   bool filter_operation = 4;
   message TimeRange {

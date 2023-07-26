@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.topology.client
 
+import cats.syntax.parallel.*
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.crypto.{CryptoPureApi, SigningPublicKey}
@@ -24,6 +25,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.*
 import com.digitalasset.canton.topology.transaction.TrustLevel.*
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, BaseTestWordSpec, HasExecutionContext, SequencerCounter}
 import org.scalatest.wordspec.AsyncWordSpec
@@ -242,6 +244,77 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
       } yield {
         compareMappings(party1Mappings, Map(participant1 -> Observation))
       }
+    }
+
+    "distinguishes between removed and disabled participants" in {
+      val fixture = new Fixture()
+      def genPs(
+          participant: ParticipantId,
+          permission: ParticipantPermission,
+          side: RequestSide,
+      ) =
+        mkAdd(
+          ParticipantState(
+            side,
+            domainId,
+            participant,
+            permission,
+            TrustLevel.Ordinary,
+          )
+        )
+      val ps1 = genPs(participant1, ParticipantPermission.Submission, RequestSide.Both)
+      val ps2 = genPs(participant2, ParticipantPermission.Submission, RequestSide.From)
+      for {
+        _ <- fixture.add(
+          ts,
+          Seq(
+            ps1,
+            ps2,
+            genPs(participant3, ParticipantPermission.Submission, RequestSide.To),
+          ),
+        )
+        _ <- fixture.add(
+          ts.plusMillis(1),
+          Seq(
+            revert(ps1), // revert first one, so there should be no cert, so None
+            genPs(
+              participant2,
+              ParticipantPermission.Submission,
+              RequestSide.To,
+            ), // happy path on both sides
+            genPs(
+              participant3,
+              ParticipantPermission.Disabled,
+              RequestSide.From,
+            ), // should be Some(Disabled)
+            genPs(
+              participant3,
+              ParticipantPermission.Submission,
+              RequestSide.From,
+            ), // should not confuse the previous statement (Disabled should be stronger)
+          ),
+        )
+        _ <- fixture.add(ts.plusMillis(2), Seq(revert(ps2)))
+        sp1 <- fixture.client.snapshot(ts.immediateSuccessor)
+        sp2 <- fixture.client.snapshot(ts.plusMillis(1).immediateSuccessor)
+        sp3 <- fixture.client.snapshot(ts.plusMillis(2).immediateSuccessor)
+        participants1 <- sp1.participants()
+        participants2 <- sp2.participants()
+        participants3 <- sp3.participants()
+        participants = Seq(participant1, participant2, participant3)
+        st1ps <- participants.parTraverse(p => sp1.findParticipantState(p).map(_.map(_.permission)))
+        st2ps <- participants.parTraverse(p => sp2.findParticipantState(p).map(_.map(_.permission)))
+        st3ps <- participants.parTraverse(p => sp3.findParticipantState(p).map(_.map(_.permission)))
+      } yield {
+        // note: the domain topology dispatcher relies on this behaviour here for protocol version v5
+        participants1 shouldBe Seq(participant1 -> Submission)
+        participants2 shouldBe Seq(participant2 -> Submission, participant3 -> Disabled)
+        participants3 shouldBe Seq(participant3 -> Disabled)
+        st1ps shouldBe Seq(Some(Submission), None, None)
+        st2ps shouldBe Seq(None, Some(Submission), Some(Disabled))
+        st3ps shouldBe Seq(None, None, Some(Disabled))
+      }
+
     }
 
     "work properly with updates" in {

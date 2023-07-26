@@ -65,7 +65,7 @@ final class StoreBasedTopologyStateForInitializationService(
             case Some(effective) =>
               domainTopologyStore.findEssentialStateForMember(participant, effective.value)
             case None =>
-              // TODO(#11255) should this error out if nothing can be found?
+              // TODO(#12390) should this error out if nothing can be found?
               Future.successful(StoredTopologyTransactionsX(Seq.empty))
           }
         } yield storedTopologyTransactions
@@ -81,7 +81,7 @@ final class StoreBasedTopologyStateForInitializationService(
             case Some(effective) =>
               domainTopologyStore.findEssentialStateForMember(mediator, effective.value)
             case None =>
-              // TODO(#11255) should this error out if nothing can be found?
+              // TODO(#12390) should this error out if nothing can be found?
               Future.successful(StoredTopologyTransactionsX(Seq.empty))
           }
 
@@ -90,7 +90,7 @@ final class StoreBasedTopologyStateForInitializationService(
         }
 
       case _ =>
-        // TODO(#11255) proper error
+        // TODO(#12390) proper error
         ???
     }
   }

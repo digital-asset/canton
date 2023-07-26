@@ -111,7 +111,7 @@ object SignedContent
       SignedContent[BytestringWithCryptographicEvidence],
     ] {
 
-  override protected def name: String = "SignedContent"
+  override def name: String = "SignedContent"
 
   override def supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.SignedContent)(

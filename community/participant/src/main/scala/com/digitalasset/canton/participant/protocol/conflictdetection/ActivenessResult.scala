@@ -3,10 +3,9 @@
 
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting, PrettyUtil}
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractKeyJournal}
 import com.digitalasset.canton.protocol.{LfContractId, LfGlobalKey, TransferId}
-import pprint.Tree
 
 /** The result of the activeness check for an [[ActivenessSet]].
   * If all sets are empty, the activeness check was successful.
@@ -24,30 +23,13 @@ final case class ActivenessResult(
     contracts.isSuccessful && inactiveTransfers.isEmpty && keys.isSuccessful
 
   override def pretty: Pretty[ActivenessResult] = {
-    import ActivenessResult.paramIfNotSuccessful
     prettyOfClass(
-      paramIfNotSuccessful("contracts", _.contracts),
+      param("contracts", _.contracts, !_.contracts.isEmpty),
       paramIfNonEmpty("inactiveTransfers", _.inactiveTransfers),
-      paramIfNotSuccessful("keys", _.keys),
+      param("keys", _.keys, !_.keys.isEmpty),
     )
   }
 
-}
-
-object ActivenessResult {
-  val success: ActivenessResult =
-    ActivenessResult(
-      ActivenessCheckResult.success,
-      Set.empty,
-      ActivenessCheckResult.success,
-    )
-
-  private def paramIfNotSuccessful[K, A <: PrettyPrinting](
-      name: String,
-      getValue: ActivenessResult => ActivenessCheckResult[K, A],
-  ): ActivenessResult => Option[Tree] = {
-    PrettyUtil.param(name, getValue, !getValue(_).isSuccessful)
-  }
 }
 
 /** The result of the activeness check for an [[ActivenessCheck]].
@@ -57,6 +39,10 @@ object ActivenessResult {
   * @param notFresh The items that are supposed to not exist, but do.
   * @param notFree The items that shall be free, but are not.
   * @param notActive The contracts that shall be active, but are not.
+  * @param priorStates The prior states for the items from [[ActivenessCheck.needPriorState]].
+  *                    Does not contain items that were already locked
+  *                    as the prior state of a locked item is not known during conflict detection.
+  *                    Mapped to [[scala.None$]] if the item is fresh.
   */
 private[conflictdetection] final case class ActivenessCheckResult[Key, Status <: PrettyPrinting](
     alreadyLocked: Set[Key],
@@ -64,9 +50,13 @@ private[conflictdetection] final case class ActivenessCheckResult[Key, Status <:
     unknown: Set[Key],
     notFree: Map[Key, Status],
     notActive: Map[Key, Status],
+    priorStates: Map[Key, Option[Status]],
 )(implicit val prettyK: Pretty[Key])
     extends PrettyPrinting {
 
+  private[conflictdetection] def isEmpty: Boolean = isSuccessful && priorStates.isEmpty
+
+  /** Returns whether all checks were successful. The caller must check the requested prior states separately. */
   def isSuccessful: Boolean =
     alreadyLocked.isEmpty && notFresh.isEmpty && unknown.isEmpty && notFree.isEmpty && notActive.isEmpty
 
@@ -76,11 +66,6 @@ private[conflictdetection] final case class ActivenessCheckResult[Key, Status <:
     paramIfNonEmpty("unknown", _.unknown),
     paramIfNonEmpty("notFree", _.notFree),
     paramIfNonEmpty("notActive", _.notActive),
+    paramIfNonEmpty("priorStates", _.priorStates),
   )
-
-}
-
-private[conflictdetection] object ActivenessCheckResult {
-  def success[Key: Pretty, Status <: PrettyPrinting] =
-    ActivenessCheckResult[Key, Status](Set.empty, Set.empty, Set.empty, Map.empty, Map.empty)
 }

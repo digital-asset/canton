@@ -128,14 +128,6 @@ object TransactionTreeFactory {
     )
   }
 
-  final case class DivergingKeyResolutionError(
-      divergingKeys: Map[LfGlobalKey, Set[Option[LfContractId]]]
-  ) extends TransactionTreeConversionError {
-    override def pretty: Pretty[DivergingKeyResolutionError] = prettyOfClass(
-      unnamedParam(_.divergingKeys)
-    )
-  }
-
   final case class MissingContractKeyLookupError(key: LfGlobalKey)
       extends TransactionTreeConversionError {
     override def pretty: Pretty[MissingContractKeyLookupError] =
@@ -162,11 +154,10 @@ object TransactionTreeFactory {
 
   final case class PackageUnknownTo(
       packageId: LfPackageId,
-      description: String,
       participantId: ParticipantId,
   ) extends PrettyPrinting {
     override def pretty: Pretty[PackageUnknownTo] = prettyOfString { put =>
-      show"Participant $participantId has not vetted ${put.description.doubleQuoted} (${put.packageId})"
+      show"Participant $participantId has not vetted ${put.packageId}"
     }
   }
 }

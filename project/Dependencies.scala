@@ -142,7 +142,11 @@ object Dependencies {
 
   lazy val chimney = "io.scalaland" %% "chimney" % "0.6.1"
 
-  // TODO(#10852) yet another json lbirary
+  lazy val magnolia = "com.softwaremill.magnolia1_2" %% "magnolia" % "1.1.3"
+  lazy val magnolifyShared = "com.spotify" % "magnolify-shared_2.13" % "0.6.2"
+  lazy val magnolifyScalacheck = "com.spotify" % "magnolify-scalacheck_2.13" % "0.6.2"
+
+  // TODO(#10852) yet another json library
   lazy val circe_core = "io.circe" %% "circe-core" % circe_version
   lazy val circe_generic = "io.circe" %% "circe-generic" % circe_version
   lazy val circe_generic_extras = "io.circe" %% "circe-generic-extras" % circe_version

@@ -40,7 +40,7 @@ sealed trait LocalVerdict
 
 object LocalVerdict extends HasProtocolVersionedCompanion[LocalVerdict] {
 
-  override protected def name: String = getClass.getSimpleName
+  override def name: String = getClass.getSimpleName
 
   override def supportedProtoVersions: messages.LocalVerdict.SupportedProtoVersions =
     SupportedProtoVersions(

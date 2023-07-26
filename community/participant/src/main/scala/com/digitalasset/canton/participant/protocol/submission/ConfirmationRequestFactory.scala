@@ -14,7 +14,6 @@ import com.digitalasset.canton.data.*
 import com.digitalasset.canton.ledger.participant.state.v2.SubmitterInfo
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.PackageService
 import com.digitalasset.canton.participant.protocol.submission.ConfirmationRequestFactory.*
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
   SerializableContractOfId,
@@ -45,7 +44,6 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 class ConfirmationRequestFactory(
     submitterNode: ParticipantId,
-    domain: DomainId,
     loggingConfig: LoggingConfig,
     val loggerFactory: NamedLoggerFactory,
 )(val transactionTreeFactory: TransactionTreeFactory, seedGenerator: SeedGenerator)(implicit
@@ -215,7 +213,6 @@ object ConfirmationRequestFactory {
   def apply(submitterNode: ParticipantId, domainId: DomainId, protocolVersion: ProtocolVersion)(
       cryptoOps: HashOps with HmacOps,
       seedGenerator: SeedGenerator,
-      packageService: PackageService,
       loggingConfig: LoggingConfig,
       uniqueContractKeys: Boolean,
       loggerFactory: NamedLoggerFactory,
@@ -227,12 +224,11 @@ object ConfirmationRequestFactory {
         domainId,
         protocolVersion,
         cryptoOps,
-        packageService,
         uniqueContractKeys,
         loggerFactory,
       )
 
-    new ConfirmationRequestFactory(submitterNode, domainId, loggingConfig, loggerFactory)(
+    new ConfirmationRequestFactory(submitterNode, loggingConfig, loggerFactory)(
       transactionTreeFactory,
       seedGenerator,
     )
@@ -250,16 +246,6 @@ object ConfirmationRequestFactory {
   final case class ParticipantAuthorizationError(message: String)
       extends ConfirmationRequestCreationError {
     override def pretty: Pretty[ParticipantAuthorizationError] = prettyOfClass(
-      unnamedParam(_.message.unquoted)
-    )
-  }
-
-  /** Indicates that the submitter is not authorized to commit the given transaction.
-    * I.e. the commit built from the submitter and the transaction is not well-authorized.
-    */
-  final case class DamlAuthorizationError(message: String)
-      extends ConfirmationRequestCreationError {
-    override def pretty: Pretty[DamlAuthorizationError] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
   }
@@ -321,10 +307,6 @@ object ConfirmationRequestFactory {
   final case class TransactionTreeFactoryError(cause: TransactionTreeConversionError)
       extends ConfirmationRequestCreationError {
     override def pretty: Pretty[TransactionTreeFactoryError] = prettyOfParam(_.cause)
-  }
-
-  final case class SeedGeneratorError(cause: SaltError) extends ConfirmationRequestCreationError {
-    override def pretty: Pretty[SeedGeneratorError] = prettyOfParam(_.cause)
   }
 
   final case class RecipientsCreationError(message: String)

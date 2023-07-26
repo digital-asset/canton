@@ -41,7 +41,7 @@ object StoredParties
     SortedSet.from(parties)
   )
 
-  override protected def name: String = "stored parties"
+  override def name: String = "stored parties"
 
   def fromProtoV0(proto0: v0.StoredParties): ParsingResult[StoredParties] = {
     val v0.StoredParties(partiesP) = proto0

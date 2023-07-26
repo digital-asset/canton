@@ -47,7 +47,7 @@ class TopologyStateProcessorX(
       ValidatedTopologyTransactionX(currentTx, rejection.get())
   }
 
-  // TODO(#11255) use cache instead and remember empty
+  // TODO(#14063) use cache instead and remember empty
   private val txForMapping = TrieMap[MappingHash, MaybePending]()
   private val proposalsByMapping = TrieMap[MappingHash, Seq[TxHash]]()
   private val proposalsForTx = TrieMap[TxHash, MaybePending]()
@@ -64,7 +64,7 @@ class TopologyStateProcessorX(
       sequenced: SequencedTime,
       effective: EffectiveTime,
       transactions: Seq[GenericSignedTopologyTransactionX],
-      // TODO(#11255) propagate and abort unless we use force
+      // TODO(#12390) propagate and abort unless we use force
       abortIfCascading: Boolean,
       abortOnError: Boolean,
       expectFullAuthorization: Boolean,
@@ -79,7 +79,7 @@ class TopologyStateProcessorX(
     // first, pre-load the currently existing mappings and proposals for the given transactions
     val preloadTxsForMappingF = preloadTxsForMapping(effective, transactions)
     val preloadProposalsForTxF = preloadProposalsForTx(effective, transactions)
-    // TODO(#11255) preload authorization data
+    // TODO(#14064) preload authorization data
     val ret = for {
       _ <- EitherT.right[Lft](preloadProposalsForTxF)
       _ <- EitherT.right[Lft](preloadTxsForMappingF)
@@ -97,17 +97,17 @@ class TopologyStateProcessorX(
         (removes, pendingWrites)
       }
       validatedTx = pendingWrites.map(_.validatedTx)
-      immediatleyExpiredValidatedTx = pendingWrites.collect {
+      immediatelyExpiredValidatedTx = pendingWrites.collect {
         case pw if pw.expireImmediately.get() => pw.validatedTx.transaction.transaction.hash
       }.toSet
       _ <- EitherT.cond[Future](
-        // TODO(#11255) differentiate error reason and only abort actual errors, not in-batch merges
+        // TODO(#12390) differentiate error reason and only abort actual errors, not in-batch merges
         !abortOnError || validatedTx.forall(_.rejectionReason.isEmpty),
         (), {
           // reset caches as they are broken now if we abort
           txForMapping.clear()
           proposalsForTx.clear()
-          // TODO(#11255) reset authorization state too
+          // TODO(#14064) reset authorization state too
           validatedTx
         }: Lft,
       ): EitherT[Future, Lft, Unit]
@@ -118,7 +118,7 @@ class TopologyStateProcessorX(
           mappingRemoves,
           txRemoves,
           validatedTx,
-          immediatleyExpiredValidatedTx,
+          immediatelyExpiredValidatedTx,
         )
       )
     } yield validatedTx
@@ -130,7 +130,6 @@ class TopologyStateProcessorX(
       success => {
         logger.info(
           s"Persisted topology transactions ($sequenced, $effective):\n" + success
-            .map(_.transaction)
             .mkString(
               ",\n"
             )
@@ -213,7 +212,7 @@ class TopologyStateProcessorX(
     // the signatures to be sufficient
     // if the tx is a proposal but has enough signatures, emit log message
     // that it is now fully authorized and counts as state now
-    // TODO(#11255) @gerolf: have fun
+    // TODO(#12390) @gerolf: have fun
     //  - check that signatures are correct
     //  - check whether the keys are allowed to sign the tx
     //  - check if there are enough signatures
@@ -221,7 +220,7 @@ class TopologyStateProcessorX(
       SignedTopologyTransactionX(
         current.transaction,
         current.signatures,
-        isProposal = false, // TODO(#11255) only set to false if it is authorized
+        isProposal = false, // TODO(#12390) only set to false if it is authorized
       )(current.representativeProtocolVersion)
     )
   }
@@ -231,7 +230,7 @@ class TopologyStateProcessorX(
       current: GenericSignedTopologyTransactionX,
   ): (Boolean, GenericSignedTopologyTransactionX) = previous match {
     case Some(value) if value.transaction.hash == current.transaction.hash =>
-      // TODO(#11255) deduplicate if no new signatures are being added
+      // TODO(#12390) deduplicate if no new signatures are being added
       // => DuplicateTransaction -> reject or ignore
       (true, value.addSignatures(current.signatures.toSeq))
     case _ => (false, current)
@@ -260,7 +259,7 @@ class TopologyStateProcessorX(
     // first, merge a pending proposal with this transaction. we do this as it might
     // subsequently activate the given transaction
     val txB = fetchPendingProposalAndMerge(txA)
-    // TODO(#11255) add a check here for consistency. these checks should reject on the mediator / topology
+    // TODO(#12390) add a check here for consistency. these checks should reject on the mediator / topology
     //   manager, but only warn on the processor.
     //   things we need to catch are:
     //     - a party to participant mapping mentioning a participant who is not on the domain
@@ -271,7 +270,7 @@ class TopologyStateProcessorX(
       // we check if the transaction is properly authorized given the current topology state
       // if it is a proposal, then we demand that all signatures are appropriate (but
       // not necessarily sufficient)
-      // TODO(#11255) emit appropriate log message
+      // TODO(#12390) emit appropriate log message
       txC <- transactionIsAuthorized(last, txB, expectFullAuthorization).left.map(
         TopologyTransactionRejection.Other(_)
       )
@@ -286,7 +285,7 @@ class TopologyStateProcessorX(
     ret match {
       case Right(value) => ValidatedTopologyTransactionX(value, None)
       case Left(rejectionReason) =>
-        // TODO(#11255) emit appropriate log message
+        // TODO(#12390) emit appropriate log message
         ValidatedTopologyTransactionX(txA, Some(rejectionReason))
     }
   }
@@ -299,8 +298,12 @@ class TopologyStateProcessorX(
     val finalTx = tx.currentTx
     // UPDATE tx SET valid_until = effective WHERE storeId = XYZ
     //    AND valid_until is NULL and valid_from < effective
-    // if this is a proposal, we only delete the "previously existing proposal"
-    if (finalTx.isProposal) {
+
+    if (tx.rejection.get().nonEmpty) {
+      // if the transaction has been rejected, we don't actually expire any proposals or currently valid transactions
+      (removeMappings, removeTxs)
+    } else if (finalTx.isProposal) {
+      // if this is a proposal, we only delete the "previously existing proposal"
       // AND ((tx_hash = ..))
       val txHash = finalTx.transaction.hash
       proposalsForTx.put(txHash, tx).foreach { previous =>
@@ -337,7 +340,7 @@ class TopologyStateProcessorX(
             }
           )
         )
-      // TODO(#11255) if this is a removal of a certificate, compute cascading deletes
+      // TODO(#12390) if this is a removal of a certificate, compute cascading deletes
       //   if boolean flag is set, then abort, otherwise notify
       //   rules: if a namespace delegation is a root delegation, it won't be affected by the
       //          cascading deletion of its authorizer. this will allow us to roll namespace certs

@@ -114,13 +114,6 @@ class ParticipantTopologyManager(
         )
     )
 
-  // function to support sequential reading from identity store
-  def sequentialStoreRead(run: => Future[Unit], description: String)(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] = {
-    sequentialQueue.execute(run, description)
-  }
-
   override protected def wrapError(error: TopologyManagerError)(implicit
       traceContext: TraceContext
   ): ParticipantTopologyManagerError =

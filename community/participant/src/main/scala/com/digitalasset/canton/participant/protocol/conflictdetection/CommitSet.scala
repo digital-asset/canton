@@ -40,9 +40,6 @@ final case class CommitSet(
     transferIns: Map[LfContractId, WithContractHash[TransferInCommit]],
     keyUpdates: Map[LfGlobalKey, ContractKeyJournal.Status],
 ) extends PrettyPrinting {
-  // In a request by a malicious submitter,
-  // creations may overlap with transferIns because transfer-in requests can be batched with a confirmation request.
-  // A transfer-out request cannot be batched with a confirmation request, though.
   requireDisjoint(transferOuts.keySet -> "Transfer-outs", archivals.keySet -> "archivals")
   requireDisjoint(transferIns.keySet -> "Transfer-ins", creations.keySet -> "creations")
 

@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.topology
 import akka.stream.Materializer
 import cats.data.EitherT
 import cats.syntax.functor.*
-import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
@@ -39,19 +38,12 @@ import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerClie
 import com.digitalasset.canton.sequencing.protocol.Batch
 import com.digitalasset.canton.sequencing.{EnvelopeHandler, SequencerConnections}
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId, TopologyStoreX}
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.*
-import com.digitalasset.canton.topology.{
-  DomainId,
-  ParticipantId,
-  SequencerId,
-  TopologyManagerObserver,
-  TopologyManagerX,
-  *,
-}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.*
@@ -374,13 +366,13 @@ class ParticipantTopologyDispatcherX(
               targetDomains = Seq.empty,
             ),
             serial = None,
-            // TODO(#11255) auto-determine signing keys
+            // TODO(#12390) auto-determine signing keys
             signingKeys = Seq(participantId.uid.namespace.fingerprint),
             protocolVersion = state.protocolVersion,
             expectFullAuthorization = true,
             force = false,
           )
-          // TODO(#11255) improve error handling
+          // TODO(#14048) improve error handling
           .leftMap(_.cause)
       ).map(_ => ())
     // check if cert already exists
@@ -439,14 +431,10 @@ class ParticipantTopologyDispatcherX(
     val domainLoggerFactory = loggerFactory.append("domainId", domainId.toString)
     new ParticipantTopologyDispatcherHandle {
       val handle = new SequencerBasedRegisterTopologyTransactionHandleX(
-        (traceContext, env) =>
-          sequencerClient.sendAsync(
-            Batch(List(env), protocolVersion)
-          )(traceContext),
+        sequencerClient,
         domainId,
         participantId,
-        participantId,
-        clock.some,
+        clock,
         config.topologyX,
         protocolVersion,
         timeouts,

@@ -67,6 +67,7 @@ class TransactionProcessor(
     override protected val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
     skipRecipientsCheck: Boolean,
+    enableContractUpgrading: Boolean,
 )(implicit val ec: ExecutionContext)
     extends ProtocolProcessor[
       TransactionProcessingSteps.SubmissionParam,
@@ -89,6 +90,7 @@ class TransactionProcessor(
           damle,
           confirmationRequestFactory.transactionTreeFactory,
           staticDomainParameters.protocolVersion,
+          enableContractUpgrading,
           loggerFactory,
         ),
         staticDomainParameters,
@@ -97,7 +99,7 @@ class TransactionProcessor(
         metrics,
         new SerializableContractAuthenticatorImpl(new UnicumGenerator(crypto.pureCrypto)),
         new AuthenticationValidator(),
-        new AuthorizationValidator(participantId),
+        new AuthorizationValidator(participantId, enableContractUpgrading),
         new InternalConsistencyChecker(
           staticDomainParameters.uniqueContractKeys,
           staticDomainParameters.protocolVersion,

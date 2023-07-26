@@ -3,5 +3,5 @@
 
 package com.digitalasset.canton.topology
 
-// TODO(#11255) delete class, it's anyway just a UID
+// TODO(#14048) delete class, it's anyway just a UID
 final case class NodeId(identity: UniqueIdentifier)

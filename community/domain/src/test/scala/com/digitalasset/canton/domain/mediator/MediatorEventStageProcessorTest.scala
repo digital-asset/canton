@@ -89,8 +89,6 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
       state,
       domainSyncCryptoApi,
       identityClientEventHandler,
-      None,
-      None,
       (requestId, events, _tc) => {
         receivedEvents.append((requestId, events))
         HandlerResult.done

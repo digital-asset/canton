@@ -163,7 +163,7 @@ object MerkleSeq
       ),
     ] {
 
-  override protected def name: String = "MerkleSeq"
+  override def name: String = "MerkleSeq"
 
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
@@ -425,7 +425,7 @@ object MerkleSeq
         // The function in the second part of the context is the deserializer for unblinded nodes
         (HashOps, ByteString => ParsingResult[MerkleTree[VersionedMerkleTree[_]]]),
       ] {
-    override protected val name: String = "MerkleSeqElement"
+    override val name: String = "MerkleSeqElement"
 
     def seqOf[M <: VersionedMerkleTree[_]](
         elementTree: MerkleTree[MerkleSeqElement[M]]

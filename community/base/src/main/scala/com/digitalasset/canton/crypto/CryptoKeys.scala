@@ -112,7 +112,7 @@ trait CryptoKeyPair[+PK <: PublicKey, +SK <: PrivateKey]
 
 object CryptoKeyPair extends HasVersionedMessageCompanion[CryptoKeyPair[PublicKey, PrivateKey]] {
 
-  override protected def name: String = "crypto key pair"
+  override def name: String = "crypto key pair"
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
@@ -177,8 +177,11 @@ object PublicKey {
 
 }
 
-final case class KeyName(protected val str: String300) extends LengthLimitedStringWrapper {
+final case class KeyName(protected val str: String300)
+    extends LengthLimitedStringWrapper
+    with PrettyPrinting {
   def emptyStringAsNone: Option[KeyName] = if (str.unwrap.isEmpty) None else Some(this)
+  override def pretty: Pretty[KeyName] = prettyOfClass(unnamedParam(_.str.unwrap.unquoted))
 }
 object KeyName extends LengthLimitedStringWrapperCompanion[String300, KeyName] {
   override def instanceName: String = "KeyName"
@@ -207,7 +210,7 @@ trait PublicKeyWithName
 
 object PublicKeyWithName extends HasVersionedMessageCompanion[PublicKeyWithName] {
 
-  override protected def name: String = "PublicKeyWithName"
+  override def name: String = "PublicKeyWithName"
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(

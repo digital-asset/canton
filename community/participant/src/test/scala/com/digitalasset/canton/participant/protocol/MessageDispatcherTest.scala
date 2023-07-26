@@ -42,24 +42,11 @@ import com.digitalasset.canton.sequencing.{
 }
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.time.TimeProof
-import com.digitalasset.canton.topology.{
-  DomainId,
-  MediatorId,
-  MediatorRef,
-  ParticipantId,
-  TestingTopology,
-  UniqueIdentifier,
-}
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.Traced
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
-import com.digitalasset.canton.version.{
-  HasProtocolVersionedWrapperCompanion,
-  HasVersionedToByteString,
-  ProtoVersion,
-  ProtocolVersion,
-  RepresentativeProtocolVersion,
-}
+import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{
   BaseTest,
   DiscardOps,

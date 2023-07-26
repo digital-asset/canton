@@ -166,5 +166,5 @@ object TransferOutMediatorMessage
       )
     } yield TransferOutMediatorMessage(tree)
 
-  override protected def name: String = "TransferOutMediatorMessage"
+  override def name: String = "TransferOutMediatorMessage"
 }

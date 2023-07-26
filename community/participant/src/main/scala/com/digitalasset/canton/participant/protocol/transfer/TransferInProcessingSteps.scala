@@ -35,6 +35,7 @@ import com.digitalasset.canton.participant.protocol.{
   ProcessingSteps,
   ProtocolProcessor,
 }
+import com.digitalasset.canton.participant.store.ActiveContractStore.Archived
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, TimestampedEvent}
 import com.digitalasset.canton.participant.util.DAMLe
@@ -47,7 +48,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{
   LfPartyId,
@@ -307,11 +307,12 @@ private[transfer] class TransferInProcessingSteps(
         .contains(participantId.adminParty.toLf)
 
       contractIdS = Set(contractId)
-      contractCheck = ActivenessCheck(
+      contractCheck = ActivenessCheck.tryCreate(
         checkFresh = Set.empty,
         checkFree = contractIdS,
         checkActive = Set.empty,
         lock = contractIdS,
+        needPriorState = Set.empty,
       )
       activenessSet = ActivenessSet(
         contracts = contractCheck,
@@ -420,11 +421,11 @@ private[transfer] class TransferInProcessingSteps(
               LocalApprove(targetProtocolVersion.v)
             else if (contractResult.notFree.nonEmpty) {
               contractResult.notFree.toSeq match {
-                case Seq(coid, archived) =>
+                case Seq((coid, Archived)) =>
                   LocalReject.TransferInRejects.ContractAlreadyArchived.Reject(show"coid=$coid")(
                     localVerdictProtocolVersion
                   )
-                case Seq((coid, state)) =>
+                case Seq((coid, _state)) =>
                   LocalReject.TransferInRejects.ContractAlreadyActive.Reject(show"coid=$coid")(
                     localVerdictProtocolVersion
                   )
@@ -685,9 +686,16 @@ object TransferInProcessingSteps {
     val viewSalt = Salt.tryDeriveSalt(seed, 1, pureCrypto)
 
     // if transfer is initiated from a domain where the transfers counters are not yet defined, we set it to 0
-    // TODO(#12373) Adapt when releasing BFT
+    // and if we transfer to a domain that does not support transfer counters, we omit it.
+    // This may cause ACS consistency violations if invariant checks are enabled
+    // TODO(#13249) Decide which transfers we want to allow.
     val transferCounter =
-      if (sourceProtocolVersion.v < ProtocolVersion.dev) Some(TransferCounter.Genesis)
+      if (
+        sourceProtocolVersion.v < TransferCommonData.minimumPvForTransferCounter &&
+        targetProtocolVersion.v >= TransferCommonData.minimumPvForTransferCounter
+      )
+        Some(TransferCounter.Genesis)
+      else if (targetProtocolVersion.v < TransferCommonData.minimumPvForTransferCounter) None
       else transferCounterO
 
     for {
@@ -698,19 +706,21 @@ object TransferInProcessingSteps {
           targetMediator,
           stakeholders,
           transferInUuid,
-          transferCounter,
           targetProtocolVersion,
         )
         .leftMap(reason => InvalidTransferCommonData(reason))
-      view = TransferInView.create(pureCrypto)(
-        viewSalt,
-        submitterMetadata,
-        contract,
-        creatingTransactionId,
-        transferOutResult,
-        sourceProtocolVersion,
-        targetProtocolVersion,
-      )
+      view <- TransferInView
+        .create(pureCrypto)(
+          viewSalt,
+          submitterMetadata,
+          contract,
+          creatingTransactionId,
+          transferOutResult,
+          sourceProtocolVersion,
+          targetProtocolVersion,
+          transferCounter,
+        )
+        .leftMap(reason => InvalidTransferView(reason))
       tree = TransferInViewTree(commonData, view)(pureCrypto)
     } yield FullTransferInTree(tree)
   }

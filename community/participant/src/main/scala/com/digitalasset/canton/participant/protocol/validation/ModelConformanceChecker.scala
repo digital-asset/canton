@@ -82,6 +82,7 @@ class ModelConformanceChecker(
         TraceContext,
     ) => EitherT[Future, ContractValidationFailure, Unit],
     val transactionTreeFactory: TransactionTreeFactory,
+    val enableContractUpgrading: Boolean,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging {
@@ -194,7 +195,8 @@ class ModelConformanceChecker(
       traceContext: TraceContext
   ): EitherT[Future, Error, WithRollbackScope[WellFormedTransaction[WithSuffixes]]] = {
     val viewParticipantData = view.viewParticipantData.tryUnwrap
-    val RootAction(cmd, authorizers, failed) = viewParticipantData.rootAction
+    val RootAction(cmd, authorizers, failed) =
+      viewParticipantData.rootAction(enableContractUpgrading)
     val rbContext = viewParticipantData.rollbackContext
     val seed = viewParticipantData.actionDescription.seedOption
     for {
@@ -293,6 +295,7 @@ object ModelConformanceChecker {
       damle: DAMLe,
       transactionTreeFactory: TransactionTreeFactory,
       protocolVersion: ProtocolVersion,
+      enableContractUpgrading: Boolean,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): ModelConformanceChecker = {
     def reinterpret(
@@ -323,6 +326,7 @@ object ModelConformanceChecker {
       if (protocolVersion >= ProtocolVersion.v5) validateSerializedContract(damle)
       else noSerializedContractValidation,
       transactionTreeFactory,
+      enableContractUpgrading,
       loggerFactory,
     )
   }

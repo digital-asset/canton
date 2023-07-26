@@ -13,6 +13,7 @@ import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactoryImpl
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.*
 import com.digitalasset.canton.participant.store.ContractLookup
+import com.digitalasset.canton.protocol.ExampleTransactionFactory.lfHash
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
@@ -38,16 +39,16 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
       context: TraceContext,
   ): EitherT[Future, ContractValidationFailure, Unit] = EitherT.pure(())
 
-  def reinterpret(example: ExampleTransaction)(
-      contracts: ContractLookup,
-      submitters: Set[LfPartyId],
+  def reinterpret(example: ExampleTransaction, enableContractUpgrading: Boolean = false)(
+      _contracts: ContractLookup,
+      _submitters: Set[LfPartyId],
       cmd: LfCommand,
       ledgerTime: CantonTimestamp,
       submissionTime: CantonTimestamp,
       rootSeed: Option[LfHash],
-      inRollback: Boolean,
-      viewHash: ViewHash,
-      traceContext: TraceContext,
+      _inRollback: Boolean,
+      _viewHash: ViewHash,
+      _traceContext: TraceContext,
   ): EitherT[Future, DAMLeError, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver)] = {
 
     ledgerTime shouldEqual factory.ledgerTime
@@ -55,7 +56,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
 
     val (_viewTree, (reinterpretedTx, metadata, keyResolver), _witnesses) =
       example.reinterpretedSubtransactions.find { case (viewTree, (tx, md, keyResolver), _) =>
-        viewTree.viewParticipantData.rootAction.command == cmd &&
+        viewTree.viewParticipantData.rootAction(enableContractUpgrading).command == cmd &&
         // Commands are otherwise not sufficiently unique (whereas with nodes, we can produce unique nodes, e.g.
         // based on LfNodeCreate.agreementText not part of LfCreateCommand.
         rootSeed == md.seeds.get(tx.roots(0))
@@ -75,7 +76,6 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
       factory.domainId,
       testedProtocolVersion,
       factory.cryptoOps,
-      ExampleTransactionFactory.defaultPackageInfoService,
       uniqueContractKeys = true,
       loggerFactory,
     )
@@ -107,6 +107,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
             reinterpret(example),
             validateContractOk,
             transactionTreeFactory,
+            enableContractUpgrading = false,
             loggerFactory,
           )
 
@@ -154,6 +155,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
         (_, _, _, _, _, _, _, _, _) => throw new UnsupportedOperationException(),
         validateContractOk,
         transactionTreeFactory,
+        enableContractUpgrading = false,
         loggerFactory,
       )
 
@@ -179,6 +181,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
           ),
         validateContractOk,
         transactionTreeFactory,
+        enableContractUpgrading = false,
         loggerFactory,
       )
       val example = factory.MultipleRootsAndViewNestings
@@ -193,6 +196,29 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
           )("reinterpretation fails")
         } yield failure.error shouldBe error
       }
+    }
+
+    "contract upgrading is enabled" should {
+
+      val example: factory.UpgradedSingleExercise = factory.UpgradedSingleExercise(lfHash(0))
+
+      "the choice package may differ from the contract package" in {
+
+        val sut =
+          new ModelConformanceChecker(
+            reinterpret(example, enableContractUpgrading = true),
+            validateContractOk,
+            transactionTreeFactory,
+            enableContractUpgrading = true,
+            loggerFactory,
+          )
+
+        valueOrFail(
+          check(sut, viewsWithNoInputKeys(example.rootTransactionViewTrees))
+        )(s"failed to find upgraded contract").map(_ => succeed)
+
+      }
+
     }
 
     "differences in the reconstructed transaction must yield an error" should {
@@ -215,6 +241,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
             ),
           validateContractOk,
           transactionTreeFactory,
+          enableContractUpgrading = false,
           loggerFactory,
         )
         for {

@@ -40,7 +40,7 @@ class TransactionProcessingStepsTest extends AsyncWordSpec with BaseTest {
       behaviors(_)
     },
     new AuthenticationValidator(),
-    new AuthorizationValidator(participantId),
+    new AuthorizationValidator(participantId, enableContractUpgrading = false),
     new InternalConsistencyChecker(
       defaultStaticDomainParameters.uniqueContractKeys,
       defaultStaticDomainParameters.protocolVersion,

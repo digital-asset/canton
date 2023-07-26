@@ -89,7 +89,7 @@ object CausalityMessage extends HasProtocolVersionedCompanion[CausalityMessage] 
     )(protocolVersionRepresentativeFor(ProtoVersion(0)))
   }
 
-  override protected def name: String = "CausalityMessage"
+  override def name: String = "CausalityMessage"
 }
 
 /** A vector clock represents the causal constraints that must be respected for a party at a certain point in time.

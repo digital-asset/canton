@@ -16,24 +16,12 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages
 import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
+import com.digitalasset.canton.topology.TopologyManagerError.TopologyManagerAlarm
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.client.{
-  DomainTopologyClient,
-  StoreBasedDomainTopologyClient,
-  StoreBasedTopologySnapshot,
-}
-import com.digitalasset.canton.topology.processing.{
-  EffectiveTime,
-  SequencedTime,
-  SnapshotAuthorizationValidator,
-}
+import com.digitalasset.canton.topology.client.{DomainTopologyClient, StoreBasedTopologySnapshot}
+import com.digitalasset.canton.topology.processing.SnapshotAuthorizationValidator
+import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
-import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
-import com.digitalasset.canton.topology.store.{
-  TopologyStore,
-  TopologyStoreId,
-  ValidatedTopologyTransaction,
-}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
@@ -85,6 +73,11 @@ private[domain] object RequestProcessingStrategy {
       extends RequestProcessingStrategy
       with NamedLogging {
 
+    private val allowedOnboardingSet =
+      TopologyStore.initialParticipantDispatchingSet + DomainTopologyTransactionType.NamespaceDelegation + DomainTopologyTransactionType.IdentifierDelegation
+    private val allowedSet =
+      allowedOnboardingSet + DomainTopologyTransactionType.PackageUse + DomainTopologyTransactionType.PartyToParticipant
+
     protected def awaitParticipantIsActive(participantId: ParticipantId)(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[Boolean] =
@@ -92,15 +85,8 @@ private[domain] object RequestProcessingStrategy {
 
     private val authorizedSnapshot = makeSnapshot(authorizedStore)
 
-    private def makeSnapshot(store: TopologyStore[TopologyStoreId]): StoreBasedTopologySnapshot =
-      new StoreBasedTopologySnapshot(
-        CantonTimestamp.MaxValue, // we use a max value here, as this will give us the "head snapshot" transactions (valid_from < t && until.isNone)
-        store,
-        Map(),
-        useStateTxs = false,
-        packageDependencies = StoreBasedDomainTopologyClient.NoPackageDependencies,
-        loggerFactory,
-      )
+    private def makeSnapshot(store: TopologyStore[AuthorizedStore]): StoreBasedTopologySnapshot =
+      StoreBasedTopologySnapshot.headstateOfAuthorizedStore(store, loggerFactory)
 
     private def toResult[T](
         eitherT: EitherT[FutureUnlessShutdown, DomainTopologyManagerError, T]
@@ -126,11 +112,40 @@ private[domain] object RequestProcessingStrategy {
     )(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[List[RegisterTopologyTransactionResponseResult.State]] = {
-      def process(transaction: SignedTopologyTransaction[TopologyChangeOp]) =
-        FutureUnlessShutdown.outcomeF(authorizedStore.exists(transaction)).flatMap {
-          case false => toResult(hooks.addFromRequest(transaction))
-          case true => FutureUnlessShutdown.pure(Duplicate)
+      def permitted(transaction: SignedTopologyTransaction[TopologyChangeOp]): Boolean = {
+        if (!allowedSet.contains(transaction.transaction.element.mapping.dbType)) {
+          TopologyManagerAlarm
+            .Warn(
+              s"Rejecting requested change by participant of not-permitted type: ${transaction.transaction} "
+            )
+            .report()
+          false
+        } else {
+          transaction.transaction.element.mapping match {
+            case OwnerToKeyMapping(owner, _)
+                if owner.uid == domainId.uid &&
+                  owner.code != ParticipantId.Code =>
+              TopologyManagerAlarm
+                .Warn(
+                  s"Rejecting requested change by participant of domain key: ${transaction.transaction} "
+                )
+                .report()
+              false
+            case _ => true
+          }
         }
+      }
+      def process(transaction: SignedTopologyTransaction[TopologyChangeOp]) = {
+        if (!permitted(transaction)) {
+          FutureUnlessShutdown.pure(Failed)
+        } else {
+          FutureUnlessShutdown.outcomeF(authorizedStore.exists(transaction)).flatMap {
+            case false => toResult(hooks.addFromRequest(transaction))
+            case true => FutureUnlessShutdown.pure(Duplicate)
+          }
+        }
+      }
+
       for {
         res <- MonadUtil.sequentialTraverse(transactions)(process)
       } yield res.toList
@@ -176,13 +191,11 @@ private[domain] object RequestProcessingStrategy {
     ): EitherT[Future, DomainTopologyManagerError, Unit] = if (protocolVersion < ProtocolVersion.v3)
       EitherT.pure(())
     else {
-      val allowedSet =
-        TopologyStore.initialParticipantDispatchingSet + DomainTopologyTransactionType.NamespaceDelegation + DomainTopologyTransactionType.IdentifierDelegation
       EitherT
         .fromEither[Future](transactions.traverse { tx =>
           for {
             _ <- Either.cond(
-              allowedSet.contains(tx.transaction.element.mapping.dbType),
+              allowedOnboardingSet.contains(tx.transaction.element.mapping.dbType),
               (),
               s"Transaction type of ${tx.transaction.element.mapping} must not be sent as part of an on-boarding request",
             )
@@ -216,60 +229,15 @@ private[domain] object RequestProcessingStrategy {
         transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
     )(implicit
         traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, DomainTopologyManagerError, Unit] = {
-
-      val store =
-        new InMemoryTopologyStore(
-          AuthorizedStore,
-          loggerFactory,
-          timeouts,
-          futureSupervisor,
-        )
-      val validator =
-        new SnapshotAuthorizationValidator(
-          CantonTimestamp.MaxValue,
-          store,
-          timeouts,
-          loggerFactory,
-          futureSupervisor,
-        )
-
-      def requiresReset(tx: SignedTopologyTransaction[TopologyChangeOp]): Boolean =
-        tx.transaction.element.mapping.dbType == DomainTopologyTransactionType.NamespaceDelegation ||
-          tx.transaction.element.mapping.dbType == DomainTopologyTransactionType.IdentifierDelegation
-
-      // check that all transactions are authorized
-      EitherT(
-        MonadUtil.foldLeftM(
-          Right(()): Either[DomainTopologyManagerError, Unit],
-          transactions.zipWithIndex,
-        ) {
-          case (Right(_), (tx, idx)) =>
-            val ts = CantonTimestamp.Epoch.plusMillis(idx.toLong)
-            // incrementally add it to the store and check the validation
-            for {
-              isValidated <- validator.authorizedBy(tx).map(_.nonEmpty)
-              _ <- FutureUnlessShutdown.outcomeF(
-                store.append(
-                  SequencedTime(ts),
-                  EffectiveTime(ts),
-                  Seq(ValidatedTopologyTransaction(tx, None)),
-                )
-              )
-              // if the transaction was a namespace delegation, drop it
-              _ <- if (requiresReset(tx)) validator.reset() else FutureUnlessShutdown.unit
-            } yield Either.cond(
-              isValidated,
-              (),
-              DomainTopologyManagerError.InvalidOrFaultyOnboardingRequest.Failure(
-                participantId,
-                s"Unauthorized topology transaction in onboarding request: $tx",
-              ),
-            )
-          case (acc, _) => FutureUnlessShutdown.pure(acc)
+    ): EitherT[FutureUnlessShutdown, DomainTopologyManagerError, TopologyStore[AuthorizedStore]] =
+      SnapshotAuthorizationValidator
+        .validateTransactions(timeouts, futureSupervisor, loggerFactory)(transactions)
+        .leftMap { err =>
+          DomainTopologyManagerError.InvalidOrFaultyOnboardingRequest.Failure(
+            participantId,
+            err,
+          )
         }
-      )
-    }
 
     def processOnboardingRequest(
         participant: ParticipantId,
@@ -277,21 +245,7 @@ private[domain] object RequestProcessingStrategy {
     )(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[List[RegisterTopologyTransactionResponseResult.State]] = {
-      // create a temporary store so we can use some convenience functions
-      val store = new InMemoryTopologyStore(
-        TopologyStoreId.AuthorizedStore,
-        loggerFactory,
-        timeouts,
-        futureSupervisor,
-      )
-      val ts = CantonTimestamp.Epoch
-      val initF = store.append(
-        SequencedTime(ts),
-        EffectiveTime(ts),
-        transactions.map(ValidatedTopologyTransaction(_, None)),
-      )
 
-      val snapshot = makeSnapshot(store)
       type S = SignedTopologyTransaction[TopologyChangeOp]
 
       def extract(items: Seq[S])(matcher: TopologyMapping => Boolean) =
@@ -320,9 +274,9 @@ private[domain] object RequestProcessingStrategy {
       //   - plus all delegations
       // if domain is open, then issue domain trust certificate,
       val ret = for {
-        _ <- EitherT.right(initF).mapK(FutureUnlessShutdown.outcomeK)
         // check that all transactions are authorized (note, they could still be out of order)
-        _ <- validateAuthorizationOfOnboardingTransactions(participant, transactions)
+        store <- validateAuthorizationOfOnboardingTransactions(participant, transactions)
+        snapshot = makeSnapshot(store)
         // check that we only got the transactions we expected
         _ <- validateOnlyOnboardingTransactions(participant, transactions).mapK(
           FutureUnlessShutdown.outcomeK
@@ -358,14 +312,14 @@ private[domain] object RequestProcessingStrategy {
           ),
         )
         res <- EitherT.right(addTransactions(reduced1.toList))
-        // Finally, add the participant state (keys need to be pushed before the participant is active)
-        rest <- EitherT
-          .right(addTransactions(participantStates.toList))
         // Activate the participant
         _ <-
           if (!domainTrustsParticipant)
             hooks.issueParticipantStateForDomain(participant)
           else EitherT.rightT[FutureUnlessShutdown, DomainTopologyManagerError](())
+        // Finally, add the participant state (keys need to be pushed before the participant is active)
+        rest <- EitherT
+          .right(addTransactions(participantStates.toList))
         // wait until the participant has become active on the domain. we do that such that this
         // request doesn't terminate before the participant can proceed with subscribing.
         // on shutdown, we don't wait, as the participant will subsequently fail to subscribe anyway

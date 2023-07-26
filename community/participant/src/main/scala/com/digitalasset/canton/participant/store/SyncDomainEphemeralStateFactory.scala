@@ -490,8 +490,10 @@ object SyncDomainEphemeralStateFactory {
           )
         )
         .valueOr(err => throw err.asThrowable)
-      // I am guessing that I also need to do something here for the SubmissionTracker store,
-      // but I have not yet studied this in details. Do I need to also handle a request counter?
+      _ = logger.debug("Deleting registered fresh requests")
+      _ <- persistentState.submissionTrackerStore.deleteSince(
+        processingStartingPoint.prenextTimestamp.immediateSuccessor
+      )
     } yield ()
   }
 }

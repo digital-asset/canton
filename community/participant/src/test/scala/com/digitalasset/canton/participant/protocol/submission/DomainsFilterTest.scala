@@ -9,9 +9,8 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.protocol.submission.DomainSelectionFixture.Transactions.ExerciseByInterface
 import com.digitalasset.canton.participant.protocol.submission.DomainSelectionFixture.*
 import com.digitalasset.canton.participant.protocol.submission.DomainsFilterTest.*
-import com.digitalasset.canton.protocol.{ExampleTransactionFactory, LfVersionedTransaction}
+import com.digitalasset.canton.protocol.LfVersionedTransaction
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPackageId, LfPartyId}
 import org.scalatest.wordspec.AnyWordSpec
@@ -44,7 +43,7 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
         filter.split(loggerFactory, topology, correctPackages).futureValue
 
       unusableDomains shouldBe List(
-        DomainUsabilityChecker.MissingActiveParticipant(
+        UsableDomain.MissingActiveParticipant(
           DefaultTestIdentities.domainId,
           Set(partyNotConnected),
         )
@@ -61,9 +60,9 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
       usableDomains shouldBe empty
 
       unusableDomains shouldBe List(
-        DomainUsabilityChecker.UnknownPackage(
+        UsableDomain.UnknownPackage(
           DefaultTestIdentities.domainId,
-          Set(
+          List(
             unknownPackageFor(submitterParticipantId, missingPackage),
             unknownPackageFor(observerParticipantId, missingPackage),
           ),
@@ -84,7 +83,7 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
           .split(loggerFactory, correctTopology, Transactions.Create.correctPackages)
           .futureValue
       unusableDomains shouldBe List(
-        DomainUsabilityChecker.DomainNotSupportingMinimumProtocolVersion(
+        UsableDomain.UnsupportedMinimumProtocolVersion(
           domainId = DefaultTestIdentities.domainId,
           currentPV = currentDomainPV,
           requiredPV = ProtocolVersion.v4,
@@ -112,9 +111,9 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
 
     "reject domains when packages are missing" in {
       val testInstances = Seq(
-        Set(defaultPackageId),
-        Set(Transactions.ExerciseByInterface.interfacePackageId),
-        Set(defaultPackageId, Transactions.ExerciseByInterface.interfacePackageId),
+        List(defaultPackageId),
+        List(Transactions.ExerciseByInterface.interfacePackageId),
+        List(defaultPackageId, Transactions.ExerciseByInterface.interfacePackageId),
       )
 
       forAll(testInstances) { missingPackages =>
@@ -122,10 +121,9 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
 
         def unknownPackageFor(
             participantId: ParticipantId
-        ): Set[DomainUsabilityChecker.PackageUnknownTo] = missingPackages.map { missingPackage =>
-          DomainUsabilityChecker.PackageUnknownTo(
+        ): List[TransactionTreeFactory.PackageUnknownTo] = missingPackages.map { missingPackage =>
+          TransactionTreeFactory.PackageUnknownTo(
             missingPackage,
-            "package does not exist on local node",
             participantId,
           )
         }
@@ -135,7 +133,7 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
 
         usableDomains shouldBe empty
         unusableDomains shouldBe List(
-          DomainUsabilityChecker.UnknownPackage(
+          UsableDomain.UnknownPackage(
             DefaultTestIdentities.domainId,
             unknownPackageFor(submitterParticipantId) ++ unknownPackageFor(observerParticipantId),
           )
@@ -156,20 +154,17 @@ private[submission] object DomainsFilterTest {
         topology: Map[LfPartyId, List[ParticipantId]],
         packages: Seq[LfPackageId] = Seq(),
     )(implicit
-        ec: ExecutionContext,
-        traceContext: TraceContext,
-    ): Future[(List[DomainUsabilityChecker.DomainNotUsedReason], List[DomainId])] = {
+        ec: ExecutionContext
+    ): Future[(List[UsableDomain.DomainNotUsedReason], List[DomainId])] = {
       val domains = List(
         (
           DefaultTestIdentities.domainId,
           domainProtocolVersion,
           SimpleTopology.defaultTestingIdentityFactory(topology, packages),
-          ExampleTransactionFactory.defaultPackageInfoService,
         )
       )
 
       DomainsFilter(
-        localParticipantId = SimpleTopology.submitterParticipantId,
         submittedTransaction = tx,
         domains = domains,
         loggerFactory = loggerFactory,
