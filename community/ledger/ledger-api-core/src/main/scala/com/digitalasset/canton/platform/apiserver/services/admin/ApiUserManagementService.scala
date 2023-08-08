@@ -24,6 +24,10 @@ import com.digitalasset.canton.ledger.api.domain.*
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.validation.FieldValidator
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.{
+  RequestValidationErrors,
+  UserManagementServiceErrors,
+}
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexPartyManagementService
 import com.digitalasset.canton.logging.LoggingContextUtil.createLoggingContext
 import com.digitalasset.canton.logging.LoggingContextWithTrace.withEnrichedLoggingContext
@@ -185,7 +189,7 @@ private[apiserver] final class ApiUserManagementService(
                 .contains(userUpdate.id) && userUpdate.isDeactivatedUpdateO.contains(true)
             ) {
               Future.failed(
-                LedgerApiErrors.RequestValidation.InvalidArgument
+                RequestValidationErrors.InvalidArgument
                   .Reject(
                     "Requesting user cannot self-deactivate"
                   )
@@ -279,7 +283,7 @@ private[apiserver] final class ApiUserManagementService(
         rawPageSize <- Either.cond(
           request.pageSize >= 0,
           request.pageSize,
-          LedgerApiErrors.RequestValidation.InvalidArgument
+          RequestValidationErrors.InvalidArgument
             .Reject("Max page size must be non-negative")
             .asGrpcError,
         )
@@ -439,7 +443,7 @@ private[apiserver] final class ApiUserManagementService(
     result match {
       case Left(e: update.UpdatePathError) =>
         Future.failed(
-          LedgerApiErrors.Admin.UserManagement.InvalidUpdateUserRequest
+          UserManagementServiceErrors.InvalidUpdateUserRequest
             .Reject(userId = userId, e.getReason)
             .asGrpcError
         )
@@ -501,7 +505,7 @@ private[apiserver] final class ApiUserManagementService(
       s"Provided parties have not been found in " +
         s"identity_provider_id=`${identityProviderId.toRequestString}`: [${unknownParties.mkString(",")}]."
     Future.failed(
-      LedgerApiErrors.RequestValidation.InvalidArgument
+      RequestValidationErrors.InvalidArgument
         .Reject(message)
         .asGrpcError
     )
@@ -519,7 +523,7 @@ private[apiserver] final class ApiUserManagementService(
           Future.unit
         else
           Future.failed(
-            LedgerApiErrors.RequestValidation.InvalidArgument
+            RequestValidationErrors.InvalidArgument
               .Reject(s"Provided identity_provider_id $id has not been found.")
               .asGrpcError
           )
@@ -553,7 +557,7 @@ private[apiserver] final class ApiUserManagementService(
 
       case proto.Right(proto.Right.Kind.Empty) =>
         Left(
-          LedgerApiErrors.RequestValidation.InvalidArgument
+          RequestValidationErrors.InvalidArgument
             .Reject(
               "unknown kind of right - check that the Ledger API version of the server is recent enough"
             )
@@ -648,7 +652,7 @@ object ApiUserManagementService {
   private def invalidPageToken(implicit
       errorLogger: ContextualizedErrorLogger
   ): StatusRuntimeException = {
-    LedgerApiErrors.RequestValidation.InvalidArgument
+    RequestValidationErrors.InvalidArgument
       .Reject("Invalid page token")
       .asGrpcError
   }

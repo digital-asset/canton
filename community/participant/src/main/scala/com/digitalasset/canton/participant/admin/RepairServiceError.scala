@@ -26,7 +26,7 @@ object RepairServiceError extends RepairServiceErrorGroup {
       ) {
     final case class Error(
         requestedProtocolVersion: ProtocolVersion,
-        supportedVersions: Seq[ProtocolVersion],
+        supportedVersions: Seq[ProtocolVersion] = ProtocolVersion.supported,
     )(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
@@ -84,6 +84,26 @@ object RepairServiceError extends RepairServiceErrorGroup {
         with RepairServiceError
   }
 
+  @Explanation(
+    "The ACS snapshot cannot be returned because it contains inconsistencies. This is likely due to the request happening concurrently with pruning."
+  )
+  @Resolution(
+    "Retry the operation"
+  )
+  object InconsistentAcsSnapshot
+      extends ErrorCode(
+        id = "INCONSISTENT_ACS_SNAPSHOT",
+        ErrorCategory.TransientServerFailure,
+      ) {
+    final case class Error(domainId: DomainId)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause =
+            s"The ACS snapshot for $domainId cannot be returned because it contains inconsistencies."
+        )
+        with RepairServiceError
+  }
+
   object InvalidArgument
       extends ErrorCode(
         id = "INVALID_ARGUMENT_REPAIR",
@@ -91,6 +111,23 @@ object RepairServiceError extends RepairServiceErrorGroup {
       ) {
     final case class Error(reason: String)(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(reason)
+        with RepairServiceError
+  }
+
+  @Explanation(
+    "An unexpected error occurred"
+  )
+  @Resolution(
+    "Retry the operation with a proper back-off strategy. Contact the operator if the error persists."
+  )
+  object UnexpectedError
+      extends ErrorCode(
+        id = "UNEXPECTED_ERROR_REPAIR",
+        ErrorCategory.TransientServerFailure,
+      ) {
+    final case class Error()(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(cause = "An unexpected error occurred")
         with RepairServiceError
   }
 }

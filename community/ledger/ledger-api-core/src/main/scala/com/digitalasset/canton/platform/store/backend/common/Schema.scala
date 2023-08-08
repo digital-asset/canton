@@ -143,6 +143,9 @@ private[backend] object AppendOnlySchema {
         ),
         "create_agreement_text" -> fieldStrategy.stringOptional(_ => _.create_agreement_text),
         "create_key_value" -> fieldStrategy.byteaOptional(_ => _.create_key_value),
+        "create_key_maintainers" -> fieldStrategy.intArrayOptional(stringInterning =>
+          _.create_key_maintainers.map(_.map(stringInterning.party.unsafe.internalize))
+        ),
         "create_key_hash" -> fieldStrategy.stringOptional(_ => _.create_key_hash),
         "event_sequential_id" -> fieldStrategy.bigint(_ => _.event_sequential_id),
         "create_argument_compression" -> fieldStrategy.smallintOptional(_ =>
@@ -267,6 +270,9 @@ private[backend] object AppendOnlySchema {
         ),
         "create_agreement_text" -> fieldStrategy.stringOptional(_ => _.create_agreement_text),
         "create_key_value" -> fieldStrategy.byteaOptional(_ => _.create_key_value),
+        "create_key_maintainers" -> fieldStrategy.intArrayOptional(stringInterning =>
+          _.create_key_maintainers.map(_.map(stringInterning.party.unsafe.internalize))
+        ),
         "create_key_hash" -> fieldStrategy.stringOptional(_ => _.create_key_hash),
         "create_argument_compression" -> fieldStrategy.smallintOptional(_ =>
           _.create_argument_compression

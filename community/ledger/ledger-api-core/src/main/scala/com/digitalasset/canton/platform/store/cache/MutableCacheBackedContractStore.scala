@@ -46,7 +46,16 @@ private[platform] class MutableCacheBackedContractStore(
     lookupContractStateValue(contractId)
       .map {
         case active: Active =>
-          v2.ContractState.Active(active.contract, active.createLedgerEffectiveTime)
+          v2.ContractState.Active(
+            contractInstance = active.contract,
+            ledgerEffectiveTime = active.createLedgerEffectiveTime,
+            stakeholders = active.stakeholders,
+            agreementText = active.agreementText,
+            signatories = active.signatories,
+            globalKey = active.globalKey,
+            maintainers = active.keyMaintainers,
+            driverMetadata = active.driverMetadata,
+          )
         case _: Archived => v2.ContractState.Archived
         case NotFound => v2.ContractState.NotFound
       }
@@ -109,7 +118,8 @@ private[platform] class MutableCacheBackedContractStore(
       loggingContext: LoggingContextWithTrace
   ): Future[Option[Contract]] =
     value match {
-      case Active(contract, stakeholders, _) if nonEmptyIntersection(stakeholders, readers) =>
+      case Active(contract, stakeholders, _, _, _, _, _, _)
+          if nonEmptyIntersection(stakeholders, readers) =>
         Future.successful(Some(contract))
       case Archived(stakeholders) if nonEmptyIntersection(stakeholders, readers) =>
         Future.successful(Option.empty)
@@ -130,7 +140,7 @@ private[platform] class MutableCacheBackedContractStore(
       loggingContext: LoggingContextWithTrace
   ): Future[Option[Contract]] =
     contractStateValue match {
-      case Active(contract, _, _) =>
+      case Active(contract, _, _, _, _, _, _, _) =>
         metrics.daml.execution.cache.resolveDivulgenceLookup.inc()
         contractsReader.lookupActiveContractWithCachedArgument(
           forParties,
@@ -148,8 +158,17 @@ private[platform] class MutableCacheBackedContractStore(
     }
 
   private val toContractCacheValue: Option[ContractState] => ContractStateValue = {
-    case Some(ActiveContract(contract, stakeholders, ledgerEffectiveTime)) =>
-      ContractStateValue.Active(contract, stakeholders, ledgerEffectiveTime)
+    case Some(active: ActiveContract) =>
+      ContractStateValue.Active(
+        contract = active.contract,
+        stakeholders = active.stakeholders,
+        createLedgerEffectiveTime = active.ledgerEffectiveTime,
+        agreementText = active.agreementText,
+        signatories = active.signatories,
+        globalKey = active.globalKey,
+        keyMaintainers = active.keyMaintainers,
+        driverMetadata = active.driverMetadata,
+      )
     case Some(ArchivedContract(stakeholders)) =>
       ContractStateValue.Archived(stakeholders)
     case None => ContractStateValue.NotFound

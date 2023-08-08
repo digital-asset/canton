@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol
 
 import cats.data.{EitherT, OptionT}
-import cats.syntax.alternative.*
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
@@ -21,7 +20,7 @@ import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors
 import com.digitalasset.canton.ledger.participant.state.v2.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -63,7 +62,6 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlar
 import com.digitalasset.canton.participant.sync.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessageError.IncompleteLightViewTree
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
@@ -143,8 +141,6 @@ class TransactionProcessingSteps(
   override type RequestType = ProcessingSteps.RequestType.Transaction
   override val requestType = ProcessingSteps.RequestType.Transaction
 
-  override type DecryptedView = TransactionViewTree
-
   override def pendingSubmissions(state: SyncDomainEphemeralState): Unit = ()
 
   override def requestKind: String = "Transaction"
@@ -200,7 +196,7 @@ class TransactionProcessingSteps(
     parameters.decisionTimeFor(requestTs).leftMap(DomainParametersError(parameters.domainId, _))
 
   override def getSubmissionDataForTracker(
-      views: Seq[DecryptedView]
+      views: Seq[FullView]
   ): Option[SubmissionTracker.SubmissionData] =
     views.map(_.tree.submitterMetadata.unwrap).collectFirst { case Right(meta) =>
       SubmissionTracker.SubmissionData(meta.submitterParticipant, meta.maxSequencingTimeO)
@@ -661,7 +657,7 @@ class TransactionProcessingSteps(
       def decryptViewWithRandomness(
           viewMessage: TransactionViewMessage,
           randomness: SecureRandomness,
-      ): EitherT[Future, DecryptionError, (LightTransactionViewTree, Option[Signature])] =
+      ): EitherT[Future, DecryptionError, (DecryptedView, Option[Signature])] =
         for {
           ltvt <- decryptTree(viewMessage, Some(randomness))
           _ <- EitherT.fromEither[Future](
@@ -676,7 +672,7 @@ class TransactionProcessingSteps(
       def decryptView(
           transactionViewEnvelope: OpenEnvelope[TransactionViewMessage]
       ): Future[
-        Either[DecryptionError, (WithRecipients[LightTransactionViewTree], Option[Signature])]
+        Either[DecryptionError, (WithRecipients[DecryptedView], Option[Signature])]
       ] = {
         for {
           _ <- extractRandomnessFromView(transactionViewEnvelope)
@@ -692,27 +688,13 @@ class TransactionProcessingSteps(
 
       val result = for {
         decryptionResult <- batch.toNEF.parTraverse(decryptView)
-      } yield {
-        val (decryptionErrors, viewsWithRecipientsAndSignatures) =
-          decryptionResult.forgetNE.separate
-
-        val (fullViewTrees, incompleteLightViewTreeErrors) =
-          fullViewTreesOf(pureCrypto, viewsWithRecipientsAndSignatures)
-
-        DecryptedViews(fullViewTrees, decryptionErrors ++ incompleteLightViewTreeErrors)
-      }
+      } yield DecryptedViews(decryptionResult)
       EitherT.right(result)
     }
 
-  private def fullViewTreesOf(
-      hashOps: HashOps,
-      viewsWithRecipientsAndSignatures: Seq[
-        (WithRecipients[LightTransactionViewTree], Option[Signature])
-      ],
-  ): (
-      Seq[(WithRecipients[TransactionViewTree], Option[Signature])],
-      Seq[IncompleteLightViewTree],
-  ) = {
+  override def computeFullViews(
+      decryptedViewsWithSignatures: Seq[(WithRecipients[DecryptedView], Option[Signature])]
+  ): (Seq[(WithRecipients[FullView], Option[Signature])], Seq[MalformedPayload]) = {
 
     val lens = PLens[
       (WithRecipients[LightTransactionViewTree], Option[Signature]),
@@ -723,27 +705,33 @@ class TransactionProcessingSteps(
       (WithRecipients(tvt, rec), sig)
     })
 
-    val (fullViews, incompleteLightViewTrees) = LightTransactionViewTree.toFullViewTrees(
-      lens,
-      protocolVersion,
-      hashOps,
-      topLevelOnly = true,
-    )(viewsWithRecipientsAndSignatures)
+    val (fullViews, incompleteLightViewTrees, duplicateLightViewTrees) =
+      LightTransactionViewTree.toFullViewTrees(
+        lens,
+        protocolVersion,
+        crypto.pureCrypto,
+        topLevelOnly = true,
+      )(decryptedViewsWithSignatures)
 
     val incompleteLightViewTreeErrors = incompleteLightViewTrees.map {
       case (WithRecipients(vt, _), _) =>
-        IncompleteLightViewTree(vt.viewPosition)
+        ProtocolProcessor.IncompleteLightViewTree(vt.viewPosition)
     }
 
-    (fullViews, incompleteLightViewTreeErrors)
+    val duplicateLightViewTreeErrors = duplicateLightViewTrees.map {
+      case (WithRecipients(vt, _), _) =>
+        ProtocolProcessor.DuplicateLightViewTree(vt.viewPosition)
+    }
+
+    (fullViews, incompleteLightViewTreeErrors ++ duplicateLightViewTreeErrors)
   }
 
   override def computeActivenessSetAndPendingContracts(
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      decryptedViewsWithSignatures: NonEmpty[
-        Seq[(WithRecipients[DecryptedView], Option[Signature])]
+      fullViewsWithSignatures: NonEmpty[
+        Seq[(WithRecipients[FullView], Option[Signature])]
       ],
       malformedPayloads: Seq[MalformedPayload],
       snapshot: DomainSnapshotSyncCryptoApi,
@@ -752,14 +740,14 @@ class TransactionProcessingSteps(
       traceContext: TraceContext
   ): EitherT[Future, TransactionProcessorError, CheckActivenessAndWritePendingContracts] = {
 
-    val lightViewTrees = decryptedViewsWithSignatures.map { case (view, _) => view.unwrap }
+    val fullViewTrees = fullViewsWithSignatures.map { case (view, _) => view.unwrap }
 
     // The transaction ID is the root hash and all `decryptedViews` have the same root hash
     // so we can take any.
-    val transactionId = lightViewTrees.head1.transactionId
+    val transactionId = fullViewTrees.head1.transactionId
 
     val policy = {
-      val candidates = lightViewTrees.map(_.confirmationPolicy).toSet
+      val candidates = fullViewTrees.map(_.confirmationPolicy).toSet
       // The decryptedViews should all have the same root hash and therefore the same confirmation policy.
       // Bail out, if this is not the case.
       ErrorUtil.requireArgument(
@@ -769,10 +757,10 @@ class TransactionProcessingSteps(
       candidates.head1
     }
     val workflowIdO =
-      IterableUtil.assertAtMostOne(lightViewTrees.forgetNE.mapFilter(_.workflowIdO), "workflow")
+      IterableUtil.assertAtMostOne(fullViewTrees.forgetNE.mapFilter(_.workflowIdO), "workflow")
     val submitterMetaO =
       IterableUtil.assertAtMostOne(
-        lightViewTrees.forgetNE.mapFilter(_.tree.submitterMetadata.unwrap.toOption),
+        fullViewTrees.forgetNE.mapFilter(_.tree.submitterMetadata.unwrap.toOption),
         "submitterMetadata",
       )
 
@@ -782,8 +770,8 @@ class TransactionProcessingSteps(
     val usedAndCreatedF = ExtractUsedAndCreated(
       participantId,
       staticDomainParameters,
-      decryptedViewsWithSignatures.map { case (WithRecipients(view, _), signature) =>
-        (view, signature)
+      fullViewsWithSignatures.map { case (WithRecipients(viewTree, _), signature) =>
+        (viewTree, signature)
       },
       snapshot.ipsSnapshot,
       loggerFactory,
@@ -838,7 +826,6 @@ class TransactionProcessingSteps(
     TransactionProcessorError,
     StorePendingDataAndSendResponseAndCreateTimeout,
   ] = {
-    import cats.Order.*
 
     val PendingDataAndResponseArgs(
       enrichedTransaction,
@@ -954,7 +941,9 @@ class TransactionProcessingSteps(
         parallelChecksResult: ParallelChecksResult,
         activenessResult: ActivenessResult,
     ): TransactionValidationResult = {
-      val viewResults = SortedMap.newBuilder[ViewPosition, ViewValidationResult]
+      val viewResults = SortedMap.newBuilder[ViewPosition, ViewValidationResult](
+        ViewPosition.orderViewPosition.toOrdering
+      )
 
       enrichedTransaction.rootViewsWithUsedAndCreated.rootViewsWithSignatures
         .map { case (view, _) => view }
@@ -1135,12 +1124,12 @@ class TransactionProcessingSteps(
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      decryptedViews: NonEmpty[Seq[WithRecipients[DecryptedView]]],
+      fullViews: NonEmpty[Seq[WithRecipients[FullView]]],
       freshOwnTimelyTx: Boolean,
   )(implicit
       traceContext: TraceContext
   ): (Option[TimestampedEvent], Option[PendingSubmissionId]) = {
-    val someView = decryptedViews.head1
+    val someView = fullViews.head1
     val mediator = someView.unwrap.mediator
     val submitterMetadataO = someView.unwrap.tree.submitterMetadata.unwrap.toOption
     submitterMetadataO.flatMap(completionInfoFromSubmitterMetadataO(_, freshOwnTimelyTx)).map {
@@ -1202,13 +1191,13 @@ class TransactionProcessingSteps(
         // TODO(#7866): As part of mediator privacy work, clean up this ugly error code remapping
         case duplicateKeyReject: LocalReject.ConsistencyRejections.DuplicateKey.Reject =>
           LedgerSyncEvent.CommandRejected.FinalReason(
-            LedgerApiErrors.ConsistencyErrors.DuplicateContractKey
+            ConsistencyErrors.DuplicateContractKey
               .Reject(duplicateKeyReject.cause)
               .rpcStatus()
           )
         case inconsistentKeyReject: LocalReject.ConsistencyRejections.InconsistentKey.Reject =>
           LedgerSyncEvent.CommandRejected.FinalReason(
-            LedgerApiErrors.ConsistencyErrors.InconsistentContractKey
+            ConsistencyErrors.InconsistentContractKey
               .Reject(inconsistentKeyReject.cause)
               .rpcStatus()
           )

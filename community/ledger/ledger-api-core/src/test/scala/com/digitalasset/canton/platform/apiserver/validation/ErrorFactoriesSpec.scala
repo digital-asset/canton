@@ -7,7 +7,13 @@ import com.daml.error.*
 import com.daml.error.utils.ErrorDetails
 import com.daml.lf.data.Ref
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.ledger.error.groups.RequestValidation.InvalidDeduplicationPeriodField.ValidMaxDeduplicationFieldKey
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.InvalidDeduplicationPeriodField.ValidMaxDeduplicationFieldKey
+import com.digitalasset.canton.ledger.error.groups.{
+  AdminServiceErrors,
+  AuthorizationChecksErrors,
+  ConsistencyErrors,
+  RequestValidationErrors,
+}
 import com.digitalasset.canton.ledger.error.{CommonErrors, IndexErrors, LedgerApiErrors}
 import com.digitalasset.canton.logging.{LedgerErrorLoggingContext, SuppressionRule}
 import com.google.rpc.*
@@ -234,7 +240,7 @@ class ErrorFactoriesSpec
     "return packageNotFound" in {
       val msg = s"PACKAGE_NOT_FOUND(11,$truncatedCorrelationId): Could not find package."
       assertError(
-        LedgerApiErrors.RequestValidation.NotFound.Package
+        RequestValidationErrors.NotFound.Package
           .Reject("packageId123")(contextualizedErrorLogger)
       )(
         code = Code.NOT_FOUND,
@@ -269,7 +275,7 @@ class ErrorFactoriesSpec
     "return the configurationEntryRejected" in {
       val msg = s"CONFIGURATION_ENTRY_REJECTED(9,$truncatedCorrelationId): message123"
       assertError(
-        LedgerApiErrors.Admin.ConfigurationEntryRejected.Reject("message123")(
+        AdminServiceErrors.ConfigurationEntryRejected.Reject("message123")(
           contextualizedErrorLogger
         )
       )(
@@ -292,7 +298,7 @@ class ErrorFactoriesSpec
       val msg =
         s"TRANSACTION_NOT_FOUND(11,$truncatedCorrelationId): Transaction not found, or not visible."
       assertError(
-        LedgerApiErrors.RequestValidation.NotFound.Transaction
+        RequestValidationErrors.NotFound.Transaction
           .Reject(Ref.TransactionId.assertFromString("tId"))(contextualizedErrorLogger)
       )(
         code = Code.NOT_FOUND,
@@ -315,7 +321,7 @@ class ErrorFactoriesSpec
       val msg =
         s"DUPLICATE_COMMAND(10,$truncatedCorrelationId): A command with the given command id has already been successfully processed"
       assertError(
-        LedgerApiErrors.ConsistencyErrors.DuplicateCommand
+        ConsistencyErrors.DuplicateCommand
           .Reject(existingCommandSubmissionId = None)(contextualizedErrorLogger)
       )(
         code = Code.ALREADY_EXISTS,
@@ -335,7 +341,7 @@ class ErrorFactoriesSpec
 
     "return a permissionDenied error" in {
       assertError(
-        LedgerApiErrors.AuthorizationChecks.PermissionDenied.Reject("some cause")(
+        AuthorizationChecksErrors.PermissionDenied.Reject("some cause")(
           contextualizedErrorLogger
         )
       )(
@@ -374,7 +380,7 @@ class ErrorFactoriesSpec
       val msg =
         s"NON_HEXADECIMAL_OFFSET(8,$truncatedCorrelationId): Offset in fieldName123 not specified in hexadecimal: offsetValue123: message123"
       assertError(
-        LedgerApiErrors.RequestValidation.NonHexOffset
+        RequestValidationErrors.NonHexOffset
           .Error(
             fieldName = "fieldName123",
             offsetValue = "offsetValue123",
@@ -401,7 +407,7 @@ class ErrorFactoriesSpec
       val expectedMessage = s"Absolute offset (AABBCC) is after ledger end (E)"
       val msg = s"OFFSET_AFTER_LEDGER_END(12,$truncatedCorrelationId): $expectedMessage"
       assertError(
-        LedgerApiErrors.RequestValidation.OffsetAfterLedgerEnd
+        RequestValidationErrors.OffsetAfterLedgerEnd
           .Reject("Absolute", "AABBCC", "E")(contextualizedErrorLogger)
       )(
         code = Code.OUT_OF_RANGE,
@@ -422,7 +428,7 @@ class ErrorFactoriesSpec
     "return a offsetOutOfRange error" in {
       val msg = s"OFFSET_OUT_OF_RANGE(9,$truncatedCorrelationId): message123"
       assertError(
-        LedgerApiErrors.RequestValidation.OffsetOutOfRange
+        RequestValidationErrors.OffsetOutOfRange
           .Reject("message123")(contextualizedErrorLogger)
       )(
         code = Code.FAILED_PRECONDITION,
@@ -442,7 +448,7 @@ class ErrorFactoriesSpec
 
     "return an unauthenticatedMissingJwtToken error" in {
       assertError(
-        LedgerApiErrors.AuthorizationChecks.Unauthenticated
+        AuthorizationChecksErrors.Unauthenticated
           .MissingJwtToken()(contextualizedErrorLogger)
       )(
         code = Code.UNAUTHENTICATED,
@@ -458,7 +464,7 @@ class ErrorFactoriesSpec
       val someSecuritySafeMessage = "nothing security sensitive in here"
       val someThrowable = new RuntimeException("some internal authentication error")
       assertError(
-        LedgerApiErrors.AuthorizationChecks.InternalAuthorizationError
+        AuthorizationChecksErrors.InternalAuthorizationError
           .Reject(someSecuritySafeMessage, someThrowable)(contextualizedErrorLogger)
       )(
         code = Code.INTERNAL,
@@ -475,7 +481,7 @@ class ErrorFactoriesSpec
       val msg =
         s"LEDGER_CONFIGURATION_NOT_FOUND(11,$truncatedCorrelationId): The ledger configuration could not be retrieved."
       assertError(
-        LedgerApiErrors.RequestValidation.NotFound.LedgerConfiguration
+        RequestValidationErrors.NotFound.LedgerConfiguration
           .Reject()(contextualizedErrorLogger)
       )(
         code = Code.NOT_FOUND,
@@ -499,7 +505,7 @@ class ErrorFactoriesSpec
       val msg =
         s"INVALID_DEDUPLICATION_PERIOD(9,$truncatedCorrelationId): The submitted command had an invalid deduplication period: $errorDetailMessage"
       assertError(
-        LedgerApiErrors.RequestValidation.InvalidDeduplicationPeriodField
+        RequestValidationErrors.InvalidDeduplicationPeriodField
           .Reject(
             reason = errorDetailMessage,
             maxDeduplicationDuration = Some(maxDeduplicationDuration),
@@ -531,7 +537,7 @@ class ErrorFactoriesSpec
       val msg =
         s"INVALID_FIELD(8,$truncatedCorrelationId): The submitted command has a field with invalid value: Invalid field $fieldName: my message"
       assertError(
-        LedgerApiErrors.RequestValidation.InvalidField
+        RequestValidationErrors.InvalidField
           .Reject(fieldName, "my message")(contextualizedErrorLogger)
       )(
         code = Code.INVALID_ARGUMENT,
@@ -553,7 +559,7 @@ class ErrorFactoriesSpec
       val msg =
         s"LEDGER_ID_MISMATCH(11,$truncatedCorrelationId): Ledger ID 'received' not found. Actual Ledger ID is 'expected'."
       assertError(
-        LedgerApiErrors.RequestValidation.LedgerIdMismatch
+        RequestValidationErrors.LedgerIdMismatch
           .Reject("expected", "received")(contextualizedErrorLogger)
       )(
         code = Code.NOT_FOUND,
@@ -574,7 +580,7 @@ class ErrorFactoriesSpec
     "return a participantPrunedDataAccessed error" in {
       val msg = s"PARTICIPANT_PRUNED_DATA_ACCESSED(9,$truncatedCorrelationId): my message"
       assertError(
-        LedgerApiErrors.RequestValidation.ParticipantPrunedDataAccessed
+        RequestValidationErrors.ParticipantPrunedDataAccessed
           .Reject(
             "my message",
             "00",
@@ -645,7 +651,7 @@ class ErrorFactoriesSpec
       val msg =
         s"MISSING_FIELD(8,$truncatedCorrelationId): The submitted command is missing a mandatory field: $fieldName"
       assertError(
-        LedgerApiErrors.RequestValidation.MissingField
+        RequestValidationErrors.MissingField
           .Reject(fieldName)(contextualizedErrorLogger)
       )(
         code = Code.INVALID_ARGUMENT,
@@ -672,7 +678,7 @@ class ErrorFactoriesSpec
       s"INVALID_ARGUMENT(8,$truncatedCorrelationId): The submitted command has invalid arguments: my message"
     "return an invalidArgument error" in {
       assertError(
-        LedgerApiErrors.RequestValidation.InvalidArgument
+        RequestValidationErrors.InvalidArgument
           .Reject("my message")(contextualizedErrorLogger)
       )(
         code = Code.INVALID_ARGUMENT,

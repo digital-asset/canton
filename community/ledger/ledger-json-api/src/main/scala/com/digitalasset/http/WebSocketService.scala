@@ -7,30 +7,18 @@ import akka.NotUsed
 import akka.http.scaladsl.model.ws.{BinaryMessage, Message, TextMessage}
 import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.stream.Materializer
-import com.daml.fetchcontracts.util.{
-  AbsoluteBookmark,
-  BeginBookmark,
-  ContractStreamStep,
-  InsertDeleteStep,
-}
+import com.daml.fetchcontracts.util.{AbsoluteBookmark, BeginBookmark, ContractStreamStep, InsertDeleteStep}
 import com.daml.fetchcontracts.util.GraphExtensions.*
 import com.daml.http.EndpointsCompanion.*
-import com.daml.http.domain.{
-  ContractKeyStreamRequest,
-  JwtPayload,
-  SearchForeverRequest,
-  StartingOffset,
-}
-import com.daml.http.domain.ResolvedQuery
+import com.daml.http.domain.{ContractKeyStreamRequest, JwtPayload, ResolvedQuery, SearchForeverRequest, StartingOffset}
 import com.daml.http.json.{DomainJsonDecoder, JsonProtocol, SprayJson}
 import com.daml.http.LedgerClientJwt.Terminates
 import util.ApiValueToLfValueConverter.apiValueToLfValue
 import util.toLedgerId
 import ContractStreamStep.{Acs, LiveBegin, Txn}
 import json.JsonProtocol.LfValueCodec.apiValueToJsValue as lfValueToJsValue
-import query.ValuePredicate.{LfV, TypeLookup}
+import query.ValuePredicate.LfV
 import com.daml.jwt.domain.Jwt
-import com.daml.http.query.ValuePredicate
 import scalaz.syntax.bifunctor.*
 import scalaz.syntax.std.boolean.*
 import scalaz.syntax.std.option.*
@@ -54,14 +42,12 @@ import scala.concurrent.{ExecutionContext, Future}
 import scalaz.EitherT.{either, eitherT, rightT}
 import com.digitalasset.canton.ledger.api.domain as LedgerApiDomain
 import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.NonEmptyColl.foldable1
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.NoTracing
 
 object WebSocketService extends NoTracing {
   import util.ErrorOps.*
-
-  private type CompiledQueries =
-    NonEmpty[Map[domain.ContractTypeId.Resolved, (ValuePredicate, LfV => Boolean)]]
 
   final case class StreamPredicate[+Positive](
       resolvedQuery: domain.ResolvedQuery,
@@ -211,7 +197,6 @@ object WebSocketService extends NoTracing {
     private[WebSocketService] def predicate(
         resolvedRequest: R,
         resolveContractTypeId: PackageService.ResolveContractTypeId,
-        lookupType: ValuePredicate.TypeLookup,
         jwt: Jwt,
         ledgerId: LedgerApiDomain.LedgerId,
     )(implicit
@@ -248,7 +233,6 @@ object WebSocketService extends NoTracing {
 
   final case class ResolvedSearchForeverQuery(
       resolvedQuery: ResolvedQuery,
-      query: Map[String, JsValue],
       offset: Option[domain.Offset],
   )
 
@@ -312,23 +296,13 @@ object WebSocketService extends NoTracing {
               Int,
               Set[domain.ContractTypeId.OptionalPkg],
           )
-        ] = {
-          (for {
-            partitionedResolved <- resolveIds(sfq)
-            (resolved, unresolved) = partitionedResolved
-            res = domain.ResolvedQuery(resolved).map { rq =>
-              (
-                ResolvedSearchForeverQuery(
-                  rq,
-                  sfq.query,
-                  sfq.offset,
-                ),
-                pos,
-                unresolved,
-              )
-            }
-          } yield res)
-        }
+        ] = for {
+          partitionedResolved <- resolveIds(sfq)
+          (resolved, unresolved) = partitionedResolved
+          res = domain.ResolvedQuery(resolved).map { rq =>
+            (ResolvedSearchForeverQuery(rq, sfq.offset), pos, unresolved)
+          }
+        } yield res
 
         Future
           .sequence(
@@ -377,7 +351,6 @@ object WebSocketService extends NoTracing {
       override private[WebSocketService] def predicate(
           request: ResolvedSearchForeverRequest,
           resolveContractTypeId: PackageService.ResolveContractTypeId,
-          lookupType: ValuePredicate.TypeLookup,
           jwt: Jwt,
           ledgerId: LedgerApiDomain.LedgerId,
       )(implicit
@@ -402,31 +375,25 @@ object WebSocketService extends NoTracing {
         }
 
         def fn(
-            q: Map[domain.ContractTypeId.Resolved, NonEmptyList[
-              ((ValuePredicate, LfV => Boolean), (Int, Int))
-            ]]
+            q: Map[domain.ContractTypeId.Resolved, NonEmptyList[(Int, Int)]]
         )(
             a: domain.ActiveContract.ResolvedCtTyId[LfV],
             o: Option[domain.Offset],
-        ): Option[Positive] = {
+        ): Option[Positive] =
           q.get(a.templateId).flatMap { preds =>
-            preds.collect(Function unlift { case ((_, p), (ix, pos)) =>
-              val matchesPredicate = p(a.payload)
-              (matchesPredicate && matchesOffset(ix, o)).option(pos)
+            preds.collect(Function unlift { case (ix, pos) =>
+              matchesOffset(ix, o).option(pos)
             })
           }
-        }
 
         def query(
             rsfq: ResolvedSearchForeverQuery,
             pos: Int,
             ix: Int,
         ): NonEmpty[Map[domain.ContractTypeId.Resolved, NonEmptyList[
-          ((ValuePredicate, ValuePredicate.LfV => Boolean), (Int, Int))
-        ]]] = {
-          val compiledQueries = prepareFilters(rsfq.resolvedQuery.resolved, rsfq.query, lookupType)
-          compiledQueries.transform((_, p) => NonEmptyList((p, (ix, pos))))
-        }
+          (Int, Int)
+        ]]] =
+          rsfq.resolvedQuery.resolved.map(_ -> NonEmptyList(ix -> pos)).toMap
 
         val q = {
           import scalaz.syntax.foldable1.*
@@ -444,16 +411,6 @@ object WebSocketService extends NoTracing {
           )
         )
       }
-
-      private def prepareFilters(
-          resolved: NonEmpty[Set[domain.ContractTypeId.Resolved]],
-          queryExpr: Map[String, JsValue],
-          lookupType: ValuePredicate.TypeLookup,
-      ): CompiledQueries =
-        resolved.toSeq.map { tid =>
-          val vp = ValuePredicate.fromTemplateJsObject(queryExpr, tid, lookupType)
-          (tid, (vp, vp.toFunPredicate))
-        }.toMap
 
       override def renderCreatedMetadata(p: Positive) =
         Map {
@@ -603,7 +560,6 @@ object WebSocketService extends NoTracing {
     override private[WebSocketService] def predicate(
         resolvedRequest: ResolvedContractKeyStreamRequest[Cid, LfV],
         resolveContractTypeId: PackageService.ResolveContractTypeId,
-        lookupType: TypeLookup,
         jwt: Jwt,
         ledgerId: LedgerApiDomain.LedgerId,
     )(implicit
@@ -684,7 +640,6 @@ class WebSocketService(
     contractsService: ContractsService,
     resolveContractTypeId: PackageService.ResolveContractTypeId,
     decoder: DomainJsonDecoder,
-    lookupType: ValuePredicate.TypeLookup,
     wsConfig: Option[WebsocketConfig],
     val loggerFactory: NamedLoggerFactory,
 )(implicit mat: Materializer, ec: ExecutionContext)
@@ -843,11 +798,6 @@ class WebSocketService(
         )
     }
 
-  private[this] def liveBegin(
-      bookmark: BeginBookmark[domain.Offset]
-  ): Source[StepAndErrors[Nothing, Nothing], NotUsed] =
-    Source.single(StepAndErrors(Seq.empty, ContractStreamStep.LiveBegin(bookmark), loggerFactory))
-
   // simple alias to avoid passing in the class parameters
   private[this] def queryPredicate[A](
       request: A,
@@ -857,7 +807,7 @@ class WebSocketService(
       lc: LoggingContextOf[InstanceUUID],
       Q: StreamQuery[A],
   ): Future[StreamPredicate[Q.Positive]] =
-    Q.predicate(request, resolveContractTypeId, lookupType, jwt, ledgerId)
+    Q.predicate(request, resolveContractTypeId, jwt, ledgerId)
 
   private def getTransactionSourceForParty[A](
       jwt: Jwt,

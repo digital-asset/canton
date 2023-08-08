@@ -361,7 +361,7 @@ class RecordOrderPublisher(
 
     override def perform(): FutureUnlessShutdown[Unit] = {
       // If the requestCounterCommitSetPairO is not set, then by default the commit set is empty, and
-      // the request counter is the smallest possible value that it does not throw an exception in
+      // the request counter is the smallest possible value that does not throw an exception in
       // ActiveContractStore.bulkContractsTransferCounterSnapshot, i.e., lowerBound + 1
       val (requestCounter, commitSet) =
         requestCounterCommitSetPairO.getOrElse((RequestCounter.LowerBound + 1, CommitSet.empty))
@@ -372,6 +372,7 @@ class RecordOrderPublisher(
           // Retrieves the transfer counters of the archived contracts from the latest state in the active contract store
           archivalsWithTransferCountersOnly <- activeContractSnapshot
             .bulkContractsTransferCounterSnapshot(commitSet.archivals.keySet, requestCounter)
+
         } yield {
           // Computes the ACS change by decorating the archive events in the commit set with their transfer counters
           val acsChange = AcsChange.fromCommitSet(commitSet, archivalsWithTransferCountersOnly)

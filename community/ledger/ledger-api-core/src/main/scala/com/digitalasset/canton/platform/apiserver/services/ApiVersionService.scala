@@ -18,7 +18,7 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
 }
 import com.digitalasset.canton.platform.apiserver.LedgerFeatures
-import com.digitalasset.canton.platform.localstore.UserManagementConfig
+import com.digitalasset.canton.platform.config.UserManagementServiceConfig
 import io.grpc.ServerServiceDefinition
 
 import scala.annotation.nowarn
@@ -29,7 +29,7 @@ import scala.util.control.NonFatal
 
 private[apiserver] final class ApiVersionService private (
     ledgerFeatures: LedgerFeatures,
-    userManagementConfig: UserManagementConfig,
+    userManagementServiceConfig: UserManagementServiceConfig,
     telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
@@ -44,11 +44,11 @@ private[apiserver] final class ApiVersionService private (
   private val featuresDescriptor =
     FeaturesDescriptor.of(
       userManagement = Some(
-        if (userManagementConfig.enabled) {
+        if (userManagementServiceConfig.enabled) {
           UserManagementFeature(
             supported = true,
-            maxRightsPerUser = userManagementConfig.maxRightsPerUser,
-            maxUsersPageSize = userManagementConfig.maxUsersPageSize,
+            maxRightsPerUser = userManagementServiceConfig.maxRightsPerUser,
+            maxUsersPageSize = userManagementServiceConfig.maxUsersPageSize,
           )
         } else {
           UserManagementFeature(
@@ -117,13 +117,13 @@ private[apiserver] final class ApiVersionService private (
 private[apiserver] object ApiVersionService {
   def create(
       ledgerFeatures: LedgerFeatures,
-      userManagementConfig: UserManagementConfig,
+      userManagementServiceConfig: UserManagementServiceConfig,
       telemetry: Telemetry,
       loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext): ApiVersionService =
     new ApiVersionService(
       ledgerFeatures,
-      userManagementConfig = userManagementConfig,
+      userManagementServiceConfig = userManagementServiceConfig,
       telemetry = telemetry,
       loggerFactory = loggerFactory,
     )

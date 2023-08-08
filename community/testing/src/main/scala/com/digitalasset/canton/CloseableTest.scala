@@ -9,7 +9,7 @@ import org.scalatest.{BeforeAndAfterAll, Suite}
 trait CloseableTest extends BeforeAndAfterAll with FlagCloseable with HasCloseContext {
   self: Suite =>
 
-  override protected def afterAll(): Unit = {
+  override def afterAll(): Unit = {
     close()
     // Ensure "sibling traits" such as EnvironmentSetup clean up as well where afterAll closes plugins
     // including docker test containers (#13786, for an overview of how scala linearizes traits, see

@@ -10,14 +10,9 @@ import cats.syntax.parallel.*
 import com.daml.lf.engine
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
-import com.digitalasset.canton.crypto.DomainSnapshotSyncCryptoApi
+import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, Signature}
 import com.digitalasset.canton.data.ViewType.TransferViewType
-import com.digitalasset.canton.data.{
-  CantonTimestamp,
-  TransferSubmitterMetadata,
-  TransferViewTree,
-  ViewType,
-}
+import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata, ViewType}
 import com.digitalasset.canton.ledger.participant.state.v2.CompletionInfo
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
@@ -74,8 +69,6 @@ trait TransferProcessingSteps[
       TransferProcessorError,
     ]
     with NamedLogging {
-
-  override type DecryptedView <: TransferViewTree
 
   val participantId: ParticipantId
 
@@ -181,6 +174,11 @@ trait TransferProcessingSteps[
     EitherT.right(result)
   }
 
+  override def computeFullViews(
+      decryptedViewsWithSignatures: Seq[(WithRecipients[DecryptedView], Option[Signature])]
+  ): (Seq[(WithRecipients[FullView], Option[Signature])], Seq[ProtocolProcessor.MalformedPayload]) =
+    (decryptedViewsWithSignatures, Seq.empty)
+
   override def constructResponsesForMalformedPayloads(
       requestId: RequestId,
       malformedPayloads: Seq[MalformedPayload],
@@ -212,12 +210,12 @@ trait TransferProcessingSteps[
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      decryptedViews: NonEmpty[Seq[WithRecipients[DecryptedView]]],
+      fullViews: NonEmpty[Seq[WithRecipients[FullView]]],
       freshOwnTimelyTx: Boolean,
   )(implicit
       traceContext: TraceContext
   ): (Option[TimestampedEvent], Option[PendingSubmissionId]) = {
-    val someView = decryptedViews.head1
+    val someView = fullViews.head1
     val mediator = someView.unwrap.mediator
     val submitterMetadata = someView.unwrap.submitterMetadata
 
@@ -247,7 +245,7 @@ trait TransferProcessingSteps[
       )
     )
 
-    (tse, decryptedViews.head1.unwrap.rootHash.some)
+    (tse, fullViews.head1.unwrap.rootHash.some)
   }
 
   override def createRejectionEvent(rejectionArgs: RejectionArgs)(implicit
@@ -297,7 +295,7 @@ trait TransferProcessingSteps[
     parameters.decisionTimeFor(requestTs).leftMap(TransferParametersError(parameters.domainId, _))
 
   override def getSubmissionDataForTracker(
-      views: Seq[DecryptedView]
+      views: Seq[FullView]
   ): Option[SubmissionTracker.SubmissionData] = None // Currently not used for transfers
 
   override def participantResponseDeadlineFor(

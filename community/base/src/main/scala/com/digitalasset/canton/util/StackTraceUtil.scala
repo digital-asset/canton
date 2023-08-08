@@ -19,8 +19,6 @@ object StackTraceUtil {
     s"  ${thread.toString} is-daemon=${thread.isDaemon} state=${thread.getState.toString}"
 
   def formatStackTrace(stackTrace: Array[StackTraceElement]): String = if (stackTrace.isEmpty) ""
-  else if (stackTrace(0).getMethodName == "park" && stackTrace(0).getClassName.endsWith("Unsafe"))
-    " <parked>"
   else stackTrace.mkString("\n    ", "\n    ", "\n")
 
   def caller(offset: Int = 1): String = {

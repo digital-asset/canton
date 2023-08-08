@@ -49,5 +49,11 @@ object ContractState {
   final case class Active(
       contractInstance: VersionedContractInstance,
       ledgerEffectiveTime: Timestamp,
+      stakeholders: Set[Party],
+      agreementText: Option[String],
+      signatories: Set[Party],
+      globalKey: Option[GlobalKey],
+      maintainers: Option[Set[Party]],
+      driverMetadata: Option[Array[Byte]],
   ) extends ContractState
 }

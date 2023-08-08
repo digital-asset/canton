@@ -45,7 +45,11 @@ import com.digitalasset.canton.ledger.api.validation.FieldValidator.{
   verifyMetadataAnnotations,
 }
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.{
+  AuthorizationChecksErrors,
+  PartyManagementServiceErrors,
+  RequestValidationErrors,
+}
 import com.digitalasset.canton.ledger.participant.state.index.v2.*
 import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.logging.LoggingContextUtil.createLoggingContext
@@ -310,7 +314,7 @@ private[apiserver] final class ApiPartyManagementService private (
             case Some(partyDetails) => Future.successful(partyDetails)
             case None =>
               Future.failed(
-                LedgerApiErrors.Admin.PartyManagement.PartyNotFound
+                PartyManagementServiceErrors.PartyNotFound
                   .Reject(
                     operation = "updating a party record",
                     party = partyRecord.party,
@@ -321,7 +325,7 @@ private[apiserver] final class ApiPartyManagementService private (
           partyRecordUpdate: PartyRecordUpdate <- {
             if (partyDetailsUpdate.isLocalUpdate.exists(_ != fetchedPartyDetails.isLocal)) {
               Future.failed(
-                LedgerApiErrors.Admin.PartyManagement.InvalidUpdatePartyDetailsRequest
+                PartyManagementServiceErrors.InvalidUpdatePartyDetailsRequest
                   .Reject(
                     party = partyRecord.party,
                     reason =
@@ -333,7 +337,7 @@ private[apiserver] final class ApiPartyManagementService private (
               partyDetailsUpdate.displayNameUpdate.exists(_ != fetchedPartyDetails.displayName)
             ) {
               Future.failed(
-                LedgerApiErrors.Admin.PartyManagement.InvalidUpdatePartyDetailsRequest
+                PartyManagementServiceErrors.InvalidUpdatePartyDetailsRequest
                   .Reject(
                     party = partyRecord.party,
                     reason =
@@ -408,7 +412,7 @@ private[apiserver] final class ApiPartyManagementService private (
           case Some(_) => Future.unit
           case None =>
             Future.failed(
-              LedgerApiErrors.Admin.PartyManagement.PartyNotFound
+              PartyManagementServiceErrors.PartyNotFound
                 .Reject(
                   operation = "updating party's identity provider",
                   party = party,
@@ -440,7 +444,7 @@ private[apiserver] final class ApiPartyManagementService private (
     partyRecordStore.getPartyRecordO(party).flatMap {
       case Right(Some(party)) if party.identityProviderId != identityProviderId =>
         Future.failed(
-          LedgerApiErrors.AuthorizationChecks.PermissionDenied
+          AuthorizationChecksErrors.PermissionDenied
             .Reject(
               s"Party $party belongs to an identity provider that differs from the one specified in the request"
             )
@@ -477,7 +481,7 @@ private[apiserver] final class ApiPartyManagementService private (
     result match {
       case Left(e: update.UpdatePathError) =>
         Future.failed(
-          LedgerApiErrors.Admin.PartyManagement.InvalidUpdatePartyDetailsRequest
+          PartyManagementServiceErrors.InvalidUpdatePartyDetailsRequest
             .Reject(party, reason = e.getReason)
             .asGrpcError
         )
@@ -491,35 +495,35 @@ private[apiserver] final class ApiPartyManagementService private (
     result match {
       case Left(PartyRecordStore.PartyNotFound(party)) =>
         Future.failed(
-          LedgerApiErrors.Admin.PartyManagement.PartyNotFound
+          PartyManagementServiceErrors.PartyNotFound
             .Reject(operation, party = party)
             .asGrpcError
         )
 
       case Left(PartyRecordStore.PartyRecordNotFoundFatal(party)) =>
         Future.failed(
-          LedgerApiErrors.Admin.PartyManagement.InternalPartyRecordNotFound
+          PartyManagementServiceErrors.InternalPartyRecordNotFound
             .Reject(operation, party = party)
             .asGrpcError
         )
 
       case Left(PartyRecordStore.PartyRecordExistsFatal(party)) =>
         Future.failed(
-          LedgerApiErrors.Admin.PartyManagement.InternalPartyRecordAlreadyExists
+          PartyManagementServiceErrors.InternalPartyRecordAlreadyExists
             .Reject(operation, party = party)
             .asGrpcError
         )
 
       case Left(PartyRecordStore.ConcurrentPartyUpdate(party)) =>
         Future.failed(
-          LedgerApiErrors.Admin.PartyManagement.ConcurrentPartyDetailsUpdateDetected
+          PartyManagementServiceErrors.ConcurrentPartyDetailsUpdateDetected
             .Reject(party = party)
             .asGrpcError
         )
 
       case Left(PartyRecordStore.MaxAnnotationsSizeExceeded(party)) =>
         Future.failed(
-          LedgerApiErrors.Admin.PartyManagement.MaxPartyAnnotationsSizeExceeded
+          PartyManagementServiceErrors.MaxPartyAnnotationsSizeExceeded
             .Reject(party = party)
             .asGrpcError
         )
@@ -540,7 +544,7 @@ private[apiserver] final class ApiPartyManagementService private (
           Future.successful(())
         else
           Future.failed(
-            LedgerApiErrors.RequestValidation.InvalidArgument
+            RequestValidationErrors.InvalidArgument
               .Reject(s"Provided identity_provider_id $id has not been found.")
               .asGrpcError
           )

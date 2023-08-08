@@ -6,21 +6,24 @@ package com.digitalasset.canton.participant.admin.grpc
 import better.files.*
 import cats.data.EitherT
 import cats.syntax.all.*
-import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.RepairServiceError
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.admin.grpc.GrpcParticipantRepairService.ValidDownloadRequest
 import com.digitalasset.canton.participant.admin.grpc.util.AcsUtil
 import com.digitalasset.canton.participant.admin.v0.*
+import com.digitalasset.canton.participant.admin.{RepairServiceError, SyncStateInspection}
 import com.digitalasset.canton.participant.domain.{DomainAliasManager, DomainConnectionConfig}
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.protocol.{SerializableContract, SerializableContractWithWitnesses}
 import com.digitalasset.canton.topology.{DomainId, PartyId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherTUtil, OptionUtil}
+import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, OptionUtil, ResourceUtil}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{DomainAlias, LfPartyId}
 import com.google.protobuf.ByteString
+import com.google.protobuf.timestamp.Timestamp
 import io.grpc.stub.StreamObserver
 
 import java.io.ByteArrayOutputStream
@@ -29,13 +32,87 @@ import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 
 object GrpcParticipantRepairService {
-  val defaultChunkSize: Int =
-    1024 * 1024 * 2 // 2MB - This is half of the default max message size of gRPC
 
-  private val groupBy = 1000
+  // 2MB - This is half of the default max message size of gRPC
+  val DefaultChunkSize: PositiveInt =
+    PositiveInt.tryCreate(1024 * 1024 * 2)
+
+  private val DefaultBatchSize = 1000
+
+  private object ValidDownloadRequest {
+
+    private def validateParties(parties: Seq[String]): Either[String, Seq[LfPartyId]] =
+      parties
+        .map(party => UniqueIdentifier.fromProtoPrimitive_(party).map(PartyId(_).toLf))
+        .sequence
+
+    private def validateTimestamp(
+        timestamp: Option[Timestamp]
+    ): Either[String, Option[CantonTimestamp]] =
+      timestamp.map(CantonTimestamp.fromProtoPrimitive).sequence.leftMap(_.message)
+
+    private def validateProtocolVersion(
+        protocolVersion: String
+    ): Either[String, Option[ProtocolVersion]] =
+      OptionUtil.emptyStringAsNone(protocolVersion).traverse(ProtocolVersion.create)
+
+    private def validateContractDomainRenames(
+        contractDomainRenames: Map[String, String]
+    ): Either[String, List[(DomainId, DomainId)]] =
+      contractDomainRenames.toList.traverse { case (source, target) =>
+        for {
+          sourceId <- DomainId.fromString(source)
+          targetId <- DomainId.fromString(target)
+        } yield (sourceId, targetId)
+      }
+
+    private def validateChunkSize(chunkSize: Option[Int]): Either[String, PositiveInt] =
+      chunkSize.traverse(PositiveInt.create).bimap(_.message, _.getOrElse(DefaultChunkSize))
+
+    private def validateAll(request: DownloadRequest): Either[String, ValidDownloadRequest] =
+      for {
+        parties <- validateParties(request.parties)
+        timestamp <- validateTimestamp(request.timestamp)
+        protocolVersion <- validateProtocolVersion(request.protocolVersion)
+        contractDomainRenames <- validateContractDomainRenames(request.contractDomainRenames)
+        chunkSize <- validateChunkSize(request.chunkSize)
+      } yield ValidDownloadRequest(
+        parties.toSet,
+        timestamp,
+        protocolVersion,
+        contractDomainRenames.toMap,
+        chunkSize,
+      )
+
+    def apply(request: DownloadRequest)(implicit
+        elc: ErrorLoggingContext
+    ): Either[RepairServiceError, ValidDownloadRequest] =
+      for {
+        validRequest <- validateAll(request).leftMap(RepairServiceError.InvalidArgument.Error(_))
+        _ <- validRequest.protocolVersion.traverse_(isSupported)
+      } yield validRequest
+
+  }
+
+  private final case class ValidDownloadRequest private (
+      parties: Set[LfPartyId],
+      timestamp: Option[CantonTimestamp],
+      protocolVersion: Option[ProtocolVersion],
+      contractDomainRenames: Map[DomainId, DomainId],
+      chunkSize: PositiveInt,
+  )
+
+  private def isSupported(protocolVersion: ProtocolVersion)(implicit
+      elc: ErrorLoggingContext
+  ): Either[RepairServiceError, Unit] =
+    EitherUtil.condUnitE(
+      protocolVersion.isSupported,
+      RepairServiceError.UnsupportedProtocolVersionParticipant.Error(protocolVersion),
+    )
+
 }
 
-class GrpcParticipantRepairService(
+final class GrpcParticipantRepairService(
     sync: CantonSyncService,
     aliasManager: DomainAliasManager,
     processingTimeout: ProcessingTimeout,
@@ -46,6 +123,35 @@ class GrpcParticipantRepairService(
 
   private val domainMigrationInProgress = new AtomicReference[Boolean](false)
 
+  private def toRepairServiceError(
+      error: (DomainId, SyncStateInspection.Error)
+  )(implicit tc: TraceContext): RepairServiceError =
+    error match {
+      case (domainId, SyncStateInspection.Error.TimestampAfterPrehead(requested, clean)) =>
+        RepairServiceError.InvalidAcsSnapshotTimestamp.Error(
+          requested,
+          clean,
+          domainId,
+        )
+      case (domainId, SyncStateInspection.Error.TimestampBeforePruning(requested, pruned)) =>
+        RepairServiceError.UnavailableAcsSnapshot.Error(
+          requested,
+          pruned,
+          domainId,
+        )
+      case (domainId, SyncStateInspection.Error.InconsistentSnapshot(missingContracts)) =>
+        lazy val missingContractsAsString = missingContracts.mkString(", ")
+        logger.warn(
+          s"Inconsistent ACS snapshot for domain $domainId. Possibly non-exhaustive list of missing contracts: $missingContractsAsString"
+        )
+        RepairServiceError.InconsistentAcsSnapshot.Error(domainId)
+      case (domainId, SyncStateInspection.Error.UnexpectedError(cause)) =>
+        logger.error(s"Unexpected error while retrieving the ACS snapshot for $domainId", cause)
+        RepairServiceError.UnexpectedError.Error()
+    }
+
+  private final val AcsSnapshotTemporaryFileNamePrefix = "temporary-canton-acs-snapshot"
+
   /** get contracts for a party
     */
   override def download(
@@ -53,74 +159,60 @@ class GrpcParticipantRepairService(
       responseObserver: StreamObserver[AcsSnapshotChunk],
   ): Unit = {
     TraceContext.withNewTraceContext { implicit traceContext =>
-      val suffix = if (request.gzipFormat) ".gz" else ""
-      val temporaryFile =
-        File.newTemporaryFile(prefix = "temporary-canton-acs-snapshot", suffix = suffix)
-      lazy val acsFile = for {
-        parties <- EitherT.fromEither[Future](
-          request.parties
-            .map(x =>
-              UniqueIdentifier
-                .fromProtoPrimitive_(x)
-                .bimap(error => RepairServiceError.InvalidArgument.Error(error), PartyId.apply)
-            )
-            .sequence
-        )
-        timestamp <- EitherT.fromEither[Future](
-          request.timestamp
-            .map(CantonTimestamp.fromProtoPrimitive)
-            .sequence
-            .leftMap(error => RepairServiceError.InvalidArgument.Error(error.message))
-        )
-        pv <- EitherT.fromEither[Future](
-          OptionUtil
-            .emptyStringAsNone(request.protocolVersion)
-            .traverse(ProtocolVersion.create)
-            .leftMap(error => RepairServiceError.InvalidArgument.Error(error))
-        )
-        contractDomainRenamesList <-
-          request.contractDomainRenames.toList
-            .traverse { case (source, target) =>
-              for {
-                sourceId <- DomainId.fromString(source)
-                targetId <- DomainId.fromString(target)
-              } yield (sourceId, targetId)
-            }
-            .leftMap(err => RepairServiceError.InvalidArgument.Error(err))
-            .toEitherT[Future]
+      val (temporaryFile, outputStream) =
+        if (request.gzipFormat) {
+          val file = File.newTemporaryFile(AcsSnapshotTemporaryFileNamePrefix, suffix = ".gz")
+          file -> file.newGzipOutputStream()
+        } else {
+          val file = File.newTemporaryFile(AcsSnapshotTemporaryFileNamePrefix)
+          file -> file.newOutputStream()
+        }
 
-        acs <-
-          sync.stateInspection
-            .storeActiveContractsToFile(
-              parties.toSet,
-              temporaryFile.toJava,
-              _.filterString.startsWith(request.filterDomainId),
-              timestamp,
-              pv,
-              contractDomainRenamesList.toMap,
-            )
-      } yield acs
+      def createAcsSnapshotTemporaryFile(
+          validRequest: ValidDownloadRequest
+      ): EitherT[Future, RepairServiceError, Unit] = {
+        val timestampAsString = validRequest.timestamp.fold("head")(ts => s"at $ts")
+        logger.info(
+          s"Downloading active contract set ($timestampAsString) to $temporaryFile for parties ${validRequest.parties}"
+        )
+        ResourceUtil
+          .withResourceEitherT(outputStream)(
+            sync.stateInspection
+              .writeActiveContracts(
+                _,
+                _.filterString.startsWith(request.filterDomainId),
+                validRequest.parties,
+                validRequest.timestamp,
+                validRequest.protocolVersion,
+                validRequest.contractDomainRenames,
+              )
+          )
+          .leftMap(toRepairServiceError)
+      }
 
       // Create a context that will be automatically cancelled after the processing timeout deadline
       val context = io.grpc.Context.current().withCancellation()
 
       context.run { () =>
-        val response = acsFile.map { file =>
-          val chunkSize = request.chunkSize.getOrElse(GrpcParticipantRepairService.defaultChunkSize)
-          File(file.toPath).newInputStream
-            .buffered(chunkSize)
-            .autoClosed { s =>
-              Iterator
-                .continually(s.readNBytes(chunkSize))
-                .takeWhile(_.nonEmpty && !context.isCancelled)
-                .foreach { chunk =>
-                  responseObserver.onNext(AcsSnapshotChunk(ByteString.copyFrom(chunk)))
-                }
-            }
-        }
+        val result =
+          for {
+            validRequest <- EitherT.fromEither[Future](ValidDownloadRequest(request))
+            _ <- createAcsSnapshotTemporaryFile(validRequest)
+          } yield {
+            temporaryFile.newInputStream
+              .buffered(validRequest.chunkSize.value)
+              .autoClosed { s =>
+                Iterator
+                  .continually(s.readNBytes(validRequest.chunkSize.value))
+                  .takeWhile(_.nonEmpty && !context.isCancelled)
+                  .foreach { chunk =>
+                    responseObserver.onNext(AcsSnapshotChunk(ByteString.copyFrom(chunk)))
+                  }
+              }
+          }
 
         Await
-          .result(response.value, processingTimeout.unbounded.duration) match {
+          .result(result.value, processingTimeout.unbounded.duration) match {
           case Right(_) =>
             if (!context.isCancelled) responseObserver.onCompleted()
             else {
@@ -199,7 +291,7 @@ class GrpcParticipantRepairService(
               .leftMap(_.asGrpcError.getStatus.getDescription)
               .value
               .onShutdown {
-                Left(("Aborted due to shutdown."))
+                Left("Aborted due to shutdown.")
               }
           )
         } yield MigrateDomainResponse()
@@ -230,7 +322,7 @@ class GrpcParticipantRepairService(
       val resultE = for {
         lazyContracts <- AcsUtil.loadFromByteString(content, gzip)
         grouped = lazyContracts
-          .grouped(GrpcParticipantRepairService.groupBy)
+          .grouped(GrpcParticipantRepairService.DefaultBatchSize)
           .map(_.groupMap(_.domainId)(_.contract))
         _ <- LazyList
           .from(grouped)

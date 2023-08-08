@@ -17,7 +17,7 @@ import com.digitalasset.canton.ledger.api.validation.ValueValidator.{
   validateOptionalIdentifier,
   validateRecordFields,
 }
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.google.protobuf.any.Any.toJavaProto
 import io.grpc.StatusRuntimeException
 
@@ -34,7 +34,7 @@ class ValidateDisclosedContracts(explicitDisclosureFeatureEnabled: Boolean) {
       _ <- Either.cond(
         explicitDisclosureFeatureEnabled || commands.disclosedContracts.isEmpty,
         (),
-        LedgerApiErrors.RequestValidation.InvalidField
+        RequestValidationErrors.InvalidField
           .Reject(
             "disclosed_contracts",
             "feature in development: disclosed_contracts should not be set",

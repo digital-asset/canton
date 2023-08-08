@@ -22,17 +22,6 @@ final class VersionClient(service: VersionServiceStub) {
         new GetLedgerApiVersionRequest(ledgerIdToUse.unwrap)
       )
       .map(_.version)
-
-  def getApiFeatures(
-      ledgerIdToUse: LedgerId,
-      token: Option[String] = None,
-  )(implicit executionContext: ExecutionContext): Future[Seq[Feature]] =
-    LedgerClient
-      .stub(service, token)
-      .getLedgerApiVersion(
-        new GetLedgerApiVersionRequest(ledgerIdToUse.unwrap)
-      )
-      .map(_.features.toList.flatMap(VersionClient.fromProto))
 }
 
 object VersionClient {

@@ -82,8 +82,6 @@ class TransferOutProcessingSteps(
     ]
     with NamedLogging {
 
-  override type DecryptedView = FullTransferOutTree
-
   override type SubmissionResultArgs = PendingTransferSubmission
 
   override type PendingDataAndResponseArgs = TransferOutProcessingSteps.PendingDataAndResponseArgs
@@ -308,7 +306,7 @@ class TransferOutProcessingSteps(
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      decryptedViewsWithSignatures: NonEmpty[
+      fullViewsWithSignatures: NonEmpty[
         Seq[(WithRecipients[FullTransferOutTree], Option[Signature])]
       ],
       malformedPayloads: Seq[ProtocolProcessor.MalformedPayload],
@@ -317,7 +315,7 @@ class TransferOutProcessingSteps(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, CheckActivenessAndWritePendingContracts] = {
-    val correctRootHashes = decryptedViewsWithSignatures.map { case (rootHashes, _) => rootHashes }
+    val correctRootHashes = fullViewsWithSignatures.map { case (rootHashes, _) => rootHashes }
     // TODO(i12926): Send a rejection if malformedPayloads is non-empty
     for {
       txOutRequestAndRecipients <- EitherT.cond[Future](

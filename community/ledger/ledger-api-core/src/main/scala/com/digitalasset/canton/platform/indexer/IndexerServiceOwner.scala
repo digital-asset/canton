@@ -15,6 +15,7 @@ import com.digitalasset.canton.platform.index.InMemoryStateUpdater
 import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
 import com.digitalasset.canton.platform.store.FlywayMigrations
 import com.digitalasset.canton.tracing.TraceContext
+import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -28,6 +29,7 @@ final class IndexerServiceOwner(
     inMemoryStateUpdaterFlow: InMemoryStateUpdater.UpdaterFlow,
     additionalMigrationPaths: Seq[String] = Seq.empty,
     executionContext: ExecutionContext,
+    tracer: Tracer,
     val loggerFactory: NamedLoggerFactory,
     multiDomainEnabled: Boolean,
 )(implicit materializer: Materializer, traceContext: TraceContext)
@@ -50,6 +52,7 @@ final class IndexerServiceOwner(
       inMemoryState,
       inMemoryStateUpdaterFlow,
       executionContext,
+      tracer,
       loggerFactory,
       multiDomainEnabled,
     )

@@ -12,8 +12,9 @@ import com.daml.ledger.api.v1.commands.Command.Command.{
   Exercise as ProtoExercise,
   ExerciseByKey as ProtoExerciseByKey,
 }
-import com.daml.ledger.api.v1.{commands as V1}
-import com.daml.ledger.api.v2.{commands as V2}
+import com.daml.ledger.api.v1.value.Identifier
+import com.daml.ledger.api.v1.commands as V1
+import com.daml.ledger.api.v2.commands as V2
 import com.daml.lf.command.*
 import com.daml.lf.data.*
 import com.daml.lf.value.Value as Lf
@@ -22,8 +23,9 @@ import com.digitalasset.canton.ledger.api.validation.CommandsValidator.{
   Submitters,
   effectiveSubmitters,
 }
+import com.digitalasset.canton.ledger.api.validation.FieldValidator.ResolveToTemplateId
 import com.digitalasset.canton.ledger.api.{DeduplicationPeriod, domain}
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.offset.Offset
 import io.grpc.StatusRuntimeException
 import scalaz.syntax.tag.*
@@ -35,6 +37,8 @@ import scala.collection.immutable
 
 final class CommandsValidator(
     ledgerId: LedgerId,
+    resolveToTemplateId: ResolveToTemplateId,
+    upgradingEnabled: Boolean = false,
     validateDisclosedContracts: ValidateDisclosedContracts = new ValidateDisclosedContracts(false),
 ) {
 
@@ -141,7 +145,7 @@ final class CommandsValidator(
       case c: ProtoCreate =>
         for {
           templateId <- requirePresence(c.value.templateId, "template_id")
-          validatedTemplateId <- validateIdentifier(templateId)
+          validatedTemplateId <- validateTemplateId(templateId)
           createArguments <- requirePresence(c.value.createArguments, "create_arguments")
           recordId <- validateOptionalIdentifier(createArguments.recordId)
           validatedRecordField <- validateRecordFields(createArguments.fields)
@@ -153,7 +157,7 @@ final class CommandsValidator(
       case e: ProtoExercise =>
         for {
           templateId <- requirePresence(e.value.templateId, "template_id")
-          validatedTemplateId <- validateIdentifier(templateId)
+          validatedTemplateId <- validateTemplateId(templateId)
           contractId <- requireContractId(e.value.contractId, "contract_id")
           choice <- requireName(e.value.choice, "choice")
           value <- requirePresence(e.value.choiceArgument, "value")
@@ -168,7 +172,7 @@ final class CommandsValidator(
       case ek: ProtoExerciseByKey =>
         for {
           templateId <- requirePresence(ek.value.templateId, "template_id")
-          validatedTemplateId <- validateIdentifier(templateId)
+          validatedTemplateId <- validateTemplateId(templateId)
           contractKey <- requirePresence(ek.value.contractKey, "contract_key")
           validatedContractKey <- validateValue(contractKey)
           choice <- requireName(ek.value.choice, "choice")
@@ -184,7 +188,7 @@ final class CommandsValidator(
       case ce: ProtoCreateAndExercise =>
         for {
           templateId <- requirePresence(ce.value.templateId, "template_id")
-          validatedTemplateId <- validateIdentifier(templateId)
+          validatedTemplateId <- validateTemplateId(templateId)
           createArguments <- requirePresence(ce.value.createArguments, "create_arguments")
           recordId <- validateOptionalIdentifier(createArguments.recordId)
           validatedRecordField <- validateRecordFields(createArguments.fields)
@@ -200,6 +204,13 @@ final class CommandsValidator(
       case ProtoEmpty =>
         Left(missingField("command"))
     }
+
+  private def validateTemplateId(identifier: Identifier)(implicit
+      contextualizedErrorLogger: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, Ref.Identifier] =
+    if (upgradingEnabled)
+      validateIdentifierWithOptionalPackageId(resolveToTemplateId)(identifier)
+    else validateIdentifier(identifier)
 
   private def validateSubmitters(
       commands: V1.Commands
@@ -236,7 +247,7 @@ final class CommandsValidator(
   ): Either[StatusRuntimeException, DeduplicationPeriod] =
     optMaxDeduplicationDuration.fold[Either[StatusRuntimeException, DeduplicationPeriod]](
       Left(
-        LedgerApiErrors.RequestValidation.NotFound.LedgerConfiguration
+        RequestValidationErrors.NotFound.LedgerConfiguration
           .Reject()
           .asGrpcError
       )
@@ -260,7 +271,7 @@ final class CommandsValidator(
             .fold(
               _ =>
                 Left(
-                  LedgerApiErrors.RequestValidation.NonHexOffset
+                  RequestValidationErrors.NonHexOffset
                     .Error(
                       fieldName = "deduplication_period",
                       offsetValue = offset,
@@ -277,10 +288,18 @@ final class CommandsValidator(
 }
 
 object CommandsValidator {
-  def apply(ledgerId: LedgerId, explicitDisclosureUnsafeEnabled: Boolean) = new CommandsValidator(
-    ledgerId = ledgerId,
-    validateDisclosedContracts = new ValidateDisclosedContracts(explicitDisclosureUnsafeEnabled),
-  )
+  def apply(
+      ledgerId: LedgerId,
+      resolveToTemplateId: ResolveToTemplateId,
+      upgradingEnabled: Boolean,
+      explicitDisclosureUnsafeEnabled: Boolean,
+  ) =
+    new CommandsValidator(
+      ledgerId = ledgerId,
+      resolveToTemplateId = resolveToTemplateId,
+      upgradingEnabled = upgradingEnabled,
+      validateDisclosedContracts = new ValidateDisclosedContracts(explicitDisclosureUnsafeEnabled),
+    )
 
   /** Effective submitters of a command
     * @param actAs Guaranteed to be non-empty. Will contain exactly one element in most cases.

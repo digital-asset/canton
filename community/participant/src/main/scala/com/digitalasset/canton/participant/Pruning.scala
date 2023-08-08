@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant
 
-import com.digitalasset.canton.participant.store.EventLogId
+import com.digitalasset.canton.participant.store.{DomainConnectionConfigStore, EventLogId}
 import com.digitalasset.canton.participant.sync.UpstreamOffsetConvert
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.ShowUtil.*
@@ -40,4 +40,13 @@ object Pruning {
   }
 
   final case class LedgerPruningOffsetNonCantonFormat(message: String) extends LedgerPruningError
+
+  final case class LedgerPruningNotPossibleDuringHardMigration(
+      domainId: DomainId,
+      status: DomainConnectionConfigStore.Status,
+  ) extends LedgerPruningError {
+    override def message =
+      s"The domain ${domainId} can not be pruned as there is a pending domain migration: ${status}"
+  }
+
 }

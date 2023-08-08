@@ -16,7 +16,6 @@ import com.daml.ledger.api.v1.transaction_service.{
 }
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
-import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.services.CommandService
 import com.digitalasset.canton.ledger.api.validation.CommandsValidator
@@ -35,7 +34,7 @@ import com.digitalasset.canton.platform.apiserver.services.tracking.{
   SubmissionTracker,
 }
 import com.digitalasset.canton.platform.apiserver.services.{ApiCommandService, logging}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.google.protobuf.empty.Empty
 import io.grpc.Context
 
@@ -47,9 +46,8 @@ import scala.concurrent.{ExecutionContext, Future}
 private[apiserver] final class CommandServiceImpl private[services] (
     transactionServices: TransactionServices,
     submissionTracker: SubmissionTracker,
-    submit: SubmitRequest => Future[Empty],
+    submit: Traced[SubmitRequest] => Future[Empty],
     defaultTrackingTimeout: Duration,
-    telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
     executionContext: ExecutionContext
@@ -68,7 +66,7 @@ private[apiserver] final class CommandServiceImpl private[services] (
   def submitAndWait(
       request: SubmitAndWaitRequest
   )(loggingContext: LoggingContextWithTrace): Future[Empty] =
-    withCommandsLoggingContext(request.getCommands) { (errorLogger, traceContext) =>
+    withCommandsLoggingContext(request.getCommands, loggingContext) { (errorLogger, traceContext) =>
       submitAndWaitInternal(request)(errorLogger, traceContext).map { _ =>
         Empty.defaultInstance
       }
@@ -77,7 +75,7 @@ private[apiserver] final class CommandServiceImpl private[services] (
   def submitAndWaitForTransactionId(
       request: SubmitAndWaitRequest
   )(loggingContext: LoggingContextWithTrace): Future[SubmitAndWaitForTransactionIdResponse] =
-    withCommandsLoggingContext(request.getCommands) { (errorLogger, traceContext) =>
+    withCommandsLoggingContext(request.getCommands, loggingContext) { (errorLogger, traceContext) =>
       submitAndWaitInternal(request)(errorLogger, traceContext).map { response =>
         SubmitAndWaitForTransactionIdResponse.of(
           transactionId = response.completion.updateId,
@@ -92,7 +90,7 @@ private[apiserver] final class CommandServiceImpl private[services] (
   def submitAndWaitForTransaction(
       request: SubmitAndWaitRequest
   )(loggingContext: LoggingContextWithTrace): Future[SubmitAndWaitForTransactionResponse] =
-    withCommandsLoggingContext(request.getCommands) { (errorLogger, traceContext) =>
+    withCommandsLoggingContext(request.getCommands, loggingContext) { (errorLogger, traceContext) =>
       submitAndWaitInternal(request)(errorLogger, traceContext).flatMap { resp =>
         val effectiveActAs = CommandsValidator.effectiveSubmitters(request.getCommands).actAs
         val txRequest = GetTransactionByIdRequest(
@@ -115,7 +113,7 @@ private[apiserver] final class CommandServiceImpl private[services] (
   def submitAndWaitForTransactionTree(
       request: SubmitAndWaitRequest
   )(loggingContext: LoggingContextWithTrace): Future[SubmitAndWaitForTransactionTreeResponse] =
-    withCommandsLoggingContext(request.getCommands) { (errorLogger, traceContext) =>
+    withCommandsLoggingContext(request.getCommands, loggingContext) { (errorLogger, traceContext) =>
       submitAndWaitInternal(request)(errorLogger, traceContext).flatMap { resp =>
         val effectiveActAs = CommandsValidator.effectiveSubmitters(request.getCommands).actAs
         val txRequest = GetTransactionByIdRequest(
@@ -154,14 +152,17 @@ private[apiserver] final class CommandServiceImpl private[services] (
           parties = CommandsValidator.effectiveActAs(commands),
         ),
         timeout = timeout,
-        submit = () => submit(SubmitRequest(Some(commands))),
+        submit = childContext => submit(Traced(SubmitRequest(Some(commands)))(childContext)),
       )(errorLogger, traceContext)
     } else
       Future.failed(
         CommonErrors.ServiceNotRunning.Reject("Command Service")(errorLogger).asGrpcError
       )
 
-  private def withCommandsLoggingContext[T](commands: Commands)(
+  private def withCommandsLoggingContext[T](
+      commands: Commands,
+      loggingContextWithTrace: LoggingContextWithTrace,
+  )(
       submitWithContext: (ContextualizedErrorLogger, TraceContext) => Future[T]
   ): Future[T] = {
     LoggingContextWithTrace.withEnrichedLoggingContext(
@@ -180,7 +181,7 @@ private[apiserver] final class CommandServiceImpl private[services] (
         ),
         loggingContext.traceContext,
       )
-    }(LoggingContextWithTrace(loggerFactory, telemetry))
+    }(loggingContextWithTrace)
   }
 }
 
@@ -188,12 +189,12 @@ private[apiserver] object CommandServiceImpl {
 
   def createApiService(
       submissionTracker: SubmissionTracker,
-      submit: SubmitRequest => Future[Empty],
-      configuration: Configuration,
+      commandsValidator: CommandsValidator,
+      submit: Traced[SubmitRequest] => Future[Empty],
+      defaultTrackingTimeout: Duration,
       transactionServices: TransactionServices,
       timeProvider: TimeProvider,
       ledgerConfigurationSubscription: LedgerConfigurationSubscription,
-      explicitDisclosureUnsafeEnabled: Boolean,
       telemetry: Telemetry,
       loggerFactory: NamedLoggerFactory,
   )(implicit
@@ -204,25 +205,18 @@ private[apiserver] object CommandServiceImpl {
         transactionServices,
         submissionTracker,
         submit,
-        configuration.defaultTrackingTimeout,
-        telemetry,
+        defaultTrackingTimeout,
         loggerFactory,
       ),
-      ledgerId = configuration.ledgerId,
+      commandsValidator = commandsValidator,
       currentLedgerTime = () => timeProvider.getCurrentTime,
       currentUtcTime = () => Instant.now,
       maxDeduplicationDuration = () =>
         ledgerConfigurationSubscription.latestConfiguration().map(_.maxDeduplicationDuration),
       generateSubmissionId = SubmissionIdGenerator.Random,
-      explicitDisclosureUnsafeEnabled = explicitDisclosureUnsafeEnabled,
       telemetry = telemetry,
       loggerFactory = loggerFactory,
     )
-
-  final case class Configuration(
-      ledgerId: LedgerId,
-      defaultTrackingTimeout: Duration,
-  )
 
   final class TransactionServices(
       val getTransactionById: GetTransactionByIdRequest => Future[GetTransactionResponse],

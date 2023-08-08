@@ -794,7 +794,7 @@ class RepairService(
       batchSize: PositiveInt,
   )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] =
     MonadUtil
-      .batchedSequentialTraverse(parameters.maxDbConnections * 2, batchSize.value)(cids)(
+      .batchedSequentialTraverse(parameters.maxDbConnections * PositiveInt.two, batchSize)(cids)(
         migrateContracts(_, repairSource, repairTarget, skipInactive).map(_ => Seq[Unit]())
       )
       .map(_ => ())

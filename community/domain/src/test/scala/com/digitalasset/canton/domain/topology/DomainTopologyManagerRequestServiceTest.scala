@@ -68,7 +68,7 @@ class DomainTopologyManagerRequestServiceTest
       )
     }
     def storedTransactions: Future[Seq[SignedTopologyTransaction[TopologyChangeOp]]] =
-      authorizedStore.allTransactions.map(_.result.map(_.transaction))
+      authorizedStore.allTransactions().map(_.result.map(_.transaction))
 
     val fromResponses =
       mutable.Queue[EitherT[Future, DomainTopologyManagerError, Unit]]()

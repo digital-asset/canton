@@ -228,48 +228,45 @@ trait CompletionStorageBackend {
 
 trait ContractStorageBackend {
   def keyState(key: Key, validAt: Offset)(connection: Connection): KeyState
-  def contractStates(contractIds: Seq[ContractId], before: Offset)(
+  def archivedContracts(contractIds: Seq[ContractId], before: Offset)(
       connection: Connection
-  ): Map[ContractId, ContractStorageBackend.RawContractState]
+  ): Map[ContractId, ContractStorageBackend.RawArchivedContract]
+  def createdContracts(contractIds: Seq[ContractId], before: Offset)(
+      connection: Connection
+  ): Map[ContractId, ContractStorageBackend.RawCreatedContract]
   def activeContractWithArgument(readers: Set[Party], contractId: ContractId)(
       connection: Connection
   ): Option[ContractStorageBackend.RawContract]
   def activeContractWithoutArgument(readers: Set[Party], contractId: ContractId)(
       connection: Connection
   ): Option[String]
-  def contractStateEvents(startExclusive: Long, endInclusive: Long)(
-      connection: Connection
-  ): Vector[ContractStorageBackend.RawContractStateEvent]
 }
 
 object ContractStorageBackend {
-  final case class RawContractState(
-      templateId: Option[String],
+  sealed trait RawContractState
+
+  final case class RawCreatedContract(
+      templateId: String,
       flatEventWitnesses: Set[Party],
-      createArgument: Option[Array[Byte]],
+      createArgument: Array[Byte],
       createArgumentCompression: Option[Int],
-      eventKind: Int,
-      ledgerEffectiveTime: Option[Timestamp],
-  )
+      ledgerEffectiveTime: Timestamp,
+      agreementText: Option[String],
+      signatories: Set[Party],
+      createKey: Option[Array[Byte]],
+      createKeyCompression: Option[Int],
+      keyMaintainers: Option[Set[Party]],
+      driverMetadata: Option[Array[Byte]],
+  ) extends RawContractState
+
+  final case class RawArchivedContract(
+      flatEventWitnesses: Set[Party]
+  ) extends RawContractState
 
   class RawContract(
       val templateId: String,
       val createArgument: Array[Byte],
       val createArgumentCompression: Option[Int],
-  )
-
-  final case class RawContractStateEvent(
-      eventKind: Int,
-      contractId: ContractId,
-      templateId: Option[Identifier],
-      ledgerEffectiveTime: Option[Timestamp],
-      createKeyValue: Option[Array[Byte]],
-      createKeyCompression: Option[Int],
-      createArgument: Option[Array[Byte]],
-      createArgumentCompression: Option[Int],
-      flatEventWitnesses: Set[Party],
-      eventSequentialId: Long,
-      offset: Offset,
   )
 }
 

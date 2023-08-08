@@ -184,7 +184,7 @@ trait SharedEnvironment[E <: Environment, TCE <: TestConsoleEnvironment[E]]
     sharedEnvironment = Some(createEnvironment())
   }
 
-  override protected def afterAll(): Unit =
+  override def afterAll(): Unit =
     try {
       sharedEnvironment.foreach(destroyEnvironment)
     } finally super.afterAll()

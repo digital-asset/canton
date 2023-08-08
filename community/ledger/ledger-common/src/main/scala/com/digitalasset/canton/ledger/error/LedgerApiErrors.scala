@@ -7,19 +7,13 @@ import com.daml.error.*
 import com.daml.lf.engine.Error.Validation.ReplayMismatch
 import com.daml.lf.engine.Error as LfError
 import com.daml.metrics.ExecutorServiceMetrics
+import com.digitalasset.canton.ledger.error.ParticipantErrorGroup.LedgerApiErrorGroup
 import org.slf4j.event.Level
 
 @Explanation(
   "Errors raised by or forwarded by the Ledger API."
 )
-object LedgerApiErrors extends ErrorGroup()(ParticipantErrorGroup.errorClass) {
-
-  val Admin: groups.AdminServices.type = groups.AdminServices
-  val CommandExecution: groups.CommandExecution.type = groups.CommandExecution
-  val AuthorizationChecks: groups.AuthorizationChecks.type = groups.AuthorizationChecks
-  val ConsistencyErrors: groups.ConsistencyErrors.type = groups.ConsistencyErrors
-  val RequestValidation: groups.RequestValidation.type = groups.RequestValidation
-  val WriteServiceRejections: groups.WriteServiceRejections.type = groups.WriteServiceRejections
+object LedgerApiErrors extends LedgerApiErrorGroup {
 
   val EarliestOffsetMetadataKey = "earliest_offset"
 

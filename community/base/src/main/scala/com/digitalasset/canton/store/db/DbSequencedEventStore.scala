@@ -11,6 +11,7 @@ import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.CantonRequireTypes.String3
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.*
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
@@ -54,7 +55,7 @@ class DbSequencedEventStore(
     */
   private val semaphore: Semaphore = new Semaphore(1)
 
-  private def withLock[F[_], Content[_], A](body: => F[A], caller: String)(implicit
+  private def withLock[F[_], Content[_], A](caller: String)(body: => F[A])(implicit
       thereafter: Thereafter[F, Content],
       traceContext: TraceContext,
   ): F[A] = {
@@ -130,15 +131,24 @@ class DbSequencedEventStore(
 
   override def store(
       events: Seq[OrdinarySerializedEvent]
-  )(implicit traceContext: TraceContext): Future[Unit] =
+  )(implicit traceContext: TraceContext, externalCloseContext: CloseContext): Future[Unit] = {
+
     if (events.isEmpty) Future.unit
     else
       processingTime.event {
-        withLock(
-          storage.queryAndUpdate(bulkInsertQuery(events), functionFullName).void,
-          functionFullName,
-        )
+        withLock(functionFullName) {
+          CloseContext.withCombinedContextF(closeContext, externalCloseContext, timeouts, logger) {
+            combinedCloseContext =>
+              storage
+                .queryAndUpdate(bulkInsertQuery(events), functionFullName)(
+                  traceContext,
+                  combinedCloseContext,
+                )
+                .void
+          }
+        }
       }
+  }
 
   private def bulkInsertQuery(
       events: Seq[PossiblyIgnoredSerializedEvent]
@@ -318,15 +328,12 @@ class DbSequencedEventStore(
   override def ignoreEvents(from: SequencerCounter, to: SequencerCounter)(implicit
       traceContext: TraceContext
   ): EitherT[Future, ChangeWouldResultInGap, Unit] =
-    withLock(
-      {
-        for {
-          _ <- appendEmptyIgnoredEvents(from, to)
-          _ <- EitherT.right(setIgnoreStatus(from, to, ignore = true))
-        } yield ()
-      },
-      functionFullName,
-    )
+    withLock(functionFullName) {
+      for {
+        _ <- appendEmptyIgnoredEvents(from, to)
+        _ <- EitherT.right(setIgnoreStatus(from, to, ignore = true))
+      } yield ()
+    }
 
   private def appendEmptyIgnoredEvents(from: SequencerCounter, to: SequencerCounter)(implicit
       traceContext: TraceContext
@@ -376,15 +383,12 @@ class DbSequencedEventStore(
   override def unignoreEvents(from: SequencerCounter, to: SequencerCounter)(implicit
       traceContext: TraceContext
   ): EitherT[Future, ChangeWouldResultInGap, Unit] =
-    withLock(
-      {
-        for {
-          _ <- deleteEmptyIgnoredEvents(from, to)
-          _ <- EitherT.right(setIgnoreStatus(from, to, ignore = false))
-        } yield ()
-      },
-      functionFullName,
-    )
+    withLock(functionFullName) {
+      for {
+        _ <- deleteEmptyIgnoredEvents(from, to)
+        _ <- EitherT.right(setIgnoreStatus(from, to, ignore = false))
+      } yield ()
+    }
 
   private def deleteEmptyIgnoredEvents(from: SequencerCounter, to: SequencerCounter)(implicit
       traceContext: TraceContext

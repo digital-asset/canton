@@ -10,8 +10,7 @@ import com.daml.ledger.api.v1.command_submission_service.{
   SubmitRequest as ApiSubmitRequest,
 }
 import com.daml.metrics.{Metrics, Timed}
-import com.daml.tracing.{SpanAttribute, Telemetry, TelemetryContext}
-import com.digitalasset.canton.ledger.api.domain.LedgerId
+import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.services.CommandSubmissionService
 import com.digitalasset.canton.ledger.api.validation.{CommandsValidator, SubmitRequestValidator}
@@ -22,46 +21,44 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
 }
+import com.digitalasset.canton.tracing.{Spanning, Traced}
 import com.google.protobuf.empty.Empty
 import io.grpc.ServerServiceDefinition
+import io.opentelemetry.api.trace.Tracer
 
 import java.time.{Duration, Instant}
 import scala.concurrent.{ExecutionContext, Future}
 
 class ApiCommandSubmissionService(
-    override protected val service: CommandSubmissionService with AutoCloseable,
-    ledgerId: LedgerId,
+    override protected val service: CommandSubmissionService & AutoCloseable,
+    commandsValidator: CommandsValidator,
     currentLedgerTime: () => Instant,
     currentUtcTime: () => Instant,
     maxDeduplicationDuration: () => Option[Duration],
     submissionIdGenerator: SubmissionIdGenerator,
     metrics: Metrics,
-    explicitDisclosureUnsafeEnabled: Boolean,
     telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
-)(implicit executionContext: ExecutionContext)
+)(implicit executionContext: ExecutionContext, val tracer: Tracer)
     extends GrpcCommandSubmissionService
     with ProxyCloseable
     with GrpcApiService
+    with Spanning
     with NamedLogging {
 
-  private val validator = new SubmitRequestValidator(
-    CommandsValidator(ledgerId, explicitDisclosureUnsafeEnabled)
-  )
+  private val validator = new SubmitRequestValidator(commandsValidator)
 
   override def submit(request: ApiSubmitRequest): Future[Empty] = {
-    implicit val telemetryContext: TelemetryContext =
-      telemetry.contextFromGrpcThreadLocalContext()
-    request.commands.foreach { commands =>
-      telemetryContext
-        .setAttribute(SpanAttribute.ApplicationId, commands.applicationId)
-        .setAttribute(SpanAttribute.CommandId, commands.commandId)
-        .setAttribute(SpanAttribute.Submitter, commands.party)
-        .setAttribute(SpanAttribute.WorkflowId, commands.workflowId)
-    }
+    implicit val traceContext = getAnnotedCommandTraceContext(request.commands, telemetry)
+    submitWithTraceContext(Traced(request))
+  }
+
+  def submitWithTraceContext(
+      request: Traced[ApiSubmitRequest]
+  ): Future[Empty] = {
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory, telemetry)
-    val requestWithSubmissionId = generateSubmissionIdIfEmpty(request)
+      LoggingContextWithTrace(loggerFactory)(request.traceContext)
+    val requestWithSubmissionId = generateSubmissionIdIfEmpty(request.value)
     val errorLogger: ContextualizedErrorLogger =
       ErrorLoggingContext.fromOption(
         logger,

@@ -10,7 +10,7 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   TimeoutType,
 }
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.crypto.PublicKey
+import com.digitalasset.canton.crypto.{Fingerprint, PublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.admin.v0.EnterpriseMediatorAdministrationServiceGrpc
 import com.digitalasset.canton.domain.admin.{v0, v2}
@@ -64,6 +64,7 @@ object EnterpriseMediatorAdministrationCommands {
       topologyState: Option[StoredTopologyTransactions[TopologyChangeOp.Positive]],
       domainParameters: StaticDomainParameters,
       sequencerConnections: SequencerConnections,
+      signingKeyFingerprint: Option[Fingerprint],
   ) extends BaseMediatorInitializationCommand[
         v0.InitializeMediatorRequest,
         v0.InitializeMediatorResponse,
@@ -77,6 +78,7 @@ object EnterpriseMediatorAdministrationCommands {
           topologyState,
           domainParameters,
           sequencerConnections,
+          signingKeyFingerprint,
         ).toProtoV0
       )
 

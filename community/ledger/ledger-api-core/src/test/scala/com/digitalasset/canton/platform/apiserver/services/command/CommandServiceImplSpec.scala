@@ -16,6 +16,7 @@ import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
 import com.daml.lf.data.Ref
 import com.daml.tracing.DefaultOpenTelemetry
 import com.digitalasset.canton.ledger.api.domain.LedgerId
+import com.digitalasset.canton.ledger.api.validation.{CommandsValidator, ValidateDisclosedContracts}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, LoggingContextWithTrace}
 import com.digitalasset.canton.platform.apiserver.services.command.CommandServiceImplSpec.*
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker.SubmissionKey
@@ -24,7 +25,7 @@ import com.digitalasset.canton.platform.apiserver.services.tracking.{
   SubmissionTracker,
 }
 import com.digitalasset.canton.platform.apiserver.services.{ApiCommandService, tracking}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.google.protobuf.empty.Empty
 import com.google.rpc.Code
@@ -61,9 +62,13 @@ class CommandServiceImplSpec
     )
     val commands = someCommands()
     val submissionTracker = mock[SubmissionTracker]
-    val submit = mock[SubmitRequest => Future[Empty]]
+    val submit = mock[Traced[SubmitRequest] => Future[Empty]]
     when(
-      submissionTracker.track(eqTo(expectedSubmissionKey), any[Duration], any[() => Future[Any]])(
+      submissionTracker.track(
+        eqTo(expectedSubmissionKey),
+        any[Duration],
+        any[TraceContext => Future[Any]],
+      )(
         any[ContextualizedErrorLogger],
         any[TraceContext],
       )
@@ -76,7 +81,6 @@ class CommandServiceImplSpec
           submissionTracker,
           submit,
           Duration.ofSeconds(1000L),
-          telemetry,
           loggerFactory,
         )
       ).use { stub =>
@@ -85,7 +89,7 @@ class CommandServiceImplSpec
           verify(submissionTracker).track(
             eqTo(expectedSubmissionKey),
             eqTo(Duration.ofSeconds(1000L)),
-            any[() => Future[Any]],
+            any[TraceContext => Future[Any]],
           )(any[ContextualizedErrorLogger], any[TraceContext])
           response.transactionId should be("transaction ID")
           response.completionOffset shouldBe "offset"
@@ -106,7 +110,6 @@ class CommandServiceImplSpec
           submissionTracker,
           submit,
           Duration.ofSeconds(1L),
-          telemetry,
           loggerFactory,
         ),
         deadlineTicker,
@@ -119,7 +122,7 @@ class CommandServiceImplSpec
             verify(submissionTracker).track(
               eqTo(expectedSubmissionKey),
               eqTo(Duration.ofSeconds(1000L)),
-              any[() => Future[Any]],
+              any[TraceContext => Future[Any]],
             )(any[ContextualizedErrorLogger], any[TraceContext])
             response.transactionId should be("transaction ID")
             succeed
@@ -129,7 +132,11 @@ class CommandServiceImplSpec
 
     "time out if the tracker times out" in {
       when(
-        submissionTracker.track(eqTo(expectedSubmissionKey), any[Duration], any[() => Future[Any]])(
+        submissionTracker.track(
+          eqTo(expectedSubmissionKey),
+          any[Duration],
+          any[TraceContext => Future[Any]],
+        )(
           any[ContextualizedErrorLogger],
           any[TraceContext],
         )
@@ -149,7 +156,6 @@ class CommandServiceImplSpec
         submissionTracker,
         submit,
         Duration.ofSeconds(1337L),
-        telemetry,
         loggerFactory,
       )
 
@@ -172,7 +178,6 @@ class CommandServiceImplSpec
         submissionTracker,
         submit,
         Duration.ofSeconds(1337L),
-        telemetry,
         loggerFactory,
       )
 
@@ -188,14 +193,19 @@ class CommandServiceImplSpec
       service: CommandServiceImpl,
       deadlineTicker: Deadline.Ticker = Deadline.getSystemTicker,
   ): ResourceOwner[CommandServiceGrpc.CommandServiceStub] = {
+    val commandsValidator = new CommandsValidator(
+      ledgerId = ledgerId,
+      resolveToTemplateId = _ => fail("should not be called"),
+      upgradingEnabled = false,
+      validateDisclosedContracts = new ValidateDisclosedContracts(false),
+    )
     val apiService = new ApiCommandService(
       service = service,
-      ledgerId = ledgerId,
+      commandsValidator = commandsValidator,
       currentLedgerTime = () => Instant.EPOCH,
       currentUtcTime = () => Instant.EPOCH,
       maxDeduplicationDuration = () => Some(maxDeduplicationDuration),
       generateSubmissionId = () => submissionId,
-      explicitDisclosureUnsafeEnabled = false,
       telemetry = telemetry,
       loggerFactory = loggerFactory,
     )

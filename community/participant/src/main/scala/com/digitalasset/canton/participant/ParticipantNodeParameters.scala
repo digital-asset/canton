@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant
 
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt, PositiveNumeric}
 import com.digitalasset.canton.config.{
   ApiLoggingConfig,
   BatchAggregatorConfig,
@@ -35,7 +35,7 @@ final case class ParticipantNodeParameters(
     protocolConfig: ParticipantProtocolConfig,
     uniqueContractKeys: Boolean,
     ledgerApiServerParameters: LedgerApiServerParametersConfig,
-    maxDbConnections: Int,
+    maxDbConnections: PositiveInt,
     excludeInfrastructureTransactions: Boolean,
     enableEngineStackTrace: Boolean,
     enableContractUpgrading: Boolean,
@@ -85,7 +85,7 @@ object ParticipantNodeParameters {
     ),
     uniqueContractKeys = false,
     ledgerApiServerParameters = LedgerApiServerParametersConfig(),
-    maxDbConnections = 10,
+    maxDbConnections = PositiveInt.tryCreate(10),
     excludeInfrastructureTransactions = true,
     enableEngineStackTrace = false,
     enableContractUpgrading = false,

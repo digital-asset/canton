@@ -17,7 +17,9 @@ import scala.concurrent.{ExecutionContext, Future, blocking}
 @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
 class ThreadingTest extends AnyWordSpec with BaseTest with TestMetrics {
 
-  lazy val expectedNumberOfParallelTasks: Int = Threading.detectNumberOfThreads(logger)
+  lazy val configuredNumerOfThreads: Int = Threading.detectNumberOfThreads(logger)
+  lazy val expectedNumberOfParallelTasks: Int =
+    configuredNumerOfThreads max Threading.minParallelism
   val expectedNumberOfParallelTasksWrappedInBlocking: Int = 200
   val numberOfTasksToMakeExecutionContextBusy: Int = 200
 
@@ -26,8 +28,8 @@ class ThreadingTest extends AnyWordSpec with BaseTest with TestMetrics {
   "A new execution context" when {
 
     "nothing else is happening" must {
-      s"provide at least $expectedNumberOfParallelTasks threads" in {
-        withTaskRunnerOnNewEc(expectedNumberOfParallelTasks, wrapInBlocking = false) { taskRunner =>
+      s"provide at least $configuredNumerOfThreads threads" in {
+        withTaskRunnerOnNewEc(configuredNumerOfThreads, wrapInBlocking = false) { taskRunner =>
           taskRunner.startTasks()
           taskRunner.assertTasksRunning()
         }
@@ -57,14 +59,13 @@ class ThreadingTest extends AnyWordSpec with BaseTest with TestMetrics {
           body
         }
 
-      s"provide at least $expectedNumberOfParallelTasks threads" in {
+      s"provide at least $configuredNumerOfThreads threads" in {
         withGlobalEcBusy {
 
-          withTaskRunnerOnNewEc(expectedNumberOfParallelTasks, wrapInBlocking = false) {
-            taskRunner =>
-              taskRunner.startTasks()
+          withTaskRunnerOnNewEc(configuredNumerOfThreads, wrapInBlocking = false) { taskRunner =>
+            taskRunner.startTasks()
 
-              taskRunner.assertTasksRunning()
+            taskRunner.assertTasksRunning()
           }
         }
       }
@@ -86,17 +87,16 @@ class ThreadingTest extends AnyWordSpec with BaseTest with TestMetrics {
 
     "another new execution context is busy" must {
 
-      s"provide at least $expectedNumberOfParallelTasks threads" in {
+      s"provide at least $configuredNumerOfThreads threads" in {
         withTaskRunnerOnNewEc(numberOfTasksToMakeExecutionContextBusy, wrapInBlocking = true) {
           taskRunner =>
             taskRunner.startTasks()
             taskRunner.assertTasksRunning()
 
-            withTaskRunnerOnNewEc(expectedNumberOfParallelTasks, wrapInBlocking = false) {
-              taskRunner =>
-                taskRunner.startTasks()
+            withTaskRunnerOnNewEc(configuredNumerOfThreads, wrapInBlocking = false) { taskRunner =>
+              taskRunner.startTasks()
 
-                taskRunner.assertTasksRunning()
+              taskRunner.assertTasksRunning()
             }
         }
       }
@@ -278,7 +278,7 @@ class ThreadingTest extends AnyWordSpec with BaseTest with TestMetrics {
         val lvt = new LazyValTest(semaphore)
 
         // Use a few more threads to avoid flakes
-        val concurrentInitializationThreads = expectedNumberOfParallelTasks + 2
+        val concurrentInitializationThreads = expectedNumberOfParallelTasks + 1
         val futures = ((1 to (concurrentInitializationThreads)): Seq[Int]).parTraverse_ { _ =>
           Future(lvt.blocker)
         }
@@ -312,7 +312,7 @@ class ThreadingTest extends AnyWordSpec with BaseTest with TestMetrics {
         val lvt = new LazyValTest(semaphore)
 
         // Use a few more threads to avoid flakes
-        val concurrentInitializationThreads = expectedNumberOfParallelTasks + 2
+        val concurrentInitializationThreads = expectedNumberOfParallelTasks + 1
         val futures = ((1 to (concurrentInitializationThreads)): Seq[Int]).parTraverse_ { _ =>
           Future(lvt.blockerWithContext)
         }

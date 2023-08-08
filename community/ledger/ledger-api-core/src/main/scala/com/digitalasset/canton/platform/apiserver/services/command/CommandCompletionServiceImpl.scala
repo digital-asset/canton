@@ -44,7 +44,6 @@ private[apiserver] final class CommandCompletionServiceImpl private (
     completionsService: IndexCompletionsService,
     validator: CompletionServiceRequestValidator,
     metrics: Metrics,
-    telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
     protected val materializer: Materializer,
@@ -140,7 +139,6 @@ private[apiserver] object CommandCompletionServiceImpl {
         completionsService,
         validator,
         metrics,
-        telemetry,
         loggerFactory,
       )
 

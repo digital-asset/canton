@@ -7,36 +7,26 @@ import com.daml.ports.Port
 import com.digitalasset.canton.ledger.api.tls.TlsConfiguration
 import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
-import com.digitalasset.canton.platform.configuration.{
-  CommandConfiguration,
-  InitialLedgerConfiguration,
-}
-import com.digitalasset.canton.platform.localstore.{
-  IdentityProviderManagementConfig,
-  UserManagementConfig,
-}
+import com.digitalasset.canton.platform.config.{CommandServiceConfig, UserManagementServiceConfig}
+import com.digitalasset.canton.platform.localstore.IdentityProviderManagementConfig
 import com.digitalasset.canton.platform.services.time.TimeProviderType
 
-import java.nio.file.Path
 import scala.concurrent.duration.*
 
 final case class ApiServerConfig(
     address: Option[String] =
       ApiServerConfig.DefaultAddress, // This defaults to "localhost" when set to `None`.
     apiStreamShutdownTimeout: Duration = ApiServerConfig.DefaultApiStreamShutdownTimeout,
-    command: CommandConfiguration = ApiServerConfig.DefaultCommand,
+    command: CommandServiceConfig = ApiServerConfig.DefaultCommandServiceConfig,
     configurationLoadTimeout: Duration = ApiServerConfig.DefaultConfigurationLoadTimeout,
-    initialLedgerConfiguration: Option[InitialLedgerConfiguration] =
-      ApiServerConfig.DefaultInitialLedgerConfiguration,
     managementServiceTimeout: FiniteDuration = ApiServerConfig.DefaultManagementServiceTimeout,
     maxInboundMessageSize: Int = ApiServerConfig.DefaultMaxInboundMessageSize,
     port: Port = ApiServerConfig.DefaultPort,
-    portFile: Option[Path] = ApiServerConfig.DefaultPortFile,
     rateLimit: Option[RateLimitingConfig] = ApiServerConfig.DefaultRateLimitingConfig,
     seeding: Seeding = ApiServerConfig.DefaultSeeding,
     timeProviderType: TimeProviderType = ApiServerConfig.DefaultTimeProviderType,
     tls: Option[TlsConfiguration] = ApiServerConfig.DefaultTls,
-    userManagement: UserManagementConfig = ApiServerConfig.DefaultUserManagement,
+    userManagement: UserManagementServiceConfig = ApiServerConfig.DefaultUserManagement,
     identityProviderManagement: IdentityProviderManagementConfig =
       ApiServerConfig.DefaultIdentityProviderManagementConfig,
 )
@@ -46,17 +36,14 @@ object ApiServerConfig {
   val DefaultAddress: Option[String] = None
   val DefaultTls: Option[TlsConfiguration] = None
   val DefaultMaxInboundMessageSize: Int = 64 * 1024 * 1024
-  val DefaultInitialLedgerConfiguration: Option[InitialLedgerConfiguration] = Some(
-    InitialLedgerConfiguration()
-  )
   val DefaultConfigurationLoadTimeout: Duration = 10.seconds
-  val DefaultPortFile: Option[Path] = None
   val DefaultSeeding: Seeding = Seeding.Strong
   val DefaultManagementServiceTimeout: FiniteDuration = 2.minutes
-  val DefaultUserManagement: UserManagementConfig = UserManagementConfig.default(enabled = false)
+  val DefaultUserManagement: UserManagementServiceConfig =
+    UserManagementServiceConfig.default(enabled = false)
   val DefaultIdentityProviderManagementConfig: IdentityProviderManagementConfig =
     IdentityProviderManagementConfig()
-  val DefaultCommand: CommandConfiguration = CommandConfiguration.Default
+  val DefaultCommandServiceConfig: CommandServiceConfig = CommandServiceConfig.Default
   val DefaultTimeProviderType: TimeProviderType = TimeProviderType.WallClock
   val DefaultApiStreamShutdownTimeout: FiniteDuration = FiniteDuration(5, "seconds")
   val DefaultRateLimitingConfig: Option[RateLimitingConfig] = Some(RateLimitingConfig.Default)

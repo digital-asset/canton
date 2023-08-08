@@ -23,7 +23,7 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
 }
 import com.digitalasset.canton.platform.apiserver.LedgerFeatures
-import com.digitalasset.canton.platform.localstore.UserManagementConfig
+import com.digitalasset.canton.platform.config.UserManagementServiceConfig
 import io.grpc.ServerServiceDefinition
 
 import scala.annotation.nowarn
@@ -34,7 +34,7 @@ import scala.util.control.NonFatal
 
 private[apiserver] final class ApiVersionServiceV2(
     ledgerFeatures: LedgerFeatures,
-    userManagementConfig: UserManagementConfig,
+    userManagementServiceConfig: UserManagementServiceConfig,
     telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
@@ -49,11 +49,11 @@ private[apiserver] final class ApiVersionServiceV2(
   private val featuresDescriptor =
     FeaturesDescriptor.of(
       userManagement = Some(
-        if (userManagementConfig.enabled) {
+        if (userManagementServiceConfig.enabled) {
           UserManagementFeature(
             supported = true,
-            maxRightsPerUser = userManagementConfig.maxRightsPerUser,
-            maxUsersPageSize = userManagementConfig.maxUsersPageSize,
+            maxRightsPerUser = userManagementServiceConfig.maxRightsPerUser,
+            maxUsersPageSize = userManagementServiceConfig.maxUsersPageSize,
           )
         } else {
           UserManagementFeature(

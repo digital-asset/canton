@@ -42,7 +42,8 @@ import com.digitalasset.canton.health.HealthReporting.{
 }
 import com.digitalasset.canton.ledger.api.health.HealthStatus
 import com.digitalasset.canton.ledger.configuration.*
-import com.digitalasset.canton.ledger.error.{CommonErrors, LedgerApiErrors, PackageServiceError}
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
+import com.digitalasset.canton.ledger.error.{CommonErrors, PackageServiceErrors}
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.v2.ReadService.ConnectedDomainResponse
 import com.digitalasset.canton.ledger.participant.state.v2.*
@@ -670,7 +671,7 @@ class CantonSyncService(
           sourceDescriptionLenLimit <- EitherT.fromEither[Future](
             String256M
               .create(sourceDescription.getOrElse(""), Some("package source description"))
-              .leftMap(PackageServiceError.InternalError.Generic.apply)
+              .leftMap(PackageServiceErrors.InternalError.Generic.apply)
           )
           _ <- packageService
             .storeValidatedPackagesAndSyncEvent(
@@ -681,7 +682,7 @@ class CantonSyncService(
               vetAllPackages = true,
               synchronizeVetting = false,
             )
-            .onShutdown(Left(PackageServiceError.ParticipantShuttingDown.Error()))
+            .onShutdown(Left(PackageServiceErrors.ParticipantShuttingDown.Error()))
         } yield SubmissionResult.Acknowledged
         ret.valueOr(err => TransactionError.internalError(CantonError.stringFromContext(err)))
       }
@@ -1547,17 +1548,17 @@ class CantonSyncService(
         for {
           syncDomain <- EitherT.fromOption[Future](
             readySyncDomainById(domain),
-            ifNone = LedgerApiErrors.RequestValidation.InvalidArgument
+            ifNone = RequestValidationErrors.InvalidArgument
               .Reject(s"Domain ID not found: $domain"): DamlError,
           )
           remoteProtocolVersion <- EitherT.fromOptionF(
             protocolVersionGetter(Traced(remoteDomain)),
-            ifNone = LedgerApiErrors.RequestValidation.InvalidArgument
+            ifNone = RequestValidationErrors.InvalidArgument
               .Reject(s"Domain ID's protocol version not found: $remoteDomain"): DamlError,
           )
           _ <- transfer(remoteProtocolVersion)(syncDomain)
             .leftMap(error =>
-              LedgerApiErrors.RequestValidation.InvalidArgument
+              RequestValidationErrors.InvalidArgument
                 .Reject(
                   error.message
                 ): DamlError // TODO(i13240): Improve reassignment-submission Ledger API errors

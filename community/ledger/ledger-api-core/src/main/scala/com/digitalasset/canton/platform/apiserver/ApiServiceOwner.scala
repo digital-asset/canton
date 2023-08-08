@@ -12,7 +12,6 @@ import com.daml.ledger.resources.ResourceOwner
 import com.daml.lf.data.Ref
 import com.daml.lf.engine.Engine
 import com.daml.metrics.Metrics
-import com.daml.ports.{Port, PortFiles}
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.auth.*
 import com.digitalasset.canton.ledger.api.auth.interceptor.AuthorizationInterceptor
@@ -35,12 +34,11 @@ import com.digitalasset.canton.platform.localstore.api.{
 import com.digitalasset.canton.platform.services.time.TimeProviderType
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.{BindableService, ServerInterceptor}
-import scalaz.{-\/, \/-}
+import io.opentelemetry.api.trace.Tracer
 
 import java.time.Clock
 import scala.collection.immutable
 import scala.concurrent.{ExecutionContextExecutor, Future}
-import scala.util.{Failure, Success, Try}
 
 object ApiServiceOwner {
 
@@ -71,27 +69,16 @@ object ApiServiceOwner {
       meteringReportKey: MeteringReportKey = CommunityKey,
       jwtTimestampLeeway: Option[JwtTimestampLeeway],
       explicitDisclosureUnsafeEnabled: Boolean = false,
-      createExternalServices: () => List[BindableService] = () => Nil,
       telemetry: Telemetry,
       loggerFactory: NamedLoggerFactory,
       multiDomainEnabled: Boolean,
+      upgradingEnabled: Boolean,
   )(implicit
       actorSystem: ActorSystem,
       materializer: Materializer,
       traceContext: TraceContext,
+      tracer: Tracer,
   ): ResourceOwner[ApiService] = {
-
-    def writePortFile(port: Port): Try[Unit] = {
-      config.portFile match {
-        case Some(path) =>
-          PortFiles.write(path, port) match {
-            case -\/(err) => Failure(new RuntimeException(err.toString))
-            case \/-(()) => Success(())
-          }
-        case None =>
-          Success(())
-      }
-    }
 
     val authorizer = new Authorizer(
       Clock.systemUTC.instant _,
@@ -132,7 +119,6 @@ object ApiServiceOwner {
           ),
         submissionTracker = submissionTracker,
         configurationLoadTimeout = config.configurationLoadTimeout,
-        initialLedgerConfiguration = config.initialLedgerConfiguration,
         commandConfig = config.command,
         optTimeServiceBackend = timeServiceBackend,
         servicesExecutionContext = servicesExecutionContext,
@@ -145,15 +131,15 @@ object ApiServiceOwner {
         identityProviderConfigStore = identityProviderConfigStore,
         partyRecordStore = partyRecordStore,
         ledgerFeatures = ledgerFeatures,
-        userManagementConfig = config.userManagement,
+        userManagementServiceConfig = config.userManagement,
         apiStreamShutdownTimeout = config.apiStreamShutdownTimeout,
         meteringReportKey = meteringReportKey,
         explicitDisclosureUnsafeEnabled = explicitDisclosureUnsafeEnabled,
-        createExternalServices = createExternalServices,
         telemetry = telemetry,
         loggerFactory = loggerFactory,
         multiDomainEnabled = multiDomainEnabled,
-      )(materializer, executionSequencerFactory)
+        upgradingEnabled = upgradingEnabled,
+      )(materializer, executionSequencerFactory, tracer)
         .map(_.withServices(otherServices))
       apiService <- new LedgerApiService(
         apiServicesOwner,
@@ -177,7 +163,6 @@ object ApiServiceOwner {
         metrics,
         loggerFactory,
       )
-      _ <- ResourceOwner.forTry(() => writePortFile(apiService.port))
     } yield {
       loggerFactory
         .getTracedLogger(getClass)

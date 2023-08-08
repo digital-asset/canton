@@ -512,7 +512,7 @@ object ParticipantAdminCommands {
         val requestObserver = service.upload(responseObserver)
 
         request.acsSnapshot.toByteArray
-          .grouped(GrpcParticipantRepairService.defaultChunkSize)
+          .grouped(GrpcParticipantRepairService.DefaultChunkSize.value)
           .foreach { bytes =>
             blocking {
               requestObserver.onNext(UploadRequest(ByteString.copyFrom(bytes), gzip))

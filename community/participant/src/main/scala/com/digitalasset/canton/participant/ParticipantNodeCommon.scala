@@ -71,7 +71,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{TraceContext, TracerProvider}
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.version.{ProtocolVersionCompatibility, ReleaseProtocolVersion}
-import io.grpc.{BindableService, ServerServiceDefinition}
+import io.grpc.ServerServiceDefinition
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
@@ -82,10 +82,6 @@ class CantonLedgerApiServerFactory(
     testingTimeService: TestingTimeService,
     allocateIndexerLockIds: DbConfig => Either[String, Option[IndexerLockIds]],
     meteringReportKey: MeteringReportKey,
-    additionalGrpcServices: (
-        CantonSyncService,
-        Eval[ParticipantNodePersistentState],
-    ) => List[BindableService] = (_, _) => Nil,
     val multiDomainEnabled: Boolean,
     futureSupervisor: FutureSupervisor,
     val loggerFactory: NamedLoggerFactory,
@@ -160,8 +156,6 @@ class CantonLedgerApiServerFactory(
           ),
           // start ledger API server iff participant replica is active
           startLedgerApiServer = sync.isActive(),
-          createExternalServices =
-            () => additionalGrpcServices(sync, participantNodePersistentState),
           futureSupervisor = futureSupervisor,
           multiDomainEnabled = multiDomainEnabled,
         )(executionContext, actorSystem)

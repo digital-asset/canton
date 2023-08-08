@@ -14,13 +14,18 @@ import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResp
 import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult.State
 import com.digitalasset.canton.time.WallClock
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
+import com.digitalasset.canton.topology.client.{
+  DomainTopologyClientWithInit,
+  StoreBasedDomainTopologyClient,
+  StoreBasedDomainTopologyClientX,
+}
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStoreX
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransactionsX,
   TopologyStoreId,
   TopologyStoreX,
+  TopologyTransactionRejection,
   ValidatedTopologyTransactionX,
 }
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
@@ -30,10 +35,16 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{FutureUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{BaseTest, DomainAlias, ProtocolVersionChecksAsyncWordSpec}
+import com.digitalasset.canton.{
+  BaseTest,
+  DomainAlias,
+  ProtocolVersionChecksAsyncWordSpec,
+  SequencerCounter,
+}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
+import scala.annotation.nowarn
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration.*
 import scala.concurrent.{Future, Promise}
@@ -66,7 +77,12 @@ class DomainOutboxXTest
   val slice1 = transactions.slice(0, 2)
   val slice2 = transactions.slice(slice1.length, transactions.length)
 
-  private def mk(expect: Int) = {
+  private def mk(
+      expect: Int,
+      responses: Iterator[RegisterTopologyTransactionResponseResult.State] =
+        Iterator.continually(RegisterTopologyTransactionResponseResult.State.Accepted),
+      rejections: Iterator[Option[TopologyTransactionRejection]] = Iterator.continually(None),
+  ) = {
     val source = new InMemoryTopologyStoreX(
       TopologyStoreId.AuthorizedStore,
       loggerFactory,
@@ -84,15 +100,34 @@ class DomainOutboxXTest
       futureSupervisor,
       loggerFactory,
     )
-    val handle = new MockHandle(expect, store = target)
-    val client = mock[DomainTopologyClientWithInit]
+    val client = new StoreBasedDomainTopologyClientX(
+      clock,
+      domainId,
+      protocolVersion = testedProtocolVersion,
+      store = target,
+      packageDependencies = StoreBasedDomainTopologyClient.NoPackageDependencies,
+      timeouts = timeouts,
+      futureSupervisor = futureSupervisor,
+      loggerFactory = loggerFactory,
+    )
+    val handle =
+      new MockHandle(
+        expect,
+        responses = responses,
+        store = target,
+        targetClient = client,
+        rejections = rejections,
+      )
+
     (source, target, manager, handle, client)
   }
 
   private class MockHandle(
       expectI: Int,
-      response: State = State.Accepted,
+      responses: Iterator[State],
       store: TopologyStoreX[TopologyStoreId],
+      targetClient: StoreBasedDomainTopologyClientX,
+      rejections: Iterator[Option[TopologyTransactionRejection]] = Iterator.continually(None),
   ) extends RegisterTopologyTransactionHandleCommon[GenericSignedTopologyTransactionX] {
     val buffer = ListBuffer[GenericSignedTopologyTransactionX]()
     val promise = new AtomicReference[Promise[Unit]](Promise[Unit]())
@@ -105,29 +140,45 @@ class DomainOutboxXTest
       FutureUnlessShutdown.outcomeF {
         logger.debug(s"Observed ${transactions.length} transactions")
         buffer ++= transactions
+        val finalResult = transactions.map(_ => responses.next())
         for {
           _ <- MonadUtil.sequentialTraverse(transactions)(x => {
             logger.debug(s"Processing $x")
             val ts = CantonTimestamp.now()
-            store.update(
-              SequencedTime(ts),
-              EffectiveTime(ts),
-              additions = List(ValidatedTopologyTransactionX(x, None)),
-              // dumbed down version of how to "append" ValidatedTopologyTransactionXs:
-              removeMapping = Option
-                .when(x.transaction.op == TopologyChangeOpX.Remove)(x.transaction.mapping.uniqueKey)
-                .toList
-                .toSet,
-              removeTxs = Set.empty,
-              expiredAdditions = Set.empty,
-            )
+            if (finalResult.forall(_ == State.Accepted))
+              store
+                .update(
+                  SequencedTime(ts),
+                  EffectiveTime(ts),
+                  additions = List(ValidatedTopologyTransactionX(x, rejections.next())),
+                  // dumbed down version of how to "append" ValidatedTopologyTransactionXs:
+                  removeMapping = Option
+                    .when(x.transaction.op == TopologyChangeOpX.Remove)(
+                      x.transaction.mapping.uniqueKey
+                    )
+                    .toList
+                    .toSet,
+                  removeTxs = Set.empty,
+                  expiredAdditions = Set.empty,
+                )
+                .flatMap(_ =>
+                  targetClient
+                    .observed(
+                      SequencedTime(ts),
+                      EffectiveTime(ts),
+                      SequencerCounter(3),
+                      if (rejections.isEmpty) Seq(x) else Seq.empty,
+                    )
+                    .onShutdown(())
+                )
+            else Future.unit
           })
           _ = if (buffer.length >= expect.get()) {
             promise.get().success(())
           }
         } yield {
           logger.debug(s"Done with observed ${transactions.length} transactions")
-          transactions.map(_ => response)
+          finalResult
         }
       }
 
@@ -354,6 +405,55 @@ class DomainOutboxXTest
         )
         handle.buffer should have length (6)
       }
+    }
+
+    "handle rejected transactions" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+      val (source, target, manager, handle, client) =
+        mk(
+          transactions.size,
+          rejections = Iterator.continually(Some(TopologyTransactionRejection.NotAuthorized)),
+        )
+      for {
+        _ <- outboxConnected(manager, handle, client, source, target)
+        res <- push(manager, transactions)
+        _ <- handle.allObserved()
+      } yield {
+        res.value shouldBe a[Seq[_]]
+        handle.buffer should have length (transactions.length.toLong)
+      }
+    }
+
+    "handle failed transactions" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+      val (source, target, manager, handle, client) =
+        mk(
+          2,
+          responses = Iterator(
+            // we fail the transaction on the first attempt
+            State.Failed,
+            // When it gets submitted again, let's have it be successful
+            State.Accepted,
+            State.Accepted,
+          ),
+        )
+
+      @nowarn val Seq(tx1) = transactions.take(1)
+      @nowarn val Seq(tx2) = transactions.slice(1, 2)
+
+      lazy val action = for {
+        _ <- outboxConnected(manager, handle, client, source, target)
+        res1 <- push(manager, Seq(tx1))
+        res2 <- push(manager, Seq(tx2))
+        _ <- handle.allObserved()
+
+      } yield {
+        res1.value shouldBe a[Seq[_]]
+        res2.value shouldBe a[Seq[_]]
+        handle.buffer should have length 3
+      }
+      loggerFactory.assertLogs(
+        action,
+        _.errorMessage should include("failed the following topology transactions"),
+      )
     }
 
   }

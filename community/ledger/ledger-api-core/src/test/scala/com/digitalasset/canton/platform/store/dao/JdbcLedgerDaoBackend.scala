@@ -16,7 +16,7 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.domain.{LedgerId, ParticipantId}
 import com.digitalasset.canton.logging.LoggingContextWithTrace.withNewLoggingContext
 import com.digitalasset.canton.logging.SuppressingLogger
-import com.digitalasset.canton.platform.configuration.{
+import com.digitalasset.canton.platform.config.{
   AcsStreamsConfig,
   ServerRole,
   TransactionFlatStreamsConfig,

@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -73,7 +74,7 @@ object SyncDomainPersistentState {
       pureCryptoApi: CryptoPureApi,
       parameters: ParticipantStoreConfig,
       caching: CachingConfigs,
-      maxDbConnections: Int,
+      maxDbConnections: PositiveInt,
       processingTimeouts: ProcessingTimeout,
       enableAdditionalConsistencyChecks: Boolean,
       indexedStringStore: IndexedStringStore,
@@ -117,7 +118,7 @@ object SyncDomainPersistentState {
       pureCryptoApi: CryptoPureApi,
       parameters: ParticipantStoreConfig,
       caching: CachingConfigs,
-      maxDbConnections: Int,
+      maxDbConnections: PositiveInt,
       processingTimeouts: ProcessingTimeout,
       enableAdditionalConsistencyChecks: Boolean,
       indexedStringStore: IndexedStringStore,

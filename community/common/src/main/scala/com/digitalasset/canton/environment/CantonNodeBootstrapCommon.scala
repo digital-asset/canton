@@ -15,6 +15,7 @@ import com.digitalasset.canton.concurrent.{
   FutureSupervisor,
 }
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{LocalNodeConfig, ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService.GrpcVaultServiceFactory
@@ -145,6 +146,12 @@ abstract class CantonNodeBootstrapCommon[
   // This absolutely must be a "def", because it is used during class initialization.
   protected def connectionPoolForParticipant: Boolean = false
 
+  protected val maxDbConnections: PositiveInt = config.storage.maxConnectionsCanton(
+    forParticipant = connectionPoolForParticipant,
+    withWriteConnectionPool = true,
+    withMainConnection = true,
+  )
+
   protected val ips = new IdentityProvidingServiceClient()
 
   private def status: Future[NodeStatus[NodeStatus.Status]] = {
@@ -247,6 +254,19 @@ object CantonNodeBootstrapCommon {
       name,
     )
 
+  def getOrCreateSigningKeyByFingerprint(crypto: Crypto)(
+      fingerprint: Fingerprint
+  )(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): EitherT[Future, String, SigningPublicKey] =
+    getKeyByFingerprint(
+      "signing",
+      crypto.cryptoPublicStore.findSigningKeyIdByFingerprint,
+      crypto.cryptoPrivateStore.existsSigningKey,
+      fingerprint,
+    )
+
   def getOrCreateEncryptionKey(crypto: Crypto)(
       name: String
   )(implicit
@@ -260,6 +280,33 @@ object CantonNodeBootstrapCommon {
       crypto.cryptoPrivateStore.existsDecryptionKey,
       name,
     )
+
+  private def getKeyByFingerprint[P <: PublicKey](
+      typ: String,
+      findPubKeyIdByFingerprint: Fingerprint => EitherT[Future, CryptoPublicStoreError, Option[P]],
+      existPrivateKeyByFp: Fingerprint => EitherT[Future, CryptoPrivateStoreError, Boolean],
+      fingerprint: Fingerprint,
+  )(implicit ec: ExecutionContext): EitherT[Future, String, P] = for {
+    keyIdO <- findPubKeyIdByFingerprint(fingerprint)
+      .leftMap(err =>
+        s"Failure while looking for $typ fingerprint $fingerprint in public store: ${err}"
+      )
+    pubKey <- keyIdO.fold(
+      EitherT.leftT[Future, P](s"$typ key with fingerprint $fingerprint does not exist")
+    ) { keyWithFingerprint =>
+      val fingerprint = keyWithFingerprint.fingerprint
+      existPrivateKeyByFp(fingerprint)
+        .leftMap(err =>
+          s"Failure while looking for $typ key $fingerprint in private key store: $err"
+        )
+        .transform {
+          case Right(true) => Right(keyWithFingerprint)
+          case Right(false) =>
+            Left(s"Broken private key store: Could not find $typ key $fingerprint")
+          case Left(err) => Left(err)
+        }
+    }
+  } yield pubKey
 
   private def getOrCreateKey[P <: PublicKey](
       typ: String,

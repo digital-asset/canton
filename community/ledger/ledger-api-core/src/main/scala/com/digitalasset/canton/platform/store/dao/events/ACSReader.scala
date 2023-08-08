@@ -30,7 +30,7 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
 }
 import com.digitalasset.canton.platform.TemplatePartiesFilter
-import com.digitalasset.canton.platform.configuration.AcsStreamsConfig
+import com.digitalasset.canton.platform.config.AcsStreamsConfig
 import com.digitalasset.canton.platform.indexer.parallel.BatchN
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{

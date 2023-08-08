@@ -20,8 +20,9 @@ import com.digitalasset.canton.ledger.api.DomainMocks.{
   workflowId,
 }
 import com.digitalasset.canton.ledger.api.domain.{Commands as ApiCommands, LedgerId}
+import com.digitalasset.canton.ledger.api.validation.FieldValidator.ResolveToTemplateId
 import com.digitalasset.canton.ledger.api.{DeduplicationPeriod, DomainMocks, domain}
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.google.protobuf.duration.Duration
 import com.google.protobuf.empty.Empty
 import io.grpc.Status.Code.{INVALID_ARGUMENT, NOT_FOUND}
@@ -44,25 +45,38 @@ class SubmitRequestValidatorTest
   private implicit val contextualizedErrorLogger: ContextualizedErrorLogger = NoLogging
 
   private object api {
-    val identifier = Identifier("package", moduleName = "module", entityName = "entity")
+    private val packageId = "package"
+    private val moduleName = "module"
+    private val entityName = "entity"
+    val identifier = Identifier(packageId, moduleName = moduleName, entityName = entityName)
     val int64 = Sum.Int64(1)
     val label = "label"
     val constructor = "constructor"
     val submitter = "party"
     val deduplicationDuration = new Duration().withSeconds(10)
-    val command = Command.of(
-      Command.Command.Create(
-        CreateCommand.of(
-          Some(Identifier("package", moduleName = "module", entityName = "entity")),
-          Some(
-            Record(
-              Some(Identifier("package", moduleName = "module", entityName = "entity")),
-              Seq(RecordField("something", Some(Value(Value.Sum.Bool(true))))),
-            )
-          ),
+
+    private def commandDef(createPackageId: String, moduleName: String = moduleName) =
+      Command.of(
+        Command.Command.Create(
+          CreateCommand.of(
+            Some(Identifier(createPackageId, moduleName = moduleName, entityName = entityName)),
+            Some(
+              Record(
+                Some(Identifier(packageId, moduleName = moduleName, entityName = entityName)),
+                Seq(RecordField("something", Some(Value(Value.Sum.Bool(true))))),
+              )
+            ),
+          )
         )
       )
-    )
+
+    val command = commandDef(packageId)
+    val commandWithoutPackageId = commandDef("")
+    val commandWithInvalidQualifiedName = commandDef("", "invalid")
+
+    val templateQualifiedName = Ref.QualifiedName.assertFromString(moduleName + ":" + entityName)
+    val templateId =
+      Ref.Identifier(Ref.PackageId.assertFromString(packageId), templateQualifiedName)
 
     val commands = Commands(
       ledgerId = ledgerId.unwrap,
@@ -153,8 +167,26 @@ class SubmitRequestValidatorTest
   when(validateDisclosedContractsMock(any[Commands])(any[ContextualizedErrorLogger]))
     .thenReturn(Right(internal.disclosedContracts))
 
+  private val resolveToTemplateIdMock: ResolveToTemplateId = {
+    case api.`templateQualifiedName` => _ => Right(api.templateId)
+    case _ =>
+      _ =>
+        Left(
+          io.grpc.Status.INVALID_ARGUMENT
+            .augmentDescription("invalid qualified name")
+            .asRuntimeException()
+        )
+  }
+
+  private val failsIfCalled: ResolveToTemplateId = _ => fail("Should not be called")
+
   private val testedCommandValidator =
-    new CommandsValidator(ledgerId, validateDisclosedContractsMock)
+    new CommandsValidator(
+      ledgerId = ledgerId,
+      resolveToTemplateId = failsIfCalled,
+      upgradingEnabled = false,
+      validateDisclosedContracts = validateDisclosedContractsMock,
+    )
   private val testedValueValidator = ValueValidator
 
   "CommandSubmissionRequestValidator" when {
@@ -444,7 +476,7 @@ class SubmitRequestValidatorTest
         when(validateDisclosedContractsMock(any[Commands])(any[ContextualizedErrorLogger]))
           .thenReturn(
             Left(
-              LedgerApiErrors.RequestValidation.InvalidField
+              RequestValidationErrors.InvalidField
                 .Reject("some failed", "some message")
                 .asGrpcError
             )
@@ -462,6 +494,61 @@ class SubmitRequestValidatorTest
             "INVALID_FIELD(8,0): The submitted command has a field with invalid value: Invalid field some failed: some message",
           metadata = Map.empty,
         )
+      }
+
+      "not allow missing packageId (if upgrading disabled)" in {
+        requestMustFailWith(
+          request = testedCommandValidator
+            .validateCommands(
+              api.commands.copy(commands = Seq(api.commandWithoutPackageId)),
+              internal.ledgerTime,
+              internal.submittedAt,
+              Some(internal.maxDeduplicationDuration),
+            ),
+          code = INVALID_ARGUMENT,
+          description =
+            "MISSING_FIELD(8,0): The submitted command is missing a mandatory field: package_id",
+          metadata = Map.empty,
+        )
+      }
+
+      "when upgrading enabled" should {
+        val validateDisclosedContractsMock = mock[ValidateDisclosedContracts]
+
+        when(validateDisclosedContractsMock(any[Commands])(any[ContextualizedErrorLogger]))
+          .thenReturn(Right(internal.disclosedContracts))
+
+        val commandsValidatorWithUpgradingEnabled = new CommandsValidator(
+          ledgerId = ledgerId,
+          resolveToTemplateId = resolveToTemplateIdMock,
+          upgradingEnabled = true,
+          validateDisclosedContracts = validateDisclosedContractsMock,
+        )
+
+        "allow missing packageId and resolve to template id" in {
+          commandsValidatorWithUpgradingEnabled
+            .validateCommands(
+              api.commands.copy(commands = Seq(api.commandWithoutPackageId)),
+              internal.ledgerTime,
+              internal.submittedAt,
+              Some(internal.maxDeduplicationDuration),
+            ) shouldBe Right(internal.emptyCommands)
+        }
+
+        "forward error on templateId resolution failure" in {
+          requestMustFailWith(
+            request = commandsValidatorWithUpgradingEnabled
+              .validateCommands(
+                api.commands.copy(commands = Seq(api.commandWithInvalidQualifiedName)),
+                internal.ledgerTime,
+                internal.submittedAt,
+                Some(internal.maxDeduplicationDuration),
+              ),
+            code = INVALID_ARGUMENT,
+            description = "invalid qualified name",
+            metadata = Map.empty,
+          )
+        }
       }
     }
 

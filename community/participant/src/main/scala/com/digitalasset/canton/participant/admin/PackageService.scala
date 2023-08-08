@@ -20,7 +20,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.Dar
 import com.digitalasset.canton.config.CantonRequireTypes.{String255, String256M}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{Hash, HashOps, HashPurpose}
-import com.digitalasset.canton.ledger.error.PackageServiceError
+import com.digitalasset.canton.ledger.error.PackageServiceErrors
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode
@@ -293,19 +293,19 @@ class PackageService(
     EitherT.fromEither(attempt match {
       case Right(value) => Right(value)
       case Left(LfArchiveError.InvalidDar(entries, cause)) =>
-        Left(PackageServiceError.Reading.InvalidDar.Error(entries.entries.keys.toSeq, cause))
+        Left(PackageServiceErrors.Reading.InvalidDar.Error(entries.entries.keys.toSeq, cause))
       case Left(LfArchiveError.InvalidZipEntry(name, entries)) =>
         Left(
-          PackageServiceError.Reading.InvalidZipEntry.Error(name, entries.entries.keys.toSeq)
+          PackageServiceErrors.Reading.InvalidZipEntry.Error(name, entries.entries.keys.toSeq)
         )
       case Left(LfArchiveError.InvalidLegacyDar(entries)) =>
-        Left(PackageServiceError.Reading.InvalidLegacyDar.Error(entries.entries.keys.toSeq))
+        Left(PackageServiceErrors.Reading.InvalidLegacyDar.Error(entries.entries.keys.toSeq))
       case Left(LfArchiveError.ZipBomb) =>
-        Left(PackageServiceError.Reading.ZipBomb.Error(LfArchiveError.ZipBomb.getMessage))
+        Left(PackageServiceErrors.Reading.ZipBomb.Error(LfArchiveError.ZipBomb.getMessage))
       case Left(e: LfArchiveError) =>
-        Left(PackageServiceError.Reading.ParseError.Error(e.msg))
+        Left(PackageServiceErrors.Reading.ParseError.Error(e.msg))
       case Left(e) =>
-        Left(PackageServiceError.InternalError.Unhandled(e))
+        Left(PackageServiceErrors.InternalError.Unhandled(e))
     })
 
   private def appendDar(
@@ -322,7 +322,7 @@ class PackageService(
           String255
             .create(darName, Some("DAR file name"))
         )
-        .leftMap(PackageServiceError.Reading.InvalidDarFileName.Error(_))
+        .leftMap(PackageServiceErrors.Reading.InvalidDarFileName.Error(_))
       dar <- catchUpstreamErrors(DarParser.readArchive(darName, stream))
         .mapK(FutureUnlessShutdown.outcomeK)
       // Validate the packages before storing them in the DAR store or the package store
@@ -375,7 +375,7 @@ class PackageService(
         engine
           .validatePackages(packages)
           .leftMap(
-            PackageServiceError.Validation.handleLfEnginePackageError(_): DamlError
+            PackageServiceErrors.Validation.handleLfEnginePackageError(_): DamlError
           )
       )
     } yield ()

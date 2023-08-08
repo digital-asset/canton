@@ -16,8 +16,8 @@ import com.daml.lf.engine.Engine
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.domain.{LedgerOffset, PackageEntry}
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
-import com.digitalasset.canton.ledger.error.PackageServiceError.Validation
+import com.digitalasset.canton.ledger.error.PackageServiceErrors.Validation
+import com.digitalasset.canton.ledger.error.groups.AdminServiceErrors
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
   IndexPackagesService,
   IndexTransactionsService,
@@ -227,7 +227,7 @@ private[apiserver] object ApiPackageManagementService {
         loggingContext: LoggingContextWithTrace
     ): PartialFunction[PackageEntry, StatusRuntimeException] = {
       case PackageEntry.PackageUploadRejected(`submissionId`, _, reason) =>
-        LedgerApiErrors.Admin.PackageUploadRejected
+        AdminServiceErrors.PackageUploadRejected
           .Reject(reason)(
             LedgerErrorLoggingContext(
               logger,

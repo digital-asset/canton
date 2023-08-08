@@ -19,7 +19,6 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.v0.DomainParametersChangeAuthorization.Parameters
 import com.digitalasset.canton.topology.admin.v0.*
-import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -27,9 +26,8 @@ import com.digitalasset.canton.{LfPackageId, ProtoDeserializationError}
 
 import scala.concurrent.{ExecutionContext, Future}
 
-class GrpcTopologyManagerWriteService[T <: CantonError](
+final class GrpcTopologyManagerWriteService[T <: CantonError](
     manager: TopologyManager[T],
-    store: TopologyStore[TopologyStoreId.AuthorizedStore],
     cryptoPublicStore: CryptoPublicStore,
     protocolVersion: ProtocolVersion,
     override val loggerFactory: NamedLoggerFactory,

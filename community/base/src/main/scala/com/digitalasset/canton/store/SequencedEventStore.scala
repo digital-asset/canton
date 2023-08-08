@@ -9,6 +9,7 @@ import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.{DefaultOpenEnvelope, ProtocolMessage}
@@ -53,7 +54,8 @@ trait SequencedEventStore extends PrunableByTime with NamedLogging with AutoClos
     * If an event with the same timestamp already exist, the event may remain unchanged or overwritten.
     */
   def store(signedEvents: Seq[OrdinarySerializedEvent])(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      externalCloseContext: CloseContext,
   ): Future[Unit]
 
   /** Looks up an event by the given criterion.

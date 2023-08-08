@@ -67,9 +67,7 @@ object BlockOrderer {
 
   final case class Block(
       blockHeight: Long,
-      orderingTime: Long,
-      requests: Seq[Traced[Request]],
+      requests: Seq[Traced[OrderedRequest]],
   )
-
-  final case class Request(tag: String, body: ByteString)
+  final case class OrderedRequest(microsecondsSinceEpoch: Long, tag: String, body: ByteString)
 }

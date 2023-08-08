@@ -51,7 +51,16 @@ class ContractStateCaches(
           }
           contractMappingsBuilder.addOne(
             created.contractId ->
-              Active(created.contract, created.stakeholders, created.ledgerEffectiveTime)
+              Active(
+                contract = created.contract,
+                stakeholders = created.stakeholders,
+                createLedgerEffectiveTime = created.ledgerEffectiveTime,
+                agreementText = created.agreementText,
+                signatories = created.signatories,
+                globalKey = created.globalKey,
+                keyMaintainers = created.keyMaintainers,
+                driverMetadata = created.driverMetadata,
+              )
           )
         case archived: ContractStateEvent.Archived =>
           archived.globalKey.foreach { key =>

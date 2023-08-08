@@ -371,23 +371,20 @@ abstract class CantonNodeBootstrapBase[
     .onShutdown(Left("Aborted due to shutdown"))
 
   protected def startTopologyManagementWriteService[E <: CantonError](
-      topologyManager: TopologyManager[E],
-      authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
+      topologyManager: TopologyManager[E]
   ): Unit = {
     adminServerRegistry
       .addServiceU(
-        topologyManagerWriteService(topologyManager, authorizedStore)
+        topologyManagerWriteService(topologyManager)
       )
   }
 
   protected def topologyManagerWriteService[E <: CantonError](
-      topologyManager: TopologyManager[E],
-      authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
+      topologyManager: TopologyManager[E]
   ): ServerServiceDefinition = {
     TopologyManagerWriteServiceGrpc.bindService(
       new GrpcTopologyManagerWriteService(
         topologyManager,
-        authorizedStore,
         crypto.value.cryptoPublicStore,
         parameterConfig.initialProtocolVersion,
         loggerFactory,

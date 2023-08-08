@@ -28,7 +28,7 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
 import com.digitalasset.canton.topology.{DomainId, DomainTopologyManagerId, Member, ParticipantId}
-import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{EitherTUtil, FutureUtil}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -286,8 +286,9 @@ class DomainTopologyServiceX(
 
   def registerTopologyTransaction(
       request: TopologyTransactionsBroadcastX
+  )(implicit
+      traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[RegisterTopologyTransactionResponseResult.State]] = {
-    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val sendCallback = SendCallback.future
 
     performUnlessClosingEitherUSF(
@@ -309,7 +310,7 @@ class DomainTopologyServiceX(
                   RegisterTopologyTransactionResponseResult.State.Accepted
                 case notSequenced @ (_: SendResult.Timeout | _: SendResult.Error) =>
                   logger.info(
-                    s"The submitted topology transaction was not sequenced. Error={$notSequenced}. Transactions=${request.broadcasts}"
+                    s"The submitted topology transactions were not sequenced. Error=[$notSequenced]. Transactions=${request.broadcasts}"
                   )
                   RegisterTopologyTransactionResponseResult.State.Failed
               },
@@ -322,7 +323,7 @@ class DomainTopologyServiceX(
       request: TopologyTransactionsBroadcastX,
       sendCallback: SendCallback,
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] = {
-    logger.debug(s"Broadcasting topology transaction: ${request}")
+    logger.debug(s"Broadcasting topology transaction: ${request.broadcasts}")
     EitherTUtil.logOnError(
       sequencerClient.sendAsyncUnauthenticatedOrNot(
         Batch.of(protocolVersion, (request, Recipients.cc(TopologyBroadcastAddress.recipient))),

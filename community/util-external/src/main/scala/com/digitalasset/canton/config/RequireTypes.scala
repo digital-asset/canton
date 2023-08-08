@@ -173,8 +173,12 @@ object RequireTypes {
       extends RefinedNumeric[T] {
     import num.*
 
-    def +(other: PositiveNumeric[T]) = PositiveNumeric.tryCreate(value + other.value)
-    def tryAdd(other: T) = PositiveNumeric.tryCreate(value + other)
+    def +(other: PositiveNumeric[T]): PositiveNumeric[T] =
+      PositiveNumeric.tryCreate(value + other.value)
+    def *(other: PositiveNumeric[T]): PositiveNumeric[T] =
+      PositiveNumeric.tryCreate(value * other.value)
+
+    def tryAdd(other: T): PositiveNumeric[T] = PositiveNumeric.tryCreate(value + other)
 
     def toNonNegative: NonNegativeNumeric[T] =
       NonNegativeNumeric.tryCreate(value) // always possible to convert positive to non negative num
@@ -187,6 +191,7 @@ object RequireTypes {
     def tryCreate(n: Int): PositiveInt = PositiveNumeric.tryCreate(n)
 
     lazy val one: PositiveInt = PositiveInt.tryCreate(1)
+    lazy val two: PositiveInt = PositiveInt.tryCreate(2)
     lazy val MaxValue: PositiveInt = PositiveInt.tryCreate(Int.MaxValue)
   }
 

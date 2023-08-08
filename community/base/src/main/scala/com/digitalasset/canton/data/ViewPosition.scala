@@ -4,12 +4,12 @@
 package com.digitalasset.canton.data
 
 import cats.Order
+import cats.instances.list.*
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndex.Direction
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v2
 import com.digitalasset.canton.serialization.DeterministicEncoding
-import com.digitalasset.canton.util.ByteStringUtil
 import com.google.protobuf.ByteString
 
 /** A position encodes the path from a view in a transaction tree to its root.
@@ -51,8 +51,12 @@ object ViewPosition {
     prettyOfClass(unnamedParam(_.position))
   }
 
-  implicit val orderViewPosition: Order[ViewPosition] =
-    Order.by[ViewPosition, ByteString](_.encodeDeterministically)(ByteStringUtil.orderByteString)
+  /** Will fail with an exception, if used to compare `ListIndex` with `MerkleSeqIndex` or `MerkleSeqIndexFromRoot`.
+    */
+  private[canton] val orderViewPosition: Order[ViewPosition] =
+    Order.by((_: ViewPosition).position.reverse)(
+      catsKernelStdOrderForList(MerklePathElement.orderMerklePathElement)
+    )
 
   def fromProtoV2(viewPositionP: v2.ViewPosition): ViewPosition = {
     val v2.ViewPosition(positionP) = viewPositionP
@@ -127,6 +131,27 @@ object ViewPosition {
     // Must be unique to prevent collisions of view position encodings
     private[ViewPosition] val ListIndexPrefix: Byte = 1
     private[ViewPosition] val MerkleSeqIndexPrefix: Byte = 2
+
+    /** Will throw if used to compare `ListIndex` with `MerkleSeqIndex` or `MerkleSeqIndexFromRoot`.
+      */
+    private[data] val orderMerklePathElement: Order[MerklePathElement] = Order.from {
+      case (ListIndex(index1), ListIndex(index2)) =>
+        implicitly[Order[Int]].compare(index1, index2)
+
+      case (MerkleSeqIndexFromRoot(index1), MerkleSeqIndexFromRoot(index2)) =>
+        implicitly[Order[List[Direction]]].compare(index1, index2)
+
+      case (MerkleSeqIndex(index1), element2) =>
+        orderMerklePathElement.compare(MerkleSeqIndexFromRoot(index1.reverse), element2)
+
+      case (element1, MerkleSeqIndex(index2)) =>
+        orderMerklePathElement.compare(element1, MerkleSeqIndexFromRoot(index2.reverse))
+
+      case (element1, element2) =>
+        throw new UnsupportedOperationException(
+          s"Unable to compare ${element1.getClass.getSimpleName} with ${element2.getClass.getSimpleName}."
+        )
+    }
   }
 
   object MerkleSeqIndex {
@@ -134,6 +159,11 @@ object ViewPosition {
       def encodeDeterministically: ByteString
     }
     object Direction {
+
+      implicit val orderDirection: Order[Direction] = Order.by {
+        case Left => 0
+        case Right => 1
+      }
 
       case object Left extends Direction {
         override def encodeDeterministically: ByteString = DeterministicEncoding.encodeByte(0)

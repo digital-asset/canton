@@ -584,15 +584,30 @@ trait ActiveContractSnapshot {
       traceContext: TraceContext
   ): Future[Map[LfContractId, TransferCounterO]]
 
-  /** Returns all changes to the active contract set between the two timestamps (both inclusive)
+  /** Returns all changes to the active contract set between the two timestamps
+    * (exclusive lower bound timestamp, inclusive upper bound timestamp)
     * in the order of their changes.
     * The provided lower bound must not be larger than the upper bound.
     *
     * @param fromExclusive The lower bound for the changes. Must not be larger than the upper bound.
     * @param toInclusive The upper bound for the changes. Must not be smaller than the lower bound.
-    *
     * @throws java.lang.IllegalArgumentException If the intervals are in the wrong order.
     */
+  /*
+   * In contrast to creates, transfer-ins and transfer-outs, the DB does not store transfer counters
+   * for archivals. As such, to retrieve transfer counters for archivals, for every contract `cid`
+   * archived with request counter `rc`, we retrieve the biggest transfer counter from an activation event
+   * (create or transfer in) with a request counter rc' <= rc.
+   * Some contracts archived between (`fromExclusive`, `toInclusive`] might have been activated last at time
+   * lastActivationTime <= `fromExclusive`. Therefore, for retrieving the transfer counter of archived contracts,
+   * we may need to look at activations between (`fromExclusive`, `toInclusive`], and at activations taking
+   * place at a time <= `fromExclusive`.
+   *
+   * The implementation assumes that:
+   * - transfer counters for a contract are strictly increasing for different activations of that contract
+   * - the activations/deactivations retrieved from the DB really describe a well-formed
+   * set of contracts, e.g., a contract is not archived twice, etc TODO(i12904)
+   */
   def changesBetween(fromExclusive: TimeOfChange, toInclusive: TimeOfChange)(implicit
       traceContext: TraceContext
   ): Future[LazyList[(TimeOfChange, ActiveContractIdsChange)]]
@@ -602,12 +617,12 @@ trait ActiveContractSnapshot {
 object ActiveContractSnapshot {
 
   final case class ActiveContractIdsChange(
-      activations: Set[LfContractId],
-      deactivations: Set[LfContractId],
+      activations: Map[LfContractId, TransferCounterO],
+      deactivations: Map[LfContractId, TransferCounterO],
   )
 
   object ActiveContractIdsChange {
-    val empty = ActiveContractIdsChange(Set.empty, Set.empty)
+    val empty = ActiveContractIdsChange(Map.empty, Map.empty)
   }
 
 }

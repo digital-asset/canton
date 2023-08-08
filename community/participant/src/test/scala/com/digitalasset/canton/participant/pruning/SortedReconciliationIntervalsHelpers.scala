@@ -9,6 +9,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.protocol.messages.CommitmentPeriod
 import com.digitalasset.canton.protocol.{
   DomainParameters,
+  DynamicDomainParameters,
   DynamicDomainParametersWithValidity,
   TestDomainParameters,
 }
@@ -16,6 +17,7 @@ import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveSeconds}
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -31,10 +33,13 @@ trait SortedReconciliationIntervalsHelpers {
       validFrom: Long,
       validTo: Long,
       reconciliationInterval: Long,
+      protocolVersion: ProtocolVersion,
   ): DynamicDomainParametersWithValidity =
     DynamicDomainParametersWithValidity(
-      defaultParameters.tryUpdate(reconciliationInterval =
-        PositiveSeconds.tryOfSeconds(reconciliationInterval)
+      DynamicDomainParameters.tryInitialValues(
+        topologyChangeDelay = NonNegativeFiniteDuration.tryOfMillis(250),
+        reconciliationInterval = PositiveSeconds.tryOfSeconds(reconciliationInterval),
+        protocolVersion = protocolVersion,
       ),
       fromEpoch(validFrom),
       Some(fromEpoch(validTo)),
@@ -44,10 +49,13 @@ trait SortedReconciliationIntervalsHelpers {
   protected def mkDynamicDomainParameters(
       validFrom: Long,
       reconciliationInterval: Long,
+      protocolVersion: ProtocolVersion,
   ): DynamicDomainParametersWithValidity =
     DynamicDomainParametersWithValidity(
-      defaultParameters.tryUpdate(reconciliationInterval =
-        PositiveSeconds.tryOfSeconds(reconciliationInterval)
+      DynamicDomainParameters.tryInitialValues(
+        topologyChangeDelay = NonNegativeFiniteDuration.tryOfMillis(250),
+        reconciliationInterval = PositiveSeconds.tryOfSeconds(reconciliationInterval),
+        protocolVersion = protocolVersion,
       ),
       fromEpoch(validFrom),
       None,

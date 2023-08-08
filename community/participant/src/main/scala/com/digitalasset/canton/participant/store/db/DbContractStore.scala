@@ -41,7 +41,7 @@ class DbContractStore(
     domainIdIndexed: IndexedDomain,
     protocolVersion: ProtocolVersion,
     maxContractIdSqlInListSize: PositiveInt,
-    maxDbConnections: Int, // used to throttle query batching
+    maxDbConnections: PositiveInt, // used to throttle query batching
     cacheConfig: CacheConfig,
     dbQueryBatcherConfig: BatchAggregatorConfig,
     insertBatchAggregatorConfig: BatchAggregatorConfig,
@@ -151,13 +151,11 @@ class DbContractStore(
 
   override def lookupManyUncached(
       ids: Seq[LfContractId]
-  )(implicit traceContext: TraceContext): Future[List[Option[StoredContract]]] = {
+  )(implicit traceContext: TraceContext): Future[List[(LfContractId, Option[StoredContract])]] =
     NonEmpty
       .from(ids)
-      .fold(Future.successful(List.empty[Option[StoredContract]])) { items =>
-        lookupManyUncachedInternal(items).map(_.toList)
-      }
-  }
+      .map(lookupManyUncachedInternal(_).map(ids.toList.zip(_)))
+      .getOrElse(Future.successful(List.empty))
 
   private def lookupManyUncachedInternal(
       ids: NonEmpty[Seq[LfContractId]]
@@ -477,13 +475,12 @@ class DbContractStore(
     import DbStorage.Implicits.BuilderChain.*
     MonadUtil
       .batchedSequentialTraverse_(
-        parallelism = 2 * maxDbConnections,
-        chunkSize = maxContractIdSqlInListSize.value,
+        parallelism = PositiveInt.two * maxDbConnections,
+        chunkSize = maxContractIdSqlInListSize,
       )(contractIds.toSeq) { cids =>
         val inClause = sql"contract_id in (" ++
           cids
             .map(value => sql"$value")
-            .toSeq
             .intercalate(sql", ") ++ sql")"
         processingTime
           .event {

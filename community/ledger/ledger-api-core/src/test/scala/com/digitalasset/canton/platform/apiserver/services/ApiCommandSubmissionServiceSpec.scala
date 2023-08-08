@@ -13,6 +13,7 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequest
 import com.digitalasset.canton.ledger.api.services.CommandSubmissionService
+import com.digitalasset.canton.ledger.api.validation.{CommandsValidator, ValidateDisclosedContracts}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.tracing.TestTelemetrySetup
 import io.opentelemetry.sdk.OpenTelemetrySdk
@@ -141,15 +142,19 @@ class ApiCommandSubmissionServiceSpec
   ) =
     new ApiCommandSubmissionService(
       commandSubmissionService,
-      ledgerId = LedgerId(ledgerId),
       currentLedgerTime = () => Instant.EPOCH,
       currentUtcTime = () => Instant.EPOCH,
       maxDeduplicationDuration = () => Some(Duration.ZERO),
       submissionIdGenerator = () => Ref.SubmissionId.assertFromString(generatedSubmissionId),
       metrics = Metrics.ForTesting,
-      explicitDisclosureUnsafeEnabled = false,
       telemetry = new DefaultOpenTelemetry(OpenTelemetrySdk.builder().build()),
       loggerFactory = loggerFactory,
+      commandsValidator = new CommandsValidator(
+        ledgerId = LedgerId(ledgerId),
+        resolveToTemplateId = _ => fail("should not be called"),
+        upgradingEnabled = false,
+        validateDisclosedContracts = new ValidateDisclosedContracts(false),
+      ),
     )
 }
 

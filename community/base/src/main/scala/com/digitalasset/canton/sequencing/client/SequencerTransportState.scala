@@ -7,6 +7,7 @@ import cats.implicits.catsSyntaxFlatten
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.lifecycle.{FlagCloseable, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.client.SequencerClient.{
@@ -23,6 +24,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 import scala.util.{Failure, Success, Try}
@@ -42,6 +44,9 @@ class SequencersTransportState(
   private val lock = new Object()
 
   private val state = new mutable.HashMap[SequencerId, SequencerTransportState]()
+
+  private val sequencerTrustThreshold =
+    new AtomicReference[PositiveInt](initialSequencerTransports.sequencerTrustThreshold)
 
   blocking(lock.synchronized {
     val sequencerIdToTransportStateMap = initialSequencerTransports.sequencerIdToTransportMap.map {
@@ -101,7 +106,9 @@ class SequencersTransportState(
     transportState(sequencerId)
       .map(
         _.subscription
-          .exists(!_.resilientSequencerSubscription.isFailed)
+          .exists(x =>
+            !x.resilientSequencerSubscription.isFailed && !x.resilientSequencerSubscription.isClosing
+          )
       )
       .onShutdown(false)
 
@@ -149,6 +156,7 @@ class SequencersTransportState(
   def changeTransport(
       sequencerTransports: SequencerTransports
   )(implicit traceContext: TraceContext): Future[Unit] = blocking(lock.synchronized {
+    sequencerTrustThreshold.set(sequencerTransports.sequencerTrustThreshold)
     val oldSequencerIds = state.keySet.toSet
     val newSequencerIds = sequencerTransports.sequencerIdToTransportMap.keySet
 
@@ -203,9 +211,12 @@ class SequencersTransportState(
       .discard
   })
 
+  private def isEnoughSequencersToOperateWithoutSequencer: Boolean =
+    state.size > sequencerTrustThreshold.get().unwrap
+
   private def closeWithSubscriptionReason(sequencerId: SequencerId)(
       subscriptionCloseReason: Try[SubscriptionCloseReason[SequencerClientSubscriptionError]]
-  ): Unit = {
+  )(implicit traceContext: TraceContext): Unit = {
     // TODO(i12076): Consider aggregating the current situation about other sequencers and
     //               close the sequencer client only in case of not enough healthy sequencers
 
@@ -220,18 +231,36 @@ class SequencersTransportState(
         case SubscriptionCloseReason.HandlerError(err) =>
           Left(SequencerClient.CloseReason.UnrecoverableError(s"handler returned error: $err"))
         case permissionDenied: SubscriptionCloseReason.PermissionDeniedError =>
-          // TODO(i12076) This reason should not be closing sequencer client, but should depend on aggregation logic
-          Left(SequencerClient.CloseReason.PermissionDenied(s"$permissionDenied"))
+          blocking(lock.synchronized {
+            if (!isEnoughSequencersToOperateWithoutSequencer)
+              Left(SequencerClient.CloseReason.PermissionDenied(s"$permissionDenied"))
+            else {
+              state.remove(sequencerId).foreach(closeSubscription(sequencerId, _))
+              Right(())
+            }
+          })
         case subscriptionError: SubscriptionCloseReason.SubscriptionError =>
-          // TODO(i12076) This reason should not be closing sequencer client, but should depend on aggregation logic
-          Left(
-            SequencerClient.CloseReason.UnrecoverableError(
-              s"subscription implementation failed: $subscriptionError"
-            )
-          )
+          blocking(lock.synchronized {
+            if (!isEnoughSequencersToOperateWithoutSequencer)
+              Left(
+                SequencerClient.CloseReason.UnrecoverableError(
+                  s"subscription implementation failed: $subscriptionError"
+                )
+              )
+            else {
+              state.remove(sequencerId).foreach(closeSubscription(sequencerId, _))
+              Right(())
+            }
+          })
         case SubscriptionCloseReason.Closed =>
-          // TODO(i12076) This reason should not be closing sequencer client, but should depend on aggregation logic
-          Left(SequencerClient.CloseReason.ClientShutdown)
+          blocking(lock.synchronized {
+            if (!isEnoughSequencersToOperateWithoutSequencer)
+              Left(SequencerClient.CloseReason.ClientShutdown)
+            else {
+              state.remove(sequencerId).foreach(closeSubscription(sequencerId, _))
+              Right(())
+            }
+          })
         case SubscriptionCloseReason.Shutdown => Left(SequencerClient.CloseReason.ClientShutdown)
         case SubscriptionCloseReason.TransportChange =>
           Right(()) // we don't want to close the sequencer client when changing transport

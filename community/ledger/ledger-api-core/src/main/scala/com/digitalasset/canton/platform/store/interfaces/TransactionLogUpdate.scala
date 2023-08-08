@@ -9,6 +9,7 @@ import com.daml.lf.data.Bytes
 import com.daml.lf.data.Ref.Party
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.ledger.EventId
+import com.daml.lf.transaction.GlobalKey
 import com.daml.lf.value.Value as LfValue
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.ReassignmentInfo
@@ -119,6 +120,8 @@ object TransactionLogUpdate {
       createObservers: Set[Party],
       createAgreementText: Option[String],
       createKeyHash: Option[Hash],
+      createKey: Option[GlobalKey],
+      createKeyMaintainers: Option[Set[Party]],
       driverMetadata: Option[Bytes],
   ) extends Event
 

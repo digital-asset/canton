@@ -155,6 +155,19 @@ abstract class TopologyTransactionProcessorCommonImpl[M](
       logger.debug(
         s"Initializing topology processing for start=$start with effective ts ${clientInitTimes.map(_._1)}"
       )
+
+      // let our client know about the latest known information right now, but schedule the updating
+      // of the approximate time subsequently
+      val maxEffective = clientInitTimes
+        .map { case (effective, _) => effective }
+        .maxOption
+        .getOrElse(EffectiveTime.MinValue)
+      val minApproximate = clientInitTimes
+        .map { case (_, approximate) => approximate }
+        .minOption
+        .getOrElse(ApproximateTime.MaxValue)
+      listenersUpdateHead(maxEffective, minApproximate, potentialChanges = true)
+
       val directExecutionContext = DirectExecutionContext(logger)
       clientInitTimes.foreach { case (effective, approximate) =>
         // if the effective time is in the future, schedule a clock to update the time accordingly
@@ -163,10 +176,6 @@ abstract class TopologyTransactionProcessorCommonImpl[M](
             // The effective time is in the past. Directly advance our approximate time to the respective effective time
             listenersUpdateHead(effective, effective.toApproximate, potentialChanges = true)
           case Some(tickF) =>
-            // set approximate time now and schedule task to update the approximate time to the effective time in the future
-            if (effective.value != approximate.value) {
-              listenersUpdateHead(effective, approximate, potentialChanges = true)
-            }
             FutureUtil.doNotAwait(
               tickF.map(_ =>
                 listenersUpdateHead(effective, effective.toApproximate, potentialChanges = true)

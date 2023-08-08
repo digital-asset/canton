@@ -15,7 +15,8 @@ import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTr
   SubmissionKey,
   Submitters,
 }
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{Spanning, TraceContext}
+import io.opentelemetry.api.trace.Tracer
 
 import java.time.Duration
 import scala.collection.concurrent.TrieMap
@@ -26,7 +27,7 @@ trait SubmissionTracker extends AutoCloseable {
   def track(
       submissionKey: SubmissionKey,
       timeout: Duration,
-      submit: () => Future[Any],
+      submit: TraceContext => Future[Any],
   )(implicit
       errorLogger: ContextualizedErrorLogger,
       traceContext: TraceContext,
@@ -45,6 +46,7 @@ object SubmissionTracker {
   def owner(
       maxCommandsInFlight: Int,
       metrics: Metrics,
+      tracer: Tracer,
       loggerFactory: NamedLoggerFactory,
   ): ResourceOwner[SubmissionTracker] =
     for {
@@ -58,7 +60,7 @@ object SubmissionTracker {
           maxCommandsInFlight,
           metrics,
           loggerFactory,
-        )
+        )(tracer)
       )
     } yield tracker
 
@@ -67,7 +69,9 @@ object SubmissionTracker {
       maxCommandsInFlight: Int,
       metrics: Metrics,
       val loggerFactory: NamedLoggerFactory,
-  ) extends SubmissionTracker
+  )(implicit val tracer: Tracer)
+      extends SubmissionTracker
+      with Spanning
       with NamedLogging {
 
     private val directEc = DirectExecutionContext(logger)
@@ -81,11 +85,11 @@ object SubmissionTracker {
     override def track(
         submissionKey: SubmissionKey,
         timeout: Duration,
-        submit: () => Future[Any],
+        submit: TraceContext => Future[Any],
     )(implicit
         errorLogger: ContextualizedErrorLogger,
         traceContext: TraceContext,
-    ): Future[CompletionResponse] =
+    ): Future[CompletionResponse] = {
       ensuringSubmissionIdPopulated(submissionKey) {
         ensuringMaximumInFlight {
           val promise = Promise[CompletionResponse]()
@@ -105,25 +109,30 @@ object SubmissionTracker {
                   CompletionResponse.timeout(submissionKey.commandId, submissionKey.submissionId)(
                     errorLogger
                   ),
-              )
+              )(traceContext)
 
-              submit()
-                .onComplete {
-                  case Success(_) => // succeeded, nothing to do
-                  case Failure(throwable) =>
-                    // Submitting command failed, finishing entry with the very same error
-                    promise.tryComplete(Failure(throwable))
-                }(directEc)
+              withSpan("SubmissionTracker.track") { childContext => _ =>
+                submit(childContext)
+                  .onComplete {
+                    case Success(_) => // succeeded, nothing to do
+                    case Failure(throwable) =>
+                      // Submitting command failed, finishing entry with the very same error
+                      promise.tryComplete(Failure(throwable))
+                  }(directEc)
+              }
 
               promise.future.onComplete { _ =>
                 // register timeout cancellation and removal from map
-                cancelTimeout.close()
-                pending.remove(submissionKey)
+                withSpan("SubmissionTracker.complete") { _ => _ =>
+                  cancelTimeout.close()
+                  pending.remove(submissionKey)
+                }(traceContext, tracer)
               }(directEc)
           }
           promise.future
         }(errorLogger)
       }(errorLogger)
+    }
 
     override def onCompletion(completionResult: (CompletionStreamResponse, Submitters)): Unit = {
       val (completionStreamResponse, submitters) = completionResult

@@ -234,24 +234,68 @@ class InMemoryActiveContractStore(
         s"Provided timestamps are in the wrong order: $fromExclusive and $toInclusive",
       )
 
-      val changesByToc: Map[TimeOfChange, List[(LfContractId, ActivenessChange)]] = table.toList
-        .flatMap { case (coid, status) =>
-          status.changes
-            .filter { case (ch, _) => ch.toc > fromExclusive && ch.toc <= toInclusive }
-            .toList
-            .map(ch => (coid, ch._1))
-        }
-        .groupBy(_._2.toc)
+      // obtain the maximum creation timestamp per contract up to a certain rc
+      val latestActivationTransferCounterPerCid
+          : Map[(LfContractId, RequestCounter), TransferCounterO] =
+        table.toList.flatMap { case (cid, status) =>
+          // we only constrain here the upper bound timestamp, because we want to find the
+          // transfer counter of archivals, which might have been activated earlier
+          // than the lower bound
+          /*
+             TODO(i12904): Here we compute the maximum of the previous transfer counters;
+              instead, we could retrieve the transfer counter of the latest activation
+           */
+          val filterToc = status.changes.filter { case (ch, _) => ch.toc <= toInclusive }
+          filterToc
+            .map { case (change, _) =>
+              (
+                (cid, change.toc.rc),
+                filterToc
+                  .collect {
+                    case (ch, detail) if ch.isActivation && ch.toc.rc <= change.toc.rc =>
+                      detail.transferCounter
+                  }
+                  .maxOption
+                  .flatten,
+              )
+            }
+        }.toMap
 
-      val byTsAndChangeType: Map[TimeOfChange, Map[Boolean, List[LfContractId]]] = changesByToc
-        .fmap(_.groupBy(_._2.isActivation).fmap(_.map(_._1)))
+      val changesByToc
+          : Map[TimeOfChange, List[(LfContractId, ActivenessChange, ActivenessChangeDetail)]] =
+        table.toList
+          .flatMap { case (coid, status) =>
+            status.changes
+              .filter { case (ch, _) => ch.toc > fromExclusive && ch.toc <= toInclusive }
+              .toList
+              .map { case (activenessChange, activenessChangeDetail) =>
+                (coid, activenessChange, activenessChangeDetail)
+              }
+          }
+          .groupBy(_._2.toc)
+
+      val byTsAndChangeType
+          : Map[TimeOfChange, Map[Boolean, List[(LfContractId, TransferCounterO)]]] = changesByToc
+        .fmap(_.groupBy(_._2.isActivation).fmap(_.map {
+          case (coid, activenessChange, activenessChangeDetail) =>
+            if (!activenessChange.isActivation && !activenessChangeDetail.isTransfer)
+              (
+                coid,
+                latestActivationTransferCounterPerCid.getOrElse(
+                  (coid, activenessChange.toc.rc),
+                  activenessChangeDetail.transferCounter,
+                ),
+              )
+            else
+              (coid, activenessChangeDetail.transferCounter)
+        }))
 
       byTsAndChangeType
         .to(LazyList)
         .sortBy { case (timeOfChange, _) => timeOfChange }
         .map { case (toc, changes) =>
-          val activatedIds = changes.getOrElse(true, Iterable.empty).toSet
-          val deactivatedIds = changes.getOrElse(false, Iterable.empty).toSet
+          val activatedIds = changes.getOrElse(true, Iterable.empty).toMap
+          val deactivatedIds = changes.getOrElse(false, Iterable.empty).toMap
           (
             toc,
             ActiveContractIdsChange(

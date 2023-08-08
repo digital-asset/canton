@@ -24,7 +24,7 @@ import com.digitalasset.canton.console.{
   Help,
   Helpful,
 }
-import com.digitalasset.canton.crypto.PublicKey
+import com.digitalasset.canton.crypto.{Fingerprint, PublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.admin.v0.EnterpriseMediatorAdministrationServiceGrpc
 import com.digitalasset.canton.domain.admin.v0.EnterpriseMediatorAdministrationServiceGrpc.EnterpriseMediatorAdministrationServiceStub
@@ -159,6 +159,7 @@ class MediatorAdministrationGroupWithInit(
       domainParameters: StaticDomainParameters,
       sequencerConnections: SequencerConnections,
       topologySnapshot: Option[StoredTopologyTransactions[TopologyChangeOp.Positive]],
+      signingKeyFingerprint: Option[Fingerprint] = None,
   ): PublicKey = consoleEnvironment.run {
     runner.adminCommand(
       Initialize(
@@ -167,6 +168,7 @@ class MediatorAdministrationGroupWithInit(
         topologySnapshot,
         domainParameters.toInternal,
         sequencerConnections,
+        signingKeyFingerprint,
       )
     )
   }
@@ -178,6 +180,7 @@ class MediatorAdministrationGroupWithInit(
       domainParameters: StaticDomainParameters,
       sequencerConnection: SequencerConnection,
       topologySnapshot: Option[StoredTopologyTransactions[TopologyChangeOp.Positive]],
+      signingKeyFingerprint: Option[Fingerprint],
   ): PublicKey = consoleEnvironment.run {
     runner.adminCommand(
       Initialize(
@@ -186,6 +189,7 @@ class MediatorAdministrationGroupWithInit(
         topologySnapshot,
         domainParameters.toInternal,
         SequencerConnections.single(sequencerConnection),
+        signingKeyFingerprint,
       )
     )
   }

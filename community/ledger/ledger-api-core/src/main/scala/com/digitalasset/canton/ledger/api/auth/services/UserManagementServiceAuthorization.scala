@@ -8,7 +8,7 @@ import com.daml.ledger.api.v1.admin.user_management_service.*
 import com.digitalasset.canton.ledger.api.ProxyCloseable
 import com.digitalasset.canton.ledger.api.auth.*
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
   LoggingContextWithTrace,
@@ -155,7 +155,7 @@ final class UserManagementServiceAuthorization(
       case None if userId.isEmpty =>
         // This case can be hit both when running without authentication and when using custom Daml tokens.
         Failure(
-          LedgerApiErrors.RequestValidation.InvalidArgument
+          RequestValidationErrors.InvalidArgument
             .Reject(
               "requests with an empty user-id are only supported if there is an authenticated user"
             )

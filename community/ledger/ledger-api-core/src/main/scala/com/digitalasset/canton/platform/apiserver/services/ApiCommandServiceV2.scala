@@ -18,7 +18,7 @@ import com.digitalasset.canton.ledger.api.validation.{
   CommandsValidator,
   SubmitAndWaitRequestValidator,
 }
-import com.digitalasset.canton.ledger.api.{SubmissionIdGenerator, ValidationLogger, domain}
+import com.digitalasset.canton.ledger.api.{SubmissionIdGenerator, ValidationLogger}
 import com.digitalasset.canton.ledger.error.CommonErrors
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
@@ -33,7 +33,7 @@ import com.digitalasset.canton.platform.apiserver.services.tracking.{
   CompletionResponse,
   SubmissionTracker,
 }
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.google.protobuf.empty.Empty
 import io.grpc.Context
 
@@ -44,14 +44,14 @@ import scala.concurrent.{ExecutionContext, Future}
 
 final class ApiCommandServiceV2(
     transactionServices: TransactionServices,
+    commandsValidator: CommandsValidator,
     submissionTracker: SubmissionTracker,
-    submit: SubmitRequest => Future[Any],
+    submit: Traced[SubmitRequest] => Future[Any],
     defaultTrackingTimeout: Duration,
     currentLedgerTime: () => Instant,
     currentUtcTime: () => Instant,
     maxDeduplicationDuration: () => Option[Duration],
     generateSubmissionId: SubmissionIdGenerator,
-    explicitDisclosureUnsafeEnabled: Boolean,
     telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
@@ -62,12 +62,7 @@ final class ApiCommandServiceV2(
 
   private val running = new AtomicBoolean(true)
 
-  private[this] val validator = new SubmitAndWaitRequestValidator(
-    CommandsValidator(
-      domain.LedgerId(""), // not used
-      explicitDisclosureUnsafeEnabled,
-    )
-  )
+  private[this] val validator = new SubmitAndWaitRequestValidator(commandsValidator)
 
   override def close(): Unit = {
     logger.info("Shutting down Command Service.")(TraceContext.empty)
@@ -76,8 +71,8 @@ final class ApiCommandServiceV2(
   }
 
   override def submitAndWait(request: SubmitAndWaitRequest): Future[Empty] =
-    withCommandsLoggingContext(request.getCommands) { (errorLogger, traceContext) =>
-      submitAndWaitInternal(request)(errorLogger, traceContext).map { _ =>
+    withCommandsLoggingContext(request.getCommands) { (errorLogger, loggingContextWithTrace) =>
+      submitAndWaitInternal(request)(errorLogger, loggingContextWithTrace).map { _ =>
         Empty.defaultInstance
       }
     }
@@ -85,8 +80,8 @@ final class ApiCommandServiceV2(
   override def submitAndWaitForUpdateId(
       request: SubmitAndWaitRequest
   ): Future[SubmitAndWaitForUpdateIdResponse] =
-    withCommandsLoggingContext(request.getCommands) { (errorLogger, traceContext) =>
-      submitAndWaitInternal(request)(errorLogger, traceContext).map { response =>
+    withCommandsLoggingContext(request.getCommands) { (errorLogger, loggingContextWithTrace) =>
+      submitAndWaitInternal(request)(errorLogger, loggingContextWithTrace).map { response =>
         SubmitAndWaitForUpdateIdResponse.of(
           updateId = response.completion.updateId,
           completionOffset = offsetFromCheckpoint(response.checkpoint),
@@ -100,8 +95,8 @@ final class ApiCommandServiceV2(
   override def submitAndWaitForTransaction(
       request: SubmitAndWaitRequest
   ): Future[SubmitAndWaitForTransactionResponse] =
-    withCommandsLoggingContext(request.getCommands) { (errorLogger, traceContext) =>
-      submitAndWaitInternal(request)(errorLogger, traceContext).flatMap { resp =>
+    withCommandsLoggingContext(request.getCommands) { (errorLogger, loggingContextWithTrace) =>
+      submitAndWaitInternal(request)(errorLogger, loggingContextWithTrace).flatMap { resp =>
         val effectiveActAs = CommandsValidator.effectiveActAs(request.getCommands)
         val txRequest = GetTransactionByIdRequest(
           updateId = resp.completion.updateId,
@@ -122,8 +117,8 @@ final class ApiCommandServiceV2(
   override def submitAndWaitForTransactionTree(
       request: SubmitAndWaitRequest
   ): Future[SubmitAndWaitForTransactionTreeResponse] =
-    withCommandsLoggingContext(request.getCommands) { (errorLogger, traceContext) =>
-      submitAndWaitInternal(request)(errorLogger, traceContext).flatMap { resp =>
+    withCommandsLoggingContext(request.getCommands) { (errorLogger, loggingContextWithTrace) =>
+      submitAndWaitInternal(request)(errorLogger, loggingContextWithTrace).flatMap { resp =>
         val effectiveActAs = CommandsValidator.effectiveSubmitters(request.getCommands).actAs
         val txRequest = GetTransactionByIdRequest(
           updateId = resp.completion.updateId,
@@ -142,7 +137,7 @@ final class ApiCommandServiceV2(
       req: SubmitAndWaitRequest
   )(implicit
       errorLogger: ContextualizedErrorLogger,
-      traceContext: TraceContext,
+      loggingContextWithTrace: LoggingContextWithTrace,
   ): Future[CompletionResponse] =
     if (running.get()) {
       enrichRequestAndSubmit(req) { request =>
@@ -161,8 +156,8 @@ final class ApiCommandServiceV2(
             parties = CommandsValidator.effectiveActAs(commands),
           ),
           timeout = timeout,
-          submit = () => submit(SubmitRequest(Some(commands))),
-        )(errorLogger, traceContext)
+          submit = childContext => submit(Traced(SubmitRequest(Some(commands)))(childContext)),
+        )(errorLogger, loggingContextWithTrace.traceContext)
       }
     } else
       Future.failed(
@@ -170,8 +165,11 @@ final class ApiCommandServiceV2(
       )
 
   private def withCommandsLoggingContext[T](commands: Commands)(
-      submitWithContext: (ContextualizedErrorLogger, TraceContext) => Future[T]
+      submitWithContext: (ContextualizedErrorLogger, LoggingContextWithTrace) => Future[T]
   ): Future[T] = {
+    val traceContext = getAnnotedCommandTraceContextV2(Some(commands), telemetry)
+    implicit val loggingContext: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(traceContext)
     LoggingContextWithTrace.withEnrichedLoggingContext(
       logging.submissionId(commands.submissionId),
       logging.commandId(commands.commandId),
@@ -186,16 +184,16 @@ final class ApiCommandServiceV2(
           loggingContext.traceContext,
           commands.submissionId,
         ),
-        loggingContext.traceContext,
+        loggingContext,
       )
-    }(LoggingContextWithTrace(loggerFactory, telemetry))
+    }
   }
 
   private def enrichRequestAndSubmit[T](
       request: SubmitAndWaitRequest
-  )(submit: SubmitAndWaitRequest => Future[T]): Future[T] = {
-    implicit val loggingContext: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory, telemetry)
+  )(
+      submit: SubmitAndWaitRequest => Future[T]
+  )(implicit loggingContextWithTrace: LoggingContextWithTrace): Future[T] = {
     val requestWithSubmissionId = generateSubmissionIdIfEmpty(request)
     validator
       .validate(

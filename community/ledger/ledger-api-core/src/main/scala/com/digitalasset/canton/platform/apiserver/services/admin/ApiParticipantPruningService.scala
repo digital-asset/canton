@@ -16,7 +16,7 @@ import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.*
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
   IndexParticipantPruningService,
@@ -181,7 +181,7 @@ final class ApiParticipantPruningService private (
       .toEither
       .left
       .map(t =>
-        LedgerApiErrors.RequestValidation.NonHexOffset
+        RequestValidationErrors.NonHexOffset
           .Error(
             fieldName = "prune_up_to",
             offsetValue = pruneUpToString,
@@ -204,7 +204,7 @@ final class ApiParticipantPruningService private (
         if (pruneUpToString < ledgerEnd.value) Future.successful(())
         else
           Future.failed(
-            LedgerApiErrors.RequestValidation.OffsetOutOfRange
+            RequestValidationErrors.OffsetOutOfRange
               .Reject(
                 s"prune_up_to needs to be before ledger end ${ledgerEnd.value}"
               )

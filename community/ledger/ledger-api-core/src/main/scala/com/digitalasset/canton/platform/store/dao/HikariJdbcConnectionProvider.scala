@@ -8,7 +8,7 @@ import com.daml.ledger.resources.ResourceOwner
 import com.daml.metrics.{DatabaseMetrics, Timed}
 import com.digitalasset.canton.ledger.api.health.{HealthStatus, Healthy, Unhealthy}
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.platform.configuration.ServerRole
+import com.digitalasset.canton.platform.config.ServerRole
 import com.digitalasset.canton.tracing.TraceContext
 import com.zaxxer.hikari.{HikariConfig, HikariDataSource}
 

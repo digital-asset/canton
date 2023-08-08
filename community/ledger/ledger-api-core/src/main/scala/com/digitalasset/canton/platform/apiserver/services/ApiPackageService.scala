@@ -13,7 +13,7 @@ import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.grpc.{GrpcApiService, GrpcPackageService}
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexPackagesService
 import com.digitalasset.canton.logging.LoggingContextUtil.createLoggingContext
 import com.digitalasset.canton.logging.LoggingContextWithTrace.{
@@ -70,7 +70,7 @@ private[apiserver] final class ApiPackageService private (
           .flatMap {
             case None =>
               Future.failed[GetPackageResponse](
-                LedgerApiErrors.RequestValidation.NotFound.Package
+                RequestValidationErrors.NotFound.Package
                   .Reject(packageId = packageId)(
                     createContextualizedErrorLogger
                   )

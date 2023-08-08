@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.backend
 
+import com.digitalasset.canton.platform.store.backend.common.EventPayloadSourceForTreeTx
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -19,7 +20,6 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
     val parties = executeSql(backend.party.knownParties)
     val config = executeSql(backend.configuration.ledgerConfiguration)
     val packages = executeSql(backend.packageBackend.lfPackages)
-    val events = executeSql(backend.contract.contractStateEvents(0, Long.MaxValue))
     val stringInterningEntries = executeSql(
       backend.stringInterning.loadStringInterningEntries(0, 1000)
     )
@@ -28,7 +28,6 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
     end shouldBe ParameterStorageBackend.LedgerEnd.beforeBegin
     parties shouldBe empty
     packages shouldBe empty
-    events shouldBe empty
     config shouldBe None
     stringInterningEntries shouldBe empty
   }
@@ -81,7 +80,18 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
 
     def end = executeSql(backend.parameter.ledgerEnd)
 
-    def events = executeSql(backend.contract.contractStateEvents(0, Long.MaxValue))
+    def events = {
+      executeSql(
+        backend.event.transactionStreamingQueries.fetchEventPayloadsTree(
+          EventPayloadSourceForTreeTx.Create
+        )(List(1L), Set.empty)
+      ) ++
+        executeSql(
+          backend.event.transactionStreamingQueries.fetchEventPayloadsTree(
+            EventPayloadSourceForTreeTx.Consuming
+          )(List(2L), Set.empty)
+        )
+    }
 
     def parties = executeSql(backend.party.knownParties)
 
@@ -140,7 +150,7 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
     // verify queries indeed returning something
     identity should not be None
     end should not be ParameterStorageBackend.LedgerEnd.beforeBegin
-    events should not be empty
+    events.size shouldBe 2
     parties should not be empty
     packages should not be empty
     config should not be None

@@ -19,7 +19,7 @@ import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFact
 import com.digitalasset.canton.platform.InMemoryState
 import com.digitalasset.canton.platform.apiserver.TimedIndexService
 import com.digitalasset.canton.platform.common.{LedgerIdNotFoundException, MismatchException}
-import com.digitalasset.canton.platform.configuration.IndexServiceConfig
+import com.digitalasset.canton.platform.config.IndexServiceConfig
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.platform.store.cache.*
 import com.digitalasset.canton.platform.store.dao.events.{

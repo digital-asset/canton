@@ -32,8 +32,8 @@ import com.digitalasset.canton.logging.{
   SuppressionRule,
 }
 import com.digitalasset.canton.platform.LedgerApiServer
-import com.digitalasset.canton.platform.configuration.{
-  CommandConfiguration,
+import com.digitalasset.canton.platform.config.{
+  CommandServiceConfig,
   IndexServiceConfig,
   ServerRole,
 }
@@ -46,7 +46,8 @@ import com.digitalasset.canton.platform.store.DbSupport.{
 }
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.tracing.TraceContext.{withNewTraceContext, wrapWithNewTraceContext}
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, Traced}
+import io.opentelemetry.api.trace.Tracer
 import org.mockito.Mockito.*
 import org.mockito.{ArgumentMatchers, MockitoSugar}
 import org.scalatest.concurrent.{Eventually, IntegrationPatience}
@@ -81,6 +82,7 @@ class RecoveringIndexerIntegrationSpec
     LoggingContextWithTrace.ForTesting
 
   override val loggerFactory: SuppressingLogger = SuppressingLogger(getClass)
+  val tracer: Tracer = NoReportingTracerProvider.tracer
 
   override def beforeEach(): Unit = {
     super.beforeEach()
@@ -249,9 +251,10 @@ class RecoveringIndexerIntegrationSpec
         LedgerApiServer
           .createInMemoryStateAndUpdater(
             IndexServiceConfig(),
-            CommandConfiguration.DefaultMaxCommandsInFlight,
+            CommandServiceConfig.DefaultMaxCommandsInFlight,
             metrics,
             parallelExecutionContext,
+            tracer,
             loggerFactory,
             multiDomainEnabled = false,
           )
@@ -267,6 +270,7 @@ class RecoveringIndexerIntegrationSpec
         inMemoryState = inMemoryState,
         inMemoryStateUpdaterFlow = inMemoryStateUpdaterFlow,
         executionContext = servicesExecutionContext,
+        tracer = tracer,
         loggerFactory = loggerFactory,
         multiDomainEnabled = false,
       )(materializer, traceContext)

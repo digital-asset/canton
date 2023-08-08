@@ -12,7 +12,6 @@ import cats.syntax.traverse.*
 import cats.syntax.validated.*
 import com.daml.error.*
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
@@ -47,7 +46,9 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.retry.Policy
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{LfPartyId, TransferCounter, TransferCounterO}
 import com.google.common.annotations.VisibleForTesting
+import com.google.protobuf.ByteString
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
@@ -342,6 +343,7 @@ class AcsCommitmentProcessor(
         _ = logger.debug(
           show"Commitment messages for $completedPeriod: ${msgs.fmap(_.message.commitment)}"
         )
+
         _ <- storeAndSendCommitmentMessages(completedPeriod, msgs)
         _ <- store.markOutstanding(completedPeriod, msgs.keySet)
         _ <- persistRunningCommitments(snapshotRes)
@@ -889,27 +891,44 @@ object AcsCommitmentProcessor extends HasLoggerName {
     }
 
     def update(rt: RecordTime, change: AcsChange): Unit = {
-
-      def concatenate(contractHash: LfHash, contractId: LfContractId): Array[Byte] =
-        (contractHash.bytes.toByteString // hash always 32 bytes long per lf.crypto.Hash.underlyingLength
-          concat contractId.encodeDeterministically).toByteArray
+      /*
+      The concatenate function is guaranteed to be safe when contract IDs always have the same length.
+      Otherwise, a longer contract ID without a transfer counter might collide with a
+      shorter contract ID with a transfer counter.
+      In the current implementation collisions cannot happen, because either all contracts in a commitment
+      have a transfer counter or none, depending on the protocol version.
+       */
+      def concatenate(
+          contractHash: LfHash,
+          contractId: LfContractId,
+          transferCounter: TransferCounterO,
+      ): Array[Byte] =
+        (
+          contractHash.bytes.toByteString // hash always 32 bytes long per lf.crypto.Hash.underlyingLength
+            concat contractId.encodeDeterministically
+            concat transferCounter.fold(ByteString.EMPTY)(TransferCounter.encodeDeterministically)
+        ).toByteArray
 
       import com.digitalasset.canton.lfPartyOrdering
       blocking {
         lock.synchronized {
           this.rt = rt
-          change.activations.foreach { case (cid, WithContractHash(metadata, hash)) =>
-            val sortedStakeholders = SortedSet(metadata.stakeholders.toSeq: _*)
-            val h = commitments.getOrElseUpdate(sortedStakeholders, LtHash16())
-            h.add(concatenate(hash, cid))
+          change.activations.foreach {
+            case (cid, WithContractHash(metadataAndTransferCounter, hash)) =>
+              val sortedStakeholders =
+                SortedSet(metadataAndTransferCounter.contractMetadata.stakeholders.toSeq: _*)
+              val h = commitments.getOrElseUpdate(sortedStakeholders, LtHash16())
+              h.add(concatenate(hash, cid, metadataAndTransferCounter.transferCounter))
 
-            deltaB += sortedStakeholders -> h
+              deltaB += sortedStakeholders -> h
           }
-          change.deactivations.foreach { case (cid, WithContractHash(stakeholders, hash)) =>
-            val sortedStakeholders = SortedSet(stakeholders.toSeq: _*)
-            val h = commitments.getOrElseUpdate(sortedStakeholders, LtHash16())
-            h.remove(concatenate(hash, cid))
-            deltaB += sortedStakeholders -> h
+          change.deactivations.foreach {
+            case (cid, WithContractHash(stakeholdersAndTransferCounter, hash)) =>
+              val sortedStakeholders =
+                SortedSet(stakeholdersAndTransferCounter.stakeholders.toSeq: _*)
+              val h = commitments.getOrElseUpdate(sortedStakeholders, LtHash16())
+              h.remove(concatenate(hash, cid, stakeholdersAndTransferCounter.transferCounter))
+              deltaB += sortedStakeholders -> h
           }
         }
       }
@@ -981,12 +1000,11 @@ object AcsCommitmentProcessor extends HasLoggerName {
       commitmentsPruningBound: CommitmentsPruningBound,
       earliestInFlightSubmissionF: Future[Option[CantonTimestamp]],
       sortedReconciliationIntervalsProvider: SortedReconciliationIntervalsProvider,
+      domainId: DomainId,
   )(implicit
       ec: ExecutionContext,
       loggingContext: NamedLoggingContext,
   ): Future[Option[CantonTimestampSecond]] = {
-    val logger = loggingContext.loggerFactory.getLogger(AcsCommitmentProcessor.getClass)
-
     for {
       // This logic progressively lowers the timestamp based on the following constraints:
       // 1. Pruning must not delete data needed for recovery (after the clean replay timestamp)
@@ -1007,10 +1025,14 @@ object AcsCommitmentProcessor extends HasLoggerName {
           .map(_.tickBeforeOrAt(ts))
           .flatMap {
             case Some(tick) =>
-              logger.info(s"Tick before or at $ts yields $tick")
+              loggingContext.info(s"Tick before or at $ts yields $tick on domain $domainId")
               Future.successful(tick)
             case None =>
-              Future.failed(new RuntimeException(s"Unable to compute tick before or at `$ts`"))
+              Future.failed(
+                new RuntimeException(
+                  s"Unable to compute tick before or at `$ts` for domain $domainId"
+                )
+              )
           }
 
       // Latest potential pruning point is the ACS commitment tick before or at the "clean replay" timestamp
@@ -1035,7 +1057,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
           } yield tickBeforeLastComputedAndSentO.map(_.min(latestTickBeforeOrAt))
       }
 
-      _ = logger.info {
+      _ = loggingContext.info {
         val timestamps = Map(
           "cleanReplayTs" -> cleanReplayTs.toString,
           "inFlightSubmissionTs" -> inFlightSubmissionTs.toString,
@@ -1043,14 +1065,14 @@ object AcsCommitmentProcessor extends HasLoggerName {
           "tsSafeToPruneUpTo" -> tsSafeToPruneUpTo.toString,
         )
 
-        s"Getting safe to prune commitment tick with data $timestamps"
+        s"Getting safe to prune commitment tick with data $timestamps on domain $domainId"
       }
 
       // Sanity check that safe pruning timestamp has not "increased" (which would be a coding bug).
       _ = tsSafeToPruneUpTo.foreach(ts =>
         ErrorUtil.requireState(
           ts <= latestTickBeforeOrAt,
-          s"limit $tsSafeToPruneUpTo after $latestTickBeforeOrAt",
+          s"limit $tsSafeToPruneUpTo after $latestTickBeforeOrAt on domain $domainId",
         )
       )
     } yield tsSafeToPruneUpTo
@@ -1103,6 +1125,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
       commitmentsPruningBound = commitmentsPruningBound,
       earliestInFlightF,
       sortedReconciliationIntervalsProvider,
+      domainId,
     )
   }
 

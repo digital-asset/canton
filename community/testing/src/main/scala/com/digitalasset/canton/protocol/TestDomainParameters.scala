@@ -51,7 +51,7 @@ object TestDomainParameters {
       maxRatePerParticipant: NonNegativeInt,
       maxRequestSize: MaxRequestSize,
   ): DynamicDomainParameters =
-    DynamicDomainParameters.initialValues(
+    DynamicDomainParameters.tryInitialValues(
       topologyChangeDelay = NonNegativeFiniteDuration.tryOfMillis(250),
       protocolVersion = BaseTest.testedProtocolVersion,
       maxRatePerParticipant = maxRatePerParticipant,

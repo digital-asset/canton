@@ -6,7 +6,8 @@ package com.digitalasset.canton.platform.apiserver.services.tracking
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.command_completion_service.Checkpoint as PbCheckpoint
 import com.daml.ledger.api.v2.completion.Completion as PbCompletion
-import com.digitalasset.canton.ledger.error.{CommonErrors, LedgerApiErrors}
+import com.digitalasset.canton.ledger.error.CommonErrors
+import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors
 import com.google.rpc.status
 import io.grpc.StatusRuntimeException
 import io.grpc.protobuf.StatusProto
@@ -51,7 +52,7 @@ object CompletionResponse {
       submissionId: String
   )(implicit errorLogger: ContextualizedErrorLogger): Try[CompletionResponse] =
     Failure(
-      LedgerApiErrors.ConsistencyErrors.DuplicateCommand
+      ConsistencyErrors.DuplicateCommand
         .Reject(existingCommandSubmissionId = Some(submissionId))
         .asGrpcError
     )

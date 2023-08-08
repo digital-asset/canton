@@ -1476,14 +1476,29 @@ trait ActiveContractStoreTest extends PrunableByTimeTest {
         changes.toList shouldBe List(
           (
             toc2,
-            ActiveContractIdsChange(activations = Set(coid10, coid11), deactivations = Set(coid01)),
+            ActiveContractIdsChange(
+              activations = Map(coid10 -> initialTransferCounter, coid11 -> tc1),
+              deactivations = Map(coid01 -> initialTransferCounter),
+            ),
           ),
           (
             toc3,
-            ActiveContractIdsChange(activations = Set.empty, deactivations = Set(coid10, coid11)),
+            ActiveContractIdsChange(
+              activations = Map.empty,
+              deactivations = Map(coid10 -> initialTransferCounter, coid11 -> tc2),
+            ),
           ),
-          (toc4, ActiveContractIdsChange(activations = Set(coid11), deactivations = Set.empty)),
-          (toc5, ActiveContractIdsChange(activations = Set.empty, deactivations = Set(coid11))),
+          (
+            toc4,
+            ActiveContractIdsChange(activations = Map(coid11 -> tc3), deactivations = Map.empty),
+          ),
+          (
+            toc5,
+            ActiveContractIdsChange(
+              activations = Map.empty,
+              deactivations = Map(coid11 -> tc3),
+            ),
+          ),
         )
       }
     }

@@ -51,6 +51,8 @@ object DbDtoToStringsForInterning {
           dbDto.tree_event_witnesses.iterator ++
           dbDto.flat_event_witnesses.iterator ++
           dbDto.create_observers.getOrElse(Set.empty).iterator ++
+          // dbDto also contains key_maintainers. We don't internize these
+          // as they're already included in the signatories set
           dbDto.create_signatories.getOrElse(Set.empty).iterator
 
       case dbDto: DbDto.EventUnassign =>
@@ -61,6 +63,8 @@ object DbDtoToStringsForInterning {
         Iterator(dbDto.submitter) ++
           dbDto.flat_event_witnesses.iterator ++
           dbDto.create_observers.iterator ++
+          // dbDto also contains key_maintainers. We don't internize these
+          // as they're already included in the signatories set
           dbDto.create_signatories.iterator
 
       case dbDto: DbDto.CommandCompletion =>

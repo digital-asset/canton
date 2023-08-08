@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.util.retry
 
+import cats.Eval
 import cats.syntax.flatMap.*
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
@@ -104,6 +105,7 @@ abstract class RetryWithDelay(
     totalMaxRetries: Int,
     flagCloseable: FlagCloseable,
     retryLogLevel: Option[Level],
+    killSwitchRetries: Eval[Boolean],
 ) extends Policy(logger) {
 
   private val complainAfterRetries: Int = 10
@@ -187,7 +189,15 @@ abstract class RetryWithDelay(
             )
             Future.successful(RetryOutcome(succ, RetryTermination.Success))
 
+          case outcome if killSwitchRetries.value =>
+            logger.debug(
+              s"Giving up on retrying the operation '$operationName' due to kill switch. Last attempt was $lastErrorKind"
+            )
+            Future.successful(RetryOutcome(outcome, RetryTermination.GiveUp))
           case outcome if flagCloseable.isClosing =>
+            logger.debug(
+              s"Giving up on retrying the operation '$operationName' due to shutdown. Last attempt was $lastErrorKind"
+            )
             Future.successful(RetryOutcome(outcome, RetryTermination.Shutdown))
 
           case outcome if totalMaxRetries < Int.MaxValue && totalRetries >= totalMaxRetries =>
@@ -364,6 +374,7 @@ final case class Directly(
       maxRetries,
       flagCloseable,
       retryLogLevel,
+      killSwitchRetries = Eval.now(false),
     ) {
 
   override def nextDelay(nextCount: Int, delay: FiniteDuration): FiniteDuration = Duration.Zero
@@ -388,6 +399,7 @@ final case class Pause(
       maxRetries,
       flagCloseable,
       retryLogLevel,
+      killSwitchRetries = Eval.now(false),
     ) {
 
   override def nextDelay(nextCount: Int, delay: FiniteDuration): FiniteDuration = delay
@@ -436,6 +448,7 @@ final case class Backoff(
     longDescription: String = "",
     actionable: Option[String] = None,
     retryLogLevel: Option[Level] = None,
+    killSwitchRetries: Eval[Boolean] = Eval.now(false),
 )(implicit jitter: Jitter = Jitter.full(maxDelay))
     extends RetryWithDelay(
       logger,
@@ -446,6 +459,7 @@ final case class Backoff(
       maxRetries,
       flagCloseable,
       retryLogLevel,
+      killSwitchRetries,
     ) {
 
   override def nextDelay(nextCount: Int, delay: FiniteDuration): FiniteDuration =

@@ -239,7 +239,16 @@ class ContractStoreBasedMaximumLedgerTimeServiceSpec
   private def timestampFromInstant(i: Instant): Timestamp = Timestamp.assertFromInstant(i)
 
   private def active(ledgerEffectiveTime: Timestamp): ContractState =
-    Active(null, ledgerEffectiveTime) // we do not care about the payload here
+    Active(
+      null,
+      ledgerEffectiveTime,
+      Set.empty,
+      None,
+      Set.empty,
+      None,
+      None,
+      None,
+    ) // we do not care about the payload here
 
   private def testeeWithFixture(fixture: (ContractId, ContractState)*): MaximumLedgerTimeService = {
     val fixtureMap = fixture.toMap

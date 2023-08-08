@@ -14,8 +14,10 @@ import com.daml.lf.engine.{
   ResultInterruption,
   ResultNeedAuthority,
   ResultNeedContract,
+  ResultNeedCreate,
   ResultNeedKey,
   ResultNeedPackage,
+  ResultNeedUpgradeVerification,
 }
 import com.daml.lf.transaction.{Node, SubmittedTransaction, Transaction}
 import com.daml.lf.value.Value
@@ -213,6 +215,9 @@ private[apiserver] final class StoreBackedCommandExecutor(
               )
             }
 
+        case ResultNeedCreate(acoid, resume) =>
+          resolveStep(resume(None)) // TODO(#14281) Add ResultNeedCreate support
+
         case ResultNeedKey(key, resume) =>
           val start = System.nanoTime
           Timed
@@ -278,6 +283,13 @@ private[apiserver] final class StoreBackedCommandExecutor(
                 )
               )
             }
+        case ResultNeedUpgradeVerification(_, _, _, _, resume) =>
+          resolveStep(
+            Tracked.value(
+              metrics.daml.execution.engineRunning,
+              trackSyncExecution(interpretationTimeNanos)(resume(None)),
+            )
+          )
       }
 
     resolveStep(result).andThen { case _ =>

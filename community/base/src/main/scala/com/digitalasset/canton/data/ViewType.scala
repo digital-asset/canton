@@ -17,6 +17,8 @@ trait ViewType extends Product with Serializable with PrettyPrinting {
   /** The subclass of [[ViewTree]] that is reified. */
   type View <: ViewTree with HasVersionedToByteString
 
+  type FullView <: ViewTree
+
   type Processor = RequestProcessor[this.type]
 
   def toProtoEnum: v0.ViewType
@@ -37,12 +39,16 @@ object ViewType {
 
   case object TransactionViewType extends ViewType {
     override type View = LightTransactionViewTree
+
+    override type FullView = TransactionViewTree
+
     override def toProtoEnum: v0.ViewType = v0.ViewType.TransactionViewType
   }
   type TransactionViewType = TransactionViewType.type
 
   sealed trait TransferViewType extends ViewType {
     type View <: TransferViewTree with HasVersionedToByteString
+    type FullView = View
   }
 
   case object TransferOutViewType extends TransferViewType {

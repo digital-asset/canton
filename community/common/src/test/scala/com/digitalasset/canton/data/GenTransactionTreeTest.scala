@@ -138,7 +138,7 @@ class GenTransactionTreeTest
         LightTransactionViewTree
           .toFullViewTrees(PIso.id, testedProtocolVersion, factory.cryptoOps, topLevelOnly = false)(
             allLightTrees
-          ) shouldBe (allTrees, Seq.empty)
+          ) shouldBe (allTrees, Seq.empty, Seq.empty)
       }
 
       "correctly reconstruct the top-level transaction view trees from the lightweight ones" in {
@@ -149,7 +149,7 @@ class GenTransactionTreeTest
         LightTransactionViewTree
           .toFullViewTrees(PIso.id, testedProtocolVersion, factory.cryptoOps, topLevelOnly = true)(
             allLightTrees
-          ) shouldBe (allTrees, Seq.empty)
+          ) shouldBe (allTrees, Seq.empty, Seq.empty)
       }
 
       "correctly reconstruct the top-level transaction view trees from the lightweight ones for each informee" in {
@@ -187,7 +187,7 @@ class GenTransactionTreeTest
               topLevelOnly = true,
             )(
               allLightWeightForInf
-            ) shouldBe (topLevelForInf, Seq.empty)
+            ) shouldBe (topLevelForInf, Seq.empty, Seq.empty)
         }
       }
 
@@ -214,7 +214,7 @@ class GenTransactionTreeTest
         LightTransactionViewTree
           .toFullViewTrees(PIso.id, testedProtocolVersion, factory.cryptoOps, topLevelOnly = false)(
             inputLightTrees
-          ) shouldBe (expectedFullTrees, badLightTrees)
+          ) shouldBe (expectedFullTrees, badLightTrees, Seq.empty)
       }
 
       "correctly process duplicate views" in {
@@ -223,20 +223,16 @@ class GenTransactionTreeTest
         val allFullTrees = example.transactionTree.allTransactionViewTrees
 
         val inputLightTrees1 = allLightTrees.flatMap(tree => Seq(tree, tree))
-        val expectedFullTrees1 = allFullTrees.flatMap(tree => Seq(tree, tree))
-
         LightTransactionViewTree
           .toFullViewTrees(PIso.id, testedProtocolVersion, factory.cryptoOps, topLevelOnly = false)(
             inputLightTrees1
-          ) shouldBe (expectedFullTrees1, Seq.empty)
+          ) shouldBe (allFullTrees, Seq.empty, allLightTrees)
 
         val inputLightTrees2 = allLightTrees ++ allLightTrees
-        val expectedFullTrees2 = allFullTrees ++ allFullTrees
-
         LightTransactionViewTree
           .toFullViewTrees(PIso.id, testedProtocolVersion, factory.cryptoOps, topLevelOnly = false)(
             inputLightTrees2
-          ) shouldBe (expectedFullTrees2, Seq.empty)
+          ) shouldBe (allFullTrees, Seq.empty, allLightTrees)
       }
 
       "correctly process views in an unusual order" in {
@@ -244,11 +240,10 @@ class GenTransactionTreeTest
           example.transactionTree.allLightTransactionViewTrees(testedProtocolVersion)
         val inputLightTrees = allLightTrees.sortBy(_.viewPosition.position.size)
         val allFullTrees = example.transactionTree.allTransactionViewTrees
-        val expectedFullTrees = allFullTrees.sortBy(_.viewPosition.position.size)
         LightTransactionViewTree
           .toFullViewTrees(PIso.id, testedProtocolVersion, factory.cryptoOps, topLevelOnly = false)(
             inputLightTrees
-          ) shouldBe (expectedFullTrees, Seq.empty)
+          ) shouldBe (allFullTrees, Seq.empty, Seq.empty)
       }
     }
   }

@@ -35,7 +35,7 @@ class BatchNSpec extends AsyncFlatSpec with Matchers with AkkaBeforeAndAfterAll 
     }
   }
 
-  it should "form maximally-sized batches under downstream back-pressure" in {
+  it should "form maximally-sized batches if downstream is slower than upstream" in {
     val inputSize = 100
     val input = 1 to inputSize
 
@@ -53,6 +53,50 @@ class BatchNSpec extends AsyncFlatSpec with Matchers with AkkaBeforeAndAfterAll 
       batches.flatten should contain theSameElementsInOrderAs input
       batches.map(_.size) should contain theSameElementsAs Array.fill(inputSize / MaxBatchSize)(
         MaxBatchSize
+      )
+    }
+  }
+
+  it should "form even-sized batches under downstream back-pressure" in {
+    val inputSize = 15
+    val input = 1 to inputSize
+
+    val batchesF =
+      Source(input)
+        .via(BatchN(MaxBatchSize, MaxBatchCount))
+        // slow downstream
+        .initialDelay(10.millis)
+        .async
+        .delay(10.millis, DelayOverflowStrategy.backpressure)
+        .addAttributes(Attributes(InputBuffer(1, 1)))
+        .runWith(Sink.seq)
+
+    batchesF.map { batches =>
+      batches.flatten should contain theSameElementsInOrderAs input
+      batches.map(_.size) should contain theSameElementsAs Array.fill(5)(
+        3
+      )
+    }
+  }
+
+  it should "form one-sized batches under slight downstream back-pressure" in {
+    val inputSize = 3
+    val input = 1 to inputSize
+
+    val batchesF =
+      Source(input)
+        .via(BatchN(MaxBatchSize, MaxBatchCount))
+        // slow downstream
+        .initialDelay(10.millis)
+        .async
+        .delay(10.millis, DelayOverflowStrategy.backpressure)
+        .addAttributes(Attributes(InputBuffer(1, 1)))
+        .runWith(Sink.seq)
+
+    batchesF.map { batches =>
+      batches.flatten should contain theSameElementsInOrderAs input
+      batches.map(_.size) should contain theSameElementsAs Array.fill(3)(
+        1
       )
     }
   }

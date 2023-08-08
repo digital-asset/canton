@@ -71,10 +71,16 @@ object LedgerDaoContractsReader {
     def stakeholders: Set[Party]
   }
 
+  // Note that for TransactionVersion <= V15 maintainers may not be populated even where globalKey is
   final case class ActiveContract(
       contract: Contract,
       stakeholders: Set[Party],
       ledgerEffectiveTime: Timestamp,
+      agreementText: Option[String],
+      signatories: Set[Party],
+      globalKey: Option[GlobalKey],
+      keyMaintainers: Option[Set[Party]],
+      driverMetadata: Option[Array[Byte]],
   ) extends ContractState
 
   final case class ArchivedContract(stakeholders: Set[Party]) extends ContractState

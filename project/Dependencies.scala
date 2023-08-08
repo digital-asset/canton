@@ -184,6 +184,10 @@ object Dependencies {
     "io.opentelemetry" % "opentelemetry-exporter-zipkin" % opentelemetry_version
   lazy val opentelemetry_jaeger =
     "io.opentelemetry" % "opentelemetry-exporter-jaeger" % opentelemetry_version
+  lazy val opentelemetry_otlp =
+    "io.opentelemetry" % "opentelemetry-exporter-otlp-trace" % opentelemetry_version
+  lazy val opentelemetry_proto =
+    "io.opentelemetry" % "opentelemetry-proto" % "1.7.1-alpha"
 
   lazy val opentelemetry_instrumentation_grpc =
     "io.opentelemetry.instrumentation" % "opentelemetry-grpc-1.6" % s"$opentelemetry_version-alpha"

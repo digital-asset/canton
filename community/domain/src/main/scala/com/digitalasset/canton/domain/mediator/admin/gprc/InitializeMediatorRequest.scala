@@ -4,6 +4,7 @@
 package com.digitalasset.canton.domain.mediator.admin.gprc
 
 import cats.syntax.traverse.*
+import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.domain.admin.{v0, v2}
 import com.digitalasset.canton.domain.sequencing.admin.grpc.InitializeSequencerRequest
 import com.digitalasset.canton.protocol.StaticDomainParameters
@@ -20,6 +21,7 @@ final case class InitializeMediatorRequest(
     topologyState: Option[StoredTopologyTransactions[TopologyChangeOp.Positive]],
     domainParameters: StaticDomainParameters,
     sequencerConnections: SequencerConnections,
+    signingKeyFingerprint: Option[Fingerprint],
 ) {
   def toProtoV0: v0.InitializeMediatorRequest =
     v0.InitializeMediatorRequest(
@@ -29,6 +31,7 @@ final case class InitializeMediatorRequest(
       Some(domainParameters.toProtoV0),
       // Non-BFT domain is only supporting a single sequencer connection
       Some(sequencerConnections.default.toProtoV0),
+      signingKeyFingerprint.map(_.toProtoPrimitive),
     )
 }
 
@@ -42,6 +45,7 @@ object InitializeMediatorRequest {
       topologyStateP,
       domainParametersP,
       sequencerConnectionP,
+      signingKeyFingerprintP,
     ) = requestP
     for {
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain_id")
@@ -57,12 +61,14 @@ object InitializeMediatorRequest {
         "sequencer_connection",
         sequencerConnectionP,
       )
+      signingKeyFingerprint <- signingKeyFingerprintP.traverse(Fingerprint.fromProtoPrimitive)
     } yield InitializeMediatorRequest(
       domainId,
       mediatorId,
       topologyState,
       domainParameters,
       SequencerConnections.single(sequencerConnection),
+      signingKeyFingerprint,
     )
   }
 }

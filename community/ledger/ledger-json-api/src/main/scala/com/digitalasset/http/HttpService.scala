@@ -110,9 +110,8 @@ class HttpService(
         packageService.allTemplateIds,
         ledgerClientJwt.getByContractId(ledgerClient),
         ledgerClientJwt.getByContractKey(ledgerClient),
-      ledgerClientJwt.getActiveContracts(ledgerClient),
-      ledgerClientJwt.getCreatesAndArchivesSince(ledgerClient),
-        LedgerReader.damlLfTypeLookup(() => packageService.packageStore),
+        ledgerClientJwt.getActiveContracts(ledgerClient),
+        ledgerClientJwt.getCreatesAndArchivesSince(ledgerClient),
         loggerFactory,
       )
 
@@ -180,7 +179,6 @@ class HttpService(
         contractsService,
         packageService.resolveContractTypeId,
         decoder,
-        LedgerReader.damlLfTypeLookup(() => packageService.packageStore),
         wsConfig,
         loggerFactory,
       )

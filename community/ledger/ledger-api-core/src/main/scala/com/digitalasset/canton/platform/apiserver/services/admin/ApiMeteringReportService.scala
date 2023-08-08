@@ -13,7 +13,7 @@ import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.AdminServiceErrors
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.ReportData
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
@@ -84,7 +84,7 @@ private[apiserver] final class ApiMeteringReportService(
       errorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, GetMeteringReportResponse] = {
     generator.generate(request, from, to, applicationId, reportData, clock()).left.map { e =>
-      LedgerApiErrors.Admin.InternallyInvalidKey.Reject(e).asGrpcError
+      AdminServiceErrors.InternallyInvalidKey.Reject(e).asGrpcError
     }
   }
 

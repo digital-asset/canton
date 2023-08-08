@@ -5,7 +5,7 @@ package com.digitalasset.canton.ledger.api.auth
 
 import akka.actor.Scheduler
 import com.daml.jwt.JwtTimestampLeeway
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.AuthorizationChecksErrors
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
   LoggingContextWithTrace,
@@ -131,7 +131,7 @@ private[auth] final class OngoingAuthorizationObserver[A](
       .notExpired(now, jwtTimestampLeeway)
       .left
       .map(authorizationError =>
-        LedgerApiErrors.AuthorizationChecks.PermissionDenied
+        AuthorizationChecksErrors.PermissionDenied
           .Reject(authorizationError.reason)(errorLogger)
           .asGrpcError
       )
@@ -139,7 +139,7 @@ private[auth] final class OngoingAuthorizationObserver[A](
   private def staleStreamAuthError: StatusRuntimeException =
     // Terminate the stream, so that clients will restart their streams
     // and claims will be rechecked precisely.
-    LedgerApiErrors.AuthorizationChecks.StaleUserManagementBasedStreamClaims
+    AuthorizationChecksErrors.StaleUserManagementBasedStreamClaims
       .Reject()(errorLogger)
       .asGrpcError
 }

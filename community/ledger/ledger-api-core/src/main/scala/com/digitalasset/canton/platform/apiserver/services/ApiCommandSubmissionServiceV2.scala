@@ -18,7 +18,7 @@ import com.daml.tracing.{SpanAttribute, Telemetry, TelemetryContext}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.api.services.CommandSubmissionService
 import com.digitalasset.canton.ledger.api.validation.{CommandsValidator, SubmitRequestValidator}
-import com.digitalasset.canton.ledger.api.{SubmissionIdGenerator, ValidationLogger, domain}
+import com.digitalasset.canton.ledger.api.{SubmissionIdGenerator, ValidationLogger}
 import com.digitalasset.canton.ledger.participant.state.v2.{ReassignmentCommand, WriteService}
 import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
@@ -29,6 +29,7 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
 }
+import com.digitalasset.canton.tracing.Traced
 
 import java.time.{Duration, Instant}
 import scala.concurrent.{ExecutionContext, Future}
@@ -36,8 +37,8 @@ import scala.util.{Failure, Success, Try}
 
 final class ApiCommandSubmissionServiceV2(
     commandSubmissionService: CommandSubmissionService,
+    commandsValidator: CommandsValidator,
     writeService: WriteService,
-    explicitDisclosureUnsafeEnabled: Boolean,
     currentLedgerTime: () => Instant,
     currentUtcTime: () => Instant,
     maxDeduplicationDuration: () => Option[Duration],
@@ -51,27 +52,19 @@ final class ApiCommandSubmissionServiceV2(
     with NamedLogging {
   import ApiConversions.*
 
-  private val validator = new SubmitRequestValidator(
-    CommandsValidator(
-      domain.LedgerId(""), // not used
-      explicitDisclosureUnsafeEnabled,
-    )
-  )
+  private val validator = new SubmitRequestValidator(commandsValidator)
 
   override def submit(request: SubmitRequest): Future[SubmitResponse] = {
-    implicit val telemetryContext: TelemetryContext =
-      telemetry.contextFromGrpcThreadLocalContext()
-    implicit val loggingContextWithTrace: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val traceContext = getAnnotedCommandTraceContextV2(request.commands, telemetry)
+    submitWithTraceContext(Traced(request))
+  }
 
-    request.commands.foreach { commands =>
-      telemetryContext
-        .setAttribute(SpanAttribute.ApplicationId, commands.applicationId)
-        .setAttribute(SpanAttribute.CommandId, commands.commandId)
-        .setAttribute(SpanAttribute.Submitter, commands.party)
-        .setAttribute(SpanAttribute.WorkflowId, commands.workflowId)
-    }
-    val requestWithSubmissionId = generateSubmissionIdIfEmpty(request)
+  def submitWithTraceContext(
+      request: Traced[SubmitRequest]
+  ): Future[SubmitResponse] = {
+    implicit val loggingContextWithTrace: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(request.traceContext)
+    val requestWithSubmissionId = generateSubmissionIdIfEmpty(request.value)
     val errorLogger: ContextualizedErrorLogger =
       ErrorLoggingContext.fromOption(
         logger,

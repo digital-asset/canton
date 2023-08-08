@@ -15,6 +15,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.{
   String300,
 }
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Fingerprint, PublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -167,7 +168,7 @@ trait DbTopologyStoreCommon[+StoreId <: TopologyStoreId] extends NamedLogging {
   import DbStorage.Implicits.BuilderChain.*
   import storage.api.*
 
-  protected def maxItemsInSqlQuery: Int
+  protected def maxItemsInSqlQuery: PositiveInt
   protected def transactionStoreIdName: LengthLimitedString
   protected def updatingTime: TimedLoadGauge
   protected def readTime: TimedLoadGauge
@@ -250,7 +251,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
-    override protected val maxItemsInSqlQuery: Int = 100,
+    override protected val maxItemsInSqlQuery: PositiveInt = PositiveInt.tryCreate(100),
 )(implicit val ec: ExecutionContext)
     extends TopologyStore[StoreId]
     with DbTopologyStoreCommon[StoreId]
@@ -403,12 +404,14 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       subQuery: SQLActionBuilder,
       limit: String = "",
       orderBy: String = " ORDER BY id ",
+      includeRejected: Boolean = false,
   )(implicit
       traceContext: TraceContext
   ): Future[StoredTopologyTransactions[TopologyChangeOp]] = {
     val query =
       sql"SELECT id, instance, sequenced, valid_from, valid_until FROM topology_transactions WHERE store_id = $store" ++
-        subQuery ++ sql" AND ignore_reason IS NULL #${orderBy} #${limit}"
+        subQuery ++ (if (!includeRejected) sql" AND ignore_reason IS NULL"
+                     else sql"") ++ sql" #${orderBy} #${limit}"
     readTime.event {
       storage
         .query(
@@ -567,10 +570,10 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       }
   }
 
-  override def allTransactions(implicit
+  override def allTransactions(includeRejected: Boolean = false)(implicit
       traceContext: TraceContext
   ): Future[StoredTopologyTransactions[TopologyChangeOp]] =
-    queryForTransactions(transactionStoreIdName, sql"")
+    queryForTransactions(transactionStoreIdName, sql"", includeRejected = includeRejected)
 
   @SuppressWarnings(Array("com.digitalasset.canton.SlickString"))
   override def inspectKnownParties(
@@ -660,6 +663,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
   private def findStoredSql(
       transaction: TopologyTransaction[TopologyChangeOp],
       subQuery: SQLActionBuilder = sql"",
+      includeRejected: Boolean = false,
   )(implicit
       traceContext: TraceContext
   ): Future[StoredTopologyTransactions[TopologyChangeOp]] =
@@ -668,14 +672,18 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       sql"AND" ++ pathQuery(
         transaction.element.uniquePath
       ) ++ sql" AND operation = ${transaction.op}" ++ subQuery,
+      includeRejected = includeRejected,
     )
 
   override def findStored(
-      transaction: SignedTopologyTransaction[TopologyChangeOp]
+      transaction: SignedTopologyTransaction[TopologyChangeOp],
+      includeRejected: Boolean = false,
   )(implicit
       traceContext: TraceContext
   ): Future[Option[StoredTopologyTransaction[TopologyChangeOp]]] =
-    findStoredSql(transaction.transaction).map(_.result.headOption)
+    findStoredSql(transaction.transaction, includeRejected = includeRejected).map(
+      _.result.headOption
+    )
 
   override def findStoredNoSignature(
       transaction: TopologyTransaction[TopologyChangeOp]
@@ -745,10 +753,10 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       )
     filterUid match {
       case None => forward(None)
-      case Some(uids) if uids.sizeCompare(maxItemsInSqlQuery) < 0 => forward(filterUid)
+      case Some(uids) if uids.sizeCompare(maxItemsInSqlQuery.value) < 0 => forward(filterUid)
       case Some(uids) =>
         uids
-          .grouped(maxItemsInSqlQuery)
+          .grouped(maxItemsInSqlQuery.value)
           .toList
           .parTraverse(lessUids => forward(Some(lessUids)))
           .map(all => StoredTopologyTransactions(all.flatMap(_.result)))

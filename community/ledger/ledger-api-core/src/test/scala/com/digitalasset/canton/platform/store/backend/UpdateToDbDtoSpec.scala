@@ -8,9 +8,9 @@ import com.daml.ledger.api.v1.event.{CreatedEvent, ExercisedEvent}
 import com.daml.lf.crypto
 import com.daml.lf.data.{Bytes, Ref, Time}
 import com.daml.lf.ledger.EventId
-import com.daml.lf.transaction.BlindingInfo
 import com.daml.lf.transaction.test.TestNodeBuilder.CreateKey
 import com.daml.lf.transaction.test.{NodeIdTransactionBuilder, TestNodeBuilder, TransactionBuilder}
+import com.daml.lf.transaction.{BlindingInfo, GlobalKey}
 import com.daml.lf.value.Value
 import com.daml.metrics.Metrics
 import com.daml.metrics.api.MetricsContext
@@ -310,13 +310,16 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val transactionMeta = someTransactionMeta
       val builder = TxBuilder()
       val contractId = builder.newCid
+      val keyValue = Value.ValueUnit
+      val contractTemplate = Ref.Identifier.assertFromString("P:M:T")
       val createNode = builder
         .create(
           id = contractId,
-          templateId = "M:T",
-          argument = Value.ValueUnit,
-          signatories = Set("signatory"),
+          templateId = contractTemplate,
+          argument = keyValue,
+          signatories = Set("signatory1", "signatory2", "signatory3"),
           observers = Set("observer"),
+          key = CreateKey.KeyWithMaintainers(Value.ValueUnit, Set("signatory2", "signatory3")),
         )
         .copy(agreementText = "agreement text")
       val createNodeId = builder.add(createNode)
@@ -346,20 +349,29 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         event_id = Some(EventId(update.transactionId, createNodeId).toLedgerString),
         contract_id = createNode.coid.coid,
         template_id = Some(createNode.templateId.toString),
-        flat_event_witnesses = Set("signatory", "observer"), // stakeholders
-        tree_event_witnesses = Set("signatory", "observer"), // informees
+        flat_event_witnesses =
+          Set("signatory1", "signatory2", "signatory3", "observer"), // stakeholders
+        tree_event_witnesses =
+          Set("signatory1", "signatory2", "signatory3", "observer"), // informees
         create_argument = Some(emptyArray),
-        create_signatories = Some(Set("signatory")),
+        create_signatories = Some(Set("signatory1", "signatory2", "signatory3")),
         create_observers = Some(Set("observer")),
         create_agreement_text = Some(createNode.agreementText),
-        create_key_value = None,
-        create_key_hash = None,
+        create_key_value = Some(emptyArray),
+        create_key_maintainers = Some(Set("signatory2", "signatory3")),
+        create_key_hash = Some(
+          GlobalKey
+            .assertBuild(contractTemplate, keyValue)
+            .hash
+            .bytes
+            .toHexString
+        ),
         create_argument_compression = compressionAlgorithmId,
-        create_key_value_compression = None,
+        create_key_value_compression = compressionAlgorithmId,
         event_sequential_id = 0,
         driver_metadata = Some(someContractDriverMetadata.toByteArray),
       )
-      dtos(3) shouldEqual DbDto.CommandCompletion(
+      dtos(5) shouldEqual DbDto.CommandCompletion(
         completion_offset = someOffset.toHexString,
         record_time = update.recordTime.micros,
         application_id = completionInfo.applicationId,
@@ -375,17 +387,19 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         deduplication_duration_seconds = None,
         deduplication_start = None,
       )
-      dtos(4) shouldEqual DbDto.TransactionMeta(
+      dtos(6) shouldEqual DbDto.TransactionMeta(
         transaction_id = transactionId,
         event_offset = someOffset.toHexString,
         event_sequential_id_first = 0,
         event_sequential_id_last = 0,
       )
-      Set(dtos(1), dtos(2)) should contain theSameElementsAs Set(
-        DbDto.IdFilterCreateStakeholder(0L, createNode.templateId.toString, "signatory"),
+      Set(dtos(1), dtos(2), dtos(3), dtos(4)) should contain theSameElementsAs Set(
+        DbDto.IdFilterCreateStakeholder(0L, createNode.templateId.toString, "signatory1"),
+        DbDto.IdFilterCreateStakeholder(0L, createNode.templateId.toString, "signatory2"),
+        DbDto.IdFilterCreateStakeholder(0L, createNode.templateId.toString, "signatory3"),
         DbDto.IdFilterCreateStakeholder(0L, createNode.templateId.toString, "observer"),
       )
-      dtos.size shouldEqual 5
+      dtos.size shouldEqual 7
     }
 
     "handle TransactionAccepted (single create node)" in {
@@ -393,13 +407,16 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val transactionMeta = someTransactionMeta
       val builder = TxBuilder()
       val contractId = builder.newCid
+      val contractTemplate = Ref.Identifier.assertFromString("P:M:T")
+      val keyValue = Value.ValueUnit
       val createNode = builder
         .create(
           id = contractId,
-          templateId = "M:T",
+          templateId = contractTemplate,
           argument = Value.ValueUnit,
-          signatories = Set("signatory"),
+          signatories = Set("signatory1", "signatory2", "signatory3"),
           observers = Set("observer"),
+          key = CreateKey.KeyWithMaintainers(keyValue, Set("signatory2", "signatory3")),
         )
         .copy(agreementText = "agreement text")
       val createNodeId = builder.add(createNode)
@@ -429,21 +446,30 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         event_id = Some(EventId(update.transactionId, createNodeId).toLedgerString),
         contract_id = createNode.coid.coid,
         template_id = Some(createNode.templateId.toString),
-        flat_event_witnesses = Set("signatory", "observer"), // stakeholders
-        tree_event_witnesses = Set("signatory", "observer"), // informees
+        flat_event_witnesses =
+          Set("signatory1", "signatory2", "signatory3", "observer"), // stakeholders
+        tree_event_witnesses =
+          Set("signatory1", "signatory2", "signatory3", "observer"), // informees
         create_argument = Some(emptyArray),
-        create_signatories = Some(Set("signatory")),
+        create_signatories = Some(Set("signatory1", "signatory2", "signatory3")),
         create_observers = Some(Set("observer")),
         create_agreement_text = Some(createNode.agreementText),
-        create_key_value = None,
-        create_key_hash = None,
+        create_key_value = Some(emptyArray),
+        create_key_maintainers = Some(Set("signatory2", "signatory3")),
+        create_key_hash = Some(
+          GlobalKey
+            .assertBuild(contractTemplate, keyValue)
+            .hash
+            .bytes
+            .toHexString
+        ),
         create_argument_compression = compressionAlgorithmId,
-        create_key_value_compression = None,
+        create_key_value_compression = compressionAlgorithmId,
         event_sequential_id = 0,
         driver_metadata = Some(someContractDriverMetadata.toByteArray),
         domain_id = Some(someDomainId1.toProtoPrimitive),
       )
-      dtos(3) shouldEqual DbDto.CommandCompletion(
+      dtos(5) shouldEqual DbDto.CommandCompletion(
         completion_offset = someOffset.toHexString,
         record_time = update.recordTime.micros,
         application_id = completionInfo.applicationId,
@@ -460,17 +486,19 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         deduplication_start = None,
         domain_id = Some(someDomainId1.toProtoPrimitive),
       )
-      dtos(4) shouldEqual DbDto.TransactionMeta(
+      dtos(6) shouldEqual DbDto.TransactionMeta(
         transaction_id = transactionId,
         event_offset = someOffset.toHexString,
         event_sequential_id_first = 0,
         event_sequential_id_last = 0,
       )
-      Set(dtos(1), dtos(2)) should contain theSameElementsAs Set(
-        DbDto.IdFilterCreateStakeholder(0L, createNode.templateId.toString, "signatory"),
+      Set(dtos(1), dtos(2), dtos(3), dtos(4)) should contain theSameElementsAs Set(
+        DbDto.IdFilterCreateStakeholder(0L, createNode.templateId.toString, "signatory1"),
+        DbDto.IdFilterCreateStakeholder(0L, createNode.templateId.toString, "signatory2"),
+        DbDto.IdFilterCreateStakeholder(0L, createNode.templateId.toString, "signatory3"),
         DbDto.IdFilterCreateStakeholder(0L, createNode.templateId.toString, "observer"),
       )
-      dtos.size shouldEqual 5
+      dtos.size shouldEqual 7
     }
 
     "handle TransactionAccepted (single consuming exercise node) single-domain" in {
@@ -1493,6 +1521,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         create_observers = Some(Set("observer")),
         create_agreement_text = None,
         create_key_value = None,
+        create_key_maintainers = None,
         create_key_hash = None,
         create_argument_compression = compressionAlgorithmId,
         create_key_value_compression = None,
@@ -1837,6 +1866,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         create_observers = Some(Set("observer")),
         create_agreement_text = None,
         create_key_value = None,
+        create_key_maintainers = None,
         create_key_hash = None,
         create_argument_compression = compressionAlgorithmId,
         create_key_value_compression = None,
@@ -1898,6 +1928,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         create_observers = Some(Set("observer")),
         create_agreement_text = None,
         create_key_value = None,
+        create_key_maintainers = None,
         create_key_hash = None,
         create_argument_compression = compressionAlgorithmId,
         create_key_value_compression = None,
@@ -2032,6 +2063,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             create_observers = Some(Set("observer")),
             create_agreement_text = None,
             create_key_value = None,
+            create_key_maintainers = None,
             create_key_hash = None,
             create_argument_compression = compressionAlgorithmId,
             create_key_value_compression = None,
@@ -2092,11 +2124,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           targetDomain = TargetDomainId(DomainId.tryFromString("x::domain2")),
           submitter = someParty,
           reassignmentCounter = 1500L,
-          hostedStakeholders = List(
-            someParty,
-            Ref.Party.assertFromString("signatory"),
-            Ref.Party.assertFromString("observer2"),
-          ),
+          hostedStakeholders = Nil,
           unassignId = CantonTimestamp.assertFromLong(1000000000),
         ),
         reassignment = Reassignment.Assign(
@@ -2118,12 +2146,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         submitter = someParty,
         contract_id = createNode.coid.coid,
         template_id = createNode.templateId.toString,
-        flat_event_witnesses = Set("signatory", "observer2"),
+        flat_event_witnesses = Set("signatory", "observer", "observer2"),
         create_argument = emptyArray,
         create_signatories = Set("signatory"),
         create_observers = Set("observer", "observer2"),
         create_agreement_text = Some("agreement text"),
         create_key_value = None,
+        create_key_maintainers = None,
         create_key_hash = None,
         create_argument_compression = compressionAlgorithmId,
         create_key_value_compression = None,
@@ -2135,7 +2164,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         unassign_id = "1000000000",
         reassignment_counter = 1500L,
       )
-      dtos(3) shouldEqual DbDto.CommandCompletion(
+      dtos(4) shouldEqual DbDto.CommandCompletion(
         completion_offset = someOffset.toHexString,
         record_time = update.recordTime.micros,
         application_id = completionInfo.applicationId,
@@ -2152,17 +2181,18 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         deduplication_start = None,
         domain_id = Some("x::domain2"),
       )
-      dtos(4) shouldEqual DbDto.TransactionMeta(
+      dtos(5) shouldEqual DbDto.TransactionMeta(
         transaction_id = transactionId,
         event_offset = someOffset.toHexString,
         event_sequential_id_first = 0,
         event_sequential_id_last = 0,
       )
-      Set(dtos(1), dtos(2)) should contain theSameElementsAs Set(
+      Set(dtos(1), dtos(2), dtos(3)) should contain theSameElementsAs Set(
         DbDto.IdFilterAssignStakeholder(0L, createNode.templateId.toString, "signatory"),
+        DbDto.IdFilterAssignStakeholder(0L, createNode.templateId.toString, "observer"),
         DbDto.IdFilterAssignStakeholder(0L, createNode.templateId.toString, "observer2"),
       )
-      dtos.size shouldEqual 5
+      dtos.size shouldEqual 6
     }
 
     "handle ReassignmentAccepted - Unassign" in {
@@ -2189,11 +2219,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           targetDomain = TargetDomainId(DomainId.tryFromString("x::domain2")),
           submitter = someParty,
           reassignmentCounter = 1500L,
-          hostedStakeholders = List(
-            someParty3,
-            Ref.Party.assertFromString("signatory12"),
-            Ref.Party.assertFromString("observer23"),
-          ),
+          hostedStakeholders = Nil,
           unassignId = CantonTimestamp.assertFromLong(1000000000),
         ),
         reassignment = Reassignment.Unassign(
@@ -2217,7 +2243,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         submitter = someParty,
         contract_id = createNode.coid.coid,
         template_id = createNode.templateId.toString,
-        flat_event_witnesses = Set("signatory12", "observer23"),
+        flat_event_witnesses = Set("signatory12", "observer23", "asdasdasd"),
         event_sequential_id = 0,
         source_domain_id = "x::domain1",
         target_domain_id = "x::domain2",
@@ -2225,7 +2251,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         reassignment_counter = 1500L,
         assignment_exclusivity = Some(123456L),
       )
-      dtos(3) shouldEqual DbDto.CommandCompletion(
+      dtos(4) shouldEqual DbDto.CommandCompletion(
         completion_offset = someOffset.toHexString,
         record_time = update.recordTime.micros,
         application_id = completionInfo.applicationId,
@@ -2242,17 +2268,18 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         deduplication_start = None,
         domain_id = Some("x::domain1"),
       )
-      dtos(4) shouldEqual DbDto.TransactionMeta(
+      dtos(5) shouldEqual DbDto.TransactionMeta(
         transaction_id = transactionId,
         event_offset = someOffset.toHexString,
         event_sequential_id_first = 0,
         event_sequential_id_last = 0,
       )
-      Set(dtos(1), dtos(2)) should contain theSameElementsAs Set(
+      Set(dtos(1), dtos(2), dtos(3)) should contain theSameElementsAs Set(
         DbDto.IdFilterUnassignStakeholder(0L, createNode.templateId.toString, "signatory12"),
         DbDto.IdFilterUnassignStakeholder(0L, createNode.templateId.toString, "observer23"),
+        DbDto.IdFilterUnassignStakeholder(0L, createNode.templateId.toString, "asdasdasd"),
       )
-      dtos.size shouldEqual 5
+      dtos.size shouldEqual 6
     }
 
   }

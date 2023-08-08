@@ -89,6 +89,11 @@ trait CryptoPublicStore extends AutoCloseable {
   ): EitherT[Future, CryptoPublicStoreError, Option[SigningPublicKey]] =
     listSigningKeys.map(_.find(_.name.contains(keyName)).map(_.publicKey))
 
+  def findSigningKeyIdByFingerprint(fingerprint: Fingerprint)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, CryptoPublicStoreError, Option[SigningPublicKey]] =
+    listSigningKeys.map(_.find(_.publicKey.fingerprint == fingerprint).map(_.publicKey))
+
   def findEncryptionKeyIdByName(keyName: KeyName)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPublicStoreError, Option[EncryptionPublicKey]] =

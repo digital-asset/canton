@@ -7,7 +7,7 @@ import cats.data.{EitherT, OptionT}
 import cats.syntax.alternative.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps, Signature}
-import com.digitalasset.canton.data.{CantonTimestamp, ViewTree, ViewType}
+import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -87,7 +87,9 @@ trait ProcessingSteps[
   type SubmissionResultArgs
 
   /** The type of decrypted view trees */
-  type DecryptedView <: ViewTree
+  type DecryptedView = RequestViewType#View
+
+  type FullView = RequestViewType#FullView
 
   /** The type of data needed to generate the pending data and response in [[constructPendingDataAndResponse]].
     * The data is created by [[decryptViews]]
@@ -153,7 +155,7 @@ trait ProcessingSteps[
 
   /** Return the submission data needed by the SubmissionTracker to decide on transaction validity */
   def getSubmissionDataForTracker(
-      views: Seq[DecryptedView]
+      views: Seq[FullView]
   ): Option[SubmissionTracker.SubmissionData]
 
   def participantResponseDeadlineFor(
@@ -341,12 +343,19 @@ trait ProcessingSteps[
     }
   }
 
+  /** Converts the decrypted (possible light-weight) view trees to the corresponding full view trees.
+    * Views that cannot be converted are mapped to [[ProtocolProcessor.MalformedPayload]] errors.
+    */
+  def computeFullViews(
+      decryptedViewsWithSignatures: Seq[(WithRecipients[DecryptedView], Option[Signature])]
+  ): (Seq[(WithRecipients[FullView], Option[Signature])], Seq[MalformedPayload])
+
   /** Phase 3, step 2 (some good views):
     *
     * @param ts         The timestamp of the request
     * @param rc         The [[com.digitalasset.canton.RequestCounter]] of the request
     * @param sc         The [[com.digitalasset.canton.SequencerCounter]] of the request
-    * @param decryptedViewsWithSignatures The decrypted views from step 1 with the right root hash
+    * @param fullViewsWithSignatures The decrypted views from step 1 with the right root hash
     *                                     and their respective signatures
     * @param malformedPayloads The decryption errors and decrypted views with a wrong root hash
     * @param snapshot Snapshot of the topology state at the request timestamp
@@ -358,8 +367,8 @@ trait ProcessingSteps[
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      decryptedViewsWithSignatures: NonEmpty[
-        Seq[(WithRecipients[DecryptedView], Option[Signature])]
+      fullViewsWithSignatures: NonEmpty[
+        Seq[(WithRecipients[FullView], Option[Signature])]
       ],
       malformedPayloads: Seq[MalformedPayload],
       snapshot: DomainSnapshotSyncCryptoApi,
@@ -373,7 +382,7 @@ trait ProcessingSteps[
     * @param ts         The timestamp of the request
     * @param rc         The [[com.digitalasset.canton.RequestCounter]] of the request
     * @param sc         The [[com.digitalasset.canton.SequencerCounter]] of the request
-    * @param decryptedViews The decrypted views from step 1 with the right root hash
+    * @param fullViews The decrypted views from step 1 with the right root hash
     * @return The optional rejection event to be published in the event log,
     *         and the optional submission ID corresponding to this request
     */
@@ -381,7 +390,7 @@ trait ProcessingSteps[
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      decryptedViews: NonEmpty[Seq[WithRecipients[DecryptedView]]],
+      fullViews: NonEmpty[Seq[WithRecipients[FullView]]],
       freshOwnTimelyTx: Boolean,
   )(implicit
       traceContext: TraceContext

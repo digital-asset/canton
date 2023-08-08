@@ -37,8 +37,6 @@ lazy val `daml-copy-testing-0` = DamlProjects.`daml-copy-testing-0`
 lazy val `daml-copy-testing-1` = DamlProjects.`daml-copy-testing-1`
 lazy val `ledger-api-core` = CommunityProjects.`ledger-api-core`
 lazy val `ledger-json-api` = CommunityProjects.`ledger-json-api`
-lazy val `ledger-api-bench-tool` = CommunityProjects.`ledger-api-bench-tool`
-lazy val `ledger-api-it` = CommunityProjects.`ledger-api-it`
 lazy val `ledger-api-tools` = CommunityProjects.`ledger-api-tools`
 lazy val `ledger-api-string-interning-benchmark` =
   CommunityProjects.`ledger-api-string-interning-benchmark`

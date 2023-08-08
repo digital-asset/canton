@@ -24,7 +24,7 @@ import java.util.UUID
 /** Except where specified, values should be treated as opaque
   */
 @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
-private[backend] object StorageBackendTestValues {
+private[store] object StorageBackendTestValues {
 
   def hashCid(key: String): ContractId = ContractId.V1(Hash.hashPrivateKey(key))
 
@@ -158,6 +158,7 @@ private[backend] object StorageBackendTestValues {
       create_observers = Some(Set(observer)),
       create_agreement_text = None,
       create_key_value = None,
+      create_key_maintainers = None,
       create_key_hash = keyHash,
       create_argument_compression = None,
       create_key_value_compression = None,
@@ -266,6 +267,7 @@ private[backend] object StorageBackendTestValues {
       create_observers = Set(observer),
       create_agreement_text = Some("agreement"),
       create_key_value = None,
+      create_key_maintainers = None,
       create_key_hash = None,
       create_argument_compression = Some(123),
       create_key_value_compression = Some(456),

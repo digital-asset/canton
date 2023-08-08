@@ -17,13 +17,14 @@ import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.services.CommandService
+import com.digitalasset.canton.ledger.api.validation.{CommandsValidator, ValidateDisclosedContracts}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.google.protobuf.empty.Empty
 import org.mockito.captor.ArgCaptor
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
-import org.scalatest.Assertion
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
+import org.scalatest.{Assertion, Assertions}
 
 import java.time.{Duration, Instant}
 import java.util.concurrent.atomic.AtomicInteger
@@ -71,7 +72,7 @@ class ApiCommandServiceSpec
 
       val grpcCommandService = new ApiCommandService(
         mockCommandService,
-        ledgerId = LedgerId(ledgerId),
+        commandsValidator = commandsValidator,
         currentLedgerTime = () => Instant.EPOCH,
         currentUtcTime = () => Instant.EPOCH,
         maxDeduplicationDuration = () => Some(Duration.ZERO),
@@ -79,7 +80,6 @@ class ApiCommandServiceSpec
           Ref.SubmissionId.assertFromString(
             s"$submissionIdPrefix${submissionCounter.incrementAndGet()}"
           ),
-        explicitDisclosureUnsafeEnabled = false,
         telemetry = telemetry,
         loggerFactory = loggerFactory,
       )
@@ -125,12 +125,11 @@ class ApiCommandServiceSpec
 
       val grpcCommandService = new ApiCommandService(
         mockCommandService,
-        ledgerId = LedgerId(ledgerId),
+        commandsValidator = commandsValidator,
         currentLedgerTime = () => Instant.EPOCH,
         currentUtcTime = () => Instant.EPOCH,
         maxDeduplicationDuration = () => Some(Duration.ZERO),
         generateSubmissionId = () => Ref.SubmissionId.assertFromString(s"submissionId"),
-        explicitDisclosureUnsafeEnabled = false,
         telemetry = telemetry,
         loggerFactory = loggerFactory,
       )
@@ -190,4 +189,11 @@ object ApiCommandServiceSpec {
   )
 
   private val submissionIdPrefix = "submissionId-"
+
+  private val commandsValidator = new CommandsValidator(
+    ledgerId = LedgerId(ledgerId),
+    resolveToTemplateId = _ => Assertions.fail("should not be called"),
+    upgradingEnabled = false,
+    validateDisclosedContracts = new ValidateDisclosedContracts(false),
+  )
 }

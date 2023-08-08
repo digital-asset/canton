@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.apiserver
 import akka.NotUsed
 import akka.stream.scaladsl.Source
 import com.daml.daml_lf_dev.DamlLf
+import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.event_query_service.GetEventsByContractKeyResponse
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdResponse
@@ -35,14 +36,10 @@ import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.ReportData
-import com.digitalasset.canton.ledger.participant.state.index.v2.{
-  ContractState,
-  IndexService,
-  IndexerPartyDetails,
-  MaximumLedgerTime,
-  PartyEntry,
-}
+import com.digitalasset.canton.ledger.participant.state.index.v2.*
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.platform.store.packagemeta.PackageMetadata
+import io.grpc.StatusRuntimeException
 
 import scala.concurrent.Future
 
@@ -275,4 +272,8 @@ final class TimedIndexService(delegate: IndexService, metrics: Metrics) extends 
       ),
     )
 
+  override def resolveToTemplateIds(templateQualifiedName: Ref.QualifiedName)(implicit
+      loggingContext: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, PackageMetadata.TemplatesForQualifiedName] =
+    delegate.resolveToTemplateIds(templateQualifiedName)
 }

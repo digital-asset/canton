@@ -39,7 +39,8 @@ import com.digitalasset.canton.ledger.api.domain.{
 import com.digitalasset.canton.ledger.api.health.HealthStatus
 import com.digitalasset.canton.ledger.api.{TraceIdentifiers, domain}
 import com.digitalasset.canton.ledger.configuration.Configuration
-import com.digitalasset.canton.ledger.error.{CommonErrors, LedgerApiErrors}
+import com.digitalasset.canton.ledger.error.CommonErrors
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.ReportData
@@ -62,8 +63,7 @@ import com.digitalasset.canton.platform.store.dao.{
   LedgerReadDao,
 }
 import com.digitalasset.canton.platform.store.entries.PartyLedgerEntry
-import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView
-import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView.PackageMetadata
+import com.digitalasset.canton.platform.store.packagemeta.{PackageMetadata, PackageMetadataView}
 import com.digitalasset.canton.platform.{ApiOffset, Party, PruneBuffers, TemplatePartiesFilter}
 import io.grpc.StatusRuntimeException
 import scalaz.syntax.tag.ToTagOps
@@ -500,7 +500,7 @@ private[index] class IndexServiceImpl(
             Source.empty
           case Some(end) if begin > end =>
             Source.failed(
-              LedgerApiErrors.RequestValidation.OffsetOutOfRange
+              RequestValidationErrors.OffsetOutOfRange
                 .Reject(
                   s"End offset ${end.toApiString} is before Begin offset ${begin.toApiString}."
                 )(ErrorLoggingContext(logger, loggingContext))
@@ -552,6 +552,19 @@ private[index] class IndexServiceImpl(
           divulgencePrunedUpToO.getOrElse(Offset.beforeBegin)
         )
       }(directEc)
+
+  override def resolveToTemplateIds(templateQualifiedName: Ref.QualifiedName)(implicit
+      loggingContext: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, PackageMetadata.TemplatesForQualifiedName] =
+    packageMetadataView
+      .current()
+      .templates
+      .get(templateQualifiedName)
+      .toRight(
+        RequestValidationErrors.NotFound.TemplateQualifiedNameNotFound
+          .Reject(templateQualifiedName)(loggingContext)
+          .asGrpcError
+      )
 }
 
 object IndexServiceImpl {
@@ -568,7 +581,9 @@ object IndexServiceImpl {
           .map(_.interfaceId)
           .diff(metadata.interfaces)
           .map(Right(_))
-      unknownTemplates = inclusiveFilter.templateIds.diff(metadata.templates).map(Left(_))
+      unknownTemplates = inclusiveFilter.templateIds
+        .diff(metadata.templates.view.values.flatMap(_.all).toSet)
+        .map(Left(_))
       unknownTemplateOrInterface <- unknownInterfaces ++ unknownTemplates
     } yield unknownTemplateOrInterface).toList
 
@@ -600,7 +615,7 @@ object IndexServiceImpl {
       checkUnknownTemplatesOrInterfaces(domainTransactionFilter, metadata)
     if (unknownTemplatesOrInterfaces.nonEmpty) {
       Left(
-        LedgerApiErrors.RequestValidation.NotFound.TemplateOrInterfaceIdsNotFound
+        RequestValidationErrors.NotFound.TemplateOrInterfaceIdsNotFound
           .Reject(unknownTemplatesOrInterfaces)
           .asGrpcError
       )
@@ -614,7 +629,7 @@ object IndexServiceImpl {
   )(implicit errorLogger: ContextualizedErrorLogger): Either[StatusRuntimeException, Unit] = {
     if (activeAt > ledgerEnd) {
       Left(
-        LedgerApiErrors.RequestValidation.OffsetAfterLedgerEnd
+        RequestValidationErrors.OffsetAfterLedgerEnd
           .Reject(
             offsetType = "active_at_offset",
             requestedOffset = activeAt.toApiString,

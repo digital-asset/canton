@@ -490,6 +490,9 @@ final class LfValueTranslation(
           case LfEngine.ResultNeedContract(_, _) =>
             Future.failed(new IllegalStateException("View computation must be a pure function"))
 
+          case LfEngine.ResultNeedCreate(_, _) =>
+            Future.failed(new IllegalStateException("View computation must be a pure function"))
+
           case LfEngine.ResultNeedKey(_, _) =>
             Future.failed(new IllegalStateException("View computation must be a pure function"))
 
@@ -507,6 +510,9 @@ final class LfValueTranslation(
             goAsync(continue())
 
           case LfEngine.ResultNeedAuthority(_, _, _) =>
+            Future.failed(new IllegalStateException("View computation must be a pure function"))
+
+          case LfEngine.ResultNeedUpgradeVerification(_, _, _, _, _) =>
             Future.failed(new IllegalStateException("View computation must be a pure function"))
 
         }

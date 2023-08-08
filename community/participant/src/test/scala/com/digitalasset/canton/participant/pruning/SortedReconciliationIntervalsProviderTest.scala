@@ -30,8 +30,8 @@ class SortedReconciliationIntervalsProviderTest
       val clock = new SimClock(fromEpoch(0), loggerFactory)
 
       val domainParameters = Vector(
-        mkDynamicDomainParameters(0, 10, 1),
-        mkDynamicDomainParameters(10, 2),
+        mkDynamicDomainParameters(0, 10, 1, protocolVersion),
+        mkDynamicDomainParameters(10, 2, protocolVersion),
       )
 
       val reconciliationIntervals = domainParameters.map(_.map(_.reconciliationInterval))

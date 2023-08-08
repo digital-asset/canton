@@ -202,7 +202,7 @@ class GrpcVaultService(
         .toEitherT[Future]
       protocolVersion = ProtocolVersion.fromProtoPrimitive(request.protocolVersion)
       _ <- EitherTUtil.condUnitET[Future](
-        ProtocolVersion.supported.contains(protocolVersion),
+        protocolVersion.isSupported,
         s"Requested protocol version $protocolVersion is not supported",
       )
       privateKey <- cryptoPrivateStore

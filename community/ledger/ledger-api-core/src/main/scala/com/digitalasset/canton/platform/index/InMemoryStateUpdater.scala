@@ -5,11 +5,12 @@ package com.digitalasset.canton.platform.index
 
 import akka.NotUsed
 import akka.stream.scaladsl.Flow
-import cats.implicits.toBifunctorOps
+import cats.implicits.{catsSyntaxSemigroup, toBifunctorOps}
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.executors.InstrumentedExecutors
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.lf.data.Ref.HexString
+import com.daml.lf.data.Time
 import com.daml.lf.engine.Blinding
 import com.daml.lf.ledger.EventId
 import com.daml.lf.transaction.Node.{Create, Exercise}
@@ -30,7 +31,8 @@ import com.digitalasset.canton.platform.store.CompletionFromTransaction
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.CompletionDetails
-import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView.PackageMetadata
+import com.digitalasset.canton.platform.store.packagemeta.PackageMetadata
+import com.digitalasset.canton.platform.store.packagemeta.PackageMetadata.Implicits.packageMetadataSemigroup
 import com.digitalasset.canton.platform.{Contract, InMemoryState, Key, Party}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 
@@ -118,10 +120,10 @@ private[platform] object InMemoryStateUpdater {
     logger = logger,
   )(
     prepare = prepare(
-      archiveToMetadata = archive =>
+      archiveToMetadata = (archive, timestamp) =>
         Timed.value(
           metrics.daml.index.packageMetadata.decodeArchive,
-          PackageMetadata.from(archive),
+          PackageMetadata.from(archive, timestamp),
         ),
       multiDomainEnabled = multiDomainEnabled,
     ),
@@ -129,18 +131,20 @@ private[platform] object InMemoryStateUpdater {
   )
 
   private[index] def extractMetadataFromUploadedPackages(
-      archiveToMetadata: DamlLf.Archive => PackageMetadata
+      archiveToMetadata: (DamlLf.Archive, Time.Timestamp) => PackageMetadata
   )(
       batch: Vector[(Offset, Traced[Update])]
   ): PackageMetadata =
     batch.view
       .collect { case (_, Traced(packageUpload: Update.PublicPackageUpload)) => packageUpload }
-      .flatMap(_.archives.view)
-      .map(archiveToMetadata)
-      .foldLeft(PackageMetadata.empty)(_ append _)
+      .foldLeft(PackageMetadata()) { case (pkgMeta, packageUpload) =>
+        packageUpload.archives.view
+          .map(archiveToMetadata(_, packageUpload.recordTime))
+          .foldLeft(pkgMeta)(_ |+| _)
+      }
 
   private[index] def prepare(
-      archiveToMetadata: DamlLf.Archive => PackageMetadata,
+      archiveToMetadata: (DamlLf.Archive, Time.Timestamp) => PackageMetadata,
       multiDomainEnabled: Boolean,
   )(
       batch: Vector[(Offset, Traced[Update])],
@@ -248,6 +252,10 @@ private[platform] object InMemoryStateUpdater {
               stakeholders = createdEvent.flatEventWitnesses.map(Party.assertFromString),
               eventOffset = createdEvent.eventOffset,
               eventSequentialId = createdEvent.eventSequentialId,
+              agreementText = createdEvent.createAgreementText,
+              signatories = createdEvent.createSignatories,
+              keyMaintainers = createdEvent.createKeyMaintainers,
+              driverMetadata = createdEvent.driverMetadata.map(_.toByteArray),
             )
           case exercisedEvent: TransactionLogUpdate.ExercisedEvent if exercisedEvent.consuming =>
             ContractStateEvent.Archived(
@@ -307,6 +315,8 @@ private[platform] object InMemoryStateUpdater {
           createObservers = create.stakeholders.diff(create.signatories),
           createAgreementText = Some(create.agreementText).filter(_.nonEmpty),
           createKeyHash = create.keyOpt.map(_.globalKey.hash),
+          createKey = create.keyOpt.map(_.globalKey),
+          createKeyMaintainers = create.keyOpt.map(_.maintainers),
           driverMetadata = txAccepted.contractMetadata.get(create.coid),
         )
       case (nodeId, exercise: Exercise) =>
@@ -465,6 +475,8 @@ private[platform] object InMemoryStateUpdater {
               createObservers = create.stakeholders.diff(create.signatories),
               createAgreementText = Some(create.agreementText).filter(_.nonEmpty),
               createKeyHash = create.keyOpt.map(_.globalKey.hash),
+              createKey = create.keyOpt.map(_.globalKey),
+              createKeyMaintainers = create.keyOpt.map(_.maintainers),
               driverMetadata = Some(assign.contractMetadata),
             )
           )

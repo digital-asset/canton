@@ -5,8 +5,8 @@ package com.digitalasset.canton.ledger.indexerbenchmark
 
 import com.daml.lf.data.Ref
 import com.daml.metrics.api.reporters.MetricsReporter
-import com.digitalasset.canton.platform.configuration.IndexServiceConfig
-import com.digitalasset.canton.platform.configuration.Readers.*
+import com.digitalasset.canton.platform.config.IndexServiceConfig
+import com.digitalasset.canton.platform.config.Readers.*
 import com.digitalasset.canton.platform.indexer.{IndexerConfig, IndexerStartupMode}
 import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
 import scopt.OptionParser

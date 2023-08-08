@@ -13,7 +13,7 @@ import com.daml.lf.value.Value.ContractId
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, JwksUrl, LedgerId}
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.*
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.topology.DomainId
 import com.google.protobuf.ByteString
 import com.google.protobuf.timestamp.Timestamp
@@ -28,6 +28,8 @@ import ResourceAnnotationValidator.{
 }
 
 object FieldValidator {
+  type ResolveToTemplateId =
+    Ref.QualifiedName => ContextualizedErrorLogger => Either[StatusRuntimeException, Ref.Identifier]
 
   def matchLedgerId(
       ledgerId: LedgerId
@@ -39,7 +41,7 @@ object FieldValidator {
     case Some(mismatching) =>
       import scalaz.syntax.tag.*
       Left(
-        LedgerApiErrors.RequestValidation.LedgerIdMismatch
+        RequestValidationErrors.LedgerIdMismatch
           .Reject(ledgerId.unwrap, mismatching.unwrap)
           .asGrpcError
       )
@@ -281,10 +283,21 @@ object FieldValidator {
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, Ref.Identifier] =
     for {
+      qualifiedName <- validateTemplateQualifiedName(identifier.moduleName, identifier.entityName)
       packageId <- requirePackageId(identifier.packageId, "package_id")
-      mn <- requireDottedName(identifier.moduleName, "module_name")
-      en <- requireDottedName(identifier.entityName, "entity_name")
-    } yield Ref.Identifier(packageId, Ref.QualifiedName(mn, en))
+    } yield Ref.Identifier(packageId, qualifiedName)
+
+  def validateIdentifierWithOptionalPackageId(resolve: ResolveToTemplateId)(
+      identifier: Identifier
+  )(implicit
+      contextualizedErrorLogger: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, Ref.Identifier] =
+    if (identifier.packageId.nonEmpty) validateIdentifier(identifier)
+    else
+      for {
+        qn <- validateTemplateQualifiedName(identifier.moduleName, identifier.entityName)
+        validatedIdentifier <- resolve(qn)(contextualizedErrorLogger)
+      } yield validatedIdentifier
 
   def optionalString[T](s: String)(
       someValidation: String => Either[StatusRuntimeException, T]
@@ -357,4 +370,12 @@ object FieldValidator {
       validation: T => Either[StatusRuntimeException, U]
   ): Either[StatusRuntimeException, Option[U]] =
     t.map(validation).map(_.map(Some(_))).getOrElse(Right(None))
+
+  private def validateTemplateQualifiedName(moduleName: String, entityName: String)(implicit
+      contextualizedErrorLogger: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, Ref.QualifiedName] =
+    for {
+      mn <- requireDottedName(moduleName, "module_name")
+      en <- requireDottedName(entityName, "entity_name")
+    } yield Ref.QualifiedName(mn, en)
 }

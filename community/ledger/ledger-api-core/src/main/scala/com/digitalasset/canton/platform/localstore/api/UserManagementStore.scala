@@ -8,7 +8,10 @@ import com.daml.lf.data.Ref
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, User, UserRight}
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.{
+  AuthorizationChecksErrors,
+  UserManagementServiceErrors,
+}
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLogging}
 
@@ -150,40 +153,40 @@ object UserManagementStore {
     result match {
       case Left(UserManagementStore.PermissionDenied(id)) =>
         Future.failed(
-          LedgerApiErrors.AuthorizationChecks.PermissionDenied
+          AuthorizationChecksErrors.PermissionDenied
             .Reject(s"User $id belongs to another Identity Provider")
             .asGrpcError
         )
       case Left(UserManagementStore.UserNotFound(id)) =>
         Future.failed(
-          LedgerApiErrors.Admin.UserManagement.UserNotFound
+          UserManagementServiceErrors.UserNotFound
             .Reject(operation, id)
             .asGrpcError
         )
 
       case Left(UserManagementStore.UserExists(id)) =>
         Future.failed(
-          LedgerApiErrors.Admin.UserManagement.UserAlreadyExists
+          UserManagementServiceErrors.UserAlreadyExists
             .Reject(operation, id)
             .asGrpcError
         )
 
       case Left(UserManagementStore.TooManyUserRights(id)) =>
         Future.failed(
-          LedgerApiErrors.Admin.UserManagement.TooManyUserRights
+          UserManagementServiceErrors.TooManyUserRights
             .Reject(operation, id: String)
             .asGrpcError
         )
       case Left(e: UserManagementStore.ConcurrentUserUpdate) =>
         Future.failed(
-          LedgerApiErrors.Admin.UserManagement.ConcurrentUserUpdateDetected
+          UserManagementServiceErrors.ConcurrentUserUpdateDetected
             .Reject(userId = e.userId)
             .asGrpcError
         )
 
       case Left(e: UserManagementStore.MaxAnnotationsSizeExceeded) =>
         Future.failed(
-          LedgerApiErrors.Admin.UserManagement.MaxUserAnnotationsSizeExceeded
+          UserManagementServiceErrors.MaxUserAnnotationsSizeExceeded
             .Reject(userId = e.userId)
             .asGrpcError
         )

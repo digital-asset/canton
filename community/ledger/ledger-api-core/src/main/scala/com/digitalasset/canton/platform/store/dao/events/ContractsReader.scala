@@ -3,18 +3,17 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
-import com.daml.error.ContextualizedErrorLogger
+import com.daml.lf.transaction.GlobalKey
+import com.daml.lf.value.Value.VersionedValue
 import com.daml.metrics.api.MetricHandle.Timer
 import com.daml.metrics.{Metrics, Timed}
-import com.digitalasset.canton.ledger.error.IndexErrors
 import com.digitalasset.canton.ledger.offset.Offset
-import com.digitalasset.canton.logging.{
-  ErrorLoggingContext,
-  LoggingContextWithTrace,
-  NamedLoggerFactory,
-  NamedLogging,
-}
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.backend.ContractStorageBackend
+import com.digitalasset.canton.platform.store.backend.ContractStorageBackend.{
+  RawArchivedContract,
+  RawCreatedContract,
+}
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import com.digitalasset.canton.platform.store.dao.events.ContractsReader.*
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
@@ -22,7 +21,7 @@ import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReade
 import com.digitalasset.canton.platform.store.serialization.{Compression, ValueSerializer}
 import com.digitalasset.canton.platform.{Contract, ContractId, Identifier, Key, Party, Value}
 
-import java.io.ByteArrayInputStream
+import java.io.{ByteArrayInputStream, InputStream}
 import scala.concurrent.{ExecutionContext, Future}
 
 private[dao] sealed class ContractsReader(
@@ -53,44 +52,52 @@ private[dao] sealed class ContractsReader(
 
   override def lookupContractState(contractId: ContractId, before: Offset)(implicit
       loggingContext: LoggingContextWithTrace
-  ): Future[Option[ContractState]] = {
-    implicit val errorLogger: ContextualizedErrorLogger =
-      ErrorLoggingContext(logger, loggingContext)
+  ): Future[Option[ContractState]] =
     Timed.future(
       metrics.daml.index.db.lookupActiveContract,
       contractLoader
         .load(contractId -> before)
         .map(_.map {
-          case raw if raw.eventKind == 10 =>
+          case raw: RawCreatedContract =>
+            val decompressionTimer =
+              metrics.daml.index.db.lookupCreatedContractsDbMetrics.compressionTimer
+            val deserializationTimer =
+              metrics.daml.index.db.lookupCreatedContractsDbMetrics.translationTimer
+
             val contract = toContract(
               contractId = contractId,
-              templateId =
-                assertPresent(raw.templateId)("template_id must be present for a create event"),
-              createArgument = assertPresent(raw.createArgument)(
-                "create_argument must be present for a create event"
-              ),
+              templateId = raw.templateId,
+              createArgument = raw.createArgument,
               createArgumentCompression =
                 Compression.Algorithm.assertLookup(raw.createArgumentCompression),
-              decompressionTimer =
-                metrics.daml.index.db.lookupActiveContractsDbMetrics.compressionTimer,
-              deserializationTimer =
-                metrics.daml.index.db.lookupActiveContractsDbMetrics.translationTimer,
+              decompressionTimer = decompressionTimer,
+              deserializationTimer = deserializationTimer,
             )
+
+            val globalKey = raw.createKey.map { key =>
+              val keyCompression = Compression.Algorithm.assertLookup(raw.createKeyCompression)
+              val decompressed = decompress(key, keyCompression, decompressionTimer)
+              val value = deserializeValue(
+                decompressed,
+                deserializationTimer,
+                s"Failed to deserialize create key for contract ${contractId.coid}",
+              )
+              GlobalKey.assertBuild(contract.unversioned.template, value.unversioned)
+            }
+
             ActiveContract(
-              contract,
-              raw.flatEventWitnesses,
-              assertPresent(raw.ledgerEffectiveTime)(
-                "ledger_effective_time must be present for a create event"
-              ),
+              contract = contract,
+              stakeholders = raw.flatEventWitnesses,
+              ledgerEffectiveTime = raw.ledgerEffectiveTime,
+              agreementText = raw.agreementText,
+              signatories = raw.signatories,
+              globalKey = globalKey,
+              keyMaintainers = raw.keyMaintainers,
+              driverMetadata = raw.driverMetadata,
             )
-          case raw if raw.eventKind == 20 => ArchivedContract(raw.flatEventWitnesses)
-          case raw =>
-            throw throw IndexErrors.DatabaseErrors.ResultSetError
-              .Reject(s"Unexpected event kind ${raw.eventKind}")
-              .asGrpcError
+          case raw: RawArchivedContract => ArchivedContract(raw.flatEventWitnesses)
         }),
     )
-  }
 
   /** Lookup of a contract in the case the contract value is not already known */
   override def lookupActiveContractAndLoadArgument(
@@ -163,6 +170,28 @@ private[dao] object ContractsReader {
     )
   }
 
+  private def decompress(
+      data: Array[Byte],
+      algorithm: Compression.Algorithm,
+      timer: Timer,
+  ): InputStream = {
+    Timed.value(
+      timer,
+      value = algorithm.decompress(new ByteArrayInputStream(data)),
+    )
+  }
+
+  private def deserializeValue(
+      decompressed: InputStream,
+      timer: Timer,
+      errorContext: String,
+  ): VersionedValue = {
+    Timed.value(
+      timer,
+      value = ValueSerializer.deserializeValue(decompressed, errorContext),
+    )
+  }
+
   // The contracts table _does not_ store agreement texts as they are
   // unnecessary for interpretation and validation. The contracts returned
   // from this table will _always_ have an empty agreement text.
@@ -174,19 +203,12 @@ private[dao] object ContractsReader {
       decompressionTimer: Timer,
       deserializationTimer: Timer,
   ): Contract = {
-    val decompressed =
-      Timed.value(
-        timer = decompressionTimer,
-        value = createArgumentCompression.decompress(new ByteArrayInputStream(createArgument)),
-      )
-    val deserialized =
-      Timed.value(
-        timer = deserializationTimer,
-        value = ValueSerializer.deserializeValue(
-          stream = decompressed,
-          errorContext = s"Failed to deserialize create argument for contract ${contractId.coid}",
-        ),
-      )
+    val decompressed = decompress(createArgument, createArgumentCompression, decompressionTimer)
+    val deserialized = deserializeValue(
+      decompressed,
+      deserializationTimer,
+      s"Failed to deserialize create argument for contract ${contractId.coid}",
+    )
     Contract(
       template = Identifier.assertFromString(templateId),
       arg = deserialized,
@@ -201,9 +223,4 @@ private[dao] object ContractsReader {
       template = Identifier.assertFromString(templateId),
       arg = createArgument,
     )
-
-  private def assertPresent[T](in: Option[T])(err: String)(implicit
-      errorLogger: ContextualizedErrorLogger
-  ): T =
-    in.getOrElse(throw IndexErrors.DatabaseErrors.ResultSetError.Reject(err).asGrpcError)
 }

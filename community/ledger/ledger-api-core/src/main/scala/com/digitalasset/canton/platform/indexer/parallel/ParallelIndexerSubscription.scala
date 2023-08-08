@@ -30,7 +30,8 @@ import com.digitalasset.canton.platform.store.interning.{
   InternizingStringInterningView,
   StringInterning,
 }
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
+import io.opentelemetry.api.trace.Tracer
 
 import java.sql.Connection
 import scala.concurrent.Future
@@ -52,13 +53,21 @@ private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
     metrics: Metrics,
     inMemoryStateUpdaterFlow: InMemoryStateUpdater.UpdaterFlow,
     stringInterningView: StringInterning & InternizingStringInterningView,
+    tracer: Tracer,
     loggerFactory: NamedLoggerFactory,
     multiDomainEnabled: Boolean,
-) extends NamedLogging {
+) extends NamedLogging
+    with Spanning {
   import ParallelIndexerSubscription.*
   private implicit val metricsContext: MetricsContext = MetricsContext(
     "participant_id" -> participantId
   )
+  private def mapInSpan(
+      mapper: Offset => Traced[Update] => Iterator[DbDto]
+  )(offset: Offset)(update: Traced[Update]): Iterator[DbDto] = {
+    withSpan("Indexer.mapInput")(_ => _ => mapper(offset)(update))(update.traceContext, tracer)
+  }
+
   def apply(
       inputMapperExecutor: Executor,
       batcherExecutor: Executor,
@@ -72,12 +81,14 @@ private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
         inputMapper = inputMapperExecutor.execute(
           inputMapper(
             metrics,
-            UpdateToDbDto(
-              participantId = participantId,
-              translation = translation,
-              compressionStrategy = compressionStrategy,
-              metrics = metrics,
-              multiDomainEnabled = multiDomainEnabled,
+            mapInSpan(
+              UpdateToDbDto(
+                participantId = participantId,
+                translation = translation,
+                compressionStrategy = compressionStrategy,
+                metrics = metrics,
+                multiDomainEnabled = multiDomainEnabled,
+              )
             ),
             UpdateToMeteringDbDto(metrics = metrics.daml.indexerEvents),
             logger,
@@ -154,17 +165,19 @@ object ParallelIndexerSubscription {
       logger: TracedLogger,
   ): Iterable[(Offset, Traced[Update])] => Batch[Vector[DbDto]] = { input =>
     metrics.daml.parallelIndexer.inputMapping.batchSize.update(input.size)(MetricsContext.Empty)
-    input.foreach { case (offset, update) =>
-      LoggingContextWithTrace.withNewLoggingContext("offset" -> offset, "update" -> update.value) {
-        implicit loggingContext =>
+
+    val mainBatch = input.iterator.flatMap {
+      case (offset, update) => {
+        LoggingContextWithTrace.withNewLoggingContext(
+          "offset" -> offset,
+          "update" -> update.value,
+        ) { implicit loggingContext =>
           logger.info(
             s"Storing ${update.value.description}, ${loggingContext.serializeFiltered("offset", "update")}"
           )
-      }(update.traceContext)
-    }
-
-    val mainBatch = input.iterator.flatMap { case (offset, update) =>
-      toDbDto(offset)(update)
+        }(update.traceContext)
+        toDbDto(offset)(update)
+      }
     }.toVector
 
     val meteringBatch = toMeteringDbDto(input)

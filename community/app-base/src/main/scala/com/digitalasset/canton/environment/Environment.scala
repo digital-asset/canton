@@ -26,6 +26,7 @@ import com.digitalasset.canton.environment.CantonNodeBootstrap.HealthDumpFunctio
 import com.digitalasset.canton.environment.Environment.*
 import com.digitalasset.canton.environment.ParticipantNodes.{ParticipantNodesOld, ParticipantNodesX}
 import com.digitalasset.canton.health.{HealthCheck, HealthServer}
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.MetricsConfig.Prometheus
@@ -62,6 +63,11 @@ import scala.util.control.NonFatal
   */
 trait Environment extends NamedLogging with AutoCloseable with NoTracing {
 
+  // TODO(i14111): Remove this, once the cyclic class initialization has been fixed upstream.
+  //  https://github.com/DACH-NY/canton/issues/14111
+  //  Background: https://www.farside.org.uk/201510/deadlocks_in_java_class_initialisation
+  LedgerApiErrors.discard
+
   type Config <: CantonConfig
   type Console <: ConsoleEnvironment
 
@@ -80,6 +86,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
       isPrometheusEnabled,
       config.monitoring.tracing.tracer,
       config.monitoring.metrics.histograms,
+      loggerFactory,
     )
   }
 
