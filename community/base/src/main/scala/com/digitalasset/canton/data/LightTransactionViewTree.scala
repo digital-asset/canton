@@ -248,20 +248,20 @@ object LightTransactionViewTree
     } yield result
 
   /** Converts a sequence of light transaction view trees to the corresponding full view trees.
-    * The light view trees need to be passed in some sort of preorder; that means:
-    * given a non-empty suffix `tvs` of `lightViewTreesInPreorder`,
-    * the first element `tv` of `tvs` can be converted to a full view tree,
-    * if all descendants of `tv` are contained in `tvs`
-    * and can be converted to full view trees as well.
+    * A light transaction view tree can be converted to its corresponding full view tree if and only if
+    * all descendants can be converted.
     *
     * To make the method more generic, light view trees are represented as `A` and full view trees as `B` and the
     * `lens` parameter is used to convert between these types, as needed.
     *
     * @param topLevelOnly whether to return only top-level full view trees
-    * @param lightViewTreesInPreorder the light transaction view trees to convert
-    * @return A tuple consisting of the full view trees that could be converted and
-    *         the light view trees that could not be converted.
-    *         The view trees in the output occur in the same order as in the input.
+    * @param lightViewTrees the light transaction view trees to convert
+    * @return A triple consisting of (1) the full view trees that could be converted,
+    *         (2) the light view trees that could not be converted due to missing descendants, and
+    *         (3) duplicate light view trees in the input.
+    *         The view trees in the output are sorted by view position, i.e., in pre-order.
+    *         If the input contains the same view several times, then
+    *         the output (1) contains one occurrence and the output (3) every other occurrence of the view.
     */
   def toFullViewTrees[A, B](
       lens: PLens[A, B, LightTransactionViewTree, TransactionViewTree],
@@ -269,10 +269,12 @@ object LightTransactionViewTree
       hashOps: HashOps,
       topLevelOnly: Boolean,
   )(
-      lightViewTreesInPreorder: Seq[A]
-  ): (Seq[B], Seq[A]) = {
+      lightViewTrees: Seq[A]
+  ): (Seq[B], Seq[A], Seq[A]) = {
 
-    val lightViewTreesInPostOrder = lightViewTreesInPreorder.view.reverse
+    val lightViewTreesBoxedInPostOrder = lightViewTrees
+      .sortBy(lens.get(_).viewPosition)(ViewPosition.orderViewPosition.toOrdering)
+      .reverse
 
     // All reconstructed full views
     val fullViewByHash = mutable.Map.empty[ViewHash, TransactionView]
@@ -280,10 +282,12 @@ object LightTransactionViewTree
     val allFullViewTreesInPreorderB = mutable.ListBuffer.empty[(ViewHash, B)]
     // All light view trees, boxed, that could not be reconstructed to full view trees, due to missing descendants
     val invalidLightViewTreesB = Seq.newBuilder[A]
+    // All duplicate light view trees, boxed.
+    val duplicateLightViewTreesB = Seq.newBuilder[A]
     // All hashes of non-toplevel full view trees that could be reconstructed
     val subviewHashesB = Set.newBuilder[ViewHash]
 
-    for (lightViewTreeBoxed <- lightViewTreesInPostOrder) {
+    for (lightViewTreeBoxed <- lightViewTreesBoxedInPostOrder) {
       val lightViewTree = lens.get(lightViewTreeBoxed)
       val subviewHashes = lightViewTree.subviewHashes.toSet
       val missingSubviews = subviewHashes -- fullViewByHash.keys
@@ -299,8 +303,13 @@ object LightTransactionViewTree
 
         if (topLevelOnly)
           subviewHashesB ++= subviewHashes
-        (fullViewTree.viewHash -> fullViewTreeBoxed) +=: allFullViewTreesInPreorderB
-        fullViewByHash += fullView.viewHash -> fullView
+        if (fullViewByHash.contains(fullViewTree.viewHash)) {
+          // Deduplicate views
+          duplicateLightViewTreesB += lightViewTreeBoxed
+        } else {
+          (fullViewTree.viewHash -> fullViewTreeBoxed) +=: allFullViewTreesInPreorderB
+          fullViewByHash += fullView.viewHash -> fullView
+        }
       } else {
         invalidLightViewTreesB += lightViewTreeBoxed
       }
@@ -316,7 +325,11 @@ object LightTransactionViewTree
             fullViewTreeBoxed
         }
 
-    (allFullViewTreesInPreorder, invalidLightViewTreesB.result().reverse)
+    (
+      allFullViewTreesInPreorder,
+      invalidLightViewTreesB.result().reverse,
+      duplicateLightViewTreesB.result().reverse,
+    )
   }
 
   /** Turns a full transaction view tree into a lightweight one. Not stack-safe. */

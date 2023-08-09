@@ -38,5 +38,6 @@ CREATE INDEX idx_in_flight_submission_root_hash ON in_flight_submission (root_ha
 CREATE TABLE kms_metadata_store (
     fingerprint varchar(300) collate "C" not null,
     kms_key_id varchar(300) collate "C" not null,
+    purpose smallint not null,
     primary key (fingerprint)
 );

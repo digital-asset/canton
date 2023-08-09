@@ -97,20 +97,15 @@ object RegisterTopologyTransactionRequest
       transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
       domainId: DomainId,
       protocolVersion: ProtocolVersion,
-  ): Iterable[RegisterTopologyTransactionRequest] = {
-    // TODO(#14051) this isn't a good idea. txs shouldn't be regrouped. agreed with raf: we should remove this
-    //   the topology txs are serialized as bytestrings individually, which means the version differences don't matter
-    transactions.groupBy(_.representativeProtocolVersion).map {
-      case (_transactionRepresentativeProtocolVersion, transactions) =>
-        RegisterTopologyTransactionRequest(
-          requestedBy = requestedBy,
-          participant = participant,
-          requestId = requestId,
-          transactions = transactions,
-          domainId = domainId,
-        )(protocolVersionRepresentativeFor(protocolVersion))
-    }
-  }
+  ): Iterable[RegisterTopologyTransactionRequest] = Seq(
+    RegisterTopologyTransactionRequest(
+      requestedBy = requestedBy,
+      participant = participant,
+      requestId = requestId,
+      transactions = transactions,
+      domainId = domainId,
+    )(protocolVersionRepresentativeFor(protocolVersion))
+  )
 
   def fromProtoV0(
       message: v0.RegisterTopologyTransactionRequest

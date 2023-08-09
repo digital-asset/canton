@@ -7,7 +7,7 @@ import com.daml.error.ErrorsAssertions
 import com.daml.lf.data.Ref
 import com.daml.platform.apiserver.page_tokens.ListUsersPageTokenPayload
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import org.scalatest.EitherValues
 import org.scalatest.concurrent.{Eventually, IntegrationPatience}
 import org.scalatest.flatspec.AnyFlatSpec
@@ -44,7 +44,7 @@ class ApiUserManagementServiceSpec
     val error = actualNextPageToken.left.value
     assertError(
       actual = error,
-      expected = LedgerApiErrors.RequestValidation.InvalidArgument
+      expected = RequestValidationErrors.InvalidArgument
         .Reject("Invalid page token")
         .asGrpcError,
     )
@@ -62,7 +62,7 @@ class ApiUserManagementServiceSpec
     val error = actualNextPageToken.left.value
     assertError(
       actual = error,
-      expected = LedgerApiErrors.RequestValidation.InvalidArgument
+      expected = RequestValidationErrors.InvalidArgument
         .Reject("Invalid page token")
         .asGrpcError,
     )
@@ -84,7 +84,7 @@ class ApiUserManagementServiceSpec
     val error = actualNextPageToken.left.value
     assertError(
       actual = error,
-      expected = LedgerApiErrors.RequestValidation.InvalidArgument
+      expected = RequestValidationErrors.InvalidArgument
         .Reject("Invalid page token")
         .asGrpcError,
     )

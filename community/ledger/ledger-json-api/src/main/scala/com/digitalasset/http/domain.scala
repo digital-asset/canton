@@ -24,7 +24,6 @@ import scalaz.syntax.show.*
 import scalaz.syntax.std.option.*
 import scalaz.syntax.traverse.*
 import scalaz.{-\/, @@, Applicative, Bitraverse, Functor, NonEmptyList, Tag, Traverse, \/, \/-}
-import spray.json.JsValue
 import scalaz.syntax.tag.*
 
 import scala.annotation.tailrec
@@ -188,7 +187,6 @@ package domain {
 
   final case class GetActiveContractsRequest(
       templateIds: NonEmpty[Set[ContractTypeId.OptionalPkg]],
-      query: Map[String, JsValue],
       readAs: Option[NonEmptyList[Party]],
   )
 
@@ -198,7 +196,6 @@ package domain {
 
   final case class SearchForeverQuery(
       templateIds: NonEmpty[Set[ContractTypeId.OptionalPkg]],
-      query: Map[String, JsValue],
       offset: Option[domain.Offset],
   )
 

@@ -29,8 +29,12 @@ trait ContractLookup {
 
   def lookupManyUncached(
       ids: Seq[LfContractId]
-  )(implicit traceContext: TraceContext): Future[List[Option[StoredContract]]] =
-    ids.toList.parTraverse(lookup(_).value)
+  )(implicit traceContext: TraceContext): Future[List[(LfContractId, Option[StoredContract])]] = {
+    for {
+      contractIds <- Future.successful(ids.toList)
+      storedContracts <- ids.toList.parTraverse(id => lookup(id).value)
+    } yield contractIds.zip(storedContracts)
+  }
 
   def lookupE(id: LfContractId)(implicit
       traceContext: TraceContext
@@ -98,7 +102,8 @@ object ContractAndKeyLookup {
 
       override def lookupManyUncached(ids: Seq[LfContractId])(implicit
           traceContext: TraceContext
-      ): Future[List[Option[StoredContract]]] = Future.successful(ids.map(_ => None).toList)
+      ): Future[List[(LfContractId, Option[StoredContract])]] =
+        Future.successful(ids.toList.map(_ -> None))
 
       override def lookupKey(key: LfGlobalKey)(implicit
           traceContext: TraceContext

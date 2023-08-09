@@ -113,7 +113,7 @@ object DomainConnectionConfigStore {
   case object Inactive extends Status {
     val dbType: Char = 'I'
     val canMigrateTo: Boolean =
-      true // we can migrate to inactive domains in case we need to "downgrade"
+      false // we can not downgrade as we might have pruned all important state
     val canMigrateFrom: Boolean = false
     val isActive: Boolean = false
   }

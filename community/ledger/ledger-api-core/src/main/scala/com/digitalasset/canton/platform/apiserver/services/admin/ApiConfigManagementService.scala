@@ -17,7 +17,7 @@ import com.digitalasset.canton.ledger.api.validation.FieldValidator
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.*
 import com.digitalasset.canton.ledger.api.{ValidationLogger, domain}
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.{AdminServiceErrors, RequestValidationErrors}
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexConfigManagementService
 import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.logging.LoggingContextUtil.createLoggingContext
@@ -78,7 +78,7 @@ private[apiserver] final class ApiConfigManagementService private (
           Future.successful(configurationToResponse(configuration))
         case None =>
           Future.failed(
-            LedgerApiErrors.RequestValidation.NotFound.LedgerConfiguration
+            RequestValidationErrors.NotFound.LedgerConfiguration
               .Reject()(
                 ErrorLoggingContext(
                   logger,
@@ -138,7 +138,7 @@ private[apiserver] final class ApiConfigManagementService private (
                 "Could not get the current time model. The index does not yet have any ledger configuration."
               )
               Future.failed(
-                LedgerApiErrors.RequestValidation.NotFound.LedgerConfiguration
+                RequestValidationErrors.NotFound.LedgerConfiguration
                   .Reject()
                   .asGrpcError
               )
@@ -287,7 +287,7 @@ private[apiserver] object ApiConfigManagementService {
         loggingContext: LoggingContextWithTrace
     ): PartialFunction[ConfigurationEntry, StatusRuntimeException] = {
       case domain.ConfigurationEntry.Rejected(`submissionId`, reason, _) =>
-        LedgerApiErrors.Admin.ConfigurationEntryRejected
+        AdminServiceErrors.ConfigurationEntryRejected
           .Reject(reason)(
             LedgerErrorLoggingContext(
               logger,

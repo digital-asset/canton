@@ -3,87 +3,37 @@
 
 package com.digitalasset.canton.platform.store.packagemeta
 
-import com.daml.lf.data.Ref
+import cats.implicits.catsSyntaxSemigroup
+import com.daml.lf.data.{Ref, Time}
 import com.daml.lf.value.test.ValueGenerators.idGen
-import com.daml.scalatest.FlatSpecCheckLaws
-import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView.PackageMetadata
+import com.daml.nonempty.NonEmptyUtil
+import com.digitalasset.canton.platform.store.packagemeta.PackageMetadata.{
+  TemplateIdWithPriority,
+  TemplatesForQualifiedName,
+}
 import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataViewSpec.*
-import org.scalacheck.{Arbitrary, Gen}
-import org.scalatest.EitherValues
+import org.scalacheck.Gen
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import scalaz.scalacheck.ScalazProperties
-import scalaz.{Equal, Monoid}
+import org.scalatestplus.scalacheck.ScalaCheckDrivenPropertyChecks
+
+import PackageMetadata.Implicits.packageMetadataSemigroup
 
 class PackageMetadataViewSpec
     extends AnyFlatSpec
     with Matchers
-    with FlatSpecCheckLaws
-    with EitherValues {
+    with ScalaCheckDrivenPropertyChecks {
 
-  behavior of "MetadataDefinitions Monoid"
-  checkLaws(
-    ScalazProperties.monoid
-      .laws[PackageMetadata](monoidPackageMetadata, equalPackageMetadata, packageMetadataArbitrary)
-  )
+  "PackageMetadataView" should "append" in forAll(packageMetadataGen, packageMetadataGen) {
+    (pkgMeta1, pkgMeta2) =>
+      val view = PackageMetadataView.create
+      view.current() shouldBe PackageMetadata()
 
-  behavior of "PackageMetadataView"
+      view.update(pkgMeta1)
+      view.current() shouldBe pkgMeta1
 
-  it should "noop in case of empty MetadataDefinitions" in new Scope {
-    view.current() shouldBe PackageMetadata()
-    view.update(PackageMetadata())
-    view.current() shouldBe PackageMetadata()
-  }
-
-  it should "append templates" in new Scope {
-    view.current() shouldBe PackageMetadata()
-    view.update(PackageMetadata(templates = Set(template1)))
-    view.current() shouldBe PackageMetadata(templates = Set(template1))
-  }
-
-  it should "append interfaces" in new Scope {
-    view.current() shouldBe PackageMetadata()
-    view.update(PackageMetadata(interfaces = Set(iface1)))
-    view.current() shouldBe PackageMetadata(interfaces = Set(iface1))
-  }
-
-  it should "append interface to templates map" in new Scope {
-    view.current() shouldBe PackageMetadata()
-    view.update(
-      PackageMetadata(interfacesImplementedBy = Map(iface1 -> Set(template1, template2)))
-    )
-    view.current() shouldBe PackageMetadata(
-      interfacesImplementedBy = Map(iface1 -> Set(template1, template2))
-    )
-  }
-
-  it should "append interface to templates by key" in new Scope {
-    view.current() shouldBe PackageMetadata()
-    view.update(
-      PackageMetadata(interfacesImplementedBy = Map(iface1 -> Set(template1)))
-    )
-    view.update(
-      PackageMetadata(interfacesImplementedBy = Map(iface1 -> Set(template2)))
-    )
-    view.current() shouldBe PackageMetadata(
-      interfacesImplementedBy = Map(iface1 -> Set(template1, template2))
-    )
-  }
-
-  it should "append additional interfaces to interface map" in new Scope {
-    view.current() shouldBe PackageMetadata()
-    view.update(
-      PackageMetadata(interfacesImplementedBy = Map(iface1 -> Set(template1, template2)))
-    )
-    view.update(
-      PackageMetadata(interfacesImplementedBy = Map(iface2 -> Set(template1)))
-    )
-    view.current() shouldBe PackageMetadata(
-      interfacesImplementedBy = Map(
-        iface1 -> Set(template1, template2),
-        iface2 -> Set(template1),
-      )
-    )
+      view.update(pkgMeta2)
+      view.current() shouldBe pkgMeta1 |+| pkgMeta2
   }
 }
 
@@ -99,25 +49,20 @@ object PackageMetadataViewSpec {
       entries <- Gen.listOf(entryGen)
     } yield entries.toMap
 
+  private def priorityGen: Gen[Time.Timestamp] =
+    Gen.choose(1L, 1L << 20).map(Time.Timestamp.assertFromLong)
+
   private val packageMetadataGen = for {
     map <- interfacesImplementedByMap
-  } yield PackageMetadata(map.keySet, map.values.flatten.toSet, map)
-
-  implicit val monoidPackageMetadata = new Monoid[PackageMetadata] {
-    override def zero: PackageMetadata = PackageMetadata()
-    override def append(f1: PackageMetadata, f2: => PackageMetadata): PackageMetadata =
-      f1.append(f2)
-  }
-  implicit def equalPackageMetadata: Equal[PackageMetadata] =
-    (a1: PackageMetadata, a2: PackageMetadata) => a1 == a2
-
-  implicit def packageMetadataArbitrary: Arbitrary[PackageMetadata] = Arbitrary(packageMetadataGen)
-
-  trait Scope {
-    val template1 = Ref.Identifier.assertFromString("PackageName:ModuleName:template1")
-    val template2 = Ref.Identifier.assertFromString("PackageName:ModuleName:template2")
-    val iface1 = Ref.Identifier.assertFromString("PackageName:ModuleName:iface1")
-    val iface2 = Ref.Identifier.assertFromString("PackageName:ModuleName:iface2")
-    val view = PackageMetadataView.create
-  }
+    priority <- priorityGen
+  } yield PackageMetadata(
+    templates = map.keySet.groupBy(_.qualifiedName).map { case (qn, templateIds) =>
+      qn -> TemplatesForQualifiedName(
+        NonEmptyUtil.fromUnsafe(templateIds),
+        TemplateIdWithPriority(templateIds.head, priority),
+      )
+    },
+    interfaces = map.values.flatten.toSet,
+    interfacesImplementedBy = map,
+  )
 }

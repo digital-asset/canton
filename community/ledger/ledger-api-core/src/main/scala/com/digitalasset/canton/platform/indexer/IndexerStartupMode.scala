@@ -11,7 +11,6 @@ object IndexerStartupMode {
 
   val DefaultSchemaMigrationAttempts: Int = 30
   val DefaultSchemaMigrationAttemptBackoff: FiniteDuration = 1.second
-  val DefaultAllowExistingSchema: Boolean = false
 
   case object ValidateAndStart extends IndexerStartupMode
 

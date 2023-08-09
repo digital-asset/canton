@@ -78,6 +78,7 @@ class DomainOutbox(
       timeouts,
       loggerFactory,
       crypto,
+      syncTransactionAfterDispatch = false,
     )
     with DomainOutboxDispatchHelperOld {
   override protected def awaitTransactionObserved(
@@ -140,6 +141,7 @@ class DomainOutboxX(
       timeouts,
       loggerFactory,
       crypto,
+      syncTransactionAfterDispatch = true,
     )
     with DomainOutboxDispatchHelperX {
   override protected def awaitTransactionObserved(
@@ -188,6 +190,7 @@ abstract class DomainOutboxCommon[
     override protected val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
     override protected val crypto: Crypto,
+    syncTransactionAfterDispatch: Boolean,
 )(implicit val ec: ExecutionContext)
     extends DomainOutboxDispatch[TX, H, DTS] {
 
@@ -293,7 +296,7 @@ abstract class DomainOutboxCommon[
   def newTransactionsAddedToAuthorizedStore(
       asOf: CantonTimestamp,
       num: Int,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+  ): FutureUnlessShutdown[Unit] = {
     watermarks.updateAndGet(_.updateAuthorized(asOf, num)).discard
     kickOffFlush()
     FutureUnlessShutdown.unit
@@ -342,10 +345,12 @@ abstract class DomainOutboxCommon[
     } yield ()
   }
 
-  private def kickOffFlush()(implicit traceContext: TraceContext): Unit = {
+  private def kickOffFlush(): Unit = {
     // It's fine to ignore shutdown because we do not await the future anyway.
     if (initialized.get()) {
-      EitherTUtil.doNotAwait(flush().onShutdown(Either.unit), "domain outbox flusher")
+      TraceContext.withNewTraceContext(implicit tc =>
+        EitherTUtil.doNotAwait(flush().onShutdown(Either.unit), "domain outbox flusher")
+      )
     }
   }
 
@@ -397,6 +402,24 @@ abstract class DomainOutboxCommon[
           }
           // dispatch to domain
           responses <- dispatch(domain, transactions = convertedTxs)
+          observed <- EitherT.right(
+            if (syncTransactionAfterDispatch) {
+              // this block is only run for x-nodes.
+              // for x-nodes, we either receive accepted or failed for all transactions in a submission batch.
+              // failed submissions are turned into a Left in dispatch. Therefore it's safe to await without additional checks.
+              convertedTxs.headOption
+                .map(awaitTransactionObserved(targetClient, _, timeouts.unbounded.duration))
+                // there were no transactions to wait for
+                .getOrElse(FutureUnlessShutdown.pure(true))
+            } else {
+              // the domain outbox is configured to not wait for submitted transactions, so we just
+              FutureUnlessShutdown.pure(true)
+            }
+          )
+          _ =
+            if (!observed) {
+              logger.warn("Did not observe transactions in target domain store.")
+            }
           // update watermark according to responses
           _ <- EitherT.right[ /*DomainRegistryError*/ String](
             updateWatermark(pending, applicable, responses)

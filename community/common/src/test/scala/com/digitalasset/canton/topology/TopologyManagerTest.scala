@@ -157,7 +157,7 @@ trait TopologyManagerTest
         numActive: Int,
     ): Future[Unit] =
       for {
-        tr <- store.allTransactions
+        tr <- store.allTransactions()
         ac <- store.headTransactions
       } yield {
         tr.result should have length numTransactions.toLong

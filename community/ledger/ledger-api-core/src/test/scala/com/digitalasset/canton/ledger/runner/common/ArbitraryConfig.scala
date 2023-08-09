@@ -12,30 +12,20 @@ import com.daml.lf.language.LanguageVersion
 import com.daml.lf.transaction.ContractKeyUniquenessMode
 import com.daml.metrics.api.reporters.MetricsReporter
 import com.daml.ports.Port
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.ledger.api.tls.{TlsConfiguration, TlsVersion}
 import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.apiserver.{ApiServerConfig, AuthServiceConfig}
 import com.digitalasset.canton.platform.config.MetricsConfig.MetricRegistryType
-import com.digitalasset.canton.platform.config.{MetricsConfig, ParticipantConfig}
-import com.digitalasset.canton.platform.configuration.{
-  AcsStreamsConfig,
-  CommandConfiguration,
-  IndexServiceConfig,
-  InitialLedgerConfiguration,
-  TransactionFlatStreamsConfig,
-  TransactionTreeStreamsConfig,
-}
+import com.digitalasset.canton.platform.config.*
 import com.digitalasset.canton.platform.indexer.ha.HaConfig
 import com.digitalasset.canton.platform.indexer.{
   IndexerConfig,
   IndexerStartupMode,
   PackageMetadataViewConfig,
 }
-import com.digitalasset.canton.platform.localstore.{
-  IdentityProviderManagementConfig,
-  UserManagementConfig,
-}
+import com.digitalasset.canton.platform.localstore.IdentityProviderManagementConfig
 import com.digitalasset.canton.platform.services.time.TimeProviderType
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.platform.store.DbSupport.DataSourceProperties
@@ -92,7 +82,6 @@ object ArbitraryConfig {
     allowedLanguageVersions <- versionRange
     packageValidation <- Gen.oneOf(true, false)
     stackTraceMode <- Gen.oneOf(true, false)
-    forbidV0ContractId <- Gen.oneOf(true, false)
     requireSuffixedGlobalContractId <- Gen.oneOf(true, false)
     contractKeyUniqueness <- contractKeyUniquenessMode
     limits <- limits
@@ -163,30 +152,14 @@ object ArbitraryConfig {
 
   val port = Gen.choose(0, 65535).map(p => Port(p))
 
-  val initialLedgerConfiguration = for {
-    maxDeduplicationDuration <- duration
-    avgTransactionLatency <- duration
-    minSkew <- duration
-    maxSkew <- duration
-    delayBeforeSubmitting <- duration
-    config = InitialLedgerConfiguration(
-      maxDeduplicationDuration,
-      avgTransactionLatency,
-      minSkew,
-      maxSkew,
-      delayBeforeSubmitting,
-    )
-    optConfig <- Gen.option(config)
-  } yield optConfig
-
   val seeding = Gen.oneOf(Seeding.Weak, Seeding.Strong, Seeding.Static)
 
-  val userManagementConfig = for {
+  val userManagementServiceConfig = for {
     enabled <- Gen.oneOf(true, false)
     maxCacheSize <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
     cacheExpiryAfterWriteInSeconds <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
     maxUsersPageSize <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
-  } yield UserManagementConfig(
+  } yield UserManagementServiceConfig(
     enabled = enabled,
     maxCacheSize = maxCacheSize,
     cacheExpiryAfterWriteInSeconds = cacheExpiryAfterWriteInSeconds,
@@ -247,11 +220,11 @@ object ArbitraryConfig {
     JwtRs256Jwks,
   )
 
-  val commandConfiguration = for {
+  val commandServiceConfig = for {
     maxCommandsInFlight <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
     maxTrackingTimeout <- duration
-  } yield CommandConfiguration(
-    maxTrackingTimeout,
+  } yield CommandServiceConfig(
+    NonNegativeFiniteDuration(maxTrackingTimeout),
     maxCommandsInFlight,
   )
 
@@ -299,28 +272,24 @@ object ArbitraryConfig {
   val apiServerConfig = for {
     address <- Gen.option(Gen.alphaStr)
     apiStreamShutdownTimeout <- Gen.finiteDuration
-    command <- commandConfiguration
+    command <- commandServiceConfig
     configurationLoadTimeout <- Gen.finiteDuration
-    initialLedgerConfiguration <- initialLedgerConfiguration
     managementServiceTimeout <- Gen.finiteDuration
     maxInboundMessageSize <- Gen.chooseNum(0, Int.MaxValue)
     port <- port
-    portFile <- Gen.option(Gen.alphaStr.map(p => Paths.get(p)))
     rateLimit <- rateLimitingConfig
     seeding <- seeding
     timeProviderType <- timeProviderType
     tls <- Gen.option(tlsConfiguration)
-    userManagement <- userManagementConfig
+    userManagement <- userManagementServiceConfig
   } yield ApiServerConfig(
     address = address,
     apiStreamShutdownTimeout = apiStreamShutdownTimeout,
     command = command,
     configurationLoadTimeout = configurationLoadTimeout,
-    initialLedgerConfiguration = initialLedgerConfiguration,
     managementServiceTimeout = managementServiceTimeout,
     maxInboundMessageSize = maxInboundMessageSize,
     port = port,
-    portFile = portFile,
     rateLimit = rateLimit,
     seeding = seeding,
     timeProviderType = timeProviderType,

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.ledger.client.services.version
 
 import com.daml.ledger.api.v1.version_service.VersionServiceGrpc.VersionServiceStub
-import com.digitalasset.canton.ledger.api.domain.{Feature, LedgerId}
+import com.digitalasset.canton.ledger.api.domain.LedgerId
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -15,11 +15,5 @@ final class VersionClient(ledgerId: LedgerId, service: VersionServiceStub) {
       token: Option[String] = None
   )(implicit executionContext: ExecutionContext): Future[String] =
     it.getApiVersion(ledgerId, token)
-
-  def getApiFeatures(
-      ledgerIdToUse: LedgerId,
-      token: Option[String] = None,
-  )(implicit executionContext: ExecutionContext): Future[Seq[Feature]] =
-    it.getApiFeatures(ledgerIdToUse, token)
 
 }

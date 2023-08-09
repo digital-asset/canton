@@ -428,8 +428,7 @@ final case class DynamicDomainParameters private (
     transferExclusivityTimeout > NonNegativeFiniteDuration.Zero
 
   def update(
-      transferExclusivityTimeout: NonNegativeFiniteDuration = transferExclusivityTimeout,
-      reconciliationInterval: PositiveSeconds = reconciliationInterval,
+      transferExclusivityTimeout: NonNegativeFiniteDuration = transferExclusivityTimeout
   ): DynamicDomainParameters =
     this.copy(
       transferExclusivityTimeout = transferExclusivityTimeout,
@@ -706,10 +705,8 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
   def initialValues(
       topologyChangeDelay: NonNegativeFiniteDuration,
       protocolVersion: ProtocolVersion,
-      maxRatePerParticipant: NonNegativeInt = StaticDomainParameters.defaultMaxRatePerParticipant,
-      maxRequestSize: MaxRequestSize = StaticDomainParameters.defaultMaxRequestSize,
       mediatorReactionTimeout: NonNegativeFiniteDuration = defaultMediatorReactionTimeout,
-  ) = checked( // safe because default values are safe
+  ): DynamicDomainParameters = checked( // safe because default values are safe
     DynamicDomainParameters.tryCreate(
       participantResponseTimeout = defaultParticipantResponseTimeout,
       mediatorReactionTimeout = mediatorReactionTimeout,
@@ -718,12 +715,34 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
       ledgerTimeRecordTimeTolerance = defaultLedgerTimeRecordTimeTolerance,
       mediatorDeduplicationTimeout = defaultMediatorDeduplicationTimeout,
       reconciliationInterval = StaticDomainParameters.defaultReconciliationInterval,
+      maxRatePerParticipant = StaticDomainParameters.defaultMaxRatePerParticipant,
+      maxRequestSize = StaticDomainParameters.defaultMaxRequestSize,
+    )(
+      protocolVersionRepresentativeFor(protocolVersion)
+    )
+  )
+
+  def tryInitialValues(
+      topologyChangeDelay: NonNegativeFiniteDuration,
+      protocolVersion: ProtocolVersion,
+      maxRatePerParticipant: NonNegativeInt = StaticDomainParameters.defaultMaxRatePerParticipant,
+      maxRequestSize: MaxRequestSize = StaticDomainParameters.defaultMaxRequestSize,
+      mediatorReactionTimeout: NonNegativeFiniteDuration = defaultMediatorReactionTimeout,
+      reconciliationInterval: PositiveSeconds = StaticDomainParameters.defaultReconciliationInterval,
+  ) =
+    DynamicDomainParameters.tryCreate(
+      participantResponseTimeout = defaultParticipantResponseTimeout,
+      mediatorReactionTimeout = mediatorReactionTimeout,
+      transferExclusivityTimeout = defaultTransferExclusivityTimeout,
+      topologyChangeDelay = topologyChangeDelay,
+      ledgerTimeRecordTimeTolerance = defaultLedgerTimeRecordTimeTolerance,
+      mediatorDeduplicationTimeout = defaultMediatorDeduplicationTimeout,
+      reconciliationInterval = reconciliationInterval,
       maxRatePerParticipant = maxRatePerParticipant,
       maxRequestSize = maxRequestSize,
     )(
       protocolVersionRepresentativeFor(protocolVersion)
     )
-  )
 
   def initialValues(clock: Clock, protocolVersion: ProtocolVersion): DynamicDomainParameters = {
     val topologyChangeDelay = clock match {

@@ -143,7 +143,7 @@ class CantonAuthorityResolverTest
           AuthorityRequest(
             holding = Set(p2),
             requesting = Set(p1),
-            domainId = Some(domainId.toString),
+            domainId = Some(domainId),
           ),
           Map(p1 -> AuthorityOfDelegation(Set(p2), PositiveInt.tryCreate(1))),
         ),

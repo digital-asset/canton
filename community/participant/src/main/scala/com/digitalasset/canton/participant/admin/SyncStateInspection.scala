@@ -3,18 +3,21 @@
 
 package com.digitalasset.canton.participant.admin
 
-import cats.Eval
 import cats.data.{EitherT, OptionT}
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.parallel.*
+import cats.{Eval, Foldable}
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.SyncStateInspection.SerializableContractWithDomainId
+import com.digitalasset.canton.participant.admin.SyncStateInspection.{
+  SerializableContractWithDomainId,
+  TimestampValidation,
+}
 import com.digitalasset.canton.participant.protocol.RequestJournal
 import com.digitalasset.canton.participant.pruning.PruningProcessor
 import com.digitalasset.canton.participant.store.ActiveContractStore.AcsError
@@ -26,12 +29,14 @@ import com.digitalasset.canton.participant.sync.{
   UpstreamOffsetConvert,
 }
 import com.digitalasset.canton.participant.{GlobalOffset, Pruning}
+import com.digitalasset.canton.protocol.ContractIdSyntax.orderingLfContractId
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
   CommitmentPeriod,
   SignedProtocolMessage,
 }
 import com.digitalasset.canton.protocol.{LfCommittedTransaction, LfContractId, SerializableContract}
+import com.digitalasset.canton.pruning.PruningStatus
 import com.digitalasset.canton.sequencing.PossiblyIgnoredProtocolEvent
 import com.digitalasset.canton.sequencing.handlers.EnvelopeOpener
 import com.digitalasset.canton.store.CursorPrehead.{
@@ -47,21 +52,22 @@ import com.digitalasset.canton.store.{
   SequencedEventRangeOverlapsWithPruning,
   SequencedEventStore,
 }
-import com.digitalasset.canton.topology.{DomainId, ParticipantId, PartyId}
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.util.{MonadUtil, ResourceUtil}
+import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DomainAlias, LedgerTransactionId, LfPartyId, RequestCounter}
 
-import java.io.{BufferedOutputStream, File, FileOutputStream, OutputStreamWriter}
+import java.io.OutputStream
 import java.time.Instant
 import java.util.Base64
-import java.util.zip.GZIPOutputStream
+import scala.collection.immutable.SortedMap
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.Try
 
 /** Implements inspection functions for the sync state of a participant node */
-class SyncStateInspection(
+final class SyncStateInspection(
     syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
     participantNodePersistentState: Eval[ParticipantNodePersistentState],
     pruningProcessor: PruningProcessor,
@@ -143,169 +149,115 @@ class SyncStateInspection(
     )
   }
 
-  def storeActiveContractsToFile(
-      parties: Set[PartyId],
-      outputFile: File,
+  def writeActiveContracts(
+      outputStream: OutputStream,
       filterDomain: DomainId => Boolean,
+      parties: Set[LfPartyId],
       timestamp: Option[CantonTimestamp],
       protocolVersion: Option[ProtocolVersion],
       contractDomainRenames: Map[DomainId, DomainId],
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, RepairServiceError, File] = {
-    val openStream =
-      if (outputFile.getName.endsWith(".gz")) {
-        // default gzip output buffer is 512, so setting it to the same as the
-        // buffered output stream defaults
-        new GZIPOutputStream(new FileOutputStream(outputFile), 8192)
-      } else {
-        new BufferedOutputStream(new FileOutputStream(outputFile))
-      }
-
-    logger.info(
-      s"Downloading active contract set (${timestamp
-          .fold("head")(ts => s"at $ts")}) to ${outputFile} for parties ${parties}"
-    )
-    ResourceUtil.withResourceEitherT(openStream) { buff =>
-      ResourceUtil.withResourceEitherT(new OutputStreamWriter(buff)) { writer =>
-        storeActiveContractsIntoStream(
-          parties,
-          writer,
-          filterDomain,
-          timestamp,
-          protocolVersion,
-          contractDomainRenames,
-        ).map(_ => outputFile)
-      }
+  ): EitherT[Future, (DomainId, SyncStateInspection.Error), Unit] =
+    MonadUtil.sequentialTraverse_(syncDomainPersistentStateManager.getAll) {
+      case (domainId, state) if filterDomain(domainId) =>
+        val domainIdForExport = contractDomainRenames.getOrElse(domainId, domainId)
+        for {
+          useProtocolVersion <- protocolVersion.fold(getProtocolVersion(state))(EitherT.rightT(_))
+          _ <- writeActiveContracts(
+            outputStream,
+            domainIdForExport,
+            parties,
+            state,
+            timestamp,
+            useProtocolVersion,
+          ).leftMap(domainId -> _)
+        } yield ()
+      case _ =>
+        EitherTUtil.unit
     }
-  }
 
-  private def storeActiveContractsIntoStream(
-      parties: Set[PartyId],
-      writer: OutputStreamWriter,
-      filterDomain: DomainId => Boolean,
-      timestamp: Option[CantonTimestamp],
-      protocolVersion: Option[ProtocolVersion],
-      contractDomainRenames: Map[DomainId, DomainId],
+  private def getProtocolVersion[A](
+      state: SyncDomainPersistentState
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, RepairServiceError, List[(DomainId, Long)]] =
-    syncDomainPersistentStateManager.getAll.toList
-      .parTraverseFilter { case (domainId, state) =>
-        storeActiveContractsIntoStreamPerDomainId(
-          domainId,
-          parties,
-          filterDomain,
-          state,
-          timestamp,
-          SyncStateInspection.batchSize,
-          protocolVersion,
-          writer,
-          contractDomainRenames,
-        )
-      }
+  ): EitherT[Future, A, ProtocolVersion] =
+    EitherT.right[A](
+      state.parameterStore.lastParameters.map(_.fold(ProtocolVersion.latest)(_.protocolVersion))
+    )
 
-  private def storeActiveContractsIntoStreamPerDomainId(
-      domainId: DomainId,
-      parties: Set[PartyId],
-      filterDomain: DomainId => Boolean,
+  // fetch acs, checking that the requested timestamp is clean
+  private def acsSnapshotAt(state: SyncDomainPersistentState)(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, SyncStateInspection.Error, SortedMap[LfContractId, CantonTimestamp]] =
+    for {
+      _ <- TimestampValidation.beforePrehead(state.requestJournalStore.preheadClean, timestamp)
+      snapshot <- EitherT.right(state.activeContractStore.snapshot(timestamp))
+      // check after getting the snapshot in case a pruning was happening concurrently
+      _ <- TimestampValidation.afterPruning(state.activeContractStore.pruningStatus, timestamp)
+    } yield snapshot.view.mapValues { case (ts, _transferCounter) => ts }.to(SortedMap)
+
+  // sort acs for easier comparison
+  private def getAcsSnapshot(
       state: SyncDomainPersistentState,
       timestamp: Option[CantonTimestamp],
-      batchSize: PositiveInt,
-      protocolVersion: Option[ProtocolVersion],
-      writer: OutputStreamWriter,
-      contractDomainRenames: Map[DomainId, DomainId],
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, RepairServiceError, Option[(DomainId, Long)]] = {
-    val lfParties: Set[LfPartyId] = parties.map(_.toLf)
+  ): EitherT[Future, SyncStateInspection.Error, Iterator[
+    SortedMap[LfContractId, CantonTimestamp]
+  ]] =
+    timestamp
+      .map(acsSnapshotAt(state))
+      .getOrElse(EitherT.right(currentAcsSnapshot(state).map(SortedMap.from(_))))
+      .map(_.grouped(SyncStateInspection.BatchSize.value))
 
-    if (filterDomain(domainId)) {
-      for {
-        // fetch acs, checking that the requested timestamp is clean
-        acs <- timestamp match {
-          case Some(requestedTimestamp) =>
-            for {
-              cursorPreheadO <- EitherT.right[RepairServiceError](
-                state.requestJournalStore.preheadClean
-              )
-              _ <- cursorPreheadO.traverse_(cursorPrehead =>
-                EitherT.cond[Future](
-                  cursorPrehead.timestamp >= requestedTimestamp,
-                  (),
-                  RepairServiceError.InvalidAcsSnapshotTimestamp
-                    .Error(requestedTimestamp, cursorPrehead.timestamp, domainId),
-                )
-              )
-              snapshot <- EitherT.right[RepairServiceError](
-                state.activeContractStore
-                  .snapshot(requestedTimestamp)
-                  .map(_.unsorted.map { case (cid, (ts, _transferCounter)) => cid -> ts })
-              )
-              pruningStatus <- EitherT.right[RepairServiceError](
-                state.activeContractStore.pruningStatus
-              )
-              _ <- pruningStatus.traverse_(status =>
-                EitherT.cond[Future](
-                  status.timestamp < requestedTimestamp,
-                  (),
-                  RepairServiceError.UnavailableAcsSnapshot
-                    .Error(requestedTimestamp, status.timestamp, domainId): RepairServiceError,
-                )
-              )
-            } yield snapshot
-          case None => EitherT.right[RepairServiceError](currentAcsSnapshot(state))
-        }
-        useProtocolVersion <- protocolVersion match {
-          case Some(pv) if pv.isSupported => EitherT.right(Future.successful(pv))
-          case Some(pv) =>
-            EitherT.leftT[Future, ProtocolVersion](
-              RepairServiceError.UnsupportedProtocolVersionParticipant.Error(
-                pv,
-                ProtocolVersion.supported ++ ProtocolVersion.unstable,
-              )
-            )
-          case None =>
-            EitherT.right(
-              state.parameterStore.lastParameters
-                .map(_.map(_.protocolVersion).getOrElse(ProtocolVersion.latest))
-            )
-        }
-        // sort acs by coid (for easier comparison ...)
-        grouped = acs.toList
-          .sortBy { case (contractId, _) => contractId.coid }
-          .grouped(batchSize.value)
-
-        // Try to map the domain id based on the contract domain renames, or keep the current one when no mapping is present
-        mappedDomainId = contractDomainRenames.getOrElse(domainId, domainId)
-
-        // fetch contracts
-        numberOfContracts <- EitherT.right(MonadUtil.sequentialTraverse(grouped.toSeq) { batch =>
-          state.contractStore
-            .lookupManyUncached(batch.map { case (cid, _) => cid })
-            .map(_.flatten)
-            .map(writeToStream(writer, mappedDomainId, _, lfParties, useProtocolVersion))
-
-        })
-      } yield Some(domainId -> numberOfContracts.sum.toLong)
-    } else EitherT.rightT[Future, RepairServiceError](None)
-  }
-
-  private def writeToStream(
-      writer: OutputStreamWriter,
-      domainId: DomainId,
-      contracts: Seq[StoredContract],
-      lfParties: Set[LfPartyId],
+  private def writeActiveContracts(
+      outputStream: OutputStream,
+      domainIdForExport: DomainId,
+      parties: Set[LfPartyId],
+      state: SyncDomainPersistentState,
+      timestamp: Option[CantonTimestamp],
       protocolVersion: ProtocolVersion,
-  ): Int = {
-    val res = contracts.collect {
-      case contract if lfParties.exists(contract.contract.metadata.stakeholders.contains) =>
-        val domainToContract = SerializableContractWithDomainId(domainId, contract.contract)
-        writer.write(domainToContract.encode(protocolVersion))
-        writer.write("\n")
-    }
-    writer.flush()
-    res.size
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, SyncStateInspection.Error, Unit] =
+    for {
+      acs <- getAcsSnapshot(state, timestamp)
+      unit <- MonadUtil.sequentialTraverse_(acs)(
+        writeBatch(outputStream, domainIdForExport, parties, protocolVersion, state)
+      )
+    } yield unit
+
+  private def writeBatch(
+      outputStream: OutputStream,
+      domainIdForExport: DomainId,
+      parties: Set[LfPartyId],
+      protocolVersion: ProtocolVersion,
+      state: SyncDomainPersistentState,
+  )(
+      batch: SortedMap[LfContractId, CantonTimestamp]
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, SyncStateInspection.Error, Unit] = EitherT {
+    state.contractStore
+      .lookupManyUncached(batch.keysIterator.toSeq)
+      .map(_.partitionMap {
+        case (contractId, None) => Left(contractId)
+        case (_, Some(stored)) => Right(stored.contract)
+      })
+      .map {
+        case (Nil, contracts) =>
+          Try {
+            for (contract <- contracts if parties.exists(contract.metadata.stakeholders)) {
+              val domainToContract = SerializableContractWithDomainId(domainIdForExport, contract)
+              val encodedContract = domainToContract.encode(protocolVersion)
+              outputStream.write(encodedContract.getBytes)
+              outputStream.flush()
+            }
+          }.toEither.leftMap(SyncStateInspection.Error.UnexpectedError)
+        case (missingContractIds, _) =>
+          Left(SyncStateInspection.Error.InconsistentSnapshot(missingContractIds))
+      }
   }
 
   def contractCount(domain: DomainAlias)(implicit traceContext: TraceContext): Future[Int] = {
@@ -553,17 +505,14 @@ class SyncStateInspection(
 
     if (numTransactions <= 0L)
       throw new IllegalArgumentException(
-        s"Number of transactions needs to be positive and not ${numTransactions}"
+        s"Number of transactions needs to be positive and not $numTransactions"
       )
 
     participantNodePersistentState.value.multiDomainEventLog
       .locateOffset(numTransactions - 1L)
-      .fold(
-        Left(s"Participant does not contain ${numTransactions} transactions."): Either[
-          String,
-          LedgerOffset,
-        ]
-      )(o => Right(UpstreamOffsetConvert.toLedgerOffset(o)))
+      .toRight(s"Participant does not contain $numTransactions transactions.")
+      .map(UpstreamOffsetConvert.toLedgerOffset)
+      .value
   }
 
   def getOffsetByTime(
@@ -582,38 +531,44 @@ class SyncStateInspection(
     )
     res <- participantNodePersistentState.value.multiDomainEventLog
       .lookupOffset(globalOffset)
-      .toRight(s"offset ${ledgerOffset} not found")
+      .toRight(s"offset $ledgerOffset not found")
     (_eventLogId, _localOffset, publicationTimestamp) = res
   } yield publicationTimestamp
 
 }
 
 object SyncStateInspection {
-  type DisplayOffset = String
 
-  val batchSize = PositiveInt.tryCreate(1000)
+  private type DisplayOffset = String
+
+  private val BatchSize = PositiveInt.tryCreate(1000)
+
   private def getOrFail[T](opt: Option[T], domain: DomainAlias): T =
-    opt.getOrElse(throw new IllegalArgumentException(s"no such domain [${domain}]"))
+    opt.getOrElse(throw new IllegalArgumentException(s"no such domain [$domain]"))
 
-  final case class NoSuchDomain(alias: DomainAlias) extends AcsError
+  private final case class NoSuchDomain(alias: DomainAlias) extends AcsError
 
   final case class SerializableContractWithDomainId(
       domainId: DomainId,
       contract: SerializableContract,
   ) {
 
+    import SerializableContractWithDomainId.{Delimiter, encoder}
+
     def encode(protocolVersion: ProtocolVersion): String = {
       val byteStr = contract.toByteString(protocolVersion)
-      s"${domainId.filterString}${SerializableContractWithDomainId.delimiter}${SerializableContractWithDomainId.encoder
-          .encodeToString(byteStr.toByteArray)}"
+      val encoded = encoder.encodeToString(byteStr.toByteArray)
+      val domain = domainId.filterString
+      s"$domain$Delimiter$encoded\n"
     }
   }
+
   object SerializableContractWithDomainId {
-    val delimiter = ":::"
-    val decoder = java.util.Base64.getDecoder
-    val encoder: Base64.Encoder = java.util.Base64.getEncoder
+    private val Delimiter = ":::"
+    private val decoder = java.util.Base64.getDecoder
+    private val encoder: Base64.Encoder = java.util.Base64.getEncoder
     def decode(line: String, lineNumber: Int): Either[String, SerializableContractWithDomainId] =
-      line.split(":::").toList match {
+      line.split(Delimiter).toList match {
         case domainId :: contractByteString :: Nil =>
           for {
             domainId <- DomainId.fromString(domainId)
@@ -624,4 +579,48 @@ object SyncStateInspection {
         case line => Either.left(s"Failed parsing line $lineNumber: $line ")
       }
   }
+
+  sealed abstract class Error extends Product with Serializable
+
+  object Error {
+
+    final case class TimestampAfterPrehead private[SyncStateInspection] (
+        requestedTimestamp: CantonTimestamp,
+        cleanTimestamp: CantonTimestamp,
+    ) extends Error
+
+    final case class TimestampBeforePruning private[SyncStateInspection] (
+        requestedTimestamp: CantonTimestamp,
+        prunedTimestamp: CantonTimestamp,
+    ) extends Error
+
+    final case class InconsistentSnapshot(missingContracts: List[LfContractId]) extends Error
+
+    final case class UnexpectedError(cause: Throwable) extends Error
+
+  }
+
+  private object TimestampValidation {
+
+    private def validate[A, F[_]: Foldable](ffa: Future[F[A]])(p: A => Boolean)(fail: A => Error)(
+        implicit ec: ExecutionContext
+    ): EitherT[Future, Error, Unit] =
+      EitherT(ffa.map(_.traverse_(a => EitherUtil.condUnitE(p(a), fail(a)))))
+
+    def beforePrehead(
+        cursorPrehead: Future[Option[RequestCounterCursorPrehead]],
+        timestamp: CantonTimestamp,
+    )(implicit ec: ExecutionContext): EitherT[Future, Error, Unit] =
+      validate(cursorPrehead)(timestamp < _.timestamp)(cp =>
+        Error.TimestampAfterPrehead(timestamp, cp.timestamp)
+      )
+
+    def afterPruning(pruningStatus: Future[Option[PruningStatus]], timestamp: CantonTimestamp)(
+        implicit ec: ExecutionContext
+    ): EitherT[Future, Error, Unit] =
+      validate(pruningStatus)(timestamp >= _.timestamp)(ps =>
+        Error.TimestampBeforePruning(timestamp, ps.timestamp)
+      )
+  }
+
 }

@@ -161,6 +161,11 @@ object Threading extends NoTracing {
     new ForkJoinIdlenessExecutorService(forkJoinPool, monitoredExecutorService, reporter, name)
   }
 
+  /** Minimum parallelism of ForkJoinPool.
+    * Currently greater than one to work around a bug that prevents creation of new threads to compensate blocking tasks.
+    */
+  val minParallelism = 3
+
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
   private def createForkJoinPool(
       parallelism: Int,
@@ -169,16 +174,15 @@ object Threading extends NoTracing {
       logger: TracedLogger,
   )(implicit traceContext: TraceContext): ForkJoinPool = {
     val tunedParallelism =
-      if (parallelism >= 2) parallelism
+      if (parallelism >= minParallelism) parallelism
       else {
         // The calculation of running threads in ForkJoinPool may overestimate the actual number.
-        // As a result, we need to request at least 2 threads to get at least 1 (with high probability).
+        // As a result, we need to request at least minParallelism threads to get at least 1 (with high probability).
         // The pool may still run out of threads, but the probability is much lower.
         logger.info(
-          s"Creating ForkJoinPool with parallelism = 2 (instead of $parallelism) to avoid starvation."
+          s"Creating ForkJoinPool with parallelism = $minParallelism (instead of $parallelism) to avoid starvation."
         )
-        // IF YOU EVER CHANGE THIS, PLEASE ALSO ADAPT THE Math.max(2, ...) IN EXECUTION CONTEXT MONITOR TEST
-        2
+        minParallelism
       }
 
     try {
@@ -245,7 +249,7 @@ object Threading extends NoTracing {
           if (parsedValue >= 1) Some(parsedValue)
           else {
             logger.warn(
-              show"The value $parsedValue of '-D${name.unquoted}' is less then 1. Ignoring value."
+              show"The value $parsedValue of '-D${name.unquoted}' is less than 1. Ignoring value."
             )
             None
           }

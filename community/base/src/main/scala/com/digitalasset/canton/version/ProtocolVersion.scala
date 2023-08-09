@@ -44,10 +44,9 @@ sealed case class ProtocolVersion private[version] (v: Int)
 
   def isDeleted: Boolean = deleted.contains(this)
 
-  def isDev: Boolean = v == Int.MaxValue
+  def isDev: Boolean = this == ProtocolVersion.dev
 
-  def isSupported: Boolean =
-    supported.contains(this) || unstable.contains(this)
+  def isSupported: Boolean = supported.contains(this)
 
   override def pretty: Pretty[ProtocolVersion] =
     prettyOfString(_ => if (isDev) "dev" else v.toString)
@@ -169,7 +168,7 @@ object ProtocolVersion {
   final case class InvalidProtocolVersion(override val description: String) extends FailureReason
 
   // All stable protocol versions supported by this release
-  val supported: NonEmpty[List[ProtocolVersion]] =
+  private val stableAndSupported: NonEmpty[List[ProtocolVersion]] =
     NonEmpty
       .from(BuildInfo.protocolVersions.map(ProtocolVersion.tryCreate).toList)
       .getOrElse(
@@ -177,16 +176,19 @@ object ProtocolVersion {
       )
 
   private val deprecated: Seq[ProtocolVersion] = Seq()
-  val deleted: Seq[ProtocolVersion] = Seq(ProtocolVersion(2))
+  private val deleted: Seq[ProtocolVersion] = Seq(ProtocolVersion(2))
 
   val unstable: NonEmpty[List[ProtocolVersionWithStatus[Unstable]]] =
     NonEmpty.mk(List, ProtocolVersion.dev)
 
-  val latest: ProtocolVersion = supported.max1
+  val supported: NonEmpty[List[ProtocolVersion]] =
+    stableAndSupported ++ unstable
+
+  val latest: ProtocolVersion = stableAndSupported.max1
 
   def lastStableVersions2: (ProtocolVersion, ProtocolVersion) = {
     val List(beforeLastStableProtocolVersion, lastStableProtocolVersion) =
-      ProtocolVersion.supported.forgetNE.sorted.takeRight(2): @unchecked
+      ProtocolVersion.stableAndSupported.forgetNE.sorted.takeRight(2): @unchecked
 
     (beforeLastStableProtocolVersion, lastStableProtocolVersion)
   }

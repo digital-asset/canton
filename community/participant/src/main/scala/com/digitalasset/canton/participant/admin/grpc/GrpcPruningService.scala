@@ -11,7 +11,7 @@ import com.digitalasset.canton.admin.grpc.{GrpcPruningScheduler, HasPruningSched
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.PruningServiceErrorGroup
-import com.digitalasset.canton.ledger.error.LedgerApiErrors.RequestValidation.NonHexOffset
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.NonHexOffset
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.participant.admin.v0.*
@@ -20,7 +20,7 @@ import com.digitalasset.canton.participant.{GlobalOffset, Pruning}
 import com.digitalasset.canton.scheduler.PruningScheduler
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.EitherTUtil
 import io.grpc.Status
 
@@ -38,7 +38,7 @@ class GrpcPruningService(
     with NamedLogging {
 
   override def prune(request: PruneRequest): Future[PruneResponse] =
-    TraceContext.withNewTraceContext { implicit traceContext =>
+    TraceContextGrpc.withGrpcTraceContext { implicit traceContext =>
       EitherTUtil.toFuture {
         for {
           ledgerSyncOffset <-
@@ -56,7 +56,7 @@ class GrpcPruningService(
 
   override def getSafePruningOffset(
       request: GetSafePruningOffsetRequest
-  ): Future[GetSafePruningOffsetResponse] = TraceContext.withNewTraceContext {
+  ): Future[GetSafePruningOffsetResponse] = TraceContextGrpc.withGrpcTraceContext {
     implicit traceContext =>
       val validatedRequestE: ParsingResult[(CantonTimestamp, GlobalOffset)] = for {
         beforeOrAt <-

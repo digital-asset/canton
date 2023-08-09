@@ -5,7 +5,7 @@ package com.digitalasset.canton.ledger.api.validation
 
 import com.daml.error.ContextualizedErrorLogger
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import io.grpc.StatusRuntimeException
 
 import java.time.Duration
@@ -32,7 +32,7 @@ object DeduplicationPeriodValidator {
     validateNonNegativeDuration(duration).flatMap { duration =>
       if (duration.compareTo(maxDeduplicationDuration) > 0)
         Left(
-          LedgerApiErrors.RequestValidation.InvalidDeduplicationPeriodField
+          RequestValidationErrors.InvalidDeduplicationPeriodField
             .Reject(
               s"The given deduplication duration of $duration exceeds the maximum deduplication duration of $maxDeduplicationDuration",
               Some(maxDeduplicationDuration),

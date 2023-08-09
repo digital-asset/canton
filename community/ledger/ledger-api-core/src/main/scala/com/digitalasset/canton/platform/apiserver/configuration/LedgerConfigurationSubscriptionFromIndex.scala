@@ -12,7 +12,7 @@ import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.LedgerOffset
 import com.digitalasset.canton.ledger.configuration.Configuration
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexConfigManagementService
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
@@ -90,7 +90,7 @@ private[apiserver] final class LedgerConfigurationSubscriptionFromIndex(
                 logger.warn(
                   s"No ledger configuration found after $configurationLoadTimeout. The ledger API server will now start " +
                     s"but all services that depend on the ledger configuration will return " +
-                    s"${LedgerApiErrors.RequestValidation.NotFound.LedgerConfiguration.id} until at least one ledger configuration is found."
+                    s"${RequestValidationErrors.NotFound.LedgerConfiguration.id} until at least one ledger configuration is found."
                 )
               }
               ()

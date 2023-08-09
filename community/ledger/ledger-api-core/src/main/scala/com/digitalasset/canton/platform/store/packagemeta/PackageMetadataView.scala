@@ -3,12 +3,11 @@
 
 package com.digitalasset.canton.platform.store.packagemeta
 
-import com.daml.daml_lf_dev.DamlLf
-import com.daml.lf.archive.Decode
-import com.daml.lf.data.Ref
-import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView.*
+import cats.implicits.catsSyntaxSemigroup
 
-import scala.concurrent.blocking
+import java.util.concurrent.atomic.AtomicReference
+
+import PackageMetadata.Implicits.packageMetadataSemigroup
 
 trait PackageMetadataView {
   def update(packageMetadata: PackageMetadata): Unit
@@ -18,49 +17,13 @@ trait PackageMetadataView {
 
 object PackageMetadataView {
   def create: PackageMetadataView = new PackageMetaDataViewImpl
-
-  final case class PackageMetadata(
-      templates: Set[Ref.Identifier] = Set.empty,
-      interfaces: Set[Ref.Identifier] = Set.empty,
-      interfacesImplementedBy: Map[Ref.Identifier, Set[Ref.Identifier]] = Map.empty,
-  ) {
-    def append(
-        updated: PackageMetadata
-    ): PackageMetadata =
-      PackageMetadata(
-        templates = templates ++ updated.templates,
-        interfaces = interfaces ++ updated.interfaces,
-        interfacesImplementedBy =
-          updated.interfacesImplementedBy.foldLeft(interfacesImplementedBy) {
-            case (acc, (interface, templates)) =>
-              acc + (interface -> (acc.getOrElse(interface, Set.empty) ++ templates))
-          },
-      )
-  }
-
-  object PackageMetadata {
-    def from(archive: DamlLf.Archive): PackageMetadata = {
-      val packageInfo = Decode.assertDecodeInfoPackage(archive)
-      PackageMetadata(
-        templates = packageInfo.definedTemplates,
-        interfaces = packageInfo.definedInterfaces,
-        interfacesImplementedBy = packageInfo.interfaceInstances,
-      )
-    }
-    def empty: PackageMetadata = PackageMetadata()
-  }
 }
 
 private[packagemeta] class PackageMetaDataViewImpl extends PackageMetadataView {
-  @SuppressWarnings(Array("org.wartremover.warts.Var"))
-  @volatile private var packageMetadata = PackageMetadata()
+  private val packageMetadataRef = new AtomicReference(PackageMetadata())
 
-  override def update(packageMetadata: PackageMetadata): Unit =
-    blocking(
-      synchronized(
-        this.packageMetadata = this.packageMetadata.append(packageMetadata)
-      )
-    )
+  override def update(other: PackageMetadata): Unit =
+    packageMetadataRef.updateAndGet(_ |+| other).discard
 
-  override def current(): PackageMetadata = packageMetadata
+  override def current(): PackageMetadata = packageMetadataRef.get()
 }

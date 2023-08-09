@@ -85,6 +85,7 @@ private[http] final class ContractList(
 
     } yield domain.OkResponse(jsVal)
   }
+
   def retrieveAll(req: HttpRequest)(implicit
       lc: LoggingContextOf[InstanceUUID with RequestID],
       metrics: HttpApiMetrics,
@@ -149,7 +150,6 @@ private[http] final class ContractList(
     Flow
       .fromFunction((_: E \/ A).leftMap(E.run))
       .recover(Error.fromThrowable andThen (-\/(_)))
-
 }
 
 private[endpoints] object ContractList {

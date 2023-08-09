@@ -4,15 +4,16 @@
 package com.digitalasset.canton.platform.index
 
 import com.daml.error.{ContextualizedErrorLogger, NoLogging}
-import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.Identifier
+import com.daml.lf.data.{Ref, Time}
+import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.ledger.api.domain.{
   Filters,
   InclusiveFilters,
   InterfaceFilter,
   TransactionFilter,
 }
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.platform.TemplatePartiesFilter
 import com.digitalasset.canton.platform.index.IndexServiceImpl.{
   checkUnknownTemplatesOrInterfaces,
@@ -23,11 +24,12 @@ import com.digitalasset.canton.platform.index.IndexServiceImpl.{
 import com.digitalasset.canton.platform.index.IndexServiceImplSpec.Scope
 import com.digitalasset.canton.platform.store.dao.EventProjectionProperties
 import com.digitalasset.canton.platform.store.dao.EventProjectionProperties.InterfaceViewFilter
-import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView
-import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView.PackageMetadata
+import com.digitalasset.canton.platform.store.packagemeta.{PackageMetadata, PackageMetadataView}
 import org.mockito.MockitoSugar
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+
+import PackageMetadata.{TemplateIdWithPriority, TemplatesForQualifiedName}
 
 class IndexServiceImplSpec extends AnyFlatSpec with Matchers with MockitoSugar {
 
@@ -320,7 +322,7 @@ class IndexServiceImplSpec extends AnyFlatSpec with Matchers with MockitoSugar {
   it should "return zero unknown templates for known templates" in new Scope {
     checkUnknownTemplatesOrInterfaces(
       new TransactionFilter(Map(party -> Filters(InclusiveFilters(Set(template1), Set())))),
-      PackageMetadata(templates = Set(template1)),
+      PackageMetadata(templates = Map(templatesForQn1)),
     ) shouldBe List()
   }
 
@@ -337,7 +339,7 @@ class IndexServiceImplSpec extends AnyFlatSpec with Matchers with MockitoSugar {
         )
       ),
       PackageMetadata(
-        templates = Set(template1),
+        templates = Map(templatesForQn1),
         interfaces = Set(iface1),
       ),
     ) shouldBe List(Right(iface2), Left(template2), Left(template3))
@@ -347,13 +349,13 @@ class IndexServiceImplSpec extends AnyFlatSpec with Matchers with MockitoSugar {
 
   private implicit val contextualizedErrorLogger: ContextualizedErrorLogger = NoLogging
   it should "provide no message if the list of invalid templates or interfaces is empty" in new Scope {
-    LedgerApiErrors.RequestValidation.NotFound.TemplateOrInterfaceIdsNotFound
+    RequestValidationErrors.NotFound.TemplateOrInterfaceIdsNotFound
       .Reject(List.empty)
       .cause shouldBe ""
   }
 
   it should "combine a message containing invalid interfaces and templates together" in new Scope {
-    LedgerApiErrors.RequestValidation.NotFound.TemplateOrInterfaceIdsNotFound
+    RequestValidationErrors.NotFound.TemplateOrInterfaceIdsNotFound
       .Reject(
         List(Right(iface2), Left(template2), Left(template3))
       )
@@ -361,7 +363,7 @@ class IndexServiceImplSpec extends AnyFlatSpec with Matchers with MockitoSugar {
   }
 
   it should "provide a message for invalid templates" in new Scope {
-    LedgerApiErrors.RequestValidation.NotFound.TemplateOrInterfaceIdsNotFound
+    RequestValidationErrors.NotFound.TemplateOrInterfaceIdsNotFound
       .Reject(
         List(Left(template2), Left(template3))
       )
@@ -369,7 +371,7 @@ class IndexServiceImplSpec extends AnyFlatSpec with Matchers with MockitoSugar {
   }
 
   it should "provide a message for invalid interfaces" in new Scope {
-    LedgerApiErrors.RequestValidation.NotFound.TemplateOrInterfaceIdsNotFound
+    RequestValidationErrors.NotFound.TemplateOrInterfaceIdsNotFound
       .Reject(
         List(Right(iface1), Right(iface2))
       )
@@ -381,7 +383,13 @@ object IndexServiceImplSpec {
   trait Scope extends MockitoSugar {
     val party = Ref.Party.assertFromString("party")
     val party2 = Ref.Party.assertFromString("party2")
+    val templateQualifiedName1 = Ref.QualifiedName.assertFromString("ModuleName:template1")
     val template1 = Ref.Identifier.assertFromString("PackageName:ModuleName:template1")
+    val templatesForQn1 = templateQualifiedName1 ->
+      TemplatesForQualifiedName(
+        NonEmptyUtil.fromUnsafe(Set(template1)),
+        TemplateIdWithPriority(template1, Time.Timestamp.Epoch),
+      )
     val template2 = Ref.Identifier.assertFromString("PackageName:ModuleName:template2")
     val template3 = Ref.Identifier.assertFromString("PackageName:ModuleName:template3")
     val iface1 = Ref.Identifier.assertFromString("PackageName:ModuleName:iface1")

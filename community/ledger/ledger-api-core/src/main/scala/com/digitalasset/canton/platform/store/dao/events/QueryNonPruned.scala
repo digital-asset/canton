@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
@@ -62,7 +62,7 @@ final case class QueryNonPrunedImpl(
         result
 
       case Some(pruningOffsetUpToInclusive) =>
-        throw LedgerApiErrors.RequestValidation.ParticipantPrunedDataAccessed
+        throw RequestValidationErrors.ParticipantPrunedDataAccessed
           .Reject(
             cause = error(pruningOffsetUpToInclusive),
             earliestOffset = pruningOffsetUpToInclusive.toHexString,

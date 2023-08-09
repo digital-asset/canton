@@ -4,6 +4,7 @@
 package com.digitalasset.canton.topology.store.db
 
 import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.TestDomainParameters
@@ -62,7 +63,7 @@ trait DbTopologyStoreTest extends TopologyStoreTest {
       timeouts,
       loggerFactory,
       futureSupervisor,
-      maxItemsInSqlQuery = 1,
+      maxItemsInSqlQuery = PositiveInt.one,
     )
 
   "DbTopologyStore" should {

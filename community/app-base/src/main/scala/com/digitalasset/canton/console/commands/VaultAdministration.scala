@@ -226,11 +226,19 @@ class SecretKeyAdministration(
     topologyAdmin match {
       case t: TopologyAdministrationGroup =>
         t.owner_to_key_mappings
-          .list(filterStore = AuthorizedStore.filterName, filterKeyOwnerUid = owner.filterString)
+          .list(
+            filterStore = AuthorizedStore.filterName,
+            filterKeyOwnerUid = owner.filterString,
+            filterKeyOwnerType = Some(owner.code),
+          )
           .map(_.item.key)
       case tx: TopologyAdministrationGroupX =>
         tx.owner_to_key_mappings
-          .list(filterStore = AuthorizedStore.filterName, filterKeyOwnerUid = owner.filterString)
+          .list(
+            filterStore = AuthorizedStore.filterName,
+            filterKeyOwnerUid = owner.filterString,
+            filterKeyOwnerType = Some(owner.code),
+          )
           .flatMap(_.item.keys)
       case _ =>
         throw new IllegalStateException(

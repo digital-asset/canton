@@ -208,6 +208,7 @@ CREATE TABLE participant_events_create (
     create_agreement_text VARCHAR,
     create_key_value BINARY LARGE OBJECT,
     create_key_hash VARCHAR,
+    create_key_maintainers INTEGER ARRAY,
 
     -- * compression flags
     create_argument_compression SMALLINT,
@@ -427,6 +428,7 @@ CREATE TABLE participant_events_assign (
     create_agreement_text VARCHAR,
     create_key_value BINARY LARGE OBJECT,
     create_key_hash VARCHAR,
+    create_key_maintainers INTEGER ARRAY,
     create_argument_compression SMALLINT,
     create_key_value_compression SMALLINT,
     ledger_effective_time BIGINT NOT NULL,

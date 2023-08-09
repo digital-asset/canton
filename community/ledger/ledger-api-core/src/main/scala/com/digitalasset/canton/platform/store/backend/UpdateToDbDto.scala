@@ -249,6 +249,7 @@ object UpdateToDbDto {
                     create_agreement_text = Some(create.agreementText).filter(_.nonEmpty),
                     create_key_value = createKeyValue
                       .map(compressionStrategy.createKeyValueCompression.compress),
+                    create_key_maintainers = create.keyOpt.map(_.maintainers.map(_.toString)),
                     create_key_hash = create.keyOpt.map(_.globalKey.hash.bytes.toHexString),
                     create_argument_compression = compressionStrategy.createArgumentCompression.id,
                     create_key_value_compression =
@@ -391,10 +392,9 @@ object UpdateToDbDto {
           events ++ divulgences ++ completions ++ Seq(transactionMeta)
 
         case u: ReassignmentAccepted if multiDomainEnabled =>
-          val hostedWitnesses = u.reassignmentInfo.hostedStakeholders.toSet
           val events = u.reassignment match {
             case unassign: Reassignment.Unassign =>
-              val flatEventWitnesses = unassign.stakeholders.filter(hostedWitnesses).map(_.toString)
+              val flatEventWitnesses = unassign.stakeholders.map(_.toString)
               val templateId = unassign.templateId.toString
               Iterator(
                 DbDto.EventUnassign(
@@ -423,7 +423,7 @@ object UpdateToDbDto {
             case assign: Reassignment.Assign =>
               val templateId = assign.createNode.templateId.toString
               val flatEventWitnesses =
-                assign.createNode.stakeholders.filter(hostedWitnesses).map(_.toString)
+                assign.createNode.stakeholders.map(_.toString)
               val (createArgument, createKeyValue) = translation.serialize(assign.createNode)
               Iterator(
                 DbDto.EventAssign(
@@ -443,6 +443,8 @@ object UpdateToDbDto {
                   create_agreement_text = Some(assign.createNode.agreementText).filter(_.nonEmpty),
                   create_key_value = createKeyValue
                     .map(compressionStrategy.createKeyValueCompression.compress),
+                  create_key_maintainers =
+                    assign.createNode.keyOpt.map(_.maintainers.map(_.toString)),
                   create_key_hash =
                     assign.createNode.keyOpt.map(_.globalKey.hash.bytes.toHexString),
                   create_argument_compression = compressionStrategy.createArgumentCompression.id,

@@ -315,7 +315,7 @@ class DomainNodeBootstrap(
       futureSupervisor,
     )
     topologyManager = Some(manager)
-    startTopologyManagementWriteService(manager, manager.store)
+    startTopologyManagementWriteService(manager)
     Right(manager)
   }
 

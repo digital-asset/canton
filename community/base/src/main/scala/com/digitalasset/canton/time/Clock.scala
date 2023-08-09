@@ -67,12 +67,12 @@ abstract class Clock() extends TimeProvider with AutoCloseable with NamedLogging
 
   protected def addToQueue(queue: Queued): Unit
 
-  /** thread safe weakly monotonistic time: each timestamp will be either equal or increasing
+  /** thread safe weakly monotonic time: each timestamp will be either equal or increasing
     * May go backwards across restarts.
     */
   final def monotonicTime(): CantonTimestamp = internalMonotonicTime(0)
 
-  /** thread safe strongly monotonistic increasing time: each timestamp will be unique
+  /** thread safe strongly monotonic increasing time: each timestamp will be unique
     * May go backwards across restarts.
     */
   final def uniqueTime(): CantonTimestamp = internalMonotonicTime(1)

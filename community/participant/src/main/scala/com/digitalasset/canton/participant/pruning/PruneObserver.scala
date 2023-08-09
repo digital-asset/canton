@@ -102,23 +102,34 @@ private[participant] class PruneObserver(
 
     if (oldTs < localTs) {
       logger.debug(s"Starting periodic background pruning at ${pruneTs}")
+      val acsDescription = s"Periodic ACS prune at $pruneTs:"
       // Clean unused entries from the ACS
-      val acsF = FutureUtil.logOnFailure(
-        acs.prune(pruneTs.forgetRefinement),
-        s"Periodic ACS prune at $pruneTs:",
+      val acsF = performUnlessClosingF(acsDescription)(
+        FutureUtil.logOnFailure(
+          acs.prune(pruneTs.forgetRefinement),
+          acsDescription,
+        )
       )
+      val journalFDescription = s"Periodic contract key journal prune at $pruneTs: "
       // clean unused contract key journal entries
-      val journalF = FutureUtil.logOnFailure(
-        keyJournal.prune(pruneTs.forgetRefinement),
-        s"Periodic contract key journal prune at $pruneTs: ",
+      val journalF = performUnlessClosingF(journalFDescription)(
+        FutureUtil.logOnFailure(
+          keyJournal.prune(pruneTs.forgetRefinement),
+          journalFDescription,
+        )
       )
+      val submissionTrackerStoreDescription =
+        s"Periodic submission tracker store prune at $pruneTs: "
       // Clean unused entries from the submission tracker store
-      val submissionTrackerStoreF = FutureUtil.logOnFailure(
-        submissionTrackerStore.prune(pruneTs.forgetRefinement),
-        s"Periodic submission tracker store prune at $pruneTs: ",
+      val submissionTrackerStoreF = performUnlessClosingF(submissionTrackerStoreDescription)(
+        FutureUtil.logOnFailure(
+          submissionTrackerStore.prune(pruneTs.forgetRefinement),
+          submissionTrackerStoreDescription,
+        )
       )
 
-      val pruneF = Seq(acsF, journalF, submissionTrackerStoreF).sequence_
+      val pruneFUS = Seq(acsF, journalF, submissionTrackerStoreF).sequence_
+      val pruneF = pruneFUS.onShutdown(())
       promise.completeWith(pruneF)
       pruneF
     } else {

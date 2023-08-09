@@ -20,6 +20,7 @@ import com.daml.lf.transaction.test.{TestNodeBuilder, TransactionBuilder}
 import com.daml.lf.transaction.{CommittedTransaction, NodeId}
 import com.daml.lf.value.Value
 import com.daml.metrics.Metrics
+import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.Update.CommandRejected.FinalReason
@@ -37,8 +38,11 @@ import com.digitalasset.canton.platform.store.cache.{
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.CreatedEvent
 import com.digitalasset.canton.platform.store.interning.StringInterningView
-import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView
-import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView.PackageMetadata
+import com.digitalasset.canton.platform.store.packagemeta.PackageMetadata.{
+  TemplateIdWithPriority,
+  TemplatesForQualifiedName,
+}
+import com.digitalasset.canton.platform.store.packagemeta.{PackageMetadata, PackageMetadataView}
 import com.digitalasset.canton.platform.{DispatcherState, InMemoryState}
 import com.digitalasset.canton.protocol.{SourceDomainId, TargetDomainId}
 import com.digitalasset.canton.topology.DomainId
@@ -154,9 +158,11 @@ class InMemoryStateUpdaterSpec
   }
 
   "prepare" should "append package metadata" in new Scope {
-    def metadata: DamlLf.Archive => PackageMetadata = {
-      case archive if archive.getHash == "00001" => PackageMetadata(templates = Set(templateId))
-      case archive if archive.getHash == "00002" => PackageMetadata(templates = Set(templateId2))
+    def metadata: (DamlLf.Archive, Time.Timestamp) => PackageMetadata = {
+      case (archive, _) if archive.getHash == "00001" =>
+        PackageMetadata(templates = Map(templatesForQn1))
+      case (archive, _) if archive.getHash == "00002" =>
+        PackageMetadata(templates = Map(templatesForQn2))
       case _ => fail("unexpected archive hash")
     }
 
@@ -168,7 +174,7 @@ class InMemoryStateUpdaterSpec
       offset(6L),
       0L,
       update6._2.traceContext,
-      PackageMetadata(templates = Set(templateId, templateId2)),
+      PackageMetadata(templates = Map(templatesForQn1, templatesForQn2)),
     )
   }
 
@@ -220,7 +226,8 @@ object InMemoryStateUpdaterSpec {
 
     override def handleFailure(message: String) = fail(message)
 
-    val emptyArchiveToMetadata: DamlLf.Archive => PackageMetadata = _ => PackageMetadata()
+    val emptyArchiveToMetadata: (DamlLf.Archive, Time.Timestamp) => PackageMetadata = (_, _) =>
+      PackageMetadata()
     val cacheUpdates = ArrayBuffer.empty[PrepareResult]
     val cachesUpdateCaptor =
       (v: PrepareResult) => cacheUpdates.addOne(v).pipe(_ => ())
@@ -287,6 +294,8 @@ object InMemoryStateUpdaterSpec {
             createObservers = Set(party2),
             createAgreementText = Some("agreement text"),
             createKeyHash = None,
+            createKey = None,
+            createKeyMaintainers = None,
             driverMetadata = Some(someContractMetadataBytes),
           )
         ),
@@ -414,7 +423,7 @@ object InMemoryStateUpdaterSpec {
         offset = tx_rejected_offset,
         completionDetails = tx_rejected_completionDetails,
       )
-    val packageMetadata: PackageMetadata = PackageMetadata(templates = Set(templateId))
+    val packageMetadata: PackageMetadata = PackageMetadata(templates = Map(templatesForQn1))
 
     val lastOffset: Offset = tx_rejected_offset
     val lastEventSeqId = 123L
@@ -464,8 +473,22 @@ object InMemoryStateUpdaterSpec {
   private val party1 = Ref.Party.assertFromString("someparty1")
   private val party2 = Ref.Party.assertFromString("someparty2")
 
-  private val templateId = Identifier.assertFromString("noPkgId:Mod:I")
-  private val templateId2 = Identifier.assertFromString("noPkgId:Mod:I2")
+  private val templateQualifiedName1 = Ref.QualifiedName.assertFromString("Mod:I")
+  private val templateQualifiedName2 = Ref.QualifiedName.assertFromString("Mod:I2")
+
+  private val templateId = Identifier.assertFromString("pkgId1:Mod:I")
+  private val templateId2 = Identifier.assertFromString("pkgId2:Mod:I2")
+
+  private val templatesForQn1 = templateQualifiedName1 ->
+    TemplatesForQualifiedName(
+      NonEmptyUtil.fromUnsafe(Set(templateId)),
+      TemplateIdWithPriority(templateId, Time.Timestamp.Epoch),
+    )
+  private val templatesForQn2 = templateQualifiedName2 ->
+    TemplatesForQualifiedName(
+      NonEmptyUtil.fromUnsafe(Set(templateId2)),
+      TemplateIdWithPriority(templateId2, Time.Timestamp.Epoch),
+    )
 
   private val someCreateNode = {
     val contractId = TransactionBuilder.newCid

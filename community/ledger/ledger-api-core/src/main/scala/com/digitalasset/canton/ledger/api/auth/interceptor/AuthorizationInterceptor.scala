@@ -10,7 +10,7 @@ import com.digitalasset.canton.ledger.api.auth.*
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, User, UserRight}
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.AuthorizationChecksErrors
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
   LoggingContextWithTrace,
@@ -70,7 +70,7 @@ final case class AuthorizationInterceptor(
           case Failure(error: StatusRuntimeException) =>
             closeWithError(error)
           case Failure(exception: Throwable) =>
-            val error = LedgerApiErrors.AuthorizationChecks.InternalAuthorizationError
+            val error = AuthorizationChecksErrors.InternalAuthorizationError
               .Reject(
                 message = "Failed to get claims from request metadata",
                 throwable = exception,
@@ -117,7 +117,7 @@ final case class AuthorizationInterceptor(
           claimsSet <- userRightsResult match {
             case Left(msg) =>
               Future.failed(
-                LedgerApiErrors.AuthorizationChecks.PermissionDenied
+                AuthorizationChecksErrors.PermissionDenied
                   .Reject(
                     s"Could not resolve rights for user '$userId' due to '$msg'"
                   )
@@ -148,7 +148,7 @@ final case class AuthorizationInterceptor(
   )(implicit errorLoggingContext: ErrorLoggingContext): Future[Unit] =
     if (user.identityProviderId != identityProviderId) {
       Future.failed(
-        LedgerApiErrors.AuthorizationChecks.PermissionDenied
+        AuthorizationChecksErrors.PermissionDenied
           .Reject(
             s"User is assigned to another identity provider"
           )
@@ -169,7 +169,7 @@ final case class AuthorizationInterceptor(
       value <- userResult match {
         case Left(msg) =>
           Future.failed(
-            LedgerApiErrors.AuthorizationChecks.PermissionDenied
+            AuthorizationChecksErrors.PermissionDenied
               .Reject(
                 s"Could not resolve is_deactivated status for user '$userId' and identity_provider_id '$identityProviderId' due to '$msg'"
               )
@@ -178,7 +178,7 @@ final case class AuthorizationInterceptor(
         case Right(user: domain.User) =>
           if (user.isDeactivated) {
             Future.failed(
-              LedgerApiErrors.AuthorizationChecks.PermissionDenied
+              AuthorizationChecksErrors.PermissionDenied
                 .Reject(
                   s"User $userId is deactivated"
                 )
@@ -196,7 +196,7 @@ final case class AuthorizationInterceptor(
     userManagementStoreO match {
       case None =>
         Future.failed(
-          LedgerApiErrors.AuthorizationChecks.Unauthenticated
+          AuthorizationChecksErrors.Unauthenticated
             .UserBasedAuthenticationIsDisabled()
             .asGrpcError
         )

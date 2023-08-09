@@ -208,7 +208,7 @@ private object MutableCacheBackedContractStoreRaceTests {
       _ <- indexViewContractsReader
         .lookupContractState(event.contractId, event.offset)
         .map {
-          case Some(ActiveContract(actualContract, _, _))
+          case Some(ActiveContract(actualContract, _, _, _, _, _, _, _))
               if event.created && event.contract == actualContract =>
           case Some(ArchivedContract(_)) if !event.created =>
           case actual =>
@@ -337,6 +337,10 @@ private object MutableCacheBackedContractStoreRaceTests {
           stakeholders = stakeholders, // Not used
           eventOffset = offset,
           eventSequentialId = 0L, // Not used
+          agreementText = None,
+          signatories = stakeholders,
+          keyMaintainers = None,
+          driverMetadata = None,
         )
       else
         ContractStateEvent.Archived(
@@ -425,7 +429,18 @@ private object MutableCacheBackedContractStoreRaceTests {
           .flatMap { case ContractLifecycle(_, contract, createdAt, maybeArchivedAt) =>
             if (validAt < createdAt) None
             else if (maybeArchivedAt.forall(_ > validAt))
-              Some(ActiveContract(contract, stakeholders, Time.Timestamp.MinValue))
+              Some(
+                ActiveContract(
+                  contract,
+                  stakeholders,
+                  Time.Timestamp.MinValue,
+                  None,
+                  Set.empty,
+                  None,
+                  None,
+                  None,
+                )
+              )
             else Some(ArchivedContract(stakeholders))
           }
       }(ec)

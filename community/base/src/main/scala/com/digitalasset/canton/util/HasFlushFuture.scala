@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.util
 
-import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.lifecycle.SyncCloseable
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{DiscardOps, config}
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future, Promise}
@@ -94,4 +94,21 @@ object HasFlushFuture {
     override def pretty: Pretty[NamedTask] =
       prettyOfString(x => if (x.future.isCompleted) x.name + " (completed)" else x.name)
   }
+}
+
+/** Stand-alone implementation of [[HasFlushFuture]] */
+class FlushFuture(name: String, override protected val loggerFactory: NamedLoggerFactory)
+    extends HasFlushFuture {
+
+  override def addToFlushAndLogError(name: String)(future: Future[_])(implicit
+      loggingContext: ErrorLoggingContext
+  ): Unit = super.addToFlushAndLogError(name)(future)
+
+  override def addToFlushWithoutLogging(name: String)(future: Future[_]): Unit =
+    super.addToFlushWithoutLogging(name)(future)
+
+  def flush(): Future[Unit] = doFlush()
+
+  def asCloseable(timeout: config.NonNegativeDuration): SyncCloseable =
+    flushCloseable(name, timeout)
 }

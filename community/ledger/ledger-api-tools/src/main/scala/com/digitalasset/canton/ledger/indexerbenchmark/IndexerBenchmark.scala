@@ -30,7 +30,8 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.LedgerApiServer
 import com.digitalasset.canton.platform.indexer.{Indexer, IndexerServiceOwner, JdbcIndexer}
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, Traced}
+import io.opentelemetry.api.trace.Tracer
 
 import java.util.concurrent.{Executors, TimeUnit}
 import scala.concurrent.duration.Duration
@@ -55,6 +56,7 @@ class IndexerBenchmark extends NamedLogging {
 
       val indexerExecutor = Executors.newWorkStealingPool()
       val indexerExecutionContext = ExecutionContext.fromExecutor(indexerExecutor)
+      val tracer: Tracer = NoReportingTracerProvider.tracer
 
       println("Generating state updates...")
       val updates = Await.result(createUpdates(), Duration(10, "minute"))
@@ -75,6 +77,7 @@ class IndexerBenchmark extends NamedLogging {
               256,
               metrics,
               indexerExecutionContext,
+              tracer,
               loggerFactory,
               multiDomainEnabled = false,
             )
@@ -88,6 +91,7 @@ class IndexerBenchmark extends NamedLogging {
           inMemoryState,
           inMemoryStateUpdaterFlow,
           servicesExecutionContext,
+          tracer,
           loggerFactory,
           multiDomainEnabled = false,
         )

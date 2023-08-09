@@ -16,14 +16,14 @@ import com.digitalasset.canton.store.SequencedEventStore.*
 import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.{BaseTest, SequencerCounter, TestMetrics}
+import com.digitalasset.canton.{BaseTest, CloseableTest, SequencerCounter, TestMetrics}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.ExecutionContext
 
-trait SequencedEventStoreTest extends PrunableByTimeTest {
-  this: AsyncWordSpec & BaseTest & TestMetrics =>
+trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest {
+  this: AsyncWordSpec with BaseTest with TestMetrics =>
 
   val sequencerKey: Fingerprint = Fingerprint.tryCreate("sequencer")
   val crypto: Crypto =

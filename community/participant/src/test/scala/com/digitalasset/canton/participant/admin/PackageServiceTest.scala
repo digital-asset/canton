@@ -11,7 +11,7 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.CantonRequireTypes.{String255, String256M}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
-import com.digitalasset.canton.ledger.error.PackageServiceError
+import com.digitalasset.canton.ledger.error.PackageServiceErrors
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.admin.PackageService.{Dar, DarDescriptor}
 import com.digitalasset.canton.participant.admin.PackageServiceTest.readCantonExamples
@@ -186,7 +186,7 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
         )("append illformed.dar").failOnShutdown
       } yield {
         error match {
-          case validation: PackageServiceError.Validation.ValidationError.Error =>
+          case validation: PackageServiceErrors.Validation.ValidationError.Error =>
             validation.validationError shouldBe a[com.daml.lf.validation.ETypeMismatch]
           case _ => fail(s"$error is not a validation error")
         }

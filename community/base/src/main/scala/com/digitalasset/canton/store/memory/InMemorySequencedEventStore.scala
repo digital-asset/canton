@@ -7,6 +7,7 @@ import cats.data.EitherT
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, PossiblyIgnoredSerializedEvent}
 import com.digitalasset.canton.store.SequencedEventStore.*
@@ -47,7 +48,7 @@ class InMemorySequencedEventStore(protected val loggerFactory: NamedLoggerFactor
 
   def store(
       events: Seq[OrdinarySerializedEvent]
-  )(implicit traceContext: TraceContext): Future[Unit] =
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[Unit] =
     NonEmpty.from(events).fold(Future.unit) { events =>
       logger.debug(
         show"Storing delivery events from ${events.head1.timestamp} to ${events.last1.timestamp}."

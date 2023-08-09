@@ -18,15 +18,14 @@ import com.digitalasset.canton.ledger.runner.common.OptConfigValue.{
 import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.apiserver.{ApiServerConfig, AuthServiceConfig}
-import com.digitalasset.canton.platform.config.MetricsConfig
-import com.digitalasset.canton.platform.configuration.{
-  CommandConfiguration,
+import com.digitalasset.canton.platform.config.{
+  CommandServiceConfig,
   IndexServiceConfig,
-  InitialLedgerConfiguration,
+  MetricsConfig,
+  UserManagementServiceConfig,
 }
 import com.digitalasset.canton.platform.indexer.ha.HaConfig
 import com.digitalasset.canton.platform.indexer.{IndexerConfig, PackageMetadataViewConfig}
-import com.digitalasset.canton.platform.localstore.UserManagementConfig
 import com.digitalasset.canton.platform.services.time.TimeProviderType
 import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig.SynchronousCommitValue
@@ -92,13 +91,8 @@ class PureConfigReaderWriterSpec
     testReaderWriterIsomorphism(secure, Gen.oneOf(TlsVersion.allVersions))
     testReaderWriterIsomorphism(secure, ArbitraryConfig.tlsConfiguration)
     testReaderWriterIsomorphism(secure, ArbitraryConfig.port)
-    testReaderWriterIsomorphism(
-      secure,
-      ArbitraryConfig.initialLedgerConfiguration,
-      Some("InitialLedgerConfiguration"),
-    )
     testReaderWriterIsomorphism(secure, ArbitraryConfig.clientAuth)
-    testReaderWriterIsomorphism(secure, ArbitraryConfig.userManagementConfig)
+    testReaderWriterIsomorphism(secure, ArbitraryConfig.userManagementServiceConfig)
     testReaderWriterIsomorphism(secure, ArbitraryConfig.identityProviderManagementConfig)
     testReaderWriterIsomorphism(secure, ArbitraryConfig.connectionPoolConfig)
     testReaderWriterIsomorphism(secure, ArbitraryConfig.postgresDataSourceConfig)
@@ -111,7 +105,7 @@ class PureConfigReaderWriterSpec
     testReaderWriterIsomorphism(secure, ArbitraryConfig.indexerConfig)
     testReaderWriterIsomorphism(secure, ArbitraryConfig.indexerStartupMode)
     testReaderWriterIsomorphism(secure, ArbitraryConfig.packageMetadataViewConfig)
-    testReaderWriterIsomorphism(secure, ArbitraryConfig.commandConfiguration)
+    testReaderWriterIsomorphism(secure, ArbitraryConfig.commandServiceConfig)
     testReaderWriterIsomorphism(secure, ArbitraryConfig.apiServerConfig)
     testReaderWriterIsomorphism(secure, ArbitraryConfig.haConfig)
     testReaderWriterIsomorphism(secure, ArbitraryConfig.indexServiceConfig)
@@ -408,51 +402,6 @@ class PureConfigReaderWriterSpec
       .to(SecretsUrl.fromString(secretUrl)) shouldBe fromAnyRef(secretUrl)
   }
 
-  behavior of "InitialLedgerConfiguration"
-
-  val validInitialLedgerConfiguration =
-    """
-      |  enabled = true
-      |  avg-transaction-latency = 0 days
-      |  delay-before-submitting = 0 days
-      |  max-deduplication-duration = 30 minutes
-      |  max-skew = 30 seconds
-      |  min-skew = 30 seconds
-      |  """.stripMargin
-
-  it should "support current defaults" in {
-    val value = validInitialLedgerConfiguration
-    convert(initialLedgerConfigurationConvert, value).value shouldBe Some(
-      InitialLedgerConfiguration()
-    )
-  }
-
-  it should "not support unknown keys" in {
-    val value = "unknown-key=yes\n" + validInitialLedgerConfiguration
-    convert(initialLedgerConfigurationConvert, value).left.value
-      .prettyPrint(0) should include("Unknown key")
-  }
-
-  it should "read/write against predefined values" in {
-    val value =
-      """
-          |enabled = true
-          |avg-transaction-latency = 1 days
-          |delay-before-submitting = 2 days
-          |max-deduplication-duration = 3 minutes
-          |max-skew = 4 seconds
-          |min-skew = 5 seconds
-          |""".stripMargin
-    val expectedValue = InitialLedgerConfiguration(
-      maxDeduplicationDuration = Duration.ofMinutes(3),
-      avgTransactionLatency = Duration.ofDays(1),
-      minSkew = Duration.ofSeconds(5),
-      maxSkew = Duration.ofSeconds(4),
-      delayBeforeSubmitting = Duration.ofDays(2),
-    )
-    convert(initialLedgerConfigurationConvert, value).value shouldBe Some(expectedValue)
-  }
-
   behavior of "Seeding"
 
   it should "read/write against predefined values" in {
@@ -464,23 +413,23 @@ class PureConfigReaderWriterSpec
     seedingReader.from(fromAnyRef("strong")).value shouldBe Seeding.Strong
   }
 
-  behavior of "userManagementConfig"
+  behavior of "userManagementServiceConfig"
 
-  val validUserManagementConfigValue =
+  val validUserManagementServiceConfigValue =
     """
       |  cache-expiry-after-write-in-seconds = 5
-      |  enabled = false
+      |  enabled = true
       |  max-cache-size = 100
       |  max-users-page-size = 1000""".stripMargin
 
   it should "support current defaults" in {
-    val value = validUserManagementConfigValue
-    convert(userManagementConfigConvert, value).value shouldBe UserManagementConfig()
+    val value = validUserManagementServiceConfigValue
+    convert(userManagementServiceConfigConvert, value).value shouldBe UserManagementServiceConfig()
   }
 
   it should "not support invalid keys" in {
-    val value = "unknown-key=yes\n" + validUserManagementConfigValue
-    convert(userManagementConfigConvert, value).left.value
+    val value = "unknown-key=yes\n" + validUserManagementServiceConfigValue
+    convert(userManagementServiceConfigConvert, value).left.value
       .prettyPrint(0) should include("Unknown key")
   }
 
@@ -491,7 +440,7 @@ class PureConfigReaderWriterSpec
     |  max-cache-size = 99
     |  max-users-page-size = 999""".stripMargin
 
-    convert(userManagementConfigConvert, value).value shouldBe UserManagementConfig(
+    convert(userManagementServiceConfigConvert, value).value shouldBe UserManagementServiceConfig(
       enabled = true,
       cacheExpiryAfterWriteInSeconds = 1,
       maxCacheSize = 99,
@@ -554,7 +503,7 @@ class PureConfigReaderWriterSpec
     )
   }
 
-  behavior of "CommandConfiguration"
+  behavior of "CommandServiceConfig"
 
   val validCommandConfigurationValue =
     """
@@ -563,7 +512,7 @@ class PureConfigReaderWriterSpec
 
   it should "read/write against predefined values" in {
     val value = validCommandConfigurationValue
-    convert(commandConfigurationConvert, value).value shouldBe CommandConfiguration()
+    convert(commandConfigurationConvert, value).value shouldBe CommandServiceConfig()
   }
 
   it should "not support additional unknown keys" in {
@@ -633,14 +582,6 @@ class PureConfigReaderWriterSpec
       |command {
       |  default-tracking-timeout = "300 seconds"
       |  max-commands-in-flight = 256
-      |}
-      |initial-ledger-configuration {
-      |  enabled = true
-      |  avg-transaction-latency = 0 days
-      |  delay-before-submitting = 0 days
-      |  max-deduplication-duration = 30 minutes
-      |  max-skew = 30 seconds
-      |  min-skew = 30 seconds
       |}
       |configuration-load-timeout = "10s"
       |management-service-timeout = "2m"

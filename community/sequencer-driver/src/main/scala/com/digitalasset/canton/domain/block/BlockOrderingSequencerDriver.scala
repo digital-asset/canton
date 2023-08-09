@@ -85,23 +85,24 @@ object BlockOrderingSequencerDriver {
       ): Source[RawLedgerBlock, KillSwitch] = {
         blockOrderer
           .subscribe(firstBlockHeight)
-          .map { case BlockOrderer.Block(blockHeight, orderingTime, requests) =>
+          .map { case BlockOrderer.Block(blockHeight, requests) =>
             RawLedgerBlock(
               blockHeight,
-              requests.map { case event @ Traced(BlockOrderer.Request(tag, body)) =>
-                implicit val traceContext: TraceContext =
-                  event.traceContext // Preserve the request trace ID in the log
-                tag match {
-                  case RegisterMemberTag =>
-                    Traced(RawLedgerBlock.RawBlockEvent.AddMember(body.toStringUtf8))
-                  case AcknowledgeTag =>
-                    Traced(RawLedgerBlock.RawBlockEvent.Acknowledgment(body))
-                  case SendTag =>
-                    Traced(RawLedgerBlock.RawBlockEvent.Send(body, orderingTime))
-                  case _ =>
-                    logger.error(s"Unexpected tag $tag")
-                    sys.exit(1)
-                }
+              requests.map {
+                case event @ Traced(BlockOrderer.OrderedRequest(orderingTime, tag, body)) =>
+                  implicit val traceContext: TraceContext =
+                    event.traceContext // Preserve the request trace ID in the log
+                  tag match {
+                    case RegisterMemberTag =>
+                      Traced(RawLedgerBlock.RawBlockEvent.AddMember(body.toStringUtf8))
+                    case AcknowledgeTag =>
+                      Traced(RawLedgerBlock.RawBlockEvent.Acknowledgment(body))
+                    case SendTag =>
+                      Traced(RawLedgerBlock.RawBlockEvent.Send(body, orderingTime))
+                    case _ =>
+                      logger.error(s"Unexpected tag $tag")
+                      sys.exit(1)
+                  }
               },
             )
           }

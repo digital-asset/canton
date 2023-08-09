@@ -5,7 +5,6 @@ package com.digitalasset.canton
 
 import cats.Functor
 import cats.data.{EitherT, OptionT}
-import cats.syntax.either.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor, Threading}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
@@ -403,6 +402,8 @@ object BaseTest {
   lazy val PerformanceTestPath: String = getResourcePath("PerformanceTest.dar")
   lazy val DamlTestFilesPath: String = getResourcePath("DamlTestFiles.dar")
   lazy val DamlTestLfV15FilesPath: String = getResourcePath("DamlTestLfV15Files.dar")
+  lazy val UpgradeV1: String = getResourcePath("upgrade-v1.dar")
+  lazy val UpgradeV2: String = getResourcePath("upgrade-v2.dar")
 
   private def getResourcePath(name: String): String =
     Option(getClass.getClassLoader.getResource(name))

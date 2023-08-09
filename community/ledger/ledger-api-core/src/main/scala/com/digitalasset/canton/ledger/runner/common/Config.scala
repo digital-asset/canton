@@ -24,10 +24,7 @@ final case class Config(
     dataSource: Map[Ref.ParticipantId, ParticipantDataSourceConfig] =
       DefaultParticipantsDatasourceConfig,
     participants: Map[Ref.ParticipantId, ParticipantConfig] = DefaultParticipants,
-) {
-  def withDataSource(dataSource: Map[Ref.ParticipantId, ParticipantDataSourceConfig]): Config =
-    copy(dataSource = dataSource)
-}
+) {}
 
 object Config {
   val DefaultLedgerId: String = "default-ledger-id"

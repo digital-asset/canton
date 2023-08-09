@@ -3,18 +3,15 @@
 
 package com.digitalasset.canton.version
 
-import com.daml.nonempty.NonEmpty
 import org.scalacheck.{Arbitrary, Gen}
 
 object GeneratorsVersion {
-  private val allProtocolVersions: NonEmpty[List[ProtocolVersion]] =
-    (ProtocolVersion.unstable ++ ProtocolVersion.supported)
 
-  val protocolVersionGen: Gen[ProtocolVersion] = Gen.oneOf(allProtocolVersions)
+  val protocolVersionGen: Gen[ProtocolVersion] =
+    Gen.oneOf(ProtocolVersion.supported)
 
-  implicit val protocolVersionArb: Arbitrary[ProtocolVersion] = Arbitrary(
-    Gen.oneOf(allProtocolVersions)
-  )
+  implicit val protocolVersionArb: Arbitrary[ProtocolVersion] =
+    Arbitrary(protocolVersionGen)
 
   def defaultValueGen[Comp <: HasProtocolVersionedWrapperCompanion[_, _], T](
       protocolVersion: ProtocolVersion,

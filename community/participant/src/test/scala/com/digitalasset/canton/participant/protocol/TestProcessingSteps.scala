@@ -94,8 +94,6 @@ class TestProcessingSteps(
   override type RequestType = TestPendingRequestDataType
   override val requestType = TestPendingRequestDataType
 
-  override type DecryptedView = TestViewTree
-
   override def embedRequestError(
       err: ProtocolProcessor.RequestProcessingError
   ): TestProcessingError =
@@ -209,11 +207,16 @@ class TestProcessingSteps(
     )
   }
 
+  override def computeFullViews(
+      decryptedViewsWithSignatures: Seq[(WithRecipients[DecryptedView], Option[Signature])]
+  ): (Seq[(WithRecipients[FullView], Option[Signature])], Seq[ProtocolProcessor.MalformedPayload]) =
+    (decryptedViewsWithSignatures, Seq.empty)
+
   override def computeActivenessSetAndPendingContracts(
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      decryptedViewsWithSignatures: NonEmpty[
+      fullViewsWithSignatures: NonEmpty[
         Seq[(WithRecipients[TestViewTree], Option[Signature])]
       ],
       malformedPayloads: Seq[ProtocolProcessor.MalformedPayload],
@@ -264,7 +267,7 @@ class TestProcessingSteps(
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      decryptedViews: NonEmpty[Seq[WithRecipients[DecryptedView]]],
+      fullViews: NonEmpty[Seq[WithRecipients[DecryptedView]]],
       freshOwnTimelyTx: Boolean,
   )(implicit traceContext: TraceContext): (Option[TimestampedEvent], Option[PendingSubmissionId]) =
     (None, None)
@@ -328,6 +331,7 @@ object TestProcessingSteps {
 
   case object TestViewType extends ViewType {
     override type View = TestViewTree
+    override type FullView = TestViewTree
 
     override def toProtoEnum: v0.ViewType =
       throw new UnsupportedOperationException("TestViewType cannot be serialized")

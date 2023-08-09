@@ -206,7 +206,8 @@ class SequencerClientImpl(
     with FlagCloseableAsync
     with NamedLogging
     with HasFlushFuture
-    with Spanning {
+    with Spanning
+    with HasCloseContext {
 
   private val loggingTimeoutHandler: SendTimeoutHandler = msgId => {
     // logged at debug as this is likely logged at the caller using a send callback at a higher level
@@ -725,9 +726,8 @@ class SequencerClientImpl(
             .valueOr(err => throw SequencerClientSubscriptionException(err))
         )
       } yield {
-        sequencerTransports.sequencerIdToTransportMap
-          .take(sequencerTransports.sequencerTrustThreshold.unwrap)
-          .foreach { case (sequencerId, _) =>
+        sequencerTransports.sequencerIdToTransportMap.keySet
+          .foreach { sequencerId =>
             createSubscription(
               sequencerId,
               replayEvents,

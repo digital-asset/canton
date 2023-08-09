@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.sequencing.handlers
 
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.OrdinaryApplicationHandler
 import com.digitalasset.canton.sequencing.protocol.ClosedEnvelope
@@ -27,7 +27,7 @@ class StoreSequencedEvent(
 
   def apply(
       handler: OrdinaryApplicationHandler[ClosedEnvelope]
-  ): OrdinaryApplicationHandler[ClosedEnvelope] =
+  )(implicit closeContext: CloseContext): OrdinaryApplicationHandler[ClosedEnvelope] =
     handler.replace(tracedEvents =>
       tracedEvents.withTraceContext { implicit batchTraceContext => events =>
         val wrongDomainEvents = events.filter(_.signedEvent.content.domainId != domainId)

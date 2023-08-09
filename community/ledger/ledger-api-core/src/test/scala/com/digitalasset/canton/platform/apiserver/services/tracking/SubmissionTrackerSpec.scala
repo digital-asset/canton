@@ -7,12 +7,14 @@ import com.daml.error.{ContextualizedErrorLogger, ErrorsAssertions}
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.api.v2.completion.Completion
 import com.daml.metrics.Metrics
+import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors
 import com.digitalasset.canton.ledger.error.{CommonErrors, LedgerApiErrors}
 import com.digitalasset.canton.logging.LedgerErrorLoggingContext
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker.{
   SubmissionKey,
   SubmissionTrackerImpl,
 }
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.google.rpc.status.Status
 import io.grpc.StatusRuntimeException
@@ -160,7 +162,7 @@ class SubmissionTrackerSpec
       // Expect duplicate error
       assertError(
         actual = actualStatusRuntimeException,
-        expected = LedgerApiErrors.ConsistencyErrors.DuplicateCommand
+        expected = ConsistencyErrors.DuplicateCommand
           .Reject(existingCommandSubmissionId = Some(submissionId))
           .asGrpcError,
       )
@@ -322,8 +324,8 @@ class SubmissionTrackerSpec
     )
     val otherSubmissionKey: SubmissionKey = submissionKey.copy(commandId = "cId_2")
     val failureInSubmit = new RuntimeException("failure in submit")
-    val submitFails: () => Future[Any] = () => Future.failed(failureInSubmit)
-    val submitSucceeds: () => Future[Any] = () => Future.successful(())
+    val submitFails: TraceContext => Future[Any] = _ => Future.failed(failureInSubmit)
+    val submitSucceeds: TraceContext => Future[Any] = _ => Future.successful(())
 
     val submitters: Set[String] = (actAs :+ party).toSet
 

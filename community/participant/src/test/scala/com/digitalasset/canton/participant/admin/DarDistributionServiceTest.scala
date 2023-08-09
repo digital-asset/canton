@@ -17,7 +17,7 @@ import com.daml.ledger.client.binding.Primitive as P
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.ledger.error.PackageServiceError
+import com.digitalasset.canton.ledger.error.PackageServiceErrors
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{SuppressingLogger, TracedLogger}
 import com.digitalasset.canton.participant.admin.PackageService.{Dar, DarDescriptor}
@@ -375,9 +375,9 @@ class DarDistributionServiceTest extends AsyncWordSpec with BaseTest {
   private class MockDarService extends DarService {
     private val dars = mutable.Buffer[DarDescriptor]()
 
-    def suppressInternalError(reason: String): PackageServiceError.InternalError.Generic = {
+    def suppressInternalError(reason: String): PackageServiceErrors.InternalError.Generic = {
       loggerFactory.assertLogs(
-        PackageServiceError.InternalError.Generic(reason),
+        PackageServiceErrors.InternalError.Generic(reason),
         logEntry => {
           logEntry.message should include(
             "PACKAGE_SERVICE_INTERNAL_ERROR(4,0): Generic error (please check the reason string)."

@@ -106,9 +106,9 @@ class CantonAuthorityResolver(
   ): Future[AuthorityResolver.AuthorityResponse] =
     NonEmpty.from(request.requesting) match {
       case Some(requestingAuthority) =>
-        request.domainId.map(DomainId.fromProtoPrimitive(_, "domain_id")) match {
+        request.domainId match {
           // TODO(i12742): `domainId` should be mandatory, but is currently missing because there is no Ledger API support.
-          case Some(Right(domainId)) =>
+          case Some(domainId) =>
             checkAuthorityInDomain(request.holding, requestingAuthority, domainId)
           case _ =>
             lookupAuthorityInConnectedDomains(request.holding, requestingAuthority)

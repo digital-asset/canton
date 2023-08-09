@@ -3,12 +3,13 @@
 
 package com.digitalasset.canton.topology.store.db
 
+import cats.syntax.foldable.*
 import cats.syntax.option.*
-import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CantonRequireTypes.{LengthLimitedString, String185}
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -23,14 +24,7 @@ import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX.{
   PositiveStoredTopologyTransactionsX,
 }
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransactionX.GenericValidatedTopologyTransactionX
-import com.digitalasset.canton.topology.store.{
-  StoredTopologyTransactionsX,
-  TimeQueryX,
-  TopologyStore,
-  TopologyStoreId,
-  TopologyStoreX,
-  *,
-}
+import com.digitalasset.canton.topology.store.*
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.TopologyChangeOpX.Replace
 import com.digitalasset.canton.topology.transaction.TopologyMappingX.MappingHash
@@ -49,6 +43,7 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import slick.jdbc.GetResult
 import slick.jdbc.canton.SQLActionBuilder
@@ -59,9 +54,10 @@ import scala.concurrent.{ExecutionContext, Future}
 class DbTopologyStoreX[StoreId <: TopologyStoreId](
     override protected val storage: DbStorage,
     val storeId: StoreId,
+    maxDbConnections: PositiveInt, // used to throttle query batching
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
-    override protected val maxItemsInSqlQuery: Int = 100,
+    override protected val maxItemsInSqlQuery: PositiveInt = PositiveInt.tryCreate(100),
 )(implicit ec: ExecutionContext)
     extends TopologyStoreX[StoreId]
     with DbTopologyStoreCommon[StoreId]
@@ -108,10 +104,26 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
       .map(mappingHash => sql"mapping_key_hash = ${mappingHash.hash.toLengthLimitedHexString}")
       .forgetNE
       .toList
-      .intercalate(
-        sql" OR "
-      ) ++ sql")",
+      .intercalate(sql" OR ") ++ sql")",
   )
+
+  /** @param elements       Elements to be batched
+    * @param operationName  Name of the operation
+    * @param f              Create a DBIOAction from a batch
+    */
+  private def performBatchedDbOperation[X](elements: Seq[X], operationName: String)(
+      f: Seq[X] => DBIOAction[_, NoStream, Effect.Write with Effect.Transactional]
+  )(implicit traceContext: TraceContext) = if (elements.isEmpty) Future.successful(())
+  else
+    MonadUtil.batchedSequentialTraverse_(
+      parallelism = PositiveInt.two * maxDbConnections,
+      chunkSize = maxItemsInSqlQuery,
+    )(elements) { elementsBatch =>
+      storage.update_(
+        f(elementsBatch),
+        operationName = operationName,
+      )
+    }
 
   /** add validated topology transaction as is to the topology transaction table
     */
@@ -127,36 +139,40 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
     val effectiveTs = effective.value
 
     val transactionRemovals = removeMapping.toList.map(mappingHash =>
-      sql"(mapping_key_hash = ${mappingHash.hash.toLengthLimitedHexString})"
-    ) ++ removeTxs.map(txHash => sql"tx_hash = ${txHash.hash.toLengthLimitedHexString}")
+      sql"mapping_key_hash=${mappingHash.hash.toLengthLimitedHexString}"
+    ) ++ removeTxs.map(txHash => sql"tx_hash=${txHash.hash.toLengthLimitedHexString}")
 
-    lazy val updateRemovals =
-      (sql"UPDATE topology_transactions_x SET valid_until = ${Some(effectiveTs)} WHERE store_id = $transactionStoreIdName AND (" ++
-        transactionRemovals
-          .intercalate(
-            sql" OR "
-          ) ++ sql") AND valid_from < $effectiveTs AND valid_until is null").asUpdate
+    lazy val updateRemovalsF =
+      performBatchedDbOperation(transactionRemovals, "update-topology-transactions") {
+        transactionRemovalsBatch =>
+          (sql"UPDATE topology_transactions_x SET valid_until = ${Some(effectiveTs)} WHERE store_id=$transactionStoreIdName AND (" ++
+            transactionRemovalsBatch
+              .intercalate(
+                sql" OR "
+              ) ++ sql") AND valid_from < $effectiveTs AND valid_until is null").asUpdate
+      }
 
-    lazy val insertAdditionsX = insertSignedTransaction[GenericValidatedTopologyTransactionX](vtx =>
-      TransactionEntry(
-        sequenced,
-        effective,
-        Option.when(
-          vtx.rejectionReason.nonEmpty || expiredAdditions(vtx.transaction.transaction.hash)
-        )(effective),
-        vtx.transaction,
-        vtx.rejectionReason,
-      )
-    )(additions)
+    lazy val additionsF = performBatchedDbOperation(additions, "update-topology-transactions") {
+      additionsBatch =>
+        insertSignedTransaction[GenericValidatedTopologyTransactionX](vtx =>
+          TransactionEntry(
+            sequenced,
+            effective,
+            Option.when(
+              vtx.rejectionReason.nonEmpty || expiredAdditions(vtx.transaction.transaction.hash)
+            )(effective),
+            vtx.transaction,
+            vtx.rejectionReason,
+          )
+        )(additionsBatch)
+    }
 
     updatingTime.event {
-      storage.update_(
-        DBIO.seq(
-          if (transactionRemovals.nonEmpty) updateRemovals else DBIO.successful(0),
-          if (additions.nonEmpty) insertAdditionsX else DBIO.successful(0),
-        ),
-        operationName = "update-topology-transactions",
-      )
+      // Sequential because is done for updateRemovals and additions
+      for {
+        _ <- updateRemovalsF
+        _ <- additionsF
+      } yield ()
     }
   }
 
@@ -380,12 +396,9 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
   override def bootstrap(snapshot: GenericStoredTopologyTransactionsX)(implicit
       traceContext: TraceContext
   ): Future[Unit] = updatingTime.event {
-    storage.update_(
-      insertSignedTransaction[GenericStoredTopologyTransactionX](TransactionEntry.fromStoredTx)(
-        snapshot.result
-      ),
-      operationName = "bootstrap",
-    )
+    performBatchedDbOperation(snapshot.result, "bootstrap") { txs =>
+      insertSignedTransaction[GenericStoredTopologyTransactionX](TransactionEntry.fromStoredTx)(txs)
+    }
   }
 
   override def findUpcomingEffectiveChanges(asOfInclusive: CantonTimestamp)(implicit
@@ -414,11 +427,14 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
   }
 
   override def findStored(
-      transaction: GenericSignedTopologyTransactionX
+      transaction: GenericSignedTopologyTransactionX,
+      includeRejected: Boolean = false,
   )(implicit
       traceContext: TraceContext
   ): Future[Option[GenericStoredTopologyTransactionX]] =
-    findStoredSql(transaction.transaction).map(_.result.headOption)
+    findStoredSql(transaction.transaction, includeRejected = includeRejected).map(
+      _.result.headOption
+    )
 
   override def findStoredForVersion(
       transaction: GenericTopologyTransactionX,
@@ -456,7 +472,7 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
   // Insert helper shared by bootstrap and update.
   private def insertSignedTransaction[T](toTxEntry: T => TransactionEntry)(
       transactions: Seq[T]
-  ): SqlStreamingAction[Vector[Int], Int, Effect.Write]#ResultAction[
+  ): SqlStreamingAction[Vector[Int], Int, slick.dbio.Effect.Write]#ResultAction[
     Int,
     NoStream,
     Effect.Write,
@@ -532,13 +548,13 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
       _.filterNot(uid => filterNamespace.exists(_.contains(uid.namespace)))
     ) match {
       case None => forwardBatch(None)
-      case Some(uids) if uids.sizeCompare(maxItemsInSqlQuery) < 0 => forwardBatch(filterUid)
       case Some(uids) =>
-        uids
-          .grouped(maxItemsInSqlQuery)
-          .toList
-          .parTraverse(batchedUidFilters => forwardBatch(Some(batchedUidFilters)))
-          .map(transactions => StoredTopologyTransactionsX(transactions.flatMap(_.result)))
+        MonadUtil
+          .batchedSequentialTraverse(
+            parallelism = maxDbConnections,
+            chunkSize = maxItemsInSqlQuery,
+          )(uids) { batchedUidFilters => forwardBatch(Some(batchedUidFilters)).map(_.result) }
+          .map(StoredTopologyTransactionsX(_))
     }
   }
 
@@ -592,6 +608,7 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
   private def findStoredSql(
       transaction: GenericTopologyTransactionX,
       subQuery: SQLActionBuilder = sql"",
+      includeRejected: Boolean = false,
   )(implicit
       traceContext: TraceContext
   ): Future[GenericStoredTopologyTransactionsX] = {
@@ -604,7 +621,8 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
         ++ sql" AND serial_counter = ${transaction.serial}"
         ++ sql" AND tx_hash = ${transaction.hash.hash.toLengthLimitedHexString}"
         ++ sql" AND operation = ${transaction.op}"
-        ++ subQuery
+        ++ subQuery,
+      includeRejected = includeRejected,
     )
   }
 
@@ -612,12 +630,14 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
       subQuery: SQLActionBuilder,
       limit: String = "",
       orderBy: String = " ORDER BY id ",
+      includeRejected: Boolean = false,
   )(implicit
       traceContext: TraceContext
   ): Future[GenericStoredTopologyTransactionsX] = {
     val query =
       sql"SELECT instance, sequenced, valid_from, valid_until FROM topology_transactions_x WHERE store_id = $transactionStoreIdName" ++
-        subQuery ++ sql" AND rejection_reason IS NULL #${orderBy} #${limit}"
+        subQuery ++ (if (!includeRejected) sql" AND rejection_reason IS NULL"
+                     else sql"") ++ sql" #${orderBy} #${limit}"
     readTime.event {
       storage
         .query(

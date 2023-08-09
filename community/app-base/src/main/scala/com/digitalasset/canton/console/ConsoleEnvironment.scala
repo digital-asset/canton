@@ -4,7 +4,6 @@
 package com.digitalasset.canton.console
 
 import ammonite.util.Bind
-import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.admin.api.client.data.CantonStatus
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble, PositiveInt}
@@ -28,8 +27,9 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnection}
 import com.digitalasset.canton.time.SimClock
-import com.digitalasset.canton.topology.{Identifier, ParticipantId}
+import com.digitalasset.canton.topology.{Identifier, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TracerProvider}
+import com.digitalasset.canton.{DomainAlias, LfPartyId}
 import com.typesafe.scalalogging.Logger
 import io.opentelemetry.api.trace.Tracer
 
@@ -537,6 +537,9 @@ object ConsoleEnvironment {
         instances: Seq[LocalInstanceReferenceCommon]
     ): LocalInstancesExtensions =
       new LocalInstancesExtensions.Impl(instances)
+
+    /** Implicit maps an LfPartyId to a PartyId */
+    implicit def toPartId(lfPartyId: LfPartyId): PartyId = PartyId.tryFromLfParty(lfPartyId)
 
     /** Extensions for many instance references
       */

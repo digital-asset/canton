@@ -21,7 +21,7 @@ import com.digitalasset.canton.ledger.api.validation.{
   ValidationErrors,
 }
 import com.digitalasset.canton.ledger.api.{ValidationLogger, domain}
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexTransactionsService
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
@@ -190,7 +190,7 @@ final class ApiUpdateService(
                 .flatMap {
                   case None =>
                     Future.failed(
-                      LedgerApiErrors.RequestValidation.NotFound.Transaction
+                      RequestValidationErrors.NotFound.Transaction
                         .Reject(transactionId)
                         .asGrpcError
                     )
@@ -239,7 +239,7 @@ final class ApiUpdateService(
             .flatMap {
               case None =>
                 Future.failed(
-                  LedgerApiErrors.RequestValidation.NotFound.Transaction
+                  RequestValidationErrors.NotFound.Transaction
                     .Reject(request.transactionId.unwrap)
                     .asGrpcError
                 )
@@ -285,7 +285,7 @@ final class ApiUpdateService(
                 .flatMap {
                   case None =>
                     Future.failed(
-                      LedgerApiErrors.RequestValidation.NotFound.Transaction
+                      RequestValidationErrors.NotFound.Transaction
                         .Reject(transactionId)
                         .asGrpcError
                     )
@@ -331,7 +331,7 @@ final class ApiUpdateService(
             .flatMap {
               case None =>
                 Future.failed(
-                  LedgerApiErrors.RequestValidation.NotFound.Transaction
+                  RequestValidationErrors.NotFound.Transaction
                     .Reject(request.transactionId.unwrap)
                     .asGrpcError
                 )

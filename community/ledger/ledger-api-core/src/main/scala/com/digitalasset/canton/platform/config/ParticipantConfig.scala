@@ -6,7 +6,6 @@ package com.digitalasset.canton.platform.config
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.lf.data.Ref
 import com.digitalasset.canton.platform.apiserver.{ApiServerConfig, AuthServiceConfig}
-import com.digitalasset.canton.platform.configuration.IndexServiceConfig
 import com.digitalasset.canton.platform.indexer.IndexerConfig
 import com.digitalasset.canton.platform.store.DbSupport.{ConnectionPoolConfig, DataSourceProperties}
 
@@ -29,8 +28,6 @@ final case class ParticipantConfig(
 )
 
 object ParticipantConfig {
-  def defaultIndexJdbcUrl(participantId: Ref.ParticipantId): String =
-    s"jdbc:h2:mem:$participantId;db_close_delay=-1;db_close_on_exit=false"
   val DefaultParticipantId: Ref.ParticipantId = Ref.ParticipantId.assertFromString("default")
   val DefaultServicesThreadPoolSize: Int = Runtime.getRuntime.availableProcessors()
 }

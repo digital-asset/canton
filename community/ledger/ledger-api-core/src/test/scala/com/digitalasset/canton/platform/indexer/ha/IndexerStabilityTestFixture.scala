@@ -12,15 +12,16 @@ import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.ledger.api.health.ReportsHealth
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.platform.LedgerApiServer
-import com.digitalasset.canton.platform.configuration.{CommandConfiguration, IndexServiceConfig}
+import com.digitalasset.canton.platform.config.{CommandServiceConfig, IndexServiceConfig}
 import com.digitalasset.canton.platform.indexer.{
   IndexerConfig,
   IndexerServiceOwner,
   IndexerStartupMode,
 }
 import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
-import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
+import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext}
+import io.opentelemetry.api.trace.Tracer
 
 import java.util.concurrent.Executors
 import scala.concurrent.ExecutionContext
@@ -43,6 +44,7 @@ final case class Indexers(indexers: List[ReadServiceAndIndexer]) {
 final class IndexerStabilityTestFixture(loggerFactory: NamedLoggerFactory) {
 
   private val logger: TracedLogger = TracedLogger(loggerFactory.getLogger(getClass))
+  val tracer: Tracer = NoReportingTracerProvider.tracer
 
   def owner(
       updatesPerSecond: Int,
@@ -101,9 +103,10 @@ final class IndexerStabilityTestFixture(loggerFactory: NamedLoggerFactory) {
           LedgerApiServer
             .createInMemoryStateAndUpdater(
               IndexServiceConfig(),
-              CommandConfiguration.DefaultMaxCommandsInFlight,
+              CommandServiceConfig.DefaultMaxCommandsInFlight,
               metrics,
               executionContext,
+              tracer,
               loggerFactory,
               multiDomainEnabled = false,
             )
@@ -119,6 +122,7 @@ final class IndexerStabilityTestFixture(loggerFactory: NamedLoggerFactory) {
           inMemoryState = inMemoryState,
           inMemoryStateUpdaterFlow = inMemoryStateUpdaterFlow,
           executionContext = executionContext,
+          tracer = tracer,
           loggerFactory = loggerFactoryForIteration,
           multiDomainEnabled = false,
         ).acquire()

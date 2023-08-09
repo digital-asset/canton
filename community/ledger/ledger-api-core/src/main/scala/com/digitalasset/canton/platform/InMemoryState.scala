@@ -19,6 +19,7 @@ import com.digitalasset.canton.platform.store.interning.{
 }
 import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView
 import com.digitalasset.canton.tracing.TraceContext
+import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future}
@@ -82,13 +83,19 @@ object InMemoryState {
       maxCommandsInFlight: Int,
       metrics: Metrics,
       executionContext: ExecutionContext,
+      tracer: Tracer,
       loggerFactory: NamedLoggerFactory,
   )(implicit traceContext: TraceContext): ResourceOwner[InMemoryState] = {
     val initialLedgerEnd = LedgerEnd.beforeBegin
 
     for {
       dispatcherState <- DispatcherState.owner(apiStreamShutdownTimeout, loggerFactory)
-      submissionTracker <- SubmissionTracker.owner(maxCommandsInFlight, metrics, loggerFactory)
+      submissionTracker <- SubmissionTracker.owner(
+        maxCommandsInFlight,
+        metrics,
+        tracer,
+        loggerFactory,
+      )
     } yield new InMemoryState(
       ledgerEndCache = MutableLedgerEndCache()
         .tap(

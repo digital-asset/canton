@@ -31,12 +31,13 @@ import com.digitalasset.canton.store.{CursorPrehead, IndexedDomain}
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, RequestCounter, SequencerCounter}
+import com.digitalasset.canton.{BaseTest, CloseableTest, RequestCounter, SequencerCounter}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future
 
-class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
+class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest with CloseableTest {
+
   private lazy val indexedStringStore = InMemoryIndexedStringStore()
   private lazy val domainIdF =
     IndexedDomain.indexed(indexedStringStore)(DomainId.tryFromString("domain::da"))

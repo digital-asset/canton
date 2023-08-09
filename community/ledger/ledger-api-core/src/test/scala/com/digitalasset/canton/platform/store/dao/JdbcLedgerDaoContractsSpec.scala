@@ -127,7 +127,7 @@ private[dao] trait JdbcLedgerDaoContractsSpec extends LoneElement with Inside wi
       )
     } yield {
       queryAfterCreate.value match {
-        case LedgerDaoContractsReader.ActiveContract(contract, stakeholders, _) =>
+        case LedgerDaoContractsReader.ActiveContract(contract, stakeholders, _, _, _, _, _, _) =>
           contract shouldBe someVersionedContractInstance
           stakeholders should contain theSameElementsAs Set(alice)
         case LedgerDaoContractsReader.ArchivedContract(_) =>

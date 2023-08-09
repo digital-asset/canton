@@ -14,7 +14,7 @@ import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.grpc.{GrpcApiService, StreamingServiceLifecycleManagement}
 import com.digitalasset.canton.ledger.api.validation.{FieldValidator, TransactionFilterValidator}
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
   IndexActiveContractsService as ACSBackend,
   IndexTransactionsService,
@@ -63,7 +63,7 @@ final class ApiStateService(
       )
       activeAtO <- FieldValidator.optionalString(request.activeAtOffset)(str =>
         ApiOffset.fromString(str).left.map { errorMsg =>
-          LedgerApiErrors.RequestValidation.NonHexOffset
+          RequestValidationErrors.NonHexOffset
             .Error(
               fieldName = "active_at_offset",
               offsetValue = request.activeAtOffset,

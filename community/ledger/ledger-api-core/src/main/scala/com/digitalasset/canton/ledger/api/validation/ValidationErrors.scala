@@ -4,7 +4,7 @@
 package com.digitalasset.canton.ledger.api.validation
 
 import com.daml.error.ContextualizedErrorLogger
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import io.grpc.StatusRuntimeException
 
 object ValidationErrors {
@@ -12,14 +12,14 @@ object ValidationErrors {
   def missingField(fieldName: String)(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): StatusRuntimeException =
-    LedgerApiErrors.RequestValidation.MissingField
+    RequestValidationErrors.MissingField
       .Reject(fieldName)
       .asGrpcError
 
   def invalidArgument(message: String)(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): StatusRuntimeException =
-    LedgerApiErrors.RequestValidation.InvalidArgument
+    RequestValidationErrors.InvalidArgument
       .Reject(message)
       .asGrpcError
 
@@ -27,7 +27,7 @@ object ValidationErrors {
       fieldName: String,
       message: String,
   )(implicit contextualizedErrorLogger: ContextualizedErrorLogger): StatusRuntimeException =
-    LedgerApiErrors.RequestValidation.InvalidField
+    RequestValidationErrors.InvalidField
       .Reject(fieldName = fieldName, message = message)
       .asGrpcError
 

@@ -377,7 +377,7 @@ trait TopologyStoreCommon[+StoreID <: TopologyStoreId, ValidTx, StoredTx, Signed
       traceContext: TraceContext
   ): Future[Boolean] = findStored(transaction).map(_.exists(signedTxFromStoredTx(_) == transaction))
 
-  def findStored(transaction: SignedTx)(implicit
+  def findStored(transaction: SignedTx, includeRejected: Boolean = false)(implicit
       traceContext: TraceContext
   ): Future[Option[StoredTx]]
 }
@@ -453,7 +453,7 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
   ): Future[Seq[SignedTopologyTransaction[TopologyChangeOp.Positive]]]
 
   @VisibleForTesting
-  def allTransactions(implicit
+  def allTransactions(includeRejected: Boolean = false)(implicit
       traceContext: TraceContext
   ): Future[StoredTopologyTransactions[TopologyChangeOp]]
 

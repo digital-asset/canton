@@ -9,7 +9,7 @@ import com.daml.error.ErrorsAssertions
 import com.daml.jwt.JwtTimestampLeeway
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.auth.AuthorizationError.Expired
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.AuthorizationChecksErrors
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore
 import io.grpc.StatusRuntimeException
@@ -86,7 +86,7 @@ class OngoingAuthorizationObserverSpec
     verify(cancellableMock, times(1)).cancel()
     assertError(
       actual = captor.getValue,
-      expected = LedgerApiErrors.AuthorizationChecks.StaleUserManagementBasedStreamClaims
+      expected = AuthorizationChecksErrors.StaleUserManagementBasedStreamClaims
         .Reject()
         .asGrpcError,
     )
@@ -192,7 +192,7 @@ class OngoingAuthorizationObserverSpec
         verify(cancellableMock, times(1)).cancel()
         assertError(
           actual = captor.getValue,
-          expected = LedgerApiErrors.AuthorizationChecks.PermissionDenied
+          expected = AuthorizationChecksErrors.PermissionDenied
             .Reject(Expired(expiration, clock.instant).reason)
             .asGrpcError,
         )

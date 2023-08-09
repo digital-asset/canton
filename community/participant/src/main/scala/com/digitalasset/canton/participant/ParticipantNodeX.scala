@@ -55,11 +55,11 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, SingleUseCell}
 import com.digitalasset.canton.version.ProtocolVersion
-import io.grpc.{BindableService, ServerServiceDefinition}
+import io.grpc.ServerServiceDefinition
 
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
 
 class ParticipantNodeBootstrapX(
     arguments: CantonNodeBootstrapCommonArguments[
@@ -80,6 +80,7 @@ class ParticipantNodeBootstrapX(
     private[canton] val persistentStateFactory: ParticipantNodePersistentStateFactory,
     ledgerApiServerFactory: CantonLedgerApiServerFactory,
     skipRecipientsCheck: Boolean,
+    abortRetry: Eval[Boolean],
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     scheduler: ScheduledExecutorService,
@@ -307,6 +308,8 @@ class ParticipantNodeBootstrapX(
         partyNotifier
       }
 
+      storage.setAbortRetry(abortRetry)
+
       createParticipantServices(
         participantId,
         crypto,
@@ -419,14 +422,9 @@ object ParticipantNodeBootstrapX {
         persistentStateFactory = ParticipantNodePersistentStateFactory,
         ledgerApiServerFactory = ledgerApiServerFactory,
         skipRecipientsCheck = true,
+        abortRetry = Eval.always(false),
       )
     }
-
-    override protected def additionalGrpcServices(arguments: Arguments)(implicit
-        executionContext: ExecutionContext,
-        actorSystem: ActorSystem,
-    ): (CantonSyncService, Eval[ParticipantNodePersistentState]) => List[BindableService] =
-      (_, _) => Nil
 
     override protected def multiDomainEnabledForLedgerApiServer: Boolean = true
   }

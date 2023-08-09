@@ -69,7 +69,7 @@ import com.digitalasset.canton.topology.transaction.{NamespaceDelegation, OwnerT
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.EitherTUtil
-import io.grpc.{BindableService, ServerServiceDefinition}
+import io.grpc.ServerServiceDefinition
 
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.AtomicReference
@@ -94,6 +94,7 @@ class ParticipantNodeBootstrap(
     ledgerApiServerFactory: CantonLedgerApiServerFactory,
     private[canton] val persistentStateFactory: ParticipantNodePersistentStateFactory,
     skipRecipientsCheck: Boolean,
+    abortRetry: Eval[Boolean],
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     scheduler: ScheduledExecutorService,
@@ -139,7 +140,7 @@ class ParticipantNodeBootstrap(
   private val partyMetadataStore =
     PartyMetadataStore(storage, parameterConfig.processingTimeouts, loggerFactory)
   // add participant node topology manager
-  startTopologyManagementWriteService(topologyManager, topologyManager.store)
+  startTopologyManagementWriteService(topologyManager)
 
   override protected def autoInitializeIdentity(
       initConfigBase: InitConfigBase
@@ -241,6 +242,8 @@ class ParticipantNodeBootstrap(
 
       val participantId: ParticipantId = ParticipantId(id.identity)
       topologyManager.setParticipantId(participantId)
+
+      storage.setAbortRetry(abortRetry)
 
       val componentFactory = new ParticipantComponentBootstrapFactory {
         override def createSyncDomainAndTopologyDispatcher(
@@ -466,16 +469,10 @@ object ParticipantNodeBootstrap {
         testingTimeService = testingTimeService,
         allocateIndexerLockIds = _dbConfig => Option.empty[IndexerLockIds].asRight,
         meteringReportKey = CommunityKey,
-        additionalGrpcServices = additionalGrpcServices(arguments),
         futureSupervisor = arguments.futureSupervisor,
         loggerFactory = arguments.loggerFactory,
         multiDomainEnabled = multiDomainEnabledForLedgerApiServer,
       )
-
-    protected def additionalGrpcServices(arguments: Arguments)(implicit
-        executionContext: ExecutionContext,
-        actorSystem: ActorSystem,
-    ): (CantonSyncService, Eval[ParticipantNodePersistentState]) => List[BindableService]
 
     protected def multiDomainEnabledForLedgerApiServer: Boolean
 
@@ -547,13 +544,8 @@ object ParticipantNodeBootstrap {
         persistentStateFactory = ParticipantNodePersistentStateFactory,
         skipRecipientsCheck = false,
         ledgerApiServerFactory = ledgerApiServerFactory,
+        abortRetry = Eval.now(false),
       )
-
-    override protected def additionalGrpcServices(arguments: Arguments)(implicit
-        executionContext: ExecutionContext,
-        actorSystem: ActorSystem,
-    ): (CantonSyncService, Eval[ParticipantNodePersistentState]) => List[BindableService] =
-      (_, _) => Nil
 
     override protected def multiDomainEnabledForLedgerApiServer: Boolean = false
   }

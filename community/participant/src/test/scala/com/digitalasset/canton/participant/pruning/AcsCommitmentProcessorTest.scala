@@ -13,9 +13,21 @@ import com.digitalasset.canton.config.{DefaultProcessingTimeouts, NonNegativeDur
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.participant.event.{AcsChange, RecordTime}
+import com.digitalasset.canton.participant.event.{
+  AcsChange,
+  ContractMetadataAndTransferCounter,
+  ContractStakeholdersAndTransferCounter,
+  RecordTime,
+}
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.protocol.RequestJournal.{RequestData, RequestState}
+import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet
+import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet.{
+  ArchivalCommit,
+  CreationCommit,
+  TransferInCommit,
+  TransferOutCommit,
+}
 import com.digitalasset.canton.participant.protocol.submission.{
   ChangeIdHash,
   InFlightSubmission,
@@ -56,6 +68,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
+import com.google.protobuf.ByteString
 import org.scalatest.Assertion
 import org.scalatest.wordspec.{AnyWordSpec, AsyncWordSpec}
 
@@ -96,6 +109,9 @@ sealed trait AcsCommitmentProcessorBaseTest
     remoteId1 -> Set(bob),
     remoteId2 -> Set(carol),
   )
+
+  lazy val initialTransferCounter: TransferCounterO =
+    TransferCounter.forCreatedContract(testedProtocolVersion)
 
   protected def ts(i: Int): CantonTimestampSecond = CantonTimestampSecond.ofEpochSecond(i.longValue)
 
@@ -142,11 +158,26 @@ sealed trait AcsCommitmentProcessorBaseTest
         case (acsChange, (cid, (stkhs, creationToc, archivalToc))) =>
           val metadata = ContractMetadata.tryCreate(Set.empty, stkhs, None)
           AcsChange(
-            deactivations = acsChange.deactivations ++ (if (archivalToc == toc)
-                                                          Map(cid -> withTestHash(stkhs))
-                                                        else Map.empty),
+            deactivations =
+              acsChange.deactivations ++ (if (archivalToc == toc)
+                                            Map(
+                                              cid -> withTestHash(
+                                                ContractStakeholdersAndTransferCounter(
+                                                  stkhs,
+                                                  initialTransferCounter,
+                                                )
+                                              )
+                                            )
+                                          else Map.empty),
             activations = acsChange.activations ++ (if (creationToc == toc)
-                                                      Map(cid -> withTestHash(metadata))
+                                                      Map(
+                                                        cid -> withTestHash(
+                                                          ContractMetadataAndTransferCounter(
+                                                            metadata,
+                                                            initialTransferCounter,
+                                                          )
+                                                        )
+                                                      )
                                                     else Map.empty),
           )
       },
@@ -261,10 +292,17 @@ class AcsCommitmentProcessorTest
   // This is duplicating the internal logic of the commitment computation, but I don't have a better solution at the moment
   // if we want to test whether commitment buffering works
   // Also assumes that all the contract IDs in the list have the same stakeholders
+  // Also assumes that all contracts have transfer counter None
   private def commitment(cids: List[LfContractId]): AcsCommitment.CommitmentType = {
     val h = LtHash16()
+    val transferCounter = initialTransferCounter
     cids.foreach { cid =>
-      h.add((testHash.bytes.toByteString concat cid.encodeDeterministically).toByteArray)
+      h.add(
+        (testHash.bytes.toByteString concat cid.encodeDeterministically
+          concat transferCounter.fold(ByteString.EMPTY)(
+            TransferCounter.encodeDeterministically
+          )).toByteArray
+      )
     }
     val doubleH = LtHash16()
     doubleH.add(h.get())
@@ -303,6 +341,7 @@ class AcsCommitmentProcessorTest
           earliestInFlightSubmissionF = Future.successful(None),
           sortedReconciliationIntervalsProvider =
             constantSortedReconciliationIntervalsProvider(longInterval),
+          domainId,
         )
       } yield res shouldBe None
     }
@@ -318,6 +357,7 @@ class AcsCommitmentProcessorTest
           earliestInFlightSubmissionF = Future.successful(None),
           sortedReconciliationIntervalsProvider =
             constantSortedReconciliationIntervalsProvider(longInterval),
+          domainId,
         )
       } yield res shouldBe Some(CantonTimestampSecond.MinValue)
     }
@@ -345,6 +385,7 @@ class AcsCommitmentProcessorTest
           earliestInFlightSubmissionF = Future.successful(None),
           sortedReconciliationIntervalsProvider =
             constantSortedReconciliationIntervalsProvider(longInterval),
+          domainId,
         )
       }
 
@@ -545,7 +586,12 @@ class AcsCommitmentProcessorTest
     /*
      This test is disabled for protocol versions for which the reconciliation interval is
      static because the described setting cannot occur.
+
+     Important note! The test duplicates the logic of computing (remote) commitments via the val `commitmentMsg`.
+     If one changes the logic of computing commitments, one *also* needs to change the commitment computation
+     in `commitmentMsg`, otherwise the test will fail.
      */
+
     "work when commitment tick falls between two participants connection to the domain" onlyRunWithOrGreaterThan ProtocolVersion.v4 in {
       /*
         The goal here is to check that ACS commitment processing works even when
@@ -625,6 +671,7 @@ class AcsCommitmentProcessorTest
           timeProofs.lastOption.value,
           None,
         )
+
       } yield {
         computed.size shouldBe 1
         inside(computed.headOption.value) { case (commitmentPeriod, participantId, _) =>
@@ -800,7 +847,9 @@ class AcsCommitmentProcessorTest
           assertInIntervalBefore(ts1, reconciliationInterval)(res1)
         } // Do not prune request 1
         // Do not prune request 1 as crash recovery may delete the dirty request 4 and then we're back in the same situation as for res1
-        withClue("request 3:") { assertInIntervalBefore(ts1, reconciliationInterval)(res2) }
+        withClue("request 3:") {
+          assertInIntervalBefore(ts1, reconciliationInterval)(res2)
+        }
       }
     }
 
@@ -1023,8 +1072,18 @@ class AcsCommitmentProcessorTest
       )
       val ch1 = AcsChange(
         activations = Map(
-          coid(0, 0) -> withTestHash(ContractMetadata.tryCreate(Set.empty, Set(alice, bob), None)),
-          coid(0, 1) -> withTestHash(ContractMetadata.tryCreate(Set.empty, Set(bob, carol), None)),
+          coid(0, 0) -> withTestHash(
+            ContractMetadataAndTransferCounter(
+              ContractMetadata.tryCreate(Set.empty, Set(alice, bob), None),
+              initialTransferCounter,
+            )
+          ),
+          coid(0, 1) -> withTestHash(
+            ContractMetadataAndTransferCounter(
+              ContractMetadata.tryCreate(Set.empty, Set(bob, carol), None),
+              initialTransferCounter,
+            )
+          ),
         ),
         deactivations = Map.empty,
       )
@@ -1037,9 +1096,18 @@ class AcsCommitmentProcessorTest
       snap1.deleted shouldBe Set.empty
 
       val ch2 = AcsChange(
-        deactivations = Map(coid(0, 0) -> withTestHash(Set(alice, bob))),
+        deactivations = Map(
+          coid(0, 0) -> withTestHash(
+            ContractStakeholdersAndTransferCounter(Set(alice, bob), initialTransferCounter)
+          )
+        ),
         activations = Map(
-          coid(1, 1) -> withTestHash(ContractMetadata.tryCreate(Set.empty, Set(alice, carol), None))
+          coid(1, 1) -> withTestHash(
+            ContractMetadataAndTransferCounter(
+              ContractMetadata.tryCreate(Set.empty, Set(alice, carol), None),
+              initialTransferCounter,
+            )
+          )
         ),
       )
       rc.update(rt(1, 1), ch2)
@@ -1053,7 +1121,12 @@ class AcsCommitmentProcessorTest
       val ch3 = AcsChange(
         deactivations = Map.empty,
         activations = Map(
-          coid(2, 1) -> withTestHash(ContractMetadata.tryCreate(Set.empty, Set(alice, carol), None))
+          coid(2, 1) -> withTestHash(
+            ContractMetadataAndTransferCounter(
+              ContractMetadata.tryCreate(Set.empty, Set(alice, carol), None),
+              initialTransferCounter,
+            )
+          )
         ),
       )
       rc.update(rt(3, 0), ch3)
@@ -1089,7 +1162,10 @@ class AcsCommitmentProcessorTest
         val ch1 = AcsChange(
           activations = Map(
             commonContractId -> WithContractHash(
-              ContractMetadata.tryCreate(Set.empty, Set(alice, bob), None),
+              ContractMetadataAndTransferCounter(
+                ContractMetadata.tryCreate(Set.empty, Set(alice, bob), None),
+                initialTransferCounter,
+              ),
               hash,
             )
           ),
@@ -1109,6 +1185,81 @@ class AcsCommitmentProcessorTest
       val (activeCommitment2, deltaAddedCommitment2) = addCommonContractId(rc2, hash2)
       activeCommitment1 should not be activeCommitment2
       deltaAddedCommitment1 should not be deltaAddedCommitment2
+    }
+
+    "transient contracts in a commit set obtain the correct transfer counter for archivals, hence do not appear in the ACS change" in {
+      val cid1 = coid(0, 1)
+      val hash1 = ExampleTransactionFactory.lfHash(1)
+      val cid2 = coid(0, 2)
+      val hash2 = ExampleTransactionFactory.lfHash(2)
+      val cid3 = coid(0, 3)
+      val hash3 = ExampleTransactionFactory.lfHash(3)
+      val cid4 = coid(0, 4)
+      val hash4 = ExampleTransactionFactory.lfHash(4)
+      val tc1 = initialTransferCounter.map(_ + 1)
+      val tc2 = initialTransferCounter.map(_ + 2)
+      val tc3 = initialTransferCounter.map(_ + 3)
+
+      val cs = CommitSet(
+        creations = Map[LfContractId, WithContractHash[CreationCommit]](
+          cid1.leftSide -> WithContractHash(
+            CommitSet.CreationCommit(
+              ContractMetadata.tryCreate(Set.empty, Set(alice, bob), None),
+              initialTransferCounter,
+            ),
+            hash1,
+          )
+        ),
+        archivals = Map[LfContractId, WithContractHash[ArchivalCommit]](
+          cid1.leftSide -> WithContractHash(CommitSet.ArchivalCommit(Set(alice, bob)), hash1),
+          cid3.leftSide -> WithContractHash(CommitSet.ArchivalCommit(Set(bob)), hash3),
+          cid4.leftSide -> WithContractHash(CommitSet.ArchivalCommit(Set(alice)), hash4),
+        ),
+        transferOuts = Map[LfContractId, WithContractHash[TransferOutCommit]](
+          cid2.leftSide -> WithContractHash(
+            CommitSet.TransferOutCommit(TargetDomainId(domainId), Set(alice), tc2),
+            hash2,
+          )
+        ),
+        transferIns = Map[LfContractId, WithContractHash[TransferInCommit]](
+          cid3.leftSide -> WithContractHash(
+            CommitSet.TransferInCommit(
+              TransferId(SourceDomainId(domainId), CantonTimestamp.Epoch),
+              ContractMetadata.tryCreate(Set.empty, Set(bob), None),
+              tc1,
+            ),
+            hash3,
+          )
+        ),
+        keyUpdates = Map.empty[LfGlobalKey, ContractKeyJournal.Status],
+      )
+
+      // Ommiting cid3 -> None to test that the code considers the missing cid to have transfer counter None
+      val transferCounterOfArchival =
+        Map[LfContractId, TransferCounterO](cid1 -> None, cid4 -> tc3)
+
+      val acs1 = AcsChange.fromCommitSet(cs, transferCounterOfArchival)
+
+      // cid1 is a transient creation with transfer counter initialTransferCounter and should not appear in the ACS change
+      AcsChange.transferCountersforArchivedCidInclTransient(
+        cid1,
+        cs,
+        transferCounterOfArchival,
+      ) shouldBe initialTransferCounter
+      acs1.activations.get(cid1) shouldBe None
+      acs1.deactivations.get(cid1) shouldBe None
+      // cid3 is a transient transfer-in and should not appear in the ACS change
+      AcsChange.transferCountersforArchivedCidInclTransient(
+        cid3,
+        cs,
+        transferCounterOfArchival,
+      ) shouldBe tc1
+      acs1.activations.get(cid3) shouldBe None
+      acs1.deactivations.get(cid3) shouldBe None
+      // transfer-out cid2 is a deactivation with transfer counter tc2
+      acs1.deactivations(cid2.leftSide).unwrap.transferCounter shouldBe tc2
+      // archival of cid4 is a deactivation with transfer counter tc3
+      acs1.deactivations(cid4.leftSide).unwrap.transferCounter shouldBe tc3
     }
   }
 }

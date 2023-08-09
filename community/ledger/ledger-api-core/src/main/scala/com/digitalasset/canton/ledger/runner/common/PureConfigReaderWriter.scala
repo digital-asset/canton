@@ -20,14 +20,15 @@ import com.digitalasset.canton.ledger.runner.common.OptConfigValue.{
 import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.apiserver.{ApiServerConfig, AuthServiceConfig}
-import com.digitalasset.canton.platform.config.{MetricsConfig, ParticipantConfig}
-import com.digitalasset.canton.platform.configuration.{
+import com.digitalasset.canton.platform.config.{
   AcsStreamsConfig,
-  CommandConfiguration,
+  CommandServiceConfig,
   IndexServiceConfig,
-  InitialLedgerConfiguration,
+  MetricsConfig,
+  ParticipantConfig,
   TransactionFlatStreamsConfig,
   TransactionTreeStreamsConfig,
+  UserManagementServiceConfig,
 }
 import com.digitalasset.canton.platform.indexer.ha.HaConfig
 import com.digitalasset.canton.platform.indexer.{
@@ -35,10 +36,7 @@ import com.digitalasset.canton.platform.indexer.{
   IndexerStartupMode,
   PackageMetadataViewConfig,
 }
-import com.digitalasset.canton.platform.localstore.{
-  IdentityProviderManagementConfig,
-  UserManagementConfig,
-}
+import com.digitalasset.canton.platform.localstore.IdentityProviderManagementConfig
 import com.digitalasset.canton.platform.services.time.TimeProviderType
 import com.digitalasset.canton.platform.store.DbSupport.{
   ConnectionPoolConfig,
@@ -187,13 +185,6 @@ class PureConfigReaderWriter(secure: Boolean = true) {
     port: Port => port.value
   }
 
-  implicit val initialLedgerConfigurationHint =
-    optProductHint[InitialLedgerConfiguration](allowUnknownKeys = false)
-
-  implicit val initialLedgerConfigurationConvert
-      : ConfigConvert[Option[InitialLedgerConfiguration]] =
-    optConvertEnabled(deriveConvert[InitialLedgerConfiguration])
-
   implicit val seedingReader: ConfigReader[Seeding] =
     // Not using deriveEnumerationReader[Seeding] as we prefer "testing-static" over static (that appears
     // in Seeding.name, but not in the case object name).
@@ -213,11 +204,11 @@ class PureConfigReaderWriter(secure: Boolean = true) {
 
   implicit val seedingWriter: ConfigWriter[Seeding] = ConfigWriter.toString(_.name)
 
-  implicit val userManagementConfigHint =
-    ProductHint[UserManagementConfig](allowUnknownKeys = false)
+  implicit val userManagementServiceConfigHint =
+    ProductHint[UserManagementServiceConfig](allowUnknownKeys = false)
 
-  implicit val userManagementConfigConvert: ConfigConvert[UserManagementConfig] =
-    deriveConvert[UserManagementConfig]
+  implicit val userManagementServiceConfigConvert: ConfigConvert[UserManagementServiceConfig] =
+    deriveConvert[UserManagementServiceConfig]
 
   implicit val identityProviderManagementConfigHint =
     ProductHint[IdentityProviderManagementConfig](allowUnknownKeys = false)
@@ -268,10 +259,10 @@ class PureConfigReaderWriter(secure: Boolean = true) {
     deriveConvert[AuthServiceConfig]
 
   implicit val commandConfigurationHint =
-    ProductHint[CommandConfiguration](allowUnknownKeys = false)
+    ProductHint[CommandServiceConfig](allowUnknownKeys = false)
 
-  implicit val commandConfigurationConvert: ConfigConvert[CommandConfiguration] =
-    deriveConvert[CommandConfiguration]
+  implicit val commandConfigurationConvert: ConfigConvert[CommandServiceConfig] =
+    deriveConvert[CommandServiceConfig]
 
   implicit val timeProviderTypeConvert: ConfigConvert[TimeProviderType] =
     deriveEnumerationConvert[TimeProviderType]

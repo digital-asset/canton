@@ -23,7 +23,6 @@ import com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationDurat
 import com.digitalasset.canton.ledger.api.domain.{CommandId, Commands}
 import com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequest
 import com.digitalasset.canton.ledger.configuration.Configuration
-import com.digitalasset.canton.ledger.participant.state.index.v2.IndexPartyManagementService
 import com.digitalasset.canton.ledger.participant.state.v2.{
   SubmissionResult,
   SubmitterInfo,
@@ -205,7 +204,6 @@ class CommandSubmissionServiceImplSpec
 
   private trait TestContext {
     val writeService = mock[state.WriteService]
-    val partyManagementService = mock[IndexPartyManagementService]
     val timeProvider = TimeProvider.Constant(Instant.now)
     val timeProviderType = TimeProviderType.Static
     val ledgerConfigurationSubscription = mock[LedgerConfigurationSubscription]

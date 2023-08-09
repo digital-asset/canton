@@ -16,7 +16,7 @@ import com.digitalasset.canton.crypto.{
   DomainSyncCryptoClient,
   Signature,
 }
-import com.digitalasset.canton.data.{CantonTimestamp, ViewTree, ViewType}
+import com.digitalasset.canton.data.{CantonTimestamp, ViewPosition, ViewTree, ViewType}
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.lifecycle.{
@@ -699,9 +699,13 @@ abstract class ProtocolProcessor[
         )
         (incorrectRecipients, viewsWithCorrectRootHashAndRecipients) = checkRecipientsResult
 
-        malformedPayloads = decryptionErrors ++ incorrectRootHashes ++ incorrectRecipients
+        (fullViewsWithCorrectRootHashAndRecipients, incorrectDecryptedViews) =
+          steps.computeFullViews(viewsWithCorrectRootHashAndRecipients)
 
-        _ <- NonEmpty.from(viewsWithCorrectRootHashAndRecipients) match {
+        malformedPayloads =
+          decryptionErrors ++ incorrectRootHashes ++ incorrectRecipients ++ incorrectDecryptedViews
+
+        _ <- NonEmpty.from(fullViewsWithCorrectRootHashAndRecipients) match {
           case None =>
             ephemeral.submissionTracker.cancelRegistration(rootHash, requestId)
             trackAndSendResponsesMalformed(
@@ -791,7 +795,7 @@ abstract class ProtocolProcessor[
       snapshot: DomainSnapshotSyncCryptoApi,
       mediator: MediatorRef,
       viewsWithSignatures: NonEmpty[
-        Seq[(WithRecipients[ProtocolProcessor.this.steps.DecryptedView], Option[Signature])]
+        Seq[(WithRecipients[steps.FullView], Option[Signature])]
       ],
       malformedPayloads: Seq[MalformedPayload],
       freshOwnTimelyTxF: FutureUnlessShutdown[Boolean],
@@ -1889,5 +1893,21 @@ object ProtocolProcessor {
         param("viewHash", _.viewTree.viewHash),
         param("viewPosition", _.viewTree.viewPosition),
       )
+  }
+
+  final case class IncompleteLightViewTree(
+      position: ViewPosition
+  ) extends MalformedPayload {
+
+    override def pretty: Pretty[IncompleteLightViewTree] =
+      prettyOfClass(param("position", _.position))
+  }
+
+  final case class DuplicateLightViewTree(
+      position: ViewPosition
+  ) extends MalformedPayload {
+
+    override def pretty: Pretty[DuplicateLightViewTree] =
+      prettyOfClass(param("position", _.position))
   }
 }

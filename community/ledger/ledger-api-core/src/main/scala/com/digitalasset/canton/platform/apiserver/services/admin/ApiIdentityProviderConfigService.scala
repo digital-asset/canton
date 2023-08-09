@@ -7,7 +7,7 @@ import com.daml.ledger.api.v1.admin.identity_provider_config_service as proto
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderConfig, IdentityProviderId}
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.IdentityProviderConfigServiceErrors
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiIdentityProviderConfigService.toProto
@@ -167,31 +167,31 @@ class ApiIdentityProviderConfigService(
   )(implicit traceContext: TraceContext): Future[T] = result match {
     case Left(IdentityProviderConfigStore.IdentityProviderConfigNotFound(id)) =>
       Future.failed(
-        LedgerApiErrors.Admin.IdentityProviderConfig.IdentityProviderConfigNotFound
+        IdentityProviderConfigServiceErrors.IdentityProviderConfigNotFound
           .Reject(operation, id.value)
           .asGrpcError
       )
     case Left(IdentityProviderConfigStore.IdentityProviderConfigExists(id)) =>
       Future.failed(
-        LedgerApiErrors.Admin.IdentityProviderConfig.IdentityProviderConfigAlreadyExists
+        IdentityProviderConfigServiceErrors.IdentityProviderConfigAlreadyExists
           .Reject(operation, id.value)
           .asGrpcError
       )
     case Left(IdentityProviderConfigStore.IdentityProviderConfigWithIssuerExists(issuer)) =>
       Future.failed(
-        LedgerApiErrors.Admin.IdentityProviderConfig.IdentityProviderConfigIssuerAlreadyExists
+        IdentityProviderConfigServiceErrors.IdentityProviderConfigIssuerAlreadyExists
           .Reject(operation, issuer)
           .asGrpcError
       )
     case Left(IdentityProviderConfigStore.TooManyIdentityProviderConfigs()) =>
       Future.failed(
-        LedgerApiErrors.Admin.IdentityProviderConfig.TooManyIdentityProviderConfigs
+        IdentityProviderConfigServiceErrors.TooManyIdentityProviderConfigs
           .Reject(operation)
           .asGrpcError
       )
     case Left(IdentityProviderConfigStore.IdentityProviderConfigByIssuerNotFound(issuer)) =>
       Future.failed(
-        LedgerApiErrors.Admin.IdentityProviderConfig.IdentityProviderConfigByIssuerNotFound
+        IdentityProviderConfigServiceErrors.IdentityProviderConfigByIssuerNotFound
           .Reject(operation, issuer)
           .asGrpcError
       )
@@ -206,7 +206,7 @@ class ApiIdentityProviderConfigService(
     result match {
       case Left(e: update.UpdatePathError) =>
         Future.failed(
-          LedgerApiErrors.Admin.IdentityProviderConfig.InvalidUpdateIdentityProviderConfigRequest
+          IdentityProviderConfigServiceErrors.InvalidUpdateIdentityProviderConfigRequest
             .Reject(identityProviderId.value, reason = e.getReason)
             .asGrpcError
         )

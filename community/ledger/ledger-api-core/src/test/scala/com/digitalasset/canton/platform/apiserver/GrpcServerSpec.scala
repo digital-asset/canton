@@ -14,6 +14,7 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.client.GrpcChannel
 import com.digitalasset.canton.ledger.client.configuration.LedgerClientChannelConfiguration
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
   LoggingContextWithTrace,
@@ -145,7 +146,7 @@ object GrpcServerSpec {
       val errorLogger = ErrorLoggingContext(logger, LoggingContextWithTrace.ForTesting)
 
       Future.failed(
-        LedgerApiErrors.RequestValidation.InvalidArgument
+        RequestValidationErrors.InvalidArgument
           .Reject(request.payload.toStringUtf8)(errorLogger)
           .asGrpcError
       )

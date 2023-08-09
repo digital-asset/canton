@@ -3,16 +3,13 @@
 
 package com.digitalasset.canton.platform.indexer
 
-import akka.NotUsed
 import akka.stream.*
-import akka.stream.scaladsl.{Sink, Source}
 import com.daml.ledger.resources.ResourceOwner
-import com.daml.lf.archive.ArchiveParser
 import com.daml.lf.data.Ref
-import com.daml.metrics.{Metrics, Timed}
-import com.daml.timer.FutureCheck.*
+import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.platform.InMemoryState
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater
 import com.digitalasset.canton.platform.indexer.parallel.{
   InitializeParallelIngestion,
@@ -22,7 +19,6 @@ import com.digitalasset.canton.platform.indexer.parallel.{
 import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
 import com.digitalasset.canton.platform.store.DbType
 import com.digitalasset.canton.platform.store.backend.{
-  PackageStorageBackend,
   ParameterStorageBackend,
   StorageBackendFactory,
   StringInterningStorageBackend,
@@ -31,14 +27,10 @@ import com.digitalasset.canton.platform.store.cache.ImmutableLedgerEndCache
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import com.digitalasset.canton.platform.store.dao.events.{CompressionStrategy, LfValueTranslation}
 import com.digitalasset.canton.platform.store.interning.UpdatingStringInterningView
-import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView
-import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView.PackageMetadata
-import com.digitalasset.canton.platform.{InMemoryState, PackageId}
 import com.digitalasset.canton.tracing.TraceContext
+import io.opentelemetry.api.trace.Tracer
 
-import java.util.concurrent.TimeUnit
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.control.NonFatal
 
 object JdbcIndexer {
   final class Factory(
@@ -50,6 +42,7 @@ object JdbcIndexer {
       inMemoryState: InMemoryState,
       apiUpdaterFlow: InMemoryStateUpdater.UpdaterFlow,
       executionContext: ExecutionContext,
+      tracer: Tracer,
       loggerFactory: NamedLoggerFactory,
       multiDomainEnabled: Boolean,
   )(implicit materializer: Materializer) {
@@ -108,6 +101,7 @@ object JdbcIndexer {
           metrics = metrics,
           inMemoryStateUpdaterFlow = apiUpdaterFlow,
           stringInterningView = inMemoryState.stringInterningView,
+          tracer = tracer,
           loggerFactory = loggerFactory,
           multiDomainEnabled = multiDomainEnabled,
         ),
@@ -131,7 +125,7 @@ object JdbcIndexer {
                   updatingStringInterningView,
                   ledgerEnd,
                 ),
-              updatePackageMetadataView = updatePackageMetadataView(
+              updatePackageMetadataView = UpdatePackageMetadataView(
                 factory.createPackageStorageBackend(
                   ImmutableLedgerEndCache(ledgerEnd.lastOffset -> ledgerEnd.lastEventSeqId)
                 ),
@@ -169,77 +163,4 @@ object JdbcIndexer {
         }
       }
     )
-
-  private def updatePackageMetadataView(
-      packageStorageBackend: PackageStorageBackend,
-      metrics: Metrics,
-      dbDispatcher: DbDispatcher,
-      packageMetadataView: PackageMetadataView,
-      computationExecutionContext: ExecutionContext,
-      config: PackageMetadataViewConfig,
-      loggerFactory: NamedLoggerFactory,
-  )(implicit materializer: Materializer, traceContext: TraceContext): Future[Unit] = {
-    val logger = loggerFactory.getTracedLogger(getClass)
-    implicit val loggingContext: LoggingContextWithTrace =
-      LoggingContextWithTrace.empty
-    implicit val ec: ExecutionContext = computationExecutionContext
-    logger.info("Package Metadata View initialization has been started.")
-    val startedTime = System.nanoTime()
-
-    def loadLfArchive(packageId: PackageId): Future[(PackageId, Array[Byte])] =
-      dbDispatcher
-        .executeSql(metrics.daml.index.db.loadArchive)(connection =>
-          packageStorageBackend
-            .lfArchive(packageId)(connection)
-            .getOrElse(
-              // should never happen as we received a reference to packageId
-              sys.error(s"LfArchive does not exist by packageId=$packageId")
-            )
-        )
-        .map(bytes => (packageId, bytes))
-
-    def lfPackagesSource(): Future[Source[PackageId, NotUsed]] =
-      dbDispatcher.executeSql(metrics.daml.index.db.loadPackages)(connection =>
-        Source(packageStorageBackend.lfPackages(connection).keySet)
-      )
-
-    def toMetadataDefinition(packageBytes: Array[Byte]): PackageMetadata = {
-      val archive = ArchiveParser.assertFromByteArray(packageBytes)
-      Timed.value(
-        metrics.daml.index.packageMetadata.decodeArchive,
-        PackageMetadata.from(archive),
-      )
-    }
-
-    def processPackage(archive: (PackageId, Array[Byte])): Future[PackageMetadata] = {
-      val (packageId, packageBytes) = archive
-      Future(toMetadataDefinition(packageBytes)).recover { case NonFatal(e) =>
-        logger.error(s"Failed to decode loaded LF Archive by packageId=$packageId", e)
-        throw e
-      }
-    }
-
-    Source
-      .futureSource(lfPackagesSource())
-      .mapAsyncUnordered(config.initLoadParallelism)(loadLfArchive)
-      .mapAsyncUnordered(config.initProcessParallelism)(processPackage)
-      .runWith(Sink.foreach(packageMetadataView.update))
-      .checkIfComplete(config.initTakesTooLongInitialDelay, config.initTakesTooLongInterval) {
-        val duration = (System.nanoTime() - startedTime) / 1000000L
-        logger.warn(
-          s"Package Metadata View initialization takes to long ($duration ms)"
-        )
-      }
-      .map { _ =>
-        val duration = System.nanoTime() - startedTime
-        metrics.daml.index.packageMetadata.viewInitialisation.update(duration, TimeUnit.NANOSECONDS)
-        logger.info(
-          s"Package Metadata View has been initialized (${duration / 1000000L} ms)"
-        )
-      }(computationExecutionContext)
-      .recover { case NonFatal(e) =>
-        logger.error(s"Failed to initialize Package Metadata View", e)
-        throw e
-      }
-  }
 }

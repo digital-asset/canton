@@ -221,7 +221,10 @@ class MainIndexDBMetrics(
   val lookupDivulgedActiveContractDbMetrics: DatabaseMetrics = createDbMetrics(
     "lookup_divulged_active_contract"
   )
-  val lookupActiveContractsDbMetrics: DatabaseMetrics = createDbMetrics("lookup_active_contracts")
+  val lookupCreatedContractsDbMetrics: DatabaseMetrics = createDbMetrics("lookup_created_contracts")
+  val lookupArchivedContractsDbMetrics: DatabaseMetrics = createDbMetrics(
+    "lookup_archived_contracts"
+  )
   val lookupContractByKeyDbMetrics: DatabaseMetrics = createDbMetrics(
     "lookup_contract_by_key"
   )

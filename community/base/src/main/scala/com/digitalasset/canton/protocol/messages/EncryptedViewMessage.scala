@@ -9,7 +9,7 @@ import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError.CryptoDeserializationError
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.data.{ViewPosition, ViewType}
+import com.digitalasset.canton.data.ViewType
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessageError.WrongRandomnessLength
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessageV1.RecipientsInfo
@@ -630,12 +630,4 @@ object EncryptedViewMessageError {
       length: Int,
       expectedLength: Int,
   ) extends EncryptedViewMessageError[VT]
-
-  final case class IncompleteLightViewTree(
-      position: ViewPosition
-  ) extends EncryptedViewMessageError[ViewType.TransactionViewType] {
-
-    override def pretty: Pretty[IncompleteLightViewTree] =
-      prettyOfClass(param("position", _.position))
-  }
 }

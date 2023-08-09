@@ -21,9 +21,9 @@ import org.scalatest.{Assertion, Suite}
 
 import scala.concurrent.Future
 
-trait TopologyStoreXTestBase extends BaseTest with HasExecutionContext {
+private[store] trait TopologyStoreXTestBase extends BaseTest with HasExecutionContext {
   this: Suite & NamedLogging =>
-  def update(
+  protected def update(
       store: TopologyStoreX[TopologyStoreId],
       ts: CantonTimestamp,
       add: Seq[GenericSignedTopologyTransactionX] = Seq.empty,
@@ -41,7 +41,7 @@ trait TopologyStoreXTestBase extends BaseTest with HasExecutionContext {
     )
   }
 
-  def inspect(
+  protected def inspect(
       store: TopologyStoreX[TopologyStoreId],
       timeQuery: TimeQueryX,
       proposals: Boolean = false,
@@ -63,7 +63,7 @@ trait TopologyStoreXTestBase extends BaseTest with HasExecutionContext {
       namespaceOnly,
     )
 
-  def inspectKnownParties(
+  protected def inspectKnownParties(
       store: TopologyStoreX[TopologyStoreId],
       timestamp: CantonTimestamp,
       filterParty: String = "",
@@ -76,7 +76,7 @@ trait TopologyStoreXTestBase extends BaseTest with HasExecutionContext {
       limit = 1000,
     )
 
-  def findPositiveTransactions(
+  protected def findPositiveTransactions(
       store: TopologyStoreX[TopologyStoreId],
       asOf: CantonTimestamp,
       asOfInclusive: Boolean = false,
@@ -94,7 +94,7 @@ trait TopologyStoreXTestBase extends BaseTest with HasExecutionContext {
       filterNamespace,
     )
 
-  def expectTransactions(
+  protected def expectTransactions(
       actual: GenericStoredTopologyTransactionsX,
       expected: Seq[GenericSignedTopologyTransactionX],
   ): Assertion = {

@@ -9,7 +9,6 @@ import com.daml.jwt.JwtTimestampLeeway
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
 import com.digitalasset.canton.config.LocalNodeConfig.LocalNodeConfigDeprecationImplicits
-import com.digitalasset.canton.config.NonNegativeFiniteDuration.*
 import com.digitalasset.canton.config.RequireTypes.*
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.ledger.api.tls.{SecretsUrl, TlsConfiguration, TlsVersion}
@@ -17,22 +16,17 @@ import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
 import com.digitalasset.canton.participant.config.LedgerApiServerConfig.DefaultRateLimit
-import com.digitalasset.canton.participant.config.PostgresDataSourceConfigCanton.{
-  DefaultPostgresTcpKeepalivesCount,
-  DefaultPostgresTcpKeepalivesIdle,
-  DefaultPostgresTcpKeepalivesInterval,
-  SynchronousCommitValue,
-}
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.IndexerLockIds
 import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.apiserver.ApiServerConfig as DamlApiServerConfig
-import com.digitalasset.canton.platform.configuration.{
+import com.digitalasset.canton.platform.config.{
   AcsStreamsConfig as LedgerAcsStreamsConfig,
-  CommandConfiguration,
+  CommandServiceConfig,
   IndexServiceConfig as LedgerIndexServiceConfig,
   TransactionFlatStreamsConfig as LedgerTransactionFlatStreamsConfig,
   TransactionTreeStreamsConfig as LedgerTransactionTreeStreamsConfig,
+  UserManagementServiceConfig,
 }
 import com.digitalasset.canton.platform.indexer.ha.HaConfig
 import com.digitalasset.canton.platform.indexer.{
@@ -40,9 +34,8 @@ import com.digitalasset.canton.platform.indexer.{
   IndexerStartupMode,
   PackageMetadataViewConfig,
 }
-import com.digitalasset.canton.platform.localstore.UserManagementConfig
 import com.digitalasset.canton.platform.store.DbSupport.DataSourceProperties as DamlDataSourceProperties
-import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig as DamlPostgresDataSourceConfig
+import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVersion}
 import com.digitalasset.canton.{DiscardOps, config}
@@ -51,7 +44,6 @@ import io.scalaland.chimney.Transformer
 import io.scalaland.chimney.dsl.*
 import monocle.macros.syntax.lens.*
 
-import java.security.InvalidParameterException
 import scala.jdk.DurationConverters.*
 
 /** Base for all participant configs - both local and remote */
@@ -262,7 +254,7 @@ final case class LedgerApiServerConfig(
     userManagementService: UserManagementServiceConfig = UserManagementServiceConfig(),
     managementServiceTimeout: NonNegativeFiniteDuration =
       LedgerApiServerConfig.DefaultManagementServiceTimeout,
-    postgresDataSource: PostgresDataSourceConfigCanton = PostgresDataSourceConfigCanton(),
+    postgresDataSource: PostgresDataSourceConfig = PostgresDataSourceConfig(),
     authServices: Seq[AuthServiceConfig] = Seq.empty,
     keepAliveServer: Option[KeepAliveServerConfig] = Some(KeepAliveServerConfig()),
     maxContractStateCacheSize: Long = LedgerApiServerConfig.DefaultMaxContractStateCacheSize,
@@ -300,8 +292,6 @@ final case class LedgerApiServerConfig(
 
 object LedgerApiServerConfig {
 
-  // Defaults inspired by default settings in kvutils
-  private val DefaultEventsPageSize: Int = 1000
   private val DefaultEventsProcessingParallelism: Int = 8
   private val DefaultConfigurationLoadTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(10L)
@@ -357,9 +347,8 @@ object LedgerApiServerConfig {
 
   object DeprecatedImplicits extends LedgerApiServerConfigDeprecationsImplicits
 
-  /** the following case class match will help us detect any additional configuration options added
-    * when we upgrade the Daml code. if the below match fails because there are more config options,
-    * add them to our "LedgerApiServerConfig".
+  /** the following case class match will help us detect any additional configuration options added.
+    * If the below match fails because there are more config options, add them to our "LedgerApiServerConfig".
     */
   private def _completenessCheck(
       apiServerConfig: DamlApiServerConfig,
@@ -371,11 +360,9 @@ object LedgerApiServerConfig {
       apiStreamShutdownTimeout,
       _command,
       _configurationLoadTimeout, // time the ledger api submit services wait for canton to send time model configuration
-      _initialLedgerConfiguration, // not used by canton - always None
       managementServiceTimeout,
       _maxInboundMessageSize, // configured via participant.maxInboundMessageSize
       port,
-      _portFile,
       _rateLimitingConfig,
       _seeding,
       _timeProviderType,
@@ -656,152 +643,6 @@ final case class TreeTransactionStreamsConfig(
     transactionsProcessingParallelism: Int =
       LedgerTransactionTreeStreamsConfig.default.transactionsProcessingParallelism,
 )
-
-/** Ledger api command service specific configurations
-  *
-  * @param defaultTrackingTimeout default command tracking duration
-  * @param maxCommandsInFlight    maximum number of submitted commands waiting to be completed
-  */
-final case class CommandServiceConfig(
-    defaultTrackingTimeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration(
-      CommandConfiguration.Default.defaultTrackingTimeout
-    ),
-    maxCommandsInFlight: Int = CommandConfiguration.Default.maxCommandsInFlight,
-) {
-  // This helps us detect if any CommandService configuration are added in the daml repo.
-  private def _completenessCheck(config: CommandConfiguration): CommandServiceConfig =
-    config match {
-      case CommandConfiguration(defaultTrackingTimeout, maxCommandsInFlight) =>
-        CommandServiceConfig(
-          defaultTrackingTimeout = NonNegativeFiniteDuration(defaultTrackingTimeout),
-          maxCommandsInFlight = maxCommandsInFlight,
-        )
-    }
-
-  def damlConfig: CommandConfiguration =
-    this.into[CommandConfiguration].disableDefaultValues.transform
-}
-
-object CommandServiceConfig {
-  // This only serves to detect changes upstream (e.g., deletion of a field)
-  def fromDaml(config: CommandConfiguration): CommandServiceConfig = {
-    config
-      .into[CommandServiceConfig]
-      .disableDefaultValues
-      .withFieldComputed(
-        _.defaultTrackingTimeout,
-        c => NonNegativeFiniteDuration(c.defaultTrackingTimeout),
-      )
-      .transform
-  }
-}
-
-/** Ledger api user management service specific configurations
-  *
-  * @param enabled                        whether to enable participant user management
-  * @param maxCacheSize                   maximum in-memory cache size for user management state
-  * @param cacheExpiryAfterWriteInSeconds determines the maximum delay for propagating user management state changes
-  * @param maxRightsPerUser               maximum number of rights per user
-  * @param maxUsersPageSize               maximum number of users returned
-  */
-final case class UserManagementServiceConfig(
-    enabled: Boolean = true,
-    maxCacheSize: Int = UserManagementConfig.DefaultMaxCacheSize,
-    cacheExpiryAfterWriteInSeconds: Int =
-      UserManagementConfig.DefaultCacheExpiryAfterWriteInSeconds,
-    maxRightsPerUser: Int = UserManagementConfig.DefaultMaxRightsPerUser,
-    maxUsersPageSize: Int = UserManagementConfig.DefaultMaxUsersPageSize,
-    additionalAdminUserId: Option[String] = None,
-) {
-
-  def damlConfig: UserManagementConfig =
-    this.into[UserManagementConfig].disableDefaultValues.transform
-}
-
-object UserManagementServiceConfig {
-  // This only serves to detect changes upstream (e.g., deletion of a field)
-  def fromDaml(config: UserManagementConfig): UserManagementServiceConfig = {
-    config
-      .into[UserManagementServiceConfig]
-      .disableDefaultValues
-      .withFieldConst(_.maxRightsPerUser, UserManagementConfig.DefaultMaxRightsPerUser)
-      .withFieldConst(_.additionalAdminUserId, None)
-      .transform
-  }
-}
-
-final case class PostgresDataSourceConfigCanton(
-    synchronousCommit: Option[String] = None,
-    // TCP keepalive configuration for postgres. See https://www.postgresql.org/docs/13/runtime-config-connection.html#RUNTIME-CONFIG-CONNECTION-SETTINGS for details
-    tcpKeepalivesIdle: Option[Int] =
-      DefaultPostgresTcpKeepalivesIdle, // corresponds to: tcp_keepalives_idle
-    tcpKeepalivesInterval: Option[Int] =
-      DefaultPostgresTcpKeepalivesInterval, // corresponds to: tcp_keepalives_interval
-    tcpKeepalivesCount: Option[Int] =
-      DefaultPostgresTcpKeepalivesCount, // corresponds to: tcp_keepalives_count
-) {
-  val typedSynchronousCommit: Option[SynchronousCommitValue] =
-    synchronousCommit.map(_.toLowerCase).map {
-      case "on" => SynchronousCommitValue.On
-      case "off" => SynchronousCommitValue.Off
-      case "remote_write" => SynchronousCommitValue.RemoteWrite
-      case "remote_apply" => SynchronousCommitValue.RemoteApply
-      case "local" => SynchronousCommitValue.Local
-      case other =>
-        throw new InvalidParameterException(s"Unsupported value `$other` for synchronous commit.")
-    }
-
-  def damlConfig: DamlPostgresDataSourceConfig =
-    this
-      .into[DamlPostgresDataSourceConfig]
-      .withFieldComputed(_.synchronousCommit, _.typedSynchronousCommit.map(_.damlConfig))
-      .disableDefaultValues
-      .transform
-}
-
-object PostgresDataSourceConfigCanton {
-  // By default synchronous commit locally but don't await ACKs when replicated
-  val DefaultSynchronousCommitMode: String = "LOCAL"
-
-  private val defaultPostgresDataSourceConfig = DamlIndexerConfig
-    .createDataSourceProperties(DamlIndexerConfig.DefaultIngestionParallelism)
-    .postgres
-  val DefaultPostgresTcpKeepalivesIdle: Option[Int] =
-    defaultPostgresDataSourceConfig.tcpKeepalivesIdle
-  val DefaultPostgresTcpKeepalivesInterval: Option[Int] =
-    defaultPostgresDataSourceConfig.tcpKeepalivesInterval
-  val DefaultPostgresTcpKeepalivesCount: Option[Int] =
-    defaultPostgresDataSourceConfig.tcpKeepalivesCount
-
-  sealed abstract class SynchronousCommitValue(val value: String) {
-    def damlConfig: DamlPostgresDataSourceConfig.SynchronousCommitValue
-  }
-  object SynchronousCommitValue {
-    case object On extends SynchronousCommitValue("on") {
-      val damlConfig = DamlPostgresDataSourceConfig.SynchronousCommitValue.On
-    }
-    case object Off extends SynchronousCommitValue("off") {
-      val damlConfig = DamlPostgresDataSourceConfig.SynchronousCommitValue.Off
-    }
-    case object RemoteWrite extends SynchronousCommitValue("remote_write") {
-      val damlConfig = DamlPostgresDataSourceConfig.SynchronousCommitValue.RemoteWrite
-    }
-    case object RemoteApply extends SynchronousCommitValue("remote_apply") {
-      val damlConfig = DamlPostgresDataSourceConfig.SynchronousCommitValue.RemoteApply
-    }
-    case object Local extends SynchronousCommitValue("local") {
-      val damlConfig = DamlPostgresDataSourceConfig.SynchronousCommitValue.Local
-    }
-  }
-
-  // This only serves to detect changes upstream (e.g., deletion of a field)
-  def fromDaml(config: DamlPostgresDataSourceConfig): PostgresDataSourceConfigCanton =
-    config
-      .into[PostgresDataSourceConfigCanton]
-      .disableDefaultValues
-      .withFieldComputed(_.synchronousCommit, _.synchronousCommit.map(_.pgSqlName))
-      .transform
-}
 
 /** Ledger api indexer specific configurations
   *

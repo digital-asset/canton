@@ -7,7 +7,7 @@ import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset.LedgerBoundary
 import com.digitalasset.canton.ledger.api.domain
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import io.grpc.StatusRuntimeException
 
 import scala.math.Ordered.*
@@ -57,7 +57,7 @@ object LedgerOffsetValidator {
     ledgerOffset match {
       case abs: domain.LedgerOffset.Absolute if abs > ledgerEnd =>
         Left(
-          LedgerApiErrors.RequestValidation.OffsetAfterLedgerEnd
+          RequestValidationErrors.OffsetAfterLedgerEnd
             .Reject(offsetType, abs.value, ledgerEnd.value)
             .asGrpcError
         )

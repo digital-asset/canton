@@ -42,8 +42,11 @@ private[backend] trait StorageBackendTestsContracts
     val templateIdO = executeSql(
       backend.contract.activeContractWithoutArgument(Set(signatory), contractId)
     )
-    val contractStates = executeSql(
-      backend.contract.contractStates(contractId :: Nil, offset(1))
+    val createdContracts = executeSql(
+      backend.contract.createdContracts(contractId :: Nil, offset(1))
+    )
+    val archivedContracts = executeSql(
+      backend.contract.archivedContracts(contractId :: Nil, offset(1))
     )
 
     templateIdO shouldBe Some(someTemplateId.toString)
@@ -51,13 +54,13 @@ private[backend] trait StorageBackendTestsContracts
       rawContract.templateId shouldBe someTemplateId.toString
       rawContract.createArgumentCompression shouldBe None
     }
-    contractStates.get(contractId).isDefined shouldBe true
-    contractStates.get(contractId).foreach { c =>
-      c.templateId shouldBe Some(someTemplateId.toString)
+    createdContracts.get(contractId).isDefined shouldBe true
+    createdContracts.get(contractId).foreach { c =>
+      c.templateId shouldBe someTemplateId.toString
       c.createArgumentCompression shouldBe None
       c.flatEventWitnesses shouldBe Set(signatory, observer)
-      c.eventKind shouldBe 10
     }
+    archivedContracts.isEmpty shouldBe true
   }
 
   it should "not find an archived contract" in {
@@ -86,28 +89,37 @@ private[backend] trait StorageBackendTestsContracts
     val templateIdO = executeSql(
       backend.contract.activeContractWithoutArgument(Set(signatory), contractId)
     )
-    val contractStates1 = executeSql(
-      backend.contract.contractStates(contractId :: Nil, offset(1))
+    val createdContracts1 = executeSql(
+      backend.contract.createdContracts(contractId :: Nil, offset(1))
     )
-    val contractStates2 = executeSql(
-      backend.contract.contractStates(contractId :: Nil, offset(2))
+    val archivedContracts1 = executeSql(
+      backend.contract.archivedContracts(contractId :: Nil, offset(1))
+    )
+    val createdContracts2 = executeSql(
+      backend.contract.createdContracts(contractId :: Nil, offset(2))
+    )
+    val archivedContracts2 = executeSql(
+      backend.contract.archivedContracts(contractId :: Nil, offset(2))
     )
 
     templateIdO shouldBe None
     rawContractO shouldBe None
-    contractStates1.get(contractId).isDefined shouldBe true
-    contractStates1.get(contractId).foreach { c =>
-      c.templateId shouldBe Some(someTemplateId.toString)
+    createdContracts1.get(contractId).isDefined shouldBe true
+    createdContracts1.get(contractId).foreach { c =>
+      c.templateId shouldBe someTemplateId.toString
       c.createArgumentCompression shouldBe None
       c.flatEventWitnesses shouldBe Set(signatory, observer)
-      c.eventKind shouldBe 10
     }
-    contractStates2.get(contractId).isDefined shouldBe true
-    contractStates2.get(contractId).foreach { c =>
-      c.templateId shouldBe Some(someTemplateId.toString)
+    archivedContracts1.get(contractId) shouldBe None
+    createdContracts2.get(contractId).isDefined shouldBe true
+    createdContracts2.get(contractId).foreach { c =>
+      c.templateId shouldBe someTemplateId.toString
       c.createArgumentCompression shouldBe None
+      c.flatEventWitnesses shouldBe Set(signatory, observer)
+    }
+    archivedContracts2.get(contractId).isDefined shouldBe true
+    archivedContracts2.get(contractId).foreach { c =>
       c.flatEventWitnesses shouldBe Set(signatory)
-      c.eventKind shouldBe 20
     }
   }
 
@@ -137,8 +149,20 @@ private[backend] trait StorageBackendTestsContracts
     executeSql(
       updateLedgerEnd(offset(3), 6L)
     )
-    val contractStates = executeSql(
-      backend.contract.contractStates(
+    val createdContracts = executeSql(
+      backend.contract.createdContracts(
+        List(
+          contractId1,
+          contractId2,
+          contractId3,
+          contractId4,
+          contractId5,
+        ),
+        offset(2),
+      )
+    )
+    val archivedContracts = executeSql(
+      backend.contract.archivedContracts(
         List(
           contractId1,
           contractId2,
@@ -150,7 +174,7 @@ private[backend] trait StorageBackendTestsContracts
       )
     )
 
-    contractStates.keySet shouldBe Set(
+    createdContracts.keySet shouldBe Set(
       contractId1,
       contractId2,
       contractId3,
@@ -158,18 +182,20 @@ private[backend] trait StorageBackendTestsContracts
     )
     def assertContract(
         contractId: ContractId,
-        eventKind: Int = 10,
         witnesses: Set[Ref.Party] = Set(signatory, observer),
     ) = {
-      contractStates(contractId).eventKind shouldBe eventKind
-      contractStates(contractId).templateId shouldBe Some(someTemplateId.toString)
-      contractStates(contractId).createArgumentCompression shouldBe None
-      contractStates(contractId).flatEventWitnesses shouldBe witnesses
+      createdContracts(contractId).templateId shouldBe someTemplateId.toString
+      createdContracts(contractId).createArgumentCompression shouldBe None
+      createdContracts(contractId).flatEventWitnesses shouldBe witnesses
     }
-    assertContract(contractId1, 20, Set(signatory))
+    assertContract(contractId1)
     assertContract(contractId2)
     assertContract(contractId3)
     assertContract(contractId4)
+    archivedContracts.keySet shouldBe Set(
+      contractId1
+    )
+    archivedContracts(contractId1).flatEventWitnesses shouldBe Set(signatory)
   }
 
   it should "be able to query with 1000 contract ids" in {
@@ -177,13 +203,21 @@ private[backend] trait StorageBackendTestsContracts
     executeSql(
       updateLedgerEnd(offset(3), 6L)
     )
-    val contractStates = executeSql(
-      backend.contract.contractStates(
+    val createdContracts = executeSql(
+      backend.contract.createdContracts(
         1.to(1000).map(n => hashCid(s"#$n")),
         offset(2),
       )
     )
-    contractStates shouldBe Map.empty
+    val archivedContracts = executeSql(
+      backend.contract.archivedContracts(
+        1.to(1000).map(n => hashCid(s"#$n")),
+        offset(2),
+      )
+    )
+
+    createdContracts shouldBe Map.empty
+    archivedContracts shouldBe Map.empty
   }
 
   it should "correctly find a divulged contract" in {

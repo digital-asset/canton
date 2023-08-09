@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.apiserver.execution
 
 import com.daml.lf.data.Ref.*
 import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver.AuthorityResponse
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.Future
@@ -16,9 +17,6 @@ trait AuthorityResolver {
 }
 
 object AuthorityResolver {
-  type DomainId =
-    String // TODO(#14065) Make `DomainId` available on the ledger API side of the codebase.
-
   sealed trait AuthorityResponse
   object AuthorityResponse {
     final case object Authorized extends AuthorityResponse

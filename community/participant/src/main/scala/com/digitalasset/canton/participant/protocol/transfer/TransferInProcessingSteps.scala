@@ -81,8 +81,6 @@ private[transfer] class TransferInProcessingSteps(
 
   import TransferInProcessingSteps.*
 
-  override type DecryptedView = FullTransferInTree
-
   override def requestKind: String = "TransferIn"
 
   override def submissionDescription(param: SubmissionParam): String =
@@ -273,7 +271,7 @@ private[transfer] class TransferInProcessingSteps(
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      decryptedViewsWithSignatures: NonEmpty[
+      fullViewsWithSignatures: NonEmpty[
         Seq[(WithRecipients[FullTransferInTree], Option[Signature])]
       ],
       malformedPayloads: Seq[ProtocolProcessor.MalformedPayload],
@@ -282,7 +280,7 @@ private[transfer] class TransferInProcessingSteps(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, CheckActivenessAndWritePendingContracts] = {
-    val correctRootHashes = decryptedViewsWithSignatures.map { case (rootHashes, _) =>
+    val correctRootHashes = fullViewsWithSignatures.map { case (rootHashes, _) =>
       rootHashes.unwrap
     }
     // TODO(i12926): Send a rejection if malformedPayloads is non-empty

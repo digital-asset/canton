@@ -28,29 +28,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import java.sql.Connection
 import scala.concurrent.{ExecutionContext, Future}
 
-object UserManagementConfig {
-
-  val DefaultMaxCacheSize = 100
-  val DefaultCacheExpiryAfterWriteInSeconds = 5
-  val DefaultMaxUsersPageSize = 1000
-  val DefaultMaxRightsPerUser = 1000
-
-  def default(enabled: Boolean): UserManagementConfig = UserManagementConfig(
-    enabled = enabled,
-    maxCacheSize = DefaultMaxCacheSize,
-    cacheExpiryAfterWriteInSeconds = DefaultCacheExpiryAfterWriteInSeconds,
-    maxUsersPageSize = DefaultMaxUsersPageSize,
-  )
-}
-final case class UserManagementConfig(
-    enabled: Boolean = false,
-    maxCacheSize: Int = UserManagementConfig.DefaultMaxCacheSize,
-    cacheExpiryAfterWriteInSeconds: Int =
-      UserManagementConfig.DefaultCacheExpiryAfterWriteInSeconds,
-    maxUsersPageSize: Int = UserManagementConfig.DefaultMaxUsersPageSize,
-    maxRightsPerUser: Int = UserManagementConfig.DefaultMaxRightsPerUser,
-)
-
 class PersistentUserManagementStore(
     dbSupport: DbSupport,
     metrics: Metrics,

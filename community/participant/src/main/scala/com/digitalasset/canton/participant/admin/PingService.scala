@@ -16,7 +16,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.error.ErrorCodeUtils
-import com.digitalasset.canton.ledger.error.LedgerApiErrors.ConsistencyErrors.ContractNotFound
+import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors.ContractNotFound
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}

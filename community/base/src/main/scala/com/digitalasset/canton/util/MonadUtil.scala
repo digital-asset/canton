@@ -5,6 +5,7 @@ package com.digitalasset.canton.util
 
 import cats.syntax.parallel.*
 import cats.{Monad, Monoid, Parallel}
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 
 import scala.annotation.tailrec
 import scala.collection.immutable
@@ -76,11 +77,11 @@ object MonadUtil {
     * as parameter for parallelism to not overload the database queue but to make sufficient use
     * of the existing resources.
     */
-  def batchedSequentialTraverse[X, M[_], S](parallelism: Int, chunkSize: Int)(
+  def batchedSequentialTraverse[X, M[_], S](parallelism: PositiveInt, chunkSize: PositiveInt)(
       xs: Seq[X]
   )(processChunk: Seq[X] => M[Seq[S]])(implicit M: Parallel[M]): M[Seq[S]] =
     M.monad.map(
-      sequentialTraverse(xs.grouped(chunkSize).grouped(parallelism).toSeq)(
+      sequentialTraverse(xs.grouped(chunkSize.value).grouped(parallelism.value).toSeq)(
         _.parFlatTraverse(processChunk)
       )(M.monad)
     )(_.flatten)
@@ -96,10 +97,10 @@ object MonadUtil {
       )(M.monad)
     )(_.flatten)
 
-  def batchedSequentialTraverse_[X, M[_], S](parallelism: Int, chunkSize: Int)(
+  def batchedSequentialTraverse_[X, M[_]](parallelism: PositiveInt, chunkSize: PositiveInt)(
       xs: Seq[X]
   )(processChunk: Seq[X] => M[Unit])(implicit M: Parallel[M]): M[Unit] = {
-    sequentialTraverse_(xs.grouped(chunkSize).grouped(parallelism))(chunk =>
+    sequentialTraverse_(xs.grouped(chunkSize.value).grouped(parallelism.value))(chunk =>
       chunk.toSeq.parTraverse_(processChunk)
     )(M.monad)
   }

@@ -35,7 +35,7 @@ object DAMLe {
       enableLfDev: Boolean,
       enableStackTraces: Boolean,
       profileDir: Option[Path] = None,
-      enableContractUpgrading: Boolean = true,
+      enableContractUpgrading: Boolean = false,
   ): Engine =
     new Engine(
       EngineConfig(
@@ -299,6 +299,8 @@ class DAMLe(
           .lookupLfInstance(acoid)
           .value
           .flatMap(optInst => handleResult(contracts, resume(optInst)))
+      case ResultNeedCreate(acoid, resume) =>
+        handleResult(contracts, resume(None)) // TODO(#14281) Add ResultNeedCreate support
       case ResultError(err) => Future.successful(Left(err))
       case ResultInterruption(continue) =>
         handleResult(contracts, iterateOverInterrupts(continue))
@@ -306,7 +308,7 @@ class DAMLe(
         authorityResolver
           .resolve(
             AuthorityResolver
-              .AuthorityRequest(holding, requesting, domainId.map(_.toProtoPrimitive))
+              .AuthorityRequest(holding, requesting, domainId)
           )
           .flatMap {
             case AuthorityResolver.AuthorityResponse.Authorized =>
@@ -318,6 +320,9 @@ class DAMLe(
               )
               handleResult(contracts, resume(false))
           }
+
+      case ResultNeedUpgradeVerification(_, _, _, _, resume) =>
+        handleResult(contracts, resume(None))
     }
   }
 

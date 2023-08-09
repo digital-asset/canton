@@ -218,11 +218,12 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
   private def filteredState(
       table: Seq[TopologyStoreEntry[TopologyChangeOp]],
       filter: TopologyStoreEntry[TopologyChangeOp] => Boolean,
+      includeRejected: Boolean = false,
   ): Future[StoredTopologyTransactions[TopologyChangeOp]] =
     Future.successful(
       StoredTopologyTransactions(
         table.collect {
-          case entry if filter(entry) && entry.rejected.isEmpty =>
+          case entry if filter(entry) && (entry.rejected.isEmpty || includeRejected) =>
             entry.toStoredTransaction
         }
       )
@@ -268,20 +269,27 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
         }
     )
 
-  override def allTransactions(implicit
+  override def allTransactions(includeRejected: Boolean = false)(implicit
       traceContext: TraceContext
   ): Future[StoredTopologyTransactions[TopologyChangeOp]] =
-    filteredState(blocking(synchronized(topologyTransactionStore.toSeq)), _ => true)
+    filteredState(
+      blocking(synchronized(topologyTransactionStore.toSeq)),
+      _ => true,
+      includeRejected,
+    )
 
-  override def findStored(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
+  override def findStored(
+      transaction: SignedTopologyTransaction[TopologyChangeOp],
+      includeRejected: Boolean = false,
+  )(implicit
       traceContext: TraceContext
   ): Future[Option[StoredTopologyTransaction[TopologyChangeOp]]] =
-    allTransactions.map(_.result.find(_.transaction == transaction))
+    allTransactions(includeRejected).map(_.result.find(_.transaction == transaction))
 
   override def findStoredNoSignature(transaction: TopologyTransaction[TopologyChangeOp])(implicit
       traceContext: TraceContext
   ): Future[Seq[StoredTopologyTransaction[TopologyChangeOp]]] =
-    allTransactions.map(
+    allTransactions().map(
       _.result.filter(_.transaction.transaction.element.mapping == transaction.element.mapping)
     )
 
@@ -291,7 +299,7 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
   )(implicit
       traceContext: TraceContext
   ): Future[Option[StoredTopologyTransaction[TopologyChangeOp]]] =
-    allTransactions.map(
+    allTransactions().map(
       _.result.find(tx =>
         tx.transaction.transaction == transaction && tx.transaction.representativeProtocolVersion == TopologyTransaction
           .protocolVersionRepresentativeFor(protocolVersion)

@@ -156,14 +156,16 @@ trait TopologyStoreTest
         until: Option[CantonTimestamp],
         op: TopologyChangeOp,
     ): Future[Seq[SignedTopologyTransaction[TopologyChangeOp]]] = {
-      store.allTransactions.map(
-        _.result
-          .filter(x =>
-            x.validFrom.value == from && x.validUntil
-              .map(_.value) == until && x.transaction.operation == op
-          )
-          .map(_.transaction)
-      )
+      store
+        .allTransactions()
+        .map(
+          _.result
+            .filter(x =>
+              x.validFrom.value == from && x.validUntil
+                .map(_.value) == until && x.transaction.operation == op
+            )
+            .map(_.transaction)
+        )
     }
 
     def getTransactions[Op <: TopologyChangeOp](validatedTx: List[ValidatedTopologyTransaction])(
@@ -437,7 +439,7 @@ trait TopologyStoreTest
           val store = mk()
           for {
             _ <- store.timestamp()
-            _ <- store.allTransactions
+            _ <- store.allTransactions()
             _ <- store.headTransactions
             _ <- store.findPositiveTransactions(
               CantonTimestamp.now(),
@@ -533,7 +535,7 @@ trait TopologyStoreTest
             _ <- append(store, ts, first)
             _ <- append(store, ts1, snd)
             maxTimestamp <- store.timestamp()
-            all <- store.allTransactions
+            all <- store.allTransactions()
             headState <- store.headTransactions
             empty1 <- snapshot(ts.immediatePredecessor)
             snapshot1 <- snapshot(ts.plusMillis(5))
@@ -923,7 +925,7 @@ trait TopologyStoreTest
                 None,
                 None,
               )
-              all <- store.allTransactions
+              all <- store.allTransactions()
             } yield {
               flt.combine.result shouldBe empty
               all.result shouldBe empty
@@ -950,7 +952,7 @@ trait TopologyStoreTest
                 None,
                 None,
               )
-              all <- store.allTransactions
+              all <- store.allTransactions()
             } yield {
               assert(flt.combine.result.nonEmpty, flt.combine.result)
               assert(all.result.nonEmpty, all.result)
@@ -1236,7 +1238,7 @@ trait TopologyStoreTest
         for {
           _ <- append(store, ts, List(oldTx))
           _ <- append(store, ts.plusMillis(1), List(newTx))
-          txs <- store.allTransactions
+          txs <- store.allTransactions()
         } yield {
           txs.result.size shouldEqual 2
         }

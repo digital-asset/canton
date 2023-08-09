@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.store.db
 
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.lifecycle.Lifecycle
@@ -38,7 +39,7 @@ abstract class DbSyncDomainPersistentStateCommon(
     override val pureCryptoApi: CryptoPureApi,
     parameters: ParticipantStoreConfig,
     val caching: CachingConfigs,
-    maxDbConnections: Int,
+    maxDbConnections: PositiveInt,
     val timeouts: ProcessingTimeout,
     override val enableAdditionalConsistencyChecks: Boolean,
     indexedStringStore: IndexedStringStore,
@@ -138,7 +139,7 @@ abstract class DbSyncDomainPersistentStateCommon(
 
   override def isMemory(): Boolean = false
 
-  override def close() = Lifecycle.close(
+  override def close(): Unit = Lifecycle.close(
     eventLog,
     contractStore,
     transferStore,
@@ -160,7 +161,7 @@ class DbSyncDomainPersistentStateOld(
     pureCryptoApi: CryptoPureApi,
     parameters: ParticipantStoreConfig,
     caching: CachingConfigs,
-    maxDbConnections: Int,
+    maxDbConnections: PositiveInt,
     timeouts: ProcessingTimeout,
     enableAdditionalConsistencyChecks: Boolean,
     indexedStringStore: IndexedStringStore,
@@ -192,7 +193,7 @@ class DbSyncDomainPersistentStateOld(
       futureSupervisor,
     )
 
-  override def close() = {
+  override def close(): Unit = {
     Lifecycle.close(
       topologyStore
     )(logger)
@@ -208,7 +209,7 @@ class DbSyncDomainPersistentStateX(
     pureCryptoApi: CryptoPureApi,
     parameters: ParticipantStoreConfig,
     cachingConfigs: CachingConfigs,
-    maxDbConnections: Int,
+    maxDbConnections: PositiveInt,
     processingTimeouts: ProcessingTimeout,
     enableAdditionalConsistencyChecks: Boolean,
     indexedStringStore: IndexedStringStore,
@@ -235,6 +236,7 @@ class DbSyncDomainPersistentStateX(
     new DbTopologyStoreX(
       storage,
       DomainStore(domainId.item),
+      maxDbConnections,
       processingTimeouts,
       loggerFactory,
     )

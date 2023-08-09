@@ -6,6 +6,7 @@
 package com.digitalasset.canton.topology.store.db
 
 import com.digitalasset.canton.TestEssentials
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.DbTest
 import com.digitalasset.canton.topology.DefaultTestIdentities
@@ -34,13 +35,12 @@ trait DbTopologyStoreXHelper {
     )
   }
 
-  protected def createTopologyStore(): TopologyStoreX[DomainStore] = {
-
+  protected def createTopologyStore(): TopologyStoreX[DomainStore] =
     new DbTopologyStoreX(
       storage,
       storeId,
+      maxDbConnections = PositiveInt.tryCreate(5),
       timeouts,
       loggerFactory,
     )
-  }
 }

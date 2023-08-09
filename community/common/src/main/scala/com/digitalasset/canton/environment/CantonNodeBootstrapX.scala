@@ -194,7 +194,13 @@ abstract class CantonNodeBootstrapX[
     private val initializationStore = InitializationStore(storage, timeouts, loggerFactory)
     addCloseable(initializationStore)
     private val authorizedStore =
-      TopologyStoreX(TopologyStoreId.AuthorizedStore, storage, timeouts, loggerFactory)
+      TopologyStoreX(
+        TopologyStoreId.AuthorizedStore,
+        storage,
+        maxDbConnections,
+        timeouts,
+        loggerFactory,
+      )
     addCloseable(authorizedStore)
 
     private val topologyManager: TopologyManagerX =

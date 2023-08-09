@@ -10,7 +10,10 @@ import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.auth.interceptor.AuthorizationInterceptor
 import com.digitalasset.canton.ledger.api.domain.IdentityProviderId
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.{
+  AuthorizationChecksErrors,
+  RequestValidationErrors,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore
 import com.digitalasset.canton.tracing.{TelemetryTracing, TraceContext}
@@ -257,7 +260,7 @@ final class Authorizer(
             case Some(applicationId) => Success(Some(applicationId))
             case None =>
               Failure(
-                LedgerApiErrors.AuthorizationChecks.InternalAuthorizationError
+                AuthorizationChecksErrors.InternalAuthorizationError
                   .Reject(
                     "unexpectedly the user-id is not set in the authenticated claims",
                     new RuntimeException(),
@@ -295,13 +298,13 @@ final class Authorizer(
       {
         case AuthorizationError.InvalidField(fieldName, reason) =>
           Left(
-            LedgerApiErrors.RequestValidation.InvalidField
+            RequestValidationErrors.InvalidField
               .Reject(fieldName = fieldName, message = reason)
               .asGrpcError
           )
         case err =>
           Left(
-            LedgerApiErrors.AuthorizationChecks.PermissionDenied.Reject(err.reason).asGrpcError
+            AuthorizationChecksErrors.PermissionDenied.Reject(err.reason).asGrpcError
           )
       },
       Right(_),
@@ -343,13 +346,13 @@ final class Authorizer(
       .flatMap({
         case ClaimSet.Unauthenticated =>
           Failure(
-            LedgerApiErrors.AuthorizationChecks.Unauthenticated
+            AuthorizationChecksErrors.Unauthenticated
               .MissingJwtToken()
               .asGrpcError
           )
         case authenticatedUser: ClaimSet.AuthenticatedUser =>
           Failure(
-            LedgerApiErrors.AuthorizationChecks.InternalAuthorizationError
+            AuthorizationChecksErrors.InternalAuthorizationError
               .Reject(
                 s"Unexpected unresolved authenticated user claim",
                 new RuntimeException(

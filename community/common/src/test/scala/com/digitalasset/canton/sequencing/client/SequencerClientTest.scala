@@ -14,7 +14,7 @@ import com.digitalasset.canton.config.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{CryptoPureApi, Fingerprint, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
@@ -58,14 +58,8 @@ import com.digitalasset.canton.store.{
 }
 import com.digitalasset.canton.time.{DomainTimeTracker, MockTimeRequestSubmitter, SimClock}
 import com.digitalasset.canton.topology.DefaultTestIdentities.{participant1, sequencerId}
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySnapshot}
-import com.digitalasset.canton.topology.{
-  DefaultTestIdentities,
-  Identifier,
-  Namespace,
-  SequencerId,
-  UniqueIdentifier,
-}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
@@ -79,7 +73,11 @@ import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 import scala.jdk.CollectionConverters.*
 import scala.util.{Failure, Success}
 
-class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorService {
+class SequencerClientTest
+    extends AnyWordSpec
+    with BaseTest
+    with HasExecutorService
+    with CloseableTest {
 
   implicit lazy val executionContext: ExecutionContext = executorService
 
@@ -994,7 +992,7 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
         eventValidator: SequencedEventValidator = eventAlwaysValid,
         options: SequencerClientConfig = SequencerClientConfig(),
         useParallelExecutionContext: Boolean = false,
-    ): Future[Env] = {
+    )(implicit closeContext: CloseContext): Future[Env] = {
       // if parallel execution is desired use the UseExecutorService executor service (which is a parallel execution context)
       // otherwise use the default serial execution context provided by ScalaTest
       implicit val executionContext: ExecutionContext =

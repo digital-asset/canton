@@ -12,12 +12,13 @@ import com.daml.scalautil.future.FutureConversion.CompletionStageConversionOps
 import com.daml.timer.Delayed
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
-import com.digitalasset.canton.ledger.api.domain.{Commands as ApiCommands, LedgerId, SubmissionId}
+import com.digitalasset.canton.ledger.api.domain.{Commands as ApiCommands, SubmissionId}
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequest
 import com.digitalasset.canton.ledger.api.services.CommandSubmissionService
+import com.digitalasset.canton.ledger.api.validation.CommandsValidator
 import com.digitalasset.canton.ledger.configuration.Configuration
-import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.logging.LoggingContextWithTrace.{
   implicitExtractTraceContext,
@@ -43,7 +44,8 @@ import com.digitalasset.canton.platform.apiserver.services.{
   logging,
 }
 import com.digitalasset.canton.platform.services.time.TimeProviderType
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{Spanning, TraceContext}
+import io.opentelemetry.api.trace.Tracer
 
 import java.time.{Duration, Instant}
 import scala.concurrent.{ExecutionContext, Future}
@@ -52,8 +54,8 @@ import scala.util.{Failure, Success, Try}
 private[apiserver] object CommandSubmissionServiceImpl {
 
   def createApiService(
-      ledgerId: LedgerId,
       writeService: state.WriteService,
+      commandsValidator: CommandsValidator,
       timeProvider: TimeProvider,
       timeProviderType: TimeProviderType,
       ledgerConfigurationSubscription: LedgerConfigurationSubscription,
@@ -61,12 +63,12 @@ private[apiserver] object CommandSubmissionServiceImpl {
       commandExecutor: CommandExecutor,
       checkOverloaded: TraceContext => Option[state.SubmissionResult],
       metrics: Metrics,
-      explicitDisclosureUnsafeEnabled: Boolean,
       telemetry: Telemetry,
       loggerFactory: NamedLoggerFactory,
   )(implicit
-      executionContext: ExecutionContext
-  ): (ApiCommandSubmissionService with GrpcApiService, CommandSubmissionService) = {
+      executionContext: ExecutionContext,
+      tracer: Tracer,
+  ): (ApiCommandSubmissionService & GrpcApiService, CommandSubmissionService) = {
     val apiSubmissionService = new CommandSubmissionServiceImpl(
       writeService,
       timeProvider,
@@ -80,16 +82,15 @@ private[apiserver] object CommandSubmissionServiceImpl {
     )
     new ApiCommandSubmissionService(
       service = apiSubmissionService,
-      ledgerId = ledgerId,
       currentLedgerTime = () => timeProvider.getCurrentTime,
       currentUtcTime = () => Instant.now,
       maxDeduplicationDuration =
         () => ledgerConfigurationSubscription.latestConfiguration().map(_.maxDeduplicationDuration),
       submissionIdGenerator = SubmissionIdGenerator.Random,
       metrics = metrics,
-      explicitDisclosureUnsafeEnabled = explicitDisclosureUnsafeEnabled,
       telemetry = telemetry,
       loggerFactory = loggerFactory,
+      commandsValidator = commandsValidator,
     ) -> apiSubmissionService
   }
 }
@@ -104,9 +105,10 @@ private[apiserver] final class CommandSubmissionServiceImpl private[services] (
     checkOverloaded: TraceContext => Option[state.SubmissionResult],
     metrics: Metrics,
     val loggerFactory: NamedLoggerFactory,
-)(implicit executionContext: ExecutionContext)
+)(implicit executionContext: ExecutionContext, tracer: Tracer)
     extends CommandSubmissionService
     with AutoCloseable
+    with Spanning
     with NamedLogging {
 
   override def submit(
@@ -134,7 +136,7 @@ private[apiserver] final class CommandSubmissionServiceImpl private[services] (
             .transform(handleSubmissionResult)
         case None =>
           Future.failed(
-            LedgerApiErrors.RequestValidation.NotFound.LedgerConfiguration
+            RequestValidationErrors.NotFound.LedgerConfiguration
               .Reject()
               .asGrpcError
           )
@@ -181,12 +183,14 @@ private[apiserver] final class CommandSubmissionServiceImpl private[services] (
   )(implicit
       loggingContext: LoggingContextWithTrace,
       errorLoggingContext: ContextualizedErrorLogger,
-  ): Future[state.SubmissionResult] =
+  ): Future[state.SubmissionResult] = {
     checkOverloaded(loggingContext.traceContext) match {
       case Some(submissionResult) => Future.successful(submissionResult)
       case None =>
         for {
-          result <- commandExecutor.execute(commands, submissionSeed, ledgerConfig)
+          result <- withSpan("ApiSubmissionService.evaluate") { _ => _ =>
+            commandExecutor.execute(commands, submissionSeed, ledgerConfig)
+          }
           transactionInfo <- handleCommandExecutionResult(result)
           submissionResult <- submitTransaction(
             transactionInfo,
@@ -194,6 +198,7 @@ private[apiserver] final class CommandSubmissionServiceImpl private[services] (
           )
         } yield submissionResult
     }
+  }
 
   private def submitTransaction(
       transactionInfo: CommandExecutionResult,

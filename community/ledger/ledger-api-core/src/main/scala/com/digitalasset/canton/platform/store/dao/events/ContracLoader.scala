@@ -19,6 +19,7 @@ import com.digitalasset.canton.logging.{
 }
 import com.digitalasset.canton.platform.indexer.parallel.BatchN
 import com.digitalasset.canton.platform.store.backend.ContractStorageBackend
+import com.digitalasset.canton.platform.store.backend.ContractStorageBackend.RawContractState
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import io.grpc.{Metadata, StatusRuntimeException}
 
@@ -145,18 +146,32 @@ object ContractLoader {
               )
             metrics.daml.index.db.activeContractLookupBatchSize
               .update(batch.size)(MetricsContext.Empty)
-            dbDispatcher
-              .executeSql(metrics.daml.index.db.lookupActiveContractsDbMetrics)(
-                contractStorageBackend.contractStates(
-                  contractIds = batch.map(_._1._1),
-                  before = latestValidAtOffset,
-                )
-              )(usedLoggingContext)
-              .map(results =>
-                batch.view.flatMap { case ((contractId, offset), _) =>
-                  results.get(contractId).map((contractId, offset) -> _).toList
-                }.toMap
-              )
+            val archivedContractsF =
+              dbDispatcher
+                .executeSql(metrics.daml.index.db.lookupArchivedContractsDbMetrics)(
+                  contractStorageBackend.archivedContracts(
+                    contractIds = batch.map(_._1._1),
+                    before = latestValidAtOffset,
+                  )
+                )(usedLoggingContext)
+            val createdContractsF =
+              dbDispatcher
+                .executeSql(metrics.daml.index.db.lookupCreatedContractsDbMetrics)(
+                  contractStorageBackend.createdContracts(
+                    contractIds = batch.map(_._1._1),
+                    before = latestValidAtOffset,
+                  )
+                )(usedLoggingContext)
+            for {
+              archivedContracts <- archivedContractsF
+              createdContracts <- createdContractsF
+            } yield batch.view.flatMap { case ((contractId, offset), _) =>
+              archivedContracts
+                .get(contractId)
+                .orElse(createdContracts.get(contractId): Option[RawContractState])
+                .map((contractId, offset) -> _)
+                .toList
+            }.toMap
           },
           createQueue = () =>
             InstrumentedGraph.queue(

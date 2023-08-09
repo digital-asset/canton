@@ -48,15 +48,21 @@ object IndexerConfig {
       tcpKeepalivesInterval = Some(1),
       tcpKeepalivesCount = Some(5),
     ),
-    connectionPool = ConnectionPoolConfig(
-      connectionPoolSize = ingestionParallelism + 1, // + 1 for the tailing ledger_end updates
-      // 250 millis is the lowest possible value for this Hikari configuration (see HikariConfig JavaDoc)
-      connectionTimeout = FiniteDuration(
+    connectionPool = createConnectionPoolConfig(ingestionParallelism),
+  )
+
+  def createConnectionPoolConfig(
+      ingestionParallelism: Int,
+      connectionTimeout: FiniteDuration = FiniteDuration(
+        // 250 millis is the lowest possible value for this Hikari configuration (see HikariConfig JavaDoc)
         250,
         "millis",
       ),
-    ),
-  )
+  ): ConnectionPoolConfig =
+    ConnectionPoolConfig(
+      connectionPoolSize = ingestionParallelism + 1, // + 1 for the tailing ledger_end updates
+      connectionTimeout = connectionTimeout,
+    )
 
   val DefaultIndexerStartupMode: IndexerStartupMode =
     IndexerStartupMode.MigrateAndStart

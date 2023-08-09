@@ -16,7 +16,7 @@ import com.digitalasset.canton.ledger.api.TraceIdentifiers
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.platform.configuration.TransactionTreeStreamsConfig
+import com.digitalasset.canton.platform.config.TransactionTreeStreamsConfig
 import com.digitalasset.canton.platform.indexer.parallel.BatchN
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
 import com.digitalasset.canton.platform.store.backend.common.{

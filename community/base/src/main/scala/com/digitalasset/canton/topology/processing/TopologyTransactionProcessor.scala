@@ -60,6 +60,14 @@ object EffectiveTime {
     CantonTimestamp.fromProtoPrimitive(ts).map(EffectiveTime(_))
 }
 final case class ApproximateTime(value: CantonTimestamp)
+
+object ApproximateTime {
+  val MinValue: ApproximateTime = ApproximateTime(CantonTimestamp.MinValue)
+  val MaxValue: ApproximateTime = ApproximateTime(CantonTimestamp.MaxValue)
+  implicit val orderingApproximateTime: Ordering[ApproximateTime] =
+    Ordering.by[ApproximateTime, CantonTimestamp](_.value)
+}
+
 final case class SequencedTime(value: CantonTimestamp) {
   def toProtoPrimitive: ProtoTimestamp = value.toProtoPrimitive
 }

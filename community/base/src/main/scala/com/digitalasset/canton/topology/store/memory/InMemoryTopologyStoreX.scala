@@ -165,11 +165,12 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
   private def filteredState(
       table: Seq[TopologyStoreEntry],
       filter: TopologyStoreEntry => Boolean,
+      includeRejected: Boolean = false,
   ): Future[StoredTopologyTransactionsX[TopologyChangeOpX, TopologyMappingX]] =
     Future.successful(
       StoredTopologyTransactionsX(
         table.collect {
-          case entry if filter(entry) && entry.rejected.isEmpty =>
+          case entry if filter(entry) && (entry.rejected.isEmpty || includeRejected) =>
             entry.toStoredTransaction
         }
       )
@@ -443,15 +444,22 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
       Future.successful(StoredTopologyTransactionsX(limit.fold(selected)(selected.take)))
     })
 
-  private def allTransactions: Future[GenericStoredTopologyTransactionsX] =
-    filteredState(blocking(synchronized(topologyTransactionStore.toSeq)), _ => true)
+  private def allTransactions(
+      includeRejected: Boolean = false
+  ): Future[GenericStoredTopologyTransactionsX] =
+    filteredState(
+      blocking(synchronized(topologyTransactionStore.toSeq)),
+      _ => true,
+      includeRejected,
+    )
 
   override def findStored(
-      transaction: GenericSignedTopologyTransactionX
+      transaction: GenericSignedTopologyTransactionX,
+      includeRejected: Boolean = false,
   )(implicit
       traceContext: TraceContext
   ): Future[Option[GenericStoredTopologyTransactionX]] =
-    allTransactions.map(
+    allTransactions(includeRejected).map(
       _.result.find(_.transaction.transaction.hash == transaction.transaction.hash)
     )
 
@@ -461,7 +469,7 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
   )(implicit
       traceContext: TraceContext
   ): Future[Option[GenericStoredTopologyTransactionX]] =
-    allTransactions.map(
+    allTransactions().map(
       _.result.find(tx =>
         tx.transaction.transaction == transaction && tx.transaction.representativeProtocolVersion == TopologyTransactionX
           .protocolVersionRepresentativeFor(protocolVersion)

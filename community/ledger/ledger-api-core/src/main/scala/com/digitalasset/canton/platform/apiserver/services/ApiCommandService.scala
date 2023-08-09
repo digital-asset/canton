@@ -6,7 +6,6 @@ package com.digitalasset.canton.platform.apiserver.services
 import com.daml.ledger.api.v1.command_service.CommandServiceGrpc.CommandService as CommandServiceGrpc
 import com.daml.ledger.api.v1.command_service.*
 import com.daml.tracing.Telemetry
-import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.services.CommandService
 import com.digitalasset.canton.ledger.api.validation.{
@@ -28,12 +27,11 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class ApiCommandService(
     protected val service: CommandService & AutoCloseable,
-    val ledgerId: LedgerId,
+    commandsValidator: CommandsValidator,
     currentLedgerTime: () => Instant,
     currentUtcTime: () => Instant,
     maxDeduplicationDuration: () => Option[Duration],
     generateSubmissionId: SubmissionIdGenerator,
-    explicitDisclosureUnsafeEnabled: Boolean,
     telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -42,9 +40,7 @@ class ApiCommandService(
     with ProxyCloseable
     with NamedLogging {
 
-  private[this] val validator = new SubmitAndWaitRequestValidator(
-    CommandsValidator(ledgerId, explicitDisclosureUnsafeEnabled)
-  )
+  private[this] val validator = new SubmitAndWaitRequestValidator(commandsValidator)
 
   override def submitAndWait(request: SubmitAndWaitRequest): Future[Empty] =
     enrichRequestAndSubmit(request)(service.submitAndWait)
@@ -70,8 +66,9 @@ class ApiCommandService(
   private def enrichRequestAndSubmit[T](
       request: SubmitAndWaitRequest
   )(submit: SubmitAndWaitRequest => LoggingContextWithTrace => Future[T]): Future[T] = {
+    val traceContext = getAnnotedCommandTraceContext(request.commands, telemetry)
     implicit val loggingContext: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory, telemetry)
+      LoggingContextWithTrace(loggerFactory)(traceContext)
     val requestWithSubmissionId = generateSubmissionIdIfEmpty(request)
     validator
       .validate(

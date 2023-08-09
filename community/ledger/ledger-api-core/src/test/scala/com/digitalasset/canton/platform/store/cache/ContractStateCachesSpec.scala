@@ -124,6 +124,10 @@ class ContractStateCachesSpec
         stakeholders = Set(Ref.Party.assertFromString(s"party-$cId")),
         eventOffset = offset,
         eventSequentialId = eventSequentialId,
+        agreementText = None,
+        signatories = Set(Ref.Party.assertFromString(s"party-$cId")),
+        keyMaintainers = None,
+        driverMetadata = None,
       )
     }
 
@@ -146,6 +150,11 @@ class ContractStateCachesSpec
       create.contract,
       create.stakeholders,
       create.ledgerEffectiveTime,
+      create.agreementText,
+      create.signatories,
+      create.globalKey,
+      create.keyMaintainers,
+      create.driverMetadata,
     )
 
   private def contractArchived(create: ContractStateEvent.Created) =

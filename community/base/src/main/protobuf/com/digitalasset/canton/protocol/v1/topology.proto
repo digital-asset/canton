@@ -52,8 +52,8 @@ message TopologyTransaction {
 
 /*
    Differences with v0.RegisterTopologyTransactionResponse
-     - Removed deprecated Result.State.REQUESTED
-     - Removed Result.unique_path
+   - Removed deprecated Result.State.REQUESTED
+   - Removed Result.unique_path
 */
 message RegisterTopologyTransactionResponse {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";

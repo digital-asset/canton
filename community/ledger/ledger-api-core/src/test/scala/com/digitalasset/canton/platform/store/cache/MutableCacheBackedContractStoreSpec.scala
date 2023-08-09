@@ -227,6 +227,29 @@ class MutableCacheBackedContractStoreSpec
   }
 
   "lookupContractStateWithoutDivulgence" should {
+
+    val stateValueActive = ContractStateValue.Active(
+      contract = contract4,
+      createLedgerEffectiveTime = t4,
+      stakeholders = exStakeholders,
+      agreementText = exAgreementText,
+      signatories = exSignatories,
+      globalKey = Some(someKey),
+      keyMaintainers = exMaintainers,
+      driverMetadata = exDriverMetadata,
+    )
+
+    val stateActive = ContractState.Active(
+      contractInstance = contract4,
+      ledgerEffectiveTime = t4,
+      stakeholders = exStakeholders,
+      agreementText = exAgreementText,
+      signatories = exSignatories,
+      globalKey = Some(someKey),
+      maintainers = exMaintainers,
+      driverMetadata = exDriverMetadata,
+    )
+
     "resolve lookup from cache" in {
       for {
         store <- contractStore(cachesSize = 2L, loggerFactory).asFuture
@@ -234,11 +257,7 @@ class MutableCacheBackedContractStoreSpec
           offset2,
           Map(
             // Populate the cache with an active contract
-            cId_4 -> ContractStateValue.Active(
-              contract = contract4,
-              stakeholders = Set.empty,
-              createLedgerEffectiveTime = t4,
-            ),
+            cId_4 -> stateValueActive,
             // Populate the cache with an archived contract
             cId_5 -> ContractStateValue.Archived(Set.empty),
           ),
@@ -247,7 +266,7 @@ class MutableCacheBackedContractStoreSpec
         archivedContractLookupResult <- store.lookupContractStateWithoutDivulgence(cId_5)
         nonExistentContractLookupResult <- store.lookupContractStateWithoutDivulgence(cId_7)
       } yield {
-        activeContractLookupResult shouldBe ContractState.Active(contract4, t4)
+        activeContractLookupResult shouldBe stateActive
         archivedContractLookupResult shouldBe ContractState.Archived
         nonExistentContractLookupResult shouldBe ContractState.NotFound
       }
@@ -260,7 +279,7 @@ class MutableCacheBackedContractStoreSpec
         archivedContractLookupResult <- store.lookupContractStateWithoutDivulgence(cId_5)
         nonExistentContractLookupResult <- store.lookupContractStateWithoutDivulgence(cId_7)
       } yield {
-        activeContractLookupResult shouldBe ContractState.Active(contract4, t4)
+        activeContractLookupResult shouldBe stateActive
         archivedContractLookupResult shouldBe ContractState.Archived
         nonExistentContractLookupResult shouldBe ContractState.NotFound
       }
@@ -286,6 +305,12 @@ object MutableCacheBackedContractStoreSpec {
     }.unzip3
 
   private val someKey = globalKey("key1")
+
+  private val exAgreementText = Some("agreement")
+  private val exStakeholders = Set(bob)
+  private val exSignatories = Set(alice)
+  private val exMaintainers = Some(Set(bob))
+  private val exDriverMetadata = Some("meta".getBytes)
 
   private def contractStore(
       cachesSize: Long,
@@ -324,9 +349,10 @@ object MutableCacheBackedContractStoreSpec {
       (contractId, validAt) match {
         case (`cId_1`, `offset0`) => activeContract(contract1, Set(alice), t1)
         case (`cId_1`, validAt) if validAt > offset0 => archivedContract(Set(alice))
-        case (`cId_2`, validAt) if validAt >= offset1 => activeContract(contract2, Set(bob), t2)
-        case (`cId_3`, _) => activeContract(contract3, Set(bob), t3)
-        case (`cId_4`, _) => activeContract(contract4, Set(bob), t4)
+        case (`cId_2`, validAt) if validAt >= offset1 =>
+          activeContract(contract2, exStakeholders, t2)
+        case (`cId_3`, _) => activeContract(contract3, exStakeholders, t3)
+        case (`cId_4`, _) => activeContract(contract4, exStakeholders, t4)
         case (`cId_5`, _) => archivedContract(Set(bob))
         case (`cId_6`, _) =>
           // Simulate store being populated from one query to another
@@ -365,11 +391,27 @@ object MutableCacheBackedContractStoreSpec {
 
   private def activeContract(
       contract: Contract,
-      parties: Set[Party],
+      stakeholders: Set[Party],
       ledgerEffectiveTime: Timestamp,
+      agreementText: Option[String] = exAgreementText,
+      signatories: Set[Party] = exSignatories,
+      globalKey: Option[GlobalKey] = Some(someKey),
+      maintainers: Option[Set[Party]] = exMaintainers,
+      driverMetadata: Option[Array[Byte]] = exDriverMetadata,
   ): Future[Option[LedgerDaoContractsReader.ActiveContract]] =
     Future.successful(
-      Some(LedgerDaoContractsReader.ActiveContract(contract, parties, ledgerEffectiveTime))
+      Some(
+        LedgerDaoContractsReader.ActiveContract(
+          contract = contract,
+          stakeholders = stakeholders,
+          ledgerEffectiveTime = ledgerEffectiveTime,
+          agreementText = agreementText,
+          signatories = signatories,
+          globalKey = globalKey,
+          keyMaintainers = maintainers,
+          driverMetadata = driverMetadata,
+        )
+      )
     )
 
   private def archivedContract(
