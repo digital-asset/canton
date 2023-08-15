@@ -97,6 +97,7 @@ class ConfirmationRequestFactory(
           contractInstanceOfId,
           keyResolver,
           maxSequencingTime,
+          validatePackageVettings = true,
         )
         .leftMap(TransactionTreeFactoryError)
 

@@ -205,9 +205,8 @@ object Dependencies {
   lazy val testcontainers = "org.testcontainers" % "testcontainers" % testcontainers_version
   lazy val testcontainers_postgresql = "org.testcontainers" % "postgresql" % testcontainers_version
 
-  lazy val sttp_version = "3.1.7"
+  lazy val sttp_version = "3.8.16"
   lazy val sttp = "com.softwaremill.sttp.client3" %% "core" % sttp_version
-  lazy val sttp_okhttp = "com.softwaremill.sttp.client3" %% "okhttp-backend" % sttp_version
   lazy val sttp_circe = "com.softwaremill.sttp.client3" %% "circe" % sttp_version
   lazy val sttp_slf4j = "com.softwaremill.sttp.client3" %% "slf4j-backend" % sttp_version
 

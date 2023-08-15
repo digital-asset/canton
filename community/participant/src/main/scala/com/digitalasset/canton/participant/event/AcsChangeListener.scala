@@ -3,10 +3,12 @@
 
 package com.digitalasset.canton.participant.event
 
-import com.digitalasset.canton.logging.HasLoggerName
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet
 import com.digitalasset.canton.protocol.{ContractMetadata, LfContractId, WithContractHash}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{LfPartyId, TransferCounterO}
 import com.google.common.annotations.VisibleForTesting
 
@@ -36,12 +38,22 @@ final case class AcsChange(
 final case class ContractMetadataAndTransferCounter(
     contractMetadata: ContractMetadata,
     transferCounter: TransferCounterO,
-)
+) extends PrettyPrinting {
+  override def pretty: Pretty[ContractMetadataAndTransferCounter] = prettyOfClass(
+    param("contract metadata", _.contractMetadata),
+    param("transfer counter", _.transferCounter),
+  )
+}
 
 final case class ContractStakeholdersAndTransferCounter(
     stakeholders: Set[LfPartyId],
     transferCounter: TransferCounterO,
-)
+) extends PrettyPrinting {
+  override def pretty: Pretty[ContractStakeholdersAndTransferCounter] = prettyOfClass(
+    param("stakeholders", _.stakeholders),
+    param("transfer counter", _.transferCounter),
+  )
+}
 
 object AcsChange extends HasLoggerName {
   val empty: AcsChange = AcsChange(Map.empty, Map.empty)
@@ -73,7 +85,8 @@ object AcsChange extends HasLoggerName {
   def fromCommitSet(
       commitSet: CommitSet,
       transferCounterOfArchivalIncomplete: Map[LfContractId, TransferCounterO],
-  ): AcsChange = {
+  )(implicit loggingContext: NamedLoggingContext): AcsChange = {
+
     val transferCounterOfArchival = commitSet.archivals.keySet
       .map(k => (k, transferCounterOfArchivalIncomplete.getOrElse(k, None)))
       .toMap
@@ -162,6 +175,13 @@ object AcsChange extends HasLoggerName {
           ),
         )
     }
+    loggingContext.debug(
+      show"Called fromCommitSet with inputs commitSet creations ${commitSet.creations}" +
+        show"transferIns ${commitSet.transferIns} archivals ${commitSet.archivals} transferOuts ${commitSet.transferOuts} and" +
+        show"archival transfer counters from DB $transferCounterOfArchivalIncomplete" +
+        show"Completed fromCommitSet with results transient $transient" +
+        show"activations $activations archivalDeactivations $archivalDeactivations transferOutDeactivations $transferOutDeactivations"
+    )
     AcsChange(
       activations = activations,
       deactivations = archivalDeactivations ++ transferOutDeactivations,

@@ -97,9 +97,13 @@ class MutableCacheBackedContractStoreSpec
         nonExistentCId_lookup shouldBe Option.empty
         another_nonExistentCId_lookup shouldBe Option.empty
 
-        verify(spyContractsReader).lookupContractState(cId_2, offset1)
-        verify(spyContractsReader).lookupContractState(cId_3, offset2)
-        verify(spyContractsReader).lookupContractState(nonExistentCId, offset3)
+        // The cache is evicted BOTH on the number of entries AND memory pressure
+        // So even though a read-through populates missing entries,
+        // they can be immediately evicted by GCs and lead to subsequent misses.
+        // Hence, verify atLeastOnce for LedgerDaoContractsReader.lookupContractState
+        verify(spyContractsReader, atLeastOnce).lookupContractState(cId_2, offset1)
+        verify(spyContractsReader, atLeastOnce).lookupContractState(cId_3, offset2)
+        verify(spyContractsReader, atLeastOnce).lookupContractState(nonExistentCId, offset3)
         succeed
       }
     }

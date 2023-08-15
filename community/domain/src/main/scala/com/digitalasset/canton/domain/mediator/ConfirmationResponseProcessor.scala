@@ -464,7 +464,7 @@ private[mediator] class ConfirmationResponseProcessor(
 
     request.informeesAndThresholdByViewPosition.toSeq
       .traverse_ { case (viewPosition, (informees, threshold)) =>
-        val minimumThreshold = request.confirmationPolicy.minimumThreshold(informees)
+        val minimumThreshold = request.minimumThreshold(informees)
         EitherUtil.condUnitE(
           threshold >= minimumThreshold,
           MediatorError.MalformedMessage

@@ -30,7 +30,7 @@ import com.digitalasset.canton.ledger.api.domain.{
 }
 import com.digitalasset.canton.ledger.api.messages.transaction.*
 import com.digitalasset.canton.ledger.api.services.TransactionService
-import com.digitalasset.canton.ledger.api.validation.PartyNameChecker
+import com.digitalasset.canton.ledger.api.validation.TransactionServiceRequestValidator
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.invalidArgument
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexTransactionsService
@@ -63,6 +63,7 @@ private[apiserver] object TransactionServiceImpl {
       metrics: Metrics,
       telemetry: Telemetry,
       loggerFactory: NamedLoggerFactory,
+      validator: TransactionServiceRequestValidator,
   )(implicit
       ec: ExecutionContext,
       mat: Materializer,
@@ -71,8 +72,8 @@ private[apiserver] object TransactionServiceImpl {
     new ApiTransactionService(
       new TransactionServiceImpl(transactionsService, metrics, loggerFactory),
       ledgerId,
-      PartyNameChecker.AllowAllParties,
       telemetry,
+      validator,
       loggerFactory,
     )
 }

@@ -158,25 +158,7 @@ object ConfirmationPolicy {
     override def requiredTrustLevel: TrustLevel = TrustLevel.Ordinary
   }
 
-  case object Full extends ConfirmationPolicy {
-    override val name = "Full"
-    protected override val index: Int = 2
-
-    override def informeesAndThreshold(node: LfActionNode, topologySnapshot: TopologySnapshot)(
-        implicit ec: ExecutionContext
-    ): Future[(Set[Informee], NonNegativeInt)] = {
-      val informees = node.informeesOfNode
-      require(
-        informees.nonEmpty,
-        "There must be at least one informee as every node must have at least one signatory.",
-      )
-      Future.successful(toInformeesAndThreshold(informees, Set.empty, TrustLevel.Ordinary))
-    }
-
-    override def requiredTrustLevel: TrustLevel = TrustLevel.Ordinary
-  }
-
-  val values: Seq[ConfirmationPolicy] = Seq[ConfirmationPolicy](Vip, Signatory, Full)
+  val values: Seq[ConfirmationPolicy] = Seq[ConfirmationPolicy](Vip, Signatory)
 
   require(
     values.zipWithIndex.forall { case (policy, index) => policy.index == index },
@@ -190,7 +172,6 @@ object ConfirmationPolicy {
   /** Chooses appropriate confirmation policies for a transaction.
     * It chooses [[Vip]] if every node has at least one VIP who knows the state
     * It chooses [[Signatory]] if every node has a Participant that can confirm.
-    * It never chooses [[Full]].
     */
   def choose(transaction: LfVersionedTransaction, topologySnapshot: TopologySnapshot)(implicit
       ec: ExecutionContext
@@ -235,7 +216,7 @@ object ConfirmationPolicy {
     DeterministicEncoding.decodeString(encodedName).flatMap {
       case (Vip.name, _) => Right(Vip)
       case (Signatory.name, _) => Right(Signatory)
-      case (badName, badBytes) =>
+      case (badName, _) =>
         Left(DefaultDeserializationError(s"Invalid confirmation policy $badName"))
     }
 }

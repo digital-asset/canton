@@ -114,20 +114,4 @@ object RepairServiceError extends RepairServiceErrorGroup {
         with RepairServiceError
   }
 
-  @Explanation(
-    "An unexpected error occurred"
-  )
-  @Resolution(
-    "Retry the operation with a proper back-off strategy. Contact the operator if the error persists."
-  )
-  object UnexpectedError
-      extends ErrorCode(
-        id = "UNEXPECTED_ERROR_REPAIR",
-        ErrorCategory.TransientServerFailure,
-      ) {
-    final case class Error()(implicit
-        val loggingContext: ErrorLoggingContext
-    ) extends CantonError.Impl(cause = "An unexpected error occurred")
-        with RepairServiceError
-  }
 }

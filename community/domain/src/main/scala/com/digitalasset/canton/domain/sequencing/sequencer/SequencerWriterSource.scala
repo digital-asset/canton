@@ -14,12 +14,15 @@ import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
-import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
-import com.digitalasset.canton.sequencing.protocol.{SendAsyncError, SubmissionRequest}
+import com.digitalasset.canton.sequencing.protocol.{
+  SendAsyncError,
+  SequencerErrors,
+  SubmissionRequest,
+}
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.BatchTracing.withTracedBatch
@@ -27,6 +30,7 @@ import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.retry.RetryUtil.DbExceptionRetryable
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.UUID
@@ -156,6 +160,7 @@ object SequencerWriterSource {
       clock: Clock,
       eventSignaller: EventSignaller,
       loggerFactory: NamedLoggerFactory,
+      protocolVersion: ProtocolVersion,
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
@@ -181,6 +186,7 @@ object SequencerWriterSource {
     val eventGenerator = new SendEventGenerator(
       store,
       () => PayloadId(payloadIdGenerator.generateNext),
+      protocolVersion,
     )
 
     // Take deliver events with full payloads and first write them before adding them to the events queue
@@ -221,6 +227,7 @@ object SequencerWriterSource {
           store,
           eventTimestampGenerator,
           loggerFactory,
+          protocolVersion,
         )
       )
       // Merge watermark updating in case we are running slow here
@@ -242,6 +249,7 @@ object SequencerWriterSource {
 class SendEventGenerator(
     store: SequencerWriterStore,
     payloadIdGenerator: () => PayloadId,
+    protocolVersion: ProtocolVersion,
 )(implicit
     executionContext: ExecutionContext
 ) {
@@ -276,10 +284,13 @@ class SendEventGenerator(
 
     def validateAndGenerateEvent(senderId: SequencerMemberId): Future[StoreEvent[Payload]] = {
       def deliverError(unknownRecipients: NonEmpty[Seq[Member]]): DeliverErrorStoreEvent = {
-        val message = String256M.tryCreate(
-          s"Unknown recipients: ${unknownRecipients.toList.take(1000).mkString(", ")}"
+        val error = SequencerErrors.UnknownRecipients(unknownRecipients)
+        DeliverErrorStoreEvent(
+          senderId,
+          submission.messageId,
+          DeliverErrorStoreEvent.serializeError(error, protocolVersion),
+          traceContext,
         )
-        DeliverErrorStoreEvent(senderId, submission.messageId, message, traceContext)
       }
 
       def deliver(recipientIds: Set[SequencerMemberId]): StoreEvent[Payload] = {
@@ -315,6 +326,7 @@ object SequenceWritesFlow {
       store: SequencerWriterStore,
       eventTimestampGenerator: PartitionedTimestampGenerator,
       loggerFactory: NamedLoggerFactory,
+      protocolVersion: ProtocolVersion,
   )(implicit executionContext: ExecutionContext): Flow[Write, Traced[BatchWritten], NotUsed] = {
     val logger = TracedLogger(WritePayloadsFlow.getClass, loggerFactory)
 
@@ -388,14 +400,17 @@ object SequenceWritesFlow {
             // to a different sequencer, this sequencer will assign a higher timestamp than the requested signing timestamp.
             // So this check should only fail if the sequencer client violates this policy.
             if (signingTimestamp <= timestamp) deliver
-            else
+            else {
+              val reason = SequencerErrors
+                .SigningTimestampAfterSequencingTimestamp(signingTimestamp, timestamp)
+                .forProtocolVersion(protocolVersion)
               DeliverErrorStoreEvent(
                 sender,
                 messageId,
-                Sequencer
-                  .signingTimestampAfterSequencingTimestampError(signingTimestamp, timestamp),
+                DeliverErrorStoreEvent.serializeError(reason, protocolVersion),
                 event.traceContext,
               )
+            }
           case other => other
         }
 

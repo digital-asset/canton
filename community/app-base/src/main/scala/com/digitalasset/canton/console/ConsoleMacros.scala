@@ -28,7 +28,8 @@ import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.ConsoleEnvironment.Implicits.*
 import com.digitalasset.canton.logging.{LastErrorsAppender, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.{RepairService, SyncStateInspection}
+import com.digitalasset.canton.participant.admin.RepairService
+import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
 import com.digitalasset.canton.participant.config.{AuthServiceConfig, BaseParticipantConfig}
 import com.digitalasset.canton.participant.ledger.api.JwtTokenUtilities
 import com.digitalasset.canton.protocol.{LfContractId, SerializableContract}

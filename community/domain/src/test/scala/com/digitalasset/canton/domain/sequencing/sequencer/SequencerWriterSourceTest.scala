@@ -10,6 +10,7 @@ import akka.stream.scaladsl.{Keep, Sink, Source}
 import cats.data.EitherT
 import cats.syntax.functor.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
+import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store.*
@@ -25,6 +26,7 @@ import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.AkkaUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutorService}
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
@@ -116,6 +118,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
           clock,
           eventSignaller,
           loggerFactory,
+          testedProtocolVersion,
         )(executorService, implicitly[TraceContext])
           .toMat(Sink.ignore)(Keep.both)
       },
@@ -144,6 +147,15 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
     val result = testCode(env)
     result.onComplete(_ => env.close())
     result
+  }
+
+  private def getErrorMessage(message: String256M): String = {
+    // TODO(#12373) Adapt when releasing BFT
+    if (testedProtocolVersion >= ProtocolVersion.dev) {
+      DeliverErrorStoreEvent.deserializeError(message, testedProtocolVersion).toString
+    } else {
+      message.unwrap
+    }
   }
 
   private val alice = ParticipantId("alice")
@@ -301,7 +313,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
         }
 
         inside(sortedEvents(1)) { case DeliverErrorStoreEvent(_, `messageId2`, message, _) =>
-          message.unwrap should (include("Invalid signing timestamp")
+          getErrorMessage(message) should (include("Invalid signing timestamp")
             and include("The signing timestamp must be before or at "))
         }
       }
@@ -347,7 +359,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
                   ) =>
                 deliverError
             }.value
-          } yield error.message shouldBe s"Unknown recipients: $bob"
+          } yield getErrorMessage(error.message) should include(s"Unknown recipients: $bob")
         }
       } yield succeed
     }

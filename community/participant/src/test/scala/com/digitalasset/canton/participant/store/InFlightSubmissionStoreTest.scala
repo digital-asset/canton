@@ -7,15 +7,13 @@ import cats.syntax.option.*
 import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.DefaultParticipantStateValues
-import com.digitalasset.canton.participant.protocol.TransactionProcessor
 import com.digitalasset.canton.participant.protocol.submission.*
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
   InFlightByMessageId,
   InFlightBySequencingInfo,
 }
-import com.digitalasset.canton.participant.sync.LedgerSyncEvent
 import com.digitalasset.canton.protocol.RootHash
-import com.digitalasset.canton.sequencing.protocol.{DeliverErrorReason, MessageId}
+import com.digitalasset.canton.sequencing.protocol.{MessageId, SequencerErrors}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
@@ -53,11 +51,9 @@ trait InFlightSubmissionStoreTest extends AsyncWordSpec with BaseTest {
   lazy val trackingData3 = TransactionSubmissionTrackingData(
     completionInfo,
     TransactionSubmissionTrackingData.CauseWithTemplate(
-      LedgerSyncEvent.CommandRejected.FinalReason(
-        TransactionProcessor.SubmissionErrors.SequencerDeliver
-          .Error(DeliverErrorReason.BatchInvalid("Some invalid batch"))
-          .rpcStatus()
-      )
+      SequencerErrors
+        .SubmissionRequestMalformed("Some invalid batch")
+        .rpcStatusWithoutLoggingContext()
     ),
     None,
     testedProtocolVersion,

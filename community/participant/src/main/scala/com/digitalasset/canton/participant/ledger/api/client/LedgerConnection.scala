@@ -78,6 +78,7 @@ trait LedgerAcs extends LedgerSubmit {
   def activeContracts(
       filter: TransactionFilter = LedgerConnection.transactionFilter(sender)
   ): Future[(Seq[CreatedEvent], LedgerOffset)]
+  def getPackageStatus(packageId: String): Future[GetPackageStatusResponse]
 }
 
 trait LedgerConnection extends LedgerSubmit with LedgerAcs {
@@ -117,8 +118,6 @@ trait LedgerConnection extends LedgerSubmit with LedgerAcs {
   def transactionById(id: String): Future[Option[Transaction]]
 
   def allocatePartyViaLedgerApi(hint: Option[String], displayName: Option[String]): Future[PartyId]
-
-  def getPackageStatus(packageId: String): Future[GetPackageStatusResponse]
 
 }
 

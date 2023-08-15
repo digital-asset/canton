@@ -28,7 +28,7 @@ object GeneratorsProtocol {
       requiredHashAlgorithms <- nonEmptySetGen[HashAlgorithm]
       requiredCryptoKeyFormats <- nonEmptySetGen[CryptoKeyFormat]
 
-      protocolVersion <- protocolVersionGen
+      protocolVersion <- protocolVersionArb.arbitrary
 
       reconciliationInterval <- defaultValueGen(
         protocolVersion,
@@ -62,12 +62,12 @@ object GeneratorsProtocol {
   }
 
   implicit val dynamicDomainParametersArb: Arbitrary[DynamicDomainParameters] = Arbitrary(for {
-    participantResponseTimeout <- nonNegativeFiniteDurationGen
-    mediatorReactionTimeout <- nonNegativeFiniteDurationGen
-    transferExclusivityTimeout <- nonNegativeFiniteDurationGen
-    topologyChangeDelay <- nonNegativeFiniteDurationGen
+    participantResponseTimeout <- nonNegativeFiniteDurationArb.arbitrary
+    mediatorReactionTimeout <- nonNegativeFiniteDurationArb.arbitrary
+    transferExclusivityTimeout <- nonNegativeFiniteDurationArb.arbitrary
+    topologyChangeDelay <- nonNegativeFiniteDurationArb.arbitrary
 
-    mediatorDeduplicationMargin <- nonNegativeFiniteDurationGen
+    mediatorDeduplicationMargin <- nonNegativeFiniteDurationArb.arbitrary
     // Because of the potential multiplication by 2 below, we want a reasonably small value
     ledgerTimeRecordTimeTolerance <- Gen
       .choose(0L, 10000L)
@@ -111,4 +111,5 @@ object GeneratorsProtocol {
 
   } yield dynamicDomainParameters)
 
+  implicit val confirmationPolicyArb: Arbitrary[ConfirmationPolicy] = genArbitrary
 }

@@ -848,7 +848,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
   class RunningCommitments(
       initRt: RecordTime,
       commitments: TrieMap[SortedSet[LfPartyId], LtHash16],
-  ) {
+  ) extends HasLoggerName {
 
     private val lock = new Object
     @volatile private var rt: RecordTime = initRt
@@ -890,7 +890,9 @@ object AcsCommitmentProcessor extends HasLoggerName {
       }
     }
 
-    def update(rt: RecordTime, change: AcsChange): Unit = {
+    def update(rt: RecordTime, change: AcsChange)(implicit
+        loggingContext: NamedLoggingContext
+    ): Unit = {
       /*
       The concatenate function is guaranteed to be safe when contract IDs always have the same length.
       Otherwise, a longer contract ID without a transfer counter might collide with a
@@ -919,7 +921,9 @@ object AcsCommitmentProcessor extends HasLoggerName {
                 SortedSet(metadataAndTransferCounter.contractMetadata.stakeholders.toSeq: _*)
               val h = commitments.getOrElseUpdate(sortedStakeholders, LtHash16())
               h.add(concatenate(hash, cid, metadataAndTransferCounter.transferCounter))
-
+              loggingContext.trace(
+                s"Adding to commitment activation cid $cid transferCounter ${metadataAndTransferCounter.transferCounter}"
+              )
               deltaB += sortedStakeholders -> h
           }
           change.deactivations.foreach {
@@ -928,6 +932,9 @@ object AcsCommitmentProcessor extends HasLoggerName {
                 SortedSet(stakeholdersAndTransferCounter.stakeholders.toSeq: _*)
               val h = commitments.getOrElseUpdate(sortedStakeholders, LtHash16())
               h.remove(concatenate(hash, cid, stakeholdersAndTransferCounter.transferCounter))
+              loggingContext.trace(
+                s"Removing from commitment activation cid $cid transferCounter ${stakeholdersAndTransferCounter.transferCounter}"
+              )
               deltaB += sortedStakeholders -> h
           }
         }

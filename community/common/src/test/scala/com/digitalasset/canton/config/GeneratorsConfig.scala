@@ -8,17 +8,18 @@ import org.scalacheck.{Arbitrary, Gen}
 
 object GeneratorsConfig {
   // Refined Int
-  val nonNegativeIntGen: Gen[NonNegativeInt] =
+  implicit val nonNegativeIntArb: Arbitrary[NonNegativeInt] = Arbitrary(
     Gen.choose(0, Int.MaxValue).map(NonNegativeInt.tryCreate)
-  implicit val nonNegativeIntArb: Arbitrary[NonNegativeInt] = Arbitrary(nonNegativeIntGen)
-  val positiveIntGen: Gen[PositiveInt] = Gen.choose(1, Int.MaxValue).map(PositiveInt.tryCreate)
-  implicit val positiveIntArb: Arbitrary[PositiveInt] = Arbitrary(positiveIntGen)
+  )
+  implicit val positiveIntArb: Arbitrary[PositiveInt] = Arbitrary(
+    Gen.choose(1, Int.MaxValue).map(PositiveInt.tryCreate)
+  )
 
   // Refined Long
-  val nonNegativeLongGen: Gen[NonNegativeLong] =
+  implicit val nonNegativeLongArb: Arbitrary[NonNegativeLong] = Arbitrary(
     Gen.choose(0, Long.MaxValue).map(NonNegativeLong.tryCreate)
-  implicit val nonNegativeLongArb: Arbitrary[NonNegativeLong] = Arbitrary(nonNegativeLongGen)
-
-  val positiveLongGen: Gen[PositiveLong] = Gen.choose(1, Long.MaxValue).map(PositiveLong.tryCreate)
-  implicit val positiveLongArb: Arbitrary[PositiveLong] = Arbitrary(positiveLongGen)
+  )
+  implicit val positiveLongArb: Arbitrary[PositiveLong] = Arbitrary(
+    Gen.choose(1, Long.MaxValue).map(PositiveLong.tryCreate)
+  )
 }

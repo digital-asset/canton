@@ -9,16 +9,7 @@ import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.{FullInformeeTree, Informee, ViewPosition, ViewType}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
-import com.digitalasset.canton.protocol.{
-  ConfirmationPolicy,
-  RequestId,
-  RootHash,
-  ViewHash,
-  v0,
-  v1,
-  v2,
-  v3,
-}
+import com.digitalasset.canton.protocol.{RequestId, RootHash, ViewHash, v0, v1, v2, v3}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, MediatorRef}
@@ -127,7 +118,8 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(
   override def toProtoSomeEnvelopeContentV3: v3.EnvelopeContent.SomeEnvelopeContent =
     v3.EnvelopeContent.SomeEnvelopeContent.InformeeMessage(toProtoV1)
 
-  override def confirmationPolicy: ConfirmationPolicy = fullInformeeTree.confirmationPolicy
+  override def minimumThreshold(informees: Set[Informee]): NonNegativeInt =
+    fullInformeeTree.confirmationPolicy.minimumThreshold(informees)
 
   override def rootHash: Option[RootHash] = Some(fullInformeeTree.transactionId.toRootHash)
 

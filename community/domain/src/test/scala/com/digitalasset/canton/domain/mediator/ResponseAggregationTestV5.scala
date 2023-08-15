@@ -109,14 +109,15 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
 
       val requestId = RequestId(CantonTimestamp.Epoch)
 
-      val commonMetadataSignatory = CommonMetadata(hashOps)(
-        ConfirmationPolicy.Signatory,
-        domainId,
-        mediator,
-        salt(5417),
-        new UUID(0L, 0L),
-        testedProtocolVersion,
-      )
+      val commonMetadataSignatory = CommonMetadata
+        .create(hashOps, testedProtocolVersion)(
+          ConfirmationPolicy.Signatory,
+          domainId,
+          mediator,
+          salt(5417),
+          new UUID(0L, 0L),
+        )
+        .value
 
       def mkResponse(
           viewHash: ViewHash,
@@ -645,14 +646,15 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
       }
 
       describe("under the VIP policy") {
-        val commonMetadata = CommonMetadata(hashOps)(
-          ConfirmationPolicy.Vip,
-          domainId,
-          mediator,
-          salt(5417),
-          new UUID(0L, 0L),
-          testedProtocolVersion,
-        )
+        val commonMetadata = CommonMetadata
+          .create(hashOps, testedProtocolVersion)(
+            ConfirmationPolicy.Vip,
+            domainId,
+            mediator,
+            salt(5417),
+            new UUID(0L, 0L),
+          )
+          .value
         val fullInformeeTree = FullInformeeTree.tryCreate(
           GenTransactionTree.tryCreate(hashOps)(
             b(0),

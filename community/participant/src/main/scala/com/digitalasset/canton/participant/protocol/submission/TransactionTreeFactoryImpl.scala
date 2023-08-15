@@ -91,6 +91,7 @@ abstract class TransactionTreeFactoryImpl(
       contractOfId: SerializableContractOfId,
       keyResolver: LfKeyResolver,
       maxSequencingTime: CantonTimestamp,
+      validatePackageVettings: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionTreeConversionError, GenTransactionTree] = {
@@ -110,15 +111,6 @@ abstract class TransactionTreeFactoryImpl(
     val participantMetadataSalt = checked(state.tryNextSalt())
 
     // Create fields
-    val commonMetadata = CommonMetadata(cryptoOps)(
-      confirmationPolicy,
-      domainId,
-      mediator,
-      commonMetadataSalt,
-      transactionUuid,
-      protocolVersion,
-    )
-
     val participantMetadata = ParticipantMetadata(cryptoOps)(
       metadata.ledgerTime,
       metadata.submissionTime,
@@ -137,6 +129,18 @@ abstract class TransactionTreeFactoryImpl(
       )
 
     for {
+      commonMetadata <- EitherT.fromEither[Future](
+        CommonMetadata
+          .create(cryptoOps, protocolVersion)(
+            confirmationPolicy,
+            domainId,
+            mediator,
+            commonMetadataSalt,
+            transactionUuid,
+          )
+          .leftMap(CommonMetadataError)
+      )
+
       submitterMetadata <- EitherT.fromEither[Future](
         SubmitterMetadata
           .fromSubmitterInfo(cryptoOps)(
@@ -154,13 +158,16 @@ abstract class TransactionTreeFactoryImpl(
       )
       rootViewDecompositions <- EitherT.liftF(rootViewDecompositionsF)
 
-      _ <- UsableDomain
-        .resolveParticipantsAndCheckPackagesVetted(
-          domainId = domainId,
-          snapshot = topologySnapshot,
-          requiredPackagesByParty = requiredPackagesByParty(rootViewDecompositions),
-        )
-        .leftMap(_.transformInto[UnknownPackageError])
+      _ <-
+        if (validatePackageVettings)
+          UsableDomain
+            .resolveParticipantsAndCheckPackagesVetted(
+              domainId = domainId,
+              snapshot = topologySnapshot,
+              requiredPackagesByParty = requiredPackagesByParty(rootViewDecompositions),
+            )
+            .leftMap(_.transformInto[UnknownPackageError])
+        else EitherT.rightT[Future, TransactionTreeConversionError](())
 
       rootViews <- createRootViews(rootViewDecompositions, state, contractOfId)
         .map(rootViews =>

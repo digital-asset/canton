@@ -13,7 +13,7 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory,
 import com.digitalasset.canton.participant.admin.grpc.GrpcParticipantRepairService.ValidDownloadRequest
 import com.digitalasset.canton.participant.admin.grpc.util.AcsUtil
 import com.digitalasset.canton.participant.admin.v0.*
-import com.digitalasset.canton.participant.admin.{RepairServiceError, SyncStateInspection}
+import com.digitalasset.canton.participant.admin.{RepairServiceError, inspection}
 import com.digitalasset.canton.participant.domain.{DomainAliasManager, DomainConnectionConfig}
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.protocol.{SerializableContract, SerializableContractWithWitnesses}
@@ -124,30 +124,26 @@ final class GrpcParticipantRepairService(
   private val domainMigrationInProgress = new AtomicReference[Boolean](false)
 
   private def toRepairServiceError(
-      error: (DomainId, SyncStateInspection.Error)
+      error: (DomainId, inspection.Error)
   )(implicit tc: TraceContext): RepairServiceError =
     error match {
-      case (domainId, SyncStateInspection.Error.TimestampAfterPrehead(requested, clean)) =>
+      case (domainId, inspection.Error.TimestampAfterPrehead(requested, clean)) =>
         RepairServiceError.InvalidAcsSnapshotTimestamp.Error(
           requested,
           clean,
           domainId,
         )
-      case (domainId, SyncStateInspection.Error.TimestampBeforePruning(requested, pruned)) =>
+      case (domainId, inspection.Error.TimestampBeforePruning(requested, pruned)) =>
         RepairServiceError.UnavailableAcsSnapshot.Error(
           requested,
           pruned,
           domainId,
         )
-      case (domainId, SyncStateInspection.Error.InconsistentSnapshot(missingContracts)) =>
-        lazy val missingContractsAsString = missingContracts.mkString(", ")
+      case (domainId, inspection.Error.InconsistentSnapshot(missingContract)) =>
         logger.warn(
-          s"Inconsistent ACS snapshot for domain $domainId. Possibly non-exhaustive list of missing contracts: $missingContractsAsString"
+          s"Inconsistent ACS snapshot for domain $domainId. Contract $missingContract (and possibly others) is missing."
         )
         RepairServiceError.InconsistentAcsSnapshot.Error(domainId)
-      case (domainId, SyncStateInspection.Error.UnexpectedError(cause)) =>
-        logger.error(s"Unexpected error while retrieving the ACS snapshot for $domainId", cause)
-        RepairServiceError.UnexpectedError.Error()
     }
 
   private final val AcsSnapshotTemporaryFileNamePrefix = "temporary-canton-acs-snapshot"
@@ -178,7 +174,7 @@ final class GrpcParticipantRepairService(
         ResourceUtil
           .withResourceEitherT(outputStream)(
             sync.stateInspection
-              .writeActiveContracts(
+              .dumpActiveContracts(
                 _,
                 _.filterString.startsWith(request.filterDomainId),
                 validRequest.parties,

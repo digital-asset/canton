@@ -667,14 +667,15 @@ class ExampleTransactionFactory(
     )
 
   val commonMetadata: CommonMetadata =
-    CommonMetadata(cryptoOps)(
-      confirmationPolicy,
-      domainId,
-      mediatorRef,
-      Salt.tryDeriveSalt(transactionSeed, 1, cryptoOps),
-      transactionUuid,
-      protocolVersion,
-    )
+    CommonMetadata
+      .create(cryptoOps, protocolVersion)(
+        confirmationPolicy,
+        domainId,
+        mediatorRef,
+        Salt.tryDeriveSalt(transactionSeed, 1, cryptoOps),
+        transactionUuid,
+      )
+      .value
 
   val participantMetadata: ParticipantMetadata =
     ParticipantMetadata(cryptoOps)(

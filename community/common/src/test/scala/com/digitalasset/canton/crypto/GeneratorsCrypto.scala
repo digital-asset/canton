@@ -5,14 +5,20 @@ package com.digitalasset.canton.crypto
 
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.Generators
+import com.digitalasset.canton.config.CantonRequireTypes.String68
+import com.google.protobuf.ByteString
 import magnolify.scalacheck.auto.*
 import org.scalacheck.*
 
 object GeneratorsCrypto {
+  import Generators.*
+  import org.scalatest.EitherValues.*
+
   implicit val signingKeySchemeArb: Arbitrary[SigningKeyScheme] = genArbitrary
   implicit val symmetricKeySchemeArb: Arbitrary[SymmetricKeyScheme] = genArbitrary
   implicit val encryptionKeySchemeArb: Arbitrary[EncryptionKeyScheme] = genArbitrary
   implicit val hashAlgorithmArb: Arbitrary[HashAlgorithm] = genArbitrary
+  implicit val saltAlgorithmArb: Arbitrary[SaltAlgorithm] = genArbitrary
   implicit val cryptoKeyFormatArb: Arbitrary[CryptoKeyFormat] = genArbitrary
 
   implicit val signingKeySchemeNESArb: Arbitrary[NonEmpty[Set[SigningKeyScheme]]] =
@@ -25,4 +31,28 @@ object GeneratorsCrypto {
     Generators.nonEmptySet[HashAlgorithm]
   implicit val cryptoKeyFormatNESArb: Arbitrary[NonEmpty[Set[CryptoKeyFormat]]] =
     Generators.nonEmptySet[CryptoKeyFormat]
+
+  implicit val fingerprintArb: Arbitrary[Fingerprint] = Arbitrary(
+    Generators.lengthLimitedStringGen(String68).map(s => Fingerprint.tryCreate(s.str))
+  )
+
+  implicit val signatureArb: Arbitrary[Signature] = genArbitrary
+
+  implicit val hashArb: Arbitrary[Hash] = Arbitrary(
+    for {
+      hashAlgorithm <- hashAlgorithmArb.arbitrary
+      hash <- Gen
+        .stringOfN(hashAlgorithm.length.toInt, Gen.alphaNumChar)
+        .map(ByteString.copyFromUtf8)
+    } yield Hash.tryCreate(hash, hashAlgorithm)
+  )
+
+  implicit val saltArb: Arbitrary[Salt] = Arbitrary(
+    for {
+      saltAlgorithm <- saltAlgorithmArb.arbitrary
+      salt <- Gen
+        .stringOfN(saltAlgorithm.length.toInt, Gen.alphaNumChar)
+        .map(ByteString.copyFromUtf8)
+    } yield Salt.create(salt, saltAlgorithm).value
+  )
 }

@@ -26,6 +26,9 @@ import com.digitalasset.canton.version.{
 }
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import com.google.rpc.status.Status
+import pprint.Tree
+import pprint.Tree.{Apply, KeyValue, Literal}
 
 /** The Deliver events are received as a consequence of a '''Send''' command, received by the recipients of the
   * originating '''Send''' event.
@@ -78,6 +81,7 @@ object SequencedEvent
   override def name: String = "SequencedEvent"
 
   override val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    // TODO(#9014): Cleanup v0 after 3.x line is cut
     ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.SequencedEvent)(
       supportedProtoVersionMemoized(_)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -97,7 +101,7 @@ object SequencedEvent
       domainIdP: String,
       mbMsgIdP: Option[String],
       deserializedBatch: => ParsingResult[Option[Batch[ClosedEnvelope]]],
-      mbDeliverErrorReasonP: Option[v0.DeliverErrorReason],
+      mbDeliverErrorReasonP: ParsingResult[Option[Status]],
       bytes: ByteString,
       protoVersion: ProtoVersion,
   ): ParsingResult[SequencedEvent[ClosedEnvelope]] = {
@@ -110,7 +114,7 @@ object SequencedEvent
         .flatMap(CantonTimestamp.fromProtoPrimitive)
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "SequencedEvent.domainId")
       mbBatch <- deserializedBatch
-      mbDeliverErrorReason <- mbDeliverErrorReasonP.traverse(DeliverErrorReason.fromProtoV0)
+      mbDeliverErrorReason <- mbDeliverErrorReasonP
       // errors have an error reason, delivers have a batch
       event <- ((mbDeliverErrorReason, mbBatch) match {
         case (Some(_), Some(_)) =>
@@ -171,7 +175,7 @@ object SequencedEvent
       domainIdP,
       mbMsgIdP,
       mbBatch,
-      mbDeliverErrorReasonP,
+      mbDeliverErrorReasonP.traverse(x => DeliverErrorReason.mkStatus(x.reason)),
       bytes,
       ProtoVersion(0),
     )
@@ -193,7 +197,7 @@ object SequencedEvent
       domainIdP,
       mbMsgIdP,
       mbBatch,
-      mbDeliverErrorReasonP,
+      Right(mbDeliverErrorReasonP),
       bytes,
       ProtoVersion(1),
     )
@@ -239,7 +243,7 @@ sealed abstract case class DeliverError private[sequencing] (
     override val timestamp: CantonTimestamp,
     override val domainId: DomainId,
     messageId: MessageId,
-    reason: DeliverErrorReason,
+    reason: Status,
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[SequencedEvent.type],
     override val deserializedFrom: Option[ByteString],
@@ -251,7 +255,7 @@ sealed abstract case class DeliverError private[sequencing] (
     domainId = domainId.toProtoPrimitive,
     messageId = Some(messageId.toProtoPrimitive),
     batch = None,
-    deliverErrorReason = Some(reason.toProtoV0),
+    deliverErrorReason = Some(DeliverErrorReason.tryFromStatus(reason).toProtoV0),
   )
 
   def toProtoV1: v1.SequencedEvent = v1.SequencedEvent(
@@ -260,7 +264,7 @@ sealed abstract case class DeliverError private[sequencing] (
     domainId = domainId.toProtoPrimitive,
     messageId = Some(messageId.toProtoPrimitive),
     batch = None,
-    deliverErrorReason = Some(reason.toProtoV0),
+    deliverErrorReason = Some(reason),
   )
 
   override protected def traverse[F[_], Env <: Envelope[_]](f: Nothing => F[Env])(implicit
@@ -279,18 +283,56 @@ sealed abstract case class DeliverError private[sequencing] (
 }
 
 object DeliverError {
+
+  implicit val prettyStatus: Pretty[Status] = new Pretty[Status] {
+    override def treeOf(t: Status): Tree = {
+      Apply(
+        "Status",
+        Seq(
+          KeyValue("Code", Literal(t.code.toString)),
+          KeyValue("Message", Literal(t.message)),
+        ).iterator,
+      )
+    }
+  }
+
   def create(
       counter: SequencerCounter,
       timestamp: CantonTimestamp,
       domainId: DomainId,
       messageId: MessageId,
-      reason: DeliverErrorReason,
+      sequencerError: SequencerDeliverError,
       protocolVersion: ProtocolVersion,
-  ) =
-    new DeliverError(counter, timestamp, domainId, messageId, reason)(
+  ): DeliverError = {
+    new DeliverError(
+      counter,
+      timestamp,
+      domainId,
+      messageId,
+      sequencerError.forProtocolVersion(protocolVersion).rpcStatusWithoutLoggingContext(),
+    )(
       SequencedEvent.protocolVersionRepresentativeFor(protocolVersion),
       None,
     ) {}
+  }
+
+  def tryCreate(
+      counter: SequencerCounter,
+      timestamp: CantonTimestamp,
+      domainId: DomainId,
+      messageId: MessageId,
+      status: Status,
+      protocolVersion: ProtocolVersion,
+  ): DeliverError = {
+    // TODO(#12373) Adapt when releasing BFT
+    if (SequencedEvent.protoVersionFor(protocolVersion) == ProtoVersion(0)) {
+      DeliverErrorReason.tryFromStatus(status): Unit // enforce the invariant
+    }
+    new DeliverError(counter, timestamp, domainId, messageId, status)(
+      SequencedEvent.protocolVersionRepresentativeFor(protocolVersion),
+      None,
+    ) {}
+  }
 }
 
 /** Intuitively, the member learns all envelopes addressed to it. It learns some recipients of

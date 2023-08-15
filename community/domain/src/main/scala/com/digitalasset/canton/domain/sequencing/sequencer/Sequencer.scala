@@ -8,7 +8,6 @@ import akka.stream.KillSwitch
 import akka.stream.scaladsl.Source
 import cats.data.EitherT
 import com.digitalasset.canton.SequencerCounter
-import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
@@ -251,27 +250,4 @@ object Sequencer extends HasLoggerName {
     * was pulled. Termination of the main flow must be awaited separately.
     */
   type EventSource = Source[OrdinarySerializedEvent, (KillSwitch, Future[Done])]
-
-  // TODO(#5990) use an error code
-  def signingTimestampAfterSequencingTimestampError(
-      signingTimestamp: CantonTimestamp,
-      sequencingTimestamp: CantonTimestamp,
-  ): String256M =
-    String256M.tryCreate(
-      s"Invalid signing timestamp $signingTimestamp. The signing timestamp must be before or at $sequencingTimestamp."
-    )
-
-  // TODO(#5990) use an error code
-  def signingTimestampTooEarlyError(
-      signingTimestamp: CantonTimestamp,
-      sequencingTimestamp: CantonTimestamp,
-  ): DeliverErrorReason.BatchRefused = {
-    // We can't easily compute a valid signing timestamp because we'd have to scan through
-    // the domain parameter updates to compute a bound, as the signing tolerance is taken
-    // from the domain parameters valid at the signing timestamp, not the sequencing timestamp.
-    val errorMsg =
-      s"Signing timestamp $signingTimestamp is too early for sequencing time $sequencingTimestamp."
-    DeliverErrorReason.BatchRefused(errorMsg)
-  }
-
 }

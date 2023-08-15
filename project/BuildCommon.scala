@@ -749,7 +749,6 @@ object BuildCommon {
           tink,
           slick,
           sttp,
-          sttp_okhttp,
           sttp_circe,
           monocle_macro, // Include it here, even if unused, so that it can be used everywhere
           pureconfig, // Only dependencies may be needed, but it is simplest to include it like this

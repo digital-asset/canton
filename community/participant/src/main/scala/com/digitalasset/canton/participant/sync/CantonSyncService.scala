@@ -9,7 +9,6 @@ import akka.stream.scaladsl.Source
 import cats.Eval
 import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
@@ -59,6 +58,7 @@ import com.digitalasset.canton.participant.Pruning.*
 import com.digitalasset.canton.participant.*
 import com.digitalasset.canton.participant.admin.*
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
+import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
 import com.digitalasset.canton.participant.domain.*
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
@@ -1382,31 +1382,8 @@ class CantonSyncService(
   /** Checks if a given party has any active contracts. */
   def partyHasActiveContracts(
       partyId: PartyId
-  )(implicit traceContext: TraceContext): Future[Boolean] = {
-
-    // checks active contracts for all stores of connected domains
-    syncDomainPersistentStateManager.getAll.toList
-      .findM { case (_, store) =>
-        partyHasActiveContractsInDomain(store, partyId, stateInspection)
-      }
-      .map(_.nonEmpty)
-  }
-
-  /** Checks if a given party has any active contracts for a given domain. */
-  private def partyHasActiveContractsInDomain(
-      domainStore: SyncDomainPersistentState,
-      partyId: PartyId,
-      stateInspection: SyncStateInspection,
-  )(implicit traceContext: TraceContext): Future[Boolean] = {
-    for {
-      acs <- stateInspection.currentAcsSnapshot(domainStore)
-      res <- domainStore.contractStore
-        .hasActiveContracts(
-          partyId,
-          acs.keys.toVector,
-        )
-    } yield res
-  }
+  )(implicit traceContext: TraceContext): Future[Boolean] =
+    stateInspection.partyHasActiveContracts(partyId)
 
   /** prepares a domain connection for migration: connect and wait until the topology state has been pushed
     * so we don't deploy against an empty domain

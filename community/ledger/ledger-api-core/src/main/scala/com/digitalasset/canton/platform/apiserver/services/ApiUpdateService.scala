@@ -13,14 +13,13 @@ import com.daml.lf.ledger.EventId
 import com.daml.logging.entries.LoggingEntries
 import com.daml.metrics.Metrics
 import com.daml.tracing.Telemetry
+import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.domain.TransactionId
 import com.digitalasset.canton.ledger.api.grpc.StreamingServiceLifecycleManagement
 import com.digitalasset.canton.ledger.api.validation.{
-  PartyNameChecker,
   TransactionServiceRequestValidator,
   ValidationErrors,
 }
-import com.digitalasset.canton.ledger.api.{ValidationLogger, domain}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexTransactionsService
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
@@ -41,6 +40,7 @@ final class ApiUpdateService(
     metrics: Metrics,
     telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
+    validator: TransactionServiceRequestValidator,
 )(implicit
     esf: ExecutionSequencerFactory,
     executionContext: ExecutionContext,
@@ -50,12 +50,6 @@ final class ApiUpdateService(
     with NamedLogging {
 
   import ApiConversions.*
-
-  private val validator =
-    new TransactionServiceRequestValidator(
-      domain.LedgerId(""), // not used
-      PartyNameChecker.AllowAllParties,
-    )
 
   override def getUpdates(
       request: GetUpdatesRequest,

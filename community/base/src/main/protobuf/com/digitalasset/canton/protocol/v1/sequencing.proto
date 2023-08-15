@@ -10,6 +10,7 @@ import "com/digitalasset/canton/protocol/v0/sequencing.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
+import "google/rpc/status.proto";
 import "scalapb/scalapb.proto";
 
 message StaticDomainParameters {
@@ -72,7 +73,7 @@ message SequencedEvent {
   google.protobuf.StringValue message_id = 4; // Optional: Present for DeliverError, present for the sender of a Deliver.
   // Changed in v1 from v0.CompressedBatch to v1.CompressedBatch
   CompressedBatch batch = 5; // Optional: Present for Deliver, absent for DeliverError
-  v0.DeliverErrorReason deliver_error_reason = 6; // Optional: Present for DeliverError, absent for other events
+  google.rpc.Status deliver_error_reason = 6; // Optional: Present for DeliverError, absent for other events
 }
 
 message SignedContent {

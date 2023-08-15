@@ -9,8 +9,8 @@ import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.sequencing.protocol.{
   Deliver,
   DeliverError,
-  DeliverErrorReason,
   Envelope,
+  SequencerErrors,
 }
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -60,9 +60,9 @@ object SendResult {
     result match {
       case SendResult.Success(_) =>
         FutureUnlessShutdown.pure(())
-      // TODO(i13155): Use a dedicated signalling mechanism for this case
-      case SendResult.Error(DeliverError(_, _, _, _, DeliverErrorReason.BatchRefused(message)))
-          if message.contains("was previously delivered at") =>
+      case SendResult.Error(
+            DeliverError(_, _, _, _, SequencerErrors.AggregateSubmissionAlreadySent(_))
+          ) =>
         // Stop retrying
         FutureUnlessShutdown.unit
       case SendResult.Error(error) =>

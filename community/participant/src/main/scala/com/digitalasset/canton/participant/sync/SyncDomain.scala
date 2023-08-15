@@ -329,15 +329,13 @@ class SyncDomain(
     def withMetadataSeq(cids: Seq[LfContractId]): Future[Seq[StoredContract]] =
       persistent.contractStore
         .lookupManyUncached(cids)
-        .map(_.map {
-          case (cid, None) =>
-            ErrorUtil.internalError(
-              new IllegalStateException(
-                s"Contract $cid is in the active contract store but not in the contract store"
-              )
+        .valueOr { missingContractId =>
+          ErrorUtil.internalError(
+            new IllegalStateException(
+              s"Contract $missingContractId is in the active contract store but not in the contract store"
             )
-          case (_, Some(sc)) => sc
-        })
+          )
+        }
 
     def lookupChangeMetadata(change: ActiveContractIdsChange): Future[AcsChange] = {
       for {
@@ -416,6 +414,14 @@ class SyncDomain(
       } yield {
         logger.info(
           s"Replaying ${changes.size} ACS changes between $fromExclusive (exclusive) and $toInclusive to the commitment processor"
+        )
+        logger.debug(
+          s"Retrieved contract ID changes from changesBetween " +
+            s"${contractIdChanges.force
+                .map { case (toc, activeContractsChange) =>
+                  s"at time ${toc} activations ${activeContractsChange.activations} deactivations ${activeContractsChange.deactivations} "
+                }
+                .toString()}"
         )
         changes
       })
