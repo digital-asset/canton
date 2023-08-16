@@ -413,6 +413,7 @@ object SequencerWriter {
           clock,
           eventSignaller,
           loggerFactory,
+          protocolVersion,
         )
           .toMat(Sink.ignore)(Keep.both)
           .mapMaterializedValue(m => new RunningSequencerWriterFlow(m._1, m._2.void)),

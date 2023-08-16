@@ -17,13 +17,13 @@ import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
-import com.digitalasset.canton.sequencing.protocol.DeliverErrorReason.{BatchInvalid, BatchRefused}
-import com.digitalasset.canton.sequencing.protocol.{AggregationRule, *}
+import com.digitalasset.canton.sequencing.protocol.{AggregationRule, SequencerErrors, *}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.util.AkkaUtil
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
+import com.google.rpc.status.Status
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 import org.scalatest.{Assertion, FutureOutcome}
 
@@ -386,11 +386,12 @@ abstract class SequencerApiTest
           reads12a,
         )
 
-        checkRejection(reads13, p13, messageId3) { case BatchRefused(reason) =>
-          reason should (
-            include(s"The aggregatable request with aggregation ID") and
-              include("was previously delivered at")
-          )
+        checkRejection(reads13, p13, messageId3) {
+          case SequencerErrors.AggregateSubmissionAlreadySent(reason) =>
+            reason should (
+              include(s"The aggregatable request with aggregation ID") and
+                include("was previously delivered at")
+            )
         }
       }
     }
@@ -460,10 +461,11 @@ abstract class SequencerApiTest
           Seq(EventDetails(SequencerCounter.Genesis, p14, Some(request1.messageId))),
           reads14,
         )
-        checkRejection(reads14a, p14, messageId2) { case BatchRefused(reason) =>
-          reason should include(
-            s"The sender ${p14} previously contributed to the aggregatable submission with ID"
-          )
+        checkRejection(reads14a, p14, messageId2) {
+          case SequencerErrors.AggregateSubmissionStuffing(reason) =>
+            reason should include(
+              s"The sender ${p14} previously contributed to the aggregatable submission with ID"
+            )
         }
         val deliveredEnvelopeDetails = EnvelopeDetails(
           messageContent,
@@ -537,8 +539,9 @@ abstract class SequencerApiTest
         _ <- valueOrFail(sequencer.sendAsync(request))("Sent async")
         reads <- readForMembers(Seq(p16), sequencer)
       } yield {
-        checkRejection(reads, p16, messageId) { case BatchInvalid(reason) =>
-          reason should include("Threshold 2 cannot be reached")
+        checkRejection(reads, p16, messageId) {
+          case SequencerErrors.SubmissionRequestMalformed(reason) =>
+            reason should include("Threshold 2 cannot be reached")
         }
       }
     }
@@ -567,8 +570,9 @@ abstract class SequencerApiTest
         _ <- valueOrFail(sequencer.sendAsync(request))("Sent async")
         reads <- readForMembers(Seq(p17), sequencer)
       } yield {
-        checkRejection(reads, p17, messageId) { case BatchInvalid(reason) =>
-          reason should include("Sender is not eligible according to the aggregation rule")
+        checkRejection(reads, p17, messageId) {
+          case SequencerErrors.SubmissionRequestMalformed(reason) =>
+            reason should include("Sender is not eligible according to the aggregation rule")
         }
       }
     }
@@ -602,10 +606,11 @@ abstract class SequencerApiTest
         _ <- valueOrFail(sequencer.sendAsync(request))("Sent async")
         reads <- readForMembers(Seq(p18), sequencer)
       } yield {
-        checkRejection(reads, p18, messageId) { case BatchInvalid(reason) =>
-          reason should include(
-            "Eligible senders in aggregation rule must be authenticated, but found unauthenticated members"
-          )
+        checkRejection(reads, p18, messageId) {
+          case SequencerErrors.SubmissionRequestMalformed(reason) =>
+            reason should include(
+              "Eligible senders in aggregation rule must be authenticated, but found unauthenticated members"
+            )
         }
       }
     }
@@ -722,7 +727,7 @@ trait SequencerApiTestUtils extends FixtureAsyncWordSpec with BaseTest with HasE
       got: Seq[(Member, OrdinarySerializedEvent)],
       sender: Member,
       expectedMessageId: MessageId,
-  )(assertReason: PartialFunction[DeliverErrorReason, Assertion]): Assertion = {
+  )(assertReason: PartialFunction[Status, Assertion]): Assertion = {
     got match {
       case Seq((`sender`, event)) =>
         event.signedEvent.content match {

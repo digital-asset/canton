@@ -26,13 +26,13 @@ import com.digitalasset.canton.sequencing.client.{
 import com.digitalasset.canton.sequencing.protocol.{
   AggregationRule,
   Batch,
-  DeliverErrorReason,
   MediatorsOfDomain,
   MemberRecipient,
   OpenEnvelope,
   ParticipantsOfParty,
   Recipient,
   Recipients,
+  SequencerErrors,
 }
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{MediatorId, MediatorRef, ParticipantId, PartyId}
@@ -140,17 +140,14 @@ private[mediator] class DefaultVerdictSender(
       case UnlessShutdown.Outcome(SendResult.Error(error)) =>
         val reason = error.reason
         reason match {
-          case _: DeliverErrorReason.BatchRefused =>
-            // TODO(i13155):
-            if (reason.message.contains("was previously delivered at")) {
-              logger.info(
-                s"Result message was refused for $requestId: $reason"
-              )
-            } else {
-              logger.warn(
-                s"Result message was refused for $requestId: $reason"
-              )
-            }
+          case SequencerErrors.AggregateSubmissionAlreadySent(_) =>
+            logger.info(
+              s"Result message was already sent for $requestId: $reason"
+            )
+          case SequencerErrors.SubmissionRequestRefused(_) =>
+            logger.warn(
+              s"Result message was refused for $requestId: $reason"
+            )
           case _ =>
             logger.error(
               s"Failed to send result message for $requestId: $reason"

@@ -5,6 +5,7 @@ package com.digitalasset.canton.ledger.api.validation
 
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.transaction_filter.{Filters, InterfaceFilter, TransactionFilter}
+import com.daml.lf.data.Ref
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.InclusiveFilters
 import io.grpc.StatusRuntimeException
@@ -12,7 +13,13 @@ import scalaz.std.either.*
 import scalaz.std.list.*
 import scalaz.syntax.traverse.*
 
-object TransactionFilterValidator {
+class TransactionFilterValidator(
+    resolveTemplateIds: Ref.QualifiedName => ContextualizedErrorLogger => Either[
+      StatusRuntimeException,
+      Iterable[Ref.Identifier],
+    ],
+    upgradingEnabled: Boolean,
+) {
 
   import FieldValidator.*
   import ValidationErrors.*
@@ -29,21 +36,39 @@ object TransactionFilterValidator {
         txFilter.filtersByParty.toList.traverse { case (k, v) =>
           for {
             key <- requireParty(k)
-            value <- validateFilters(v)
+            value <- validateFilters(
+              v,
+              resolveTemplateIds(_)(contextualizedErrorLogger),
+              upgradingEnabled,
+            )
           } yield key -> value
         }
       convertedFilters.map(m => domain.TransactionFilter(m.toMap))
     }
   }
 
-  def validateFilters(filters: Filters)(implicit
+  private def validateFilters(
+      filters: Filters,
+      resolvePackageIds: Ref.QualifiedName => Either[StatusRuntimeException, Iterable[
+        Ref.Identifier
+      ]],
+      upgradingEnabled: Boolean,
+  )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, domain.Filters] = {
     filters.inclusive
       .fold[Either[StatusRuntimeException, domain.Filters]](Right(domain.Filters.noFilter)) {
         inclusive =>
           for {
-            validatedIdents <- inclusive.templateIds.toList traverse validateIdentifier
+            validatedIdents <-
+              inclusive.templateIds.toList
+                .traverse(
+                  validatedTemplateIdWithPackageIdResolutionFallback(
+                    _,
+                    resolvePackageIds,
+                  )(upgradingEnabled)
+                )
+                .map(_.flatten)
             validatedInterfaces <-
               inclusive.interfaceFilters.toList traverse validateInterfaceFilter
           } yield domain.Filters(
@@ -52,7 +77,7 @@ object TransactionFilterValidator {
       }
   }
 
-  def validateInterfaceFilter(filter: InterfaceFilter)(implicit
+  private def validateInterfaceFilter(filter: InterfaceFilter)(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, domain.InterfaceFilter] = {
     for {

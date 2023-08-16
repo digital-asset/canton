@@ -7,11 +7,9 @@ import org.scalacheck.{Arbitrary, Gen}
 
 object GeneratorsVersion {
 
-  val protocolVersionGen: Gen[ProtocolVersion] =
-    Gen.oneOf(ProtocolVersion.supported)
-
+  // Prefer to use `representativeProtocolVersionGen` which offers a better distribution over the protobuf versions
   implicit val protocolVersionArb: Arbitrary[ProtocolVersion] =
-    Arbitrary(protocolVersionGen)
+    Arbitrary(Gen.oneOf(ProtocolVersion.supported))
 
   def defaultValueGen[Comp <: HasProtocolVersionedWrapperCompanion[_, _], T](
       protocolVersion: ProtocolVersion,
@@ -19,14 +17,23 @@ object GeneratorsVersion {
   )(implicit arb: Arbitrary[T]): Gen[T] =
     arb.arbitrary.map(defaultValue.orValue(_, protocolVersion))
 
+  def defaultValueGen[Comp <: HasProtocolVersionedWrapperCompanion[_, _], T](
+      protocolVersion: RepresentativeProtocolVersion[Comp],
+      defaultValue: Comp#DefaultValue[T],
+  )(implicit arb: Arbitrary[T]): Gen[T] =
+    defaultValueGen(protocolVersion.representative, defaultValue)
+
   def defaultValueArb[Comp <: HasProtocolVersionedWrapperCompanion[_, _], T](
       protocolVersion: RepresentativeProtocolVersion[Comp],
       defaultValue: Comp#DefaultValue[T],
   )(implicit arb: Arbitrary[T]): Gen[T] =
     defaultValueGen(protocolVersion.representative, defaultValue)
 
-  def representativeProtocolVersionGen[ValueClass](
+  def representativeProtocolVersionGen[ValueClass <: HasRepresentativeProtocolVersion](
       companion: HasProtocolVersionedWrapperCompanion[ValueClass, _]
-  ): Gen[RepresentativeProtocolVersion[companion.type]] =
-    Gen.oneOf(companion.supportedProtoVersions.table.values)
+  ): Gen[RepresentativeProtocolVersion[companion.type]] = {
+    Gen.oneOf(companion.supportedProtoVersions.converters.forgetNE.values.collect {
+      case codec if codec.isSupported => codec.fromInclusive
+    })
+  }
 }

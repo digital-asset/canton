@@ -11,7 +11,7 @@ import com.digitalasset.canton.console.{
   InstanceReferenceWithSequencerConnection,
   LocalParticipantReference,
 }
-import com.digitalasset.canton.participant.admin.SyncStateInspection
+import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
 import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, TimestampedEvent}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*

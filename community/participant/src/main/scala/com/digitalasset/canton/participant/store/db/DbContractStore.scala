@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.store.db
 import cats.data.{EitherT, OptionT}
 import cats.syntax.option.*
 import cats.syntax.parallel.*
+import cats.syntax.traverse.*
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CantonRequireTypes.String2066
@@ -151,11 +152,15 @@ class DbContractStore(
 
   override def lookupManyUncached(
       ids: Seq[LfContractId]
-  )(implicit traceContext: TraceContext): Future[List[(LfContractId, Option[StoredContract])]] =
+  )(implicit traceContext: TraceContext): EitherT[Future, LfContractId, List[StoredContract]] =
     NonEmpty
       .from(ids)
-      .map(lookupManyUncachedInternal(_).map(ids.toList.zip(_)))
-      .getOrElse(Future.successful(List.empty))
+      .map(ids =>
+        EitherT(lookupManyUncachedInternal(ids).map(ids.toList.zip(_).traverse {
+          case (id, contract) => contract.toRight(id)
+        }))
+      )
+      .getOrElse(EitherT.rightT(List.empty))
 
   private def lookupManyUncachedInternal(
       ids: NonEmpty[Seq[LfContractId]]

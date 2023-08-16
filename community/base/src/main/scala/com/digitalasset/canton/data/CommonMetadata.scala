@@ -6,6 +6,7 @@ package com.digitalasset.canton.data
 import cats.syntax.either.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.data.CommonMetadata.singleMediatorError
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.{v0, *}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -49,8 +50,7 @@ final case class CommonMetadata private (
 
   @transient override protected lazy val companionObj: CommonMetadata.type = CommonMetadata
 
-  private[CommonMetadata] def toProtoV0: v0.CommonMetadata = {
-    require(isEquivalentTo(ProtocolVersion.v3))
+  private def toProtoV0: v0.CommonMetadata = {
     mediator match {
       case MediatorRef.Single(mediatorId) =>
         v0.CommonMetadata(
@@ -61,15 +61,12 @@ final case class CommonMetadata private (
           mediatorId = mediatorId.toProtoPrimitive,
         )
       case _ =>
-        throw new IllegalStateException(
-          s"Only single mediator exist in for the representative protocol version $representativeProtocolVersion"
-        )
+        throw new IllegalStateException(singleMediatorError(representativeProtocolVersion))
     }
   }
 
-  private[CommonMetadata] def toProtoV1: v1.CommonMetadata = {
+  private def toProtoV1: v1.CommonMetadata = {
     // TODO(#12373) Adapt when releasing BFT
-    require(isEquivalentTo(ProtocolVersion.dev))
     v1.CommonMetadata(
       confirmationPolicy = confirmationPolicy.toProtoPrimitive,
       domainId = domainId.toProtoPrimitive,
@@ -99,20 +96,53 @@ object CommonMetadata
     ),
   )
 
-  def apply(
-      hashOps: HashOps
+  private def singleMediatorError(
+      rpv: RepresentativeProtocolVersion[CommonMetadata.type]
+  ): String = s"Only single mediator exist in for the representative protocol version $rpv"
+
+  private[data] def shouldHaveSingleMediator(
+      rpv: RepresentativeProtocolVersion[CommonMetadata.type]
+  ): Boolean = rpv == protocolVersionRepresentativeFor(ProtocolVersion.v3)
+
+  def create(
+      hashOps: HashOps,
+      protocolVersion: ProtocolVersion,
   )(
       confirmationPolicy: ConfirmationPolicy,
       domain: DomainId,
       mediator: MediatorRef,
       salt: Salt,
       uuid: UUID,
-      protocolVersion: ProtocolVersion,
-  ): CommonMetadata = CommonMetadata(confirmationPolicy, domain, mediator, salt, uuid)(
+  ): Either[String, CommonMetadata] = create(
     hashOps,
     protocolVersionRepresentativeFor(protocolVersion),
-    None,
-  )
+  )(confirmationPolicy, domain, mediator, salt, uuid)
+
+  def create(
+      hashOps: HashOps,
+      protocolVersion: RepresentativeProtocolVersion[CommonMetadata.type],
+  )(
+      confirmationPolicy: ConfirmationPolicy,
+      domain: DomainId,
+      mediator: MediatorRef,
+      salt: Salt,
+      uuid: UUID,
+  ): Either[String, CommonMetadata] = {
+
+    mediator match {
+      case MediatorRef.Group(_) if shouldHaveSingleMediator(protocolVersion) =>
+        Left(singleMediatorError(protocolVersion))
+
+      case _ =>
+        Right(
+          CommonMetadata(confirmationPolicy, domain, mediator, salt, uuid)(
+            hashOps,
+            protocolVersion,
+            None,
+          )
+        )
+    }
+  }
 
   private def fromProtoV0(hashOps: HashOps, metaDataP: v0.CommonMetadata)(
       bytes: ByteString

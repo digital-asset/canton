@@ -71,6 +71,7 @@ final class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
       contractInstanceOfId,
       keyResolver,
       factory.ledgerTime.plusSeconds(100),
+      validatePackageVettings = true,
     )
   }
 

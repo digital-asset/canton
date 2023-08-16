@@ -67,7 +67,7 @@ final case class TransferInMediatorMessage(tree: TransferInViewTree)
     Map(tree.viewPosition -> ((confirmingParties, threshold)))
   }
 
-  override def confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.Full
+  override def minimumThreshold(informees: Set[Informee]): NonNegativeInt = NonNegativeInt.one
 
   override def createMediatorResult(
       requestId: RequestId,

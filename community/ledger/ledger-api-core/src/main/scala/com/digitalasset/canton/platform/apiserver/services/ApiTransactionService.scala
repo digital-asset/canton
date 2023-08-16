@@ -13,11 +13,8 @@ import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.grpc.{GrpcApiService, StreamingServiceLifecycleManagement}
 import com.digitalasset.canton.ledger.api.services.TransactionService
+import com.digitalasset.canton.ledger.api.validation.TransactionServiceRequestValidator
 import com.digitalasset.canton.ledger.api.validation.TransactionServiceRequestValidator.Result
-import com.digitalasset.canton.ledger.api.validation.{
-  PartyNameChecker,
-  TransactionServiceRequestValidator,
-}
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
@@ -33,8 +30,8 @@ import scala.concurrent.{ExecutionContext, Future}
 final class ApiTransactionService(
     protected val service: TransactionService,
     val ledgerId: LedgerId,
-    partyNameChecker: PartyNameChecker,
     telemetry: Telemetry,
+    validator: TransactionServiceRequestValidator,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
     esf: ExecutionSequencerFactory,
@@ -44,9 +41,6 @@ final class ApiTransactionService(
     with StreamingServiceLifecycleManagement
     with GrpcApiService
     with NamedLogging {
-
-  private val validator =
-    new TransactionServiceRequestValidator(ledgerId, partyNameChecker)
 
   def getTransactions(
       request: GetTransactionsRequest,

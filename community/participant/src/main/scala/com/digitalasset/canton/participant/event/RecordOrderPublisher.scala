@@ -367,6 +367,11 @@ class RecordOrderPublisher(
         requestCounterCommitSetPairO.getOrElse((RequestCounter.LowerBound + 1, CommitSet.empty))
       // Augments the commit set with the updated transfer counters for archive events,
       // computes the acs change and publishes it
+      logger.debug(
+        show"The received commit set contains creations ${commitSet.creations}" +
+          show"transfer-ins ${commitSet.transferIns}" +
+          show"archivals ${commitSet.archivals} transfer-outs ${commitSet.transferOuts}"
+      )
       val acsChangePublish =
         for {
           // Retrieves the transfer counters of the archived contracts from the latest state in the active contract store
@@ -376,6 +381,9 @@ class RecordOrderPublisher(
         } yield {
           // Computes the ACS change by decorating the archive events in the commit set with their transfer counters
           val acsChange = AcsChange.fromCommitSet(commitSet, archivalsWithTransferCountersOnly)
+          logger.debug(
+            s"Computed ACS change activations ${acsChange.activations} deactivations ${acsChange.deactivations}"
+          )
           acsChangeListener.get.foreach(_.publish(recordTime, acsChange))
         }
       FutureUnlessShutdown.outcomeF(acsChangePublish)

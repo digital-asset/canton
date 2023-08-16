@@ -32,6 +32,7 @@ import com.digitalasset.canton.sequencing.protocol.{
   DeliverError,
   MessageId,
   Recipients,
+  SequencerErrors,
 }
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
@@ -698,8 +699,11 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
                       sequencingTimestamp,
                       domainId,
                       messageId,
-                      Sequencer
-                        .signingTimestampTooEarlyError(signingTimestamp, sequencingTimestamp),
+                      SequencerErrors
+                        .SigningTimestampTooEarly(
+                          signingTimestamp,
+                          sequencingTimestamp,
+                        ),
                       testedProtocolVersion,
                     )
                 delivered.signedEvent.content shouldBe expectedSequencedEvent

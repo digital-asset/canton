@@ -17,7 +17,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.error.ErrorCodeUtils
 import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors.ContractNotFound
-import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.participant.admin.workflows.{PingPong as M, PingPongVacuum as V}
@@ -40,9 +40,17 @@ import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.util.{BatchAggregator, FutureUtil, LoggerUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
+import com.digitalasset.canton.util.{
+  BatchAggregator,
+  FutureUtil,
+  LoggerUtil,
+  SimpleExecutionQueue,
+  retry,
+}
 import com.google.common.annotations.VisibleForTesting
 import org.slf4j.event.Level
+import scalaz.Tag
 
 import java.time.Duration
 import java.util.UUID
@@ -112,6 +120,29 @@ class PingService(
     timeouts,
     loggerFactory,
   )
+
+  private val packageReadyFU = {
+    import TraceContext.Implicits.Empty.*
+    implicit val success = retry.Success((x: Boolean) => x)
+    retry
+      .Backoff(
+        logger,
+        this,
+        retry.Forever,
+        100.millis,
+        2.seconds,
+        "wait-for-admin-workflows-to-appear-on-ledger-api",
+      )
+      .unlessShutdown(
+        performUnlessClosingF("wait-for-admin-workflows-to-appear-on-ledger-api")(
+          connection
+            .getPackageStatus(Tag.unwrap(M.Ping.id).packageId)
+            .map(_.packageStatus.isRegistered)
+        ),
+        AllExnRetryable,
+      )
+      .map { _ => () }
+  }
 
   // Execute vacuuming task when (re)connecting to a new domain
   syncService.foreach(
@@ -196,30 +227,33 @@ class PingService(
     * Try to limit Bong explosions by atomically responding to our own stale pings and eliminating the
     * resulting contracts (see `PingPongVacuum` Daml module).
     */
-  private def vacuumStaleContracts(implicit traceContext: TraceContext): Future[Unit] = {
-    // TODO(i10722): To be improved when a better multi-domain API is available
-    performUnlessClosingF("Ping vacuuming")(for {
-      (activeContracts, offset) <- connection.activeContracts(vacuumFilter)
-      _ = logger.debug(
-        s"Attempting to vacuum ${activeContracts.size} active PingService contract(s) ; offset = $offset"
-      )
+  private def vacuumStaleContracts(implicit traceContext: TraceContext): Future[Unit] =
+    packageReadyFU
+      .flatMap { _ =>
+        // TODO(i10722): To be improved when a better multi-domain API is available
+        performUnlessClosingF("Ping vacuuming")(for {
+          (activeContracts, offset) <- connection.activeContracts(vacuumFilter)
+          _ = logger.debug(
+            s"Attempting to vacuum ${activeContracts.size} active PingService contract(s) ; offset = $offset"
+          )
 
-      _ <- Seq(
-        vacuumPingProposals(activeContracts),
-        vacuumPings(activeContracts),
+          _ <- Seq(
+            vacuumPingProposals(activeContracts),
+            vacuumPings(activeContracts),
 
-        // Process the Pong contracts normally
-        processPongsF(
-          activeContracts.flatMap(DecodeUtil.decodeCreated(M.Pong)(_)),
-          vacuumWorkflowId,
-          unknownInformeesLogLevel = Level.INFO,
-        ),
-        vacuumExplodes(activeContracts),
-        vacuumMerges(activeContracts),
-        vacuumCollapses(activeContracts),
-      ).sequence_
-    } yield ()).onShutdown(())
-  }
+            // Process the Pong contracts normally
+            processPongsF(
+              activeContracts.flatMap(DecodeUtil.decodeCreated(M.Pong)(_)),
+              vacuumWorkflowId,
+              unknownInformeesLogLevel = Level.INFO,
+            ),
+            vacuumExplodes(activeContracts),
+            vacuumMerges(activeContracts),
+            vacuumCollapses(activeContracts),
+          ).sequence_
+        } yield ())
+      }
+      .onShutdown(())
 
   private def vacuumPingProposals(
       activeContracts: Seq[CreatedEvent]
@@ -372,65 +406,70 @@ class PingService(
       maxLevel: Long = 0,
       workflowId: Option[WorkflowId] = None,
       id: String = UUID.randomUUID().toString,
-  )(implicit traceContext: TraceContext): Future[PingService.Result] = {
-    logger.debug(s"Sending ping $id from $adminParty to $targetParties")
-    val promise = Promise[String]()
-    val resultPromise: (Option[String], Option[Promise[String]]) =
-      (None, Some(promise))
-    responses += (id -> resultPromise)
-    if (maxLevel > maxLevelSupported) {
-      logger.warn(s"Capping max level $maxLevel to $maxLevelSupported")
-    }
-    val start = System.nanoTime()
-    val result = for {
-      _ <- submitPing(
-        id,
-        targetParties,
-        validators,
-        min(maxLevel, maxLevelSupported),
-        workflowId,
-        timeoutMillis,
-      )
-      response <- timeout(promise.future, timeoutMillis)
-      end = System.nanoTime()
-      rtt = Duration.ofNanos(end - start)
-      _ = if (targetParties.size > 1)
-        logger.debug(s"Received ping response from $response within $rtt")
-      successMsg = PingService.Success(rtt, response)
-      success <- responses.get(id) match {
-        case None =>
-          // should not happen as this here is the only place where we remove them
-          Future.failed(new RuntimeException("Ping disappeared while waiting"))
-        case Some((Some(`response`), Some(gracePromise))) =>
-          // wait for grace period
-          if (targetParties.size > 1) {
-            // wait for grace period to expire. if it throws, we are good, because we shouldn't get another responsefailed with reason
-            timeout(gracePromise.future, duplicateGracePeriod) transform {
-              // future needs to timeout. otherwise we received a duplicate spent
-              case Failure(_: TimeoutException) => Success(successMsg)
-              case Success(x) =>
-                logger.debug(s"gracePromise for Ping $id resulted in $x. Expected a Timeout.")
-                Success(PingService.Failure)
-              case Failure(ex) =>
-                logger.debug(s"gracePromise for Ping $id threw unexpected exception.", ex)
-                Failure(ex)
+  )(implicit traceContext: TraceContext): Future[PingService.Result] =
+    packageReadyFU
+      .flatMap { _ =>
+        FutureUnlessShutdown.outcomeF {
+          logger.debug(s"Sending ping $id from $adminParty to $targetParties")
+          val promise = Promise[String]()
+          val resultPromise: (Option[String], Option[Promise[String]]) =
+            (None, Some(promise))
+          responses += (id -> resultPromise)
+          if (maxLevel > maxLevelSupported) {
+            logger.warn(s"Capping max level $maxLevel to $maxLevelSupported")
+          }
+          val start = System.nanoTime()
+          val result = for {
+            _ <- submitPing(
+              id,
+              targetParties,
+              validators,
+              min(maxLevel, maxLevelSupported),
+              workflowId,
+              timeoutMillis,
+            )
+            response <- timeout(promise.future, timeoutMillis)
+            end = System.nanoTime()
+            rtt = Duration.ofNanos(end - start)
+            _ = if (targetParties.size > 1)
+              logger.debug(s"Received ping response from $response within $rtt")
+            successMsg = PingService.Success(rtt, response)
+            success <- responses.get(id) match {
+              case None =>
+                // should not happen as this here is the only place where we remove them
+                Future.failed(new RuntimeException("Ping disappeared while waiting"))
+              case Some((Some(`response`), Some(gracePromise))) =>
+                // wait for grace period
+                if (targetParties.size > 1) {
+                  // wait for grace period to expire. if it throws, we are good, because we shouldn't get another responsefailed with reason
+                  timeout(gracePromise.future, duplicateGracePeriod) transform {
+                    // future needs to timeout. otherwise we received a duplicate spent
+                    case Failure(_: TimeoutException) => Success(successMsg)
+                    case Success(x) =>
+                      logger.debug(s"gracePromise for Ping $id resulted in $x. Expected a Timeout.")
+                      Success(PingService.Failure)
+                    case Failure(ex) =>
+                      logger.debug(s"gracePromise for Ping $id threw unexpected exception.", ex)
+                      Failure(ex)
+                  }
+                } else Future.successful(successMsg)
+              case Some(x) =>
+                logger.debug(s"Ping $id response was $x. Expected (Some, Some).")
+                Future.successful(PingService.Failure)
             }
-          } else Future.successful(successMsg)
-        case Some(x) =>
-          logger.debug(s"Ping $id response was $x. Expected (Some, Some).")
-          Future.successful(PingService.Failure)
-      }
-      _ = logger.debug(s"Ping test $id resulted in $success, deregistering")
-      _ = responses -= id
-    } yield success
+            _ = logger.debug(s"Ping test $id resulted in $success, deregistering")
+            _ = responses -= id
+          } yield success
 
-    result transform {
-      case Failure(_: TimeoutException) =>
-        responses -= id
-        Success(PingService.Failure)
-      case other => other
-    }
-  }
+          result transform {
+            case Failure(_: TimeoutException) =>
+              responses -= id
+              Success(PingService.Failure)
+            case other => other
+          }
+        }
+      }
+      .onShutdown(PingService.Failure)
 
   override protected def onClosed(): Unit = Lifecycle.close(connection, vacuumQueue)(logger)
 

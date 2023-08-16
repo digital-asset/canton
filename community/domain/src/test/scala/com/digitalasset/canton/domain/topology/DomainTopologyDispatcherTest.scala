@@ -779,7 +779,7 @@ class DomainTopologySenderTest
                   timestamp = CantonTimestamp.Epoch,
                   domainId,
                   messageId = MessageId.tryCreate("booh"),
-                  reason = DeliverErrorReason.BatchInvalid("booh"),
+                  sequencerError = SequencerErrors.SubmissionRequestMalformed("booh"),
                   protocolVersion = testedProtocolVersion,
                 )
               )

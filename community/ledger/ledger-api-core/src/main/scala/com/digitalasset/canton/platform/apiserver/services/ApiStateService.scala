@@ -41,6 +41,7 @@ final class ApiStateService(
     metrics: Metrics,
     telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
+    transactionFilterValidator: TransactionFilterValidator,
 )(implicit
     mat: Materializer,
     esf: ExecutionSequencerFactory,
@@ -58,7 +59,7 @@ final class ApiStateService(
       LoggingContextWithTrace(loggerFactory, telemetry)
 
     val result = for {
-      filters <- TransactionFilterValidator.validate(
+      filters <- transactionFilterValidator.validate(
         TransactionFilter(request.getFilter.filtersByParty)
       )
       activeAtO <- FieldValidator.optionalString(request.activeAtOffset)(str =>

@@ -22,7 +22,10 @@ trait ValidatorTestUtils extends Matchers with Inside with OptionValues {
   protected val includedTemplate = "includedTemplate"
   protected val expectedLedgerId = "expectedLedgerId"
   protected val expectedApplicationId = "expectedApplicationId"
+  protected val templateQualifiedName =
+    Ref.QualifiedName.assertFromString(s"$includedModule:$includedTemplate")
   protected val packageId = Ref.PackageId.assertFromString("packageId")
+  protected val packageId2 = Ref.PackageId.assertFromString("packageId2")
   protected val absoluteOffset = Ref.LedgerString.assertFromString("0042")
   protected val party = Ref.Party.assertFromString("party")
   protected val verbose = false
@@ -30,11 +33,25 @@ trait ValidatorTestUtils extends Matchers with Inside with OptionValues {
   protected val transactionId = "42"
   protected val ledgerEnd = domain.LedgerOffset.Absolute(Ref.LedgerString.assertFromString("1000"))
   protected val contractId = ContractId.V1.assertFromString("00" * 32 + "0001")
-  protected val moduleName = Ref.ModuleName.assertFromString("moduleName")
-  protected val dottedName = Ref.DottedName.assertFromString("dottedName")
-  protected val templateId = Ref.Identifier(packageId, Ref.QualifiedName(moduleName, dottedName))
+  protected val moduleName = Ref.ModuleName.assertFromString(includedModule)
+  protected val dottedName = Ref.DottedName.assertFromString(includedTemplate)
+  protected val refTemplateId = Ref.Identifier(packageId, templateQualifiedName)
+  protected val refTemplateId2 = Ref.Identifier(packageId2, templateQualifiedName)
 
-  protected def hasExpectedFilters(req: transaction.GetTransactionsRequest) = {
+  private val expectedTemplateIds = Set(
+    Ref.Identifier(
+      Ref.PackageId.assertFromString(packageId),
+      Ref.QualifiedName(
+        Ref.DottedName.assertFromString(includedModule),
+        Ref.DottedName.assertFromString(includedTemplate),
+      ),
+    )
+  )
+
+  protected def hasExpectedFilters(
+      req: transaction.GetTransactionsRequest,
+      expectedTemplateIds: Set[Ref.Identifier] = expectedTemplateIds,
+  ) = {
     val filtersByParty = req.filter.filtersByParty
     filtersByParty should have size 1
     inside(filtersByParty.headOption.value) { case (p, filters) =>
@@ -42,15 +59,7 @@ trait ValidatorTestUtils extends Matchers with Inside with OptionValues {
       filters shouldEqual domain.Filters(
         Some(
           domain.InclusiveFilters(
-            templateIds = Set(
-              Ref.Identifier(
-                Ref.PackageId.assertFromString(packageId),
-                Ref.QualifiedName(
-                  Ref.DottedName.assertFromString(includedModule),
-                  Ref.DottedName.assertFromString(includedTemplate),
-                ),
-              )
-            ),
+            templateIds = expectedTemplateIds,
             interfaceFilters = Set(
               InterfaceFilter(
                 interfaceId = Ref.Identifier(

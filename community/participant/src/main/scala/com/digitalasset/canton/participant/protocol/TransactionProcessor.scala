@@ -43,7 +43,6 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.client.{SendAsyncClientError, SequencerClient}
-import com.digitalasset.canton.sequencing.protocol.DeliverErrorReason
 import com.digitalasset.canton.topology.{DomainId, MediatorRef, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
@@ -90,6 +89,7 @@ class TransactionProcessor(
           damle,
           confirmationRequestFactory.transactionTreeFactory,
           staticDomainParameters.protocolVersion,
+          participantId,
           enableContractUpgrading,
           loggerFactory,
         ),
@@ -273,23 +273,6 @@ object TransactionProcessor {
       // TODO(i5990) proper send async client errors
       //  SendAsyncClientError.RequestRefused(SendAsyncError.Overloaded) is already mapped to DomainBackpressure
       final case class Error(sendError: SendAsyncClientError)
-          extends TransactionErrorImpl(
-            cause = "Failed to send command",
-            // Only reported asynchronously via timely rejections, so covered by submission rank guarantee
-            definiteAnswer = true,
-          )
-    }
-
-    @Explanation(
-      """This error occurs when the domain refused to sequence the given message."""
-    )
-    object SequencerDeliver
-        extends ErrorCode(
-          id = "SEQUENCER_DELIVER_ERROR",
-          ErrorCategory.ContentionOnSharedResources,
-        ) {
-      // TODO(i5990) proper deliver errors
-      final case class Error(deliverErrorReason: DeliverErrorReason)
           extends TransactionErrorImpl(
             cause = "Failed to send command",
             // Only reported asynchronously via timely rejections, so covered by submission rank guarantee

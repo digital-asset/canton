@@ -1181,7 +1181,6 @@ class SequencerClientImpl(
       SyncCloseable("sequencer-client-subscription", sequencersTransportState.close()),
       SyncCloseable("handler-becomes-idle", waitForHandlerToComplete()),
       SyncCloseable("sequencer-client-recorder", recorderO.foreach(_.close())),
-      SyncCloseable("sequenced-event-store", sequencedEventStore.close()),
       SyncCloseable("deferred-subscription-health", deferredSubscriptionHealth.close()),
     )
   }

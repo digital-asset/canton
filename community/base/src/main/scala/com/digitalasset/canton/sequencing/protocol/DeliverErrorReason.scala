@@ -3,12 +3,13 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
-import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.google.rpc.status.Status
 
+// TODO(#9014): Remove for 3.0
 /** Why was the sequencer unable to sequence the requested send */
 sealed trait DeliverErrorReason extends PrettyPrinting {
 
@@ -53,19 +54,42 @@ object DeliverErrorReason {
         Right(DeliverErrorReason.BatchRefused(message))
     }
 
-  private def factoryForName(name: String): Option[String => DeliverErrorReason] = name match {
-    case "BatchInvalid" => Some(BatchInvalid)
-    case "BatchRefused" => Some(BatchRefused)
-    case _ => None
+  private def getCauseFromMessage(message: String): Either[Unit, String] = {
+    if (message.contains(":")) {
+      Right(message.split(": ", 2)(1))
+    } else {
+      Left(())
+    }
+  }
+  private[protocol] def tryFromStatus(status: Status): DeliverErrorReason = {
+    def throwOnError() = {
+      throw new IllegalArgumentException(
+        s"The message of status $status doesn't follow the expected structure `ERROR_CODE(<category>, <trace-id>): <message>`. DeliverErrorReason only supports ${SequencerErrors.SubmissionRequestMalformed.id} and ${SequencerErrors.SubmissionRequestRefused.id} error codes and statuses generated from them."
+      )
+    }
+
+    status match {
+      case SequencerErrors.SubmissionRequestRefused(message) =>
+        DeliverErrorReason.BatchRefused(getCauseFromMessage(message).getOrElse(throwOnError()))
+      case SequencerErrors.SubmissionRequestMalformed(message) =>
+        DeliverErrorReason.BatchInvalid(getCauseFromMessage(message).getOrElse(throwOnError()))
+      case _ =>
+        throw new IllegalArgumentException(
+          s"DeliverErrorReason only supports ${SequencerErrors.SubmissionRequestMalformed.id} and ${SequencerErrors.SubmissionRequestRefused.id} statuses, could not match against the status = $status"
+        )
+    }
   }
 
-  def fromText(
-      name: String,
-      message: String,
-  ): ParsingResult[DeliverErrorReason] =
-    for {
-      factory <- factoryForName(name)
-        .toRight(s"Unknown DeliverErrorReason [$name]")
-        .leftMap(ProtoDeserializationError.OtherError)
-    } yield factory(message)
+  private[protocol] def mkStatus(
+      deliverErrorReason: v0.DeliverErrorReason.Reason
+  ): ParsingResult[Status] = {
+    deliverErrorReason match {
+      case v0.DeliverErrorReason.Reason.Empty =>
+        Left(ProtoDeserializationError.FieldNotSet("DeliverErrorReason.reason"))
+      case v0.DeliverErrorReason.Reason.BatchInvalid(message) =>
+        Right(SequencerErrors.SubmissionRequestMalformed(message).rpcStatusWithoutLoggingContext())
+      case v0.DeliverErrorReason.Reason.BatchRefused(message) =>
+        Right(SequencerErrors.SubmissionRequestRefused(message).rpcStatusWithoutLoggingContext())
+    }
+  }
 }

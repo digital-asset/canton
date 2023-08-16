@@ -125,6 +125,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
           _contractOfId: SerializableContractOfId,
           _keyResolver: LfKeyResolver,
           _maxSequencingTime: CantonTimestamp,
+          validatePackageVettings: Boolean,
       )(implicit
           traceContext: TraceContext
       ): EitherT[Future, TransactionTreeConversionError, GenTransactionTree] = {

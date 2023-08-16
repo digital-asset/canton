@@ -8,6 +8,7 @@ import com.daml.ledger.api.v1.commands.Command as ScalaCommand
 import com.daml.ledger.api.v1.completion.Completion
 import com.daml.ledger.api.v1.event.CreatedEvent
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
+import com.daml.ledger.api.v1.package_service.{GetPackageStatusResponse, PackageStatus}
 import com.daml.ledger.api.v1.transaction_filter.TransactionFilter
 import com.daml.ledger.client.binding.Primitive
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
@@ -51,4 +52,7 @@ class MockLedgerAcs(override val logger: TracedLogger, override val sender: Prim
       filter: TransactionFilter
   ): Future[(Seq[CreatedEvent], LedgerOffset)] =
     Future.successful((Seq(), LedgerOffset(value = LedgerOffset.Value.Empty)))
+
+  override def getPackageStatus(packageId: String): Future[GetPackageStatusResponse] =
+    Future.successful(GetPackageStatusResponse(PackageStatus.REGISTERED))
 }

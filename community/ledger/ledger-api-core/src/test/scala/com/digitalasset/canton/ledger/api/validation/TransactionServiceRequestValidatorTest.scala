@@ -19,6 +19,7 @@ import com.daml.ledger.api.v1.transaction_service.{
   GetTransactionsRequest,
 }
 import com.daml.ledger.api.v1.value.Identifier
+import com.daml.lf.data.Ref
 import com.digitalasset.canton.ledger.api.domain
 import io.grpc.Status.Code.*
 import org.mockito.MockitoSugar
@@ -30,7 +31,10 @@ class TransactionServiceRequestValidatorTest
     with MockitoSugar {
   private implicit val noLogging: ContextualizedErrorLogger = NoLogging
 
-  private val txReq = GetTransactionsRequest(
+  private val templateId = Identifier(packageId, includedModule, includedTemplate)
+  private val templateIdV2 = Identifier(packageId2, includedModule, includedTemplate)
+
+  private def txReqBuilder(templateIdsForParty: Seq[Identifier]) = GetTransactionsRequest(
     expectedLedgerId,
     Some(LedgerOffset(LedgerOffset.Value.Boundary(LedgerBoundary.LEDGER_BEGIN))),
     Some(LedgerOffset(LedgerOffset.Value.Absolute(absoluteOffset))),
@@ -41,13 +45,7 @@ class TransactionServiceRequestValidatorTest
             Filters(
               Some(
                 InclusiveFilters(
-                  Seq(
-                    Identifier(
-                      packageId,
-                      moduleName = includedModule,
-                      entityName = includedTemplate,
-                    )
-                  ),
+                  templateIdsForParty,
                   interfaceFilters = Seq(
                     InterfaceFilter(
                       interfaceId = Some(
@@ -69,6 +67,9 @@ class TransactionServiceRequestValidatorTest
     ),
     verbose,
   )
+  private val txReq = txReqBuilder(Seq(templateId))
+  private val txReqWithMissingPackageId = txReqBuilder(Seq(templateId.copy(packageId = "")))
+
   private val txTreeReq = GetTransactionsRequest(
     expectedLedgerId,
     Some(LedgerOffset(LedgerOffset.Value.Boundary(LedgerBoundary.LEDGER_BEGIN))),
@@ -85,9 +86,36 @@ class TransactionServiceRequestValidatorTest
   private val txByIdReq =
     GetTransactionByIdRequest(expectedLedgerId, transactionId, Seq(party))
 
+  private val transactionFilterValidator = new TransactionFilterValidator(
+    upgradingEnabled = false,
+    resolveTemplateIds = _ => fail("Code path should not be exercised"),
+  )
+
   private val validator = new TransactionServiceRequestValidator(
     domain.LedgerId(expectedLedgerId),
-    PartyNameChecker.AllowAllParties,
+    new PartyValidator(PartyNameChecker.AllowAllParties),
+    transactionFilterValidator,
+  )
+
+  private val transactionFilterValidatorUpgradingEnabled = new TransactionFilterValidator(
+    upgradingEnabled = true,
+    resolveTemplateIds = {
+      case `templateQualifiedName` =>
+        _ => Right(Set(refTemplateId, refTemplateId2))
+      case _ =>
+        _ =>
+          Left(
+            io.grpc.Status.NOT_FOUND
+              .augmentDescription("template qualified name not resolved!")
+              .asRuntimeException()
+          )
+    },
+  )
+
+  private val validatorUpgradingEnabled = new TransactionServiceRequestValidator(
+    domain.LedgerId(expectedLedgerId),
+    new PartyValidator(PartyNameChecker.AllowAllParties),
+    transactionFilterValidatorUpgradingEnabled,
   )
 
   "TransactionRequestValidation" when {
@@ -301,6 +329,54 @@ class TransactionServiceRequestValidatorTest
           req.verbose shouldEqual verbose
         }
       }
+
+      "when upgrading enabled" should {
+        "still allow populated packageIds in templateIds (for backwards compatibility)" in {
+          inside(validatorUpgradingEnabled.validate(txReq, ledgerEnd)) { case Right(req) =>
+            req.ledgerId shouldEqual Some(expectedLedgerId)
+            req.startExclusive shouldEqual domain.LedgerOffset.LedgerBegin
+            req.endInclusive shouldEqual Some(domain.LedgerOffset.Absolute(absoluteOffset))
+            hasExpectedFilters(req)
+            req.verbose shouldEqual verbose
+          }
+        }
+
+        "resolve missing packageIds" in {
+          inside(validatorUpgradingEnabled.validate(txReqWithMissingPackageId, ledgerEnd)) {
+            case Right(req) =>
+              req.ledgerId shouldEqual Some(expectedLedgerId)
+              req.startExclusive shouldEqual domain.LedgerOffset.LedgerBegin
+              req.endInclusive shouldEqual Some(domain.LedgerOffset.Absolute(absoluteOffset))
+              val expectedTemplateIds =
+                Iterator(packageId, packageId2)
+                  .map(pkgId =>
+                    Ref.Identifier(
+                      Ref.PackageId.assertFromString(pkgId),
+                      Ref.QualifiedName(
+                        Ref.DottedName.assertFromString(includedModule),
+                        Ref.DottedName.assertFromString(includedTemplate),
+                      ),
+                    )
+                  )
+                  .toSet
+
+              hasExpectedFilters(req, expectedTemplateIds)
+              req.verbose shouldEqual verbose
+          }
+        }
+
+        "forward resolution error from resolver" in {
+          requestMustFailWith(
+            request = validatorUpgradingEnabled.validate(
+              txReqBuilder(Seq(Identifier("", "unknownModule", "unknownEntity"))),
+              ledgerEnd,
+            ),
+            code = NOT_FOUND,
+            description = "template qualified name not resolved!",
+            metadata = Map.empty,
+          )
+        }
+      }
     }
 
     "validating tree requests" should {
@@ -468,7 +544,8 @@ class TransactionServiceRequestValidatorTest
 
       val partyRestrictiveValidator = new TransactionServiceRequestValidator(
         domain.LedgerId(expectedLedgerId),
-        PartyNameChecker.AllowPartySet(Set(party)),
+        new PartyValidator(PartyNameChecker.AllowPartySet(Set(party))),
+        transactionFilterValidator,
       )
 
       val partyWithUnknowns = List("party", "Alice", "Bob")

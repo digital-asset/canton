@@ -44,9 +44,10 @@ import com.digitalasset.canton.health.admin.data.ParticipantStatus
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.participant.ParticipantNode
 import com.digitalasset.canton.participant.admin.grpc.TransferSearchResult
+import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
 import com.digitalasset.canton.participant.admin.v0.PruningServiceGrpc
 import com.digitalasset.canton.participant.admin.v0.PruningServiceGrpc.PruningServiceStub
-import com.digitalasset.canton.participant.admin.{ResourceLimits, SyncStateInspection, v0}
+import com.digitalasset.canton.participant.admin.{ResourceLimits, v0}
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.protocol.messages.{

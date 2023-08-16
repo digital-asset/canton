@@ -340,16 +340,14 @@ class SequencerReader(
                 // we deliver an empty batch to the member if it is not the sender.
                 // This way, we can avoid revalidating the skipped events after the checkpoint we resubscribe from.
                 val event = if (registeredMember.memberId == sender) {
-                  val reason = Sequencer.signingTimestampTooEarlyError(
-                    signingTimestamp,
-                    sequencingTimestamp,
-                  )
+                  val error =
+                    SequencerErrors.SigningTimestampTooEarly(signingTimestamp, sequencingTimestamp)
                   DeliverError.create(
                     counter,
                     sequencingTimestamp,
                     domainId,
                     messageId,
-                    reason,
+                    error,
                     protocolVersion,
                   )
                 } else
@@ -502,12 +500,15 @@ class SequencerReader(
             protocolVersion,
           )
         case DeliverErrorStoreEvent(_, messageId, message, traceContext) =>
-          DeliverError.create(
+          val error = DeliverErrorStoreEvent
+            .deserializeError(message, protocolVersion)
+            .fold(err => throw new DbDeserializationException(err.toString), identity)
+          DeliverError.tryCreate(
             counter,
             timestamp,
             domainId,
             messageId,
-            reason = DeliverErrorReason.BatchRefused(message.unwrap),
+            error,
             protocolVersion,
           )
       }

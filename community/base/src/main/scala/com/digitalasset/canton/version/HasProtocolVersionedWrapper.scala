@@ -87,7 +87,8 @@ object RepresentativeProtocolVersion {
   * but we often specify the typed alias [[com.digitalasset.canton.version.VersionedMessage]]
   * instead.
   */
-trait HasProtocolVersionedWrapper[ValueClass] extends HasRepresentativeProtocolVersion {
+trait HasProtocolVersionedWrapper[ValueClass <: HasRepresentativeProtocolVersion]
+    extends HasRepresentativeProtocolVersion {
   self: ValueClass =>
 
   @transient
@@ -203,6 +204,55 @@ trait HasSupportedProtoVersions[ValueClass] {
   // Serializer: (ValueClass => Proto)
   type Serializer = ValueClass => ByteString
 
+  private type ThisRepresentativeProtocolVersion = RepresentativeProtocolVersion[this.type]
+
+  /*
+    This trait encodes a default value starting (or ending) at a specific protocol version.
+   */
+  private[version] sealed trait DefaultValue[T] {
+    def attribute: ValueClass => T
+
+    def name: String
+
+    def defaultValue: T
+
+    /** Returns `v` or the default value, depending on the `protocolVersion`.
+      */
+    def orValue(v: T, protocolVersion: ProtocolVersion): T
+
+    /** Returns `v` or the default value, depending on the `protocolVersion`.
+      */
+    def orValue(v: T, protocolVersion: ThisRepresentativeProtocolVersion): T
+  }
+
+  case class DefaultValueFrom[T](
+      attribute: ValueClass => T,
+      name: String,
+      startInclusive: ThisRepresentativeProtocolVersion,
+      defaultValue: T,
+  ) extends DefaultValue[T] {
+    def orValue(v: T, protocolVersion: ProtocolVersion): T =
+      if (protocolVersion >= startInclusive.representative) defaultValue else v
+
+    def orValue(v: T, protocolVersion: ThisRepresentativeProtocolVersion): T =
+      if (protocolVersion >= startInclusive) defaultValue else v
+  }
+
+  case class DefaultValueUntil[T](
+      attribute: ValueClass => T,
+      name: String,
+      untilInclusive: ThisRepresentativeProtocolVersion,
+      defaultValue: T,
+  ) extends DefaultValue[T] {
+    def orValue(v: T, protocolVersion: ProtocolVersion): T =
+      if (protocolVersion <= untilInclusive.representative) defaultValue else v
+
+    def orValue(v: T, protocolVersion: ThisRepresentativeProtocolVersion): T =
+      if (protocolVersion <= untilInclusive) defaultValue else v
+  }
+
+  def defaultValues: Seq[DefaultValue[_]] = Nil
+
   def protocolVersionRepresentativeFor(
       protocolVersion: ProtocolVersion
   ): RepresentativeProtocolVersion[this.type] =
@@ -234,6 +284,7 @@ trait HasSupportedProtoVersions[ValueClass] {
     // at compile time when it is a dependent type of ValueClass (e.g in HasProtocolVersionedWrapper).
     // Instead use this method to differentiate between versioned and un-versioned serialization
     def isVersioned: Boolean
+    def isSupported: Boolean
   }
 
   /** Supported Proto version
@@ -247,7 +298,8 @@ trait HasSupportedProtoVersions[ValueClass] {
       serializer: Serializer,
   ) extends ProtoCodec
       with PrettyPrinting {
-    override val isVersioned = true
+    override val isVersioned: Boolean = true
+    override val isSupported: Boolean = true
 
     override def pretty: Pretty[this.type] =
       prettyOfClass(
@@ -297,7 +349,8 @@ trait HasSupportedProtoVersions[ValueClass] {
       serializer: Serializer,
   ) extends ProtoCodec
       with PrettyPrinting {
-    override val isVersioned = false
+    override val isVersioned: Boolean = false
+    override val isSupported: Boolean = true
 
     override def pretty: Pretty[this.type] = prettyOfClass(
       unnamedParam(_ => HasSupportedProtoVersions.this.getClass.getSimpleName.unquoted),
@@ -335,7 +388,8 @@ trait HasSupportedProtoVersions[ValueClass] {
       fromInclusive: RepresentativeProtocolVersion[HasSupportedProtoVersions.this.type]
   ) extends ProtoCodec
       with PrettyPrinting {
-    override val isVersioned = false
+    override val isVersioned: Boolean = false
+    override val isSupported: Boolean = false
 
     private def valueClassName: String = HasSupportedProtoVersions.this.getClass.getSimpleName
 
@@ -466,6 +520,9 @@ trait HasSupportedProtoVersions[ValueClass] {
       )
       val (_, lowestProtocolVersion) = sortedConverters.last1
 
+      // If you are hitting this require failing when your message doesn't exist in PV.minimum,
+      // remember to specify that explicitly by adding to the SupportedProtoVersions:
+      // ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.minimum),
       require(
         lowestProtocolVersion.fromInclusive.representative == ProtocolVersion.minimum,
         s"ProtocolVersion corresponding to lowest proto version should be ${ProtocolVersion.minimum}, found $lowestProtocolVersion",
@@ -482,59 +539,10 @@ trait HasSupportedProtoVersions[ValueClass] {
 }
 
 trait HasProtocolVersionedWrapperCompanion[
-    ValueClass,
+    ValueClass <: HasRepresentativeProtocolVersion,
     DeserializedValueClass,
 ] extends HasSupportedProtoVersions[ValueClass]
     with Serializable {
-
-  private type ThisRepresentativeProtocolVersion = RepresentativeProtocolVersion[this.type]
-
-  /*
-    This trait encodes a default value starting (or ending) at a specific protocol version.
-   */
-  private[version] sealed trait DefaultValue[T] {
-    def attribute: ValueClass => T
-
-    def name: String
-
-    def defaultValue: T
-
-    /** Returns `v` or the default value, depending on the `protocolVersion`.
-      */
-    def orValue(v: T, protocolVersion: ProtocolVersion): T
-
-    /** Returns `v` or the default value, depending on the `protocolVersion`.
-      */
-    def orValue(v: T, protocolVersion: ThisRepresentativeProtocolVersion): T
-  }
-
-  case class DefaultValueFrom[T](
-      attribute: ValueClass => T,
-      name: String,
-      startInclusive: ThisRepresentativeProtocolVersion,
-      defaultValue: T,
-  ) extends DefaultValue[T] {
-    def orValue(v: T, protocolVersion: ProtocolVersion): T =
-      if (protocolVersion >= startInclusive.representative) defaultValue else v
-
-    def orValue(v: T, protocolVersion: ThisRepresentativeProtocolVersion): T =
-      if (protocolVersion >= startInclusive) defaultValue else v
-  }
-
-  case class DefaultValueUntil[T](
-      attribute: ValueClass => T,
-      name: String,
-      untilInclusive: ThisRepresentativeProtocolVersion,
-      defaultValue: T,
-  ) extends DefaultValue[T] {
-    def orValue(v: T, protocolVersion: ProtocolVersion): T =
-      if (protocolVersion <= untilInclusive.representative) defaultValue else v
-
-    def orValue(v: T, protocolVersion: ThisRepresentativeProtocolVersion): T =
-      if (protocolVersion <= untilInclusive) defaultValue else v
-  }
-
-  def defaultValues: Seq[DefaultValue[_]] = Nil
 
   /** The name of the class as used for pretty-printing and error reporting */
   def name: String
@@ -559,6 +567,13 @@ trait HasProtocolVersionedWrapperCompanion[
   }
 }
 
+trait HasProtocolVersionedWrapperWithoutContextCompanion[
+    ValueClass <: HasRepresentativeProtocolVersion,
+    DeserializedValueClass,
+] extends HasProtocolVersionedWrapperCompanion[ValueClass, DeserializedValueClass] {
+  def fromByteString(bytes: OriginalByteString): ParsingResult[DeserializedValueClass]
+}
+
 /** Trait for companion objects of serializable classes with memoization.
   * Use this class if deserialization produces a different type than where serialization starts.
   * For example, if a container can serialize its elements, but the container's deserializer
@@ -569,7 +584,7 @@ trait HasProtocolVersionedWrapperCompanion[
 trait HasMemoizedProtocolVersionedWrapperCompanion2[
     ValueClass <: HasRepresentativeProtocolVersion,
     DeserializedValueClass,
-] extends HasProtocolVersionedWrapperCompanion[ValueClass, DeserializedValueClass] {
+] extends HasProtocolVersionedWrapperWithoutContextCompanion[ValueClass, DeserializedValueClass] {
   // Deserializer: (Proto => DeserializedValueClass)
   override type Deserializer =
     (OriginalByteString, DataByteString) => ParsingResult[DeserializedValueClass]
@@ -586,12 +601,13 @@ trait HasMemoizedProtocolVersionedWrapperCompanion2[
     ByteString.copyFrom(bytes)
   )
 
-  def fromByteString(bytes: OriginalByteString): ParsingResult[DeserializedValueClass] = for {
-    proto <- ProtoConverter.protoParser(UntypedVersionedMessage.parseFrom)(bytes)
-    data <- proto.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet(s"$name: data"))
-    valueClass <- supportedProtoVersions
-      .deserializerFor(ProtoVersion(proto.version))(bytes, data)
-  } yield valueClass
+  override def fromByteString(bytes: OriginalByteString): ParsingResult[DeserializedValueClass] =
+    for {
+      proto <- ProtoConverter.protoParser(UntypedVersionedMessage.parseFrom)(bytes)
+      data <- proto.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet(s"$name: data"))
+      valueClass <- supportedProtoVersions
+        .deserializerFor(ProtoVersion(proto.version))(bytes, data)
+    } yield valueClass
 
   /** Use this method when deserializing bytes for classes that have a legacy proto converter to explicitly
     * set the version to use for the deserialization.
@@ -665,7 +681,7 @@ trait HasMemoizedProtocolVersionedWithContextCompanion2[
 trait HasProtocolVersionedCompanion2[
     ValueClass <: HasRepresentativeProtocolVersion,
     DeserializedValueClass,
-] extends HasProtocolVersionedWrapperCompanion[ValueClass, DeserializedValueClass] {
+] extends HasProtocolVersionedWrapperWithoutContextCompanion[ValueClass, DeserializedValueClass] {
   override type Deserializer = DataByteString => ParsingResult[DeserializedValueClass]
 
   protected def supportedProtoVersion[Proto <: scalapb.GeneratedMessage](
@@ -687,10 +703,11 @@ trait HasProtocolVersionedCompanion2[
       supportedProtoVersions.deserializerFor(ProtoVersion(proto.version))
     }
 
-  def fromByteString(bytes: OriginalByteString): ParsingResult[DeserializedValueClass] = for {
-    proto <- ProtoConverter.protoParser(UntypedVersionedMessage.parseFrom)(bytes)
-    valueClass <- fromProtoVersioned(VersionedMessage(proto))
-  } yield valueClass
+  override def fromByteString(bytes: OriginalByteString): ParsingResult[DeserializedValueClass] =
+    for {
+      proto <- ProtoConverter.protoParser(UntypedVersionedMessage.parseFrom)(bytes)
+      valueClass <- fromProtoVersioned(VersionedMessage(proto))
+    } yield valueClass
 
   /** Use this method when deserializing bytes for classes that have a legacy proto converter to explicitly
     * set the version to use for the deserialization.

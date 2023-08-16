@@ -5,7 +5,6 @@ package com.daml.error
 
 import com.daml.error.ErrorCode.MaxCauseLogLength
 import com.daml.error.utils.ErrorDetails
-import com.google.rpc.Status
 import io.grpc.Status.Code
 import io.grpc.StatusRuntimeException
 import io.grpc.protobuf.StatusProto
@@ -68,7 +67,9 @@ abstract class ErrorCode(val id: String, val category: ErrorCategory)(implicit
     s"${codeStr(correlationId)}: $truncatedCause"
   }
 
-  def asGrpcStatus(err: BaseError)(implicit loggingContext: ContextualizedErrorLogger): Status = {
+  def asGrpcStatus(
+      err: BaseError
+  )(implicit loggingContext: ContextualizedErrorLogger): com.google.rpc.Status = {
     val statusInfo = getStatusInfo(err)(loggingContext)
     // Provide error id and context via ErrorInfo
     val errorInfo =

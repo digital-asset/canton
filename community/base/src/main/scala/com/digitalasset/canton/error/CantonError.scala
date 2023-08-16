@@ -75,11 +75,14 @@ trait BaseCantonError extends BaseError {
   /** The error code, usually passed in as implicit where the error class is defined */
   def code: ErrorCode
 
+  def rpcStatusWithoutLoggingContext(): com.google.rpc.status.Status = rpcStatus()(NoLogging)
+
   def rpcStatus(
       overrideCode: Option[Status.Code] = None
-  )(implicit loggingContext: ErrorLoggingContext): com.google.rpc.status.Status = {
+  )(implicit loggingContext: ContextualizedErrorLogger): com.google.rpc.status.Status = {
     import scala.jdk.CollectionConverters.*
     val status0: com.google.rpc.Status = code.asGrpcStatus(this)
+
     val details: Seq[com.google.protobuf.Any] = status0.getDetailsList.asScala.toSeq
     val detailsScalapb = details.map(com.google.protobuf.any.Any.fromJavaProto)
 
@@ -169,17 +172,24 @@ object BaseCantonError {
   )(implicit override val code: ErrorCode)
       extends BaseCantonError {}
 
-  def isStatusErrorCode(errorCode: ErrorCode, status: com.google.rpc.status.Status): Boolean = {
+  def isStatusErrorCode(errorCode: ErrorCode, status: com.google.rpc.status.Status): Boolean =
+    extractStatusErrorCodeMessage(errorCode, status).isDefined
+
+  def extractStatusErrorCodeMessage(
+      errorCode: ErrorCode,
+      status: com.google.rpc.status.Status,
+  ): Option[String] = {
     val code = errorCode.category.grpcCode.getOrElse(
       throw new IllegalArgumentException(s"Error code $errorCode does not have a gRPC code")
     )
     if (status.code == code.value()) {
-      status.details.exists { any =>
-        if (any.is(ErrorInfo.messageCompanion)) {
-          Try(any.unpack(ErrorInfo.messageCompanion)).toOption.exists(_.reason == errorCode.id)
-        } else false
+      status.details.collectFirst {
+        case any
+            if (any.is(ErrorInfo) && Try(any.unpack(ErrorInfo))
+              .fold(_ => false, _.reason == errorCode.id)) =>
+          status.message
       }
-    } else false
+    } else None
   }
 }
 

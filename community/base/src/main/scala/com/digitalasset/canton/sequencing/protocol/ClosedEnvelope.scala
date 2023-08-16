@@ -32,8 +32,8 @@ import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{
-  HasRepresentativeProtocolVersion,
-  HasSupportedProtoVersions,
+  HasProtocolVersionedCompanion,
+  HasProtocolVersionedWrapper,
   ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
@@ -57,7 +57,10 @@ final case class ClosedEnvelope private (
     signatures: Seq[Signature],
 )(override val representativeProtocolVersion: RepresentativeProtocolVersion[ClosedEnvelope.type])
     extends Envelope[ByteString]
-    with HasRepresentativeProtocolVersion {
+    with HasProtocolVersionedWrapper[ClosedEnvelope] {
+
+  // Ensures the invariants related to default values hold
+  validateInstance().valueOr(err => throw new IllegalArgumentException(err))
 
   @transient override protected lazy val companionObj: ClosedEnvelope.type = ClosedEnvelope
 
@@ -121,7 +124,7 @@ final case class ClosedEnvelope private (
   }
 }
 
-object ClosedEnvelope extends HasSupportedProtoVersions[ClosedEnvelope] {
+object ClosedEnvelope extends HasProtocolVersionedCompanion[ClosedEnvelope] {
 
   override type Deserializer = ByteString => ParsingResult[ClosedEnvelope]
 
@@ -143,8 +146,21 @@ object ClosedEnvelope extends HasSupportedProtoVersions[ClosedEnvelope] {
     ),
   )
 
-  val signaturesSupportedSince = protocolVersionRepresentativeFor(ProtoVersion(1))
-  val groupAddressesSupportedSince = protocolVersionRepresentativeFor(ProtoVersion(1))
+  private val signaturesSupportedSince = protocolVersionRepresentativeFor(ProtoVersion(1))
+  private[protocol] val groupAddressesSupportedSince = protocolVersionRepresentativeFor(
+    ProtoVersion(1)
+  )
+
+  override lazy val defaultValues = Seq(
+    defaultSignaturesUntil
+  )
+
+  lazy val defaultSignaturesUntil = DefaultValueUntil(
+    _.signatures,
+    "signatures",
+    protocolVersionRepresentativeFor(ProtoVersion(0)),
+    Nil,
+  )
 
   def create(
       bytes: ByteString,
@@ -206,7 +222,7 @@ object ClosedEnvelope extends HasSupportedProtoVersions[ClosedEnvelope] {
           contentP,
           recipients,
           Seq.empty,
-          protocolVersionRepresentativeFor(ProtoVersion(1)),
+          protocolVersionRepresentativeFor(ProtoVersion(0)),
         )
         .leftMap(ProtoDeserializationError.InvariantViolation.toProtoDeserializationError)
     } yield closedEnvelope

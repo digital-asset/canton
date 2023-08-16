@@ -133,7 +133,7 @@ abstract class MalformedErrorCode(id: String, override val v0CodeP: v0.LocalReje
   implicit override val code: MalformedErrorCode = this
 }
 
-trait LocalReject extends LocalVerdict with TransactionError {
+sealed trait LocalReject extends LocalVerdict with TransactionError {
 
   /** The first part of the cause. Typically the same for all instances of the particular type.
     */
@@ -192,7 +192,7 @@ trait LocalReject extends LocalVerdict with TransactionError {
 
 /** Base class for LocalReject errors, if the rejection does not (necessarily) occur due to malicious behavior.
   */
-abstract class LocalRejectImpl(
+sealed abstract class LocalRejectImpl(
     override val _causePrefix: String,
     override val _details: String = "",
     override val throwableO: Option[Throwable] = None,

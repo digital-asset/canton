@@ -5,8 +5,9 @@ package com.digitalasset.canton.participant.protocol.validation
 
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
+import cats.syntax.functor.*
 import cats.syntax.parallel.*
-import com.daml.lf.data.Ref.Identifier
+import com.daml.lf.data.Ref.{Identifier, PackageId}
 import com.daml.lf.engine
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
@@ -82,6 +83,7 @@ class ModelConformanceChecker(
         TraceContext,
     ) => EitherT[Future, ContractValidationFailure, Unit],
     val transactionTreeFactory: TransactionTreeFactory,
+    participantId: ParticipantId,
     val enableContractUpgrading: Boolean,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -201,6 +203,9 @@ class ModelConformanceChecker(
     val seed = viewParticipantData.actionDescription.seedOption
     for {
       viewInputContracts <- validateInputContracts(view, requestCounter)
+
+      _ <- validatePackageVettings(view, topologySnapshot)
+
       lookupWithKeys =
         new ExtendedContractLookup(
           ContractLookup.noContracts(logger), // all contracts and keys specified explicitly
@@ -257,6 +262,36 @@ class ModelConformanceChecker(
     } yield WithRollbackScope(rbContext.rollbackScope, suffixedTx)
   }
 
+  private def validatePackageVettings(view: TransactionView, snapshot: TopologySnapshot)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, Error, Unit] = {
+    val referencedContracts =
+      (view.inputContracts.fmap(_.contract) ++ view.createdContracts.fmap(_.contract)).values.toSet
+    val packageIds = referencedContracts.map(_.contractInstance.unversioned.template.packageId)
+
+    val informees = view.viewCommonData.tryUnwrap.informees.map(_.party)
+
+    EitherT(for {
+      informeeParticipantsByParty <- snapshot.activeParticipantsOfParties(informees.toSeq)
+      informeeParticipants = informeeParticipantsByParty.values.flatten.toSet
+      unvettedResult <- informeeParticipants.toSeq
+        .parTraverse(p => snapshot.findUnvettedPackagesOrDependencies(p, packageIds).map(p -> _))
+        .value
+      unvettedPackages = unvettedResult match {
+        case Left(packageId) =>
+          // The package is not in the store and thus the package is not vetted.
+          // If the admin has tampered with the package store and the package is still vetted,
+          // we consider this participant as malicious;
+          // in that case, other participants may still commit the view.
+          Seq(participantId -> Set(packageId))
+        case Right(unvettedSeq) =>
+          unvettedSeq.filter { case (_, packageIds) => packageIds.nonEmpty }
+      }
+    } yield {
+      Either.cond(unvettedPackages.isEmpty, (), UnvettedPackages(unvettedPackages.toMap))
+    })
+  }
+
 }
 
 object ModelConformanceChecker {
@@ -295,6 +330,7 @@ object ModelConformanceChecker {
       damle: DAMLe,
       transactionTreeFactory: TransactionTreeFactory,
       protocolVersion: ProtocolVersion,
+      participantId: ParticipantId,
       enableContractUpgrading: Boolean,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): ModelConformanceChecker = {
@@ -326,6 +362,7 @@ object ModelConformanceChecker {
       if (protocolVersion >= ProtocolVersion.v5) validateSerializedContract(damle)
       else noSerializedContractValidation,
       transactionTreeFactory,
+      participantId,
       enableContractUpgrading,
       loggerFactory,
     )
@@ -472,6 +509,20 @@ object ModelConformanceChecker {
       param("contractId", _.contractId),
       param("templateId", _.templateId),
       unnamedParam(_.viewHash),
+    )
+  }
+
+  final case class UnvettedPackages(
+      unvetted: Map[ParticipantId, Set[PackageId]]
+  ) extends Error {
+    override def pretty: Pretty[UnvettedPackages] = prettyOfClass(
+      unnamedParam(
+        _.unvetted
+          .map { case (participant, packageIds) =>
+            show"$participant has not vetted $packageIds".unquoted
+          }
+          .mkShow("\n")
+      )
     )
   }
 

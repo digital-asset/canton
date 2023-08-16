@@ -24,13 +24,11 @@ object TransactionServiceRequestValidator {
 }
 class TransactionServiceRequestValidator(
     ledgerId: LedgerId,
-    partyNameChecker: PartyNameChecker,
+    partyValidator: PartyValidator,
+    transactionFilterValidator: TransactionFilterValidator,
 ) {
 
   import TransactionServiceRequestValidator.Result
-
-  private val partyValidator =
-    new PartyValidator(partyNameChecker)
 
   import FieldValidator.*
   import ValidationErrors.invalidArgument
@@ -86,7 +84,7 @@ class TransactionServiceRequestValidator(
         partial.end,
         ledgerEnd,
       )
-      convertedFilter <- TransactionFilterValidator.validate(partial.transactionFilter)
+      convertedFilter <- transactionFilterValidator.validate(partial.transactionFilter)
     } yield {
       transaction.GetTransactionsRequest(
         partial.ledgerId,

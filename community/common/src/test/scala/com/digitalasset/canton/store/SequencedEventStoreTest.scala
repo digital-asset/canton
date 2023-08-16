@@ -169,7 +169,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest {
           ts,
           domainId,
           MessageId.tryCreate("deliver-error"),
-          DeliverErrorReason.BatchRefused("paniertes schnitzel"),
+          SequencerErrors.SubmissionRequestRefused("paniertes schnitzel"),
           testedProtocolVersion,
         ),
         sign("Deliver error signature"),

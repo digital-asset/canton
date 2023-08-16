@@ -26,7 +26,13 @@ import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
-import com.digitalasset.canton.sequencing.protocol.{MessageId, SequencedEvent}
+import com.digitalasset.canton.sequencing.protocol.{
+  MessageId,
+  SequencedEvent,
+  SequencerDeliverError,
+  SequencerErrors,
+}
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{Member, UnauthenticatedMemberId}
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext, Traced}
@@ -36,9 +42,10 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import com.google.rpc.status.Status
 import slick.jdbc.{GetResult, SetParameter}
 
-import java.util.UUID
+import java.util.{Base64, UUID}
 import scala.collection.immutable.SortedSet
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -183,6 +190,42 @@ final case class DeliverErrorStoreEvent(
   override def members: NonEmpty[Set[SequencerMemberId]] = NonEmpty(Set, sender)
   override def map[P](f: Nothing => P): StoreEvent[P] = this
   override def payloadO: Option[Nothing] = None
+}
+
+object DeliverErrorStoreEvent {
+  def serializeError(error: SequencerDeliverError, protocolVersion: ProtocolVersion): String256M = {
+    String256M(
+      // TODO(#12373) Adapt when releasing BFT
+      if (protocolVersion >= ProtocolVersion.dev) {
+        Base64.getUrlEncoder.encodeToString(
+          VersionedStatus
+            .create(error.rpcStatusWithoutLoggingContext(), protocolVersion)
+            .toByteString
+            .toByteArray
+        )
+      } else {
+        error.cause
+      }
+    )()
+  }
+
+  def deserializeError(
+      serializedError: String256M,
+      protocolVersion: ProtocolVersion,
+  ): ParsingResult[Status] = {
+    // TODO(#12373) Adapt when releasing BFT
+    if (protocolVersion >= ProtocolVersion.dev) {
+      VersionedStatus
+        .fromByteArray(Base64.getDecoder.decode(serializedError.unwrap))
+        .map(_.status)
+    } else {
+      Right(
+        SequencerErrors
+          .SubmissionRequestRefused(serializedError.unwrap)
+          .rpcStatusWithoutLoggingContext()
+      )
+    }
+  }
 }
 
 final case class Presequenced[+E <: StoreEvent[_]](

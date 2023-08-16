@@ -37,6 +37,7 @@ private[apiserver] final class ApiActiveContractsService private (
     metrics: Metrics,
     telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
+    transactionFilterValidator: TransactionFilterValidator,
 )(implicit
     mat: Materializer,
     esf: ExecutionSequencerFactory,
@@ -53,7 +54,7 @@ private[apiserver] final class ApiActiveContractsService private (
     implicit val loggingContext = LoggingContextWithTrace(loggerFactory, telemetry)
 
     val result = for {
-      filters <- TransactionFilterValidator.validate(request.getFilter)
+      filters <- transactionFilterValidator.validate(request.getFilter)
       activeAtO <- FieldValidator.optionalString(request.activeAtOffset)(str =>
         ApiOffset.fromString(str).left.map { errorMsg =>
           RequestValidationErrors.NonHexOffset
@@ -106,6 +107,7 @@ private[apiserver] object ApiActiveContractsService {
       metrics: Metrics,
       telemetry: Telemetry,
       loggerFactory: NamedLoggerFactory,
+      transactionFilterValidator: TransactionFilterValidator,
   )(implicit
       mat: Materializer,
       esf: ExecutionSequencerFactory,
@@ -116,6 +118,7 @@ private[apiserver] object ApiActiveContractsService {
       metrics = metrics,
       telemetry = telemetry,
       loggerFactory = loggerFactory,
+      transactionFilterValidator = transactionFilterValidator,
     )
     new GrpcActiveContractsService(
       service = service,

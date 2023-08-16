@@ -299,6 +299,23 @@ object FieldValidator {
         validatedIdentifier <- resolve(qn)(contextualizedErrorLogger)
       } yield validatedIdentifier
 
+  def validatedTemplateIdWithPackageIdResolutionFallback(
+      identifier: Identifier,
+      resolveTemplateIds: Ref.QualifiedName => Either[StatusRuntimeException, Iterable[
+        Ref.Identifier
+      ]],
+  )(upgradingEnabled: Boolean)(implicit
+      contextualizedErrorLogger: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, Iterable[Ref.Identifier]] =
+    for {
+      qualifiedName <- validateTemplateQualifiedName(identifier.moduleName, identifier.entityName)
+      templateIds <-
+        if (identifier.packageId.isEmpty && upgradingEnabled) resolveTemplateIds(qualifiedName)
+        else
+          requirePackageId(identifier.packageId, "package_id")
+            .map(pkgId => Iterable(Ref.Identifier(pkgId, qualifiedName)))
+    } yield templateIds
+
   def optionalString[T](s: String)(
       someValidation: String => Either[StatusRuntimeException, T]
   ): Either[StatusRuntimeException, Option[T]] =

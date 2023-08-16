@@ -604,23 +604,27 @@ class DbActiveContractStore(
         fromExclusive <= toInclusive,
         s"Provided timestamps are in the wrong order: $fromExclusive and $toInclusive",
       )
-      val changeQuery =
+      val changeQuery = {
+        val changeOrder = storage.profile match {
+          case _: DbStorage.Profile.Oracle => "asc"
+          case _ => "desc"
+        }
         sql"""select ts, request_counter, contract_id, change, transfer_counter, operation
-             from active_contracts where domain_id = $domainId and
-             ((ts = ${fromExclusive.timestamp} and request_counter > ${fromExclusive.rc}) or ts > ${fromExclusive.timestamp})
-             and
-             ((ts = ${toInclusive.timestamp} and request_counter <= ${toInclusive.rc}) or ts <= ${toInclusive.timestamp})
-             order by ts asc, request_counter asc"""
-          .as[
-            (
-                CantonTimestamp,
-                RequestCounter,
-                LfContractId,
-                ChangeType,
-                TransferCounterO,
-                OperationType,
-            )
-          ]
+                         from active_contracts where domain_id = $domainId and
+                         ((ts = ${fromExclusive.timestamp} and request_counter > ${fromExclusive.rc}) or ts > ${fromExclusive.timestamp})
+                         and
+                         ((ts = ${toInclusive.timestamp} and request_counter <= ${toInclusive.rc}) or ts <= ${toInclusive.timestamp})
+                         order by ts asc, request_counter asc, change #$changeOrder"""
+      }.as[
+        (
+            CantonTimestamp,
+            RequestCounter,
+            LfContractId,
+            ChangeType,
+            TransferCounterO,
+            OperationType,
+        )
+      ]
 
       /* Computes the maximum transfer counter for each contract in the `res` vector, up to a certain request counter `rc`.
          The computation for max_transferCounter(`rc`, `cid`) reuses the result of max_transferCounter(`rc-1`, `cid`).

@@ -7,7 +7,7 @@ import cats.syntax.either.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.LedgerTransactionId
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.participant.admin.SyncStateInspection
+import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
 import com.digitalasset.canton.participant.admin.v0.InspectionServiceGrpc.InspectionService
 import com.digitalasset.canton.participant.admin.v0.{
   LookupContractDomain,

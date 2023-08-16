@@ -18,7 +18,13 @@ import com.digitalasset.canton.ledger.api.auth.services.*
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.grpc.GrpcHealthService
 import com.digitalasset.canton.ledger.api.health.HealthChecks
-import com.digitalasset.canton.ledger.api.validation.CommandsValidator
+import com.digitalasset.canton.ledger.api.validation.{
+  CommandsValidator,
+  PartyNameChecker,
+  PartyValidator,
+  TransactionFilterValidator,
+  TransactionServiceRequestValidator,
+}
 import com.digitalasset.canton.ledger.participant.state.index.v2.*
 import com.digitalasset.canton.ledger.participant.state.v2.ReadService
 import com.digitalasset.canton.ledger.participant.state.v2 as state
@@ -48,6 +54,7 @@ import com.digitalasset.canton.platform.localstore.api.{
   UserManagementStore,
 }
 import com.digitalasset.canton.platform.services.time.TimeProviderType
+import com.digitalasset.canton.platform.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.protobuf.services.ProtoReflectionService
 import io.grpc.{BindableService, StatusRuntimeException}
@@ -163,6 +170,18 @@ object ApiServices {
         executionContext: ExecutionContext
     ): List[BindableService] = {
 
+      val transactionFilterValidator =
+        new TransactionFilterValidator(
+          resolveTemplateIds = resolveTemplateNameTo[Set[Ref.Identifier]](_.all)(indexService),
+          upgradingEnabled = upgradingEnabled,
+        )
+      val transactionServiceRequestValidator =
+        new TransactionServiceRequestValidator(
+          ledgerId = ledgerId,
+          partyValidator = new PartyValidator(PartyNameChecker.AllowAllParties),
+          transactionFilterValidator = transactionFilterValidator,
+        )
+
       val apiTransactionService =
         TransactionServiceImpl.create(
           ledgerId,
@@ -170,6 +189,7 @@ object ApiServices {
           metrics,
           telemetry,
           loggerFactory,
+          transactionServiceRequestValidator,
         )
 
       val apiEventQueryService =
@@ -213,6 +233,7 @@ object ApiServices {
           metrics,
           telemetry,
           loggerFactory,
+          transactionFilterValidator,
         )
 
       val apiTimeServiceOpt =
@@ -242,7 +263,13 @@ object ApiServices {
           new ApiEventQueryServiceV2(eventQueryService, telemetry, loggerFactory)
         val apiPackageService = new ApiPackageServiceV2(packagesService, telemetry, loggerFactory)
         val apiUpdateService =
-          new ApiUpdateService(transactionsService, metrics, telemetry, loggerFactory)
+          new ApiUpdateService(
+            transactionsService,
+            metrics,
+            telemetry,
+            loggerFactory,
+            transactionServiceRequestValidator,
+          )
         val apiStateService =
           new ApiStateService(
             acsService = activeContractsService,
@@ -251,6 +278,7 @@ object ApiServices {
             metrics = metrics,
             telemetry = telemetry,
             loggerFactory = loggerFactory,
+            transactionFilterValidator = transactionFilterValidator,
           )
         val apiVersionService =
           new ApiVersionServiceV2(
@@ -374,10 +402,10 @@ object ApiServices {
         )
 
         val commandsValidator = CommandsValidator(
-          ledgerId,
-          resolveTemplateNameToTemplateId(indexService),
-          upgradingEnabled,
-          explicitDisclosureUnsafeEnabled,
+          ledgerId = ledgerId,
+          resolveToTemplateId = resolveTemplateNameTo(_.primary)(indexService),
+          upgradingEnabled = upgradingEnabled,
+          explicitDisclosureUnsafeEnabled = explicitDisclosureUnsafeEnabled,
         )
         val (apiSubmissionService, commandSubmissionService) =
           CommandSubmissionServiceImpl.createApiService(
@@ -506,15 +534,12 @@ object ApiServices {
     }
   }
 
-  private def resolveTemplateNameToTemplateId(
+  private def resolveTemplateNameTo[O](to: PackageMetadata.TemplatesForQualifiedName => O)(
       indexService: IndexService
-  ): Ref.QualifiedName => ContextualizedErrorLogger => Either[
-    StatusRuntimeException,
-    Ref.Identifier,
-  ] =
+  ): Ref.QualifiedName => ContextualizedErrorLogger => Either[StatusRuntimeException, O] =
     (templateQualifiedName: Ref.QualifiedName) =>
       (contextualizedErrorLogger: ContextualizedErrorLogger) =>
         indexService
           .resolveToTemplateIds(templateQualifiedName)(contextualizedErrorLogger)
-          .map(_.primary)
+          .map(to)
 }

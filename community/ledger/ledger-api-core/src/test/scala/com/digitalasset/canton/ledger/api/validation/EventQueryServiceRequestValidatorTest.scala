@@ -65,7 +65,7 @@ class EventQueryServiceRequestValidatorTest
 
       val txRequest = event.GetEventsByContractKeyRequest(
         contractKey = Lf.ValueText("contractKey"),
-        templateId = templateId,
+        templateId = refTemplateId,
         requestingParties = Set(party),
         endExclusiveSeqId = None,
       )

@@ -48,6 +48,7 @@ trait TransactionTreeFactory {
       contractOfId: SerializableContractOfId,
       keyResolver: LfKeyResolver,
       maxSequencingTime: CantonTimestamp,
+      validatePackageVettings: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionTreeConversionError, GenTransactionTree]
@@ -111,6 +112,12 @@ object TransactionTreeFactory {
     override def pretty: Pretty[ContractLookupError] = prettyOfClass(
       param("id", _.id),
       param("message", _.message.unquoted),
+    )
+  }
+
+  final case class CommonMetadataError(message: String) extends TransactionTreeConversionError {
+    override def pretty: Pretty[CommonMetadataError] = prettyOfClass(
+      unnamedParam(_.message.unquoted)
     )
   }
 

@@ -72,7 +72,7 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
           timestamp,
           DefaultTestIdentities.domainId,
           msgId,
-          DeliverErrorReason.BatchRefused("test"),
+          SequencerErrors.SubmissionRequestRefused("test"),
           testedProtocolVersion,
         )
       ),

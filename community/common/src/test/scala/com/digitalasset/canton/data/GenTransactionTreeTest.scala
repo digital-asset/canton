@@ -724,14 +724,15 @@ class GenTransactionTreeTest
       )
 
     def mkCommonMetadata(protocolVersion: ProtocolVersion): CommonMetadata =
-      CommonMetadata(factory.cryptoOps)(
-        factory.confirmationPolicy,
-        factory.domainId,
-        factory.mediatorRef,
-        mkTestSalt(0),
-        factory.transactionUuid,
-        protocolVersion,
-      )
+      CommonMetadata
+        .create(factory.cryptoOps, protocolVersion)(
+          factory.confirmationPolicy,
+          factory.domainId,
+          factory.mediatorRef,
+          mkTestSalt(0),
+          factory.transactionUuid,
+        )
+        .value
 
     def mkParticipantMetadata(protocolVersion: ProtocolVersion): ParticipantMetadata =
       ParticipantMetadata(factory.cryptoOps)(

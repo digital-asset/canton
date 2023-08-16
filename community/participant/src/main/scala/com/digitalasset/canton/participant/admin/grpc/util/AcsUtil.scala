@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.admin.grpc.util
 import better.files.File
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.participant.admin.SyncStateInspection.SerializableContractWithDomainId
+import com.digitalasset.canton.SerializableContractWithDomainId
 import com.digitalasset.canton.util.{ByteStringUtil, ResourceUtil}
 import com.google.protobuf.ByteString
 

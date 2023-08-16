@@ -69,16 +69,13 @@ class SequencedEventTest extends BaseTestWordSpec {
         CantonTimestamp.now(),
         domainId,
         MessageId.tryCreate("some-message-id"),
-        DeliverErrorReason.BatchRefused("no batches here please"),
+        SequencerErrors.SubmissionRequestRefused("no batches here please"),
         testedProtocolVersion,
       )
-      val deliverErrorPV0 = deliverError.toProtoV0
-      val deserializedEventV0 = deserializeV0(deliverErrorPV0)
       val deliverErrorP = deliverError.toProtoVersioned
       val deserializedEvent = deserializeVersioned(deliverErrorP)
 
       deserializedEvent.value shouldBe deliverError
-      deserializedEventV0.value shouldBe deliverError
     }
 
     def deserializeV0(

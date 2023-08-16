@@ -80,8 +80,12 @@ trait ContractStore extends ContractLookup {
 
   def contractCount()(implicit traceContext: TraceContext): Future[Int]
 
-  def hasActiveContracts(partyId: PartyId, contractIds: Vector[LfContractId], batchSize: Int = 10)(
-      implicit traceContext: TraceContext
+  def hasActiveContracts(
+      partyId: PartyId,
+      contractIds: Iterator[LfContractId],
+      batchSize: Int = 10,
+  )(implicit
+      traceContext: TraceContext
   ): Future[Boolean] = {
     val lfParty = partyId.toLf
     contractIds
