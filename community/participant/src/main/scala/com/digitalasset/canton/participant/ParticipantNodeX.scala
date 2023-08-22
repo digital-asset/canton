@@ -80,7 +80,6 @@ class ParticipantNodeBootstrapX(
     private[canton] val persistentStateFactory: ParticipantNodePersistentStateFactory,
     ledgerApiServerFactory: CantonLedgerApiServerFactory,
     skipRecipientsCheck: Boolean,
-    abortRetry: Eval[Boolean],
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     scheduler: ScheduledExecutorService,
@@ -308,8 +307,6 @@ class ParticipantNodeBootstrapX(
         partyNotifier
       }
 
-      storage.setAbortRetry(abortRetry)
-
       createParticipantServices(
         participantId,
         crypto,
@@ -422,7 +419,6 @@ object ParticipantNodeBootstrapX {
         persistentStateFactory = ParticipantNodePersistentStateFactory,
         ledgerApiServerFactory = ledgerApiServerFactory,
         skipRecipientsCheck = true,
-        abortRetry = Eval.always(false),
       )
     }
 

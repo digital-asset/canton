@@ -66,7 +66,7 @@ private[transfer] final case class TransferOutValidation(
 
   private def checkTemplateId()(implicit
       executionContext: ExecutionContext
-  ): EitherT[FutureUnlessShutdown, TransferProcessorError, Unit] =
+  ): EitherT[FutureUnlessShutdown, TransferProcessorError, Unit] = {
     EitherT.cond[FutureUnlessShutdown](
       // TODO(#12373) Adapt when releasing BFT
       sourceProtocolVersion.v < ProtocolVersion.dev || expectedTemplateId == request.templateId,
@@ -76,7 +76,7 @@ private[transfer] final case class TransferOutValidation(
         expectedTemplateId = expectedTemplateId,
       ),
     )
-
+  }
 }
 
 private[transfer] object TransferOutValidation {
@@ -109,8 +109,12 @@ private[transfer] object TransferOutValidation {
       _ <- validation.checkStakeholders
       _ <- validation.checkParticipants(logger)
       _ <- validation.checkTemplateId()
+      _ <- PVSourceDestinationDomainsAreCompatible(
+        sourceProtocolVersion,
+        request.targetDomainPV,
+        request.contractId,
+      )
     } yield ()
-
   }
 
 }

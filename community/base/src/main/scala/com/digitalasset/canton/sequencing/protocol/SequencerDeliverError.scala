@@ -20,6 +20,7 @@ sealed trait SequencerDeliverError extends TransactionError {
     */
   def forProtocolVersion(protocolVersion: ProtocolVersion): SequencerDeliverError = {
     if (
+      // TODO(#12373) Adapt when releasing BFT
       protocolVersion < ProtocolVersion.dev && this.code != SequencerErrors.SubmissionRequestRefused
     ) {
       SequencerErrors.SubmissionRequestRefused(this.cause)

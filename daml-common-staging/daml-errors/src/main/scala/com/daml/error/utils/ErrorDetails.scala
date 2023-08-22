@@ -3,11 +3,11 @@
 
 package com.daml.error.utils
 
-import com.daml.error.{BaseError, ErrorCode}
+import com.daml.error.ErrorCode
 import com.google.protobuf
 import com.google.rpc.{ErrorInfo, RequestInfo, ResourceInfo, RetryInfo}
+import io.grpc.StatusRuntimeException
 import io.grpc.protobuf.StatusProto
-import io.grpc.{Status, StatusRuntimeException}
 
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
@@ -95,16 +95,6 @@ object ErrorDetails {
     case any => throw new IllegalStateException(s"Could not unpack value of: |$any|")
   }
 
-  def isInternalError(t: Throwable): Boolean = t match {
-    case e: StatusRuntimeException => isInternalError(e)
-    case _ => false
-  }
-
-  def isInternalError(e: StatusRuntimeException): Boolean =
-    e.getStatus.getCode == Status.Code.INTERNAL && e.getStatus.getDescription.startsWith(
-      BaseError.SecuritySensitiveMessageOnApiPrefix
-    )
-
   /** @return whether a status runtime exception matches the error code.
     *
     * NOTE: This method is not suitable for:
@@ -125,7 +115,4 @@ object ErrorDetails {
     case e: StatusRuntimeException => matches(e, errorCode)
     case _ => false
   }
-
-  def matchesOneOf(t: Throwable, errorCodes: ErrorCode*): Boolean =
-    errorCodes.exists(matches(t, _))
 }

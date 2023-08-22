@@ -110,7 +110,7 @@ class InMemoryMultiDomainEventLog(
       )
     )
 
-  override protected val dispatcher: Dispatcher[GlobalOffset] = Dispatcher[GlobalOffset](
+  private val dispatcher: Dispatcher[GlobalOffset] = Dispatcher[GlobalOffset](
     loggerFactory.name,
     ledgerFirstOffset - 1, // start index is exclusive
     ledgerFirstOffset - 1, // end index is inclusive
@@ -315,29 +315,6 @@ class InMemoryMultiDomainEventLog(
         }.value
       }
       .map(_.toMap)
-  }
-
-  override def lookupByLocalOffsets(id: EventLogId, offsets: Seq[LocalOffset])(implicit
-      traceContext: TraceContext
-  ): Future[Seq[(GlobalOffset, TimestampedEvent)]] =
-    offsets
-      .parTraverseFilter { localOffset =>
-        OptionT(globalOffsetFor(id, localOffset)).semiflatMap { case (globalOffset, _) =>
-          lookupEvent(namedLoggingContext)(id, localOffset).map((globalOffset, _))
-        }.value
-      }
-      .map(_.sortBy { case (globalOffset, _) => globalOffset })
-
-  override def lookupByGlobalOffsets(offsets: Seq[GlobalOffset])(implicit
-      traceContext: TraceContext
-  ): Future[Seq[(GlobalOffset, TimestampedEvent)]] = {
-    val entries = entriesRef.get()
-    val references =
-      offsets.map(globalOffset => globalOffset -> entries.referencesByOffset(globalOffset))
-
-    references.toList.parTraverse { case (globalOffset, (id, localOffset, _processingTime)) =>
-      lookupEvent(namedLoggingContext)(id, localOffset).map(globalOffset -> _)
-    }
   }
 
   override def lookupTransactionDomain(

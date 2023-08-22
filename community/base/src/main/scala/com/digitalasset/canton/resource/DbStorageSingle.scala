@@ -87,7 +87,7 @@ class DbStorageSingle private (
       valid
     } catch {
       case e: SQLException =>
-        failureOccurred(DatabaseConnectionLost(e.getMessage, e))
+        failureOccurred(DatabaseConnectionLost(e.getMessage))
         false
     })).map { active =>
       val old = isActiveRef.getAndSet(active)

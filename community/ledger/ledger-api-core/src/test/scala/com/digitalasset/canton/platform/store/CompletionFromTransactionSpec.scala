@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.store
 
 import com.daml.ledger.api.v2.completion.Completion.DeduplicationPeriod
 import com.daml.lf.data.Time
+import com.digitalasset.canton.TestEssentials
 import com.digitalasset.canton.ledger.offset.Offset
 import com.google.protobuf.duration.Duration
 import com.google.protobuf.timestamp.Timestamp
@@ -20,6 +21,7 @@ class CompletionFromTransactionSpec
     extends AnyWordSpec
     with Matchers
     with OptionValues
+    with TestEssentials
     with TableDrivenPropertyChecks {
 
   "CompletionFromTransaction" should {
@@ -66,6 +68,7 @@ class CompletionFromTransactionSpec
             "transactionId",
             "applicationId",
             None,
+            traceContext,
             submissionId,
             deduplicationOffset,
             deduplicationDurationSeconds,
@@ -101,6 +104,7 @@ class CompletionFromTransactionSpec
             "transactionId",
             "applicationId",
             None,
+            traceContext,
             Some("submissionId"),
             None,
             deduplicationDurationSeconds,
@@ -119,6 +123,7 @@ class CompletionFromTransactionSpec
         status,
         "applicationId",
         None,
+        traceContext,
         Some("submissionId"),
       )
 

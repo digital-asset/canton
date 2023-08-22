@@ -11,7 +11,7 @@ function adjust_startup_scripts() {
   REPLACE_VERSION=$(cat version.sbt | sed -E 's/.*= \"(.*)\"/\1/')
   REPLACE_REVISION=$(git rev-parse HEAD)
   REPLACE_JVM_OPTS="-XX:+CrashOnOutOfMemoryError"
-  REPLACE_JAR="lib\/*"
+  REPLACE_JAR="lib\/$RELEASE.jar"
   REPLACE_MAIN_CLASS="$MAIN_CLASS"
   REPLACE_MAC_ICON_FILE="lib\/canton.ico"
   for ff in "bin/canton" "bin/canton.bat"
@@ -63,19 +63,13 @@ echo "assembling release in $RELEASE_DIR"
 cp -v $JARFILE $RELEASE_DIR/lib/$RELEASE.jar
 
 state="scan"
-COPY_OUTPUT=$RELEASE_DIR
 
 for ff in $PACKS
 do
   case $state in
     "scan")
       case $ff in
-        "-c-lib")
-          COPY_OUTPUT=$RELEASE_DIR/lib
-          state="copy"
-          ;;
         "-c")
-          COPY_OUTPUT=$RELEASE_DIR
           state="copy"
           ;;
         "-r")
@@ -93,11 +87,11 @@ do
             echo "skipping empty $ff"
           else
             echo "copying content from $ff"
-            cp -r $ff/* $COPY_OUTPUT
+            cp -r $ff/* $RELEASE_DIR
           fi
         else
           echo "copying file $ff"
-          cp $ff $COPY_OUTPUT
+          cp $ff $RELEASE_DIR
         fi
       else
         echo "ERROR, no such file $ff for copying"

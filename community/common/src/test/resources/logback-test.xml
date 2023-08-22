@@ -57,6 +57,5 @@
   <!-- Enable for database-relevant debug logs -->
 <!--  <logger name="slick" level="DEBUG"/>-->
 <!--  <logger name="com.zaxxer.hikari" level="DEBUG"/>-->
-  <!-- TODO(i14208): Comment out when issue is closed -->
-  <logger name="org.testcontainers" level="DEBUG"/>
+<!--  <logger name="org.testcontainers" level="DEBUG"/>-->
 </configuration>

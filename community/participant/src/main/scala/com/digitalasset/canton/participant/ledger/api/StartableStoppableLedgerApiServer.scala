@@ -181,9 +181,9 @@ class StartableStoppableLedgerApiServer(
     val acsStreamsConfig =
       config.serverConfig.activeContractsService.transformInto[LedgerAcsStreamsConfig]
     val txFlatStreamsConfig =
-      config.serverConfig.activeContractsService.transformInto[LedgerTransactionFlatStreamsConfig]
+      config.serverConfig.transactionFlatStreams.transformInto[LedgerTransactionFlatStreamsConfig]
     val txTreeStreamsConfig =
-      config.serverConfig.activeContractsService.transformInto[LedgerTransactionTreeStreamsConfig]
+      config.serverConfig.transactionTreeStreams.transformInto[LedgerTransactionTreeStreamsConfig]
 
     val indexServiceConfig = LedgerIndexServiceConfig(
       acsStreams = acsStreamsConfig,

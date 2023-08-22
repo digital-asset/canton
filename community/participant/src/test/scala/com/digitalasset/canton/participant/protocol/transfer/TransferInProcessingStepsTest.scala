@@ -28,6 +28,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
 import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferInValidation.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.{
+  IncompatibleProtocolVersions,
   NoTransferSubmissionPermission,
   ReceivedMultipleRequests,
   StakeholdersMismatch,
@@ -53,6 +54,7 @@ import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.time.{DomainTimeTracker, TimeProofTestUtil}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -343,14 +345,12 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     }
 
     "fail when submitting party not hosted on the participant" in {
-
       val submissionParam2 =
         SubmissionParam(
           submitterInfo(party2),
           transferId,
           SourceProtocolVersion(testedProtocolVersion),
         )
-
       for {
         transferData2 <- TransferStoreTest.mkTransferDataForDomain(
           transferId,
@@ -373,6 +373,38 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         preparedSubmission should matchPattern { case NoTransferSubmissionPermission(_, _, _) =>
         }
       }
+    }
+
+    "fail when protocol version are incompatible" in {
+      // source domain does not support transfer counters
+      val submissionParam2 =
+        submissionParam.copy(sourceProtocolVersion = SourceProtocolVersion(ProtocolVersion.dev))
+      for {
+        transferData <- transferDataF
+        deps <- statefulDependencies
+        (persistentState, ephemeralState) = deps
+        _ <- setUpOrFail(transferData, transferOutResult, persistentState)
+        preparedSubmission <-
+          transferInProcessingSteps
+            .prepareSubmission(
+              submissionParam2,
+              targetMediator,
+              ephemeralState,
+              cryptoSnapshot,
+            )
+            .value
+            .failOnShutdown
+        // if (testedProtocolVersion < TransferCommonData.minimumPvForTransferCounter) preparedS
+
+        // )("prepare submission did not return a left")
+      } yield {
+        if (testedProtocolVersion < ProtocolVersion.dev)
+          preparedSubmission should matchPattern {
+            case Left(IncompatibleProtocolVersions(_, _, _)) =>
+          }
+        else preparedSubmission should matchPattern { case Right(_) => }
+      }
+
     }
   }
 

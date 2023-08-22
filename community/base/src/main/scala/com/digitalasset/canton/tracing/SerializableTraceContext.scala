@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.tracing
 
+import com.daml.ledger.api.v1.trace_context.TraceContext as DamlTraceContext
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.v0
@@ -31,6 +32,11 @@ final case class SerializableTraceContext(traceContext: TraceContext)
     val w3cTraceContext = traceContext.asW3CTraceContext
     v0.TraceContext(w3cTraceContext.map(_.parent), w3cTraceContext.flatMap(_.state))
   }
+
+  def toDamlProto: DamlTraceContext = {
+    val w3cTraceContext = traceContext.asW3CTraceContext
+    DamlTraceContext(w3cTraceContext.map(_.parent), w3cTraceContext.flatMap(_.state))
+  }
 }
 
 object SerializableTraceContext
@@ -49,12 +55,6 @@ object SerializableTraceContext
 
   val empty: SerializableTraceContext = SerializableTraceContext(TraceContext.empty)
 
-  /** Construct a TraceContext from provided protobuf bytes.
-    * Errors will be logged at a WARN level using the provided storageLogger and an empty TraceContext will be returned.
-    */
-  def fromByteArraySafe(logger: Logger)(bytes: Array[Byte]): SerializableTraceContext =
-    safely(logger)(fromByteArray)(bytes)
-
   /** Construct a TraceContext from provided protobuf structure.
     * Errors will be logged at a WARN level using the provided storageLogger and an empty TraceContext will be returned.
     */
@@ -72,6 +72,22 @@ object SerializableTraceContext
     } yield tc
 
   def fromProtoV0(tc: v0.TraceContext): ParsingResult[SerializableTraceContext] =
+    Right(SerializableTraceContext(W3CTraceContext.toTraceContext(tc.traceparent, tc.tracestate)))
+
+  def fromDamlProtoSafeOpt(logger: Logger)(
+      traceContextP: Option[DamlTraceContext]
+  ): SerializableTraceContext =
+    safely(logger)(fromDamlProtoOpt)(traceContextP)
+
+  def fromDamlProtoOpt(
+      traceContextP: Option[DamlTraceContext]
+  ): ParsingResult[SerializableTraceContext] =
+    for {
+      tcP <- ProtoConverter.required("traceContext", traceContextP)
+      tc <- fromDamlProto(tcP)
+    } yield tc
+
+  def fromDamlProto(tc: DamlTraceContext): ParsingResult[SerializableTraceContext] =
     Right(SerializableTraceContext(W3CTraceContext.toTraceContext(tc.traceparent, tc.tracestate)))
 
   private def safely[A](

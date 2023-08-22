@@ -105,7 +105,7 @@ abstract class RetryWithDelay(
     totalMaxRetries: Int,
     flagCloseable: FlagCloseable,
     retryLogLevel: Option[Level],
-    killSwitchRetries: Eval[Boolean],
+    suspendRetries: Eval[FiniteDuration],
 ) extends Policy(logger) {
 
   private val complainAfterRetries: Int = 10
@@ -182,126 +182,134 @@ abstract class RetryWithDelay(
         delay: FiniteDuration,
     ): Future[RetryOutcome[T]] = logOnThrow {
       previousResult.transformWith { x =>
-        logOnThrow(x match {
-          case succ @ util.Success(result) if success.predicate(result) =>
-            logger.trace(
-              s"The operation '$operationName' was successful. No need to retry. $longDescription"
-            )
-            Future.successful(RetryOutcome(succ, RetryTermination.Success))
-
-          case outcome if killSwitchRetries.value =>
-            logger.debug(
-              s"Giving up on retrying the operation '$operationName' due to kill switch. Last attempt was $lastErrorKind"
-            )
-            Future.successful(RetryOutcome(outcome, RetryTermination.GiveUp))
-          case outcome if flagCloseable.isClosing =>
-            logger.debug(
-              s"Giving up on retrying the operation '$operationName' due to shutdown. Last attempt was $lastErrorKind"
-            )
-            Future.successful(RetryOutcome(outcome, RetryTermination.Shutdown))
-
-          case outcome if totalMaxRetries < Int.MaxValue && totalRetries >= totalMaxRetries =>
-            logger.info(
-              messageOfOutcome(
-                outcome,
-                s"Total maximum number of retries $totalMaxRetries exceeded. Giving up.",
-              ),
-              throwableOfOutcome(outcome),
-            )
-            Future.successful(RetryOutcome(outcome, RetryTermination.GiveUp))
-
-          case outcome =>
-            // this will also log the exception in outcome
-            val errorKind = retryable.retryOK(outcome, logger)
-            val retriesOfErrorKind =
-              if (errorKind == lastErrorKind) {
-                logger.trace(s"Kind of error has not changed since last attempt: $errorKind")
-                retriesOfLastErrorKind
-              } else {
-                logger.info(messageOfOutcome(outcome, s"New kind of error: $errorKind."))
-                // No need to log the exception in outcome, as this has been logged by retryable.retryOk.
-                0
-              }
-            if (errorKind.maxRetries == Int.MaxValue || retriesOfErrorKind < errorKind.maxRetries) {
-
-              val level = retryLogLevel.getOrElse {
-                if (totalRetries < complainAfterRetries || totalMaxRetries != Int.MaxValue)
-                  Level.INFO
-                else Level.WARN
-              }
-
-              LoggerUtil.logAtLevel(
-                level,
-                messageOfOutcome(outcome, show"Retrying after $delay."),
-                // No need to log the exception in outcome, as this has been logged by retryable.retryOk.
+        logOnThrow(
+          x match {
+            case succ @ util.Success(result) if success.predicate(result) =>
+              logger.trace(
+                s"The operation '$operationName' was successful. No need to retry. $longDescription"
               )
+              Future.successful(RetryOutcome(succ, RetryTermination.Success))
 
-              val delayedF = DelayUtil.delayIfNotClosing(operationName, delay, flagCloseable)
-              delayedF
-                .flatMap { _ =>
-                  logOnThrow {
-                    LoggerUtil.logAtLevel(
-                      level,
-                      s"Now retrying operation '$operationName'. $longDescription$actionableMessage",
-                    )
-                    // Run the task again on the normal execution context as the task might take a long time.
-                    // `performUnlessClosingF` guards against closing the execution context.
-                    val nextRunUnlessShutdown =
-                      flagCloseable
-                        .performUnlessClosingF(operationName)(runTask())(
-                          executionContext,
-                          traceContext,
-                        )
-                    @SuppressWarnings(Array("org.wartremover.warts.TryPartial"))
-                    val nextRunF = nextRunUnlessShutdown
-                      .onShutdown {
-                        // If we're closing, report the previous `outcome` and recurse.
-                        // This will enter the case branch with `flagCloseable.isClosing`
-                        // and therefore yield the termination reason `Shutdown`.
-                        outcome.get
-                      }(
-                        // Use the direct execution context as this is a small task.
-                        // The surrounding `performUnlessClosing` ensures that this post-processing
-                        // is registered with the normal execution context before it can close.
-                        directExecutionContext
-                      )
-                    FutureUnlessShutdown.outcomeF(
-                      run(
-                        nextRunF,
-                        totalRetries + 1,
-                        errorKind,
-                        retriesOfErrorKind + 1,
-                        nextDelay(totalRetries + 1, delay),
-                      )
-                    )(executionContext)
-                  }
-                }(
-                  // It is safe to use the general execution context here by the following argument.
-                  // - If the `onComplete` executes before `DelayUtil` completes the returned promise,
-                  //   then the completion of the promise will schedule the function immediately.
-                  //   Since this completion is guarded by `performUnlessClosing`,
-                  //   the body gets scheduled with `executionContext` before `flagCloseable`'s close method completes.
-                  // - If `DelayUtil` completes the returned promise before the `onComplete` call executes,
-                  //   the `onComplete` call itself will schedule the body
-                  //   and this is guarded by the `performUnlessClosing` above.
-                  // Therefore the execution context is still open when the scheduling happens.
-                  executionContext
-                )
-                .onShutdown(
-                  RetryOutcome(outcome, RetryTermination.Shutdown)
-                )(executionContext)
+            case outcome if flagCloseable.isClosing =>
+              logger.debug(
+                s"Giving up on retrying the operation '$operationName' due to shutdown. Last attempt was $lastErrorKind"
+              )
+              Future.successful(RetryOutcome(outcome, RetryTermination.Shutdown))
 
-            } else {
+            case outcome if totalMaxRetries < Int.MaxValue && totalRetries >= totalMaxRetries =>
               logger.info(
                 messageOfOutcome(
                   outcome,
-                  s"Maximum number of retries ${errorKind.maxRetries} exceeded. Giving up.",
-                  // No need to log the exception in outcome, as this has been logged by retryable.retryOk.
-                )
+                  s"Total maximum number of retries $totalMaxRetries exceeded. Giving up.",
+                ),
+                throwableOfOutcome(outcome),
               )
               Future.successful(RetryOutcome(outcome, RetryTermination.GiveUp))
-            }
-        })
+
+            case outcome =>
+              // this will also log the exception in outcome
+              val errorKind = retryable.retryOK(outcome, logger)
+              val retriesOfErrorKind = if (errorKind == lastErrorKind) retriesOfLastErrorKind else 0
+              if (
+                errorKind.maxRetries == Int.MaxValue || retriesOfErrorKind < errorKind.maxRetries
+              ) {
+                val suspendDuration = suspendRetries.value
+                if (suspendDuration > Duration.Zero) {
+                  logger.info(
+                    s"Suspend retrying the operation '$operationName' for $suspendDuration."
+                  )
+                  DelayUtil
+                    .delay(suspendDuration)
+                    .flatMap(_ => run(previousResult, 0, errorKind, 0, initialDelay))(
+                      directExecutionContext
+                    )
+                } else {
+                  if (errorKind == lastErrorKind) {
+                    logger.trace(s"Kind of error has not changed since last attempt: $errorKind")
+                  } else {
+                    logger.info(messageOfOutcome(outcome, s"New kind of error: $errorKind."))
+                    // No need to log the exception in outcome, as this has been logged by retryable.retryOk.
+                  }
+
+                  val level = retryLogLevel.getOrElse {
+                    if (totalRetries < complainAfterRetries || totalMaxRetries != Int.MaxValue)
+                      Level.INFO
+                    else Level.WARN
+                  }
+
+                  LoggerUtil.logAtLevel(
+                    level,
+                    messageOfOutcome(outcome, show"Retrying after $delay."),
+                    // No need to log the exception in outcome, as this has been logged by retryable.retryOk.
+                  )
+
+                  val delayedF = DelayUtil.delayIfNotClosing(operationName, delay, flagCloseable)
+                  delayedF
+                    .flatMap { _ =>
+                      logOnThrow {
+                        LoggerUtil.logAtLevel(
+                          level,
+                          s"Now retrying operation '$operationName'. $longDescription$actionableMessage",
+                        )
+                        // Run the task again on the normal execution context as the task might take a long time.
+                        // `performUnlessClosingF` guards against closing the execution context.
+                        val nextRunUnlessShutdown =
+                          flagCloseable
+                            .performUnlessClosingF(operationName)(runTask())(
+                              executionContext,
+                              traceContext,
+                            )
+                        @SuppressWarnings(Array("org.wartremover.warts.TryPartial"))
+                        val nextRunF = nextRunUnlessShutdown
+                          .onShutdown {
+                            // If we're closing, report the previous `outcome` and recurse.
+                            // This will enter the case branch with `flagCloseable.isClosing`
+                            // and therefore yield the termination reason `Shutdown`.
+                            outcome.get
+                          }(
+                            // Use the direct execution context as this is a small task.
+                            // The surrounding `performUnlessClosing` ensures that this post-processing
+                            // is registered with the normal execution context before it can close.
+                            directExecutionContext
+                          )
+                        FutureUnlessShutdown.outcomeF(
+                          run(
+                            nextRunF,
+                            totalRetries + 1,
+                            errorKind,
+                            retriesOfErrorKind + 1,
+                            nextDelay(totalRetries + 1, delay),
+                          )
+                        )(executionContext)
+                      }
+                    }(
+                      // It is safe to use the general execution context here by the following argument.
+                      // - If the `onComplete` executes before `DelayUtil` completes the returned promise,
+                      //   then the completion of the promise will schedule the function immediately.
+                      //   Since this completion is guarded by `performUnlessClosing`,
+                      //   the body gets scheduled with `executionContext` before `flagCloseable`'s close method completes.
+                      // - If `DelayUtil` completes the returned promise before the `onComplete` call executes,
+                      //   the `onComplete` call itself will schedule the body
+                      //   and this is guarded by the `performUnlessClosing` above.
+                      // Therefore the execution context is still open when the scheduling happens.
+                      executionContext
+                    )
+                    .onShutdown(
+                      RetryOutcome(outcome, RetryTermination.Shutdown)
+                    )(executionContext)
+                }
+              } else {
+                logger.info(
+                  messageOfOutcome(
+                    outcome,
+                    s"Maximum number of retries ${errorKind.maxRetries} exceeded. Giving up.",
+                    // No need to log the exception in outcome, as this has been logged by retryable.retryOk.
+                  )
+                )
+                Future.successful(RetryOutcome(outcome, RetryTermination.GiveUp))
+              }
+          }
+        )
       // Although in most cases, it may be ok to schedule the body on executionContext,
       // there is a chance that executionContext is closed when the body is scheduled.
       // By choosing directExecutionContext, we avoid a RejectedExecutionException in this case.
@@ -365,6 +373,7 @@ final case class Directly(
     operationName: String,
     longDescription: String = "",
     retryLogLevel: Option[Level] = None,
+    suspendRetries: Eval[FiniteDuration] = Eval.now(Duration.Zero),
 ) extends RetryWithDelay(
       logger,
       operationName,
@@ -374,7 +383,7 @@ final case class Directly(
       maxRetries,
       flagCloseable,
       retryLogLevel,
-      killSwitchRetries = Eval.now(false),
+      suspendRetries,
     ) {
 
   override def nextDelay(nextCount: Int, delay: FiniteDuration): FiniteDuration = Duration.Zero
@@ -390,6 +399,7 @@ final case class Pause(
     longDescription: String = "",
     actionable: Option[String] = None,
     retryLogLevel: Option[Level] = None,
+    suspendRetries: Eval[FiniteDuration] = Eval.now(Duration.Zero),
 ) extends RetryWithDelay(
       logger,
       operationName,
@@ -399,7 +409,7 @@ final case class Pause(
       maxRetries,
       flagCloseable,
       retryLogLevel,
-      killSwitchRetries = Eval.now(false),
+      suspendRetries,
     ) {
 
   override def nextDelay(nextCount: Int, delay: FiniteDuration): FiniteDuration = delay
@@ -448,7 +458,7 @@ final case class Backoff(
     longDescription: String = "",
     actionable: Option[String] = None,
     retryLogLevel: Option[Level] = None,
-    killSwitchRetries: Eval[Boolean] = Eval.now(false),
+    suspendRetries: Eval[FiniteDuration] = Eval.now(Duration.Zero),
 )(implicit jitter: Jitter = Jitter.full(maxDelay))
     extends RetryWithDelay(
       logger,
@@ -459,7 +469,7 @@ final case class Backoff(
       maxRetries,
       flagCloseable,
       retryLogLevel,
-      killSwitchRetries,
+      suspendRetries,
     ) {
 
   override def nextDelay(nextCount: Int, delay: FiniteDuration): FiniteDuration =

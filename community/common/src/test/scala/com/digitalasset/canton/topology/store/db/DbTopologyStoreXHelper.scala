@@ -35,6 +35,8 @@ trait DbTopologyStoreXHelper {
     )
   }
 
+  protected val maxItemsInSqlQuery: PositiveInt = PositiveInt.tryCreate(20)
+
   protected def createTopologyStore(): TopologyStoreX[DomainStore] =
     new DbTopologyStoreX(
       storage,
@@ -42,5 +44,6 @@ trait DbTopologyStoreXHelper {
       maxDbConnections = PositiveInt.tryCreate(5),
       timeouts,
       loggerFactory,
+      maxItemsInSqlQuery = maxItemsInSqlQuery,
     )
 }

@@ -335,19 +335,9 @@ object BuildCommon {
       // add license to package
       val renames =
         releaseNotes ++ licenseFiles ++ demoSource ++ demoDars ++ demoJars ++ demoArtefacts ++ damlSampleSource ++ damlSampleDars ++ protoFiles
+      val args = bundlePack.value ++ renames.flatMap(x => Seq("-r", x._1.toString, x._2))
       // build the canton fat-jar
       val assembleJar = assembly.value
-
-      // Find non bundled dependencies and add them to the list of files to be copied over to the lib directory
-      val excludedJars = (assembly / assemblyExcludedJars).value.map(_.data)
-      log.info(
-        s"The following non bundled dependencies will be copied to the lib directory: ${excludedJars.map(_.toString).mkString(", ")}"
-      )
-
-      val args = bundlePack.value ++ renames.flatMap(x =>
-        Seq("-r", x._1.toString, x._2)
-      ) ++ excludedJars.toList.flatMap(c => Seq("-c-lib", c.toString))
-
       runCommand(
         f"bash ./scripts/ci/create-bundle.sh ${assembleJar.toString} ${(assembly / mainClass).value.get} ${args
             .mkString(" ")}",
@@ -445,17 +435,6 @@ object BuildCommon {
     assembly / test := {}, // don't run tests during assembly
     // when building the fat jar, we need to properly merge our artefacts
     assembly / assemblyMergeStrategy := mergeStrategy((assembly / assemblyMergeStrategy).value),
-    // Files excluded here will automatically be copied in the bundle task to the lib directory and included on the classpath separately
-    assembly / assemblyExcludedJars := {
-      val cp = (assembly / fullClasspath).value
-      cp.filter { c =>
-        // Exclude bouncy castle from the assembly jar to avoid signature verification errors in Oracle JDK
-        c.data.getName.contains("bcprov") && c.data.getName.contains(s"$bouncy_castle_version.jar")
-      }
-    },
-    assembly / packageOptions += Package.ManifestAttributes(
-      "Class-Path" -> (assembly / assemblyExcludedJars).value.map(_.data.getName).mkString(" ")
-    ),
   )
 
   // which files to include into the release package
@@ -1084,6 +1063,8 @@ object BuildCommon {
           grpc_api,
           reflections,
           scalatest % Test,
+          scalacheck % Test,
+          scalatestScalacheck % Test,
         ),
         coverageEnabled := false,
         JvmRulesPlugin.damlRepoHeaderSettings,

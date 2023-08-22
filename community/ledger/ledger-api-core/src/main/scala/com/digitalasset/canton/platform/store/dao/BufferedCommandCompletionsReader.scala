@@ -15,6 +15,7 @@ import com.digitalasset.canton.platform.store.dao.BufferedStreamsReader.FetchFro
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.CompletionDetails
 import com.digitalasset.canton.platform.{ApplicationId, Party}
+import com.digitalasset.canton.tracing.Traced
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -40,10 +41,10 @@ class BufferedCommandCompletionsReader(
     )
 
   private def filterCompletions(
-      transactionLogUpdate: TransactionLogUpdate,
+      transactionLogUpdate: Traced[TransactionLogUpdate],
       parties: Set[Party],
       applicationId: String,
-  ): Option[CompletionStreamResponse] = (transactionLogUpdate match {
+  ): Option[CompletionStreamResponse] = (transactionLogUpdate.value match {
     case TransactionLogUpdate.TransactionAccepted(_, _, _, _, _, _, Some(completionDetails), _) =>
       Some(completionDetails)
     case TransactionLogUpdate.TransactionRejected(_, completionDetails) => Some(completionDetails)

@@ -9,7 +9,7 @@ import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer.*
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 
 import scala.collection.Searching.{Found, InsertionPoint, SearchResult}
 import scala.collection.View
@@ -35,9 +35,9 @@ class InMemoryFanoutBuffer(
     val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {
   @volatile private[cache] var _bufferLog =
-    Vector.empty[(Offset, TransactionLogUpdate)]
+    Vector.empty[(Offset, Traced[TransactionLogUpdate])]
   @volatile private[cache] var _lookupMap =
-    Map.empty[TransactionId, TransactionLogUpdate.TransactionAccepted]
+    Map.empty[TransactionId, Traced[TransactionLogUpdate.TransactionAccepted]]
 
   private val bufferMetrics = metrics.daml.services.index.InMemoryFanoutBuffer
   private val pushTimer = bufferMetrics.push
@@ -52,7 +52,7 @@ class InMemoryFanoutBuffer(
     *              Must be higher than the last appended entry's offset.
     * @param entry The buffer entry.
     */
-  def push(offset: Offset, entry: TransactionLogUpdate)(implicit traceContext: TraceContext): Unit =
+  def push(offset: Offset, entry: Traced[TransactionLogUpdate]): Unit =
     Timed.value(
       pushTimer,
       blocking(synchronized {
@@ -67,7 +67,7 @@ class InMemoryFanoutBuffer(
           // Do nothing since buffer updates are not atomic and the reads are not synchronized.
           // This ensures that reads can never see data in the buffer.
         } else {
-          ensureSize(maxBufferSize - 1)
+          ensureSize(maxBufferSize - 1)(entry.traceContext)
 
           _bufferLog = _bufferLog :+ offset -> entry
           extractEntryFromMap(entry).foreach { case (key, value) =>
@@ -88,7 +88,7 @@ class InMemoryFanoutBuffer(
   def slice[FILTER_RESULT](
       startExclusive: Offset,
       endInclusive: Offset,
-      filter: TransactionLogUpdate => Option[FILTER_RESULT],
+      filter: Traced[TransactionLogUpdate] => Option[FILTER_RESULT],
   ): BufferSlice[(Offset, FILTER_RESULT)] = {
     val vectorSnapshot = _bufferLog
 
@@ -115,7 +115,9 @@ class InMemoryFanoutBuffer(
   }
 
   /** Lookup the accepted transaction update by transaction id. */
-  def lookup(transactionId: TransactionId): Option[TransactionLogUpdate.TransactionAccepted] =
+  def lookup(
+      transactionId: TransactionId
+  ): Option[Traced[TransactionLogUpdate.TransactionAccepted]] =
     _lookupMap.get(transactionId)
 
   /** Removes entries starting from the buffer head up until `endInclusive`.
@@ -167,20 +169,20 @@ class InMemoryFanoutBuffer(
   private def dropOldest(dropCount: Int): Unit = blocking(synchronized {
     val (evicted, remainingBufferLog) = _bufferLog.splitAt(dropCount)
     val lookupKeysToEvict =
-      evicted.view.map(_._2).flatMap(extractEntryFromMap).map(_._2.transactionId)
+      evicted.view.map(_._2).flatMap(extractEntryFromMap).map(_._2.value.transactionId)
 
     _bufferLog = remainingBufferLog
     _lookupMap = _lookupMap -- lookupKeysToEvict
   })
 
   private def extractEntryFromMap(
-      transactionLogUpdate: TransactionLogUpdate
-  ): Option[(TransactionId, TransactionLogUpdate.TransactionAccepted)] =
-    transactionLogUpdate match {
+      transactionLogUpdate: Traced[TransactionLogUpdate]
+  ): Option[(TransactionId, Traced[TransactionLogUpdate.TransactionAccepted])] =
+    transactionLogUpdate.withTraceContext(implicit traceContext => {
       case txAccepted: TransactionLogUpdate.TransactionAccepted =>
-        Some(txAccepted.transactionId -> txAccepted)
+        Some(txAccepted.transactionId -> Traced(txAccepted))
       case _ => None
-    }
+    })
 }
 
 private[platform] object InMemoryFanoutBuffer {
@@ -216,8 +218,8 @@ private[platform] object InMemoryFanoutBuffer {
     }
 
   private[cache] def filterAndChunkSlice[FILTER_RESULT](
-      sliceView: View[(Offset, TransactionLogUpdate)],
-      filter: TransactionLogUpdate => Option[FILTER_RESULT],
+      sliceView: View[(Offset, Traced[TransactionLogUpdate])],
+      filter: Traced[TransactionLogUpdate] => Option[FILTER_RESULT],
       maxChunkSize: Int,
   ): Vector[(Offset, FILTER_RESULT)] =
     sliceView
@@ -227,8 +229,8 @@ private[platform] object InMemoryFanoutBuffer {
 
   @SuppressWarnings(Array("org.wartremover.warts.IterableOps"))
   private[cache] def lastFilteredChunk[FILTER_RESULT](
-      bufferSlice: Vector[(Offset, TransactionLogUpdate)],
-      filter: TransactionLogUpdate => Option[FILTER_RESULT],
+      bufferSlice: Vector[(Offset, Traced[TransactionLogUpdate])],
+      filter: Traced[TransactionLogUpdate] => Option[FILTER_RESULT],
       maxChunkSize: Int,
   ): BufferSlice.LastBufferChunkSuffix[(Offset, FILTER_RESULT)] = {
     val lastChunk =

@@ -4,14 +4,21 @@
 package com.digitalasset.canton.util
 
 import akka.actor.ActorSystem
-import akka.stream.scaladsl.{RunnableGraph, Source}
+import akka.stream.scaladsl.{Keep, RunnableGraph, Source}
+import akka.stream.stage.{GraphStageLogic, GraphStageWithMaterializedValue, InHandler, OutHandler}
 import akka.stream.{
   ActorAttributes,
+  Attributes,
+  FlowShape,
+  Inlet,
   KillSwitch,
+  KillSwitches,
   Materializer,
+  Outlet,
   QueueCompletionResult,
   QueueOfferResult,
   Supervision,
+  UniqueKillSwitch,
 }
 import akka.{Done, NotUsed}
 import com.daml.grpc.adapter.{AkkaExecutionSequencerPool, ExecutionSequencerFactory}
@@ -405,6 +412,56 @@ object AkkaUtil extends HasLoggerName {
       }
   }
 
+  /** Adds a [[akka.stream.KillSwitches.single]] into the stream after the given source
+    * and injects the created kill switch into the stream
+    */
+  def withUniqueKillSwitch[A, Mat, Mat2](
+      source: Source[A, Mat]
+  )(mat: (Mat, UniqueKillSwitch) => Mat2): Source[(A, KillSwitch), Mat2] = {
+    import syntax.*
+    source
+      .withMaterializedValueMat(new AtomicReference[UniqueKillSwitch])(Keep.both)
+      .viaMat(KillSwitches.single) { case ((m, ref), killSwitch) =>
+        ref.set(killSwitch)
+        mat(m, killSwitch)
+      }
+      .map { case (a, ref) => (a, ref.get()) }
+  }
+
+  private[util] def withMaterializedValueMat[M, A, Mat, Mat2](create: => M)(source: Source[A, Mat])(
+      combine: (Mat, M) => Mat2
+  ): Source[(A, M), Mat2] =
+    source.viaMat(new WithMaterializedValue[M, A](() => create))(combine)
+
+  /** Creates a value upon materialization that is added to every element of the stream.
+    *
+    * WARNING: This flow breaks the synchronization abstraction of Akka streams,
+    * as the created value is accessible from within the stream and from the outside through the materialized value.
+    * Users of this flow must make sure that accessing the value is thread-safe!
+    */
+  private class WithMaterializedValue[M, A](create: () => M)
+      extends GraphStageWithMaterializedValue[FlowShape[A, (A, M)], M] {
+    private val in: Inlet[A] = Inlet[A]("withMaterializedValue.in")
+    private val out: Outlet[(A, M)] = Outlet[(A, M)]("withMaterializedValue.out")
+    override val shape: FlowShape[A, (A, M)] = FlowShape(in, out)
+
+    override def initialAttributes: Attributes = Attributes.name("withMaterializedValue")
+
+    override def createLogicAndMaterializedValue(
+        inheritedAttributes: Attributes
+    ): (GraphStageLogic, M) = {
+      val m: M = create()
+      val logic = new GraphStageLogic(shape) with InHandler with OutHandler {
+        override def onPush(): Unit = push(out, grab(in) -> m)
+
+        override def onPull(): Unit = pull(in)
+
+        setHandlers(in, out, this)
+      }
+      (logic, m)
+    }
+  }
+
   object syntax {
 
     /** Defines extension methods for [[akka.stream.scaladsl.Source]] that map to the methods defined in this class */
@@ -424,6 +481,15 @@ object AkkaUtil extends HasLoggerName {
           f: A => FutureUnlessShutdown[B]
       )(implicit loggingContext: NamedLoggingContext): Source[B, Mat] =
         AkkaUtil.mapAsyncAndDrainUS(source, parallelism)(f)
+
+      private[util] def withMaterializedValueMat[M, Mat2](create: => M)(
+          mat: (Mat, M) => Mat2
+      ): Source[(A, M), Mat2] =
+        AkkaUtil.withMaterializedValueMat(create)(source)(mat)
+
+      def withUniqueKillSwitchMat[Mat2](
+      )(mat: (Mat, UniqueKillSwitch) => Mat2): Source[(A, KillSwitch), Mat2] =
+        AkkaUtil.withUniqueKillSwitch(source)(mat)
     }
   }
 }

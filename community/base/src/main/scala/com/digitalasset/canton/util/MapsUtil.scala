@@ -238,6 +238,6 @@ object MapsUtil {
       subtrahend.keySet.subsetOf(subtrahend.keySet),
       s"Cannot compute map difference if minuend is not defined whenever subtrahend is defined. Missing keys: ${subtrahend.keySet diff minuend.keySet}",
     )
-    minuend.collect { case (k, v) if !subtrahend.get(k).contains(v) => (k, v) }
+    minuend.filter { case (k, v) => !subtrahend.get(k).contains(v) }
   }
 }

@@ -22,7 +22,6 @@ import com.digitalasset.canton.metrics.{MetricsHelper, TimedLoadGauge}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher.{
   PendingEventPublish,
   PendingPublish,
-  PendingTransferPublish,
 }
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.store.EventLogId.ParticipantEventLogId
@@ -53,7 +52,7 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
-import com.digitalasset.canton.{DiscardOps, LedgerTransactionId, RequestCounter}
+import com.digitalasset.canton.{DiscardOps, LedgerTransactionId}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
@@ -111,7 +110,7 @@ class DbMultiDomainEventLog private[db] (
   private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("multi-domain-event-log")
 
-  override protected val dispatcher: Dispatcher[GlobalOffset] =
+  private val dispatcher: Dispatcher[GlobalOffset] =
     Dispatcher(
       loggerFactory.name,
       MultiDomainEventLog.ledgerFirstOffset - 1, // start index is exclusive
@@ -398,21 +397,12 @@ class DbMultiDomainEventLog private[db] (
           toTimestampInclusive = None,
           limit = None,
         )
-
-        unpublishedTransfers <- storage.query(
-          sql"""select request_counter, request_timestamp from transfer_causality_updates where log_id = ${id.index} and request_counter > $fromExclusive and request_counter <= $upToInclusive order by request_counter"""
-            .as[(RequestCounter, CantonTimestamp)],
-          functionFullName,
-        )
       } yield {
-        val publishes: List[PendingPublish] = unpublishedLocalOffsets.toList.map {
-
-          case (_rc, tse) => PendingEventPublish(tse, tse.timestamp, id)
-        }
-        val transferPublishes: List[PendingPublish] = unpublishedTransfers.toList.map {
-          case (rc, timestamp) => PendingTransferPublish(rc, timestamp, id)
-        }
-        (publishes ++ transferPublishes).sortBy(pending => pending.rc)
+        unpublishedLocalOffsets.toList
+          .map { case (_rc, tse) =>
+            PendingEventPublish(tse, tse.timestamp, id)
+          }
+          .sortBy(pending => pending.rc)
       }
     }
   }
@@ -502,56 +492,6 @@ class DbMultiDomainEventLog private[db] (
         }.toMap
       }
     case _ => Future.successful(Map.empty)
-  }
-
-  override def lookupByGlobalOffsets(offsets: Seq[GlobalOffset])(implicit
-      traceContext: TraceContext
-  ): Future[Seq[(GlobalOffset, TimestampedEvent)]] = {
-    offsets match {
-      case NonEmpty(offsetsNE) =>
-        val inClauses = DbStorage.toInClauses_(
-          "global_offset",
-          offsetsNE,
-          maxBatchSize,
-        )
-
-        val queries = inClauses.map { inClause =>
-          import DbStorage.Implicits.BuilderChain.*
-          (sql"""
-              select lel.global_offset, el.local_offset, request_sequencer_counter, el.event_id, el.content, trace_context
-              from linearized_event_log lel join event_log el on lel.log_id = el.log_id and lel.local_offset = el.local_offset
-              where
-              """ ++ inClause).as[(GlobalOffset, TimestampedEvent)]
-        }
-        storage
-          .sequentialQueryAndCombine(queries, functionFullName)
-          .map(_.toSeq.sortBy { case (globalOffset, _) => globalOffset })
-      case _ => Future.successful(Seq.empty)
-    }
-  }
-
-  override def lookupByLocalOffsets(id: EventLogId, offsets: Seq[LocalOffset])(implicit
-      traceContext: TraceContext
-  ): Future[Seq[(GlobalOffset, TimestampedEvent)]] = offsets match {
-    case NonEmpty(offsetsNE) =>
-      val inClauses = DbStorage.toInClauses_(
-        "lel.local_offset",
-        offsetsNE,
-        maxBatchSize,
-      )
-
-      val queries = inClauses.map { inClause =>
-        import DbStorage.Implicits.BuilderChain.*
-        (sql"""
-              select global_offset, el.local_offset, request_sequencer_counter, el.event_id, content, trace_context
-              from linearized_event_log lel join event_log el on lel.log_id = el.log_id and lel.local_offset = el.local_offset
-              where lel.log_id=$id and
-              """ ++ inClause).as[(GlobalOffset, TimestampedEvent)]
-      }
-      storage
-        .sequentialQueryAndCombine(queries, functionFullName)
-        .map(_.toSeq.sortBy { case (globalOffset, _) => globalOffset })
-    case _ => Future.successful(Seq.empty)
   }
 
   override def lookupTransactionDomain(transactionId: LedgerTransactionId)(implicit

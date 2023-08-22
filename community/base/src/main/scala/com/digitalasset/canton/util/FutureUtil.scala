@@ -4,7 +4,7 @@
 package com.digitalasset.canton.util
 
 import com.digitalasset.canton.concurrent.DirectExecutionContext
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.google.common.annotations.VisibleForTesting
@@ -14,6 +14,7 @@ import java.util.regex.Pattern
 import scala.annotation.tailrec
 import scala.concurrent.duration.{Duration, *}
 import scala.concurrent.{Await, ExecutionContext, Future, TimeoutException}
+import scala.math.Ordered.*
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 
@@ -26,13 +27,23 @@ object FutureUtil {
       failureMessage: => String,
       onFailure: Throwable => Unit = _ => (),
       level: => Level = Level.ERROR,
+      closeContext: Option[CloseContext] = None,
   )(implicit loggingContext: ErrorLoggingContext): Future[T] = {
     implicit val ec: ExecutionContext = DirectExecutionContext(loggingContext.logger)
     future.recover {
       // Catching NonFatal only, because a future cannot fail with fatal throwables.
       // Also, it may be a bad idea to run a callback after an OutOfMemoryError.
       case NonFatal(err) =>
-        LoggerUtil.logThrowableAtLevel(level, failureMessage, err)
+        // if the optional close context is closing down, log at most with INFO
+        if (closeContext.exists(_.flagCloseable.isClosing) && level > Level.INFO) {
+          LoggerUtil.logThrowableAtLevel(
+            Level.INFO,
+            s"Logging the following failure on INFO instead of ${level} due to an ongoing shutdown: $failureMessage",
+            err,
+          )
+        } else {
+          LoggerUtil.logThrowableAtLevel(level, failureMessage, err)
+        }
         try {
           onFailure(err)
         } catch {
@@ -56,8 +67,11 @@ object FutureUtil {
       failureMessage: => String,
       onFailure: Throwable => Unit = _ => (),
       level: => Level = Level.ERROR,
+      closeContext: Option[CloseContext] = None,
   )(implicit loggingContext: ErrorLoggingContext): FutureUnlessShutdown[T] = {
-    FutureUnlessShutdown(logOnFailure(future.unwrap, failureMessage, onFailure, level))
+    FutureUnlessShutdown(
+      logOnFailure(future.unwrap, failureMessage, onFailure, level, closeContext)
+    )
   }
 
   /** Discard `future` and log an error if it does not complete successfully.

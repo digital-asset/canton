@@ -111,12 +111,16 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
     * @param operationName  Name of the operation
     * @param f              Create a DBIOAction from a batch
     */
-  private def performBatchedDbOperation[X](elements: Seq[X], operationName: String)(
+  private def performBatchedDbOperation[X](
+      elements: Seq[X],
+      operationName: String,
+      processInParallel: Boolean,
+  )(
       f: Seq[X] => DBIOAction[_, NoStream, Effect.Write with Effect.Transactional]
   )(implicit traceContext: TraceContext) = if (elements.isEmpty) Future.successful(())
   else
     MonadUtil.batchedSequentialTraverse_(
-      parallelism = PositiveInt.two * maxDbConnections,
+      parallelism = if (processInParallel) PositiveInt.two * maxDbConnections else PositiveInt.one,
       chunkSize = maxItemsInSqlQuery,
     )(elements) { elementsBatch =>
       storage.update_(
@@ -143,28 +147,34 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
     ) ++ removeTxs.map(txHash => sql"tx_hash=${txHash.hash.toLengthLimitedHexString}")
 
     lazy val updateRemovalsF =
-      performBatchedDbOperation(transactionRemovals, "update-topology-transactions") {
-        transactionRemovalsBatch =>
-          (sql"UPDATE topology_transactions_x SET valid_until = ${Some(effectiveTs)} WHERE store_id=$transactionStoreIdName AND (" ++
-            transactionRemovalsBatch
-              .intercalate(
-                sql" OR "
-              ) ++ sql") AND valid_from < $effectiveTs AND valid_until is null").asUpdate
+      performBatchedDbOperation(
+        transactionRemovals,
+        "update-topology-transactions",
+        processInParallel = true,
+      ) { transactionRemovalsBatch =>
+        (sql"UPDATE topology_transactions_x SET valid_until = ${Some(effectiveTs)} WHERE store_id=$transactionStoreIdName AND (" ++
+          transactionRemovalsBatch
+            .intercalate(
+              sql" OR "
+            ) ++ sql") AND valid_from < $effectiveTs AND valid_until is null").asUpdate
       }
 
-    lazy val additionsF = performBatchedDbOperation(additions, "update-topology-transactions") {
-      additionsBatch =>
-        insertSignedTransaction[GenericValidatedTopologyTransactionX](vtx =>
-          TransactionEntry(
-            sequenced,
-            effective,
-            Option.when(
-              vtx.rejectionReason.nonEmpty || expiredAdditions(vtx.transaction.transaction.hash)
-            )(effective),
-            vtx.transaction,
-            vtx.rejectionReason,
-          )
-        )(additionsBatch)
+    lazy val additionsF = performBatchedDbOperation(
+      additions,
+      "insert-topology-transactions",
+      processInParallel = false,
+    ) { additionsBatch =>
+      insertSignedTransaction[GenericValidatedTopologyTransactionX](vtx =>
+        TransactionEntry(
+          sequenced,
+          effective,
+          Option.when(
+            vtx.rejectionReason.nonEmpty || expiredAdditions(vtx.transaction.transaction.hash)
+          )(effective),
+          vtx.transaction,
+          vtx.rejectionReason,
+        )
+      )(additionsBatch)
     }
 
     updatingTime.event {
@@ -396,7 +406,9 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
   override def bootstrap(snapshot: GenericStoredTopologyTransactionsX)(implicit
       traceContext: TraceContext
   ): Future[Unit] = updatingTime.event {
-    performBatchedDbOperation(snapshot.result, "bootstrap") { txs =>
+    // inserts must not be processed in parallel to keep the insertion order (as indicated by the `id` column)
+    // in sync with the monotonicity of sequenced
+    performBatchedDbOperation(snapshot.result, "bootstrap", processInParallel = false) { txs =>
       insertSignedTransaction[GenericStoredTopologyTransactionX](TransactionEntry.fromStoredTx)(txs)
     }
   }

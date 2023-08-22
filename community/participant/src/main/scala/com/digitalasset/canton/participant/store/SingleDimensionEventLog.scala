@@ -59,7 +59,7 @@ trait SingleDimensionEventLog[+Id <: EventLogId] extends SingleDimensionEventLog
     * @throws java.lang.IllegalArgumentException if a different event has already been published with the same
     *                                            [[com.digitalasset.canton.participant.LocalOffset]]
     */
-  def insertUnlessEventIdClash(event: TimestampedEvent)(implicit
+  private[store] def insertUnlessEventIdClash(event: TimestampedEvent)(implicit
       traceContext: TraceContext
   ): EitherT[Future, TimestampedEvent, Unit] = EitherT {
     insertsUnlessEventIdClash(Seq(event)).map {
@@ -107,7 +107,7 @@ trait SingleDimensionEventLog[+Id <: EventLogId] extends SingleDimensionEventLog
 
   def prune(beforeAndIncluding: LocalOffset)(implicit traceContext: TraceContext): Future[Unit]
 
-  def lastOffset(implicit traceContext: TraceContext): OptionT[Future, LocalOffset]
+  private[store] def lastOffset(implicit traceContext: TraceContext): OptionT[Future, LocalOffset]
 
   def eventById(eventId: EventId)(implicit
       traceContext: TraceContext
@@ -124,7 +124,10 @@ trait SingleDimensionEventLog[+Id <: EventLogId] extends SingleDimensionEventLog
     * In an event logs where timestamps need not increase with offsets,
     * this can be used to check that whether there are events with lower offsets and larger timestamps.
     */
-  def existsBetween(timestampInclusive: CantonTimestamp, localOffsetInclusive: LocalOffset)(implicit
+  private[store] def existsBetween(
+      timestampInclusive: CantonTimestamp,
+      localOffsetInclusive: LocalOffset,
+  )(implicit
       traceContext: TraceContext
   ): Future[Boolean]
 

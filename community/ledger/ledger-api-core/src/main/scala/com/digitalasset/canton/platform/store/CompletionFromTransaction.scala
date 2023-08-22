@@ -11,8 +11,9 @@ import com.daml.ledger.api.v2.completion.Completion
 import com.daml.lf.data.Time.Timestamp
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.platform.ApiOffset.ApiOffsetConverter
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.google.protobuf.duration.Duration
-import com.google.rpc.status.{Status as StatusProto}
+import com.google.rpc.status.Status as StatusProto
 import io.grpc.Status
 
 // Turn a stream of transactions into a stream of completions for a given application and set of parties
@@ -27,6 +28,7 @@ private[platform] object CompletionFromTransaction {
       transactionId: String,
       applicationId: String,
       domainId: Option[String],
+      traceContext: TraceContext,
       optSubmissionId: Option[String] = None,
       optDeduplicationOffset: Option[String] = None,
       optDeduplicationDurationSeconds: Option[Long] = None,
@@ -39,6 +41,7 @@ private[platform] object CompletionFromTransaction {
           commandId = commandId,
           transactionId = transactionId,
           applicationId = applicationId,
+          traceContext = traceContext,
           optStatus = Some(OkStatus),
           optSubmissionId = optSubmissionId,
           optDeduplicationOffset = optDeduplicationOffset,
@@ -56,6 +59,7 @@ private[platform] object CompletionFromTransaction {
       status: StatusProto,
       applicationId: String,
       domainId: Option[String],
+      traceContext: TraceContext,
       optSubmissionId: Option[String] = None,
       optDeduplicationOffset: Option[String] = None,
       optDeduplicationDurationSeconds: Option[Long] = None,
@@ -68,6 +72,7 @@ private[platform] object CompletionFromTransaction {
           commandId = commandId,
           transactionId = RejectionTransactionId,
           applicationId = applicationId,
+          traceContext = traceContext,
           optStatus = Some(status),
           optSubmissionId = optSubmissionId,
           optDeduplicationOffset = optDeduplicationOffset,
@@ -88,6 +93,7 @@ private[platform] object CompletionFromTransaction {
       commandId: String,
       transactionId: String,
       applicationId: String,
+      traceContext: TraceContext,
       optStatus: Option[StatusProto],
       optSubmissionId: Option[String],
       optDeduplicationOffset: Option[String],
@@ -99,6 +105,7 @@ private[platform] object CompletionFromTransaction {
       status = optStatus,
       updateId = transactionId,
       applicationId = applicationId,
+      traceContext = Some(SerializableTraceContext(traceContext).toDamlProto),
     )
     val optDeduplicationPeriod = toApiDeduplicationPeriod(
       optDeduplicationOffset = optDeduplicationOffset,

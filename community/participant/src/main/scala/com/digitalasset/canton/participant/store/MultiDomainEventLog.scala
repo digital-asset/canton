@@ -39,7 +39,6 @@ import com.digitalasset.canton.participant.sync.{
   TimestampedEvent,
 }
 import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
-import com.digitalasset.canton.platform.akkastreams.dispatcher.Dispatcher
 import com.digitalasset.canton.protocol.TargetDomainId
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
@@ -73,8 +72,6 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
 
   protected implicit def executionContext: ExecutionContext
 
-  protected def dispatcher: Dispatcher[GlobalOffset]
-
   /** Appends a new event to the event log.
     *
     * The new event must already have been published in the [[SingleDimensionEventLog]] with id
@@ -86,7 +83,7 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
     *
     * The returned future completes already when the event has been successfully inserted into the internal
     * (in-memory) inbox. Events will be persisted asynchronously. Actual publication has happened
-    * before a subsequent [[flush]] call's future completes.
+    * before a subsequent flush call's future completes.
     *
     * The caller must await completion of the returned future before calling the method again.
     * Otherwise, the method may fail with an exception or return a failed future.
@@ -136,22 +133,6 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
   def lookupByEventIds(eventIds: Seq[EventId])(implicit
       traceContext: TraceContext
   ): Future[Map[EventId, (GlobalOffset, TimestampedEvent, CantonTimestamp)]]
-
-  /** Yields all the published events with the given IDs.
-    * Unpublished events are ignored.
-    * Results are sorted by global offset.
-    */
-  def lookupByLocalOffsets(id: EventLogId, offsets: Seq[LocalOffset])(implicit
-      traceContext: TraceContext
-  ): Future[Seq[(GlobalOffset, TimestampedEvent)]]
-
-  /** Yields all the published events with the given IDs.
-    * Unpublished events are ignored.
-    * Results are sorted by global offset.
-    */
-  def lookupByGlobalOffsets(offsets: Seq[GlobalOffset])(implicit
-      traceContext: TraceContext
-  ): Future[Seq[(GlobalOffset, TimestampedEvent)]]
 
   /** Find the domain of a committed transaction. */
   def lookupTransactionDomain(transactionId: LedgerTransactionId)(implicit
@@ -321,9 +302,9 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
   def publicationTimeLowerBound: CantonTimestamp
 
   /** Returns a future that completes after all publications have happened whose [[publish]] future has completed
-    * before the call to [[flush]].
+    * before the call to flush.
     */
-  def flush(): Future[Unit]
+  private[store] def flush(): Future[Unit]
 
   /** Report the max-event-age metric based on the oldest event timestamp and the current clock time or
     * zero if no oldest timestamp exists (e.g. events fully pruned).

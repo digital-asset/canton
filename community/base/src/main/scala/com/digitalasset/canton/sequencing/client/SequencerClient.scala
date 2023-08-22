@@ -1067,6 +1067,13 @@ class SequencerClientImpl(
                 )
                 putApplicationHandlerFailure(ApplicationHandlerPassive(reason))
 
+              case _ if isClosing =>
+                logger.info(
+                  s"$sync event processing failed for event batch with sequencer counters $firstSc to $lastSc, most likely due to an ongoing shutdown",
+                  error,
+                )
+                putApplicationHandlerFailure(ApplicationHandlerShutdown)
+
               case _ =>
                 logger.error(
                   s"$sync event processing failed for event batch with sequencer counters $firstSc to $lastSc.",

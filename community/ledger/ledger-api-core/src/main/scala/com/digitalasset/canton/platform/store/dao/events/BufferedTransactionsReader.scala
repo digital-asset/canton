@@ -31,6 +31,7 @@ import com.digitalasset.canton.platform.store.dao.{
 }
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.platform.{Party, TemplatePartiesFilter}
+import com.digitalasset.canton.tracing.Traced
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -233,7 +234,7 @@ private[platform] object BufferedTransactionsReader {
             requestingParties,
           )(loggingContext),
         toApiResponse = (
-            transactionAccepted: TransactionLogUpdate.TransactionAccepted,
+            transactionAccepted: Traced[TransactionLogUpdate.TransactionAccepted],
             requestingParties: Set[Party],
             loggingContext: LoggingContextWithTrace,
         ) =>
@@ -257,7 +258,7 @@ private[platform] object BufferedTransactionsReader {
             requestingParties,
           )(loggingContext),
         toApiResponse = (
-            transactionAccepted: TransactionLogUpdate.TransactionAccepted,
+            transactionAccepted: Traced[TransactionLogUpdate.TransactionAccepted],
             requestingParties: Set[Party],
             loggingContext: LoggingContextWithTrace,
         ) =>

@@ -124,6 +124,7 @@ class CompletionStorageBackendTemplate(
             optDeduplicationDurationSeconds = deduplicationDurationSeconds,
             optDeduplicationDurationNanos = deduplicationDurationNanos,
             domainId = internedDomainId.map(stringInterning.domainId.unsafe.externalize),
+            traceContext = TraceContext.empty,
           )
       }
 
@@ -156,6 +157,7 @@ class CompletionStorageBackendTemplate(
             optDeduplicationDurationSeconds = deduplicationDurationSeconds,
             optDeduplicationDurationNanos = deduplicationDurationNanos,
             domainId = internedDomainId.map(stringInterning.domainId.unsafe.externalize),
+            traceContext = TraceContext.empty,
           )
       }
 

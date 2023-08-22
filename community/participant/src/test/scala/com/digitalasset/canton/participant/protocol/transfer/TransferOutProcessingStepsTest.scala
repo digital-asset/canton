@@ -31,6 +31,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
 import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessingSteps.PendingTransferOut
 import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessorError.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.{
+  IncompatibleProtocolVersions,
   NoTransferSubmissionPermission,
   TransferProcessorError,
 }
@@ -612,6 +613,65 @@ final class TransferOutProcessingStepsTest
         )("prepare submission succeeded unexpectedly")
       } yield {
         submissionResult shouldBe a[TargetDomainIsSourceDomain]
+      }
+    }
+
+    "forbid transfer if the target domain does not support transfer counters and the source domain supports them" in {
+      val targetProtocolVersion = TargetProtocolVersion(ProtocolVersion.v4)
+      val state = mkState
+      val contractId = ExampleTransactionFactory.suffixedId(10, 0)
+      val contract = ExampleTransactionFactory.asSerializable(
+        contractId,
+        contractInstance = ExampleTransactionFactory.contractInstance(templateId = templateId),
+        metadata = ContractMetadata.tryCreate(
+          signatories = Set(party1),
+          stakeholders = Set(party1),
+          maybeKeyWithMaintainers = None,
+        ),
+      )
+      val transactionId = ExampleTransactionFactory.transactionId(1)
+      val submissionParam = TransferOutProcessingSteps.SubmissionParam(
+        submitterMetadata = submitterMetadata(party1),
+        contractId,
+        TargetDomainId(targetDomain.id),
+        targetProtocolVersion,
+      )
+
+      for {
+        _ <- state.storedContractManager.addPendingContracts(
+          RequestCounter(1),
+          Seq(WithTransactionId(contract, transactionId)),
+        )
+        _ <- persistentState.activeContractStore
+          .createContracts(
+            Seq(contractId),
+            TimeOfChange(RequestCounter(1), timeEvent.timestamp),
+          )
+          .value
+        submissionResult <-
+          outProcessingSteps
+            .prepareSubmission(
+              submissionParam,
+              sourceMediator,
+              state,
+              cryptoSnapshot,
+            )
+            .value
+            .failOnShutdown
+      } yield {
+        // TODO(#12373) Adapt when releasing BFT
+        if (outProcessingSteps.sourceDomainProtocolVersion.v == ProtocolVersion.dev) {
+          submissionResult shouldBe Left(
+            IncompatibleProtocolVersions(
+              contractId,
+              outProcessingSteps.sourceDomainProtocolVersion,
+              targetProtocolVersion,
+            )
+          )
+        } else {
+          succeed
+        }
+
       }
     }
   }

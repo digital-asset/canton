@@ -14,6 +14,7 @@ import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReader.FetchFromPersistence
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReaderSpec.*
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
+import com.digitalasset.canton.tracing.Traced
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, HasExecutorServiceGeneric}
 import org.scalatest.Assertion
 import org.scalatest.concurrent.ScalaFutures
@@ -255,14 +256,16 @@ object BufferedStreamsReaderSpec {
 
     val metrics = Metrics.ForTesting
     val Seq(offset0, offset1, offset2, offset3) = (0 to 3) map { idx => offset(idx.toLong) }
-    val offsetUpdates: Seq[(Offset, TransactionLogUpdate.TransactionAccepted)] =
-      Seq(offset1, offset2, offset3).zip((1 to 3).map(idx => transaction(s"tx-$idx")))
+    val offsetUpdates: Seq[(Offset, Traced[TransactionLogUpdate.TransactionAccepted])] =
+      Seq(offset1, offset2, offset3).zip((1 to 3).map(idx => Traced(transaction(s"tx-$idx"))))
 
     val noFilterBufferSlice
-        : TransactionLogUpdate => Option[TransactionLogUpdate.TransactionAccepted] = {
-      case update: TransactionLogUpdate.TransactionAccepted => Some(update)
-      case _: TransactionLogUpdate.TransactionRejected => None
-    }
+        : Traced[TransactionLogUpdate] => Option[TransactionLogUpdate.TransactionAccepted] =
+      tracedUpdate =>
+        tracedUpdate.value match {
+          case update: TransactionLogUpdate.TransactionAccepted => Some(update)
+          case _: TransactionLogUpdate.TransactionRejected => None
+        }
 
     val inMemoryFanoutBuffer: InMemoryFanoutBuffer = new InMemoryFanoutBuffer(
       maxBufferSize = 3,
@@ -306,7 +309,7 @@ object BufferedStreamsReaderSpec {
           transactionsBuffer: InMemoryFanoutBuffer = inMemoryFanoutBufferWithSmallChunkSize,
           fetchFromPersistence: FetchFromPersistence[Object, String] = failingPersistenceFetch,
           persistenceFetchArgs: Object = new Object,
-          bufferSliceFilter: TransactionLogUpdate => Option[
+          bufferSliceFilter: Traced[TransactionLogUpdate] => Option[
             TransactionLogUpdate.TransactionAccepted
           ] = noFilterBufferSlice,
       ): Done =
@@ -461,7 +464,7 @@ object BufferedStreamsReaderSpec {
         val offsetAt = offset(idx)
         val tx = transaction(s"tx-$idx")
         persistenceStore = persistenceStore.appended(offsetAt -> tx)
-        inMemoryFanoutBuffer.push(offsetAt, tx)
+        inMemoryFanoutBuffer.push(offsetAt, Traced(tx))
         ledgerEndIndex = idx
       }
     }

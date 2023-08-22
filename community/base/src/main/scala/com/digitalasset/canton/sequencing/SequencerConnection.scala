@@ -31,11 +31,30 @@ sealed trait SequencerConnection extends PrettyPrinting {
 
   def toProtoV0: v0.SequencerConnection
 
+  @deprecated("Use addEndpoints instead", "2.7.1")
+  final def addConnection(
+      connection: String,
+      additionalConnections: String*
+  ): SequencerConnection =
+    addEndpoints(connection, additionalConnections *)
+
+  @deprecated("Use addEndpoints instead", "2.7.1")
+  final def addConnection(
+      connection: URI,
+      additionalConnections: URI*
+  ): SequencerConnection = addEndpoints(connection, additionalConnections *)
+
+  @deprecated("Use addEndpoints instead", "2.7.1")
+  final def addConnection(
+      connection: SequencerConnection,
+      additionalConnections: SequencerConnection*
+  ): SequencerConnection = addEndpoints(connection, additionalConnections *)
+
   def addEndpoints(
       connection: String,
       additionalConnections: String*
   ): SequencerConnection =
-    addEndpoints(new URI(connection), additionalConnections.map(new URI(_)): _*)
+    addEndpoints(new URI(connection), additionalConnections.map(new URI(_)) *)
 
   // TODO(i9014) change this to Either
   def addEndpoints(
