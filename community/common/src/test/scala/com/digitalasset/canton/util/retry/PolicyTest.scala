@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.util.retry
 
+import cats.Eval
 import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, Threading}
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
@@ -13,16 +14,20 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.FutureUtil
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.retry.Jitter.RandomSource
-import com.digitalasset.canton.util.retry.RetryUtil.{AllExnRetryable, DbExceptionRetryable}
+import com.digitalasset.canton.util.retry.RetryUtil.{
+  AllExnRetryable,
+  DbExceptionRetryable,
+  NoExnRetryable,
+}
+import com.digitalasset.canton.util.{DelayUtil, FutureUtil}
 import com.digitalasset.canton.{BaseTest, HasExecutorService, TestMetrics}
 import org.scalatest.funspec.AsyncFunSpec
 import org.slf4j.event.Level
 
 import java.util.Random
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong}
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong, AtomicReference}
 import scala.concurrent.duration.*
 import scala.concurrent.{Await, Future}
 
@@ -138,6 +143,10 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService with
     testClosedExecutionContext(Directly(logger, _, Forever, "op", retryLogLevel = Some(Level.INFO)))
 
     testStopOnShutdown(Directly(logger, _, Forever, "op"), 10)
+
+    testSuspend(maxRetries =>
+      suspend => Directly(logger, flagCloseable, maxRetries, "op", suspendRetries = suspend)
+    )
   }
 
   describe("retry.Pause") {
@@ -198,6 +207,10 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService with
     )
 
     testStopOnShutdown(Pause(logger, _, Forever, 1.millis, "op"), 10)
+
+    testSuspend(maxRetries =>
+      suspend => Pause(logger, flagCloseable, maxRetries, 10.millis, "op", suspendRetries = suspend)
+    )
   }
 
   describe("retry.Backoff") {
@@ -259,6 +272,19 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService with
     )
 
     testStopOnShutdown(Backoff(logger, _, 10, 1.millis, Duration.Inf, "op"), 3)
+
+    testSuspend(maxRetries =>
+      suspend =>
+        Backoff(
+          logger,
+          flagCloseable,
+          maxRetries,
+          1.milli,
+          Duration.Inf,
+          "op",
+          suspendRetries = suspend,
+        )
+    )
   }
 
   def testJitterBackoff(name: String, algoCreator: FiniteDuration => Jitter): Unit = {
@@ -747,6 +773,35 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService with
       policy(flagCloseable1).unlessShutdown(run(), AllExnRetryable).unwrap.map { result =>
         result shouldBe AbortedDueToShutdown
         retried.get() shouldBe retriedUntilShutdown
+      }
+    }
+  }
+
+  def testSuspend(mkPolicy: Int => Eval[FiniteDuration] => RetryWithDelay): Unit = {
+    it("does not retry while suspended") {
+      implicit val success: Success[Unit] = Success(_ => false)
+      val maxRetries = 10
+
+      val retried = new AtomicInteger()
+      val suspend = new AtomicReference(Duration.Zero)
+
+      def run(): Future[Unit] = {
+        val retries = retried.incrementAndGet()
+        if (suspend.get() > Duration.Zero) {
+          logger.error(s"Policy is still retrying despite suspension.")
+        } else if (retries == 3) {
+          suspend.set(1.millis)
+          FutureUtil.doNotAwait(
+            DelayUtil.delay(10.millis).map(_ => suspend.set(Duration.Zero)),
+            "An error occurred while resetting suspension delay.",
+          )
+        }
+        Future.unit
+      }
+
+      val policy = mkPolicy(maxRetries)(Eval.always(suspend.get()))
+      policy.apply(run(), NoExnRetryable).map { _ =>
+        retried.get() shouldBe maxRetries + 3
       }
     }
   }

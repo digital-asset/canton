@@ -188,24 +188,30 @@ private[transfer] class TransferInValidation(
               } yield if (source && target) Some(stakeholder) else None
             }
           )
+
+          // Disallow reassignments from a source domains that support transfer counters to a
+          // destination domain that does not support them
+          // TODO(#12373) Adapt when releasing BFT
+          _ <- condUnitET[Future](
+            !incompatibleProtocolVersionsBetweenSourceAndDestinationDomains(
+              transferData.sourceProtocolVersion,
+              targetProtocolVersion,
+            ),
+            IncompatibleProtocolVersions(
+              transferData.contract.contractId,
+              transferData.sourceProtocolVersion,
+              targetProtocolVersion,
+            ): TransferProcessorError,
+          )
+
           _ <- EitherT.cond[Future](
             // transfer counter is the same in transfer-out and transfer-in requests
             transferInRequest.transferCounter == transferData.transferCounter || (
               // Be lenient if the transfer-out happened on a domain without transfer counters
               // and the transfer-in happens on a domain with transfer counters
-              // TODO(#13249) Decide which transfers we want to allow.
               transferInRequest.transferCounter.contains(TransferCounter.Genesis) &&
                 transferData.transferCounter.isEmpty &&
                 allowTransferCounterReset(transferData.sourceProtocolVersion, targetProtocolVersion)
-            ) || (
-              // Be lenient if the transfer-out happened on a domain with transfer counters
-              // and the transfer-in happens on a domain without
-              // TODO(#13249) Decide which transfers we want to allow.
-              transferInRequest.transferCounter.isEmpty && transferData.transferCounter.nonEmpty &&
-                allowTransferCounterAmnesia(
-                  transferData.sourceProtocolVersion,
-                  targetProtocolVersion,
-                )
             ),
             (),
             InconsistentTransferCounter(
@@ -214,6 +220,7 @@ private[transfer] class TransferInValidation(
               transferData.transferCounter,
             ): TransferProcessorError,
           )
+
         } yield Some(TransferInValidationResult(confirmingParties.toSet))
       case None =>
         for {
@@ -251,16 +258,6 @@ object TransferInValidation {
   ): Boolean =
     // TODO(#12373) Adapt when releasing BFT
     sourceProtocolVersion.v < ProtocolVersion.dev && targetProtocolVersion.v >= ProtocolVersion.dev
-
-  /** Should we allow a transfer counter to be forgotten when transferring from source to target protocol version?
-    */
-  def allowTransferCounterAmnesia(
-      sourceProtocolVersion: SourceProtocolVersion,
-      targetProtocolVersion: TargetProtocolVersion,
-  ): Boolean =
-    // TODO(#12373) Adapt when releasing BFT
-    sourceProtocolVersion.v >= ProtocolVersion.dev &&
-      targetProtocolVersion.v < ProtocolVersion.dev
 
   final case class TransferInValidationResult(confirmingParties: Set[LfPartyId])
 

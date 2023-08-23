@@ -15,6 +15,7 @@ import com.digitalasset.canton.platform.store.dao.BufferedTransactionByIdReader.
   ToApiResponse,
 }
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
+import com.digitalasset.canton.tracing.Traced
 import org.mockito.MockitoSugar
 import org.scalatest.flatspec.AsyncFlatSpec
 
@@ -32,8 +33,8 @@ class BufferedTransactionByIdReaderSpec extends AsyncFlatSpec with MockitoSugar 
   private val notBufferedTransactionId = "notBufferedTid"
   private val unknownTransactionId = "unknownTransactionId"
 
-  private val bufferedTransaction1 = tx(bufferedTransactionId1)
-  private val bufferedTransaction2 = tx(bufferedTransactionId2)
+  private val bufferedTransaction1 = Traced(tx(bufferedTransactionId1))
+  private val bufferedTransaction2 = Traced(tx(bufferedTransactionId2))
 
   private val inMemoryFanout = mock[InMemoryFanoutBuffer]
   when(inMemoryFanout.lookup(bufferedTransactionId1)).thenReturn(Some(bufferedTransaction1))

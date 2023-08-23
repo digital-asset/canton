@@ -263,11 +263,16 @@ class ConfirmationResponseFactory(
                   )(verdictProtocolVersion)
               }
 
+            val contractConsistencyRejections =
+              transactionValidationResult.contractConsistencyResultE.swap.toOption.map { err =>
+                LocalReject.MalformedRejects.MalformedRequest.Reject(err.toString, protocolVersion)
+              }
+
             // Approve if the consistency check succeeded, reject otherwise.
             val consistencyVerdicts = verdictsForView(viewValidationResult, hostedConfirmingParties)
 
             val localVerdicts: Seq[LocalVerdict] =
-              consistencyVerdicts.toList ++ timeValidationRejections ++
+              consistencyVerdicts.toList ++ timeValidationRejections ++ contractConsistencyRejections ++
                 authenticationRejections ++ authorizationRejections ++
                 modelConformanceRejections ++ internalConsistencyRejections ++
                 replayRejections

@@ -20,10 +20,8 @@ object ContractConsistencyChecker {
       contractCreationTime: CantonTimestamp,
       transactionLedgerTime: CantonTimestamp,
   ) extends PrettyPrinting {
-    override def pretty: Pretty[ReferenceToFutureContractError] = prettyOfClass(
-      param("contract id", _.contractId),
-      param("contract creation time", _.contractCreationTime),
-      param("transaction ledger time", _.transactionLedgerTime),
+    override def pretty: Pretty[ReferenceToFutureContractError] = prettyOfString(self =>
+      show"A request with ledger time ${self.transactionLedgerTime} uses a future contract (created at ${self.contractCreationTime}, id = ${self.contractId})"
     )
   }
 

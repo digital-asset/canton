@@ -400,38 +400,44 @@ object InMemoryStateUpdaterSpec {
     val tx_rejected_offset: Offset =
       Offset.fromHexString(Ref.HexString.assertFromString("cccc"))
 
-    val tx_accepted_withCompletionDetails: TransactionLogUpdate.TransactionAccepted =
-      TransactionLogUpdate.TransactionAccepted(
-        transactionId = tx_accepted_transactionId,
-        commandId = tx_accepted_commandId,
-        workflowId = "wAccepted",
-        effectiveAt = Timestamp.assertFromLong(1L),
-        offset = tx_accepted_withCompletionDetails_offset,
-        events = (1 to 3).map(_ => mock[TransactionLogUpdate.Event]).toVector,
-        completionDetails = Some(tx_accepted_completionDetails),
-        domainId = None,
-      )
+    val tx_accepted_withCompletionDetails: Traced[TransactionLogUpdate.TransactionAccepted] =
+      Traced(
+        TransactionLogUpdate.TransactionAccepted(
+          transactionId = tx_accepted_transactionId,
+          commandId = tx_accepted_commandId,
+          workflowId = "wAccepted",
+          effectiveAt = Timestamp.assertFromLong(1L),
+          offset = tx_accepted_withCompletionDetails_offset,
+          events = (1 to 3).map(_ => mock[TransactionLogUpdate.Event]).toVector,
+          completionDetails = Some(tx_accepted_completionDetails),
+          domainId = None,
+        )
+      )(emptyTraceContext)
 
-    val tx_accepted_withoutCompletionDetails: TransactionLogUpdate.TransactionAccepted =
-      tx_accepted_withCompletionDetails.copy(
-        completionDetails = None,
-        offset = tx_accepted_withoutCompletionDetails_offset,
-      )
+    val tx_accepted_withoutCompletionDetails: Traced[TransactionLogUpdate.TransactionAccepted] =
+      Traced(
+        tx_accepted_withCompletionDetails.value.copy(
+          completionDetails = None,
+          offset = tx_accepted_withoutCompletionDetails_offset,
+        )
+      )(emptyTraceContext)
 
-    val tx_rejected: TransactionLogUpdate.TransactionRejected =
-      TransactionLogUpdate.TransactionRejected(
-        offset = tx_rejected_offset,
-        completionDetails = tx_rejected_completionDetails,
-      )
+    val tx_rejected: Traced[TransactionLogUpdate.TransactionRejected] =
+      Traced(
+        TransactionLogUpdate.TransactionRejected(
+          offset = tx_rejected_offset,
+          completionDetails = tx_rejected_completionDetails,
+        )
+      )(emptyTraceContext)
     val packageMetadata: PackageMetadata = PackageMetadata(templates = Map(templatesForQn1))
 
     val lastOffset: Offset = tx_rejected_offset
     val lastEventSeqId = 123L
     val updates: Vector[Traced[TransactionLogUpdate]] =
       Vector(
-        Traced(tx_accepted_withCompletionDetails)(emptyTraceContext),
-        Traced(tx_accepted_withoutCompletionDetails)(emptyTraceContext),
-        Traced(tx_rejected)(emptyTraceContext),
+        tx_accepted_withCompletionDetails,
+        tx_accepted_withoutCompletionDetails,
+        tx_rejected,
       )
     val prepareResult: PrepareResult = PrepareResult(
       updates = updates,

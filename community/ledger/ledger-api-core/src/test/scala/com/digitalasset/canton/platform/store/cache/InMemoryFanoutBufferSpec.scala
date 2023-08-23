@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.cache
 
+import cats.syntax.bifunctor.toBifunctorOps
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.lf.data.Time
 import com.daml.metrics.Metrics
@@ -15,6 +16,7 @@ import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer.{
 }
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.CompletionDetails
+import com.digitalasset.canton.tracing.Traced
 import org.scalatest.Succeeded
 import org.scalatest.compatible.Assertion
 import org.scalatest.matchers.should.Matchers
@@ -36,15 +38,16 @@ class InMemoryFanoutBufferSpec
   private val BeginOffset = offset(0L)
   private val offsets = offsetIdx.map(i => offset(i.toLong))
 
-  private val IdentityFilter: TransactionLogUpdate => Option[TransactionLogUpdate] = Some(_)
+  private val IdentityFilter: Traced[TransactionLogUpdate] => Option[TransactionLogUpdate] =
+    tracedUpdate => Some(tracedUpdate.value)
 
   inside(offsets) { case Seq(offset1, offset2, offset3, offset4, offset5) =>
-    val txAccepted1 = txAccepted(1L, offset1)
-    val txAccepted2 = txAccepted(2L, offset2)
-    val txAccepted3 = txAccepted(3L, offset3)
-    val txAccepted4 = txAccepted(4L, offset4)
+    val txAccepted1 = Traced(txAccepted(1L, offset1))
+    val txAccepted2 = Traced(txAccepted(2L, offset2))
+    val txAccepted3 = Traced(txAccepted(3L, offset3))
+    val txAccepted4 = Traced(txAccepted(4L, offset4))
     val bufferValues = Seq(txAccepted1, txAccepted2, txAccepted3, txAccepted4)
-    val txAccepted5 = txAccepted(5L, offset5)
+    val txAccepted5 = Traced(txAccepted(5L, offset5))
     val bufferElements = offsets.zip(bufferValues)
     val LastOffset = offset4
 
@@ -58,7 +61,7 @@ class InMemoryFanoutBufferSpec
 
             buffer.slice(BeginOffset, LastOffset, IdentityFilter) shouldBe LastBufferChunkSuffix(
               bufferedStartExclusive = offset2,
-              slice = Vector(entry3, entry4),
+              slice = Vector(entry3, entry4).map(untrace),
             )
 
             // Assert that all the entries are visible by lookup
@@ -71,13 +74,13 @@ class InMemoryFanoutBufferSpec
 
             buffer.slice(BeginOffset, offset5, IdentityFilter) shouldBe LastBufferChunkSuffix(
               bufferedStartExclusive = offset3,
-              slice = Vector(entry4, offset5 -> txAccepted5),
+              slice = Vector(entry4, offset5 -> txAccepted5).map(untrace),
             )
 
             // Assert that the new entry is visible by lookup
             verifyLookupPresent(buffer, txAccepted5)
             // Assert oldest entry is evicted
-            verifyLookupAbsent(buffer, txAccepted2.transactionId)
+            verifyLookupAbsent(buffer, txAccepted2)
           }
         }
 
@@ -126,16 +129,16 @@ class InMemoryFanoutBufferSpec
           verifyLookupPresent(buffer, txAccepted1, txAccepted2, txAccepted3, txAccepted4)
 
           // Enqueue a rejected transaction
-          buffer.push(offset5, txRejected(5L, offset5))
+          buffer.push(offset5, Traced(txRejected(5L, offset5)))
 
           // Assert the last element is evicted on full buffer
-          verifyLookupAbsent(buffer, txAccepted1.transactionId)
+          verifyLookupAbsent(buffer, txAccepted1)
 
           // Assert that the buffer does not include the rejected transaction
           buffer._lookupMap should contain theSameElementsAs Map(
-            txAccepted2.transactionId -> txAccepted2,
-            txAccepted3.transactionId -> txAccepted3,
-            txAccepted4.transactionId -> txAccepted4,
+            txAccepted2.value.transactionId -> txAccepted2,
+            txAccepted3.value.transactionId -> txAccepted3,
+            txAccepted4.value.transactionId -> txAccepted4,
           )
         }
       }
@@ -151,13 +154,13 @@ class InMemoryFanoutBufferSpec
         "called with startExclusive gteq than the buffer start" should {
           "return an Inclusive slice" in withBuffer() { buffer =>
             buffer.slice(offset1, succ(offset3), IdentityFilter) shouldBe BufferSlice.Inclusive(
-              Vector(entry2, entry3)
+              Vector(entry2, entry3).map(untrace)
             )
             buffer.slice(offset1, offset4, IdentityFilter) shouldBe BufferSlice.Inclusive(
-              Vector(entry2, entry3, entry4)
+              Vector(entry2, entry3, entry4).map(untrace)
             )
             buffer.slice(succ(offset1), offset4, IdentityFilter) shouldBe BufferSlice.Inclusive(
-              Vector(entry2, entry3, entry4)
+              Vector(entry2, entry3, entry4).map(untrace)
             )
           }
 
@@ -165,7 +168,7 @@ class InMemoryFanoutBufferSpec
             maxFetchSize = 2
           ) { buffer =>
             buffer.slice(offset1, offset4, IdentityFilter) shouldBe BufferSlice.Inclusive(
-              Vector(entry2, entry3)
+              Vector(entry2, entry3).map(untrace)
             )
           }
         }
@@ -202,7 +205,7 @@ class InMemoryFanoutBufferSpec
               IdentityFilter,
             ) shouldBe LastBufferChunkSuffix(
               offset1,
-              Vector(entry2, entry3),
+              Vector(entry2, entry3).map(untrace),
             )
             buffer.slice(
               Offset.beforeBegin,
@@ -210,7 +213,7 @@ class InMemoryFanoutBufferSpec
               IdentityFilter,
             ) shouldBe LastBufferChunkSuffix(
               offset1,
-              Vector(entry2, entry3),
+              Vector(entry2, entry3).map(untrace),
             )
           }
 
@@ -223,7 +226,7 @@ class InMemoryFanoutBufferSpec
               IdentityFilter,
             ) shouldBe LastBufferChunkSuffix(
               offset2,
-              Vector(entry3, entry4),
+              Vector(entry3, entry4).map(untrace),
             )
           }
         }
@@ -236,7 +239,7 @@ class InMemoryFanoutBufferSpec
           ) { buffer =>
             (0 until 1000).foreach(idx => {
               val updateOffset = offset(idx.toLong)
-              buffer.push(updateOffset, txAccepted(idx.toLong, updateOffset))
+              buffer.push(updateOffset, Traced(txAccepted(idx.toLong, updateOffset)))
             }) // fill buffer to max size
 
             val pushExecutor, sliceExecutor =
@@ -257,7 +260,7 @@ class InMemoryFanoutBufferSpec
                   val updateOffset = offset(lastInsertedIdx)
                   for {
                     _ <- Future(
-                      buffer.push(updateOffset, txAccepted(lastInsertedIdx, updateOffset))
+                      buffer.push(updateOffset, Traced(txAccepted(lastInsertedIdx, updateOffset)))
                     )(
                       pushExecutor
                     )
@@ -295,9 +298,9 @@ class InMemoryFanoutBufferSpec
 
             verifyLookupAbsent(
               buffer,
-              txAccepted1.transactionId,
-              txAccepted2.transactionId,
-              txAccepted3.transactionId,
+              txAccepted1,
+              txAccepted2,
+              txAccepted3,
             )
             verifyLookupPresent(buffer, txAccepted4)
           }
@@ -314,9 +317,9 @@ class InMemoryFanoutBufferSpec
             )
             verifyLookupAbsent(
               buffer,
-              txAccepted1.transactionId,
-              txAccepted2.transactionId,
-              txAccepted3.transactionId,
+              txAccepted1,
+              txAccepted2,
+              txAccepted3,
             )
             verifyLookupPresent(buffer, txAccepted4)
           }
@@ -329,7 +332,7 @@ class InMemoryFanoutBufferSpec
             buffer.prune(offset(1))
             buffer.slice(BeginOffset, LastOffset, IdentityFilter) shouldBe LastBufferChunkSuffix(
               offset1,
-              bufferElements.drop(1),
+              bufferElements.drop(1).map(untrace),
             )
 
             verifyLookupPresent(buffer, txAccepted1, txAccepted2, txAccepted3, txAccepted4)
@@ -348,10 +351,10 @@ class InMemoryFanoutBufferSpec
 
             verifyLookupAbsent(
               buffer,
-              txAccepted1.transactionId,
-              txAccepted2.transactionId,
-              txAccepted3.transactionId,
-              txAccepted4.transactionId,
+              txAccepted1,
+              txAccepted2,
+              txAccepted3,
+              txAccepted4,
             )
           }
         }
@@ -366,7 +369,7 @@ class InMemoryFanoutBufferSpec
               Vector.empty,
             )
 
-            verifyLookupAbsent(buffer, txAccepted2.transactionId)
+            verifyLookupAbsent(buffer, txAccepted2)
           }
         }
       }
@@ -377,7 +380,7 @@ class InMemoryFanoutBufferSpec
 
           buffer.slice(BeginOffset, LastOffset, IdentityFilter) shouldBe LastBufferChunkSuffix(
             bufferedStartExclusive = offset2,
-            slice = Vector(entry3, entry4),
+            slice = Vector(entry3, entry4).map(untrace),
           )
 
           buffer.flush()
@@ -390,9 +393,9 @@ class InMemoryFanoutBufferSpec
           )
           verifyLookupAbsent(
             buffer,
-            txAccepted2.transactionId,
-            txAccepted3.transactionId,
-            txAccepted4.transactionId,
+            txAccepted2,
+            txAccepted3,
+            txAccepted4,
           )
         }
       }
@@ -410,13 +413,13 @@ class InMemoryFanoutBufferSpec
 
           InMemoryFanoutBuffer.filterAndChunkSlice[TransactionLogUpdate](
             sliceView = input,
-            filter = Option(_).filterNot(_ == entry2._2),
+            filter = tracedUpdate => Option(tracedUpdate.value).filterNot(_ == entry2._2.value),
             maxChunkSize = 3,
-          ) shouldBe Vector(entry1, entry3, entry4)
+          ) shouldBe Vector(entry1, entry3, entry4).map(untrace)
 
           InMemoryFanoutBuffer.filterAndChunkSlice[TransactionLogUpdate](
             sliceView = View.empty,
-            filter = Some(_),
+            filter = tu => Some(tu.value),
             maxChunkSize = 3,
           ) shouldBe Vector.empty
         }
@@ -428,27 +431,27 @@ class InMemoryFanoutBufferSpec
         "return a LastBufferChunkSuffix with the last maxChunkSize-sized chunk from the slice with filter" in {
           InMemoryFanoutBuffer.lastFilteredChunk[TransactionLogUpdate](
             bufferSlice = input,
-            filter = Option(_).filterNot(_ == entry2._2),
+            filter = tu => Option(tu.value).filterNot(_ == entry2._2.value),
             maxChunkSize = 1,
-          ) shouldBe LastBufferChunkSuffix(entry3._1, Vector(entry4))
+          ) shouldBe LastBufferChunkSuffix(entry3._1, Vector(entry4).map(untrace))
 
           InMemoryFanoutBuffer.lastFilteredChunk[TransactionLogUpdate](
             bufferSlice = input,
-            filter = Option(_).filterNot(_ == entry2._2),
+            filter = tu => Option(tu.value).filterNot(_ == entry2._2.value),
             maxChunkSize = 2,
-          ) shouldBe LastBufferChunkSuffix(entry1._1, Vector(entry3, entry4))
+          ) shouldBe LastBufferChunkSuffix(entry1._1, Vector(entry3, entry4).map(untrace))
 
           InMemoryFanoutBuffer.lastFilteredChunk[TransactionLogUpdate](
             bufferSlice = input,
-            filter = Option(_).filterNot(_ == entry2._2),
+            filter = tu => Option(tu.value).filterNot(_ == entry2._2.value),
             maxChunkSize = 3,
-          ) shouldBe LastBufferChunkSuffix(entry1._1, Vector(entry3, entry4))
+          ) shouldBe LastBufferChunkSuffix(entry1._1, Vector(entry3, entry4).map(untrace))
 
           InMemoryFanoutBuffer.lastFilteredChunk[TransactionLogUpdate](
             bufferSlice = input,
-            filter = Some(_), // No filter
+            filter = tu => Some(tu.value), // No filter
             maxChunkSize = 4,
-          ) shouldBe LastBufferChunkSuffix(entry1._1, Vector(entry2, entry3, entry4))
+          ) shouldBe LastBufferChunkSuffix(entry1._1, Vector(entry2, entry3, entry4).map(untrace))
         }
 
         "use the slice head as bufferedStartExclusive when filter yields an empty result slice" in {
@@ -463,7 +466,7 @@ class InMemoryFanoutBufferSpec
 
     def withBuffer(
         maxBufferSize: Int = 5,
-        elems: immutable.Vector[(Offset, TransactionLogUpdate)] = bufferElements,
+        elems: immutable.Vector[(Offset, Traced[TransactionLogUpdate])] = bufferElements,
         maxFetchSize: Int = 10,
     )(test: InMemoryFanoutBuffer => Assertion): Assertion = {
       val buffer = new InMemoryFanoutBuffer(
@@ -510,21 +513,26 @@ class InMemoryFanoutBufferSpec
 
   private def verifyLookupPresent(
       buffer: InMemoryFanoutBuffer,
-      txs: TransactionLogUpdate.TransactionAccepted*
+      txs: Traced[TransactionLogUpdate.TransactionAccepted]*
   ): Assertion =
     txs.foldLeft(succeed) {
       case (Succeeded, tx) =>
-        buffer.lookup(tx.transactionId) shouldBe Some(tx)
+        buffer.lookup(tx.value.transactionId) shouldBe Some(tx)
       case (failed, _) => failed
     }
 
   private def verifyLookupAbsent(
       buffer: InMemoryFanoutBuffer,
-      txIds: String*
+      txs: Traced[TransactionLogUpdate.TransactionAccepted]*
   ): Assertion =
-    txIds.foldLeft(succeed) {
-      case (Succeeded, txId) =>
-        buffer.lookup(txId) shouldBe None
+    txs.foldLeft(succeed) {
+      case (Succeeded, Traced(tx)) =>
+        buffer.lookup(tx.transactionId) shouldBe None
       case (failed, _) => failed
     }
+
+  private def untrace(
+      offsetWithTracedUpdate: (Offset, Traced[TransactionLogUpdate])
+  ): (Offset, TransactionLogUpdate) =
+    offsetWithTracedUpdate.bimap(identity, _.value)
 }

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
+import cats.syntax.traverse.*
 import com.daml.api.util.TimestampConversion
 import com.daml.api.util.TimestampConversion.fromInstant
 import com.daml.ledger.api.v1.contract_metadata.ContractMetadata
@@ -34,6 +35,7 @@ import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.{
   ExercisedEvent,
 }
 import com.digitalasset.canton.platform.{ApiOffset, TemplatePartiesFilter, Value}
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, Traced}
 import com.google.protobuf.ByteString
 import com.google.protobuf.timestamp.Timestamp
 
@@ -46,41 +48,42 @@ private[events] object TransactionLogUpdatesConversions {
         templateSpecificParties: Map[Identifier, Set[Party]],
         requestingParties: Set[Party],
         multiDomainEnabled: Boolean,
-    ): TransactionLogUpdate => Option[TransactionLogUpdate] = {
-      case transaction: TransactionLogUpdate.TransactionAccepted =>
-        val flatTransactionEvents = transaction.events.collect {
-          case createdEvent: TransactionLogUpdate.CreatedEvent => createdEvent
-          case exercisedEvent: TransactionLogUpdate.ExercisedEvent if exercisedEvent.consuming =>
-            exercisedEvent
-        }
-        val filteredFlatEvents = flatTransactionEvents
-          .filter(flatTransactionPredicate(wildcardParties, templateSpecificParties))
-        val commandId = getCommandId(filteredFlatEvents, requestingParties)
-        val nonTransient = removeTransient(filteredFlatEvents)
-        // Allows emitting flat transactions with no events, a use-case needed
-        // for the functioning of Daml triggers.
-        // (more details in https://github.com/digital-asset/daml/issues/6975)
-        Option.when(nonTransient.nonEmpty || commandId.nonEmpty)(
-          transaction.copy(
-            commandId = commandId,
-            events = nonTransient,
+    ): Traced[TransactionLogUpdate] => Option[Traced[TransactionLogUpdate]] = traced =>
+      traced.traverse {
+        case transaction: TransactionLogUpdate.TransactionAccepted =>
+          val flatTransactionEvents = transaction.events.collect {
+            case createdEvent: TransactionLogUpdate.CreatedEvent => createdEvent
+            case exercisedEvent: TransactionLogUpdate.ExercisedEvent if exercisedEvent.consuming =>
+              exercisedEvent
+          }
+          val filteredFlatEvents = flatTransactionEvents
+            .filter(flatTransactionPredicate(wildcardParties, templateSpecificParties))
+          val commandId = getCommandId(filteredFlatEvents, requestingParties)
+          val nonTransient = removeTransient(filteredFlatEvents)
+          // Allows emitting flat transactions with no events, a use-case needed
+          // for the functioning of Daml triggers.
+          // (more details in https://github.com/digital-asset/daml/issues/6975)
+          Option.when(nonTransient.nonEmpty || commandId.nonEmpty)(
+            transaction.copy(
+              commandId = commandId,
+              events = nonTransient,
+            )
           )
-        )
-      case _: TransactionLogUpdate.TransactionRejected => None
-      case u: TransactionLogUpdate.ReassignmentAccepted =>
-        Option.when(
-          multiDomainEnabled && u.reassignmentInfo.hostedStakeholders.exists(party =>
-            wildcardParties(party) || templateSpecificParties
-              .get(u.reassignment match {
-                case TransactionLogUpdate.ReassignmentAccepted.Unassigned(unassign) =>
-                  unassign.templateId
-                case TransactionLogUpdate.ReassignmentAccepted.Assigned(createdEvent) =>
-                  createdEvent.templateId
-              })
-              .exists(_ contains party)
-          )
-        )(u)
-    }
+        case _: TransactionLogUpdate.TransactionRejected => None
+        case u: TransactionLogUpdate.ReassignmentAccepted =>
+          Option.when(
+            multiDomainEnabled && u.reassignmentInfo.hostedStakeholders.exists(party =>
+              wildcardParties(party) || templateSpecificParties
+                .get(u.reassignment match {
+                  case TransactionLogUpdate.ReassignmentAccepted.Unassigned(unassign) =>
+                    unassign.templateId
+                  case TransactionLogUpdate.ReassignmentAccepted.Assigned(createdEvent) =>
+                    createdEvent.templateId
+                })
+                .exists(_ contains party)
+            )
+          )(u)
+      }
 
     def toGetTransactionsResponse(
         filter: TemplatePartiesFilter,
@@ -89,25 +92,27 @@ private[events] object TransactionLogUpdatesConversions {
     )(implicit
         loggingContext: LoggingContextWithTrace,
         executionContext: ExecutionContext,
-    ): TransactionLogUpdate => Future[GetUpdatesResponse] = {
-      case transactionAccepted: TransactionLogUpdate.TransactionAccepted =>
+    ): Traced[TransactionLogUpdate] => Future[GetUpdatesResponse] = {
+      case traced @ Traced(transactionAccepted: TransactionLogUpdate.TransactionAccepted) =>
         toFlatTransaction(
           transactionAccepted,
           filter,
           eventProjectionProperties,
           lfValueTranslation,
+          traced.traceContext,
         )
           .map(transaction =>
             GetUpdatesResponse(GetUpdatesResponse.Update.Transaction(transaction))
               .withPrecomputedSerializedSize()
           )
 
-      case reassignmenAccepted: TransactionLogUpdate.ReassignmentAccepted =>
+      case traced @ Traced(reassignmentAccepted: TransactionLogUpdate.ReassignmentAccepted) =>
         toReassignment(
-          reassignmenAccepted,
+          reassignmentAccepted,
           filter.allFilterParties,
           eventProjectionProperties,
           lfValueTranslation,
+          traced.traceContext,
         )
           .map(reassignment =>
             GetUpdatesResponse(GetUpdatesResponse.Update.Reassignment(reassignment))
@@ -118,7 +123,7 @@ private[events] object TransactionLogUpdatesConversions {
     }
 
     def toGetFlatTransactionResponse(
-        transactionLogUpdate: TransactionLogUpdate,
+        transactionLogUpdate: Traced[TransactionLogUpdate],
         requestingParties: Set[Party],
         lfValueTranslation: LfValueTranslation,
     )(implicit
@@ -126,16 +131,19 @@ private[events] object TransactionLogUpdatesConversions {
         executionContext: ExecutionContext,
     ): Future[Option[GetTransactionResponse]] =
       filter(requestingParties, Map.empty, requestingParties, false)(transactionLogUpdate)
-        .collect { case transactionAccepted: TransactionLogUpdate.TransactionAccepted =>
-          toFlatTransaction(
-            transactionAccepted = transactionAccepted,
-            filter = TemplatePartiesFilter(Map.empty, requestingParties),
-            eventProjectionProperties = EventProjectionProperties(
-              verbose = true,
-              witnessTemplateIdFilter = requestingParties.map(_ -> Set.empty[Ref.Identifier]).toMap,
-            ),
-            lfValueTranslation = lfValueTranslation,
-          )
+        .collect {
+          case traced @ Traced(transactionAccepted: TransactionLogUpdate.TransactionAccepted) =>
+            toFlatTransaction(
+              transactionAccepted = transactionAccepted,
+              filter = TemplatePartiesFilter(Map.empty, requestingParties),
+              eventProjectionProperties = EventProjectionProperties(
+                verbose = true,
+                witnessTemplateIdFilter =
+                  requestingParties.map(_ -> Set.empty[Ref.Identifier]).toMap,
+              ),
+              lfValueTranslation = lfValueTranslation,
+              traceContext = traced.traceContext,
+            )
         }
         .map(_.map(flatTransaction => Some(GetTransactionResponse(Some(flatTransaction)))))
         .getOrElse(Future.successful(None))
@@ -145,6 +153,7 @@ private[events] object TransactionLogUpdatesConversions {
         filter: TemplatePartiesFilter,
         eventProjectionProperties: EventProjectionProperties,
         lfValueTranslation: LfValueTranslation,
+        traceContext: TraceContext,
     )(implicit
         loggingContext: LoggingContextWithTrace,
         executionContext: ExecutionContext,
@@ -168,6 +177,7 @@ private[events] object TransactionLogUpdatesConversions {
               events = flatEvents,
               offset = ApiOffset.toApiString(transactionAccepted.offset),
               domainId = transactionAccepted.domainId.getOrElse(""),
+              traceContext = Some(SerializableTraceContext(traceContext).toDamlProto),
             )
           )
       }
@@ -243,23 +253,24 @@ private[events] object TransactionLogUpdatesConversions {
     def filter(
         requestingParties: Set[Party],
         multiDomainEnabled: Boolean,
-    ): TransactionLogUpdate => Option[TransactionLogUpdate] = {
-      case transaction: TransactionLogUpdate.TransactionAccepted =>
-        val filteredForVisibility =
-          transaction.events.filter(transactionTreePredicate(requestingParties))
+    ): Traced[TransactionLogUpdate] => Option[Traced[TransactionLogUpdate]] = traced =>
+      traced.traverse {
+        case transaction: TransactionLogUpdate.TransactionAccepted =>
+          val filteredForVisibility =
+            transaction.events.filter(transactionTreePredicate(requestingParties))
 
-        Option.when(filteredForVisibility.nonEmpty)(
-          transaction.copy(events = filteredForVisibility)
-        )
-      case _: TransactionLogUpdate.TransactionRejected => None
-      case u: TransactionLogUpdate.ReassignmentAccepted =>
-        Option.when(
-          multiDomainEnabled && u.reassignmentInfo.hostedStakeholders.exists(requestingParties)
-        )(u)
-    }
+          Option.when(filteredForVisibility.nonEmpty)(
+            transaction.copy(events = filteredForVisibility)
+          )
+        case _: TransactionLogUpdate.TransactionRejected => None
+        case u: TransactionLogUpdate.ReassignmentAccepted =>
+          Option.when(
+            multiDomainEnabled && u.reassignmentInfo.hostedStakeholders.exists(requestingParties)
+          )(u)
+      }
 
     def toGetTransactionResponse(
-        transactionLogUpdate: TransactionLogUpdate,
+        transactionLogUpdate: Traced[TransactionLogUpdate],
         requestingParties: Set[Party],
         lfValueTranslation: LfValueTranslation,
     )(implicit
@@ -267,7 +278,7 @@ private[events] object TransactionLogUpdatesConversions {
         executionContext: ExecutionContext,
     ): Future[Option[GetTransactionTreeResponse]] =
       filter(requestingParties, false)(transactionLogUpdate)
-        .collect { case tx: TransactionLogUpdate.TransactionAccepted =>
+        .collect { case traced @ Traced(tx: TransactionLogUpdate.TransactionAccepted) =>
           toTransactionTree(
             transactionAccepted = tx,
             requestingParties,
@@ -276,6 +287,7 @@ private[events] object TransactionLogUpdatesConversions {
               witnessTemplateIdFilter = requestingParties.map(_ -> Set.empty[Ref.Identifier]).toMap,
             ),
             lfValueTranslation = lfValueTranslation,
+            traceContext = traced.traceContext,
           )
         }
         .map(_.map(transactionTree => Some(GetTransactionTreeResponse(Some(transactionTree)))))
@@ -288,25 +300,26 @@ private[events] object TransactionLogUpdatesConversions {
     )(implicit
         loggingContext: LoggingContextWithTrace,
         executionContext: ExecutionContext,
-    ): TransactionLogUpdate => Future[GetUpdateTreesResponse] = {
-      case transactionAccepted: TransactionLogUpdate.TransactionAccepted =>
+    ): Traced[TransactionLogUpdate] => Future[GetUpdateTreesResponse] = {
+      case traced @ Traced(transactionAccepted: TransactionLogUpdate.TransactionAccepted) =>
         toTransactionTree(
           transactionAccepted,
           requestingParties,
           eventProjectionProperties,
           lfValueTranslation,
+          traced.traceContext,
         )
           .map(txTree =>
             GetUpdateTreesResponse(GetUpdateTreesResponse.Update.TransactionTree(txTree))
               .withPrecomputedSerializedSize()
           )
-
-      case reassignmenAccepted: TransactionLogUpdate.ReassignmentAccepted =>
+      case traced @ Traced(reassignmentAccepted: TransactionLogUpdate.ReassignmentAccepted) =>
         toReassignment(
-          reassignmenAccepted,
+          reassignmentAccepted,
           requestingParties,
           eventProjectionProperties,
           lfValueTranslation,
+          traced.traceContext,
         )
           .map(reassignment =>
             GetUpdateTreesResponse(GetUpdateTreesResponse.Update.Reassignment(reassignment))
@@ -321,6 +334,7 @@ private[events] object TransactionLogUpdatesConversions {
         requestingParties: Set[Party],
         eventProjectionProperties: EventProjectionProperties,
         lfValueTranslation: LfValueTranslation,
+        traceContext: TraceContext,
     )(implicit
         loggingContext: LoggingContextWithTrace,
         executionContext: ExecutionContext,
@@ -364,6 +378,7 @@ private[events] object TransactionLogUpdatesConversions {
               eventsById = eventsById,
               rootEventIds = rootEventIds,
               domainId = transactionAccepted.domainId.getOrElse(""),
+              traceContext = Some(SerializableTraceContext(traceContext).toDamlProto),
             )
           }
       }
@@ -534,6 +549,7 @@ private[events] object TransactionLogUpdatesConversions {
       requestingParties: Set[Party],
       eventProjectionProperties: EventProjectionProperties,
       lfValueTranslation: LfValueTranslation,
+      traceContext: TraceContext,
   )(implicit
       loggingContext: LoggingContextWithTrace,
       executionContext: ExecutionContext,
@@ -589,6 +605,7 @@ private[events] object TransactionLogUpdatesConversions {
         workflowId = reassignmentAccepted.workflowId,
         offset = ApiOffset.toApiString(reassignmentAccepted.offset),
         event = event,
+        traceContext = Some(SerializableTraceContext(traceContext).toDamlProto),
       )
     )
   }

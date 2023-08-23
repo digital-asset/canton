@@ -147,59 +147,57 @@ class GrpcSequencerSubscription[E, R: HasProtoTraceContext] private[transports] 
   @VisibleForTesting // so unit tests can call onNext, onError and onComplete
   private[transports] val observer = new StreamObserver[R] {
     override def onNext(value: R): Unit = {
-      metrics.load.syncEvent {
-        // we take the unusual step of immediately trying to deserialize the trace-context
-        // so it is available here for logging
-        implicit val traceContext: TraceContext =
-          SerializableTraceContext
-            .fromProtoSafeV0Opt(loggerWithoutTracing(logger))(
-              implicitly[HasProtoTraceContext[R]].traceContext(value)
-            )
-            .unwrap
+      // we take the unusual step of immediately trying to deserialize the trace-context
+      // so it is available here for logging
+      implicit val traceContext: TraceContext =
+        SerializableTraceContext
+          .fromProtoSafeV0Opt(loggerWithoutTracing(logger))(
+            implicitly[HasProtoTraceContext[R]].traceContext(value)
+          )
+          .unwrap
 
-        logger.debug("Received a message from the sequencer.")
+      logger.debug("Received a message from the sequencer.")
 
-        val current = Promise[Unit]()
-        val closeReasonOO = performUnlessClosing(functionFullName) {
-          try {
-            appendToCurrentProcessing(_ => current.future)
+      val current = Promise[Unit]()
+      val closeReasonOO = performUnlessClosing(functionFullName) {
+        try {
+          appendToCurrentProcessing(_ => current.future)
 
-            // as we're responsible for calling the handler we block onNext from processing further items
-            // calls to onNext are guaranteed to happen in order
+          // as we're responsible for calling the handler we block onNext from processing further items
+          // calls to onNext are guaranteed to happen in order
 
-            val handlerResult = Try {
-              val cancelableAwait = Promise[UnlessShutdown[Either[E, Unit]]]()
-              currentAwaitOnNext.set(cancelableAwait)
-              cancelableAwait.completeWith(callHandler(Traced(value)).map(Outcome(_)))
-              timeouts.unbounded
-                .await(s"${this.getClass}: Blocking processing of further items")(
-                  cancelableAwait.future
-                )
-            }
+          val handlerResult = Try {
+            val cancelableAwait = Promise[UnlessShutdown[Either[E, Unit]]]()
+            currentAwaitOnNext.set(cancelableAwait)
+            cancelableAwait.completeWith(callHandler(Traced(value)).map(Outcome(_)))
+            timeouts.unbounded
+              .await(s"${this.getClass}: Blocking processing of further items")(
+                cancelableAwait.future
+              )
+          }
 
-            handlerResult.fold[Option[SubscriptionCloseReason[E]]](
-              ex => Some(SubscriptionCloseReason.HandlerException(ex)),
-              {
-                case Outcome(Left(err)) =>
-                  Some(SubscriptionCloseReason.HandlerError(err))
-                case Outcome(Right(_)) =>
-                  // we'll continue
-                  None
-                case AbortedDueToShutdown =>
-                  Some(SubscriptionCloseReason.Shutdown)
-              },
-            )
-          } finally current.success(())
-        }
+          handlerResult.fold[Option[SubscriptionCloseReason[E]]](
+            ex => Some(SubscriptionCloseReason.HandlerException(ex)),
+            {
+              case Outcome(Left(err)) =>
+                Some(SubscriptionCloseReason.HandlerError(err))
+              case Outcome(Right(_)) =>
+                // we'll continue
+                None
+              case AbortedDueToShutdown =>
+                Some(SubscriptionCloseReason.Shutdown)
+            },
+          )
+        } finally current.success(())
+      }
 
-        // if a close reason was returned, close the subscription
-        closeReasonOO match {
-          case UnlessShutdown.Outcome(maybeCloseReason) =>
-            maybeCloseReason.foreach(complete)
-            logger.debug("Finished processing of the sequencer message.")
-          case UnlessShutdown.AbortedDueToShutdown =>
-            logger.debug(s"The message is not processed, as the node is closing.")
-        }
+      // if a close reason was returned, close the subscription
+      closeReasonOO match {
+        case UnlessShutdown.Outcome(maybeCloseReason) =>
+          maybeCloseReason.foreach(complete)
+          logger.debug("Finished processing of the sequencer message.")
+        case UnlessShutdown.AbortedDueToShutdown =>
+          logger.debug(s"The message is not processed, as the node is closing.")
       }
     }
 
@@ -304,19 +302,16 @@ object GrpcSequencerSubscription {
     withTraceContext { implicit traceContext => responseP =>
       fromProto(responseP, traceContext)
         .fold(
-          err => {
+          err =>
             Future.failed(
               new RuntimeException(
                 s"Unable to parse response from sequencer. Discarding message. Reason: $err"
               )
-            )
-          },
+            ),
           response => {
-            val tracedSignedEvent = response.signedSequencedEvent
+            val signedEvent = response.signedSequencedEvent
             val ordinaryEvent =
-              OrdinarySequencedEvent(tracedSignedEvent.value, response.trafficState)(
-                tracedSignedEvent.traceContext
-              )
+              OrdinarySequencedEvent(signedEvent, response.trafficState)(response.traceContext)
             handler(ordinaryEvent)
           },
         )

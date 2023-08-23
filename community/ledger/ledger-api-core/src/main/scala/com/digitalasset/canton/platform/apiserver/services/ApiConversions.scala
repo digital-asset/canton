@@ -122,6 +122,7 @@ object ApiConversions {
         case CompletionV2.DeduplicationPeriod.DeduplicationDuration(duration) =>
           CompletionV1.DeduplicationPeriod.DeduplicationDuration(duration)
       },
+      traceContext = completion.traceContext,
     )
 
   def toV1(completionStreamResponse: CompletionStreamResponseV2): CompletionStreamResponseV1 =

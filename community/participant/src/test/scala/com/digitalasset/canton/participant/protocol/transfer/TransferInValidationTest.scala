@@ -9,6 +9,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.{CantonTimestamp, FullTransferInTree, TransferSubmitterMetadata}
 import com.digitalasset.canton.participant.protocol.submission.SeedGenerator
 import com.digitalasset.canton.participant.protocol.transfer.TransferInValidation.*
+import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.IncompatibleProtocolVersions
 import com.digitalasset.canton.participant.store.TransferStoreTest.transactionId1
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.submitterParticipant
 import com.digitalasset.canton.protocol.*
@@ -247,6 +248,36 @@ class TransferInValidationTest
               transferId,
               inRequestWithWrongCounter.transferCounter,
               transferData.transferCounter,
+            )
+          )
+        }
+      }
+    }
+
+    "disallow transfers from source domain supporting transfer counter to destination domain not supporting them" in {
+      val transferDataSourceDomainDev =
+        transferData.copy(sourceProtocolVersion = SourceProtocolVersion(ProtocolVersion.dev))
+      for {
+        result <-
+          transferInValidation
+            .validateTransferInRequest(
+              CantonTimestamp.Epoch,
+              inRequest,
+              Some(transferDataSourceDomainDev),
+              cryptoSnapshot,
+              transferringParticipant = true,
+            )
+            .value
+      } yield {
+        // TODO(#12373) Adapt when releasing BFT
+        if (transferOutRequest.targetProtocolVersion.v == ProtocolVersion.dev) {
+          result shouldBe Right(Some(TransferInValidationResult(Set(party1))))
+        } else {
+          result shouldBe Left(
+            IncompatibleProtocolVersions(
+              transferDataSourceDomainDev.contract.contractId,
+              transferDataSourceDomainDev.sourceProtocolVersion,
+              transferOutRequest.targetProtocolVersion,
             )
           )
         }

@@ -6,16 +6,18 @@ package com.digitalasset.canton.sequencing.protocol
 import cats.syntax.traverse.*
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, required}
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.TraceContext
 
 final case class SubscriptionResponse(
-    signedSequencedEvent: Traced[SignedContent[SequencedEvent[ClosedEnvelope]]],
+    signedSequencedEvent: SignedContent[SequencedEvent[ClosedEnvelope]],
+    traceContext: TraceContext,
     trafficState: Option[SequencedEventTrafficState],
 )
 
 object SubscriptionResponse {
 
-  /** Deserializes the SubscriptionResponse however will ignore the traceContext field and instead use the supplied value.
+  /** Deserializes the SubscriptionResponse however will ignore the
+    * [[com.digitalasset.canton.domain.api.v0.SubscriptionResponse.traceContext]] field and instead use the supplied value.
     * This is because we deserialize the traceContext separately from this request immediately on receiving the structure.
     */
   def fromProtoV0(responseP: v0.SubscriptionResponse)(implicit
@@ -32,7 +34,7 @@ object SubscriptionResponse {
       )
       signedContent <- SignedContent.fromProtoV0(signedSequencedEventP)
       signedSequencedEvent <- signedContent.deserializeContent(SequencedEvent.fromByteString)
-    } yield SubscriptionResponse(Traced(signedSequencedEvent)(traceContext), None)
+    } yield SubscriptionResponse(signedSequencedEvent, traceContext, None)
   }
 
   def fromVersionedProtoV0(responseP: v0.VersionedSubscriptionResponse)(implicit
@@ -47,7 +49,7 @@ object SubscriptionResponse {
       signedContent <- SignedContent.fromByteString(signedSequencedEvent)
       signedSequencedEvent <- signedContent.deserializeContent(SequencedEvent.fromByteString)
       trafficState <- trafficStateP.traverse(SequencedEventTrafficState.fromProtoV0)
-    } yield SubscriptionResponse(Traced(signedSequencedEvent)(traceContext), trafficState)
+    } yield SubscriptionResponse(signedSequencedEvent, traceContext, trafficState)
 
   }
 }

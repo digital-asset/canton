@@ -184,7 +184,7 @@ class ErrorCodeSpec
         val expectedStatus = Status
           .newBuilder()
           .setMessage(
-            BaseError.securitySensitiveMessage(Some("123correlationId"))
+            BaseError.SecuritySensitiveMessage(Some("123correlationId"))
           )
           .setCode(testedErrorCode.category.grpcCode.value.value())
           .addDetails(requestInfo.toRpcAny)
@@ -200,7 +200,7 @@ class ErrorCodeSpec
         assertError(
           actual = testedErrorCode.asGrpcError(testedError)(errorLoggerBig),
           expectedStatusCode = testedErrorCode.category.grpcCode.value,
-          expectedMessage = BaseError.securitySensitiveMessage(Some("123correlationId")),
+          expectedMessage = BaseError.SecuritySensitiveMessage(Some("123correlationId")),
           expectedDetails = Seq(requestInfo, retryInfo),
         )
       }

@@ -360,6 +360,29 @@ object ErrorCategory {
       with ErrorCategory
 
   implicit val orderingErrorType: Ordering[ErrorCategory] = Ordering.by[ErrorCategory, Int](_.rank)
+
+  /** Generic error category class meant to be used as a data container for
+    * information deserialized from gRPC statuses (see [[com.daml.error.utils.DeserializedCantonError]]).
+    *
+    * Note: Do NOT use this class for adding error category information to error code instances
+    * but instead re-use existing ones or define new ones (see [[ErrorCategory.all]])
+    */
+  final case class GenericErrorCategory(
+      override val grpcCode: Option[Code],
+      override val logLevel: Level,
+      override val retryable: Option[ErrorCategoryRetry],
+      override val securitySensitive: Boolean,
+      override val asInt: Int,
+      override val rank: Int,
+  ) extends ErrorCategoryImpl(
+        grpcCode = grpcCode,
+        logLevel = logLevel,
+        retryable = retryable,
+        securitySensitive = securitySensitive,
+        asInt = asInt,
+        rank = rank,
+      )
+      with ErrorCategory
 }
 
 /** Default retryability information

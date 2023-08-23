@@ -6,7 +6,7 @@ package com.digitalasset.canton.ledger.runner.common
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.lf.data.Ref
 import com.daml.lf.engine.EngineConfig
-import com.daml.lf.language.LanguageVersion
+import com.daml.lf.language.{LanguageDevConfig, LanguageVersion}
 import com.daml.lf.transaction.ContractKeyUniquenessMode
 import com.daml.lf.{VersionRange, interpretation, language}
 import com.daml.metrics.api.reporters.MetricsReporter
@@ -120,6 +120,26 @@ class PureConfigReaderWriter(secure: Boolean = true) {
 
   implicit val contractKeyUniquenessModeConvert: ConfigConvert[ContractKeyUniquenessMode] =
     deriveEnumerationConvert[ContractKeyUniquenessMode]
+
+  implicit val evaluationOrderReader: ConfigReader[LanguageDevConfig.EvaluationOrder] =
+    ConfigReader.fromString[LanguageDevConfig.EvaluationOrder] {
+      case "left-to-right" => Right(LanguageDevConfig.LeftToRight)
+      case "right-to-left" => Right(LanguageDevConfig.RightToLeft)
+      case value =>
+        Left(
+          CannotConvert(
+            value,
+            LanguageDevConfig.EvaluationOrder.getClass.getName,
+            s"$value is not recognized. ",
+          )
+        )
+    }
+
+  implicit val evaluationOrderWriter: ConfigWriter[LanguageDevConfig.EvaluationOrder] =
+    ConfigWriter.toString {
+      case LanguageDevConfig.LeftToRight => "left-to-right"
+      case LanguageDevConfig.RightToLeft => "right-to-left"
+    }
 
   implicit val engineHint = ProductHint[EngineConfig](allowUnknownKeys = false)
 

@@ -61,7 +61,7 @@ import slick.util.{AsyncExecutor, AsyncExecutorWithMetrics, ClassLoaderUtil}
 import java.io.ByteArrayInputStream
 import java.sql.{Blob, SQLException, Statement}
 import java.util.UUID
-import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.{ScheduledExecutorService, TimeUnit}
 import javax.sql.rowset.serial.SerialBlob
 import scala.annotation.nowarn
@@ -78,18 +78,9 @@ import scala.language.implicitConversions
   */
 sealed trait Storage extends FlagCloseable with HealthComponent { self: NamedLogging =>
 
-  private val abortRetryRef = new AtomicReference[Eval[Boolean]](Eval.now(false))
-
   /** Indicates if the storage instance is active and ready to perform updates/writes. */
   def isActive: Boolean
 
-  /** When true, the storage should stop retrying failed operations
-    */
-  def abortRetry: Eval[Boolean] = abortRetryRef.get()
-
-  /** Set the abortRetry function above
-    */
-  def setAbortRetry(abort: Eval[Boolean]): Unit = abortRetryRef.set(abort)
 }
 
 trait StorageFactory {
@@ -317,7 +308,10 @@ trait DbStorage extends Storage with FlagCloseable { self: NamedLogging =>
         initialDelay = 50.milliseconds,
         maxDelay = timeouts.storageMaxRetryInterval.unwrap,
         operationName = operationName,
-        killSwitchRetries = abortRetry,
+        suspendRetries = Eval.always(
+          if (isActive) Duration.Zero
+          else dbConfig.parameters.connectionTimeout.asFiniteApproximation
+        ),
       )
       .apply(body, DbExceptionRetryable)
   }

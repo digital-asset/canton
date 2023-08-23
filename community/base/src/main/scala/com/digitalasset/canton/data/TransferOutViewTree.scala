@@ -731,6 +731,8 @@ final case class FullTransferOutTree(tree: TransferOutViewTree)
 
   def targetDomain: TargetDomainId = view.targetDomain
 
+  def targetDomainPV: TargetProtocolVersion = view.targetProtocolVersion
+
   def targetTimeProof: TimeProof = view.targetTimeProof
 
   def mediatorMessage: TransferOutMediatorMessage = tree.mediatorMessage

@@ -156,11 +156,11 @@ private[platform] object InMemoryStateUpdater {
     PrepareResult(
       updates = batch.collect {
         case (offset, t @ Traced(u: Update.TransactionAccepted)) =>
-          t.map(_ => convertTransactionAccepted(offset, u))
+          t.map(_ => convertTransactionAccepted(offset, u, t.traceContext))
         case (offset, r @ Traced(u: Update.CommandRejected)) =>
-          r.map(_ => convertTransactionRejected(offset, u))
+          r.map(_ => convertTransactionRejected(offset, u, r.traceContext))
         case (offset, r @ Traced(u: Update.ReassignmentAccepted)) if multiDomainEnabled =>
-          r.map(_ => convertReassignmentAccepted(offset, u))
+          r.map(_ => convertReassignmentAccepted(offset, u, r.traceContext))
       },
       lastOffset = offset,
       lastEventSequentialId = lastEventSequentialId,
@@ -207,7 +207,7 @@ private[platform] object InMemoryStateUpdater {
       // TODO(i12283) LLP: Batch update caches
       tracedTransaction.withTraceContext(implicit traceContext =>
         transaction => {
-          inMemoryState.inMemoryFanoutBuffer.push(transaction.offset, transaction)
+          inMemoryState.inMemoryFanoutBuffer.push(transaction.offset, tracedTransaction)
           val contractStateEventsBatch = convertToContractStateEvents(transaction)
           if (contractStateEventsBatch.nonEmpty) {
             inMemoryState.contractStateCaches.push(contractStateEventsBatch)
@@ -274,6 +274,7 @@ private[platform] object InMemoryStateUpdater {
   private def convertTransactionAccepted(
       offset: Offset,
       txAccepted: Update.TransactionAccepted,
+      traceContext: TraceContext,
   ): TransactionLogUpdate.TransactionAccepted = {
     // TODO(i12283) LLP: Extract in common functionality together with duplicated code in [[UpdateToDbDto]]
     val rawEvents = txAccepted.transaction.transaction
@@ -367,6 +368,7 @@ private[platform] object InMemoryStateUpdater {
             optDeduplicationDurationSeconds = deduplicationDurationSeconds,
             optDeduplicationDurationNanos = deduplicationDurationNanos,
             domainId = txAccepted.transactionMeta.optDomainId.map(_.toProtoPrimitive),
+            traceContext = traceContext,
           ),
           submitters = completionInfo.actAs.toSet,
         )
@@ -387,6 +389,7 @@ private[platform] object InMemoryStateUpdater {
   private def convertTransactionRejected(
       offset: Offset,
       u: Update.CommandRejected,
+      traceContext: TraceContext,
   ): TransactionLogUpdate.TransactionRejected = {
     val (deduplicationOffset, deduplicationDurationSeconds, deduplicationDurationNanos) =
       deduplicationInfo(u.completionInfo)
@@ -405,6 +408,7 @@ private[platform] object InMemoryStateUpdater {
           optDeduplicationDurationSeconds = deduplicationDurationSeconds,
           optDeduplicationDurationNanos = deduplicationDurationNanos,
           domainId = u.domainId.map(_.toProtoPrimitive),
+          traceContext = traceContext,
         ),
         submitters = u.completionInfo.actAs.toSet,
       ),
@@ -414,6 +418,7 @@ private[platform] object InMemoryStateUpdater {
   private def convertReassignmentAccepted(
       offset: Offset,
       u: Update.ReassignmentAccepted,
+      traceContext: TraceContext,
   ): TransactionLogUpdate.ReassignmentAccepted = {
     val completionDetails = u.optCompletionInfo
       .map { completionInfo =>
@@ -436,6 +441,7 @@ private[platform] object InMemoryStateUpdater {
               case _: Reassignment.Unassign =>
                 u.reassignmentInfo.sourceDomain.unwrap.toProtoPrimitive
             }),
+            traceContext = traceContext,
           ),
           submitters = completionInfo.actAs.toSet,
         )

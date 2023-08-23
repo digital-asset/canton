@@ -51,7 +51,6 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.{condUnitET, ifThenET}
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{
   LfPartyId,
@@ -70,7 +69,7 @@ class TransferOutProcessingSteps(
     val engine: DAMLe,
     transferCoordination: TransferCoordination,
     seedGenerator: SeedGenerator,
-    sourceDomainProtocolVersion: SourceProtocolVersion,
+    val sourceDomainProtocolVersion: SourceProtocolVersion,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends TransferProcessingSteps[
@@ -133,16 +132,10 @@ class TransferOutProcessingSteps(
       stakeholders = storedContract.contract.metadata.stakeholders
       templateId = storedContract.contract.rawContractInstance.contractInstance.unversioned.template
 
-      /*
-        In PV=4, we introduced the sourceProtocolVersion in TransferInView, which is needed for
-        proper deserialization. Hence, we disallow some transfers
-       */
-      missingSourceProtocolVersionInTransferIn = targetProtocolVersion.v <= ProtocolVersion.v3
-      isSourceProtocolVersionRequired = sourceDomainProtocolVersion.v >= ProtocolVersion.v4
-
-      _ <- condUnitET[FutureUnlessShutdown](
-        !(missingSourceProtocolVersionInTransferIn && isSourceProtocolVersionRequired),
-        IncompatibleProtocolVersions(contractId, sourceDomainProtocolVersion, targetProtocolVersion),
+      _ <- PVSourceDestinationDomainsAreCompatible(
+        sourceDomainProtocolVersion,
+        targetProtocolVersion,
+        contractId,
       )
 
       timeProofAndSnapshot <- transferCoordination.getTimeProofAndSnapshot(targetDomain)
@@ -817,4 +810,5 @@ object TransferOutProcessingSteps {
       sc: SequencerCounter,
       sourceSnapshot: DomainSnapshotSyncCryptoApi,
   )
+
 }

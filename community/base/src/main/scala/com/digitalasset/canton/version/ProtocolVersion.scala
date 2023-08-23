@@ -29,6 +29,34 @@ import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
   *
   * For more details, please refer to the [[https://docs.daml.com/canton/usermanual/versioning.html versioning documentation]]
   * in the user manual.
+  *
+  * How to add a new protocol version `N`:
+  *  - Define a new constant `v<N>` in the [[ProtocolVersion$]] object via
+  *    ``lazy val v<N>: ProtocolVersionWithStatus[Unstable] = ProtocolVersion.unstable(<N>)``
+  *
+  *  - The new protocol version should be declared as unstable until it is released:
+  *    Define it with type argument [[com.digitalasset.canton.version.ProtocolVersion.Unstable]]
+  *    and add it to the list in [[com.digitalasset.canton.version.ProtocolVersion.unstable]].
+  *
+  *  - Add a new test job for the protocol version `N` to the canton_build workflow.
+  *    Make a sensible decision how often it should run.
+  *    If sensible, consider to reduce the frequency some of the other protocol version test jobs are running,
+  *    e.g., by moving them to the canton_nightly job.
+  *
+  * How to release a protocol version `N`:
+  *  - Switch the type parameter of the protocol version constant `v<N>` from
+  *    [[com.digitalasset.canton.version.ProtocolVersion.Unstable]] to [[com.digitalasset.canton.version.ProtocolVersion.Stable]]
+  *    As a result, you may have to modify a couple of protobuf definitions and mark them as stable as well.
+  *
+  *  - Remove `v<N>` from [[com.digitalasset.canton.version.ProtocolVersion.unstable]]
+  *    and add it to [[com.digitalasset.canton.buildinfo.BuildInfo.protocolVersions]].
+  *
+  *  - Check the test jobs for protocol versions:
+  *    Likely `N` will become the default protocol version used by the `test` job,
+  *    namely [[com.digitalasset.canton.version.ProtocolVersion.latest]].
+  *    So the separate test job for `N` is no longer needed.
+  *    Conversely, we now need a new job for the previous default protocol version.
+  *    Usually, it is enough to run the previous version only in canton_nightly.
   */
 // Internal only: for the full background, please refer to the following [design doc](https://docs.google.com/document/d/1kDiN-373bZOWploDrtOJ69m_0nKFu_23RNzmEXQOFc8/edit?usp=sharing).
 // or [code walkthrough](https://drive.google.com/file/d/199wHq-P5pVPkitu_AYLR4V3i0fJtYRPg/view?usp=sharing)
@@ -179,7 +207,7 @@ object ProtocolVersion {
   private val deleted: Seq[ProtocolVersion] = Seq(ProtocolVersion(2))
 
   val unstable: NonEmpty[List[ProtocolVersionWithStatus[Unstable]]] =
-    NonEmpty.mk(List, ProtocolVersion.dev)
+    NonEmpty.mk(List, ProtocolVersion.v6, ProtocolVersion.dev)
 
   val supported: NonEmpty[List[ProtocolVersion]] =
     stableAndSupported ++ unstable
@@ -198,6 +226,7 @@ object ProtocolVersion {
   lazy val v3: ProtocolVersionWithStatus[Stable] = ProtocolVersion.stable(3)
   lazy val v4: ProtocolVersionWithStatus[Stable] = ProtocolVersion.stable(4)
   lazy val v5: ProtocolVersionWithStatus[Stable] = ProtocolVersion.stable(5)
+  lazy val v6: ProtocolVersionWithStatus[Unstable] = ProtocolVersion.unstable(6)
 
   // Minimum stable protocol version introduced
   lazy val minimum: ProtocolVersion = v3

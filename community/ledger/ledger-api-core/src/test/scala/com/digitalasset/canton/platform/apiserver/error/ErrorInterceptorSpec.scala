@@ -275,7 +275,7 @@ final class ErrorInterceptorSpec
     assertError(
       actual,
       expectedStatusCode = Status.Code.INTERNAL,
-      expectedMessage = BaseError.securitySensitiveMessage(None),
+      expectedMessage = BaseError.SecuritySensitiveMessage(None),
       expectedDetails = Seq(),
       verifyEmptyStackTrace = false,
     )

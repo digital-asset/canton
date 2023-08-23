@@ -324,6 +324,7 @@ private[mediator] class Mediator(
           val result = FutureUtil.logOnFailureUnlessShutdown(
             eventsProcessor.handle(tracedOpenEvents),
             "Failed to handle Mediator events",
+            closeContext = Some(closeContext),
           )
           FutureUnlessShutdown.outcomeF(rejectionsF.sequence_).flatMap { case () => result }
         }

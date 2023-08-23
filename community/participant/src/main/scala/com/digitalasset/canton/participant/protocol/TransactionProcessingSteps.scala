@@ -1259,7 +1259,7 @@ class TransactionProcessingSteps(
       sc: SequencerCounter,
       mediator: MediatorRef,
       freshOwnTimelyTx: Boolean,
-  )(implicit traceContext: TraceContext): PendingTransaction = {
+  ): PendingTransaction = {
     val TransactionValidationResult(
       transactionId,
       confirmationPolicies,
@@ -1281,11 +1281,6 @@ class TransactionProcessingSteps(
       hostedInformeeStakeholders,
       replayCheckResult,
     ) = transactionValidationResult
-
-    ErrorUtil.requireArgument(
-      contractConsistencyE.isRight,
-      s"Cannot handle contract-inconsistent transaction $transactionId: $contractConsistencyE",
-    )
 
     validation.PendingTransaction(
       transactionId,

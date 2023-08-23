@@ -94,7 +94,6 @@ class ParticipantNodeBootstrap(
     ledgerApiServerFactory: CantonLedgerApiServerFactory,
     private[canton] val persistentStateFactory: ParticipantNodePersistentStateFactory,
     skipRecipientsCheck: Boolean,
-    abortRetry: Eval[Boolean],
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     scheduler: ScheduledExecutorService,
@@ -242,8 +241,6 @@ class ParticipantNodeBootstrap(
 
       val participantId: ParticipantId = ParticipantId(id.identity)
       topologyManager.setParticipantId(participantId)
-
-      storage.setAbortRetry(abortRetry)
 
       val componentFactory = new ParticipantComponentBootstrapFactory {
         override def createSyncDomainAndTopologyDispatcher(
@@ -544,7 +541,6 @@ object ParticipantNodeBootstrap {
         persistentStateFactory = ParticipantNodePersistentStateFactory,
         skipRecipientsCheck = false,
         ledgerApiServerFactory = ledgerApiServerFactory,
-        abortRetry = Eval.now(false),
       )
 
     override protected def multiDomainEnabledForLedgerApiServer: Boolean = false

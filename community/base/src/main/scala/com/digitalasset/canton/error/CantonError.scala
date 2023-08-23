@@ -7,7 +7,7 @@ import com.daml.error.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.google.rpc.error_details.ErrorInfo
-import io.grpc.{Status, StatusRuntimeException}
+import io.grpc.StatusRuntimeException
 
 import scala.util.Try
 import scala.util.matching.Regex
@@ -72,26 +72,7 @@ trait BaseCantonError extends BaseError {
   // so anything using def, lay val and constructor arguments works. just not val. but best, just use
   // [[CantonUserError]] or [[CantonInternalError]]
 
-  /** The error code, usually passed in as implicit where the error class is defined */
-  def code: ErrorCode
-
   def rpcStatusWithoutLoggingContext(): com.google.rpc.status.Status = rpcStatus()(NoLogging)
-
-  def rpcStatus(
-      overrideCode: Option[Status.Code] = None
-  )(implicit loggingContext: ContextualizedErrorLogger): com.google.rpc.status.Status = {
-    import scala.jdk.CollectionConverters.*
-    val status0: com.google.rpc.Status = code.asGrpcStatus(this)
-
-    val details: Seq[com.google.protobuf.Any] = status0.getDetailsList.asScala.toSeq
-    val detailsScalapb = details.map(com.google.protobuf.any.Any.fromJavaProto)
-
-    com.google.rpc.status.Status(
-      overrideCode.map(_.value()).getOrElse(status0.getCode),
-      status0.getMessage,
-      detailsScalapb,
-    )
-  }
 
   def log()(implicit loggingContext: ErrorLoggingContext): Unit = logWithContext()(loggingContext)
 

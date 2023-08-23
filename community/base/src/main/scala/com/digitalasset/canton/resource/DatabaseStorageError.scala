@@ -53,12 +53,12 @@ object DatabaseStorageError extends StorageErrorGroup {
          | it is not possible to connect to the database. That is, an attempt has been made to connect
          | but it either timed out or failed to check that the connection was valid.""".stripMargin
     )
-    final case class DatabaseConnectionLost(messageFromSlick: String, throwable: Throwable)(implicit
+    final case class DatabaseConnectionLost(messageFromSlick: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause =
             s"Database health check failed to establish a valid connection: $messageFromSlick",
-          throwableO = Some(throwable),
+          throwableO = None,
         ) {}
   }
 }

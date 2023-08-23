@@ -11,6 +11,7 @@ import com.digitalasset.canton.platform.store.dao.BufferedTransactionByIdReader.
   ToApiResponse,
 }
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.TransactionAccepted
+import com.digitalasset.canton.tracing.Traced
 
 import scala.concurrent.Future
 
@@ -60,7 +61,7 @@ object BufferedTransactionByIdReader {
 
   trait ToApiResponse[API_RESPONSE] {
     def apply(
-        transactionAccepted: TransactionAccepted,
+        transactionAccepted: Traced[TransactionAccepted],
         requestingParties: Set[Party],
         loggingContext: LoggingContextWithTrace,
     ): Future[Option[API_RESPONSE]]

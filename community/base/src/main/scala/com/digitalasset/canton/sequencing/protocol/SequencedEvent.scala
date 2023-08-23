@@ -86,10 +86,8 @@ object SequencedEvent
       supportedProtoVersionMemoized(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtoVersion(1) -> VersionedProtoConverter(
-      // TODO(#12373) Adapt when releasing BFT
-      ProtocolVersion.dev
-    )(v1.SequencedEvent)(
+    // TODO(#12373) Adapt when releasing BFT
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.dev)(v1.SequencedEvent)(
       supportedProtoVersionMemoized(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),

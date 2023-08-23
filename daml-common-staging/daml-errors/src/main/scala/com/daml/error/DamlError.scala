@@ -3,8 +3,6 @@
 
 package com.daml.error
 
-import scala.jdk.CollectionConverters.*
-
 class DamlError(
     override val cause: String,
     override val throwableO: Option[Throwable] = None,
@@ -19,18 +17,6 @@ class DamlError(
 
   override def context: Map[String, String] =
     super.context ++ extraContext.view.mapValues(_.toString)
-
-  def rpcStatus(): com.google.rpc.status.Status = {
-    val status0: com.google.rpc.Status = code.asGrpcStatus(this)
-    val details: Seq[com.google.protobuf.Any] = status0.getDetailsList.asScala.toSeq
-    val detailsScalapb = details.map(com.google.protobuf.any.Any.fromJavaProto)
-    com.google.rpc.status.Status(
-      status0.getCode,
-      status0.getMessage,
-      detailsScalapb,
-    )
-  }
-
 }
 
 /** @param definiteAnswer Determines the value of the `definite_answer` key in the error details

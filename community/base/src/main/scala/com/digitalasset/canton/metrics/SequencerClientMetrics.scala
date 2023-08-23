@@ -35,15 +35,6 @@ class SequencerClientMetrics(
   val processingTime: Timer = metricsFactory.timer(prefix :+ "event-handle")
 
   @MetricDoc.Tag(
-    summary = "The load on the event subscription",
-    description = """The event subscription processor is a sequential process. The load is a factor between
-                    |0 and 1 describing how much of an existing interval has been spent in the event handler.""",
-    qualification = Debug,
-  )
-  val load: TimedLoadGauge =
-    metricsFactory.loadGauge(prefix :+ "load", 1.second, processingTime)(MetricsContext.Empty)
-
-  @MetricDoc.Tag(
     summary = "The delay on the event processing",
     description = """Every message received from the sequencer carries a timestamp that was assigned
         |by the sequencer when it sequenced the message. This timestamp is called the sequencing timestamp.
