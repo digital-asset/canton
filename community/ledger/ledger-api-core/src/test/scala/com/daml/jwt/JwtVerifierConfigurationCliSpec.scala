@@ -114,7 +114,9 @@ object JwtVerifierConfigurationCliSpec {
   private def parseConfig(args: Array[String]): Option[AuthService] = {
     val parser = new OptionParser[AtomicReference[AuthService]]("test") {}
     JwtVerifierConfigurationCli.parse(parser) { (verifier, config) =>
-      config.set(AuthServiceJWT(verifier, targetAudience = None))
+      config.set(
+        AuthServiceJWT(verifier, targetAudience = None, loggerFactory = SuppressingLogger(getClass))
+      )
       config
     }
     parser.parse(args, new AtomicReference[AuthService](AuthServiceWildcard)).map(_.get())

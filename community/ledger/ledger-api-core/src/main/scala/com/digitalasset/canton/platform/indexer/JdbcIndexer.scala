@@ -11,12 +11,16 @@ import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.platform.InMemoryState
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater
+import com.digitalasset.canton.platform.indexer.ha.HaConfig
 import com.digitalasset.canton.platform.indexer.parallel.{
   InitializeParallelIngestion,
   ParallelIndexerFactory,
   ParallelIndexerSubscription,
 }
-import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
+import com.digitalasset.canton.platform.store.DbSupport.{
+  DataSourceProperties,
+  ParticipantDataSourceConfig,
+}
 import com.digitalasset.canton.platform.store.DbType
 import com.digitalasset.canton.platform.store.backend.{
   ParameterStorageBackend,
@@ -45,6 +49,8 @@ object JdbcIndexer {
       tracer: Tracer,
       loggerFactory: NamedLoggerFactory,
       multiDomainEnabled: Boolean,
+      dataSourceProperties: Option[DataSourceProperties],
+      highAvailability: HaConfig,
   )(implicit materializer: Materializer) {
 
     def initialized(
@@ -61,12 +67,12 @@ object JdbcIndexer {
       val meteringParameterStorageBackend = factory.createMeteringParameterStorageBackend
       val DBLockStorageBackend = factory.createDBLockStorageBackend
       val stringInterningStorageBackend = factory.createStringInterningStorageBackend
-      val dbConfig = IndexerConfig.dataSourceProperties(config)
+      val dbConfig = IndexerConfig.dataSourceProperties(dataSourceProperties, config)
       val indexer = ParallelIndexerFactory(
-        inputMappingParallelism = config.inputMappingParallelism,
-        batchingParallelism = config.batchingParallelism,
+        inputMappingParallelism = config.inputMappingParallelism.unwrap,
+        batchingParallelism = config.batchingParallelism.unwrap,
         dbConfig = dbConfig.createDbConfig(participantDataSourceConfig),
-        haConfig = config.highAvailability,
+        haConfig = highAvailability,
         metrics = metrics,
         dbLockStorageBackend = DBLockStorageBackend,
         dataSourceStorageBackend = dataSourceStorageBackend,
@@ -91,10 +97,10 @@ object JdbcIndexer {
           compressionStrategy =
             if (config.enableCompression) CompressionStrategy.allGZIP(metrics)
             else CompressionStrategy.none(metrics),
-          maxInputBufferSize = config.maxInputBufferSize,
-          inputMappingParallelism = config.inputMappingParallelism,
-          batchingParallelism = config.batchingParallelism,
-          ingestionParallelism = config.ingestionParallelism,
+          maxInputBufferSize = config.maxInputBufferSize.unwrap,
+          inputMappingParallelism = config.inputMappingParallelism.unwrap,
+          batchingParallelism = config.batchingParallelism.unwrap,
+          ingestionParallelism = config.ingestionParallelism.unwrap,
           submissionBatchSize = config.submissionBatchSize,
           maxTailerBatchSize = config.maxTailerBatchSize,
           maxOutputBatchedBufferSize = config.maxOutputBatchedBufferSize,

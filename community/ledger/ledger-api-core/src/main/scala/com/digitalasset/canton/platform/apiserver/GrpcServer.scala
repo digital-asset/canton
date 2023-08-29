@@ -6,8 +6,8 @@ package com.digitalasset.canton.platform.apiserver
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.metrics.Metrics
 import com.daml.metrics.grpc.GrpcMetricsServerInterceptor
-import com.daml.ports.Port
 import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.apiserver.error.ErrorInterceptor
 import com.google.protobuf.Message
@@ -45,7 +45,7 @@ private[apiserver] object GrpcServer {
       loggerFactory: NamedLoggerFactory,
   ): ResourceOwner[Server] = {
     val host = address.map(InetAddress.getByName).getOrElse(InetAddress.getLoopbackAddress)
-    val builder = NettyServerBuilder.forAddress(new InetSocketAddress(host, desiredPort.value))
+    val builder = NettyServerBuilder.forAddress(new InetSocketAddress(host, desiredPort.unwrap))
     builder.sslContext(sslContext.orNull)
     builder.permitKeepAliveTime(10, SECONDS)
     builder.permitKeepAliveWithoutCalls(true)

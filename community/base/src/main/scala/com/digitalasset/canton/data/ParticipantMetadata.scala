@@ -49,7 +49,7 @@ final case class ParticipantMetadata private (
   @transient override protected lazy val companionObj: ParticipantMetadata.type =
     ParticipantMetadata
 
-  protected def toProtoV0: v0.ParticipantMetadata = v0.ParticipantMetadata(
+  private def toProtoV0: v0.ParticipantMetadata = v0.ParticipantMetadata(
     ledgerTime = Some(ledgerTime.toProtoPrimitive),
     submissionTime = Some(submissionTime.toProtoPrimitive),
     workflowId = workflowIdO.fold("")(_.toProtoPrimitive),

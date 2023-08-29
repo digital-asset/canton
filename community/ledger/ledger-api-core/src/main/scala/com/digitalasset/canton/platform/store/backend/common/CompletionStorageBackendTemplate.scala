@@ -12,7 +12,11 @@ import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.CompletionFromTransaction
 import com.digitalasset.canton.platform.store.backend.CompletionStorageBackend
-import com.digitalasset.canton.platform.store.backend.Conversions.{offset, timestampFromMicros}
+import com.digitalasset.canton.platform.store.backend.Conversions.{
+  offset,
+  timestampFromMicros,
+  traceContextOption,
+}
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.platform.{ApplicationId, Party}
@@ -61,7 +65,8 @@ class CompletionStorageBackendTemplate(
           deduplication_duration_seconds,
           deduplication_duration_nanos,
           deduplication_start,
-          domain_id
+          domain_id,
+          trace_context
         FROM
           participant_command_completions
         WHERE
@@ -81,7 +86,7 @@ class CompletionStorageBackendTemplate(
   }
 
   private val sharedColumns: RowParser[
-    Array[Int] ~ Offset ~ Timestamp ~ String ~ String ~ Option[String] ~ Option[Int]
+    Array[Int] ~ Offset ~ Timestamp ~ String ~ String ~ Option[String] ~ Option[Int] ~ TraceContext
   ] = {
     array[Int]("submitters") ~
       offset("completion_offset") ~
@@ -89,11 +94,14 @@ class CompletionStorageBackendTemplate(
       str("command_id") ~
       str("application_id") ~
       str("submission_id").? ~
-      int("domain_id").?
+      int("domain_id").? ~
+      traceContextOption("trace_context")(noTracingLogger)
   }
 
   private val acceptedCommandSharedColumns: RowParser[
-    Array[Int] ~ Offset ~ Timestamp ~ String ~ String ~ Option[String] ~ Option[Int] ~ String
+    Array[Int] ~ Offset ~ Timestamp ~ String ~ String ~ Option[String] ~ Option[
+      Int
+    ] ~ TraceContext ~ String
   ] =
     sharedColumns ~ str("transaction_id")
 
@@ -111,7 +119,7 @@ class CompletionStorageBackendTemplate(
       deduplicationOffsetColumn ~
       deduplicationDurationSecondsColumn ~ deduplicationDurationNanosColumn ~
       deduplicationStartColumn map {
-        case submitters ~ offset ~ recordTime ~ commandId ~ applicationId ~ submissionId ~ internedDomainId ~ transactionId ~
+        case submitters ~ offset ~ recordTime ~ commandId ~ applicationId ~ submissionId ~ internedDomainId ~ traceContext ~ transactionId ~
             deduplicationOffset ~ deduplicationDurationSeconds ~ deduplicationDurationNanos ~ _ =>
           submitters -> CompletionFromTransaction.acceptedCompletion(
             recordTime = recordTime,
@@ -124,7 +132,7 @@ class CompletionStorageBackendTemplate(
             optDeduplicationDurationSeconds = deduplicationDurationSeconds,
             optDeduplicationDurationNanos = deduplicationDurationNanos,
             domainId = internedDomainId.map(stringInterning.domainId.unsafe.externalize),
-            traceContext = TraceContext.empty,
+            traceContext = traceContext,
           )
       }
 
@@ -141,7 +149,7 @@ class CompletionStorageBackendTemplate(
       rejectionStatusCodeColumn ~
       rejectionStatusMessageColumn ~
       rejectionStatusDetailsColumn map {
-        case submitters ~ offset ~ recordTime ~ commandId ~ applicationId ~ submissionId ~ internedDomainId ~
+        case submitters ~ offset ~ recordTime ~ commandId ~ applicationId ~ submissionId ~ internedDomainId ~ traceContext ~
             deduplicationOffset ~ deduplicationDurationSeconds ~ deduplicationDurationNanos ~ _ ~
             rejectionStatusCode ~ rejectionStatusMessage ~ rejectionStatusDetails =>
           val status =
@@ -157,7 +165,7 @@ class CompletionStorageBackendTemplate(
             optDeduplicationDurationSeconds = deduplicationDurationSeconds,
             optDeduplicationDurationNanos = deduplicationDurationNanos,
             domainId = internedDomainId.map(stringInterning.domainId.unsafe.externalize),
-            traceContext = TraceContext.empty,
+            traceContext = traceContext,
           )
       }
 

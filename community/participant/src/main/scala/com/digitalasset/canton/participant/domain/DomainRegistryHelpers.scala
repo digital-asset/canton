@@ -9,6 +9,7 @@ import cats.data.EitherT
 import cats.instances.future.*
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
+import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.*
 import com.digitalasset.canton.common.domain.SequencerConnectClient
@@ -52,6 +53,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
 
   implicit def ec: ExecutionContextExecutor
   override protected def executionContext: ExecutionContext = ec
+  implicit def executionSequencerFactory: ExecutionSequencerFactory
   implicit def materializer: Materializer
   implicit def tracer: Tracer
 

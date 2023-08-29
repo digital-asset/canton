@@ -5,9 +5,10 @@ package com.digitalasset.canton.ledger.indexerbenchmark
 
 import com.daml.lf.data.Ref
 import com.daml.metrics.api.reporters.MetricsReporter
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.platform.config.IndexServiceConfig
 import com.digitalasset.canton.platform.config.Readers.*
-import com.digitalasset.canton.platform.indexer.{IndexerConfig, IndexerStartupMode}
+import com.digitalasset.canton.platform.indexer.IndexerConfig
 import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
 import scopt.OptionParser
 
@@ -38,9 +39,7 @@ object Config {
     metricsReporter = None,
     metricsReportingInterval = Duration.ofSeconds(1),
     indexServiceConfig = IndexServiceConfig(),
-    indexerConfig = IndexerConfig(
-      startupMode = IndexerStartupMode.MigrateAndStart
-    ),
+    indexerConfig = IndexerConfig(),
     waitForUserInput = false,
     minUpdateRate = None,
     participantId = Ref.ParticipantId.assertFromString("IndexerBenchmarkParticipant"),
@@ -62,19 +61,25 @@ object Config {
       opt[Int]("indexer-input-mapping-parallelism")
         .text("Sets the value of IndexerConfig.inputMappingParallelism.")
         .action((value, config) =>
-          config.copy(indexerConfig = config.indexerConfig.copy(inputMappingParallelism = value))
+          config.copy(indexerConfig =
+            config.indexerConfig.copy(inputMappingParallelism = NonNegativeInt.tryCreate(value))
+          )
         )
         .discard
       opt[Int]("indexer-ingestion-parallelism")
         .text("Sets the value of IndexerConfig.ingestionParallelism.")
         .action((value, config) =>
-          config.copy(indexerConfig = config.indexerConfig.copy(ingestionParallelism = value))
+          config.copy(indexerConfig =
+            config.indexerConfig.copy(ingestionParallelism = NonNegativeInt.tryCreate(value))
+          )
         )
         .discard
       opt[Int]("indexer-batching-parallelism")
         .text("Sets the value of IndexerConfig.batchingParallelism.")
         .action((value, config) =>
-          config.copy(indexerConfig = config.indexerConfig.copy(batchingParallelism = value))
+          config.copy(indexerConfig =
+            config.indexerConfig.copy(batchingParallelism = NonNegativeInt.tryCreate(value))
+          )
         )
         .discard
       opt[Long]("indexer-submission-batch-size")
@@ -92,7 +97,9 @@ object Config {
       opt[Int]("indexer-max-input-buffer-size")
         .text("Sets the value of IndexerConfig.maxInputBufferSize.")
         .action((value, config) =>
-          config.copy(indexerConfig = config.indexerConfig.copy(maxInputBufferSize = value))
+          config.copy(indexerConfig =
+            config.indexerConfig.copy(maxInputBufferSize = NonNegativeInt.tryCreate(value))
+          )
         )
         .discard
 

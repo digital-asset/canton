@@ -101,7 +101,18 @@ class DirectSequencerClientTransport(
     {
       val subscriptionET =
         subscriptionFactory
-          .create(request.counter, "direct", request.member, handler)
+          .create(
+            request.counter,
+            "direct",
+            request.member,
+            {
+              case Right(event) => handler(event)
+              case Left(error) =>
+                ErrorUtil.invalidState(
+                  s"Direct transport subscriptions must not trigger subscription errors such as ${error}"
+                )
+            },
+          )
           .thereafter {
             case Success(Right(subscription)) =>
               closeReasonPromise.completeWith(subscription.closeReason)

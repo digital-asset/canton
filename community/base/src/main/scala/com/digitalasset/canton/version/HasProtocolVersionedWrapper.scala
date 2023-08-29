@@ -107,23 +107,7 @@ trait HasProtocolVersionedWrapper[ValueClass <: HasRepresentativeProtocolVersion
   /** Will check that default value rules defined in `companionObj.defaultValues` hold.
     */
   def validateInstance(): Either[String, Unit] =
-    companionObj.defaultValues.traverse_ { defaultValue =>
-      val value = defaultValue.attribute(this)
-
-      val shouldHaveDefaultValue = defaultValue match {
-        case from: companionObj.DefaultValueFrom[_] =>
-          representativeProtocolVersion >= from.startInclusive
-
-        case until: companionObj.DefaultValueUntil[_] =>
-          representativeProtocolVersion <= until.untilInclusive
-      }
-
-      Either.cond(
-        !shouldHaveDefaultValue || value == defaultValue.defaultValue,
-        (),
-        s"expected default value for ${defaultValue.name} in ${companionObj.name} but found $value",
-      )
-    }
+    companionObj.invariants.traverse_(_.validateInstance(this, representativeProtocolVersion))
 
   /** Yields the proto representation of the class inside an `UntypedVersionedMessage` wrapper.
     *
@@ -206,13 +190,47 @@ trait HasSupportedProtoVersions[ValueClass] {
 
   private type ThisRepresentativeProtocolVersion = RepresentativeProtocolVersion[this.type]
 
+  private[version] sealed trait Invariant[T] {
+    def attribute: ValueClass => T
+    def validate(v: T, pv: ProtocolVersion): Either[String, Unit]
+    def validate(v: T, rpv: ThisRepresentativeProtocolVersion): Either[String, Unit]
+    def validateInstance(
+        v: ValueClass,
+        rpv: ThisRepresentativeProtocolVersion,
+    ): Either[String, Unit] =
+      validate(attribute(v), rpv)
+  }
+
+  /* Starting from `startInclusive`, the predicate must hold */
+  case class InvariantFromInclusive[T](
+      attribute: ValueClass => T,
+      predicate: T => Boolean,
+      onFailure: String,
+      startInclusive: ThisRepresentativeProtocolVersion,
+  ) extends Invariant[T] {
+    override def validate(
+        v: T,
+        rpv: ThisRepresentativeProtocolVersion,
+    ): Either[String, Unit] = Either.cond(
+      rpv < startInclusive || predicate(v),
+      (),
+      s"invariant violation for representative protocol version $rpv: $onFailure. Found: $v",
+    )
+
+    override def validate(
+        v: T,
+        pv: ProtocolVersion,
+    ): Either[String, Unit] = Either.cond(
+      pv < startInclusive.representative || predicate(v),
+      (),
+      s"invariant violation for protocol version $pv: $onFailure. Found: $v",
+    )
+  }
+
   /*
     This trait encodes a default value starting (or ending) at a specific protocol version.
    */
-  private[version] sealed trait DefaultValue[T] {
-    def attribute: ValueClass => T
-
-    def name: String
+  private[version] sealed trait DefaultValue[T] extends Invariant[T] {
 
     def defaultValue: T
 
@@ -223,11 +241,14 @@ trait HasSupportedProtoVersions[ValueClass] {
     /** Returns `v` or the default value, depending on the `protocolVersion`.
       */
     def orValue(v: T, protocolVersion: ThisRepresentativeProtocolVersion): T
+
+    override def validate(v: T, rpv: ThisRepresentativeProtocolVersion): Either[String, Unit] =
+      validate(v, rpv.representative)
   }
 
-  case class DefaultValueFrom[T](
+  case class DefaultValueFromInclusive[T](
       attribute: ValueClass => T,
-      name: String,
+      attributeName: String,
       startInclusive: ThisRepresentativeProtocolVersion,
       defaultValue: T,
   ) extends DefaultValue[T] {
@@ -236,22 +257,48 @@ trait HasSupportedProtoVersions[ValueClass] {
 
     def orValue(v: T, protocolVersion: ThisRepresentativeProtocolVersion): T =
       if (protocolVersion >= startInclusive) defaultValue else v
+
+    override def validate(
+        v: T,
+        pv: ProtocolVersion,
+    ): Either[String, Unit] = {
+      val shouldHaveDefaultValue = pv >= startInclusive.representative
+
+      Either.cond(
+        !shouldHaveDefaultValue || v == defaultValue,
+        (),
+        s"expected default value for $attributeName in $name but found $v",
+      )
+    }
   }
 
-  case class DefaultValueUntil[T](
+  case class DefaultValueUntilExclusive[T](
       attribute: ValueClass => T,
-      name: String,
-      untilInclusive: ThisRepresentativeProtocolVersion,
+      attributeName: String,
+      untilExclusive: ThisRepresentativeProtocolVersion,
       defaultValue: T,
   ) extends DefaultValue[T] {
     def orValue(v: T, protocolVersion: ProtocolVersion): T =
-      if (protocolVersion <= untilInclusive.representative) defaultValue else v
+      if (protocolVersion < untilExclusive.representative) defaultValue else v
 
     def orValue(v: T, protocolVersion: ThisRepresentativeProtocolVersion): T =
-      if (protocolVersion <= untilInclusive) defaultValue else v
+      if (protocolVersion < untilExclusive) defaultValue else v
+
+    override def validate(
+        v: T,
+        pv: ProtocolVersion,
+    ): Either[String, Unit] = {
+      val shouldHaveDefaultValue = pv < untilExclusive.representative
+
+      Either.cond(
+        !shouldHaveDefaultValue || v == defaultValue,
+        (),
+        s"expected default value for $attributeName in $name but found $v",
+      )
+    }
   }
 
-  def defaultValues: Seq[DefaultValue[_]] = Nil
+  def invariants: Seq[Invariant[_]] = Nil
 
   def protocolVersionRepresentativeFor(
       protocolVersion: ProtocolVersion

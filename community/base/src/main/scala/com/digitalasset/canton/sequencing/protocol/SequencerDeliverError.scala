@@ -155,12 +155,11 @@ object SequencerErrors extends SequencerErrorGroup {
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       )
 
-  // TODO(#14324): Review the texts below
   @Explanation(
-    """Sequencer has refused a submission request due to low or never existing traffic credits."""
+    """Sequencer has refused a submission request due to insufficient credits in the sender's traffic balance."""
   )
   @Resolution(
-    """Acquire more traffic credits with the system."""
+    """Acquire more traffic credits with the system by topping up traffic credits for the sender."""
   )
   object TrafficCredit
       extends SequencerDeliverErrorCode(

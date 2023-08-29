@@ -17,7 +17,7 @@ import com.digitalasset.canton.ledger.api.domain.{LedgerId, ParticipantId}
 import com.digitalasset.canton.logging.LoggingContextWithTrace.withNewLoggingContext
 import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.platform.config.{
-  AcsStreamsConfig,
+  ActiveContractsServiceStreamsConfig,
   ServerRole,
   TransactionFlatStreamsConfig,
   TransactionTreeStreamsConfig,
@@ -133,7 +133,7 @@ private[dao] trait JdbcLedgerDaoBackend extends AkkaBeforeAndAfterAll with BaseT
       ledgerEndCache = ledgerEndCache,
       stringInterning = stringInterningView,
       completionsPageSize = 1000,
-      acsStreamsConfig = AcsStreamsConfig(
+      activeContractsServiceStreamsConfig = ActiveContractsServiceStreamsConfig(
         maxPayloadsPerPayloadsPage = eventsPageSize,
         maxIdsPerIdPage = acsIdPageSize,
         maxPagesPerIdPagesBuffer = 1,

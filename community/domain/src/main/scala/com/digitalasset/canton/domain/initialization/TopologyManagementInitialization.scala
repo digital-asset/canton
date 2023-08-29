@@ -6,6 +6,7 @@ package com.digitalasset.canton.domain.initialization
 import akka.stream.Materializer
 import cats.data.EitherT
 import cats.instances.future.*
+import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -158,6 +159,7 @@ object TopologyManagementInitialization {
       loggerFactory: NamedLoggerFactory,
   )(implicit
       executionContext: ExecutionContextExecutor,
+      executionSequencerFactory: ExecutionSequencerFactory,
       materializer: Materializer,
       tracer: Tracer,
       loggingContext: ErrorLoggingContext,

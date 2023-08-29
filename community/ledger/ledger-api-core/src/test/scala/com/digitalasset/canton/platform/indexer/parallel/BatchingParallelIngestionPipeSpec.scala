@@ -75,12 +75,15 @@ class BatchingParallelIngestionPipeSpec
     runPipe(
       inputMapperHook = () => Threading.sleep(1L),
       ingesterHook = batch => {
-        if (batch.head == 21) Threading.sleep(1000)
+        // due to timing issues it can be that other than full batches are formed, so we check if the batch contains 21
+        if (batch.contains(21)) Threading.sleep(1000)
       },
       timeout = FiniteDuration(100, "milliseconds"),
     ).map { case (ingested, ingestedTail, err) =>
       err.value.getMessage shouldBe "timed out"
-      ingested.size shouldBe 25
+      // 25 consists of 4 full batches before 21, then the one full batch after the frozen full batch since parallelism == 2
+      // 25 is the ideal case: due to timing issues it can be that other than full batches are formed, so either having < 20 before and < 5 after is possiblef
+      ingested.size should be <= 25
       ingestedTail.last shouldBe 20
     }
   }

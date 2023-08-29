@@ -104,6 +104,10 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
         s"read for $member"
       ) flatMap {
         _.take(limit.toLong)
+          .map {
+            case Right(event) => event
+            case Left(err) => fail(s"The DatabaseSequencer does not emit tombstone-errors: $err")
+          }
           .idleTimeout(30.seconds)
           .runWith(Sink.seq)
       }

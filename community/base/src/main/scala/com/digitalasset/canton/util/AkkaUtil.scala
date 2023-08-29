@@ -417,7 +417,7 @@ object AkkaUtil extends HasLoggerName {
     */
   def withUniqueKillSwitch[A, Mat, Mat2](
       source: Source[A, Mat]
-  )(mat: (Mat, UniqueKillSwitch) => Mat2): Source[(A, KillSwitch), Mat2] = {
+  )(mat: (Mat, UniqueKillSwitch) => Mat2): Source[WithKillSwitch[A], Mat2] = {
     import syntax.*
     source
       .withMaterializedValueMat(new AtomicReference[UniqueKillSwitch])(Keep.both)
@@ -425,7 +425,7 @@ object AkkaUtil extends HasLoggerName {
         ref.set(killSwitch)
         mat(m, killSwitch)
       }
-      .map { case (a, ref) => (a, ref.get()) }
+      .map { case (a, ref) => WithKillSwitch(a, ref.get()) }
   }
 
   private[util] def withMaterializedValueMat[M, A, Mat, Mat2](create: => M)(source: Source[A, Mat])(
@@ -462,6 +462,41 @@ object AkkaUtil extends HasLoggerName {
     }
   }
 
+  final case class WithKillSwitch[+A](private val value: A, killSwitch: KillSwitch) {
+    def unwrap: A = value
+    def map[B](f: A => B): WithKillSwitch[B] = WithKillSwitch(f(value), killSwitch)
+  }
+
+  /** Passes through all elements of the source until and including the first element that satisfies the condition.
+    * Thereafter pulls the kill switch of the first such element and drops all remaining elements of the source.
+    *
+    * '''Emits when''' upstream emits and all previously emitted elements do not meet the condition.
+    *
+    * '''Backpressures when''' downstream backpressures
+    *
+    * '''Completes when upstream''' completes
+    *
+    * '''Cancels when''' downstream cancels
+    */
+  def takeUntilThenDrain[A, Mat](
+      source: Source[WithKillSwitch[A], Mat],
+      condition: A => Boolean,
+  ): Source[WithKillSwitch[A], Mat] =
+    source.statefulMapConcat(() => {
+      @SuppressWarnings(Array("org.wartremover.warts.Var"))
+      var draining = false
+      elem => {
+        if (draining) Iterable.empty[WithKillSwitch[A]]
+        else {
+          if (condition(elem.unwrap)) {
+            draining = true
+            elem.killSwitch.shutdown()
+          }
+          Iterable.single(elem)
+        }
+      }
+    })
+
   object syntax {
 
     /** Defines extension methods for [[akka.stream.scaladsl.Source]] that map to the methods defined in this class */
@@ -488,8 +523,15 @@ object AkkaUtil extends HasLoggerName {
         AkkaUtil.withMaterializedValueMat(create)(source)(mat)
 
       def withUniqueKillSwitchMat[Mat2](
-      )(mat: (Mat, UniqueKillSwitch) => Mat2): Source[(A, KillSwitch), Mat2] =
+      )(mat: (Mat, UniqueKillSwitch) => Mat2): Source[WithKillSwitch[A], Mat2] =
         AkkaUtil.withUniqueKillSwitch(source)(mat)
+    }
+
+    implicit class AkkaUtilSyntaxForSourceWithKillSwitch[A, Mat](
+        private val source: Source[WithKillSwitch[A], Mat]
+    ) extends AnyVal {
+      def takeUntilThenDrain(condition: A => Boolean): Source[WithKillSwitch[A], Mat] =
+        AkkaUtil.takeUntilThenDrain(source, condition)
     }
   }
 }

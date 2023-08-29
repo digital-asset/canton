@@ -56,13 +56,6 @@ sealed trait SequencedEvent[+Env <: Envelope[_]]
   /** The domain which this deliver event belongs to */
   val domainId: DomainId
 
-  val isDeliver: Boolean = {
-    this match {
-      case _: Deliver[_] => true
-      case _: DeliverError => false
-    }
-  }
-
   protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
 

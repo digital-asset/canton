@@ -71,7 +71,7 @@ trait HasVersionedWrapper[ValueClass] extends HasVersionedToByteString {
 trait HasVersionedMessageCompanionCommon[ValueClass] {
 
   /** The name of the class as used for pretty-printing and error reporting */
-  protected def name: String
+  def name: String
 
   type Serializer = ValueClass => ByteString
   type Deserializer

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.backend
 
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -177,6 +178,7 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       deduplication_duration_nanos = Some(1),
       deduplication_start = Some(1),
       domain_id = Some("domain4"),
+      trace_context = Some(SerializableTraceContext(TraceContext.empty).toDamlProto.toByteArray),
     ),
     DbDto.ConfigurationEntry(
       ledger_offset = "75",

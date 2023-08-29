@@ -30,7 +30,7 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
 }
 import com.digitalasset.canton.platform.TemplatePartiesFilter
-import com.digitalasset.canton.platform.config.AcsStreamsConfig
+import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfig
 import com.digitalasset.canton.platform.indexer.parallel.BatchN
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
@@ -74,7 +74,7 @@ import scala.util.chaining.*
   * the input to the payload fetching step.
   */
 class ACSReader(
-    config: AcsStreamsConfig,
+    config: ActiveContractsServiceStreamsConfig,
     globalIdQueriesLimiter: ConcurrencyLimiter,
     globalPayloadQueriesLimiter: ConcurrencyLimiter,
     dispatcher: DbDispatcher,

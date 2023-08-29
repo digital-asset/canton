@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.initialization
 
 import akka.actor.ActorSystem
 import cats.data.EitherT
+import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -55,6 +56,7 @@ object EmbeddedMediatorInitialization {
       loggerFactory: NamedLoggerFactory,
   )(implicit
       executionContext: ExecutionContextExecutorService,
+      executionSequencerFactory: ExecutionSequencerFactory,
       tracer: Tracer,
       traceContext: TraceContext,
       actorSystem: ActorSystem,

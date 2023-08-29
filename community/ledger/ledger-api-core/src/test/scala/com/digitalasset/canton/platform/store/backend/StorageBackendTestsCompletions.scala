@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.store.backend
 
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.google.protobuf.duration.Duration
 import org.scalatest.Inside
 import org.scalatest.flatspec.AnyFlatSpec
@@ -20,40 +21,57 @@ private[backend] trait StorageBackendTestsCompletions
   import StorageBackendTestValues.*
 
   it should "correctly find completions by offset range" in {
-    val party = someParty
-    val applicationId = someApplicationId
+    TraceContext.withNewTraceContext { aTraceContext =>
+      val party = someParty
+      val applicationId = someApplicationId
 
-    val dtos = Vector(
-      dtoConfiguration(offset(1)),
-      dtoCompletion(offset(2), submitter = party),
-      dtoCompletion(offset(3), submitter = party),
-      dtoCompletion(offset(4), submitter = party),
-    )
+      val dtos = Vector(
+        dtoConfiguration(offset(1)),
+        dtoCompletion(offset(2), submitter = party),
+        dtoCompletion(offset(3), submitter = party, traceContext = None),
+        dtoCompletion(
+          offset(4),
+          submitter = party,
+          traceContext = Some(SerializableTraceContext(aTraceContext).toDamlProto.toByteArray),
+        ),
+      )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
-    executeSql(ingest(dtos, _))
-    executeSql(updateLedgerEnd(offset(4), 3L))
-    val completions0to3 = executeSql(
-      backend.completion
-        .commandCompletions(Offset.beforeBegin, offset(3), applicationId, Set(party), limit = 10)
-    )
-    val completions1to3 = executeSql(
-      backend.completion
-        .commandCompletions(offset(1), offset(3), applicationId, Set(party), limit = 10)
-    )
-    val completions2to3 = executeSql(
-      backend.completion
-        .commandCompletions(offset(2), offset(3), applicationId, Set(party), limit = 10)
-    )
-    val completions1to9 = executeSql(
-      backend.completion
-        .commandCompletions(offset(1), offset(9), applicationId, Set(party), limit = 10)
-    )
+      executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+      executeSql(ingest(dtos, _))
+      executeSql(updateLedgerEnd(offset(4), 3L))
+      val completions0to3 = executeSql(
+        backend.completion
+          .commandCompletions(Offset.beforeBegin, offset(3), applicationId, Set(party), limit = 10)
+      )
+      val completions1to3 = executeSql(
+        backend.completion
+          .commandCompletions(offset(1), offset(3), applicationId, Set(party), limit = 10)
+      )
+      val completions2to3 = executeSql(
+        backend.completion
+          .commandCompletions(offset(2), offset(3), applicationId, Set(party), limit = 10)
+      )
+      val completions1to9 = executeSql(
+        backend.completion
+          .commandCompletions(offset(1), offset(9), applicationId, Set(party), limit = 10)
+      )
 
-    completions0to3 should have length 2
-    completions1to3 should have length 2
-    completions2to3 should have length 1
-    completions1to9 should have length 3
+      completions0to3 should have length 2
+      completions1to3 should have length 2
+      completions2to3 should have length 1
+      completions1to9 should have length 3
+
+      completions1to9.head.completion.map(_.traceContext) shouldBe Some(
+        Some(SerializableTraceContext(TraceContext.empty).toDamlProto)
+      )
+      // even though we serialize a none, it will be returned as empty tracecontext
+      completions1to9(1).completion.map(_.traceContext) shouldBe Some(
+        Some(SerializableTraceContext(TraceContext.empty).toDamlProto)
+      )
+      completions1to9(2).completion.map(_.traceContext) shouldBe Some(
+        Some(SerializableTraceContext(aTraceContext).toDamlProto)
+      )
+    }
   }
 
   it should "correctly persist and retrieve application IDs" in {

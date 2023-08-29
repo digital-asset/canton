@@ -3,28 +3,26 @@
 
 package com.digitalasset.canton.platform.indexer
 
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.platform.indexer.IndexerConfig.*
-import com.digitalasset.canton.platform.indexer.ha.HaConfig
 import com.digitalasset.canton.platform.store.DbSupport.{ConnectionPoolConfig, DataSourceProperties}
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
 
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
+/** See com.digitalasset.canton.platform.indexer.JdbcIndexer for semantics on these configurations.
+  */
 final case class IndexerConfig(
-    batchingParallelism: Int = DefaultBatchingParallelism,
-    /*
-     * If properties are provided - they are going to be used, otherwise - defaults are provided.
-     * By default `dataSourceProperties` are implied from the configuration of Indexer (look at `createDataSourceProperties`).
-     */
-    dataSourceProperties: Option[DataSourceProperties] = None,
+    batchingParallelism: NonNegativeInt = NonNegativeInt.tryCreate(DefaultBatchingParallelism),
     enableCompression: Boolean = DefaultEnableCompression,
-    highAvailability: HaConfig = DefaultHaConfig,
-    ingestionParallelism: Int = DefaultIngestionParallelism,
-    inputMappingParallelism: Int = DefaultInputMappingParallelism,
-    maxInputBufferSize: Int = DefaultMaxInputBufferSize,
+    ingestionParallelism: NonNegativeInt = NonNegativeInt.tryCreate(DefaultIngestionParallelism),
+    inputMappingParallelism: NonNegativeInt =
+      NonNegativeInt.tryCreate(DefaultInputMappingParallelism),
+    maxInputBufferSize: NonNegativeInt = NonNegativeInt.tryCreate(DefaultMaxInputBufferSize),
     packageMetadataView: PackageMetadataViewConfig = DefaultPackageMetadataViewConfig,
-    restartDelay: FiniteDuration = DefaultRestartDelay,
-    startupMode: IndexerStartupMode = DefaultIndexerStartupMode,
+    restartDelay: NonNegativeFiniteDuration =
+      NonNegativeFiniteDuration.ofSeconds(DefaultRestartDelay.toSeconds),
     submissionBatchSize: Long = DefaultSubmissionBatchSize,
     maxOutputBatchedBufferSize: Int = DefaultMaxOutputBatchedBufferSize,
     maxTailerBatchSize: Int = DefaultMaxTailerBatchSize,
@@ -32,8 +30,11 @@ final case class IndexerConfig(
 
 object IndexerConfig {
 
-  def dataSourceProperties(config: IndexerConfig): DataSourceProperties =
-    config.dataSourceProperties.getOrElse(createDataSourceProperties(config.ingestionParallelism))
+  def dataSourceProperties(
+      dataSourceProperties: Option[DataSourceProperties],
+      config: IndexerConfig,
+  ): DataSourceProperties =
+    dataSourceProperties.getOrElse(createDataSourceProperties(config.ingestionParallelism.unwrap))
 
   // Exposed as public method so defaults can be overriden in the downstream code.
   def createDataSourceProperties(
@@ -66,7 +67,6 @@ object IndexerConfig {
 
   val DefaultIndexerStartupMode: IndexerStartupMode =
     IndexerStartupMode.MigrateAndStart
-  val DefaultHaConfig: HaConfig = HaConfig()
   val DefaultRestartDelay: FiniteDuration = 10.seconds
   val DefaultMaxInputBufferSize: Int = 50
   val DefaultInputMappingParallelism: Int = 16

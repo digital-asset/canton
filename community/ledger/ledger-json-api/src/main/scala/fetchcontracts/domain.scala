@@ -89,9 +89,6 @@ package domain {
   object ActiveContract {
     type ResolvedCtTyId[+LfV] = ActiveContract[ContractTypeId.Resolved, LfV]
 
-    def matchesKey(k: LfValue)(a: ResolvedCtTyId[LfValue]): Boolean =
-      a.key.fold(false)(_ == k)
-
     case object IgnoreInterface
 
     def fromLedgerApi[RQ, CtTyId](

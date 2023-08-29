@@ -12,7 +12,11 @@ import com.digitalasset.canton.ledger.participant.state.v2.ReadService
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.InMemoryState
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater
-import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
+import com.digitalasset.canton.platform.indexer.ha.HaConfig
+import com.digitalasset.canton.platform.store.DbSupport.{
+  DataSourceProperties,
+  ParticipantDataSourceConfig,
+}
 import com.digitalasset.canton.platform.store.FlywayMigrations
 import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.trace.Tracer
@@ -32,6 +36,9 @@ final class IndexerServiceOwner(
     tracer: Tracer,
     val loggerFactory: NamedLoggerFactory,
     multiDomainEnabled: Boolean,
+    startupMode: IndexerStartupMode,
+    dataSourceProperties: Option[DataSourceProperties],
+    highAvailability: HaConfig,
 )(implicit materializer: Materializer, traceContext: TraceContext)
     extends ResourceOwner[ReportsHealth]
     with NamedLogging {
@@ -55,11 +62,13 @@ final class IndexerServiceOwner(
       tracer,
       loggerFactory,
       multiDomainEnabled,
+      dataSourceProperties,
+      highAvailability,
     )
     val indexer = RecoveringIndexer(
       materializer.system.scheduler,
       materializer.executionContext,
-      config.restartDelay,
+      config.restartDelay.asFiniteApproximation,
       loggerFactory,
     )
 
@@ -76,7 +85,7 @@ final class IndexerServiceOwner(
           healthReporter
         }
 
-    config.startupMode match {
+    startupMode match {
       case IndexerStartupMode.MigrateAndStart =>
         startIndexer(
           migration = flywayMigrations.migrate()

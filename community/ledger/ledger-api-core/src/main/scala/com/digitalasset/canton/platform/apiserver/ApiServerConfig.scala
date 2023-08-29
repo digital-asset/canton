@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.apiserver
 
-import com.daml.ports.Port
+import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.ledger.api.tls.TlsConfiguration
 import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
@@ -32,7 +32,7 @@ final case class ApiServerConfig(
 )
 
 object ApiServerConfig {
-  val DefaultPort: Port = Port(6865)
+  val DefaultPort: Port = Port.tryCreate(6865)
   val DefaultAddress: Option[String] = None
   val DefaultTls: Option[TlsConfiguration] = None
   val DefaultMaxInboundMessageSize: Int = 64 * 1024 * 1024

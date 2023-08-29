@@ -3,9 +3,12 @@
 
 package com.digitalasset.canton.sequencing.client
 
+import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.error.CantonError
+import com.digitalasset.canton.error.CantonErrorGroups.SequencerSubscriptionErrorGroup
 import com.digitalasset.canton.lifecycle.{AsyncCloseable, AsyncOrSyncCloseable, FlagCloseableAsync}
-import com.digitalasset.canton.logging.NamedLogging
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{Future, Promise}
@@ -86,5 +89,31 @@ trait SequencerSubscription[HandlerError] extends FlagCloseableAsync with NamedL
   // a stalled stream
   override def onCloseFailure(e: Throwable): Unit = {
     logger.warn("Failed to close sequencer subscription", e)(TraceContext.empty)
+  }
+}
+
+object SequencerSubscriptionError extends SequencerSubscriptionErrorGroup {
+
+  sealed trait SequencedEventError extends CantonError
+
+  @Explanation(
+    """This error indicates that a sequencer subscription to a recently onboarded sequencer attempted to read
+      |an event replaced with a tombstone. A tombstone occurs if the timestamp associated with the event predates
+      |the validity of the sequencer's signing key. This error results in the sequencer client disconnecting from
+      |the sequencer."""
+  )
+  @Resolution(
+    """Connect to another sequencer with older event history to consume the tombstoned events
+      |before reconnecting to the recently onboarded sequencer."""
+  )
+  object TombstoneEncountered
+      extends ErrorCode(
+        id = "SEQUENCER_TOMBSTONE_ENCOUNTERED",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    final case class Error(override val cause: String)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(cause)
+        with SequencedEventError
   }
 }

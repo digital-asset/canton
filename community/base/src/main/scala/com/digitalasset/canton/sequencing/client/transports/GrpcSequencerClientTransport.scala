@@ -38,7 +38,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future}
 
-class GrpcSequencerClientTransport(
+private[transports] abstract class GrpcSequencerClientTransportCommon(
     channel: ManagedChannel,
     callOptions: CallOptions,
     clientAuth: GrpcSequencerClientAuth,
@@ -47,11 +47,11 @@ class GrpcSequencerClientTransport(
     protected val loggerFactory: NamedLoggerFactory,
     protocolVersion: ProtocolVersion,
 )(implicit executionContext: ExecutionContext)
-    extends SequencerClientTransport
+    extends SequencerClientTransportCommon
     with NamedLogging {
 
   private val sequencerConnectServiceClient = new SequencerConnectServiceStub(channel)
-  private val sequencerServiceClient = clientAuth(
+  protected val sequencerServiceClient = clientAuth(
     new SequencerServiceStub(channel, options = callOptions)
   )
   private val noLoggingShutdownErrorsLogPolicy: GrpcError => TracedLogger => TraceContext => Unit =
@@ -206,9 +206,6 @@ class GrpcSequencerClientTransport(
     result
   }
 
-  override def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy =
-    new GrpcSubscriptionErrorRetryPolicy(loggerFactory)
-
   /** We receive grpc errors for a variety of reasons. The send operation is at-most-once and should only be bubbled up
     * and potentially retried if we are absolutely certain the request will never be sequenced.
     */
@@ -255,6 +252,101 @@ class GrpcSequencerClientTransport(
           case _ => false
         }
   }
+
+  override def acknowledge(request: AcknowledgeRequest)(implicit
+      traceContext: TraceContext
+  ): Future[Unit] = {
+    val timestamp = request.timestamp
+    val requestP = request.toProtoV0
+    val responseP = CantonGrpcUtil.sendGrpcRequest(sequencerServiceClient, "sequencer")(
+      _.acknowledge(requestP),
+      requestDescription = s"acknowledge/$timestamp",
+      timeout = timeouts.network.duration,
+      logger = logger,
+      logPolicy = noLoggingShutdownErrorsLogPolicy,
+      retryPolicy = retryPolicy(retryOnUnavailable = false),
+    )
+
+    logger.debug(s"Acknowledging timestamp: $timestamp")
+    responseP.value map {
+      case Left(error) =>
+        logger.warn(s"Failed to send acknowledgement for $timestamp: $error")
+      case Right(_) =>
+        logger.debug(s"Acknowledged timestamp: $timestamp")
+    }
+  }
+
+  override def acknowledgeSigned(signedRequest: SignedContent[AcknowledgeRequest])(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, Unit] = {
+    val request = signedRequest.content
+    val timestamp = request.timestamp
+    val requestP = signedRequest.toProtoV0
+    logger.debug(s"Acknowledging timestamp: $timestamp")
+    CantonGrpcUtil
+      .sendGrpcRequest(sequencerServiceClient, "sequencer")(
+        _.acknowledgeSigned(requestP),
+        requestDescription = s"acknowledge-signed/$timestamp",
+        timeout = timeouts.network.duration,
+        logger = logger,
+        logPolicy = noLoggingShutdownErrorsLogPolicy,
+        retryPolicy = retryPolicy(retryOnUnavailable = false),
+      )
+      .leftMap(_.toString)
+      .map(_ => logger.debug(s"Acknowledged timestamp: $timestamp"))
+  }
+
+  override def downloadTopologyStateForInit(request: TopologyStateForInitRequest)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, TopologyStateForInitResponse] = {
+    val requestP = request.toProtoV0
+
+    logger.debug("Downloading topology state for initialization")
+    CantonGrpcUtil
+      .sendGrpcRequest(sequencerServiceClient, "sequencer")(
+        _.downloadTopologyStateForInit(requestP),
+        requestDescription = s"download-topology-state-for-init/${request.member}",
+        timeout = timeouts.network.duration,
+        logger = logger,
+        logPolicy = noLoggingShutdownErrorsLogPolicy,
+        retryPolicy = retryPolicy(retryOnUnavailable = false),
+      )
+      .leftMap(_.toString)
+      .subflatMap(TopologyStateForInitResponse.fromProtoV0(_).leftMap(_.toString))
+      .map { response =>
+        logger.debug(
+          s"Downloaded topology state for initialization with last change timestamp at ${response.topologyTransactions.value.lastChangeTimestamp}"
+        )
+        response
+      }
+  }
+
+  override protected def onClosed(): Unit =
+    Lifecycle.close(
+      clientAuth,
+      new CloseableChannel(channel, logger, "grpc-sequencer-transport"),
+    )(logger)
+}
+
+class GrpcSequencerClientTransport(
+    channel: ManagedChannel,
+    callOptions: CallOptions,
+    clientAuth: GrpcSequencerClientAuth,
+    metrics: SequencerClientMetrics,
+    timeouts: ProcessingTimeout,
+    loggerFactory: NamedLoggerFactory,
+    protocolVersion: ProtocolVersion,
+)(implicit executionContext: ExecutionContext)
+    extends GrpcSequencerClientTransportCommon(
+      channel,
+      callOptions,
+      clientAuth,
+      metrics,
+      timeouts,
+      loggerFactory,
+      protocolVersion,
+    )
+    with SequencerClientTransport {
 
   override def subscribe[E](
       subscriptionRequest: SubscriptionRequest,
@@ -332,77 +424,6 @@ class GrpcSequencerClientTransport(
   )(implicit traceContext: TraceContext): SequencerSubscription[E] =
     subscribeInternal(request, handler, requiresAuthentication = false)
 
-  override def acknowledge(request: AcknowledgeRequest)(implicit
-      traceContext: TraceContext
-  ): Future[Unit] = {
-    val timestamp = request.timestamp
-    val requestP = request.toProtoV0
-    val responseP = CantonGrpcUtil.sendGrpcRequest(sequencerServiceClient, "sequencer")(
-      _.acknowledge(requestP),
-      requestDescription = s"acknowledge/$timestamp",
-      timeout = timeouts.network.duration,
-      logger = logger,
-      logPolicy = noLoggingShutdownErrorsLogPolicy,
-      retryPolicy = retryPolicy(retryOnUnavailable = false),
-    )
-
-    logger.debug(s"Acknowledging timestamp: $timestamp")
-    responseP.value map {
-      case Left(error) =>
-        logger.warn(s"Failed to send acknowledgement for $timestamp: $error")
-      case Right(_) =>
-        logger.debug(s"Acknowledged timestamp: $timestamp")
-    }
-  }
-
-  override def acknowledgeSigned(signedRequest: SignedContent[AcknowledgeRequest])(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, String, Unit] = {
-    val request = signedRequest.content
-    val timestamp = request.timestamp
-    val requestP = signedRequest.toProtoV0
-    logger.debug(s"Acknowledging timestamp: $timestamp")
-    CantonGrpcUtil
-      .sendGrpcRequest(sequencerServiceClient, "sequencer")(
-        _.acknowledgeSigned(requestP),
-        requestDescription = s"acknowledge-signed/$timestamp",
-        timeout = timeouts.network.duration,
-        logger = logger,
-        logPolicy = noLoggingShutdownErrorsLogPolicy,
-        retryPolicy = retryPolicy(retryOnUnavailable = false),
-      )
-      .leftMap(_.toString)
-      .map(_ => logger.debug(s"Acknowledged timestamp: $timestamp"))
-  }
-
-  override def downloadTopologyStateForInit(request: TopologyStateForInitRequest)(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, String, TopologyStateForInitResponse] = {
-    val requestP = request.toProtoV0
-
-    logger.debug("Downloading topology state for initialization")
-    CantonGrpcUtil
-      .sendGrpcRequest(sequencerServiceClient, "sequencer")(
-        _.downloadTopologyStateForInit(requestP),
-        requestDescription = s"download-topology-state-for-init/${request.member}",
-        timeout = timeouts.network.duration,
-        logger = logger,
-        logPolicy = noLoggingShutdownErrorsLogPolicy,
-        retryPolicy = retryPolicy(retryOnUnavailable = false),
-      )
-      .leftMap(_.toString)
-      .subflatMap(TopologyStateForInitResponse.fromProtoV0(_).leftMap(_.toString))
-      .map { response =>
-        logger.debug(
-          s"Downloaded topology state for initialization with last change timestamp at ${response.topologyTransactions.value.lastChangeTimestamp}"
-        )
-        response
-      }
-  }
-
-  override protected def onClosed(): Unit =
-    Lifecycle.close(
-      clientAuth,
-      new CloseableChannel(channel, logger, "grpc-sequencer-transport"),
-    )(logger)
+  override def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy =
+    new GrpcSubscriptionErrorRetryPolicy(loggerFactory)
 }

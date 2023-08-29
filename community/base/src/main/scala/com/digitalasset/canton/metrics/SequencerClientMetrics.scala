@@ -9,7 +9,6 @@ import com.daml.metrics.api.{MetricDoc, MetricName, MetricsContext}
 import com.digitalasset.canton.metrics.MetricHandle.MetricsFactory
 
 import scala.annotation.nowarn
-import scala.concurrent.duration.*
 
 class SequencerClientMetrics(
     basePrefix: MetricName,

@@ -11,7 +11,6 @@ import com.daml.ledger.resources.{ResourceOwner, TestResourceContext}
 import com.daml.lf.data.Ref.{Party, SubmissionId}
 import com.daml.lf.data.{Ref, Time}
 import com.daml.metrics.Metrics
-import com.digitalasset.canton.HasExecutionContext
 import com.digitalasset.canton.ledger.api.health.HealthStatus
 import com.digitalasset.canton.ledger.configuration.{
   Configuration,
@@ -37,7 +36,9 @@ import com.digitalasset.canton.platform.config.{
   IndexServiceConfig,
   ServerRole,
 }
+import com.digitalasset.canton.platform.indexer.IndexerStartupMode.MigrateAndStart
 import com.digitalasset.canton.platform.indexer.RecoveringIndexerIntegrationSpec.*
+import com.digitalasset.canton.platform.indexer.ha.HaConfig
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.platform.store.DbSupport.{
   ConnectionPoolConfig,
@@ -47,6 +48,7 @@ import com.digitalasset.canton.platform.store.DbSupport.{
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.tracing.TraceContext.{withNewTraceContext, wrapWithNewTraceContext}
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, Traced}
+import com.digitalasset.canton.{HasExecutionContext, config}
 import io.opentelemetry.api.trace.Tracer
 import org.mockito.Mockito.*
 import org.mockito.{ArgumentMatchers, MockitoSugar}
@@ -62,7 +64,7 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.{CompletionStage, Executors}
 import scala.collection.mutable
-import scala.concurrent.duration.{DurationInt, FiniteDuration}
+import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.FutureConverters.{CompletionStageOps, FutureOps}
 
@@ -188,7 +190,10 @@ class RecoveringIndexerIntegrationSpec
     "stop when the kill switch is hit after a failure" in withNewTraceContext {
       implicit traceContext =>
         loggerFactory.suppress(RecoveringIndexerSuppressionRule) {
-          participantServer(ParticipantStateThatFailsOften, restartDelay = 10.seconds)
+          participantServer(
+            ParticipantStateThatFailsOften,
+            restartDelay = config.NonNegativeFiniteDuration.ofSeconds(10),
+          )
             .use { participantState =>
               for {
                 _ <- participantState
@@ -232,7 +237,8 @@ class RecoveringIndexerIntegrationSpec
 
   private def participantServer(
       newParticipantState: ParticipantStateFactory,
-      restartDelay: FiniteDuration = 100.millis,
+      restartDelay: config.NonNegativeFiniteDuration =
+        config.NonNegativeFiniteDuration.ofMillis(100),
   )(implicit traceContext: TraceContext): ResourceOwner[WritePartyService] = {
     val ledgerId = Ref.LedgerString.assertFromString(s"ledger-$testId")
     val participantId = Ref.ParticipantId.assertFromString(s"participant-$testId")
@@ -262,8 +268,7 @@ class RecoveringIndexerIntegrationSpec
         readService = participantState._1,
         participantId = participantId,
         config = IndexerConfig(
-          startupMode = IndexerStartupMode.MigrateAndStart,
-          restartDelay = restartDelay,
+          restartDelay = restartDelay
         ),
         metrics = metrics,
         participantDataSourceConfig = participantDataSourceConfig,
@@ -273,6 +278,9 @@ class RecoveringIndexerIntegrationSpec
         tracer = tracer,
         loggerFactory = loggerFactory,
         multiDomainEnabled = false,
+        startupMode = MigrateAndStart,
+        dataSourceProperties = None,
+        highAvailability = HaConfig(),
       )(materializer, traceContext)
     } yield participantState._2
   }

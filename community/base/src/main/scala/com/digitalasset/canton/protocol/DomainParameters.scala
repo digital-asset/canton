@@ -136,7 +136,7 @@ object StaticDomainParameters
     ),
   )
 
-  override lazy val defaultValues = Seq(
+  override lazy val invariants = Seq(
     defaultReconciliationIntervalFrom,
     defaultMaxRatePerParticipantFrom,
     defaultMaxRequestSizeFrom,
@@ -146,7 +146,7 @@ object StaticDomainParameters
     protocolVersionRepresentativeFor(ProtocolVersion.v4)
 
   lazy val defaultReconciliationInterval: PositiveSeconds = PositiveSeconds.tryOfSeconds(60)
-  lazy val defaultReconciliationIntervalFrom = DefaultValueFrom(
+  lazy val defaultReconciliationIntervalFrom = DefaultValueFromInclusive(
     _.reconciliationInterval,
     "reconciliationInterval",
     rpv4,
@@ -154,7 +154,7 @@ object StaticDomainParameters
   )
 
   lazy val defaultMaxRatePerParticipant: NonNegativeInt = NonNegativeInt.tryCreate(1000000)
-  lazy val defaultMaxRatePerParticipantFrom = DefaultValueFrom(
+  lazy val defaultMaxRatePerParticipantFrom = DefaultValueFromInclusive(
     _.maxRatePerParticipant,
     "maxRatePerParticipant",
     rpv4,
@@ -164,7 +164,7 @@ object StaticDomainParameters
   lazy val defaultMaxRequestSize: MaxRequestSize = MaxRequestSize(
     NonNegativeInt.tryCreate(10 * 1024 * 1024)
   )
-  lazy val defaultMaxRequestSizeFrom = DefaultValueFrom(
+  lazy val defaultMaxRequestSizeFrom = DefaultValueFromInclusive(
     _.maxRequestSize,
     "maxRequestSize",
     rpv4,
@@ -568,32 +568,32 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
 
   override def name: String = "dynamic domain parameters"
 
-  private lazy val rpv3 = protocolVersionRepresentativeFor(ProtocolVersion.v3)
+  private lazy val rpv4 = protocolVersionRepresentativeFor(ProtocolVersion.v4)
 
-  override lazy val defaultValues = Seq(
+  override lazy val invariants = Seq(
     defaultReconciliationIntervalUntil,
     defaultMaxRatePerParticipantUntil,
     defaultMaxRequestSizeUntil,
   )
 
-  lazy val defaultReconciliationIntervalUntil = DefaultValueUntil(
+  lazy val defaultReconciliationIntervalUntil = DefaultValueUntilExclusive(
     _.reconciliationInterval,
     "reconciliationInterval",
-    rpv3,
+    rpv4,
     StaticDomainParameters.defaultReconciliationInterval,
   )
 
-  lazy val defaultMaxRatePerParticipantUntil = DefaultValueUntil(
+  lazy val defaultMaxRatePerParticipantUntil = DefaultValueUntilExclusive(
     _.maxRatePerParticipant,
     "maxRatePerParticipant",
-    rpv3,
+    rpv4,
     StaticDomainParameters.defaultMaxRatePerParticipant,
   )
 
-  lazy val defaultMaxRequestSizeUntil = DefaultValueUntil(
+  lazy val defaultMaxRequestSizeUntil = DefaultValueUntilExclusive(
     _.maxRequestSize,
     "maxRequestSize",
-    rpv3,
+    rpv4,
     StaticDomainParameters.defaultMaxRequestSize,
   )
 

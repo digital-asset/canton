@@ -7,8 +7,8 @@ import com.daml.jwt.{Error, JwtFromBearerHeader, JwtVerifier, JwtVerifierBase}
 import com.daml.lf.data.Ref
 import com.digitalasset.canton.ledger.api.auth.AuthService.AUTHORIZATION_KEY
 import com.digitalasset.canton.ledger.api.domain.IdentityProviderId
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import io.grpc.Metadata
-import org.slf4j.{Logger, LoggerFactory}
 import spray.json.*
 
 import java.util.concurrent.{CompletableFuture, CompletionStage}
@@ -18,10 +18,12 @@ import scala.util.Try
 /** An AuthService that reads a JWT token from a `Authorization: Bearer` HTTP header.
   * The token is expected to use the format as defined in [[AuthServiceJWTPayload]]:
   */
-class AuthServiceJWT(verifier: JwtVerifierBase, targetAudience: Option[String])
-    extends AuthService {
-
-  protected val logger: Logger = LoggerFactory.getLogger(AuthServiceJWT.getClass)
+class AuthServiceJWT(
+    verifier: JwtVerifierBase,
+    targetAudience: Option[String],
+    val loggerFactory: NamedLoggerFactory,
+) extends AuthService
+    with NamedLogging {
 
   override def decodeMetadata(headers: Metadata): CompletionStage[ClaimSet] =
     CompletableFuture.completedFuture {
@@ -37,7 +39,7 @@ class AuthServiceJWT(verifier: JwtVerifierBase, targetAudience: Option[String])
   private[this] def parseHeader(header: String): ClaimSet =
     parseJWTPayload(header).fold(
       error => {
-        logger.warn("Authorization error: " + error.message)
+        noTracingLogger.warn("Authorization error: " + error.message)
         ClaimSet.Unauthenticated
       },
       token => payloadToClaims(token),
@@ -128,9 +130,14 @@ object AuthServiceJWT {
   def apply(
       verifier: com.auth0.jwt.interfaces.JWTVerifier,
       targetAudience: Option[String],
+      loggerFactory: NamedLoggerFactory,
   ): AuthServiceJWT =
-    new AuthServiceJWT(new JwtVerifier(verifier), targetAudience)
+    new AuthServiceJWT(new JwtVerifier(verifier), targetAudience, loggerFactory)
 
-  def apply(verifier: JwtVerifierBase, targetAudience: Option[String]): AuthServiceJWT =
-    new AuthServiceJWT(verifier, targetAudience)
+  def apply(
+      verifier: JwtVerifierBase,
+      targetAudience: Option[String],
+      loggerFactory: NamedLoggerFactory,
+  ): AuthServiceJWT =
+    new AuthServiceJWT(verifier, targetAudience, loggerFactory)
 }

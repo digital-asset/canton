@@ -126,6 +126,9 @@ object RejectionGenerators {
         case e: LfInterpretationError.ContractIdComparability =>
           CommandExecutionErrors.Interpreter.ContractIdComparability
             .Reject(renderedMessage, e)
+        case e: LfInterpretationError.ValueNesting =>
+          CommandExecutionErrors.Interpreter.ValueNesting
+            .Reject(renderedMessage, e)
         case LfInterpretationError.Dev(_, err) =>
           CommandExecutionErrors.Interpreter.InterpretationDevError
             .Reject(renderedMessage, err)

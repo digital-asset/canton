@@ -9,8 +9,8 @@ import com.daml.ledger.resources.{ResourceOwner, TestResourceContext}
 import com.daml.metrics.Metrics
 import com.daml.metrics.api.testing.{InMemoryMetricsFactory, MetricValues}
 import com.daml.platform.hello.{HelloRequest, HelloResponse, HelloServiceGrpc}
-import com.daml.ports.Port
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.ledger.client.GrpcChannel
 import com.digitalasset.canton.ledger.client.configuration.LedgerClientChannelConfiguration
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
@@ -171,7 +171,7 @@ object GrpcServerSpec {
         loggerFactory = loggerFactory,
       )
       channel <- new GrpcChannel.Owner(
-        Port(server.getPort),
+        Port.tryCreate(server.getPort),
         LedgerClientChannelConfiguration.InsecureDefaults,
       )
     } yield channel

@@ -399,6 +399,8 @@ final case class TransferOutView private (
     with ProtocolVersionedMemoizedEvidence {
 
   // TODO(#12373) Adapt when releasing BFT
+  // Ensures the invariants related to default values hold
+  validateInstance().valueOr(err => throw new IllegalArgumentException(err))
   require(
     (representativeProtocolVersion.representative < ProtocolVersion.dev) == transferCounter.isEmpty,
     s"Transfer counter must be defined only in protocol version ${ProtocolVersion.dev} or higher",
@@ -532,6 +534,17 @@ object TransferOutView
     ),
   )
 
+  override lazy val invariants = Seq(
+    transferCounterInvariant
+  )
+
+  lazy val transferCounterInvariant = InvariantFromInclusive[TransferCounterO](
+    _.transferCounter,
+    _.nonEmpty,
+    "transferCounter should not be empty",
+    protocolVersionRepresentativeFor(TransferCommonData.minimumPvForTransferCounter),
+  )
+
   def create(hashOps: HashOps)(
       salt: Salt,
       submitterMetadata: TransferSubmitterMetadata,
@@ -544,7 +557,7 @@ object TransferOutView
       transferCounter: TransferCounterO,
   ): Either[String, TransferOutView] =
     for {
-      _ <- TransferCommonData.checkTransferCounter(transferCounter, sourceProtocolVersion.v)
+      _ <- transferCounterInvariant.validate(transferCounter, sourceProtocolVersion.v)
     } yield TransferOutView(
       salt,
       submitterMetadata,

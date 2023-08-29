@@ -1,25 +1,26 @@
-import DamlPlugin.autoImport._
-import Dependencies._
-import better.files.{File => BetterFile, _}
-import com.typesafe.sbt.SbtLicenseReport.autoImportImpl._
+import java.io.File
+import DamlPlugin.autoImport.*
+import Dependencies.*
+import better.files.{File as BetterFile, *}
+import com.typesafe.sbt.SbtLicenseReport.autoImportImpl.*
 import de.heikoseeberger.sbtheader.HeaderPlugin.autoImport.{headerResources, headerSources}
 import org.scalafmt.sbt.ScalafmtPlugin
 import pl.project13.scala.sbt.JmhPlugin
-import sbt.Keys._
+import sbt.Keys.*
 import sbt.Tests.{Group, SubProcess}
-import sbt._
+import sbt.*
 import sbt.internal.util.ManagedLogger
-import sbt.nio.Keys._
-import sbtassembly.AssemblyKeys._
+import sbt.nio.Keys.*
+import sbtassembly.AssemblyKeys.*
 import sbtassembly.AssemblyPlugin.autoImport.assembly
 import sbtassembly.{MergeStrategy, PathList}
 import sbtbuildinfo.BuildInfoPlugin
-import sbtbuildinfo.BuildInfoPlugin.autoImport._
+import sbtbuildinfo.BuildInfoPlugin.autoImport.*
 import sbtprotoc.ProtocPlugin.autoImport.PB
 import scalafix.sbt.ScalafixPlugin
-import scoverage.ScoverageKeys._
+import scoverage.ScoverageKeys.*
 import wartremover.WartRemover
-import wartremover.WartRemover.autoImport._
+import wartremover.WartRemover.autoImport.*
 
 import scala.language.postfixOps
 
@@ -345,7 +346,20 @@ object BuildCommon {
       )
     }
 
+  class RenameMergeStrategy(target: String) extends MergeStrategy {
+    override def name: String = s"Rename to ${target}"
+
+    override def apply(
+        tempDir: File,
+        path: String,
+        files: Seq[File],
+    ): Either[String, Seq[(File, String)]] = {
+      Right(files.map(_ -> target))
+    }
+  }
+
   def mergeStrategy(oldStrategy: String => MergeStrategy): String => MergeStrategy = {
+    case PathList("LICENSE") => MergeStrategy.last
     case PathList("buf.yaml") => MergeStrategy.discard
     case PathList("META-INF", "io.netty.versions.properties") => MergeStrategy.first
     case "reflect.properties" => MergeStrategy.first
@@ -584,6 +598,12 @@ object BuildCommon {
           "LICENSE.txt",
         ),
         additionalBundleSources := Seq.empty,
+        assemblyMergeStrategy := {
+          case "LICENSE-open-source-bundle.txt" => new RenameMergeStrategy("LICENSE-DA.txt")
+          case x =>
+            val oldStrategy = (ThisBuild / assemblyMergeStrategy).value
+            oldStrategy(x)
+        },
         assembly / mainClass := Some("com.digitalasset.canton.CantonCommunityApp"),
         assembly / assemblyJarName := s"canton-open-source-${version.value}.jar",
         // specifying the damlSourceDirectory to non-default location enables checking/updating of daml version
@@ -1144,6 +1164,7 @@ object BuildCommon {
       .dependsOn(
         `ledger-common` % "compile->compile;test->test",
         `community-base`,
+        `community-common`,
         `community-testing` % "test->test",
       )
       .settings(
