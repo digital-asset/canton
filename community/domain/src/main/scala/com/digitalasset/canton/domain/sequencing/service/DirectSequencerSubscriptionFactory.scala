@@ -10,7 +10,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.sequencing.SerializedEventHandler
+import com.digitalasset.canton.sequencing.SerializedEventOrErrorHandler
 import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
@@ -42,7 +42,7 @@ class DirectSequencerSubscriptionFactory(
       startingAt: SequencerCounter,
       identifier: String,
       member: Member,
-      handler: SerializedEventHandler[E],
+      handler: SerializedEventOrErrorHandler[E],
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, CreateSubscriptionError, SequencerSubscription[E]] = {

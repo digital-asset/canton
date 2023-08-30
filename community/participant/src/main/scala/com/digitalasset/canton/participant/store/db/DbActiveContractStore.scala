@@ -519,49 +519,87 @@ class DbActiveContractStore(
   override def doPrune(beforeAndIncluding: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Future[Unit] = processingTime.event {
-
     // For each contract select the last deactivation before or at the timestamp.
     // If such a deactivation exists then delete all acs records up to and including the deactivation
 
-    val query = storage.profile match {
-      case _: DbStorage.Profile.Postgres =>
-        sqlu"""
-      	  with deactivation_counter(contract_id, request_counter) as (
-            select contract_id, max(request_counter)
-            from active_contracts
-            where domain_id = ${domainId}
-            and change = cast('deactivation' as change_type)
-            and ts <= ${beforeAndIncluding}
-            group by contract_id
-          )
-		  delete from active_contracts
-          where (domain_id, contract_id, ts, request_counter, change) in (
-			select ac.domain_id, ac.contract_id, ac.ts, ac.request_counter, ac.change
-            from deactivation_counter dc
-            join active_contracts ac on ac.domain_id = ${domainId} and ac.contract_id = dc.contract_id
-            where ac.request_counter <= dc.request_counter
-          );
-        """
-      case _: DbStorage.Profile.H2 =>
-        sqlu"""
-      	  with deactivation_counter(contract_id, request_counter) as (
-            select contract_id, max(request_counter)
-            from active_contracts
-            where domain_id = ${domainId}
-            and change = ${ChangeType.Deactivation}
-            and ts <= ${beforeAndIncluding}
-            group by contract_id
-          )
-		  delete from active_contracts
-          where (domain_id, contract_id, ts, request_counter, change) in (
-			select ac.domain_id, ac.contract_id, ac.ts, ac.request_counter, ac.change
-            from deactivation_counter dc
-            join active_contracts ac on ac.domain_id = ${domainId} and ac.contract_id = dc.contract_id
-            where ac.request_counter <= dc.request_counter
-          );
-          """
-      case _: DbStorage.Profile.Oracle =>
-        sqlu"""delete from active_contracts where rowid in (
+    (for {
+      nrPruned <-
+        storage.profile match {
+          case _: DbStorage.Profile.Postgres =>
+            // On postgres running the single-sql-statement with both select/delete has resulted in Postgres
+            // flakily hanging indefinitely on the ACS pruning select/delete. The only workaround that also still makes
+            // use of the partial index "active_contracts_pruning_idx" appears to be splitting the select and delete
+            // into separate statements. See #11292.
+            for {
+              acsEntriesToPrune <- performUnlessClosingF("Fetch ACS entries batch")(
+                storage.query(
+                  sql"""
+                  with deactivation_counter(contract_id, request_counter) as (
+                    select contract_id, max(request_counter)
+                    from active_contracts
+                    where domain_id = ${domainId}
+                      and change = cast('deactivation' as change_type)
+                      and ts <= ${beforeAndIncluding}
+                    group by contract_id
+                  )
+                    select ac.contract_id, ac.ts, ac.request_counter, ac.change
+                    from deactivation_counter dc
+                      join active_contracts ac on ac.domain_id = ${domainId} and ac.contract_id = dc.contract_id
+                    where ac.request_counter <= dc.request_counter"""
+                    .as[(LfContractId, CantonTimestamp, RequestCounter, ChangeType)],
+                  s"${functionFullName}: Fetch ACS entries to be pruned",
+                )
+              )
+              totalEntriesPruned <-
+                performUnlessClosingF("Delete ACS entries batch")(
+                  NonEmpty.from(acsEntriesToPrune).fold(Future.successful(0)) { acsEntries =>
+                    val deleteStatement =
+                      s"delete from active_contracts where domain_id = ? and contract_id = ? and ts = ?"
+                        + " and request_counter = ? and change = CAST(? as change_type);"
+                    storage.queryAndUpdate(
+                      DbStorage
+                        .bulkOperation(deleteStatement, acsEntriesToPrune, storage.profile) { pp =>
+                          { case (contractId, ts, rc, change) =>
+                            pp >> domainId
+                            pp >> contractId
+                            pp >> ts
+                            pp >> rc
+                            pp >> change
+                          }
+                        }
+                        .map(_.sum),
+                      s"${functionFullName}: Bulk-delete ACS entries",
+                    )
+                  }
+                )
+            } yield totalEntriesPruned
+          case _: DbStorage.Profile.H2 =>
+            performUnlessClosingF("ACS.doPrune")(
+              storage.queryAndUpdate(
+                sqlu"""
+            with deactivation_counter(contract_id, request_counter) as (
+              select contract_id, max(request_counter)
+              from active_contracts
+              where domain_id = ${domainId}
+              and change = ${ChangeType.Deactivation}
+              and ts <= ${beforeAndIncluding}
+              group by contract_id
+            )
+		    delete from active_contracts
+            where (domain_id, contract_id, ts, request_counter, change) in (
+		      select ac.domain_id, ac.contract_id, ac.ts, ac.request_counter, ac.change
+              from deactivation_counter dc
+              join active_contracts ac on ac.domain_id = ${domainId} and ac.contract_id = dc.contract_id
+              where ac.request_counter <= dc.request_counter
+            );
+            """,
+                functionFullName,
+              )
+            )
+          case _: DbStorage.Profile.Oracle =>
+            performUnlessClosingF("ACS.doPrune")(
+              storage.queryAndUpdate(
+                sqlu"""delete from active_contracts where rowid in (
             with deactivation_counter(contract_id, request_counter) as (
                 select contract_id, max(request_counter)
                 from active_contracts
@@ -574,15 +612,16 @@ class DbActiveContractStore(
             from deactivation_counter dc
             join active_contracts ac on ac.domain_id = ${domainId} and ac.contract_id = dc.contract_id
             where ac.request_counter <= dc.request_counter
-        )"""
-    }
-    for {
-      nrPruned <- storage.queryAndUpdate(query, functionFullName)
+            )""",
+                functionFullName,
+              )
+            )
+        }
     } yield {
       logger.info(
         s"Pruned at least $nrPruned entries from the ACS of domain $domainId older or equal to $beforeAndIncluding"
       )
-    }
+    }).onShutdown(())
   }
 
   def deleteSince(criterion: RequestCounter)(implicit traceContext: TraceContext): Future[Unit] =

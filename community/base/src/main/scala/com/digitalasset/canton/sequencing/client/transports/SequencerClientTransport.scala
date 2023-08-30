@@ -18,8 +18,8 @@ import com.digitalasset.canton.tracing.TraceContext
 import scala.concurrent.Future
 import scala.concurrent.duration.Duration
 
-/** Implementation dependent operations for a client to read and write to a domain sequencer. */
-trait SequencerClientTransport extends FlagCloseable with SupportsHandshake {
+/** Implementation dependent operations for a client to write to a domain sequencer. */
+trait SequencerClientTransportCommon extends FlagCloseable with SupportsHandshake {
 
   /** Sends a submission request to the sequencer.
     * If we failed to make the request, an error will be returned.
@@ -49,6 +49,28 @@ trait SequencerClientTransport extends FlagCloseable with SupportsHandshake {
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit]
 
+  /** Acknowledge that we have successfully processed all events up to and including the given timestamp.
+    * The client should then never subscribe for events from before this point.
+    */
+  def acknowledge(request: AcknowledgeRequest)(implicit
+      traceContext: TraceContext
+  ): Future[Unit]
+
+  def acknowledgeSigned(request: SignedContent[AcknowledgeRequest])(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, Unit]
+
+  def downloadTopologyStateForInit(request: TopologyStateForInitRequest)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, TopologyStateForInitResponse]
+
+  /** The transport can decide which errors will cause the sequencer client to not try to reestablish a subscription */
+  def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy
+}
+
+/** Implementation dependent operations for a client to read and write to a domain sequencer. */
+trait SequencerClientTransport extends SequencerClientTransportCommon {
+
   /** Create a single subscription to read events from the Sequencer for this member starting from the counter defined in the request.
     * Transports are currently responsible for calling the supplied handler.
     * The handler must not be called concurrently and must receive events in-order.
@@ -63,22 +85,4 @@ trait SequencerClientTransport extends FlagCloseable with SupportsHandshake {
   def subscribeUnauthenticated[E](request: SubscriptionRequest, handler: SerializedEventHandler[E])(
       implicit traceContext: TraceContext
   ): SequencerSubscription[E]
-
-  /** Acknowledge that we have successfully processed all events up to and including the given timestamp.
-    * The client should then never subscribe for events from before this point.
-    */
-  def acknowledge(request: AcknowledgeRequest)(implicit
-      traceContext: TraceContext
-  ): Future[Unit]
-
-  def acknowledgeSigned(request: SignedContent[AcknowledgeRequest])(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, String, Unit]
-
-  /** The transport can decide which errors will cause the sequencer client to not try to reestablish a subscription */
-  def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy
-
-  def downloadTopologyStateForInit(request: TopologyStateForInitRequest)(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, String, TopologyStateForInitResponse]
 }

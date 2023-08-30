@@ -18,7 +18,10 @@ import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionErro
   ApplicationHandlerPassive,
   ApplicationHandlerShutdown,
 }
-import com.digitalasset.canton.sequencing.client.transports.SequencerClientTransport
+import com.digitalasset.canton.sequencing.client.transports.{
+  SequencerClientTransport,
+  SequencerClientTransportCommon,
+}
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
@@ -83,7 +86,7 @@ class SequencersTransportState(
       })
     }.flatten
 
-  def transport(implicit traceContext: TraceContext): SequencerClientTransport = blocking(
+  def transport(implicit traceContext: TraceContext): SequencerClientTransportCommon = blocking(
     lock.synchronized {
       val (_, sequencerTransportState) = state.view
         .filterKeys(subscriptionIsHealthy)

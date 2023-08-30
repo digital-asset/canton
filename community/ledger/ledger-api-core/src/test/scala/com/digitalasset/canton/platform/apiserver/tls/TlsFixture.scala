@@ -7,7 +7,7 @@ import com.daml.grpc.sampleservice.implementations.HelloServiceReferenceImplemen
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.metrics.Metrics
 import com.daml.platform.hello.{HelloRequest, HelloResponse, HelloServiceGrpc}
-import com.daml.ports.Port
+import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.ledger.api.tls.TlsConfiguration
 import com.digitalasset.canton.ledger.client.GrpcChannel
 import com.digitalasset.canton.ledger.client.configuration.LedgerClientChannelConfiguration

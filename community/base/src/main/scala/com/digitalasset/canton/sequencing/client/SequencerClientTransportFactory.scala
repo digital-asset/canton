@@ -5,6 +5,7 @@ package com.digitalasset.canton.sequencing.client
 
 import akka.stream.Materializer
 import cats.data.EitherT
+import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -32,6 +33,7 @@ trait SequencerClientTransportFactory {
       requestSigner: RequestSigner,
   )(implicit
       executionContext: ExecutionContextExecutor,
+      executionSequencerFactory: ExecutionSequencerFactory,
       materializer: Materializer,
       traceContext: TraceContext,
   ): EitherT[Future, String, NonEmpty[Map[SequencerAlias, SequencerClientTransport]]] =
@@ -81,6 +83,7 @@ trait SequencerClientTransportFactory {
       requestSigner: RequestSigner,
   )(implicit
       executionContext: ExecutionContextExecutor,
+      executionSequencerFactory: ExecutionSequencerFactory,
       materializer: Materializer,
       traceContext: TraceContext,
   ): EitherT[Future, String, SequencerClientTransport]

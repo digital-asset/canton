@@ -125,7 +125,8 @@ CREATE TABLE participant_command_completions (
     rejection_status_code INTEGER,
     rejection_status_message VARCHAR,
     rejection_status_details BINARY LARGE OBJECT,
-    domain_id INTEGER
+    domain_id INTEGER,
+    trace_context BINARY LARGE OBJECT
 );
 
 CREATE INDEX participant_command_completions_application_id_offset_idx ON participant_command_completions USING btree (application_id, completion_offset);

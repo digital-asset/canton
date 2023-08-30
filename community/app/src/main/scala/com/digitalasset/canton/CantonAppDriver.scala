@@ -137,7 +137,7 @@ abstract class CantonAppDriver[E <: Environment] extends App with NamedLogging w
     }
     val finalConfig = CantonConfig.mergeConfigs(mergedUserConfigs, Seq(configFromMap))
 
-    loadConfig(finalConfig) match {
+    val loadedConfig = loadConfig(finalConfig) match {
       case Left(_) =>
         if (cliOptions.configFiles.sizeCompare(1) > 0)
           writeConfigToTmpFile(mergedUserConfigs)
@@ -146,6 +146,21 @@ abstract class CantonAppDriver[E <: Environment] extends App with NamedLogging w
         if (cliOptions.manualStart) withManualStart(loaded)
         else loaded
     }
+    if (loadedConfig.monitoring.logging.logConfigOnStartup) {
+      // we have two ways to log the config. both have their pro and cons.
+      // full means we include default values. in such a case, it's hard to figure
+      // out what really the config settings are.
+      // the other method just uses the loaded `Config` object that doesn't have default
+      // values, but therefore needs a separate way to handle the rendering
+      logger.info(
+        "Starting up with resolved config:\n" +
+          (if (loadedConfig.monitoring.logging.logConfigWithDefaults)
+             loadedConfig.dumpString
+           else
+             CantonConfig.renderForLoggingOnStartup(finalConfig))
+      )
+    }
+    loadedConfig
   }
 
   private def writeConfigToTmpFile(mergedUserConfigs: Config) = {

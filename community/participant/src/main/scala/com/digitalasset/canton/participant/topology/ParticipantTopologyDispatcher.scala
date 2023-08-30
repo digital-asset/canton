@@ -7,6 +7,7 @@ import akka.stream.Materializer
 import cats.data.EitherT
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
+import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.common.domain.{
@@ -90,6 +91,7 @@ trait ParticipantTopologyDispatcherCommon extends TopologyDispatcherCommon {
       expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
   )(implicit
       executionContext: ExecutionContextExecutor,
+      executionServiceFactory: ExecutionSequencerFactory,
       materializer: Materializer,
       tracer: Tracer,
       traceContext: TraceContext,
@@ -274,6 +276,7 @@ class ParticipantTopologyDispatcher(
       expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
   )(implicit
       executionContext: ExecutionContextExecutor,
+      executionServiceFactory: ExecutionSequencerFactory,
       materializer: Materializer,
       tracer: Tracer,
       traceContext: TraceContext,
@@ -396,6 +399,7 @@ class ParticipantTopologyDispatcherX(
       expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
   )(implicit
       executionContext: ExecutionContextExecutor,
+      executionSequencerFactory: ExecutionSequencerFactory,
       materializer: Materializer,
       tracer: Tracer,
       traceContext: TraceContext,

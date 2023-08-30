@@ -11,6 +11,7 @@ import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.stream.{KillSwitch, OverflowStrategy}
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.util.AkkaUtil.WithKillSwitch
 import com.digitalasset.canton.util.AkkaUtil.syntax.*
 import com.digitalasset.canton.{BaseTest, DiscardOps}
 
@@ -560,9 +561,9 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
       val (source, sink) = TestSource
         .probe[Int]
         .withUniqueKillSwitchMat()(Keep.left)
-        .map { case (i, killSwitch) =>
-          if (i > 0) killSwitch.shutdown()
-          i
+        .map { elem =>
+          if (elem.unwrap > 0) elem.killSwitch.shutdown()
+          elem.unwrap
         }
         .toMat(TestSink.probe)(Keep.both)
         .run()
@@ -581,7 +582,7 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
         .run()
       sink.request(3)
       source.sendNext(100)
-      sink.expectNext(100 -> killSwitch)
+      sink.expectNext(WithKillSwitch(100, killSwitch))
       killSwitch.shutdown()
       source.expectCancellation()
       sink.expectComplete()
@@ -604,9 +605,9 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
       val (source, sink) = TestSource
         .probe[Int]
         .withUniqueKillSwitchMat()(Keep.left)
-        .map { case (i, killSwitch) =>
-          killSwitch.abort(ex)
-          i
+        .map { elem =>
+          elem.killSwitch.abort(ex)
+          elem.unwrap
         }
         .toMat(TestSink.probe)(Keep.both)
         .run()
@@ -621,6 +622,42 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
       sink.expectNext(1)
       sink.expectError(ex)
     }
+  }
 
+  "takeUntilThenDrain" should {
+    "pass elements through until the first one satisfying the predicate" in assertAllStagesStopped {
+      val elemsF = Source
+        // Infinite source to test that we really stop
+        .fromIterator(() => Iterator.from(1))
+        .withUniqueKillSwitchMat()(Keep.left)
+        .takeUntilThenDrain(_ >= 5)
+        .runWith(Sink.seq)
+      elemsF.futureValue.map(_.unwrap) shouldBe (1 to 5)
+    }
+
+    "pass all elements if the condition never fires" in assertAllStagesStopped {
+      val elemsF = Source(1 to 10)
+        .withUniqueKillSwitchMat()(Keep.left)
+        .takeUntilThenDrain(_ => false)
+        .runWith(Sink.seq)
+      elemsF.futureValue.map(_.unwrap) shouldBe (1 to 10)
+    }
+
+    "drain the source" in assertAllStagesStopped {
+      val observed = new AtomicReference[Seq[Int]](Seq.empty[Int])
+      val noOpKillSwitch = new KillSwitch {
+        override def shutdown(): Unit = ()
+        override def abort(ex: Throwable): Unit = ()
+      }
+      val elemsF = Source(1 to 10)
+        .map { i =>
+          observed.getAndUpdate(_ :+ i)
+          WithKillSwitch(i, noOpKillSwitch)
+        }
+        .takeUntilThenDrain(_ >= 5)
+        .runWith(Sink.seq)
+      elemsF.futureValue.map(_.unwrap) shouldBe (1 to 5)
+      observed.get() shouldBe (1 to 10)
+    }
   }
 }

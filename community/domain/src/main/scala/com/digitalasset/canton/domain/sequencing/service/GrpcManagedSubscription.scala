@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.domain.sequencing.service
 
-import akka.NotUsed
 import cats.data.EitherT
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
@@ -12,6 +12,7 @@ import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.SequencerSubscription
+import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.SequencedEventError
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
@@ -41,10 +42,10 @@ trait ManagedSubscription extends FlagCloseable with CloseNotification {
   * Any exception thrown by the call to `observer.onNext` will cause the subscription to close.
   */
 private[service] class GrpcManagedSubscription[T](
-    createSubscription: SerializedEventHandler[NotUsed] => EitherT[
+    createSubscription: SerializedEventOrErrorHandler[SequencedEventError] => EitherT[
       Future,
       CreateSubscriptionError,
-      SequencerSubscription[NotUsed],
+      SequencerSubscription[SequencedEventError],
     ],
     observer: ServerCallStreamObserver[T],
     val member: Member,
@@ -58,7 +59,8 @@ private[service] class GrpcManagedSubscription[T](
 
   protected val loggerFactory: NamedLoggerFactory =
     baseLoggerFactory.append("member", show"$member")
-  private val subscriptionRef = new AtomicReference[Option[SequencerSubscription[NotUsed]]](None)
+  private val subscriptionRef =
+    new AtomicReference[Option[SequencerSubscription[SequencedEventError]]](None)
 
   /** How should the response observer be closed
     */
@@ -84,20 +86,31 @@ private[service] class GrpcManagedSubscription[T](
   // as the underlying channel is cancelled we can no longer send a response
   observer.setOnCancelHandler(() => signalAndClose(NoSignal))
 
-  private val handler: SerializedEventHandler[NotUsed] = event => {
-    implicit val traceContext: TraceContext = event.traceContext
-    Future {
-      Right(performUnlessClosing("grpc-managed-subscription-handler") {
-        observer.onNext(toSubscriptionResponse(event))
-      }.onShutdown(()))
-    }.recover { case NonFatal(e) =>
-      logger.warn(
-        "Unexpected error was thrown while publishing a sequencer event to GRPC subscriber",
-        e,
-      )
-      signalAndClose(ErrorSignal(Status.INTERNAL.withCause(e).asException()))
-      Right(())
-    }
+  private val handler: SerializedEventOrErrorHandler[SequencedEventError] = {
+    case Right(event) =>
+      implicit val traceContext: TraceContext = event.traceContext
+      Future {
+        Right(performUnlessClosing("grpc-managed-subscription-handler") {
+          observer.onNext(toSubscriptionResponse(event))
+        }.onShutdown(()))
+      }.recover { case NonFatal(e) =>
+        logger.warn(
+          "Unexpected error was thrown while publishing a sequencer event to GRPC subscriber",
+          e,
+        )
+        signalAndClose(ErrorSignal(Status.INTERNAL.withCause(e).asException()))
+        Right(())
+      }
+    case Left(error) =>
+      // Turn a subscription error (e.g. due to a tombstone) into a grpc observer error and
+      // terminate the subscription (rather than extending the SequencerResponse with
+      // tombstone related information).
+      Future {
+        // Close asynchronously to avoid deadlocking with the DirectSequencerSubscription's
+        //  "done" akka flow that invokes this handler.
+        signalAndClose(ErrorSignal(error.asGrpcError))
+      }.discard
+      Future.successful(Left(error))
   }
 
   // TODO(#5705) Redo this when revisiting the subscription pool

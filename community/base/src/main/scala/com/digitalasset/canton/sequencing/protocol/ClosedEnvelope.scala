@@ -151,14 +151,12 @@ object ClosedEnvelope extends HasProtocolVersionedCompanion[ClosedEnvelope] {
     ProtoVersion(1)
   )
 
-  override lazy val defaultValues = Seq(
-    defaultSignaturesUntil
-  )
+  override lazy val invariants = Seq(defaultSignaturesUntil)
 
-  lazy val defaultSignaturesUntil = DefaultValueUntil(
+  lazy val defaultSignaturesUntil = DefaultValueUntilExclusive(
     _.signatures,
     "signatures",
-    protocolVersionRepresentativeFor(ProtoVersion(0)),
+    protocolVersionRepresentativeFor(ProtoVersion(1)),
     Nil,
   )
 

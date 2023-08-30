@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.domain
 
 import akka.stream.Materializer
 import cats.data.EitherT
+import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.common.domain.{
   RegisterTopologyTransactionHandleWithProcessor,
@@ -80,6 +81,7 @@ abstract class ParticipantInitializeTopologyCommon[TX](
 
   def run()(implicit
       executionContext: ExecutionContextExecutor,
+      executionSequencerFactory: ExecutionSequencerFactory,
       materializer: Materializer,
       tracer: Tracer,
       traceContext: TraceContext,

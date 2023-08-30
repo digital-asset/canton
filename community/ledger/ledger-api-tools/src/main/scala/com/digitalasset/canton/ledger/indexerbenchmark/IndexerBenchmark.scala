@@ -28,7 +28,9 @@ import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.{ReadService, Update}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.LedgerApiServer
+import com.digitalasset.canton.platform.indexer.ha.HaConfig
 import com.digitalasset.canton.platform.indexer.{Indexer, IndexerServiceOwner, JdbcIndexer}
+import com.digitalasset.canton.platform.store.DbSupport.DataSourceProperties
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, Traced}
 import io.opentelemetry.api.trace.Tracer
@@ -48,6 +50,8 @@ class IndexerBenchmark extends NamedLogging {
   def run(
       createUpdates: () => Future[Source[(Offset, Traced[Update]), NotUsed]],
       config: Config,
+      dataSourceProperties: Option[DataSourceProperties],
+      highAvailability: HaConfig,
   ): Future[Unit] = {
     withNewTraceContext { implicit traceContext =>
       val system = ActorSystem("IndexerBenchmark")
@@ -94,6 +98,8 @@ class IndexerBenchmark extends NamedLogging {
           tracer,
           loggerFactory,
           multiDomainEnabled = false,
+          dataSourceProperties,
+          highAvailability,
         )
         _ = println("Setting up the index database...")
         indexer <- indexer(config, indexerExecutionContext, indexerFactory)
@@ -206,10 +212,12 @@ class IndexerBenchmark extends NamedLogging {
 
   def runAndExit(
       config: Config,
+      dataSourceProperties: Option[DataSourceProperties],
+      highAvailability: HaConfig,
       updates: () => Future[Source[(Offset, Traced[Update]), NotUsed]],
   ): Unit = {
     val result: Future[Unit] = new IndexerBenchmark()
-      .run(updates, config)
+      .run(updates, config, dataSourceProperties, highAvailability)
       .recover { case ex =>
         logger.error("Error running benchmark", ex)(TraceContext.empty)
         sys.exit(1)

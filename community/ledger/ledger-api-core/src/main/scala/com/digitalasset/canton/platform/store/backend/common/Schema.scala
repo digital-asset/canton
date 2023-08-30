@@ -363,6 +363,7 @@ private[backend] object AppendOnlySchema {
         "domain_id" -> fieldStrategy.intOptional(stringInterning =>
           _.domain_id.map(stringInterning.domainId.unsafe.internalize)
         ),
+        "trace_context" -> fieldStrategy.byteaOptional(_ => _.trace_context),
       )
 
     val stringInterningTable: Table[DbDto.StringInterningDto] =

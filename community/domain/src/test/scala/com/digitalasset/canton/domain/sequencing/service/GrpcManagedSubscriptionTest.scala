@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.domain.sequencing.service
 
-import akka.NotUsed
 import cats.data.EitherT
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
@@ -12,6 +11,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscrip
 import com.digitalasset.canton.sequencing.SequencerTestUtils.MockMessageContent
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.SequencerSubscription
+import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.SequencedEventError
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.topology.{
@@ -32,9 +32,9 @@ class GrpcManagedSubscriptionTest extends AnyWordSpec with BaseTest with HasExec
 
   @SuppressWarnings(Array("org.wartremover.warts.Var", "org.wartremover.warts.Null"))
   private class Env {
-    val sequencerSubscription = mock[SequencerSubscription[NotUsed]]
+    val sequencerSubscription = mock[SequencerSubscription[SequencedEventError]]
     val domainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("da::default"))
-    var handler: Option[SerializedEventHandler[NotUsed]] = None
+    var handler: Option[SerializedEventOrErrorHandler[SequencedEventError]] = None
     val member = ParticipantId(DefaultTestIdentities.uid)
     val observer = mock[ServerCallStreamObserver[v0.SubscriptionResponse]]
     var cancelCallback: Option[Runnable] = None
@@ -46,8 +46,8 @@ class GrpcManagedSubscriptionTest extends AnyWordSpec with BaseTest with HasExec
       cancelCallback.fold(fail("no cancel handler registered"))(_.run())
 
     def createSequencerSubscription(
-        newHandler: SerializedEventHandler[NotUsed]
-    ): EitherT[Future, CreateSubscriptionError, SequencerSubscription[NotUsed]] = {
+        newHandler: SerializedEventOrErrorHandler[SequencedEventError]
+    ): EitherT[Future, CreateSubscriptionError, SequencerSubscription[SequencedEventError]] = {
       handler = Some(newHandler)
       EitherT.rightT[Future, CreateSubscriptionError](sequencerSubscription)
     }
@@ -74,7 +74,7 @@ class GrpcManagedSubscriptionTest extends AnyWordSpec with BaseTest with HasExec
         testedProtocolVersion,
       )
       handler.fold(fail("handler not registered"))(h =>
-        Await.result(h(OrdinarySequencedEvent(event, None)(traceContext)), 5.seconds)
+        Await.result(h(Right(OrdinarySequencedEvent(event, None)(traceContext))), 5.seconds)
       )
     }
 

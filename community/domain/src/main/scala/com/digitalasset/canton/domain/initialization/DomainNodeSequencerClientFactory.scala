@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.initialization
 
 import akka.stream.Materializer
 import cats.data.EitherT
+import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -60,6 +61,7 @@ class DomainNodeSequencerClientFactory(
       expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
   )(implicit
       executionContext: ExecutionContextExecutor,
+      executionSequencerFactory: ExecutionSequencerFactory,
       materializer: Materializer,
       tracer: Tracer,
       traceContext: TraceContext,
@@ -79,6 +81,7 @@ class DomainNodeSequencerClientFactory(
       requestSigner: RequestSigner,
   )(implicit
       executionContext: ExecutionContextExecutor,
+      executionSequencerFactory: ExecutionSequencerFactory,
       materializer: Materializer,
       traceContext: TraceContext,
   ): EitherT[Future, String, SequencerClientTransport] =

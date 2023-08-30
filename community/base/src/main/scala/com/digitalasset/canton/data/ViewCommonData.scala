@@ -156,7 +156,7 @@ object ViewCommonData
       context: (HashOps, ConfirmationPolicy),
       viewCommonDataP: v1.ViewCommonData,
   )(bytes: ByteString): ParsingResult[ViewCommonData] = {
-    val (hashOps, confirmationPolicy) = context
+    val (hashOps, _confirmationPolicy) = context
     for {
       informees <- viewCommonDataP.informees.traverse(Informee.fromProtoV1)
 

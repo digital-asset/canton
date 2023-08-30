@@ -15,7 +15,6 @@ import com.daml.ledger.api.v1.experimental_features.{
 }
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.ports.Port
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.{
@@ -34,6 +33,7 @@ import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.{ApiRequestLogger, ClientChannelBuilder}
 import com.digitalasset.canton.participant.config.LedgerApiServerConfig
+import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.IndexerLockIds
 import com.digitalasset.canton.platform.LedgerApiServer
 import com.digitalasset.canton.platform.apiserver.ratelimiting.{
   RateLimitingInterceptor,
@@ -41,15 +41,14 @@ import com.digitalasset.canton.platform.apiserver.ratelimiting.{
 }
 import com.digitalasset.canton.platform.apiserver.{ApiServerConfig, ApiServiceOwner, LedgerFeatures}
 import com.digitalasset.canton.platform.config.{
-  AcsStreamsConfig as LedgerAcsStreamsConfig,
   IndexServiceConfig as LedgerIndexServiceConfig,
   ServerRole,
-  TransactionFlatStreamsConfig as LedgerTransactionFlatStreamsConfig,
-  TransactionTreeStreamsConfig as LedgerTransactionTreeStreamsConfig,
 }
 import com.digitalasset.canton.platform.index.IndexServiceOwner
+import com.digitalasset.canton.platform.indexer.IndexerConfig.DefaultIndexerStartupMode
+import com.digitalasset.canton.platform.indexer.ha.HaConfig
 import com.digitalasset.canton.platform.indexer.{
-  IndexerConfig as DamlIndexerConfig,
+  IndexerConfig,
   IndexerServiceOwner,
   IndexerStartupMode,
 }
@@ -64,7 +63,6 @@ import com.digitalasset.canton.util.{FutureUtil, SimpleExecutionQueue}
 import io.grpc.ServerInterceptor
 import io.opentelemetry.api.trace.Tracer
 import io.opentelemetry.instrumentation.grpc.v1_6.GrpcTracing
-import io.scalaland.chimney.dsl.*
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.Future
@@ -178,17 +176,11 @@ class StartableStoppableLedgerApiServer(
       overrideIndexerStartupMode: Option[IndexerStartupMode]
   )(implicit traceContext: TraceContext) = {
     implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
-    val acsStreamsConfig =
-      config.serverConfig.activeContractsService.transformInto[LedgerAcsStreamsConfig]
-    val txFlatStreamsConfig =
-      config.serverConfig.transactionFlatStreams.transformInto[LedgerTransactionFlatStreamsConfig]
-    val txTreeStreamsConfig =
-      config.serverConfig.transactionTreeStreams.transformInto[LedgerTransactionTreeStreamsConfig]
 
     val indexServiceConfig = LedgerIndexServiceConfig(
-      acsStreams = acsStreamsConfig,
-      transactionFlatStreams = txFlatStreamsConfig,
-      transactionTreeStreams = txTreeStreamsConfig,
+      activeContractsServiceStreams = config.serverConfig.activeContractsService,
+      transactionFlatStreams = config.serverConfig.transactionFlatStreams,
+      transactionTreeStreams = config.serverConfig.transactionTreeStreams,
       bufferedEventsProcessingParallelism = config.serverConfig.bufferedEventsProcessingParallelism,
       maxContractStateCacheSize = config.serverConfig.maxContractStateCacheSize,
       maxContractKeyStateCacheSize = config.serverConfig.maxContractKeyStateCacheSize,
@@ -201,27 +193,18 @@ class StartableStoppableLedgerApiServer(
       ),
       preparePackageMetadataTimeOutWarning =
         config.serverConfig.preparePackageMetadataTimeOutWarning.underlying,
-    )
-
-    val indexerConfig = config.indexerConfig.damlConfig(
-      indexerLockIds = config.indexerLockIds,
-      dataSourceProperties = Some(
-        DbSupport.DataSourceProperties(
-          connectionPool = DamlIndexerConfig
-            .createConnectionPoolConfig(
-              ingestionParallelism = config.indexerConfig.ingestionParallelism.unwrap,
-              connectionTimeout = config.serverConfig.databaseConnectionTimeout.underlying,
-            ),
-          postgres = config.serverConfig.postgresDataSource,
-        )
-      ),
+      completionsPageSize = config.serverConfig.completionsPageSize,
+      globalMaxEventIdQueries = config.serverConfig.globalMaxEventIdQueries,
+      globalMaxEventPayloadQueries = config.serverConfig.globalMaxEventPayloadQueries,
+      bufferedStreamsPageSize = config.serverConfig.bufferedStreamsPageSize,
     )
 
     val authService = new CantonAdminTokenAuthService(
       config.adminToken,
       parent = config.serverConfig.authServices.map(
         _.create(
-          config.cantonParameterConfig.ledgerApiServerParameters.jwtTimestampLeeway
+          config.cantonParameterConfig.ledgerApiServerParameters.jwtTimestampLeeway,
+          loggerFactory,
         )
       ),
     )
@@ -244,9 +227,7 @@ class StartableStoppableLedgerApiServer(
         config.participantId,
         participantDataSourceConfig,
         timedReadService,
-        overrideIndexerStartupMode
-          .map(overrideStartupMode => indexerConfig.copy(startupMode = overrideStartupMode))
-          .getOrElse(indexerConfig),
+        config.indexerConfig,
         config.metrics,
         inMemoryState,
         inMemoryStateUpdaterFlow,
@@ -255,6 +236,21 @@ class StartableStoppableLedgerApiServer(
         tracer,
         loggerFactory,
         multiDomainEnabled = multiDomainEnabled,
+        startupMode = overrideIndexerStartupMode.getOrElse(DefaultIndexerStartupMode),
+        dataSourceProperties = Some(
+          DbSupport.DataSourceProperties(
+            connectionPool = IndexerConfig
+              .createConnectionPoolConfig(
+                ingestionParallelism = config.indexerConfig.ingestionParallelism.unwrap,
+                connectionTimeout = config.serverConfig.databaseConnectionTimeout.underlying,
+              ),
+            postgres = config.serverConfig.postgresDataSource,
+          )
+        ),
+        highAvailability = config.indexerLockIds.fold(HaConfig()) {
+          case IndexerLockIds(mainLockId, workerLockId) =>
+            HaConfig(indexerLockId = mainLockId, indexerWorkerLockId = workerLockId)
+        },
       )
       dbSupport <- DbSupport
         .owner(
@@ -439,7 +435,7 @@ class StartableStoppableLedgerApiServer(
     configurationLoadTimeout = config.serverConfig.configurationLoadTimeout.unwrap,
     managementServiceTimeout = config.serverConfig.managementServiceTimeout.underlying,
     maxInboundMessageSize = config.serverConfig.maxInboundMessageSize.unwrap,
-    port = Port(config.serverConfig.port.unwrap),
+    port = config.serverConfig.port,
     rateLimit = config.serverConfig.rateLimit,
     seeding = config.cantonParameterConfig.ledgerApiServerParameters.contractIdSeeding,
     timeProviderType = config.testingTimeService match {

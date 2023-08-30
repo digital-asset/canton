@@ -3,9 +3,13 @@
 
 package com.digitalasset.canton.protocol
 
+import com.daml.lf.transaction.Versioned
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.util.LfTransactionBuilder
 import com.digitalasset.canton.version.{GeneratorsVersion, ProtocolVersion}
 import magnolify.scalacheck.auto.*
 import org.scalacheck.{Arbitrary, Gen}
@@ -13,6 +17,7 @@ import org.scalacheck.{Arbitrary, Gen}
 object GeneratorsProtocol {
 
   import com.digitalasset.canton.crypto.GeneratorsCrypto.*
+  import com.digitalasset.canton.data.GeneratorsData.*
   import com.digitalasset.canton.config.GeneratorsConfig.*
   import com.digitalasset.canton.time.GeneratorsTime.*
   import com.digitalasset.canton.version.GeneratorsVersion.*
@@ -112,4 +117,72 @@ object GeneratorsProtocol {
   } yield dynamicDomainParameters)
 
   implicit val confirmationPolicyArb: Arbitrary[ConfirmationPolicy] = genArbitrary
+
+  implicit val serializableRawContractInstanceArb: Arbitrary[SerializableRawContractInstance] =
+    Arbitrary(
+      for {
+        agreementText <- Gen.asciiPrintableStr.map(AgreementText(_))
+        contractInstance = ExampleTransactionFactory.contractInstance()
+      } yield SerializableRawContractInstance.create(contractInstance, agreementText).value
+    )
+
+  implicit val serializableContractArb: Arbitrary[SerializableContract] = Arbitrary(
+    for {
+      contractId <- implicitly[Arbitrary[LfContractId]].arbitrary
+      rawContractInstance <- implicitly[Arbitrary[SerializableRawContractInstance]].arbitrary
+      metadata <- implicitly[Arbitrary[ContractMetadata]].arbitrary
+      ledgerCreateTime <- implicitly[Arbitrary[CantonTimestamp]].arbitrary
+      contractSalt <- Gen.option(implicitly[Arbitrary[Salt]].arbitrary)
+    } yield SerializableContract(
+      contractId,
+      rawContractInstance,
+      metadata,
+      ledgerCreateTime,
+      contractSalt,
+    )
+  )
+
+  implicit val globalKeyWithMaintainersArb: Arbitrary[Versioned[LfGlobalKeyWithMaintainers]] =
+    Arbitrary(
+      for {
+        maintainers <- Gen.containerOf[Set, LfPartyId](implicitly[Arbitrary[LfPartyId]].arbitrary)
+      } yield ExampleTransactionFactory.globalKeyWithMaintainers(
+        LfTransactionBuilder.defaultGlobalKey,
+        maintainers,
+      )
+    )
+
+  implicit val contractMetadataArb: Arbitrary[ContractMetadata] = Arbitrary(
+    for {
+      maybeKeyWithMaintainers <- Gen.option(globalKeyWithMaintainersArb.arbitrary)
+      maintainers = maybeKeyWithMaintainers.fold(Set.empty[LfPartyId])(_.unversioned.maintainers)
+
+      signatories <- Gen.containerOf[Set, LfPartyId](implicitly[Arbitrary[LfPartyId]].arbitrary)
+      observers <- Gen.containerOf[Set, LfPartyId](implicitly[Arbitrary[LfPartyId]].arbitrary)
+
+      allSignatories = maintainers ++ signatories
+      allStakeholders = allSignatories ++ observers
+
+      // Required invariant: maintainers \subset signatories \subset stakeholders
+    } yield ContractMetadata.tryCreate(
+      signatories = allSignatories,
+      stakeholders = allStakeholders,
+      maybeKeyWithMaintainers,
+    )
+  )
+
+  implicit val lfContractIdArb: Arbitrary[LfContractId] = Arbitrary(
+    for {
+      index <- Gen.posNum[Int]
+      contractIdDiscriminator = ExampleTransactionFactory.lfHash(index)
+
+      suffix <- Gen.posNum[Int]
+      contractIdSuffix = Unicum(
+        Hash.build(TestHash.testHashPurpose, HashAlgorithm.Sha256).add(suffix).finish()
+      )
+    } yield AuthenticatedContractIdVersion.fromDiscriminator(
+      contractIdDiscriminator,
+      contractIdSuffix,
+    )
+  )
 }

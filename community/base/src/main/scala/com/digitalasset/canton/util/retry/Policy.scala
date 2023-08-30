@@ -219,7 +219,8 @@ abstract class RetryWithDelay(
                     s"Suspend retrying the operation '$operationName' for $suspendDuration."
                   )
                   DelayUtil
-                    .delay(suspendDuration)
+                    .delayIfNotClosing(operationName, suspendDuration, flagCloseable)
+                    .onShutdown(())(directExecutionContext)
                     .flatMap(_ => run(previousResult, 0, errorKind, 0, initialDelay))(
                       directExecutionContext
                     )

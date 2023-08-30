@@ -21,7 +21,7 @@ import com.digitalasset.canton.ledger.participant.state.v2.{CompletionInfo, Reas
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.store.dao.JdbcLedgerDao
 import com.digitalasset.canton.platform.store.dao.events.*
-import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, Traced}
 import io.grpc.Status
 
 import java.util.UUID
@@ -60,6 +60,7 @@ object UpdateToDbDto {
               transactionId = None,
               completionInfo = u.completionInfo,
               domainId = domainId,
+              traceContext = tracedUpdate.traceContext,
             ).copy(
               rejection_status_code = Some(u.reasonTemplate.code),
               rejection_status_message = Some(u.reasonTemplate.message),
@@ -377,11 +378,12 @@ object UpdateToDbDto {
           val completions =
             u.completionInfoO.iterator.map(
               commandCompletion(
-                offset,
-                u.recordTime,
-                Some(u.transactionId),
+                offset = offset,
+                recordTime = u.recordTime,
+                transactionId = Some(u.transactionId),
                 _,
-                domainId,
+                domainId = domainId,
+                traceContext = tracedUpdate.traceContext,
               )
             )
 
@@ -471,16 +473,17 @@ object UpdateToDbDto {
 
           val completions = u.optCompletionInfo.iterator.map(
             commandCompletion(
-              offset,
-              u.recordTime,
-              Some(u.updateId),
+              offset = offset,
+              recordTime = u.recordTime,
+              transactionId = Some(u.updateId),
               _,
-              u.reassignment match {
+              domainId = u.reassignment match {
                 case _: Reassignment.Unassign =>
                   Some(u.reassignmentInfo.sourceDomain.unwrap.toProtoPrimitive)
                 case _: Reassignment.Assign =>
                   Some(u.reassignmentInfo.targetDomain.unwrap.toProtoPrimitive)
               },
+              traceContext = tracedUpdate.traceContext,
             )
           )
 
@@ -521,6 +524,7 @@ object UpdateToDbDto {
       transactionId: Option[Ref.TransactionId],
       completionInfo: CompletionInfo,
       domainId: Option[String],
+      traceContext: TraceContext,
   ): DbDto.CommandCompletion = {
     val (deduplicationOffset, deduplicationDurationSeconds, deduplicationDurationNanos) =
       completionInfo.optDeduplicationPeriod
@@ -548,6 +552,7 @@ object UpdateToDbDto {
       deduplication_duration_nanos = deduplicationDurationNanos,
       deduplication_start = None,
       domain_id = domainId,
+      trace_context = Some(SerializableTraceContext(traceContext).toDamlProto.toByteArray),
     )
   }
 }

@@ -637,7 +637,8 @@ trait SequencerApiTestUtils extends FixtureAsyncWordSpec with BaseTest with HasE
             .takeWithin(timeout)
             .runWith(Sink.seq)
             .map {
-              case Seq(e) => Some((member, e))
+              case Seq(Right(e)) => Some((member, e))
+              case Seq(Left(err)) => fail(s"Test does not expect tombstones: $err")
               case _ =>
                 // We read no messages for a member when we expected some
                 None

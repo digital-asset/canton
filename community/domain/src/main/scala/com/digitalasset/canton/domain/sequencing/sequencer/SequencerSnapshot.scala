@@ -18,6 +18,8 @@ import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{ProtoDeserializationError, SequencerCounter}
 import com.google.protobuf.ByteString
 
+import scala.collection.SeqView
+
 final case class SequencerSnapshot(
     lastTs: CantonTimestamp,
     heads: Map[Member, SequencerCounter],
@@ -242,4 +244,26 @@ final case class SequencerInitialState(
     domainId: DomainId,
     snapshot: SequencerSnapshot,
     latestTopologyClientTimestamp: Option[CantonTimestamp],
+    initialTopologyEffectiveTimestamp: Option[CantonTimestamp],
 )
+
+object SequencerInitialState {
+  def apply(
+      domainId: DomainId,
+      snapshot: SequencerSnapshot,
+      times: SeqView[(CantonTimestamp, CantonTimestamp)],
+  ): SequencerInitialState = {
+    /* Take the sequencing time of the last topology update for the latest topology client timestamp.
+     * There may have been further events addressed to the topology client member after this topology update,
+     * but it is safe to ignore them. We assume that the topology snapshot includes all changes that have
+     * been sequenced up to the sequencer snapshot.
+     *
+     * Analogously take the maximum effective time mark the initial topology snapshot effective time.
+     * The sequencer topology snapshot can include events that become effective after the sequencer's onboarding
+     * transaction, and as a result "effectiveTimes.maxOption" can be higher than strictly necessary to prevent
+     * tombstoned signing failures, but at least the additional time is bounded by the topology change delay.
+     */
+    val (sequencedTimes, effectiveTimes) = times.unzip
+    SequencerInitialState(domainId, snapshot, sequencedTimes.maxOption, effectiveTimes.maxOption)
+  }
+}

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.apiserver
 
-import com.daml.ports.Port
+import com.digitalasset.canton.config.RequireTypes.Port
 
 trait ApiService {
 

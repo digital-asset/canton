@@ -22,11 +22,15 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, L
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
-import com.digitalasset.canton.participant.config.{IndexerConfig, LedgerApiServerConfig}
+import com.digitalasset.canton.participant.config.LedgerApiServerConfig
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.platform.apiserver.*
 import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportKey
-import com.digitalasset.canton.platform.indexer.{IndexerServiceOwner, IndexerStartupMode}
+import com.digitalasset.canton.platform.indexer.{
+  IndexerConfig,
+  IndexerServiceOwner,
+  IndexerStartupMode,
+}
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.tracing.{NoTracing, TracerProvider}
 import com.digitalasset.canton.{LedgerParticipantId, checked}

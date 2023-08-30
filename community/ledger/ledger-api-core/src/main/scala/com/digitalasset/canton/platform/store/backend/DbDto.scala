@@ -181,6 +181,7 @@ object DbDto {
       deduplication_duration_nanos: Option[Int],
       deduplication_start: Option[Long],
       domain_id: Option[String] = None,
+      trace_context: Option[Array[Byte]],
   ) extends DbDto
 
   final case class StringInterningDto(

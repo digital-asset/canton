@@ -3,6 +3,9 @@
 
 package com.digitalasset.canton.platform.config
 
+import com.digitalasset.canton.config.DeprecatedConfigUtils
+import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
+
 import scala.concurrent.duration.{Duration, FiniteDuration}
 
 final case class IndexServiceConfig(
@@ -20,7 +23,8 @@ final case class IndexServiceConfig(
     preparePackageMetadataTimeOutWarning: FiniteDuration =
       IndexServiceConfig.PreparePackageMetadataTimeOutWarning,
     completionsPageSize: Int = 1000,
-    acsStreams: AcsStreamsConfig = AcsStreamsConfig.default,
+    activeContractsServiceStreams: ActiveContractsServiceStreamsConfig =
+      ActiveContractsServiceStreamsConfig.default,
     transactionFlatStreams: TransactionFlatStreamsConfig = TransactionFlatStreamsConfig.default,
     transactionTreeStreams: TransactionTreeStreamsConfig = TransactionTreeStreamsConfig.default,
     globalMaxEventIdQueries: Int = 20,
@@ -39,20 +43,35 @@ object IndexServiceConfig {
   val PreparePackageMetadataTimeOutWarning: FiniteDuration = FiniteDuration(5, "second")
 }
 
-final case class AcsStreamsConfig(
-    maxIdsPerIdPage: Int = AcsStreamsConfig.DefaultAcsIdPageSize,
-    maxPagesPerIdPagesBuffer: Int = AcsStreamsConfig.DefaultAcsIdPageBufferSize,
-    maxWorkingMemoryInBytesForIdPages: Int = AcsStreamsConfig.DefaultAcsIdPageWorkingMemoryBytes,
-    maxPayloadsPerPayloadsPage: Int = AcsStreamsConfig.DefaultEventsPageSize,
-    maxParallelIdCreateQueries: Int = AcsStreamsConfig.DefaultAcsIdFetchingParallelism,
+/** Ledger api active contracts service specific configurations
+  *
+  * @param maxIdsPerIdPage                   Number of event ids to retrieve in a single query (a page of event ids).
+  * @param maxPagesPerIdPagesBuffer          Number of id pages to store in a buffer. There is a buffer for each decomposed filtering constraint.
+  * @param maxWorkingMemoryInBytesForIdPages Memory for storing id pages across all id pages buffers. Per single stream.
+  * @param maxPayloadsPerPayloadsPage        Number of parallel queries that fetch payloads of create events. Per single stream.
+  * @param maxParallelIdCreateQueries        Number of parallel queries that fetch ids of create events. Per single stream.
+  * @param maxParallelPayloadCreateQueries   Number of event payloads to retrieve in a single query (a page of event payloads).
+  * @param contractProcessingParallelism     The parallelism for contract processing.
+  * @param maxIncompletePageSize             The maximum size of an incomplete page. Stream is chunked up this into groups of this size.
+  */
+final case class ActiveContractsServiceStreamsConfig(
+    maxIdsPerIdPage: Int = ActiveContractsServiceStreamsConfig.DefaultAcsIdPageSize,
+    maxPagesPerIdPagesBuffer: Int = ActiveContractsServiceStreamsConfig.DefaultAcsIdPageBufferSize,
+    maxWorkingMemoryInBytesForIdPages: Int =
+      ActiveContractsServiceStreamsConfig.DefaultAcsIdPageWorkingMemoryBytes,
+    maxPayloadsPerPayloadsPage: Int = ActiveContractsServiceStreamsConfig.DefaultEventsPageSize,
+    maxParallelIdCreateQueries: Int =
+      ActiveContractsServiceStreamsConfig.DefaultAcsIdFetchingParallelism,
     // Must be a power of 2
-    maxParallelPayloadCreateQueries: Int = AcsStreamsConfig.DefaultAcsContractFetchingParallelism,
-    contractProcessingParallelism: Int = AcsStreamsConfig.DefaultContractProcessingParallelism,
+    maxParallelPayloadCreateQueries: Int =
+      ActiveContractsServiceStreamsConfig.DefaultAcsContractFetchingParallelism,
+    contractProcessingParallelism: Int =
+      ActiveContractsServiceStreamsConfig.DefaultContractProcessingParallelism,
     // Temporary incomplete population parameters
     maxIncompletePageSize: Int = 20,
 )
 
-object AcsStreamsConfig {
+object ActiveContractsServiceStreamsConfig {
   val DefaultEventsPageSize: Int = 1000
   val DefaultAcsIdPageSize: Int = 20000
   val DefaultAcsIdPageBufferSize: Int = 1
@@ -62,9 +81,45 @@ object AcsStreamsConfig {
   val DefaultAcsContractFetchingParallelism: Int = 2
   val DefaultContractProcessingParallelism: Int = 8
 
-  val default: AcsStreamsConfig = AcsStreamsConfig()
+  val default: ActiveContractsServiceStreamsConfig = ActiveContractsServiceStreamsConfig()
+
+  trait ActiveContractsServiceDeprecationsImplicits {
+    implicit def deprecatedActiveContractsServiceConfig[X <: ActiveContractsServiceStreamsConfig]
+        : DeprecatedFieldsFor[X] = new DeprecatedFieldsFor[ActiveContractsServiceStreamsConfig] {
+      override def movedFields: List[DeprecatedConfigUtils.MovedConfigPath] = List(
+        DeprecatedConfigUtils.MovedConfigPath("acs-id-page-size", "max-ids-per-id-page"),
+        DeprecatedConfigUtils
+          .MovedConfigPath("acs-id-page-buffer-size", "max-pages-per-id-pages-buffer"),
+        DeprecatedConfigUtils
+          .MovedConfigPath("acs-id-fetching-parallelism", "max-parallel-id-create-queries"),
+        DeprecatedConfigUtils.MovedConfigPath(
+          "acs-contract-fetching-parallelism",
+          "max-parallel-payload-create-queries",
+        ),
+      )
+    }
+  }
+
+  object DeprecatedImplicits extends ActiveContractsServiceDeprecationsImplicits
 }
 
+/** Flat transaction streams configuration.
+  *
+  * @param maxIdsPerIdPage                    Number of event ids to retrieve in a single query (a page of event ids).
+  * @param maxPagesPerIdPagesBuffer           Number of id pages to store in a buffer. There is a buffer for each decomposed filtering constraint.
+  * @param maxWorkingMemoryInBytesForIdPages  Memory for storing id pages across all id pages buffers. Per single stream.
+  * @param maxPayloadsPerPayloadsPage         Number of event payloads to retrieve in a single query (a page of event payloads).
+  * @param maxParallelIdCreateQueries         Number of parallel queries that fetch ids of create events. Per single stream.
+  * @param maxParallelIdConsumingQueries      Number of parallel queries that fetch ids of consuming events. Per single stream.
+  * @param maxParallelIdAssignQueries         Number of parallel queries that fetch ids of assign events. Per single stream.
+  * @param maxParallelIdUnassignQueries       Number of parallel queries that fetch ids of unassign events. Per single stream.
+  * @param maxParallelPayloadCreateQueries    Number of parallel queries that fetch payloads of create events. Per single stream.
+  * @param maxParallelPayloadConsumingQueries Number of parallel queries that fetch payloads of consuming events. Per single stream.
+  * @param maxParallelPayloadAssignQueries    Number of parallel queries that fetch payloads of assign events. Per single stream.
+  * @param maxParallelPayloadUnassignQueries  Number of parallel queries that fetch payloads of unassign events. Per single stream.
+  * @param maxParallelPayloadQueries          Upper bound on the number of parallel queries that fetch payloads. Per single stream.
+  * @param transactionsProcessingParallelism  Number of transactions to process in parallel. Per single stream.
+  */
 final case class TransactionFlatStreamsConfig(
     maxIdsPerIdPage: Int = 20000,
     maxPagesPerIdPagesBuffer: Int = 1,
@@ -85,6 +140,25 @@ object TransactionFlatStreamsConfig {
   val default: TransactionFlatStreamsConfig = TransactionFlatStreamsConfig()
 }
 
+/** Transaction tree streams configuration.
+  *
+  * @param maxIdsPerIdPage                        Number of event ids to retrieve in a single query (a page of event ids).
+  * @param maxPagesPerIdPagesBuffer               Number of id pages to store in a buffer. There is a buffer for each decomposed filtering constraint.
+  * @param maxWorkingMemoryInBytesForIdPages      Memory for storing id pages across all id pages buffers. Per single stream.
+  * @param maxPayloadsPerPayloadsPage             Number of event payloads to retrieve in a single query (a page of event payloads).
+  * @param maxParallelIdCreateQueries             Number of parallel queries that fetch ids of create events. Per single stream.
+  * @param maxParallelIdConsumingQueries          Number of parallel queries that fetch ids of consuming events. Per single stream.
+  * @param maxParallelIdNonConsumingQueries       Number of parallel queries that fetch payloads of non-consuming events. Per single stream.
+  * @param maxParallelIdAssignQueries             Number of parallel queries that fetch payloads of assign events. Per single stream.
+  * @param maxParallelIdUnassignQueries           Number of parallel queries that fetch payloads of unassign events. Per single stream.
+  * @param maxParallelPayloadCreateQueries        Number of parallel queries that fetch payloads of create events. Per single stream.
+  * @param maxParallelPayloadConsumingQueries     Number of parallel queries that fetch payloads of consuming events. Per single stream.
+  * @param maxParallelPayloadNonConsumingQueries  Number of parallel queries that fetch ids of non-consuming events. Per single stream.
+  * @param maxParallelPayloadAssignQueries        Number of parallel queries that fetch ids of assign events. Per single stream.
+  * @param maxParallelPayloadUnassignQueries      Number of parallel queries that fetch ids of unassign events. Per single stream.
+  * @param maxParallelPayloadQueries              Upper bound on the number of parallel queries that fetch payloads. Per single stream.
+  * @param transactionsProcessingParallelism      Number of transactions to process in parallel. Per single stream.
+  */
 final case class TransactionTreeStreamsConfig(
     maxIdsPerIdPage: Int = 20000,
     maxPagesPerIdPagesBuffer: Int = 1,

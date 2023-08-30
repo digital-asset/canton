@@ -401,7 +401,12 @@ class SequencerReader(
           // Neither do we have evidence that parallel processing helps, as a single sequencer reader
           // will typically serve many subscriptions in parallel.
           parallelism = 1
-        )(signValidatedEvent(_))
+        )(
+          signValidatedEvent(_).map(
+            // The database sequencer does not generate tombstones that would have to be turned into errors, hence always Right.
+            Right(_)
+          )
+        )
     }
 
     /** Attempt to save the counter checkpoint and fail horribly if we find this is an inconsistent checkpoint update. */

@@ -7,6 +7,7 @@ import akka.NotUsed
 import akka.stream.Materializer
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import cats.data.EitherT
+import cats.syntax.traverse.*
 import com.codahale.metrics.{ConsoleReporter, MetricFilter, MetricRegistry}
 import com.daml.metrics.api.MetricsContext.withEmptyMetricsContext
 import com.daml.nameof.NameOf.functionFullName
@@ -17,7 +18,11 @@ import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.SequencerClientMetrics
 import com.digitalasset.canton.sequencing.client.*
-import com.digitalasset.canton.sequencing.client.transports.SequencerClientTransport
+import com.digitalasset.canton.sequencing.client.transports.{
+  SequencerClientTransport,
+  SequencerClientTransportAkka,
+  SequencerClientTransportCommon,
+}
 import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{
@@ -55,29 +60,35 @@ import scala.util.chaining.*
   * This testing transport is very stateful and the metrics will only make sense for a single replay,
   * however currently multiple or even concurrent calls are not prevented (just don't).
   */
-class ReplayingSendsSequencerClientTransport(
-    protocolVersion: ProtocolVersion,
-    recordedPath: Path,
-    replaySendsConfig: ReplayAction.SequencerSends,
-    member: Member,
-    underlyingTransport: SequencerClientTransport,
-    requestSigner: RequestSigner,
-    metrics: SequencerClientMetrics,
-    override protected val timeouts: ProcessingTimeout,
-    override protected val loggerFactory: NamedLoggerFactory,
-)(implicit executionContext: ExecutionContext, materializer: Materializer)
-    extends SequencerClientTransport
-    with NamedLogging
-    with NoTracing
-    with FlagCloseableAsync {
+trait ReplayingSendsSequencerClientTransport extends SequencerClientTransportCommon {
+  import ReplayingSendsSequencerClientTransport.*
+  def replay(sendParallelism: Int): Future[SendReplayReport]
 
-  case class SendReplayReport(successful: Int = 0, overloaded: Int = 0, errors: Int = 0) {
+  def waitForIdle(
+      duration: FiniteDuration,
+      startFromCounter: SequencerCounter = SequencerCounter.Genesis,
+  ): Future[EventsReceivedReport]
+
+  /** Dump the submission related metrics into a string for periodic reporting during the replay test */
+  def metricReport(registry: MetricRegistry): String
+}
+
+object ReplayingSendsSequencerClientTransport {
+  final case class SendReplayReport(successful: Int = 0, overloaded: Int = 0, errors: Int = 0)(
+      sendDuration: => Option[java.time.Duration]
+  ) {
     def update(result: Either[SendAsyncClientError, Unit]): SendReplayReport = result match {
       case Left(SendAsyncClientError.RequestRefused(_: SendAsyncError.Overloaded)) =>
         copy(overloaded = overloaded + 1)
       case Left(_) => copy(errors = errors + 1)
       case Right(_) => copy(successful = successful + 1)
     }
+
+    def copy(
+        successful: Int = this.successful,
+        overloaded: Int = this.overloaded,
+        errors: Int = this.errors,
+    ): SendReplayReport = SendReplayReport(successful, overloaded, errors)(sendDuration)
 
     lazy val total: Int = successful + overloaded + errors
 
@@ -87,7 +98,7 @@ class ReplayingSendsSequencerClientTransport(
     }
   }
 
-  case class EventsReceivedReport(
+  final case class EventsReceivedReport(
       elapsedDuration: FiniteDuration,
       totalEventsReceived: Int,
       finishedAtCounter: SequencerCounter,
@@ -95,6 +106,25 @@ class ReplayingSendsSequencerClientTransport(
     override def toString: String =
       s"Received $totalEventsReceived events within ${elapsedDuration.toSeconds}s"
   }
+
+}
+
+abstract class ReplayingSendsSequencerClientTransportCommon(
+    protocolVersion: ProtocolVersion,
+    recordedPath: Path,
+    replaySendsConfig: ReplayAction.SequencerSends,
+    member: Member,
+    underlyingTransport: SequencerClientTransportCommon,
+    requestSigner: RequestSigner,
+    metrics: SequencerClientMetrics,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
+)(implicit executionContext: ExecutionContext, materializer: Materializer)
+    extends ReplayingSendsSequencerClientTransport
+    with NamedLogging
+    with NoTracing
+    with FlagCloseableAsync {
+  import ReplayingSendsSequencerClientTransport.*
 
   private val pendingSends = TrieMap[MessageId, CantonTimestamp]()
   private val firstSend = new AtomicReference[Option[CantonTimestamp]](None)
@@ -193,18 +223,18 @@ class ReplayingSendsSequencerClientTransport(
     }
   }
 
-  def replay(sendParallelism: Int): Future[SendReplayReport] = withNewTraceContext {
+  override def replay(sendParallelism: Int): Future[SendReplayReport] = withNewTraceContext {
     implicit traceContext =>
       logger.info(s"Replaying ${submissionRequests.size} sends")
 
       val submissionReplay = Source(submissionRequests)
         .mapAsyncUnordered(sendParallelism)(replaySubmit)
-        .toMat(Sink.fold(SendReplayReport())(_.update(_)))(Keep.right)
+        .toMat(Sink.fold(SendReplayReport()(sendDuration))(_.update(_)))(Keep.right)
 
       AkkaUtil.runSupervised(logger.error("Failed to run submission replay", _), submissionReplay)
   }
 
-  def waitForIdle(
+  override def waitForIdle(
       duration: FiniteDuration,
       startFromCounter: SequencerCounter = SequencerCounter.Genesis,
   ): Future[EventsReceivedReport] = {
@@ -218,7 +248,7 @@ class ReplayingSendsSequencerClientTransport(
   }
 
   /** Dump the submission related metrics into a string for periodic reporting during the replay test */
-  def metricReport(registry: MetricRegistry): String =
+  override def metricReport(registry: MetricRegistry): String =
     withResource(new ByteArrayOutputStream()) { os =>
       withResource(new PrintStream(os)) { ps =>
         withResource(
@@ -234,6 +264,11 @@ class ReplayingSendsSequencerClientTransport(
         }
       }
     }
+
+  protected def subscribe(
+      request: SubscriptionRequest,
+      handler: SerializedEventHandler[NotUsed],
+  ): AutoCloseable
 
   /** Monitor that when created subscribes the underlying transports and waits for Deliver or DeliverError events
     * to stop being observed for the given [[idlenessDuration]] (suggesting that there are no more events being
@@ -340,13 +375,13 @@ class ReplayingSendsSequencerClientTransport(
       updateMetrics(content)
       updateLastDeliver(content.counter)
 
-      Future(Right(()))
+      Future.successful(Right(()))
     }
 
     val idleF: Future[EventsReceivedReport] = idleP.future
 
     private val subscription =
-      underlyingTransport.subscribe(SubscriptionRequest(member, readFrom, protocolVersion), handle)
+      subscribe(SubscriptionRequest(member, readFrom, protocolVersion), handle)
 
     override protected def closeAsync(): Seq[AsyncOrSyncCloseable] =
       Seq(
@@ -376,25 +411,6 @@ class ReplayingSendsSequencerClientTransport(
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] = EitherT.rightT(())
 
-  override def subscribe[E](request: SubscriptionRequest, handler: SerializedEventHandler[E])(
-      implicit traceContext: TraceContext
-  ): SequencerSubscription[E] = new SequencerSubscription[E] {
-    override protected def loggerFactory: NamedLoggerFactory =
-      ReplayingSendsSequencerClientTransport.this.loggerFactory
-
-    override protected def timeouts: ProcessingTimeout =
-      ReplayingSendsSequencerClientTransport.this.timeouts
-
-    override private[canton] def complete(reason: SubscriptionCloseReason[E])(implicit
-        traceContext: TraceContext
-    ): Unit = closeReasonPromise.trySuccess(reason).discard[Boolean]
-  }
-
-  override def subscribeUnauthenticated[E](
-      request: SubscriptionRequest,
-      handler: SerializedEventHandler[E],
-  )(implicit traceContext: TraceContext): SequencerSubscription[E] = subscribe(request, handler)
-
   override def acknowledge(request: AcknowledgeRequest)(implicit
       traceContext: TraceContext
   ): Future[Unit] = Future.unit
@@ -403,9 +419,6 @@ class ReplayingSendsSequencerClientTransport(
       traceContext: TraceContext
   ): EitherT[Future, String, Unit] =
     EitherT.rightT(())
-
-  override def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy =
-    SubscriptionErrorRetryPolicy.never
 
   override def handshake(request: HandshakeRequest)(implicit
       traceContext: TraceContext
@@ -421,4 +434,116 @@ class ReplayingSendsSequencerClientTransport(
     SyncCloseable("underlying-transport", underlyingTransport.close())
   )
 
+}
+
+class ReplayingSendsSequencerClientTransportImpl(
+    protocolVersion: ProtocolVersion,
+    recordedPath: Path,
+    replaySendsConfig: ReplayAction.SequencerSends,
+    member: Member,
+    underlyingTransport: SequencerClientTransport,
+    requestSigner: RequestSigner,
+    metrics: SequencerClientMetrics,
+    timeouts: ProcessingTimeout,
+    loggerFactory: NamedLoggerFactory,
+)(implicit executionContext: ExecutionContext, materializer: Materializer)
+    extends ReplayingSendsSequencerClientTransportCommon(
+      protocolVersion,
+      recordedPath,
+      replaySendsConfig,
+      member,
+      underlyingTransport,
+      requestSigner,
+      metrics,
+      timeouts,
+      loggerFactory,
+    )
+    with SequencerClientTransport {
+  override def subscribe[E](request: SubscriptionRequest, handler: SerializedEventHandler[E])(
+      implicit traceContext: TraceContext
+  ): SequencerSubscription[E] = new SequencerSubscription[E] {
+    override protected def loggerFactory: NamedLoggerFactory =
+      ReplayingSendsSequencerClientTransportImpl.this.loggerFactory
+
+    override protected def timeouts: ProcessingTimeout =
+      ReplayingSendsSequencerClientTransportImpl.this.timeouts
+
+    override private[canton] def complete(reason: SubscriptionCloseReason[E])(implicit
+        traceContext: TraceContext
+    ): Unit = closeReasonPromise.trySuccess(reason).discard[Boolean]
+  }
+
+  override def subscribeUnauthenticated[E](
+      request: SubscriptionRequest,
+      handler: SerializedEventHandler[E],
+  )(implicit traceContext: TraceContext): SequencerSubscription[E] = subscribe(request, handler)
+
+  override def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy =
+    SubscriptionErrorRetryPolicy.never
+
+  override protected def subscribe(
+      request: SubscriptionRequest,
+      handler: SerializedEventHandler[NotUsed],
+  ): AutoCloseable =
+    underlyingTransport.subscribe(request, handler)
+
+}
+
+class ReplayingSendsSequencerClientTransportAkka(
+    protocolVersion: ProtocolVersion,
+    recordedPath: Path,
+    replaySendsConfig: ReplayAction.SequencerSends,
+    member: Member,
+    val underlyingTransport: SequencerClientTransportAkka & SequencerClientTransport,
+    requestSigner: RequestSigner,
+    metrics: SequencerClientMetrics,
+    timeouts: ProcessingTimeout,
+    loggerFactory: NamedLoggerFactory,
+)(implicit executionContext: ExecutionContext, materializer: Materializer)
+// TODO(#13789) Extend `ReplayingSendsSequencerClientTransportCommon`
+    extends ReplayingSendsSequencerClientTransportImpl(
+      protocolVersion,
+      recordedPath,
+      replaySendsConfig,
+      member,
+      underlyingTransport,
+      requestSigner,
+      metrics,
+      timeouts,
+      loggerFactory,
+    )
+    with SequencerClientTransportAkka {
+
+  override type SubscriptionError = underlyingTransport.SubscriptionError
+
+  override protected def subscribe(
+      request: SubscriptionRequest,
+      handler: SerializedEventHandler[NotUsed],
+  ): AutoCloseable = {
+    val ((killSwitch, _), doneF) = subscribe(request).source
+      .mapAsync(parallelism = 10)(_.traverse { event =>
+        handler(event)
+      })
+      .watchTermination()(Keep.both)
+      .to(Sink.ignore)
+      .run()
+    new AutoCloseable {
+      override def close(): Unit = {
+        killSwitch.shutdown()
+        timeouts.closing.await_("closing subscription")(doneF)
+      }
+    }
+  }
+
+  override def subscribe(request: SubscriptionRequest)(implicit
+      traceContext: TraceContext
+  ): SequencerSubscriptionAkka[SubscriptionError] = underlyingTransport.subscribe(request)
+
+  override def subscribeUnauthenticated(request: SubscriptionRequest)(implicit
+      traceContext: TraceContext
+  ): SequencerSubscriptionAkka[SubscriptionError] =
+    underlyingTransport.subscribeUnauthenticated(request)
+
+  override def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy =
+    SubscriptionErrorRetryPolicy.never
 }

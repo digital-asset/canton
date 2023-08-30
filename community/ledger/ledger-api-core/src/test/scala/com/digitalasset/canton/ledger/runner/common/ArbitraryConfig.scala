@@ -5,26 +5,18 @@ package com.digitalasset.canton.ledger.runner.common
 
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.lf.VersionRange
-import com.daml.lf.data.Ref
-import com.daml.lf.engine.EngineConfig
 import com.daml.lf.interpretation.Limits
 import com.daml.lf.language.LanguageVersion
 import com.daml.lf.transaction.ContractKeyUniquenessMode
 import com.daml.metrics.api.reporters.MetricsReporter
-import com.daml.ports.Port
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
 import com.digitalasset.canton.ledger.api.tls.{TlsConfiguration, TlsVersion}
+import com.digitalasset.canton.platform.apiserver.ApiServerConfig
 import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
-import com.digitalasset.canton.platform.apiserver.{ApiServerConfig, AuthServiceConfig}
-import com.digitalasset.canton.platform.config.MetricsConfig.MetricRegistryType
 import com.digitalasset.canton.platform.config.*
-import com.digitalasset.canton.platform.indexer.ha.HaConfig
-import com.digitalasset.canton.platform.indexer.{
-  IndexerConfig,
-  IndexerStartupMode,
-  PackageMetadataViewConfig,
-}
+import com.digitalasset.canton.platform.indexer.{IndexerConfig, PackageMetadataViewConfig}
 import com.digitalasset.canton.platform.localstore.IdentityProviderManagementConfig
 import com.digitalasset.canton.platform.services.time.TimeProviderType
 import com.digitalasset.canton.platform.store.DbSupport
@@ -41,6 +33,10 @@ import java.time.Duration
 import java.time.temporal.ChronoUnit
 
 object ArbitraryConfig {
+
+  val nonNegativeIntGen: Gen[NonNegativeInt] =
+    Gen.chooseNum(0, Int.MaxValue).map(NonNegativeInt.tryCreate)
+
   val duration: Gen[Duration] = for {
     value <- Gen.chooseNum(0, Int.MaxValue)
     unit <- Gen.oneOf(
@@ -52,6 +48,9 @@ object ArbitraryConfig {
       )
     )
   } yield Duration.of(value.toLong, unit)
+
+  val nonNegativeFiniteDurationGen: Gen[NonNegativeFiniteDuration] =
+    duration.map(NonNegativeFiniteDuration.tryFromJavaDuration)
 
   val versionRange: Gen[VersionRange[LanguageVersion]] = for {
     min <- Gen.oneOf(LanguageVersion.All)
@@ -78,23 +77,6 @@ object ArbitraryConfig {
   val contractKeyUniquenessMode: Gen[ContractKeyUniquenessMode] =
     Gen.oneOf(ContractKeyUniquenessMode.Strict, ContractKeyUniquenessMode.Off)
 
-  val engineConfig: Gen[EngineConfig] = for {
-    allowedLanguageVersions <- versionRange
-    packageValidation <- Gen.oneOf(true, false)
-    stackTraceMode <- Gen.oneOf(true, false)
-    requireSuffixedGlobalContractId <- Gen.oneOf(true, false)
-    contractKeyUniqueness <- contractKeyUniquenessMode
-    limits <- limits
-  } yield EngineConfig(
-    allowedLanguageVersions = allowedLanguageVersions,
-    packageValidation = packageValidation,
-    stackTraceMode = stackTraceMode,
-    profileDir = None,
-    contractKeyUniqueness = contractKeyUniqueness,
-    requireSuffixedGlobalContractId = requireSuffixedGlobalContractId,
-    limits = limits,
-  )
-
   val inetSocketAddress = for {
     host <- Gen.alphaStr
     port <- Gen.chooseNum(1, 65535)
@@ -116,16 +98,6 @@ object ArbitraryConfig {
 
   val metricsReporter: Gen[MetricsReporter] =
     Gen.oneOf(graphiteReporter, prometheusReporter, csvReporter, Gen.const(MetricsReporter.Console))
-
-  val metricRegistryType: Gen[MetricRegistryType] =
-    Gen.oneOf[MetricRegistryType](MetricRegistryType.JvmShared, MetricRegistryType.New)
-
-  val metricConfig = for {
-    enabled <- Gen.oneOf(true, false)
-    reporter <- metricsReporter
-    reportingInterval <- Gen.finiteDuration
-    registryType <- metricRegistryType
-  } yield MetricsConfig(enabled, reporter, reportingInterval, registryType)
 
   val clientAuth = Gen.oneOf(ClientAuth.values().toList)
 
@@ -150,7 +122,7 @@ object ArbitraryConfig {
     minimumServerProtocolVersion,
   )
 
-  val port = Gen.choose(0, 65535).map(p => Port(p))
+  val port = Gen.choose(0, 65535).map(p => Port.tryCreate(p))
 
   val seeding = Gen.oneOf(Seeding.Weak, Seeding.Strong, Seeding.Static)
 
@@ -185,40 +157,6 @@ object ArbitraryConfig {
       notBefore = notBefore,
     )
   }
-
-  val UnsafeJwtHmac256 = for {
-    secret <- Gen.alphaStr
-    aud <- Gen.option(Gen.alphaStr)
-  } yield AuthServiceConfig.UnsafeJwtHmac256(secret, aud)
-
-  val JwtRs256Crt = for {
-    certificate <- Gen.alphaStr
-    aud <- Gen.option(Gen.alphaStr)
-  } yield AuthServiceConfig.JwtRs256(certificate, aud)
-
-  val JwtEs256Crt = for {
-    certificate <- Gen.alphaStr
-    aud <- Gen.option(Gen.alphaStr)
-  } yield AuthServiceConfig.JwtEs256(certificate, aud)
-
-  val JwtEs512Crt = for {
-    certificate <- Gen.alphaStr
-    aud <- Gen.option(Gen.alphaStr)
-  } yield AuthServiceConfig.JwtEs512(certificate, aud)
-
-  val JwtRs256Jwks = for {
-    url <- Gen.alphaStr
-    aud <- Gen.option(Gen.alphaStr)
-  } yield AuthServiceConfig.JwtRs256Jwks(url, aud)
-
-  val authServiceConfig = Gen.oneOf(
-    Gen.const(AuthServiceConfig.Wildcard),
-    UnsafeJwtHmac256,
-    JwtRs256Crt,
-    JwtEs256Crt,
-    JwtEs512Crt,
-    JwtRs256Jwks,
-  )
 
   val commandServiceConfig = for {
     maxCommandsInFlight <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
@@ -297,66 +235,32 @@ object ArbitraryConfig {
     userManagement = userManagement,
   )
 
-  val indexerStartupMode: Gen[IndexerStartupMode] = for {
-    schemaMigrationAttempts <- Gen.chooseNum(0, Int.MaxValue)
-    schemaMigrationAttemptBackoff <- Gen.finiteDuration
-    value <- Gen.oneOf[IndexerStartupMode](
-      IndexerStartupMode.ValidateAndStart,
-      IndexerStartupMode
-        .ValidateAndWaitOnly(schemaMigrationAttempts, schemaMigrationAttemptBackoff),
-      IndexerStartupMode.MigrateOnEmptySchemaAndStart,
-      IndexerStartupMode.MigrateAndStart,
-    )
-  } yield value
-
-  val haConfig = for {
-    mainLockAcquireRetryMillis <- Gen.long
-    workerLockAcquireRetryMillis <- Gen.long
-    workerLockAcquireMaxRetry <- Gen.long
-    mainLockCheckerPeriodMillis <- Gen.long
-    indexerLockId <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
-    indexerWorkerLockId <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
-  } yield HaConfig(
-    mainLockAcquireRetryMillis,
-    workerLockAcquireRetryMillis,
-    workerLockAcquireMaxRetry,
-    mainLockCheckerPeriodMillis,
-    indexerLockId,
-    indexerWorkerLockId,
-  )
-
   val packageMetadataViewConfig = for {
     initLoadParallelism <- Gen.chooseNum(0, Int.MaxValue)
     initProcessParallelism <- Gen.chooseNum(0, Int.MaxValue)
   } yield PackageMetadataViewConfig(initLoadParallelism, initProcessParallelism)
 
   val indexerConfig = for {
-    batchingParallelism <- Gen.chooseNum(0, Int.MaxValue)
-    dataSourceProperties <- Gen.option(dataSourceProperties)
+    batchingParallelism <- nonNegativeIntGen
     enableCompression <- Gen.oneOf(true, false)
-    highAvailability <- haConfig
-    ingestionParallelism <- Gen.chooseNum(0, Int.MaxValue)
-    inputMappingParallelism <- Gen.chooseNum(0, Int.MaxValue)
-    maxInputBufferSize <- Gen.chooseNum(0, Int.MaxValue)
-    restartDelay <- Gen.finiteDuration
-    startupMode <- indexerStartupMode
+    ingestionParallelism <- nonNegativeIntGen
+    inputMappingParallelism <- nonNegativeIntGen
+    maxInputBufferSize <- nonNegativeIntGen
+    restartDelay <- nonNegativeFiniteDurationGen
     submissionBatchSize <- Gen.long
     packageMetadataViewConfig <- packageMetadataViewConfig
   } yield IndexerConfig(
     batchingParallelism = batchingParallelism,
-    dataSourceProperties = dataSourceProperties,
     enableCompression = enableCompression,
-    highAvailability = highAvailability,
     ingestionParallelism = ingestionParallelism,
     inputMappingParallelism = inputMappingParallelism,
     maxInputBufferSize = maxInputBufferSize,
     restartDelay = restartDelay,
-    startupMode = startupMode,
     submissionBatchSize = submissionBatchSize,
     packageMetadataView = packageMetadataViewConfig,
   )
 
-  def genAcsStreamConfig: Gen[AcsStreamsConfig] =
+  def genActiveContractsServiceStreamConfig: Gen[ActiveContractsServiceStreamsConfig] =
     for {
       eventsPageSize <- Gen.chooseNum(0, Int.MaxValue)
       acsIdPageSize <- Gen.chooseNum(0, Int.MaxValue)
@@ -364,7 +268,7 @@ object ArbitraryConfig {
       acsIdPageWorkingMemoryBytes <- Gen.chooseNum(0, Int.MaxValue)
       acsIdFetchingParallelism <- Gen.chooseNum(0, Int.MaxValue)
       acsContractFetchingParallelism <- Gen.chooseNum(0, Int.MaxValue)
-    } yield AcsStreamsConfig(
+    } yield ActiveContractsServiceStreamsConfig(
       maxIdsPerIdPage = acsIdPageSize,
       maxPayloadsPerPayloadsPage = eventsPageSize,
       maxPagesPerIdPagesBuffer = acsIdPageBufferSize,
@@ -428,7 +332,7 @@ object ArbitraryConfig {
     )
 
   val indexServiceConfig: Gen[IndexServiceConfig] = for {
-    acsStreams <- genAcsStreamConfig
+    activeContractsServiceStreamsConfig <- genActiveContractsServiceStreamConfig
     transactionFlatStreams <- genTransactionFlatStreams
     transactionTreeStreams <- genTransactionTreeStreams
     eventsProcessingParallelism <- Gen.chooseNum(0, Int.MaxValue)
@@ -444,40 +348,9 @@ object ArbitraryConfig {
     maxContractKeyStateCacheSize,
     maxTransactionsInMemoryFanOutBufferSize,
     apiStreamShutdownTimeout,
-    acsStreams = acsStreams,
+    activeContractsServiceStreams = activeContractsServiceStreamsConfig,
     transactionFlatStreams = transactionFlatStreams,
     transactionTreeStreams = transactionTreeStreams,
-  )
-
-  val participantConfig = for {
-    apiServer <- apiServerConfig
-    dataSourceProperties <- dataSourceProperties
-    indexService <- indexServiceConfig
-    indexer <- indexerConfig
-    jwtTimestampLeeway <- Gen.option(jwtTimestampLeewayGen)
-  } yield ParticipantConfig(
-    apiServer = apiServer,
-    authentication = AuthServiceConfig.Wildcard, // hardcoded to wildcard, as otherwise it
-    // will be redacted and cannot be checked for isomorphism
-    jwtTimestampLeeway = jwtTimestampLeeway,
-    dataSourceProperties = dataSourceProperties,
-    indexService = indexService,
-    indexer = indexer,
-  )
-
-  val config = for {
-    engine <- engineConfig
-    ledgerId <- Gen.alphaStr
-    metrics <- metricConfig
-    participant <- participantConfig
-  } yield Config(
-    engine = engine,
-    ledgerId = ledgerId,
-    metrics = metrics,
-    dataSource = Map.empty, // hardcoded to wildcard, as otherwise it
-    participants = Map(
-      Ref.ParticipantId.assertFromString("default") -> participant
-    ), // will be redacted and cannot be checked for isomorphism
   )
 
 }

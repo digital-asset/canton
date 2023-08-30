@@ -34,7 +34,7 @@ import scala.util.{Failure, Success}
 private[service] class DirectSequencerSubscription[E](
     member: Member,
     source: Sequencer.EventSource,
-    handler: SerializedEventHandler[E],
+    handler: SerializedEventOrErrorHandler[E],
     override protected val timeouts: ProcessingTimeout,
     baseLoggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext, materializer: Materializer)
@@ -51,18 +51,21 @@ private[service] class DirectSequencerSubscription[E](
   private val ((killSwitch, sourceDone), done) = AkkaUtil.runSupervised(
     logger.error("Fatally failed to handle event", _),
     source
-      .mapAsync(1) { event =>
+      .mapAsync(1) { eventOrError =>
         externalCompletionRef.get match {
           case None =>
             performUnlessClosingF("direct-sequencer-subscription-handler") {
-              handler(event)
+              handler(eventOrError)
             }.onShutdown {
               Right(())
             }.map(_.leftMap(SubscriptionCloseReason.HandlerError(_)))
           case Some(reason) => Future.successful(Left(reason))
         }
       }
-      .collect { case Left(err) => err }
+      .collect { case Left(err) =>
+        logger.info(s"DirectSequencerSubscription encountered close reason ${err}")
+        err
+      }
       .take(1)
       .toMat(Sink.headOption)(Keep.both),
   )

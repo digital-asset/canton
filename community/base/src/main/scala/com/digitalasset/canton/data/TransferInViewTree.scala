@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.data
 
-import cats.syntax.bifunctor.*
+import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.crypto.*
@@ -352,6 +352,8 @@ final case class TransferInView private (
     with ProtocolVersionedMemoizedEvidence {
 
   // TODO(#12373) Adapt when releasing BFT
+  // Ensures the invariants related to default values hold
+  validateInstance().valueOr(err => throw new IllegalArgumentException(err))
   require(
     (representativeProtocolVersion.representative < ProtocolVersion.dev) == transferCounter.isEmpty,
     s"Transfer counter must be defined only in protocol version ${ProtocolVersion.dev} or higher",
@@ -488,6 +490,15 @@ object TransferInView
     ),
   )
 
+  override lazy val invariants = Seq(transferCounterInvariant)
+
+  lazy val transferCounterInvariant = InvariantFromInclusive[TransferCounterO](
+    _.transferCounter,
+    _.nonEmpty,
+    "transferCounter should not be empty",
+    protocolVersionRepresentativeFor(TransferCommonData.minimumPvForTransferCounter),
+  )
+
   def create(hashOps: HashOps)(
       salt: Salt,
       submitterMetadata: TransferSubmitterMetadata,
@@ -499,7 +510,7 @@ object TransferInView
       transferCounter: TransferCounterO,
   ): Either[String, TransferInView] =
     for {
-      _ <- TransferCommonData.checkTransferCounter(transferCounter, targetProtocolVersion.v)
+      _ <- transferCounterInvariant.validate(transferCounter, targetProtocolVersion.v)
     } yield TransferInView(
       salt,
       submitterMetadata,

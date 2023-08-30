@@ -69,13 +69,7 @@ final class IndexerStabilityTestFixture(loggerFactory: NamedLoggerFactory) {
       jdbcUrl: String,
       lockIdSeed: Int,
   )(implicit resourceContext: ResourceContext, materializer: Materializer): Resource[Indexers] = {
-    val indexerConfig = IndexerConfig(
-      startupMode = IndexerStartupMode.MigrateAndStart,
-      highAvailability = HaConfig(
-        indexerLockId = lockIdSeed,
-        indexerWorkerLockId = lockIdSeed + 1,
-      ),
-    )
+    val indexerConfig = IndexerConfig()
 
     def createReaderAndIndexer(
         i: Int,
@@ -125,6 +119,12 @@ final class IndexerStabilityTestFixture(loggerFactory: NamedLoggerFactory) {
           tracer = tracer,
           loggerFactory = loggerFactoryForIteration,
           multiDomainEnabled = false,
+          startupMode = IndexerStartupMode.MigrateAndStart,
+          dataSourceProperties = None,
+          highAvailability = HaConfig(
+            indexerLockId = lockIdSeed,
+            indexerWorkerLockId = lockIdSeed + 1,
+          ),
         ).acquire()
       } yield ReadServiceAndIndexer(readService, indexing)
     }

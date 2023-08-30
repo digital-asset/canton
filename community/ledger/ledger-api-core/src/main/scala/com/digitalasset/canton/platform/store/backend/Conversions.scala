@@ -12,6 +12,8 @@ import com.daml.lf.ledger.EventId
 import com.daml.lf.value.Value
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
+import com.typesafe.scalalogging.Logger
 import spray.json.DefaultJsonProtocol.*
 import spray.json.*
 
@@ -244,4 +246,18 @@ private[backend] object Conversions {
   def domainId(name: String): RowParser[DomainId] =
     SqlParser.get[String](name).map(DomainId.tryFromString)
 
+  def traceContextOption(name: String)(implicit logger: Logger): RowParser[TraceContext] = {
+    import com.daml.ledger.api.v1.trace_context.TraceContext as ProtoTraceContext
+    SqlParser
+      .get[Array[Byte]](name)
+      .map(traceContextBytes =>
+        SerializableTraceContext
+          .fromDamlProtoSafeOpt(logger)(
+            Some(ProtoTraceContext.parseFrom(traceContextBytes))
+          )
+          .traceContext
+      )
+      .?
+      .map(_.getOrElse(TraceContext.empty))
+  }
 }

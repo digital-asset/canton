@@ -5,7 +5,7 @@ package com.digitalasset.canton.sequencing.client
 
 import akka.stream.Materializer
 import cats.data.EitherT
-import cats.syntax.either.*
+import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.common.domain.ServiceAgreementId
@@ -20,6 +20,7 @@ import com.digitalasset.canton.logging.{
   NamedLoggingContext,
 }
 import com.digitalasset.canton.metrics.SequencerClientMetrics
+import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import com.digitalasset.canton.protocol.{DomainParametersLookup, StaticDomainParameters}
 import com.digitalasset.canton.sequencing.*
@@ -29,7 +30,8 @@ import com.digitalasset.canton.sequencing.client.grpc.GrpcSequencerChannelBuilde
 import com.digitalasset.canton.sequencing.client.transports.*
 import com.digitalasset.canton.sequencing.client.transports.replay.{
   ReplayingEventsSequencerClientTransport,
-  ReplayingSendsSequencerClientTransport,
+  ReplayingSendsSequencerClientTransportAkka,
+  ReplayingSendsSequencerClientTransportImpl,
 }
 import com.digitalasset.canton.sequencing.handshake.SequencerHandshake
 import com.digitalasset.canton.store.*
@@ -38,7 +40,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClient
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.version.ProtocolVersion
-import io.grpc.CallOptions
+import io.grpc.{CallOptions, ManagedChannel}
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.*
@@ -53,6 +55,7 @@ trait SequencerClientFactory {
       expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
   )(implicit
       executionContext: ExecutionContextExecutor,
+      executionSequencerFactory: ExecutionSequencerFactory,
       materializer: Materializer,
       tracer: Tracer,
       traceContext: TraceContext,
@@ -93,6 +96,7 @@ object SequencerClientFactory {
           expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
       )(implicit
           executionContext: ExecutionContextExecutor,
+          executionSequencerFactory: ExecutionSequencerFactory,
           materializer: Materializer,
           tracer: Tracer,
           traceContext: TraceContext,
@@ -189,45 +193,63 @@ object SequencerClientFactory {
           requestSigner: RequestSigner,
       )(implicit
           executionContext: ExecutionContextExecutor,
+          executionSequencerFactory: ExecutionSequencerFactory,
           materializer: Materializer,
           traceContext: TraceContext,
       ): EitherT[Future, String, SequencerClientTransport] = {
-        def mkRealTransport: EitherT[Future, String, SequencerClientTransport] =
+        def mkRealTransport(): SequencerClientTransport =
           connection match {
-            case grpc: GrpcSequencerConnection => grpcTransport(grpc, member).toEitherT
+            case grpc: GrpcSequencerConnection => grpcTransport(grpc, member)
           }
 
-        val transportEitherT: EitherT[Future, String, SequencerClientTransport] =
+        // TODO(#13789) Use only `SequencerClientTransportAkka` as the return type
+        def mkRealTransportAkka(): SequencerClientTransportAkka & SequencerClientTransport =
+          connection match {
+            case grpc: GrpcSequencerConnection => grpcTransportAkka(grpc, member)
+          }
+
+        val transport: SequencerClientTransport =
           replayConfigForMember(member) match {
-            case None => mkRealTransport
+            case None => mkRealTransport()
             case Some(ReplayConfig(recording, SequencerEvents)) =>
-              EitherT.rightT(
-                new ReplayingEventsSequencerClientTransport(
-                  domainParameters.protocolVersion,
-                  recording.fullFilePath,
-                  metrics,
-                  processingTimeout,
-                  loggerFactory,
-                )
-              )
-            case Some(ReplayConfig(recording, replaySendsConfig: SequencerSends)) =>
-              for {
-                underlyingTransport <- mkRealTransport
-              } yield new ReplayingSendsSequencerClientTransport(
+              new ReplayingEventsSequencerClientTransport(
                 domainParameters.protocolVersion,
                 recording.fullFilePath,
-                replaySendsConfig,
-                member,
-                underlyingTransport,
-                requestSigner,
                 metrics,
                 processingTimeout,
                 loggerFactory,
               )
+            case Some(ReplayConfig(recording, replaySendsConfig: SequencerSends)) =>
+              if (replaySendsConfig.useAkka) {
+                val underlyingTransport = mkRealTransportAkka()
+                new ReplayingSendsSequencerClientTransportAkka(
+                  domainParameters.protocolVersion,
+                  recording.fullFilePath,
+                  replaySendsConfig,
+                  member,
+                  underlyingTransport,
+                  requestSigner,
+                  metrics,
+                  processingTimeout,
+                  loggerFactory,
+                )
+              } else {
+                val underlyingTransport = mkRealTransport()
+                new ReplayingSendsSequencerClientTransportImpl(
+                  domainParameters.protocolVersion,
+                  recording.fullFilePath,
+                  replaySendsConfig,
+                  member,
+                  underlyingTransport,
+                  requestSigner,
+                  metrics,
+                  processingTimeout,
+                  loggerFactory,
+                )
+              }
           }
 
         for {
-          transport <- transportEitherT
           // handshake to check that sequencer client supports the protocol version required by the sequencer
           _ <- SequencerHandshake
             .handshake(
@@ -246,57 +268,82 @@ object SequencerClientFactory {
         } yield transport
       }
 
+      private def createChannel(conn: GrpcSequencerConnection)(implicit
+          executionContext: ExecutionContextExecutor
+      ): ManagedChannel = {
+        val channelBuilder = ClientChannelBuilder(loggerFactory)
+        GrpcSequencerChannelBuilder(
+          channelBuilder,
+          conn,
+          NonNegativeInt.maxValue, // we set this limit only on the sequencer node, to avoid restarting the client if this value is changed
+          traceContextPropagation,
+          config.keepAliveClient,
+        )
+      }
+
+      /** the wait-for-ready call option is added for when round-robin-ing through connections
+        * so that if one of them gets closed, we try the next one instead of unnecessarily failing.
+        * wait-for-ready semantics: https://github.com/grpc/grpc/blob/master/doc/wait-for-ready.md
+        * this is safe for non-idempotent RPCs.
+        */
+      private def callOptionsForEndpoints(endpoints: NonEmpty[Seq[Endpoint]]): CallOptions =
+        if (endpoints.length > 1) CallOptions.DEFAULT.withWaitForReady()
+        else CallOptions.DEFAULT
+
+      private def grpcSequencerClientAuth(
+          connection: GrpcSequencerConnection,
+          member: Member,
+      )(implicit executionContext: ExecutionContextExecutor): GrpcSequencerClientAuth = {
+        val channelPerEndpoint = connection.endpoints.map { endpoint =>
+          val subConnection = connection.copy(endpoints = NonEmpty.mk(Seq, endpoint))
+          endpoint -> createChannel(subConnection)
+        }.toMap
+        new GrpcSequencerClientAuth(
+          domainId,
+          member,
+          crypto,
+          agreedAgreementId,
+          channelPerEndpoint,
+          supportedProtocolVersions,
+          config.authToken,
+          clock,
+          processingTimeout,
+          loggerFactory,
+        )
+      }
+
       private def grpcTransport(connection: GrpcSequencerConnection, member: Member)(implicit
           executionContext: ExecutionContextExecutor
-      ): Either[String, SequencerClientTransport] = {
-        def createChannel(conn: GrpcSequencerConnection) = {
-          val channelBuilder = ClientChannelBuilder(loggerFactory)
-          GrpcSequencerChannelBuilder(
-            channelBuilder,
-            conn,
-            NonNegativeInt.maxValue, // we set this limit only on the sequencer node, to avoid restarting the client if this value is changed
-            traceContextPropagation,
-            config.keepAliveClient,
-          )
-        }
-
+      ): SequencerClientTransport = {
         val channel = createChannel(connection)
-        val auth = {
-          val channelPerEndpoint = connection.endpoints.map { endpoint =>
-            val subConnection = connection.copy(endpoints = NonEmpty.mk(Seq, endpoint))
-            endpoint -> createChannel(subConnection)
-          }.toMap
-          new GrpcSequencerClientAuth(
-            domainId,
-            member,
-            crypto,
-            agreedAgreementId,
-            channelPerEndpoint,
-            supportedProtocolVersions,
-            config.authToken,
-            clock,
-            processingTimeout,
-            loggerFactory,
-          )
-        }
-        val callOptions = {
-          // the wait-for-ready call option is added for when round-robin-ing through connections
-          // so that if one of them gets closed, we try the next one instead of unnecessarily failing.
-          // wait-for-ready semantics: https://github.com/grpc/grpc/blob/master/doc/wait-for-ready.md
-          // this is safe for non-idempotent RPCs.
-          if (connection.endpoints.length > 1) CallOptions.DEFAULT.withWaitForReady()
-          else CallOptions.DEFAULT
-        }
-        Right(
-          new GrpcSequencerClientTransport(
-            channel,
-            callOptions,
-            auth,
-            metrics,
-            processingTimeout,
-            loggerFactory,
-            domainParameters.protocolVersion,
-          )
+        val auth = grpcSequencerClientAuth(connection, member)
+        val callOptions = callOptionsForEndpoints(connection.endpoints)
+        new GrpcSequencerClientTransport(
+          channel,
+          callOptions,
+          auth,
+          metrics,
+          processingTimeout,
+          loggerFactory,
+          domainParameters.protocolVersion,
+        )
+      }
+
+      private def grpcTransportAkka(connection: GrpcSequencerConnection, member: Member)(implicit
+          executionContext: ExecutionContextExecutor,
+          executionSequencerFactory: ExecutionSequencerFactory,
+      ): GrpcSequencerClientTransportAkka = {
+        val channel = createChannel(connection)
+        val auth = grpcSequencerClientAuth(connection, member)
+        val callOptions = callOptionsForEndpoints(connection.endpoints)
+        new GrpcSequencerClientTransportAkka(
+          channel,
+          callOptions,
+          auth,
+          metrics,
+          processingTimeout,
+          loggerFactory,
+          domainParameters.protocolVersion,
         )
       }
 

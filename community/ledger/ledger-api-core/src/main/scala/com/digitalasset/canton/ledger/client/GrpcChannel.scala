@@ -4,8 +4,8 @@
 package com.digitalasset.canton.ledger.client
 
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
-import com.daml.ports.Port
 import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.ledger.client.configuration.LedgerClientChannelConfiguration
 import io.grpc.netty.NettyChannelBuilder
 import io.grpc.{Channel, ManagedChannel}
@@ -19,7 +19,7 @@ object GrpcChannel {
   final class Owner(builder: NettyChannelBuilder) extends ResourceOwner[ManagedChannel] {
     def this(port: Port, configuration: LedgerClientChannelConfiguration) =
       this(
-        configuration.builderFor(InetAddress.getLoopbackAddress.getHostAddress, port.value)
+        configuration.builderFor(InetAddress.getLoopbackAddress.getHostAddress, port.unwrap)
       )
 
     override def acquire()(implicit context: ResourceContext): Resource[ManagedChannel] =

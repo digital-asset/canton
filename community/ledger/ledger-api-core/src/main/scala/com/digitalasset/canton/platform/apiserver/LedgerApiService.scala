@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.apiserver
 
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.metrics.Metrics
-import com.daml.ports.Port
+import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.ledger.api.tls.TlsConfiguration
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
@@ -54,7 +54,7 @@ final class LedgerApiService(
       logger.info(s"Listening on $host:$actualPort over $transportMedium.")
       new ApiService {
         override val port: Port =
-          Port(server.getPort)
+          Port.tryCreate(server.getPort)
       }
     }).transformWith {
       case Failure(ex) =>

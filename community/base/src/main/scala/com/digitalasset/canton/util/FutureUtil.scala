@@ -82,8 +82,21 @@ object FutureUtil {
       failureMessage: => String,
       onFailure: Throwable => Unit = _ => (),
       level: => Level = Level.ERROR,
+      closeContext: Option[CloseContext] = None,
   )(implicit loggingContext: ErrorLoggingContext): Unit = {
-    val _ = logOnFailure(future, failureMessage, onFailure, level)
+    val _ = logOnFailure(future, failureMessage, onFailure, level, closeContext)
+  }
+
+  /** [[doNotAwait]] but for FUS
+    */
+  def doNotAwaitUnlessShutdown(
+      future: FutureUnlessShutdown[_],
+      failureMessage: => String,
+      onFailure: Throwable => Unit = _ => (),
+      level: => Level = Level.ERROR,
+      closeContext: Option[CloseContext] = None,
+  )(implicit loggingContext: ErrorLoggingContext): Unit = {
+    doNotAwait(future.unwrap, failureMessage, onFailure, level, closeContext)
   }
 
   /** Variant of [[doNotAwait]] that also catches non-fatal errors thrown while constructing the future. */

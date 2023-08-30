@@ -53,7 +53,7 @@ import com.digitalasset.canton.sequencing.{
   GrpcSequencerConnection,
   OrdinaryApplicationHandler,
   SequencerConnections,
-  SerializedEventHandler,
+  SerializedEventOrErrorHandler,
 }
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
@@ -88,6 +88,8 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
     with ArgumentMatchersSugar
     with Matchers {
   implicit val actorSystem = AkkaUtil.createActorSystem("GrpcSequencerIntegrationTest")
+  implicit val executionSequencerFactory =
+    AkkaUtil.createExecutionSequencerFactory("GrpcSequencerIntegrationTest", logger)
   val sequencer = mock[Sequencer]
   private val participant = ParticipantId("testing")
   private val domainId = DefaultTestIdentities.domainId
@@ -290,6 +292,7 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
       service,
       Lifecycle.toCloseableServer(server, logger, "test"),
       client,
+      executionSequencerFactory,
       Lifecycle.toCloseableActorSystem(actorSystem, logger, timeouts),
     )(logger)
 
@@ -305,7 +308,7 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
           any[SequencerCounter],
           any[String],
           any[Member],
-          any[SerializedEventHandler[NotUsed]],
+          any[SerializedEventOrErrorHandler[NotUsed]],
         )(any[TraceContext])
     )
       .thenAnswer {

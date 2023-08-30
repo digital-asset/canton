@@ -16,6 +16,7 @@ import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.TransactionMetering
 import com.digitalasset.canton.platform.store.backend.MeteringParameterStorageBackend.LedgerMeteringEnd
 import com.digitalasset.canton.platform.store.dao.JdbcLedgerDao
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.google.protobuf.ByteString
 
 import java.time.{Duration, Instant}
@@ -321,6 +322,9 @@ private[store] object StorageBackendTestValues {
       deduplicationDurationNanos: Option[Int] = None,
       deduplicationStart: Option[Timestamp] = None,
       domainId: Option[String] = None,
+      traceContext: Option[Array[Byte]] = Some(
+        SerializableTraceContext(TraceContext.empty).toDamlProto.toByteArray
+      ),
   ): DbDto.CommandCompletion =
     DbDto.CommandCompletion(
       completion_offset = offset.toHexString,
@@ -338,6 +342,7 @@ private[store] object StorageBackendTestValues {
       deduplication_duration_nanos = deduplicationDurationNanos,
       deduplication_start = deduplicationStart.map(_.micros),
       domain_id = domainId,
+      trace_context = traceContext,
     )
 
   def dtoTransactionMeta(

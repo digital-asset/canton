@@ -9,6 +9,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.daml.error.*
+import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
@@ -108,6 +109,7 @@ class DomainNodeBootstrap(
     mediatorFactory: MediatorRuntimeFactory,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
+    executionSequencerFactory: ExecutionSequencerFactory,
     scheduler: ScheduledExecutorService,
     actorSystem: ActorSystem,
 ) extends CantonNodeBootstrapBase[Domain, DomainConfig, DomainNodeParameters, DomainMetrics](
@@ -655,7 +657,8 @@ object DomainNodeBootstrap {
     )(implicit
         actorSystem: ActorSystem,
         scheduler: ScheduledExecutorService,
-        ec: ExecutionContextIdlenessExecutorService,
+        executionContext: ExecutionContextIdlenessExecutorService,
+        executionSequencerFactory: ExecutionSequencerFactory,
         traceContext: TraceContext,
     ): Either[String, DomainNodeBootstrap]
 
@@ -681,6 +684,7 @@ object DomainNodeBootstrap {
         actorSystem: ActorSystem,
         scheduler: ScheduledExecutorService,
         executionContext: ExecutionContextIdlenessExecutorService,
+        executionSequencerFactory: ExecutionSequencerFactory,
         traceContext: TraceContext,
     ): Either[String, DomainNodeBootstrap] =
       arguments

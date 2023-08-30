@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.protocol.submission.routing
 
-import cats.syntax.alternative.*
 import com.daml.lf.data.Ref.Party
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.protocol.LfContractId
@@ -27,16 +26,15 @@ private[routing] object ContractsDomainData {
       .map { domainMap =>
         // Collect domains of input contracts, ignoring contracts that cannot be found in the ACS.
         // Such contracts need to be ignored, because they could be divulged contracts.
-        val (bad, good) = contractRoutingParties
-          .map { case (coid, routingParties) =>
+        val (bad, good) = contractRoutingParties.toSeq
+          .partitionMap { case (coid, routingParties) =>
             domainMap.get(coid) match {
               case Some(domainId) =>
                 Right(ContractData(coid, domainId, routingParties))
               case None => Left(coid)
             }
           }
-          .toSeq
-          .separate
+
         ContractsDomainData(good, bad)
       }
   }

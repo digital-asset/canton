@@ -249,5 +249,5 @@ object Sequencer extends HasLoggerName {
   /** The materialized future completes when all internal side-flows of the source have completed after the kill switch
     * was pulled. Termination of the main flow must be awaited separately.
     */
-  type EventSource = Source[OrdinarySerializedEvent, (KillSwitch, Future[Done])]
+  type EventSource = Source[OrdinarySerializedEventOrError, (KillSwitch, Future[Done])]
 }

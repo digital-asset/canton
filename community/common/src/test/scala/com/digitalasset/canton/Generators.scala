@@ -18,6 +18,22 @@ object Generators {
     Gen.stringOfN(256, Gen.alphaNumChar).map(ByteString.copyFromUtf8)
   )
 
+  implicit val applicationIdArb: Arbitrary[ApplicationId] = Arbitrary(
+    Gen.stringOfN(32, Gen.alphaNumChar).map(ApplicationId.assertFromString)
+  )
+  implicit val commandIdArb: Arbitrary[CommandId] = Arbitrary(
+    Gen.stringOfN(32, Gen.alphaNumChar).map(CommandId.assertFromString)
+  )
+  implicit val ledgerSubmissionIdArb: Arbitrary[LedgerSubmissionId] = Arbitrary(
+    Gen.stringOfN(32, Gen.alphaNumChar).map(LedgerSubmissionId.assertFromString)
+  )
+  implicit val lfPartyIdArb: Arbitrary[LfPartyId] = Arbitrary(
+    com.digitalasset.canton.topology.GeneratorsTopology.partyIdArb.arbitrary.map(_.toLf)
+  )
+  implicit val workflowIdArb: Arbitrary[WorkflowId] = Arbitrary(
+    Gen.stringOfN(32, Gen.alphaNumChar).map(WorkflowId.assertFromString)
+  )
+
   def lengthLimitedStringGen[A <: AbstractLengthLimitedString](
       companion: LengthLimitedStringCompanion[A]
   ): Gen[A] = for {

@@ -14,20 +14,24 @@ import com.daml.jwt.{
 }
 import com.digitalasset.canton.config.CantonRequireTypes.*
 import com.digitalasset.canton.ledger.api.auth.{AuthService, AuthServiceJWT, AuthServiceWildcard}
-import com.digitalasset.canton.platform.apiserver.{AuthServiceConfig as DamlAuthServiceConfig}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 
 sealed trait AuthServiceConfig {
-  def create(jwtTimestampLeeway: Option[JwtTimestampLeeway]): AuthService
-  def damlConfig: DamlAuthServiceConfig
+  def create(
+      jwtTimestampLeeway: Option[JwtTimestampLeeway],
+      loggerFactory: NamedLoggerFactory,
+  ): AuthService
 }
 
 object AuthServiceConfig {
 
   /** [default] Allows everything */
   object Wildcard extends AuthServiceConfig {
-    override def create(jwtTimestampLeeway: Option[JwtTimestampLeeway]): AuthService =
+    override def create(
+        jwtTimestampLeeway: Option[JwtTimestampLeeway],
+        loggerFactory: NamedLoggerFactory,
+    ): AuthService =
       AuthServiceWildcard
-    override def damlConfig: DamlAuthServiceConfig = DamlAuthServiceConfig.Wildcard
   }
 
   /** [UNSAFE] Enables JWT-based authorization with shared secret HMAC256 signing: USE THIS EXCLUSIVELY FOR TESTING */
@@ -39,11 +43,12 @@ object AuthServiceConfig {
           s"Failed to create HMAC256 verifier (secret: $secret): $err"
         )
       )
-    override def create(jwtTimestampLeeway: Option[JwtTimestampLeeway]): AuthService =
-      AuthServiceJWT(verifier(jwtTimestampLeeway), targetAudience)
+    override def create(
+        jwtTimestampLeeway: Option[JwtTimestampLeeway],
+        loggerFactory: NamedLoggerFactory,
+    ): AuthService =
+      AuthServiceJWT(verifier(jwtTimestampLeeway), targetAudience, loggerFactory)
 
-    override def damlConfig: DamlAuthServiceConfig =
-      DamlAuthServiceConfig.UnsafeJwtHmac256(secret.unwrap, targetAudience)
   }
 
   /** Enables JWT-based authorization, where the JWT is signed by RSA256 with a public key loaded from the given X509 certificate file (.crt) */
@@ -52,11 +57,12 @@ object AuthServiceConfig {
     private def verifier(jwtTimestampLeeway: Option[JwtTimestampLeeway]) = RSA256Verifier
       .fromCrtFile(certificate, jwtTimestampLeeway)
       .valueOr(err => throw new IllegalArgumentException(s"Failed to create RSA256 verifier: $err"))
-    override def create(jwtTimestampLeeway: Option[JwtTimestampLeeway]): AuthService =
-      AuthServiceJWT(verifier(jwtTimestampLeeway), targetAudience)
+    override def create(
+        jwtTimestampLeeway: Option[JwtTimestampLeeway],
+        loggerFactory: NamedLoggerFactory,
+    ): AuthService =
+      AuthServiceJWT(verifier(jwtTimestampLeeway), targetAudience, loggerFactory)
 
-    override def damlConfig: DamlAuthServiceConfig =
-      DamlAuthServiceConfig.JwtRs256(certificate, targetAudience)
   }
 
   /** "Enables JWT-based authorization, where the JWT is signed by ECDSA256 with a public key loaded from the given X509 certificate file (.crt)" */
@@ -68,11 +74,12 @@ object AuthServiceConfig {
       .valueOr(err =>
         throw new IllegalArgumentException(s"Failed to create ECDSA256 verifier: $err")
       )
-    override def create(jwtTimestampLeeway: Option[JwtTimestampLeeway]): AuthService =
-      AuthServiceJWT(verifier(jwtTimestampLeeway), targetAudience)
+    override def create(
+        jwtTimestampLeeway: Option[JwtTimestampLeeway],
+        loggerFactory: NamedLoggerFactory,
+    ): AuthService =
+      AuthServiceJWT(verifier(jwtTimestampLeeway), targetAudience, loggerFactory)
 
-    override def damlConfig: DamlAuthServiceConfig =
-      DamlAuthServiceConfig.JwtEs256(certificate, targetAudience)
   }
 
   /** Enables JWT-based authorization, where the JWT is signed by ECDSA512 with a public key loaded from the given X509 certificate file (.crt) */
@@ -84,11 +91,12 @@ object AuthServiceConfig {
       .valueOr(err =>
         throw new IllegalArgumentException(s"Failed to create ECDSA512 verifier: $err")
       )
-    override def create(jwtTimestampLeeway: Option[JwtTimestampLeeway]): AuthService =
-      AuthServiceJWT(verifier(jwtTimestampLeeway), targetAudience)
+    override def create(
+        jwtTimestampLeeway: Option[JwtTimestampLeeway],
+        loggerFactory: NamedLoggerFactory,
+    ): AuthService =
+      AuthServiceJWT(verifier(jwtTimestampLeeway), targetAudience, loggerFactory)
 
-    override def damlConfig: DamlAuthServiceConfig =
-      DamlAuthServiceConfig.JwtEs512(certificate, targetAudience)
   }
 
   /** Enables JWT-based authorization, where the JWT is signed by RSA256 with a public key loaded from the given JWKS URL */
@@ -96,11 +104,12 @@ object AuthServiceConfig {
       extends AuthServiceConfig {
     private def verifier(jwtTimestampLeeway: Option[JwtTimestampLeeway]) =
       JwksVerifier(url.unwrap, jwtTimestampLeeway)
-    override def create(jwtTimestampLeeway: Option[JwtTimestampLeeway]): AuthService =
-      AuthServiceJWT(verifier(jwtTimestampLeeway), targetAudience)
+    override def create(
+        jwtTimestampLeeway: Option[JwtTimestampLeeway],
+        loggerFactory: NamedLoggerFactory,
+    ): AuthService =
+      AuthServiceJWT(verifier(jwtTimestampLeeway), targetAudience, loggerFactory)
 
-    override def damlConfig: DamlAuthServiceConfig =
-      DamlAuthServiceConfig.JwtRs256Jwks(url.unwrap, targetAudience)
   }
 
 }

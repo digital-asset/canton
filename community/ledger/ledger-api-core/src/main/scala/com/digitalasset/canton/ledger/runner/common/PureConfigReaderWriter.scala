@@ -17,15 +17,13 @@ import com.digitalasset.canton.ledger.runner.common.OptConfigValue.{
   optConvertEnabled,
   optProductHint,
 }
+import com.digitalasset.canton.platform.apiserver.ApiServerConfig
 import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
-import com.digitalasset.canton.platform.apiserver.{ApiServerConfig, AuthServiceConfig}
 import com.digitalasset.canton.platform.config.{
-  AcsStreamsConfig,
+  ActiveContractsServiceStreamsConfig,
   CommandServiceConfig,
   IndexServiceConfig,
-  MetricsConfig,
-  ParticipantConfig,
   TransactionFlatStreamsConfig,
   TransactionTreeStreamsConfig,
   UserManagementServiceConfig,
@@ -160,13 +158,6 @@ class PureConfigReaderWriter(secure: Boolean = true) {
         s"prometheus://${address.getHostName}:${address.getPort}"
     }
 
-  implicit val metricsRegistryTypeConvert: ConfigConvert[MetricsConfig.MetricRegistryType] =
-    deriveEnumerationConvert[MetricsConfig.MetricRegistryType]
-
-  implicit val metricsHint = ProductHint[MetricsConfig](allowUnknownKeys = false)
-
-  implicit val metricsConvert: ConfigConvert[MetricsConfig] = deriveConvert[MetricsConfig]
-
   implicit val secretsUrlReader: ConfigReader[SecretsUrl] =
     ConfigReader.fromString[SecretsUrl] { url =>
       Right(SecretsUrl.fromString(url))
@@ -242,41 +233,6 @@ class PureConfigReaderWriter(secure: Boolean = true) {
 
   implicit val jwtTimestampLeewayConfigConvert: ConfigConvert[Option[JwtTimestampLeeway]] =
     optConvertEnabled(deriveConvert[JwtTimestampLeeway])
-
-  implicit val authServiceConfigUnsafeJwtHmac256Reader
-      : ConfigReader[AuthServiceConfig.UnsafeJwtHmac256] =
-    deriveReader[AuthServiceConfig.UnsafeJwtHmac256]
-  implicit val authServiceConfigUnsafeJwtHmac256Writer
-      : ConfigWriter[AuthServiceConfig.UnsafeJwtHmac256] =
-    deriveWriter[AuthServiceConfig.UnsafeJwtHmac256].contramap[AuthServiceConfig.UnsafeJwtHmac256] {
-      case x if secure => x.copy(secret = Secret)
-      case x => x
-    }
-
-  implicit val authServiceConfigJwtEs256CrtHint =
-    ProductHint[AuthServiceConfig.JwtEs256](allowUnknownKeys = false)
-  implicit val authServiceConfigJwtEs512CrtHint =
-    ProductHint[AuthServiceConfig.JwtEs512](allowUnknownKeys = false)
-  implicit val authServiceConfigJwtRs256CrtHint =
-    ProductHint[AuthServiceConfig.JwtRs256](allowUnknownKeys = false)
-  implicit val authServiceConfigJwtRs256JwksHint =
-    ProductHint[AuthServiceConfig.JwtRs256Jwks](allowUnknownKeys = false)
-  implicit val authServiceConfigWildcardHint =
-    ProductHint[AuthServiceConfig.Wildcard.type](allowUnknownKeys = false)
-  implicit val authServiceConfigHint = ProductHint[AuthServiceConfig](allowUnknownKeys = false)
-
-  implicit val authServiceConfigJwtEs256CrtConvert: ConfigConvert[AuthServiceConfig.JwtEs256] =
-    deriveConvert[AuthServiceConfig.JwtEs256]
-  implicit val authServiceConfigJwtEs512CrtConvert: ConfigConvert[AuthServiceConfig.JwtEs512] =
-    deriveConvert[AuthServiceConfig.JwtEs512]
-  implicit val authServiceConfigJwtRs256CrtConvert: ConfigConvert[AuthServiceConfig.JwtRs256] =
-    deriveConvert[AuthServiceConfig.JwtRs256]
-  implicit val authServiceConfigJwtRs256JwksConvert: ConfigConvert[AuthServiceConfig.JwtRs256Jwks] =
-    deriveConvert[AuthServiceConfig.JwtRs256Jwks]
-  implicit val authServiceConfigWildcardConvert: ConfigConvert[AuthServiceConfig.Wildcard.type] =
-    deriveConvert[AuthServiceConfig.Wildcard.type]
-  implicit val authServiceConfigConvert: ConfigConvert[AuthServiceConfig] =
-    deriveConvert[AuthServiceConfig]
 
   implicit val commandConfigurationHint =
     ProductHint[CommandServiceConfig](allowUnknownKeys = false)
@@ -370,8 +326,9 @@ class PureConfigReaderWriter(secure: Boolean = true) {
   implicit val indexServiceConfigHint =
     ProductHint[IndexServiceConfig](allowUnknownKeys = false)
 
-  implicit val acsStreamsConfigConvert: ConfigConvert[AcsStreamsConfig] =
-    deriveConvert[AcsStreamsConfig]
+  implicit val activecContractsServiceStreamsConfigConvert
+      : ConfigConvert[ActiveContractsServiceStreamsConfig] =
+    deriveConvert[ActiveContractsServiceStreamsConfig]
 
   implicit val transactionTreeStreamsConfigConvert: ConfigConvert[TransactionTreeStreamsConfig] =
     deriveConvert[TransactionTreeStreamsConfig]
@@ -381,12 +338,6 @@ class PureConfigReaderWriter(secure: Boolean = true) {
 
   implicit val indexServiceConfigConvert: ConfigConvert[IndexServiceConfig] =
     deriveConvert[IndexServiceConfig]
-
-  implicit val participantConfigHint =
-    ProductHint[ParticipantConfig](allowUnknownKeys = false)
-
-  implicit val participantConfigConvert: ConfigConvert[ParticipantConfig] =
-    deriveConvert[ParticipantConfig]
 
   implicit val participantDataSourceConfigReader: ConfigReader[ParticipantDataSourceConfig] =
     ConfigReader.fromString[ParticipantDataSourceConfig] { url =>
@@ -408,15 +359,6 @@ class PureConfigReaderWriter(secure: Boolean = true) {
       : ConfigWriter[Map[Ref.ParticipantId, ParticipantDataSourceConfig]] =
     genericMapWriter[Ref.ParticipantId, ParticipantDataSourceConfig](_.toString)
 
-  implicit val participantConfigMapReader: ConfigReader[Map[Ref.ParticipantId, ParticipantConfig]] =
-    genericMapReader[Ref.ParticipantId, ParticipantConfig]((s: String) => createParticipantId(s))
-  implicit val participantConfigMapWriter: ConfigWriter[Map[Ref.ParticipantId, ParticipantConfig]] =
-    genericMapWriter[Ref.ParticipantId, ParticipantConfig](_.toString)
-
-  implicit val configHint =
-    ProductHint[Config](allowUnknownKeys = false)
-
-  implicit val configConvert: ConfigConvert[Config] = deriveConvert[Config]
 }
 
 object PureConfigReaderWriter {

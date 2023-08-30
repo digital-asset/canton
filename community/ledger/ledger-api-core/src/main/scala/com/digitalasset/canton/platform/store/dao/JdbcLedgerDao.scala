@@ -37,7 +37,7 @@ import com.digitalasset.canton.logging.{
 }
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.config.{
-  AcsStreamsConfig,
+  ActiveContractsServiceStreamsConfig,
   TransactionFlatStreamsConfig,
   TransactionTreeStreamsConfig,
 }
@@ -70,7 +70,7 @@ private class JdbcLedgerDao(
     parameterStorageBackend: ParameterStorageBackend,
     ledgerEndCache: LedgerEndCache,
     completionsPageSize: Int,
-    acsStreamsConfig: AcsStreamsConfig,
+    activeContractsServiceStreamsConfig: ActiveContractsServiceStreamsConfig,
     transactionFlatStreamsConfig: TransactionFlatStreamsConfig,
     transactionTreeStreamsConfig: TransactionTreeStreamsConfig,
     globalMaxEventIdQueries: Int,
@@ -533,7 +533,7 @@ private class JdbcLedgerDao(
   )
 
   private val acsReader = new ACSReader(
-    config = acsStreamsConfig,
+    config = activeContractsServiceStreamsConfig,
     globalIdQueriesLimiter = globalIdQueriesLimiter,
     globalPayloadQueriesLimiter = globalPayloadQueriesLimiter,
     dispatcher = dbDispatcher,
@@ -732,7 +732,7 @@ private[platform] object JdbcLedgerDao {
       ledgerEndCache: LedgerEndCache,
       stringInterning: StringInterning,
       completionsPageSize: Int,
-      acsStreamsConfig: AcsStreamsConfig,
+      activeContractsServiceStreamsConfig: ActiveContractsServiceStreamsConfig,
       transactionFlatStreamsConfig: TransactionFlatStreamsConfig,
       transactionTreeStreamsConfig: TransactionTreeStreamsConfig,
       globalMaxEventIdQueries: Int,
@@ -754,7 +754,7 @@ private[platform] object JdbcLedgerDao {
       parameterStorageBackend = dbSupport.storageBackendFactory.createParameterStorageBackend,
       ledgerEndCache = ledgerEndCache,
       completionsPageSize = completionsPageSize,
-      acsStreamsConfig = acsStreamsConfig,
+      activeContractsServiceStreamsConfig = activeContractsServiceStreamsConfig,
       transactionFlatStreamsConfig = transactionFlatStreamsConfig,
       transactionTreeStreamsConfig = transactionTreeStreamsConfig,
       globalMaxEventIdQueries = globalMaxEventIdQueries,
@@ -775,7 +775,7 @@ private[platform] object JdbcLedgerDao {
       ledgerEndCache: LedgerEndCache,
       stringInterning: StringInterning,
       completionsPageSize: Int,
-      acsStreamsConfig: AcsStreamsConfig,
+      activeContractsServiceStreamsConfig: ActiveContractsServiceStreamsConfig,
       transactionFlatStreamsConfig: TransactionFlatStreamsConfig,
       transactionTreeStreamsConfig: TransactionTreeStreamsConfig,
       globalMaxEventIdQueries: Int,
@@ -796,7 +796,7 @@ private[platform] object JdbcLedgerDao {
       parameterStorageBackend = dbSupport.storageBackendFactory.createParameterStorageBackend,
       ledgerEndCache = ledgerEndCache,
       completionsPageSize = completionsPageSize,
-      acsStreamsConfig = acsStreamsConfig,
+      activeContractsServiceStreamsConfig = activeContractsServiceStreamsConfig,
       transactionFlatStreamsConfig = transactionFlatStreamsConfig,
       transactionTreeStreamsConfig = transactionTreeStreamsConfig,
       globalMaxEventIdQueries = globalMaxEventIdQueries,

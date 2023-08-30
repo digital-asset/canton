@@ -5,6 +5,7 @@ package com.digitalasset.canton
 
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
+import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.SequencedEventError
 import com.digitalasset.canton.sequencing.protocol.{
   ClosedEnvelope,
   Envelope,
@@ -77,6 +78,8 @@ package object sequencing {
 
   type PossiblyIgnoredSerializedEvent = BoxedEnvelope[PossiblyIgnoredSequencedEvent, ClosedEnvelope]
 
+  type OrdinarySerializedEventOrError = Either[SequencedEventError, OrdinarySerializedEvent]
+
   /////////////////////////////////
   // Protocol events (deserialized)
   /////////////////////////////////
@@ -110,4 +113,6 @@ package object sequencing {
   /** Default type for handlers on serialized events with error reporting
     */
   type SerializedEventHandler[Err] = OrdinarySerializedEvent => Future[Either[Err, Unit]]
+  type SerializedEventOrErrorHandler[Err] =
+    OrdinarySerializedEventOrError => Future[Either[Err, Unit]]
 }
