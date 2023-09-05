@@ -166,7 +166,7 @@ object SignedTopologyTransactionX
     val originTx = signedTx.transaction
 
     // Convert and resign the transaction if the topology transaction version does not match the expected version
-    if (!originTx.hasEquivalentVersion(protocolVersion)) {
+    if (!originTx.isEquivalentTo(protocolVersion)) {
       if (signedTx.signatures.size > 1) {
         EitherT.leftT(
           s"Failed to resign topology transaction $originTx with multiple signatures, as only one signature is supported"

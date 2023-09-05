@@ -64,6 +64,12 @@ trait HasFlushFuture
 
   private val directExecutionContext: ExecutionContext = DirectExecutionContext(logger)
 
+  /** Returns the list of currently incomplete tasks.
+    * Use only for inspection and debugging.
+    */
+  def snapshotIncomplete: Seq[String] =
+    tasks.readOnlySnapshot().keys.filterNot(_.future.isCompleted).map(_.name).toSeq
+
   protected def flushCloseable(name: String, timeout: NonNegativeDuration): SyncCloseable = {
     implicit val traceContext: TraceContext = TraceContext.empty
     val snapshot = tasks.readOnlySnapshot().keys
@@ -90,7 +96,7 @@ trait HasFlushFuture
 
 object HasFlushFuture {
   // Not a case class so that we get by-reference equality
-  class NamedTask(val name: String, val future: Future[_]) extends PrettyPrinting {
+  private class NamedTask(val name: String, val future: Future[_]) extends PrettyPrinting {
     override def pretty: Pretty[NamedTask] =
       prettyOfString(x => if (x.future.isCompleted) x.name + " (completed)" else x.name)
   }

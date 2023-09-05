@@ -122,11 +122,11 @@ abstract class ParticipantTopologyDispatcherImplCommon[S <: SyncDomainPersistent
 ) extends ParticipantTopologyDispatcherCommon {
 
   /** map of active domain outboxes, i.e. where we are connected and actively try to push topology state onto the domains */
-  private[topology] val domains = new TrieMap[DomainAlias, DomainOutboxCommon[?, ?, ?]]()
+  private[topology] val domains = new TrieMap[DomainAlias, NonEmpty[Seq[DomainOutboxCommon]]]()
 
   def queueStatus: TopologyQueueStatus = {
     val (dispatcher, clients) = domains.values.foldLeft((0, 0)) { case ((disp, clts), outbox) =>
-      (disp + outbox.queueSize, clts + outbox.targetClient.numPendingChanges)
+      (disp + outbox.map(_.queueSize).sum, clts + outbox.map(_.targetClient.numPendingChanges).sum)
     }
     TopologyQueueStatus(
       manager = managerQueueSize,
@@ -141,7 +141,7 @@ abstract class ParticipantTopologyDispatcherImplCommon[S <: SyncDomainPersistent
   )(implicit traceContext: TraceContext): Unit = {
     domains.remove(domain) match {
       case Some(outbox) =>
-        outbox.close()
+        outbox.foreach(_.close())
       case None =>
         logger.debug(s"Topology pusher already disconnected from $domain")
     }
@@ -159,7 +159,11 @@ abstract class ParticipantTopologyDispatcherImplCommon[S <: SyncDomainPersistent
               "Can not await idle without the domain being connected"
             ): DomainRegistryError
         )
-      )(x => EitherT.right[DomainRegistryError](x.awaitIdle(timeout)))
+      )(x =>
+        EitherT.right[DomainRegistryError](
+          x.forgetNE.parTraverse(_.awaitIdle(timeout)).map(_.forall(identity))
+        )
+      )
   }
 
   protected def getState(domainId: DomainId)(implicit
@@ -203,6 +207,7 @@ class ParticipantTopologyDispatcher(
     )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
       val num = transactions.size
       domains.values.toList
+        .flatMap(_.forgetNE)
         .parTraverse(_.newTransactionsAddedToAuthorizedStore(timestamp, num))
         .map(_ => ())
     }
@@ -234,7 +239,7 @@ class ParticipantTopologyDispatcher(
     ): EitherT[FutureUnlessShutdown, DomainRegistryError, Unit] =
       getState(domainId)
         .flatMap { state =>
-          val outbox = new DomainOutbox(
+          val outbox = new StoreBasedDomainOutbox(
             domain,
             domainId,
             participantId,
@@ -251,7 +256,7 @@ class ParticipantTopologyDispatcher(
             !domains.contains(domain),
             s"topology pusher for $domain already exists",
           )
-          domains += domain -> outbox
+          domains += domain -> NonEmpty(Seq, outbox)
           outbox
             .startup()
             .leftMap(DomainRegistryError.DomainRegistryInternalError.InitialOnboardingError(_))
@@ -303,7 +308,7 @@ class ParticipantTopologyDispatcher(
 }
 
 class ParticipantTopologyDispatcherX(
-    val manager: TopologyManagerX,
+    val manager: AuthorizedTopologyManagerX,
     participantId: ParticipantId,
     state: SyncDomainPersistentStateManagerImpl[SyncDomainPersistentStateX],
     crypto: Crypto,
@@ -314,7 +319,8 @@ class ParticipantTopologyDispatcherX(
 )(implicit ec: ExecutionContext)
     extends ParticipantTopologyDispatcherImplCommon[SyncDomainPersistentStateX](state) {
 
-  override protected def managerQueueSize: Int = manager.queueSize
+  override protected def managerQueueSize: Int =
+    manager.queueSize + state.getAll.values.map(_.topologyManager.queueSize).sum
 
   // connect to manager
   manager.addObserver(new TopologyManagerObserver {
@@ -324,6 +330,8 @@ class ParticipantTopologyDispatcherX(
     )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
       val num = transactions.size
       domains.values.toList
+        .flatMap(_.forgetNE)
+        .collect { case outbox: StoreBasedDomainOutboxX => outbox }
         .parTraverse(_.newTransactionsAddedToAuthorizedStore(timestamp, num))
         .map(_ => ())
     }
@@ -450,27 +458,56 @@ class ParticipantTopologyDispatcherX(
       ): EitherT[FutureUnlessShutdown, DomainRegistryError, Unit] =
         getState(domainId)
           .flatMap { state =>
-            val outbox = new DomainOutboxX(
+            val queueBasedDomainOutbox = new QueueBasedDomainOutboxX(
               domain,
               domainId,
               participantId,
               protocolVersion,
               handle,
               client,
-              manager.store,
+              state.domainOutboxQueue,
               state.topologyStore,
               timeouts,
               domainLoggerFactory,
+              crypto,
+            )
+
+            val storeBasedDomainOutbox = new StoreBasedDomainOutboxX(
+              domain,
+              domainId,
+              memberId = participantId,
+              protocolVersion,
+              handle,
+              client,
+              manager.store,
+              targetStore = state.topologyStore,
+              timeouts,
+              loggerFactory,
               crypto,
             )
             ErrorUtil.requireState(
               !domains.contains(domain),
               s"topology pusher for $domain already exists",
             )
-            domains += domain -> outbox
-            outbox
-              .startup()
-              .leftMap(DomainRegistryError.DomainRegistryInternalError.InitialOnboardingError(_))
+            val outboxes = NonEmpty(Seq, queueBasedDomainOutbox, storeBasedDomainOutbox)
+            domains += domain -> outboxes
+
+            state.topologyManager.addObserver(new TopologyManagerObserver {
+              override def addedNewTransactions(
+                  timestamp: CantonTimestamp,
+                  transactions: Seq[SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]],
+              )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+                queueBasedDomainOutbox.newTransactionsAddedToAuthorizedStore(
+                  timestamp,
+                  transactions.size,
+                )
+            })
+
+            outboxes.forgetNE.parTraverse_(
+              _.startup().leftMap(
+                DomainRegistryError.DomainRegistryInternalError.InitialOnboardingError(_)
+              )
+            )
           }
 
       override def processor: EnvelopeHandler = handle.processor
@@ -635,7 +672,7 @@ private class DomainOnboardingOutboxX(
       RegisterTopologyTransactionHandleWithProcessor[GenericSignedTopologyTransactionX],
       TopologyStoreX[TopologyStoreId.DomainStore],
     ]
-    with DomainOutboxDispatchHelperX {
+    with StoreBasedDomainOutboxDispatchHelperX {
 
   override protected val memberId: Member = participantId
 

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.resource
 
-import cats.syntax.alternative.*
 import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import com.daml.nameof.NameOf.functionFullName
@@ -49,10 +48,10 @@ object TransactionalStoreUpdate {
       // We first execute all DB updates in a single DB transaction and, if successful, all in-memory updates afterwards.
       // This gives transactionality as the in-memory updates cannot fail by the requirement on `InMemoryTransactionalStoreUpdate`.
 
-      val (dbUpdates, inMemUpdates) = updates.toList.map {
+      val (dbUpdates, inMemUpdates) = updates.toList.partitionMap {
         case upd: InMemoryTransactionalStoreUpdate => Right(upd)
         case upd: DbTransactionalStoreUpdate => Left(upd)
-      }.separate
+      }
 
       // Make sure that all DB updates use the same Db storage object.
       // Otherwise we cannot combine the SQL updates into a single DB transaction.

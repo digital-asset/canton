@@ -71,6 +71,9 @@ private[store] object StorageBackendTestValues {
   // because Oracle converts empty arrays to NULL, which then breaks non-null constraints.
   val someSerializedDamlLfValue: Array[Byte] = Array.fill[Byte](8)(15)
 
+  private val serializableTraceContext: Array[Byte] =
+    SerializableTraceContext(TraceContext.empty).toDamlProto.toByteArray
+
   def dtoConfiguration(
       offset: Offset,
       configuration: Configuration = someConfiguration,
@@ -166,6 +169,7 @@ private[store] object StorageBackendTestValues {
       event_sequential_id = eventSequentialId,
       driver_metadata = driverMetadata,
       domain_id = domainId,
+      trace_context = serializableTraceContext,
     )
   }
 
@@ -212,6 +216,7 @@ private[store] object StorageBackendTestValues {
       exercise_result_compression = None,
       event_sequential_id = eventSequentialId,
       domain_id = domainId,
+      trace_context = serializableTraceContext,
     )
   }
 
@@ -279,6 +284,7 @@ private[store] object StorageBackendTestValues {
       target_domain_id = targetDomainId,
       unassign_id = "123456789",
       reassignment_counter = 1000L,
+      trace_context = serializableTraceContext,
     )
   }
 
@@ -308,6 +314,7 @@ private[store] object StorageBackendTestValues {
       unassign_id = "123456789",
       reassignment_counter = 1000L,
       assignment_exclusivity = Some(11111),
+      trace_context = serializableTraceContext,
     )
   }
 
@@ -322,9 +329,7 @@ private[store] object StorageBackendTestValues {
       deduplicationDurationNanos: Option[Int] = None,
       deduplicationStart: Option[Timestamp] = None,
       domainId: Option[String] = None,
-      traceContext: Option[Array[Byte]] = Some(
-        SerializableTraceContext(TraceContext.empty).toDamlProto.toByteArray
-      ),
+      traceContext: Array[Byte] = serializableTraceContext,
   ): DbDto.CommandCompletion =
     DbDto.CommandCompletion(
       completion_offset = offset.toHexString,

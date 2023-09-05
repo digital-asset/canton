@@ -248,6 +248,39 @@ object ParticipantAdminCommands {
 
     }
 
+    final case class VetDar(darDash: String, synchronize: Boolean)
+        extends PackageCommand[VetDarRequest, VetDarResponse, Unit] {
+      override def createRequest(): Either[String, VetDarRequest] = Right(
+        VetDarRequest(darDash, synchronize)
+      )
+
+      override def submitRequest(
+          service: PackageServiceStub,
+          request: VetDarRequest,
+      ): Future[VetDarResponse] = service.vetDar(request)
+
+      override def handleResponse(response: VetDarResponse): Either[String, Unit] =
+        Right(())
+    }
+
+    // TODO(#14432): Add `synchronize` flag which makes the call block until the unvetting operation
+    //               is observed by the participant on all connected domains.
+    final case class UnvetDar(darDash: String)
+        extends PackageCommand[UnvetDarRequest, UnvetDarResponse, Unit] {
+
+      override def createRequest(): Either[String, UnvetDarRequest] = Right(
+        UnvetDarRequest(darDash)
+      )
+
+      override def submitRequest(
+          service: PackageServiceStub,
+          request: UnvetDarRequest,
+      ): Future[UnvetDarResponse] = service.unvetDar(request)
+
+      override def handleResponse(response: UnvetDarResponse): Either[String, Unit] =
+        Right(())
+    }
+
     final case class ListDars(limit: PositiveInt)
         extends PackageCommand[ListDarsRequest, ListDarsResponse, Seq[DarDescription]] {
       override def createRequest(): Either[String, ListDarsRequest] = Right(
@@ -419,6 +452,8 @@ object ParticipantAdminCommands {
 
   object ParticipantRepairManagement {
 
+    // TODO(i14441): Remove deprecated ACS download / upload functionality
+    @deprecated("Use ExportAcs", since = "2.8.0")
     final case class Download(
         parties: Set[PartyId],
         filterDomainId: String,
@@ -445,7 +480,7 @@ object ParticipantAdminCommands {
             parties.map(_.toLf).toSeq,
             filterDomainId,
             timestamp.map(Timestamp.apply),
-            protocolVersion.map(_.toString).getOrElse(""),
+            protocolVersion.map(_.toProtoPrimitiveS).getOrElse(""),
             chunkSize.map(_.value),
             gzipFormat,
             contractDomainRenames.map { case (source, target) =>
@@ -470,27 +505,17 @@ object ParticipantAdminCommands {
 
     }
 
-    final case class Upload(acsChunk: ByteString, gzip: Boolean)
-        extends GrpcAdminCommand[UploadRequest, UploadResponse, Unit] {
+    sealed trait StreamingMachinery[Req, Resp] {
+      def stream(
+          load: StreamObserver[Resp] => StreamObserver[Req],
+          requestBuilder: Array[Byte] => Req,
+          snapshot: ByteString,
+      ): Future[Resp] = {
+        val requestComplete = Promise[Resp]()
+        val ref = new AtomicReference[Option[Resp]](None)
 
-      override type Svc = ParticipantRepairServiceStub
-
-      override def createService(channel: ManagedChannel): ParticipantRepairServiceStub =
-        ParticipantRepairServiceGrpc.stub(channel)
-
-      override def createRequest(): Either[String, UploadRequest] = {
-        Right(UploadRequest(acsChunk, gzip))
-      }
-
-      override def submitRequest(
-          service: ParticipantRepairServiceStub,
-          request: UploadRequest,
-      ): Future[UploadResponse] = {
-        val requestComplete = Promise[UploadResponse]()
-        val ref = new AtomicReference[Option[UploadResponse]](None)
-
-        val responseObserver = new StreamObserver[UploadResponse] {
-          override def onNext(value: UploadResponse): Unit = {
+        val responseObserver = new StreamObserver[Resp] {
+          override def onNext(value: Resp): Unit = {
             ref.set(Some(value))
           }
 
@@ -509,20 +534,123 @@ object ParticipantAdminCommands {
 
           }
         }
-        val requestObserver = service.upload(responseObserver)
+        val requestObserver = load(responseObserver)
 
-        request.acsSnapshot.toByteArray
+        snapshot.toByteArray
           .grouped(GrpcParticipantRepairService.DefaultChunkSize.value)
           .foreach { bytes =>
             blocking {
-              requestObserver.onNext(UploadRequest(ByteString.copyFrom(bytes), gzip))
+              requestObserver.onNext(requestBuilder(bytes))
             }
           }
         requestObserver.onCompleted()
         requestComplete.future
       }
+    }
+
+    // TODO(i14441): Remove deprecated ACS download / upload functionality
+    @deprecated("Use ImportAcs", since = "2.8.0")
+    final case class Upload(acsChunk: ByteString, gzip: Boolean)
+        extends GrpcAdminCommand[UploadRequest, UploadResponse, Unit]
+        with StreamingMachinery[UploadRequest, UploadResponse] {
+
+      override type Svc = ParticipantRepairServiceStub
+
+      override def createService(channel: ManagedChannel): ParticipantRepairServiceStub =
+        ParticipantRepairServiceGrpc.stub(channel)
+
+      override def createRequest(): Either[String, UploadRequest] = {
+        Right(UploadRequest(acsChunk, gzip))
+      }
+
+      override def submitRequest(
+          service: ParticipantRepairServiceStub,
+          request: UploadRequest,
+      ): Future[UploadResponse] = {
+        stream(
+          service.upload,
+          (bytes: Array[Byte]) => UploadRequest(ByteString.copyFrom(bytes), gzip),
+          request.acsSnapshot,
+        )
+      }
 
       override def handleResponse(response: UploadResponse): Either[String, Unit] = {
+        Right(())
+      }
+    }
+
+    final case class ExportAcs(
+        parties: Set[PartyId],
+        filterDomainId: Option[DomainId],
+        timestamp: Option[Instant],
+        protocolVersion: Option[ProtocolVersion],
+        observer: StreamObserver[ExportAcsResponse],
+        contractDomainRenames: Map[DomainId, DomainId],
+    ) extends GrpcAdminCommand[
+          ExportAcsRequest,
+          CancellableContext,
+          CancellableContext,
+        ] {
+
+      override type Svc = ParticipantRepairServiceStub
+
+      override def createService(channel: ManagedChannel): ParticipantRepairServiceStub =
+        ParticipantRepairServiceGrpc.stub(channel)
+
+      override def createRequest(): Either[String, ExportAcsRequest] = {
+        Right(
+          ExportAcsRequest(
+            parties.map(_.toLf).toSeq,
+            filterDomainId.map(_.toProtoPrimitive).getOrElse(""),
+            timestamp.map(Timestamp.apply),
+            protocolVersion.map(_.toProtoPrimitive),
+            contractDomainRenames.map { case (source, target) =>
+              (source.toProtoPrimitive, target.toProtoPrimitive)
+            },
+          )
+        )
+      }
+
+      override def submitRequest(
+          service: ParticipantRepairServiceStub,
+          request: ExportAcsRequest,
+      ): Future[CancellableContext] = {
+        val context = Context.current().withCancellation()
+        context.run(() => service.exportAcs(request, observer))
+        Future.successful(context)
+      }
+
+      override def handleResponse(
+          response: CancellableContext
+      ): Either[String, CancellableContext] = Right(response)
+
+    }
+
+    final case class ImportAcs(acsChunk: ByteString)
+        extends GrpcAdminCommand[ImportAcsRequest, ImportAcsResponse, Unit]
+        with StreamingMachinery[ImportAcsRequest, ImportAcsResponse] {
+
+      override type Svc = ParticipantRepairServiceStub
+
+      override def createService(channel: ManagedChannel): ParticipantRepairServiceStub =
+        ParticipantRepairServiceGrpc.stub(channel)
+
+      override def createRequest(): Either[String, ImportAcsRequest] = {
+        Right(ImportAcsRequest(acsChunk))
+      }
+
+      override def submitRequest(
+          service: ParticipantRepairServiceStub,
+          request: ImportAcsRequest,
+      ): Future[ImportAcsResponse] = {
+        stream(
+          service.importAcs,
+          (bytes: Array[Byte]) => ImportAcsRequest(ByteString.copyFrom(bytes)),
+          request.acsSnapshot,
+        )
+      }
+
+      override def handleResponse(response: ImportAcsResponse): Either[String, Unit] = {
         Right(())
       }
     }

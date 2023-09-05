@@ -33,7 +33,8 @@ import com.digitalasset.canton.participant.admin.grpc.*
 import com.digitalasset.canton.participant.admin.v0.*
 import com.digitalasset.canton.participant.admin.{
   DomainConnectivityService,
-  PackageInspectionOps,
+  PackageDependencyResolver,
+  PackageOps,
   PackageService,
   ResourceManagementService,
 }
@@ -52,8 +53,6 @@ import com.digitalasset.canton.participant.ledger.api.*
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.scheduler.ParticipantSchedulersParameters
 import com.digitalasset.canton.participant.store.*
-import com.digitalasset.canton.participant.store.db.DbDamlPackageStore
-import com.digitalasset.canton.participant.store.memory.InMemoryDamlPackageStore
 import com.digitalasset.canton.participant.sync.*
 import com.digitalasset.canton.participant.topology.{
   LedgerServerPartyNotifier,
@@ -61,7 +60,8 @@ import com.digitalasset.canton.participant.topology.{
   ParticipantTopologyManagerOps,
 }
 import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportKey
-import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
+import com.digitalasset.canton.platform.indexer.ha.HaConfig
+import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.SchedulersWithPruning
 import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig, SequencerClient}
 import com.digitalasset.canton.store.IndexedStringStore
@@ -133,26 +133,31 @@ class CantonLedgerApiServerFactory(
             EitherT.rightT[FutureUnlessShutdown, String](None)
         }
 
+      indexerHaConfig = indexerLockIds.fold(HaConfig()) {
+        case IndexerLockIds(mainLockId, workerLockId) =>
+          HaConfig(indexerLockId = mainLockId, indexerWorkerLockId = workerLockId)
+      }
+
       ledgerApiServer <- CantonLedgerApiServerWrapper
         .initialize(
           CantonLedgerApiServerWrapper.Config(
-            config.ledgerApi,
-            config.httpLedgerApiExperimental.map(_.toConfig),
-            parameters.ledgerApiServerParameters.indexer,
-            indexerLockIds,
-            ledgerId,
-            participantId,
-            engine,
-            sync,
-            config.storage,
-            parameters,
-            ledgerTestingTimeService,
-            adminToken,
-            loggerFactory,
-            tracerProvider,
-            metrics,
-            httpApiMetrics,
-            meteringReportKey,
+            serverConfig = config.ledgerApi,
+            jsonApiConfig = config.httpLedgerApiExperimental.map(_.toConfig),
+            indexerConfig = parameters.ledgerApiServerParameters.indexer,
+            indexerHaConfig = indexerHaConfig,
+            ledgerId = ledgerId,
+            participantId = participantId,
+            engine = engine,
+            syncService = sync,
+            storageConfig = config.storage,
+            cantonParameterConfig = parameters,
+            testingTimeService = ledgerTestingTimeService,
+            adminToken = adminToken,
+            loggerFactory = loggerFactory,
+            tracerProvider = tracerProvider,
+            metrics = metrics,
+            jsonApiMetrics = httpApiMetrics,
+            meteringReportKey = meteringReportKey,
           ),
           // start ledger API server iff participant replica is active
           startLedgerApiServer = sync.isActive(),
@@ -181,10 +186,10 @@ private[this] trait ParticipantComponentBootstrapFactory {
       indexedStringStore: IndexedStringStore,
   ): (SyncDomainPersistentStateManager, ParticipantTopologyDispatcherCommon)
 
-  def createPackageInspectionOps(
+  def createPackageOps(
       manager: SyncDomainPersistentStateManager,
       crypto: SyncCryptoApiProvider,
-  ): PackageInspectionOps
+  ): PackageOps
 
 }
 
@@ -224,7 +229,7 @@ trait ParticipantNodeBootstrapCommon {
       timeouts,
     )
 
-  protected def setPostInitCallbacks(sync: CantonSyncService, packageService: PackageService): Unit
+  protected def setPostInitCallbacks(sync: CantonSyncService): Unit
 
   protected def createParticipantServices(
       participantId: ParticipantId,
@@ -245,6 +250,7 @@ trait ParticipantNodeBootstrapCommon {
       createPartyNotifierAndSubscribe: ParticipantEventPublisher => LedgerServerPartyNotifier,
       adminToken: CantonAdminToken,
       topologyManager: ParticipantTopologyManagerOps,
+      packageDependencyResolver: PackageDependencyResolver,
       componentFactory: ParticipantComponentBootstrapFactory,
       skipRecipientsCheck: Boolean,
       overrideKeyUniqueness: Option[Boolean] = None, // TODO(i13235) remove when UCK is gone
@@ -339,32 +345,17 @@ trait ParticipantNodeBootstrapCommon {
       )
 
       // Package Store and Management
-      packageService = {
-        val packageStore = storage match {
-          case _: MemoryStorage =>
-            new InMemoryDamlPackageStore(loggerFactory)
-          case pool: DbStorage =>
-            new DbDamlPackageStore(
-              parameterConfig.stores.maxItemsInSqlClause,
-              pool,
-              parameterConfig.processingTimeouts,
-              futureSupervisor,
-              loggerFactory,
-            )
-        }
-        // TODO(#12944) refactor package service such that we can break the cycle between manager / package service
+      packageService =
         new PackageService(
           engine,
-          packageStore,
+          packageDependencyResolver,
           ephemeralState.participantEventPublisher,
           syncCrypto.pureCrypto,
-          topologyManager,
-          componentFactory.createPackageInspectionOps(syncDomainPersistentStateManager, syncCrypto),
+          componentFactory.createPackageOps(syncDomainPersistentStateManager, syncCrypto),
           arguments.metrics,
           parameterConfig.processingTimeouts,
           loggerFactory,
         )
-      }
 
       sequencerInfoLoader = new SequencerInfoLoader(
         parameterConfig.processingTimeouts,
@@ -389,7 +380,7 @@ trait ParticipantNodeBootstrapCommon {
         arguments.testingConfig,
         recordSequencerInteractions,
         replaySequencerConfig,
-        packageId => packageService.packageDependencies(List(packageId)),
+        packageId => packageDependencyResolver.packageDependencies(List(packageId)),
         arguments.metrics.domainMetrics,
         sequencerInfoLoader,
         futureSupervisor,
@@ -470,7 +461,7 @@ trait ParticipantNodeBootstrapCommon {
       )
 
       _ = {
-        setPostInitCallbacks(sync, packageService)
+        setPostInitCallbacks(sync)
         syncDomainHealth.set(sync.syncDomainHealth)
         syncDomainEphemeralHealth.set(sync.ephemeralHealth)
         syncDomainSequencerClientHealth.set(sync.sequencerClientHealth)
@@ -602,6 +593,7 @@ trait ParticipantNodeBootstrapCommon {
     }
   }
 }
+
 abstract class ParticipantNodeCommon(
     private[canton] val sync: CantonSyncService
 ) extends CantonNode

@@ -17,7 +17,12 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.db.DbActiveContractStore.*
-import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractStore}
+import com.digitalasset.canton.participant.store.{
+  ActiveContractStore,
+  ContractChange,
+  ContractStore,
+  StateChangeType,
+}
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.{
@@ -810,18 +815,26 @@ class DbActiveContractStore(
             changeType == ChangeType.Activation
           }
           TimeOfChange(rc, ts) -> ActiveContractIdsChange(
-            acts.map { case (_, _, cid, _, transferCounter, _) => (cid, transferCounter) }.toMap,
+            acts.map { case (_, _, cid, _, transferCounter, opType) =>
+              if (opType == OperationType.Create)
+                (cid, StateChangeType(ContractChange.Created, transferCounter))
+              else
+                (cid, StateChangeType(ContractChange.Assigned, transferCounter))
+            }.toMap,
             deacts.map { case (_, requestCounter, cid, _, transferCounter, opType) =>
               if (opType == OperationType.Archive) {
                 (
                   cid,
-                  definedMaxTransferCountersPerCidUpToRc.getOrElse(
-                    (requestCounter, cid),
-                    maxTransferCountersPerRemainingCidUpToRc
-                      .getOrElse((requestCounter, cid), transferCounter),
+                  StateChangeType(
+                    ContractChange.Archived,
+                    definedMaxTransferCountersPerCidUpToRc.getOrElse(
+                      (requestCounter, cid),
+                      maxTransferCountersPerRemainingCidUpToRc
+                        .getOrElse((requestCounter, cid), transferCounter),
+                    ),
                   ),
                 )
-              } else (cid, transferCounter)
+              } else (cid, StateChangeType(ContractChange.Unassigned, transferCounter))
             }.toMap,
           )
         }

@@ -19,7 +19,11 @@ import com.digitalasset.canton.logging.{
 }
 import com.digitalasset.canton.platform.indexer.parallel.BatchN
 import com.digitalasset.canton.platform.store.backend.ContractStorageBackend
-import com.digitalasset.canton.platform.store.backend.ContractStorageBackend.RawContractState
+import com.digitalasset.canton.platform.store.backend.ContractStorageBackend.{
+  RawArchivedContract,
+  RawContractState,
+  RawCreatedContract,
+}
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import io.grpc.{Metadata, StatusRuntimeException}
 
@@ -117,7 +121,7 @@ class AkkaStreamParallelBatchedLoader[KEY, VALUE](
   }
 }
 
-trait ContractLoader extends Loader[(ContractId, Offset), ContractStorageBackend.RawContractState]
+trait ContractLoader extends Loader[(ContractId, Offset), RawContractState]
 
 object ContractLoader {
   def create(
@@ -127,6 +131,7 @@ object ContractLoader {
       maxQueueSize: Int,
       maxBatchSize: Int,
       parallelism: Int,
+      multiDomainEnabled: Boolean,
       loggerFactory: NamedLoggerFactory,
   )(implicit
       materializer: Materializer,
@@ -136,7 +141,7 @@ object ContractLoader {
       .forReleasable(() =>
         new AkkaStreamParallelBatchedLoader[
           (ContractId, Offset),
-          ContractStorageBackend.RawContractState,
+          RawContractState,
         ](
           batchLoad = { batch =>
             val ((_, latestValidAtOffset), usedLoggingContext) = batch
@@ -146,11 +151,12 @@ object ContractLoader {
               )
             metrics.daml.index.db.activeContractLookupBatchSize
               .update(batch.size)(MetricsContext.Empty)
+            val contractIds = batch.map(_._1._1)
             val archivedContractsF =
               dbDispatcher
                 .executeSql(metrics.daml.index.db.lookupArchivedContractsDbMetrics)(
                   contractStorageBackend.archivedContracts(
-                    contractIds = batch.map(_._1._1),
+                    contractIds = contractIds,
                     before = latestValidAtOffset,
                   )
                 )(usedLoggingContext)
@@ -158,17 +164,42 @@ object ContractLoader {
               dbDispatcher
                 .executeSql(metrics.daml.index.db.lookupCreatedContractsDbMetrics)(
                   contractStorageBackend.createdContracts(
-                    contractIds = batch.map(_._1._1),
+                    contractIds = contractIds,
                     before = latestValidAtOffset,
                   )
                 )(usedLoggingContext)
+            def additionalContractsF(
+                archivedContracts: Map[ContractId, RawArchivedContract],
+                createdContracts: Map[ContractId, RawCreatedContract],
+            ): Future[Map[ContractId, RawCreatedContract]] =
+              if (multiDomainEnabled) {
+                val notFoundContractIds = contractIds.view
+                  .filterNot(archivedContracts.contains)
+                  .filterNot(createdContracts.contains)
+                  .toSeq
+                if (notFoundContractIds.isEmpty) Future.successful(Map.empty)
+                else
+                  dbDispatcher.executeSql(metrics.daml.index.db.lookupAssignedContractsDbMetrics)(
+                    // The latestValidAtOffset is not used here as an upper bound for the lookup,
+                    // since the ContractStateCache only tracks creation and archival, therefore the
+                    // index is not moving ahead in case of assignment. This in corner cases would mean
+                    // that the index is behind of some assignments.
+                    // Instead the query is constrained by the ledgerEndCache.
+                    contractStorageBackend.assignedContracts(notFoundContractIds)
+                  )(usedLoggingContext)
+              } else Future.successful(Map.empty)
             for {
               archivedContracts <- archivedContractsF
               createdContracts <- createdContractsF
+              additionalContracts <- additionalContractsF(
+                archivedContracts = archivedContracts,
+                createdContracts = createdContracts,
+              )
             } yield batch.view.flatMap { case ((contractId, offset), _) =>
               archivedContracts
                 .get(contractId)
                 .orElse(createdContracts.get(contractId): Option[RawContractState])
+                .orElse(additionalContracts.get(contractId): Option[RawContractState])
                 .map((contractId, offset) -> _)
                 .toList
             }.toMap
@@ -189,7 +220,7 @@ object ContractLoader {
         new ContractLoader {
           override def load(key: (ContractId, Offset))(implicit
               loggingContext: LoggingContextWithTrace
-          ): Future[Option[ContractStorageBackend.RawContractState]] =
+          ): Future[Option[RawContractState]] =
             loader.load(key)
         }
       )
@@ -198,6 +229,6 @@ object ContractLoader {
   val dummyLoader = new ContractLoader {
     override def load(key: (ContractId, Offset))(implicit
         loggingContext: LoggingContextWithTrace
-    ): Future[Option[ContractStorageBackend.RawContractState]] = Future.successful(None)
+    ): Future[Option[RawContractState]] = Future.successful(None)
   }
 }

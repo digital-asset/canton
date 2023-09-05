@@ -7,6 +7,8 @@ import akka.stream.KillSwitch
 import akka.testkit.TestProbe
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.logging.{SuppressingLogger, TracedLogger}
 import com.digitalasset.canton.platform.store.backend.DBLockStorageBackend
 import com.digitalasset.canton.tracing.TraceContext
@@ -33,11 +35,12 @@ class HaCoordinatorSpec
   private val logger = TracedLogger(loggerFactory.getLogger(getClass))
   private val timer = new Timer(true)
 
-  private val mainLockAcquireRetryMillis = 20L
-  private val workerLockAcquireRetryMillis = 20L
-  private val mainLockCheckerPeriodMillis = 20L
-  private val timeoutToleranceMillis =
-    600000L // unfortunately this needs to be a insanely big tolerance, not to render the test flaky. under normal circumstances this should pass with +5 millis
+  private val mainLockAcquireRetryTimeout = NonNegativeFiniteDuration.ofMillis(20)
+  private val workerLockAcquireRetryTimeout = NonNegativeFiniteDuration.ofMillis(20)
+  private val mainLockCheckerPeriod = NonNegativeFiniteDuration.ofMillis(20)
+  private val timeoutTolerance = NonNegativeFiniteDuration.ofSeconds(
+    600
+  ) // unfortunately this needs to be a insanely big tolerance, not to render the test flaky. under normal circumstances this should pass with +5 millis
 
   private val mainLockId = 10
   private val main = TestLockId(mainLockId)
@@ -468,7 +471,7 @@ class HaCoordinatorSpec
       within = {
         val protectedSetup = setup(
           dbLock = dbLock,
-          workerLockAcquireMaxRetry = 2,
+          workerLockAcquireMaxRetries = NonNegativeLong.tryCreate(2),
         )
         import protectedSetup.*
         Threading.sleep(200)
@@ -582,9 +585,9 @@ class HaCoordinatorSpec
         logger.info("Execution is aborted")
         abortException.getMessage shouldBe "check failed, killSwitch aborted"
         (System.nanoTime() - mainConnectionSeveredAtNanos) should be < ((
-          mainLockAcquireRetryMillis +
-            timeoutToleranceMillis
-        ) * 1000L * 1000L)
+          mainLockAcquireRetryTimeout +
+            timeoutTolerance
+        ).duration.toNanos)
         logger.info("Within polling time-bounds")
         Try(connectionInitializer.initialize(new TestConnection)).isFailure shouldBe true
         logger.info("Connection initializer not working anymore")
@@ -697,9 +700,9 @@ class HaCoordinatorSpec
       )
       nodeStartedExecutionProbe.expectMsg("started")
       (System.nanoTime() - mainConnCutNanos) should be < ((
-        mainLockAcquireRetryMillis +
-          timeoutToleranceMillis
-      ) * 1000L * 1000L)
+        mainLockAcquireRetryTimeout +
+          timeoutTolerance
+      ).duration.toNanos)
       logger.info("Some other node started execution within time bounds")
       nodeStoppedExecutionProbe.expectMsg("stopped")
       nodeHaltedProbe.expectMsg("halted")
@@ -841,11 +844,13 @@ class HaCoordinatorSpec
       )
       nodeStartedExecutionProbe.expectMsg("started")
       (System.nanoTime() - mainConnCutNanos) should be < ((
-        mainLockCheckerPeriodMillis + // first active node has to realize that it lost the lock
-          keepUsingWorkerAfterShutdownMillis + // then it is shutting down, but it will take this long to release the worker lock as well
-          workerLockAcquireRetryMillis + // by the time of here the new active node already acquired the main lock, and it is polling for the worker lock, so maximum so much time we need to wait
-          timeoutToleranceMillis
-      ) * 1000L * 1000L)
+        mainLockCheckerPeriod + // first active node has to realize that it lost the lock
+          NonNegativeFiniteDuration.ofMillis(
+            keepUsingWorkerAfterShutdownMillis
+          ) + // then it is shutting down, but it will take this long to release the worker lock as well
+          workerLockAcquireRetryTimeout + // by the time of here the new active node already acquired the main lock, and it is polling for the worker lock, so maximum so much time we need to wait
+          timeoutTolerance
+      ).duration.toNanos)
       logger.info("Some other node started execution within time bounds")
       nodeStoppedExecutionProbe.expectMsg("stopped")
       nodeHaltedProbe.expectMsg("halted")
@@ -881,7 +886,7 @@ class HaCoordinatorSpec
 
   private def setup(
       connectionFactory: () => Connection = () => new TestConnection,
-      workerLockAcquireMaxRetry: Long = 100,
+      workerLockAcquireMaxRetries: NonNegativeLong = NonNegativeLong.tryCreate(100),
       dbLock: TestDBLockStorageBackend = new TestDBLockStorageBackend,
   ): ProtectedSetup = {
     val connectionInitializerPromise = Promise[ConnectionInitializer]()
@@ -898,10 +903,10 @@ class HaCoordinatorSpec
         executionContext = system.dispatcher,
         timer = timer,
         haConfig = HaConfig(
-          mainLockAcquireRetryMillis = mainLockAcquireRetryMillis,
-          workerLockAcquireRetryMillis = workerLockAcquireRetryMillis,
-          workerLockAcquireMaxRetry = workerLockAcquireMaxRetry,
-          mainLockCheckerPeriodMillis = mainLockCheckerPeriodMillis,
+          mainLockAcquireRetryTimeout = mainLockAcquireRetryTimeout,
+          workerLockAcquireRetryTimeout = workerLockAcquireRetryTimeout,
+          workerLockAcquireMaxRetries = workerLockAcquireMaxRetries,
+          mainLockCheckerPeriod = mainLockCheckerPeriod,
           indexerLockId = 10,
           indexerWorkerLockId = 20,
         ),

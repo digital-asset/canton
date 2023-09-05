@@ -98,7 +98,7 @@ import scala.concurrent.{ExecutionContext, Future}
 class RepairService(
     participantId: ParticipantId,
     syncCrypto: SyncCryptoApiProvider,
-    packagesDarsService: PackageService,
+    packageDependencyResolver: PackageDependencyResolver,
     damle: DAMLe,
     multiDomainEventLog: Eval[MultiDomainEventLog],
     syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
@@ -1173,7 +1173,7 @@ class RepairService(
   )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] = {
     for {
       packageDescription <- EitherTUtil.fromFuture(
-        packagesDarsService.packagesDarsStore.getPackageDescription(lfPackageId),
+        packageDependencyResolver.getPackageDescription(lfPackageId),
         t => log(s"Failed to look up package ${lfPackageId}", t),
       )
       _packageVetted <- EitherTUtil
@@ -1338,7 +1338,7 @@ class RepairService(
 
       topologySnapshot = topologyFactory.createTopologySnapshot(
         tsRepair,
-        packageId => packagesDarsService.packageDependencies(List(packageId)),
+        packageId => packageDependencyResolver.packageDependencies(List(packageId)),
         preferCaching = true,
       )
       domainParameters <- OptionT(persistentState.parameterStore.lastParameters)

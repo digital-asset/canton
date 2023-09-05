@@ -209,7 +209,7 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService with
     testStopOnShutdown(Pause(logger, _, Forever, 1.millis, "op"), 10)
 
     testSuspend(maxRetries =>
-      suspend => Pause(logger, flagCloseable, maxRetries, 10.millis, "op", suspendRetries = suspend)
+      suspend => Pause(logger, flagCloseable, maxRetries, 5.millis, "op", suspendRetries = suspend)
     )
   }
 
@@ -279,7 +279,7 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService with
           logger,
           flagCloseable,
           maxRetries,
-          1.milli,
+          5.milli,
           Duration.Inf,
           "op",
           suspendRetries = suspend,
@@ -685,7 +685,7 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService with
       assert(result == retriedUntilClose, "Expected to get last result as result.")
       assert(
         retried.get() == retriedUntilClose,
-        s"Expected to increment ${retriedUntilClose} times before failure",
+        s"Expected to increment $retriedUntilClose times before failure",
       )
     }
 
@@ -695,7 +695,7 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService with
 
       def run(): Future[Int] = Future.successful {
         val num = retried.incrementAndGet()
-        logger.debug(s"Increment retried is ${num}, closeable is ${closeable.isClosing}")
+        logger.debug(s"Increment retried is $num, closeable is ${closeable.isClosing}")
         num
       }
 
@@ -788,11 +788,11 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService with
       def run(): Future[Unit] = {
         val retries = retried.incrementAndGet()
         if (suspend.get() > Duration.Zero) {
-          logger.error(s"Policy is still retrying despite suspension.")
+          logger.error("Policy is still retrying despite suspension.")
         } else if (retries == 3) {
           suspend.set(1.millis)
           FutureUtil.doNotAwait(
-            DelayUtil.delay(10.millis).map(_ => suspend.set(Duration.Zero)),
+            DelayUtil.delay(100.millis).map(_ => suspend.set(Duration.Zero)),
             "An error occurred while resetting suspension delay.",
           )
         }

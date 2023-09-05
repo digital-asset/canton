@@ -28,6 +28,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class TopologyStateProcessorX(
     val store: TopologyStoreX[TopologyStoreId],
+    outboxQueue: Option[DomainOutboxQueue],
     loggerFactoryParent: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
@@ -111,16 +112,23 @@ class TopologyStateProcessorX(
           validatedTx
         }: Lft,
       ): EitherT[Future, Lft, Unit]
-      _ <- EitherT.right[Lft](
-        store.update(
-          sequenced,
-          effective,
-          mappingRemoves,
-          txRemoves,
-          validatedTx,
-          immediatelyExpiredValidatedTx,
-        )
-      )
+
+      _ <- outboxQueue match {
+        case Some(queue) =>
+          EitherT.rightT[Future, Lft](queue.enqueue(validatedTx.map(_.transaction)))
+
+        case None =>
+          EitherT.right[Lft](
+            store.update(
+              sequenced,
+              effective,
+              mappingRemoves,
+              txRemoves,
+              validatedTx,
+              immediatelyExpiredValidatedTx,
+            )
+          )
+      }
     } yield validatedTx
     ret.bimap(
       failed => {
@@ -128,12 +136,14 @@ class TopologyStateProcessorX(
         failed
       },
       success => {
-        logger.info(
-          s"Persisted topology transactions ($sequenced, $effective):\n" + success
-            .mkString(
-              ",\n"
-            )
-        )
+        if (outboxQueue.isEmpty)
+          logger.info(
+            s"Persisted topology transactions ($sequenced, $effective):\n" + success
+              .mkString(
+                ",\n"
+              )
+          )
+        else logger.info("Enqueued topology transactions:\n" + success.mkString((",\n")))
         success
       },
     )

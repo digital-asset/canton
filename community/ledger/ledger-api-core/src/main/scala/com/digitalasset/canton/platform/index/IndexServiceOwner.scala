@@ -86,7 +86,11 @@ final class IndexServiceOwner(
 
       inMemoryFanOutExecutionContext <- buildInMemoryFanOutExecutionContext(
         metrics = metrics,
-        threadPoolSize = config.inMemoryFanOutThreadPoolSize,
+        threadPoolSize = config.inMemoryFanOutThreadPoolSize.getOrElse(
+          IndexServiceConfig.DefaultInMemoryFanOutThreadPoolSize(
+            errorLoggingContext(TraceContext.empty)
+          )
+        ),
       ).acquire()
 
       bufferedTransactionsReader = BufferedTransactionsReader(

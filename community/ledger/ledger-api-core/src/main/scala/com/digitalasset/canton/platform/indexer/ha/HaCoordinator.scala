@@ -5,6 +5,8 @@ package com.digitalasset.canton.platform.indexer.ha
 
 import akka.stream.KillSwitch
 import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.platform.store.backend.DBLockStorageBackend
 import com.digitalasset.canton.platform.store.backend.DBLockStorageBackend.{Lock, LockId, LockMode}
@@ -55,11 +57,14 @@ trait HaCoordinator {
 }
 
 final case class HaConfig(
-    mainLockAcquireRetryMillis: Long = 500,
-    workerLockAcquireRetryMillis: Long = 500,
-    workerLockAcquireMaxRetry: Long = 1000,
-    mainLockCheckerPeriodMillis: Long = 1000,
-    mainLockCheckerJdbcNetworkTimeoutMillis: Int = 10000,
+    mainLockAcquireRetryTimeout: NonNegativeFiniteDuration =
+      NonNegativeFiniteDuration.ofMillis(500),
+    workerLockAcquireRetryTimeout: NonNegativeFiniteDuration =
+      NonNegativeFiniteDuration.ofMillis(500),
+    workerLockAcquireMaxRetries: NonNegativeLong = NonNegativeLong.tryCreate(1000),
+    mainLockCheckerPeriod: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMillis(1000),
+    mainLockCheckerJdbcNetworkTimeout: NonNegativeFiniteDuration =
+      NonNegativeFiniteDuration.ofMillis(10000),
     indexerLockId: Int = 0x646d6c0, // note 0x646d6c equals ASCII encoded "dml"
     indexerWorkerLockId: Int = 0x646d6c1,
 )
@@ -122,7 +127,7 @@ object HaCoordinator {
             }
             _ = logger.info("Waiting to be elected as leader")
             _ <- retry(
-              waitMillisBetweenRetries = haConfig.mainLockAcquireRetryMillis,
+              waitMillisBetweenRetries = haConfig.mainLockAcquireRetryTimeout.duration.toMillis,
               retryable = _.isInstanceOf[CannotAcquireLockException],
             )(acquireMainLock(mainConnection))
             _ = logger.info("Elected as leader: starting initialization")
@@ -131,8 +136,8 @@ object HaCoordinator {
               "Step 2: acquire exclusive Indexer Main Lock on main-connection - DONE"
             )
             exclusiveWorkerLock <- retry[Lock](
-              waitMillisBetweenRetries = haConfig.workerLockAcquireRetryMillis,
-              maxAmountOfRetries = haConfig.workerLockAcquireMaxRetry,
+              waitMillisBetweenRetries = haConfig.workerLockAcquireRetryTimeout.duration.toMillis,
+              maxAmountOfRetries = haConfig.workerLockAcquireMaxRetries.unwrap,
               retryable = _.isInstanceOf[CannotAcquireLockException],
             )(acquireLock(mainConnection, indexerWorkerLockId, LockMode.Exclusive))
             _ = logger.info(
@@ -147,7 +152,7 @@ object HaCoordinator {
             )
             mainLockChecker <- go[PollingChecker](
               new PollingChecker(
-                periodMillis = haConfig.mainLockCheckerPeriodMillis,
+                periodMillis = haConfig.mainLockCheckerPeriod.duration.toMillis,
                 checkBody = acquireMainLock(mainConnection),
                 killSwitch =
                   handle.killSwitch, // meaning: this PollingChecker will shut down the main preemptableSequence

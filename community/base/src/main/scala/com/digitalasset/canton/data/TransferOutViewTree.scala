@@ -6,6 +6,7 @@ package com.digitalasset.canton.data
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
@@ -204,7 +205,7 @@ final case class TransferOutCommonData private (
   override def hashPurpose: HashPurpose = HashPurpose.TransferOutCommonData
 
   def confirmingParties: Set[Informee] =
-    (stakeholders ++ adminParties).map(ConfirmingParty(_, 1, TrustLevel.Ordinary))
+    (stakeholders ++ adminParties).map(ConfirmingParty(_, PositiveInt.one, TrustLevel.Ordinary))
 
   override def pretty: Pretty[TransferOutCommonData] = prettyOfClass(
     param("source domain", _.sourceDomain),
@@ -535,15 +536,81 @@ object TransferOutView
   )
 
   override lazy val invariants = Seq(
-    transferCounterInvariant
+    transferCounterInvariant,
+    templateIdDefaultValue,
+    targetProtocolVersionDefaultValue,
   )
 
-  lazy val transferCounterInvariant = InvariantFromInclusive[TransferCounterO](
-    _.transferCounter,
-    _.nonEmpty,
-    "transferCounter should not be empty",
-    protocolVersionRepresentativeFor(TransferCommonData.minimumPvForTransferCounter),
-  )
+  private lazy val rpv4: RepresentativeProtocolVersion[TransferOutView.type] =
+    protocolVersionRepresentativeFor(ProtocolVersion.v4)
+
+  // TODO(#12373) Adapt when releasing BFT
+  private lazy val rpvDev: RepresentativeProtocolVersion[TransferOutView.type] =
+    protocolVersionRepresentativeFor(ProtocolVersion.dev)
+
+  lazy val transferCounterInvariant: InvariantFromInclusive[TransferCounterO] =
+    InvariantFromInclusive[TransferCounterO](
+      _.transferCounter,
+      _.nonEmpty,
+      "transferCounter should not be empty",
+      protocolVersionRepresentativeFor(TransferCommonData.minimumPvForTransferCounter),
+    )
+
+  lazy val submittingParticipantDefaultValue: DefaultValueUntilExclusive[LedgerParticipantId] =
+    DefaultValueUntilExclusive(
+      _.submitterMetadata.submittingParticipant,
+      "submitterMetadata.submittingParticipant",
+      rpvDev,
+      LedgerParticipantId.assertFromString("no-participant-id"),
+    )
+
+  lazy val commandIdDefaultValue: DefaultValueUntilExclusive[LedgerCommandId] =
+    DefaultValueUntilExclusive(
+      _.submitterMetadata.commandId,
+      "submitterMetadata.commandId",
+      rpvDev,
+      LedgerCommandId.assertFromString("no-command-id"),
+    )
+
+  lazy val applicationIdDefaultValue: DefaultValueUntilExclusive[LedgerApplicationId] =
+    DefaultValueUntilExclusive(
+      _.submitterMetadata.applicationId,
+      "submitterMetadata.applicationId",
+      rpvDev,
+      LedgerApplicationId.assertFromString("no-application-id"),
+    )
+
+  lazy val submissionIdDefaultValue: DefaultValueUntilExclusive[Option[LedgerSubmissionId]] =
+    DefaultValueUntilExclusive(
+      _.submitterMetadata.submissionId,
+      "submitterMetadata.submissionId",
+      rpvDev,
+      None,
+    )
+
+  lazy val workflowIdDefaultValue: DefaultValueUntilExclusive[Option[LfWorkflowId]] =
+    DefaultValueUntilExclusive(
+      _.submitterMetadata.workflowId,
+      "submitterMetadata.worfklowId",
+      rpvDev,
+      None,
+    )
+
+  lazy val templateIdDefaultValue: DefaultValueUntilExclusive[LfTemplateId] =
+    DefaultValueUntilExclusive(
+      _.templateId,
+      "templateId",
+      rpvDev,
+      LfTemplateId.assertFromString("no-package-id:no.module.name:no.entity.name"),
+    )
+
+  lazy val targetProtocolVersionDefaultValue: DefaultValueUntilExclusive[TargetProtocolVersion] =
+    DefaultValueUntilExclusive(
+      _.targetProtocolVersion,
+      "targetProtocolVersion",
+      rpv4,
+      TargetProtocolVersion(ProtocolVersion.v3),
+    )
 
   def create(hashOps: HashOps)(
       salt: Salt,
@@ -555,20 +622,20 @@ object TransferOutView
       sourceProtocolVersion: SourceProtocolVersion,
       targetProtocolVersion: TargetProtocolVersion,
       transferCounter: TransferCounterO,
-  ): Either[String, TransferOutView] =
-    for {
-      _ <- transferCounterInvariant.validate(transferCounter, sourceProtocolVersion.v)
-    } yield TransferOutView(
-      salt,
-      submitterMetadata,
-      contractId,
-      templateId,
-      targetDomain,
-      targetTimeProof,
-      targetProtocolVersion,
-      transferCounter,
-    )(hashOps, protocolVersionRepresentativeFor(sourceProtocolVersion.v), None)
-
+  ): Either[String, TransferOutView] = Either
+    .catchOnly[IllegalArgumentException](
+      TransferOutView(
+        salt,
+        submitterMetadata,
+        contractId,
+        templateId,
+        targetDomain,
+        targetTimeProof,
+        targetProtocolVersion,
+        transferCounter,
+      )(hashOps, protocolVersionRepresentativeFor(sourceProtocolVersion.v), None)
+    )
+    .leftMap(_.getMessage)
   private[this] def fromProtoV0(hashOps: HashOps, transferOutViewP: v0.TransferOutView)(
       bytes: ByteString
   ): ParsingResult[TransferOutView] = {
@@ -588,14 +655,14 @@ object TransferOutView
       commonData.salt,
       TransferSubmitterMetadata(
         commonData.submitter,
-        TransferViewTree.VersionedLedgerApplicationId.default,
-        TransferViewTree.VersionedLedgerParticipantId.default,
-        TransferViewTree.VersionedLedgerCommandId.default,
-        submissionId = None,
-        workflowId = None,
+        applicationIdDefaultValue.defaultValue,
+        submittingParticipantDefaultValue.defaultValue,
+        commandIdDefaultValue.defaultValue,
+        submissionId = submissionIdDefaultValue.defaultValue,
+        workflowId = workflowIdDefaultValue.defaultValue,
       ),
       commonData.contractId,
-      TransferViewTree.VersionedLfTemplateId.default,
+      templateIdDefaultValue.defaultValue,
       commonData.targetDomain,
       commonData.targetTimeProof,
       commonData.targetDomainPV,
@@ -633,14 +700,14 @@ object TransferOutView
       commonData.salt,
       TransferSubmitterMetadata(
         commonData.submitter,
-        TransferViewTree.VersionedLedgerApplicationId.default,
-        TransferViewTree.VersionedLedgerParticipantId.default,
-        TransferViewTree.VersionedLedgerCommandId.default,
-        submissionId = None,
-        workflowId = None,
+        applicationIdDefaultValue.defaultValue,
+        submittingParticipantDefaultValue.defaultValue,
+        commandIdDefaultValue.defaultValue,
+        submissionId = submissionIdDefaultValue.defaultValue,
+        workflowId = workflowIdDefaultValue.defaultValue,
       ),
       commonData.contractId,
-      TransferViewTree.VersionedLfTemplateId.default,
+      templateIdDefaultValue.defaultValue,
       commonData.targetDomain,
       commonData.targetTimeProof,
       commonData.targetDomainPV,

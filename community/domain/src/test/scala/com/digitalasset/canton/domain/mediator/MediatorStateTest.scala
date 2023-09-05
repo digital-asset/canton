@@ -40,7 +40,11 @@ class MediatorStateTest
       val domainId = DefaultTestIdentities.domainId
       val mediatorId = DefaultTestIdentities.mediator
       val alice = PlainInformee(LfPartyId.assertFromString("alice"))
-      val bob = ConfirmingParty(LfPartyId.assertFromString("bob"), 2, TrustLevel.Ordinary)
+      val bob = ConfirmingParty(
+        LfPartyId.assertFromString("bob"),
+        PositiveInt.tryCreate(2),
+        TrustLevel.Ordinary,
+      )
       val hashOps: HashOps = new SymbolicPureCrypto
       val h: Int => Hash = TestHash.digest
       val s: Int => Salt = TestSalt.generateSalt

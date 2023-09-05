@@ -92,15 +92,36 @@ class GrpcPackageService(
     EitherTUtil.toFuture(ret)
   }
 
+  override def vetDar(request: VetDarRequest): Future[VetDarResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val ret = for {
+      hash <- EitherT.fromEither[Future](extractHash(request.darHash))
+      _unit <- service
+        .vetDar(hash, request.synchronize)
+        .leftMap(_.asGrpcError)
+        .onShutdown(Left(GrpcErrors.AbortedDueToShutdown.Error().asGrpcError))
+    } yield VetDarResponse()
+
+    EitherTUtil.toFuture(ret)
+  }
+
+  override def unvetDar(request: UnvetDarRequest): Future[UnvetDarResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+
+    val ret = for {
+      hash <- EitherT.fromEither[Future](extractHash(request.darHash))
+      _unit <- service
+        .unvetDar(hash)
+        .leftMap(_.asGrpcError)
+        .onShutdown(Left(GrpcErrors.AbortedDueToShutdown.Error().asGrpcError))
+    } yield UnvetDarResponse()
+
+    EitherTUtil.toFuture(ret)
+  }
+
   override def removeDar(request: RemoveDarRequest): Future[RemoveDarResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val hashE = Hash
-      .fromHexString(request.darHash)
-      .leftMap(err =>
-        Status.INVALID_ARGUMENT
-          .withDescription(s"Invalid dar hash: ${request.darHash} [$err]")
-          .asRuntimeException()
-      )
+    val hashE = extractHash(request.darHash)
     val ret = {
       for {
         hash <- EitherT.fromEither[Future](hashE)
@@ -115,6 +136,15 @@ class GrpcPackageService(
 
     EitherTUtil.toFuture(ret)
   }
+
+  private def extractHash(apiHash: String): Either[StatusRuntimeException, Hash] =
+    Hash
+      .fromHexString(apiHash)
+      .leftMap(err =>
+        Status.INVALID_ARGUMENT
+          .withDescription(s"Invalid dar hash: $apiHash [$err]")
+          .asRuntimeException()
+      )
 
   override def getDar(request: GetDarRequest): Future[GetDarResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext

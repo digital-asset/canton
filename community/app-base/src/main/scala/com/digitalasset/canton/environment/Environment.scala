@@ -4,6 +4,7 @@
 package com.digitalasset.canton.environment
 
 import akka.actor.ActorSystem
+import cats.data.EitherT
 import cats.instances.option.*
 import cats.syntax.apply.*
 import cats.syntax.either.*
@@ -45,7 +46,8 @@ import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.time.*
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TracerProvider}
-import com.digitalasset.canton.util.{AkkaUtil, SingleUseCell}
+import com.digitalasset.canton.util.FutureInstances.parallelFuture
+import com.digitalasset.canton.util.{AkkaUtil, MonadUtil, SingleUseCell}
 import com.digitalasset.canton.{DiscardOps, DomainAlias}
 import com.google.common.annotations.VisibleForTesting
 import io.circe.Encoder
@@ -54,8 +56,7 @@ import org.slf4j.bridge.SLF4JBridgeHandler
 
 import java.util.concurrent.ScheduledExecutorService
 import scala.collection.mutable.ListBuffer
-import scala.concurrent.duration.*
-import scala.concurrent.{Await, Future, blocking}
+import scala.concurrent.{Future, blocking}
 import scala.util.control.NonFatal
 
 /** Holds all significant resources held by this process.
@@ -165,11 +166,13 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
   implicit val scheduler: ScheduledExecutorService =
     Threading.singleThreadScheduledExecutor(loggerFactory.threadName + "-env-scheduler", logger)
 
+  private val numThreads = Threading.detectNumberOfThreads(logger)
   implicit val executionContext: ExecutionContextIdlenessExecutorService =
     Threading.newExecutionContext(
       loggerFactory.threadName + "-env-execution-context",
       logger,
       metricsFactory.executionServiceMetrics,
+      numThreads,
     )
 
   private val deadlockConfig = config.monitoring.deadlockDetection
@@ -344,13 +347,11 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
         Right(())
       } else {
         logger.info("Automatically starting all instances")
-
         val startup = for {
-          _ <- allNodes.traverse(_.attemptStartAll)
+          _ <- startAll()
           _ <- reconnectParticipants
           _ <- if (autoConnectLocal) autoConnectLocalNodes() else Right(())
         } yield writePortsFile()
-
         // log results
         startup
           .bimap(
@@ -394,45 +395,102 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
   ): Either[StartupError, Unit] = {
     def reconnect(
         instance: CantonNodeBootstrap[ParticipantNodeCommon] & ParticipantNodeBootstrapCommon
-    ): Either[StartupError, Unit] = {
-      for {
-        _ <- instance.getNode match {
-          case None =>
-            // should not happen, but if it does, display at least a warning.
-            if (instance.config.init.autoInit) {
-              logger.error(
-                s"Auto-initialisation failed or was too slow for ${instance.name}. Will not automatically re-connect to domains."
-              )
-            }
-            Right(())
-          case Some(node) =>
-            Await
-              .result(
-                node
-                  .reconnectDomainsIgnoreFailures()
-                  .leftMap(err => StartFailed(instance.name.unwrap, err.toString))
-                  .onShutdown(Left(StartFailed(instance.name.unwrap, "aborted due to shutdown")))
-                  .value,
-                config.parameters.timeouts.processing.unbounded.unwrap.minus(25.milliseconds),
-              )
-        }
-      } yield ()
+    ): EitherT[Future, StartupError, Unit] = {
+      instance.getNode match {
+        case None =>
+          // should not happen, but if it does, display at least a warning.
+          if (instance.config.init.autoInit) {
+            logger.error(
+              s"Auto-initialisation failed or was too slow for ${instance.name}. Will not automatically re-connect to domains."
+            )
+          }
+          EitherT.rightT(())
+        case Some(node) =>
+          node
+            .reconnectDomainsIgnoreFailures()
+            .leftMap(err => StartFailed(instance.name.unwrap, err.toString))
+            .onShutdown(Left(StartFailed(instance.name.unwrap, "aborted due to shutdown")))
+
+      }
     }
-    (participants.running ++ participantsX.running).traverse_(reconnect)
+    config.parameters.timeouts.processing.unbounded.await("reconnect-particiapnts")(
+      MonadUtil
+        .parTraverseWithLimit_(config.parameters.getStartupParallelism(numThreads))(
+          (participants.running ++ participantsX.running)
+        )(reconnect)
+        .value
+    )
   }
 
   /** Return current time of environment
     */
   def now: CantonTimestamp = clock.now
 
+  private def allNodesWithGroup = {
+    allNodes.flatMap { nodeGroup =>
+      nodeGroup.names().map(name => (name, nodeGroup))
+    }
+  }
+
   /** Start all instances described in the configuration
     */
-  def startAll(): Either[Seq[StartupError], Unit] = {
-    val errors = allNodes
-      .map(_.startAll)
-      .flatMap(_.left.getOrElse(Seq.empty))
+  def startAll()(implicit traceContext: TraceContext): Either[StartupError, Unit] =
+    startNodes(allNodesWithGroup)
 
-    Either.cond(errors.isEmpty, (), errors)
+  def stopAll()(implicit traceContext: TraceContext): Either[ShutdownError, Unit] =
+    stopNodes(allNodesWithGroup)
+
+  def startNodes(
+      nodes: Seq[(String, Nodes[CantonNode, CantonNodeBootstrap[CantonNode]])]
+  )(implicit traceContext: TraceContext): Either[StartupError, Unit] = {
+    runOnNodesOrderedByStartupGroup(
+      "startup-of-all-nodes",
+      nodes,
+      { case (name, nodes) => nodes.start(name) },
+      reverse = false,
+    )
+  }
+
+  def stopNodes(
+      nodes: Seq[(String, Nodes[CantonNode, CantonNodeBootstrap[CantonNode]])]
+  )(implicit traceContext: TraceContext): Either[ShutdownError, Unit] = {
+    runOnNodesOrderedByStartupGroup(
+      "stop-of-all-nodes",
+      nodes,
+      { case (name, nodes) => nodes.stop(name) },
+      reverse = true,
+    )
+  }
+
+  /** run some task on nodes ordered by their startup group
+    *
+    * @param reverse if true, then the order will be reverted (e.g. for stop)
+    */
+  private def runOnNodesOrderedByStartupGroup[T, I](
+      name: String,
+      nodes: Seq[(String, Nodes[CantonNode, CantonNodeBootstrap[CantonNode]])],
+      task: (String, Nodes[CantonNode, CantonNodeBootstrap[CantonNode]]) => EitherT[Future, T, I],
+      reverse: Boolean,
+  )(implicit traceContext: TraceContext): Either[T, Unit] = {
+    config.parameters.timeouts.processing.unbounded.await(name)(
+      MonadUtil
+        .sequentialTraverse_(
+          nodes
+            // parallelize startup by groups (mediator / topology manager need the sequencer to run when we startup)
+            // as otherwise, they start to emit a few warnings which are ugly
+            .groupBy { case (_, group) => group.startUpGroup }
+            .toList
+            .sortBy { case (group, _) => if (reverse) -group else group }
+        ) { case (_, namesWithGroup) =>
+          MonadUtil
+            .parTraverseWithLimit_(config.parameters.getStartupParallelism(numThreads))(
+              namesWithGroup.sortBy { case (name, _) =>
+                name // sort by name to make the invocation order deterministic, hence also the result
+              }
+            ) { case (name, nodes) => task(name, nodes) }
+        }
+        .value
+    )
   }
 
   @VisibleForTesting

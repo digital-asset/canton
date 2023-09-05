@@ -105,7 +105,7 @@ private[platform] object CompletionFromTransaction {
       status = optStatus,
       updateId = transactionId,
       applicationId = applicationId,
-      traceContext = Some(SerializableTraceContext(traceContext).toDamlProto),
+      traceContext = SerializableTraceContext(traceContext).toDamlProtoOpt,
     )
     val optDeduplicationPeriod = toApiDeduplicationPeriod(
       optDeduplicationOffset = optDeduplicationOffset,

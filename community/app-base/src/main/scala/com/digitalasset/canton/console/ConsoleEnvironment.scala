@@ -4,6 +4,7 @@
 package com.digitalasset.canton.console
 
 import ammonite.util.Bind
+import cats.syntax.either.*
 import com.digitalasset.canton.admin.api.client.data.CantonStatus
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble, PositiveInt}
@@ -25,7 +26,11 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.environment.Environment
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnection}
+import com.digitalasset.canton.sequencing.{
+  GrpcSequencerConnection,
+  SequencerConnection,
+  SequencerConnections,
+}
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.{Identifier, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TracerProvider}
@@ -208,6 +213,10 @@ trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing 
 
   // lazy to prevent publication of this before this has been fully initialized
   lazy val grpcAdminCommandRunner: ConsoleGrpcAdminCommandRunner = createAdminCommandRunner(this)
+
+  def runE[E, A](result: => Either[E, A]): A = {
+    run(ConsoleCommandResult.fromEither(result.leftMap(_.toString)))
+  }
 
   /** Run a console command.
     */
@@ -509,19 +518,9 @@ trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing 
     grpcAdminCommandRunner.closeChannels()
   }
 
-  def startAll(): Unit = {
-    import ConsoleEnvironment.Implicits.toInstanceReferenceExtensions
-    implicit val consoleEnvironment = this
+  def startAll(): Unit = runE(environment.startAll())
 
-    nodes.local.start()
-  }
-
-  def stopAll(): Unit = {
-    import ConsoleEnvironment.Implicits.toInstanceReferenceExtensions
-    implicit val consoleEnvironment = this
-
-    nodes.local.stop()
-  }
+  def stopAll(): Unit = runE(environment.stopAll())
 
 }
 
@@ -570,10 +569,19 @@ object ConsoleEnvironment {
 
     implicit def toGrpcSequencerConnection(connection: String): SequencerConnection =
       GrpcSequencerConnection.tryCreate(connection)
+
+    implicit def toSequencerConnections(connection: String): SequencerConnections =
+      SequencerConnections.single(GrpcSequencerConnection.tryCreate(connection))
+
     implicit def toGSequencerConnection(
         ref: InstanceReferenceWithSequencerConnection
     ): SequencerConnection =
       ref.sequencerConnection
+
+    implicit def toGSequencerConnections(
+        ref: InstanceReferenceWithSequencerConnection
+    ): SequencerConnections =
+      SequencerConnections.single(ref.sequencerConnection)
 
     implicit def toIdentifier(id: String): Identifier = Identifier.tryCreate(id)
     implicit def toFingerprint(fp: String): Fingerprint = Fingerprint.tryCreate(fp)

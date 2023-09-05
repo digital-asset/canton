@@ -73,7 +73,7 @@ final case class TransferOutRequest(
           viewSalt,
           submitterMetadata,
           contractId,
-          templateId,
+          TransferOutView.templateIdDefaultValue.orValue(templateId, sourceProtocolVersion.v),
           targetDomain,
           targetTimeProof,
           sourceProtocolVersion,

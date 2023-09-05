@@ -617,12 +617,31 @@ trait ActiveContractSnapshot {
 object ActiveContractSnapshot {
 
   final case class ActiveContractIdsChange(
-      activations: Map[LfContractId, TransferCounterO],
-      deactivations: Map[LfContractId, TransferCounterO],
+      activations: Map[LfContractId, StateChangeType],
+      deactivations: Map[LfContractId, StateChangeType],
   )
 
   object ActiveContractIdsChange {
     val empty = ActiveContractIdsChange(Map.empty, Map.empty)
   }
 
+}
+
+sealed trait ContractChange extends Product with Serializable with PrettyPrinting {
+  override def pretty: Pretty[ContractChange.this.type] = prettyOfObject[this.type]
+}
+object ContractChange {
+  case object Created extends ContractChange
+  case object Archived extends ContractChange
+  case object Unassigned extends ContractChange
+  case object Assigned extends ContractChange
+}
+
+/** Type of state change of a contract as returned by [[com.digitalasset.canton.participant.store.ActiveContractStore.changesBetween]]
+  * through a [[com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange]]
+  */
+final case class StateChangeType(change: ContractChange, transferCounter: TransferCounterO)
+    extends PrettyPrinting {
+  override def pretty: Pretty[StateChangeType] =
+    prettyOfClass(param("", _.change), paramIfDefined("", _.transferCounter))
 }

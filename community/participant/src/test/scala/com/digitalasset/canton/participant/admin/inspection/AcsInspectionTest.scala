@@ -7,7 +7,10 @@ import cats.data.OptionT
 import com.daml.lf.data.Ref
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.participant.admin.inspection.AcsInspectionTest.readAllVisibleActiveContracts
+import com.digitalasset.canton.participant.admin.inspection.AcsInspectionTest.{
+  FakeDomainId,
+  readAllVisibleActiveContracts,
+}
 import com.digitalasset.canton.participant.store.{
   ActiveContractStore,
   ContractStore,
@@ -27,6 +30,7 @@ import com.digitalasset.canton.protocol.{
 }
 import com.digitalasset.canton.store.CursorPrehead
 import com.digitalasset.canton.store.CursorPrehead.RequestCounterCursorPrehead
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{
   LfPartyId,
@@ -107,7 +111,7 @@ final class AcsInspectionTest
       "return an error if the inconsistency is visible in the final result" in {
         for (contracts <- readAllVisibleActiveContracts(inconsistent, Set(party("b"))))
           yield {
-            contracts.left.value shouldBe Error.InconsistentSnapshot(contract('2'))
+            contracts.left.value shouldBe Error.InconsistentSnapshot(FakeDomainId, contract('2'))
           }
       }
     }
@@ -116,6 +120,8 @@ final class AcsInspectionTest
 }
 
 object AcsInspectionTest extends MockitoSugar with ArgumentMatchersSugar {
+
+  private val FakeDomainId = DomainId.tryFromString(s"acme::${"0" * 68}")
 
   private val MaxCursorPrehead: RequestCounterCursorPrehead =
     CursorPrehead[RequestCounterDiscriminator](RequestCounter(0), CantonTimestamp.MaxValue)
@@ -197,7 +203,10 @@ object AcsInspectionTest extends MockitoSugar with ArgumentMatchersSugar {
     TraceContext.withNewTraceContext { implicit tc =>
       val builder = Vector.newBuilder[SerializableContract]
       AcsInspection
-        .forEachVisibleActiveContract(state, parties, timestamp = None)(builder += _)
+        .forEachVisibleActiveContract(FakeDomainId, state, parties, timestamp = None) { contract =>
+          builder += contract
+          Right(())
+        }
         .map(_ => builder.result())
         .value
     }

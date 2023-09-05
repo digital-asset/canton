@@ -47,6 +47,7 @@ import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.v2.ReadService.ConnectedDomainResponse
 import com.digitalasset.canton.ledger.participant.state.v2.*
 import com.digitalasset.canton.lifecycle.{
+  CloseContext,
   FlagCloseable,
   FutureUnlessShutdown,
   Lifecycle,
@@ -355,7 +356,7 @@ class CantonSyncService(
   val repairService: RepairService = new RepairService(
     participantId,
     syncCrypto,
-    packageService,
+    packageService.dependencyResolver,
     repairServiceDAMLe,
     participantNodePersistentState.map(_.multiDomainEventLog),
     syncDomainPersistentStateManager,
@@ -824,7 +825,10 @@ class CantonSyncService(
     for {
       targetDomainInfo <- performUnlessClosingEitherU(functionFullName)(
         sequencerInfoLoader
-          .loadSequencerEndpoints(target.domain, target.sequencerConnections)
+          .loadSequencerEndpoints(target.domain, target.sequencerConnections)(
+            traceContext,
+            CloseContext(this),
+          )
           .leftMap(DomainRegistryError.fromSequencerInfoLoaderError)
           .leftMap[SyncServiceError](err =>
             SyncServiceError.SyncServiceFailedDomainConnection(
@@ -1213,7 +1217,11 @@ class CantonSyncService(
           loggerFactory,
         )
 
-        trafficStateController = new TrafficStateController(participantId, loggerFactory)
+        trafficStateController = new TrafficStateController(
+          participantId,
+          loggerFactory,
+          domainHandle.topologyClient,
+        )
 
         syncDomain = syncDomainFactory.create(
           domainId,

@@ -54,7 +54,9 @@ import com.digitalasset.canton.participant.pruning.{
 }
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.{
+  ContractChange,
   ParticipantNodePersistentState,
+  StateChangeType,
   StoredContract,
   SyncDomainEphemeralState,
   SyncDomainPersistentState,
@@ -280,7 +282,6 @@ class SyncDomain(
   private val repairProcessor: RepairProcessor =
     new RepairProcessor(
       ephemeral.requestCounterAllocator,
-      ephemeral.phase37Synchronizer,
       loggerFactory,
     )
 
@@ -313,7 +314,7 @@ class SyncDomain(
       loggerFactory,
     )
 
-  def getTrafficControlState: Future[Option[MemberTrafficStatus]] =
+  def getTrafficControlState(implicit tc: TraceContext): Future[Option[MemberTrafficStatus]] =
     trafficStateController.getState
 
   def authorityOfInSnapshotApproximation(requestingAuthority: Set[LfPartyId])(implicit
@@ -361,7 +362,7 @@ class SyncDomain(
                 c.contract,
                 ContractMetadataAndTransferCounter(
                   c.contract.metadata,
-                  change.activations(c.contractId),
+                  change.activations(c.contractId).transferCounter,
                 ),
               )
             )
@@ -373,7 +374,7 @@ class SyncDomain(
                   c.contract,
                   ContractStakeholdersAndTransferCounter(
                     c.contract.metadata.stakeholders,
-                    change.deactivations(c.contractId),
+                    change.deactivations(c.contractId).transferCounter,
                   ),
                 )
             )
@@ -409,7 +410,19 @@ class SyncDomain(
         contractIdChanges <- persistent.activeContractStore
           .changesBetween(fromExclusive, toInclusive)
         changes <- contractIdChanges.parTraverse { case (toc, change) =>
-          lookupChangeMetadata(change).map(ch => (RecordTime.fromTimeOfChange(toc), ch))
+          val changeWithAdjustedTransferCountersForUnassignments = ActiveContractIdsChange(
+            change.activations,
+            change.deactivations.fmap(change =>
+              change match {
+                case StateChangeType(ContractChange.Unassigned, transferCounter) =>
+                  StateChangeType(ContractChange.Unassigned, transferCounter.map(_ - 1))
+                case _ => change
+              }
+            ),
+          )
+          lookupChangeMetadata(changeWithAdjustedTransferCountersForUnassignments).map(ch =>
+            (RecordTime.fromTimeOfChange(toc), ch)
+          )
         }
       } yield {
         logger.info(
@@ -613,7 +626,7 @@ class SyncDomain(
           ): HandlerResult = {
             tracedEvents.withTraceContext { traceContext => closedEvents =>
               val openEvents = closedEvents.map { event =>
-                event.trafficState.foreach(trafficStateController.updateState(_, event.timestamp))
+                event.trafficState.foreach(trafficStateController.updateState)
 
                 val openedEvent = PossiblyIgnoredSequencedEvent.openEnvelopes(event)(
                   staticDomainParameters.protocolVersion,

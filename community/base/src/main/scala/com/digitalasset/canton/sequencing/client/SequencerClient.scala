@@ -99,7 +99,7 @@ trait SequencerClient extends SequencerClientSend with FlagCloseable {
     * so that the `sequencerCounterTrackerStore` advances the prehead
     * when (a batch of) events has been successfully processed by the `eventHandler` (synchronously and asynchronously).
     *
-    * @see subscribe for the description of the `eventHandler`, `timeTracker` and the `timeoutHandler`
+    * @see subscribe for the description of the `eventHandler` and the `timeTracker`
     */
   def subscribeTracking(
       sequencerCounterTrackerStore: SequencerCounterTrackerStore,
@@ -111,8 +111,8 @@ trait SequencerClient extends SequencerClientSend with FlagCloseable {
   /** Create a subscription for sequenced events for this member,
     * starting after the last event in the [[com.digitalasset.canton.store.SequencedEventStore]] up to `priorTimestamp`.
     * A sequencer client can only have a single subscription - additional subscription attempts will throw an exception.
-    * When an event is received any send timeouts caused by the advancement of the sequencer clock observed from the
-    * event will first be raised to the `timeoutHandler`, then the `eventHandler` will be invoked.
+    * When an event is received, we will check the pending sends and invoke the provided call-backs with the send result
+    * (which can be deliver or timeout) before invoking the `eventHandler`.
     *
     * If the [[com.digitalasset.canton.store.SequencedEventStore]] contains events after `priorTimestamp`,
     * the handler is first fed with these events before the subscription is established,
@@ -208,12 +208,6 @@ class SequencerClientImpl(
     with HasFlushFuture
     with Spanning
     with HasCloseContext {
-
-  private val loggingTimeoutHandler: SendTimeoutHandler = msgId => {
-    // logged at debug as this is likely logged at the caller using a send callback at a higher level
-    logger.debug(s"Send with message id [$msgId] has timed out")(TraceContext.empty)
-    Future.unit
-  }
 
   private val sequencerAggregator =
     new SequencerAggregator(
@@ -566,7 +560,7 @@ class SequencerClientImpl(
     * so that the `sequencerCounterTrackerStore` advances the prehead
     * when (a batch of) events has been successfully processed by the `eventHandler` (synchronously and asynchronously).
     *
-    * @see subscribe for the description of the `eventHandler`, `timeTracker` and the `timeoutHandler`
+    * @see subscribe for the description of the `eventHandler` and the `timeTracker`
     */
   def subscribeTracking(
       sequencerCounterTrackerStore: SequencerCounterTrackerStore,
@@ -596,8 +590,8 @@ class SequencerClientImpl(
   /** Create a subscription for sequenced events for this member,
     * starting after the last event in the [[com.digitalasset.canton.store.SequencedEventStore]] up to `priorTimestamp`.
     * A sequencer client can only have a single subscription - additional subscription attempts will throw an exception.
-    * When an event is received any send timeouts caused by the advancement of the sequencer clock observed from the
-    * event will first be raised to the `timeoutHandler`, then the `eventHandler` will be invoked.
+    * When an event is received, we will check the pending sends and invoke the provided call-backs with the send result
+    * (which can be deliver or timeout) before invoking the `eventHandler`.
     *
     * If the [[com.digitalasset.canton.store.SequencedEventStore]] contains events after `priorTimestamp`,
     * the handler is first fed with these events before the subscription is established,
@@ -625,7 +619,6 @@ class SequencerClientImpl(
       cleanPreheadTsO,
       eventHandler,
       timeTracker,
-      loggingTimeoutHandler,
       fetchCleanTimestamp,
       requiresAuthentication = true,
     )
@@ -646,7 +639,6 @@ class SequencerClientImpl(
       cleanPreheadTsO = None,
       eventHandler,
       timeTracker,
-      loggingTimeoutHandler,
       PeriodicAcknowledgements.noAcknowledgements,
       requiresAuthentication = false,
     )
@@ -656,7 +648,6 @@ class SequencerClientImpl(
       cleanPreheadTsO: Option[CantonTimestamp],
       nonThrottledEventHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope],
       timeTracker: DomainTimeTracker,
-      timeoutHandler: SendTimeoutHandler,
       fetchCleanTimestamp: PeriodicAcknowledgements.FetchCleanTimestamp,
       requiresAuthentication: Boolean,
   )(implicit traceContext: TraceContext): Future[Unit] = {
@@ -735,7 +726,6 @@ class SequencerClientImpl(
               requiresAuthentication,
               timeTracker,
               eventHandler,
-              timeoutHandler,
             ).discard
           }
 
@@ -780,7 +770,6 @@ class SequencerClientImpl(
       requiresAuthentication: Boolean,
       timeTracker: DomainTimeTracker,
       eventHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope],
-      timeoutHandler: SendTimeoutHandler,
   )(implicit traceContext: TraceContext) = {
     val lastEvent = replayEvents.lastOption
     val preSubscriptionEvent = lastEvent.orElse(initialPriorEventO)
@@ -820,7 +809,6 @@ class SequencerClientImpl(
       StoreSequencedEvent(sequencedEventStore, domainId, loggerFactory).apply(
         timeTracker.wrapHandler(eventHandler)
       ),
-      timeoutHandler,
       eventValidator,
       eventDelay,
       preSubscriptionEvent,
@@ -859,7 +847,6 @@ class SequencerClientImpl(
 
   private class SubscriptionHandler(
       applicationHandler: OrdinaryApplicationHandler[ClosedEnvelope],
-      timeoutHandler: SendTimeoutHandler,
       eventValidator: SequencedEventValidator,
       processingDelay: DelaySequencedEvent,
       initialPriorEvent: Option[PossiblyIgnoredSerializedEvent],
@@ -967,15 +954,15 @@ class SequencerClientImpl(
       val javaEventList = new java.util.ArrayList[OrdinarySerializedEvent](inboxSize)
       if (sequencerAggregator.eventQueue.drainTo(javaEventList, inboxSize) > 0) {
         import scala.jdk.CollectionConverters.*
-        val handlerEvents = javaEventList.asScala
+        val handlerEvents = javaEventList.asScala.toSeq
 
         def stopHandler(): Unit = blocking {
           this.synchronized { val _ = handlerIdle.get().success(()) }
         }
 
-        MonadUtil
-          .sequentialTraverse_(handlerEvents)(sendTracker.update(timeoutHandler))
-          .flatMap(_ => processEventBatch(eventHandler, handlerEvents.toSeq).value)
+        sendTracker
+          .update(handlerEvents)
+          .flatMap(_ => processEventBatch(eventHandler, handlerEvents).value)
           .transformWith {
             case Success(Right(())) => handleReceivedEventsUntilEmpty(eventHandler)
             case Success(Left(_)) | Failure(_) =>

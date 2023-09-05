@@ -8,6 +8,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.RepairServiceErrorGroup
 import com.digitalasset.canton.error.{BaseCantonError, CantonError}
 import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -100,6 +101,25 @@ object RepairServiceError extends RepairServiceErrorGroup {
     ) extends CantonError.Impl(
           cause =
             s"The ACS snapshot for $domainId cannot be returned because it contains inconsistencies."
+        )
+        with RepairServiceError
+  }
+
+  @Explanation(
+    "A contract cannot be serialized due to an error."
+  )
+  @Resolution(
+    "Retry after operator intervention."
+  )
+  object SerializationError
+      extends ErrorCode(
+        id = "CONTRACT_SERIALIZATION_ERROR",
+        ErrorCategory.SystemInternalAssumptionViolated,
+      ) {
+    final case class Error(domainId: DomainId, contractId: LfContractId)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause = s"Serialization for contract $contractId in domain $domainId failed"
         )
         with RepairServiceError
   }

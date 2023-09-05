@@ -5,7 +5,7 @@ package com.digitalasset.canton.domain.mediator.store
 
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.*
@@ -39,7 +39,11 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
     val mediatorId = DefaultTestIdentities.mediator
 
     val alice = PlainInformee(LfPartyId.assertFromString("alice"))
-    val bob = ConfirmingParty(LfPartyId.assertFromString("bob"), 2, TrustLevel.Ordinary)
+    val bob = ConfirmingParty(
+      LfPartyId.assertFromString("bob"),
+      PositiveInt.tryCreate(2),
+      TrustLevel.Ordinary,
+    )
     val hashOps = new SymbolicPureCrypto
 
     def h(i: Int): Hash = TestHash.digest(i)

@@ -225,7 +225,7 @@ private[mediator] final case class ResponseAggregationV0(
             logger.debug(
               show"$requestId(view hash $viewHash): Received an approval (or reached consortium thresholds) for parties: $newlyRespondedFullVotes"
             )
-            val contribution = newlyRespondedFullVotes.foldLeft(0)(_ + _.weight)
+            val contribution = newlyRespondedFullVotes.foldLeft(0)(_ + _.weight.unwrap)
             val stillPending = pendingConfirmingParties -- newlyRespondedFullVotes
             if (newlyRespondedFullVotes.isEmpty) {
               logger.debug(

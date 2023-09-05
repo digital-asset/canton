@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.protocol.validation
 import cats.syntax.parallel.*
 import com.daml.lf.transaction.ContractStateMachine.{KeyInactive, KeyMapping}
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.validation.ExtractUsedAndCreated.{
@@ -71,11 +70,10 @@ object ExtractUsedAndCreated {
   }
 
   private def extractPartyIds(
-      rootViewTreesWithSignatures: NonEmpty[Seq[(TransactionViewTree, Option[Signature])]]
+      rootViews: NonEmpty[Seq[TransactionView]]
   ): Set[LfPartyId] = {
     val parties = Set.newBuilder[LfPartyId]
-    val views: Seq[TransactionView] = rootViewTreesWithSignatures.map { case (t, _) => t.view }
-    views.flatMap(viewDataInPreOrder).foreach { data =>
+    rootViews.forgetNE.flatMap(viewDataInPreOrder).foreach { data =>
       parties ++= data.informees
       data.participant.coreInputs.values.foreach { c =>
         parties ++= c.stakeholders
@@ -106,12 +104,12 @@ object ExtractUsedAndCreated {
   def apply(
       participantId: ParticipantId,
       staticDomainParameters: StaticDomainParameters,
-      rootViewTreesWithSignatures: NonEmpty[Seq[(TransactionViewTree, Option[Signature])]],
+      rootViews: NonEmpty[Seq[TransactionView]],
       topologySnapshot: TopologySnapshot,
       loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext, traceContext: TraceContext): Future[UsedAndCreated] = {
 
-    val partyIds = extractPartyIds(rootViewTreesWithSignatures)
+    val partyIds = extractPartyIds(rootViews)
 
     fetchHostedParties(partyIds, participantId, topologySnapshot)
       .map { hostedParties =>
@@ -120,7 +118,7 @@ object ExtractUsedAndCreated {
           staticDomainParameters.protocolVersion,
           hostedParties,
           loggerFactory,
-        ).usedAndCreated(rootViewTreesWithSignatures)
+        ).usedAndCreated(rootViews)
       }
   }
 
@@ -148,31 +146,27 @@ private[validation] class ExtractUsedAndCreated(
     extends NamedLogging {
 
   private[validation] def usedAndCreated(
-      rootViewTreesWithSignatures: NonEmpty[Seq[(TransactionViewTree, Option[Signature])]]
+      rootViews: NonEmpty[Seq[TransactionView]]
   ): UsedAndCreated = {
 
-    val rootViewTrees: Seq[TransactionViewTree] = rootViewTreesWithSignatures
-      .map { case (t, _) => t }
-
-    val dataViews = rootViewTrees.flatMap(t => viewDataInPreOrder(t.view))
+    val dataViews = rootViews.forgetNE.flatMap(v => viewDataInPreOrder(v))
 
     val createdContracts = createdContractPrep(dataViews)
     val inputContracts = inputContractPrep(dataViews)
     val transientContracts = transientContractsPrep(dataViews)
 
     UsedAndCreated(
-      rootViewsWithSignatures = rootViewTreesWithSignatures,
       contracts = usedAndCreatedContracts(createdContracts, inputContracts, transientContracts),
-      keys = inputAndUpdatedKeys(rootViewTrees),
+      keys = inputAndUpdatedKeys(rootViews.forgetNE),
       hostedWitnesses = hostedParties.filter(_._2).map(_._1).toSet,
     )
   }
 
-  private def inputAndUpdatedKeys(rootViewTrees: Seq[TransactionViewTree]): InputAndUpdatedKeys = {
+  private def inputAndUpdatedKeys(rootViews: Seq[TransactionView]): InputAndUpdatedKeys = {
     if (protocolVersion >= ProtocolVersion.v3)
-      extractInputAndUpdatedKeysV3(rootViewTrees)
+      extractInputAndUpdatedKeysV3(rootViews)
     else
-      extractInputAndUpdatedKeysV2(rootViewTrees)
+      extractInputAndUpdatedKeysV2(rootViews)
   }
 
   private[validation] def inputContractPrep(
@@ -319,7 +313,7 @@ private[validation] class ExtractUsedAndCreated(
     * com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactoryImplV2
     */
   private def extractInputAndUpdatedKeysV2(
-      rootViewTrees: Seq[TransactionViewTree]
+      rootViews: Seq[TransactionView]
   ): InputAndUpdatedKeys = {
     val perRootViewInputKeysB = Map.newBuilder[ViewHash, LfKeyResolver]
     // We had computed `transientSameViewOrEarlier` already in `extractUsedAndCreatedContracts`,
@@ -356,10 +350,10 @@ private[validation] class ExtractUsedAndCreated(
       inputKeysOfHostedMaintainers.getOrElseUpdate(key, ContractKeyJournal.Unassigned).discard
     }
 
-    rootViewTrees.foreach { rootViewTree =>
+    rootViews.foreach { rootView =>
       val resolvedKeysInView = mutable.Map.empty[LfGlobalKey, Option[LfContractId]]
 
-      viewDataInPreOrder(rootViewTree.view).foreach { viewData =>
+      viewDataInPreOrder(rootView).foreach { viewData =>
         val viewParticipantData = viewData.participant
         val informees = viewData.common.informees.map(_.party)
 
@@ -441,7 +435,7 @@ private[validation] class ExtractUsedAndCreated(
           }
         }
       }
-      perRootViewInputKeysB += rootViewTree.viewHash -> resolvedKeysInView.toMap
+      perRootViewInputKeysB += rootView.viewHash -> resolvedKeysInView.toMap
     }
 
     // Only perform activeness checks for keys on domains with unique contract key semantics
@@ -476,7 +470,7 @@ private[validation] class ExtractUsedAndCreated(
     * [[com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactoryImplV3]]
     */
   private def extractInputAndUpdatedKeysV3(
-      rootViewTrees: Seq[TransactionViewTree]
+      rootViews: Seq[TransactionView]
   ): InputAndUpdatedKeys = {
     val (updatedKeys, freeKeys) = if (uniqueContractKeys) {
       /* In UCK mode, the globalKeyInputs have been computed with `ContractKeyUniquenessMode.Strict`,
@@ -490,9 +484,9 @@ private[validation] class ExtractUsedAndCreated(
        * the committed subtransaction would still contain the rollback node.
        */
       val freeKeysB = Set.newBuilder[LfGlobalKey]
-      rootViewTrees
-        .foldLeft(Set.empty[LfGlobalKey]) { (seenKeys, rootViewTree) =>
-          val gki = rootViewTree.view.globalKeyInputs
+      rootViews
+        .foldLeft(Set.empty[LfGlobalKey]) { (seenKeys, rootView) =>
+          val gki = rootView.globalKeyInputs
           gki.foldLeft(seenKeys) { case (seenKeys, (key, resolution)) =>
             if (seenKeys.contains(key)) seenKeys
             else {
@@ -512,8 +506,8 @@ private[validation] class ExtractUsedAndCreated(
       // Since transactions can be committed partially, the transient contract may actually be created.
       // So we have to lock the key.
 
-      val allUpdatedKeys = rootViewTrees.foldLeft(Map.empty[LfGlobalKey, Set[LfPartyId]]) {
-        (acc, rootView) => acc ++ rootView.view.updatedKeys
+      val allUpdatedKeys = rootViews.foldLeft(Map.empty[LfGlobalKey, Set[LfPartyId]]) {
+        (acc, rootView) => acc ++ rootView.updatedKeys
       }
       val updatedKeysOfHostedMaintainer = allUpdatedKeys.filter { case (_, maintainers) =>
         hostsAny(maintainers)
@@ -522,8 +516,8 @@ private[validation] class ExtractUsedAndCreated(
       // As the participant receives all views that update a key it hosts a maintainer of,
       // we simply merge the active ledger states at the end of all root views for the updated keys.
       // This gives the final resolution for the key.
-      val mergedKeys = rootViewTrees.foldLeft(Map.empty[LfGlobalKey, KeyMapping]) {
-        (accKeys, rootView) => accKeys ++ rootView.view.updatedKeyValues
+      val mergedKeys = rootViews.foldLeft(Map.empty[LfGlobalKey, KeyMapping]) {
+        (accKeys, rootView) => accKeys ++ rootView.updatedKeyValues
       }
 
       val updatedKeys = mergedKeys.collect {

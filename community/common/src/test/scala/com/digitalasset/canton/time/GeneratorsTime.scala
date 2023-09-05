@@ -3,13 +3,18 @@
 
 package com.digitalasset.canton.time
 
-import org.scalacheck.Arbitrary
-import org.scalatest.EitherValues
+import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.protocol.TargetDomainId
+import magnolify.scalacheck.auto.*
+import org.scalacheck.{Arbitrary, Gen}
 
 import java.time.Duration
 
-object GeneratorsTime extends EitherValues {
+object GeneratorsTime {
   import com.digitalasset.canton.config.GeneratorsConfig.*
+  import com.digitalasset.canton.data.GeneratorsData.*
+  import com.digitalasset.canton.topology.GeneratorsTopology.*
+  import org.scalatest.EitherValues.*
 
   implicit val nonNegativeSecondsArb: Arbitrary[NonNegativeSeconds] = Arbitrary(
     nonNegativeLongArb.arbitrary.map(i => NonNegativeSeconds.tryOfSeconds(i.unwrap))
@@ -24,4 +29,10 @@ object GeneratorsTime extends EitherValues {
   implicit val positiveSecondsArb: Arbitrary[PositiveSeconds] = Arbitrary(
     positiveLongArb.arbitrary.map(i => PositiveSeconds.tryOfSeconds(i.unwrap))
   )
+
+  implicit val timeProofArb: Arbitrary[TimeProof] = Arbitrary(for {
+    timestamp <- implicitly[Arbitrary[CantonTimestamp]].arbitrary
+    counter <- Gen.long
+    targetDomain <- implicitly[Arbitrary[TargetDomainId]].arbitrary
+  } yield TimeProofTestUtil.mkTimeProof(timestamp, counter, targetDomain))
 }

@@ -508,7 +508,7 @@ private[mediator] class ConfirmationResponseProcessor(
           (unauthorized, authorized) = partitionedConfirmingParties.separate
 
           _ <- EitherTUtil.condUnitET[Future][MediatorReject](
-            authorized.map(_.weight).sum >= threshold.value, {
+            authorized.map(_.weight.unwrap).sum >= threshold.value, {
               // This partitioning is correct, because a VIP hosted party can always confirm.
               // So if the required trust level is VIP, the problem must be the actual trust level.
               val (insufficientTrustLevel, insufficientPermission) =

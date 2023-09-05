@@ -12,7 +12,12 @@ import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
-import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractStore}
+import com.digitalasset.canton.participant.store.{
+  ActiveContractStore,
+  ContractChange,
+  ContractStore,
+  StateChangeType,
+}
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange}
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.{LfContractId, SourceDomainId, TargetDomainId}
@@ -275,19 +280,26 @@ class InMemoryActiveContractStore(
           .groupBy(_._2.toc)
 
       val byTsAndChangeType
-          : Map[TimeOfChange, Map[Boolean, List[(LfContractId, TransferCounterO)]]] = changesByToc
+          : Map[TimeOfChange, Map[Boolean, List[(LfContractId, StateChangeType)]]] = changesByToc
         .fmap(_.groupBy(_._2.isActivation).fmap(_.map {
+
           case (coid, activenessChange, activenessChangeDetail) =>
-            if (!activenessChange.isActivation && !activenessChangeDetail.isTransfer)
-              (
-                coid,
-                latestActivationTransferCounterPerCid.getOrElse(
-                  (coid, activenessChange.toc.rc),
-                  activenessChangeDetail.transferCounter,
-                ),
-              )
-            else
-              (coid, activenessChangeDetail.transferCounter)
+            val stateChange =
+              if (activenessChange.isActivation && !activenessChangeDetail.isTransfer)
+                StateChangeType(ContractChange.Created, activenessChangeDetail.transferCounter)
+              else if (activenessChange.isActivation && activenessChangeDetail.isTransfer)
+                StateChangeType(ContractChange.Assigned, activenessChangeDetail.transferCounter)
+              else if (!activenessChange.isActivation && activenessChangeDetail.isTransfer)
+                StateChangeType(ContractChange.Unassigned, activenessChangeDetail.transferCounter)
+              else
+                StateChangeType(
+                  ContractChange.Archived,
+                  latestActivationTransferCounterPerCid.getOrElse(
+                    (coid, activenessChange.toc.rc),
+                    activenessChangeDetail.transferCounter,
+                  ),
+                )
+            (coid, stateChange)
         }))
 
       byTsAndChangeType

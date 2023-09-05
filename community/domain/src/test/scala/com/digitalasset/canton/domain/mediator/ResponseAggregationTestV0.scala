@@ -45,12 +45,26 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
       val domainId = DefaultTestIdentities.domainId
       val mediator = MediatorRef(DefaultTestIdentities.mediator)
 
-      val alice = ConfirmingParty(LfPartyId.assertFromString("alice"), 3, TrustLevel.Ordinary)
-      val aliceVip = ConfirmingParty(LfPartyId.assertFromString("alice"), 3, TrustLevel.Vip)
-      val bob = ConfirmingParty(LfPartyId.assertFromString("bob"), 2, TrustLevel.Ordinary)
-      val bobVip = ConfirmingParty(LfPartyId.assertFromString("bob"), 2, TrustLevel.Vip)
+      val alice = ConfirmingParty(
+        LfPartyId.assertFromString("alice"),
+        PositiveInt.tryCreate(3),
+        TrustLevel.Ordinary,
+      )
+      val aliceVip = ConfirmingParty(
+        LfPartyId.assertFromString("alice"),
+        PositiveInt.tryCreate(3),
+        TrustLevel.Vip,
+      )
+      val bob = ConfirmingParty(
+        LfPartyId.assertFromString("bob"),
+        PositiveInt.tryCreate(2),
+        TrustLevel.Ordinary,
+      )
+      val bobVip =
+        ConfirmingParty(LfPartyId.assertFromString("bob"), PositiveInt.tryCreate(2), TrustLevel.Vip)
       val charlie = PlainInformee(LfPartyId.assertFromString("charlie"))
-      val dave = ConfirmingParty(LfPartyId.assertFromString("dave"), 1, TrustLevel.Ordinary)
+      val dave =
+        ConfirmingParty(LfPartyId.assertFromString("dave"), PositiveInt.one, TrustLevel.Ordinary)
       val solo = ParticipantId("solo")
       val uno = ParticipantId("uno")
       val duo = ParticipantId("duo")

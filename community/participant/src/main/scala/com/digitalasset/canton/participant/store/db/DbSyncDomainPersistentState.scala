@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.store.db
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout}
-import com.digitalasset.canton.crypto.CryptoPureApi
+import com.digitalasset.canton.crypto.{Crypto, CryptoPureApi}
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.config.ParticipantStoreConfig
@@ -25,8 +25,10 @@ import com.digitalasset.canton.store.db.{
 }
 import com.digitalasset.canton.store.memory.InMemorySendTrackerStore
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.store.db.{DbTopologyStore, DbTopologyStoreX}
+import com.digitalasset.canton.topology.{DomainOutboxQueue, DomainTopologyManagerX}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
 
@@ -205,8 +207,9 @@ class DbSyncDomainPersistentStateOld(
 class DbSyncDomainPersistentStateX(
     domainId: IndexedDomain,
     protocolVersion: ProtocolVersion,
+    clock: Clock,
     storage: DbStorage,
-    pureCryptoApi: CryptoPureApi,
+    crypto: Crypto,
     parameters: ParticipantStoreConfig,
     cachingConfigs: CachingConfigs,
     maxDbConnections: PositiveInt,
@@ -220,7 +223,7 @@ class DbSyncDomainPersistentStateX(
       domainId,
       protocolVersion,
       storage,
-      pureCryptoApi,
+      crypto.pureCrypto,
       parameters,
       cachingConfigs,
       maxDbConnections,
@@ -232,7 +235,7 @@ class DbSyncDomainPersistentStateX(
     )
     with SyncDomainPersistentStateX {
 
-  val topologyStore =
+  override val topologyStore =
     new DbTopologyStoreX(
       storage,
       DomainStore(domainId.item),
@@ -241,9 +244,22 @@ class DbSyncDomainPersistentStateX(
       loggerFactory,
     )
 
+  override val domainOutboxQueue = new DomainOutboxQueue(loggerFactory)
+
+  override val topologyManager = new DomainTopologyManagerX(
+    clock = clock,
+    crypto = crypto,
+    store = topologyStore,
+    outboxQueue = domainOutboxQueue,
+    timeouts = timeouts,
+    futureSupervisor = futureSupervisor,
+    loggerFactory = loggerFactory,
+  )
+
   override def close() = {
     Lifecycle.close(
-      topologyStore
+      topologyStore,
+      topologyManager,
     )(logger)
     super.close()
   }

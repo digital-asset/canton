@@ -45,9 +45,9 @@ import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.ledger.runner.common.PureConfigReaderWriter.Secure.{
   commandConfigurationConvert,
   dbConfigPostgresDataSourceConfigConvert,
+  identityProviderManagementConfigConvert,
+  indexServiceConfigConvert,
   indexerConfigConvert,
-  transactionFlatStreamsConfigConvert,
-  transactionTreeStreamsConfigConvert,
   userManagementServiceConfigConvert,
 }
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -279,6 +279,7 @@ final case class RetentionPeriodDefaults(
   *
   * @param enableAdditionalConsistencyChecks if true, run additional consistency checks. This will degrade performance.
   * @param manualStart  If set to true, the nodes have to be manually started via console (default false)
+  * @param startupParallelism Start up to N nodes in parallel (default is num-threads)
   * @param nonStandardConfig don't fail config validation on non-standard configuration settings
   * @param devVersionSupport If true, allow domain nodes to use unstable protocol versions and participant nodes to connect to such domains
   * @param timeouts Sets the timeouts used for processing and console
@@ -288,13 +289,17 @@ final case class CantonParameters(
     clock: ClockConfig = ClockConfig.WallClock(),
     enableAdditionalConsistencyChecks: Boolean = false,
     manualStart: Boolean = false,
+    startupParallelism: Option[PositiveInt] = None,
     nonStandardConfig: Boolean = false,
     devVersionSupport: Boolean = false,
     portsFile: Option[String] = None,
     timeouts: TimeoutSettings = TimeoutSettings(),
     retentionPeriodDefaults: RetentionPeriodDefaults = RetentionPeriodDefaults(),
     console: AmmoniteConsoleConfig = AmmoniteConsoleConfig(),
-)
+) {
+  def getStartupParallelism(numThreads: Int): Int =
+    startupParallelism.fold(numThreads)(_.value)
+}
 
 /** Control which features are turned on / off in Canton
   *

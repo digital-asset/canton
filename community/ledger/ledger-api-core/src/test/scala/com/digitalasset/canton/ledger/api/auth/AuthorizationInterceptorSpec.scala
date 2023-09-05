@@ -86,7 +86,8 @@ class AuthorizationInterceptorSpec
       identityProviderAwareAuthService.decodeMetadata(any[Metadata])(any[LoggingContextWithTrace])
     )
       .thenReturn(Future.successful(ClaimSet.Unauthenticated))
-    when(authService.decodeMetadata(any[Metadata])).thenReturn(failedMetadataDecode)
+    when(authService.decodeMetadata(any[Metadata])(anyTraceContext))
+      .thenReturn(failedMetadataDecode)
     authorizationInterceptor.interceptCall[Nothing, Nothing](serverCall, new Metadata(), null)
 
     promise.future.map { _ =>

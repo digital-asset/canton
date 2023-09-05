@@ -95,10 +95,10 @@ class TopologyAdministrationGroupX(
         )
       }
 
-    def load(transactions: Seq[GenericSignedTopologyTransactionX]): Unit =
+    def load(transactions: Seq[GenericSignedTopologyTransactionX], store: String): Unit =
       consoleEnvironment.run {
         adminCommand(
-          TopologyAdminCommandsX.Write.AddTransactions(transactions)
+          TopologyAdminCommandsX.Write.AddTransactions(transactions, store)
         )
       }
 
@@ -196,6 +196,7 @@ class TopologyAdministrationGroupX(
         domainOwners.map(_.uid.namespace.fingerprint).toSet,
         threshold = PositiveInt.tryCreate(1.max(domainOwners.size - 1)),
         signedBy = thisNodeRootKey,
+        store = AuthorizedStore.filterName,
       )
 
       val domainId = DomainId(
@@ -212,6 +213,7 @@ class TopologyAdministrationGroupX(
           DynamicDomainParameters
             .initialXValues(consoleEnvironment.environment.clock, ProtocolVersion.dev),
           signedBy = thisNodeRootKey,
+          store = Some(AuthorizedStore.filterName),
         )
       )
 
@@ -221,6 +223,7 @@ class TopologyAdministrationGroupX(
           threshold = PositiveInt.one,
           active = mediators,
           signedBy = thisNodeRootKey,
+          store = Some(AuthorizedStore.filterName),
         )
       )
 
@@ -230,6 +233,7 @@ class TopologyAdministrationGroupX(
           threshold = PositiveInt.one,
           active = sequencers,
           signedBy = thisNodeRootKey,
+          store = Some(AuthorizedStore.filterName),
         )
       )
 
@@ -268,6 +272,7 @@ class TopologyAdministrationGroupX(
     def propose(
         owners: Set[Fingerprint],
         threshold: PositiveInt,
+        store: String,
         // TODO(#14056) don't use the instance's root namespace key by default.
         //  let the grpc service figure out the right key to use, once that's implemented
         signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
@@ -290,6 +295,7 @@ class TopologyAdministrationGroupX(
                   serial = serial,
                   change = TopologyChangeOpX.Replace,
                   mustFullyAuthorize = true,
+                  store = store,
                 )
               }
             )
@@ -489,6 +495,7 @@ class TopologyAdministrationGroupX(
         signedBy = Seq(instance.id.uid.namespace.fingerprint),
         serial = serial,
         change = op,
+        store = AuthorizedStore.filterName,
       )
 
       adminCommand(command)
@@ -585,6 +592,7 @@ class TopologyAdministrationGroupX(
         ),
         signedBy = Seq(instance.id.uid.namespace.fingerprint),
         serial = None,
+        store = AuthorizedStore.filterName,
       )
 
       synchronisation.run(synchronize)(adminCommand(cmd))
@@ -683,6 +691,7 @@ class TopologyAdministrationGroupX(
             serial = serial,
             change = TopologyChangeOpX.Replace,
             mustFullyAuthorize = true,
+            store = domainId.filterString,
           )
         )
       }
@@ -772,7 +781,8 @@ class TopologyAdministrationGroupX(
               parties,
             ),
             signedBy = signedBy.toList,
-            serial,
+            serial = serial,
+            store = AuthorizedStore.filterName,
           )
         )
       }
@@ -839,6 +849,7 @@ class TopologyAdministrationGroupX(
         //  let the grpc service figure out the right key to use, once that's implemented
         signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
         serial: Option[PositiveInt] = None,
+        store: Option[String] = None,
     ): SignedTopologyTransactionX[TopologyChangeOpX, MediatorDomainStateX] =
       consoleEnvironment.run {
         adminCommand(
@@ -849,6 +860,7 @@ class TopologyAdministrationGroupX(
             serial = serial,
             change = TopologyChangeOpX.Replace,
             mustFullyAuthorize = true,
+            store = store.getOrElse(domainId.filterString),
           )
         )
       }
@@ -890,6 +902,7 @@ class TopologyAdministrationGroupX(
         //  let the grpc service figure out the right key to use, once that's implemented
         signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
         serial: Option[PositiveInt] = None,
+        store: Option[String] = None,
     ): SignedTopologyTransactionX[TopologyChangeOpX, SequencerDomainStateX] =
       consoleEnvironment.run {
         adminCommand(
@@ -899,6 +912,7 @@ class TopologyAdministrationGroupX(
             serial = serial,
             change = TopologyChangeOpX.Replace,
             mustFullyAuthorize = true,
+            store = store.getOrElse(domainId.filterString),
           )
         )
       }
@@ -938,6 +952,7 @@ class TopologyAdministrationGroupX(
         //  let the grpc service figure out the right key to use, once that's implemented
         signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
         serial: Option[PositiveInt] = None,
+        store: Option[String] = None,
     ): SignedTopologyTransactionX[TopologyChangeOpX, DomainParametersStateX] =
       consoleEnvironment.run {
         adminCommand(
@@ -948,7 +963,8 @@ class TopologyAdministrationGroupX(
               parameters,
             ),
             signedBy.toList,
-            serial,
+            serial = serial,
+            store = store.getOrElse(domain.filterString),
           )
         )
       }

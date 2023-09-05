@@ -17,7 +17,6 @@ import com.digitalasset.canton.ledger.runner.common.OptConfigValue.{
   optConvertEnabled,
   optProductHint,
 }
-import com.digitalasset.canton.platform.apiserver.ApiServerConfig
 import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.config.{
@@ -269,12 +268,6 @@ class PureConfigReaderWriter(secure: Boolean = true) {
 
   implicit val rateLimitingConfigConvert: ConfigConvert[Option[RateLimitingConfig]] =
     optConvertEnabled(deriveConvert[RateLimitingConfig])
-
-  implicit val apiServerConfigHint =
-    ProductHint[ApiServerConfig](allowUnknownKeys = false)
-
-  implicit val apiServerConfigConvert: ConfigConvert[ApiServerConfig] =
-    deriveConvert[ApiServerConfig]
 
   implicit val validateAndStartConvert: ConfigConvert[IndexerStartupMode.ValidateAndStart.type] =
     deriveConvert[IndexerStartupMode.ValidateAndStart.type]

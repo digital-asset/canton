@@ -177,7 +177,7 @@ private[events] object TransactionLogUpdatesConversions {
               events = flatEvents,
               offset = ApiOffset.toApiString(transactionAccepted.offset),
               domainId = transactionAccepted.domainId.getOrElse(""),
-              traceContext = Some(SerializableTraceContext(traceContext).toDamlProto),
+              traceContext = SerializableTraceContext(traceContext).toDamlProtoOpt,
             )
           )
       }
@@ -378,7 +378,7 @@ private[events] object TransactionLogUpdatesConversions {
               eventsById = eventsById,
               rootEventIds = rootEventIds,
               domainId = transactionAccepted.domainId.getOrElse(""),
-              traceContext = Some(SerializableTraceContext(traceContext).toDamlProto),
+              traceContext = SerializableTraceContext(traceContext).toDamlProtoOpt,
             )
           }
       }
@@ -605,7 +605,7 @@ private[events] object TransactionLogUpdatesConversions {
         workflowId = reassignmentAccepted.workflowId,
         offset = ApiOffset.toApiString(reassignmentAccepted.offset),
         event = event,
-        traceContext = Some(SerializableTraceContext(traceContext).toDamlProto),
+        traceContext = SerializableTraceContext(traceContext).toDamlProtoOpt,
       )
     )
   }

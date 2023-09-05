@@ -41,3 +41,15 @@ message RejectionReason {
   repeated string parties = 1;
   com.digitalasset.canton.protocol.v1.LocalReject reject = 2; // Using v1.LocalReject instead of v0.LocalReject
 }
+
+message TransferResult {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
+
+  google.protobuf.Timestamp request_id = 1;
+  oneof domain {
+    string source_domain = 2; // renamed; result for transfer out request
+    string target_domain = 3; // result for transfer-in request
+  }
+  repeated string informees = 4;
+  Verdict verdict = 5; // new Verdict type
+}

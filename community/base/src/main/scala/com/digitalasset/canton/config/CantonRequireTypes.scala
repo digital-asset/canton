@@ -155,7 +155,6 @@ object CantonRequireTypes {
     type DisplayName = String255
     type TopologyRequestId = String255
     type DarName = String255
-    type SequencerStoreId = String255
 
     def errorMsg(tooLongStr: String, maxLength: Int, name: Option[String] = None): String =
       s"The given ${name.getOrElse("string")} has a maximum length of $maxLength but a ${name

@@ -621,7 +621,7 @@ abstract class ProtocolProcessor[
       (malformedPayloads, viewsWithCorrectRootHash)
     }
 
-    def observeSequencedRootHash(rootHash: RootHash, amSubmitter: Boolean): Future[Unit] =
+    def observeSequencedRootHash(amSubmitter: Boolean): Future[Unit] =
       if (amSubmitter && !isReceipt) {
         // We are the submitting participant and yet the request does not have a message ID.
         // This looks like a preplay attack, and we mark the request as sequenced in the in-flight
@@ -629,7 +629,7 @@ abstract class ProtocolProcessor[
         // and gets picked up by a timely rejection, which would emit a duplicate command completion.
         val sequenced = SequencedSubmission(sc, ts)
         inFlightSubmissionTracker.observeSequencedRootHash(
-          rootHashMessage.rootHash,
+          rootHash,
           sequenced,
         )
       } else Future.unit
@@ -733,10 +733,7 @@ abstract class ProtocolProcessor[
                   submissionData,
                 )
 
-                observeSequencedRootHash(
-                  rootHash,
-                  submissionData.submitterParticipant == participantId,
-                )
+                observeSequencedRootHash(submissionData.submitterParticipant == participantId)
               case None =>
                 // There are no root views
                 ephemeral.submissionTracker.cancelRegistration(

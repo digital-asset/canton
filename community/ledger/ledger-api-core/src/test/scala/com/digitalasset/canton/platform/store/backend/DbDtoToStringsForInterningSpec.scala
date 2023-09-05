@@ -79,6 +79,9 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
     ).sorted
   }
 
+  private val serializableTraceContext =
+    SerializableTraceContext(TraceContext.empty).toDamlProto.toByteArray
+
   private def fixture: List[DbDto] = List(
     DbDto.PartyEntry(
       ledger_offset = "0",
@@ -134,6 +137,7 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       event_sequential_id = 1,
       driver_metadata = None,
       domain_id = Some("domain2"),
+      trace_context = serializableTraceContext,
     ),
     DbDto.EventExercise(
       consuming = true,
@@ -161,6 +165,7 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       exercise_child_event_ids = Some(Vector("61", "62", "63")),
       exercise_result_compression = Some(1),
       domain_id = Some("domain3"),
+      trace_context = serializableTraceContext,
     ),
     DbDto.CommandCompletion(
       completion_offset = "64",
@@ -178,7 +183,7 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       deduplication_duration_nanos = Some(1),
       deduplication_start = Some(1),
       domain_id = Some("domain4"),
-      trace_context = Some(SerializableTraceContext(TraceContext.empty).toDamlProto.toByteArray),
+      trace_context = serializableTraceContext,
     ),
     DbDto.ConfigurationEntry(
       ledger_offset = "75",
@@ -229,6 +234,7 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       target_domain_id = "domain6",
       unassign_id = "",
       reassignment_counter = 0,
+      trace_context = serializableTraceContext,
     ),
     DbDto.EventUnassign(
       event_offset = "",
@@ -245,6 +251,7 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       unassign_id = "",
       reassignment_counter = 0,
       assignment_exclusivity = None,
+      trace_context = serializableTraceContext,
     ),
   )
 

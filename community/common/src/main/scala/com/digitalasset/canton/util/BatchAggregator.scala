@@ -73,9 +73,9 @@ object BatchAggregator {
 
     /** Computation for a single item.
       * Should be equivalent to
-      * ```
+      * {{{
       *   executeBatch(Seq(Traced(item))).map(_.head)
-      * ```
+      * }}}
       */
     def executeSingle(
         item: A

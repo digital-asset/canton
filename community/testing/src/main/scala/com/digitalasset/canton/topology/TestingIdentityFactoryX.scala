@@ -96,6 +96,11 @@ final case class TestingTopologyX(
         PositiveInt.one,
       )
     ),
+    sequencerGroup: SequencerGroup = SequencerGroup(
+      active = Seq(DefaultTestIdentities.sequencerIdX),
+      passive = Seq.empty,
+      threshold = PositiveInt.one,
+    ),
     participants: Map[ParticipantId, ParticipantAttributes] = Map.empty,
     packages: Seq[LfPackageId] = Seq.empty,
     keyPurposes: Set[KeyPurpose] = KeyPurpose.all,
@@ -114,6 +119,13 @@ final case class TestingTopologyX(
     * All domains will have exactly the same topology.
     */
   def withDomains(domains: DomainId*): TestingTopologyX = this.copy(domains = domains.toSet)
+
+  /** Overwrites the `sequencerGroup` field.
+    */
+  def withSequencerGroup(
+      sequencerGroup: SequencerGroup
+  ): TestingTopologyX =
+    this.copy(sequencerGroup = sequencerGroup)
 
   /** Overwrites the `participants` parameter while setting attributes to Submission / Ordinary.
     */
@@ -308,6 +320,18 @@ class TestingIdentityFactoryX(
       )
     )
 
+    val sequencerOnboarding =
+      mkAdd(
+        SequencerDomainStateX
+          .create(
+            domainId,
+            threshold = topology.sequencerGroup.threshold,
+            active = topology.sequencerGroup.active,
+            observers = topology.sequencerGroup.passive,
+          )
+          .getOrElse(sys.error("creating SequencerDomainStateX should not have failed"))
+      )
+
     val partyDataTx = partyToParticipantTxs()
 
     val domainGovernanceTxs = List(
@@ -321,9 +345,13 @@ class TestingIdentityFactoryX(
       EffectiveTime(CantonTimestamp.Epoch.immediatePredecessor),
       removeMapping = Set.empty,
       removeTxs = Set.empty,
-      additions =
-        (participantTxs ++ domainMembers ++ mediatorOnboarding ++ partyDataTx ++ domainGovernanceTxs)
-          .map(ValidatedTopologyTransactionX(_, rejectionReason = None)),
+      additions = (participantTxs ++
+        domainMembers ++
+        mediatorOnboarding ++
+        Seq(sequencerOnboarding) ++
+        partyDataTx ++
+        domainGovernanceTxs)
+        .map(ValidatedTopologyTransactionX(_, rejectionReason = None)),
       expiredAdditions = Set.empty,
     )(TraceContext.empty)
     Await.result(

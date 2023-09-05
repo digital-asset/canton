@@ -33,20 +33,15 @@ import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.{ApiRequestLogger, ClientChannelBuilder}
 import com.digitalasset.canton.participant.config.LedgerApiServerConfig
-import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.IndexerLockIds
 import com.digitalasset.canton.platform.LedgerApiServer
 import com.digitalasset.canton.platform.apiserver.ratelimiting.{
   RateLimitingInterceptor,
   ThreadpoolCheck,
 }
-import com.digitalasset.canton.platform.apiserver.{ApiServerConfig, ApiServiceOwner, LedgerFeatures}
-import com.digitalasset.canton.platform.config.{
-  IndexServiceConfig as LedgerIndexServiceConfig,
-  ServerRole,
-}
+import com.digitalasset.canton.platform.apiserver.{ApiServiceOwner, LedgerFeatures}
+import com.digitalasset.canton.platform.config.ServerRole
 import com.digitalasset.canton.platform.index.IndexServiceOwner
 import com.digitalasset.canton.platform.indexer.IndexerConfig.DefaultIndexerStartupMode
-import com.digitalasset.canton.platform.indexer.ha.HaConfig
 import com.digitalasset.canton.platform.indexer.{
   IndexerConfig,
   IndexerServiceOwner,
@@ -54,7 +49,6 @@ import com.digitalasset.canton.platform.indexer.{
 }
 import com.digitalasset.canton.platform.localstore.*
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore
-import com.digitalasset.canton.platform.services.time.TimeProviderType
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
 import com.digitalasset.canton.platform.store.dao.events.ContractLoader
@@ -175,29 +169,9 @@ class StartableStoppableLedgerApiServer(
   private def buildLedgerApiServerOwner(
       overrideIndexerStartupMode: Option[IndexerStartupMode]
   )(implicit traceContext: TraceContext) = {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory)
 
-    val indexServiceConfig = LedgerIndexServiceConfig(
-      activeContractsServiceStreams = config.serverConfig.activeContractsService,
-      transactionFlatStreams = config.serverConfig.transactionFlatStreams,
-      transactionTreeStreams = config.serverConfig.transactionTreeStreams,
-      bufferedEventsProcessingParallelism = config.serverConfig.bufferedEventsProcessingParallelism,
-      maxContractStateCacheSize = config.serverConfig.maxContractStateCacheSize,
-      maxContractKeyStateCacheSize = config.serverConfig.maxContractKeyStateCacheSize,
-      maxTransactionsInMemoryFanOutBufferSize =
-        config.serverConfig.maxTransactionsInMemoryFanOutBufferSize,
-      apiStreamShutdownTimeout = config.serverConfig.apiStreamShutdownTimeout.unwrap,
-      inMemoryStateUpdaterParallelism = config.serverConfig.inMemoryStateUpdaterParallelism,
-      inMemoryFanOutThreadPoolSize = config.serverConfig.inMemoryFanOutThreadPoolSize.getOrElse(
-        LedgerApiServerConfig.DefaultInMemoryFanOutThreadPoolSize
-      ),
-      preparePackageMetadataTimeOutWarning =
-        config.serverConfig.preparePackageMetadataTimeOutWarning.underlying,
-      completionsPageSize = config.serverConfig.completionsPageSize,
-      globalMaxEventIdQueries = config.serverConfig.globalMaxEventIdQueries,
-      globalMaxEventPayloadQueries = config.serverConfig.globalMaxEventPayloadQueries,
-      bufferedStreamsPageSize = config.serverConfig.bufferedStreamsPageSize,
-    )
+    val indexServiceConfig = config.serverConfig.indexService
 
     val authService = new CantonAdminTokenAuthService(
       config.adminToken,
@@ -247,10 +221,7 @@ class StartableStoppableLedgerApiServer(
             postgres = config.serverConfig.postgresDataSource,
           )
         ),
-        highAvailability = config.indexerLockIds.fold(HaConfig()) {
-          case IndexerLockIds(mainLockId, workerLockId) =>
-            HaConfig(indexerLockId = mainLockId, indexerWorkerLockId = workerLockId)
-        },
+        highAvailability = config.indexerHaConfig,
       )
       dbSupport <- DbSupport
         .owner(
@@ -271,6 +242,7 @@ class StartableStoppableLedgerApiServer(
           maxQueueSize = maxQueueSize.value,
           maxBatchSize = maxBatchSize.value,
           parallelism = parallelism.value,
+          multiDomainEnabled = multiDomainEnabled,
           loggerFactory = loggerFactory,
         )
       }
@@ -297,19 +269,30 @@ class StartableStoppableLedgerApiServer(
         loggerFactory = loggerFactory,
       )
 
-      apiServerConfig = getApiServerConfig
-
       timedWriteService = new TimedWriteService(config.syncService, config.metrics)
       _ <- ApiServiceOwner(
         submissionTracker = inMemoryState.submissionTracker,
         indexService = indexService,
         userManagementStore = userManagementStore,
-        identityProviderConfigStore =
-          getIdentityProviderConfigStore(dbSupport, apiServerConfig, loggerFactory),
+        identityProviderConfigStore = getIdentityProviderConfigStore(
+          dbSupport,
+          config.serverConfig.identityProviderManagement,
+          loggerFactory,
+        ),
         partyRecordStore = partyRecordStore,
         ledgerId = config.ledgerId,
         participantId = config.participantId,
-        config = apiServerConfig,
+        apiStreamShutdownTimeout = config.serverConfig.apiStreamShutdownTimeout,
+        command = config.serverConfig.commandService,
+        configurationLoadTimeout = config.serverConfig.configurationLoadTimeout,
+        managementServiceTimeout = config.serverConfig.managementServiceTimeout,
+        userManagement = config.serverConfig.userManagementService,
+        tls = config.serverConfig.tls
+          .map(LedgerApiServerConfig.ledgerApiServerTlsConfigFromCantonServerConfig),
+        address = Some(config.serverConfig.address),
+        maxInboundMessageSize = config.serverConfig.maxInboundMessageSize.unwrap,
+        port = config.serverConfig.port,
+        seeding = config.cantonParameterConfig.ledgerApiServerParameters.contractIdSeeding,
         optWriteService = Some(timedWriteService),
         readService = timedReadService,
         healthChecks = new HealthChecks(
@@ -351,13 +334,13 @@ class StartableStoppableLedgerApiServer(
 
   private def getIdentityProviderConfigStore(
       dbSupport: DbSupport,
-      apiServerConfig: ApiServerConfig,
+      identityProviderManagement: IdentityProviderManagementConfig,
       loggerFactory: NamedLoggerFactory,
   )(implicit traceContext: TraceContext): CachedIdentityProviderConfigStore =
     PersistentIdentityProviderConfigStore.cached(
       dbSupport = dbSupport,
       metrics = config.metrics,
-      cacheExpiryAfterWrite = apiServerConfig.identityProviderManagement.cacheExpiryAfterWrite,
+      cacheExpiryAfterWrite = identityProviderManagement.cacheExpiryAfterWrite.underlying,
       maxIdentityProviders = IdentityProviderManagementConfig.MaxIdentityProviders,
       loggerFactory = loggerFactory,
     )
@@ -426,25 +409,6 @@ class StartableStoppableLedgerApiServer(
     ),
     explicitDisclosure =
       ExperimentalExplicitDisclosure.of(config.serverConfig.explicitDisclosureUnsafe),
-  )
-
-  private def getApiServerConfig: ApiServerConfig = ApiServerConfig(
-    address = Some(config.serverConfig.address),
-    apiStreamShutdownTimeout = config.serverConfig.apiStreamShutdownTimeout.unwrap,
-    command = config.serverConfig.commandService,
-    configurationLoadTimeout = config.serverConfig.configurationLoadTimeout.unwrap,
-    managementServiceTimeout = config.serverConfig.managementServiceTimeout.underlying,
-    maxInboundMessageSize = config.serverConfig.maxInboundMessageSize.unwrap,
-    port = config.serverConfig.port,
-    rateLimit = config.serverConfig.rateLimit,
-    seeding = config.cantonParameterConfig.ledgerApiServerParameters.contractIdSeeding,
-    timeProviderType = config.testingTimeService match {
-      case Some(_) => TimeProviderType.Static
-      case None => TimeProviderType.WallClock
-    },
-    tls = config.serverConfig.tls
-      .map(LedgerApiServerConfig.ledgerApiServerTlsConfigFromCantonServerConfig),
-    userManagement = config.serverConfig.userManagementService,
   )
 
   private def startHttpApiIfEnabled: ResourceOwner[Unit] =

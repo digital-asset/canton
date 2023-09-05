@@ -26,6 +26,14 @@ service PackageService {
   // Remove a package that is not vetted
   rpc RemovePackage(RemovePackageRequest) returns (RemovePackageResponse);
 
+  // Enable vetting for all packages pertaining to a specific DAR
+  rpc VetDar(VetDarRequest) returns (VetDarResponse);
+
+  // Revoke vetting for all packages pertaining to a specific DAR.
+  // NOTE:  Experimental operation for which expert-level knowledge is required.
+  //        Erroneous usage might result in the participant failing to process transactions.
+  rpc UnvetDar(UnvetDarRequest) returns (UnvetDarResponse);
+
   // Remove a DAR that is not needed
   rpc RemoveDar(RemoveDarRequest) returns (RemoveDarResponse);
 
@@ -84,6 +92,21 @@ message RemovePackageRequest {
 message RemovePackageResponse {
   google.protobuf.Empty success = 1;
 }
+
+message VetDarRequest {
+  string dar_hash = 1;
+  // if set to true, the API call waits until the vetting transaction has been
+  // observed by this participant on all connected domains.
+  bool synchronize = 2;
+}
+
+message VetDarResponse {}
+
+message UnvetDarRequest {
+  string dar_hash = 1;
+}
+
+message UnvetDarResponse {}
 
 message RemoveDarRequest {
   string dar_hash = 1;

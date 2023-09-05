@@ -122,9 +122,56 @@ trait DomainOutboxDispatchHelperOld
 
 }
 
+trait StoreBasedDomainOutboxDispatchHelperX extends DomainOutboxDispatchHelperX {
+
+  def authorizedStore: TopologyStoreX[TopologyStoreId.AuthorizedStore]
+  override protected def convertTransactions(
+      transactions: Seq[GenericSignedTopologyTransactionX]
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[Future, /*DomainRegistryError*/ String, Seq[GenericSignedTopologyTransactionX]] = {
+    transactions
+      .parTraverse { tx =>
+        if (tx.transaction.isEquivalentTo(protocolVersion)) {
+          // Transaction already in the correct version, nothing to do here
+          EitherT.rightT[Future, String](tx)
+        } else {
+          // First try to find if the topology transaction already exists in the correct version in the topology store
+          OptionT(authorizedStore.findStoredForVersion(tx.transaction, protocolVersion))
+            .map(_.transaction)
+            .toRight("")
+            .leftFlatMap { _ =>
+              // We did not find a topology transaction with the correct version, so we try to convert and resign
+              SignedTopologyTransactionX.asVersion(tx, protocolVersion)(crypto)
+            }
+        }
+      }
+  }
+
+}
+
+trait QueueBasedDomainOutboxDispatchHelperX extends DomainOutboxDispatchHelperX {
+  override protected def convertTransactions(
+      transactions: Seq[GenericSignedTopologyTransactionX]
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[Future, /*DomainRegistryError*/ String, Seq[GenericSignedTopologyTransactionX]] = {
+    transactions
+      .parTraverse { tx =>
+        if (tx.transaction.isEquivalentTo(protocolVersion)) {
+          // Transaction already in the correct version, nothing to do here
+          EitherT.rightT[Future, String](tx)
+        } else {
+          SignedTopologyTransactionX.asVersion(tx, protocolVersion)(crypto)
+        }
+      }
+  }
+}
+
 trait DomainOutboxDispatchHelperX
     extends DomainOutboxDispatchStoreSpecific[GenericSignedTopologyTransactionX] {
-  def authorizedStore: TopologyStoreX[TopologyStoreId.AuthorizedStore]
 
   override protected def filterTransactions(
       transactions: Seq[GenericSignedTopologyTransactionX],
@@ -156,31 +203,6 @@ trait DomainOutboxDispatchHelperX
       transactions.filter(x => notAlien(x) && domainRestriction(x))
     )
   }
-
-  override protected def convertTransactions(
-      transactions: Seq[GenericSignedTopologyTransactionX]
-  )(implicit
-      ec: ExecutionContext,
-      traceContext: TraceContext,
-  ): EitherT[Future, /*DomainRegistryError*/ String, Seq[GenericSignedTopologyTransactionX]] = {
-    transactions
-      .parTraverse { tx =>
-        if (tx.transaction.hasEquivalentVersion(protocolVersion)) {
-          // Transaction already in the correct version, nothing to do here
-          EitherT.rightT[Future, String](tx)
-        } else {
-          // First try to find if the topology transaction already exists in the correct version in the topology store
-          OptionT(authorizedStore.findStoredForVersion(tx.transaction, protocolVersion))
-            .map(_.transaction)
-            .toRight("")
-            .leftFlatMap { _ =>
-              // We did not find a topology transaction with the correct version, so we try to convert and resign
-              SignedTopologyTransactionX.asVersion(tx, protocolVersion)(crypto)
-            }
-        }
-      }
-  }
-
 }
 
 trait DomainOutboxDispatch[

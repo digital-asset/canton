@@ -397,9 +397,9 @@ abstract class ConfirmationResponseProcessorTestV0Base
         val informeeMessage = new InformeeMessage(fullInformeeTree)(testedProtocolVersion) {
           override val informeesAndThresholdByViewHash
               : Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
-            val submitterI = Informee.tryCreate(submitter, 1, TrustLevel.Ordinary)
-            val signatoryI = Informee.tryCreate(signatory, 1, TrustLevel.Ordinary)
-            val observerI = Informee.tryCreate(observer, 1, TrustLevel.Ordinary)
+            val submitterI = Informee.create(submitter, NonNegativeInt.one, TrustLevel.Ordinary)
+            val signatoryI = Informee.create(signatory, NonNegativeInt.one, TrustLevel.Ordinary)
+            val observerI = Informee.create(observer, NonNegativeInt.one, TrustLevel.Ordinary)
             Map(
               view.viewHash -> (Set(
                 submitterI,
@@ -826,7 +826,7 @@ abstract class ConfirmationResponseProcessorTestV0Base
                   ),
                 factory.MultipleRootsAndViewNestings.view1.viewHash ->
                   ResponseAggregation.ViewState(
-                    Set(ConfirmingParty(signatory, 1, TrustLevel.Ordinary)),
+                    Set(ConfirmingParty(signatory, PositiveInt.one, TrustLevel.Ordinary)),
                     Map(
                       submitter -> ConsortiumVotingState(approvals =
                         Set(ExampleTransactionFactory.submitterParticipant)
@@ -838,14 +838,14 @@ abstract class ConfirmationResponseProcessorTestV0Base
                   ),
                 factory.MultipleRootsAndViewNestings.view10.viewHash ->
                   ResponseAggregation.ViewState(
-                    Set(ConfirmingParty(signatory, 1, TrustLevel.Ordinary)),
+                    Set(ConfirmingParty(signatory, PositiveInt.one, TrustLevel.Ordinary)),
                     Map(signatory -> ConsortiumVotingState()),
                     1,
                     Nil,
                   ),
                 factory.MultipleRootsAndViewNestings.view11.viewHash ->
                   ResponseAggregation.ViewState(
-                    Set(ConfirmingParty(signatory, 1, TrustLevel.Ordinary)),
+                    Set(ConfirmingParty(signatory, PositiveInt.one, TrustLevel.Ordinary)),
                     Map(
                       submitter -> ConsortiumVotingState(approvals =
                         Set(ExampleTransactionFactory.submitterParticipant)
@@ -911,9 +911,9 @@ abstract class ConfirmationResponseProcessorTestV0Base
         val informeeMessage = new InformeeMessage(fullInformeeTree)(testedProtocolVersion) {
           override val informeesAndThresholdByViewHash
               : Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
-            val submitterI = Informee.tryCreate(submitter, 1, TrustLevel.Ordinary)
-            val signatoryI = Informee.tryCreate(signatory, 1, TrustLevel.Ordinary)
-            val observerI = Informee.tryCreate(observer, 1, TrustLevel.Ordinary)
+            val submitterI = Informee.create(submitter, NonNegativeInt.one, TrustLevel.Ordinary)
+            val signatoryI = Informee.create(signatory, NonNegativeInt.one, TrustLevel.Ordinary)
+            val observerI = Informee.create(observer, NonNegativeInt.one, TrustLevel.Ordinary)
             Map(
               view.viewHash -> (Set(
                 submitterI,

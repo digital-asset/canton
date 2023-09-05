@@ -37,6 +37,9 @@ final case class SerializableTraceContext(traceContext: TraceContext)
     val w3cTraceContext = traceContext.asW3CTraceContext
     DamlTraceContext(w3cTraceContext.map(_.parent), w3cTraceContext.flatMap(_.state))
   }
+
+  def toDamlProtoOpt: Option[DamlTraceContext] =
+    Option.when(traceContext != TraceContext.empty)(toDamlProto)
 }
 
 object SerializableTraceContext

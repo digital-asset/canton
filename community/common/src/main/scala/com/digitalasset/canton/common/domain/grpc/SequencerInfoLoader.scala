@@ -7,6 +7,7 @@ import akka.stream.Materializer
 import cats.data.EitherT
 import cats.instances.future.*
 import cats.syntax.either.*
+import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.*
 import com.digitalasset.canton.common.domain.SequencerConnectClient
@@ -18,6 +19,7 @@ import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader.{
 }
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
@@ -29,8 +31,9 @@ import com.digitalasset.canton.sequencing.{
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
+import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
+import com.digitalasset.canton.util.{MonadUtil, retry}
 import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
 
@@ -153,10 +156,40 @@ class SequencerInfoLoader(
     } yield (bootstrapInfo, domainParameters)
   }
 
+  private def getBootstrapInfoDomainParametersWithRetry(
+      domainAlias: DomainAlias,
+      sequencerAlias: SequencerAlias,
+      client: SequencerConnectClient,
+  )(implicit
+      traceContext: TraceContext,
+      closeContext: CloseContext,
+  ): EitherT[
+    Future,
+    SequencerInfoLoaderError,
+    (DomainClientBootstrapInfo, StaticDomainParameters),
+  ] = {
+    val retries = 10
+    EitherT(
+      retry
+        .Pause(
+          logger,
+          flagCloseable = closeContext.flagCloseable,
+          maxRetries = retries,
+          delay = timeouts.sequencerInfo.asFiniteApproximation.div(retries.toLong),
+          operationName = functionFullName,
+        )
+        .apply(
+          getBootstrapInfoDomainParameters(domainAlias, sequencerAlias, client).value,
+          NoExnRetryable,
+        )
+    )
+  }
+
   private def getBootstrapInfoDomainParameters(
       domainAlias: DomainAlias
   )(connection: SequencerConnection)(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): EitherT[
     Future,
     SequencerInfoLoaderError,
@@ -168,7 +201,12 @@ class SequencerInfoLoader(
           client <- sequencerConnectClientBuilder(grpc).leftMap(
             SequencerInfoLoader.fromSequencerConnectClientError(domainAlias)
           )
-          bootstrapInfoDomainParameters <- getBootstrapInfoDomainParameters(
+          // retry the bootstrapping info parameters. we want to maximise the number of
+          // sequencers (and work around a bootstrapping issue with active-active sequencers)
+          // where k8 health end-points don't distinguish between admin / public api
+          // and might route our requests to an active instance that is still waiting for
+          // the node-id to be written to the database
+          bootstrapInfoDomainParameters <- getBootstrapInfoDomainParametersWithRetry(
             domainAlias,
             grpc.sequencerAlias,
             client,
@@ -211,7 +249,8 @@ class SequencerInfoLoader(
       domainAlias: DomainAlias,
       sequencerConnections: SequencerConnections,
   )(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): EitherT[Future, SequencerInfoLoaderError, SequencerAggregatedInfo] = EitherT(
     MonadUtil
       .parTraverseWithLimit(

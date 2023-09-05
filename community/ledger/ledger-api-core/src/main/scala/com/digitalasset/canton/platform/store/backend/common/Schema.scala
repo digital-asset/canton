@@ -158,6 +158,7 @@ private[backend] object AppendOnlySchema {
         "domain_id" -> fieldStrategy.intOptional(stringInterning =>
           _.domain_id.map(stringInterning.domainId.unsafe.internalize)
         ),
+        "trace_context" -> fieldStrategy.bytea(_ => _.trace_context),
       )
 
     val exerciseFields: Vector[(String, Field[DbDto.EventExercise, _, _])] =
@@ -206,6 +207,7 @@ private[backend] object AppendOnlySchema {
         "domain_id" -> fieldStrategy.intOptional(stringInterning =>
           _.domain_id.map(stringInterning.domainId.unsafe.internalize)
         ),
+        "trace_context" -> fieldStrategy.bytea(_ => _.trace_context),
       )
 
     val eventsUnassign: Table[DbDto.EventUnassign] =
@@ -234,6 +236,7 @@ private[backend] object AppendOnlySchema {
         "unassign_id" -> fieldStrategy.string(_ => _.unassign_id),
         "reassignment_counter" -> fieldStrategy.bigint(_ => _.reassignment_counter),
         "assignment_exclusivity" -> fieldStrategy.bigintOptional(_ => _.assignment_exclusivity),
+        "trace_context" -> fieldStrategy.bytea(_ => _.trace_context),
       )
 
     val eventsAssign: Table[DbDto.EventAssign] =
@@ -282,6 +285,7 @@ private[backend] object AppendOnlySchema {
         ),
         "ledger_effective_time" -> fieldStrategy.bigint(_ => _.ledger_effective_time),
         "driver_metadata" -> fieldStrategy.bytea(_ => _.driver_metadata),
+        "trace_context" -> fieldStrategy.bytea(_ => _.trace_context),
       )
 
     val eventsConsumingExercise: Table[DbDto.EventExercise] =
@@ -363,7 +367,7 @@ private[backend] object AppendOnlySchema {
         "domain_id" -> fieldStrategy.intOptional(stringInterning =>
           _.domain_id.map(stringInterning.domainId.unsafe.internalize)
         ),
-        "trace_context" -> fieldStrategy.byteaOptional(_ => _.trace_context),
+        "trace_context" -> fieldStrategy.bytea(_ => _.trace_context),
       )
 
     val stringInterningTable: Table[DbDto.StringInterningDto] =

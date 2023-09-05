@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.ledger.api
 import com.digitalasset.canton.crypto.RandomOps
 import com.digitalasset.canton.ledger.api.auth.AuthService.AUTHORIZATION_KEY
 import com.digitalasset.canton.ledger.api.auth.{AuthService, ClaimSet}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.HexString
 import io.grpc.Metadata
 
@@ -29,7 +30,9 @@ object CantonAdminToken {
   */
 class CantonAdminTokenAuthService(adminToken: CantonAdminToken, parent: Seq[AuthService])
     extends AuthService {
-  override def decodeMetadata(headers: Metadata): CompletionStage[ClaimSet] = {
+  override def decodeMetadata(
+      headers: Metadata
+  )(implicit traceContext: TraceContext): CompletionStage[ClaimSet] = {
     val bearerTokenRegex = "Bearer (.*)".r
     val authToken = for {
       authKey <- Option(headers.get(AUTHORIZATION_KEY))
@@ -44,7 +47,9 @@ class CantonAdminTokenAuthService(adminToken: CantonAdminToken, parent: Seq[Auth
   private val wildcard = CompletableFuture.completedFuture(ClaimSet.Claims.Wildcard: ClaimSet)
   private val deny = CompletableFuture.completedFuture(ClaimSet.Unauthenticated: ClaimSet)
 
-  private def decodeMetadataParent(headers: Metadata): CompletionStage[ClaimSet] = {
+  private def decodeMetadataParent(
+      headers: Metadata
+  )(implicit traceContext: TraceContext): CompletionStage[ClaimSet] = {
     // iterate until we find one claim set which is not unauthenticated
     parent.foldLeft(deny) { case (acc, elem) =>
       acc.thenCompose { prevClaims =>

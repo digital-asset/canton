@@ -62,7 +62,7 @@ final case class AuthorizationInterceptor(
       }
 
       authService
-        .decodeMetadata(headers)
+        .decodeMetadata(headers)(loggingContextWithTrace.traceContext)
         .asScala
         .flatMap(fallbackToIdpAuthService(headers, _))
         .flatMap(resolveAuthenticatedUserRights)

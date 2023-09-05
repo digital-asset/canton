@@ -7,7 +7,7 @@ import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout}
-import com.digitalasset.canton.crypto.CryptoPureApi
+import com.digitalasset.canton.crypto.{Crypto, CryptoPureApi}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.config.ParticipantStoreConfig
 import com.digitalasset.canton.participant.store.EventLogId.DomainEventLogId
@@ -21,9 +21,11 @@ import com.digitalasset.canton.participant.store.memory.{
 }
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.*
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.store.TopologyStoreCommon.DomainStoreCommon
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreX}
+import com.digitalasset.canton.topology.{DomainOutboxQueue, DomainTopologyManagerX}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
@@ -62,6 +64,9 @@ trait SyncDomainPersistentStateX extends SyncDomainPersistentState {
 
   def topologyStore: TopologyStoreX[DomainStore]
 
+  def topologyManager: DomainTopologyManagerX
+
+  def domainOutboxQueue: DomainOutboxQueue
 }
 
 object SyncDomainPersistentState {
@@ -115,7 +120,8 @@ object SyncDomainPersistentState {
       storage: Storage,
       domainId: IndexedDomain,
       protocolVersion: ProtocolVersion,
-      pureCryptoApi: CryptoPureApi,
+      clock: Clock,
+      crypto: Crypto,
       parameters: ParticipantStoreConfig,
       caching: CachingConfigs,
       maxDbConnections: PositiveInt,
@@ -129,9 +135,10 @@ object SyncDomainPersistentState {
     storage match {
       case _: MemoryStorage =>
         new InMemorySyncDomainPersistentStateX(
+          clock,
+          crypto,
           domainId,
           protocolVersion,
-          pureCryptoApi,
           enableAdditionalConsistencyChecks,
           domainLoggerFactory,
           processingTimeouts,
@@ -141,8 +148,9 @@ object SyncDomainPersistentState {
         new DbSyncDomainPersistentStateX(
           domainId,
           protocolVersion,
+          clock,
           db,
-          pureCryptoApi,
+          crypto,
           parameters,
           caching,
           maxDbConnections,

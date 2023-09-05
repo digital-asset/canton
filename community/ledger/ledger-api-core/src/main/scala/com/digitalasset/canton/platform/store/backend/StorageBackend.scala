@@ -234,6 +234,9 @@ trait ContractStorageBackend {
   def createdContracts(contractIds: Seq[ContractId], before: Offset)(
       connection: Connection
   ): Map[ContractId, ContractStorageBackend.RawCreatedContract]
+  def assignedContracts(contractIds: Seq[ContractId])(
+      connection: Connection
+  ): Map[ContractId, ContractStorageBackend.RawCreatedContract]
   def activeContractWithArgument(readers: Set[Party], contractId: ContractId)(
       connection: Connection
   ): Option[ContractStorageBackend.RawContract]
@@ -363,6 +366,7 @@ object EventStorageBackend {
       commandId: String,
       workflowId: String,
       domainId: Option[String],
+      traceContext: Option[Array[Byte]],
       event: E,
   )
 
@@ -405,6 +409,7 @@ object EventStorageBackend {
       templateId: Identifier,
       witnessParties: Set[String],
       assignmentExclusivity: Option[Timestamp],
+      traceContext: Option[Array[Byte]],
   )
 
   final case class RawAssignEvent(
@@ -417,6 +422,7 @@ object EventStorageBackend {
       submitter: String,
       reassignmentCounter: Long,
       rawCreatedEvent: RawCreatedEvent,
+      traceContext: Option[Array[Byte]],
   )
 }
 

@@ -14,6 +14,13 @@ object GeneratorsVersion {
   def defaultValueGen[Comp <: HasProtocolVersionedWrapperCompanion[_, _], T](
       protocolVersion: ProtocolVersion,
       defaultValue: Comp#DefaultValue[T],
+      gen: Gen[T],
+  ): Gen[T] =
+    gen.map(defaultValue.orValue(_, protocolVersion))
+
+  def defaultValueGen[Comp <: HasProtocolVersionedWrapperCompanion[_, _], T](
+      protocolVersion: ProtocolVersion,
+      defaultValue: Comp#DefaultValue[T],
   )(implicit arb: Arbitrary[T]): Gen[T] =
     arb.arbitrary.map(defaultValue.orValue(_, protocolVersion))
 

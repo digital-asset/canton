@@ -1,7 +1,7 @@
 // Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.participant.admin.grpc.util
+package com.digitalasset.canton.participant.admin.data
 
 import com.digitalasset.canton.topology.DomainId
 import com.google.protobuf.ByteString
@@ -11,13 +11,17 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.Base64
 
-final class AcsUtilTest extends AnyWordSpec with Matchers with EitherValues {
+// TODO(i14441): Remove deprecated ACS download / upload functionality
+final class SerializableContractWithDomainIdTest
+    extends AnyWordSpec
+    with Matchers
+    with EitherValues {
 
   "ACS.loadFromByteString" should {
 
     "fail on an identifier with a missing namespace with the expected error message" in {
       val improperDomainId = "acme"
-      AcsUtil
+      SerializableContractWithDomainId
         .loadFromByteString(
           ByteString.copyFromUtf8(s"$improperDomainId:::contract-id"),
           gzip = false,
@@ -30,7 +34,7 @@ final class AcsUtilTest extends AnyWordSpec with Matchers with EitherValues {
       val domainId = DomainId.tryFromString(s"acme::${"0" * 68}").filterString
       val encodedContractId =
         Base64.getEncoder.encodeToString(ByteString.copyFromUtf8("some-contract-id").toByteArray)
-      AcsUtil
+      SerializableContractWithDomainId
         .loadFromByteString(
           ByteString.copyFromUtf8(s"$domainId:::$encodedContractId"),
           gzip = false,

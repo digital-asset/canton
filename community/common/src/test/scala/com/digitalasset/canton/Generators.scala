@@ -8,6 +8,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.{
   AbstractLengthLimitedString,
   LengthLimitedStringCompanion,
 }
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import org.scalacheck.{Arbitrary, Gen}
 
@@ -33,6 +34,12 @@ object Generators {
   implicit val workflowIdArb: Arbitrary[WorkflowId] = Arbitrary(
     Gen.stringOfN(32, Gen.alphaNumChar).map(WorkflowId.assertFromString)
   )
+
+  // TODO(#12373) Adapt when releasing BFT
+  def transferCounterOGen(pv: ProtocolVersion): Gen[TransferCounterO] = if (
+    pv < ProtocolVersion.dev
+  ) Gen.const(None)
+  else Gen.choose(0, Long.MaxValue).map(i => Some(TransferCounter(i)))
 
   def lengthLimitedStringGen[A <: AbstractLengthLimitedString](
       companion: LengthLimitedStringCompanion[A]

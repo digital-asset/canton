@@ -572,10 +572,12 @@ object TopologyAdminCommandsX {
       override def timeoutType: TimeoutType = DefaultUnboundedTimeout
     }
 
-    final case class AddTransactions(transactions: Seq[GenericSignedTopologyTransactionX])
-        extends BaseWriteCommand[AddTransactionsRequest, AddTransactionsResponse, Unit] {
+    final case class AddTransactions(
+        transactions: Seq[GenericSignedTopologyTransactionX],
+        store: String,
+    ) extends BaseWriteCommand[AddTransactionsRequest, AddTransactionsResponse, Unit] {
       override def createRequest(): Either[String, AddTransactionsRequest] = {
-        Right(AddTransactionsRequest(transactions.map(_.toProtoV2), forceChange = false))
+        Right(AddTransactionsRequest(transactions.map(_.toProtoV2), forceChange = false, store))
       }
       override def submitRequest(
           service: TopologyManagerWriteServiceXStub,
@@ -591,6 +593,7 @@ object TopologyAdminCommandsX {
         change: TopologyChangeOpX,
         serial: Option[PositiveInt],
         mustFullyAuthorize: Boolean,
+        store: String,
     ) extends BaseWriteCommand[
           AuthorizeRequest,
           AuthorizeResponse,
@@ -609,6 +612,7 @@ object TopologyAdminCommandsX {
           mustFullyAuthorize = mustFullyAuthorize,
           forceChange = false,
           signedBy = signedBy.map(_.toProtoPrimitive),
+          store,
         )
       )
       override def submitRequest(
@@ -636,11 +640,12 @@ object TopologyAdminCommandsX {
       def apply[M <: TopologyMappingX: ClassTag](
           mapping: M,
           signedBy: Seq[Fingerprint],
+          store: String,
           serial: Option[PositiveInt] = None,
           change: TopologyChangeOpX = TopologyChangeOpX.Replace,
           mustFullyAuthorize: Boolean = true,
       ): Propose[M] =
-        Propose(Right(mapping), signedBy, change, serial, mustFullyAuthorize)
+        Propose(Right(mapping), signedBy, change, serial, mustFullyAuthorize, store)
 
     }
   }

@@ -25,7 +25,6 @@ import com.digitalasset.canton.console.{
   AdminCommandRunner,
   BaseInspection,
   CommandFailure,
-  ConsoleCommandResult,
   ConsoleEnvironment,
   ConsoleMacros,
   DomainReference,
@@ -224,12 +223,12 @@ class ParticipantTestingGroup(
       workflowId: String = "",
       id: String = "",
   ): Duration = {
-    val result =
+    consoleEnvironment.runE(
       maybe_bong(targets, validators, timeout, levels, gracePeriodMillis, workflowId, id)
         .toRight(
           s"Unable to bong $targets with $levels levels within ${LoggerUtil.roundDurationForHumans(timeout.duration)}"
         )
-    consoleEnvironment.run(ConsoleCommandResult.fromEither(result))
+    )
   }
 
   @Help.Summary("Like bong, but returns None in case of failure.", FeatureFlag.Testing)
@@ -799,12 +798,12 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         vetAllPackages: Boolean = true,
         synchronizeVetting: Boolean = true,
     ): String = {
-      val res = consoleEnvironment.run {
-        ConsoleCommandResult.fromEither(for {
+      val res = consoleEnvironment.runE {
+        for {
           hash <- ParticipantCommands.dars
             .upload(runner, path, vetAllPackages, synchronizeVetting, logger)
             .toEither
-        } yield hash)
+        } yield hash
       }
       if (synchronizeVetting && vetAllPackages) {
         packages.synchronize_vetting()
@@ -902,6 +901,29 @@ trait ParticipantAdministration extends FeatureFlagFilter {
 
     }
 
+    @Help.Summary("Change DAR vetting status")
+    @Help.Group("Vetting")
+    object vetting extends Helpful {
+      @Help.Summary(
+        "Vet all packages contained in the DAR archive identified by the provided DAR hash."
+      )
+      def enable(darHash: String, synchronize: Boolean = true): Unit =
+        check(FeatureFlag.Preview)(consoleEnvironment.run {
+          adminCommand(ParticipantAdminCommands.Package.VetDar(darHash, synchronize))
+        })
+
+      @Help.Summary("""Revoke vetting for all packages contained in the DAR archive
+          |identified by the provided DAR hash.""")
+      @Help.Description("""This command succeeds if the vetting command used to vet the DAR's packages
+          |was symmetric and resulted in a single vetting topology transaction for all the packages in the DAR.
+          |This command is potentially dangerous and misuse
+          |can lead the participant to fail in processing transactions""")
+      def disable(darHash: String): Unit =
+        check(FeatureFlag.Preview)(consoleEnvironment.run {
+          adminCommand(ParticipantAdminCommands.Package.UnvetDar(darHash))
+        })
+    }
+
   }
 
   @Help.Summary("Manage raw Daml-LF packages")
@@ -926,7 +948,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     def find(
         moduleName: String,
         limitPackages: PositiveInt = defaultLimit,
-    ): Seq[v0.PackageDescription] = consoleEnvironment.run {
+    ): Seq[v0.PackageDescription] = consoleEnvironment.runE {
       val packageC = adminCommand(ParticipantAdminCommands.Package.List(limitPackages)).toEither
       val matchingC = packageC
         .flatMap { packages =>
@@ -936,9 +958,9 @@ trait ParticipantAdministration extends FeatureFlagFilter {
             )
           )
         }
-      ConsoleCommandResult.fromEither(matchingC.map(_.filter { case (_, content) =>
+      matchingC.map(_.filter { case (_, content) =>
         content.map(_.name).contains(moduleName)
-      }.map(_._1)))
+      }.map(_._1))
     }
 
     @Help.Summary(
@@ -1451,8 +1473,8 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         domain: DomainAlias,
         modifier: DomainConnectionConfig => DomainConnectionConfig,
     ): Unit = {
-      consoleEnvironment.run {
-        val ret = for {
+      consoleEnvironment.runE {
+        for {
           configured <- adminCommand(
             ParticipantAdminCommands.DomainConnectivity.ListConfiguredDomains
           ).toEither
@@ -1468,7 +1490,6 @@ trait ParticipantAdministration extends FeatureFlagFilter {
             ParticipantAdminCommands.DomainConnectivity.ModifyDomainConnection(modifier(cfg))
           ).toEither
         } yield ()
-        ConsoleCommandResult.fromEither(ret)
       }
     }
 
@@ -1692,10 +1713,12 @@ trait ParticipantHealthAdministrationCommon extends FeatureFlagFilter {
           )
       )
     }
-    val result = adminApiRes.toRight(
-      s"Unable to ping $participantId within ${LoggerUtil.roundDurationForHumans(timeout.duration)}"
+    consoleEnvironment.runE(
+      adminApiRes.toRight(
+        s"Unable to ping $participantId within ${LoggerUtil.roundDurationForHumans(timeout.duration)}"
+      )
     )
-    consoleEnvironment.run(ConsoleCommandResult.fromEither(result))
+
   }
 
   @Help.Summary(

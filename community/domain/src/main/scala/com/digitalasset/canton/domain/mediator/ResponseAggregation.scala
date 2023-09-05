@@ -117,7 +117,7 @@ object ResponseAggregation {
       rejections: List[(Set[LfPartyId], LocalReject)],
   ) extends PrettyPrinting {
 
-    lazy val totalAvailableWeight: Int = pendingConfirmingParties.map(_.weight).sum
+    lazy val totalAvailableWeight: Int = pendingConfirmingParties.map(_.weight.unwrap).sum
 
     override def pretty: Pretty[ViewState] = {
       prettyOfClass(

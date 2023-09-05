@@ -26,6 +26,7 @@ import com.digitalasset.canton.participant.config.LedgerApiServerConfig
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.platform.apiserver.*
 import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportKey
+import com.digitalasset.canton.platform.indexer.ha.HaConfig
 import com.digitalasset.canton.platform.indexer.{
   IndexerConfig,
   IndexerServiceOwner,
@@ -76,7 +77,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
       serverConfig: LedgerApiServerConfig,
       jsonApiConfig: Option[JsonApiConfig],
       indexerConfig: IndexerConfig,
-      indexerLockIds: Option[IndexerLockIds],
+      indexerHaConfig: HaConfig,
       ledgerId: LedgerId,
       participantId: LedgerParticipantId,
       engine: Engine,

@@ -36,6 +36,41 @@ object CantonPackageServiceError extends PackageServiceErrorGroup {
   }
 
   @Explanation(
+    """The hash specified in the request does not match a DAR stored on the participant."""
+  )
+  @Resolution("""Check the provided hash and re-try the operation.""")
+  object DarNotFound
+      extends ErrorCode(
+        id = "DAR_NOT_FOUND",
+        ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
+      ) {
+    final case class Reject(operation: String, darHash: String)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause = s"$operation operation failed due to non-existent DAR archive for hash $darHash"
+        )
+  }
+
+  @Explanation(
+    """An operation could not be executed due to a missing package dependency."""
+  )
+  @Resolution(
+    """Fix the broken dependency state by re-uploading the missing package and retry the operation."""
+  )
+  object PackageMissingDependencies
+      extends ErrorCode(
+        id = "PACKAGE_MISSING_DEPENDENCIES",
+        ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
+      ) {
+
+    final case class Reject(mainPackage: String, missingDependency: String)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause = s"Package $mainPackage is missing dependency $missingDependency"
+        )
+  }
+
+  @Explanation(
     """Errors raised by the Package Service on package removal."""
   )
   object PackageRemovalErrorCode
@@ -45,7 +80,7 @@ object CantonPackageServiceError extends PackageServiceErrorGroup {
       ) {
 
     abstract class PackageRemovalError(override val cause: String)(
-        implicit override implicit val code: ErrorCode
+        override implicit val code: ErrorCode
     ) extends CantonError
 
     @Resolution(

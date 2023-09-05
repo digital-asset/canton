@@ -6,7 +6,7 @@ package com.digitalasset.canton.protocol
 import cats.Order
 import cats.syntax.parallel.*
 import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.{ConfirmingParty, Informee, PlainInformee}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.{
@@ -62,7 +62,7 @@ sealed trait ConfirmationPolicy extends Product with Serializable with PrettyPri
             submittingAdminParty,
           )
         val newSubmittingInformee =
-          oldSubmittingInformee.withAdditionalWeight(additionalWeight.unwrap)
+          oldSubmittingInformee.withAdditionalWeight(additionalWeight)
 
         val newInformees = informees - oldSubmittingInformee + newSubmittingInformee
         val newThreshold = threshold + additionalWeight
@@ -88,7 +88,7 @@ object ConfirmationPolicy {
     // We make sure that the threshold is at least 1 so that a transaction is not vacuously approved if the confirming parties are empty.
     val threshold = NonNegativeInt.tryCreate(Math.max(confirmingParties.size, 1))
     val informees =
-      confirmingParties.map(ConfirmingParty(_, 1, requiredTrustLevel): Informee) ++
+      confirmingParties.map(ConfirmingParty(_, PositiveInt.one, requiredTrustLevel): Informee) ++
         plainInformees.map(PlainInformee)
     (informees, threshold)
   }
@@ -111,7 +111,7 @@ object ConfirmationPolicy {
       confirmingPartiesF.map { confirmingParties =>
         val plainInformees = node.informeesOfNode -- confirmingParties
         val informees =
-          confirmingParties.map(ConfirmingParty(_, 1, TrustLevel.Vip)) ++
+          confirmingParties.map(ConfirmingParty(_, PositiveInt.one, TrustLevel.Vip)) ++
             plainInformees.map(PlainInformee)
         // As all VIP participants are trusted, it suffices that one of them confirms.
         (informees, NonNegativeInt.one)
@@ -124,7 +124,7 @@ object ConfirmationPolicy {
       // Make sure that at least one VIP needs to approve.
 
       val weightOfOrdinary = informees.toSeq.collect {
-        case ConfirmingParty(_, weight, TrustLevel.Ordinary) => weight
+        case ConfirmingParty(_, weight, TrustLevel.Ordinary) => weight.unwrap
       }.sum
       NonNegativeInt.tryCreate(weightOfOrdinary + 1)
     }
@@ -133,7 +133,7 @@ object ConfirmationPolicy {
         informees: Set[Informee],
         adminParty: LfPartyId,
     ): NonNegativeInt =
-      NonNegativeInt.tryCreate(informees.toSeq.map(_.weight).sum + 1)
+      NonNegativeInt.tryCreate(informees.toSeq.map(_.weight.unwrap).sum + 1)
   }
 
   case object Signatory extends ConfirmationPolicy {

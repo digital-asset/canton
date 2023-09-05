@@ -37,6 +37,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.ParticipantNodeX
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
@@ -309,6 +310,7 @@ class ParticipantPartiesAdministrationGroupX(
           ),
           signedBy = Seq(this.participantId.uid.namespace.fingerprint),
           serial = None,
+          store = AuthorizedStore.filterName,
         )
       )
   }

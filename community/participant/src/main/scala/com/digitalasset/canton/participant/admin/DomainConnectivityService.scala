@@ -10,6 +10,7 @@ import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader
 import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader.SequencerAggregatedInfo
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.AgreementService.AgreementServiceError
 import com.digitalasset.canton.participant.domain.*
@@ -194,7 +195,10 @@ class DomainConnectivityService(
       )
       result <-
         sequencerInfoLoader
-          .loadSequencerEndpoints(connectionConfig.domain, connectionConfig.sequencerConnections)
+          .loadSequencerEndpoints(connectionConfig.domain, connectionConfig.sequencerConnections)(
+            traceContext,
+            CloseContext(sync),
+          )
           .leftMap(DomainRegistryError.fromSequencerInfoLoaderError(_).asGrpcError)
       _ <- aliasManager
         .processHandshake(connectionConfig.domain, result.domainId)

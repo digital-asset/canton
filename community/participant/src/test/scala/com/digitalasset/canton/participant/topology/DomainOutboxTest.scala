@@ -9,6 +9,8 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.TracedLogger
+import com.digitalasset.canton.participant.admin.PackageDependencyResolver
+import com.digitalasset.canton.participant.store.memory.InMemoryDamlPackageStore
 import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
 import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult.State
 import com.digitalasset.canton.time.WallClock
@@ -71,10 +73,16 @@ class DomainOutboxTest extends AsyncWordSpec with BaseTest {
       timeouts,
       futureSupervisor,
     )
+    val packageDependencyResolver = new PackageDependencyResolver(
+      new InMemoryDamlPackageStore(loggerFactory),
+      timeouts,
+      loggerFactory,
+    )
     val manager = new ParticipantTopologyManager(
       clock,
       source,
       crypto,
+      packageDependencyResolver,
       timeouts,
       testedProtocolVersion,
       loggerFactory,
@@ -153,8 +161,8 @@ class DomainOutboxTest extends AsyncWordSpec with BaseTest {
       client: DomainTopologyClientWithInit,
       source: TopologyStore[TopologyStoreId.AuthorizedStore],
       target: TopologyStore[TopologyStoreId.DomainStore],
-  ): Future[DomainOutbox] = {
-    val domainOutbox = new DomainOutbox(
+  ): Future[StoreBasedDomainOutbox] = {
+    val domainOutbox = new StoreBasedDomainOutbox(
       domain,
       domainId,
       participant1,
@@ -169,7 +177,7 @@ class DomainOutboxTest extends AsyncWordSpec with BaseTest {
     )
     domainOutbox
       .startup()
-      .fold[DomainOutbox](
+      .fold[StoreBasedDomainOutbox](
         s => fail(s"Failed to start domain outbox ${s}"),
         _ =>
           domainOutbox.tap(outbox =>

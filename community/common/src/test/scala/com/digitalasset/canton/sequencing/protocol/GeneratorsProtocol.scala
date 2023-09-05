@@ -4,11 +4,12 @@
 package com.digitalasset.canton.sequencing.protocol
 
 import com.daml.nonempty.NonEmptyUtil
-import com.digitalasset.canton.Generators
+import com.digitalasset.canton.config.CantonRequireTypes.String73
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.version.GeneratorsVersion
+import com.digitalasset.canton.topology.{DomainId, Member}
+import com.digitalasset.canton.version.{GeneratorsVersion, ProtocolVersion}
+import com.digitalasset.canton.{Generators, SequencerCounter}
 import com.google.protobuf.ByteString
 import magnolify.scalacheck.auto.*
 import org.scalacheck.{Arbitrary, Gen}
@@ -53,12 +54,22 @@ object GeneratorsProtocol {
     }
   }
 
-  def recipientsArb(recipientGen: Gen[Recipient]): Arbitrary[Recipients] = Arbitrary(for {
-    depths <- nonEmptyListGen(Arbitrary(Gen.choose(0, 3)))
-    trees <- Gen.sequence[List[RecipientsTree], RecipientsTree](
-      depths.forgetNE.map(recipientsTreeGen(Arbitrary(recipientGen)))
-    )
-  } yield Recipients(NonEmptyUtil.fromUnsafe(trees)))
+  def recipientsArb(protocolVersion: ProtocolVersion): Arbitrary[Recipients] = {
+
+    // For pv < ClosedEnvelope.groupAddressesSupportedSince, the recipients should contain only members
+    val protocolVersionDependentRecipientGen =
+      if (protocolVersion < ClosedEnvelope.groupAddressesSupportedSince.representative) {
+        implicitly[Arbitrary[MemberRecipient]].arbitrary
+      } else
+        implicitly[Arbitrary[Recipient]].arbitrary
+
+    Arbitrary(for {
+      depths <- nonEmptyListGen(Arbitrary(Gen.choose(0, 3)))
+      trees <- Gen.sequence[List[RecipientsTree], RecipientsTree](
+        depths.forgetNE.map(recipientsTreeGen(Arbitrary(protocolVersionDependentRecipientGen)))
+      )
+    } yield Recipients(NonEmptyUtil.fromUnsafe(trees)))
+  }
 
   implicit val closedEnvelopeArb: Arbitrary[ClosedEnvelope] = Arbitrary(for {
     bytes <- implicitly[Arbitrary[ByteString]].arbitrary
@@ -68,20 +79,32 @@ object GeneratorsProtocol {
       Arbitrary(Gen.listOfN(5, signatureArb.arbitrary))
     )
 
-    // For pv < ClosedEnvelope.groupAddressesSupportedSince, the recipients should contain only members
-    protocolVersionDependentRecipientGen =
-      if (
-        protocolVersion.representative < ClosedEnvelope.groupAddressesSupportedSince.representative
-      ) {
-        implicitly[Arbitrary[MemberRecipient]].arbitrary
-      } else
-        implicitly[Arbitrary[Recipient]].arbitrary
-
-    recipients <- recipientsArb(protocolVersionDependentRecipientGen).arbitrary
+    recipients <- recipientsArb(protocolVersion.representative).arbitrary
 
   } yield ClosedEnvelope.tryCreate(bytes, recipients, signatures, protocolVersion.representative))
 
   implicit val mediatorsOfDomainArb: Arbitrary[MediatorsOfDomain] = Arbitrary(
     implicitly[Arbitrary[NonNegativeInt]].arbitrary.map(MediatorsOfDomain(_))
+  )
+
+  implicit val messageIdArb: Arbitrary[MessageId] = Arbitrary(
+    Generators.lengthLimitedStringGen(String73).map(s => MessageId.tryCreate(s.str))
+  )
+
+  def deliverGen[Env <: Envelope[_]](
+      domainId: DomainId,
+      batch: Batch[Env],
+      protocolVersion: ProtocolVersion,
+  ): Gen[Deliver[Env]] = for {
+    timestamp <- implicitly[Arbitrary[CantonTimestamp]].arbitrary
+    counter <- implicitly[Arbitrary[SequencerCounter]].arbitrary
+    messageIdO <- Gen.option(implicitly[Arbitrary[MessageId]].arbitrary)
+  } yield Deliver.create(
+    counter,
+    timestamp,
+    domainId,
+    messageIdO,
+    batch,
+    protocolVersion,
   )
 }

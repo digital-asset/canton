@@ -15,11 +15,13 @@ import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.version.ProtocolVersion.ProtocolVersionWithStatus
 import com.digitalasset.canton.{DiscardOps, ProtoDeserializationError, checked}
 import com.google.common.annotations.VisibleForTesting
-import com.google.protobuf.ByteString
+import com.google.protobuf.{ByteString, InvalidProtocolBufferException}
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
+import java.io.{InputStream, OutputStream}
 import scala.collection.immutable
 import scala.math.Ordered.orderingToOrdered
+import scala.util.Try
 
 trait HasRepresentativeProtocolVersion {
   // Needs to be a `val` because we need a stable ref.
@@ -150,6 +152,45 @@ trait HasProtocolVersionedWrapper[ValueClass <: HasRepresentativeProtocolVersion
     }
     .getOrElse(serializeToHighestVersion.toByteString)
 
+  /** Serializes this instance to a message together with a delimiter (the message length) to the given output stream.
+    *
+    * This method works in conjunction with
+    *  [[com.digitalasset.canton.version.HasProtocolVersionedCompanion2.parseDelimitedFrom]] which deserializes the
+    *  message again. It is useful for serializing multiple messages to a single output stream through multiple
+    *  invocations.
+    *
+    * Serialization is only supported for
+    *  [[com.digitalasset.canton.version.HasSupportedProtoVersions.VersionedProtoConverter]], an error message is
+    *  returned otherwise.
+    *
+    * @param output the sink to which this message is serialized to
+    * @return an Either where left represents an error message, and right represents a successful message
+    *         serialization
+    */
+  def writeDelimitedTo(output: OutputStream): Either[String, Unit] = {
+    val converter: Either[String, VersionedMessage[ValueClass]] =
+      companionObj.supportedProtoVersions.converters
+        .collectFirst {
+          case (protoVersion, supportedVersion)
+              if representativeProtocolVersion >= supportedVersion.fromInclusive =>
+            supportedVersion match {
+              case companionObj.VersionedProtoConverter(_, _, serializer) =>
+                Right(VersionedMessage(serializer(self), protoVersion.v))
+              case other =>
+                Left(
+                  s"Cannot call writeDelimitedTo on ${companionObj.name} in protocol version equivalent to ${other.fromInclusive.representative}"
+                )
+            }
+        }
+        .getOrElse(Right(serializeToHighestVersion))
+
+    converter.flatMap(actual =>
+      Try(actual.writeDelimitedTo(output)).toEither.leftMap(e =>
+        s"Cannot serialize ${companionObj.name} into the given output stream due to: ${e.getMessage}"
+      )
+    )
+  }
+
   /** Yields a byte array representation of the corresponding `UntypedVersionedMessage` wrapper of this instance.
     */
   def toByteArray: Array[Byte] = toByteString.toByteArray
@@ -190,7 +231,7 @@ trait HasSupportedProtoVersions[ValueClass] {
 
   private type ThisRepresentativeProtocolVersion = RepresentativeProtocolVersion[this.type]
 
-  private[version] sealed trait Invariant[T] {
+  private[version] sealed trait Invariant[T] extends Product with Serializable {
     def attribute: ValueClass => T
     def validate(v: T, pv: ProtocolVersion): Either[String, Unit]
     def validate(v: T, rpv: ThisRepresentativeProtocolVersion): Either[String, Unit]
@@ -755,6 +796,34 @@ trait HasProtocolVersionedCompanion2[
       proto <- ProtoConverter.protoParser(UntypedVersionedMessage.parseFrom)(bytes)
       valueClass <- fromProtoVersioned(VersionedMessage(proto))
     } yield valueClass
+
+  /** Deserializes a message using a delimiter (the message length) from the given input stream.
+    *
+    * This method works in conjunction with
+    *  [[com.digitalasset.canton.version.HasProtocolVersionedWrapper.writeDelimitedTo]] which should have been used to
+    *  serialize the message. It is useful for deserializing multiple messages from a single input stream through
+    *  repeated invocations.
+    *
+    * Deserialization is only supported for [[com.digitalasset.canton.version.VersionedMessage]].
+    *
+    * @param input the source from which a message is deserialized
+    * @return an Option that is None when there are no messages left anymore, otherwise it wraps an Either
+    *         where left represents a deserialization error (exception) and right represents the successfully
+    *         deserialized message
+    */
+  def parseDelimitedFrom(input: InputStream): Option[ParsingResult[DeserializedValueClass]] = {
+    try {
+      UntypedVersionedMessage
+        .parseDelimitedFrom(input)
+        .map(VersionedMessage[DeserializedValueClass])
+        .map(fromProtoVersioned)
+    } catch {
+      case protoBuffException: InvalidProtocolBufferException =>
+        Some(Left(ProtoDeserializationError.BufferException(protoBuffException)))
+      case exception: Exception =>
+        Some(Left(ProtoDeserializationError.OtherError(exception.getMessage)))
+    }
+  }
 
   /** Use this method when deserializing bytes for classes that have a legacy proto converter to explicitly
     * set the version to use for the deserialization.

@@ -20,10 +20,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 
-/** Performs the sequencer handshake.
-  * TODO(i3289) This practically implements AutoClosable to stop retries but is not actually used
-  *              as we currently don't have an approach to deal with async resource acquisition and shutdown.
-  */
+/** Performs the sequencer handshake. */
 class SequencerHandshake(
     clientVersions: Seq[ProtocolVersion],
     minimumProtocolVersion: Option[ProtocolVersion],

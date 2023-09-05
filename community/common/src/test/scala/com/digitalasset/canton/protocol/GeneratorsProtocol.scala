@@ -22,6 +22,7 @@ object GeneratorsProtocol {
   import com.digitalasset.canton.time.GeneratorsTime.*
   import com.digitalasset.canton.version.GeneratorsVersion.*
   import com.digitalasset.canton.Generators.*
+  import org.scalatest.EitherValues.*
 
   implicit val staticDomainParametersArb: Arbitrary[StaticDomainParameters] = {
     Arbitrary(for {
@@ -185,4 +186,12 @@ object GeneratorsProtocol {
       contractIdSuffix,
     )
   )
+
+  implicit val lfTemplateIdArb: Arbitrary[LfTemplateId] = Arbitrary(for {
+    packageName <- Gen.stringOfN(8, Gen.alphaChar)
+    moduleName <- Gen.stringOfN(8, Gen.alphaChar)
+    scriptName <- Gen.stringOfN(8, Gen.alphaChar)
+  } yield LfTemplateId.assertFromString(s"$packageName:$moduleName:$scriptName"))
+
+  implicit val requestIdArb: Arbitrary[RequestId] = genArbitrary
 }

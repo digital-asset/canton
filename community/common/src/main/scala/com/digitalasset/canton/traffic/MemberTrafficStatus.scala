@@ -20,7 +20,8 @@ final case class MemberTrafficStatus(
   def toProtoV0: MemberTrafficStatusP = {
     MemberTrafficStatusP(
       member.toProtoPrimitive,
-      Some(trafficState.toProtoV0),
+      trafficState.extraTrafficLimit.map(_.value),
+      trafficState.extraTrafficConsumed.value,
       currentAndFutureTopUps.map(_.toProtoV0),
       Some(timestamp.toProtoPrimitive),
     )
@@ -36,10 +37,14 @@ object MemberTrafficStatus {
         trafficStatusP.member,
         "member",
       )
-      trafficState <- ProtoConverter.parseRequired(
-        SequencedEventTrafficState.fromProtoV0,
-        "traffic_state",
-        trafficStatusP.trafficState,
+      totalExtraTrafficLimitOpt <- trafficStatusP.totalExtraTrafficLimit.traverse(
+        ProtoConverter.parseNonNegativeLong
+      )
+      totalExtraTrafficConsumed <- ProtoConverter.parseNonNegativeLong(
+        trafficStatusP.totalExtraTrafficConsumed
+      )
+      totalExtraTrafficRemainder <- ProtoConverter.parseNonNegativeLong(
+        totalExtraTrafficLimitOpt.map(_.value - totalExtraTrafficConsumed.value).getOrElse(0L)
       )
       topUps <- trafficStatusP.topUpEvents.toList.traverse(TopUpEvent.fromProtoV0)
       ts <- ProtoConverter.parseRequired(
@@ -50,7 +55,10 @@ object MemberTrafficStatus {
     } yield MemberTrafficStatus(
       member,
       ts,
-      trafficState,
+      SequencedEventTrafficState(
+        totalExtraTrafficRemainder,
+        totalExtraTrafficConsumed,
+      ),
       topUps,
     )
   }

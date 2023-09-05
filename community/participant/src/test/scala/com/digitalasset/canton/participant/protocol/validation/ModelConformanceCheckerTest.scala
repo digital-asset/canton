@@ -9,7 +9,8 @@ import com.daml.lf.data.ImmArray
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.engine
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
-import com.digitalasset.canton.data.{CantonTimestamp, TransactionViewTree}
+import com.digitalasset.canton.data.{CantonTimestamp, TransactionView, TransactionViewTree}
+import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactoryImpl
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.*
@@ -24,6 +25,7 @@ import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.{BaseTest, LfCommand, LfKeyResolver, LfPartyId, RequestCounter}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
+import pprint.Tree
 
 import java.time.Duration
 import scala.concurrent.{ExecutionContext, Future}
@@ -84,8 +86,15 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
 
   def viewsWithNoInputKeys(
       rootViews: Seq[TransactionViewTree]
-  ): NonEmpty[Seq[(TransactionViewTree, LfKeyResolver)]] =
-    NonEmptyUtil.fromUnsafe(rootViews.map(_ -> Map.empty))
+  ): NonEmpty[Seq[(TransactionViewTree, Seq[(TransactionView, LfKeyResolver)])]] =
+    NonEmptyUtil.fromUnsafe(rootViews.map { viewTree =>
+      // Include resolvers for all the subviews
+      val resolvers =
+        viewTree.view.allSubviewsWithPosition(viewTree.viewPosition).map { case (view, _viewPos) =>
+          view -> (Map.empty: LfKeyResolver)
+        }
+      (viewTree, resolvers)
+    })
 
   val transactionTreeFactory: TransactionTreeFactoryImpl = {
     TransactionTreeFactoryImpl(
@@ -100,12 +109,12 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
 
   def check(
       mcc: ModelConformanceChecker,
-      views: NonEmpty[Seq[(TransactionViewTree, LfKeyResolver)]],
+      views: NonEmpty[Seq[(TransactionViewTree, Seq[(TransactionView, LfKeyResolver)])]],
       ips: TopologySnapshot = factory.topologySnapshot,
-  ): EitherT[Future, ErrorWithSubviewsCheck, Result] = {
+  ): EitherT[Future, ErrorWithSubTransaction, Result] = {
     val rootViewTrees = views.map(_._1)
     val commonData = TransactionProcessingSteps.tryCommonData(rootViewTrees)
-    val keyResolvers = views.forgetNE.toMap
+    val keyResolvers = views.forgetNE.flatMap { case (_vt, resolvers) => resolvers }.toMap
     mcc.check(rootViewTrees, keyResolvers, RequestCounter(0), ips, commonData)
   }
 
@@ -192,7 +201,16 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
     }
 
     "reinterpretation fails" must {
-      val error = DAMLeError(mock[engine.Error], mock[ViewHash])
+      import pprint.Tree.Apply
+
+      // Without this, if the test fails, a NullPointerException shows up related to viewHash.pretty()
+      val mockViewHash = mock[ViewHash]
+      when(mockViewHash.pretty).thenAnswer(new Pretty[ViewHash] {
+        override def treeOf(t: ViewHash): Tree = Apply("[ViewHash]", Seq.empty.iterator)
+      })
+
+      val error = DAMLeError(mock[engine.Error], mockViewHash)
+
       val sut = new ModelConformanceChecker(
         (_, _, _, _, _, _, _, _, _) =>
           EitherT.leftT[Future, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver)](
@@ -206,6 +224,15 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
       )
       val example = factory.MultipleRootsAndViewNestings
 
+      def countLeaves(views: NonEmpty[Seq[TransactionView]]): Int =
+        views.foldLeft(0)((count, view) => {
+          NonEmpty.from(view.subviews.unblindedElements) match {
+            case Some(subviewsNE) => count + countLeaves(subviewsNE)
+            case None => count + 1
+          }
+        })
+      val nbLeafViews = countLeaves(NonEmptyUtil.fromUnsafe(example.rootViews))
+
       "yield an error" in {
         for {
           failure <- leftOrFail(
@@ -214,7 +241,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
               viewsWithNoInputKeys(example.rootTransactionViewTrees),
             )
           )("reinterpretation fails")
-        } yield failure.error shouldBe error
+        } yield failure.errors shouldBe Seq.fill(nbLeafViews)(error) // One error per leaf
       }
     }
 
@@ -270,7 +297,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
           result <- leftOrFail(
             check(sut, viewsWithNoInputKeys(subviewMissing.rootTransactionViewTrees))
           )("detect missing subview")
-        } yield result.error shouldBe a[TransactionTreeError]
+        } yield result.errors.forgetNE.loneElement shouldBe a[TransactionTreeError]
       }
 
       /* TODO(#3202) further error cases to test:
@@ -328,9 +355,10 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
       for {
         error <- check(sut, viewsWithNoInputKeys(rootViewTrees), snapshot).value
       } yield error shouldBe Left(
-        ErrorWithSubviewsCheck(
-          aSubviewIsValid = false,
-          expectedError,
+        ErrorWithSubTransaction(
+          NonEmpty(Seq, expectedError),
+          None,
+          Seq.empty,
         )
       )
     }

@@ -1477,26 +1477,36 @@ trait ActiveContractStoreTest extends PrunableByTimeTest {
           (
             toc2,
             ActiveContractIdsChange(
-              activations = Map(coid10 -> initialTransferCounter, coid11 -> tc1),
-              deactivations = Map(coid01 -> initialTransferCounter),
+              activations = Map(
+                coid10 -> StateChangeType(ContractChange.Created, initialTransferCounter),
+                coid11 -> StateChangeType(ContractChange.Assigned, tc1),
+              ),
+              deactivations =
+                Map(coid01 -> StateChangeType(ContractChange.Archived, initialTransferCounter)),
             ),
           ),
           (
             toc3,
             ActiveContractIdsChange(
               activations = Map.empty,
-              deactivations = Map(coid10 -> initialTransferCounter, coid11 -> tc2),
+              deactivations = Map(
+                coid10 -> StateChangeType(ContractChange.Archived, initialTransferCounter),
+                coid11 -> StateChangeType(ContractChange.Unassigned, tc2),
+              ),
             ),
           ),
           (
             toc4,
-            ActiveContractIdsChange(activations = Map(coid11 -> tc3), deactivations = Map.empty),
+            ActiveContractIdsChange(
+              activations = Map(coid11 -> StateChangeType(ContractChange.Assigned, tc3)),
+              deactivations = Map.empty,
+            ),
           ),
           (
             toc5,
             ActiveContractIdsChange(
               activations = Map.empty,
-              deactivations = Map(coid11 -> tc3),
+              deactivations = Map(coid11 -> StateChangeType(ContractChange.Archived, tc3)),
             ),
           ),
         )

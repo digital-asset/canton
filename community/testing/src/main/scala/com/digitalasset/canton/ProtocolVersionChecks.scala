@@ -152,6 +152,14 @@ trait ProtocolVersionChecksFixtureAsyncWordSpec {
     def in(testFun: FixtureParam => Future[Assertion])(implicit pos: source.Position): Unit = {
       if (condition) verb.in(testFun) else verb.ignore(testFun)
     }
+
+    def when(testFun: => Unit)(implicit pos: source.Position): Unit = {
+      if (condition) verb.when(testFun)
+      else
+        verb.ignore { _ =>
+          Future.successful { testFun; succeed }
+        }
+    }
   }
 }
 
