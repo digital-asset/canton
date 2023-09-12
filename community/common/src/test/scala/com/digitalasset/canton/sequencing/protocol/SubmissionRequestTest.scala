@@ -13,6 +13,7 @@ import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
+import java.time.Duration
 import java.util.UUID
 
 class SubmissionRequestTest extends BaseTestWordSpec {
@@ -23,6 +24,10 @@ class SubmissionRequestTest extends BaseTestWordSpec {
     testedProtocolVersion,
   )
 
+  private lazy val defaultTimestampOfSigningKey = Some(
+    CantonTimestamp.Epoch.add(Duration.ofSeconds(1))
+  )
+
   private lazy val defaultSubmissionRequest =
     SubmissionRequest.tryCreate(
       DefaultTestIdentities.participant1,
@@ -30,7 +35,7 @@ class SubmissionRequestTest extends BaseTestWordSpec {
       isRequest = false,
       Batch.empty(testedProtocolVersion),
       maxSequencingTime = CantonTimestamp.MaxValue,
-      timestampOfSigningKey = None,
+      timestampOfSigningKey = defaultTimestampOfSigningKey,
       Some(defaultAggregationRule),
       testedProtocolVersion,
     )

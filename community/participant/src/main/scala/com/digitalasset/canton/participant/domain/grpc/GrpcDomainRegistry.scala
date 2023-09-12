@@ -125,7 +125,10 @@ class GrpcDomainRegistry(
 
     val runE = for {
       info <- sequencerInfoLoader
-        .loadSequencerEndpoints(config.domain, sequencerConnections)
+        .loadSequencerEndpoints(config.domain, sequencerConnections)(
+          traceContext,
+          CloseContext(this),
+        )
         .leftMap(DomainRegistryError.fromSequencerInfoLoaderError)
         .mapK(
           FutureUnlessShutdown.outcomeK

@@ -24,7 +24,7 @@ import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscrip
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.{DbDto, ParameterStorageBackend}
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, Traced}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.SpanSugar.convertIntToGrainOfTime
@@ -36,6 +36,8 @@ import scala.concurrent.{Await, Future}
 class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers with NamedLogging {
 
   implicit val traceContext: TraceContext = TraceContext.empty
+  private val serializableTraceContext =
+    SerializableTraceContext(traceContext).toDamlProto.toByteArray
   override val loggerFactory: SuppressingLogger = SuppressingLogger(getClass)
 
   private val someParty = DbDto.PartyEntry(
@@ -86,6 +88,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers with Nam
     create_key_value_compression = None,
     event_sequential_id = 0,
     driver_metadata = None,
+    trace_context = serializableTraceContext,
   )
 
   private val someEventExercise = DbDto.EventExercise(
@@ -113,6 +116,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers with Nam
     exercise_argument_compression = None,
     exercise_result_compression = None,
     event_sequential_id = 0,
+    trace_context = serializableTraceContext,
   )
 
   private val someEventDivulgence = DbDto.EventDivulgence(
@@ -134,7 +138,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers with Nam
     update_id = "",
     command_id = None,
     workflow_id = None,
-    submitter = "",
+    submitter = None,
     contract_id = "",
     template_id = "",
     flat_event_witnesses = Set.empty,
@@ -154,6 +158,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers with Nam
     target_domain_id = "",
     unassign_id = "",
     reassignment_counter = 0,
+    trace_context = serializableTraceContext,
   )
 
   private val someEventUnassign = DbDto.EventUnassign(
@@ -161,7 +166,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers with Nam
     update_id = "",
     command_id = None,
     workflow_id = None,
-    submitter = "",
+    submitter = None,
     contract_id = "",
     template_id = "",
     flat_event_witnesses = Set.empty,
@@ -171,6 +176,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers with Nam
     unassign_id = "",
     reassignment_counter = 0,
     assignment_exclusivity = None,
+    trace_context = serializableTraceContext,
   )
 
   private val offsetsAndUpdates =

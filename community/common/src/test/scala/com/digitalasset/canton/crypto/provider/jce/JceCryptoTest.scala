@@ -10,6 +10,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.tink.TinkJavaConverter
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CommunityCryptoPrivateStoreFactory
 import com.digitalasset.canton.resource.MemoryStorage
+import com.digitalasset.canton.tracing.NoReportingTracerProvider
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -35,6 +36,7 @@ class JceCryptoTest
           testedReleaseProtocolVersion,
           timeouts,
           loggerFactory,
+          NoReportingTracerProvider,
         )
         .valueOr(err => throw new RuntimeException(s"failed to create crypto: $err"))
     }

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.protocol
 
 import com.daml.lf.value.Value
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.{ConfirmingParty, PlainInformee}
 import com.digitalasset.canton.protocol.ConfirmationPolicy.{Signatory, Vip}
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
@@ -172,8 +172,8 @@ class ConfirmationPolicyTest extends AnyWordSpec with BaseTest with HasExecution
       "correctly update informees and thresholds" in {
         val oldInformees = Set(
           PlainInformee(alice),
-          ConfirmingParty(bob, 1, TrustLevel.Ordinary),
-          ConfirmingParty(charlie, 1, TrustLevel.Vip),
+          ConfirmingParty(bob, PositiveInt.one, TrustLevel.Ordinary),
+          ConfirmingParty(charlie, PositiveInt.one, TrustLevel.Vip),
         )
         val oldThreshold = NonNegativeInt.tryCreate(2)
 
@@ -184,9 +184,9 @@ class ConfirmationPolicyTest extends AnyWordSpec with BaseTest with HasExecution
         ConfirmationPolicy.Signatory
           .withSubmittingAdminParty(Some(alice))(oldInformees, oldThreshold) shouldBe
           Set(
-            ConfirmingParty(alice, 1, TrustLevel.Ordinary),
-            ConfirmingParty(bob, 1, TrustLevel.Ordinary),
-            ConfirmingParty(charlie, 1, TrustLevel.Vip),
+            ConfirmingParty(alice, PositiveInt.one, TrustLevel.Ordinary),
+            ConfirmingParty(bob, PositiveInt.one, TrustLevel.Ordinary),
+            ConfirmingParty(charlie, PositiveInt.one, TrustLevel.Vip),
           ) -> NonNegativeInt.tryCreate(3)
 
         ConfirmationPolicy.Signatory
@@ -199,7 +199,7 @@ class ConfirmationPolicyTest extends AnyWordSpec with BaseTest with HasExecution
 
         ConfirmationPolicy.Signatory
           .withSubmittingAdminParty(Some(david))(oldInformees, oldThreshold) shouldBe
-          oldInformees + ConfirmingParty(david, 1, TrustLevel.Ordinary) ->
+          oldInformees + ConfirmingParty(david, PositiveInt.one, TrustLevel.Ordinary) ->
           NonNegativeInt.tryCreate(3)
       }
     }
@@ -210,8 +210,8 @@ class ConfirmationPolicyTest extends AnyWordSpec with BaseTest with HasExecution
       "correctly update informees and thresholds" in {
         val oldInformees = Set(
           PlainInformee(alice),
-          ConfirmingParty(bob, 1, TrustLevel.Vip),
-          ConfirmingParty(charlie, 1, TrustLevel.Vip),
+          ConfirmingParty(bob, PositiveInt.one, TrustLevel.Vip),
+          ConfirmingParty(charlie, PositiveInt.one, TrustLevel.Vip),
         )
         val oldThreshold = NonNegativeInt.one
 
@@ -222,22 +222,22 @@ class ConfirmationPolicyTest extends AnyWordSpec with BaseTest with HasExecution
         ConfirmationPolicy.Vip
           .withSubmittingAdminParty(Some(alice))(oldInformees, oldThreshold) shouldBe
           Set(
-            ConfirmingParty(alice, 3, TrustLevel.Ordinary),
-            ConfirmingParty(bob, 1, TrustLevel.Vip),
-            ConfirmingParty(charlie, 1, TrustLevel.Vip),
+            ConfirmingParty(alice, PositiveInt.tryCreate(3), TrustLevel.Ordinary),
+            ConfirmingParty(bob, PositiveInt.one, TrustLevel.Vip),
+            ConfirmingParty(charlie, PositiveInt.one, TrustLevel.Vip),
           ) -> NonNegativeInt.tryCreate(4)
 
         ConfirmationPolicy.Vip
           .withSubmittingAdminParty(Some(bob))(oldInformees, oldThreshold) shouldBe
           Set(
             PlainInformee(alice),
-            ConfirmingParty(bob, 4, TrustLevel.Vip),
-            ConfirmingParty(charlie, 1, TrustLevel.Vip),
+            ConfirmingParty(bob, PositiveInt.tryCreate(4), TrustLevel.Vip),
+            ConfirmingParty(charlie, PositiveInt.one, TrustLevel.Vip),
           ) -> NonNegativeInt.tryCreate(4)
 
         ConfirmationPolicy.Vip
           .withSubmittingAdminParty(Some(david))(oldInformees, oldThreshold) shouldBe
-          oldInformees + ConfirmingParty(david, 3, TrustLevel.Ordinary) ->
+          oldInformees + ConfirmingParty(david, PositiveInt.tryCreate(3), TrustLevel.Ordinary) ->
           NonNegativeInt.tryCreate(4)
       }
     }

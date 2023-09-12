@@ -328,7 +328,7 @@ private[dao] object TransactionsReader {
       templateId = Some(LfEngineToApi.toApiIdentifier(rawUnassignEvent.templateId)),
       source = rawUnassignEvent.sourceDomainId,
       target = rawUnassignEvent.targetDomainId,
-      submitter = rawUnassignEvent.submitter,
+      submitter = rawUnassignEvent.submitter.getOrElse(""),
       reassignmentCounter = rawUnassignEvent.reassignmentCounter,
       assignmentExclusivity =
         rawUnassignEvent.assignmentExclusivity.map(TimestampConversion.fromLf),
@@ -343,7 +343,7 @@ private[dao] object TransactionsReader {
       source = rawAssignEvent.sourceDomainId,
       target = rawAssignEvent.targetDomainId,
       unassignId = rawAssignEvent.unassignId,
-      submitter = rawAssignEvent.submitter,
+      submitter = rawAssignEvent.submitter.getOrElse(""),
       reassignmentCounter = rawAssignEvent.reassignmentCounter,
       createdEvent = Some(createdEvent),
     )

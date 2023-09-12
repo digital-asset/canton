@@ -10,6 +10,7 @@ import com.digitalasset.canton.data.{
   PeanoQueue,
   SynchronizedPeanoTreeQueue,
 }
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.protocol.Envelope
 import com.digitalasset.canton.sequencing.{HandlerResult, PossiblyIgnoredApplicationHandler}
@@ -57,25 +58,26 @@ class CleanSequencerCounterTracker(
 
   def apply[E <: Envelope[_]](
       handler: PossiblyIgnoredApplicationHandler[E]
-  ): PossiblyIgnoredApplicationHandler[E] = handler.replace { tracedEvents =>
-    tracedEvents.withTraceContext { implicit batchTraceContext => events =>
-      events.lastOption match {
-        case None => HandlerResult.done // ignore empty event batches
-        case Some(lastEvent) =>
-          val lastSc = lastEvent.counter
-          val lastTs = lastEvent.timestamp
-          val eventBatchCounter = allocateEventBatchCounter()
-          handler(tracedEvents).map { asyncF =>
-            val asyncFSignalled = asyncF.andThenF { case () =>
-              store.performUnlessClosingF("signal-clean-event-batch")(
-                signalCleanEventBatch(eventBatchCounter, lastSc, lastTs)
-              )
+  )(implicit callerCloseContext: CloseContext): PossiblyIgnoredApplicationHandler[E] =
+    handler.replace { tracedEvents =>
+      tracedEvents.withTraceContext { implicit batchTraceContext => events =>
+        events.lastOption match {
+          case None => HandlerResult.done // ignore empty event batches
+          case Some(lastEvent) =>
+            val lastSc = lastEvent.counter
+            val lastTs = lastEvent.timestamp
+            val eventBatchCounter = allocateEventBatchCounter()
+            handler(tracedEvents).map { asyncF =>
+              val asyncFSignalled = asyncF.andThenF { case () =>
+                store.performUnlessClosingF("signal-clean-event-batch")(
+                  signalCleanEventBatch(eventBatchCounter, lastSc, lastTs)
+                )
+              }
+              asyncFSignalled
             }
-            asyncFSignalled
-          }
+        }
       }
     }
-  }
 
   private[this] def allocateEventBatchCounter(): EventBatchCounter =
     Counter[EventBatchCounterDiscriminator](eventBatchCounterRef.getAndIncrement())
@@ -84,7 +86,7 @@ class CleanSequencerCounterTracker(
       eventBatchCounter: EventBatchCounter,
       lastSc: SequencerCounter,
       lastTs: CantonTimestamp,
-  )(implicit traceContext: TraceContext): Future[Unit] = {
+  )(implicit traceContext: TraceContext, callerCloseContext: CloseContext): Future[Unit] = {
     val atLeastHead =
       eventBatchQueue.insert(eventBatchCounter, Traced(CursorPrehead(lastSc, lastTs)))
     if (!atLeastHead) {
@@ -94,7 +96,7 @@ class CleanSequencerCounterTracker(
     drainAndUpdate()
   }
 
-  private[this] def drainAndUpdate(): Future[Unit] =
+  private[this] def drainAndUpdate()(implicit callerCloseContext: CloseContext): Future[Unit] =
     eventBatchQueue.dropUntilFront() match {
       case None => Future.unit
       case Some((_, tracedPrehead)) =>

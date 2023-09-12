@@ -14,6 +14,7 @@ import com.digitalasset.canton.sequencing.authentication.{
 }
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{AuthenticatedMember, DomainId, UnauthenticatedMemberId}
+import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.ForwardingClientCall.SimpleForwardingClientCall
 import io.grpc.ForwardingClientCallListener.SimpleForwardingClientCallListener
@@ -155,7 +156,7 @@ object SequencerClientTokenAuthentication {
       domainId: DomainId,
       authenticatedMember: AuthenticatedMember,
       obtainTokenPerEndpoint: NonEmpty[
-        Map[Endpoint, () => EitherT[Future, Status, AuthenticationTokenWithExpiry]]
+        Map[Endpoint, TraceContext => EitherT[Future, Status, AuthenticationTokenWithExpiry]]
       ],
       isClosed: => Boolean,
       tokenManagerConfig: AuthenticationTokenManagerConfig,

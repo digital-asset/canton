@@ -10,6 +10,7 @@ import com.daml.lf.engine.Engine
 import com.daml.metrics.Metrics
 import com.daml.resources.ProgramResource.StartupException
 import com.daml.timer.RetryStrategy
+import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.error.IndexErrors.IndexDbException
 import com.digitalasset.canton.ledger.offset.Offset
@@ -18,7 +19,7 @@ import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTr
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.InMemoryState
 import com.digitalasset.canton.platform.apiserver.TimedIndexService
-import com.digitalasset.canton.platform.common.{LedgerIdNotFoundException, MismatchException}
+import com.digitalasset.canton.platform.common.{MismatchException, ParticipantIdNotFoundException}
 import com.digitalasset.canton.platform.config.IndexServiceConfig
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.platform.store.cache.*
@@ -43,7 +44,7 @@ import scala.util.control.NoStackTrace
 final class IndexServiceOwner(
     config: IndexServiceConfig,
     dbSupport: DbSupport,
-    initialLedgerId: LedgerId,
+    ledgerId: LedgerId,
     servicesExecutionContext: ExecutionContext,
     metrics: Metrics,
     engine: Engine,
@@ -66,7 +67,7 @@ final class IndexServiceOwner(
     )
 
     for {
-      ledgerId <- Resource.fromFuture(verifyLedgerId(ledgerDao))
+      _ <- Resource.fromFuture(verifyParticipantId(ledgerDao))
       _ <- Resource.fromFuture(waitForInMemoryStateInitialization())
 
       contractStore = new MutableCacheBackedContractStore(
@@ -86,7 +87,11 @@ final class IndexServiceOwner(
 
       inMemoryFanOutExecutionContext <- buildInMemoryFanOutExecutionContext(
         metrics = metrics,
-        threadPoolSize = config.inMemoryFanOutThreadPoolSize,
+        threadPoolSize = config.inMemoryFanOutThreadPoolSize.getOrElse(
+          IndexServiceConfig.DefaultInMemoryFanOutThreadPoolSize(
+            errorLoggingContext(TraceContext.empty)
+          )
+        ),
       ).acquire()
 
       bufferedTransactionsReader = BufferedTransactionsReader(
@@ -138,18 +143,18 @@ final class IndexServiceOwner(
       }
     }
 
-  private def verifyLedgerId(
+  private def verifyParticipantId(
       ledgerDao: LedgerReadDao
   )(implicit
       executionContext: ExecutionContext
-  ): Future[LedgerId] = {
+  ): Future[Unit] = {
     // If the index database is not yet fully initialized,
-    // querying for the ledger ID will throw different errors,
+    // querying for the participant ID will throw different errors,
     // depending on the database, and how far the initialization is.
     val isRetryable: PartialFunction[Throwable, Boolean] = {
       case _: IndexDbException => true
-      case _: LedgerIdNotFoundException => true
-      case _: MismatchException.LedgerId => false
+      case _: ParticipantIdNotFoundException => true
+      case _: MismatchException.ParticipantId => false
       case _ => false
     }
 
@@ -160,20 +165,23 @@ final class IndexServiceOwner(
       implicit val loggingContext: LoggingContextWithTrace =
         LoggingContextWithTrace(loggerFactory)(TraceContext.empty)
       ledgerDao
-        .lookupLedgerId()
+        .lookupParticipantId()
         .flatMap {
-          case Some(`initialLedgerId`) =>
-            logger.info(s"Found existing ledger with ID: $initialLedgerId")
-            Future.successful(initialLedgerId)
-          case Some(foundLedgerId) =>
+          case Some(`participantId`) =>
+            logger.info(s"Found existing participant with ID: $participantId`")
+            Future.successful(())
+          case Some(foundParticipantId) =>
             Future.failed(
-              new MismatchException.LedgerId(foundLedgerId, initialLedgerId) with StartupException
+              new MismatchException.ParticipantId(
+                foundParticipantId,
+                domain.ParticipantId(participantId),
+              ) with StartupException
             )
           case None =>
             logger.info(
-              s"Ledger ID not found in the index database on attempt $attempt/$initializationMaxAttempts. Retrying again in $initializationRetryDelay."
+              s"Participant ID not found in the index database on attempt $attempt/$initializationMaxAttempts. Retrying again in $initializationRetryDelay."
             )
-            Future.failed(new LedgerIdNotFoundException(attempt))
+            Future.failed(new ParticipantIdNotFoundException(attempt))
         }
     }
   }

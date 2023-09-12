@@ -159,20 +159,11 @@ object AcsChange extends HasLoggerName {
           metadata.map(data => ContractStakeholdersAndTransferCounter(data, transferCounter)),
         )
     }
-    /*
-    Restore counters for transfer-outs by incrementing them
-     */
     val transferOutDeactivations = tmpTransferOutsClean.map {
       case ((contractId, transferCounter), metadata) =>
         (
           contractId,
-          WithContractHash(
-            ContractStakeholdersAndTransferCounter(
-              metadata.unwrap,
-              transferCounter.map(_ + 1),
-            ),
-            metadata.contractHash,
-          ),
+          metadata.map(data => ContractStakeholdersAndTransferCounter(data, transferCounter)),
         )
     }
     loggingContext.debug(

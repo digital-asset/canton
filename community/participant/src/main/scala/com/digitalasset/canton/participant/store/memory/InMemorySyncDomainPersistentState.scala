@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.store.memory
 
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto.CryptoPureApi
+import com.digitalasset.canton.crypto.{Crypto, CryptoPureApi}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.store.EventLogId.DomainEventLogId
 import com.digitalasset.canton.participant.store.{
@@ -20,8 +20,10 @@ import com.digitalasset.canton.store.memory.{
   InMemorySequencedEventStore,
   InMemorySequencerCounterTrackerStore,
 }
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.store.memory.{InMemoryTopologyStore, InMemoryTopologyStoreX}
+import com.digitalasset.canton.topology.{DomainOutboxQueue, DomainTopologyManagerX}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
@@ -78,9 +80,10 @@ class InMemorySyncDomainPersistentStateOld(
 }
 
 class InMemorySyncDomainPersistentStateX(
+    clock: Clock,
+    crypto: Crypto,
     domainId: IndexedDomain,
     val protocolVersion: ProtocolVersion,
-    pureCryptoApi: CryptoPureApi,
     enableAdditionalConsistencyChecks: Boolean,
     loggerFactory: NamedLoggerFactory,
     val timeouts: ProcessingTimeout,
@@ -88,17 +91,28 @@ class InMemorySyncDomainPersistentStateX(
 )(implicit ec: ExecutionContext)
     extends InMemorySyncDomainPersistentStateCommon(
       domainId,
-      pureCryptoApi,
+      crypto.pureCrypto,
       enableAdditionalConsistencyChecks,
       loggerFactory,
       timeouts,
     )
     with SyncDomainPersistentStateX {
 
-  val topologyStore =
+  override val topologyStore =
     new InMemoryTopologyStoreX(
       DomainStore(domainId.item),
       loggerFactory,
     )
+
+  override val domainOutboxQueue = new DomainOutboxQueue(loggerFactory)
+  override val topologyManager = new DomainTopologyManagerX(
+    clock,
+    crypto,
+    topologyStore,
+    domainOutboxQueue,
+    timeouts,
+    futureSupervisor,
+    loggerFactory,
+  )
 
 }

@@ -11,15 +11,20 @@ import scala.concurrent.Future
 
 object ParticipantPruningManagementClient {
 
-  private def pruneRequest(pruneUpTo: String) = PruneRequest(pruneUpTo = pruneUpTo)
+  private def pruneRequest(pruneUpTo: String, submissionId: Option[String]) =
+    PruneRequest(pruneUpTo = pruneUpTo, submissionId = submissionId.getOrElse(""))
 
 }
 
 final class ParticipantPruningManagementClient(service: ParticipantPruningServiceStub) {
 
-  def prune(pruneUpTo: String, token: Option[String] = None): Future[PruneResponse] =
+  def prune(
+      pruneUpTo: String,
+      token: Option[String] = None,
+      submissionId: Option[String] = None,
+  ): Future[PruneResponse] =
     LedgerClient
       .stub(service, token)
-      .prune(ParticipantPruningManagementClient.pruneRequest(pruneUpTo))
+      .prune(ParticipantPruningManagementClient.pruneRequest(pruneUpTo, submissionId))
 
 }

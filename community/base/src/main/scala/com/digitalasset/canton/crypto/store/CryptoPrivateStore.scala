@@ -11,7 +11,7 @@ import com.digitalasset.canton.crypto.store.memory.InMemoryCryptoPrivateStore
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, TracerProvider}
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -73,6 +73,7 @@ object CryptoPrivateStore {
         releaseProtocolVersion: ReleaseProtocolVersion,
         timeouts: ProcessingTimeout,
         loggerFactory: NamedLoggerFactory,
+        tracerProvider: TracerProvider,
     )(implicit
         ec: ExecutionContext,
         traceContext: TraceContext,
@@ -85,6 +86,7 @@ object CryptoPrivateStore {
         releaseProtocolVersion: ReleaseProtocolVersion,
         timeouts: ProcessingTimeout,
         loggerFactory: NamedLoggerFactory,
+        tracerProvider: TracerProvider,
     )(implicit
         ec: ExecutionContext,
         traceContext: TraceContext,

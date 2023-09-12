@@ -7,7 +7,6 @@ CREATE ALIAS array_intersection FOR "com.digitalasset.canton.platform.store.back
 -- Parameters table
 ---------------------------------------------------------------------------------------------------
 CREATE TABLE parameters (
-  ledger_id VARCHAR NOT NULL,
   participant_id VARCHAR NOT NULL,
   ledger_end VARCHAR NOT NULL,
   ledger_end_sequential_id BIGINT NOT NULL,
@@ -218,7 +217,8 @@ CREATE TABLE participant_events_create (
     -- * contract driver metadata
     driver_metadata BINARY LARGE OBJECT,
 
-    domain_id INTEGER
+    domain_id INTEGER,
+    trace_context BINARY LARGE OBJECT
 );
 
 -- offset index: used to translate to sequential_id
@@ -278,7 +278,8 @@ CREATE TABLE participant_events_consuming_exercise (
     exercise_argument_compression SMALLINT,
     exercise_result_compression SMALLINT,
 
-    domain_id INTEGER
+    domain_id INTEGER,
+    trace_context BINARY LARGE OBJECT
 );
 
 -- offset index: used to translate to sequential_id
@@ -335,7 +336,8 @@ CREATE TABLE participant_events_non_consuming_exercise (
     exercise_argument_compression SMALLINT,
     exercise_result_compression SMALLINT,
 
-    domain_id INTEGER
+    domain_id INTEGER,
+    trace_context BINARY LARGE OBJECT
 );
 
 -- offset index: used to translate to sequential_id
@@ -380,7 +382,8 @@ CREATE TABLE participant_events_unassign (
     reassignment_counter BIGINT NOT NULL,
 
     -- * unassigned specific
-    assignment_exclusivity BIGINT
+    assignment_exclusivity BIGINT,
+    trace_context BINARY LARGE OBJECT
 );
 
 -- sequential_id index for paging
@@ -433,7 +436,8 @@ CREATE TABLE participant_events_assign (
     create_argument_compression SMALLINT,
     create_key_value_compression SMALLINT,
     ledger_effective_time BIGINT NOT NULL,
-    driver_metadata BINARY LARGE OBJECT NOT NULL
+    driver_metadata BINARY LARGE OBJECT NOT NULL,
+    trace_context BINARY LARGE OBJECT
 );
 
 -- sequential_id index for paging

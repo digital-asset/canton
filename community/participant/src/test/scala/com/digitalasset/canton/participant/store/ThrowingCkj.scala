@@ -32,10 +32,10 @@ class ThrowingCkj[T <: Throwable](mk: String => T)(override implicit val ec: Exe
       traceContext: TraceContext
   ): Future[Map[LfGlobalKey, StateChange[Status]]] = Future.successful(Map.empty)
 
-  override def addKeyStateUpdates(updates: Map[LfGlobalKey, Status], toc: TimeOfChange)(implicit
+  override def addKeyStateUpdates(updates: Map[LfGlobalKey, (Status, TimeOfChange)])(implicit
       traceContext: TraceContext
   ): EitherT[Future, ContractKeyJournalError, Unit] =
-    EitherT(Future.failed[M](mk(show"addKeyStateUpdates($updates, $toc)")))
+    EitherT(Future.failed[M](mk(show"addKeyStateUpdates($updates)")))
 
   override def doPrune(beforeAndIncluding: CantonTimestamp)(implicit
       traceContext: TraceContext

@@ -5,11 +5,12 @@ package com.digitalasset.canton.participant.store
 
 import cats.Eval
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.LocalOffset
-import com.digitalasset.canton.participant.admin.RepairService
+import com.digitalasset.canton.participant.admin.repair.RepairService
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
 import com.digitalasset.canton.participant.protocol.*
 import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker
@@ -36,12 +37,14 @@ trait SyncDomainEphemeralStateFactory {
       createTimeTracker: NamedLoggerFactory => DomainTimeTracker,
       metrics: SyncDomainMetrics,
       participantId: ParticipantId,
-  )(implicit traceContext: TraceContext): Future[SyncDomainEphemeralState]
+  )(implicit
+      traceContext: TraceContext,
+      closeContext: CloseContext,
+  ): Future[SyncDomainEphemeralState]
 }
 
 class SyncDomainEphemeralStateFactoryImpl(
     timeouts: ProcessingTimeout,
-    testingConfigInternal: TestingConfigInternal,
     override val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
 )(implicit ec: ExecutionContext)
@@ -55,7 +58,10 @@ class SyncDomainEphemeralStateFactoryImpl(
       createTimeTracker: NamedLoggerFactory => DomainTimeTracker,
       metrics: SyncDomainMetrics,
       participantId: ParticipantId,
-  )(implicit traceContext: TraceContext): Future[SyncDomainEphemeralState] = {
+  )(implicit
+      traceContext: TraceContext,
+      closeContext: CloseContext,
+  ): Future[SyncDomainEphemeralState] = {
     for {
       startingPoints <- SyncDomainEphemeralStateFactory.startingPoints(
         persistentState.domainId,

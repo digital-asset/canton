@@ -54,15 +54,15 @@ import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.time.{DomainTimeTracker, TimeProofTestUtil}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
+import com.digitalasset.canton.version.{HasTestCloseContext, ProtocolVersion}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
 import scala.concurrent.Future
 
-class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
+class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with HasTestCloseContext {
   private val sourceDomain = SourceDomainId(
     DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::source"))
   )

@@ -44,7 +44,7 @@ object LedgerApiServer {
         inMemoryState = inMemoryState,
         prepareUpdatesParallelism = indexServiceConfig.inMemoryStateUpdaterParallelism,
         preparePackageMetadataTimeOutWarning =
-          indexServiceConfig.preparePackageMetadataTimeOutWarning,
+          indexServiceConfig.preparePackageMetadataTimeOutWarning.underlying,
         metrics = metrics,
         loggerFactory = loggerFactory,
         multiDomainEnabled = multiDomainEnabled,

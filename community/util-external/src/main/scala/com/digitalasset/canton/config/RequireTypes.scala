@@ -179,6 +179,10 @@ object RequireTypes {
 
     def +(other: PositiveNumeric[T]): PositiveNumeric[T] =
       PositiveNumeric.tryCreate(value + other.value)
+
+    def +(other: NonNegativeNumeric[T]): PositiveNumeric[T] =
+      PositiveNumeric.tryCreate(value + other.value)
+
     def *(other: PositiveNumeric[T]): PositiveNumeric[T] =
       PositiveNumeric.tryCreate(value * other.value)
 

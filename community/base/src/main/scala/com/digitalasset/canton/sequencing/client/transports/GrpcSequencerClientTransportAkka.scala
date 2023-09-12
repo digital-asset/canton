@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.sequencing.client.transports
 
-import akka.stream.scaladsl.Keep
+import akka.stream.scaladsl.{Keep, Source}
 import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.grpc.adapter.client.akka.ClientAdapter
@@ -12,10 +12,12 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.SequencerClientMetrics
+import com.digitalasset.canton.networking.grpc.GrpcError
+import com.digitalasset.canton.networking.grpc.GrpcError.GrpcServiceUnavailable
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.sequencing.client.{
   SequencerSubscriptionAkka,
-  SubscriptionErrorRetryPolicy,
+  SubscriptionErrorRetryPolicyAkka,
 }
 import com.digitalasset.canton.sequencing.protocol.{SubscriptionRequest, SubscriptionResponse}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -25,10 +27,9 @@ import com.digitalasset.canton.util.AkkaUtil.syntax.*
 import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.Context.CancellableContext
 import io.grpc.stub.StreamObserver
-import io.grpc.{CallOptions, Context, ManagedChannel}
+import io.grpc.{CallOptions, Context, ManagedChannel, Status, StatusRuntimeException}
 
 import scala.concurrent.ExecutionContext
-import scala.util.control.NonFatal
 
 class GrpcSequencerClientTransportAkka(
     channel: ManagedChannel,
@@ -83,7 +84,26 @@ class GrpcSequencerClientTransportAkka(
           stubWithFreshContext(subscriber),
         )
         .map(Right(_))
-        .recover { case NonFatal(e) => Left(GrpcStreamFailure(e)) }
+        .concatLazy(
+          // A sequencer subscription should never terminate; it's an endless stream.
+          // So if we see a termination, then insert an appropriate error.
+          // If there is an actual gRPC error, this source will not be evaluated as
+          // `recover` below completes the stream before emitting.
+          // See `AkkaUtilTest` for a unit test that this works as expected.
+          Source.lazySingle { () =>
+            // Info level, as this occurs from time to time due to the invalidation of the authentication token.
+            logger.info("The sequencer subscription has been terminated by the server.")
+            val error = GrpcError(
+              "subscription",
+              "sequencer",
+              Status.UNAVAILABLE
+                .withDescription("Connection terminated by the server.")
+                .asRuntimeException(),
+            )
+            Left(ExpectedGrpcFailure(error))
+          }
+        )
+        .recover(recoverOnError)
         // Everything up to here runs "synchronously" and can deal with cancellations
         // without causing shutdown synchronization problems
         // Technically, everything below until `takeUntilThenDrain` also could deal with
@@ -151,14 +171,39 @@ class GrpcSequencerClientTransportAkka(
     }
   }
 
-  override def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy =
-    new GrpcSubscriptionErrorRetryPolicy(loggerFactory)
+  private def recoverOnError(implicit
+      traceContext: TraceContext
+  ): Throwable PartialFunction Either[GrpcSequencerSubscriptionError, Nothing] = {
+    case s: StatusRuntimeException =>
+      val grpcError = if (s.getStatus.getCode() == io.grpc.Status.CANCELLED) {
+        // Since recoverOnError sits before the kill switch in the stream,
+        // this error will be passed downstream only if the cancellation came from the server.
+        // For if the subscription was cancelled by the client via the kill switch,
+        // the kill switch won't let it through any more.
+        GrpcServiceUnavailable(
+          "subscription",
+          "sequencer",
+          s.getStatus,
+          Option(s.getTrailers),
+          None,
+        )
+      } else
+        GrpcError("subscription", "sequencer", s)
+      Left(ExpectedGrpcFailure(grpcError))
+    case t: Throwable =>
+      logger.error("The sequencer subscription failed unexpectedly.", t)
+      Left(UnexpectedGrpcFailure(t))
+  }
+
+  override def subscriptionRetryPolicyAkka: SubscriptionErrorRetryPolicyAkka[SubscriptionError] =
+    new GrpcSubscriptionErrorRetryPolicyAkka()
 }
 
 object GrpcSequencerClientTransportAkka {
   sealed trait GrpcSequencerSubscriptionError extends Product with Serializable
 
-  final case class GrpcStreamFailure(ex: Throwable) extends GrpcSequencerSubscriptionError
+  final case class ExpectedGrpcFailure(error: GrpcError) extends GrpcSequencerSubscriptionError
+  final case class UnexpectedGrpcFailure(ex: Throwable) extends GrpcSequencerSubscriptionError
   final case class ResponseParseError(error: ProtoDeserializationError)
       extends GrpcSequencerSubscriptionError
 }

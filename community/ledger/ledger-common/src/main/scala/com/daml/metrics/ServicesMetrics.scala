@@ -201,8 +201,6 @@ class ServicesMetrics(
     val prefix: MetricName = ServicesMetrics.this.prefix :+ "read"
 
     @MetricDoc.FanInstanceTag
-    val getLedgerInitialConditions: Timer = factory.timer(prefix :+ "get_ledger_initial_conditions")
-    @MetricDoc.FanInstanceTag
     val stateUpdates: Timer = factory.timer(prefix :+ "state_updates")
     @MetricDoc.FanInstanceTag
     val getConnectedDomains: Timer = factory.timer(prefix :+ "get_connected_domains")

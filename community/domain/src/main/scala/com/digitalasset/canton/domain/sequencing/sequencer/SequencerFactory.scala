@@ -31,6 +31,7 @@ trait SequencerFactory extends AutoCloseable {
       domainId: DomainId,
       sequencerId: SequencerId,
       clock: Clock,
+      driverClock: Clock, // this clock is only used in tests, otherwise can the same clock as above can be passed
       domainSyncCryptoApi: DomainSyncCryptoClient,
       futureSupervisor: FutureSupervisor,
       rateLimitManager: Option[SequencerRateLimitManager],
@@ -70,6 +71,7 @@ class CommunityDatabaseSequencerFactory(
       domainId: DomainId,
       sequencerId: SequencerId,
       clock: Clock,
+      driverClock: Clock,
       domainSyncCryptoApi: DomainSyncCryptoClient,
       futureSupervisor: FutureSupervisor,
       rateLimitManager: Option[SequencerRateLimitManager],

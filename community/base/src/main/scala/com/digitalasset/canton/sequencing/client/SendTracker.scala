@@ -4,9 +4,10 @@
 package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
+import cats.syntax.foldable.*
 import cats.syntax.option.*
 import com.daml.metrics.api.MetricsContext.withEmptyMetricsContext
-import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{
@@ -26,13 +27,14 @@ import com.digitalasset.canton.sequencing.protocol.{
 }
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.{SavePendingSendError, SendTrackerStore}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.MonadUtil.sequentialTraverse_
-import com.digitalasset.canton.util.{MonadUtil, OptionUtil}
+import com.google.common.annotations.VisibleForTesting
 
 import java.time.Instant
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
 
 /** When a we make a send request to the sequencer it will not be sequenced until some point in the future and may not
   * be sequenced at all. To track a request call `send` with the messageId and max-sequencing-time of the request,
@@ -48,10 +50,11 @@ class SendTracker(
     metrics: SequencerClientMetrics,
     protected val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
-)(implicit executionContext: ExecutionContext)
-    extends NamedLogging
+) extends NamedLogging
     with FlagCloseableAsync
     with AutoCloseable {
+
+  private implicit val directExecutionContext = DirectExecutionContext(logger)
 
   /** Details of sends in flight
     * @param startedAt The time the request was made for calculating the elapsed duration for metrics.
@@ -62,13 +65,19 @@ class SendTracker(
       maxSequencingTime: CantonTimestamp,
       callback: SendCallback,
       startedAt: Option[Instant],
+      traceContext: TraceContext,
   )
 
   private val pendingSends: TrieMap[MessageId, PendingSend] =
     (TrieMap.newBuilder ++= initialPendingSends map {
       // callbacks and startedAt times will be lost between restarts of the sequencer client
       case (messageId, maxSequencingTime) =>
-        messageId -> PendingSend(maxSequencingTime, SendCallback.empty, startedAt = None)
+        messageId -> PendingSend(
+          maxSequencingTime,
+          SendCallback.empty,
+          startedAt = None,
+          TraceContext.empty,
+        )
     }).result()
 
   def track(
@@ -82,7 +91,7 @@ class SendTracker(
           .savePendingSend(messageId, maxSequencingTime)
         _ = pendingSends.put(
           messageId,
-          PendingSend(maxSequencingTime, callback, startedAt = Some(Instant.now())),
+          PendingSend(maxSequencingTime, callback, startedAt = Some(Instant.now()), traceContext),
         ) match {
           case Some(previousMaxSequencingTime) =>
             // if we were able to persist the new message id without issue but found the message id in our in-memory
@@ -110,65 +119,73 @@ class SendTracker(
     * to the caller.
     */
   def cancelPendingSend(messageId: MessageId)(implicit traceContext: TraceContext): Future[Unit] =
-    removePendingSend(messageId, None)
+    removePendingSendUnlessTimeout(messageId, resultO = None, sequencedTimeO = None)
 
-  /** Provide the latest sequenced event to update the send tracker and notify the handler of any sends that have
-    * timed out due to the new sequencing time.
+  /** Provide the latest sequenced events to update the send tracker
+    *
     * Callers must not call this concurrently and it is assumed that it is called with sequenced events in order of sequencing.
     * On receiving an event it will perform the following steps in order:
     *   1. If the event is a Deliver or DeliverError from a send that is being tracked it will stop tracking this message id.
     *      This allows using the message-id for new sends.
     *   2. Checks for any pending sends that have a max-sequencing-time that is less than the timestamp of this event.
     *      These events have timed out and a correct sequencer implementation will no longer sequence any events for this send.
-    *      The provided timeout handler will be called with the timed out message id.
-    *      If multiple sends are timed out the handler will be called sequentially with each message id (note there is
-    *      currently no defined order for the message ids it will receive).
-    *      If the handler fails the update method will immediately return and any subsequent timed out message ids will
-    *      not be provided to the handler.
+    *      The callback of the pending event will be called with the outcome result.
     *
     * The operations performed by update are not atomic, if an error is encountered midway through processing an event
     * then a subsequent replay will cause operations that still have pending sends stored to be retried.
     */
   def update(
-      timeoutHandler: SendTimeoutHandler
-  )(event: OrdinarySequencedEvent[_]): Future[Unit] = {
-    implicit val traceContext: TraceContext = event.traceContext
+      events: Seq[OrdinarySequencedEvent[_]]
+  ): Future[Unit] = if (events.isEmpty) Future.unit
+  else {
     for {
-      _ <- removePendingSend(event.signedEvent.content)
-      _ <- processTimeouts(timeoutHandler)(event.timestamp)
+      maxTimestamp <- events.foldM(CantonTimestamp.MinValue) { case (maxTs, event) =>
+        removePendingSend(event.signedEvent.content)(event.traceContext).map { _ =>
+          maxTs.max(event.timestamp)
+        }
+      }
+      _ <- processTimeouts(maxTimestamp)
     } yield ()
   }
 
-  private def processTimeouts(timeoutHandler: SendTimeoutHandler)(
+  private def processTimeouts(
       timestamp: CantonTimestamp
-  )(implicit traceContext: TraceContext): Future[Unit] = {
-    val timedOut = timedOutSends(timestamp)
-
-    sequentialTraverse_(timedOut)(handleTimeout(timeoutHandler, timestamp))
+  ): Future[Unit] = {
+    val timedOut = pendingSends.collect {
+      case (messageId, PendingSend(maxSequencingTime, _, _, traceContext))
+          if maxSequencingTime < timestamp =>
+        Traced(messageId)(traceContext)
+    }.toList
+    // parallel would be okay
+    sequentialTraverse_(timedOut)(_.withTraceContext { implicit traceContext =>
+      handleTimeout(timestamp)
+    })
   }
 
-  private def handleTimeout(handler: SendTimeoutHandler, timestamp: CantonTimestamp)(
+  @VisibleForTesting
+  protected def handleTimeout(timestamp: CantonTimestamp)(
       messageId: MessageId
   )(implicit traceContext: TraceContext): Future[Unit] = {
     logger.debug(s"Sequencer send [$messageId] has timed out at $timestamp")
     for {
-      _ <- handler(messageId)
-      _ <- removePendingSend(messageId, UnlessShutdown.Outcome(SendResult.Timeout(timestamp)).some)
+      _ <- removePendingSendUnlessTimeout(
+        messageId,
+        UnlessShutdown.Outcome(SendResult.Timeout(timestamp)).some,
+        None, // none because the message really timed out
+      )
     } yield ()
   }
-
-  private def timedOutSends(timestamp: CantonTimestamp): List[MessageId] =
-    pendingSends.collect {
-      case (messageId, PendingSend(maxSequencingTime, _, _)) if maxSequencingTime < timestamp =>
-        messageId
-    }.toList
 
   private def removePendingSend(
       event: SequencedEvent[_]
   )(implicit traceContext: TraceContext): Future[Unit] =
     extractSendResult(event)
       .fold(Future.unit) { case (messageId, sendResult) =>
-        removePendingSend(messageId, UnlessShutdown.Outcome(sendResult).some)
+        removePendingSendUnlessTimeout(
+          messageId,
+          UnlessShutdown.Outcome(sendResult).some,
+          Some(event.timestamp),
+        )
       }
 
   private def updateSequencedMetrics(pendingSend: PendingSend, result: SendResult): Unit = {
@@ -194,23 +211,47 @@ class SendTracker(
 
   /** Removes the pending send.
     * If a send result is supplied the callback will be called with it.
+    * If the sequencedTime is supplied and it is more recent than the max-sequencing time of the
+    * event, then we will not remove the pending send.
     */
-  private def removePendingSend(messageId: MessageId, resultO: Option[UnlessShutdown[SendResult]])(
-      implicit traceContext: TraceContext
+  private def removePendingSendUnlessTimeout(
+      messageId: MessageId,
+      resultO: Option[UnlessShutdown[SendResult]],
+      sequencedTimeO: Option[CantonTimestamp],
+  )(implicit
+      traceContext: TraceContext
   ): Future[Unit] = {
-    val pendingO = pendingSends.remove(messageId)
-
-    OptionUtil
-      .zipWith(pendingO, resultO) { (pending, result) =>
-        result.foreach(updateSequencedMetrics(pending, _))
-        pending.callback(result)
-      }
-      .discard
-
-    for {
-      _ <- store.removePendingSend(messageId)
-      _ = metrics.submissions.inFlight.dec()
-    } yield ()
+    // note: this should be okay from a concurrency perspective as there should be only one active
+    // send with this message-id at a time (track would fail otherwise)
+    val current = pendingSends.get(messageId)
+    val removeUnlessTimedOut = pendingSends.updateWith(messageId) {
+      case Some(pending) if sequencedTimeO.exists(_ > pending.maxSequencingTime) => Some(pending)
+      case other =>
+        // this shouldn't happen (as per above),  but let's leave a note in the logs if it does
+        if (other != current)
+          logger.error(s"Concurrent modification of pending sends $other / $current")
+        None
+    }
+    (removeUnlessTimedOut, current) match {
+      // if the sequencedTime is passed and it is more recent than the max-sequencing time of the
+      // event, then we will not remove the pending send (it will be picked up later by the handleTimeout method)
+      case (None, Some(pending)) =>
+        resultO.foreach { result =>
+          result.foreach(updateSequencedMetrics(pending, _))
+          pending.callback(result)
+        }
+        for {
+          _ <- store.removePendingSend(messageId)
+        } yield {
+          metrics.submissions.inFlight.dec()
+        }
+      case (Some(_), _) =>
+        // We observed the command being sequenced but it arrived too late to be processed.
+        Future.unit
+      case _ =>
+        logger.debug(s"Removing unknown pending command ${messageId}")
+        store.removePendingSend(messageId)
+    }
   }
 
   private def extractSendResult(
@@ -233,7 +274,7 @@ class SendTracker(
       AsyncCloseable(
         "complete-pending-sends",
         MonadUtil.sequentialTraverse_(pendingSends.keys)(
-          removePendingSend(_, Some(UnlessShutdown.AbortedDueToShutdown))
+          removePendingSendUnlessTimeout(_, Some(UnlessShutdown.AbortedDueToShutdown), None)
         ),
         timeouts.shutdownProcessing.duration,
       ),

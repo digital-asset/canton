@@ -49,11 +49,11 @@ class InMemoryContractKeyJournal(override protected val loggerFactory: NamedLogg
       keys.to(LazyList).mapFilter(key => snapshot.get(key).flatMap(_.latest.map(key -> _))).toMap
     }
 
-  override def addKeyStateUpdates(updates: Map[LfGlobalKey, Status], toc: TimeOfChange)(implicit
+  override def addKeyStateUpdates(updates: Map[LfGlobalKey, (Status, TimeOfChange)])(implicit
       traceContext: TraceContext
   ): EitherT[Future, ContractKeyJournal.ContractKeyJournalError, Unit] =
     EitherT.fromEither[Future] {
-      updates.to(LazyList).traverse_ { case (key, count) =>
+      updates.to(LazyList).traverse_ { case (key, (count, toc)) =>
         withLock {
           KeyStatus.empty.addUpdate(key, count, toc).flatMap { fresh =>
             state.putIfAbsent(key, fresh) match {

@@ -210,13 +210,13 @@ class CommunityEnvironmentTest extends AnyWordSpec with BaseTest with HasExecuti
       }
 
       "report exceptions" in new TestEnvironment {
-        val domainException = new RuntimeException("wurstsalat")
-        val participantException = new RuntimeException("spezie")
+        val exception = new RuntimeException("wurstsalat")
 
-        Seq("p1", "p2").foreach(setupParticipantFactory(_, throw participantException))
-        Seq("d1", "d2").foreach(setupDomainFactory(_, throw domainException))
+        Seq("p1", "p2").foreach(setupParticipantFactory(_, throw exception))
+        Seq("d1", "d2").foreach(setupDomainFactory(_, throw exception))
 
-        the[RuntimeException] thrownBy environment.startAndReconnect(false) shouldBe domainException
+        assertThrows[RuntimeException](environment.startAndReconnect(false))
+
       }
     }
     "starting with startAll" should {
@@ -233,12 +233,16 @@ class CommunityEnvironmentTest extends AnyWordSpec with BaseTest with HasExecuti
 
         // p2 will fail to come up
         setupParticipantFactory("p2", throw exception)
-
         the[RuntimeException] thrownBy environment.startAll() shouldBe exception
-
-        environment.domains.running.toSet shouldBe Set(d1, d2)
-        environment.participants.running should contain.only(p1)
+        // start all will kick off stuff in the background but the "parTraverseWithLimit"
+        // will terminate eagerly. so we actually have to wait until the processes finished
+        // in the background
+        eventually() {
+          environment.domains.running.toSet shouldBe Set(d1, d2)
+          environment.participants.running should contain.only(p1)
+        }
       }
     }
   }
+
 }

@@ -5,8 +5,8 @@ syntax = "proto3";
 
 package com.digitalasset.canton.traffic.v0;
 
-import "com/digitalasset/canton/domain/api/v0/sequencer_service.proto";
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
 
 // Full traffic status for a member at a point in time
 message MemberTrafficStatus {
@@ -22,10 +22,12 @@ message MemberTrafficStatus {
 
   // Member the status is about
   string member = 1;
-  // Traffic state of the member, contains the timestamp at which this status is valid
-  com.digitalasset.canton.domain.api.v0.SequencedEventTrafficState traffic_state = 2;
+  // Total extra traffic bought. Optional.
+  google.protobuf.UInt64Value total_extra_traffic_limit = 2;
+  // Total extra traffic consumed
+  uint64 total_extra_traffic_consumed = 3;
   // Current and future top up events that have been registered but are not necessarily active yet
-  repeated TopUpEvent top_up_events = 3;
+  repeated TopUpEvent top_up_events = 4;
   // Timestamp at which the status is valid
-  google.protobuf.Timestamp ts = 4;
+  google.protobuf.Timestamp ts = 5;
 }

@@ -9,7 +9,7 @@ import cats.syntax.bifunctor.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.crypto.CryptoPureApi
+import com.digitalasset.canton.crypto.{Crypto, CryptoPureApi}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.environment.{
   DomainTopologyInitializationCallback,
@@ -281,12 +281,12 @@ abstract class SyncDomainPersistentStateManagerImpl[S <: SyncDomainPersistentSta
   override def get(domainId: DomainId): Option[S] =
     domainStates.get(domainId)
 
-  override def getAll: Map[DomainId, SyncDomainPersistentState] = domainStates.toMap
+  override def getAll: Map[DomainId, S] = domainStates.toMap
 
   override def getStatusOf(domainId: DomainId): Option[DomainConnectionConfigStore.Status] =
     this.aliasResolution.connectionStateForDomain(domainId)
 
-  override def getByAlias(domainAlias: DomainAlias): Option[SyncDomainPersistentState] =
+  override def getByAlias(domainAlias: DomainAlias): Option[S] =
     for {
       domainId <- domainIdForAlias(domainAlias)
       res <- get(domainId)
@@ -370,7 +370,7 @@ class SyncDomainPersistentStateManagerX(
     storage: Storage,
     indexedStringStore: IndexedStringStore,
     parameters: ParticipantNodeParameters,
-    pureCrypto: CryptoPureApi,
+    crypto: Crypto,
     clock: Clock,
     futureSupervisor: FutureSupervisor,
     loggerFactory: NamedLoggerFactory,
@@ -392,7 +392,8 @@ class SyncDomainPersistentStateManagerX(
       storage,
       domainId,
       protocolVersion,
-      pureCrypto,
+      clock,
+      crypto,
       parameters.stores,
       parameters.cachingConfigs,
       parameters.maxDbConnections,
@@ -407,7 +408,7 @@ class SyncDomainPersistentStateManagerX(
     get(domainId).map(state =>
       new TopologyComponentFactoryX(
         domainId,
-        pureCrypto,
+        crypto.pureCrypto,
         clock,
         parameters.processingTimeouts,
         futureSupervisor,

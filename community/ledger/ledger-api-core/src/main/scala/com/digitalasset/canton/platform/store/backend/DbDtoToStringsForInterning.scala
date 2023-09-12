@@ -56,11 +56,11 @@ object DbDtoToStringsForInterning {
           dbDto.create_signatories.getOrElse(Set.empty).iterator
 
       case dbDto: DbDto.EventUnassign =>
-        Iterator(dbDto.submitter) ++
+        dbDto.submitter.iterator ++
           dbDto.flat_event_witnesses.iterator
 
       case dbDto: DbDto.EventAssign =>
-        Iterator(dbDto.submitter) ++
+        dbDto.submitter.iterator ++
           dbDto.flat_event_witnesses.iterator ++
           dbDto.create_observers.iterator ++
           // dbDto also contains key_maintainers. We don't internize these

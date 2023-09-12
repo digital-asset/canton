@@ -23,6 +23,8 @@ import com.digitalasset.canton.protocol.{
   TransferId,
   v0,
   v1,
+  v2,
+  v3,
 }
 import com.digitalasset.canton.sequencing.RawProtocolEvent
 import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, EventWithErrors, SignedContent}
@@ -65,7 +67,7 @@ case class TransferResult[+Domain <: TransferDomainId] private (
 
   @transient override protected lazy val companionObj: TransferResult.type = TransferResult
 
-  def toProtoV0: v0.TransferResult = {
+  private def toProtoV0: v0.TransferResult = {
     val domainP = (domain: @unchecked) match {
       case SourceDomainId(domainId) =>
         v0.TransferResult.Domain.OriginDomain(domainId.toProtoPrimitive)
@@ -80,7 +82,7 @@ case class TransferResult[+Domain <: TransferDomainId] private (
     )
   }
 
-  def toProtoV1: v1.TransferResult = {
+  private def toProtoV1: v1.TransferResult = {
     val domainP = (domain: @unchecked) match {
       case SourceDomainId(domainId) =>
         v1.TransferResult.Domain.OriginDomain(domainId.toProtoPrimitive)
@@ -92,6 +94,36 @@ case class TransferResult[+Domain <: TransferDomainId] private (
       domain = domainP,
       informees = informees.toSeq,
       verdict = Some(verdict.toProtoV1),
+    )
+  }
+
+  private def toProtoV2: v2.TransferResult = {
+    val domainP = (domain: @unchecked) match {
+      case SourceDomainId(domainId) =>
+        v2.TransferResult.Domain.SourceDomain(domainId.toProtoPrimitive)
+      case TargetDomainId(domainId) =>
+        v2.TransferResult.Domain.TargetDomain(domainId.toProtoPrimitive)
+    }
+    v2.TransferResult(
+      requestId = Some(requestId.toProtoPrimitive),
+      domain = domainP,
+      informees = informees.toSeq,
+      verdict = Some(verdict.toProtoV2),
+    )
+  }
+
+  private def toProtoV3: v3.TransferResult = {
+    val domainP = (domain: @unchecked) match {
+      case SourceDomainId(domainId) =>
+        v3.TransferResult.Domain.SourceDomain(domainId.toProtoPrimitive)
+      case TargetDomainId(domainId) =>
+        v3.TransferResult.Domain.TargetDomain(domainId.toProtoPrimitive)
+    }
+    v3.TransferResult(
+      requestId = Some(requestId.toProtoPrimitive),
+      domain = domainP,
+      informees = informees.toSeq,
+      verdict = Some(verdict.toProtoV3),
     )
   }
 
@@ -139,6 +171,14 @@ object TransferResult
     ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v4)(v1.TransferResult)(
       supportedProtoVersionMemoized(_)(fromProtoV1),
       _.toProtoV1.toByteString,
+    ),
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v5)(v2.TransferResult)(
+      supportedProtoVersionMemoized(_)(fromProtoV2),
+      _.toProtoV2.toByteString,
+    ),
+    ProtoVersion(3) -> VersionedProtoConverter(ProtocolVersion.v6)(v3.TransferResult)(
+      supportedProtoVersionMemoized(_)(fromProtoV3),
+      _.toProtoV3.toByteString,
     ),
   )
 
@@ -211,7 +251,67 @@ object TransferResult
         .required("TransferResult.verdict", verdictPO)
         .flatMap(Verdict.fromProtoV1)
     } yield TransferResult(requestId, informees.toSet, domain, verdict)(
-      protocolVersionRepresentativeFor(ProtoVersion(0)),
+      protocolVersionRepresentativeFor(ProtoVersion(1)),
+      Some(bytes),
+    )
+  }
+
+  private def fromProtoV2(transferResultP: v2.TransferResult)(
+      bytes: ByteString
+  ): ParsingResult[TransferResult[TransferDomainId]] = {
+    val v2.TransferResult(maybeRequestIdPO, domainP, informeesP, verdictPO) = transferResultP
+    import v2.TransferResult.Domain
+    for {
+      requestId <- ProtoConverter
+        .required("TransferOutResult.requestId", maybeRequestIdPO)
+        .flatMap(RequestId.fromProtoPrimitive)
+      domain <- domainP match {
+        case Domain.SourceDomain(sourceDomain) =>
+          DomainId
+            .fromProtoPrimitive(sourceDomain, "TransferResult.sourceDomain")
+            .map(SourceDomainId(_))
+        case Domain.TargetDomain(targetDomain) =>
+          DomainId
+            .fromProtoPrimitive(targetDomain, "TransferResult.targetDomain")
+            .map(TargetDomainId(_))
+        case Domain.Empty => Left(FieldNotSet("TransferResponse.domain"))
+      }
+      informees <- informeesP.traverse(ProtoConverter.parseLfPartyId)
+      verdict <- ProtoConverter
+        .required("TransferResult.verdict", verdictPO)
+        .flatMap(Verdict.fromProtoV2)
+    } yield TransferResult(requestId, informees.toSet, domain, verdict)(
+      protocolVersionRepresentativeFor(ProtoVersion(2)),
+      Some(bytes),
+    )
+  }
+
+  private def fromProtoV3(transferResultP: v3.TransferResult)(
+      bytes: ByteString
+  ): ParsingResult[TransferResult[TransferDomainId]] = {
+    val v3.TransferResult(maybeRequestIdPO, domainP, informeesP, verdictPO) = transferResultP
+    import v3.TransferResult.Domain
+    for {
+      requestId <- ProtoConverter
+        .required("TransferOutResult.requestId", maybeRequestIdPO)
+        .flatMap(RequestId.fromProtoPrimitive)
+      domain <- domainP match {
+        case Domain.SourceDomain(sourceDomain) =>
+          DomainId
+            .fromProtoPrimitive(sourceDomain, "TransferResult.sourceDomain")
+            .map(SourceDomainId(_))
+        case Domain.TargetDomain(targetDomain) =>
+          DomainId
+            .fromProtoPrimitive(targetDomain, "TransferResult.targetDomain")
+            .map(TargetDomainId(_))
+        case Domain.Empty => Left(FieldNotSet("TransferResponse.domain"))
+      }
+      informees <- informeesP.traverse(ProtoConverter.parseLfPartyId)
+      verdict <- ProtoConverter
+        .required("TransferResult.verdict", verdictPO)
+        .flatMap(Verdict.fromProtoV3)
+    } yield TransferResult(requestId, informees.toSet, domain, verdict)(
+      protocolVersionRepresentativeFor(ProtoVersion(3)),
       Some(bytes),
     )
   }

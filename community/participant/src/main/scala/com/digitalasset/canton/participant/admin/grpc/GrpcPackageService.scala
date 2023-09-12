@@ -6,12 +6,11 @@ package com.digitalasset.canton.participant.admin.grpc
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.ledger.api.refinements.ApiTypes
-import com.daml.ledger.client.binding.{Contract, Primitive as P}
+import com.daml.ledger.client.binding.Primitive as P
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
 import com.digitalasset.canton.participant.admin.PackageService.DarDescriptor
-import com.digitalasset.canton.participant.admin.ShareError.DarNotFound
 import com.digitalasset.canton.participant.admin.*
 import com.digitalasset.canton.participant.admin.v0.{DarDescription as ProtoDarDescription, *}
 import com.digitalasset.canton.participant.admin.workflows.DarDistribution as M
@@ -23,11 +22,9 @@ import com.google.protobuf.empty.Empty
 import io.grpc.{Status, StatusRuntimeException}
 
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.Try
 
 class GrpcPackageService(
     service: PackageService,
-    darDistribution: DarDistribution,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends PackageServiceGrpc.PackageService
@@ -92,15 +89,36 @@ class GrpcPackageService(
     EitherTUtil.toFuture(ret)
   }
 
+  override def vetDar(request: VetDarRequest): Future[VetDarResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val ret = for {
+      hash <- EitherT.fromEither[Future](extractHash(request.darHash))
+      _unit <- service
+        .vetDar(hash, request.synchronize)
+        .leftMap(_.asGrpcError)
+        .onShutdown(Left(GrpcErrors.AbortedDueToShutdown.Error().asGrpcError))
+    } yield VetDarResponse()
+
+    EitherTUtil.toFuture(ret)
+  }
+
+  override def unvetDar(request: UnvetDarRequest): Future[UnvetDarResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+
+    val ret = for {
+      hash <- EitherT.fromEither[Future](extractHash(request.darHash))
+      _unit <- service
+        .unvetDar(hash)
+        .leftMap(_.asGrpcError)
+        .onShutdown(Left(GrpcErrors.AbortedDueToShutdown.Error().asGrpcError))
+    } yield UnvetDarResponse()
+
+    EitherTUtil.toFuture(ret)
+  }
+
   override def removeDar(request: RemoveDarRequest): Future[RemoveDarResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val hashE = Hash
-      .fromHexString(request.darHash)
-      .leftMap(err =>
-        Status.INVALID_ARGUMENT
-          .withDescription(s"Invalid dar hash: ${request.darHash} [$err]")
-          .asRuntimeException()
-      )
+    val hashE = extractHash(request.darHash)
     val ret = {
       for {
         hash <- EitherT.fromEither[Future](hashE)
@@ -115,6 +133,15 @@ class GrpcPackageService(
 
     EitherTUtil.toFuture(ret)
   }
+
+  private def extractHash(apiHash: String): Either[StatusRuntimeException, Hash] =
+    Hash
+      .fromHexString(apiHash)
+      .leftMap(err =>
+        Status.INVALID_ARGUMENT
+          .withDescription(s"Invalid dar hash: $apiHash [$err]")
+          .asRuntimeException()
+      )
 
   override def getDar(request: GetDarRequest): Future[GetDarResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
@@ -165,109 +192,6 @@ class GrpcPackageService(
       })
     }
   }
-
-  override def share(request: ShareRequest): Future[Empty] = {
-    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val darHash = Hash.tryFromHexString(request.darHash)
-    darDistribution
-      .share(darHash, Converters.toParty(request.recipientId))
-      .map(_.left.map {
-        case DarNotFound =>
-          Status.NOT_FOUND.withDescription("Dar with matching hash was not found")
-        case ShareError.SubmissionFailed(_) =>
-          Status.INTERNAL.withDescription("Submission of share request to ledger failed")
-      })
-      .flatMap {
-        case Left(status) => Future.failed(status.asException())
-        case Right(_) => Future.successful(Empty())
-      }
-  }
-
-  override def listShareRequests(request: Empty): Future[ListShareRequestsResponse] =
-    darDistribution
-      .listRequests()
-      .map { requests =>
-        ListShareRequestsResponse(requests.map(shareRequestItem))
-      }
-
-  override def listShareOffers(request: Empty): Future[ListShareOffersResponse] =
-    darDistribution
-      .listOffers()
-      .map { offers =>
-        ListShareOffersResponse(offers.map(shareOfferItem))
-      }
-
-  override def acceptShareOffer(request: AcceptShareOfferRequest): Future[Empty] = {
-    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    darDistribution
-      .accept(Converters.toContractId[M.ShareDar](request.id))
-      .map(acceptRejectResultToResponse("accept"))
-      .onShutdown(scala.util.Failure(GrpcErrors.AbortedDueToShutdown.Error().asGrpcError))
-      .flatMap(Future.fromTry)
-  }
-
-  override def rejectShareOffer(request: RejectShareOfferRequest): Future[Empty] = {
-    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    darDistribution
-      .reject(Converters.toContractId[M.ShareDar](request.id), request.reason)
-      .map(acceptRejectResultToResponse("reject"))
-      .flatMap(Future.fromTry)
-  }
-
-  private def acceptRejectResultToResponse(
-      name: String
-  )(result: Either[AcceptRejectError, Unit]): Try[Empty] = {
-    import cats.syntax.either.*
-
-    def errorToStatus: AcceptRejectError => Status = {
-      case AcceptRejectError.OfferNotFound =>
-        Status.NOT_FOUND.withDescription("Offer for dar was not found")
-      case AcceptRejectError.SubmissionFailed(_) =>
-        Status.INTERNAL.withDescription(s"Submission of $name to ledger failed")
-      case AcceptRejectError.FailedToAppendDar(error) =>
-        error.asGrpcError.getStatus
-      case AcceptRejectError.InvalidOffer(error) =>
-        Status.INTERNAL.withDescription(s"Invalid offer: $error")
-      case AcceptRejectError.Shutdown =>
-        Status.ABORTED.withDescription(s"Node is shutting down")
-    }
-
-    result
-      .bimap(errorToStatus, _ => Empty())
-      .leftMap(_.asException())
-      .toTry
-  }
-
-  override def whitelistAdd(request: WhitelistChangeRequest): Future[Empty] =
-    for {
-      _ <- darDistribution.whitelistAdd(Converters.toParty(request.partyId))
-    } yield Empty()
-
-  override def whitelistRemove(request: WhitelistChangeRequest): Future[Empty] =
-    for {
-      _ <- darDistribution.whitelistRemove(Converters.toParty(request.partyId))
-    } yield Empty()
-
-  override def whitelistList(request: Empty): Future[WhitelistListResponse] =
-    for {
-      parties <- darDistribution.whitelistList()
-    } yield WhitelistListResponse(parties.map(Converters.toString))
-
-  private def shareRequestItem(share: Contract[M.ShareDar]): v0.ListShareRequestsResponse.Item =
-    v0.ListShareRequestsResponse.Item(
-      contractIdToString(share.contractId),
-      share.value.hash,
-      Converters.toString(share.value.recipient),
-      share.value.name,
-    )
-
-  private def shareOfferItem(share: Contract[M.ShareDar]): v0.ListShareOffersResponse.Item =
-    v0.ListShareOffersResponse.Item(
-      contractIdToString(share.contractId),
-      share.value.hash,
-      Converters.toString(share.value.owner),
-      share.value.name,
-    )
 
   private def contractIdToString(id: P.ContractId[M.ShareDar]): String =
     ApiTypes.ContractId.unwrap(id)

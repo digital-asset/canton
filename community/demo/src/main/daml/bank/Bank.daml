@@ -10,16 +10,16 @@ import Daml.Script
 -- Add a new type alias for currencies
 type Currency = Text
 -- Add a new data type to describe amounts, including the currency
-data Amount = Amount { quantity : Int, currency : Currency } deriving (Eq, Show) 
+data Amount = Amount { quantity : Int, currency : Currency } deriving (Eq, Show)
 -- Add a shorter type alias for contract id types we use
-type CashId = ContractId Cash 
+type CashId = ContractId Cash
 type SettleCashId = ContractId SettleCash
 
 {-
-  A simple cash contract which can be used in order to 
+  A simple cash contract which can be used in order to
   change the ownership of the cash contract.
 
-  Note that the cash contract can be transferred, but the 
+  Note that the cash contract can be transferred, but the
   deposition into an account is not included in this contract
   but in the account contract.
 
@@ -27,47 +27,50 @@ type SettleCashId = ContractId SettleCash
   does not know the larger context it exists in.
 -}
 template Cash
-  with 
-    bank : Party 
-    owner : Party 
+  with
+    bank : Party
+    owner : Party
     amount : Amount
-  where 
+  where
 
     signatory bank
+    observer owner
 
-    {- Helper function to create new amount records. -}  
-    let newAmount = \x -> (Amount with currency = amount.currency, quantity = x) 
+    {- Helper function to create new amount records. -}
+    let newAmount = \x -> (Amount with currency = amount.currency, quantity = x)
 
     {- Choices available to the owner -}
-    controller owner can 
-    
-      {- Transfer the ownership of this contract to a new owner -}
-      Transfer : CashId 
-        with 
-          newOwner : Party
-        do 
-          create this with owner = newOwner 
 
-      {- Split some amount of this contract. -}
-      Split : (CashId, CashId) 
-        with 
-          quantity : Int
-        do 
+    {- Transfer the ownership of this contract to a new owner -}
+    choice Transfer : CashId
+      with
+        newOwner : Party
+      controller owner
+        do
+          create this with owner = newOwner
+
+    {- Split some amount of this contract. -}
+    choice Split : (CashId, CashId)
+      with
+        quantity : Int
+      controller owner
+        do
           -- Ensure that the requested amount doesn't exceed available.
           assert (quantity > 0 && quantity <= amount.quantity)
           -- Calculate the remaining Cash contract
           restId <- create this with amount = (newAmount (amount.quantity - quantity))
-          -- Create the new contract 
-          newId <- create this with amount = (newAmount quantity) 
+          -- Create the new contract
+          newId <- create this with amount = (newAmount quantity)
           return (newId, restId)
 
-      {- Merge this and another cash contract into one -}
-      Merge : CashId 
-        with 
-          cashId : CashId 
-        do 
+    {- Merge this and another cash contract into one -}
+    choice Merge : CashId
+      with
+        cashId : CashId
+      controller owner
+        do
           -- Load the data of the given cash contract.
-          cash <- fetch cashId 
+          cash <- fetch cashId
           -- Ensure that the issuers, owners and currency match
           assert (cash.owner == owner)
           assert (cash.bank == bank)
@@ -77,42 +80,44 @@ template Cash
           -- Create the consolidated contract.
           create this with amount = (newAmount (amount.quantity + cash.amount.quantity))
 
-      Settle : SettleCashId   
-        with 
-          iban : Text 
-        do 
+    choice Settle : SettleCashId
+      with
+        iban : Text
+      controller owner
+        do
           -- Get the ledger time of this transaction
-          timestamp <- getTime 
-          create SettleCash with bank, owner, amount, timestamp, iban 
+          timestamp <- getTime
+          create SettleCash with bank, owner, amount, timestamp, iban
 
 {-
   A settlement contract indicating a pending cash settlement.
 
   The given contract denotes a "real world" obligation to the bank,
-  requiring the bank to transfer the given ammount to the named 
+  requiring the bank to transfer the given ammount to the named
   bank account.
 
   Once the money arrives, the owner can confirm the settlement.
 -}
 template SettleCash
-  with 
-    bank : Party 
-    owner : Party 
+  with
+    bank : Party
+    owner : Party
     amount : Amount
-    timestamp : Time 
+    timestamp : Time
     iban : Text
-  where 
+  where
 
-    signatory bank       
+    signatory bank
+    observer owner
 
     agreement "The issuing bank promises to transfer to any bank account "
         <> "named by the bearer on demand"
-        <> "the sum of " <> amount.currency <> " " <> show amount.quantity 
+        <> "the sum of " <> amount.currency <> " " <> show amount.quantity
         <> "within one business day starting from " <> show timestamp
-    
-    controller owner can 
-      Received : () 
-        do 
+
+    choice Received : ()
+      controller owner
+        do
           return ()
 
 
@@ -131,17 +136,17 @@ template TransferHelper
       controller p
       do
         (cash1, rest1) <- exercise cashId Split with quantity = quantity
-        cash2 <- exercise cash1 Transfer with newOwner = newOwner 
+        cash2 <- exercise cash1 Transfer with newOwner = newOwner
         exercise rest1 Merge with cashId = cash2
-        
 
-setup = script do 
+
+setup = script do
 
   doctor <- allocateParty "Doctor"
   bank <- allocateParty "Bank"
   insurer <- allocateParty "Insurance"
 
-  (insurerCash, doctorCash) <- submit bank do 
+  (insurerCash, doctorCash) <- submit bank do
     ia <- createCmd Bank.Cash with bank, owner = insurer, amount = (money 100)
     da <- createCmd Bank.Cash with bank, owner = doctor, amount = (money 5)
     return (ia, da)
@@ -161,9 +166,7 @@ test = script do
     createCmd Cash with
       bank = bank
       owner = alice
-      amount = initialBalance    
- 
+      amount = initialBalance
+
   submit alice do
     createAndExerciseCmd (TransferHelper alice) $ SplitTransferMerge ba alice 10
-
-

@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.store.backend
 
 import com.daml.lf.data.Ref
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import org.scalatest.Inside
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -18,6 +19,10 @@ private[backend] trait StorageBackendTestsEvents
   behavior of "StorageBackend (events)"
 
   import StorageBackendTestValues.*
+  import DbDtoEq.*
+
+  private val emptyTraceContext =
+    SerializableTraceContext(TraceContext.empty).toDamlProto.toByteArray
 
   it should "find contracts by party" in {
     val partySignatory = Ref.Party.assertFromString("signatory")
@@ -364,5 +369,71 @@ private[backend] trait StorageBackendTestsEvents
     executeSql(updateLedgerEnd(offset(20), 1110))
     maxEventSequentialId(20) shouldBe 1110
     maxEventSequentialId(21) shouldBe 1110
+  }
+
+  it should "return the correct trace context for create events" in {
+    val traceContexts = (1 to 3)
+      .flatMap(_ => List(TraceContext.empty, TraceContext.withNewTraceContext(identity)))
+      .map(SerializableTraceContext(_).toDamlProto.toByteArray)
+    val dbDtos = Vector(
+      dtoCreate(
+        offset = offset(1),
+        eventSequentialId = 1L,
+        contractId = hashCid("#1"),
+        traceContext = traceContexts(0),
+      ),
+      dtoCreate(
+        offset = offset(2),
+        eventSequentialId = 2L,
+        contractId = hashCid("#2"),
+        traceContext = traceContexts(1),
+      ),
+      dtoExercise(
+        offset = offset(3),
+        eventSequentialId = 3L,
+        consuming = false,
+        contractId = hashCid("#1"),
+        traceContext = traceContexts(2),
+      ),
+      dtoExercise(
+        offset = offset(4),
+        eventSequentialId = 4L,
+        consuming = false,
+        contractId = hashCid("#2"),
+        traceContext = traceContexts(3),
+      ),
+      dtoExercise(
+        offset = offset(5),
+        eventSequentialId = 5L,
+        consuming = true,
+        contractId = hashCid("#1"),
+        traceContext = traceContexts(4),
+      ),
+      dtoExercise(
+        offset = offset(6),
+        eventSequentialId = 6L,
+        consuming = true,
+        contractId = hashCid("#2"),
+        commandId = "command id 6",
+        traceContext = traceContexts(5),
+      ),
+    )
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(dbDtos, _))
+    executeSql(updateLedgerEnd(offset(2), 2L))
+
+    val transactionTrees = executeSql(
+      backend.event.transactionPointwiseQueries.fetchTreeTransactionEvents(1L, 6L, Set.empty)
+    )
+    for (i <- traceContexts.indices)
+      yield transactionTrees(i).traceContext should equal(Some(traceContexts(i)))
+
+    val flatTransactions = executeSql(
+      backend.event.transactionPointwiseQueries.fetchFlatTransactionEvents(1L, 6L, Set.empty)
+    )
+    val flatContexts = traceContexts.take(2) ++ traceContexts.drop(4)
+    for (i <- flatContexts.indices)
+      yield flatTransactions(i).traceContext should equal(Some(flatContexts(i)))
   }
 }

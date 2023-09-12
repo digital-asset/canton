@@ -39,20 +39,18 @@ class ThrowingAcs[T <: Throwable](mk: String => T)(override implicit val ec: Exe
     CheckedT(Future.failed[M](mk(s"archiveContracts for $contracts at $toc")))
 
   override def transferInContracts(
-      transferIns: Seq[(LfContractId, SourceDomainId, TransferCounterO)],
-      toc: TimeOfChange,
+      transferIns: Seq[(LfContractId, SourceDomainId, TransferCounterO, TimeOfChange)]
   )(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
-    CheckedT(Future.failed[M](mk(s"transferInContracts for $transferIns at $toc")))
+    CheckedT(Future.failed[M](mk(s"transferInContracts for $transferIns")))
 
   override def transferOutContracts(
-      transferOuts: Seq[(LfContractId, TargetDomainId, TransferCounterO)],
-      toc: TimeOfChange,
+      transferOuts: Seq[(LfContractId, TargetDomainId, TransferCounterO, TimeOfChange)]
   )(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
-    CheckedT(Future.failed[M](mk(s"transferOutContracts for $transferOuts at $toc")))
+    CheckedT(Future.failed[M](mk(s"transferOutContracts for $transferOuts")))
 
   override def fetchStates(contractIds: Iterable[LfContractId])(implicit
       traceContext: TraceContext

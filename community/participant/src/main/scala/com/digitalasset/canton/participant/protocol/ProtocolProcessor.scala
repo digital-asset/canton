@@ -17,7 +17,6 @@ import com.digitalasset.canton.crypto.{
   Signature,
 }
 import com.digitalasset.canton.data.{CantonTimestamp, ViewPosition, ViewTree, ViewType}
-import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
@@ -65,7 +64,7 @@ import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DiscardOps, RequestCounter, SequencerCounter, checked}
+import com.digitalasset.canton.{DiscardOps, LfPartyId, RequestCounter, SequencerCounter, checked}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.UUID
@@ -486,8 +485,14 @@ abstract class ProtocolProcessor[
           submissionData =>
             logger.debug(s"Removing sent submission $submissionId without a result.")
             steps.postProcessResult(
-              MediatorError.Timeout.Reject
-                .create(protocolVersion),
+              Verdict.ParticipantReject(
+                NonEmpty(
+                  List,
+                  Set.empty[LfPartyId] ->
+                    LocalReject.TimeRejects.LocalTimeout.Reject(protocolVersion),
+                ),
+                protocolVersion,
+              ),
               submissionData,
             )
         }
@@ -621,7 +626,7 @@ abstract class ProtocolProcessor[
       (malformedPayloads, viewsWithCorrectRootHash)
     }
 
-    def observeSequencedRootHash(rootHash: RootHash, amSubmitter: Boolean): Future[Unit] =
+    def observeSequencedRootHash(amSubmitter: Boolean): Future[Unit] =
       if (amSubmitter && !isReceipt) {
         // We are the submitting participant and yet the request does not have a message ID.
         // This looks like a preplay attack, and we mark the request as sequenced in the in-flight
@@ -629,7 +634,7 @@ abstract class ProtocolProcessor[
         // and gets picked up by a timely rejection, which would emit a duplicate command completion.
         val sequenced = SequencedSubmission(sc, ts)
         inFlightSubmissionTracker.observeSequencedRootHash(
-          rootHashMessage.rootHash,
+          rootHash,
           sequenced,
         )
       } else Future.unit
@@ -733,10 +738,7 @@ abstract class ProtocolProcessor[
                   submissionData,
                 )
 
-                observeSequencedRootHash(
-                  rootHash,
-                  submissionData.submitterParticipant == participantId,
-                )
+                observeSequencedRootHash(submissionData.submitterParticipant == participantId)
               case None =>
                 // There are no root views
                 ephemeral.submissionTracker.cancelRegistration(
@@ -1222,18 +1224,19 @@ abstract class ProtocolProcessor[
            */
         },
       )
-      _ <- resultE.merge.message.verdict match {
-        case _: MediatorError.Timeout.Reject if resultTs <= participantDeadline =>
+      _ <- EitherT.cond[Future](
+        resultTs > participantDeadline || !resultE.merge.message.verdict.isTimeoutDeterminedByMediator,
+        (), {
           SyncServiceAlarm
             .Warn(
               s"Received mediator timeout message at $resultTs before response deadline for request $requestId."
             )
             .report()
-          ephemeral.requestTracker.tick(sc, resultTs)
-          EitherT.leftT[Future, Unit](steps.embedResultError(TimeoutResultTooEarly(requestId)))
-        case _ => EitherT.rightT[Future, steps.ResultError](()) // everything ok
-      }
 
+          ephemeral.requestTracker.tick(sc, resultTs)
+          steps.embedResultError(TimeoutResultTooEarly(requestId))
+        },
+      )
       asyncResult <-
         if (!precedesCleanReplay(requestId))
           performResultProcessing2(

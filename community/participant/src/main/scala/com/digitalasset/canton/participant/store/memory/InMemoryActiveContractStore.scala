@@ -12,7 +12,12 @@ import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
-import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractStore}
+import com.digitalasset.canton.participant.store.{
+  ActiveContractStore,
+  ContractChange,
+  ContractStore,
+  StateChangeType,
+}
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange}
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.{LfContractId, SourceDomainId, TargetDomainId}
@@ -150,27 +155,25 @@ class InMemoryActiveContractStore(
   }
 
   override def transferInContracts(
-      transferIns: Seq[(LfContractId, SourceDomainId, TransferCounterO)],
-      toc: TimeOfChange,
+      transferIns: Seq[(LfContractId, SourceDomainId, TransferCounterO, TimeOfChange)]
   )(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
     CheckedT(Future.successful {
-      logger.trace(s"Transferring-in contracts at $toc: $transferIns")
-      transferIns.to(LazyList).traverse_ { case (contractId, sourceDomain, transferCounter) =>
+      logger.trace(s"Transferring-in contracts: $transferIns")
+      transferIns.to(LazyList).traverse_ { case (contractId, sourceDomain, transferCounter, toc) =>
         updateTable(contractId, _.addTransferIn(contractId, toc, sourceDomain, transferCounter))
       }
     })
 
   override def transferOutContracts(
-      transferOuts: Seq[(LfContractId, TargetDomainId, TransferCounterO)],
-      toc: TimeOfChange,
+      transferOuts: Seq[(LfContractId, TargetDomainId, TransferCounterO, TimeOfChange)]
   )(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
     CheckedT(Future.successful {
-      logger.trace(s"Transferring-out contracts at $toc: $transferOuts")
-      transferOuts.to(LazyList).traverse_ { case (contractId, targetDomain, transferCounter) =>
+      logger.trace(s"Transferring-out contracts: $transferOuts")
+      transferOuts.to(LazyList).traverse_ { case (contractId, targetDomain, transferCounter, toc) =>
         updateTable(contractId, _.addTransferOut(contractId, toc, targetDomain, transferCounter))
       }
     })
@@ -275,19 +278,26 @@ class InMemoryActiveContractStore(
           .groupBy(_._2.toc)
 
       val byTsAndChangeType
-          : Map[TimeOfChange, Map[Boolean, List[(LfContractId, TransferCounterO)]]] = changesByToc
+          : Map[TimeOfChange, Map[Boolean, List[(LfContractId, StateChangeType)]]] = changesByToc
         .fmap(_.groupBy(_._2.isActivation).fmap(_.map {
+
           case (coid, activenessChange, activenessChangeDetail) =>
-            if (!activenessChange.isActivation && !activenessChangeDetail.isTransfer)
-              (
-                coid,
-                latestActivationTransferCounterPerCid.getOrElse(
-                  (coid, activenessChange.toc.rc),
-                  activenessChangeDetail.transferCounter,
-                ),
-              )
-            else
-              (coid, activenessChangeDetail.transferCounter)
+            val stateChange =
+              if (activenessChange.isActivation && !activenessChangeDetail.isTransfer)
+                StateChangeType(ContractChange.Created, activenessChangeDetail.transferCounter)
+              else if (activenessChange.isActivation && activenessChangeDetail.isTransfer)
+                StateChangeType(ContractChange.Assigned, activenessChangeDetail.transferCounter)
+              else if (!activenessChange.isActivation && activenessChangeDetail.isTransfer)
+                StateChangeType(ContractChange.Unassigned, activenessChangeDetail.transferCounter)
+              else
+                StateChangeType(
+                  ContractChange.Archived,
+                  latestActivationTransferCounterPerCid.getOrElse(
+                    (coid, activenessChange.toc.rc),
+                    activenessChangeDetail.transferCounter,
+                  ),
+                )
+            (coid, stateChange)
         }))
 
       byTsAndChangeType

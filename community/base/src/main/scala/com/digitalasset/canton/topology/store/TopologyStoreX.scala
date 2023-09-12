@@ -76,6 +76,7 @@ object StoredTopologyTransactionX {
 final case class ValidatedTopologyTransactionX[+Op <: TopologyChangeOpX, +M <: TopologyMappingX](
     transaction: SignedTopologyTransactionX[Op, M],
     rejectionReason: Option[TopologyTransactionRejection] = None,
+    expireImmediately: Boolean = false,
 ) {
   def collectOfMapping[TargetM <: TopologyMappingX: ClassTag]
       : Option[ValidatedTopologyTransactionX[Op, TargetM]] =
@@ -100,6 +101,10 @@ abstract class TopologyStoreX[+StoreID <: TopologyStoreId](implicit
       GenericSignedTopologyTransactionX,
     ] {
   this: NamedLogging =>
+
+  def findTransactionsByTxHash(asOfExclusive: EffectiveTime, hashes: NonEmpty[Set[TxHash]])(implicit
+      traceContext: TraceContext
+  ): Future[Seq[GenericSignedTopologyTransactionX]]
 
   def findProposalsByTxHash(asOfExclusive: EffectiveTime, hashes: NonEmpty[Set[TxHash]])(implicit
       traceContext: TraceContext
@@ -135,7 +140,6 @@ abstract class TopologyStoreX[+StoreID <: TopologyStoreId](implicit
       removeMapping: Set[MappingHash],
       removeTxs: Set[TxHash],
       additions: Seq[GenericValidatedTopologyTransactionX],
-      expiredAdditions: Set[TxHash],
   )(implicit
       traceContext: TraceContext
   ): Future[Unit]

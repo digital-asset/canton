@@ -948,7 +948,7 @@ private[store] final case class SerializableTransferredOut(
     v0.TransferredOut(
       updateId = updateId,
       completionInfo = optCompletionInfo.map(SerializableCompletionInfo(_).toProtoV0),
-      submitter = submitter,
+      submitter = submitter.getOrElse(""),
       recordTime =
         Some(SerializableLfTimestamp(transferId.transferOutTimestamp.underlying).toProtoV0),
       contractId = contractId.toProtoPrimitive,
@@ -989,7 +989,7 @@ private[store] object SerializableTransferredOut {
     for {
       updateId <- ProtoConverter.parseLedgerTransactionId(updateIdP)
       optCompletionInfo <- optCompletionInfoP.traverse(SerializableCompletionInfo.fromProtoV0)
-      submitter <- ProtoConverter.parseLfPartyId(submitterP)
+      submitter <- ProtoConverter.parseLfPartyIdO(submitterP)
       recordTime <- required("record_time", recordTimeP).flatMap(
         SerializableLfTimestamp.fromProtoPrimitive
       )
@@ -1052,7 +1052,7 @@ final case class SerializableTransferredIn(transferIn: LedgerSyncEvent.Transferr
     v0.TransferredIn(
       updateId = updateId,
       completionInfo = optCompletionInfo.map(SerializableCompletionInfo(_).toProtoV0),
-      submitter = submitter,
+      submitter = submitter.getOrElse(""),
       recordTime = Some(SerializableLfTimestamp(recordTime).toProtoV0),
       ledgerCreateTime = Some(SerializableLfTimestamp(ledgerCreateTime).toProtoV0),
       contractMetadata = contractMetadataP,
@@ -1093,7 +1093,7 @@ private[store] object SerializableTransferredIn {
     for {
       updateId <- ProtoConverter.parseLedgerTransactionId(updateIdP)
       optCompletionInfo <- optCompletionInfoP.traverse(SerializableCompletionInfo.fromProtoV0)
-      submitter <- ProtoConverter.parseLfPartyId(submitterP)
+      submitter <- ProtoConverter.parseLfPartyIdO(submitterP)
       recordTime <- required("record_time", recordTimeP).flatMap(
         SerializableLfTimestamp.fromProtoPrimitive
       )

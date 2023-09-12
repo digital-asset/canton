@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.admin
 
 import better.files.*
+import cats.data.EitherT
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.daml_lf_dev.DamlLf.Archive
 import com.daml.lf.archive.DarParser
@@ -11,20 +12,22 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.CantonRequireTypes.{String255, String256M}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
+import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
+import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.ledger.error.PackageServiceErrors
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.participant.admin.PackageService.{Dar, DarDescriptor}
 import com.digitalasset.canton.participant.admin.PackageServiceTest.readCantonExamples
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.store.DamlPackageStore
 import com.digitalasset.canton.participant.store.memory.InMemoryDamlPackageStore
 import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, ParticipantEventPublisher}
-import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerOps
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.PackageDescription
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.google.protobuf.ByteString
+import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.io.File
@@ -61,19 +64,20 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
 
   private class Env {
     val packageStore = new InMemoryDamlPackageStore(loggerFactory)
+    private val processingTimeouts = ProcessingTimeout()
+    val packageDependencyResolver =
+      new PackageDependencyResolver(packageStore, processingTimeouts, loggerFactory)
     val engine =
       DAMLe.newEngine(uniqueContractKeys = false, enableLfDev = false, enableStackTraces = false)
-    val vettingOps = mock[ParticipantTopologyManagerOps]
     val sut =
       new PackageService(
         engine,
-        packageStore,
+        packageDependencyResolver,
         eventPublisher,
         new SymbolicPureCrypto(),
-        vettingOps,
-        new PackageInspectionOpsForTesting(participantId, loggerFactory),
+        new PackageOpsForTesting(participantId, loggerFactory),
         ParticipantTestMetrics,
-        ProcessingTimeout(),
+        processingTimeouts,
         loggerFactory,
       )
   }
@@ -156,7 +160,7 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
           )
           .valueOrFail("appending dar")
           .failOnShutdown
-        deps <- sut.packageDependencies(List(mainPackageId)).value
+        deps <- packageDependencyResolver.packageDependencies(List(mainPackageId)).value
       } yield {
         // test for explict dependencies
         deps match {
@@ -191,6 +195,53 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
           case _ => fail(s"$error is not a validation error")
         }
       }
+    }
+  }
+
+  "The DAR referenced by the requested hash does not exist" when {
+    def rejectOnMissingDar(
+        req: PackageService => EitherT[FutureUnlessShutdown, CantonError, Unit],
+        darHash: Hash,
+        op: String,
+    ): Env => Future[Assertion] = { env =>
+      req(env.sut).value.unwrap.map {
+        case UnlessShutdown.Outcome(result) =>
+          result shouldBe Left(
+            CantonPackageServiceError.DarNotFound
+              .Reject(
+                operation = op,
+                darHash = darHash.toHexString,
+              )
+          )
+        case UnlessShutdown.AbortedDueToShutdown => fail("Unexpected shutdown")
+      }
+    }
+
+    val unknownDarHash = Hash
+      .build(HashPurpose.TopologyTransactionSignature, HashAlgorithm.Sha256)
+      .add("darhash")
+      .finish()
+
+    "requested by PackageService.unvetDar" should {
+      "reject the request with an error" in withEnv(
+        rejectOnMissingDar(_.unvetDar(unknownDarHash), unknownDarHash, "DAR archive unvetting")
+      )
+    }
+
+    "requested by PackageService.vetDar" should {
+      "reject the request with an error" in withEnv(
+        rejectOnMissingDar(
+          _.vetDar(unknownDarHash, synchronize = true),
+          unknownDarHash,
+          "DAR archive vetting",
+        )
+      )
+    }
+
+    "requested by PackageService.removeDar" should {
+      "reject the request with an error" in withEnv(
+        rejectOnMissingDar(_.removeDar(unknownDarHash), unknownDarHash, "DAR archive removal")
+      )
     }
   }
 }

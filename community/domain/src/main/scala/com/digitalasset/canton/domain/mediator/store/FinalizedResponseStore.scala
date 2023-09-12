@@ -10,7 +10,7 @@ import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.mediator.ResponseAggregation
+import com.digitalasset.canton.domain.mediator.FinalizedResponse
 import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.TimedLoadGauge
@@ -30,13 +30,13 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 private[mediator] trait FinalizedResponseStore extends AutoCloseable {
 
-  /** Stores finalized mediator response aggregations (whose state is a Left(verdict)).
+  /** Stores finalized mediator verdict.
     * In the event of a crash we may attempt to store an existing finalized request so the store
     * should behave in an idempotent manner.
     * TODO(#4335): If there is an existing value ensure that it matches the value we want to insert
     */
   def store(
-      request: ResponseAggregation
+      finalizedResponse: FinalizedResponse
   )(implicit traceContext: TraceContext, callerCloseContext: CloseContext): Future[Unit]
 
   /** Fetch previously stored finalized mediator response aggregation by requestId.
@@ -44,7 +44,7 @@ private[mediator] trait FinalizedResponseStore extends AutoCloseable {
   def fetch(requestId: RequestId)(implicit
       traceContext: TraceContext,
       overrideCloseContext: CloseContext,
-  ): OptionT[Future, ResponseAggregation]
+  ): OptionT[Future, FinalizedResponse]
 
   /** Remove all responses up to and including the provided timestamp. */
   def prune(
@@ -96,19 +96,19 @@ private[mediator] class InMemoryFinalizedResponseStore(
 
   import scala.jdk.CollectionConverters.*
   private val finalizedRequests =
-    new ConcurrentHashMap[CantonTimestamp, ResponseAggregation].asScala
+    new ConcurrentHashMap[CantonTimestamp, FinalizedResponse].asScala
 
   override def store(
-      request: ResponseAggregation
+      finalizedResponse: FinalizedResponse
   )(implicit traceContext: TraceContext, callerCloseContext: CloseContext): Future[Unit] = {
-    finalizedRequests.putIfAbsent(request.requestId.unwrap, request).discard
+    finalizedRequests.putIfAbsent(finalizedResponse.requestId.unwrap, finalizedResponse).discard
     Future.unit
   }
 
   override def fetch(requestId: RequestId)(implicit
       traceContext: TraceContext,
       overrideCloseContext: CloseContext,
-  ): OptionT[Future, ResponseAggregation] =
+  ): OptionT[Future, FinalizedResponse] =
     OptionT.fromOption[Future](
       finalizedRequests.get(requestId.unwrap)
     )
@@ -119,7 +119,7 @@ private[mediator] class InMemoryFinalizedResponseStore(
     Future.successful {
       finalizedRequests.keys
         .filterNot(_.isAfter(timestamp))
-        .foreach(finalizedRequests.remove(_).discard[Option[ResponseAggregation]])
+        .foreach(finalizedRequests.remove(_).discard[Option[FinalizedResponse]])
     }
 
   override def count()(implicit
@@ -154,6 +154,7 @@ private[mediator] class DbFinalizedResponseStore(
 )(implicit val ec: ExecutionContext, implicit val traceContext: TraceContext)
     extends FinalizedResponseStore
     with DbStore {
+
   import storage.api.*
   import storage.converters.*
 
@@ -182,48 +183,39 @@ private[mediator] class DbFinalizedResponseStore(
     storage.metrics.loadGaugeM("finalized-response-store")
 
   override def store(
-      request: ResponseAggregation
+      finalizedResponse: FinalizedResponse
   )(implicit traceContext: TraceContext, callerCloseContext: CloseContext): Future[Unit] =
     processingTime.event {
-      request.state match {
-        case Left(verdict) =>
-          val insert = storage.profile match {
-            case _: DbStorage.Profile.Oracle =>
-              sqlu"""insert
+      val insert = storage.profile match {
+        case _: DbStorage.Profile.Oracle =>
+          sqlu"""insert
                      /*+  IGNORE_ROW_ON_DUPKEY_INDEX ( response_aggregations ( request_id ) ) */
                      into response_aggregations(request_id, mediator_request, version, verdict, request_trace_context)
                      values (
-                       ${request.requestId},${request.request},${request.version},${verdict},
-                       ${SerializableTraceContext(request.requestTraceContext)}
+                       ${finalizedResponse.requestId},${finalizedResponse.request},${finalizedResponse.version},${finalizedResponse.verdict},
+                       ${SerializableTraceContext(finalizedResponse.requestTraceContext)}
                      )"""
-            case _ =>
-              sqlu"""insert into response_aggregations(request_id, mediator_request, version, verdict, request_trace_context)
+        case _ =>
+          sqlu"""insert into response_aggregations(request_id, mediator_request, version, verdict, request_trace_context)
                      values (
-                       ${request.requestId},${request.request},${request.version},${verdict},
-                       ${SerializableTraceContext(request.requestTraceContext)}
+                       ${finalizedResponse.requestId},${finalizedResponse.request},${finalizedResponse.version},${finalizedResponse.verdict},
+                       ${SerializableTraceContext(finalizedResponse.requestTraceContext)}
                      ) on conflict do nothing"""
-          }
+      }
 
-          CloseContext.withCombinedContextF(callerCloseContext, closeContext, timeouts, logger) {
-            closeContext =>
-              storage.update_(
-                insert,
-                operationName = s"${this.getClass}: store request ${request.requestId}",
-              )(
-                traceContext,
-                closeContext,
-              )
-          }
-
-        case Right(_) =>
-          throw new IllegalArgumentException(s"Given request has not been finalized")
+      CloseContext.withCombinedContextF(callerCloseContext, closeContext, timeouts, logger) {
+        closeContext =>
+          storage.update_(
+            insert,
+            operationName = s"${this.getClass}: store request ${finalizedResponse.requestId}",
+          )(traceContext, closeContext)
       }
     }
 
   override def fetch(requestId: RequestId)(implicit
       traceContext: TraceContext,
       callerCloseContext: CloseContext,
-  ): OptionT[Future, ResponseAggregation] =
+  ): OptionT[Future, FinalizedResponse] =
     processingTime.optionTEvent {
       CloseContext.withCombinedContextOT(callerCloseContext, closeContext, timeouts, logger) {
         closeContext =>
@@ -235,15 +227,9 @@ private[mediator] class DbFinalizedResponseStore(
               .map {
                 _.headOption.map {
                   case (reqId, mediatorRequest, version, verdict, requestTraceContext) =>
-                    ResponseAggregation.fromVerdict(
-                      reqId,
-                      mediatorRequest,
-                      version,
-                      verdict,
-                    )(
-                      protocolVersion,
-                      loggerFactory,
-                    )(requestTraceContext.unwrap)
+                    FinalizedResponse(reqId, mediatorRequest, version, verdict)(
+                      requestTraceContext.unwrap
+                    )
                 }
               },
             operationName = s"${this.getClass}: fetch request $requestId",

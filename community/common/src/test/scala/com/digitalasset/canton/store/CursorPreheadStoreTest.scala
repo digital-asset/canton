@@ -5,10 +5,11 @@ package com.digitalasset.canton.store
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.{CantonTimestamp, Counter}
+import com.digitalasset.canton.lifecycle.HasCloseContext
 import org.scalatest.wordspec.AsyncWordSpecLike
 
 trait CursorPreheadStoreTest {
-  this: AsyncWordSpecLike with BaseTest =>
+  this: AsyncWordSpecLike with BaseTest with HasCloseContext =>
 
   def cursorPreheadStore[Discr](
       mk: () => CursorPreheadStore[Discr],

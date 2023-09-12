@@ -6,6 +6,7 @@ package com.digitalasset.canton.lifecycle
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.lifecycle.StartAndCloseable.StartAfterClose
 import com.digitalasset.canton.logging.TracedLogger
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, DiscardOps, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -53,7 +54,9 @@ class StartAndCloseableTest extends AnyWordSpec with BaseTest with HasExecutionC
       }
     }
 
-    override protected def startAsync(): Future[Unit] = {
+    override protected def startAsync()(implicit
+        initializationTraceContext: TraceContext
+    ): Future[Unit] = {
       startInvocations.incrementAndGet()
       started.future
     }

@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.indexer.parallel
 
 import akka.NotUsed
 import akka.stream.Materializer
-import akka.stream.scaladsl.{Sink, Source}
+import akka.stream.scaladsl.Source
 import com.daml.lf.data.Ref
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.api.domain
@@ -43,17 +43,12 @@ private[platform] final case class InitializeParallelIngestion(
     implicit val executionContext: ExecutionContext = ec
     implicit val loggingContext: LoggingContextWithTrace =
       LoggingContextWithTrace.empty
+    logger.info(s"Attempting to initialize with participant ID $providedParticipantId")
     for {
-      initialConditions <- readService.ledgerInitialConditions().runWith(Sink.head)(mat)
-      providedLedgerId = domain.LedgerId(initialConditions.ledgerId)
-      _ = logger.info(
-        s"Attempting to initialize with ledger ID $providedLedgerId and participant ID $providedParticipantId"
-      )
       _ <- dbDispatcher.executeSql(metrics.daml.index.db.initializeLedgerParameters)(
         parameterStorageBackend.initializeParameters(
           ParameterStorageBackend.IdentityParams(
-            ledgerId = providedLedgerId,
-            participantId = domain.ParticipantId(providedParticipantId),
+            participantId = domain.ParticipantId(providedParticipantId)
           ),
           loggerFactory,
         )

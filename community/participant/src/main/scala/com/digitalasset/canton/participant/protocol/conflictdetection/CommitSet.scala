@@ -3,19 +3,25 @@
 
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
+import cats.syntax.functor.*
+import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet.*
 import com.digitalasset.canton.participant.store.ContractKeyJournal
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.{
   ContractMetadata,
   LfContractId,
   LfGlobalKey,
+  RequestId,
+  SerializableContract,
   TargetDomainId,
   TransferId,
   WithContractHash,
 }
 import com.digitalasset.canton.util.SetsUtil.requireDisjoint
-import com.digitalasset.canton.{LfPartyId, TransferCounterO}
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{LfPartyId, TransferCounter, TransferCounterO}
 
 /** Describes the effect of a confirmation request on the active contracts, contract keys, and transfers.
   * Transient contracts appear the following two sets:
@@ -93,5 +99,44 @@ object CommitSet {
     override def pretty: Pretty[ArchivalCommit] = prettyOfClass(
       param("stakeholders", _.stakeholders)
     )
+  }
+
+  def createForTransaction(
+      successfulActivenessCheck: Boolean,
+      requestId: RequestId,
+      consumedInputsOfHostedParties: Map[LfContractId, WithContractHash[Set[LfPartyId]]],
+      transient: Map[LfContractId, WithContractHash[Set[LfPartyId]]],
+      createdContracts: Map[LfContractId, SerializableContract],
+      keyUpdates: Map[LfGlobalKey, ContractKeyJournal.Status],
+  )(protocolVersion: ProtocolVersion)(implicit loggingContext: ErrorLoggingContext): CommitSet = {
+    if (successfulActivenessCheck) {
+      val archivals = (consumedInputsOfHostedParties ++ transient).map {
+        case (cid, hostedStakeholders) =>
+          (
+            cid,
+            WithContractHash(
+              CommitSet.ArchivalCommit(hostedStakeholders.unwrap),
+              hostedStakeholders.contractHash,
+            ),
+          )
+      }
+      val transferCounter = TransferCounter.forCreatedContract(protocolVersion)
+      val creations = createdContracts.fmap(c =>
+        WithContractHash.fromContract(c, CommitSet.CreationCommit(c.metadata, transferCounter))
+      )
+      CommitSet(
+        archivals = archivals,
+        creations = creations,
+        transferOuts = Map.empty,
+        transferIns = Map.empty,
+        keyUpdates = keyUpdates,
+      )
+    } else {
+      SyncServiceAlarm
+        .Warn(s"Request $requestId with failed activeness check is approved.")
+        .report()
+      // TODO(i12904) Handle this case gracefully
+      throw new RuntimeException(s"Request $requestId with failed activeness check is approved.")
+    }
   }
 }

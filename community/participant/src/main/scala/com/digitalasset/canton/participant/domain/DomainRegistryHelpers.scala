@@ -78,9 +78,11 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, DomainHandle] = {
+    import sequencerAggregatedInfo.domainId
+
     for {
       indexedDomainId <- EitherT
-        .right(syncDomainPersistentStateManager.indexedDomainId(sequencerAggregatedInfo.domainId))
+        .right(syncDomainPersistentStateManager.indexedDomainId(domainId))
         .mapK(FutureUnlessShutdown.outcomeK)
 
       _ <- CryptoHandshakeValidator
@@ -89,12 +91,12 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
         .toEitherT[FutureUnlessShutdown]
 
       _ <- EitherT
-        .fromEither[Future](verifyDomainId(config, sequencerAggregatedInfo.domainId))
+        .fromEither[Future](verifyDomainId(config, domainId))
         .mapK(FutureUnlessShutdown.outcomeK)
 
       acceptedAgreement <- agreementClient
         .isRequiredAgreementAccepted(
-          sequencerAggregatedInfo.domainId,
+          domainId,
           sequencerAggregatedInfo.staticDomainParameters.protocolVersion,
         )
         .leftMap(e =>
@@ -115,7 +117,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       // check and issue the domain trust certificate
       _ <- topologyDispatcher
         .trustDomain(
-          sequencerAggregatedInfo.domainId,
+          domainId,
           sequencerAggregatedInfo.staticDomainParameters,
         )
         .leftMap(
@@ -125,7 +127,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       domainLoggerFactory = loggerFactory.append("domainId", indexedDomainId.domainId.toString)
 
       topologyFactory <- syncDomainPersistentStateManager
-        .topologyFactoryFor(sequencerAggregatedInfo.domainId)
+        .topologyFactoryFor(domainId)
         .toRight(
           DomainRegistryError.DomainRegistryInternalError
             .InvalidState("topology factory for domain is unavailable"): DomainRegistryError
@@ -144,7 +146,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
 
       domainCryptoApi <- EitherT.fromEither[FutureUnlessShutdown](
         cryptoApiProvider
-          .forDomain(sequencerAggregatedInfo.domainId)
+          .forDomain(domainId)
           .toRight(
             DomainRegistryError.DomainRegistryInternalError
               .InvalidState("crypto api for domain is unavailable"): DomainRegistryError
@@ -167,7 +169,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
         // Yields a unique path inside the given directory for record/replay purposes.
         def updateMemberRecordingPath(recordingConfig: RecordingConfig): RecordingConfig = {
           val namePrefix =
-            s"${participantId.show.stripSuffix("...")}-${sequencerAggregatedInfo.domainId.show.stripSuffix("...")}"
+            s"${participantId.show.stripSuffix("...")}-${domainId.show.stripSuffix("...")}"
           recordingConfig.setFilename(namePrefix)
         }
 
@@ -176,7 +178,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
           case _ => None // unauthenticated members don't need it
         }
         SequencerClientFactory(
-          sequencerAggregatedInfo.domainId,
+          domainId,
           domainCryptoApi,
           cryptoApiProvider.crypto,
           acceptedAgreement.map(_.id),
@@ -213,11 +215,11 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
         if (active) EitherT.pure[FutureUnlessShutdown, DomainRegistryError](())
         else {
           logger.debug(
-            s"Participant is not yet active on domain ${sequencerAggregatedInfo.domainId}. Initialising topology"
+            s"Participant is not yet active on domain ${domainId}. Initialising topology"
           )
           for {
             success <- topologyDispatcher.onboardToDomain(
-              sequencerAggregatedInfo.domainId,
+              domainId,
               config.domain,
               config.timeTracker,
               sequencerAggregatedInfo.sequencerConnections,
@@ -249,7 +251,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
         // TODO(i12076): Download topology state from one of the sequencers based on the health
         sequencerAggregatedInfo.sequencerConnections.default,
         syncDomainPersistentStateManager,
-        sequencerAggregatedInfo.domainId,
+        domainId,
         topologyClient,
         sequencerClientFactory,
         requestSigner,
@@ -269,7 +271,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
         )
         .mapK(FutureUnlessShutdown.outcomeK)
     } yield DomainHandle(
-      sequencerAggregatedInfo.domainId,
+      domainId,
       config.domain,
       sequencerAggregatedInfo.staticDomainParameters,
       sequencerClient,

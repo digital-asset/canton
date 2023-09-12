@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.domain.mediator
 
+import com.digitalasset.canton.config.CachingConfigs
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -40,7 +41,11 @@ class MediatorStateTest
       val domainId = DefaultTestIdentities.domainId
       val mediatorId = DefaultTestIdentities.mediator
       val alice = PlainInformee(LfPartyId.assertFromString("alice"))
-      val bob = ConfirmingParty(LfPartyId.assertFromString("bob"), 2, TrustLevel.Ordinary)
+      val bob = ConfirmingParty(
+        LfPartyId.assertFromString("bob"),
+        PositiveInt.tryCreate(2),
+        TrustLevel.Ordinary,
+      )
       val hashOps: HashOps = new SymbolicPureCrypto
       val h: Int => Hash = TestHash.digest
       val s: Int => Salt = TestSalt.generateSalt
@@ -89,21 +94,20 @@ class MediatorStateTest
           informeeMessage,
           testedProtocolVersion,
           mockTopologySnapshot,
-        )(
-          loggerFactory
         )(anyTraceContext, executorService)
         .futureValue // without explicit ec it deadlocks on AnyTestSuite.serialExecutionContext
 
     def mediatorState: MediatorState = {
-      val sut =
-        new MediatorState(
-          new InMemoryFinalizedResponseStore(loggerFactory),
-          new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts),
-          mock[Clock],
-          DomainTestMetrics.mediator,
-          timeouts,
-          loggerFactory,
-        )
+      val sut = new MediatorState(
+        new InMemoryFinalizedResponseStore(loggerFactory),
+        new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts),
+        mock[Clock],
+        DomainTestMetrics.mediator,
+        testedProtocolVersion,
+        CachingConfigs.defaultFinalizedMediatorRequestsCache,
+        timeouts,
+        loggerFactory,
+      )
       Await.result(sut.add(currentVersion), 1.second)
       sut
     }

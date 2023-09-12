@@ -99,6 +99,7 @@ final case class CantonNodeBootstrapCommonArguments[
     loggerFactory: NamedLoggerFactory,
     writeHealthDumpToFile: HealthDumpFunction,
     configuredOpenTelemetry: ConfiguredOpenTelemetry,
+    tracerProvider: TracerProvider,
 )
 
 abstract class CantonNodeBootstrapCommon[
@@ -133,8 +134,7 @@ abstract class CantonNodeBootstrapCommon[
   protected val cryptoConfig = config.crypto
   protected val adminApiConfig = config.adminApi
   protected val initConfig = config.init
-  protected val tracerProvider =
-    TracerProvider.Factory(arguments.configuredOpenTelemetry, name.unwrap)
+  protected val tracerProvider = arguments.tracerProvider
   protected implicit val tracer: Tracer = tracerProvider.tracer
   protected val initQueue: SimpleExecutionQueue = new SimpleExecutionQueue(
     s"init-queue-${arguments.name}",

@@ -17,7 +17,12 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.db.DbActiveContractStore.*
-import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractStore}
+import com.digitalasset.canton.participant.store.{
+  ActiveContractStore,
+  ContractChange,
+  ContractStore,
+  StateChangeType,
+}
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.{
@@ -45,6 +50,7 @@ import slick.jdbc.canton.SQLActionBuilder
 
 import scala.Ordered.orderingToOrdered
 import scala.annotation.nowarn
+import scala.collection.View
 import scala.collection.immutable.SortedMap
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -142,11 +148,10 @@ class DbActiveContractStore(
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
     processingTime.checkedTEvent {
       val transferCounter = TransferCounter.forCreatedContract(protocolVersion)
-      val contractIdAndTransferCounter = contractIds.map(_ -> transferCounter).toMap
+      val contractIdAndTransferCounter = contractIds.map(_ -> (transferCounter, toc)).toMap
       for {
         _ <- bulkInsert(
           contractIdAndTransferCounter,
-          toc,
           ChangeType.Activation,
           remoteDomain = None,
         )
@@ -180,8 +185,7 @@ class DbActiveContractStore(
     processingTime.checkedTEvent {
       for {
         _ <- bulkInsert(
-          contracts.map(cid => (cid, None: TransferCounterO)).toMap,
-          toc,
+          contracts.map(cid => (cid, (None: TransferCounterO, toc))).toMap,
           ChangeType.Deactivation,
           remoteDomain = None,
         )
@@ -210,9 +214,11 @@ class DbActiveContractStore(
     }
 
   private def indexedDomains(
-      contractByDomain: Seq[(TransferDomainId, Seq[(LfContractId, TransferCounterO)])]
+      contractByDomain: Seq[
+        (TransferDomainId, Seq[(LfContractId, (TransferCounterO, TimeOfChange))])
+      ]
   ): CheckedT[Future, AcsError, AcsWarning, Seq[
-    (IndexedDomain, Seq[(LfContractId, TransferCounterO)])
+    (IndexedDomain, Seq[(LfContractId, (TransferCounterO, TimeOfChange))])
   ]] =
     CheckedT.result(contractByDomain.parTraverse { case (domainId, contracts) =>
       IndexedDomain
@@ -220,60 +226,53 @@ class DbActiveContractStore(
         .map(_ -> contracts)
     })
 
-  def transferInContracts(
-      transferIns: Seq[(LfContractId, SourceDomainId, TransferCounterO)],
-      toc: TimeOfChange,
+  override def transferInContracts(
+      transferIns: Seq[(LfContractId, SourceDomainId, TransferCounterO, TimeOfChange)]
   )(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
     processingTime.checkedTEvent {
       val bySourceDomainIndexed =
-        transferIns.groupMap { case (_, sourceDomain, _) => sourceDomain } {
-          case (id, _, transferCounter) => id -> transferCounter
+        transferIns.groupMap { case (_, sourceDomain, _, _) => sourceDomain } {
+          case (id, _, transferCounter, toc) => (id, (transferCounter, toc))
         }.toSeq
       for {
         indexedSourceDomain <- indexedDomains(bySourceDomainIndexed)
-        _ <- indexedSourceDomain.parTraverse_ {
-          case (sourceDomain, contractIdsAndTransferCounter) =>
-            bulkInsert(
-              contractIdsAndTransferCounter.toMap,
-              toc,
-              ChangeType.Activation,
-              remoteDomain = Some(sourceDomain),
-            )
+        _ <- indexedSourceDomain.parTraverse_ { case (sourceDomain, contracts) =>
+          bulkInsert(
+            contracts.toMap,
+            ChangeType.Activation,
+            remoteDomain = Some(sourceDomain),
+          )
         }
         _ <- checkTransfersConsistency(
-          transferIns.map { case (transfer, _, counter) => transfer -> counter },
-          toc,
+          transferIns.map { case (transfer, _, counter, toc) => (transfer, counter, toc) },
           OperationType.TransferIn,
         )
       } yield ()
     }
 
-  def transferOutContracts(
-      transferOuts: Seq[(LfContractId, TargetDomainId, TransferCounterO)],
-      toc: TimeOfChange,
+  override def transferOutContracts(
+      transferOuts: Seq[(LfContractId, TargetDomainId, TransferCounterO, TimeOfChange)]
   )(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
     processingTime.checkedTEvent {
       val byTargetDomains =
-        transferOuts.groupMap { case (_, targetDomain, _) => targetDomain } {
-          case (id, _, transferCounter) => id -> transferCounter
+        transferOuts.groupMap { case (_, targetDomain, _, _) => targetDomain } {
+          case (id, _, transferCounter, toc) => (id, (transferCounter, toc))
         }.toSeq
       for {
         byTargetIndexed <- indexedDomains(byTargetDomains)
         _ <- byTargetIndexed.parTraverse_ { case (targetDomain, contracts) =>
           bulkInsert(
             contracts.toMap,
-            toc,
             ChangeType.Deactivation,
             remoteDomain = Some(targetDomain),
           )
         }
         _ <- checkTransfersConsistency(
-          transferOuts.map { case (cid, _, counter) => cid -> counter },
-          toc,
+          transferOuts.map { case (cid, _, counter, toc) => (cid, counter, toc) },
           OperationType.TransferOut,
         )
       } yield ()
@@ -810,18 +809,26 @@ class DbActiveContractStore(
             changeType == ChangeType.Activation
           }
           TimeOfChange(rc, ts) -> ActiveContractIdsChange(
-            acts.map { case (_, _, cid, _, transferCounter, _) => (cid, transferCounter) }.toMap,
+            acts.map { case (_, _, cid, _, transferCounter, opType) =>
+              if (opType == OperationType.Create)
+                (cid, StateChangeType(ContractChange.Created, transferCounter))
+              else
+                (cid, StateChangeType(ContractChange.Assigned, transferCounter))
+            }.toMap,
             deacts.map { case (_, requestCounter, cid, _, transferCounter, opType) =>
               if (opType == OperationType.Archive) {
                 (
                   cid,
-                  definedMaxTransferCountersPerCidUpToRc.getOrElse(
-                    (requestCounter, cid),
-                    maxTransferCountersPerRemainingCidUpToRc
-                      .getOrElse((requestCounter, cid), transferCounter),
+                  StateChangeType(
+                    ContractChange.Archived,
+                    definedMaxTransferCountersPerCidUpToRc.getOrElse(
+                      (requestCounter, cid),
+                      maxTransferCountersPerRemainingCidUpToRc
+                        .getOrElse((requestCounter, cid), transferCounter),
+                    ),
                   ),
                 )
-              } else (cid, transferCounter)
+              } else (cid, StateChangeType(ContractChange.Unassigned, transferCounter))
             }.toMap,
           )
         }
@@ -840,12 +847,11 @@ class DbActiveContractStore(
   }
 
   private def checkTransfersConsistency(
-      transfers: Seq[(LfContractId, TransferCounterO)],
-      toc: TimeOfChange,
+      transfers: Seq[(LfContractId, TransferCounterO, TimeOfChange)],
       operation: TransferOperationType,
   )(implicit traceContext: TraceContext): CheckedT[Future, AcsError, AcsWarning, Unit] =
     if (enableAdditionalConsistencyChecks) {
-      transfers.parTraverse_ { case (contractId, transferCounter) =>
+      transfers.parTraverse_ { case (contractId, transferCounter, toc) =>
         for {
           _ <- checkTocAgainstLatestCreation(contractId, toc)
           _ <- transferCounter
@@ -1036,8 +1042,7 @@ class DbActiveContractStore(
     })
 
   private def bulkInsert(
-      contractIdsWithTransferCounter: Map[LfContractId, TransferCounterO],
-      toc: TimeOfChange,
+      contractIdsWithTransferCounter: Map[LfContractId, (TransferCounterO, TimeOfChange)],
       change: ChangeType,
       remoteDomain: Option[IndexedDomain],
   )(implicit traceContext: TraceContext): CheckedT[Future, AcsError, AcsWarning, Unit] = {
@@ -1067,7 +1072,7 @@ class DbActiveContractStore(
     val insertAll =
       DbStorage.bulkOperation_(insertQuery, contractIdsWithTransferCounter, storage.profile) {
         pp => contractIdWithTransferCounter =>
-          val (contractId, transferCounter) = contractIdWithTransferCounter
+          val (contractId, (transferCounter, toc)) = contractIdWithTransferCounter
           pp >> contractId
           pp >> toc.timestamp
           pp >> toc.rc
@@ -1078,50 +1083,82 @@ class DbActiveContractStore(
           pp >> transferCounter
       }
 
+    @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
+    def unzip(toCheck: NonEmpty[Seq[(LfContractId, TimeOfChange)]]): (
+        NonEmpty[Seq[LfContractId]],
+        NonEmpty[Seq[RequestCounter]],
+        NonEmpty[Seq[CantonTimestamp]],
+    ) = {
+      val cids: Seq[LfContractId] =
+        new View.Map[(LfContractId, TimeOfChange), LfContractId](toCheck, _._1).toSeq
+      val rcs: Seq[RequestCounter] =
+        new View.Map[(LfContractId, TimeOfChange), RequestCounter](toCheck, _._2.rc).toSeq
+      val tss: Seq[CantonTimestamp] =
+        new View.Map[(LfContractId, TimeOfChange), CantonTimestamp](toCheck, _._2.timestamp).toSeq
+      (NonEmpty.from(cids).get, NonEmpty.from(rcs).get, NonEmpty.from(tss).get)
+    }
+
+    // This method relies on calls to bulkInsert inserting contract IDs exactly once
+    // for a given request counter and the request counter having a unique timestamp
     def checkIdempotence(
-        idsToCheck: NonEmpty[Seq[LfContractId]]
+        toCheck: NonEmpty[Seq[(LfContractId, TimeOfChange)]]
     ): CheckedT[Future, AcsError, AcsWarning, Unit] = {
       import DbStorage.Implicits.BuilderChain.*
+
+      val (idsToCheck, rcsToCheck, tssToCheck) = unzip(toCheck)
+
       val contractIdsNotInsertedInClauses =
         DbStorage.toInClauses_("contract_id", idsToCheck, maxContractIdSqlInListSize)
 
-      def query(inClause: SQLActionBuilderChain) = storage.profile match {
+      val rcsInClauses =
+        DbStorage.toInClauses_("request_counter", rcsToCheck, maxContractIdSqlInListSize)
+
+      val tssInClauses =
+        DbStorage.toInClauses_("ts", tssToCheck, maxContractIdSqlInListSize)
+
+      def query(
+          cidsInClause: SQLActionBuilderChain,
+          rcsInClause: SQLActionBuilderChain,
+          tssInClause: SQLActionBuilderChain,
+      ) = storage.profile match {
         case _: DbStorage.Profile.Oracle =>
-          sql"select contract_id, remote_domain_id, transfer_counter from active_contracts where domain_id = $domainId and " ++ inClause ++
-            sql" and ts = ${toc.timestamp} and request_counter = ${toc.rc} and change = $change and (operation <> $operation or " ++
+          sql"select contract_id, remote_domain_id, transfer_counter, request_counter, ts from active_contracts where domain_id = $domainId and " ++ cidsInClause ++
+            sql" and " ++ tssInClause ++ sql" and " ++ rcsInClause ++ sql" and change = $change and (operation <> $operation or " ++
             (if (remoteDomain.isEmpty) sql"remote_domain_id is not null"
              else sql"remote_domain_id <> $remoteDomain") ++ sql")"
         case _ =>
-          sql"select contract_id, remote_domain_id, transfer_counter from active_contracts where domain_id = $domainId and " ++ inClause ++
-            sql" and ts = ${toc.timestamp} and request_counter = ${toc.rc} and change = CAST($change as change_type) and (operation <> CAST($operation as operation_type) or " ++
+          sql"select contract_id, remote_domain_id, transfer_counter, request_counter, ts from active_contracts where domain_id = $domainId and " ++ cidsInClause ++
+            sql" and " ++ tssInClause ++ sql" and " ++ rcsInClause ++ sql" and change = CAST($change as change_type) and (operation <> CAST($operation as operation_type) or " ++
             (if (remoteDomain.isEmpty) sql"remote_domain_id is not null"
              else sql"remote_domain_id <> $remoteDomain") ++ sql")"
       }
 
       val queries =
-        contractIdsNotInsertedInClauses.map(inClause =>
-          query(inClause).as[(LfContractId, Option[Int], TransferCounterO)]
-        )
+        contractIdsNotInsertedInClauses.zip(rcsInClauses).zip(tssInClauses).map {
+          case ((cidsInClause, rcsInClause), tssInClause) =>
+            query(cidsInClause, rcsInClause, tssInClause)
+              .as[(LfContractId, Option[Int], TransferCounterO, RequestCounter, CantonTimestamp)]
+        }
       val results = storage
         .sequentialQueryAndCombine(queries, functionFullName)
         .flatMap(_.toList.parTraverseFilter {
-          case (cid, Some(remoteIdx), transferCounter) =>
+          case (cid, Some(remoteIdx), transferCounter, rc, ts) =>
             IndexedDomain
               .fromDbIndexOT("active_contracts", indexedStringStore)(remoteIdx)
               .map { indexed =>
-                (cid, TransferDetails(indexed.item, transferCounter))
+                (cid, TransferDetails(indexed.item, transferCounter), TimeOfChange(rc, ts))
               }
               .value
-          case (cid, None, transferCounter) =>
+          case (cid, None, transferCounter, rc, ts) =>
             Future.successful(
-              Some(cid -> CreationArchivalDetail(transferCounter))
+              Some((cid, CreationArchivalDetail(transferCounter), TimeOfChange(rc, ts)))
             )
         })
 
       CheckedT(results.map { presentWithOtherValues =>
         val isActivation = change == ChangeType.Activation
-        presentWithOtherValues.traverse_ { case (contractId, previousDetail) =>
-          val transferCounterO = contractIdsWithTransferCounter.get(contractId).flatten
+        presentWithOtherValues.traverse_ { case (contractId, previousDetail, toc) =>
+          val transferCounterO = contractIdsWithTransferCounter.get(contractId).flatMap(_._1)
           val detail = ActivenessChangeDetail(remoteDomain.map(_.item), transferCounterO)
           val warn =
             if (isActivation)
@@ -1149,7 +1186,9 @@ class DbActiveContractStore(
         // We don't analyze the update counts
         // so that we can use the fast IGNORE_ROW_ON_DUPKEY_INDEX directive in Oracle
         NonEmpty
-          .from(contractIdsWithTransferCounter.keys.toSeq)
+          .from(contractIdsWithTransferCounter.view.map { case (cid, (_, toc)) =>
+            (cid, toc)
+          }.toSeq)
           .map(checkIdempotence)
           .getOrElse(CheckedT.pure(()))
       } else CheckedT.pure(())

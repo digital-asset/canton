@@ -32,23 +32,11 @@ import com.digitalasset.canton.console.ConsoleEnvironment.Implicits.*
 import com.digitalasset.canton.crypto.{CryptoPureApi, Salt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{LastErrorsAppender, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.RepairService
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
+import com.digitalasset.canton.participant.admin.repair.RepairService
 import com.digitalasset.canton.participant.config.{AuthServiceConfig, BaseParticipantConfig}
 import com.digitalasset.canton.participant.ledger.api.JwtTokenUtilities
-import com.digitalasset.canton.protocol.{
-  AgreementText,
-  AuthenticatedContractIdVersion,
-  AuthenticatedContractIdVersionV2,
-  CantonContractIdVersion,
-  ContractMetadata,
-  LfContractId,
-  LfHash,
-  NonAuthenticatedContractIdVersion,
-  SerializableContract,
-  SerializableRawContractInstance,
-  UnicumGenerator,
-}
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.BinaryFileUtil
@@ -297,17 +285,15 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         env: ConsoleEnvironment
     ): SerializableContract =
       TraceContext.withNewTraceContext { implicit traceContext =>
-        env.run(
-          ConsoleCommandResult.fromEither(
-            RepairService.ContractConverter.contractDataToInstance(
-              contractData.templateId.toIdentifier,
-              contractData.createArguments,
-              contractData.signatories,
-              contractData.observers,
-              contractData.inheritedContractId,
-              contractData.ledgerCreateTime.map(_.toInstant).getOrElse(ledgerTime),
-              contractData.contractSalt,
-            )
+        env.runE(
+          RepairService.ContractConverter.contractDataToInstance(
+            contractData.templateId.toIdentifier,
+            contractData.createArguments,
+            contractData.signatories,
+            contractData.observers,
+            contractData.inheritedContractId,
+            contractData.ledgerCreateTime.map(_.toInstant).getOrElse(ledgerTime),
+            contractData.contractSalt,
           )
         )
       }
@@ -323,29 +309,27 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
     def contract_instance_to_data(
         contract: SerializableContract
     )(implicit env: ConsoleEnvironment): ContractData =
-      env.run(
-        ConsoleCommandResult.fromEither(
-          RepairService.ContractConverter.contractInstanceToData(contract).map {
-            case (
-                  templateId,
-                  createArguments,
-                  signatories,
-                  observers,
-                  contractId,
-                  contractSaltO,
-                  ledgerCreateTime,
-                ) =>
-              ContractData(
-                TemplateId.fromIdentifier(templateId),
+      env.runE(
+        RepairService.ContractConverter.contractInstanceToData(contract).map {
+          case (
+                templateId,
                 createArguments,
                 signatories,
                 observers,
                 contractId,
                 contractSaltO,
-                Some(ledgerCreateTime.underlying),
-              )
-          }
-        )
+                ledgerCreateTime,
+              ) =>
+            ContractData(
+              TemplateId.fromIdentifier(templateId),
+              createArguments,
+              signatories,
+              observers,
+              contractId,
+              contractSaltO,
+              Some(ledgerCreateTime.underlying),
+            )
+        }
       )
 
     @Help.Summary("Recompute authenticated contract ids.")
@@ -490,7 +474,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
     @Help.Summary("Reads a ByteString from a file.")
     @Help.Description("Fails with an exception, if the file can't be read.")
     def read_byte_string_from_file(fileName: String)(implicit env: ConsoleEnvironment): ByteString =
-      env.run(ConsoleCommandResult.fromEither(BinaryFileUtil.readByteStringFromFile(fileName)))
+      env.runE(BinaryFileUtil.readByteStringFromFile(fileName))
 
   }
 

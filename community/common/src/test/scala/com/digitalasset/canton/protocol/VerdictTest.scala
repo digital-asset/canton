@@ -5,8 +5,15 @@ package com.digitalasset.canton.protocol
 
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.error.MediatorError
-import com.digitalasset.canton.protocol.messages.Verdict.{Approve, ParticipantReject}
+import com.digitalasset.canton.protocol.messages.Verdict.{
+  Approve,
+  MediatorRejectV0,
+  MediatorRejectV1,
+  MediatorRejectV2,
+  ParticipantReject,
+}
 import com.digitalasset.canton.protocol.messages.{LocalReject, LocalVerdict, Verdict}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -21,7 +28,7 @@ class VerdictTest extends AnyWordSpec with BaseTest {
   private lazy val representativeProtocolVersion =
     LocalVerdict.protocolVersionRepresentativeFor(testedProtocolVersion)
 
-  "TransactionResult" can {
+  "Verdict" can {
     "converting to and from proto" should {
       "result in an equal object" in {
         val exampleResults = Table(
@@ -46,7 +53,7 @@ class VerdictTest extends AnyWordSpec with BaseTest {
               testedProtocolVersion,
             ),
           ),
-          ("timeout", MediatorError.Timeout.Reject.create(testedProtocolVersion)),
+          ("timeout", VerdictTest.timeoutVerdict(testedProtocolVersion)),
         )
         forAll(exampleResults) { (resultType: String, original: Verdict) =>
           val cycled =
@@ -62,4 +69,40 @@ class VerdictTest extends AnyWordSpec with BaseTest {
       }
     }
   }
+}
+
+object VerdictTest {
+  def timeoutVerdict(protocolVersion: ProtocolVersion): Verdict.MediatorReject =
+    if (protocolVersion >= Verdict.MediatorRejectV2.firstApplicableProtocolVersion)
+      MediatorRejectV2(
+        MediatorError.MalformedMessage.Reject("").rpcStatusWithoutLoggingContext()
+      )(Verdict.protocolVersionRepresentativeFor(protocolVersion))
+    else if (protocolVersion >= Verdict.MediatorRejectV1.firstApplicableProtocolVersion)
+      MediatorRejectV1(
+        "",
+        MediatorError.MalformedMessage.id,
+        MediatorError.MalformedMessage.category.asInt,
+      )(Verdict.protocolVersionRepresentativeFor(protocolVersion))
+    else
+      MediatorRejectV0.tryCreate(
+        com.digitalasset.canton.protocol.v0.MediatorRejection.Code.Timeout,
+        "",
+      )
+
+  def malformedVerdict(protocolVersion: ProtocolVersion): Verdict.MediatorReject =
+    if (protocolVersion >= Verdict.MediatorRejectV2.firstApplicableProtocolVersion)
+      MediatorRejectV2(
+        MediatorError.MalformedMessage.Reject("").rpcStatusWithoutLoggingContext()
+      )(Verdict.protocolVersionRepresentativeFor(protocolVersion))
+    else if (protocolVersion >= Verdict.MediatorRejectV1.firstApplicableProtocolVersion)
+      MediatorRejectV1(
+        "",
+        MediatorError.MalformedMessage.id,
+        MediatorError.MalformedMessage.category.asInt,
+      )(Verdict.protocolVersionRepresentativeFor(protocolVersion))
+    else
+      MediatorRejectV0.tryCreate(
+        com.digitalasset.canton.protocol.v0.MediatorRejection.Code.Timeout,
+        "",
+      )
 }

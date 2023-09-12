@@ -152,12 +152,7 @@ trait ActiveContractStore
 
   /** Marks the given contracts as transferred in from `toc`'s timestamp (inclusive) onwards.
     *
-    * @param transferIns The contract IDs to transfer-in and their source domains and their transfer counter.
-    * @param toc The time of change consisting of
-    *            <ul>
-    *              <li>The request counter of the transfer-in request.</li>
-    *              <li>The timestamp on the transfer-in request.</li>
-    *            </ul>
+    * @param transferIns The contract IDs to transfer-in, each with its source domain, transfer counter and time of change.
     * @return The future completes when the contract states have been updated.
     *         The following irregularities are reported:
     *         <ul>
@@ -169,8 +164,7 @@ trait ActiveContractStore
     *         </ul>
     */
   def transferInContracts(
-      transferIns: Seq[(LfContractId, SourceDomainId, TransferCounterO)],
-      toc: TimeOfChange,
+      transferIns: Seq[(LfContractId, SourceDomainId, TransferCounterO, TimeOfChange)]
   )(implicit traceContext: TraceContext): CheckedT[Future, AcsError, AcsWarning, Unit]
 
   def transferInContract(
@@ -181,16 +175,11 @@ trait ActiveContractStore
   )(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
-    transferInContracts(Seq((contractId, sourceDomain, transferCounter)), toc)
+    transferInContracts(Seq((contractId, sourceDomain, transferCounter, toc)))
 
   /** Marks the given contracts as [[ActiveContractStore.TransferredAway]] from `toc`'s timestamp (inclusive) onwards.
     *
-    * @param transferOuts The contract IDs to transfer out and their target domains and their updated transfer counters.
-    * @param toc The time of change consisting of
-    *            <ul>
-    *              <li>The request counter of the transfer-out request.</li>
-    *              <li>The timestamp on the transfer-out request.</li>
-    *            </ul>
+    * @param transferOuts The contract IDs to transfer out, each with its target domain, transfer counter and time of change.
     * @return The future completes when the contract state has been updated.
     *         The following irregularities are reported:
     *         <ul>
@@ -202,8 +191,7 @@ trait ActiveContractStore
     *         </ul>
     */
   def transferOutContracts(
-      transferOuts: Seq[(LfContractId, TargetDomainId, TransferCounterO)],
-      toc: TimeOfChange,
+      transferOuts: Seq[(LfContractId, TargetDomainId, TransferCounterO, TimeOfChange)]
   )(implicit traceContext: TraceContext): CheckedT[Future, AcsError, AcsWarning, Unit]
 
   def transferOutContract(
@@ -214,7 +202,7 @@ trait ActiveContractStore
   )(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
-    transferOutContracts(Seq((contractId, targetDomain, transferCounter)), toc)
+    transferOutContracts(Seq((contractId, targetDomain, transferCounter, toc)))
 
   /** Deletes all entries about archived contracts whose status hasn't changed after the timestamp.
     *
@@ -617,12 +605,31 @@ trait ActiveContractSnapshot {
 object ActiveContractSnapshot {
 
   final case class ActiveContractIdsChange(
-      activations: Map[LfContractId, TransferCounterO],
-      deactivations: Map[LfContractId, TransferCounterO],
+      activations: Map[LfContractId, StateChangeType],
+      deactivations: Map[LfContractId, StateChangeType],
   )
 
   object ActiveContractIdsChange {
     val empty = ActiveContractIdsChange(Map.empty, Map.empty)
   }
 
+}
+
+sealed trait ContractChange extends Product with Serializable with PrettyPrinting {
+  override def pretty: Pretty[ContractChange.this.type] = prettyOfObject[this.type]
+}
+object ContractChange {
+  case object Created extends ContractChange
+  case object Archived extends ContractChange
+  case object Unassigned extends ContractChange
+  case object Assigned extends ContractChange
+}
+
+/** Type of state change of a contract as returned by [[com.digitalasset.canton.participant.store.ActiveContractStore.changesBetween]]
+  * through a [[com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange]]
+  */
+final case class StateChangeType(change: ContractChange, transferCounter: TransferCounterO)
+    extends PrettyPrinting {
+  override def pretty: Pretty[StateChangeType] =
+    prettyOfClass(param("", _.change), paramIfDefined("", _.transferCounter))
 }

@@ -9,11 +9,13 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.BatchAggregatorConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{LogEntry, TracedLogger}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.github.blemale.scaffeine.Scaffeine
 import org.scalatest.Assertion
@@ -23,7 +25,11 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.{Future, Promise}
 import scala.util.Random
 
-class BatchAggregatorTest extends AnyWordSpec with BaseTest with HasExecutionContext {
+class BatchAggregatorTest
+    extends AnyWordSpec
+    with BaseTest
+    with HasExecutionContext
+    with HasTestCloseContext {
   type K = Int
   type V = String
   type BatchGetterType = NonEmpty[Seq[Traced[K]]] => Future[Iterable[V]]
@@ -43,7 +49,8 @@ class BatchAggregatorTest extends AnyWordSpec with BaseTest with HasExecutionCon
       override def kind: String = "item"
       override def logger: TracedLogger = BatchAggregatorTest.this.logger
       override def executeBatch(items: NonEmpty[Seq[Traced[K]]])(implicit
-          traceContext: TraceContext
+          traceContext: TraceContext,
+          callerCloseContext: CloseContext,
       ): Future[Iterable[V]] = batchGetter(items)
       override def prettyItem: Pretty[K] = implicitly
     }

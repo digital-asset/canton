@@ -52,7 +52,7 @@ class DbInFlightSubmissionStore(
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends InFlightSubmissionStore
-    with DbStore {
+    with DbStore { self =>
 
   import storage.api.*
   import storage.converters.*
@@ -203,7 +203,8 @@ class DbInFlightSubmissionStore(
         override def logger: TracedLogger = DbInFlightSubmissionStore.this.logger
 
         override def executeBatch(items: NonEmpty[Seq[Traced[SequencedRootHash]]])(implicit
-            traceContext: TraceContext
+            traceContext: TraceContext,
+            callerCloseContext: CloseContext,
         ): Future[Iterable[Unit]] = processingTime.event {
           def setParams(pp: PositionedParameters)(data: Traced[SequencedRootHash]): Unit = {
             val Traced(SequencedRootHash(rootHash, submission)) = data
@@ -223,7 +224,9 @@ class DbInFlightSubmissionStore(
             storage.profile,
           )(setParams)
 
-          storage.queryAndUpdate(action, functionFullName).map(_ => Seq.fill(items.size)(()))
+          storage
+            .queryAndUpdate(action, functionFullName)(traceContext, self.closeContext)
+            .map(_ => Seq.fill(items.size)(()))
         }
 
         override def prettyItem: Pretty[SequencedRootHash] = implicitly
@@ -383,7 +386,10 @@ object DbInFlightSubmissionStore {
 
     override def executeBatch(
         submissions: NonEmpty[Seq[Traced[InFlightSubmission[UnsequencedSubmission]]]]
-    )(implicit traceContext: TraceContext): Future[Iterable[Try[Result]]] = {
+    )(implicit
+        traceContext: TraceContext,
+        callerCloseContext: CloseContext,
+    ): Future[Iterable[Try[Result]]] = {
 
       type SubmissionAndCell =
         BulkUpdatePendingCheck[InFlightSubmission[UnsequencedSubmission], Result]
@@ -403,7 +409,7 @@ object DbInFlightSubmissionStore {
         bulkUpdateWithCheck(
           outstanding.map(_.target),
           "DbInFlightSubmissionStore.register",
-        ).map { results =>
+        )(traceContext, closeContext).map { results =>
           val newOutstandingB = List.newBuilder[SubmissionAndCell]
           results.lazyZip(outstanding).foreach { (result, submissionAndCell) =>
             result match {

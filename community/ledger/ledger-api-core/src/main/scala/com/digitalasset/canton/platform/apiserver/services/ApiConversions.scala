@@ -139,6 +139,7 @@ object ApiConversions {
       effectiveAt = transaction.effectiveAt,
       events = transaction.events,
       offset = transaction.offset,
+      traceContext = transaction.traceContext,
     )
 
   def toV1(transactionTree: TransactionTreeV2): TransactionTreeV1 =
@@ -150,6 +151,7 @@ object ApiConversions {
       offset = transactionTree.offset,
       rootEventIds = transactionTree.rootEventIds,
       eventsById = transactionTree.eventsById,
+      traceContext = transactionTree.traceContext,
     )
 
   def toV1(getUpdatesResponse: GetUpdatesResponse): Seq[GetTransactionsResponseV1] =

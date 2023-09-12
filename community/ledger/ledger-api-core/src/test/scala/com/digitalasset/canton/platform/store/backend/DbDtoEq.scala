@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.backend
 
+import org.scalactic.Equality
 import org.scalatest.matchers.should.Matchers
 
 import scala.annotation.nowarn
@@ -29,6 +30,16 @@ object DbDtoEq extends Matchers {
     case (a: Seq[_], b: Seq[_]) =>
       a.size == b.size && a.zip(b).forall({ case (x, y) => DbDtoEq.areEqual(x, y) })
     case (_, _) => false
+  }
+
+  implicit val eqOptArray: Equality[Option[Array[Byte]]] = (first: Option[Array[Byte]], b: Any) => {
+    val second = Option(b).getOrElse(Some[Array[Byte]]).asInstanceOf[Option[Array[Byte]]]
+    (first, second) match {
+      case (None, None) => true
+      case (None, Some(s)) => s.isEmpty
+      case (Some(f), None) => f.isEmpty
+      case (Some(f), Some(s)) => f === s
+    }
   }
 
 }

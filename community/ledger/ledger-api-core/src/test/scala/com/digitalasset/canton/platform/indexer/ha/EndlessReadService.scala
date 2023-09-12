@@ -14,11 +14,7 @@ import com.daml.lf.transaction.test.{TestNodeBuilder, TreeTransactionBuilder}
 import com.daml.lf.transaction.{CommittedTransaction, TransactionNodeStatistics}
 import com.daml.lf.value.Value
 import com.digitalasset.canton.ledger.api.health.HealthStatus
-import com.digitalasset.canton.ledger.configuration.{
-  Configuration,
-  LedgerId,
-  LedgerInitialConditions,
-}
+import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerId}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.{
   CompletionInfo,
@@ -53,16 +49,6 @@ final case class EndlessReadService(
     synchronized(
       if (aborted) HealthStatus.unhealthy else HealthStatus.healthy
     )
-  )
-
-  override def ledgerInitialConditions(): Source[LedgerInitialConditions, NotUsed] = blocking(
-    synchronized {
-      logger.info("EndlessReadService.ledgerInitialConditions() called")
-      initialConditionCalls += 1
-      Source
-        .single(LedgerInitialConditions(ledgerId, configuration, recordTime(0)))
-        .via(killSwitch.flow)
-    }
   )
 
   /** Produces the following stream of updates:

@@ -5,15 +5,17 @@ package com.digitalasset.canton.participant.protocol
 
 import cats.syntax.flatMap.*
 import cats.syntax.option.*
+import com.daml.metrics.api.MetricName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{Encrypted, HashPurpose, TestHash}
 import com.digitalasset.canton.data.ViewType.{TransferInViewType, TransferOutViewType}
 import com.digitalasset.canton.data.*
-import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory}
+import com.digitalasset.canton.metrics.MetricHandle.NoOpMetricsFactory
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
+import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
 import com.digitalasset.canton.participant.protocol.MessageDispatcher.{AcsCommitment as _, *}
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
 import com.digitalasset.canton.participant.protocol.submission.{
@@ -30,6 +32,7 @@ import com.digitalasset.canton.protocol.{
   RequestProcessor,
   RootHash,
   SourceDomainId,
+  VerdictTest,
   ViewHash,
   v0 as protocolv0,
 }
@@ -112,6 +115,7 @@ trait MessageDispatcherTest {
             RepairProcessor,
             InFlightSubmissionTracker,
             NamedLoggerFactory,
+            SyncDomainMetrics,
         ) => MessageDispatcher,
         initRc: RequestCounter = RequestCounter(0),
         cleanReplaySequencerCounter: SequencerCounter = SequencerCounter(0),
@@ -233,6 +237,11 @@ trait MessageDispatcherTest {
         }
       }
 
+      val syncDomainMetrics = new SyncDomainMetrics(
+        MetricName("test"),
+        NoOpMetricsFactory,
+      )
+
       val messageDispatcher = mkMd(
         testedProtocolVersion,
         uck.getOrElse(defaultStaticDomainParameters.uniqueContractKeys),
@@ -248,6 +257,7 @@ trait MessageDispatcherTest {
         repairProcessor,
         inFlightSubmissionTracker,
         loggerFactory,
+        syncDomainMetrics,
       )
 
       Fixture(
@@ -346,6 +356,7 @@ trait MessageDispatcherTest {
           RepairProcessor,
           InFlightSubmissionTracker,
           NamedLoggerFactory,
+          SyncDomainMetrics,
       ) => MessageDispatcher
   ) = {
 
@@ -383,10 +394,10 @@ trait MessageDispatcherTest {
     val commitment =
       SignedProtocolMessage.tryFrom(rawCommitment, testedProtocolVersion, dummySignature)
 
-    val reject = MediatorError.MalformedMessage.Reject("", testedProtocolVersion)
+    val reject = VerdictTest.malformedVerdict(testedProtocolVersion)
     val malformedMediatorRequestResult =
       SignedProtocolMessage.tryFrom(
-        MalformedMediatorRequestResult(
+        MalformedMediatorRequestResult.tryCreate(
           RequestId(CantonTimestamp.MinValue),
           domainId,
           TestViewType,
@@ -1172,11 +1183,9 @@ trait MessageDispatcherTest {
 
       "malformed mediator requests be sent to the right processor" in {
         def malformed(viewType: ViewType, processor: ProcessorOfFixture): Future[Assertion] = {
-          val reject = MediatorError.MalformedMessage.Reject("", testedProtocolVersion)
-
           val result =
             SignedProtocolMessage.tryFrom(
-              MalformedMediatorRequestResult(
+              MalformedMediatorRequestResult.tryCreate(
                 RequestId(CantonTimestamp.MinValue),
                 domainId,
                 viewType,

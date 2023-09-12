@@ -15,7 +15,6 @@ import com.digitalasset.canton.ledger.runner.common.OptConfigValue.{
   optReaderEnabled,
   optWriterEnabled,
 }
-import com.digitalasset.canton.platform.apiserver.ApiServerConfig
 import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.config.{
@@ -101,7 +100,6 @@ class PureConfigReaderWriterSpec
     testReaderWriterIsomorphism(secure, ArbitraryConfig.indexerConfig)
     testReaderWriterIsomorphism(secure, ArbitraryConfig.packageMetadataViewConfig)
     testReaderWriterIsomorphism(secure, ArbitraryConfig.commandServiceConfig)
-    testReaderWriterIsomorphism(secure, ArbitraryConfig.apiServerConfig)
     testReaderWriterIsomorphism(secure, ArbitraryConfig.indexServiceConfig)
   }
 
@@ -454,55 +452,17 @@ class PureConfigReaderWriterSpec
     )
   }
 
-  behavior of "ApiServerConfig"
-
-  val validApiServerConfigValue =
-    """
-      |api-stream-shutdown-timeout = "5s"
-      |command {
-      |  default-tracking-timeout = "300 seconds"
-      |  max-commands-in-flight = 256
-      |}
-      |configuration-load-timeout = "10s"
-      |management-service-timeout = "2m"
-      |max-inbound-message-size = 67108864
-      |port = 6865
-      |rate-limit {
-      |  enabled = true
-      |  max-api-services-index-db-queue-size = 1000
-      |  max-api-services-queue-size = 10000
-      |  max-used-heap-space-percentage = 100
-      |  min-free-heap-space-bytes = 0
-      |}
-      |seeding = strong
-      |time-provider-type = wall-clock
-      |user-management {
-      |  cache-expiry-after-write-in-seconds = 5
-      |  enabled = false
-      |  max-cache-size = 100
-      |  max-users-page-size = 1000
-      |}""".stripMargin
-
-  it should "support current defaults" in {
-    val value = validApiServerConfigValue
-    convert(apiServerConfigConvert, value).value shouldBe ApiServerConfig()
-  }
-
-  it should "not support unknown keys" in {
-    val value = "unknown-key=yes\n" + validApiServerConfigValue
-    convert(apiServerConfigConvert, value).left.value.prettyPrint(0) should include("Unknown key")
-  }
-
   behavior of "HaConfig"
 
   val validHaConfigValue =
     """
       |  indexer-lock-id = 105305792
       |  indexer-worker-lock-id = 105305793
-      |  main-lock-acquire-retry-millis = 500
-      |  main-lock-checker-period-millis = 1000
-      |  worker-lock-acquire-max-retry = 1000
-      |  worker-lock-acquire-retry-millis = 500
+      |  main-lock-acquire-retry-timeout= 500 milliseconds
+      |  main-lock-checker-period = 1000 milliseconds
+      |  worker-lock-acquire-max-retries = 1000
+      |  worker-lock-acquire-retry-timeout = 500 milliseconds
+      |  main-lock-checker-jdbc-network-timeout = 10000 milliseconds
       |  """.stripMargin
 
   it should "support current defaults" in {
@@ -580,7 +540,6 @@ class PureConfigReaderWriterSpec
       |buffered-events-processing-parallelism=8
       |global-max-event-id-queries=20
       |global-max-event-payload-queries=10
-      |in-memory-fan-out-thread-pool-size=16
       |in-memory-state-updater-parallelism=2
       |max-contract-key-state-cache-size=100000
       |max-contract-state-cache-size=100000

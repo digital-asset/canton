@@ -116,6 +116,9 @@ object ProtoConverter {
   def parseLfPartyId(party: String): ParsingResult[LfPartyId] =
     parseString(party)(LfPartyId.fromString)
 
+  def parseLfPartyIdO(party: String): ParsingResult[Option[LfPartyId]] =
+    Option.when(party.nonEmpty)(parseLfPartyId(party)).sequence
+
   def parseLfParticipantId(party: String): ParsingResult[LedgerParticipantId] =
     parseString(party)(LedgerParticipantId.fromString)
 

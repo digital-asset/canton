@@ -185,16 +185,16 @@ trait MediatorDeduplicationStoreTest extends AsyncWordSpec with BaseTest { this:
         _ <- store.store(data2)
         _ <- store.store(data3)
 
-        _ <- store.prune(CantonTimestamp.ofEpochSecond(10), closeContext)
+        _ <- store.prune(CantonTimestamp.ofEpochSecond(10))
         _ = store.allData() shouldBe Set(data2, data3)
 
-        _ <- store.prune(CantonTimestamp.MinValue, closeContext)
+        _ <- store.prune(CantonTimestamp.MinValue)
         _ = store.allData() shouldBe Set(data2, data3)
 
-        _ <- store.prune(CantonTimestamp.ofEpochSecond(11), closeContext)
+        _ <- store.prune(CantonTimestamp.ofEpochSecond(11))
         _ = store.allData() shouldBe Set(data3)
 
-        _ <- store.prune(CantonTimestamp.MaxValue, closeContext)
+        _ <- store.prune(CantonTimestamp.MaxValue)
       } yield store.allData() shouldBe empty
     }
   }

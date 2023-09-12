@@ -114,6 +114,7 @@ abstract class CantonNodeBootstrapBase[
           ReleaseProtocolVersion.latest,
           timeouts,
           loggerFactory,
+          tracerProvider,
         )
         .valueOr(err => throw new RuntimeException(s"Failed to initialize crypto: $err"))
     )

@@ -6,6 +6,7 @@ package com.digitalasset.canton.crypto
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.CryptoTestHelper.TestMessage
 import com.digitalasset.canton.crypto.DecryptionError.FailedToDecrypt
+import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
@@ -185,9 +186,18 @@ trait EncryptionTest extends BaseTest with CryptoTestHelper { this: AsyncWordSpe
           encrypted.ciphertext,
           publicKey2.id,
         )
-        message2 <- crypto.privateCrypto
-          .decrypt(encrypted2)(TestMessage.fromByteString)
-          .value
+        message2 <- loggerFactory.assertLoggedWarningsAndErrorsSeq(
+          crypto.privateCrypto
+            .decrypt(encrypted2)(TestMessage.fromByteString)
+            .value,
+          LogEntry.assertLogSeq(
+            Seq.empty,
+            Seq(
+              // Aws logs a failure here
+              _.warningMessage should (include("Request") and include("failed"))
+            ),
+          ),
+        )
       } yield message2
 
       res.map(res => res.left.value shouldBe a[FailedToDecrypt])

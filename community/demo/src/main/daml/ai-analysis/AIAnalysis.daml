@@ -11,21 +11,22 @@ type AnonymizedRecordsId = ContractId AnonymizedRecords
 type AnalysisResultId = ContractId AnalysisResult
 type PendingAnalysisId = ContractId PendingAnalysis
 
-template OfferAnalysis 
-  with 
-    registry : Party 
-    owner : Party 
+template OfferAnalysis
+  with
+    registry : Party
+    owner : Party
     analyser : Party
-  where 
+  where
 
-    signatory registry 
+    signatory registry
+    observer owner
 
-    controller owner can 
-      AcceptAnalysis : (AnonymizedRecordsId, PendingAnalysisId)
-        with  
-          registerId : RegisterId 
-        do 
-          registerData <- fetch registerId 
+    choice AcceptAnalysis : (AnonymizedRecordsId, PendingAnalysisId)
+      with
+        registerId : RegisterId
+      controller owner
+        do
+          registerData <- fetch registerId
           assert (registerData.owner == owner)
           newRegisterId <- exercise registerId AddObserver with party = registry
           tm <- getTime
@@ -34,59 +35,58 @@ template OfferAnalysis
           an <- create AnonymizedRecords with registry, analyser, clientId, records = registerData.records
           return (an, pa)
 
-template PendingAnalysis 
-  with 
+template PendingAnalysis
+  with
     registry : Party
-    owner : Party 
-    analyser: Party 
-    clientId : Text 
-    registerId : RegisterId 
-  where 
+    owner : Party
+    analyser: Party
+    clientId : Text
+    registerId : RegisterId
+  where
 
-    signatory registry, owner 
+    signatory registry, owner
 
-    controller registry can 
-      RecordResult : RegisterId 
-        with 
-          resultId : AnalysisResultId
-        do 
-          result <- fetch resultId 
+    choice RecordResult : RegisterId
+      with
+        resultId : AnalysisResultId
+      controller registry
+        do
+          result <- fetch resultId
           assert (result.clientId == clientId)
           assert (result.registry == registry)
           assert (result.analyser == analyser)
           exercise resultId ResultRecorded
-          exercise registerId AddRecord with description = result.diagnosis, doctor = analyser 
+          exercise registerId AddRecord with description = result.diagnosis, doctor = analyser
 
 template AnonymizedRecords
-  with  
-    registry : Party 
-    analyser : Party 
-    clientId : Text 
+  with
+    registry : Party
+    analyser : Party
+    clientId : Text
     records : [Record]
-  where 
-    signatory registry 
-    observer analyser 
+  where
+    signatory registry
+    observer analyser
 
-    controller analyser can 
-
-      ProcessingDone : AnalysisResultId
-        with 
-          diagnosis : Text 
-        do 
+    choice ProcessingDone : AnalysisResultId
+      with
+        diagnosis : Text
+      controller analyser
+        do
           create AnalysisResult with registry, analyser, clientId, diagnosis
-      
-template AnalysisResult 
-  with 
-    registry : Party 
-    analyser : Party 
-    clientId : Text 
-    diagnosis : Text 
+
+template AnalysisResult
+  with
+    registry : Party
+    analyser : Party
+    clientId : Text
+    diagnosis : Text
   where
 
-    signatory registry, analyser  
-    
-    controller registry can 
-      ResultRecorded : ()
+    signatory registry, analyser
+
+    choice ResultRecorded : ()
+      controller registry
         do
           return ()
 
@@ -98,18 +98,17 @@ setup = script do
   (alice, registry, doctor, rc) <- MedicalRecord.setup
 
   -- offer analysis
-  ofr <- submit registry do 
+  ofr <- submit registry do
     createCmd OfferAnalysis with registry, owner = alice, analyser
 
   -- accept offer
-  (ar, pa) <- submit alice do 
+  (ar, pa) <- submit alice do
     exerciseCmd ofr AcceptAnalysis with registerId = rc
-    
-  -- process analysis 
-  pra <- submit analyser do 
+
+  -- process analysis
+  pra <- submit analyser do
     exerciseCmd ar ProcessingDone with diagnosis = "The person is surprisingly healthy."
 
-  -- record result 
-  submit registry do 
-    exerciseCmd pa RecordResult with resultId = pra 
-  
+  -- record result
+  submit registry do
+    exerciseCmd pa RecordResult with resultId = pra

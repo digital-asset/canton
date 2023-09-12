@@ -6,6 +6,7 @@ package com.digitalasset.canton.data
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.{
@@ -147,7 +148,7 @@ final case class TransferInCommonData private (
     TransferInCommonData.protocolVersionRepresentativeFor(targetProtocolVersion.v)
 
   def confirmingParties: Set[Informee] =
-    stakeholders.map(ConfirmingParty(_, 1, TrustLevel.Ordinary))
+    stakeholders.map(ConfirmingParty(_, PositiveInt.one, TrustLevel.Ordinary))
 
   @transient override protected lazy val companionObj: TransferInCommonData.type =
     TransferInCommonData
@@ -490,7 +491,17 @@ object TransferInView
     ),
   )
 
-  override lazy val invariants = Seq(transferCounterInvariant)
+  override lazy val invariants = Seq(
+    transferCounterInvariant,
+    sourceProtocolVersionDefaultValue,
+  )
+
+  private lazy val rpv4: RepresentativeProtocolVersion[TransferInView.type] =
+    protocolVersionRepresentativeFor(ProtocolVersion.v4)
+
+  // TODO(#12373) Adapt when releasing BFT
+  private lazy val rpvDev: RepresentativeProtocolVersion[TransferInView.type] =
+    protocolVersionRepresentativeFor(ProtocolVersion.dev)
 
   lazy val transferCounterInvariant = InvariantFromInclusive[TransferCounterO](
     _.transferCounter,
@@ -498,6 +509,54 @@ object TransferInView
     "transferCounter should not be empty",
     protocolVersionRepresentativeFor(TransferCommonData.minimumPvForTransferCounter),
   )
+
+  lazy val submittingParticipantDefaultValue: DefaultValueUntilExclusive[LedgerParticipantId] =
+    DefaultValueUntilExclusive(
+      _.submitterMetadata.submittingParticipant,
+      "submitterMetadata.submittingParticipant",
+      rpvDev,
+      LedgerParticipantId.assertFromString("no-participant-id"),
+    )
+
+  lazy val commandIdDefaultValue: DefaultValueUntilExclusive[LedgerCommandId] =
+    DefaultValueUntilExclusive(
+      _.submitterMetadata.commandId,
+      "submitterMetadata.commandId",
+      rpvDev,
+      LedgerCommandId.assertFromString("no-command-id"),
+    )
+
+  lazy val applicationIdDefaultValue: DefaultValueUntilExclusive[LedgerApplicationId] =
+    DefaultValueUntilExclusive(
+      _.submitterMetadata.applicationId,
+      "submitterMetadata.applicationId",
+      rpvDev,
+      LedgerApplicationId.assertFromString("no-application-id"),
+    )
+
+  lazy val submissionIdDefaultValue: DefaultValueUntilExclusive[Option[LedgerSubmissionId]] =
+    DefaultValueUntilExclusive(
+      _.submitterMetadata.submissionId,
+      "submitterMetadata.submissionId",
+      rpvDev,
+      None,
+    )
+
+  lazy val workflowIdDefaultValue: DefaultValueUntilExclusive[Option[LfWorkflowId]] =
+    DefaultValueUntilExclusive(
+      _.submitterMetadata.workflowId,
+      "submitterMetadata.worfklowId",
+      rpvDev,
+      None,
+    )
+
+  lazy val sourceProtocolVersionDefaultValue: DefaultValueUntilExclusive[SourceProtocolVersion] =
+    DefaultValueUntilExclusive(
+      _.sourceProtocolVersion,
+      "sourceProtocolVersion",
+      rpv4,
+      SourceProtocolVersion(ProtocolVersion.v3),
+    )
 
   def create(hashOps: HashOps)(
       salt: Salt,
@@ -508,18 +567,19 @@ object TransferInView
       sourceProtocolVersion: SourceProtocolVersion,
       targetProtocolVersion: TargetProtocolVersion,
       transferCounter: TransferCounterO,
-  ): Either[String, TransferInView] =
-    for {
-      _ <- transferCounterInvariant.validate(transferCounter, targetProtocolVersion.v)
-    } yield TransferInView(
-      salt,
-      submitterMetadata,
-      contract,
-      creatingTransactionId,
-      transferOutResultEvent,
-      sourceProtocolVersion,
-      transferCounter,
-    )(hashOps, protocolVersionRepresentativeFor(targetProtocolVersion.v), None)
+  ): Either[String, TransferInView] = Either
+    .catchOnly[IllegalArgumentException](
+      TransferInView(
+        salt,
+        submitterMetadata,
+        contract,
+        creatingTransactionId,
+        transferOutResultEvent,
+        sourceProtocolVersion,
+        transferCounter,
+      )(hashOps, protocolVersionRepresentativeFor(targetProtocolVersion.v), None)
+    )
+    .leftMap(_.getMessage)
 
   private[this] def fromProtoV0(hashOps: HashOps, transferInViewP: v0.TransferInView)(
       bytes: ByteString
@@ -548,10 +608,10 @@ object TransferInView
       commonData.salt,
       TransferSubmitterMetadata(
         commonData.submitter,
-        TransferViewTree.VersionedLedgerApplicationId.default,
-        TransferViewTree.VersionedLedgerParticipantId.default,
-        TransferViewTree.VersionedLedgerCommandId.default,
-        submissionId = None,
+        applicationIdDefaultValue.defaultValue,
+        submittingParticipantDefaultValue.defaultValue,
+        commandIdDefaultValue.defaultValue,
+        submissionId = submissionIdDefaultValue.defaultValue,
         workflowId = None,
       ),
       contract,
@@ -590,10 +650,10 @@ object TransferInView
       commonData.salt,
       TransferSubmitterMetadata(
         commonData.submitter,
-        TransferViewTree.VersionedLedgerApplicationId.default,
-        TransferViewTree.VersionedLedgerParticipantId.default,
-        TransferViewTree.VersionedLedgerCommandId.default,
-        submissionId = None,
+        applicationIdDefaultValue.defaultValue,
+        submittingParticipantDefaultValue.defaultValue,
+        commandIdDefaultValue.defaultValue,
+        submissionId = submissionIdDefaultValue.defaultValue,
         workflowId = None,
       ),
       contract,

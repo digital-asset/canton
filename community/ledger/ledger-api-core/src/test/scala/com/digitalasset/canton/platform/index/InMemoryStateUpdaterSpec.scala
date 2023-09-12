@@ -267,7 +267,7 @@ object InMemoryStateUpdaterSpec {
         reassignmentInfo = ReassignmentInfo(
           sourceDomain = SourceDomainId(domainId1),
           targetDomain = TargetDomainId(domainId2),
-          submitter = party1,
+          submitter = Option(party1),
           reassignmentCounter = 15L,
           hostedStakeholders = party2 :: Nil,
           unassignId = CantonTimestamp.assertFromLong(155555L),
@@ -312,7 +312,7 @@ object InMemoryStateUpdaterSpec {
         reassignmentInfo = ReassignmentInfo(
           sourceDomain = SourceDomainId(domainId2),
           targetDomain = TargetDomainId(domainId1),
-          submitter = party2,
+          submitter = Option(party2),
           reassignmentCounter = 15L,
           hostedStakeholders = party1 :: Nil,
           unassignId = CantonTimestamp.assertFromLong(1555551L),
@@ -612,7 +612,7 @@ object InMemoryStateUpdaterSpec {
       reassignmentInfo = ReassignmentInfo(
         sourceDomain = SourceDomainId(domainId1),
         targetDomain = TargetDomainId(domainId2),
-        submitter = party1,
+        submitter = Option(party1),
         reassignmentCounter = 15L,
         hostedStakeholders = party2 :: Nil,
         unassignId = CantonTimestamp.assertFromLong(155555L),
@@ -634,7 +634,7 @@ object InMemoryStateUpdaterSpec {
       reassignmentInfo = ReassignmentInfo(
         sourceDomain = SourceDomainId(domainId2),
         targetDomain = TargetDomainId(domainId1),
-        submitter = party2,
+        submitter = Option(party2),
         reassignmentCounter = 15L,
         hostedStakeholders = party1 :: Nil,
         unassignId = CantonTimestamp.assertFromLong(1555551L),

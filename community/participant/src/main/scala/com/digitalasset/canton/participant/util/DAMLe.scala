@@ -299,8 +299,6 @@ class DAMLe(
           .lookupLfInstance(acoid)
           .value
           .flatMap(optInst => handleResult(contracts, resume(optInst)))
-      case ResultNeedCreate(acoid, resume) =>
-        handleResult(contracts, resume(None)) // TODO(#14281) Add ResultNeedCreate support
       case ResultError(err) => Future.successful(Left(err))
       case ResultInterruption(continue) =>
         handleResult(contracts, iterateOverInterrupts(continue))

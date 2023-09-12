@@ -95,7 +95,6 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
     private val inFlightSubmissionStore = mock[InFlightSubmissionStore]
     private val sequencerInfoLoader = mock[SequencerInfoLoader]
 
-    private val ledgerId = participantId.uid.id.unwrap
     private implicit val mat: Materializer = mock[Materializer] // not used
     private val syncDomainStateFactory: SyncDomainEphemeralStateFactory =
       mock[SyncDomainEphemeralStateFactoryImpl]
@@ -154,7 +153,6 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       partyNotifier,
       syncCrypto,
       pruningProcessor,
-      ledgerId,
       DAMLe.newEngine(uniqueContractKeys = false, enableLfDev = false, enableStackTraces = false),
       syncDomainStateFactory,
       new SimClock(loggerFactory = loggerFactory),

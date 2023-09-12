@@ -10,12 +10,11 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.Lifecycle
+import com.digitalasset.canton.lifecycle.{CloseContext, Lifecycle}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.TimedLoadGauge
-import com.digitalasset.canton.participant.admin.RepairService.RepairContext
-import com.digitalasset.canton.participant.admin.RepairService.RepairContext.*
+import com.digitalasset.canton.participant.admin.repair.RepairContext
 import com.digitalasset.canton.participant.protocol.RequestJournal.{RequestData, RequestState}
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.db.DbRequestJournalStore.ReplaceRequest
@@ -46,12 +45,11 @@ class DbRequestJournalStore(
     maxItemsInSqlInClause: PositiveNumeric[Int],
     insertBatchAggregatorConfig: BatchAggregatorConfig,
     replaceBatchAggregatorConfig: BatchAggregatorConfig,
-    enableAdditionalConsistencyChecksInOracle: Boolean,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(override private[store] implicit val ec: ExecutionContext)
     extends RequestJournalStore
-    with DbStore {
+    with DbStore { self =>
 
   import DbStorage.Implicits.*
   import storage.api.*
@@ -98,8 +96,10 @@ class DbRequestJournalStore(
       override def logger: TracedLogger = DbRequestJournalStore.this.logger
 
       override def executeBatch(items: NonEmpty[Seq[Traced[RequestData]]])(implicit
-          traceContext: TraceContext
-      ): Future[Iterable[Try[Unit]]] = bulkUpdateWithCheck(items, "DbRequestJournalStore.insert")
+          traceContext: TraceContext,
+          callerCloseContext: CloseContext,
+      ): Future[Iterable[Try[Unit]]] =
+        bulkUpdateWithCheck(items, "DbRequestJournalStore.insert")(traceContext, self.closeContext)
 
       override protected def bulkUpdateAction(items: NonEmpty[Seq[Traced[RequestData]]])(implicit
           batchTraceContext: TraceContext
@@ -241,8 +241,11 @@ class DbRequestJournalStore(
       override def logger: TracedLogger = DbRequestJournalStore.this.logger
 
       override def executeBatch(items: NonEmpty[Seq[Traced[DbRequestJournalStore.ReplaceRequest]]])(
-          implicit traceContext: TraceContext
-      ): Future[Iterable[Try[Result]]] = bulkUpdateWithCheck(items, "DbRequestJournalStore.replace")
+          implicit
+          traceContext: TraceContext,
+          callerCloseContext: CloseContext,
+      ): Future[Iterable[Try[Result]]] =
+        bulkUpdateWithCheck(items, "DbRequestJournalStore.replace")(traceContext, self.closeContext)
 
       override protected def bulkUpdateAction(items: NonEmpty[Seq[Traced[ReplaceRequest]]])(implicit
           batchTraceContext: TraceContext

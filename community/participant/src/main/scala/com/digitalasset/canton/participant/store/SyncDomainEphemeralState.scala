@@ -9,7 +9,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.health.HealthReporting.HealthComponent
-import com.digitalasset.canton.lifecycle.{AsyncCloseable, FlagCloseable, Lifecycle}
+import com.digitalasset.canton.lifecycle.{AsyncCloseable, CloseContext, FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
@@ -57,7 +57,7 @@ class SyncDomainEphemeralState(
     override val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
-)(implicit executionContext: ExecutionContext)
+)(implicit executionContext: ExecutionContext, closeContext: CloseContext)
     extends SyncDomainEphemeralStateLookup
     with FlagCloseable
     with NamedLogging

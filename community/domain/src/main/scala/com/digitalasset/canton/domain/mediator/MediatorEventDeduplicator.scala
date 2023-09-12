@@ -10,6 +10,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.store.MediatorDeduplicationStore
 import com.digitalasset.canton.error.MediatorError
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
@@ -49,12 +50,13 @@ private[mediator] trait MediatorEventDeduplicator {
   def rejectDuplicates(
       envelopesByEvent: Seq[(TracedProtocolEvent, Seq[DefaultOpenEnvelope])]
   )(implicit
-      executionContext: ExecutionContext
+      executionContext: ExecutionContext,
+      callerCloseContext: CloseContext,
   ): Future[(Seq[(TracedProtocolEvent, Seq[DefaultOpenEnvelope])], Future[Unit])] =
     MonadUtil
       .sequentialTraverse(envelopesByEvent) { case (event, envelopes) =>
         implicit val traceContext: TraceContext = event.traceContext
-        rejectDuplicates(event.value.timestamp, envelopes)(traceContext).map {
+        rejectDuplicates(event.value.timestamp, envelopes)(traceContext, callerCloseContext).map {
           case (uniqueEnvelopes, storeF) => (event, uniqueEnvelopes) -> storeF
         }
       }
@@ -69,7 +71,10 @@ private[mediator] trait MediatorEventDeduplicator {
   def rejectDuplicates(
       requestTimestamp: CantonTimestamp,
       envelopes: Seq[DefaultOpenEnvelope],
-  )(implicit traceContext: TraceContext): Future[(Seq[DefaultOpenEnvelope], Future[Unit])]
+  )(implicit
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
+  ): Future[(Seq[DefaultOpenEnvelope], Future[Unit])]
 }
 
 private[mediator] object MediatorEventDeduplicator {
@@ -124,7 +129,10 @@ class DefaultMediatorEventDeduplicator(
   override def rejectDuplicates(
       requestTimestamp: CantonTimestamp,
       envelopes: Seq[DefaultOpenEnvelope],
-  )(implicit traceContext: TraceContext): Future[(Seq[DefaultOpenEnvelope], Future[Unit])] =
+  )(implicit
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
+  ): Future[(Seq[DefaultOpenEnvelope], Future[Unit])] =
     MonadUtil
       .sequentialTraverse(envelopes) { envelope =>
         envelope.protocolMessage match {
@@ -145,7 +153,8 @@ class DefaultMediatorEventDeduplicator(
       request: MediatorRequest,
       envelopes: Seq[DefaultOpenEnvelope],
   )(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
   ): Future[(Boolean, Future[Unit])] = {
     val uuid = request.requestUuid
     val previousUsages = store.findUuid(uuid, requestTimestamp)
@@ -163,12 +172,11 @@ class DefaultMediatorEventDeduplicator(
         }
       case Some(previousUsagesNE) =>
         val expireAfter = previousUsagesNE.map(_.expireAfter).max1
-        val verdict = MediatorError.MalformedMessage.Reject(
+        val rejection = MediatorError.MalformedMessage.Reject(
           s"The request uuid ($uuid) must not be used until $expireAfter.",
           v0.MediatorRejection.Code.NonUniqueRequestUuid,
-          protocolVersion,
         )
-        verdict.report()
+        rejection.report()
 
         val rootHashMessages = envelopes.mapFilter(
           ProtocolMessage.select[RootHashMessage[SerializedRootHashMessagePayload]]
@@ -181,7 +189,7 @@ class DefaultMediatorEventDeduplicator(
             RequestId(requestTimestamp),
             Some(request),
             rootHashMessages,
-            verdict,
+            MediatorVerdict.MediatorReject(rejection).toVerdict(protocolVersion),
             decisionTime,
           )
           (false, sendF)

@@ -6,6 +6,7 @@ package com.digitalasset.canton.util
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.BatchAggregatorConfig
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.metrics.TimedLoadGauge
@@ -41,7 +42,11 @@ trait BatchAggregator[A, B] {
     *         some item in a batch, the exception may propagate to the [[scala.concurrent.Future]]s
     *         of all items in the batch.
     */
-  def run(item: A)(implicit ec: ExecutionContext, traceContext: TraceContext): Future[B]
+  def run(item: A)(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
+  ): Future[B]
 }
 
 object BatchAggregator {
@@ -59,7 +64,7 @@ object BatchAggregator {
       )
 
     case BatchAggregatorConfig.NoBatching =>
-      new NoOpBatchAggregator[A, B](processor.executeSingle(_)(_, _))
+      new NoOpBatchAggregator[A, B](processor.executeSingle(_)(_, _, _))
   }
 
   /** Processor that defines the computation that a [[BatchAggregator]] batches. */
@@ -73,13 +78,17 @@ object BatchAggregator {
 
     /** Computation for a single item.
       * Should be equivalent to
-      * ```
+      * {{{
       *   executeBatch(Seq(Traced(item))).map(_.head)
-      * ```
+      * }}}
       */
     def executeSingle(
         item: A
-    )(implicit ec: ExecutionContext, traceContext: TraceContext): Future[B] =
+    )(implicit
+        ec: ExecutionContext,
+        traceContext: TraceContext,
+        callerCloseContext: CloseContext,
+    ): Future[B] =
       executeBatch(NonEmpty(Seq, Traced(item))).flatMap(_.headOption match {
         case Some(value) => Future.successful(value)
         case None =>
@@ -94,7 +103,8 @@ object BatchAggregator {
       *         Must have the same length
       */
     def executeBatch(items: NonEmpty[Seq[Traced[A]]])(implicit
-        traceContext: TraceContext
+        traceContext: TraceContext,
+        callerCloseContext: CloseContext,
     ): Future[Iterable[B]]
 
     /** Pretty printer for items */
@@ -108,10 +118,15 @@ object BatchAggregator {
   }
 }
 
-class NoOpBatchAggregator[A, B](executeSingle: (A, ExecutionContext, TraceContext) => Future[B])
-    extends BatchAggregator[A, B] {
-  override def run(item: A)(implicit ec: ExecutionContext, traceContext: TraceContext): Future[B] =
-    executeSingle(item, ec, traceContext)
+class NoOpBatchAggregator[A, B](
+    executeSingle: (A, ExecutionContext, TraceContext, CloseContext) => Future[B]
+) extends BatchAggregator[A, B] {
+  override def run(item: A)(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
+  ): Future[B] =
+    executeSingle(item, ec, traceContext, callerCloseContext)
 }
 
 class BatchAggregatorImpl[A, B](
@@ -127,7 +142,11 @@ class BatchAggregatorImpl[A, B](
   private val queuedRequests: ConcurrentLinkedQueue[QueueType] =
     new ConcurrentLinkedQueue[QueueType]()
 
-  override def run(item: A)(implicit ec: ExecutionContext, traceContext: TraceContext): Future[B] =
+  override def run(item: A)(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
+  ): Future[B] =
     maybeMeasureTime {
       val oldInFlight = inFlight.getAndUpdate(v => (v + 1).min(maximumInFlight))
 
@@ -148,7 +167,11 @@ class BatchAggregatorImpl[A, B](
 
   private def runSingleWithoutIncrement(
       item: A
-  )(implicit ec: ExecutionContext, traceContext: TraceContext): Future[B] = {
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
+  ): Future[B] = {
     Future.fromTry(Try(processor.executeSingle(item))).flatten.thereafter { result =>
       inFlight.decrementAndGet().discard[Int]
       maybeRunQueuedQueries()
@@ -165,7 +188,10 @@ class BatchAggregatorImpl[A, B](
     if the queue is non-empty, execute a batch of items.
    */
   @SuppressWarnings(Array("org.wartremover.warts.While"))
-  private def maybeRunQueuedQueries()(implicit ec: ExecutionContext): Unit = {
+  private def maybeRunQueuedQueries()(implicit
+      ec: ExecutionContext,
+      callerCloseContext: CloseContext,
+  ): Unit = {
     val oldInFlight = inFlight.getAndUpdate(v => (v + 1).min(maximumInFlight))
 
     if (oldInFlight < maximumInFlight) {
@@ -183,7 +209,7 @@ class BatchAggregatorImpl[A, B](
             val batchTraceContext = TraceContext.ofBatch(items.toList)(processor.logger)
 
             Future
-              .fromTry(Try(processor.executeBatch(items)(batchTraceContext)))
+              .fromTry(Try(processor.executeBatch(items)(batchTraceContext, callerCloseContext)))
               .flatten
               .onComplete { result =>
                 inFlight.decrementAndGet()

@@ -24,15 +24,17 @@ private[backend] trait StorageBackendTestsCompletions
     TraceContext.withNewTraceContext { aTraceContext =>
       val party = someParty
       val applicationId = someApplicationId
+      val emptyTraceContext = SerializableTraceContext(TraceContext.empty).toDamlProto.toByteArray
+      val serializableTraceContext = SerializableTraceContext(aTraceContext).toDamlProto.toByteArray
 
       val dtos = Vector(
         dtoConfiguration(offset(1)),
         dtoCompletion(offset(2), submitter = party),
-        dtoCompletion(offset(3), submitter = party, traceContext = None),
+        dtoCompletion(offset(3), submitter = party, traceContext = emptyTraceContext),
         dtoCompletion(
           offset(4),
           submitter = party,
-          traceContext = Some(SerializableTraceContext(aTraceContext).toDamlProto.toByteArray),
+          traceContext = serializableTraceContext,
         ),
       )
 
@@ -61,13 +63,8 @@ private[backend] trait StorageBackendTestsCompletions
       completions2to3 should have length 1
       completions1to9 should have length 3
 
-      completions1to9.head.completion.map(_.traceContext) shouldBe Some(
-        Some(SerializableTraceContext(TraceContext.empty).toDamlProto)
-      )
-      // even though we serialize a none, it will be returned as empty tracecontext
-      completions1to9(1).completion.map(_.traceContext) shouldBe Some(
-        Some(SerializableTraceContext(TraceContext.empty).toDamlProto)
-      )
+      completions1to9.head.completion.map(_.traceContext) shouldBe Some(None)
+      completions1to9(1).completion.map(_.traceContext) shouldBe Some(None)
       completions1to9(2).completion.map(_.traceContext) shouldBe Some(
         Some(SerializableTraceContext(aTraceContext).toDamlProto)
       )

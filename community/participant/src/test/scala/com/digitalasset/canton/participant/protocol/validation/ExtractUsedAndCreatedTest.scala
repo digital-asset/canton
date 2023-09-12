@@ -53,11 +53,11 @@ class ExtractUsedAndCreatedTest extends BaseTestWordSpec with HasExecutionContex
 
     val tree = etf.rootTransactionViewTree(singleCreate.view0)
     val transactionViewTrees = NonEmpty(Seq, (tree, Option.empty[Signature]))
+    val transactionViews = transactionViewTrees.map { case (viewTree, _signature) => viewTree.view }
 
-    val actual = underTest.usedAndCreated(transactionViewTrees)
+    val actual = underTest.usedAndCreated(transactionViews)
 
     val expected = UsedAndCreated(
-      rootViewsWithSignatures = transactionViewTrees,
       contracts = emptyUsedAndCreatedContracts.copy(maybeCreated =
         Map(singleCreate.contractId -> singleCreate.created.headOption)
       ),

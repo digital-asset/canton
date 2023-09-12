@@ -4,6 +4,7 @@
 package com.digitalasset.canton.store
 
 import com.digitalasset.canton.data.{CantonTimestamp, Counter}
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.resource.TransactionalStoreUpdate
 import com.digitalasset.canton.tracing.TraceContext
@@ -29,7 +30,8 @@ trait CursorPreheadStore[Discr] extends AutoCloseable {
     * The prehead counter should be set to the counter before the head of the corresponding cursor.
     */
   def advancePreheadTo(newPrehead: CursorPrehead[Discr])(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
   ): Future[Unit] =
     advancePreheadToTransactionalStoreUpdate(newPrehead).runStandalone()
 

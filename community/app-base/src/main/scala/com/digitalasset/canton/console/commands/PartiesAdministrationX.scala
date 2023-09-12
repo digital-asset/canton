@@ -37,6 +37,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.ParticipantNodeX
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
@@ -160,6 +161,7 @@ class ParticipantPartiesAdministrationGroupX(
       waitForDomain: DomainChoice = DomainChoice.Only(Seq()),
       synchronizeParticipants: Seq[ParticipantReferenceX] = Seq(),
       groupAddressing: Boolean = false,
+      mustFullyAuthorize: Boolean = true,
   ): PartyId = {
 
     def registered(lst: => Seq[ListPartiesResult]): Set[DomainId] = {
@@ -242,7 +244,13 @@ class ParticipantPartiesAdministrationGroupX(
             )
               .map(domains => (p, domains intersect domainIds))
           }
-          _ <- runPartyCommand(partyId, participants, threshold, groupAddressing).toEither
+          _ <- runPartyCommand(
+            partyId,
+            participants,
+            threshold,
+            groupAddressing,
+            mustFullyAuthorize,
+          ).toEither
           _ <- validDisplayName match {
             case None => Right(())
             case Some(name) =>
@@ -286,6 +294,7 @@ class ParticipantPartiesAdministrationGroupX(
       participants: Seq[ParticipantId],
       threshold: PositiveInt,
       groupAddressing: Boolean,
+      mustFullyAuthorize: Boolean,
       force: Boolean = false,
   ): ConsoleCommandResult[SignedTopologyTransactionX[TopologyChangeOpX, PartyToParticipantX]] = {
 
@@ -309,6 +318,8 @@ class ParticipantPartiesAdministrationGroupX(
           ),
           signedBy = Seq(this.participantId.uid.namespace.fingerprint),
           serial = None,
+          store = AuthorizedStore.filterName,
+          mustFullyAuthorize = mustFullyAuthorize,
         )
       )
   }

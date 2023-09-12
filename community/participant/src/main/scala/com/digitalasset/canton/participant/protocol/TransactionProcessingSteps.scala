@@ -10,6 +10,7 @@ import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
+import com.daml.error.utils.DeserializedCantonError
 import com.daml.lf.data.ImmArray
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
@@ -37,7 +38,7 @@ import com.digitalasset.canton.participant.protocol.TransactionProcessor.Submiss
   SequencerRequest,
 }
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.*
-import com.digitalasset.canton.participant.protocol.conflictdetection.ActivenessResult
+import com.digitalasset.canton.participant.protocol.conflictdetection.{ActivenessResult, CommitSet}
 import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicator.DeduplicationFailed
 import com.digitalasset.canton.participant.protocol.submission.ConfirmationRequestFactory.*
 import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker.{
@@ -55,18 +56,23 @@ import com.digitalasset.canton.participant.protocol.validation.InternalConsisten
   ErrorWithInternalConsistencyCheck,
   alertingPartyLookup,
 }
+import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.ErrorWithSubTransaction
 import com.digitalasset.canton.participant.protocol.validation.TimeValidator.TimeCheckFailure
 import com.digitalasset.canton.participant.protocol.validation.*
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.sync.*
-import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
+import com.digitalasset.canton.protocol.WellFormedTransaction.{
+  WithSuffixesAndMerged,
+  WithoutSuffixes,
+}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.DefaultDeserializationError
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, MediatorRef, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
@@ -767,19 +773,29 @@ class TransactionProcessingSteps(
     // TODO(i12911): check that all non-root lightweight trees can be decrypted with the expected (derived) randomness
     //   Also, check that all the view's informees received the derived randomness
 
+    val rootViewTreesWithSignatures = fullViewsWithSignatures.map {
+      case (WithRecipients(viewTree, _), signature) =>
+        (viewTree, signature)
+    }
+    val rootViews = rootViewTreesWithSignatures.map { case (viewTree, _signature) => viewTree.view }
+
     val usedAndCreatedF = ExtractUsedAndCreated(
       participantId,
       staticDomainParameters,
-      fullViewsWithSignatures.map { case (WithRecipients(viewTree, _), signature) =>
-        (viewTree, signature)
-      },
+      rootViews,
       snapshot.ipsSnapshot,
       loggerFactory,
     )
 
     val fut = usedAndCreatedF.map { usedAndCreated =>
       val enrichedTransaction =
-        EnrichedTransaction(policy, usedAndCreated, workflowIdO, submitterMetaO)
+        EnrichedTransaction(
+          policy,
+          rootViewTreesWithSignatures,
+          usedAndCreated,
+          workflowIdO,
+          submitterMetaO,
+        )
 
       val activenessSet = usedAndCreated.activenessSet
 
@@ -808,7 +824,7 @@ class TransactionProcessingSteps(
       traceContext: TraceContext
   ): EitherT[Future, TransactionProcessorError, Unit] =
     authenticateInputContractsInternal(
-      pendingDataAndResponseArgs.enrichedTransaction.rootViewsWithUsedAndCreated.contracts.used
+      pendingDataAndResponseArgs.enrichedTransaction.usedAndCreated.contracts.used
     )
 
   override def constructPendingDataAndResponse(
@@ -847,21 +863,20 @@ class TransactionProcessingSteps(
       for {
         _ <- pendingCursor
 
-        rootViewsWithUsedAndCreated = enrichedTransaction.rootViewsWithUsedAndCreated
-        rootViews = rootViewsWithUsedAndCreated.rootViewsWithSignatures.map { case (viewTree, _) =>
+        rootViewTrees = enrichedTransaction.rootViewTreesWithSignatures.map { case (viewTree, _) =>
           viewTree
         }
 
         authenticationResult <-
           authenticationValidator.verifyViewSignatures(
             requestId,
-            rootViewsWithUsedAndCreated.rootViewsWithSignatures,
+            enrichedTransaction.rootViewTreesWithSignatures,
             snapshot,
           )
 
         consistencyResultE = ContractConsistencyChecker
           .assertInputContractsInPast(
-            rootViewsWithUsedAndCreated.contracts.used.toList,
+            enrichedTransaction.usedAndCreated.contracts.used.toList,
             ledgerTime,
           )
 
@@ -869,7 +884,7 @@ class TransactionProcessingSteps(
 
         // `tryCommonData` should never throw here because all views have the same root hash
         // which already commits to the ParticipantMetadata and CommonMetadata
-        commonData = checked(tryCommonData(rootViews))
+        commonData = checked(tryCommonData(rootViewTrees))
         amSubmitter = enrichedTransaction.submitterMetadataO.exists(
           _.submitterParticipant == participantId
         )
@@ -885,14 +900,14 @@ class TransactionProcessingSteps(
 
         authorizationResult <- authorizationValidator.checkAuthorization(
           requestId,
-          rootViews,
+          rootViewTrees,
           ipsSnapshot,
         )
 
         conformanceResultE <- modelConformanceChecker
           .check(
-            rootViews,
-            rootViewsWithUsedAndCreated.keys.keyResolverFor(_),
+            rootViewTrees,
+            enrichedTransaction.usedAndCreated.keys.keyResolverFor(_),
             pendingDataAndResponseArgs.rc,
             ipsSnapshot,
             commonData,
@@ -900,13 +915,13 @@ class TransactionProcessingSteps(
           .value
 
         globalKeyHostedParties <- InternalConsistencyChecker.hostedGlobalKeyParties(
-          rootViews,
+          rootViewTrees,
           participantId,
           snapshot.ipsSnapshot,
         )
 
         internalConsistencyResultE = internalConsistencyChecker.check(
-          rootViews,
+          rootViewTrees,
           alertingPartyLookup(globalKeyHostedParties),
         )
 
@@ -945,7 +960,7 @@ class TransactionProcessingSteps(
         ViewPosition.orderViewPosition.toOrdering
       )
 
-      enrichedTransaction.rootViewsWithUsedAndCreated.rootViewsWithSignatures
+      enrichedTransaction.rootViewTreesWithSignatures
         .map { case (view, _) => view }
         .forgetNE
         .flatMap(v => v.view.allSubviewsWithPosition(v.viewPosition))
@@ -1018,6 +1033,7 @@ class TransactionProcessingSteps(
           ))
         }
 
+      val usedAndCreated = enrichedTransaction.usedAndCreated
       validation.TransactionValidationResult(
         transactionId = enrichedTransaction.transactionId,
         confirmationPolicy = enrichedTransaction.policy,
@@ -1028,18 +1044,15 @@ class TransactionProcessingSteps(
         authorizationResult = parallelChecksResult.authorizationResult,
         modelConformanceResultE = parallelChecksResult.conformanceResultE,
         internalConsistencyResultE = parallelChecksResult.internalConsistencyResultE,
-        consumedInputsOfHostedParties =
-          enrichedTransaction.rootViewsWithUsedAndCreated.contracts.consumedInputsOfHostedStakeholders,
-        witnessedAndDivulged =
-          enrichedTransaction.rootViewsWithUsedAndCreated.contracts.witnessedAndDivulged,
-        createdContracts = enrichedTransaction.rootViewsWithUsedAndCreated.contracts.created,
-        transient = enrichedTransaction.rootViewsWithUsedAndCreated.contracts.transient,
-        keyUpdates =
-          enrichedTransaction.rootViewsWithUsedAndCreated.keys.uckUpdatedKeysOfHostedMaintainers,
+        consumedInputsOfHostedParties = usedAndCreated.contracts.consumedInputsOfHostedStakeholders,
+        witnessedAndDivulged = usedAndCreated.contracts.witnessedAndDivulged,
+        createdContracts = usedAndCreated.contracts.created,
+        transient = usedAndCreated.contracts.transient,
+        keyUpdates = usedAndCreated.keys.uckUpdatedKeysOfHostedMaintainers,
         successfulActivenessCheck = activenessResult.isSuccessful,
         viewValidationResults = viewResults.result(),
         timeValidationResultE = parallelChecksResult.timeValidationResultE,
-        hostedWitnesses = enrichedTransaction.rootViewsWithUsedAndCreated.hostedWitnesses,
+        hostedWitnesses = usedAndCreated.hostedWitnesses,
         replayCheckResult = parallelChecksResult.replayCheckResult,
       )
     }
@@ -1185,24 +1198,24 @@ class TransactionProcessingSteps(
       submitterMetaO.flatMap(completionInfoFromSubmitterMetadataO(_, freshOwnTimelyTx))
 
     rejectionReason.logWithContext(Map("requestId" -> pendingTransaction.requestId.toString))
-    val rejection =
-      rejectionReason match {
-        // Turn canton-specific DuplicateKey and InconsistentKey errors into generic daml error code for duplicate/inconsistent keys for conformance.
-        // TODO(#7866): As part of mediator privacy work, clean up this ugly error code remapping
-        case duplicateKeyReject: LocalReject.ConsistencyRejections.DuplicateKey.Reject =>
-          LedgerSyncEvent.CommandRejected.FinalReason(
-            ConsistencyErrors.DuplicateContractKey
-              .Reject(duplicateKeyReject.cause)
-              .rpcStatus()
-          )
-        case inconsistentKeyReject: LocalReject.ConsistencyRejections.InconsistentKey.Reject =>
-          LedgerSyncEvent.CommandRejected.FinalReason(
-            ConsistencyErrors.InconsistentContractKey
-              .Reject(inconsistentKeyReject.cause)
-              .rpcStatus()
-          )
-        case reason => LedgerSyncEvent.CommandRejected.FinalReason(reason.rpcStatus())
+    val rejectionReasonStatus = rejectionReason.rpcStatusWithoutLoggingContext()
+    val mappedRejectionReason =
+      DeserializedCantonError.fromGrpcStatus(rejectionReasonStatus) match {
+        case Right(error) =>
+          // Turn canton-specific DuplicateKey and InconsistentKey errors into generic daml error code for duplicate/inconsistent keys for conformance.
+          // TODO(#7866): As part of mediator privacy work, clean up this ugly error code remapping
+          error.code.id match {
+            case LocalReject.ConsistencyRejections.DuplicateKey.id =>
+              ConsistencyErrors.DuplicateContractKey.Reject(error.cause).rpcStatus()
+            case LocalReject.ConsistencyRejections.InconsistentKey.id =>
+              ConsistencyErrors.InconsistentContractKey.Reject(error.cause).rpcStatus()
+            case _ => rejectionReasonStatus
+          }
+        case Left(err) =>
+          logger.warn(s"Failed to parse the rejection reason: $err")
+          rejectionReasonStatus
       }
+    val rejection = LedgerSyncEvent.CommandRejected.FinalReason(mappedRejectionReason)
 
     val tseO = completionInfoO.map(info =>
       TimestampedEvent(
@@ -1299,40 +1312,65 @@ class TransactionProcessingSteps(
   private def getCommitSetAndContractsToBeStoredAndEventApproveConform(
       pendingRequestData: RequestType#PendingRequestData,
       completionInfoO: Option[CompletionInfo],
-      modelConformance: ModelConformanceChecker.Result,
+      modelConformanceResult: ModelConformanceChecker.Result,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionProcessorError, CommitAndStoreContractsAndPublishEvent] = {
-    val commitSetF =
-      Future {
-        pendingRequestData.transactionValidationResult.commitSet(pendingRequestData.requestId)(
-          protocolVersion
-        )
-      }
-    val contractsToBeStored =
-      pendingRequestData.transactionValidationResult.createdContracts.keySet
+    val txValidationResult = pendingRequestData.transactionValidationResult
+    val commitSet = txValidationResult.commitSet(pendingRequestData.requestId)(protocolVersion)
 
-    val lfTx = modelConformance.suffixedTransaction
+    computeCommitAndContractsAndEvent(
+      requestTime = pendingRequestData.requestTime,
+      requestCounter = pendingRequestData.requestCounter,
+      txId = pendingRequestData.txId,
+      workflowIdO = pendingRequestData.workflowIdO,
+      requestSequencerCounter = pendingRequestData.requestSequencerCounter,
+      commitSet = commitSet,
+      createdContracts = txValidationResult.createdContracts,
+      witnessedAndDivulged = txValidationResult.witnessedAndDivulged,
+      hostedWitnesses = txValidationResult.hostedWitnesses,
+      completionInfoO = completionInfoO,
+      lfTx = modelConformanceResult.suffixedTransaction,
+    )
+  }
+
+  private def computeCommitAndContractsAndEvent(
+      requestTime: CantonTimestamp,
+      requestCounter: RequestCounter,
+      txId: TransactionId,
+      workflowIdO: Option[WorkflowId],
+      requestSequencerCounter: SequencerCounter,
+      commitSet: CommitSet,
+      createdContracts: Map[LfContractId, SerializableContract],
+      witnessedAndDivulged: Map[LfContractId, SerializableContract],
+      hostedWitnesses: Set[LfPartyId],
+      completionInfoO: Option[CompletionInfo],
+      lfTx: WellFormedTransaction[WithSuffixesAndMerged],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, TransactionProcessorError, CommitAndStoreContractsAndPublishEvent] = {
+    val commitSetF = Future.successful(commitSet)
+    val contractsToBeStored = createdContracts.keySet
 
     def storeDivulgedContracts: EitherT[Future, TransactionProcessorError, Unit] =
       storedContractManager
         .storeDivulgedContracts(
-          pendingRequestData.requestCounter,
-          pendingRequestData.transactionValidationResult.witnessedAndDivulged.values.toSeq,
+          requestCounter,
+          witnessedAndDivulged.values.toSeq,
         )
         .leftMap(TransactionProcessor.FailedToStoreContract)
 
-    // Store the divulged contracts in the contract store
     for {
+      // Store the divulged contracts in the contract store
       _ <- storeDivulgedContracts
 
       lfTxId <- EitherT
-        .fromEither[Future](pendingRequestData.txId.asLedgerTransactionId)
+        .fromEither[Future](txId.asLedgerTransactionId)
         .leftMap[TransactionProcessorError](FieldConversionError("Transaction Id", _))
 
       contractMetadata =
         // TODO(#11047): Forward driver contract metadata also for divulged contracts
-        pendingRequestData.transactionValidationResult.createdContracts.view.collect {
+        createdContracts.view.collect {
           case (contractId, SerializableContract(_, _, _, _, Some(salt))) =>
             contractId -> DriverContractMetadata(salt).toLfBytes(protocolVersion)
         }.toMap
@@ -1341,7 +1379,7 @@ class TransactionProcessingSteps(
         completionInfoO = completionInfoO,
         transactionMeta = TransactionMeta(
           ledgerEffectiveTime = lfTx.metadata.ledgerTime.toLf,
-          workflowId = pendingRequestData.workflowIdO.map(_.unwrap),
+          workflowId = workflowIdO.map(_.unwrap),
           submissionTime = lfTx.metadata.submissionTime.toLf,
           // Set the submission seed to zeros one (None no longer accepted) because it is pointless for projected
           // transactions and it leaks the structure of the omitted parts of the transaction.
@@ -1353,27 +1391,73 @@ class TransactionProcessingSteps(
         ),
         transaction = LfCommittedTransaction(lfTx.unwrap),
         transactionId = lfTxId,
-        recordTime = pendingRequestData.requestTime.toLf,
-        divulgedContracts =
-          pendingRequestData.transactionValidationResult.witnessedAndDivulged.map {
-            case (divulgedCid, divulgedContract) =>
-              DivulgedContract(divulgedCid, divulgedContract.contractInstance)
-          }.toList,
+        recordTime = requestTime.toLf,
+        divulgedContracts = witnessedAndDivulged.map { case (divulgedCid, divulgedContract) =>
+          DivulgedContract(divulgedCid, divulgedContract.contractInstance)
+        }.toList,
         blindingInfoO = None,
-        hostedWitnesses = pendingRequestData.transactionValidationResult.hostedWitnesses.toList,
+        hostedWitnesses = hostedWitnesses.toList,
         contractMetadata = contractMetadata,
       )
 
       timestampedEvent = TimestampedEvent(
         acceptedEvent,
-        pendingRequestData.requestCounter.asLocalOffset,
-        Some(pendingRequestData.requestSequencerCounter),
+        requestCounter.asLocalOffset,
+        Some(requestSequencerCounter),
       )
     } yield CommitAndStoreContractsAndPublishEvent(
       Some(commitSetF),
       contractsToBeStored,
       Some(timestampedEvent),
     )
+  }
+
+  private def getCommitSetAndContractsToBeStoredAndEventApprovePartlyConform(
+      pendingRequestData: RequestType#PendingRequestData,
+      completionInfoO: Option[CompletionInfo],
+      validSubTransaction: WellFormedTransaction[WithSuffixesAndMerged],
+      validSubViewsNE: NonEmpty[Seq[TransactionView]],
+      topologySnapshot: TopologySnapshot,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, TransactionProcessorError, CommitAndStoreContractsAndPublishEvent] = {
+    for {
+      usedAndCreated <- EitherT.right(
+        ExtractUsedAndCreated(
+          participantId,
+          staticDomainParameters,
+          validSubViewsNE,
+          topologySnapshot,
+          loggerFactory,
+        )
+      )
+
+      createdContracts = usedAndCreated.contracts.created
+
+      commitSet = CommitSet.createForTransaction(
+        successfulActivenessCheck =
+          pendingRequestData.transactionValidationResult.successfulActivenessCheck,
+        requestId = pendingRequestData.requestId,
+        consumedInputsOfHostedParties = usedAndCreated.contracts.consumedInputsOfHostedStakeholders,
+        transient = usedAndCreated.contracts.transient,
+        createdContracts = createdContracts,
+        keyUpdates = usedAndCreated.keys.uckUpdatedKeysOfHostedMaintainers,
+      )(protocolVersion)
+
+      commitAndContractsAndEvent <- computeCommitAndContractsAndEvent(
+        requestTime = pendingRequestData.requestTime,
+        requestCounter = pendingRequestData.requestCounter,
+        txId = pendingRequestData.txId,
+        workflowIdO = pendingRequestData.workflowIdO,
+        requestSequencerCounter = pendingRequestData.requestSequencerCounter,
+        commitSet = commitSet,
+        createdContracts = createdContracts,
+        witnessedAndDivulged = usedAndCreated.contracts.witnessedAndDivulged,
+        hostedWitnesses = usedAndCreated.hostedWitnesses,
+        completionInfoO = completionInfoO,
+        lfTx = validSubTransaction,
+      )
+    } yield commitAndContractsAndEvent
   }
 
   override def getCommitSetAndContractsToBeStoredAndEvent(
@@ -1395,49 +1479,69 @@ class TransactionProcessingSteps(
       completionInfoFromSubmitterMetadataO(_, pendingRequestData.freshOwnTimelyTx)
     )
 
-    def rejected(error: TransactionError) = {
-      for {
-        event <- EitherT.fromEither[Future](
-          createRejectionEvent(RejectionArgs(pendingRequestData, error))
-        )
-      } yield CommitAndStoreContractsAndPublishEvent(None, Set(), event)
-    }
-
-    def getCommitSetAndContractsToBeStoredAndEvent()
-        : EitherT[Future, TransactionProcessorError, CommitAndStoreContractsAndPublishEvent] = {
+    def getCommitSetAndContractsToBeStoredAndEvent(
+        topologySnapshot: TopologySnapshot
+    ): EitherT[Future, TransactionProcessorError, CommitAndStoreContractsAndPublishEvent] = {
       import scala.util.Either.MergeableEither
       (
         MergeableEither[MediatorResult](resultE).merge.verdict,
         pendingRequestData.modelConformanceResultE,
       ) match {
-        case (_: Verdict.Approve, Right(modelConformance)) =>
-          getCommitSetAndContractsToBeStoredAndEventApproveConform(
-            pendingRequestData,
-            completionInfoO,
-            modelConformance,
-          )
-
-        case (_: Verdict.Approve, Left(modelConformanceError))
-            if ModelConformanceChecker
-              .isSubviewsCheckEnabled(
-                loggerFactory.name
-              ) && modelConformanceError.aSubviewIsValid =>
-          ErrorUtil.invalidState(
-            s"The Mediator approved a request where a root view fails the model conformance check while a subview passes it"
-          )
-
-        case (_, Left(modelConformanceError)) =>
-          rejected(
-            LocalReject.MalformedRejects.ModelConformance.Reject(modelConformanceError.toString)(
-              LocalVerdict.protocolVersionRepresentativeFor(protocolVersion)
-            )
-          )
-
+        case (_: Verdict.Approve, _) => handleApprovedVerdict(topologySnapshot)
+        case (_, Left(error)) => rejectedWithModelConformanceError(error)
         case (reasons: Verdict.ParticipantReject, _) =>
           rejected(reasons.keyEvent)
         case (reject: Verdict.MediatorReject, _) =>
           rejected(reject)
       }
+    }
+
+    def handleApprovedVerdict(topologySnapshot: TopologySnapshot)(implicit
+        traceContext: TraceContext
+    ): EitherT[Future, TransactionProcessorError, CommitAndStoreContractsAndPublishEvent] = {
+      pendingRequestData.modelConformanceResultE match {
+        case Right(modelConformanceResult) =>
+          getCommitSetAndContractsToBeStoredAndEventApproveConform(
+            pendingRequestData,
+            completionInfoO,
+            modelConformanceResult,
+          )
+
+        case Left(
+              ErrorWithSubTransaction(
+                _errors,
+                Some(validSubTransaction),
+                NonEmpty(validSubViewsNE),
+              )
+            ) =>
+          getCommitSetAndContractsToBeStoredAndEventApprovePartlyConform(
+            pendingRequestData,
+            completionInfoO,
+            validSubTransaction,
+            validSubViewsNE,
+            topologySnapshot,
+          )
+
+        case Left(error) =>
+          // There is no valid subview
+          //   -> we can reject as no participant will commit a subtransaction and violate transparency.
+          rejectedWithModelConformanceError(error)
+      }
+    }
+
+    def rejectedWithModelConformanceError(error: ErrorWithSubTransaction) =
+      rejected(
+        LocalReject.MalformedRejects.ModelConformance.Reject(error.errors.head1.toString)(
+          LocalVerdict.protocolVersionRepresentativeFor(protocolVersion)
+        )
+      )
+
+    def rejected(rejection: TransactionRejection) = {
+      for {
+        event <- EitherT.fromEither[Future](
+          createRejectionEvent(RejectionArgs(pendingRequestData, rejection))
+        )
+      } yield CommitAndStoreContractsAndPublishEvent(None, Set(), event)
     }
 
     for {
@@ -1453,7 +1557,7 @@ class TransactionProcessingSteps(
           EitherT.right[TransactionProcessorError](
             Future.failed(new IllegalArgumentException("Timeout message after decision time"))
           )
-      res <- getCommitSetAndContractsToBeStoredAndEvent()
+      res <- getCommitSetAndContractsToBeStoredAndEvent(topologySnapshot)
     } yield res
   }
 
@@ -1484,18 +1588,19 @@ object TransactionProcessingSteps {
 
   final case class EnrichedTransaction(
       policy: ConfirmationPolicy,
-      rootViewsWithUsedAndCreated: UsedAndCreated,
+      rootViewTreesWithSignatures: NonEmpty[Seq[(TransactionViewTree, Option[Signature])]],
+      usedAndCreated: UsedAndCreated,
       workflowIdO: Option[WorkflowId],
       submitterMetadataO: Option[SubmitterMetadata],
   ) {
 
     def transactionId: TransactionId = {
-      val (tvt, _) = rootViewsWithUsedAndCreated.rootViewsWithSignatures.head1
+      val (tvt, _) = rootViewTreesWithSignatures.head1
       tvt.transactionId
     }
 
     def ledgerTime: CantonTimestamp = {
-      val (tvt, _) = rootViewsWithUsedAndCreated.rootViewsWithSignatures.head1
+      val (tvt, _) = rootViewTreesWithSignatures.head1
       tvt.ledgerTime
     }
   }
@@ -1505,7 +1610,7 @@ object TransactionProcessingSteps {
       consistencyResultE: Either[List[ReferenceToFutureContractError], Unit],
       authorizationResult: Map[ViewPosition, String],
       conformanceResultE: Either[
-        ModelConformanceChecker.ErrorWithSubviewsCheck,
+        ModelConformanceChecker.ErrorWithSubTransaction,
         ModelConformanceChecker.Result,
       ],
       internalConsistencyResultE: Either[ErrorWithInternalConsistencyCheck, Unit],
@@ -1522,7 +1627,10 @@ object TransactionProcessingSteps {
       snapshot: DomainSnapshotSyncCryptoApi,
   )
 
-  final case class RejectionArgs(pendingTransaction: PendingTransaction, error: TransactionError)
+  final case class RejectionArgs(
+      pendingTransaction: PendingTransaction,
+      error: TransactionRejection,
+  )
 
   /** @throws java.lang.IllegalArgumentException if `receivedViewTrees` contains views with different transaction root hashes
     */

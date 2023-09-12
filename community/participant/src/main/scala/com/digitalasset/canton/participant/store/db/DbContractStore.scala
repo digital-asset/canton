@@ -14,6 +14,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchAggregatorConfig, CacheConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.Salt
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.TimedLoadGauge
@@ -50,7 +51,7 @@ class DbContractStore(
     override protected val loggerFactory: NamedLoggerFactory,
 )(protected implicit val ec: ExecutionContext)
     extends ContractStore
-    with DbStore {
+    with DbStore { self =>
 
   import DbStorage.Implicits.*
   import storage.api.*
@@ -99,7 +100,8 @@ class DbContractStore(
         override def logger: TracedLogger = DbContractStore.this.logger
 
         override def executeBatch(ids: NonEmpty[Seq[Traced[LfContractId]]])(implicit
-            traceContext: TraceContext
+            traceContext: TraceContext,
+            callerCloseContext: CloseContext,
         ): Future[Iterable[Option[StoredContract]]] =
           lookupManyUncachedInternal(ids.map(_.value))
 
@@ -252,8 +254,10 @@ class DbContractStore(
       override def logger: TracedLogger = DbContractStore.this.logger
 
       override def executeBatch(items: NonEmpty[Seq[Traced[StoredContract]]])(implicit
-          traceContext: TraceContext
-      ): Future[Iterable[Try[Unit]]] = bulkUpdateWithCheck(items, "DbContractStore.insert")
+          traceContext: TraceContext,
+          callerCloseContext: CloseContext,
+      ): Future[Iterable[Try[Unit]]] =
+        bulkUpdateWithCheck(items, "DbContractStore.insert")(traceContext, self.closeContext)
 
       override protected def bulkUpdateAction(items: NonEmpty[Seq[Traced[StoredContract]]])(implicit
           batchTraceContext: TraceContext

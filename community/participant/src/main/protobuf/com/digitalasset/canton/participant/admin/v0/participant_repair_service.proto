@@ -8,18 +8,28 @@ package com.digitalasset.canton.participant.admin.v0;
 import "com/digitalasset/canton/participant/admin/v0/domain_connectivity.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
+import "scalapb/scalapb.proto";
 
 // Moving ACS from one participant to another
 service ParticipantRepairService {
-  // get contracts for a party
+  // TODO(i14441): Remove deprecated ACS download / upload functionality
+  // deprecated endpoint to get contracts for a party
   rpc Download(DownloadRequest) returns (stream AcsSnapshotChunk);
 
-  // upload contracts for a party
+  // get contracts for a party
+  rpc ExportAcs(ExportAcsRequest) returns (stream ExportAcsResponse);
+
+  // TODO(i14441): Remove deprecated ACS download / upload functionality
+  // deprecated endpoint to upload contracts for a party
   rpc Upload(stream UploadRequest) returns (UploadResponse);
+
+  // upload contracts for a party
+  rpc ImportAcs(stream ImportAcsRequest) returns (ImportAcsResponse);
 
   rpc MigrateDomain(MigrateDomainRequest) returns (MigrateDomainResponse);
 }
 
+// TODO(i14441): Remove deprecated ACS download / upload functionality
 message DownloadRequest {
   repeated string parties = 1;
   string filter_domain_id = 2; // optional; exact match if set
@@ -35,15 +45,18 @@ message DownloadRequest {
   map<string, string> contract_domain_renames = 7;
 }
 
+// TODO(i14441): Remove deprecated ACS download / upload functionality
 message AcsSnapshotChunk {
   bytes chunk = 1; // a chunk of the acs snapshot download
 }
 
+// TODO(i14441): Remove deprecated ACS download / upload functionality
 message UploadRequest {
   bytes acs_snapshot = 1;
   bool gzip_format = 2;
 }
 
+// TODO(i14441): Remove deprecated ACS download / upload functionality
 message UploadResponse {}
 
 message MigrateDomainRequest {
@@ -55,3 +68,32 @@ message MigrateDomainRequest {
   DomainConnectionConfig target_domain_connection_config = 2;
 }
 message MigrateDomainResponse {}
+
+message ActiveContract {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
+
+  int32 protocol_version = 1;
+  string domain_id = 2;
+  bytes contract = 3;
+}
+
+message ExportAcsRequest {
+  repeated string parties = 1;
+  string filter_domain_id = 2; // optional; exact match if set
+  google.protobuf.Timestamp timestamp = 3; // optional; take acs state for this timestamp
+  google.protobuf.UInt32Value protocol_version = 4; // optional; version of serialization to use
+
+  // Optional mapping from one domain id to another to rename the associated domain of contracts in the export
+  // NOTE: This is not a proper domain migration of contracts.
+  map<string, string> contract_domain_renames = 5;
+}
+
+message ExportAcsResponse {
+  bytes chunk = 1; // a chunk of the acs snapshot download
+}
+
+message ImportAcsRequest {
+  bytes acs_snapshot = 1;
+}
+
+message ImportAcsResponse {}

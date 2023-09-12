@@ -15,13 +15,7 @@ abstract class MismatchException[A](
 
 object MismatchException {
 
-  @SuppressWarnings(Array("org.wartremover.warts.FinalCaseClass")) // This class is extended
-  case class LedgerId(
-      override val existing: domain.LedgerId,
-      override val provided: domain.LedgerId,
-  ) extends MismatchException[domain.LedgerId]("ledger id", existing, provided)
-
-  final case class ParticipantId(
+  class ParticipantId(
       override val existing: domain.ParticipantId,
       override val provided: domain.ParticipantId,
   ) extends MismatchException[domain.ParticipantId]("participant id", existing, provided)

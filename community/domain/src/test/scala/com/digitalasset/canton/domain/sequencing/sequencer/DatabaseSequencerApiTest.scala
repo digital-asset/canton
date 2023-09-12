@@ -7,13 +7,14 @@ import akka.stream.Materializer
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
+import com.digitalasset.canton.domain.sequencing.sequencer.store.NonBftDomainSequencerApiTest
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer as CantonSequencer
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.*
 
-class DatabaseSequencerApiTest extends SequencerApiTest {
+class DatabaseSequencerApiTest extends NonBftDomainSequencerApiTest {
 
   def createSequencer(
       crypto: DomainSyncCryptoClient

@@ -14,7 +14,7 @@ import com.daml.error.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
+import com.digitalasset.canton.config.RequireTypes.{PositiveInt, PositiveNumeric}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.AcsCommitmentErrorGroup
@@ -22,7 +22,12 @@ import com.digitalasset.canton.error.{Alarm, AlarmErrorCode, CantonError}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.participant.event.{AcsChange, AcsChangeListener, RecordTime}
+import com.digitalasset.canton.participant.event.{
+  AcsChange,
+  AcsChangeListener,
+  ContractMetadataAndTransferCounter,
+  RecordTime,
+}
 import com.digitalasset.canton.participant.metrics.PruningMetrics
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Errors.MismatchError.AcsCommitmentAlarm
 import com.digitalasset.canton.participant.store.*
@@ -53,7 +58,7 @@ import com.google.protobuf.ByteString
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
 import scala.collection.concurrent.TrieMap
-import scala.collection.immutable.SortedSet
+import scala.collection.immutable.{Map, SortedSet}
 import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.concurrent.{ExecutionContext, Future, blocking}
 import scala.math.Ordering.Implicits.*
@@ -139,6 +144,9 @@ class AcsCommitmentProcessor(
     protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
+    activeContractStore: ActiveContractStore,
+    contractStore: ContractStore,
+    enableAdditionalConsistencyChecks: Boolean,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends AcsChangeListener
@@ -339,11 +347,20 @@ class AcsCommitmentProcessor(
       val snapshotRes = snapshot.snapshot()
       logger.debug(show"Commitment snapshot for completed period $completedPeriod: $snapshotRes")
       for {
+        // Detect possible inconsistencies of the running commitments and the ACS state
+        // Runs only when enableAdditionalConsistencyChecks is true
+        // Should not be enabled in production
+        _ <- checkRunningCommitmentsAgainstACS(
+          snapshotRes.active,
+          activeContractStore,
+          contractStore,
+          enableAdditionalConsistencyChecks,
+          completedPeriod.toInclusive.forgetRefinement,
+        )
         msgs <- commitmentMessages(completedPeriod, snapshotRes.active, cryptoSnapshot)
         _ = logger.debug(
           show"Commitment messages for $completedPeriod: ${msgs.fmap(_.message.commitment)}"
         )
-
         _ <- storeAndSendCommitmentMessages(completedPeriod, msgs)
         _ <- store.markOutstanding(completedPeriod, msgs.keySet)
         _ <- persistRunningCommitments(snapshotRes)
@@ -751,6 +768,7 @@ class AcsCommitmentProcessor(
         Some(metrics),
         threadCount,
       )
+
       msgs <- cmts
         .collect {
           case (counterParticipant, cmt) if LtHash16.isNonEmptyCommitment(cmt) =>
@@ -1136,6 +1154,79 @@ object AcsCommitmentProcessor extends HasLoggerName {
     )
   }
 
+  private def checkRunningCommitmentsAgainstACS(
+      runningCommitments: Map[SortedSet[LfPartyId], AcsCommitment.CommitmentType],
+      activeContractStore: ActiveContractStore,
+      contractStore: ContractStore,
+      enableAdditionalConsistencyChecks: Boolean,
+      toInclusive: CantonTimestamp, // end of interval used to snapshot the ACS
+  )(implicit
+      ec: ExecutionContext,
+      namedLoggingContext: NamedLoggingContext,
+  ): Future[Unit] = {
+
+    def withMetadataSeq(cids: Seq[LfContractId]): Future[Seq[StoredContract]] =
+      contractStore
+        .lookupManyUncached(cids)(namedLoggingContext.traceContext)
+        .valueOr { missingContractId =>
+          ErrorUtil.internalError(
+            new IllegalStateException(
+              s"Contract $missingContractId is in the active contract store but not in the contract store"
+            )
+          )
+        }
+
+    def lookupChangeMetadata(
+        activations: Map[LfContractId, TransferCounterO]
+    ): Future[AcsChange] = {
+      for {
+        // TODO(i9270) extract magic numbers
+        storedActivatedContracts <- MonadUtil.batchedSequentialTraverse(
+          parallelism = PositiveInt.tryCreate(20),
+          chunkSize = PositiveInt.tryCreate(500),
+        )(activations.keySet.toSeq)(withMetadataSeq)
+      } yield {
+        AcsChange(
+          activations = storedActivatedContracts
+            .map(c =>
+              c.contractId -> WithContractHash.fromContract(
+                c.contract,
+                ContractMetadataAndTransferCounter(
+                  c.contract.metadata,
+                  activations(c.contractId),
+                ),
+              )
+            )
+            .toMap,
+          deactivations = Map.empty,
+        )
+      }
+    }
+
+    if (enableAdditionalConsistencyChecks) {
+      for {
+        activeContracts <- activeContractStore.snapshot(toInclusive)(
+          namedLoggingContext.traceContext
+        )
+        activations = activeContracts.map { case (cid, (toc, transferCounter)) =>
+          (cid, transferCounter)
+        }
+        change <- lookupChangeMetadata(activations)
+      } yield {
+        val emptyRunningCommitments =
+          new RunningCommitments(RecordTime.MinValue, TrieMap.empty[SortedSet[LfPartyId], LtHash16])
+        val toc = new RecordTime(toInclusive, 0)
+        emptyRunningCommitments.update(toc, change)
+        val acsCommitments = emptyRunningCommitments.snapshot().active
+        if (acsCommitments != runningCommitments) {
+          Errors.InternalError
+            .InconsistentRunningCommitmentAndACS(toc, acsCommitments, runningCommitments)
+            .discard
+        }
+      }
+    } else Future.unit
+  }
+
   object Errors extends AcsCommitmentErrorGroup {
     @Explanation(
       """This error indicates that there was an internal error within the ACS commitment processing."""
@@ -1157,6 +1248,21 @@ object AcsCommitmentProcessor extends HasLoggerName {
           val loggingContext: ErrorLoggingContext
       ) extends CantonError.Impl(
             cause = "Received multiple batched ACS commitments over domain"
+          )
+
+      @Explanation(
+        """This error indicates that the running commitments at the participant at the tick time do not match
+          the state found in the active contract store at the same tick time.
+          This error indicates a bug in computing the commitments."""
+      )
+      @Resolution("Contact customer support.")
+      final case class InconsistentRunningCommitmentAndACS(
+          toc: RecordTime,
+          acsCommitments: Map[SortedSet[LfPartyId], AcsCommitment.CommitmentType],
+          runningCommitments: Map[SortedSet[LfPartyId], AcsCommitment.CommitmentType],
+      )(implicit val loggingContext: ErrorLoggingContext)
+          extends CantonError.Impl(
+            cause = "Detected an inconsistency between the running commitment and the ACS"
           )
     }
 

@@ -46,7 +46,8 @@ private[mediator] trait MediatorDeduplicationStore extends NamedLogging with Fla
     *                     sequencer events can be replayed
     */
   def initialize(firstEventTs: CantonTimestamp)(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
   ): Future[Unit] = {
     require(!initialized.getAndSet(true), "The store most not be initialized more than once!")
     doInitialize(firstEventTs)
@@ -56,7 +57,8 @@ private[mediator] trait MediatorDeduplicationStore extends NamedLogging with Fla
     * delete all data with `requestTime` greater than or equal to `deleteFromInclusive`.
     */
   protected def doInitialize(deleteFromInclusive: CantonTimestamp)(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
   ): Future[Unit]
 
   private def requireInitialized()(implicit traceContext: TraceContext): Unit =
@@ -82,7 +84,9 @@ private[mediator] trait MediatorDeduplicationStore extends NamedLogging with Fla
 
   /** See the documentation of the other `store` method.
     */
-  def store(data: DeduplicationData)(implicit traceContext: TraceContext): Future[Unit] = {
+  def store(
+      data: DeduplicationData
+  )(implicit traceContext: TraceContext, callerCloseContext: CloseContext): Future[Unit] = {
     requireInitialized()
 
     // Updating in-memory state synchronously, so that changes are effective when the method returns,
@@ -111,7 +115,9 @@ private[mediator] trait MediatorDeduplicationStore extends NamedLogging with Fla
   }
 
   /** Persist data to the database. */
-  protected def persist(data: DeduplicationData)(implicit traceContext: TraceContext): Future[Unit]
+  protected def persist(
+      data: DeduplicationData
+  )(implicit traceContext: TraceContext, callerCloseContext: CloseContext): Future[Unit]
 
   /** Stores the given `uuid` together with `requestTime` and `expireAfter`.
     *
@@ -120,7 +126,8 @@ private[mediator] trait MediatorDeduplicationStore extends NamedLogging with Fla
     * If the store supports persistence, changes are persistent as soon as the returned future completes.
     */
   def store(uuid: UUID, requestTime: CantonTimestamp, expireAfter: CantonTimestamp)(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
   ): Future[Unit] = store(DeduplicationData(uuid, requestTime, expireAfter))
 
   /** Delete all data with `expireAt` before than or equal to `upToInclusive`.
@@ -128,8 +135,9 @@ private[mediator] trait MediatorDeduplicationStore extends NamedLogging with Fla
     * If some data is concurrently stored and pruned, some data may remain in the in-memory caches and / or in the database.
     * Such data will be deleted by a subsequent call to `prune`.
     */
-  def prune(upToInclusive: CantonTimestamp, callerCloseContext: CloseContext)(implicit
-      traceContext: TraceContext
+  def prune(upToInclusive: CantonTimestamp)(implicit
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
   ): Future[Unit] = {
     requireInitialized()
 
@@ -152,16 +160,16 @@ private[mediator] trait MediatorDeduplicationStore extends NamedLogging with Fla
       }
     }
 
-    prunePersistentData(upToInclusive, callerCloseContext)
+    prunePersistentData(upToInclusive)
   }
 
   /** Delete all persistent data with `expireAt` before than or equal to `upToInclusive`.
     */
   protected def prunePersistentData(
-      upToInclusive: CantonTimestamp,
-      callerCloseContext: CloseContext,
+      upToInclusive: CantonTimestamp
   )(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
   ): Future[Unit]
 }
 
@@ -222,21 +230,27 @@ private[mediator] class InMemoryMediatorDeduplicationStore(
     with NamedLogging {
 
   override protected def doInitialize(deleteFromInclusive: CantonTimestamp)(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
   ): Future[Unit] = Future.unit
 
   override protected def persist(data: DeduplicationData)(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
   ): Future[Unit] = Future.unit
 
   override protected def prunePersistentData(
-      upToInclusive: CantonTimestamp,
-      callerCloseContext: CloseContext,
+      upToInclusive: CantonTimestamp
   )(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
   ): Future[Unit] = Future.unit
 }
 
+// Note: this class ignores the inherited close context from the DbStore trait and instead relies purely on
+// callerCloseContexts parameters in each public method. This is an attempt to implement a different way to manage close
+// context propagation to improve and simplify shutdown semantics and reliability. For that reason closing this store
+// is inconsequential. DB operations won't be retried if and only if the caller's close context is closing.
 private[mediator] class DbMediatorDeduplicationStore(
     mediatorId: MediatorId,
     override protected val storage: DbStorage,
@@ -255,29 +269,31 @@ private[mediator] class DbMediatorDeduplicationStore(
 
   override protected def doInitialize(
       deleteFromInclusive: CantonTimestamp
-  )(implicit traceContext: TraceContext): Future[Unit] = processingTime.event {
-    for {
-      _ <- storage.update_(
-        sqlu"""delete from mediator_deduplication_store
+  )(implicit traceContext: TraceContext, callerCloseContext: CloseContext): Future[Unit] =
+    processingTime.event {
+      for {
+        _ <- storage.update_(
+          sqlu"""delete from mediator_deduplication_store
               where mediator_id = $mediatorId and request_time >= $deleteFromInclusive""",
-        functionFullName,
-      )
+          functionFullName,
+        )(traceContext, callerCloseContext)
 
-      activeUuids <- storage.query(
-        sql"""select uuid, request_time, expire_after from mediator_deduplication_store
+        activeUuids <- storage.query(
+          sql"""select uuid, request_time, expire_after from mediator_deduplication_store
              where mediator_id = $mediatorId and expire_after > $deleteFromInclusive"""
-          .as[DeduplicationData],
-        functionFullName,
-      )
-    } yield {
-      activeUuids.foreach(storeInMemory)
+            .as[DeduplicationData],
+          functionFullName,
+        )(traceContext, callerCloseContext)
+      } yield {
+        activeUuids.foreach(storeInMemory)
+      }
     }
-  }
 
   override protected def persist(data: DeduplicationData)(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
   ): Future[Unit] =
-    batchAggregator.run(data)
+    batchAggregator.run(data)(executionContext, traceContext, callerCloseContext)
 
   private val batchAggregator = {
     val processor: BatchAggregator.Processor[DeduplicationData, Unit] =
@@ -287,7 +303,8 @@ private[mediator] class DbMediatorDeduplicationStore(
         override def logger: TracedLogger = DbMediatorDeduplicationStore.this.logger
 
         override def executeBatch(items: NonEmpty[Seq[Traced[DeduplicationData]]])(implicit
-            traceContext: TraceContext
+            traceContext: TraceContext,
+            callerCloseContext: CloseContext,
         ): Future[Seq[Unit]] = processingTime.event {
           // The query does not have to be idempotent, because the stores don't have unique indices and
           // the data gets deduplicated on the read path.
@@ -302,7 +319,7 @@ private[mediator] class DbMediatorDeduplicationStore(
           }
 
           for {
-            _ <- storage.queryAndUpdate(action, functionFullName)
+            _ <- storage.queryAndUpdate(action, functionFullName)(traceContext, callerCloseContext)
           } yield Seq.fill(items.size)(())
         }
 
@@ -317,22 +334,15 @@ private[mediator] class DbMediatorDeduplicationStore(
   }
 
   override protected def prunePersistentData(
-      upToInclusive: CantonTimestamp,
-      callerCloseContext: CloseContext,
+      upToInclusive: CantonTimestamp
   )(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
   ): Future[Unit] = processingTime.event {
-    CloseContext.withCombinedContextF(
-      implicitly[CloseContext],
-      callerCloseContext,
-      timeouts,
-      logger,
-    ) { implicit closeContext =>
-      storage.update_(
-        sqlu"""delete from mediator_deduplication_store
+    storage.update_(
+      sqlu"""delete from mediator_deduplication_store
           where mediator_id = $mediatorId and expire_after <= $upToInclusive""",
-        functionFullName,
-      )
-    }
+      functionFullName,
+    )(traceContext, callerCloseContext)
   }
 }

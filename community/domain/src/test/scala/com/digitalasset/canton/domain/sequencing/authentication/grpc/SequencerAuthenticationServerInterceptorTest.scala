@@ -144,7 +144,14 @@ class SequencerAuthenticationServerInterceptorTest
       val obtainToken = NonEmpty
         .mk(
           Seq,
-          Endpoint("localhost", Port.tryCreate(10)) -> (() => EitherT.pure[Future, Status](token)),
+          (
+            Endpoint("localhost", Port.tryCreate(10)),
+            (_ => EitherT.pure[Future, Status](token)): TraceContext => EitherT[
+              Future,
+              Status,
+              AuthenticationTokenWithExpiry,
+            ],
+          ),
         )
         .toMap
 
@@ -187,9 +194,13 @@ class SequencerAuthenticationServerInterceptorTest
       val obtainToken = NonEmpty
         .mk(
           Seq,
-          Endpoint("localhost", Port.tryCreate(10)) -> (() =>
-            EitherT
-              .pure[Future, Status](incorrectToken)
+          (
+            Endpoint("localhost", Port.tryCreate(10)),
+            (_ => EitherT.pure[Future, Status](incorrectToken)): TraceContext => EitherT[
+              Future,
+              Status,
+              AuthenticationTokenWithExpiry,
+            ],
           ),
         )
         .toMap
@@ -222,7 +233,14 @@ class SequencerAuthenticationServerInterceptorTest
       val obtainToken = NonEmpty
         .mk(
           Seq,
-          Endpoint("localhost", Port.tryCreate(10)) -> (() => EitherT.pure[Future, Status](token)),
+          (
+            Endpoint("localhost", Port.tryCreate(10)),
+            (_ => EitherT.pure[Future, Status](token)): TraceContext => EitherT[
+              Future,
+              Status,
+              AuthenticationTokenWithExpiry,
+            ],
+          ),
         )
         .toMap
 

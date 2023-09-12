@@ -9,6 +9,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.jce.JceJavaConverter
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CommunityCryptoPrivateStoreFactory
 import com.digitalasset.canton.resource.MemoryStorage
+import com.digitalasset.canton.tracing.NoReportingTracerProvider
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future
@@ -33,6 +34,7 @@ class TinkCryptoTest
           testedReleaseProtocolVersion,
           timeouts,
           loggerFactory,
+          NoReportingTracerProvider,
         )
         .valueOrFail("create crypto")
     }

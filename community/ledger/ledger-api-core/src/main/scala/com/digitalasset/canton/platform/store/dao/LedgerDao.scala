@@ -107,9 +107,6 @@ private[platform] trait LedgerDaoEventsReader {
 }
 private[platform] trait LedgerReadDao extends ReportsHealth {
 
-  /** Looks up the ledger id */
-  def lookupLedgerId()(implicit loggingContext: LoggingContextWithTrace): Future[Option[LedgerId]]
-
   def lookupParticipantId()(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Option[ParticipantId]]

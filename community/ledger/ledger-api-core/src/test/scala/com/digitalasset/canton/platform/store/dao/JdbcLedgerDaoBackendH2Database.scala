@@ -11,5 +11,6 @@ private[dao] trait JdbcLedgerDaoBackendH2Database extends JdbcLedgerDaoBackend {
 
   override protected val dbType: DbType = DbType.H2Database
 
-  override protected val jdbcUrl: String = "jdbc:h2:mem:static_time;db_close_delay=-1"
+  override protected val jdbcUrl: String =
+    s"jdbc:h2:mem:${getClass.getSimpleName.toLowerCase};db_close_delay=-1"
 }

@@ -3,14 +3,14 @@
 
 package com.digitalasset.canton.platform.localstore
 
-import scala.concurrent.duration.FiniteDuration
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
 
 final case class IdentityProviderManagementConfig(
-    cacheExpiryAfterWrite: FiniteDuration =
+    cacheExpiryAfterWrite: NonNegativeFiniteDuration =
       IdentityProviderManagementConfig.DefaultCacheExpiryAfterWriteInSeconds
 )
 object IdentityProviderManagementConfig {
-  import scala.concurrent.duration.*
   val MaxIdentityProviders: Int = 16
-  val DefaultCacheExpiryAfterWriteInSeconds: FiniteDuration = 5.minutes
+  val DefaultCacheExpiryAfterWriteInSeconds: NonNegativeFiniteDuration =
+    NonNegativeFiniteDuration.ofMinutes(5)
 }

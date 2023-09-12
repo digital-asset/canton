@@ -16,6 +16,7 @@ import com.digitalasset.canton.serialization.{
   ProtocolVersionedMemoizedEvidence,
 }
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.util.EitherUtil
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWithContextCompanion,
   HasProtocolVersionedWrapper,
@@ -203,9 +204,21 @@ object SubmissionRequest
       timestampOfSigningKey: Option[CantonTimestamp],
       aggregationRule: Option[AggregationRule],
       representativeProtocolVersion: RepresentativeProtocolVersion[SubmissionRequest.type],
-  ): Either[InvariantViolation, SubmissionRequest] = {
-    Either.cond(
-      representativeProtocolVersion >= aggregationRuleSupportedSince || aggregationRule.isEmpty,
+  ): Either[InvariantViolation, SubmissionRequest] =
+    for {
+      _ <- EitherUtil.condUnitE(
+        representativeProtocolVersion >= aggregationRuleSupportedSince || aggregationRule.isEmpty,
+        InvariantViolation(
+          s"Aggregation rules are not supported in protocol version equivalent to ${representativeProtocolVersion.representative}"
+        ),
+      )
+      _ <- EitherUtil.condUnitE(
+        aggregationRule.isEmpty || timestampOfSigningKey.isDefined,
+        InvariantViolation(
+          s"Submission request has `aggregationRule` set, but `timestampOfSigningKey` is not defined. Please check that `timestampOfSigningKey` has been set for the submission."
+        ),
+      )
+    } yield {
       new SubmissionRequest(
         sender,
         messageId,
@@ -214,12 +227,8 @@ object SubmissionRequest
         maxSequencingTime,
         timestampOfSigningKey,
         aggregationRule,
-      )(representativeProtocolVersion, deserializedFrom = None),
-      InvariantViolation(
-        s"Aggregation rules are not supported in protocol version equivalent to ${representativeProtocolVersion.representative}"
-      ),
-    )
-  }
+      )(representativeProtocolVersion, deserializedFrom = None)
+    }
 
   def tryCreate(
       sender: Member,

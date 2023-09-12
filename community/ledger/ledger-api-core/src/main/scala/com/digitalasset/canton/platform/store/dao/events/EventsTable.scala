@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.store.dao.events
 import com.daml.api.util.TimestampConversion
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.event.Event
+import com.daml.ledger.api.v1.trace_context.TraceContext as DamlTraceContext
 import com.daml.ledger.api.v1.transaction.TreeEvent
 import com.daml.ledger.api.v2.state_service.{ActiveContract, GetActiveContractsResponse}
 import com.daml.ledger.api.v2.transaction.{
@@ -28,10 +29,19 @@ object EventsTable {
 
   object TransactionConversions {
 
+    private def extractTraceContext[EventT](
+        events: Vector[Entry[EventT]]
+    ): Option[DamlTraceContext] =
+      events
+        .map(_.traceContext)
+        .collectFirst({ case Some(tc) => tc })
+        .map(DamlTraceContext.parseFrom)
+
     private def flatTransaction(events: Vector[Entry[Event]]): Option[ApiTransaction] =
       events.headOption.flatMap { first =>
         val flatEvents =
           TransactionConversion.removeTransient(events.iterator.map(_.event).toVector)
+
         // Allows emitting flat transactions with no events, a use-case needed
         // for the functioning of Daml triggers.
         // (more details in https://github.com/digital-asset/daml/issues/6975)
@@ -45,6 +55,7 @@ object EventsTable {
               offset = ApiOffset.toApiString(first.eventOffset),
               events = flatEvents,
               domainId = first.domainId.getOrElse(""),
+              traceContext = extractTraceContext(events),
             )
           )
         else None
@@ -92,7 +103,7 @@ object EventsTable {
 
     private def treeOf(
         events: Vector[Entry[TreeEvent]]
-    ): (Map[String, TreeEvent], Vector[String]) = {
+    ): (Map[String, TreeEvent], Vector[String], Option[DamlTraceContext]) = {
 
       // The identifiers of all visible events in this transactions, preserving
       // the order in which they are retrieved from the index
@@ -121,7 +132,7 @@ object EventsTable {
       // that are not a child of some other visible item
       val rootEventIds = visible.filterNot(children)
 
-      (eventsById, rootEventIds)
+      (eventsById, rootEventIds, extractTraceContext(events))
 
     }
 
@@ -129,7 +140,7 @@ object EventsTable {
         events: Vector[Entry[TreeEvent]]
     ): Option[ApiTransactionTree] =
       events.headOption.map { first =>
-        val (eventsById, rootEventIds) = treeOf(events)
+        val (eventsById, rootEventIds, traceContext) = treeOf(events)
         ApiTransactionTree(
           updateId = first.transactionId,
           commandId = first.commandId,
@@ -139,6 +150,7 @@ object EventsTable {
           eventsById = eventsById,
           rootEventIds = rootEventIds,
           domainId = first.domainId.getOrElse(""),
+          traceContext = traceContext,
         )
       }
 

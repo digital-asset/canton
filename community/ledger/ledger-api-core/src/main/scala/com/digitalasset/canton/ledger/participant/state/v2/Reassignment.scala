@@ -49,7 +49,7 @@ object Reassignment {
   *
   * @param sourceDomain            The domain ID from the contract is unassigned.
   * @param targetDomain            The domain ID to the contract is assigned.
-  * @param submitter               Submitter of the command.
+  * @param submitter               Submitter of the command, unless the operation is performed offline.
   * @param reassignmentCounter     This counter is strictly increasing with each reassignment
   *                                for one contract.
   * @param hostedStakeholders      The stakeholders of the related contract which are hosted on this
@@ -60,7 +60,7 @@ object Reassignment {
 final case class ReassignmentInfo(
     sourceDomain: SourceDomainId,
     targetDomain: TargetDomainId,
-    submitter: Ref.Party,
+    submitter: Option[Ref.Party],
     reassignmentCounter: Long,
     hostedStakeholders: List[Ref.Party],
     unassignId: CantonTimestamp,

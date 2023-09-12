@@ -23,6 +23,7 @@ import com.digitalasset.canton.topology.admin.grpc.{
   GrpcTopologyManagerWriteServiceX,
 }
 import com.digitalasset.canton.topology.admin.{v0 as adminV0, v1 as topologyProto}
+import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.store.{InitializationStore, TopologyStoreId, TopologyStoreX}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
@@ -56,7 +57,7 @@ abstract class CantonNodeBootstrapX[
       storage: Storage,
       crypto: Crypto,
       nodeId: UniqueIdentifier,
-      manager: TopologyManagerX,
+      manager: AuthorizedTopologyManagerX,
       healthReporter: GrpcHealthReporter,
       healthService: HealthReporting.HealthService,
   ): BootstrapStageOrLeaf[T]
@@ -83,7 +84,9 @@ abstract class CantonNodeBootstrapX[
     * in the node runtime itself (participant sync domain)
     */
   // TODO(#14048) implement me!
-  protected def sequencedTopologyStores: Seq[TopologyStoreX[TopologyStoreId]] = Seq()
+  protected def sequencedTopologyStores: Seq[TopologyStoreX[DomainStore]] = Seq()
+
+  protected def sequencedTopologyManagers: Seq[DomainTopologyManagerX] = Seq()
 
   protected val bootstrapStageCallback = new BootstrapStage.Callback {
     override def loggerFactory: NamedLoggerFactory = CantonNodeBootstrapX.this.loggerFactory
@@ -156,6 +159,7 @@ abstract class CantonNodeBootstrapX[
             ReleaseProtocolVersion.latest,
             timeouts,
             loggerFactory,
+            tracerProvider,
           )
           .map { crypto =>
             addCloseable(crypto)
@@ -203,13 +207,12 @@ abstract class CantonNodeBootstrapX[
       )
     addCloseable(authorizedStore)
 
-    private val topologyManager: TopologyManagerX =
-      new TopologyManagerX(
+    private val topologyManager: AuthorizedTopologyManagerX =
+      new AuthorizedTopologyManagerX(
         clock,
         crypto,
         authorizedStore,
         timeouts,
-        parameterConfig.initialProtocolVersion,
         futureSupervisor,
         loggerFactory,
       )
@@ -232,7 +235,7 @@ abstract class CantonNodeBootstrapX[
         topologyProto.TopologyManagerWriteServiceXGrpc
           .bindService(
             new GrpcTopologyManagerWriteServiceX(
-              topologyManager,
+              sequencedTopologyManagers :+ topologyManager,
               authorizedStore,
               getId,
               crypto,
@@ -314,7 +317,7 @@ abstract class CantonNodeBootstrapX[
 
   private class GenerateOrAwaitNodeTopologyTx(
       val nodeId: UniqueIdentifier,
-      manager: TopologyManagerX,
+      manager: AuthorizedTopologyManagerX,
       authorizedStore: TopologyStoreX[TopologyStoreId.AuthorizedStore],
       storage: Storage,
       crypto: Crypto,

@@ -498,10 +498,9 @@ private[participant] class ConflictDetector(
               transferOuts
                 .map { case (coid, wrapped) =>
                   val CommitSet.TransferOutCommit(targetDomain, _, transferCounter) = wrapped.unwrap
-                  (coid, targetDomain, transferCounter)
+                  (coid, targetDomain, transferCounter, toc)
                 }
-                .to(LazyList),
-              toc,
+                .to(LazyList)
             )
 
           val transferInWrites =
@@ -510,13 +509,13 @@ private[participant] class ConflictDetector(
                 .map { case (coid, wrapped) =>
                   val CommitSet.TransferInCommit(transferId, _contractMetadata, transferCounter) =
                     wrapped.unwrap
-                  (coid, transferId.sourceDomain, transferCounter)
+                  (coid, transferId.sourceDomain, transferCounter, toc)
                 }
-                .to(LazyList),
-              toc,
+                .to(LazyList)
             )
           val transferCompletions = pendingTransferWrites.sequence_
-          val keyWrites = contractKeyJournal.addKeyStateUpdates(keyUpdates, toc)
+          val keyWrites =
+            contractKeyJournal.addKeyStateUpdates(keyUpdates.view.mapValues(_ -> toc).toMap)
 
           // Collect the results from the above futures run in parallel.
           // A for comprehension does not work due to the explicit type parameters.

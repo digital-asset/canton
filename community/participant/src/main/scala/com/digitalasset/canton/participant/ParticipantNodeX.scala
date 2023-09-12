@@ -7,10 +7,8 @@ import akka.actor.ActorSystem
 import cats.Eval
 import cats.data.EitherT
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.engine.Engine
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.CantonRequireTypes
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -23,10 +21,10 @@ import com.digitalasset.canton.health.{GrpcHealthReporter, HealthReporting}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.ParticipantNodeBootstrap.CommunityParticipantFactoryCommon
-import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode
 import com.digitalasset.canton.participant.admin.{
-  PackageInspectionOps,
-  PackageService,
+  PackageDependencyResolver,
+  PackageOps,
+  PackageOpsX,
   ResourceManagementService,
 }
 import com.digitalasset.canton.participant.config.{LocalParticipantConfig, PartyNotificationConfig}
@@ -49,11 +47,16 @@ import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig}
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.client.IdentityProvidingServiceClient
-import com.digitalasset.canton.topology.store.{PartyMetadataStore, TopologyStoreId, TopologyStoreX}
+import com.digitalasset.canton.topology.client.{
+  IdentityProvidingServiceClient,
+  StoreBasedDomainTopologyClient,
+  StoreBasedTopologySnapshotX,
+}
+import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
+import com.digitalasset.canton.topology.store.{PartyMetadataStore, TopologyStoreX}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherTUtil, SingleUseCell}
+import com.digitalasset.canton.util.SingleUseCell
 import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.ServerServiceDefinition
 
@@ -96,18 +99,21 @@ class ParticipantNodeBootstrapX(
   // TODO(#12946) clean up to remove SingleUseCell
   private val cantonSyncService = new SingleUseCell[CantonSyncService]
 
-  override protected def sequencedTopologyStores: Seq[TopologyStoreX[TopologyStoreId]] =
-    cantonSyncService.get.toList.flatMap(
-      _.syncDomainPersistentStateManager.getAll.values.map(_.topologyStore).collect {
-        case s: TopologyStoreX[TopologyStoreId] => s
-      }
-    )
+  override protected def sequencedTopologyStores: Seq[TopologyStoreX[DomainStore]] =
+    cantonSyncService.get.toList.flatMap(_.syncDomainPersistentStateManager.getAll.values).collect {
+      case s: SyncDomainPersistentStateX => s.topologyStore
+    }
+
+  override protected def sequencedTopologyManagers: Seq[DomainTopologyManagerX] =
+    cantonSyncService.get.toList.flatMap(_.syncDomainPersistentStateManager.getAll.values).collect {
+      case s: SyncDomainPersistentStateX => s.topologyManager
+    }
 
   override protected def customNodeStages(
       storage: Storage,
       crypto: Crypto,
       nodeId: UniqueIdentifier,
-      manager: TopologyManagerX,
+      manager: AuthorizedTopologyManagerX,
       healthReporter: GrpcHealthReporter,
       healthService: HealthReporting.HealthService,
   ): BootstrapStageOrLeaf[ParticipantNodeX] =
@@ -117,7 +123,7 @@ class ParticipantNodeBootstrapX(
       storage: Storage,
       crypto: Crypto,
       nodeId: UniqueIdentifier,
-      topologyManager: TopologyManagerX,
+      topologyManager: AuthorizedTopologyManagerX,
       healthReporter: GrpcHealthReporter,
       healthService: HealthReporting.HealthService,
   ) extends BootstrapStage[ParticipantNodeX, RunningNode[ParticipantNodeX]](
@@ -127,6 +133,18 @@ class ParticipantNodeBootstrapX(
       with HasCloseContext {
 
     private val participantId = ParticipantId(nodeId)
+
+    private val packageDependencyResolver = new PackageDependencyResolver(
+      DamlPackageStore(
+        storage,
+        arguments.futureSupervisor,
+        arguments.parameterConfig,
+        loggerFactory,
+      ),
+      arguments.parameterConfig.processingTimeouts,
+      loggerFactory,
+    )
+
     private val componentFactory = new ParticipantComponentBootstrapFactory {
 
       override def createSyncDomainAndTopologyDispatcher(
@@ -138,7 +156,7 @@ class ParticipantNodeBootstrapX(
           storage,
           indexedStringStore,
           parameters,
-          crypto.pureCrypto,
+          crypto,
           clock,
           futureSupervisor,
           loggerFactory,
@@ -159,84 +177,33 @@ class ParticipantNodeBootstrapX(
         (manager, topologyDispatcher)
       }
 
-      override def createPackageInspectionOps(
+      override def createPackageOps(
           manager: SyncDomainPersistentStateManager,
           crypto: SyncCryptoApiProvider,
-      ): PackageInspectionOps = new PackageInspectionOps() {
-        // TODO(#12944) the package inspection ops requires some serious refactoring in order to remove the circular dependency
-        //    however, this is just used for package removal which we can punt for the moment
-        override def packageVetted(packageId: PackageId)(implicit
-            tc: TraceContext
-        ): EitherT[Future, PackageRemovalErrorCode.PackageVetted, Unit] = ???
+      ): PackageOps = {
+        val authorizedTopologyStoreClient = new StoreBasedTopologySnapshotX(
+          CantonTimestamp.MaxValue,
+          topologyManager.store,
+          StoreBasedDomainTopologyClient.NoPackageDependencies,
+          loggerFactory,
+        )
+        val packageOpsX = new PackageOpsX(
+          participantId = participantId,
+          headAuthorizedTopologySnapshot = authorizedTopologyStoreClient,
+          manager = manager,
+          topologyManager = topologyManager,
+          nodeId = nodeId,
+          initialProtocolVersion = parameters.initialProtocolVersion,
+          loggerFactory = StartupNode.this.loggerFactory,
+          timeouts = timeouts,
+        )
 
-        override def packageUnused(packageId: PackageId)(implicit
-            tc: TraceContext
-        ): EitherT[Future, PackageRemovalErrorCode.PackageInUse, Unit] = ???
-
-        override def runTx(tx: TopologyTransaction[TopologyChangeOp], force: Boolean)(implicit
-            tc: TraceContext
-        ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] = ???
-
-        override def genRevokePackagesTx(packages: List[LfPackageId])(implicit
-            tc: TraceContext
-        ): EitherT[Future, ParticipantTopologyManagerError, TopologyTransaction[TopologyChangeOp]] =
-          ???
-
-        override protected def loggerFactory: NamedLoggerFactory = ???
+        addCloseable(packageOpsX)
+        packageOpsX
       }
     }
 
     private val participantOps = new ParticipantTopologyManagerOps {
-      override def vetPackages(packages: Seq[PackageId], synchronize: Boolean)(implicit
-          traceContext: TraceContext
-      ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] = {
-        // TODO(#14069) this vetting extension might fail on concurrent uploads of dars
-        val currentMappingF = performUnlessClosingF(functionFullName)(
-          topologyManager.store
-            .findPositiveTransactions(
-              asOf = CantonTimestamp.MaxValue,
-              asOfInclusive = true,
-              isProposal = false,
-              types = Seq(VettedPackagesX.code),
-              filterUid = Some(Seq(nodeId)),
-              filterNamespace = None,
-            )
-            .map { result =>
-              result
-                .collectOfMapping[VettedPackagesX]
-                .result
-                .lastOption
-            }
-        )
-        for {
-          currentMapping <- EitherT.right(currentMappingF)
-          currentPackages = currentMapping
-            .map(_.transaction.transaction.mapping.packageIds)
-            .getOrElse(Seq.empty)
-          nextSerial = currentMapping.map(_.transaction.transaction.serial + PositiveInt.one)
-          _ <- EitherTUtil.ifThenET(packages.diff(currentPackages).nonEmpty) {
-            performUnlessClosingEitherUSF(functionFullName)(
-              topologyManager
-                .proposeAndAuthorize(
-                  TopologyChangeOpX.Replace,
-                  VettedPackagesX(
-                    participantId = participantId,
-                    domainId = None,
-                    (currentPackages ++ packages).distinct,
-                  ),
-                  serial = nextSerial,
-                  // TODO(#12390) auto-determine signing keys
-                  signingKeys = Seq(participantId.uid.namespace.fingerprint),
-                  parameters.initialProtocolVersion,
-                  expectFullAuthorization = true,
-                )
-                .leftMap(IdentityManagerParentError(_): ParticipantTopologyManagerError)
-                .map(_ => ())
-            )
-          }
-        } yield ()
-      }
-
       override def allocateParty(
           validatedSubmissionId: CantonRequireTypes.String255,
           partyId: PartyId,
@@ -323,6 +290,7 @@ class ParticipantNodeBootstrapX(
         partyNotifierFactory,
         adminToken,
         participantOps,
+        packageDependencyResolver,
         componentFactory,
         skipRecipientsCheck,
         overrideKeyUniqueness = Some(false),
@@ -346,6 +314,7 @@ class ParticipantNodeBootstrapX(
           addCloseable(sync)
           addCloseable(ledgerApiServer)
           addCloseable(ledgerApiDependentServices)
+          addCloseable(packageDependencyResolver)
           val node = new ParticipantNodeX(
             participantId,
             arguments.metrics,
@@ -382,8 +351,7 @@ class ParticipantNodeBootstrapX(
     )
 
   override protected def setPostInitCallbacks(
-      sync: CantonSyncService,
-      packageService: PackageService,
+      sync: CantonSyncService
   ): Unit = {
     // TODO(#14048) implement me
 

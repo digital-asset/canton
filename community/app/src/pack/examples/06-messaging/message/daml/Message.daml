@@ -14,14 +14,16 @@ template Message
     signatory sender
     observer receiver
 
-    controller sender can
-      Retract: ()
+    choice Retract: ()
+      controller sender
         do
           pure ()
 
-    controller receiver can
-      nonconsuming Reply: () with
-          reply: Text
+
+    nonconsuming choice Reply: ()
+      with
+        reply: Text
+      controller receiver
         do
           create Message with
             sender = receiver

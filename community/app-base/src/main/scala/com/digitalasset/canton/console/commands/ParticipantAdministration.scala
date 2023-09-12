@@ -25,7 +25,6 @@ import com.digitalasset.canton.console.{
   AdminCommandRunner,
   BaseInspection,
   CommandFailure,
-  ConsoleCommandResult,
   ConsoleEnvironment,
   ConsoleMacros,
   DomainReference,
@@ -224,12 +223,12 @@ class ParticipantTestingGroup(
       workflowId: String = "",
       id: String = "",
   ): Duration = {
-    val result =
+    consoleEnvironment.runE(
       maybe_bong(targets, validators, timeout, levels, gracePeriodMillis, workflowId, id)
         .toRight(
           s"Unable to bong $targets with $levels levels within ${LoggerUtil.roundDurationForHumans(timeout.duration)}"
         )
-    consoleEnvironment.run(ConsoleCommandResult.fromEither(result))
+    )
   }
 
   @Help.Summary("Like bong, but returns None in case of failure.", FeatureFlag.Testing)
@@ -799,12 +798,12 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         vetAllPackages: Boolean = true,
         synchronizeVetting: Boolean = true,
     ): String = {
-      val res = consoleEnvironment.run {
-        ConsoleCommandResult.fromEither(for {
+      val res = consoleEnvironment.runE {
+        for {
           hash <- ParticipantCommands.dars
             .upload(runner, path, vetAllPackages, synchronizeVetting, logger)
             .toEither
-        } yield hash)
+        } yield hash
       }
       if (synchronizeVetting && vetAllPackages) {
         packages.synchronize_vetting()
@@ -821,85 +820,27 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       }
     }
 
-    @Help.Summary("Share DARs with other participants", FeatureFlag.Preview)
-    @Help.Group("Sharing")
-    object sharing extends Helpful {
+    @Help.Summary("Change DAR vetting status")
+    @Help.Group("Vetting")
+    object vetting extends Helpful {
+      @Help.Summary(
+        "Vet all packages contained in the DAR archive identified by the provided DAR hash."
+      )
+      def enable(darHash: String, synchronize: Boolean = true): Unit =
+        check(FeatureFlag.Preview)(consoleEnvironment.run {
+          adminCommand(ParticipantAdminCommands.Package.VetDar(darHash, synchronize))
+        })
 
-      @Help.Summary("Incoming DAR sharing offers", FeatureFlag.Preview)
-      @Help.Group("Offers")
-      object offers extends Helpful {
-        @Help.Summary("List received DAR sharing offers")
-        def list(): Seq[v0.ListShareOffersResponse.Item] =
-          check(FeatureFlag.Preview)(consoleEnvironment.run {
-            adminCommand(ParticipantAdminCommands.Package.ListShareOffers)
-          })
-
-        @Help.Summary("Accept the offer to share a DAR", FeatureFlag.Preview)
-        def accept(shareId: String): Unit =
-          check(FeatureFlag.Preview)(consoleEnvironment.run {
-            adminCommand(ParticipantAdminCommands.Package.AcceptShareOffer(shareId))
-          })
-
-        @Help.Summary("Reject the offer to share a DAR", FeatureFlag.Preview)
-        def reject(shareId: String, reason: String): Unit =
-          check(FeatureFlag.Preview)(consoleEnvironment.run {
-            adminCommand(ParticipantAdminCommands.Package.RejectShareOffer(shareId, reason))
-          })
-
-      }
-
-      @Help.Summary("Outgoing DAR sharing requests", FeatureFlag.Preview)
-      @Help.Group("Requests")
-      object requests extends Helpful {
-
-        @Help.Summary("Share a DAR with other participants", FeatureFlag.Preview)
-        def propose(darHash: String, participantId: ParticipantId): Unit =
-          check(FeatureFlag.Preview)(consoleEnvironment.run {
-            adminCommand(
-              ParticipantAdminCommands.Package
-                .ShareDar(darHash, participantId.adminParty.uid.toProtoPrimitive)
-            )
-          })
-
-        @Help.Summary("List pending requests to share a DAR with others", FeatureFlag.Preview)
-        def list(): Seq[v0.ListShareRequestsResponse.Item] =
-          check(FeatureFlag.Preview)(consoleEnvironment.run {
-            adminCommand(ParticipantAdminCommands.Package.ListShareRequests)
-          })
-
-      }
-
-      @Help.Summary("Whitelist DAR sharing counter-parties", FeatureFlag.Preview)
-      @Help.Group("Whitelist")
-      object whitelist extends Helpful {
-        @Help.Summary(
-          "List parties that are currently whitelisted to share DARs with me",
-          FeatureFlag.Preview,
-        )
-        def list(): Unit = check(FeatureFlag.Preview) {
-          val _ = consoleEnvironment.run {
-            adminCommand(ParticipantAdminCommands.Package.WhitelistList)
-          }
-        }
-
-        @Help.Summary("Add party to my DAR sharing whitelist", FeatureFlag.Preview)
-        def add(partyId: PartyId): Unit =
-          check(FeatureFlag.Preview)(consoleEnvironment.run {
-            adminCommand(
-              ParticipantAdminCommands.Package.WhitelistAdd(partyId.uid.toProtoPrimitive)
-            )
-          })
-
-        @Help.Summary("Remove party from my DAR sharing whitelist", FeatureFlag.Preview)
-        def remove(partyId: PartyId): Unit =
-          check(FeatureFlag.Preview)(consoleEnvironment.run {
-            adminCommand(
-              ParticipantAdminCommands.Package.WhitelistRemove(partyId.uid.toProtoPrimitive)
-            )
-          })
-
-      }
-
+      @Help.Summary("""Revoke vetting for all packages contained in the DAR archive
+          |identified by the provided DAR hash.""")
+      @Help.Description("""This command succeeds if the vetting command used to vet the DAR's packages
+          |was symmetric and resulted in a single vetting topology transaction for all the packages in the DAR.
+          |This command is potentially dangerous and misuse
+          |can lead the participant to fail in processing transactions""")
+      def disable(darHash: String): Unit =
+        check(FeatureFlag.Preview)(consoleEnvironment.run {
+          adminCommand(ParticipantAdminCommands.Package.UnvetDar(darHash))
+        })
     }
 
   }
@@ -926,7 +867,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     def find(
         moduleName: String,
         limitPackages: PositiveInt = defaultLimit,
-    ): Seq[v0.PackageDescription] = consoleEnvironment.run {
+    ): Seq[v0.PackageDescription] = consoleEnvironment.runE {
       val packageC = adminCommand(ParticipantAdminCommands.Package.List(limitPackages)).toEither
       val matchingC = packageC
         .flatMap { packages =>
@@ -936,9 +877,9 @@ trait ParticipantAdministration extends FeatureFlagFilter {
             )
           )
         }
-      ConsoleCommandResult.fromEither(matchingC.map(_.filter { case (_, content) =>
+      matchingC.map(_.filter { case (_, content) =>
         content.map(_.name).contains(moduleName)
-      }.map(_._1)))
+      }.map(_._1))
     }
 
     @Help.Summary(
@@ -1451,8 +1392,8 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         domain: DomainAlias,
         modifier: DomainConnectionConfig => DomainConnectionConfig,
     ): Unit = {
-      consoleEnvironment.run {
-        val ret = for {
+      consoleEnvironment.runE {
+        for {
           configured <- adminCommand(
             ParticipantAdminCommands.DomainConnectivity.ListConfiguredDomains
           ).toEither
@@ -1468,7 +1409,6 @@ trait ParticipantAdministration extends FeatureFlagFilter {
             ParticipantAdminCommands.DomainConnectivity.ModifyDomainConnection(modifier(cfg))
           ).toEither
         } yield ()
-        ConsoleCommandResult.fromEither(ret)
       }
     }
 
@@ -1692,10 +1632,12 @@ trait ParticipantHealthAdministrationCommon extends FeatureFlagFilter {
           )
       )
     }
-    val result = adminApiRes.toRight(
-      s"Unable to ping $participantId within ${LoggerUtil.roundDurationForHumans(timeout.duration)}"
+    consoleEnvironment.runE(
+      adminApiRes.toRight(
+        s"Unable to ping $participantId within ${LoggerUtil.roundDurationForHumans(timeout.duration)}"
+      )
     )
-    consoleEnvironment.run(ConsoleCommandResult.fromEither(result))
+
   }
 
   @Help.Summary(

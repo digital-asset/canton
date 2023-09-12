@@ -15,7 +15,7 @@ import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.BaseQueryX
 import com.digitalasset.canton.topology.admin.v1
-import com.digitalasset.canton.topology.admin.v1.AuthorizeRequest.Type.Proposal
+import com.digitalasset.canton.topology.admin.v1.AuthorizeRequest.Type.{Proposal, TransactionHash}
 import com.digitalasset.canton.topology.admin.v1.IdentityInitializationServiceXGrpc.IdentityInitializationServiceXStub
 import com.digitalasset.canton.topology.admin.v1.TopologyManagerReadServiceXGrpc.TopologyManagerReadServiceXStub
 import com.digitalasset.canton.topology.admin.v1.TopologyManagerWriteServiceXGrpc.TopologyManagerWriteServiceXStub
@@ -25,6 +25,8 @@ import com.digitalasset.canton.topology.admin.v1.{
   AuthorizeRequest,
   AuthorizeResponse,
   ListTrafficStateRequest,
+  SignTransactionsRequest,
+  SignTransactionsResponse,
 }
 import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX
 import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX.GenericStoredTopologyTransactionsX
@@ -572,10 +574,12 @@ object TopologyAdminCommandsX {
       override def timeoutType: TimeoutType = DefaultUnboundedTimeout
     }
 
-    final case class AddTransactions(transactions: Seq[GenericSignedTopologyTransactionX])
-        extends BaseWriteCommand[AddTransactionsRequest, AddTransactionsResponse, Unit] {
+    final case class AddTransactions(
+        transactions: Seq[GenericSignedTopologyTransactionX],
+        store: String,
+    ) extends BaseWriteCommand[AddTransactionsRequest, AddTransactionsResponse, Unit] {
       override def createRequest(): Either[String, AddTransactionsRequest] = {
-        Right(AddTransactionsRequest(transactions.map(_.toProtoV2), forceChange = false))
+        Right(AddTransactionsRequest(transactions.map(_.toProtoV2), forceChange = false, store))
       }
       override def submitRequest(
           service: TopologyManagerWriteServiceXStub,
@@ -585,12 +589,36 @@ object TopologyAdminCommandsX {
         Right(())
     }
 
+    final case class SignTransactions(
+        transactions: Seq[GenericSignedTopologyTransactionX],
+        signedBy: Seq[Fingerprint],
+    ) extends BaseWriteCommand[SignTransactionsRequest, SignTransactionsResponse, Seq[
+          GenericSignedTopologyTransactionX
+        ]] {
+      override def createRequest(): Either[String, SignTransactionsRequest] = {
+        Right(
+          SignTransactionsRequest(transactions.map(_.toProtoV2), signedBy.map(_.toProtoPrimitive))
+        )
+      }
+
+      override def submitRequest(
+          service: TopologyManagerWriteServiceXStub,
+          request: SignTransactionsRequest,
+      ): Future[SignTransactionsResponse] = service.signTransactions(request)
+
+      override def handleResponse(
+          response: SignTransactionsResponse
+      ): Either[String, Seq[GenericSignedTopologyTransactionX]] =
+        response.transactions.traverse(SignedTopologyTransactionX.fromProtoV2).leftMap(_.message)
+    }
+
     final case class Propose[M <: TopologyMappingX: ClassTag](
         mapping: Either[String, M],
         signedBy: Seq[Fingerprint],
         change: TopologyChangeOpX,
         serial: Option[PositiveInt],
         mustFullyAuthorize: Boolean,
+        store: String,
     ) extends BaseWriteCommand[
           AuthorizeRequest,
           AuthorizeResponse,
@@ -609,6 +637,7 @@ object TopologyAdminCommandsX {
           mustFullyAuthorize = mustFullyAuthorize,
           forceChange = false,
           signedBy = signedBy.map(_.toProtoPrimitive),
+          store,
         )
       )
       override def submitRequest(
@@ -636,12 +665,56 @@ object TopologyAdminCommandsX {
       def apply[M <: TopologyMappingX: ClassTag](
           mapping: M,
           signedBy: Seq[Fingerprint],
+          store: String,
           serial: Option[PositiveInt] = None,
           change: TopologyChangeOpX = TopologyChangeOpX.Replace,
           mustFullyAuthorize: Boolean = true,
       ): Propose[M] =
-        Propose(Right(mapping), signedBy, change, serial, mustFullyAuthorize)
+        Propose(Right(mapping), signedBy, change, serial, mustFullyAuthorize, store)
 
+    }
+
+    final case class Authorize[M <: TopologyMappingX: ClassTag](
+        transactionHash: String,
+        mustFullyAuthorize: Boolean,
+        signedBy: Seq[Fingerprint],
+        store: String,
+    ) extends BaseWriteCommand[
+          AuthorizeRequest,
+          AuthorizeResponse,
+          SignedTopologyTransactionX[TopologyChangeOpX, M],
+        ] {
+
+      override def createRequest(): Either[String, AuthorizeRequest] = Right(
+        AuthorizeRequest(
+          TransactionHash(transactionHash),
+          mustFullyAuthorize = mustFullyAuthorize,
+          forceChange = false,
+          signedBy = signedBy.map(_.toProtoPrimitive),
+          store = store,
+        )
+      )
+
+      override def submitRequest(
+          service: TopologyManagerWriteServiceXStub,
+          request: AuthorizeRequest,
+      ): Future[AuthorizeResponse] = service.authorize(request)
+
+      override def handleResponse(
+          response: AuthorizeResponse
+      ): Either[String, SignedTopologyTransactionX[TopologyChangeOpX, M]] = response.transaction
+        .toRight("no transaction in response")
+        .flatMap(
+          SignedTopologyTransactionX
+            .fromProtoV2(_)
+            .leftMap(_.message)
+            .flatMap(tx =>
+              tx.selectMapping[M]
+                .toRight(
+                  s"Expected mapping ${ClassTag[M].getClass.getSimpleName}, but received: ${tx.transaction.mapping.getClass.getSimpleName}"
+                )
+            )
+        )
     }
   }
 

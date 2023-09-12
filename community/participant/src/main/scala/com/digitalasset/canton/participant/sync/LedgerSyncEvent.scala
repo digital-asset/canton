@@ -317,7 +317,7 @@ object LedgerSyncEvent {
     *
     * @param updateId              Uniquely identifies the update.
     * @param optCompletionInfo     Must be provided for the participant that submitted the transfer-out.
-    * @param submitter             The partyId of the transfer submitter.
+    * @param submitter             The partyId of the transfer submitter, unless the operation was performed offline.
     * @param transferId            Uniquely identifies the transfer. See [[com.digitalasset.canton.protocol.TransferId]].
     * @param contractId            The contract-id that's being transferred-out.
     * @param templateId            The template-id of the contract that's being transferred-out.
@@ -334,7 +334,7 @@ object LedgerSyncEvent {
   final case class TransferredOut(
       updateId: LedgerTransactionId,
       optCompletionInfo: Option[CompletionInfo],
-      submitter: LfPartyId,
+      submitter: Option[LfPartyId],
       contractId: LfContractId,
       templateId: Option[LfTemplateId],
       contractStakeholders: Set[LfPartyId],
@@ -403,7 +403,7 @@ object LedgerSyncEvent {
     *
     * @param updateId                  Uniquely identifies the update.
     * @param optCompletionInfo         Must be provided for the participant that submitted the transfer-in.
-    * @param submitter                 The partyId of the transfer submitter.
+    * @param submitter                 The partyId of the transfer submitter, unless the operation is performed offline.
     * @param recordTime                The ledger-provided timestamp at which the contract was transferred in.
     * @param ledgerCreateTime          The ledger time of the transaction '''creating''' the contract
     * @param createNode                Denotes the creation of the contract being transferred-in.
@@ -422,7 +422,7 @@ object LedgerSyncEvent {
   final case class TransferredIn(
       updateId: LedgerTransactionId,
       optCompletionInfo: Option[CompletionInfo],
-      submitter: LfPartyId,
+      submitter: Option[LfPartyId],
       recordTime: LfTimestamp,
       ledgerCreateTime: LfTimestamp,
       createNode: LfNodeCreate,

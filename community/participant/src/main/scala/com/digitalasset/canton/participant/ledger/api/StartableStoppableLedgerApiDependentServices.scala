@@ -93,7 +93,6 @@ class StartableStoppableLedgerApiDependentServices(
                 packageService,
                 syncService,
                 participantId.adminParty,
-                hashOps,
                 adminToken,
                 futureSupervisor,
                 loggerFactory,
@@ -106,7 +105,6 @@ class StartableStoppableLedgerApiDependentServices(
                 .bindService(
                   new GrpcPackageService(
                     packageService,
-                    adminWorkflowServices.darDistribution,
                     loggerFactory,
                   ),
                   ec,

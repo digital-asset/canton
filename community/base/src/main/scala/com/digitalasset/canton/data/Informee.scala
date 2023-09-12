@@ -4,7 +4,7 @@
 package com.digitalasset.canton.data
 
 import cats.syntax.either.*
-import com.digitalasset.canton.data.Informee.InvalidInformee
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{ConfirmationPolicy, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -21,7 +21,7 @@ import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 sealed trait Informee extends Product with Serializable with PrettyPrinting {
   def party: LfPartyId
 
-  def weight: Int
+  def weight: NonNegativeInt
 
   def requiredTrustLevel: TrustLevel
 
@@ -30,7 +30,7 @@ sealed trait Informee extends Product with Serializable with PrettyPrinting {
     * If the new weight is zero, the resulting informee will be a plain informee;
     * in thise case, the resulting informee will have trust level ORDINARY irrespective of the trust level of this.
     */
-  def withAdditionalWeight(delta: Int): Informee
+  def withAdditionalWeight(delta: NonNegativeInt): Informee
 
   /** Creates the v0-proto version of an informee.
     *
@@ -38,10 +38,14 @@ sealed trait Informee extends Product with Serializable with PrettyPrinting {
     * Confirming parties get their assigned (positive) weight.
     */
   def toProtoV0: v0.Informee =
-    v0.Informee(party = party, weight = weight)
+    v0.Informee(party = party, weight = weight.unwrap)
 
   def toProtoV1: v1.Informee =
-    v1.Informee(party = party, weight = weight, requiredTrustLevel = requiredTrustLevel.toProtoEnum)
+    v1.Informee(
+      party = party,
+      weight = weight.unwrap,
+      requiredTrustLevel = requiredTrustLevel.toProtoEnum,
+    )
 
   override def pretty: Pretty[Informee] =
     prettyOfString(inst => show"${inst.party}*${inst.weight} $requiredTrustLevel")
@@ -49,17 +53,13 @@ sealed trait Informee extends Product with Serializable with PrettyPrinting {
 
 object Informee {
 
-  def tryCreate(party: LfPartyId, weight: Int, requiredTrustLevel: TrustLevel): Informee =
-    if (weight == 0) PlainInformee(party) else ConfirmingParty(party, weight, requiredTrustLevel)
-
   def create(
       party: LfPartyId,
-      weight: Int,
+      weight: NonNegativeInt,
       requiredTrustLevel: TrustLevel,
-  ): Either[String, Informee] =
-    Either
-      .catchOnly[InvalidInformee](tryCreate(party, weight, requiredTrustLevel))
-      .leftMap(_.message)
+  ): Informee =
+    if (weight == NonNegativeInt.zero) PlainInformee(party)
+    else ConfirmingParty(party, PositiveInt.tryCreate(weight.unwrap), requiredTrustLevel)
 
   def fromProtoV0(
       confirmationPolicy: ConfirmationPolicy
@@ -69,12 +69,12 @@ object Informee {
       party <- LfPartyId
         .fromString(partyP)
         .leftMap(ProtoDeserializationError.ValueDeserializationError("party", _))
-      informee <- Informee
-        .create(party, weightP, confirmationPolicy.requiredTrustLevel)
-        .leftMap(err =>
-          ProtoDeserializationError.OtherError(s"Unable to deserialize informee data: $err")
-        )
-    } yield informee
+
+      weight <- NonNegativeInt
+        .create(weightP)
+        .leftMap(err => ProtoDeserializationError.InvariantViolation(err.message))
+
+    } yield Informee.create(party, weight, confirmationPolicy.requiredTrustLevel)
   }
 
   def fromProtoV1(informeeP: v1.Informee): ParsingResult[Informee] = {
@@ -84,38 +84,39 @@ object Informee {
         .fromString(partyP)
         .leftMap(ProtoDeserializationError.ValueDeserializationError("party", _))
       requiredTrustLevel <- TrustLevel.fromProtoEnum(requiredTrustLevelP)
-      informee <- Informee
-        .create(party, weightP, requiredTrustLevel)
-        .leftMap(err =>
-          ProtoDeserializationError.OtherError(s"Unable to deserialize informee data: $err")
-        )
-    } yield informee
-  }
 
-  final case class InvalidInformee(message: String) extends RuntimeException(message)
+      weight <- NonNegativeInt
+        .create(weightP)
+        .leftMap(err => ProtoDeserializationError.InvariantViolation(err.message))
+    } yield Informee.create(party, weight, requiredTrustLevel)
+  }
 }
 
 /** A party that must confirm the underlying view.
   *
   * @param weight determines the impact of the party on whether the view is approved.
-  * @throws com.digitalasset.canton.data.Informee$.InvalidInformee if `weight` is not positive
   */
-final case class ConfirmingParty(party: LfPartyId, weight: Int, requiredTrustLevel: TrustLevel)
-    extends Informee {
-  if (weight <= 0)
-    throw InvalidInformee(s"Unable to create a confirming party with non-positive weight $weight.")
+final case class ConfirmingParty(
+    party: LfPartyId,
+    partyWeight: PositiveInt,
+    requiredTrustLevel: TrustLevel,
+) extends Informee {
 
-  def withAdditionalWeight(delta: Int): Informee =
-    if (weight + delta == 0) PlainInformee(party) else copy(weight = weight + delta)
+  val weight: NonNegativeInt = partyWeight.toNonNegative
+
+  def withAdditionalWeight(delta: NonNegativeInt): Informee = {
+    copy(partyWeight = partyWeight + delta)
+  }
 }
 
 /** An informee that is not a confirming party
   */
 final case class PlainInformee(party: LfPartyId) extends Informee {
-  override val weight = 0
+  override val weight: NonNegativeInt = NonNegativeInt.zero
 
   override val requiredTrustLevel: TrustLevel = TrustLevel.Ordinary
 
-  def withAdditionalWeight(delta: Int): Informee =
-    if (delta == 0) this else ConfirmingParty(party, delta, requiredTrustLevel)
+  def withAdditionalWeight(delta: NonNegativeInt): Informee =
+    if (delta == NonNegativeInt.zero) this
+    else ConfirmingParty(party, PositiveInt.tryCreate(delta.unwrap), requiredTrustLevel)
 }

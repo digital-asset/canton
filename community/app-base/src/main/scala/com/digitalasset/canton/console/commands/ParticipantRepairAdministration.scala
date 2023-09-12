@@ -4,7 +4,10 @@
 package com.digitalasset.canton.console.commands
 
 import better.files.File
-import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommands
+import com.digitalasset.canton.admin.api.client.commands.{
+  GrpcAdminCommand,
+  ParticipantAdminCommands,
+}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.CommandErrors.GenericCommandError
 import com.digitalasset.canton.console.{
@@ -21,7 +24,12 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.networking.grpc.GrpcError
 import com.digitalasset.canton.participant.ParticipantNodeCommon
-import com.digitalasset.canton.participant.admin.v0.AcsSnapshotChunk
+import com.digitalasset.canton.participant.admin.v0.{
+  AcsSnapshotChunk,
+  DownloadRequest,
+  ExportAcsRequest,
+  ExportAcsResponse,
+}
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.protocol.{LfContractId, SerializableContractWithWitnesses}
 import com.digitalasset.canton.topology.{DomainId, PartyId}
@@ -30,6 +38,7 @@ import com.digitalasset.canton.util.ResourceUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, DomainAlias, SequencerCounter}
 import com.google.protobuf.ByteString
+import io.grpc.Context.CancellableContext
 import io.grpc.StatusRuntimeException
 
 import java.time.Instant
@@ -93,9 +102,13 @@ class ParticipantRepairAdministration(
         - contractDomainRenames: As part of the export, allow to rename the associated domain id of contracts from one domain to another based on the mapping.
         """
   )
+  @deprecated(
+    "Use export_acs",
+    since = "2.8.0",
+  ) // TODO(i14441): Remove deprecated ACS download / upload functionality
   def download(
       parties: Set[PartyId],
-      outputFile: String = ParticipantRepairAdministration.defaultFile,
+      outputFile: String = ParticipantRepairAdministration.DefaultFile,
       filterDomainId: String = "",
       timestamp: Option[Instant] = None,
       protocolVersion: Option[ProtocolVersion] = None,
@@ -103,28 +116,82 @@ class ParticipantRepairAdministration(
       contractDomainRenames: Map[DomainId, DomainId] = Map.empty,
   ): Unit = {
     check(FeatureFlag.Repair) {
-      consoleEnvironment.run {
-        val target = File(outputFile)
-        val requestComplete = Promise[String]()
-        val observer = new GrpcByteChunksToFileObserver[AcsSnapshotChunk](
-          target,
-          requestComplete,
+      val generator = AcsSnapshotFileCollector[DownloadRequest, AcsSnapshotChunk](outputFile)
+      val command = ParticipantAdminCommands.ParticipantRepairManagement
+        .Download(
+          parties,
+          filterDomainId,
+          timestamp,
+          protocolVersion,
+          chunkSize,
+          generator.observer,
+          generator.hasGzipExtension,
+          contractDomainRenames,
         )
-        val timeout = consoleEnvironment.commandTimeouts.ledgerCommand
+
+      generator.materializeFile(command)
+    }
+  }
+
+  @Help.Summary("Export active contracts for the given set of parties to a file.")
+  @Help.Description(
+    """This command exports the current Active Contract Set (ACS) of a given set of parties to ACS snapshot file.
+        |Afterwards, the 'import_acs' command allows importing it into a participant's ACS again.
+        |Such ACS export (and import) is interesting for recovery and operational purposes only.
+        |Note that the 'export_acs' command execution may take a long time to complete and may require significant
+        |resources.
+        """
+  )
+  def export_acs(
+      parties: Set[PartyId],
+      outputFile: String = ParticipantRepairAdministration.ExportAcsDefaultFile,
+      filterDomainId: Option[DomainId] = None,
+      timestamp: Option[Instant] = None,
+      protocolVersion: Option[ProtocolVersion] = None,
+      contractDomainRenames: Map[DomainId, DomainId] = Map.empty,
+  ): Unit = {
+    check(FeatureFlag.Repair) {
+      val collector = AcsSnapshotFileCollector[ExportAcsRequest, ExportAcsResponse](outputFile)
+      val command = ParticipantAdminCommands.ParticipantRepairManagement
+        .ExportAcs(
+          parties,
+          filterDomainId,
+          timestamp,
+          protocolVersion,
+          collector.observer,
+          contractDomainRenames,
+        )
+
+      collector.materializeFile(command)
+
+    }
+  }
+
+  private case class AcsSnapshotFileCollector[
+      Req,
+      Resp <: GrpcByteChunksToFileObserver.ByteStringChunk,
+  ](outputFile: String) {
+    private val target = File(outputFile)
+    private val requestComplete = Promise[String]()
+    val observer = new GrpcByteChunksToFileObserver[Resp](
+      target,
+      requestComplete,
+    )
+    private val timeout = consoleEnvironment.commandTimeouts.ledgerCommand
+    val hasGzipExtension: Boolean = target.toJava.getName.endsWith(".gz")
+
+    def materializeFile(
+        command: GrpcAdminCommand[
+          Req,
+          CancellableContext,
+          CancellableContext,
+        ]
+    ): Unit = {
+      consoleEnvironment.run {
 
         def call = consoleEnvironment.run {
           runner.adminCommand(
-            ParticipantAdminCommands.ParticipantRepairManagement
-              .Download(
-                parties,
-                filterDomainId,
-                timestamp,
-                protocolVersion,
-                chunkSize,
-                observer,
-                target.toJava.getName.endsWith(".gz"),
-                contractDomainRenames,
-              )
+            command
           )
         }
 
@@ -154,8 +221,12 @@ class ParticipantRepairAdministration(
 
   @Help.Summary("Import ACS snapshot")
   @Help.Description("""Uploads a binary into the participant's ACS""")
+  @deprecated(
+    "Use import_acs",
+    since = "2.8.0",
+  ) // TODO(i14441): Remove deprecated ACS download / upload functionality
   def upload(
-      inputFile: String = ParticipantRepairAdministration.defaultFile
+      inputFile: String = ParticipantRepairAdministration.DefaultFile
   ): Unit = {
     check(FeatureFlag.Repair) {
       val file = File(inputFile)
@@ -169,6 +240,27 @@ class ParticipantRepairAdministration(
       }
     }
   }
+
+  @Help.Summary("Import active contracts from an Active Contract Set (ACS) snapshot file.")
+  @Help.Description(
+    """This command imports contracts from an ACS snapshot file into the participant's ACS.
+        |The given ACS snapshot file needs to be the resulting file from a previous 'export_acs' command invocation.
+        """
+  )
+  def import_acs(
+      inputFile: String = ParticipantRepairAdministration.ExportAcsDefaultFile
+  ): Unit = {
+    check(FeatureFlag.Repair) {
+      consoleEnvironment.run {
+        runner.adminCommand(
+          ParticipantAdminCommands.ParticipantRepairManagement.ImportAcs(
+            ByteString.copyFrom(File(inputFile).loadBytes)
+          )
+        )
+      }
+    }
+  }
+
 }
 
 abstract class LocalParticipantRepairAdministration(
@@ -346,5 +438,6 @@ abstract class LocalParticipantRepairAdministration(
 }
 
 object ParticipantRepairAdministration {
-  private val defaultFile = "canton-acs-snapshot.gz"
+  private val DefaultFile = "canton-acs-snapshot.gz"
+  private val ExportAcsDefaultFile = "canton-acs-export.gz"
 }

@@ -9,37 +9,37 @@ import DA.List
 
 -- ping proposal for the case where we use more validators than just the initiator
 template PingProposal
-  with 
+  with
     id : Text
     initiator : Party
     candidates : [Party]
     validators : [Party]
     responders : [Party]
     maxLevel : Int
-  where 
+  where
     signatory initiator, validators
     observer candidates
 
     ensure (unique candidates) && (unique validators)
 
     choice Accept : Either (ContractId PingProposal) (ContractId Ping)
-      with 
-        validator : Party 
+      with
+        validator : Party
       controller validator
-        do 
+        do
           -- check that validator is a candidate
           assert (validator `elem` candidates)
           let newCandidates = filter (/= validator) candidates
           -- if everybody agreed, we will fire up the ping
           if (Prelude.length newCandidates) == 0 then
-            do 
+            do
               cid <- create Ping with id, initiator, validators, responders, maxLevel
               return (Right cid)
           else
-            do  
+            do
               cid <- create this with candidates = newCandidates, validators = (validator :: validators)
               return (Left cid)
-          
+
 
 
 template Ping
@@ -78,9 +78,10 @@ template Pong
       signatory initiator, responder
       observer observers
 
-      controller initiator can
-        Ack : ()
-          do return ()
+      choice Ack : ()
+        controller initiator
+          do
+            return ()
 
 template Explode
   with
@@ -111,12 +112,10 @@ template Explode
           mrg <- create Merge with id, initiator, validators, responders, path
           return (mrg, cnt)
 
-    controller initiator can
-      ExpireExplode :
-          ()
+    choice ExpireExplode : ()
+      controller initiator
         do
           return ()
-
 
 template Merge
   with
@@ -154,12 +153,10 @@ template Merge
             clps <- create Collapse with id, initiator, validators, responders, path = newPath
             return (Right clps)
 
-    controller initiator can
-      ExpireMerge :
-          ()
+    choice ExpireMerge : ()
+      controller initiator
         do
           return ()
-
 template Collapse
   with
     id : Text
@@ -178,12 +175,10 @@ template Collapse
         do
           return ()
 
-    controller initiator can
-      ExpireCollapse :
-          ()
+    choice ExpireCollapse : ()
+      controller initiator
         do
           return ()
-
 
 template Cycle
   with
@@ -192,11 +187,12 @@ template Cycle
   where
     signatory owner
 
-    controller owner can
-      Repeat : ContractId Cycle
+    choice Repeat : ContractId Cycle
+      controller owner
         do
           create Cycle with id, owner
-      Void : ()
+    choice Void : ()
+      controller owner
         do
           return ()
 
@@ -211,13 +207,13 @@ main = script do
 explodeScript = script do
     [alice, bob] <- mapA allocateParty ["Alice", "Bob"]
     pingId <- submit alice $ createCmd Ping with id = "1", initiator = alice, validators = [], responders = [bob], maxLevel = 1
-    explId <- submit alice $ exerciseCmd pingId Respond with winner = alice  
-    case explId of 
-      Left png -> do 
-        assert False 
+    explId <- submit alice $ exerciseCmd pingId Respond with winner = alice
+    case explId of
+      Left png -> do
+        assert False
       Right expl -> do
         coll <- submit bob $ exerciseCmd expl ProcessExplode with winner = bob
-        case coll of 
+        case coll of
           (mrg, Left explI) -> do
             assert False
           (mrg, Right (leftId, rightId)) -> do

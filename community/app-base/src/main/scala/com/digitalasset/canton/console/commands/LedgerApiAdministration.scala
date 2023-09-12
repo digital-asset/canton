@@ -6,6 +6,8 @@ package com.digitalasset.canton.console.commands
 import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
+import com.daml.jwt.JwtDecoder
+import com.daml.jwt.domain.Jwt
 import com.daml.ledger.api
 import com.daml.ledger.api.v1.admin.package_management_service.PackageDetails
 import com.daml.ledger.api.v1.admin.party_management_service.PartyDetails as ProtoPartyDetails
@@ -42,7 +44,6 @@ import com.digitalasset.canton.console.CommandErrors.GenericCommandError
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
   CommandSuccessful,
-  ConsoleCommandResult,
   ConsoleEnvironment,
   ConsoleMacros,
   FeatureFlag,
@@ -55,6 +56,11 @@ import com.digitalasset.canton.console.{
   RemoteParticipantReferenceCommon,
 }
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.ledger.api.auth.{
+  AuthServiceJWTCodec,
+  CustomDamlJWTPayload,
+  StandardJWTPayload,
+}
 import com.digitalasset.canton.ledger.api.domain.{
   IdentityProviderConfig,
   IdentityProviderId,
@@ -89,6 +95,16 @@ trait BaseLedgerApiAdministration extends NoTracing {
   implicit protected val consoleEnvironment: ConsoleEnvironment
 
   protected val name: String
+
+  protected lazy val applicationId: String = token
+    .flatMap { encodedToken => JwtDecoder.decode(Jwt(encodedToken)).toOption }
+    .flatMap(decodedToken => AuthServiceJWTCodec.readFromString(decodedToken.payload).toOption)
+    .map {
+      case s: StandardJWTPayload => s.userId
+      case c: CustomDamlJWTPayload =>
+        c.applicationId.getOrElse(LedgerApiCommands.defaultApplicationId)
+    }
+    .getOrElse(LedgerApiCommands.defaultApplicationId)
 
   protected def domainOfTransaction(transactionId: String): DomainId
   protected def optionallyAwait[Tx](
@@ -134,6 +150,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           minLedgerTimeAbs: Option[Instant] = None,
           readAs: Seq[PartyId] = Seq.empty,
           disclosedContracts: Seq[DisclosedContract] = Seq.empty,
+          applicationId: String = applicationId,
       ): TransactionTreeV2 = check(FeatureFlag.Testing) {
         val tx = consoleEnvironment.run {
           ledgerApiCommand(
@@ -148,6 +165,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
               minLedgerTimeAbs,
               disclosedContracts,
               domainId,
+              applicationId,
             )
           )
         }
@@ -181,6 +199,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           minLedgerTimeAbs: Option[Instant] = None,
           readAs: Seq[PartyId] = Seq.empty,
           disclosedContracts: Seq[DisclosedContract] = Seq.empty,
+          applicationId: String = applicationId,
       ): TransactionV2 = check(FeatureFlag.Testing) {
         val tx = consoleEnvironment.run {
           ledgerApiCommand(
@@ -195,6 +214,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
               minLedgerTimeAbs,
               disclosedContracts,
               domainId,
+              applicationId,
             )
           )
         }
@@ -217,6 +237,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           minLedgerTimeAbs: Option[Instant] = None,
           readAs: Seq[PartyId] = Seq.empty,
           disclosedContracts: Seq[DisclosedContract] = Seq.empty,
+          applicationId: String = applicationId,
       ): Unit = check(FeatureFlag.Testing) {
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -231,6 +252,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
               minLedgerTimeAbs,
               disclosedContracts,
               domainId,
+              applicationId,
             )
           )
         }
@@ -507,6 +529,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           minLedgerTimeAbs: Option[Instant] = None,
           readAs: Seq[PartyId] = Seq.empty,
           disclosedContracts: Seq[DisclosedContract] = Seq.empty,
+          applicationId: String = applicationId,
       ): TransactionTree = check(FeatureFlag.Testing) {
         val tx = consoleEnvironment.run {
           ledgerApiCommand(
@@ -520,6 +543,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
               submissionId,
               minLedgerTimeAbs,
               disclosedContracts,
+              applicationId,
             )
           )
         }
@@ -552,6 +576,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           minLedgerTimeAbs: Option[Instant] = None,
           readAs: Seq[PartyId] = Seq.empty,
           disclosedContracts: Seq[DisclosedContract] = Seq.empty,
+          applicationId: String = applicationId,
       ): Transaction = check(FeatureFlag.Testing) {
         val tx = consoleEnvironment.run {
           ledgerApiCommand(
@@ -565,6 +590,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
               submissionId,
               minLedgerTimeAbs,
               disclosedContracts,
+              applicationId,
             )
           )
         }
@@ -586,6 +612,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           minLedgerTimeAbs: Option[Instant] = None,
           readAs: Seq[PartyId] = Seq.empty,
           disclosedContracts: Seq[DisclosedContract] = Seq.empty,
+          applicationId: String = applicationId,
       ): Unit = check(FeatureFlag.Testing) {
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -599,6 +626,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
               submissionId,
               minLedgerTimeAbs,
               disclosedContracts,
+              applicationId,
             )
           )
         }
@@ -653,8 +681,8 @@ trait BaseLedgerApiAdministration extends NoTracing {
           timeout: config.NonNegativeDuration = timeouts.unbounded,
           identityProviderId: String = "",
       ): Seq[WrappedCreatedEvent] = check(FeatureFlag.Testing)(
-        consoleEnvironment.run {
-          ConsoleCommandResult.fromEither(for {
+        consoleEnvironment.runE {
+          for {
             parties <- ledgerApiCommand(
               LedgerApiCommands.PartyManagementService.ListKnownParties(
                 identityProviderId = identityProviderId
@@ -675,7 +703,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
                 ).toEither
               }
             }
-          } yield res)
+          } yield res
         }
       )
 
@@ -715,12 +743,10 @@ trait BaseLedgerApiAdministration extends NoTracing {
           result.set(tmp.headOption)
           tmp.nonEmpty
         }
-        consoleEnvironment.run {
-          ConsoleCommandResult.fromEither(
-            result
-              .get()
-              .toRight(s"Failed to find contract of type ${companion.id} after $timeout")
-          )
+        consoleEnvironment.runE {
+          result
+            .get()
+            .toRight(s"Failed to find contract of type ${companion.id} after $timeout")
         }
       })
 
@@ -754,11 +780,9 @@ trait BaseLedgerApiAdministration extends NoTracing {
           timeout: config.NonNegativeDuration = timeouts.ledgerCommand,
       ): WrappedCreatedEvent = check(FeatureFlag.Testing) {
         def scan: Option[WrappedCreatedEvent] = of_party(partyId).find(filter(_))
-
         ConsoleMacros.utils.retry_until_true(timeout)(scan.isDefined)
-
-        consoleEnvironment.run {
-          ConsoleCommandResult.fromEither(scan.toRight(s"Failed to find contract for $partyId."))
+        consoleEnvironment.runE {
+          scan.toRight(s"Failed to find contract for $partyId.")
         }
       }
     }
@@ -937,7 +961,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           partyId: PartyId,
           atLeastNumCompletions: Int,
           offset: LedgerOffset,
-          applicationId: String = LedgerApiCommands.applicationId,
+          applicationId: String = applicationId,
           timeout: NonNegativeDuration = timeouts.ledgerCommand,
           filter: Completion => Boolean = _ => true,
       ): Seq[Completion] =
@@ -965,7 +989,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           partyId: PartyId,
           atLeastNumCompletions: Int,
           offset: LedgerOffset,
-          applicationId: String = LedgerApiCommands.applicationId,
+          applicationId: String = applicationId,
           timeout: NonNegativeDuration = timeouts.ledgerCommand,
           filter: Completion => Boolean = _ => true,
       ): Seq[(Completion, Option[Checkpoint])] =
@@ -995,6 +1019,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           parties: Seq[PartyId],
           beginOffset: LedgerOffset =
             new LedgerOffset().withBoundary(LedgerOffset.LedgerBoundary.LEDGER_BEGIN),
+          applicationId: String = applicationId,
       ): AutoCloseable = {
         check(FeatureFlag.Testing)(
           consoleEnvironment.run {
@@ -1003,6 +1028,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
                 observer,
                 parties.map(_.toLf),
                 Some(beginOffset),
+                applicationId,
               )
             )
           }

@@ -128,15 +128,15 @@ trait DbMigrations { this: NamedLogging =>
       }
     }
 
-  /** Repair the database in case the migrations files changed (e.g. due to comment changes)
+  /** Repair the database in case the migrations files changed (e.g. due to comment changes).
     * To quote the Flyway documentation:
-    * ```
+    * {{{
     * Repair is your tool to fix issues with the schema history table. It has a few main uses:
     *
     * - Remove failed migration entries (only for databases that do NOT support DDL transactions)
     * - Realign the checksums, descriptions, and types of the applied migrations with the ones of the available migrations
     * - Mark all missing migrations as deleted
-    * ```
+    * }}}
     */
   def repairFlywayMigration(): EitherT[UnlessShutdown, DbMigrations.Error, Unit] =
     TraceContext.withNewTraceContext { implicit traceContext =>

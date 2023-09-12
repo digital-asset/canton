@@ -19,9 +19,12 @@ import com.digitalasset.canton.console.HeadlessConsole.{
 }
 import com.digitalasset.canton.domain.DomainNodeBootstrap
 import com.digitalasset.canton.environment.{
+  CantonNode,
+  CantonNodeBootstrap,
   CommunityConsoleEnvironment,
   CommunityEnvironment,
   DomainNodes,
+  Nodes,
   ParticipantNodes,
 }
 import com.digitalasset.canton.metrics.OnDemandMetricsReader.NoOpOnDemandMetricsReader$
@@ -31,6 +34,7 @@ import com.digitalasset.canton.{BaseTest, ConfigStubs}
 import io.grpc.stub.AbstractStub
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import io.opentelemetry.sdk.trace.SdkTracerProvider
+import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.{anyString, eq as isEq}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
@@ -97,12 +101,14 @@ class ConsoleTest extends AnyWordSpec with BaseTest {
         NoOpOnDemandMetricsReader$,
       )
     )
+    type NodeGroup = Seq[(String, Nodes[CantonNode, CantonNodeBootstrap[CantonNode]])]
+    when(environment.startNodes(any[NodeGroup])(anyTraceContext)).thenReturn(Right(()))
 
-    when(participants.start(anyString())(anyTraceContext)).thenReturn(Right(participant))
-    when(participants.stop(anyString())).thenReturn(Right(()))
+    when(participants.startAndWait(anyString())(anyTraceContext)).thenReturn(Right(()))
+    when(participants.stopAndWait(anyString())(anyTraceContext)).thenReturn(Right(()))
     when(participants.isRunning(anyString())).thenReturn(true)
 
-    when(domains.start(anyString())(anyTraceContext)).thenReturn(Right(domain))
+    when(domains.startAndWait(anyString())(anyTraceContext)).thenReturn(Right(()))
 
     val adminCommandRunner: ConsoleGrpcAdminCommandRunner = mock[ConsoleGrpcAdminCommandRunner]
     val testConsoleOutput: TestConsoleOutput = new TestConsoleOutput(loggerFactory)
@@ -193,15 +199,15 @@ class ConsoleTest extends AnyWordSpec with BaseTest {
   "Console" can {
     "start a participant" in new TestEnvironment {
       runOrFail("p1 start")
-      verify(participants).start("p1")
+      verify(participants).startAndWait("p1")
     }
     "start a participant with scala keyword as name" in new TestEnvironment {
       runOrFail("`new` start")
-      verify(participants).start("new")
+      verify(participants).startAndWait("new")
     }
     "start a participant with underscore in name" in new TestEnvironment {
       runOrFail("`p-4` start")
-      verify(participants).start("p-4")
+      verify(participants).startAndWait("p-4")
     }
     "stop a participant" in new TestEnvironment {
       runOrFail(
@@ -209,34 +215,29 @@ class ConsoleTest extends AnyWordSpec with BaseTest {
         "p1 stop",
       )
 
-      verify(participants).start("p1")
-      verify(participants).stop("p1")
+      verify(participants).startAndWait("p1")
+      verify(participants).stopAndWait("p1")
     }
+
+    def verifyStart(env: TestEnvironment, names: Seq[String]): Assertion = {
+      import env.*
+      val argCapture: ArgumentCaptor[NodeGroup] =
+        ArgumentCaptor.forClass(classOf[NodeGroup])
+      verify(environment).startNodes(argCapture.capture())(anyTraceContext)
+      argCapture.getValue.map(_._1) shouldBe names
+    }
+
     "start all participants" in new TestEnvironment {
       runOrFail("participants.local start")
-
-      verify(participants).start("p1")
-      verify(participants).start("p2")
-      verify(participants).start("new")
-      verify(participants).start("p-4")
+      verifyStart(this, Seq("p1", "p2", "new", "p-4"))
     }
     "start all domains" in new TestEnvironment {
       runOrFail("domains.local start")
-
-      verify(domains).start("d1")
-      verify(domains).start("d2")
-      verify(domains).start("d-3")
+      verifyStart(this, Seq("d1", "d2", "d-3"))
     }
     "start all" in new TestEnvironment {
       runOrFail("nodes.local.start()")
-
-      verify(participants).start("p1")
-      verify(participants).start("p2")
-      verify(participants).start("new")
-      verify(participants).start("p-4")
-      verify(domains).start("d1")
-      verify(domains).start("d2")
-      verify(domains).start("d-3")
+      verifyStart(this, Seq("p1", "p2", "new", "p-4", "d1", "d2", "d-3"))
     }
 
     "return a compile error if the code fails to compile" in new TestEnvironment {

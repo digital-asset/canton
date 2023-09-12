@@ -6,9 +6,9 @@ package com.digitalasset.canton.topology.admin.grpc
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
+import cats.syntax.parallel.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
+import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, ProtoDeserializationFailure}
 import com.digitalasset.canton.crypto.{Crypto, Fingerprint, Hash}
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -21,17 +21,18 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.v1
 import com.digitalasset.canton.topology.admin.v1.AuthorizeRequest.{Proposal, Type}
 import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
-import com.digitalasset.canton.topology.store.TopologyStoreX
+import com.digitalasset.canton.topology.store.{TopologyStoreId, TopologyStoreX}
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.TopologyTransactionX.TxHash
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
 
 class GrpcTopologyManagerWriteServiceX(
-    manager: TopologyManagerX,
+    managers: => Seq[TopologyManagerX[TopologyStoreId]],
     topologyStoreX: TopologyStoreX[AuthorizedStore],
     getId: => Option[UniqueIdentifier],
     crypto: Crypto,
@@ -43,15 +44,12 @@ class GrpcTopologyManagerWriteServiceX(
     with NamedLogging {
 
   override def authorize(request: v1.AuthorizeRequest): Future[v1.AuthorizeResponse] = {
-    implicit val traceContext: TraceContext =
-      TraceContext.todo // TODO(#14048) replace with TraceContextGrpc.fromGrpcContext
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
     val result = request.`type` match {
       case Type.Empty =>
         EitherT.leftT[FutureUnlessShutdown, GenericSignedTopologyTransactionX][CantonError](
-          ProtoDeserializationFailure.Wrap(
-            ProtoDeserializationError.FieldNotSet("AuthorizeRequest.type")
-          )
+          ProtoDeserializationFailure.Wrap(FieldNotSet("AuthorizeRequest.type"))
         )
 
       case Type.TransactionHash(value) =>
@@ -59,6 +57,7 @@ class GrpcTopologyManagerWriteServiceX(
           txHash <- EitherT
             .fromEither[FutureUnlessShutdown](Hash.fromHexString(value).map(TxHash))
             .leftMap(err => ProtoDeserializationFailure.Wrap(err.toProtoDeserializationError))
+          manager <- targetManagerET(request.store)
           signingKeys <-
             EitherT
               .fromEither[FutureUnlessShutdown](
@@ -126,6 +125,7 @@ class GrpcTopologyManagerWriteServiceX(
             .fromEither[FutureUnlessShutdown](validatedMappingE)
             .leftMap(ProtoDeserializationFailure.Wrap(_))
           (op, serial, validatedMapping, signingKeys, forceChange) = mapping
+          manager <- targetManagerET(request.store)
           signedTopoTx <- manager
             .proposeAndAuthorize(
               op,
@@ -144,6 +144,35 @@ class GrpcTopologyManagerWriteServiceX(
     CantonGrpcUtil.mapErrNewEUS(result.map(tx => v1.AuthorizeResponse(Some(tx.toProtoV2))))
   }
 
+  override def signTransactions(
+      request: v1.SignTransactionsRequest
+  ): Future[v1.SignTransactionsResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val res = for {
+      signedTxs <- EitherT.fromEither[FutureUnlessShutdown](
+        request.transactions
+          .traverse(SignedTopologyTransactionX.fromProtoV2)
+          .leftMap(ProtoDeserializationFailure.Wrap(_): CantonError)
+      )
+      signingKeys <-
+        EitherT
+          .fromEither[FutureUnlessShutdown](
+            request.signedBy.traverse(Fingerprint.fromProtoPrimitive)
+          )
+          .leftMap(ProtoDeserializationFailure.Wrap(_): CantonError)
+
+      extendedTransactions <- signedTxs.parTraverse(tx =>
+        signingKeys
+          .parTraverse(key => crypto.privateCrypto.sign(tx.transaction.hash.hash, key))
+          .leftMap(TopologyManagerError.InternalError.TopologySigningError(_): CantonError)
+          .map(tx.addSignatures)
+          .mapK(FutureUnlessShutdown.outcomeK)
+      )
+    } yield extendedTransactions
+
+    CantonGrpcUtil.mapErrNewEUS(res.map(txs => v1.SignTransactionsResponse(txs.map(_.toProtoV2))))
+  }
+
   override def addTransactions(
       request: v1.AddTransactionsRequest
   ): Future[v1.AddTransactionsResponse] = {
@@ -154,6 +183,7 @@ class GrpcTopologyManagerWriteServiceX(
           .traverse(SignedTopologyTransactionX.fromProtoV2)
           .leftMap(ProtoDeserializationFailure.Wrap(_): CantonError)
       )
+      manager <- targetManagerET(request.store)
       // TODO(#12390) let the caller decide whether to expect full authorization or not?
       _ <- manager
         .add(signedTxs, force = request.forceChange, expectFullAuthorization = false)
@@ -161,5 +191,25 @@ class GrpcTopologyManagerWriteServiceX(
     } yield v1.AddTransactionsResponse()
     CantonGrpcUtil.mapErrNewEUS(res).andThen(_ => topologyStoreX.dumpStoreContent())
   }
+
+  private def targetManagerET(
+      store: String
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, CantonError, TopologyManagerX[TopologyStoreId]] =
+    for {
+      targetStore <- EitherT.cond[FutureUnlessShutdown](
+        store.nonEmpty,
+        store,
+        ProtoDeserializationFailure.Wrap(FieldNotSet("store")),
+      )
+      manager <- EitherT
+        .fromOption[FutureUnlessShutdown](
+          managers.find(_.store.storeId.filterName == targetStore),
+          TopologyManagerError.InternalError
+            .Other(s"Target store $targetStore unknown: available stores: $managers"),
+        )
+        .leftWiden[CantonError]
+    } yield manager
 
 }

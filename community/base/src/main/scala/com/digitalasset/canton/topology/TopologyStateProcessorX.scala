@@ -28,6 +28,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class TopologyStateProcessorX(
     val store: TopologyStoreX[TopologyStoreId],
+    outboxQueue: Option[DomainOutboxQueue],
     loggerFactoryParent: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
@@ -44,7 +45,7 @@ class TopologyStateProcessorX(
     def currentTx: GenericSignedTopologyTransactionX = adjusted.get().getOrElse(originalTx)
 
     def validatedTx: GenericValidatedTopologyTransactionX =
-      ValidatedTopologyTransactionX(currentTx, rejection.get())
+      ValidatedTopologyTransactionX(currentTx, rejection.get(), expireImmediately.get())
   }
 
   // TODO(#14063) use cache instead and remember empty
@@ -76,9 +77,15 @@ class TopologyStateProcessorX(
 
     type Lft = Seq[GenericValidatedTopologyTransactionX]
 
+    // TODO(#12390): check why tests like TrafficControlTest doesn't work anymore without always resetting the caches.
+    //               as this is "only a performance optimization", it is safe to do so, but we'd prefer not to.
+    txForMapping.clear()
+    proposalsByMapping.clear()
+    proposalsForTx.clear()
+
     // first, pre-load the currently existing mappings and proposals for the given transactions
-    val preloadTxsForMappingF = preloadTxsForMapping(effective, transactions)
-    val preloadProposalsForTxF = preloadProposalsForTx(effective, transactions)
+    val preloadTxsForMappingF = preloadTxsForMapping(EffectiveTime.MaxValue, transactions)
+    val preloadProposalsForTxF = preloadProposalsForTx(EffectiveTime.MaxValue, transactions)
     // TODO(#14064) preload authorization data
     val ret = for {
       _ <- EitherT.right[Lft](preloadProposalsForTxF)
@@ -96,31 +103,37 @@ class TopologyStateProcessorX(
           }
         (removes, pendingWrites)
       }
-      validatedTx = pendingWrites.map(_.validatedTx)
-      immediatelyExpiredValidatedTx = pendingWrites.collect {
-        case pw if pw.expireImmediately.get() => pw.validatedTx.transaction.transaction.hash
-      }.toSet
+      validatedTx = pendingWrites.map(pw => pw.validatedTx)
       _ <- EitherT.cond[Future](
         // TODO(#12390) differentiate error reason and only abort actual errors, not in-batch merges
         !abortOnError || validatedTx.forall(_.rejectionReason.isEmpty),
         (), {
-          // reset caches as they are broken now if we abort
-          txForMapping.clear()
-          proposalsForTx.clear()
           // TODO(#14064) reset authorization state too
           validatedTx
         }: Lft,
       ): EitherT[Future, Lft, Unit]
-      _ <- EitherT.right[Lft](
-        store.update(
-          sequenced,
-          effective,
-          mappingRemoves,
-          txRemoves,
-          validatedTx,
-          immediatelyExpiredValidatedTx,
-        )
-      )
+
+      _ <- outboxQueue match {
+        case Some(queue) =>
+          // if we use the domain outbox queue, we must also reset the caches, because the local validation
+          // doesn't automatically imply successful validation once the transactions have been sequenced.
+          // reset caches as they are broken now if we abort
+          txForMapping.clear()
+          proposalsByMapping.clear()
+          proposalsForTx.clear()
+          EitherT.rightT[Future, Lft](queue.enqueue(validatedTx.map(_.transaction)))
+
+        case None =>
+          EitherT.right[Lft](
+            store.update(
+              sequenced,
+              effective,
+              mappingRemoves,
+              txRemoves,
+              validatedTx,
+            )
+          )
+      }
     } yield validatedTx
     ret.bimap(
       failed => {
@@ -128,12 +141,14 @@ class TopologyStateProcessorX(
         failed
       },
       success => {
-        logger.info(
-          s"Persisted topology transactions ($sequenced, $effective):\n" + success
-            .mkString(
-              ",\n"
-            )
-        )
+        if (outboxQueue.isEmpty)
+          logger.info(
+            s"Persisted topology transactions ($sequenced, $effective):\n" + success
+              .mkString(
+                ",\n"
+              )
+          )
+        else logger.info("Enqueued topology transactions:\n" + success.mkString((",\n")))
         success
       },
     )
@@ -225,7 +240,7 @@ class TopologyStateProcessorX(
     )
   }
 
-  def potentiallyMergeWithLast(
+  private def potentiallyMergeWithLast(
       previous: Option[GenericSignedTopologyTransactionX],
       current: GenericSignedTopologyTransactionX,
   ): (Boolean, GenericSignedTopologyTransactionX) = previous match {
@@ -272,7 +287,7 @@ class TopologyStateProcessorX(
       // not necessarily sufficient)
       // TODO(#12390) emit appropriate log message
       txC <- transactionIsAuthorized(last, txB, expectFullAuthorization).left.map(
-        TopologyTransactionRejection.Other(_)
+        TopologyTransactionRejection.Other
       )
       // we potentially merge the transaction with the currently active if this is just a signature update
       (isMerge, txD) = potentiallyMergeWithLast(last, txC)

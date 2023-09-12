@@ -546,4 +546,9 @@ class ReplayingSendsSequencerClientTransportAkka(
 
   override def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy =
     SubscriptionErrorRetryPolicy.never
+
+  /** The transport can decide which errors will cause the sequencer client to not try to reestablish a subscription */
+  override def subscriptionRetryPolicyAkka
+      : SubscriptionErrorRetryPolicyAkka[underlyingTransport.SubscriptionError] =
+    SubscriptionErrorRetryPolicyAkka.never
 }

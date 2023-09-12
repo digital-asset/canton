@@ -28,6 +28,8 @@ final case class CacheConfig(
   * @param indexedStrings cache size configuration for the static string index cache
   * @param contractStore cache size configuration for the contract store
   * @param topologySnapshot cache size configuration for topology snapshots
+  * @param finalizedMediatorRequests cache size for the finalized mediator requests such the mediator does not have to
+  *                                  perform a db round-trip if we have slow responders.
   */
 final case class CachingConfigs(
     indexedStrings: CacheConfig = CachingConfigs.defaultStaticStringCache,
@@ -41,6 +43,7 @@ final case class CachingConfigs(
     trafficStatusCache: CacheConfig = CachingConfigs.defaultTrafficStatusCache,
     memberCache: CacheConfig = CachingConfigs.defaultMemberCache,
     kmsMetadataCache: CacheConfig = CachingConfigs.kmsMetadataCache,
+    finalizedMediatorRequests: CacheConfig = CachingConfigs.defaultFinalizedMediatorRequestsCache,
 )
 
 object CachingConfigs {
@@ -64,6 +67,8 @@ object CachingConfigs {
     CacheConfig(maximumSize = PositiveNumeric.tryCreate(1000))
   val kmsMetadataCache: CacheConfig =
     CacheConfig(maximumSize = PositiveNumeric.tryCreate(20))
+  val defaultFinalizedMediatorRequestsCache =
+    CacheConfig(maximumSize = PositiveNumeric.tryCreate(1000))
   @VisibleForTesting
   val testing =
     CachingConfigs(contractStore = CacheConfig(maximumSize = PositiveNumeric.tryCreate(100)))

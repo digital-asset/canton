@@ -15,8 +15,8 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, L
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
-import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
-import com.digitalasset.canton.topology.store.TopologyStoreX
+import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, DomainStore}
+import com.digitalasset.canton.topology.store.{TopologyStoreId, TopologyStoreX}
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.TopologyTransactionX.TxHash
 import com.digitalasset.canton.topology.transaction.*
@@ -37,12 +37,52 @@ trait TopologyManagerObserver {
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 }
 
-class TopologyManagerX(
+class DomainTopologyManagerX(
+    clock: Clock,
+    crypto: Crypto,
+    override val store: TopologyStoreX[DomainStore],
+    val outboxQueue: DomainOutboxQueue,
+    timeouts: ProcessingTimeout,
+    futureSupervisor: FutureSupervisor,
+    loggerFactory: NamedLoggerFactory,
+)(implicit ec: ExecutionContext)
+    extends TopologyManagerX[DomainStore](
+      clock,
+      crypto,
+      store,
+      timeouts,
+      futureSupervisor,
+      loggerFactory,
+    ) {
+  override protected val processor: TopologyStateProcessorX =
+    new TopologyStateProcessorX(store, Some(outboxQueue), loggerFactory)
+}
+
+class AuthorizedTopologyManagerX(
+    clock: Clock,
+    crypto: Crypto,
+    store: TopologyStoreX[AuthorizedStore],
+    timeouts: ProcessingTimeout,
+    futureSupervisor: FutureSupervisor,
+    loggerFactory: NamedLoggerFactory,
+)(implicit ec: ExecutionContext)
+    extends TopologyManagerX[AuthorizedStore](
+      clock,
+      crypto,
+      store,
+      timeouts,
+      futureSupervisor,
+      loggerFactory,
+    ) {
+  override protected val processor: TopologyStateProcessorX =
+    new TopologyStateProcessorX(store, None, loggerFactory)
+}
+
+abstract class TopologyManagerX[+StoreID <: TopologyStoreId](
     val clock: Clock,
     val crypto: Crypto,
-    val store: TopologyStoreX[AuthorizedStore],
+    val store: TopologyStoreX[StoreID],
     val timeouts: ProcessingTimeout,
-    protocolVersion: ProtocolVersion,
     futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -58,7 +98,7 @@ class TopologyManagerX(
     loggerFactory,
   )
 
-  private val processor = new TopologyStateProcessorX(store, loggerFactory)
+  protected val processor: TopologyStateProcessorX
 
   override def queueSize: Int = sequentialQueue.queueSize
 
@@ -122,13 +162,13 @@ class TopologyManagerX(
   ): EitherT[FutureUnlessShutdown, TopologyManagerError, GenericSignedTopologyTransactionX] = {
     // TODO(#12390): check that there is an existing topology transaction with the hash of the unique key
     for {
-      proposals <- EitherT
+      transactionsForHash <- EitherT
         .right[TopologyManagerError](
-          store.findProposalsByTxHash(EffectiveTime(clock.now), NonEmpty(Set, transactionHash))
+          store.findTransactionsByTxHash(EffectiveTime(clock.now), NonEmpty(Set, transactionHash))
         )
         .mapK(FutureUnlessShutdown.outcomeK)
       existingTransaction =
-        (proposals match {
+        (transactionsForHash match {
           case Seq() => ??? // TODO(#12390) proper error
           case Seq(tx) => tx
           case _otherwise => ??? // TODO(#12390) proper error
@@ -345,4 +385,5 @@ class TopologyManagerX(
 
   override protected def onClosed(): Unit = Lifecycle.close(store, sequentialQueue)(logger)
 
+  override def toString: String = s"TopologyManagerX[${store.storeId}]"
 }

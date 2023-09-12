@@ -13,6 +13,7 @@ import com.digitalasset.canton.sequencing.authentication.{
   AuthenticationTokenManagerConfig,
 }
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import io.grpc.Status
 
@@ -31,7 +32,7 @@ final case class AuthenticationTokenWithExpiry(
   * `getToken` always returns a `EitherT[Future, ...]` but if a token is already available will be completed immediately with that token.
   */
 class AuthenticationTokenManager(
-    obtainToken: () => EitherT[Future, Status, AuthenticationTokenWithExpiry],
+    obtainToken: TraceContext => EitherT[Future, Status, AuthenticationTokenWithExpiry],
     isClosed: => Boolean,
     config: AuthenticationTokenManagerConfig,
     clock: Clock,
@@ -79,10 +80,9 @@ class AuthenticationTokenManager(
   }
 
   private def createRefreshTokenFuture(): EitherT[Future, Status, AuthenticationToken] = {
-    import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty.*
-
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val syncP = Promise[Unit]()
-    val refresh = EitherT.right(syncP.future).flatMap(_ => obtainToken())
+    val refresh = EitherT.right(syncP.future).flatMap(_ => obtainToken(traceContext))
 
     logger.debug("Refreshing authentication token")
 

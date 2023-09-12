@@ -9,6 +9,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
+import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
 import com.digitalasset.canton.participant.protocol.MessageDispatcher.RequestProcessors
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
 import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker
@@ -56,6 +57,7 @@ class DefaultMessageDispatcher(
     override protected val repairProcessor: RepairProcessor,
     override protected val inFlightSubmissionTracker: InFlightSubmissionTracker,
     override protected val loggerFactory: NamedLoggerFactory,
+    override val metrics: SyncDomainMetrics,
 )(override implicit val ec: ExecutionContext, tracer: Tracer)
     extends MessageDispatcher
     with Spanning

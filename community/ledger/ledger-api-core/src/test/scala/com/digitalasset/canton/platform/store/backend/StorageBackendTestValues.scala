@@ -10,7 +10,7 @@ import com.daml.lf.data.{Bytes, Ref}
 import com.daml.lf.ledger.EventId
 import com.daml.lf.transaction.NodeId
 import com.daml.lf.value.Value.ContractId
-import com.digitalasset.canton.ledger.api.domain.{LedgerId, ParticipantId}
+import com.digitalasset.canton.ledger.api.domain.ParticipantId
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.TransactionMetering
@@ -42,7 +42,6 @@ private[store] object StorageBackendTestValues {
   val someConfiguration: Configuration =
     Configuration(1, LedgerTimeModel.reasonableDefault, Duration.ofHours(23))
 
-  val someLedgerId: LedgerId = LedgerId("ledger")
   val someParticipantId: ParticipantId = ParticipantId(
     Ref.ParticipantId.assertFromString("participant")
   )
@@ -50,7 +49,7 @@ private[store] object StorageBackendTestValues {
   val someTemplateId2: Ref.Identifier = Ref.Identifier.assertFromString("pkg:Mod:Template2")
   val someTemplateId3: Ref.Identifier = Ref.Identifier.assertFromString("pkg:Mod:Template3")
   val someIdentityParams: ParameterStorageBackend.IdentityParams =
-    ParameterStorageBackend.IdentityParams(someLedgerId, someParticipantId)
+    ParameterStorageBackend.IdentityParams(someParticipantId)
   val someParty: Ref.Party = Ref.Party.assertFromString("party")
   val someParty2: Ref.Party = Ref.Party.assertFromString("party2")
   val someParty3: Ref.Party = Ref.Party.assertFromString("party3")
@@ -70,6 +69,9 @@ private[store] object StorageBackendTestValues {
   // The tests never deserialize Daml-Lf values, we the just need some non-empty array
   // because Oracle converts empty arrays to NULL, which then breaks non-null constraints.
   val someSerializedDamlLfValue: Array[Byte] = Array.fill[Byte](8)(15)
+
+  private val serializableTraceContext: Array[Byte] =
+    SerializableTraceContext(TraceContext.empty).toDamlProto.toByteArray
 
   def dtoConfiguration(
       offset: Offset,
@@ -136,6 +138,7 @@ private[store] object StorageBackendTestValues {
       driverMetadata: Option[Array[Byte]] = None,
       keyHash: Option[String] = None,
       domainId: Option[String] = None,
+      traceContext: Array[Byte] = serializableTraceContext,
   ): DbDto.EventCreate = {
     val transactionId = transactionIdFromOffset(offset)
     val stakeholders = Set(signatory, observer)
@@ -166,6 +169,7 @@ private[store] object StorageBackendTestValues {
       event_sequential_id = eventSequentialId,
       driver_metadata = driverMetadata,
       domain_id = domainId,
+      trace_context = traceContext,
     )
   }
 
@@ -184,6 +188,7 @@ private[store] object StorageBackendTestValues {
       actor: String = "actor",
       commandId: String = UUID.randomUUID().toString,
       domainId: Option[String] = None,
+      traceContext: Array[Byte] = serializableTraceContext,
   ): DbDto.EventExercise = {
     val transactionId = transactionIdFromOffset(offset)
     DbDto.EventExercise(
@@ -212,6 +217,7 @@ private[store] object StorageBackendTestValues {
       exercise_result_compression = None,
       event_sequential_id = eventSequentialId,
       domain_id = domainId,
+      trace_context = traceContext,
     )
   }
 
@@ -252,6 +258,7 @@ private[store] object StorageBackendTestValues {
       driverMetadata: Bytes = someDriverMetadata,
       sourceDomainId: String = "x::sourcedomain",
       targetDomainId: String = "x::targetdomain",
+      traceContext: Array[Byte] = serializableTraceContext,
   ): DbDto.EventAssign = {
     val transactionId = transactionIdFromOffset(offset)
     DbDto.EventAssign(
@@ -259,7 +266,7 @@ private[store] object StorageBackendTestValues {
       update_id = transactionId,
       command_id = Some(commandId),
       workflow_id = Some("workflow_id"),
-      submitter = someParty,
+      submitter = Option(someParty),
       contract_id = contractId.coid,
       template_id = someTemplateId.toString,
       flat_event_witnesses = Set(signatory, observer),
@@ -279,6 +286,7 @@ private[store] object StorageBackendTestValues {
       target_domain_id = targetDomainId,
       unassign_id = "123456789",
       reassignment_counter = 1000L,
+      trace_context = traceContext,
     )
   }
 
@@ -291,6 +299,7 @@ private[store] object StorageBackendTestValues {
       commandId: String = UUID.randomUUID().toString,
       sourceDomainId: String = "x::sourcedomain",
       targetDomainId: String = "x::targetdomain",
+      traceContext: Array[Byte] = serializableTraceContext,
   ): DbDto.EventUnassign = {
     val transactionId = transactionIdFromOffset(offset)
     DbDto.EventUnassign(
@@ -298,7 +307,7 @@ private[store] object StorageBackendTestValues {
       update_id = transactionId,
       command_id = Some(commandId),
       workflow_id = Some("workflow_id"),
-      submitter = someParty,
+      submitter = Option(someParty),
       contract_id = contractId.coid,
       template_id = someTemplateId.toString,
       flat_event_witnesses = Set(signatory, observer),
@@ -308,6 +317,7 @@ private[store] object StorageBackendTestValues {
       unassign_id = "123456789",
       reassignment_counter = 1000L,
       assignment_exclusivity = Some(11111),
+      trace_context = traceContext,
     )
   }
 
@@ -322,9 +332,7 @@ private[store] object StorageBackendTestValues {
       deduplicationDurationNanos: Option[Int] = None,
       deduplicationStart: Option[Timestamp] = None,
       domainId: Option[String] = None,
-      traceContext: Option[Array[Byte]] = Some(
-        SerializableTraceContext(TraceContext.empty).toDamlProto.toByteArray
-      ),
+      traceContext: Array[Byte] = serializableTraceContext,
   ): DbDto.CommandCompletion =
     DbDto.CommandCompletion(
       completion_offset = offset.toHexString,

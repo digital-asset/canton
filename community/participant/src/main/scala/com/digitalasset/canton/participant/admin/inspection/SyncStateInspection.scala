@@ -11,6 +11,14 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.admin.data.{
+  ActiveContract,
+  SerializableContractWithDomainId,
+}
+import com.digitalasset.canton.participant.admin.inspection.Error.{
+  InvariantIssue,
+  SerializationIssue,
+}
 import com.digitalasset.canton.participant.protocol.RequestJournal
 import com.digitalasset.canton.participant.pruning.PruningProcessor
 import com.digitalasset.canton.participant.store.ActiveContractStore.AcsError
@@ -53,7 +61,8 @@ import com.digitalasset.canton.{
   LedgerTransactionId,
   LfPartyId,
   RequestCounter,
-  SerializableContractWithDomainId,
+  TransferCounter,
+  TransferCounterO,
 }
 
 import java.io.OutputStream
@@ -144,6 +153,8 @@ final class SyncStateInspection(
       state.parameterStore.lastParameters.map(_.fold(ProtocolVersion.latest)(_.protocolVersion))
     )
 
+  // TODO(i14441): Remove deprecated ACS download / upload functionality
+  @deprecated("Use exportAcsDumpActiveContracts", since = "2.8.0")
   def dumpActiveContracts(
       outputStream: OutputStream,
       filterDomain: DomainId => Boolean,
@@ -153,20 +164,62 @@ final class SyncStateInspection(
       contractDomainRenames: Map[DomainId, DomainId],
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, (DomainId, Error), Unit] =
+  ): EitherT[Future, Error, Unit] =
     MonadUtil.sequentialTraverse_(syncDomainPersistentStateManager.getAll) {
       case (domainId, state) if filterDomain(domainId) =>
         val domainIdForExport = contractDomainRenames.getOrElse(domainId, domainId)
         for {
           useProtocolVersion <- protocolVersion.fold(getProtocolVersion(state))(EitherT.rightT(_))
           _ <- AcsInspection
-            .forEachVisibleActiveContract(state, parties, timestamp) { contract =>
+            .forEachVisibleActiveContract(domainId, state, parties, timestamp) { contract =>
               val domainToContract = SerializableContractWithDomainId(domainIdForExport, contract)
               val encodedContract = domainToContract.encode(useProtocolVersion)
               outputStream.write(encodedContract.getBytes)
-              outputStream.flush()
+              Right(outputStream.flush())
             }
-            .leftMap(domainId -> _)
+        } yield ()
+      case _ =>
+        EitherTUtil.unit
+    }
+
+  def exportAcsDumpActiveContracts(
+      outputStream: OutputStream,
+      filterDomain: DomainId => Boolean,
+      parties: Set[LfPartyId],
+      timestamp: Option[CantonTimestamp],
+      protocolVersion: Option[ProtocolVersion],
+      contractDomainRenames: Map[DomainId, DomainId],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, Error, Unit] =
+    MonadUtil.sequentialTraverse_(syncDomainPersistentStateManager.getAll) {
+      case (domainId, state) if filterDomain(domainId) =>
+        val domainIdForExport = contractDomainRenames.getOrElse(domainId, domainId)
+        for {
+          useProtocolVersion <- protocolVersion.fold(getProtocolVersion(state))(EitherT.rightT(_))
+          _ <- AcsInspection
+            .forEachVisibleActiveContract(domainId, state, parties, timestamp) { contract =>
+              // TODO(i13573): The transferCounter in the RepairService should be passed in as part of the RepairRequest
+              val todoCounter: TransferCounterO =
+                TransferCounter.forCreatedContract(ProtocolVersion.dev)
+              val activeContractE =
+                ActiveContract.create(domainIdForExport, contract, todoCounter)(
+                  useProtocolVersion
+                )
+
+              activeContractE match {
+                case Left(e) => Left(InvariantIssue(domainId, contract, e.getMessage))
+                case Right(bundle) =>
+                  bundle.writeDelimitedTo(outputStream) match {
+                    case Left(errorMessage) =>
+                      Left(SerializationIssue(domainId, contract, errorMessage))
+                    case Right(_) =>
+                      outputStream.flush()
+                      Right(())
+                  }
+              }
+
+            }
         } yield ()
       case _ =>
         EitherTUtil.unit

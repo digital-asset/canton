@@ -14,7 +14,6 @@ import com.daml.lf.engine.{
   ResultInterruption,
   ResultNeedAuthority,
   ResultNeedContract,
-  ResultNeedCreate,
   ResultNeedKey,
   ResultNeedPackage,
   ResultNeedUpgradeVerification,
@@ -214,9 +213,6 @@ private[apiserver] final class StoreBackedCommandExecutor(
                 )
               )
             }
-
-        case ResultNeedCreate(acoid, resume) =>
-          resolveStep(resume(None)) // TODO(#14281) Add ResultNeedCreate support
 
         case ResultNeedKey(key, resume) =>
           val start = System.nanoTime

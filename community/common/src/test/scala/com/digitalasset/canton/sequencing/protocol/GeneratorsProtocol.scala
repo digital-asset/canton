@@ -4,11 +4,12 @@
 package com.digitalasset.canton.sequencing.protocol
 
 import com.daml.nonempty.NonEmptyUtil
-import com.digitalasset.canton.Generators
+import com.digitalasset.canton.config.CantonRequireTypes.String73
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.version.GeneratorsVersion
+import com.digitalasset.canton.topology.{DomainId, Member}
+import com.digitalasset.canton.version.{GeneratorsVersion, ProtocolVersion}
+import com.digitalasset.canton.{Generators, SequencerCounter}
 import com.google.protobuf.ByteString
 import magnolify.scalacheck.auto.*
 import org.scalacheck.{Arbitrary, Gen}
@@ -23,13 +24,13 @@ object GeneratorsProtocol {
 
   implicit val acknowledgeRequestArb: Arbitrary[AcknowledgeRequest] = Arbitrary(for {
     protocolVersion <- representativeProtocolVersionGen(AcknowledgeRequest)
-    ts <- implicitly[Arbitrary[CantonTimestamp]].arbitrary
-    member <- implicitly[Arbitrary[Member]].arbitrary
+    ts <- Arbitrary.arbitrary[CantonTimestamp]
+    member <- Arbitrary.arbitrary[Member]
   } yield AcknowledgeRequest(member, ts, protocolVersion.representative))
 
   implicit val aggregationRuleArb: Arbitrary[AggregationRule] = Arbitrary(for {
     rpv <- GeneratorsVersion.representativeProtocolVersionGen[AggregationRule](AggregationRule)
-    threshold <- implicitly[Arbitrary[PositiveInt]].arbitrary
+    threshold <- Arbitrary.arbitrary[PositiveInt]
     eligibleMembers <- Generators.nonEmptyListGen[Member]
   } yield AggregationRule(eligibleMembers, threshold)(rpv))
 
@@ -53,35 +54,57 @@ object GeneratorsProtocol {
     }
   }
 
-  def recipientsArb(recipientGen: Gen[Recipient]): Arbitrary[Recipients] = Arbitrary(for {
-    depths <- nonEmptyListGen(Arbitrary(Gen.choose(0, 3)))
-    trees <- Gen.sequence[List[RecipientsTree], RecipientsTree](
-      depths.forgetNE.map(recipientsTreeGen(Arbitrary(recipientGen)))
-    )
-  } yield Recipients(NonEmptyUtil.fromUnsafe(trees)))
+  def recipientsArb(protocolVersion: ProtocolVersion): Arbitrary[Recipients] = {
+
+    // For pv < ClosedEnvelope.groupAddressesSupportedSince, the recipients should contain only members
+    val protocolVersionDependentRecipientGen =
+      if (protocolVersion < ClosedEnvelope.groupAddressesSupportedSince.representative) {
+        Arbitrary.arbitrary[MemberRecipient]
+      } else
+        Arbitrary.arbitrary[Recipient]
+
+    Arbitrary(for {
+      depths <- nonEmptyListGen(Arbitrary(Gen.choose(0, 3)))
+      trees <- Gen.sequence[List[RecipientsTree], RecipientsTree](
+        depths.forgetNE.map(recipientsTreeGen(Arbitrary(protocolVersionDependentRecipientGen)))
+      )
+    } yield Recipients(NonEmptyUtil.fromUnsafe(trees)))
+  }
 
   implicit val closedEnvelopeArb: Arbitrary[ClosedEnvelope] = Arbitrary(for {
-    bytes <- implicitly[Arbitrary[ByteString]].arbitrary
+    bytes <- Arbitrary.arbitrary[ByteString]
 
     protocolVersion <- representativeProtocolVersionGen(ClosedEnvelope)
     signatures <- defaultValueGen(protocolVersion, ClosedEnvelope.defaultSignaturesUntil)(
       Arbitrary(Gen.listOfN(5, signatureArb.arbitrary))
     )
 
-    // For pv < ClosedEnvelope.groupAddressesSupportedSince, the recipients should contain only members
-    protocolVersionDependentRecipientGen =
-      if (
-        protocolVersion.representative < ClosedEnvelope.groupAddressesSupportedSince.representative
-      ) {
-        implicitly[Arbitrary[MemberRecipient]].arbitrary
-      } else
-        implicitly[Arbitrary[Recipient]].arbitrary
-
-    recipients <- recipientsArb(protocolVersionDependentRecipientGen).arbitrary
+    recipients <- recipientsArb(protocolVersion.representative).arbitrary
 
   } yield ClosedEnvelope.tryCreate(bytes, recipients, signatures, protocolVersion.representative))
 
   implicit val mediatorsOfDomainArb: Arbitrary[MediatorsOfDomain] = Arbitrary(
-    implicitly[Arbitrary[NonNegativeInt]].arbitrary.map(MediatorsOfDomain(_))
+    Arbitrary.arbitrary[NonNegativeInt].map(MediatorsOfDomain(_))
+  )
+
+  implicit val messageIdArb: Arbitrary[MessageId] = Arbitrary(
+    Generators.lengthLimitedStringGen(String73).map(s => MessageId.tryCreate(s.str))
+  )
+
+  def deliverGen[Env <: Envelope[?]](
+      domainId: DomainId,
+      batch: Batch[Env],
+      protocolVersion: ProtocolVersion,
+  ): Gen[Deliver[Env]] = for {
+    timestamp <- Arbitrary.arbitrary[CantonTimestamp]
+    counter <- Arbitrary.arbitrary[SequencerCounter]
+    messageIdO <- Gen.option(Arbitrary.arbitrary[MessageId])
+  } yield Deliver.create(
+    counter,
+    timestamp,
+    domainId,
+    messageIdO,
+    batch,
+    protocolVersion,
   )
 }

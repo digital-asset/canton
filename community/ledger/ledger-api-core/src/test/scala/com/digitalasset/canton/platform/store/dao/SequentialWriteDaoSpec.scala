@@ -24,7 +24,7 @@ import com.digitalasset.canton.platform.store.interning.{
   StringInterningDomain,
 }
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, Traced}
 import org.mockito.MockitoSugar.mock
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -192,6 +192,9 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
 
 object SequentialWriteDaoSpec {
 
+  private val serializableTraceContext =
+    SerializableTraceContext(TraceContext.empty).toDamlProto.toByteArray
+
   private def offset(s: String): Offset = Offset.fromHexString(Ref.HexString.assertFromString(s))
 
   private def someUpdate(key: String) = Some(
@@ -238,6 +241,7 @@ object SequentialWriteDaoSpec {
     create_key_value_compression = None,
     event_sequential_id = 0,
     driver_metadata = None,
+    trace_context = serializableTraceContext,
   )
 
   private val someEventExercise = DbDto.EventExercise(
@@ -265,6 +269,7 @@ object SequentialWriteDaoSpec {
     exercise_argument_compression = None,
     exercise_result_compression = None,
     event_sequential_id = 0,
+    trace_context = serializableTraceContext,
   )
 
   private val someEventDivulgence = DbDto.EventDivulgence(
