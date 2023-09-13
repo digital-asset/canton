@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.store
 
 import cats.data.{EitherT, OptionT}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.participant.protocol.RequestJournal.{RequestData, RequestState}
 import com.digitalasset.canton.resource.TransactionalStoreUpdate
@@ -114,7 +115,8 @@ trait RequestJournalStore { this: NamedLogging =>
     * unless it has previously been set to the same or a higher value.
     */
   def advancePreheadCleanTo(newPrehead: RequestCounterCursorPrehead)(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
   ): Future[Unit] =
     cleanPreheadStore.advancePreheadTo(newPrehead)
 

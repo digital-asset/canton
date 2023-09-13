@@ -8,6 +8,7 @@ import cats.syntax.parallel.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.lf.data.Ref.PackageId
 import com.daml.nameof.NameOf.functionFullName
+import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -16,6 +17,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
+import com.digitalasset.canton.participant.admin.PackageDependencyResolver
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManager.PostInitCallbacks
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError.IdentityManagerParentError
 import com.digitalasset.canton.time.Clock
@@ -34,15 +36,6 @@ import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future, blocking}
 
 trait ParticipantTopologyManagerOps {
-
-  def vetPackages(packages: Seq[PackageId], synchronize: Boolean)(implicit
-      traceContext: TraceContext
-  ): EitherT[
-    FutureUnlessShutdown,
-    ParticipantTopologyManagerError,
-    Unit,
-  ]
-
   def allocateParty(
       validatedSubmissionId: String255,
       partyId: PartyId,
@@ -71,6 +64,7 @@ class ParticipantTopologyManager(
     clock: Clock,
     override val store: TopologyStore[TopologyStoreId.AuthorizedStore],
     crypto: Crypto,
+    packageDependencyResolver: PackageDependencyResolver,
     override protected val timeouts: ProcessingTimeout,
     protocolVersion: ProtocolVersion,
     loggerFactory: NamedLoggerFactory,
@@ -196,7 +190,6 @@ class ParticipantTopologyManager(
 
   private def checkPackageVettingRefersToExistingPackages(
       participantId: ParticipantId,
-      callbacks: PostInitCallbacks,
       transaction: SignedTopologyTransaction[TopologyChangeOp],
       force: Boolean,
   )(implicit traceContext: TraceContext): EitherT[Future, ParticipantTopologyManagerError, Unit] =
@@ -207,7 +200,7 @@ class ParticipantTopologyManager(
               TopologyStateUpdateElement(_, VettedPackages(pid, packageIds)),
             ) if participantId == pid && !force =>
           for {
-            dependencies <- callbacks
+            dependencies <- packageDependencyResolver
               .packageDependencies(packageIds.toList)
               .leftMap(ParticipantTopologyManagerError.CannotVetDueToMissingPackages.Missing(_))
             unvetted <- EitherT.right(unvettedPackages(pid, dependencies))
@@ -278,9 +271,7 @@ class ParticipantTopologyManager(
       case x: OwnerToKeyMapping if transaction.operation == TopologyChangeOp.Add =>
         runWithParticipantId(checkOwnerToKeyMappingRefersToExistingKeys(_, x, force))
       case _: VettedPackages =>
-        runWithCallbacksAndParticipantId(
-          checkPackageVettingRefersToExistingPackages(_, _, transaction, force)
-        )
+        runWithParticipantId(checkPackageVettingRefersToExistingPackages(_, transaction, force))
       case _ => EitherT.rightT(())
     }
 
@@ -339,9 +330,9 @@ class ParticipantTopologyManager(
     ret.leftMap(_.cause)
   }
 
-  private def unvettedPackages(pid: ParticipantId, packages: Set[PackageId])(implicit
+  def unvettedPackages(pid: ParticipantId, packages: Set[PackageId])(implicit
       traceContext: TraceContext
-  ): Future[Set[PackageId]] = {
+  ): Future[Set[PackageId]] =
     this.store
       .findPositiveTransactions(
         CantonTimestamp.MaxValue,
@@ -359,74 +350,29 @@ class ParticipantTopologyManager(
             case (acc, _) => acc
           }
       }
-  }
 
-  def vetPackages(packages: Seq[PackageId], syncVetting: Boolean)(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] = {
-    val packageSet = packages.toSet
-
-    def authorizeVetting(
-        pid: ParticipantId
-    ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, SignedTopologyTransaction[
-      TopologyChangeOp
-    ]] = {
-      authorize(
-        TopologyStateUpdate.createAdd(VettedPackages(pid, packages), protocolVersion),
-        None,
-        protocolVersion,
-        force = false,
-      )
-    }
-
-    def waitForPackagesBeingVetted(
-        pid: ParticipantId,
-        clients: () => Seq[DomainTopologyClient],
-    ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Boolean] =
-      if (syncVetting) {
-        EitherT.right(
-          clients()
+  def waitForPackagesBeingVetted(
+      packageSet: Set[LfPackageId],
+      pid: ParticipantId,
+  )(implicit
+      tc: TraceContext
+  ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Boolean] =
+    packageAndSyncService
+      .mapK(FutureUnlessShutdown.outcomeK)
+      .flatMap(callbacks =>
+        EitherT.right[ParticipantTopologyManagerError](
+          callbacks
+            .clients()
             .parTraverse {
               _.await(
-                _.findUnvettedPackagesOrDependencies(pid, packageSet).value.map(x =>
-                  x.exists(_.isEmpty)
-                ),
+                _.findUnvettedPackagesOrDependencies(pid, packageSet).value
+                  .map(_.exists(_.isEmpty)),
                 timeouts.network.duration,
               )
             }
             .map(_ => true)
         )
-      } else EitherT.rightT(false)
-
-    for {
-      // get package service (stored in an atomic reference)
-      participantId <- EitherT.fromEither[FutureUnlessShutdown](
-        participantIdO
-          .get()
-          .toRight(
-            ParticipantTopologyManagerError.UninitializedParticipant
-              .Reject("Participant id is not yet set")
-          )
       )
-      callbacks <- packageAndSyncService.mapK(FutureUnlessShutdown.outcomeK)
-      isVetted <- EitherT
-        .right(unvettedPackages(participantId, packageSet).map(_.isEmpty))
-        .mapK(FutureUnlessShutdown.outcomeK)
-      _ <-
-        if (isVetted) {
-          logger.debug(show"The following packages are already vetted: ${packages}")
-          EitherT.rightT[FutureUnlessShutdown, ParticipantTopologyManagerError](())
-        } else {
-          authorizeVetting(participantId).map(_ => ())
-        }
-      // register our handle to wait for the packages being vetted
-      appeared <- waitForPackagesBeingVetted(participantId, () => callbacks.clients())
-    } yield {
-      if (appeared) {
-        logger.debug("Packages appeared on all connected domains.")
-      }
-    }
-  }
 
   override def allocateParty(
       validatedSubmissionId: String255,
@@ -460,13 +406,10 @@ class ParticipantTopologyManager(
 }
 
 object ParticipantTopologyManager {
-  // the package and sync service
+  // the sync service
   // depends on the topology manager and vice versa. therefore, we do have to inject these callbacks after init
   trait PostInitCallbacks {
     def clients(): Seq[DomainTopologyClient]
-    def packageDependencies(packages: List[PackageId])(implicit
-        traceContext: TraceContext
-    ): EitherT[Future, PackageId, Set[PackageId]]
     def partyHasActiveContracts(partyId: PartyId)(implicit
         traceContext: TraceContext
     ): Future[Boolean]

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.metrics
 
 import com.daml.metrics.HealthMetrics
-import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
+import com.daml.metrics.api.MetricDoc.MetricQualification.{Debug, Traffic}
 import com.daml.metrics.api.MetricHandle.{Gauge, Meter}
 import com.daml.metrics.api.noop.NoOpGauge
 import com.daml.metrics.api.{MetricDoc, MetricName, MetricsContext}
@@ -79,6 +79,34 @@ class SequencerMetrics(
     metricsFactory.gauge[Long](MetricName(prefix :+ "max-event-age"), 0L)(MetricsContext.Empty)
 
   object dbStorage extends DbStorageMetrics(prefix, metricsFactory)
+
+  // TODO(i14580): add testing
+  object trafficControl {
+    private val prefix = SequencerMetrics.this.prefix :+ "traffic-control"
+
+    @MetricDoc.Tag(
+      summary = "Raw size of an event received in the sequencer.",
+      description =
+        """This the raw payload size of an event, on the write path. Final event cost calculation.""",
+      qualification = Traffic,
+    )
+    val eventReceived: Meter = metricsFactory.meter(prefix :+ "event-received-size")
+
+    @MetricDoc.Tag(
+      summary = "Cost of rejected event.",
+      description =
+        """Cost of an event that was rejected because it exceeded the sender's traffic limit.""",
+      qualification = Traffic,
+    )
+    val eventRejected: Meter = metricsFactory.meter(prefix :+ "event-rejected-cost")
+
+    @MetricDoc.Tag(
+      summary = "Cost of delivered event.",
+      description = """Cost of an event that was delivered.""",
+      qualification = Traffic,
+    )
+    val eventDelivered: Meter = metricsFactory.meter(prefix :+ "event-delivered-cost")
+  }
 }
 
 object SequencerMetrics {
@@ -194,6 +222,18 @@ class MediatorMetrics(
   )
   val maxEventAge: Gauge[Long] =
     metricsFactory.gauge[Long](MetricName(prefix :+ "max-event-age"), 0L)(MetricsContext.Empty)
+
+  // TODO(i14580): add testing
+  object trafficControl {
+    @MetricDoc.Tag(
+      summary = "Event rejected because of traffic limit exceeded",
+      description =
+        """This metric is being incremented every time a sequencer rejects an event because
+           the sender does not have enough credit.""",
+      qualification = Traffic,
+    )
+    val eventRejected: Meter = metricsFactory.meter(prefix :+ "event-rejected")
+  }
 }
 
 class IdentityManagerMetrics(

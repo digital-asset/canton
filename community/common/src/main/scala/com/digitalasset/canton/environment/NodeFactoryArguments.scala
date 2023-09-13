@@ -15,6 +15,7 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.StorageFactory
 import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.tracing.TracerProvider
 
 final case class NodeFactoryArguments[
     NodeConfig <: LocalNodeConfig,
@@ -32,6 +33,8 @@ final case class NodeFactoryArguments[
     writeHealthDumpToFile: HealthDumpFunction,
     configuredOpenTelemetry: ConfiguredOpenTelemetry,
 ) {
+  val tracerProvider: TracerProvider = TracerProvider.Factory(configuredOpenTelemetry, name)
+
   def toCantonNodeBootstrapCommonArguments(
       storageFactory: StorageFactory,
       cryptoFactory: CryptoFactory,
@@ -56,6 +59,7 @@ final case class NodeFactoryArguments[
           loggerFactory,
           writeHealthDumpToFile,
           configuredOpenTelemetry,
+          tracerProvider,
         )
       )
       .leftMap(_.toString)

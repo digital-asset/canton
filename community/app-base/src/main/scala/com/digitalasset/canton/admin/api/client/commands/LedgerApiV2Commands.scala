@@ -36,8 +36,6 @@ import scala.concurrent.Future
 
 object LedgerApiV2Commands {
 
-  final val applicationId = "CantonConsole"
-
   private[commands] trait SubmitCommand extends PrettyPrinting {
     def actAs: Seq[LfPartyId]
     def readAs: Seq[LfPartyId]
@@ -49,6 +47,7 @@ object LedgerApiV2Commands {
     def minLedgerTimeAbs: Option[Instant]
     def disclosedContracts: Seq[DisclosedContract]
     def domainId: DomainId
+    def applicationId: String
 
     protected def mkCommand: Commands = Commands(
       workflowId = workflowId,
@@ -106,6 +105,7 @@ object LedgerApiV2Commands {
         override val minLedgerTimeAbs: Option[Instant],
         override val disclosedContracts: Seq[DisclosedContract],
         override val domainId: DomainId,
+        override val applicationId: String,
     ) extends SubmitCommand
         with BaseCommand[SubmitRequest, SubmitResponse, Unit] {
       override def createRequest(): Either[String, SubmitRequest] = Right(
@@ -141,6 +141,7 @@ object LedgerApiV2Commands {
         override val minLedgerTimeAbs: Option[Instant],
         override val disclosedContracts: Seq[DisclosedContract],
         override val domainId: DomainId,
+        override val applicationId: String,
     ) extends SubmitCommand
         with BaseCommand[
           SubmitAndWaitRequest,
@@ -177,6 +178,7 @@ object LedgerApiV2Commands {
         override val minLedgerTimeAbs: Option[Instant],
         override val disclosedContracts: Seq[DisclosedContract],
         override val domainId: DomainId,
+        override val applicationId: String,
     ) extends SubmitCommand
         with BaseCommand[SubmitAndWaitRequest, SubmitAndWaitForTransactionResponse, Transaction] {
 

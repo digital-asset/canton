@@ -70,9 +70,3 @@ sealed trait ShutdownError {
 final case class ConfigurationNotFound(name: String) extends StartupError with ShutdownError {
   def message = s"configuration not found: $name"
 }
-
-/** A running instance for the given name has not been started.
-  */
-final case class InstanceNotStarted(name: String) extends ShutdownError {
-  def message = s"instance not found for name: $name"
-}

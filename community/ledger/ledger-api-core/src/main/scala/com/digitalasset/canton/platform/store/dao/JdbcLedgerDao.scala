@@ -88,14 +88,6 @@ private class JdbcLedgerDao(
 
   override def currentHealth(): HealthStatus = dbDispatcher.currentHealth()
 
-  override def lookupLedgerId()(implicit
-      loggingContext: LoggingContextWithTrace
-  ): Future[Option[LedgerId]] =
-    dbDispatcher
-      .executeSql(metrics.daml.index.db.getLedgerId)(
-        parameterStorageBackend.ledgerIdentity(_).map(_.ledgerId)
-      )
-
   override def lookupParticipantId()(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Option[ParticipantId]] =
@@ -122,8 +114,7 @@ private class JdbcLedgerDao(
       .executeSql(metrics.daml.index.db.initializeLedgerParameters)(
         parameterStorageBackend.initializeParameters(
           ParameterStorageBackend.IdentityParams(
-            ledgerId = ledgerId,
-            participantId = participantId,
+            participantId = participantId
           ),
           loggerFactory,
         )

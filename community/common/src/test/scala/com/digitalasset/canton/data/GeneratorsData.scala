@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.data
 
-import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{Salt, TestHash}
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
-import com.digitalasset.canton.protocol.{ConfirmationPolicy, SourceDomainId, TargetDomainId}
+import com.digitalasset.canton.protocol.ConfirmationPolicy
 import com.digitalasset.canton.topology.{DomainId, MediatorRef, ParticipantId}
-import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
+import com.digitalasset.canton.version.ProtocolVersion
 import magnolify.scalacheck.auto.*
 import org.scalacheck.{Arbitrary, Gen}
 
@@ -17,6 +17,7 @@ import java.time.Duration
 
 object GeneratorsData {
   import com.digitalasset.canton.Generators.*
+  import com.digitalasset.canton.config.GeneratorsConfig.*
   import com.digitalasset.canton.protocol.GeneratorsProtocol.*
   import com.digitalasset.canton.topology.GeneratorsTopology.*
   import com.digitalasset.canton.crypto.GeneratorsCrypto.*
@@ -37,13 +38,13 @@ object GeneratorsData {
 
   implicit val commonMetadataArb: Arbitrary[CommonMetadata] = Arbitrary(
     for {
-      confirmationPolicy <- implicitly[Arbitrary[ConfirmationPolicy]].arbitrary
-      domainId <- implicitly[Arbitrary[DomainId]].arbitrary
+      confirmationPolicy <- Arbitrary.arbitrary[ConfirmationPolicy]
+      domainId <- Arbitrary.arbitrary[DomainId]
 
-      mediatorRef <- implicitly[Arbitrary[MediatorRef]].arbitrary
-      singleMediatorRef <- implicitly[Arbitrary[MediatorRef.Single]].arbitrary
+      mediatorRef <- Arbitrary.arbitrary[MediatorRef]
+      singleMediatorRef <- Arbitrary.arbitrary[MediatorRef.Single]
 
-      salt <- implicitly[Arbitrary[Salt]].arbitrary
+      salt <- Arbitrary.arbitrary[Salt]
       uuid <- Gen.uuid
       protocolVersion <- representativeProtocolVersionGen(CommonMetadata)
 
@@ -65,10 +66,10 @@ object GeneratorsData {
 
   implicit val participantMetadataArb: Arbitrary[ParticipantMetadata] = Arbitrary(
     for {
-      ledgerTime <- implicitly[Arbitrary[CantonTimestamp]].arbitrary
-      submissionTime <- implicitly[Arbitrary[CantonTimestamp]].arbitrary
+      ledgerTime <- Arbitrary.arbitrary[CantonTimestamp]
+      submissionTime <- Arbitrary.arbitrary[CantonTimestamp]
       workflowIdO <- Gen.option(workflowIdArb.arbitrary)
-      salt <- implicitly[Arbitrary[Salt]].arbitrary
+      salt <- Arbitrary.arbitrary[Salt]
 
       protocolVersion <- representativeProtocolVersionGen(ParticipantMetadata)
 
@@ -87,11 +88,11 @@ object GeneratorsData {
       actAs <- nonEmptySet(lfPartyIdArb).arbitrary
       applicationId <- applicationIdArb.arbitrary
       commandId <- commandIdArb.arbitrary
-      submitterParticipant <- implicitly[Arbitrary[ParticipantId]].arbitrary
-      salt <- implicitly[Arbitrary[Salt]].arbitrary
+      submitterParticipant <- Arbitrary.arbitrary[ParticipantId]
+      salt <- Arbitrary.arbitrary[Salt]
       submissionId <- Gen.option(ledgerSubmissionIdArb.arbitrary)
-      dedupPeriod <- implicitly[Arbitrary[DeduplicationPeriod]].arbitrary
-      maxSequencingTime <- implicitly[Arbitrary[CantonTimestamp]].arbitrary
+      dedupPeriod <- Arbitrary.arbitrary[DeduplicationPeriod]
+      maxSequencingTime <- Arbitrary.arbitrary[CantonTimestamp]
       hashOps = TestHash // Not used for serialization
       protocolVersion <- representativeProtocolVersionGen(SubmitterMetadata)
     } yield SubmitterMetadata(
@@ -108,67 +109,19 @@ object GeneratorsData {
     )
   )
 
-  implicit val transferInCommonData: Arbitrary[TransferInCommonData] = Arbitrary(
-    for {
-      salt <- implicitly[Arbitrary[Salt]].arbitrary
-      targetDomain <- implicitly[Arbitrary[TargetDomainId]].arbitrary
+  implicit val viewCommonDataArb: Arbitrary[ViewCommonData] = Arbitrary(for {
+    informees <- Gen.containerOf[Set, Informee](Arbitrary.arbitrary[Informee])
+    threshold <- Arbitrary.arbitrary[NonNegativeInt]
+    salt <- Arbitrary.arbitrary[Salt]
 
-      targetMediator <- implicitly[Arbitrary[MediatorRef]].arbitrary
-      singleTargetMediator <- implicitly[Arbitrary[MediatorRef.Single]].arbitrary
+    /*
+      In v0 (used for pv=3,4) the confirmation policy is passed as part of the context rather than
+      being read from the proto. This break the identify test in SerializationDeserializationTest.
+      Fixing the test tooling currently requires too much energy compared to the benefit so filtering
+      out the old protocol versions.
+     */
+    pv <- Gen.oneOf(ProtocolVersion.supported.forgetNE.filterNot(_.v < 5))
 
-      stakeholders <- Gen.containerOf[Set, LfPartyId](implicitly[Arbitrary[LfPartyId]].arbitrary)
-      uuid <- Gen.uuid
-      targetProtocolVersion <- implicitly[Arbitrary[TargetProtocolVersion]].arbitrary
-
-      updatedTargetMediator =
-        if (!TransferCommonData.isGroupMediatorSupported(targetProtocolVersion.v))
-          singleTargetMediator
-        else targetMediator
-
-      hashOps = TestHash // Not used for serialization
-
-    } yield TransferInCommonData
-      .create(hashOps)(
-        salt,
-        targetDomain,
-        updatedTargetMediator,
-        stakeholders,
-        uuid,
-        targetProtocolVersion,
-      )
-      .value
-  )
-
-  implicit val transferOutCommonData: Arbitrary[TransferOutCommonData] = Arbitrary(
-    for {
-      salt <- implicitly[Arbitrary[Salt]].arbitrary
-      sourceDomain <- implicitly[Arbitrary[SourceDomainId]].arbitrary
-
-      sourceMediator <- implicitly[Arbitrary[MediatorRef]].arbitrary
-      singleSourceMediator <- implicitly[Arbitrary[MediatorRef.Single]].arbitrary
-
-      stakeholders <- Gen.containerOf[Set, LfPartyId](implicitly[Arbitrary[LfPartyId]].arbitrary)
-      adminParties <- Gen.containerOf[Set, LfPartyId](implicitly[Arbitrary[LfPartyId]].arbitrary)
-      uuid <- Gen.uuid
-      sourceProtocolVersion <- implicitly[Arbitrary[SourceProtocolVersion]].arbitrary
-
-      updatedSourceMediator =
-        if (!TransferCommonData.isGroupMediatorSupported(sourceProtocolVersion.v))
-          singleSourceMediator
-        else sourceMediator
-
-      hashOps = TestHash // Not used for serialization
-
-    } yield TransferOutCommonData
-      .create(hashOps)(
-        salt,
-        sourceDomain,
-        updatedSourceMediator,
-        stakeholders,
-        adminParties,
-        uuid,
-        sourceProtocolVersion,
-      )
-      .value
-  )
+    hashOps = TestHash // Not used for serialization
+  } yield ViewCommonData.create(hashOps)(informees, threshold, salt, pv))
 }

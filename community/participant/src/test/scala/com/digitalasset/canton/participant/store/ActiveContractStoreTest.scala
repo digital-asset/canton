@@ -1321,16 +1321,15 @@ trait ActiveContractStoreTest extends PrunableByTimeTest {
         _ <- valueOrFail(
           acs.transferInContracts(
             Seq(
-              (coid00, sourceDomain1, initialTransferCounter),
-              (coid01, sourceDomain2, initialTransferCounter),
-            ),
-            toc1,
+              (coid00, sourceDomain1, initialTransferCounter, toc1),
+              (coid01, sourceDomain2, initialTransferCounter, toc1),
+            )
           )
         )(
           s"transfer-in contracts at $toc1"
         )
         _ <- valueOrFail(
-          acs.transferOutContracts(Seq((coid01, targetDomain1, tc1)), toc1)
+          acs.transferOutContracts(Seq((coid01, targetDomain1, tc1, toc1)))
         )(
           s"transferOut contracts at $toc1"
         )
@@ -1382,16 +1381,15 @@ trait ActiveContractStoreTest extends PrunableByTimeTest {
         _ <- valueOrFail(
           acs.transferInContracts(
             Seq(
-              (coid00, sourceDomain1, initialTransferCounter),
-              (coid01, sourceDomain2, initialTransferCounter),
-            ),
-            toc1,
+              (coid00, sourceDomain1, initialTransferCounter, toc1),
+              (coid01, sourceDomain2, initialTransferCounter, toc1),
+            )
           )
         )(
           s"transfer-in contracts at $toc1"
         )
         _ <- valueOrFail(
-          acs.transferOutContracts(Seq((coid01, targetDomain1, initialTransferCounter)), toc1)
+          acs.transferOutContracts(Seq((coid01, targetDomain1, initialTransferCounter, toc1)))
         )(
           s"transferOut contracts at $toc1"
         )
@@ -1477,26 +1475,36 @@ trait ActiveContractStoreTest extends PrunableByTimeTest {
           (
             toc2,
             ActiveContractIdsChange(
-              activations = Map(coid10 -> initialTransferCounter, coid11 -> tc1),
-              deactivations = Map(coid01 -> initialTransferCounter),
+              activations = Map(
+                coid10 -> StateChangeType(ContractChange.Created, initialTransferCounter),
+                coid11 -> StateChangeType(ContractChange.Assigned, tc1),
+              ),
+              deactivations =
+                Map(coid01 -> StateChangeType(ContractChange.Archived, initialTransferCounter)),
             ),
           ),
           (
             toc3,
             ActiveContractIdsChange(
               activations = Map.empty,
-              deactivations = Map(coid10 -> initialTransferCounter, coid11 -> tc2),
+              deactivations = Map(
+                coid10 -> StateChangeType(ContractChange.Archived, initialTransferCounter),
+                coid11 -> StateChangeType(ContractChange.Unassigned, tc2),
+              ),
             ),
           ),
           (
             toc4,
-            ActiveContractIdsChange(activations = Map(coid11 -> tc3), deactivations = Map.empty),
+            ActiveContractIdsChange(
+              activations = Map(coid11 -> StateChangeType(ContractChange.Assigned, tc3)),
+              deactivations = Map.empty,
+            ),
           ),
           (
             toc5,
             ActiveContractIdsChange(
               activations = Map.empty,
-              deactivations = Map(coid11 -> tc3),
+              deactivations = Map(coid11 -> StateChangeType(ContractChange.Archived, tc3)),
             ),
           ),
         )

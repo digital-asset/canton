@@ -32,9 +32,8 @@ class ServerRunner[E <: Environment](
         environment
           .startAll() match {
           case Right(_) => logger.info("Canton started")
-          case Left(errors) =>
-            logger.error("Canton startup encountered problems:")
-            errors.foreach(err => logger.error(s" - ${err.message}"))
+          case Left(error) =>
+            logger.error(s"Canton startup encountered problems: $error")
             // give up as we couldn't start everything successfully
             sys.exit(1)
         }

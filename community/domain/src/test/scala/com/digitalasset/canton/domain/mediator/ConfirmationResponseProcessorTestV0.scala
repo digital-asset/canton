@@ -24,7 +24,7 @@ import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.messages.Verdict.{Approve, ParticipantReject}
+import com.digitalasset.canton.protocol.messages.Verdict.Approve
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
@@ -157,15 +157,16 @@ abstract class ConfirmationResponseProcessorTestV0Base
         loggerFactory,
       )
     val timeTracker: DomainTimeTracker = mock[DomainTimeTracker]
-    val mediatorState =
-      new MediatorState(
-        new InMemoryFinalizedResponseStore(loggerFactory),
-        new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts),
-        mock[Clock],
-        DomainTestMetrics.mediator,
-        timeouts,
-        loggerFactory,
-      )
+    val mediatorState = new MediatorState(
+      new InMemoryFinalizedResponseStore(loggerFactory),
+      new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts),
+      mock[Clock],
+      DomainTestMetrics.mediator,
+      testedProtocolVersion,
+      CachingConfigs.defaultFinalizedMediatorRequestsCache,
+      timeouts,
+      loggerFactory,
+    )
     val processor = new ConfirmationResponseProcessor(
       domainId,
       mediatorId,
@@ -397,9 +398,9 @@ abstract class ConfirmationResponseProcessorTestV0Base
         val informeeMessage = new InformeeMessage(fullInformeeTree)(testedProtocolVersion) {
           override val informeesAndThresholdByViewHash
               : Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
-            val submitterI = Informee.tryCreate(submitter, 1, TrustLevel.Ordinary)
-            val signatoryI = Informee.tryCreate(signatory, 1, TrustLevel.Ordinary)
-            val observerI = Informee.tryCreate(observer, 1, TrustLevel.Ordinary)
+            val submitterI = Informee.create(submitter, NonNegativeInt.one, TrustLevel.Ordinary)
+            val signatoryI = Informee.create(signatory, NonNegativeInt.one, TrustLevel.Ordinary)
+            val observerI = Informee.create(observer, NonNegativeInt.one, TrustLevel.Ordinary)
             Map(
               view.viewHash -> (Set(
                 submitterI,
@@ -762,8 +763,6 @@ abstract class ConfirmationResponseProcessorTestV0Base
               informeeMessage,
               testedProtocolVersion,
               mockTopologySnapshot,
-            )(
-              loggerFactory
             )
           }
           _ <- {
@@ -801,16 +800,15 @@ abstract class ConfirmationResponseProcessorTestV0Base
           _ = {
             updatedState should matchPattern {
               case Some(
-                    ResponseAggregationV0(`requestId`, `informeeMessage`, `ts1`, Right(_states))
+                    ResponseAggregation(`requestId`, `informeeMessage`, `ts1`, Right(_states))
                   ) =>
             }
-            val ResponseAggregationV0(
+            val ResponseAggregation(
               `requestId`,
               `informeeMessage`,
               `ts1`,
               Right(states),
-            ) =
-              updatedState.value
+            ) = updatedState.value
             assert(
               states === Map(
                 view.viewHash ->
@@ -826,7 +824,7 @@ abstract class ConfirmationResponseProcessorTestV0Base
                   ),
                 factory.MultipleRootsAndViewNestings.view1.viewHash ->
                   ResponseAggregation.ViewState(
-                    Set(ConfirmingParty(signatory, 1, TrustLevel.Ordinary)),
+                    Set(ConfirmingParty(signatory, PositiveInt.one, TrustLevel.Ordinary)),
                     Map(
                       submitter -> ConsortiumVotingState(approvals =
                         Set(ExampleTransactionFactory.submitterParticipant)
@@ -838,14 +836,14 @@ abstract class ConfirmationResponseProcessorTestV0Base
                   ),
                 factory.MultipleRootsAndViewNestings.view10.viewHash ->
                   ResponseAggregation.ViewState(
-                    Set(ConfirmingParty(signatory, 1, TrustLevel.Ordinary)),
+                    Set(ConfirmingParty(signatory, PositiveInt.one, TrustLevel.Ordinary)),
                     Map(signatory -> ConsortiumVotingState()),
                     1,
                     Nil,
                   ),
                 factory.MultipleRootsAndViewNestings.view11.viewHash ->
                   ResponseAggregation.ViewState(
-                    Set(ConfirmingParty(signatory, 1, TrustLevel.Ordinary)),
+                    Set(ConfirmingParty(signatory, PositiveInt.one, TrustLevel.Ordinary)),
                     Map(
                       submitter -> ConsortiumVotingState(approvals =
                         Set(ExampleTransactionFactory.submitterParticipant)
@@ -894,10 +892,7 @@ abstract class ConfirmationResponseProcessorTestV0Base
           finalState <- sut.mediatorState.fetch(requestId).value
           _ = {
             inside(finalState) {
-              case Some(
-                    ResponseAggregationV0(`requestId`, `informeeMessage`, `ts2`, state)
-                  ) =>
-                assert(state === Left(Approve(testedProtocolVersion)))
+              case Some(FinalizedResponse(`requestId`, `informeeMessage`, `ts2`, Approve())) =>
             }
           }
         } yield succeed
@@ -911,9 +906,9 @@ abstract class ConfirmationResponseProcessorTestV0Base
         val informeeMessage = new InformeeMessage(fullInformeeTree)(testedProtocolVersion) {
           override val informeesAndThresholdByViewHash
               : Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
-            val submitterI = Informee.tryCreate(submitter, 1, TrustLevel.Ordinary)
-            val signatoryI = Informee.tryCreate(signatory, 1, TrustLevel.Ordinary)
-            val observerI = Informee.tryCreate(observer, 1, TrustLevel.Ordinary)
+            val submitterI = Informee.create(submitter, NonNegativeInt.one, TrustLevel.Ordinary)
+            val signatoryI = Informee.create(signatory, NonNegativeInt.one, TrustLevel.Ordinary)
+            val observerI = Informee.create(observer, NonNegativeInt.one, TrustLevel.Ordinary)
             Map(
               view.viewHash -> (Set(
                 submitterI,
@@ -1025,13 +1020,14 @@ abstract class ConfirmationResponseProcessorTestV0Base
           )
 
           finalState <- sut.mediatorState.fetch(requestId).value
-          _ = inside(finalState) {
+        } yield {
+          inside(finalState) {
             case Some(
-                  ResponseAggregationV0(
+                  FinalizedResponse(
                     _requestId,
                     _request,
                     _version,
-                    Left(ParticipantReject(reasons)),
+                    Verdict.ParticipantReject(reasons),
                   )
                 ) =>
               // TODO(#5337) These are only the rejections for the first view because this view happens to be finalized first.
@@ -1043,7 +1039,8 @@ abstract class ConfirmationResponseProcessorTestV0Base
                 party should (contain(submitter) or contain(signatory))
               }
           }
-        } yield succeed
+          succeed
+        }
       }
 
       "receiving late response" in {

@@ -18,6 +18,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
+import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
 import com.digitalasset.canton.participant.protocol.submission.{
   InFlightSubmissionTracker,
@@ -80,6 +81,7 @@ trait MessageDispatcher { this: NamedLogging =>
   protected def badRootHashMessagesRequestProcessor: BadRootHashMessagesRequestProcessor
   protected def repairProcessor: RepairProcessor
   protected def inFlightSubmissionTracker: InFlightSubmissionTracker
+  protected def metrics: SyncDomainMetrics
 
   implicit protected val ec: ExecutionContext
 
@@ -595,8 +597,9 @@ trait MessageDispatcher { this: NamedLogging =>
       events: Seq[RawProtocolEvent]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[ProcessingResult] = {
     val receipts = events.mapFilter {
-      case Deliver(counter, timestamp, _domainId, messageIdO, _batch) =>
+      case Deliver(counter, timestamp, _domainId, messageIdO, batch) =>
         // The event was submitted by the current participant iff the message ID is set.
+        messageIdO.foreach(_ => recordEventDelivered())
         messageIdO.map(_ -> SequencedSubmission(counter, timestamp))
       case DeliverError(_counter, _timestamp, _domainId, _messageId, _reason) =>
         // `observeDeliverError` takes care of generating a rejection reason if necessary
@@ -612,10 +615,21 @@ trait MessageDispatcher { this: NamedLogging =>
   protected def observeDeliverError(
       error: DeliverError
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[ProcessingResult] = {
+    recordTrafficDeliveryError(error)
     doProcess(
       DeliveryMessageKind,
       FutureUnlessShutdown.outcomeF(inFlightSubmissionTracker.observeDeliverError(error)),
     )
+  }
+
+  private def recordTrafficDeliveryError(error: DeliverError): Unit = error match {
+    case DeliverError(_, _, _, _, SequencerErrors.TrafficCredit(_)) =>
+      metrics.trafficControl.eventAboveTrafficLimit.mark()
+    case _ =>
+  }
+
+  private def recordEventDelivered(): Unit = {
+    metrics.trafficControl.eventDelivered.mark()
   }
 
   private def tickRecordOrderPublisher(sc: SequencerCounter, ts: CantonTimestamp)(implicit
@@ -735,6 +749,7 @@ private[participant] object MessageDispatcher {
         repairProcessor: RepairProcessor,
         inFlightSubmissionTracker: InFlightSubmissionTracker,
         loggerFactory: NamedLoggerFactory,
+        metrics: SyncDomainMetrics,
     )(implicit ec: ExecutionContext, tracer: Tracer): T
 
     def create(
@@ -755,6 +770,7 @@ private[participant] object MessageDispatcher {
         repairProcessor: RepairProcessor,
         inFlightSubmissionTracker: InFlightSubmissionTracker,
         loggerFactory: NamedLoggerFactory,
+        metrics: SyncDomainMetrics,
     )(implicit ec: ExecutionContext, tracer: Tracer): T = {
       val requestProcessors = new RequestProcessors {
         override def getInternal[P](viewType: ViewType { type Processor = P }): Option[P] =
@@ -795,6 +811,7 @@ private[participant] object MessageDispatcher {
         repairProcessor,
         inFlightSubmissionTracker,
         loggerFactory,
+        metrics,
       )
     }
   }
@@ -819,6 +836,7 @@ private[participant] object MessageDispatcher {
         repairProcessor: RepairProcessor,
         inFlightSubmissionTracker: InFlightSubmissionTracker,
         loggerFactory: NamedLoggerFactory,
+        metrics: SyncDomainMetrics,
     )(implicit ec: ExecutionContext, tracer: Tracer): MessageDispatcher = {
       new DefaultMessageDispatcher(
         protocolVersion,
@@ -835,6 +853,7 @@ private[participant] object MessageDispatcher {
         repairProcessor,
         inFlightSubmissionTracker,
         loggerFactory,
+        metrics,
       )
     }
   }

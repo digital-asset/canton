@@ -54,7 +54,7 @@ class TopologyTransactionProcessorX(
 
   override type SubscriberType = TopologyTransactionProcessingSubscriberX
 
-  private val stateProcessor = new TopologyStateProcessorX(store, loggerFactory)
+  private val stateProcessor = new TopologyStateProcessorX(store, None, loggerFactory)
 
   override def onClosed(): Unit = {
     super.onClosed()

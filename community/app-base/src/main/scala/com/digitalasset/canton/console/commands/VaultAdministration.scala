@@ -162,6 +162,7 @@ class SecretKeyAdministration(
 
     // Rotate the key for the node in the topology management
     instance.topology.owner_to_key_mappings.rotate_key(
+      instance,
       owner,
       currentKey,
       newKey,
@@ -183,6 +184,7 @@ class SecretKeyAdministration(
 
     // Rotate the key for the node in the topology management
     instance.topology.owner_to_key_mappings.rotate_key(
+      instance,
       owner,
       currentKey,
       newKey,
@@ -210,6 +212,7 @@ class SecretKeyAdministration(
 
       // Rotate the key for the node in the topology management
       instance.topology.owner_to_key_mappings.rotate_key(
+        instance,
         owner,
         currentKey,
         newKey,

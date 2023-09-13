@@ -676,7 +676,7 @@ class TransferOutProcessingSteps(
     } yield LedgerSyncEvent.TransferredOut(
       updateId = updateId,
       optCompletionInfo = completionInfo,
-      submitter = submitterMetadata.submitter,
+      submitter = Option(submitterMetadata.submitter),
       contractId = contractId,
       templateId = Some(templateId),
       contractStakeholders = contractStakeholders,

@@ -665,6 +665,8 @@ class GrpcSequencerServiceTest
         "reject unauthenticated eligible members in aggregation rule" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
           implicit env =>
             val request = defaultRequest
+              .focus(_.timestampOfSigningKey)
+              .replace(Some(CantonTimestamp.ofEpochSecond(1)))
               .focus(_.aggregationRule)
               .replace(
                 Some(
@@ -691,6 +693,8 @@ class GrpcSequencerServiceTest
         "reject unachievable threshold in aggregation rule" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
           implicit env =>
             val request = defaultRequest
+              .focus(_.timestampOfSigningKey)
+              .replace(Some(CantonTimestamp.ofEpochSecond(1)))
               .focus(_.aggregationRule)
               .replace(
                 Some(
@@ -713,6 +717,8 @@ class GrpcSequencerServiceTest
         "reject uneligible sender in aggregation rule" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
           implicit env =>
             val request = defaultRequest
+              .focus(_.timestampOfSigningKey)
+              .replace(Some(CantonTimestamp.ofEpochSecond(1)))
               .focus(_.aggregationRule)
               .replace(
                 Some(

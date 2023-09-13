@@ -317,7 +317,9 @@ class DefaultVerdictSenderTest
         requestId,
         Some(informeeMessage),
         Seq(rhmEnvelope),
-        MalformedMessage.Reject("Test failure", testedProtocolVersion),
+        MediatorVerdict
+          .MediatorReject(MalformedMessage.Reject("Test failure"))
+          .toVerdict(testedProtocolVersion),
         decisionTime,
       )
     }

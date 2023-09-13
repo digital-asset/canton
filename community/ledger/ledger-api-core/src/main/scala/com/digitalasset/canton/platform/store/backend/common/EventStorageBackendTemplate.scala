@@ -5,11 +5,13 @@ package com.digitalasset.canton.platform.store.backend.common
 
 import anorm.SqlParser.*
 import anorm.{Row, RowParser, SimpleSql, ~}
+import com.daml.ledger.api.v1.trace_context.TraceContext as ProtoTraceContext
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Time.Timestamp
 import com.digitalasset.canton.ledger.offset.Offset
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.NamedLogging.loggerWithoutTracing
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.platform.store.backend.Conversions.{
   hashFromHexString,
   offset,
@@ -22,7 +24,7 @@ import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.dao.events.Raw
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.platform.{Identifier, Party}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 
 import java.sql.Connection
 import scala.collection.immutable.ArraySeq
@@ -53,6 +55,7 @@ object EventStorageBackendTemplate {
       "submitters",
       "driver_metadata",
       "domain_id",
+      "trace_context",
     )
 
   private val baseColumnsForFlatTransactionsExercise =
@@ -77,6 +80,7 @@ object EventStorageBackendTemplate {
       "submitters",
       "NULL as driver_metadata",
       "domain_id",
+      "trace_context",
     )
 
   val selectColumnsForFlatTransactionsCreate: String =
@@ -90,7 +94,7 @@ object EventStorageBackendTemplate {
 
   private type SharedRow =
     Offset ~ String ~ Int ~ Long ~ String ~ String ~ Timestamp ~ Int ~ Option[String] ~
-      Option[String] ~ Array[Int] ~ Option[Array[Int]] ~ Option[Int]
+      Option[String] ~ Array[Int] ~ Option[Array[Int]] ~ Option[Int] ~ Option[Array[Byte]]
 
   private val sharedRow: RowParser[SharedRow] =
     offset("event_offset") ~
@@ -105,7 +109,8 @@ object EventStorageBackendTemplate {
       str("workflow_id").? ~
       array[Int]("event_witnesses") ~
       array[Int]("submitters").? ~
-      int("domain_id").?
+      int("domain_id").? ~
+      byteArray("trace_context").?
 
   private type CreatedEventRow =
     SharedRow ~ Array[Byte] ~ Option[Int] ~ Array[Int] ~ Array[Int] ~ Option[String] ~
@@ -144,13 +149,21 @@ object EventStorageBackendTemplate {
 
   private val archivedEventRow: RowParser[ArchiveEventRow] = sharedRow
 
+  private def extractTraceContext(
+      tcBytes: Option[Array[Byte]],
+      logger: TracedLogger,
+  ): TraceContext =
+    SerializableTraceContext
+      .fromDamlProtoSafeOpt(loggerWithoutTracing(logger))(tcBytes.map(ProtoTraceContext.parseFrom))
+      .traceContext
+
   private[common] def createdFlatEventParser(
       allQueryingParties: Set[Int],
       stringInterning: StringInterning,
   ): RowParser[EventStorageBackend.Entry[Raw.FlatEvent.Created]] =
     createdEventRow map {
       case eventOffset ~ transactionId ~ nodeIndex ~ eventSequentialId ~ eventId ~ contractId ~ ledgerEffectiveTime ~
-          templateId ~ commandId ~ workflowId ~ eventWitnesses ~ submitters ~ internedDomainId ~ createArgument ~ createArgumentCompression ~
+          templateId ~ commandId ~ workflowId ~ eventWitnesses ~ submitters ~ internedDomainId ~ traceContext ~ createArgument ~ createArgumentCompression ~
           createSignatories ~ createObservers ~ createAgreementText ~ createKeyValue ~ createKeyHash ~ createKeyValueCompression ~ driverMetadata =>
         // ArraySeq.unsafeWrapArray is safe here
         // since we get the Array from parsing and don't let it escape anywhere.
@@ -192,6 +205,7 @@ object EventStorageBackendTemplate {
             driverMetadata = driverMetadata,
           ),
           domainId = internedDomainId.map(stringInterning.domainId.unsafe.externalize),
+          traceContext = traceContext,
         )
     }
 
@@ -200,7 +214,7 @@ object EventStorageBackendTemplate {
       stringInterning: StringInterning,
   ): RowParser[EventStorageBackend.Entry[Raw.FlatEvent.Archived]] =
     archivedEventRow map {
-      case eventOffset ~ transactionId ~ nodeIndex ~ eventSequentialId ~ eventId ~ contractId ~ ledgerEffectiveTime ~ templateId ~ commandId ~ workflowId ~ eventWitnesses ~ submitters ~ internedDomainId =>
+      case eventOffset ~ transactionId ~ nodeIndex ~ eventSequentialId ~ eventId ~ contractId ~ ledgerEffectiveTime ~ templateId ~ commandId ~ workflowId ~ eventWitnesses ~ submitters ~ internedDomainId ~ traceContext =>
         // ArraySeq.unsafeWrapArray is safe here
         // since we get the Array from parsing and don't let it escape anywhere.
         EventStorageBackend.Entry(
@@ -227,6 +241,7 @@ object EventStorageBackendTemplate {
             ),
           ),
           domainId = internedDomainId.map(stringInterning.domainId.unsafe.externalize),
+          traceContext = traceContext,
         )
     }
 
@@ -244,7 +259,7 @@ object EventStorageBackendTemplate {
       stringInterning: StringInterning,
   ): RowParser[EventStorageBackend.Entry[Raw.TreeEvent.Created]] =
     createdEventRow map {
-      case eventOffset ~ transactionId ~ nodeIndex ~ eventSequentialId ~ eventId ~ contractId ~ ledgerEffectiveTime ~ templateId ~ commandId ~ workflowId ~ eventWitnesses ~ submitters ~ internedDomainId ~ createArgument ~ createArgumentCompression ~ createSignatories ~ createObservers ~ createAgreementText ~ createKeyValue ~ createKeyHash ~ createKeyValueCompression ~ driverMetadata =>
+      case eventOffset ~ transactionId ~ nodeIndex ~ eventSequentialId ~ eventId ~ contractId ~ ledgerEffectiveTime ~ templateId ~ commandId ~ workflowId ~ eventWitnesses ~ submitters ~ internedDomainId ~ traceContext ~ createArgument ~ createArgumentCompression ~ createSignatories ~ createObservers ~ createAgreementText ~ createKeyValue ~ createKeyHash ~ createKeyValueCompression ~ driverMetadata =>
         // ArraySeq.unsafeWrapArray is safe here
         // since we get the Array from parsing and don't let it escape anywhere.
         EventStorageBackend.Entry(
@@ -285,6 +300,7 @@ object EventStorageBackendTemplate {
             driverMetadata = driverMetadata,
           ),
           domainId = internedDomainId.map(stringInterning.domainId.unsafe.externalize),
+          traceContext = traceContext,
         )
     }
 
@@ -293,7 +309,7 @@ object EventStorageBackendTemplate {
       stringInterning: StringInterning,
   ): RowParser[EventStorageBackend.Entry[Raw.TreeEvent.Exercised]] =
     exercisedEventRow map {
-      case eventOffset ~ transactionId ~ nodeIndex ~ eventSequentialId ~ eventId ~ contractId ~ ledgerEffectiveTime ~ templateId ~ commandId ~ workflowId ~ eventWitnesses ~ submitters ~ internedDomainId ~ exerciseConsuming ~ qualifiedChoiceName ~ exerciseArgument ~ exerciseArgumentCompression ~ exerciseResult ~ exerciseResultCompression ~ exerciseActors ~ exerciseChildEventIds =>
+      case eventOffset ~ transactionId ~ nodeIndex ~ eventSequentialId ~ eventId ~ contractId ~ ledgerEffectiveTime ~ templateId ~ commandId ~ workflowId ~ eventWitnesses ~ submitters ~ internedDomainId ~ traceContext ~ exerciseConsuming ~ qualifiedChoiceName ~ exerciseArgument ~ exerciseArgumentCompression ~ exerciseResult ~ exerciseResultCompression ~ exerciseActors ~ exerciseChildEventIds =>
         val Ref.QualifiedChoiceName(interfaceId, choiceName) =
           Ref.QualifiedChoiceName.assertFromString(qualifiedChoiceName)
         // ArraySeq.unsafeWrapArray is safe here
@@ -333,6 +349,7 @@ object EventStorageBackendTemplate {
             ),
           ),
           domainId = internedDomainId.map(stringInterning.domainId.unsafe.externalize),
+          traceContext = traceContext,
         )
     }
 
@@ -373,6 +390,7 @@ object EventStorageBackendTemplate {
     "submitters",
     "driver_metadata",
     "domain_id",
+    "trace_context",
   ).mkString(", ")
 
   val selectColumnsForTransactionTreeExercise: String = Seq(
@@ -403,6 +421,7 @@ object EventStorageBackendTemplate {
     "submitters",
     "NULL as driver_metadata",
     "domain_id",
+    "trace_context",
   ).mkString(", ")
 
   val EventSequentialIdFirstLast: RowParser[(Long, Long)] =
@@ -418,7 +437,7 @@ object EventStorageBackendTemplate {
       int("source_domain_id") ~
       int("target_domain_id") ~
       str("unassign_id") ~
-      int("submitter") ~
+      int("submitter").? ~
       long("reassignment_counter") ~
       str("update_id") ~
       str("contract_id") ~
@@ -433,7 +452,8 @@ object EventStorageBackendTemplate {
       int("create_key_value_compression").? ~
       timestampFromMicros("ledger_effective_time") ~
       hashFromHexString("create_key_hash").? ~
-      byteArray("driver_metadata")
+      byteArray("driver_metadata") ~
+      byteArray("trace_context").?
 
   private def assignEventParser(
       allQueryingParties: Set[Int],
@@ -461,7 +481,8 @@ object EventStorageBackendTemplate {
           createKeyValueCompression ~
           ledgerEffectiveTime ~
           createKeyHash ~
-          driverMetadata =>
+          driverMetadata ~
+          traceContext =>
         EventStorageBackend.RawAssignEvent(
           commandId = commandId,
           workflowId = workflowId,
@@ -469,7 +490,7 @@ object EventStorageBackendTemplate {
           sourceDomainId = stringInterning.domainId.unsafe.externalize(sourceDomainId),
           targetDomainId = stringInterning.domainId.unsafe.externalize(targetDomainId),
           unassignId = unassignId,
-          submitter = stringInterning.party.unsafe.externalize(submitter),
+          submitter = submitter.map(stringInterning.party.unsafe.externalize),
           reassignmentCounter = reassignmentCounter,
           rawCreatedEvent = EventStorageBackend.RawCreatedEvent(
             updateId = updateId,
@@ -491,6 +512,7 @@ object EventStorageBackendTemplate {
             createKeyHash = createKeyHash,
             driverMetadata = driverMetadata,
           ),
+          traceContext = traceContext,
         )
     }
 
@@ -501,13 +523,14 @@ object EventStorageBackendTemplate {
       int("source_domain_id") ~
       int("target_domain_id") ~
       str("unassign_id") ~
-      int("submitter") ~
+      int("submitter").? ~
       long("reassignment_counter") ~
       str("update_id") ~
       str("contract_id") ~
       int("template_id") ~
       array[Int]("flat_event_witnesses") ~
-      timestampFromMicros("assignment_exclusivity").?
+      timestampFromMicros("assignment_exclusivity").? ~
+      byteArray("trace_context").?
 
   private def unassignEventParser(
       allQueryingParties: Set[Int],
@@ -526,7 +549,8 @@ object EventStorageBackendTemplate {
           contractId ~
           templateId ~
           flatEventWitnesses ~
-          assignmentExclusivity =>
+          assignmentExclusivity ~
+          traceContext =>
         EventStorageBackend.RawUnassignEvent(
           commandId = commandId,
           workflowId = workflowId,
@@ -534,7 +558,7 @@ object EventStorageBackendTemplate {
           sourceDomainId = stringInterning.domainId.unsafe.externalize(sourceDomainId),
           targetDomainId = stringInterning.domainId.unsafe.externalize(targetDomainId),
           unassignId = unassignId,
-          submitter = stringInterning.party.unsafe.externalize(submitter),
+          submitter = submitter.map(stringInterning.party.unsafe.externalize),
           reassignmentCounter = reassignmentCounter,
           updateId = updateId,
           contractId = contractId,
@@ -544,6 +568,7 @@ object EventStorageBackendTemplate {
             .map(stringInterning.party.unsafe.externalize)
             .toSet,
           assignmentExclusivity = assignmentExclusivity,
+          traceContext = traceContext,
         )
     }
 

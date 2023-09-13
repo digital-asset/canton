@@ -27,6 +27,7 @@ import com.digitalasset.canton.topology.{
   Member,
   UnauthenticatedMemberId,
 }
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.ManagedChannel
 import io.grpc.stub.AbstractStub
@@ -65,7 +66,10 @@ class GrpcSequencerClientAuth(
   def apply[S <: AbstractStub[S]](client: S): S = {
     val obtainTokenPerEndpoint = channelPerEndpoint.transform { case (_, channel) =>
       val authenticationClient = new SequencerAuthenticationServiceStub(channel)
-      () => tokenProvider.generateToken(authenticationClient)
+      tc: TraceContext =>
+        TraceContextGrpc.withGrpcContext(tc) {
+          tokenProvider.generateToken(authenticationClient)
+        }
     }
     val clientAuthentication = member match {
       case unauthenticatedMember: UnauthenticatedMemberId =>

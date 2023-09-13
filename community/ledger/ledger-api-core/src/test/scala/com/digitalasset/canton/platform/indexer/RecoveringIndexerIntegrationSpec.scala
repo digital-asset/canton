@@ -12,11 +12,7 @@ import com.daml.lf.data.Ref.{Party, SubmissionId}
 import com.daml.lf.data.{Ref, Time}
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.api.health.HealthStatus
-import com.digitalasset.canton.ledger.configuration.{
-  Configuration,
-  LedgerId,
-  LedgerInitialConditions,
-}
+import com.digitalasset.canton.ledger.configuration.LedgerId
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.{
   ReadService,
@@ -410,15 +406,6 @@ object RecoveringIndexerIntegrationSpec {
 
     private val offset = new AtomicLong(0)
     private val writtenUpdates = mutable.Buffer.empty[(Offset, Traced[Update])]
-
-    override def ledgerInitialConditions(): Source[LedgerInitialConditions, NotUsed] =
-      Source.repeat(
-        LedgerInitialConditions(
-          ledgerId,
-          Configuration.reasonableInitialConfiguration,
-          Time.Timestamp.Epoch,
-        )
-      )
 
     override def stateUpdates(beginAfter: Option[Offset])(implicit
         traceContext: TraceContext

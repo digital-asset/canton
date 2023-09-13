@@ -104,7 +104,7 @@ class SequencerRuntime(
 
   protected val isTopologyInitializedPromise = Promise[Unit]()
 
-  protected def domainOutboxO: Option[DomainOutboxCommon[?, ?, ?]] = None
+  protected def domainOutboxO: Option[DomainOutboxHandle] = None
 
   def initialize(
       topologyInitIsCompleted: Boolean = true

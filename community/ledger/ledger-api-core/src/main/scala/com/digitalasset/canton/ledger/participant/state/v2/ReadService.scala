@@ -6,7 +6,6 @@ package com.digitalasset.canton.ledger.participant.state.v2
 import akka.NotUsed
 import akka.stream.scaladsl.Source
 import com.digitalasset.canton.ledger.api.health.ReportsHealth
-import com.digitalasset.canton.ledger.configuration.LedgerInitialConditions
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
@@ -29,17 +28,6 @@ import scala.concurrent.Future
   * communicated by [[ReadService!.stateUpdates]].
   */
 trait ReadService extends ReportsHealth {
-
-  /** Retrieve the static initial conditions of the ledger, containing
-    * the ledger identifier, the ledger config and the initial ledger record time.
-    *
-    * Returns a single element Source since the implementation may need to
-    * first establish connectivity to the underlying ledger. The implementer
-    * may assume that this method is called only once, or very rarely.
-    * Source is being used instead of Future as this is in line with [[stateUpdates]],
-    * and is easy to implement from both Java and Scala.
-    */
-  def ledgerInitialConditions(): Source[LedgerInitialConditions, NotUsed]
 
   /** Get the stream of state [[Update]]s starting from the beginning or right
     * after the given [[com.digitalasset.canton.ledger.offset.Offset]]

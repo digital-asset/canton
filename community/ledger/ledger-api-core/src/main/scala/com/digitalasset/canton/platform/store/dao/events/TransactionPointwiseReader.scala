@@ -109,7 +109,7 @@ final class TransactionTreePointwiseReader(
       lastEventSequentialId: Long,
       requestingParties: Set[Party],
       eventProjectionProperties: EventProjectionProperties,
-  )(connection: Connection): Vector[EventStorageBackend.Entry[RawEventT]] = {
+  )(connection: Connection): Vector[Entry[RawEventT]] = {
     eventStorageBackend.transactionPointwiseQueries.fetchTreeTransactionEvents(
       firstEventSequentialId = firstEventSequentialId,
       lastEventSequentialId = lastEventSequentialId,

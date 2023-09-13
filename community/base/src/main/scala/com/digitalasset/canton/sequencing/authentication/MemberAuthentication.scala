@@ -46,7 +46,7 @@ sealed trait MemberAuthentication {
     for {
       // see if we have any of the possible keys that could be used to sign
       availableSigningKey <- possibleSigningKeys.forgetNE
-        .parFilterA(key => crypto.cryptoPrivateStore.existsSigningKey(key)(TraceContext.empty))
+        .parFilterA(key => crypto.cryptoPrivateStore.existsSigningKey(key))
         .map(_.headOption) // the first we find is as good as any
         .leftMap(_ => NoKeysRegistered(member))
         .subflatMap(_.toRight[AuthenticationError](NoKeysRegistered(member)))

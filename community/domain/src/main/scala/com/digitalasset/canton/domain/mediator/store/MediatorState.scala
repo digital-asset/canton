@@ -5,10 +5,15 @@ package com.digitalasset.canton.domain.mediator.store
 
 import cats.data.OptionT
 import cats.instances.future.*
-import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.{CacheConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.mediator.ResponseAggregation
+import com.digitalasset.canton.domain.mediator.{
+  FinalizedResponse,
+  ResponseAggregation,
+  ResponseAggregator,
+}
 import com.digitalasset.canton.domain.metrics.MediatorMetrics
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable, Lifecycle}
@@ -18,10 +23,9 @@ import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.version.ProtocolVersion
 
-import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.{ConcurrentLinkedQueue, ConcurrentSkipListMap}
-import scala.collection.concurrent.TrieMap
+import java.util.concurrent.ConcurrentSkipListMap
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 
@@ -37,6 +41,8 @@ private[mediator] class MediatorState(
     val deduplicationStore: MediatorDeduplicationStore,
     val clock: Clock,
     metrics: MediatorMetrics,
+    protocolVersion: ProtocolVersion,
+    finalizedRequestCache: CacheConfig,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -46,55 +52,61 @@ private[mediator] class MediatorState(
   // outstanding requests are kept in memory while finalized requests will be stored
   // a skip list is used to optimise for when we fetch all keys below a given timestamp
   private val pendingRequests =
-    new ConcurrentSkipListMap[RequestId, ResponseAggregation](implicitly[Ordering[RequestId]])
+    new ConcurrentSkipListMap[RequestId, ResponseAggregation[?]](implicitly[Ordering[RequestId]])
 
   // once requests are finished, we keep em around for a few minutes so we can deal with any
   // late request, avoiding a database lookup. otherwise, we'll be doing a db lookup in our
   // main processing stage, slowing things down quite a bit
-  private val finishedRequests = TrieMap[RequestId, ResponseAggregation]()
-  private val evictionQueue = new ConcurrentLinkedQueue[RequestId]()
-  private val evictionQueueCount = new AtomicInteger(0)
-  private val MAX_FINISHED_REQUESTS = 1000
+  private val finishedRequests = finalizedRequestCache
+    .buildScaffeine()
+    .build[RequestId, FinalizedResponse]()
 
   private def updateNumRequests(num: Int): Unit =
     metrics.outstanding.updateValue(_ + num)
 
   /** Adds an incoming ResponseAggregation */
   def add(
-      responseAggregation: ResponseAggregation
+      responseAggregation: ResponseAggregation[?]
   )(implicit traceContext: TraceContext, callerCloseContext: CloseContext): Future[Unit] = {
-    val requestId = responseAggregation.requestId
-    if (!responseAggregation.isFinalized) {
-      val existingValue = Option(pendingRequests.putIfAbsent(requestId, responseAggregation))
-      ErrorUtil.requireState(
-        existingValue.isEmpty,
-        s"Unexpected pre-existing request for $requestId",
-      )
+    responseAggregation.asFinalized(protocolVersion) match {
+      case None =>
+        val requestId = responseAggregation.requestId
+        ErrorUtil.requireState(
+          Option(pendingRequests.putIfAbsent(requestId, responseAggregation)).isEmpty,
+          s"Unexpected pre-existing request for $requestId",
+        )
 
-      metrics.requests.mark()
-      updateNumRequests(1)
-      Future.unit
-    } else
-      finalizedResponseStore.store(responseAggregation)
+        metrics.requests.mark()
+        updateNumRequests(1)
+        Future.unit
+      case Some(finalizedResponse) => add(finalizedResponse)
+    }
   }
+
+  def add(
+      finalizedResponse: FinalizedResponse
+  )(implicit traceContext: TraceContext, callerCloseContext: CloseContext): Future[Unit] =
+    finalizedResponseStore.store(finalizedResponse)
 
   def fetch(requestId: RequestId)(implicit
       traceContext: TraceContext,
       callerCloseContext: CloseContext,
-  ): OptionT[Future, ResponseAggregation] = {
-    // TODO(#10025): in an overload situation, when participants start to reply late, the fetching
-    //   from the store became punitive in the semi-optimal mediator response processing
+  ): OptionT[Future, ResponseAggregator] = {
     Option(pendingRequests.get(requestId))
-      .orElse(finishedRequests.get(requestId)) match {
+      .orElse(finishedRequests.getIfPresent(requestId)) match {
       case Some(cp) => OptionT.some[Future](cp)
-      case None => finalizedResponseStore.fetch(requestId)
+      case None =>
+        finalizedResponseStore.fetch(requestId).map { result =>
+          finishedRequests.put(requestId, result)
+          result
+        }
     }
   }
 
   /** Replaces a [[ResponseAggregation]] for the `requestId` if the stored version matches `currentVersion`.
     * You can only use this to update non-finalized aggregations
     */
-  def replace(oldValue: ResponseAggregation, newValue: ResponseAggregation)(implicit
+  def replace(oldValue: ResponseAggregator, newValue: ResponseAggregation[?])(implicit
       traceContext: TraceContext,
       callerCloseContext: CloseContext,
   ): OptionT[Future, Unit] = {
@@ -106,33 +118,14 @@ private[mediator] class MediatorState(
 
     val requestId = oldValue.requestId
 
-    def storeFinalized: OptionT[Future, Unit] = OptionT.liftF {
-      finalizedResponseStore.store(newValue) map { _ =>
+    def storeFinalized(finalizedResponse: FinalizedResponse): Future[Unit] = {
+      finalizedResponseStore.store(finalizedResponse) map { _ =>
         // keep the request around for a while to avoid a database lookup under contention
-        finishedRequests.put(requestId, newValue) match {
-          // request was not yet present, ensure we schedule the eviction
-          case None =>
-            // request was not yet present, remember it for some time and remove an older request
-            evictionQueue.offer(requestId)
-            // if this addition makes the cache exceeding the max size, don't increase it, but remove the head
-            val count = evictionQueueCount.getAndUpdate { x =>
-              if (x >= MAX_FINISHED_REQUESTS) x else x + 1
-            }
-            if (count >= MAX_FINISHED_REQUESTS) {
-              Option(evictionQueue.poll()).fold(
-                logger.error("Removing finished request failed with empty poll!")
-              )(finishedRequests.remove(_).discard)
-            }
-          case Some(_) =>
-        }
+        finishedRequests.put(requestId, finalizedResponse).discard
         Option(pendingRequests.remove(requestId)) foreach { _ =>
           updateNumRequests(-1)
         }
       }
-    }
-
-    def updatePending(): Unit = {
-      val _ = pendingRequests.put(requestId, newValue)
     }
 
     for {
@@ -155,9 +148,14 @@ private[mediator] class MediatorState(
             .log()
           OptionT.none[Future, Unit]
         }
-      _ <-
-        if (newValue.isFinalized) storeFinalized
-        else OptionT.some[Future](updatePending())
+      _ <- OptionT.liftF {
+        newValue.asFinalized(protocolVersion) match {
+          case None =>
+            pendingRequests.put(requestId, newValue)
+            Future.unit
+          case Some(finalizedResponse) => storeFinalized(finalizedResponse)
+        }
+      }
     } yield ()
   }
 
@@ -166,7 +164,7 @@ private[mediator] class MediatorState(
     pendingRequests.keySet().headSet(RequestId(cutoff)).asScala.toList
 
   /** Fetch a response aggregation from the pending requests collection. */
-  def getPending(requestId: RequestId): Option[ResponseAggregation] = Option(
+  def getPending(requestId: RequestId): Option[ResponseAggregation[?]] = Option(
     pendingRequests.get(requestId)
   )
 
@@ -200,5 +198,8 @@ private[mediator] class MediatorState(
     MetricsHelper.updateAgeInHoursGauge(clock, metrics.maxEventAge, oldestResponseTimestamp)
 
   override def onClosed(): Unit =
-    Lifecycle.close(deduplicationStore, finalizedResponseStore)(logger)
+    Lifecycle.close(
+      // deduplicationStore, Not closed on purpose, because the deduplication store methods all receive their close context directly from the caller
+      finalizedResponseStore
+    )(logger)
 }

@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.util
 
-import akka.NotUsed
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import akka.stream.testkit.StreamSpec
 import akka.stream.testkit.scaladsl.StreamTestKit.assertAllStagesStopped
 import akka.stream.testkit.scaladsl.{TestSink, TestSource}
-import akka.stream.{KillSwitch, OverflowStrategy}
+import akka.stream.{KillSwitch, KillSwitches, OverflowStrategy}
+import akka.{Done, NotUsed}
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.util.AkkaUtil.WithKillSwitch
@@ -16,11 +16,15 @@ import com.digitalasset.canton.util.AkkaUtil.syntax.*
 import com.digitalasset.canton.{BaseTest, DiscardOps}
 
 import java.util.concurrent.Semaphore
-import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
+import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.util.control.NonFatal
 
 class AkkaUtilTest extends StreamSpec with BaseTest {
+  import AkkaUtilTest.*
+
   // Override the implicit from AkkaSpec so that we don't get ambiguous implicits
   override val patience: PatienceConfig = defaultPatience
 
@@ -185,13 +189,16 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
         lastFailure: Option[Throwable],
     )
 
+    def withoutKillSwitch[A](source: Source[A, NotUsed]): Source[A, (KillSwitch, Future[Done])] =
+      source.mapMaterializedValue(_ => noOpKillSwitch -> Future.successful(Done))
+
     "restart upon normal completion" in assertAllStagesStopped {
-      def mkSource(s: Int): Source[Int, NotUsed] = Source(s until s + 3)
+      def mkSource(s: Int): Source[Int, (KillSwitch, Future[Done])] =
+        withoutKillSwitch(Source(s until s + 3))
       val lastStates = new AtomicReference[Seq[Int]](Seq.empty[Int])
-      val policy = new AkkaUtil.RetrySourcePolicy[Int, Int, NotUsed] {
+      val policy = new AkkaUtil.RetrySourcePolicy[Int, Int] {
         override def shouldRetry(
             lastState: Int,
-            mat: NotUsed,
             lastEmittedElement: Option[Int],
             lastFailure: Option[Throwable],
         ): Option[(FiniteDuration, Int)] = {
@@ -211,12 +218,12 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
     }
 
     "restart with a delay" in assertAllStagesStopped {
-      def mkSource(s: Int): Source[Int, NotUsed] = Source(s until s + 3)
+      def mkSource(s: Int): Source[Int, (KillSwitch, Future[Done])] =
+        withoutKillSwitch(Source(s until s + 3))
       val delay = 200.milliseconds
-      val policy = new AkkaUtil.RetrySourcePolicy[Int, Int, NotUsed] {
+      val policy = new AkkaUtil.RetrySourcePolicy[Int, Int] {
         override def shouldRetry(
             lastState: Int,
-            mat: NotUsed,
             lastEmittedElement: Option[Int],
             lastFailure: Option[Throwable],
         ): Option[(FiniteDuration, Int)] = {
@@ -239,12 +246,11 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
     "deal with empty sources" in assertAllStagesStopped {
       val shouldRetryCalls = new AtomicReference[Seq[RetryCallArgs]](Seq.empty[RetryCallArgs])
 
-      def mkSource(s: Int): Source[Int, NotUsed] =
-        if (s > 3) Source(1 until 3) else Source.empty[Int]
-      val policy = new AkkaUtil.RetrySourcePolicy[Int, Int, NotUsed] {
+      def mkSource(s: Int): Source[Int, (KillSwitch, Future[Done])] =
+        withoutKillSwitch(if (s > 3) Source(1 until 3) else Source.empty[Int])
+      val policy = new AkkaUtil.RetrySourcePolicy[Int, Int] {
         override def shouldRetry(
             lastState: Int,
-            mat: NotUsed,
             lastEmittedElement: Option[Int],
             lastFailure: Option[Throwable],
         ): Option[(FiniteDuration, Int)] = {
@@ -271,12 +277,13 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
       case class StreamFailure(i: Int) extends Exception(i.toString)
       val shouldRetryCalls = new AtomicReference[Seq[RetryCallArgs]](Seq.empty[RetryCallArgs])
 
-      def mkSource(s: Int): Source[Int, NotUsed] =
-        if (s % 2 == 0) Source.failed[Int](StreamFailure(s)) else Source.single(10 + s)
-      val policy = new AkkaUtil.RetrySourcePolicy[Int, Int, NotUsed] {
+      def mkSource(s: Int): Source[Int, (KillSwitch, Future[Done])] =
+        withoutKillSwitch(
+          if (s % 2 == 0) Source.failed[Int](StreamFailure(s)) else Source.single(10 + s)
+        )
+      val policy = new AkkaUtil.RetrySourcePolicy[Int, Int] {
         override def shouldRetry(
             lastState: Int,
-            mat: NotUsed,
             lastEmittedElement: Option[Int],
             lastFailure: Option[Throwable],
         ): Option[(FiniteDuration, Int)] = {
@@ -304,11 +311,11 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
       val pulledKillSwitchAt = new SingleUseCell[Int]
       val pullKillSwitch = new SingleUseCell[KillSwitch]
 
-      def mkSource(s: Int): Source[Int, NotUsed] = Source.single(s)
-      val policy = new AkkaUtil.RetrySourcePolicy[Int, Int, NotUsed] {
+      def mkSource(s: Int): Source[Int, (KillSwitch, Future[Done])] =
+        withoutKillSwitch(Source.single(s))
+      val policy = new AkkaUtil.RetrySourcePolicy[Int, Int] {
         override def shouldRetry(
             lastState: Int,
-            mat: NotUsed,
             lastEmittedElement: Option[Int],
             lastFailure: Option[Throwable],
         ): Option[(FiniteDuration, Int)] = {
@@ -334,14 +341,14 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
     }
 
     "abort the delay when the KillSwitch is closed" in assertAllStagesStopped {
-      def mkSource(s: Int): Source[Int, NotUsed] = Source.single(s)
+      def mkSource(s: Int): Source[Int, (KillSwitch, Future[Done])] =
+        withoutKillSwitch(Source.single(s))
       val pullKillSwitch = new SingleUseCell[KillSwitch]
       val longBackoff = 10.seconds
 
-      val policy = new AkkaUtil.RetrySourcePolicy[Int, Int, NotUsed] {
+      val policy = new AkkaUtil.RetrySourcePolicy[Int, Int] {
         override def shouldRetry(
             lastState: Int,
-            mat: NotUsed,
             lastEmittedElement: Option[Int],
             lastFailure: Option[Throwable],
         ): Option[(FiniteDuration, Int)] = {
@@ -366,15 +373,15 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
     }
 
     "the completion future awaits the retry to finish" in assertAllStagesStopped {
-      def mkSource(s: Int): Source[Int, NotUsed] = Source.single(s)
+      def mkSource(s: Int): Source[Int, (KillSwitch, Future[Done])] =
+        withoutKillSwitch(Source.single(s))
 
       val pullKillSwitch = new SingleUseCell[KillSwitch]
       val policyDelayPromise = Promise[Unit]()
 
-      val policy = new AkkaUtil.RetrySourcePolicy[Int, Int, NotUsed] {
+      val policy = new AkkaUtil.RetrySourcePolicy[Int, Int] {
         override def shouldRetry(
             lastState: Int,
-            mat: NotUsed,
             lastEmittedElement: Option[Int],
             lastFailure: Option[Throwable],
         ): Option[(FiniteDuration, Int)] = {
@@ -402,36 +409,88 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
       doneF.futureValue
     }
 
-    "propagate the materialized value" in assertAllStagesStopped {
-      val materializedValues = new AtomicReference[Seq[Int]](Seq.empty[Int])
-      def mkSource(s: Int): Source[Int, Int] = Source.empty.mapMaterializedValue(_ => s + 10)
-      val policy = new AkkaUtil.RetrySourcePolicy[Int, Int, Int] {
+    "close the current source when the kill switch is pulled" in assertAllStagesStopped {
+      def mkSource(s: Int): Source[Int, (KillSwitch, Future[Done])] =
+        Source
+          .fromIterator(() => Iterator.from(s))
+          .viaMat(KillSwitches.single)(Keep.right)
+          .watchTermination()(Keep.both)
+
+      val policy = AkkaUtil.RetrySourcePolicy.never[Int, Int]
+      val ((killSwitch, doneF), sink) = AkkaUtil
+        .restartSource("close-inner-source", 1, mkSource, policy)
+        .toMat(TestSink.probe)(Keep.both)
+        .run()
+      sink.request(4)
+      sink.expectNext(1).expectNext(2).expectNext(3).expectNext(4)
+      killSwitch.shutdown()
+      sink.request(10)
+      // There's still an element somewhere in the stream that gets delivered first
+      sink.expectNext(5)
+      sink.expectComplete()
+    }
+
+    "await the source's completion futures" in assertAllStagesStopped {
+      val doneP: scala.collection.concurrent.Map[Int, Promise[Done]] =
+        new TrieMap[Int, Promise[Done]]
+
+      def mkSource(s: Int): Source[Int, (KillSwitch, Future[Done])] =
+        Source.single(s).viaMat(KillSwitches.single) { (_, killSwitch) =>
+          val newPromise = Promise[Done]()
+          val promise = doneP.putIfAbsent(s, newPromise).getOrElse(newPromise)
+          killSwitch -> promise.future
+        }
+
+      val policy = new AkkaUtil.RetrySourcePolicy[Int, Int] {
         override def shouldRetry(
             lastState: Int,
-            mat: Int,
             lastEmittedElement: Option[Int],
             lastFailure: Option[Throwable],
-        ): Option[(FiniteDuration, Int)] = {
-          materializedValues.updateAndGet(_ :+ mat)
-          Option.when(lastState < 10)((0.millisecond, lastState + 1))
-        }
+        ): Option[(FiniteDuration, Int)] =
+          Some((1.millisecond, lastState + 1))
       }
-      val ((_killSwitch, doneF), retrievedElemsF) = AkkaUtil
-        .restartSource("restart-propagate-materialization", 1, mkSource, policy)
-        .toMat(Sink.seq)(Keep.both)
+
+      val ((killSwitch, doneF), sink) = AkkaUtil
+        .restartSource("await completion of inner sources", 1, mkSource, policy)
+        .toMat(TestSink.probe)(Keep.both)
         .run()
-      retrievedElemsF.futureValue shouldBe Seq.empty
-      materializedValues.get() shouldBe (11 to 20)
+
+      sink.request(3)
+      sink.expectNext(1)
+      doneP.size should be >= 1
+      sink.expectNext(2)
+      doneP.size should be >= 2
+      sink.expectNext(3)
+      logger.debug("Stopping the restart source via the kill switch")
+      killSwitch.shutdown()
+      // Ask for another element to make sure that flatMapConcat inside restartSource notices
+      // that the current source has been completed (via its kill switch)
+      // Otherwise, the stream may remain open and doneF never completes
+      sink.request(1)
+
+      always(durationOfSuccess = 100.milliseconds) {
+        doneF.isCompleted shouldBe false
+      }
+
+      doneP.remove(3).foreach(_.success(Done))
+      doneP.remove(2).foreach(_.success(Done))
+
+      always(durationOfSuccess = 100.milliseconds) {
+        doneF.isCompleted shouldBe false
+      }
+
+      // Now complete the remaining promises
+      doneP.foreachEntry((_, promise) => promise.success(Done))
       doneF.futureValue
     }
 
     "log errors thrown during the retry step and complete the stream" in assertAllStagesStopped {
-      def mkSource(s: Int): Source[Int, NotUsed] = Source.single(s)
+      def mkSource(s: Int): Source[Int, (KillSwitch, Future[Done])] =
+        withoutKillSwitch(Source.single(s))
       val exception = new Exception("Retry policy failure")
-      val policy = new AkkaUtil.RetrySourcePolicy[Int, Int, NotUsed] {
+      val policy = new AkkaUtil.RetrySourcePolicy[Int, Int] {
         override def shouldRetry(
             lastState: Int,
-            mat: NotUsed,
             lastEmittedElement: Option[Int],
             lastFailure: Option[Throwable],
         ): Option[(FiniteDuration, Int)] = {
@@ -462,11 +521,11 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
     }
 
     "can pull the kill switch after retries have stopped" in assertAllStagesStopped {
-      def mkSource(s: Int): Source[Int, NotUsed] = Source.empty[Int]
-      val policy = new AkkaUtil.RetrySourcePolicy[Int, Int, NotUsed] {
+      def mkSource(s: Int): Source[Int, (KillSwitch, Future[Done])] =
+        withoutKillSwitch(Source.empty[Int])
+      val policy = new AkkaUtil.RetrySourcePolicy[Int, Int] {
         override def shouldRetry(
             lastState: Int,
-            mat: NotUsed,
             lastEmittedElement: Option[Int],
             lastFailure: Option[Throwable],
         ): Option[(FiniteDuration, Int)] = None
@@ -645,10 +704,6 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
 
     "drain the source" in assertAllStagesStopped {
       val observed = new AtomicReference[Seq[Int]](Seq.empty[Int])
-      val noOpKillSwitch = new KillSwitch {
-        override def shutdown(): Unit = ()
-        override def abort(ex: Throwable): Unit = ()
-      }
       val elemsF = Source(1 to 10)
         .map { i =>
           observed.getAndUpdate(_ :+ i)
@@ -659,5 +714,37 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
       elemsF.futureValue.map(_.unwrap) shouldBe (1 to 5)
       observed.get() shouldBe (1 to 10)
     }
+  }
+
+  // Sanity check that the construction in GrpcSequencerClientTransportAkka works
+  "concatLazy + Source.lazySingle" should {
+    "not produce the lazy single element upon an error" in {
+      val evaluated = new AtomicBoolean()
+      val (source, sink) = TestSource
+        .probe[String]
+        .concatLazy(Source.lazySingle { () =>
+          evaluated.set(true)
+          "sentinel"
+        })
+        .recover { case NonFatal(ex) => ex.getMessage }
+        .toMat(TestSink.probe)(Keep.both)
+        .run()
+      sink.request(5)
+      source.sendNext("one")
+      sink.expectNext("one")
+      val ex = new Exception("Source error")
+      source.sendError(ex)
+      sink.expectNext("Source error")
+      sink.expectComplete()
+
+      evaluated.get() shouldBe false
+    }
+  }
+}
+
+object AkkaUtilTest {
+  val noOpKillSwitch = new KillSwitch {
+    override def shutdown(): Unit = ()
+    override def abort(ex: Throwable): Unit = ()
   }
 }

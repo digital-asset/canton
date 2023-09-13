@@ -8,7 +8,12 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata, TransferViewTree}
+import com.digitalasset.canton.data.{
+  CantonTimestamp,
+  TransferInView,
+  TransferOutView,
+  TransferSubmitterMetadata,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.protocol.submission.SeedGenerator
@@ -1328,22 +1333,21 @@ object TransferStoreTest extends EitherValues with NoTracing {
 
   private def submitterMetadata(submitter: LfPartyId): TransferSubmitterMetadata = {
 
-    import TransferViewTree.*
-
     val submittingParticipant: LedgerParticipantId =
-      versionedValue(BaseTest.testedProtocolVersion)(
-        LedgerParticipantId.assertFromString("participant1")
+      TransferInView.submittingParticipantDefaultValue.orValue(
+        LedgerParticipantId.assertFromString("participant1"),
+        BaseTest.testedProtocolVersion,
       )
 
-    val applicationId: LedgerApplicationId =
-      versionedValue(BaseTest.testedProtocolVersion)(
-        LedgerApplicationId.assertFromString("application-tests")
-      )
+    val applicationId: LedgerApplicationId = TransferInView.applicationIdDefaultValue.orValue(
+      LedgerApplicationId.assertFromString("application-tests"),
+      BaseTest.testedProtocolVersion,
+    )
 
-    val commandId: LedgerCommandId =
-      versionedValue(BaseTest.testedProtocolVersion)(
-        LedgerCommandId.assertFromString("transfer-store-command-id")
-      )
+    val commandId: LedgerCommandId = TransferInView.commandIdDefaultValue.orValue(
+      LedgerCommandId.assertFromString("transfer-store-command-id"),
+      BaseTest.testedProtocolVersion,
+    )
 
     TransferSubmitterMetadata(
       submitter,
@@ -1355,10 +1359,11 @@ object TransferStoreTest extends EitherValues with NoTracing {
     )
   }
 
-  private[participant] val templateId: LfTemplateId = {
-    import TransferViewTree.*
-    versionedValue(BaseTest.testedProtocolVersion)(contract.contractInstance.unversioned.template)
-  }
+  private[participant] val templateId: LfTemplateId =
+    TransferOutView.templateIdDefaultValue.orValue(
+      contract.contractInstance.unversioned.template,
+      BaseTest.testedProtocolVersion,
+    )
 
   def mkTransferDataForDomain(
       transferId: TransferId,

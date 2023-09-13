@@ -34,11 +34,11 @@ class PreUpdateHookCkj(private val ckj: ContractKeyJournal)(
   ): Future[Map[LfGlobalKey, ContractKeyState]] =
     ckj.fetchStates(keys)
 
-  override def addKeyStateUpdates(updates: Map[LfGlobalKey, Status], toc: TimeOfChange)(implicit
+  override def addKeyStateUpdates(updates: Map[LfGlobalKey, (Status, TimeOfChange)])(implicit
       traceContext: TraceContext
   ): EitherT[Future, ContractKeyJournalError, Unit] = {
     val preUpdate = nextAddKeyStateUpdatedHook.getAndSet(noKeyStateUpdateHook)
-    preUpdate(updates, toc).flatMap(_ => ckj.addKeyStateUpdates(updates, toc))
+    preUpdate(updates).flatMap(_ => ckj.addKeyStateUpdates(updates))
   }
 
   override def doPrune(beforeAndIncluding: CantonTimestamp)(implicit
@@ -68,8 +68,8 @@ class PreUpdateHookCkj(private val ckj: ContractKeyJournal)(
 
 object PreUpdateHookCkj {
   type AddKeyStateUpdateHook =
-    (Map[LfGlobalKey, Status], TimeOfChange) => EitherT[Future, ContractKeyJournalError, Unit]
+    (Map[LfGlobalKey, (Status, TimeOfChange)]) => EitherT[Future, ContractKeyJournalError, Unit]
 
-  val noKeyStateUpdateHook: AddKeyStateUpdateHook = (_, _) =>
+  val noKeyStateUpdateHook: AddKeyStateUpdateHook = _ =>
     EitherT(Future.successful(Either.right(())))
 }

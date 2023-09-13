@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.metrics
 
 import com.codahale.metrics.MetricRegistry
 import com.daml.http.metrics.HttpApiMetrics
-import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
+import com.daml.metrics.api.MetricDoc.MetricQualification.{Debug, Traffic}
 import com.daml.metrics.api.MetricHandle.Gauge.CloseableGauge
 import com.daml.metrics.api.MetricHandle.{Counter, Gauge, Meter}
 import com.daml.metrics.api.noop.NoOpGauge
@@ -190,6 +190,46 @@ class SyncDomainMetrics(
     @nowarn("cat=deprecation")
     def taskQueue(size: () => Int): CloseableGauge =
       factory.gauge(prefix :+ "task-queue", 0)(MetricsContext.Empty)
+  }
+
+  // TODO(i14580): add testing
+  object trafficControl {
+
+    private val prefix = SyncDomainMetrics.this.prefix :+ "traffic-control"
+
+    @MetricDoc.Tag(
+      summary = "Current amount of extra traffic remaining",
+      description = """Gets updated with every event received.""",
+      qualification = Traffic,
+    )
+    @nowarn("cat=deprecation")
+    val extraTrafficAvailable: Gauge[Long] =
+      factory.gauge(prefix :+ "extra-traffic-credit-available", 0L)(MetricsContext.Empty)
+
+    @MetricDoc.Tag(
+      summary = "Records a new top up on the participant",
+      description = """Records top up events and the new extra traffic limit associated.""",
+      qualification = Traffic,
+    )
+    @nowarn("cat=deprecation")
+    val topologyTransaction: Gauge[Long] =
+      factory.gauge(prefix :+ "traffic-state-topology-transaction", 0L)(MetricsContext.Empty)
+
+    @MetricDoc.Tag(
+      summary = "Event was not delivered because of traffic limit exceeded",
+      description = """An event was not delivered because of insufficient traffic credit.""",
+      qualification = Traffic,
+    )
+    @nowarn("cat=deprecation")
+    val eventAboveTrafficLimit: Meter = factory.meter(prefix :+ "event-above-traffic-limit")
+
+    @MetricDoc.Tag(
+      summary = "Event was delivered",
+      description = """An event was not delivered.""",
+      qualification = Traffic,
+    )
+    @nowarn("cat=deprecation")
+    val eventDelivered: Meter = factory.meter(prefix :+ "event-delivered")
   }
 
 }

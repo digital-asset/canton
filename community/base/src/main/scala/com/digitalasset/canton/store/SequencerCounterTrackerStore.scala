@@ -5,7 +5,7 @@ package com.digitalasset.canton.store
 
 import com.digitalasset.canton.SequencerCounterDiscriminator
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.lifecycle.FlagCloseable
+import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
@@ -37,7 +37,8 @@ trait SequencerCounterTrackerStore extends FlagCloseable {
   def advancePreheadSequencerCounterTo(
       sequencerCounter: SequencerCounterCursorPrehead
   )(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
   ): Future[Unit] =
     cursorStore.advancePreheadTo(sequencerCounter)
 

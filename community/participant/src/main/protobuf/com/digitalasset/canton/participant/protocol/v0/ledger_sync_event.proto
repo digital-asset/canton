@@ -160,7 +160,7 @@ message CommandRejected {
 message TransferredOut {
   string update_id = 1;
   CompletionInfo completion_info = 2; // optional
-  string submitter = 3;
+  string submitter = 3; // optional
   google.protobuf.Timestamp record_time = 4;
   string contract_id = 5;
   repeated string contract_stakeholders = 6;
@@ -177,7 +177,7 @@ message TransferredOut {
 message TransferredIn {
   string update_id = 1;
   CompletionInfo completion_info = 2; // optional
-  string submitter = 3;
+  string submitter = 3; // optional
   google.protobuf.Timestamp record_time = 4;
   google.protobuf.Timestamp ledger_create_time = 5;
   bytes create_node = 6;

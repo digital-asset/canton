@@ -107,7 +107,7 @@ class DbContractKeyJournal(
       }
     }
 
-  override def addKeyStateUpdates(updates: Map[LfGlobalKey, Status], toc: TimeOfChange)(implicit
+  override def addKeyStateUpdates(updates: Map[LfGlobalKey, (Status, TimeOfChange)])(implicit
       traceContext: TraceContext
   ): EitherT[Future, ContractKeyJournalError, Unit] =
     processingTime.eitherTEvent {
@@ -124,19 +124,21 @@ class DbContractKeyJournal(
               storage.profile match {
                 case _: DbStorage.Profile.Oracle =>
                   remainingKeys
-                    .map(key =>
+                    .map(key => {
+                      val (status, toc) = updates(key)
                       sql"select $domainId domain_id, $key contract_key_hash, ${checked(
-                          updates(key)
+                          status
                         )} status, ${toc.timestamp} ts, ${toc.rc} request_counter from dual"
-                    )
+                    })
                     .intercalate(sql" union all ")
                 case _ =>
                   remainingKeys
-                    .map(key =>
+                    .map(key => {
+                      val (status, toc) = updates(key)
                       sql"""($domainId, $key, CAST(${checked(
-                          updates(key)
+                          status
                         )} as key_status), ${toc.timestamp}, ${toc.rc})"""
-                    )
+                    })
                     .intercalate(sql", ")
               }
 
@@ -176,14 +178,19 @@ class DbContractKeyJournal(
               if (rowCount == updCount) Future.successful(Either.right(Either.right(())))
               else {
                 val keysQ = remainingKeys.map(key => sql"$key").intercalate(sql", ")
+                val (tss, rcs) =
+                  remainingKeys.collect(updates).map(_._2).map(toc => (toc.timestamp, toc.rc)).unzip
+                val tsQ = tss.map(ts => sql"$ts").intercalate(sql", ")
+                val rcQ = rcs.map(rc => sql"$rc").intercalate(sql", ")
                 // We read all keys to be written rather than those keys mapped to a different value
                 // so that we find out if some key is still missing in the DB.
+
                 val keyStatesQ =
                   sql"""
                 select contract_key_hash, status
                 from contract_key_journal
                 where domain_id = $domainId and contract_key_hash in (""" ++ keysQ ++
-                    sql""") and ts = ${toc.timestamp} and request_counter = ${toc.rc}
+                    sql""") and ts in (""" ++ tsQ ++ sql""") and request_counter in (""" ++ rcQ ++ sql""")
                 """
                 storage.query(keyStatesQ.as[(LfHash, Status)], functionFullName).map {
                   keysWithStatus =>
@@ -194,7 +201,7 @@ class DbContractKeyJournal(
                       found.get(key.hash) match {
                         case None => Either.right(Some(key))
                         case Some(status) =>
-                          val newStatus = checked(updates(key))
+                          val (newStatus, toc) = checked(updates(key))
                           Either.cond(
                             status == newStatus,
                             None,

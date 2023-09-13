@@ -23,6 +23,7 @@ import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.DefaultTestIdentities.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.DelayUtil
+import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext}
 import org.scalatest.Assertion
 
@@ -33,7 +34,10 @@ import scala.concurrent.Future
 import scala.concurrent.duration.DurationInt
 import scala.util.Random
 
-class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionContext {
+class MediatorEventDeduplicatorTest
+    extends BaseTestWordSpec
+    with HasExecutionContext
+    with HasTestCloseContext {
 
   private val requestTime: CantonTimestamp = CantonTimestamp.Epoch
   private val requestTime2: CantonTimestamp = requestTime.plusSeconds(1)
@@ -117,18 +121,18 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
       expireAfter: CantonTimestamp = this.requestTime.plus(deduplicationTimeout),
   ): Assertion = {
     val request = envelope.protocolMessage
+    val reject = MediatorVerdict.MediatorReject(
+      MediatorError.MalformedMessage.Reject(
+        s"The request uuid (${request.requestUuid}) must not be used until $expireAfter.",
+        v0.MediatorRejection.Code.NonUniqueRequestUuid,
+      )
+    )
 
     verdictSender.sentResultsQueue.poll(0, TimeUnit.SECONDS) shouldBe Result(
       RequestId(requestTime),
       decisionTime,
       Some(request),
-      Some(
-        MediatorError.MalformedMessage.Reject(
-          s"The request uuid (${request.requestUuid}) must not be used until $expireAfter.",
-          v0.MediatorRejection.Code.NonUniqueRequestUuid,
-          testedProtocolVersion,
-        )
-      ),
+      Some(reject.toVerdict(testedProtocolVersion)),
     )
   }
 
@@ -339,18 +343,20 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
         MediatorEventDeduplicatorTest.this.loggerFactory
 
       override protected def doInitialize(deleteFromInclusive: CantonTimestamp)(implicit
-          traceContext: TraceContext
+          traceContext: TraceContext,
+          callerCloseContext: CloseContext,
       ): Future[Unit] = Future.unit
 
       override protected def persist(data: DeduplicationData)(implicit
-          traceContext: TraceContext
+          traceContext: TraceContext,
+          callerCloseContext: CloseContext,
       ): Future[Unit] = Future.never
 
       override protected def prunePersistentData(
-          upToInclusive: CantonTimestamp,
-          callerCloseContext: CloseContext,
+          upToInclusive: CantonTimestamp
       )(implicit
-          traceContext: TraceContext
+          traceContext: TraceContext,
+          callerCloseContext: CloseContext,
       ): Future[Unit] = Future.unit
 
       override protected val timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing

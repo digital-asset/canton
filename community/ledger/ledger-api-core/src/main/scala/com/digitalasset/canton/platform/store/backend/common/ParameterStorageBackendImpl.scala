@@ -6,11 +6,11 @@ package com.digitalasset.canton.platform.store.backend.common
 import anorm.SqlParser.{int, long}
 import anorm.{RowParser, ~}
 import com.daml.scalautil.Statement.discard
-import com.digitalasset.canton.ledger.api.domain.{LedgerId, ParticipantId}
+import com.digitalasset.canton.ledger.api.domain.ParticipantId
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.common.MismatchException
-import com.digitalasset.canton.platform.store.backend.Conversions.{ledgerString, offset}
+import com.digitalasset.canton.platform.store.backend.Conversions.offset
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.backend.{Conversions, ParameterStorageBackend}
 import com.digitalasset.canton.tracing.TraceContext
@@ -53,14 +53,10 @@ private[backend] object ParameterStorageBackendImpl extends ParameterStorageBack
       .getOrElse(ParameterStorageBackend.LedgerEnd.beforeBegin)
 
   private val TableName: String = "parameters"
-  private val LedgerIdColumnName: String = "ledger_id"
   private val ParticipantIdColumnName: String = "participant_id"
   private val LedgerEndColumnName: String = "ledger_end"
   private val LedgerEndSequentialIdColumnName: String = "ledger_end_sequential_id"
   private val LedgerEndStringInterningIdColumnName: String = "ledger_end_string_interning_id"
-
-  private val LedgerIdParser: RowParser[LedgerId] =
-    ledgerString(LedgerIdColumnName).map(LedgerId(_))
 
   private val ParticipantIdParser: RowParser[ParticipantId] =
     Conversions.participantId(ParticipantIdColumnName).map(ParticipantId(_))
@@ -78,8 +74,8 @@ private[backend] object ParameterStorageBackendImpl extends ParameterStorageBack
     int(LedgerEndStringInterningIdColumnName)
 
   private val LedgerIdentityParser: RowParser[ParameterStorageBackend.IdentityParams] =
-    LedgerIdParser ~ ParticipantIdParser map { case ledgerId ~ participantId =>
-      ParameterStorageBackend.IdentityParams(ledgerId, participantId)
+    ParticipantIdParser map { case participantId =>
+      ParameterStorageBackend.IdentityParams(participantId)
     }
 
   private val LedgerEndParser: RowParser[ParameterStorageBackend.LedgerEnd] =
@@ -100,24 +96,21 @@ private[backend] object ParameterStorageBackendImpl extends ParameterStorageBack
     implicit val traceContext: TraceContext = TraceContext.empty
     // Note: this method is the only one that inserts a row into the parameters table
     val previous = ledgerIdentity(connection)
-    val ledgerId = params.ledgerId
     val participantId = params.participantId
     previous match {
       case None =>
         logger.info(
-          s"Initializing new database for ledgerId '${params.ledgerId}' and participantId '${params.participantId}'"
+          s"Initializing new database for participantId '${params.participantId}'"
         )
         import Conversions.OffsetToStatement
         val ledgerEnd = ParameterStorageBackend.LedgerEnd.beforeBegin
         discard(
           SQL"""insert into #$TableName(
-              #$LedgerIdColumnName,
               #$ParticipantIdColumnName,
               #$LedgerEndColumnName,
               #$LedgerEndSequentialIdColumnName,
               #$LedgerEndStringInterningIdColumnName
             ) values(
-              ${ledgerId.unwrap},
               ${participantId.unwrap: String},
               ${ledgerEnd.lastOffset},
               ${ledgerEnd.lastEventSeqId},
@@ -125,24 +118,15 @@ private[backend] object ParameterStorageBackendImpl extends ParameterStorageBack
             )"""
             .execute()(connection)
         )
-      case Some(ParameterStorageBackend.IdentityParams(`ledgerId`, `participantId`)) =>
+      case Some(ParameterStorageBackend.IdentityParams(`participantId`)) =>
         logger.info(
-          s"Found existing database for ledgerId '${params.ledgerId}' and participantId '${params.participantId}'"
+          s"Found existing database for participantId '${params.participantId}'"
         )
-      case Some(ParameterStorageBackend.IdentityParams(existing, _))
-          if existing != params.ledgerId =>
-        logger.error(
-          s"Found existing database with mismatching ledgerId: existing '$existing', provided '${params.ledgerId}'"
-        )
-        throw MismatchException.LedgerId(
-          existing = existing,
-          provided = params.ledgerId,
-        )
-      case Some(ParameterStorageBackend.IdentityParams(_, existing)) =>
+      case Some(ParameterStorageBackend.IdentityParams(existing)) =>
         logger.error(
           s"Found existing database with mismatching participantId: existing '$existing', provided '${params.participantId}'"
         )
-        throw MismatchException.ParticipantId(
+        throw new MismatchException.ParticipantId(
           existing = existing,
           provided = params.participantId,
         )
@@ -152,7 +136,7 @@ private[backend] object ParameterStorageBackendImpl extends ParameterStorageBack
   override def ledgerIdentity(
       connection: Connection
   ): Option[ParameterStorageBackend.IdentityParams] =
-    SQL"select #$LedgerIdColumnName, #$ParticipantIdColumnName from #$TableName"
+    SQL"select #$ParticipantIdColumnName from #$TableName"
       .as(LedgerIdentityParser.singleOpt)(connection)
 
   def updatePrunedUptoInclusive(prunedUpToInclusive: Offset)(connection: Connection): Unit = {

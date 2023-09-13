@@ -9,6 +9,7 @@ import cats.data.EitherT
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, Encrypted, SyncCryptoApi, TestHash}
 import com.digitalasset.canton.data.PeanoQueue.{BeforeHead, NotInserted}
 import com.digitalasset.canton.data.{CantonTimestamp, ConfirmingParty, PeanoQueue}
@@ -61,6 +62,7 @@ import com.digitalasset.canton.store.{CursorPrehead, IndexedDomain}
 import com.digitalasset.canton.time.{DomainTimeTracker, NonNegativeFiniteDuration, WallClock}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.{ParticipantPermission, TrustLevel}
+import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, RequestCounter, SequencerCounter}
 import com.google.protobuf.ByteString
 import org.mockito.ArgumentMatchers.eq as isEq
@@ -72,7 +74,11 @@ import scala.collection.concurrent
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 
-class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionContext {
+class ProtocolProcessorTest
+    extends AnyWordSpec
+    with BaseTest
+    with HasExecutionContext
+    with HasTestCloseContext {
   private val participant = ParticipantId(
     UniqueIdentifier.tryFromProtoPrimitive("participant::participant")
   )
@@ -274,7 +280,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
     val steps = new TestProcessingSteps(
       pendingSubmissionMap = pendingSubmissionMap,
       overrideConstructedPendingRequestDataO,
-      informeesOfView = _ => Set(ConfirmingParty(party.toLf, 1, TrustLevel.Ordinary)),
+      informeesOfView = _ => Set(ConfirmingParty(party.toLf, PositiveInt.one, TrustLevel.Ordinary)),
       submissionDataForTrackerO = submissionDataForTrackerO,
     )
 

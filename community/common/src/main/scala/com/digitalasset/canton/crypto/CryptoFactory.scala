@@ -37,7 +37,7 @@ import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CryptoPrivateStor
 import com.digitalasset.canton.crypto.store.{CryptoPrivateStore, CryptoPublicStore}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, TracerProvider}
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 
@@ -53,6 +53,7 @@ trait CryptoFactory {
       releaseProtocolVersion: ReleaseProtocolVersion,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
+      tracerProvider: TracerProvider,
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
@@ -92,6 +93,7 @@ trait CryptoFactory {
       releaseProtocolVersion: ReleaseProtocolVersion,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
+      tracerProvider: TracerProvider,
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
@@ -101,7 +103,7 @@ trait CryptoFactory {
         CryptoPublicStore.create(storage, releaseProtocolVersion, timeouts, loggerFactory)
       )
       cryptoPrivateStore <- cryptoPrivateStoreFactory
-        .create(storage, releaseProtocolVersion, timeouts, loggerFactory)
+        .create(storage, releaseProtocolVersion, timeouts, loggerFactory, tracerProvider)
         .leftMap(err => show"Failed to create crypto private store: $err")
       symmetricKeyScheme <- selectSchemes(config.symmetric, config.provider.symmetric)
         .map(_.default)
@@ -189,6 +191,7 @@ class CommunityCryptoFactory extends CryptoFactory {
       releaseProtocolVersion: ReleaseProtocolVersion,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
+      tracerProvider: TracerProvider,
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
@@ -201,6 +204,7 @@ class CommunityCryptoFactory extends CryptoFactory {
         releaseProtocolVersion,
         timeouts,
         loggerFactory,
+        tracerProvider,
       )
       crypto <- config.provider match {
         case CommunityCryptoProvider.Tink =>

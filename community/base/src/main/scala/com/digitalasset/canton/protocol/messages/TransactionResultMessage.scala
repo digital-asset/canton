@@ -10,7 +10,7 @@ import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data.{CantonTimestamp, InformeeTree}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
-import com.digitalasset.canton.protocol.{RequestId, RootHash, v0, v1, v2}
+import com.digitalasset.canton.protocol.{RequestId, RootHash, v0, v1, v2, v3}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
@@ -93,6 +93,16 @@ case class TransactionResultMessage private (
     )
   }
 
+  protected def toProtoV3: v3.TransactionResultMessage = {
+    require(isEquivalentTo(ProtocolVersion.v6))
+    v3.TransactionResultMessage(
+      requestId = Some(requestId.toProtoPrimitive),
+      verdict = Some(verdict.toProtoV3),
+      rootHash = rootHash.toProtoPrimitive,
+      domainId = domainId.toProtoPrimitive,
+    )
+  }
+
   override protected[messages] def toProtoSomeSignedProtocolMessage
       : v0.SignedProtocolMessage.SomeSignedProtocolMessage.TransactionResult =
     v0.SignedProtocolMessage.SomeSignedProtocolMessage.TransactionResult(getCryptographicEvidence)
@@ -133,6 +143,10 @@ object TransactionResultMessage
     ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v5)(v2.TransactionResultMessage)(
       supportedProtoVersionMemoized(_)(fromProtoV2),
       _.toProtoV2.toByteString,
+    ),
+    ProtoVersion(3) -> VersionedProtoConverter(ProtocolVersion.v6)(v3.TransactionResultMessage)(
+      supportedProtoVersionMemoized(_)(fromProtoV3),
+      _.toProtoV3.toByteString,
     ),
   )
 
@@ -218,7 +232,7 @@ object TransactionResultMessage
     )
   }
 
-  private def fromProtoV2(hashOps: HashOps, protoResultMessage: v2.TransactionResultMessage)(
+  private def fromProtoV2(_hashOps: HashOps, protoResultMessage: v2.TransactionResultMessage)(
       bytes: ByteString
   ): ParsingResult[TransactionResultMessage] = {
     val v2.TransactionResultMessage(requestIdPO, verdictPO, rootHashP, domainIdP) =
@@ -234,6 +248,26 @@ object TransactionResultMessage
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain_id")
     } yield TransactionResultMessage(requestId, transactionResult, rootHash, domainId, None)(
       protocolVersionRepresentativeFor(ProtoVersion(2)),
+      Some(bytes),
+    )
+  }
+
+  private def fromProtoV3(_hashOps: HashOps, protoResultMessage: v3.TransactionResultMessage)(
+      bytes: ByteString
+  ): ParsingResult[TransactionResultMessage] = {
+    val v3.TransactionResultMessage(requestIdPO, verdictPO, rootHashP, domainIdP) =
+      protoResultMessage
+    for {
+      requestId <- ProtoConverter
+        .required("request_id", requestIdPO)
+        .flatMap(RequestId.fromProtoPrimitive)
+      transactionResult <- ProtoConverter
+        .required("verdict", verdictPO)
+        .flatMap(Verdict.fromProtoV3)
+      rootHash <- RootHash.fromProtoPrimitive(rootHashP)
+      domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain_id")
+    } yield TransactionResultMessage(requestId, transactionResult, rootHash, domainId, None)(
+      protocolVersionRepresentativeFor(ProtoVersion(3)),
       Some(bytes),
     )
   }

@@ -28,6 +28,7 @@ import com.digitalasset.canton.store.CursorPrehead
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{BaseTest, RequestCounter}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.{AnyWordSpec, AsyncWordSpec}
@@ -37,7 +38,7 @@ import java.util.ConcurrentModificationException
 import scala.concurrent.Future
 
 @SuppressWarnings(Array("org.wartremover.warts.IsInstanceOf"))
-class RequestJournalTest extends AsyncWordSpec with BaseTest {
+class RequestJournalTest extends AsyncWordSpec with BaseTest with HasTestCloseContext {
 
   def mk(
       initRc: RequestCounter,

@@ -6,7 +6,7 @@ package com.digitalasset.canton.data
 import com.daml.lf.transaction.test.TestNodeBuilder.CreateKey
 import com.daml.lf.transaction.test.TreeTransactionBuilder.NodeWrapper
 import com.daml.lf.transaction.test.{TestIdFactory, TestNodeBuilder, TreeTransactionBuilder}
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.TransactionViewDecomposition.*
 import com.digitalasset.canton.protocol.RollbackContext.{RollbackScope, RollbackSibling}
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
@@ -69,7 +69,8 @@ class TransactionViewDecompositionTest
       "not be constructed" in {
 
         val node = createNode(unsuffixedId(0))
-        val informees = Set[Informee](ConfirmingParty(signatory, 1, TrustLevel.Ordinary))
+        val informees =
+          Set[Informee](ConfirmingParty(signatory, PositiveInt.one, TrustLevel.Ordinary))
         val rootSeed = ExampleTransactionFactory.lfHash(-1)
         val child =
           NewView(

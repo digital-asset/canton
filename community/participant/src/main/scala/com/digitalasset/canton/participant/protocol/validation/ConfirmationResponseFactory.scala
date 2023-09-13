@@ -183,12 +183,14 @@ class ConfirmationResponseFactory(
 
             // Rejections due to a failed model conformance check
             val modelConformanceRejections =
-              transactionValidationResult.modelConformanceResultE.swap.toOption.map(cause =>
-                logged(
-                  requestId,
-                  LocalReject.MalformedRejects.ModelConformance.Reject(cause.toString)(
-                    verdictProtocolVersion
-                  ),
+              transactionValidationResult.modelConformanceResultE.swap.toSeq.flatMap(error =>
+                error.errors.map(cause =>
+                  logged(
+                    requestId,
+                    LocalReject.MalformedRejects.ModelConformance.Reject(cause.toString)(
+                      verdictProtocolVersion
+                    ),
+                  )
                 )
               )
 

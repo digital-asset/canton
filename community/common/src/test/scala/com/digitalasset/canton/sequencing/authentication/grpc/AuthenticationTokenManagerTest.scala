@@ -177,7 +177,7 @@ class AuthenticationTokenManagerTest extends AsyncWordSpec with BaseTest {
     val mck = new ObtainTokenMock
     val clock = clockO.getOrElse(AuthenticationTokenManagerTest.mockClock)
     val tokenManager = new AuthenticationTokenManager(
-      () => mck.obtain(),
+      _ => mck.obtain(),
       false,
       AuthenticationTokenManagerConfig(),
       clock,

@@ -3,6 +3,9 @@
 
 package com.digitalasset.canton.console
 
+import com.digitalasset.canton.environment.{CantonNode, CantonNodeBootstrap, Nodes}
+import com.digitalasset.canton.tracing.TraceContext
+
 /** Aliases to manage a sequence of instances in a REPL environment
   */
 trait LocalInstancesExtensions extends Helpful {
@@ -41,16 +44,22 @@ trait LocalInstancesExtensions extends Helpful {
 
   }
 
+  private def runOnAllInstances[T](
+      cmd: Seq[(String, Nodes[CantonNode, CantonNodeBootstrap[CantonNode]])] => Either[T, Unit]
+  )(implicit consoleEnvironment: ConsoleEnvironment): Unit =
+    consoleEnvironment.runE(cmd(instances.map(x => (x.name, x.nodes))))
+
   @Help.Summary("Start all")
-  def start()(implicit consoleEnvironment: ConsoleEnvironment): Unit = {
-    val _ = runAll(instances.sorted(consoleEnvironment.startupOrdering)) {
-      _.startCommand()
+  def start()(implicit consoleEnvironment: ConsoleEnvironment): Unit =
+    TraceContext.withNewTraceContext { implicit traceContext =>
+      runOnAllInstances(consoleEnvironment.environment.startNodes(_))
     }
-  }
+
   @Help.Summary("Stop all")
-  def stop()(implicit consoleEnvironment: ConsoleEnvironment): Unit = {
-    val _ = runAll(instances.sorted(consoleEnvironment.startupOrdering.reverse)) { _.stopCommand() }
-  }
+  def stop()(implicit consoleEnvironment: ConsoleEnvironment): Unit =
+    TraceContext.withNewTraceContext { implicit traceContext =>
+      runOnAllInstances(consoleEnvironment.environment.stopNodes(_))
+    }
 
 }
 

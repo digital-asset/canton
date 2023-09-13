@@ -5,7 +5,8 @@ package com.digitalasset.canton.participant.store
 
 import cats.syntax.parallel.*
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.participant.admin.RepairService.RepairContext
+import com.digitalasset.canton.lifecycle.HasCloseContext
+import com.digitalasset.canton.participant.admin.repair.RepairContext
 import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState.*
 import com.digitalasset.canton.participant.protocol.RequestJournal.{
   NonterminalRequestState,
@@ -19,7 +20,7 @@ import org.scalatest.wordspec.AsyncWordSpecLike
 import scala.concurrent.Future
 
 trait RequestJournalStoreTest extends CursorPreheadStoreTest {
-  this: AsyncWordSpecLike with BaseTest =>
+  this: AsyncWordSpecLike with BaseTest with HasCloseContext =>
 
   def requestJournalStore(mk: () => RequestJournalStore): Unit = {
     val rc = RequestCounter(0)

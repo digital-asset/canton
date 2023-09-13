@@ -78,6 +78,18 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
   protected val readTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("topology-store-x-read")
 
+  def findTransactionsByTxHash(asOfExclusive: EffectiveTime, hashes: NonEmpty[Set[TxHash]])(implicit
+      traceContext: TraceContext
+  ): Future[Seq[GenericSignedTopologyTransactionX]] =
+    findAsOfExclusive(
+      asOfExclusive,
+      sql" AND (" ++ hashes
+        .map(txHash => sql"tx_hash = ${txHash.hash.toLengthLimitedHexString}")
+        .forgetNE
+        .toList
+        .intercalate(sql" OR ") ++ sql")",
+    )
+
   override def findProposalsByTxHash(
       asOfExclusive: EffectiveTime,
       hashes: NonEmpty[Set[TxHash]],
@@ -137,7 +149,6 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
       removeMapping: Set[TopologyMappingX.MappingHash],
       removeTxs: Set[TopologyTransactionX.TxHash],
       additions: Seq[GenericValidatedTopologyTransactionX],
-      expiredAdditions: Set[TopologyTransactionX.TxHash],
   )(implicit traceContext: TraceContext): Future[Unit] = {
 
     val effectiveTs = effective.value
@@ -169,7 +180,7 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
           sequenced,
           effective,
           Option.when(
-            vtx.rejectionReason.nonEmpty || expiredAdditions(vtx.transaction.transaction.hash)
+            vtx.rejectionReason.nonEmpty || vtx.expireImmediately
           )(effective),
           vtx.transaction,
           vtx.rejectionReason,

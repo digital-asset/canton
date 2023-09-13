@@ -5,11 +5,11 @@ package com.digitalasset.canton.domain.mediator.store
 
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.*
-import com.digitalasset.canton.domain.mediator.ResponseAggregation
+import com.digitalasset.canton.domain.mediator.{FinalizedResponse, MediatorVerdict}
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.protocol.messages.InformeeMessage
@@ -18,6 +18,7 @@ import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.topology.transaction.TrustLevel
 import com.digitalasset.canton.topology.{DefaultTestIdentities, MediatorRef, TestingIdentityFactory}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{BaseTest, LfPartyId}
@@ -39,7 +40,11 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
     val mediatorId = DefaultTestIdentities.mediator
 
     val alice = PlainInformee(LfPartyId.assertFromString("alice"))
-    val bob = ConfirmingParty(LfPartyId.assertFromString("bob"), 2, TrustLevel.Ordinary)
+    val bob = ConfirmingParty(
+      LfPartyId.assertFromString("bob"),
+      PositiveInt.tryCreate(2),
+      TrustLevel.Ordinary,
+    )
     val hashOps = new SymbolicPureCrypto
 
     def h(i: Int): Hash = TestHash.digest(i)
@@ -79,13 +84,18 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
     )
   }
   val informeeMessage = InformeeMessage(fullInformeeTree)(testedProtocolVersion)
-  val currentVersion =
-    ResponseAggregation.fromVerdict(
-      requestId,
-      informeeMessage,
-      requestId.unwrap,
-      MediatorError.Timeout.Reject.create(testedProtocolVersion),
-    )(testedProtocolVersion, loggerFactory)
+  val currentVersion = FinalizedResponse(
+    requestId,
+    informeeMessage,
+    requestId.unwrap,
+    MediatorVerdict
+      .MediatorReject(
+        MediatorError.Timeout.Reject(
+          unresponsiveParties = DefaultTestIdentities.party1.toLf
+        )
+      )
+      .toVerdict(testedProtocolVersion),
+  )(TraceContext.empty)
 
   private[mediator] def finalizedResponseStore(mk: () => FinalizedResponseStore): Unit = {
     implicit val closeContext: CloseContext = HasTestCloseContext.makeTestCloseContext(self.logger)
@@ -118,7 +128,8 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
       "remove all responses up and including timestamp" in {
         val sut = mk()
 
-        val requests = (1 to 3).map(n => currentVersion.withRequestId(requestIdTs(n)))
+        val requests =
+          (1 to 3).map(n => currentVersion.copy(requestId = requestIdTs(n))(TraceContext.empty))
 
         for {
           _ <- requests.toList.parTraverse(sut.store)

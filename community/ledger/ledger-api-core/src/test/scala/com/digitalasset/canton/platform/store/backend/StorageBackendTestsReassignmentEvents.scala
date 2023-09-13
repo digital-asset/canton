@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.store.backend
 
 import com.daml.lf.data.{Ref, Time}
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.RawCreatedEvent
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import org.scalatest.OptionValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -16,6 +17,10 @@ private[backend] trait StorageBackendTestsReassignmentEvents
   this: AnyFlatSpec =>
 
   import StorageBackendTestValues.*
+  import DbDtoEq.*
+
+  private val emptyTraceContext =
+    SerializableTraceContext(TraceContext.empty).toDamlProto.toByteArray
 
   behavior of "event id fetching from filter tables"
 
@@ -163,7 +168,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
     ) shouldBe Vector(1)
   }
 
-  behavior of "event bach fetching"
+  behavior of "event batch fetching"
 
   it should "return the correct assign events" in {
     val dbDtos = Vector(
@@ -194,66 +199,71 @@ private[backend] trait StorageBackendTestsReassignmentEvents
 
     result
       .map(original =>
-        original.copy(rawCreatedEvent =
-          rawCreatedEventHasExpectedCreateAgumentAndDriverMetadata(
+        original.copy(
+          rawCreatedEvent = rawCreatedEventHasExpectedCreateAgumentAndDriverMetadata(
             original.rawCreatedEvent,
             someSerializedDamlLfValue,
             someDriverMetadataBytes,
-          )
+          ),
+          traceContext = hasSameTraceContext(original.traceContext, Some(emptyTraceContext)),
         )
-      ) shouldBe Vector(
-      EventStorageBackend.RawAssignEvent(
-        commandId = Some("command id 1"),
-        workflowId = Some("workflow_id"),
-        offset = offset(1).toHexString,
-        sourceDomainId = "x::sourcedomain",
-        targetDomainId = "x::targetdomain",
-        unassignId = "123456789",
-        submitter = someParty,
-        reassignmentCounter = 1000L,
-        rawCreatedEvent = RawCreatedEvent(
-          updateId = offset(1).toHexString,
-          contractId = hashCid("#1").coid,
-          templateId = someTemplateId,
-          witnessParties = Set("signatory"),
-          signatories = Set("signatory"),
-          observers = Set("observer"),
-          agreementText = Some("agreement"),
-          createArgument = someSerializedDamlLfValue,
-          createArgumentCompression = Some(123),
-          createKeyValue = None,
-          createKeyValueCompression = Some(456),
-          ledgerEffectiveTime = someTime,
-          createKeyHash = None,
-          driverMetadata = someDriverMetadataBytes,
+      ) shouldBe (
+      Vector(
+        EventStorageBackend.RawAssignEvent(
+          commandId = Some("command id 1"),
+          workflowId = Some("workflow_id"),
+          offset = offset(1).toHexString,
+          sourceDomainId = "x::sourcedomain",
+          targetDomainId = "x::targetdomain",
+          unassignId = "123456789",
+          submitter = Option(someParty),
+          reassignmentCounter = 1000L,
+          rawCreatedEvent = RawCreatedEvent(
+            updateId = offset(1).toHexString,
+            contractId = hashCid("#1").coid,
+            templateId = someTemplateId,
+            witnessParties = Set("signatory"),
+            signatories = Set("signatory"),
+            observers = Set("observer"),
+            agreementText = Some("agreement"),
+            createArgument = someSerializedDamlLfValue,
+            createArgumentCompression = Some(123),
+            createKeyValue = None,
+            createKeyValueCompression = Some(456),
+            ledgerEffectiveTime = someTime,
+            createKeyHash = None,
+            driverMetadata = someDriverMetadataBytes,
+          ),
+          traceContext = Some(emptyTraceContext),
         ),
-      ),
-      EventStorageBackend.RawAssignEvent(
-        commandId = Some("command id 2"),
-        workflowId = Some("workflow_id"),
-        offset = offset(2).toHexString,
-        sourceDomainId = "x::sourcedomain",
-        targetDomainId = "x::targetdomain",
-        unassignId = "123456789",
-        submitter = someParty,
-        reassignmentCounter = 1000L,
-        rawCreatedEvent = RawCreatedEvent(
-          updateId = offset(2).toHexString,
-          contractId = hashCid("#2").coid,
-          templateId = someTemplateId,
-          witnessParties = Set("signatory"),
-          signatories = Set("signatory"),
-          observers = Set("observer"),
-          agreementText = Some("agreement"),
-          createArgument = someSerializedDamlLfValue,
-          createArgumentCompression = Some(123),
-          createKeyValue = None,
-          createKeyValueCompression = Some(456),
-          ledgerEffectiveTime = someTime,
-          createKeyHash = None,
-          driverMetadata = someDriverMetadataBytes,
+        EventStorageBackend.RawAssignEvent(
+          commandId = Some("command id 2"),
+          workflowId = Some("workflow_id"),
+          offset = offset(2).toHexString,
+          sourceDomainId = "x::sourcedomain",
+          targetDomainId = "x::targetdomain",
+          unassignId = "123456789",
+          submitter = Option(someParty),
+          reassignmentCounter = 1000L,
+          rawCreatedEvent = RawCreatedEvent(
+            updateId = offset(2).toHexString,
+            contractId = hashCid("#2").coid,
+            templateId = someTemplateId,
+            witnessParties = Set("signatory"),
+            signatories = Set("signatory"),
+            observers = Set("observer"),
+            agreementText = Some("agreement"),
+            createArgument = someSerializedDamlLfValue,
+            createArgumentCompression = Some(123),
+            createKeyValue = None,
+            createKeyValueCompression = Some(456),
+            ledgerEffectiveTime = someTime,
+            createKeyHash = None,
+            driverMetadata = someDriverMetadataBytes,
+          ),
+          traceContext = Some(emptyTraceContext),
         ),
-      ),
+      )
     )
   }
 
@@ -282,6 +292,10 @@ private[backend] trait StorageBackendTestsReassignmentEvents
         eventSequentialIds = List(1L, 2L),
         allFilterParties = Set(Ref.Party.assertFromString("signatory"), someParty),
       )
+    ).map(original =>
+      original.copy(traceContext =
+        hasSameTraceContext(original.traceContext, Some(emptyTraceContext))
+      )
     ) shouldBe Vector(
       EventStorageBackend.RawUnassignEvent(
         commandId = Some("command id 1"),
@@ -290,13 +304,14 @@ private[backend] trait StorageBackendTestsReassignmentEvents
         sourceDomainId = "x::sourcedomain",
         targetDomainId = "x::targetdomain",
         unassignId = "123456789",
-        submitter = someParty,
+        submitter = Option(someParty),
         reassignmentCounter = 1000L,
         contractId = hashCid("#1").coid,
         templateId = someTemplateId,
         updateId = offset(1).toHexString,
         witnessParties = Set("signatory"),
         assignmentExclusivity = Some(Time.Timestamp.assertFromLong(11111)),
+        traceContext = Some(emptyTraceContext),
       ),
       EventStorageBackend.RawUnassignEvent(
         commandId = Some("command id 2"),
@@ -305,15 +320,86 @@ private[backend] trait StorageBackendTestsReassignmentEvents
         sourceDomainId = "x::sourcedomain",
         targetDomainId = "x::targetdomain",
         unassignId = "123456789",
-        submitter = someParty,
+        submitter = Option(someParty),
         reassignmentCounter = 1000L,
         contractId = hashCid("#2").coid,
         templateId = someTemplateId,
         updateId = offset(2).toHexString,
         witnessParties = Set("signatory"),
         assignmentExclusivity = Some(Time.Timestamp.assertFromLong(11111)),
+        traceContext = Some(emptyTraceContext),
       ),
     )
+  }
+
+  it should "return the correct trace context for assign events" in {
+    TraceContext.withNewTraceContext { aTraceContext =>
+      val serializableTraceContext = SerializableTraceContext(aTraceContext).toDamlProto.toByteArray
+      val dbDtos = Vector(
+        dtoAssign(
+          offset = offset(1),
+          eventSequentialId = 1L,
+          contractId = hashCid("#1"),
+          commandId = "command id 1",
+          traceContext = emptyTraceContext,
+        ),
+        dtoAssign(
+          offset = offset(2),
+          eventSequentialId = 2L,
+          contractId = hashCid("#2"),
+          commandId = "command id 2",
+          traceContext = serializableTraceContext,
+        ),
+      )
+
+      executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+      executeSql(ingest(dbDtos, _))
+      executeSql(updateLedgerEnd(offset(2), 2L))
+
+      val assignments = executeSql(
+        backend.event.assignEventBatch(
+          eventSequentialIds = List(1L, 2L),
+          allFilterParties = Set(Ref.Party.assertFromString("signatory"), someParty),
+        )
+      )
+      assignments.head.traceContext should equal(None)
+      assignments(1).traceContext should equal(Some(serializableTraceContext))
+    }
+  }
+
+  it should "return the correct trace context for unassign events" in {
+    TraceContext.withNewTraceContext { aTraceContext =>
+      val serializableTraceContext = SerializableTraceContext(aTraceContext).toDamlProto.toByteArray
+      val dbDtos = Vector(
+        dtoUnassign(
+          offset = offset(1),
+          eventSequentialId = 1L,
+          contractId = hashCid("#1"),
+          commandId = "command id 1",
+          traceContext = emptyTraceContext,
+        ),
+        dtoUnassign(
+          offset = offset(2),
+          eventSequentialId = 2L,
+          contractId = hashCid("#2"),
+          commandId = "command id 2",
+          traceContext = serializableTraceContext,
+        ),
+      )
+
+      executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+      executeSql(ingest(dbDtos, _))
+      executeSql(updateLedgerEnd(offset(2), 2L))
+
+      val unassignments = executeSql(
+        backend.event.unassignEventBatch(
+          eventSequentialIds = List(1L, 2L),
+          allFilterParties = Set(Ref.Party.assertFromString("signatory"), someParty),
+        )
+      )
+      unassignments.head.traceContext should equal(None)
+      unassignments(1).traceContext should equal(Some(serializableTraceContext))
+    }
   }
 
   behavior of "active contract batch lookup for contracts"
@@ -712,6 +798,14 @@ private[backend] trait StorageBackendTestsReassignmentEvents
       createArgument = createArgument,
       driverMetadata = driverMetadata,
     )
+  }
+
+  def hasSameTraceContext(
+      actual: Option[Array[Byte]],
+      expected: Option[Array[Byte]],
+  ): Option[Array[Byte]] = {
+    actual should equal(expected)
+    expected
   }
 
 }

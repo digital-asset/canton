@@ -37,7 +37,6 @@ trait DbRequestJournalStoreTest extends AsyncWordSpec with BaseTest with Request
         PositiveNumeric.tryCreate(2),
         BatchAggregatorConfig.defaultsForTesting,
         BatchAggregatorConfig.defaultsForTesting,
-        enableAdditionalConsistencyChecksInOracle = true,
         timeouts,
         loggerFactory,
       )

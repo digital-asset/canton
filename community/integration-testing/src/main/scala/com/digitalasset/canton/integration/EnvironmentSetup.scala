@@ -51,7 +51,7 @@ sealed trait EnvironmentSetup[E <: Environment, TCE <: TestConsoleEnvironment[E]
 
   override val loggerFactory: SuppressingLogger = SuppressingLogger(getClass)
 
-  def assertLogsDuringAutoStart: Option[Seq[LogEntry] => Assertion] = None
+  def logsToBeHandledAtStartup: Option[Seq[LogEntry] => Assertion] = None
 
   /** Creates a new environment manually for a test without concurrent environment limitation and with optional config transformation.
     *
@@ -108,7 +108,7 @@ sealed trait EnvironmentSetup[E <: Environment, TCE <: TestConsoleEnvironment[E]
       )
 
       if (!finalConfig.parameters.manualStart) {
-        assertLogsDuringAutoStart
+        logsToBeHandledAtStartup
           .map { assertion =>
             loggerFactory.assertLoggedWarningsAndErrorsSeq(
               testEnvironment.startAll(),

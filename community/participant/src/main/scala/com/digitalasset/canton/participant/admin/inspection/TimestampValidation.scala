@@ -9,6 +9,7 @@ import cats.implicits.toFoldableOps
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.pruning.PruningStatus
 import com.digitalasset.canton.store.CursorPrehead.RequestCounterCursorPrehead
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.EitherUtil
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -21,18 +22,23 @@ private[inspection] object TimestampValidation {
     EitherT(ffa.map(_.traverse_(a => EitherUtil.condUnitE(p(a), fail(a)))))
 
   def beforePrehead(
+      domainId: DomainId,
       cursorPrehead: Future[Option[RequestCounterCursorPrehead]],
       timestamp: CantonTimestamp,
   )(implicit ec: ExecutionContext): EitherT[Future, Error, Unit] =
     validate(cursorPrehead)(timestamp < _.timestamp)(cp =>
-      Error.TimestampAfterPrehead(timestamp, cp.timestamp)
+      Error.TimestampAfterPrehead(domainId, timestamp, cp.timestamp)
     )
 
-  def afterPruning(pruningStatus: Future[Option[PruningStatus]], timestamp: CantonTimestamp)(
-      implicit ec: ExecutionContext
+  def afterPruning(
+      domainId: DomainId,
+      pruningStatus: Future[Option[PruningStatus]],
+      timestamp: CantonTimestamp,
+  )(implicit
+      ec: ExecutionContext
   ): EitherT[Future, Error, Unit] =
     validate(pruningStatus)(timestamp >= _.timestamp)(ps =>
-      Error.TimestampBeforePruning(timestamp, ps.timestamp)
+      Error.TimestampBeforePruning(domainId, timestamp, ps.timestamp)
     )
 
 }

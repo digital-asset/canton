@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.store.backend
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.Time.Timestamp
-import com.digitalasset.canton.ledger.api.domain.{LedgerId, ParticipantId}
+import com.digitalasset.canton.ledger.api.domain.ParticipantId
 import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.{
@@ -172,7 +172,7 @@ object ParameterStorageBackend {
     val beforeBegin: ParameterStorageBackend.LedgerEnd =
       ParameterStorageBackend.LedgerEnd(Offset.beforeBegin, EventSequentialId.beforeBegin, 0)
   }
-  final case class IdentityParams(ledgerId: LedgerId, participantId: ParticipantId)
+  final case class IdentityParams(participantId: ParticipantId)
 
 }
 
@@ -232,6 +232,9 @@ trait ContractStorageBackend {
       connection: Connection
   ): Map[ContractId, ContractStorageBackend.RawArchivedContract]
   def createdContracts(contractIds: Seq[ContractId], before: Offset)(
+      connection: Connection
+  ): Map[ContractId, ContractStorageBackend.RawCreatedContract]
+  def assignedContracts(contractIds: Seq[ContractId])(
       connection: Connection
   ): Map[ContractId, ContractStorageBackend.RawCreatedContract]
   def activeContractWithArgument(readers: Set[Party], contractId: ContractId)(
@@ -363,6 +366,7 @@ object EventStorageBackend {
       commandId: String,
       workflowId: String,
       domainId: Option[String],
+      traceContext: Option[Array[Byte]],
       event: E,
   )
 
@@ -399,12 +403,13 @@ object EventStorageBackend {
       sourceDomainId: String,
       targetDomainId: String,
       unassignId: String,
-      submitter: String,
+      submitter: Option[String],
       reassignmentCounter: Long,
       contractId: String,
       templateId: Identifier,
       witnessParties: Set[String],
       assignmentExclusivity: Option[Timestamp],
+      traceContext: Option[Array[Byte]],
   )
 
   final case class RawAssignEvent(
@@ -414,9 +419,10 @@ object EventStorageBackend {
       sourceDomainId: String,
       targetDomainId: String,
       unassignId: String,
-      submitter: String,
+      submitter: Option[String],
       reassignmentCounter: Long,
       rawCreatedEvent: RawCreatedEvent,
+      traceContext: Option[Array[Byte]],
   )
 }
 

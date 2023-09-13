@@ -129,7 +129,7 @@ trait TransferProcessingSteps[
       case _: Approve =>
         com.google.rpc.status.Status(com.google.rpc.Code.OK_VALUE)
       case reject: MediatorReject =>
-        reject.rpcStatus()
+        reject.rpcStatusWithoutLoggingContext()
       case reasons: ParticipantReject =>
         reasons.keyEvent.rpcStatus()
     }

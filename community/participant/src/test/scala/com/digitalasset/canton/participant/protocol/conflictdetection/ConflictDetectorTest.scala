@@ -390,12 +390,15 @@ class ConflictDetectorTest
             checkContractStateAbsent(cd, coid01)(s"Non-archived contract $coid01 is evicted.")
           }
         }
-        keyUpdates = Map(key1 -> Unassigned, key2 -> Assigned, key4 -> Assigned)
-        _ = ckj.setUpdateHook { (keys, ToC) =>
+        keyUpdates = Map(
+          key1 -> (Unassigned, toc),
+          key2 -> (Assigned, toc),
+          key4 -> (Assigned, toc),
+        )
+        _ = ckj.setUpdateHook { keys =>
           EitherT.pure {
             assert(keys == keyUpdates)
-            assert(ToC == toc)
-            forEvery(keyUpdates) { case (key, newStatus) =>
+            forEvery(keyUpdates) { case (key, (newStatus, toc)) =>
               checkKeyState(cd, key, newStatus, toc, 0, 0, 1)(
                 show"Key $key is $newStatus with pending write"
               )
@@ -404,7 +407,11 @@ class ConflictDetectorTest
         }
         fin <- cd
           .finalizeRequest(
-            mkCommitSet(arch = Set(coid00), create = Set(coid21), keys = keyUpdates),
+            mkCommitSet(
+              arch = Set(coid00),
+              create = Set(coid21),
+              keys = keyUpdates.view.mapValues(_._1).toMap,
+            ),
             toc,
           )
           .flatten
@@ -576,7 +583,7 @@ class ConflictDetectorTest
             checkContractState(cd, coid11, Archived, toc, 1, 0, 1)(s"$coid11 is being archived")
           }
         }
-        _ = ckj.setUpdateHook { (_, _) =>
+        _ = ckj.setUpdateHook { _ =>
           EitherT.pure {
             checkKeyState(cd, key1, Unassigned, toc, 1, 1, 1)(
               show"Key $key1 gets unassigned, but remains locked"
@@ -689,7 +696,7 @@ class ConflictDetectorTest
             checkContractState(cd, coid11, 0, 1, 0)(s"Rolled-back contract $coid11 remains locked")
           }
         }
-        _ = ckj.setUpdateHook { (_, _) =>
+        _ = ckj.setUpdateHook { _ =>
           EitherT.pure {
             checkKeyStateAbsent(cd, key1)(show"Assigned key $key1 is evicted")
             checkKeyState(cd, key2, Assigned, toc1, 0, 1, 1)(
@@ -1366,7 +1373,7 @@ class ConflictDetectorTest
           )
 
           // Finalize second request and then finalize third request while the updates of the second request are written.
-          _ = ckj.setUpdateHook((_, _) =>
+          _ = ckj.setUpdateHook(_ =>
             finalizeRequest3(cd)
           ) // This runs while request 2's CKJ updates are written
 
@@ -1422,7 +1429,7 @@ class ConflictDetectorTest
         }
 
         // Finalize the first request and do a lot of stuff while the updates are written
-        _ = ckj.setUpdateHook((_, _) => storeHookRequest1(ckj, cd))
+        _ = ckj.setUpdateHook(_ => storeHookRequest1(ckj, cd))
         finF1 <- cd.finalizeRequest(commitSet1, toc1).failOnShutdown
         _ = finF1Complete.success(())
         fin1 <- finF1.failOnShutdown

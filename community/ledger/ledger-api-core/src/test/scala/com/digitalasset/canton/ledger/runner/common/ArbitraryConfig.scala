@@ -12,13 +12,10 @@ import com.daml.metrics.api.reporters.MetricsReporter
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
 import com.digitalasset.canton.ledger.api.tls.{TlsConfiguration, TlsVersion}
-import com.digitalasset.canton.platform.apiserver.ApiServerConfig
-import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.config.*
 import com.digitalasset.canton.platform.indexer.{IndexerConfig, PackageMetadataViewConfig}
 import com.digitalasset.canton.platform.localstore.IdentityProviderManagementConfig
-import com.digitalasset.canton.platform.services.time.TimeProviderType
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.platform.store.DbSupport.DataSourceProperties
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
@@ -124,8 +121,6 @@ object ArbitraryConfig {
 
   val port = Gen.choose(0, 65535).map(p => Port.tryCreate(p))
 
-  val seeding = Gen.oneOf(Seeding.Weak, Seeding.Strong, Seeding.Static)
-
   val userManagementServiceConfig = for {
     enabled <- Gen.oneOf(true, false)
     maxCacheSize <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
@@ -139,7 +134,7 @@ object ArbitraryConfig {
   )
 
   val identityProviderManagementConfig = for {
-    cacheExpiryAfterWrite <- Gen.finiteDuration
+    cacheExpiryAfterWrite <- nonNegativeFiniteDurationGen
   } yield IdentityProviderManagementConfig(
     cacheExpiryAfterWrite = cacheExpiryAfterWrite
   )
@@ -165,8 +160,6 @@ object ArbitraryConfig {
     NonNegativeFiniteDuration(maxTrackingTimeout),
     maxCommandsInFlight,
   )
-
-  val timeProviderType = Gen.oneOf(TimeProviderType.Static, TimeProviderType.WallClock)
 
   val connectionPoolConfig = for {
     connectionPoolSize <- Gen.chooseNum(0, Int.MaxValue)
@@ -206,34 +199,6 @@ object ArbitraryConfig {
     )
     optElement <- Gen.option(element)
   } yield optElement
-
-  val apiServerConfig = for {
-    address <- Gen.option(Gen.alphaStr)
-    apiStreamShutdownTimeout <- Gen.finiteDuration
-    command <- commandServiceConfig
-    configurationLoadTimeout <- Gen.finiteDuration
-    managementServiceTimeout <- Gen.finiteDuration
-    maxInboundMessageSize <- Gen.chooseNum(0, Int.MaxValue)
-    port <- port
-    rateLimit <- rateLimitingConfig
-    seeding <- seeding
-    timeProviderType <- timeProviderType
-    tls <- Gen.option(tlsConfiguration)
-    userManagement <- userManagementServiceConfig
-  } yield ApiServerConfig(
-    address = address,
-    apiStreamShutdownTimeout = apiStreamShutdownTimeout,
-    command = command,
-    configurationLoadTimeout = configurationLoadTimeout,
-    managementServiceTimeout = managementServiceTimeout,
-    maxInboundMessageSize = maxInboundMessageSize,
-    port = port,
-    rateLimit = rateLimit,
-    seeding = seeding,
-    timeProviderType = timeProviderType,
-    tls = tls,
-    userManagement = userManagement,
-  )
 
   val packageMetadataViewConfig = for {
     initLoadParallelism <- Gen.chooseNum(0, Int.MaxValue)

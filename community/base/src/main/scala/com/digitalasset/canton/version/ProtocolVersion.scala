@@ -32,7 +32,7 @@ import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
   *
   * How to add a new protocol version `N`:
   *  - Define a new constant `v<N>` in the [[ProtocolVersion$]] object via
-  *    ``lazy val v<N>: ProtocolVersionWithStatus[Unstable] = ProtocolVersion.unstable(<N>)``
+  *    {{{lazy val v<N>: ProtocolVersionWithStatus[Unstable] = ProtocolVersion.unstable(<N>)}}}
   *
   *  - The new protocol version should be declared as unstable until it is released:
   *    Define it with type argument [[com.digitalasset.canton.version.ProtocolVersion.Unstable]]

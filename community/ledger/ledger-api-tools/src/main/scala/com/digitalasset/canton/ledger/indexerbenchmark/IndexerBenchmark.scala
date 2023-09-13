@@ -9,7 +9,6 @@ import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import com.codahale.metrics.MetricRegistry
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
-import com.daml.lf.data.Time
 import com.daml.metrics.api.dropwizard.DropwizardMetricsFactory
 import com.daml.metrics.api.opentelemetry.OpenTelemetryMetricsFactory
 import com.daml.metrics.api.testing.{InMemoryMetricsFactory, ProxyMetricsFactory}
@@ -19,11 +18,6 @@ import com.daml.telemetry.OpenTelemetryOwner
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.ledger.api.health.{HealthStatus, Healthy}
-import com.digitalasset.canton.ledger.configuration.{
-  Configuration,
-  LedgerInitialConditions,
-  LedgerTimeModel,
-}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.{ReadService, Update}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -184,21 +178,7 @@ class IndexerBenchmark extends NamedLogging {
   private[this] def createReadService(
       updates: Source[(Offset, Traced[Update]), NotUsed]
   ): ReadService = {
-    val initialConditions = LedgerInitialConditions(
-      IndexerBenchmark.LedgerId,
-      Configuration(
-        generation = 0,
-        timeModel = LedgerTimeModel.reasonableDefault,
-        maxDeduplicationDuration = java.time.Duration.ofDays(1),
-      ),
-      Time.Timestamp.Epoch,
-    )
-
     new ReadService {
-      override def ledgerInitialConditions(): Source[LedgerInitialConditions, NotUsed] = {
-        Source.single(initialConditions)
-      }
-
       override def stateUpdates(
           beginAfter: Option[Offset]
       )(implicit traceContext: TraceContext): Source[(Offset, Traced[Update]), NotUsed] = {

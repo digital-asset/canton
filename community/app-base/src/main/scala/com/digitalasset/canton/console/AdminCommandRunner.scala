@@ -52,13 +52,15 @@ object AdminCommandRunner {
   }
 }
 
-/** Support for running an ledgerApi commands
+/** Support for running ledgerApi commands
   */
 trait LedgerApiCommandRunner {
 
   protected[console] def ledgerApiCommand[Result](
       command: GrpcAdminCommand[_, _, Result]
   ): ConsoleCommandResult[Result]
+
+  protected[console] def token: Option[String]
 
 }
 

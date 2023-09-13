@@ -28,6 +28,8 @@ import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future, Promise}
 
 class OrderedBucketMergeHubTest extends StreamSpec with BaseTest {
+  import AkkaUtilTest.*
+
   // Override the implicit from AkkaSpec so that we don't get ambiguous implicits
   override val patience: PatienceConfig = defaultPatience
 
@@ -63,11 +65,6 @@ class OrderedBucketMergeHubTest extends StreamSpec with BaseTest {
     OrderedBucketMergeHubOps[Name, Elem, Config, Offset, Bucket](initial)(_.bucket, _.offset)(
       mkSource
     )
-
-  private lazy val noOpKillSwitch = new KillSwitch {
-    override def shutdown(): Unit = ()
-    override def abort(ex: Throwable): Unit = ()
-  }
 
   "with a single config and threshould 1" should {
     "be the identity" in assertAllStagesStopped {

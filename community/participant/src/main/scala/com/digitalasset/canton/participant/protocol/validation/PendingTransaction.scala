@@ -15,7 +15,7 @@ final case class PendingTransaction(
     txId: TransactionId,
     freshOwnTimelyTx: Boolean,
     modelConformanceResultE: Either[
-      ModelConformanceChecker.ErrorWithSubviewsCheck,
+      ModelConformanceChecker.ErrorWithSubTransaction,
       ModelConformanceChecker.Result,
     ],
     internalConsistencyResultE: Either[ErrorWithInternalConsistencyCheck, Unit],

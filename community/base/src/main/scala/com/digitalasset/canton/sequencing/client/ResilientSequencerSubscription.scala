@@ -180,7 +180,7 @@ class ResilientSequencerSubscription[HandlerError](
     // delay and then restart a subscription with an updated delay duration
     // we effectively throwing away the future here so add some logging in case it fails
     FutureUtil.doNotAwait(
-      DelayUtil.delay(functionFullName, newDelay, this) map { _ =>
+      DelayUtil.delay(functionFullName, delay, this) map { _ =>
         setupNewSubscription(newDelay)
       },
       "Delaying setup of new sequencer subscription failed",

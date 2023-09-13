@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.domain.mediator
 
+import com.daml.metrics.api.MetricName
+import com.digitalasset.canton.config.CachingConfigs
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -11,9 +13,10 @@ import com.digitalasset.canton.domain.mediator.store.{
   InMemoryMediatorDeduplicationStore,
   MediatorState,
 }
-import com.digitalasset.canton.domain.metrics.DomainTestMetrics
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.domain.metrics.{DomainTestMetrics, MediatorMetrics}
+import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.metrics.MetricHandle.NoOpMetricsFactory
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.*
@@ -64,6 +67,8 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
       new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts),
       mock[Clock],
       mediatorMetrics,
+      testedProtocolVersion,
+      CachingConfigs.defaultFinalizedMediatorRequestsCache,
       timeouts,
       loggerFactory,
     )
@@ -81,7 +86,10 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
       override def rejectDuplicates(
           requestTimestamp: CantonTimestamp,
           envelopes: Seq[DefaultOpenEnvelope],
-      )(implicit traceContext: TraceContext): Future[(Seq[DefaultOpenEnvelope], Future[Unit])] =
+      )(implicit
+          traceContext: TraceContext,
+          callerCloseContext: CloseContext,
+      ): Future[(Seq[DefaultOpenEnvelope], Future[Unit])] =
         Future.successful(envelopes -> Future.unit)
     }
 
@@ -95,6 +103,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
       },
       testedProtocolVersion,
       noopDeduplicator,
+      new MediatorMetrics(MetricName("mediator-event-state-processor"), NoOpMetricsFactory),
       loggerFactory,
     )
 
@@ -309,17 +318,16 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
     }
   }
 
-  private def responseAggregation(requestId: RequestId): Future[ResponseAggregation] = {
+  private def responseAggregation(requestId: RequestId): Future[ResponseAggregation[?]] = {
     val mockTopologySnapshot = mock[TopologySnapshot]
     when(mockTopologySnapshot.consortiumThresholds(any[Set[LfPartyId]])).thenAnswer {
       parties: Set[LfPartyId] => Future.successful(parties.map(x => x -> PositiveInt.one).toMap)
     }
-    ResponseAggregation
-      .fromRequest(
-        requestId,
-        InformeeMessage(fullInformeeTree)(testedProtocolVersion),
-        testedProtocolVersion,
-        mockTopologySnapshot,
-      )(loggerFactory) // without explicit ec it deadlocks on AnyTestSuite.serialExecutionContext
+    ResponseAggregation.fromRequest(
+      requestId,
+      InformeeMessage(fullInformeeTree)(testedProtocolVersion),
+      testedProtocolVersion,
+      mockTopologySnapshot,
+    )
   }
 }

@@ -60,7 +60,7 @@ trait StartAndCloseable[A] extends FlagCloseableAsync {
     res
   }
 
-  protected def startAsync(): Future[A]
+  protected def startAsync()(implicit tc: TraceContext): Future[A]
 
 }
 

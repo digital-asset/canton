@@ -40,8 +40,7 @@ private[participant] class HookedAcs(private val acs: ActiveContractStore)(impli
   private val nextTransferHook =
     new AtomicReference[
       (
-          Seq[(LfContractId, TransferDomainId, TransferCounterO)],
-          TimeOfChange,
+          Seq[(LfContractId, TransferDomainId, TransferCounterO, TimeOfChange)],
           Boolean,
       ) => Future[Unit]
     ](
@@ -56,13 +55,13 @@ private[participant] class HookedAcs(private val acs: ActiveContractStore)(impli
     nextArchiveHook.set(preArchive)
   def setTransferHook(
       preTransfer: (
-          Seq[(LfContractId, TransferDomainId, TransferCounterO)],
-          TimeOfChange,
+          Seq[(LfContractId, TransferDomainId, TransferCounterO, TimeOfChange)],
           Boolean,
       ) => Future[Unit]
   ): Unit =
     nextTransferHook.set(preTransfer)
-  def setFetchHook(preFetch: Iterable[LfContractId] => Future[Unit]) = nextFetchHook.set(preFetch)
+  def setFetchHook(preFetch: Iterable[LfContractId] => Future[Unit]): Unit =
+    nextFetchHook.set(preFetch)
 
   override def createContracts(contractIds: Seq[LfContractId], toc: TimeOfChange)(implicit
       traceContext: TraceContext
@@ -87,30 +86,27 @@ private[participant] class HookedAcs(private val acs: ActiveContractStore)(impli
   }
 
   override def transferInContracts(
-      transferIns: Seq[(LfContractId, SourceDomainId, TransferCounterO)],
-      toc: TimeOfChange,
+      transferIns: Seq[(LfContractId, SourceDomainId, TransferCounterO, TimeOfChange)]
   )(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] = CheckedT {
     val preTransfer = nextTransferHook.getAndSet(noTransferAction)
     preTransfer(
       transferIns,
-      toc,
       false,
     ).flatMap { _ =>
-      acs.transferInContracts(transferIns, toc).value
+      acs.transferInContracts(transferIns).value
     }
   }
 
   override def transferOutContracts(
-      transferOuts: Seq[(LfContractId, TargetDomainId, TransferCounterO)],
-      toc: TimeOfChange,
+      transferOuts: Seq[(LfContractId, TargetDomainId, TransferCounterO, TimeOfChange)]
   )(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] = CheckedT {
     val preTransfer = nextTransferHook.getAndSet(noTransferAction)
-    preTransfer(transferOuts, toc, true).flatMap { _ =>
-      acs.transferOutContracts(transferOuts, toc).value
+    preTransfer(transferOuts, true).flatMap { _ =>
+      acs.transferOutContracts(transferOuts).value
     }
   }
 
@@ -182,7 +178,7 @@ private[participant] class HookedAcs(private val acs: ActiveContractStore)(impli
 
   override def packageUsage(pkg: PackageId, contractStore: ContractStore)(implicit
       traceContext: TraceContext
-  ): Future[Option[(LfContractId)]] = acs.packageUsage(pkg, contractStore)
+  ): Future[Option[LfContractId]] = acs.packageUsage(pkg, contractStore)
 }
 
 object HookedAcs {
@@ -191,10 +187,9 @@ object HookedAcs {
   }
 
   private val noTransferAction: (
-      Seq[(LfContractId, TransferDomainId, TransferCounterO)],
-      TimeOfChange,
+      Seq[(LfContractId, TransferDomainId, TransferCounterO, TimeOfChange)],
       Boolean,
-  ) => Future[Unit] = { (_, _, _) =>
+  ) => Future[Unit] = { (_, _) =>
     Future.unit
   }
 

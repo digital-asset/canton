@@ -7,8 +7,7 @@ import cats.data.OptionT
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.LocalOffset
-import com.digitalasset.canton.participant.admin.RepairService
-import com.digitalasset.canton.participant.admin.RepairService.RepairContext
+import com.digitalasset.canton.participant.admin.repair.{RepairContext, RepairService}
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.protocol.MessageProcessingStartingPoint
 import com.digitalasset.canton.participant.protocol.RequestJournal.RequestData

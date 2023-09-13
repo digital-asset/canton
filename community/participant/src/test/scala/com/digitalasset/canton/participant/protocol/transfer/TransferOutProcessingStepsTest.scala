@@ -52,8 +52,8 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
 }
 import com.digitalasset.canton.topology.transaction.{ParticipantPermission, VettedPackages}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
+import com.digitalasset.canton.version.{HasTestCloseContext, ProtocolVersion}
 import com.digitalasset.canton.{
   BaseTest,
   HasExecutorService,
@@ -79,7 +79,8 @@ import scala.concurrent.{ExecutionContext, Future}
 final class TransferOutProcessingStepsTest
     extends AsyncWordSpec
     with BaseTest
-    with HasExecutorService {
+    with HasExecutorService
+    with HasTestCloseContext {
 
   private implicit val ec: ExecutionContext = executorService
 

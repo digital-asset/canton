@@ -42,6 +42,6 @@ private[commands] class GrpcByteChunksToFileObserver[
   }
 }
 
-object GrpcByteChunksToFileObserver {
-  private type ByteStringChunk = { val chunk: ByteString }
+private[commands] object GrpcByteChunksToFileObserver {
+  type ByteStringChunk = { val chunk: ByteString }
 }

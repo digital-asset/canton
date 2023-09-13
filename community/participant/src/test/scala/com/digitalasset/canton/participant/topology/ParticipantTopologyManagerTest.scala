@@ -4,6 +4,8 @@
 package com.digitalasset.canton.participant.topology
 
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
+import com.digitalasset.canton.participant.admin.PackageDependencyResolver
+import com.digitalasset.canton.participant.store.memory.InMemoryDamlPackageStore
 import com.digitalasset.canton.topology.{
   Identifier,
   Namespace,
@@ -26,6 +28,11 @@ class ParticipantTopologyManagerTest extends TopologyManagerTest {
           clock,
           store,
           crypto,
+          new PackageDependencyResolver(
+            new InMemoryDamlPackageStore(loggerFactory),
+            timeouts,
+            loggerFactory,
+          ),
           DefaultProcessingTimeouts.testing,
           testedProtocolVersion,
           factory,

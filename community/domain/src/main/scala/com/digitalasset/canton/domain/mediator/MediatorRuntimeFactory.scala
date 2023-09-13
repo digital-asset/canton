@@ -44,7 +44,7 @@ trait MediatorRuntime extends FlagCloseable {
 
   def timeService: ServerServiceDefinition
   def enterpriseAdministrationService: ServerServiceDefinition
-  def domainOutboxX: Option[DomainOutboxX]
+  def domainOutboxX: Option[DomainOutboxHandle]
 
   def start()(implicit
       ec: ExecutionContext,
@@ -67,7 +67,7 @@ trait MediatorRuntime extends FlagCloseable {
 
 private[mediator] class CommunityMediatorRuntime(
     override val mediator: Mediator,
-    override val domainOutboxX: Option[DomainOutboxX],
+    override val domainOutboxX: Option[DomainOutboxHandle],
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit protected val ec: ExecutionContext)
@@ -156,6 +156,8 @@ object CommunityMediatorRuntimeFactory extends MediatorRuntimeFactory {
         deduplicationStore,
         clock,
         metrics,
+        protocolVersion,
+        nodeParameters.cachingConfigs.finalizedMediatorRequests,
         nodeParameters.processingTimeouts,
         loggerFactory,
       )

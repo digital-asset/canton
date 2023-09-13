@@ -12,7 +12,8 @@ import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.store.MediatorState
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.domain.metrics.MediatorMetrics
+import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.*
@@ -89,18 +90,20 @@ private[mediator] class MediatorEventsProcessor(
     ) => HandlerResult,
     protocolVersion: ProtocolVersion,
     deduplicator: MediatorEventDeduplicator,
+    metrics: MediatorMetrics,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging {
 
   def handle(events: Seq[TracedProtocolEvent])(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
   ): HandlerResult =
     NonEmpty.from(events).fold(HandlerResult.done)(handle)
 
   private def handle(
       events: NonEmpty[Seq[TracedProtocolEvent]]
-  )(implicit traceContext: TraceContext): HandlerResult = {
+  )(implicit traceContext: TraceContext, callerCloseContext: CloseContext): HandlerResult = {
     val identityF = identityClientEventHandler(Traced(events))
 
     val envelopesByEvent = envelopesGroupedByEvent(events)
@@ -220,7 +223,11 @@ private[mediator] class MediatorEventsProcessor(
           )
           (event, domainEnvelopes)
 
-        case _: DeliverError => (event, Seq.empty)
+        case DeliverError(_, _, _, _, SequencerErrors.TrafficCredit(_)) =>
+          metrics.trafficControl.eventRejected.mark()
+          (event, Seq.empty)
+        case _: DeliverError =>
+          (event, Seq.empty)
       }
     }
 
@@ -307,6 +314,7 @@ private[mediator] object MediatorEventsProcessor {
       confirmationResponseProcessor: ConfirmationResponseProcessor,
       mediatorEventDeduplicator: MediatorEventDeduplicator,
       protocolVersion: ProtocolVersion,
+      metrics: MediatorMetrics,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): MediatorEventsProcessor = {
     new MediatorEventsProcessor(
@@ -316,6 +324,7 @@ private[mediator] object MediatorEventsProcessor {
       confirmationResponseProcessor.handleRequestEvents,
       protocolVersion,
       mediatorEventDeduplicator,
+      metrics,
       loggerFactory,
     )
   }

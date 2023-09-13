@@ -17,7 +17,13 @@ import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.error.ErrorCodeUtils
 import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors.ContractNotFound
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
+import com.digitalasset.canton.lifecycle.{
+  CloseContext,
+  FlagCloseable,
+  FutureUnlessShutdown,
+  HasCloseContext,
+  Lifecycle,
+}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.participant.admin.workflows.{PingPong as M, PingPongVacuum as V}
@@ -91,6 +97,7 @@ class PingService(
 )(implicit ec: ExecutionContext, timeoutScheduler: ScheduledExecutorService)
     extends AdminWorkflowService
     with FlagCloseable
+    with HasCloseContext
     with NamedLogging {
   private val adminParty = adminPartyId.toPrim
 
@@ -196,7 +203,8 @@ class PingService(
         override def logger: TracedLogger = PingService.this.logger
 
         override def executeBatch(items: NonEmpty[Seq[Traced[VacuumCommand]]])(implicit
-            traceContext: TraceContext
+            traceContext: TraceContext,
+            callerCloseContext: CloseContext,
         ): Future[Seq[Unit]] = {
           Future.traverse(items.forgetNE)(item => {
             submitIgnoringErrors(

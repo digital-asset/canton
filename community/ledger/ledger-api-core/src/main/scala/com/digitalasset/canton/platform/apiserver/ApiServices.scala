@@ -62,7 +62,7 @@ import io.opentelemetry.api.trace.Tracer
 
 import java.time.Instant
 import scala.collection.immutable
-import scala.concurrent.duration.{Duration, FiniteDuration}
+import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 
 trait ApiServices {
@@ -95,7 +95,7 @@ object ApiServices {
       timeProvider: TimeProvider,
       timeProviderType: TimeProviderType,
       submissionTracker: SubmissionTracker,
-      configurationLoadTimeout: Duration,
+      configurationLoadTimeout: FiniteDuration,
       commandConfig: CommandServiceConfig,
       optTimeServiceBackend: Option[TimeServiceBackend],
       servicesExecutionContext: ExecutionContext,
@@ -106,7 +106,7 @@ object ApiServices {
       checkOverloaded: TraceContext => Option[state.SubmissionResult],
       ledgerFeatures: LedgerFeatures,
       userManagementServiceConfig: UserManagementServiceConfig,
-      apiStreamShutdownTimeout: scala.concurrent.duration.Duration,
+      apiStreamShutdownTimeout: FiniteDuration,
       meteringReportKey: MeteringReportKey,
       explicitDisclosureUnsafeEnabled: Boolean,
       telemetry: Telemetry,

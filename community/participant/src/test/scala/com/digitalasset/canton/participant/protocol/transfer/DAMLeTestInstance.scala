@@ -10,11 +10,14 @@ import com.digitalasset.canton.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.logging.SuppressingLogger
-import com.digitalasset.canton.participant.admin.{PackageInspectionOpsForTesting, PackageService}
+import com.digitalasset.canton.participant.admin.{
+  PackageDependencyResolver,
+  PackageOpsForTesting,
+  PackageService,
+}
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.store.memory.*
 import com.digitalasset.canton.participant.sync.ParticipantEventPublisher
-import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerOps
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
 import com.digitalasset.canton.protocol.*
@@ -32,16 +35,20 @@ object DAMLeTestInstance {
     val pureCrypto = new SymbolicPureCrypto
     val engine =
       DAMLe.newEngine(uniqueContractKeys = false, enableLfDev = false, enableStackTraces = false)
+    val timeouts = ProcessingTimeout()
     val mockPackageService =
       new PackageService(
         engine,
-        new InMemoryDamlPackageStore(loggerFactory),
+        new PackageDependencyResolver(
+          new InMemoryDamlPackageStore(loggerFactory),
+          timeouts,
+          loggerFactory,
+        ),
         mock[ParticipantEventPublisher],
         pureCrypto,
-        mock[ParticipantTopologyManagerOps],
-        new PackageInspectionOpsForTesting(participant, loggerFactory),
+        new PackageOpsForTesting(participant, loggerFactory),
         ParticipantTestMetrics,
-        ProcessingTimeout(),
+        timeouts,
         loggerFactory,
       )
     val packageResolver = DAMLe.packageResolver(mockPackageService)

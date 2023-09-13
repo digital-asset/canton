@@ -20,6 +20,7 @@ import com.digitalasset.canton.console.{
   FeatureFlagFilter,
   Help,
   Helpful,
+  InstanceReferenceCommon,
   InstanceReferenceX,
 }
 import com.digitalasset.canton.crypto.*
@@ -36,6 +37,8 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
+
+import scala.reflect.ClassTag
 
 trait InitNodeIdX extends ConsoleCommandGroup {
 
@@ -81,6 +84,19 @@ class TopologyAdministrationGroupX(
   @Help.Group("All Transactions")
   object transactions {
 
+    // TODO(#12390): add doc annotations
+    def identity_transactions()
+        : Seq[SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]] = {
+      val txs = instance.topology.transactions.list()
+      txs.result
+        .flatMap(tx =>
+          tx.transaction
+            .selectMapping[NamespaceDelegationX]
+            .orElse(tx.transaction.selectMapping[OwnerToKeyMappingX])
+        )
+        .filter(_.transaction.mapping.namespace == instance.id.uid.namespace)
+    }
+
     @Help.Summary("Upload signed topology transaction")
     @Help.Description(
       """Topology transactions can be issued with any topology manager. In some cases, such
@@ -95,20 +111,37 @@ class TopologyAdministrationGroupX(
         )
       }
 
-    def load(transactions: Seq[GenericSignedTopologyTransactionX]): Unit =
+    def load(transactions: Seq[GenericSignedTopologyTransactionX], store: String): Unit =
       consoleEnvironment.run {
         adminCommand(
-          TopologyAdminCommandsX.Write.AddTransactions(transactions)
+          TopologyAdminCommandsX.Write.AddTransactions(transactions, store)
         )
       }
 
-    def authorize(
+    def sign(
+        transactions: Seq[GenericSignedTopologyTransactionX],
+        signedBy: Seq[Fingerprint] = Seq(instance.id.uid.namespace.fingerprint),
+    ): Seq[GenericSignedTopologyTransactionX] =
+      consoleEnvironment.run {
+        adminCommand(TopologyAdminCommandsX.Write.SignTransactions(transactions, signedBy))
+      }
+
+    def authorize[M <: TopologyMappingX: ClassTag](
         txHash: TxHash,
         mustBeFullyAuthorized: Boolean,
-        signedBy: Seq[Fingerprint] = Seq.empty,
-    ): ByteString = {
-      ByteString.EMPTY
-    }
+        store: String,
+        signedBy: Seq[Fingerprint] = Seq(instance.id.uid.namespace.fingerprint),
+    ): SignedTopologyTransactionX[TopologyChangeOpX, M] =
+      consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommandsX.Write.Authorize(
+            txHash.hash.toHexString,
+            mustFullyAuthorize = mustBeFullyAuthorized,
+            signedBy = signedBy,
+            store = store,
+          )
+        )
+      }
 
     @Help.Summary("List all transaction")
     def list(
@@ -171,8 +204,9 @@ class TopologyAdministrationGroupX(
 
     // TODO(#14048) break individual bits out into separate admin functions, and have this only be the default wrapper
     def generate_genesis_topology(
-        name: String,
+        domainId: DomainId,
         domainOwners: Seq[Member],
+        unionspaceFoundingTransactions: Seq[GenericSignedTopologyTransactionX],
         sequencers: Seq[SequencerId],
         mediators: Seq[MediatorId],
     ): Seq[SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]] = {
@@ -191,19 +225,14 @@ class TopologyAdministrationGroupX(
         .map(_.transaction)
         .filter(x => codes.contains(x.transaction.mapping.code))
 
-      // create and sign the unionspace for the domain
-      val unionspaceTransaction = instance.topology.unionspaces.propose(
-        domainOwners.map(_.uid.namespace.fingerprint).toSet,
-        threshold = PositiveInt.tryCreate(1.max(domainOwners.size - 1)),
-        signedBy = thisNodeRootKey,
-      )
-
-      val domainId = DomainId(
-        UniqueIdentifier(
-          Identifier.tryCreate(name),
-          unionspaceTransaction.transaction.mapping.unionspace,
-        )
-      )
+      // load the unionspace founding transactions
+      unionspaceFoundingTransactions
+        .groupBy(_.transaction.mapping.code)
+        .toSeq
+        .sortBy(_._1.dbInt)
+        .foreach { case (_, txs) =>
+          instance.topology.transactions.load(txs, AuthorizedStore.filterName)
+        }
 
       // create and sign the initial domain parameters
       val domainParameterState = Option.when(isDomainOwner)(
@@ -212,6 +241,7 @@ class TopologyAdministrationGroupX(
           DynamicDomainParameters
             .initialXValues(consoleEnvironment.environment.clock, ProtocolVersion.dev),
           signedBy = thisNodeRootKey,
+          store = Some(AuthorizedStore.filterName),
         )
       )
 
@@ -221,6 +251,7 @@ class TopologyAdministrationGroupX(
           threshold = PositiveInt.one,
           active = mediators,
           signedBy = thisNodeRootKey,
+          store = Some(AuthorizedStore.filterName),
         )
       )
 
@@ -230,11 +261,11 @@ class TopologyAdministrationGroupX(
           threshold = PositiveInt.one,
           active = sequencers,
           signedBy = thisNodeRootKey,
+          store = Some(AuthorizedStore.filterName),
         )
       )
 
-      namespace ++ domainParameterState ++ sequencerState ++ mediatorState ++
-        Option.when(isDomainOwner)(unionspaceTransaction)
+      namespace ++ unionspaceFoundingTransactions ++ domainParameterState ++ sequencerState ++ mediatorState
     }
   }
 
@@ -268,6 +299,7 @@ class TopologyAdministrationGroupX(
     def propose(
         owners: Set[Fingerprint],
         threshold: PositiveInt,
+        store: String,
         // TODO(#14056) don't use the instance's root namespace key by default.
         //  let the grpc service figure out the right key to use, once that's implemented
         signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
@@ -289,7 +321,9 @@ class TopologyAdministrationGroupX(
                   signedBy = signedBy.toList,
                   serial = serial,
                   change = TopologyChangeOpX.Replace,
+                  // TODO(#12390): change to false when activating topology transaction validation
                   mustFullyAuthorize = true,
+                  store = store,
                 )
               }
             )
@@ -411,9 +445,19 @@ class TopologyAdministrationGroupX(
         )
       }
 
+    def rotate_key(
+        owner: KeyOwner,
+        currentKey: PublicKey,
+        newKey: PublicKey,
+    ): Unit =
+      throw new IllegalArgumentException(
+        s"For this node use `rotate_key` where you specify the node instance"
+      )
+
     @Help.Summary("Rotate the key for an owner to key mapping")
     // TODO(#12200): Implement write service
     def rotate_key(
+        nodeInstance: InstanceReferenceCommon,
         owner: KeyOwner,
         currentKey: PublicKey,
         newKey: PublicKey,
@@ -470,9 +514,14 @@ class TopologyAdministrationGroupX(
     def propose(
         party: PartyId,
         newParticipants: Seq[(ParticipantId, ParticipantPermissionX)],
+        threshold: PositiveInt = PositiveInt.one,
         domainId: Option[DomainId] = None,
         serial: Option[PositiveInt] = None,
-    ): ConsoleCommandResult[SignedTopologyTransactionX[TopologyChangeOpX, PartyToParticipantX]] = {
+        groupAddressing: Boolean = false,
+        // TODO(#12390): change to false when activating topology transaction validation
+        mustFullyAuthorize: Boolean = true,
+        store: String = AuthorizedStore.filterName,
+    ): SignedTopologyTransactionX[TopologyChangeOpX, PartyToParticipantX] = {
       val op = NonEmpty.from(newParticipants) match {
         case Some(_) => TopologyChangeOpX.Replace
         case None => TopologyChangeOpX.Remove
@@ -482,16 +531,18 @@ class TopologyAdministrationGroupX(
         mapping = PartyToParticipantX(
           partyId = party,
           domainId = domainId,
-          threshold = PositiveInt.one, // Increase this to switch to a real consortium party
+          threshold = threshold,
           participants = newParticipants.map((HostingParticipant.apply _) tupled),
-          groupAddressing = false,
+          groupAddressing = groupAddressing,
         ),
         signedBy = Seq(instance.id.uid.namespace.fingerprint),
         serial = serial,
         change = op,
+        mustFullyAuthorize = mustFullyAuthorize,
+        store = store,
       )
 
-      adminCommand(command)
+      consoleEnvironment.run(adminCommand(command))
     }
 
     def list(
@@ -571,6 +622,7 @@ class TopologyAdministrationGroupX(
         synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
+        store: Option[String] = None,
     ): ConsoleCommandResult[
       SignedTopologyTransactionX[TopologyChangeOpX, ParticipantDomainPermissionX]
     ] = {
@@ -585,6 +637,7 @@ class TopologyAdministrationGroupX(
         ),
         signedBy = Seq(instance.id.uid.namespace.fingerprint),
         serial = None,
+        store = store.getOrElse(domainId.filterString),
       )
 
       synchronisation.run(synchronize)(adminCommand(cmd))
@@ -683,6 +736,7 @@ class TopologyAdministrationGroupX(
             serial = serial,
             change = TopologyChangeOpX.Replace,
             mustFullyAuthorize = true,
+            store = domainId.filterString,
           )
         )
       }
@@ -761,6 +815,7 @@ class TopologyAdministrationGroupX(
         //  let the grpc service figure out the right key to use, once that's implemented
         signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
         serial: Option[PositiveInt] = None,
+        store: String = AuthorizedStore.filterName,
     ): SignedTopologyTransactionX[TopologyChangeOpX, AuthorityOfX] =
       consoleEnvironment.run {
         adminCommand(
@@ -772,7 +827,8 @@ class TopologyAdministrationGroupX(
               parties,
             ),
             signedBy = signedBy.toList,
-            serial,
+            serial = serial,
+            store = store,
           )
         )
       }
@@ -839,6 +895,7 @@ class TopologyAdministrationGroupX(
         //  let the grpc service figure out the right key to use, once that's implemented
         signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
         serial: Option[PositiveInt] = None,
+        store: Option[String] = None,
     ): SignedTopologyTransactionX[TopologyChangeOpX, MediatorDomainStateX] =
       consoleEnvironment.run {
         adminCommand(
@@ -848,7 +905,9 @@ class TopologyAdministrationGroupX(
             signedBy = signedBy.toList,
             serial = serial,
             change = TopologyChangeOpX.Replace,
+            // TODO(#12390): change to false when activating topology transaction validation
             mustFullyAuthorize = true,
+            store = store.getOrElse(domainId.filterString),
           )
         )
       }
@@ -890,6 +949,7 @@ class TopologyAdministrationGroupX(
         //  let the grpc service figure out the right key to use, once that's implemented
         signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
         serial: Option[PositiveInt] = None,
+        store: Option[String] = None,
     ): SignedTopologyTransactionX[TopologyChangeOpX, SequencerDomainStateX] =
       consoleEnvironment.run {
         adminCommand(
@@ -898,7 +958,9 @@ class TopologyAdministrationGroupX(
             signedBy = signedBy.toList,
             serial = serial,
             change = TopologyChangeOpX.Replace,
+            // TODO(#12390): change to false when activating topology transaction validation
             mustFullyAuthorize = true,
+            store = store.getOrElse(domainId.filterString),
           )
         )
       }
@@ -938,6 +1000,7 @@ class TopologyAdministrationGroupX(
         //  let the grpc service figure out the right key to use, once that's implemented
         signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
         serial: Option[PositiveInt] = None,
+        store: Option[String] = None,
     ): SignedTopologyTransactionX[TopologyChangeOpX, DomainParametersStateX] =
       consoleEnvironment.run {
         adminCommand(
@@ -948,7 +1011,10 @@ class TopologyAdministrationGroupX(
               parameters,
             ),
             signedBy.toList,
-            serial,
+            serial = serial,
+            // TODO(#12390): change to false when activating topology transaction validation
+            mustFullyAuthorize = true,
+            store = store.getOrElse(domain.filterString),
           )
         )
       }

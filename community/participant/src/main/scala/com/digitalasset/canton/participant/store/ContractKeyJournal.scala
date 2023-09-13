@@ -48,7 +48,7 @@ trait ContractKeyJournal extends ConflictDetectionStore[LfGlobalKey, ContractKey
     *         if a different count with the same [[com.digitalasset.canton.participant.util.TimeOfChange]]
     *         has been written for one of the keys in the `updates` map.
     */
-  def addKeyStateUpdates(updates: Map[LfGlobalKey, Status], toc: TimeOfChange)(implicit
+  def addKeyStateUpdates(updates: Map[LfGlobalKey, (Status, TimeOfChange)])(implicit
       traceContext: TraceContext
   ): EitherT[Future, ContractKeyJournalError, Unit]
 

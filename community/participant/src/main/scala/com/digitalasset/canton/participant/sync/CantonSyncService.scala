@@ -47,8 +47,10 @@ import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.v2.ReadService.ConnectedDomainResponse
 import com.digitalasset.canton.ledger.participant.state.v2.*
 import com.digitalasset.canton.lifecycle.{
+  CloseContext,
   FlagCloseable,
   FutureUnlessShutdown,
+  HasCloseContext,
   Lifecycle,
   UnlessShutdown,
 }
@@ -59,6 +61,7 @@ import com.digitalasset.canton.participant.*
 import com.digitalasset.canton.participant.admin.*
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
+import com.digitalasset.canton.participant.admin.repair.RepairService
 import com.digitalasset.canton.participant.domain.*
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
@@ -109,7 +112,6 @@ import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetPr
 import io.opentelemetry.api.trace.Tracer
 import org.slf4j.event.Level
 
-import java.time.Duration as JDuration
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{CompletableFuture, CompletionStage}
 import scala.collection.concurrent.TrieMap
@@ -144,7 +146,6 @@ class CantonSyncService(
     partyNotifier: LedgerServerPartyNotifier,
     val syncCrypto: SyncCryptoApiProvider,
     pruningProcessor: PruningProcessor,
-    ledgerId: LedgerId,
     engine: Engine,
     syncDomainStateFactory: SyncDomainEphemeralStateFactory,
     clock: Clock,
@@ -165,7 +166,8 @@ class CantonSyncService(
     with state.v2.ReadService
     with FlagCloseable
     with Spanning
-    with NamedLogging {
+    with NamedLogging
+    with HasCloseContext {
 
   import ShowUtil.*
 
@@ -179,24 +181,6 @@ class CantonSyncService(
   val maxDeduplicationDuration: NonNegativeFiniteDuration =
     participantNodePersistentState.value.settingsStore.settings.maxDeduplicationDuration
       .getOrElse(throw new RuntimeException("Max deduplication duration is not available"))
-
-  private val ledgerInitialConditionsInternal = LedgerInitialConditions(
-    ledgerId = ledgerId,
-    config = Configuration(
-      generation = 1L,
-      timeModel = { // To start out, defining the most "permissive" time model possible
-        val min = JDuration.ofNanos(0L)
-        val max = JDuration.ofDays(365L)
-        LedgerTimeModel(
-          avgTransactionLatency = min,
-          minSkew = min,
-          maxSkew = max,
-        ).getOrElse(throw new RuntimeException("Static config should not fail"))
-      },
-      maxDeduplicationDuration = maxDeduplicationDuration.unwrap,
-    ),
-    initialRecordTime = LedgerSyncRecordTime.Epoch,
-  )
 
   private val excludedPackageIds = if (parameters.excludeInfrastructureTransactions) {
     Set(
@@ -218,9 +202,6 @@ class CantonSyncService(
     connectionListeners.updateAndGet(subscriber :: _).discard
 
   protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
-
-  override def ledgerInitialConditions(): Source[LedgerInitialConditions, NotUsed] =
-    Source.single(ledgerInitialConditionsInternal)
 
   /** The domains this sync service is connected to. Can change due to connect/disconnect operations.
     * This may contain domains for which recovery is still running.
@@ -355,7 +336,7 @@ class CantonSyncService(
   val repairService: RepairService = new RepairService(
     participantId,
     syncCrypto,
-    packageService,
+    packageService.dependencyResolver,
     repairServiceDAMLe,
     participantNodePersistentState.map(_.multiDomainEventLog),
     syncDomainPersistentStateManager,
@@ -824,7 +805,10 @@ class CantonSyncService(
     for {
       targetDomainInfo <- performUnlessClosingEitherU(functionFullName)(
         sequencerInfoLoader
-          .loadSequencerEndpoints(target.domain, target.sequencerConnections)
+          .loadSequencerEndpoints(target.domain, target.sequencerConnections)(
+            traceContext,
+            CloseContext(this),
+          )
           .leftMap(DomainRegistryError.fromSequencerInfoLoaderError)
           .leftMap[SyncServiceError](err =>
             SyncServiceError.SyncServiceFailedDomainConnection(
@@ -1213,7 +1197,13 @@ class CantonSyncService(
           loggerFactory,
         )
 
-        trafficStateController = new TrafficStateController(participantId, loggerFactory)
+        trafficStateController = new TrafficStateController(
+          participantId,
+          loggerFactory,
+          domainHandle.topologyClient,
+          metrics.domainMetrics(domainAlias),
+          clock,
+        )
 
         syncDomain = syncDomainFactory.create(
           domainId,
@@ -1669,7 +1659,6 @@ object CantonSyncService {
         identityPusher: ParticipantTopologyDispatcherCommon,
         partyNotifier: LedgerServerPartyNotifier,
         syncCrypto: SyncCryptoApiProvider,
-        ledgerId: LedgerId,
         engine: Engine,
         syncDomainStateFactory: SyncDomainEphemeralStateFactory,
         storage: Storage,
@@ -1701,7 +1690,6 @@ object CantonSyncService {
         identityPusher: ParticipantTopologyDispatcherCommon,
         partyNotifier: LedgerServerPartyNotifier,
         syncCrypto: SyncCryptoApiProvider,
-        ledgerId: LedgerId,
         engine: Engine,
         syncDomainStateFactory: SyncDomainEphemeralStateFactory,
         storage: Storage,
@@ -1735,7 +1723,6 @@ object CantonSyncService {
         partyNotifier,
         syncCrypto,
         NoOpPruningProcessor,
-        ledgerId,
         engine,
         syncDomainStateFactory,
         clock,

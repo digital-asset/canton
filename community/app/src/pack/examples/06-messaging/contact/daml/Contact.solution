@@ -10,11 +10,12 @@ template Contact
   where
     signatory myself
 
-    controller myself can
-      nonconsuming Send: () with
-          message: Text
+    nonconsuming choice Send: ()
+      with
+        message: Text
+      controller myself
         do
-          create Message with 
+          create Message with
             sender = myself
             receiver = other
             message = message

@@ -7,6 +7,7 @@ package com.digitalasset.canton.protocol.v2;
 
 import "com/digitalasset/canton/crypto/v0/crypto.proto";
 import "google/protobuf/duration.proto";
+import "scalapb/scalapb.proto";
 
 message StaticDomainParametersX {
   repeated com.digitalasset.canton.crypto.v0.SigningKeyScheme required_signing_key_schemes = 1;
@@ -28,6 +29,8 @@ message ParticipantDomainLimits {
 }
 
 message DynamicDomainParametersX {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
+
   google.protobuf.Duration participant_response_timeout = 1;
   google.protobuf.Duration mediator_reaction_timeout = 2;
   google.protobuf.Duration transfer_exclusivity_timeout = 3;
@@ -50,4 +53,5 @@ message DynamicDomainParametersX {
   ParticipantDomainLimits default_participant_limits = 13;
   // TODO(#14050) implement party hosting limits
   uint32 default_max_hosting_participants_per_party = 14;
+  google.protobuf.Duration sequencer_aggregate_submission_timeout = 15;
 }

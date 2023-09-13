@@ -9,7 +9,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.engine.Engine
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.InitConfigBase
@@ -26,9 +25,9 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.networking.grpc.StaticGrpcServices
 import com.digitalasset.canton.participant.admin.v0.*
 import com.digitalasset.canton.participant.admin.{
-  PackageInspectionOps,
-  PackageInspectionOpsImpl,
-  PackageService,
+  PackageDependencyResolver,
+  PackageOps,
+  PackageOpsImpl,
   ResourceManagementService,
 }
 import com.digitalasset.canton.participant.config.*
@@ -126,11 +125,19 @@ class ParticipantNodeBootstrap(
         Seq(syncDomainHealth, syncDomainEphemeralHealth, syncDomainSequencerClientHealth),
     )
 
+  private val packageDependencyResolver =
+    new PackageDependencyResolver(
+      DamlPackageStore(storage, futureSupervisor, parameterConfig, loggerFactory),
+      arguments.parameterConfig.processingTimeouts,
+      loggerFactory,
+    )
+
   private val topologyManager =
     new ParticipantTopologyManager(
       clock,
       authorizedTopologyStore,
       crypto.value,
+      packageDependencyResolver,
       parameterConfig.processingTimeouts,
       config.parameters.initialProtocolVersion.unwrap,
       loggerFactory,
@@ -212,8 +219,7 @@ class ParticipantNodeBootstrap(
     }
 
   override protected def setPostInitCallbacks(
-      sync: CantonSyncService,
-      packageService: PackageService,
+      sync: CantonSyncService
   ): Unit = {
     // provide the idm a handle to synchronize package vettings
     topologyManager.setPostInitCallbacks(new PostInitCallbacks {
@@ -222,11 +228,6 @@ class ParticipantNodeBootstrap(
         sync.readyDomains.values.toList.mapFilter { case (domainId, _) =>
           ips.forDomain(domainId)
         }
-
-      override def packageDependencies(packages: List[PackageId])(implicit
-          traceContext: TraceContext
-      ): EitherT[Future, PackageId, Set[PackageId]] =
-        packageService.packageDependencies(packages)
 
       override def partyHasActiveContracts(partyId: PartyId)(implicit
           traceContext: TraceContext
@@ -271,10 +272,10 @@ class ParticipantNodeBootstrap(
           (manager, topologyDispatcher)
         }
 
-        override def createPackageInspectionOps(
+        override def createPackageOps(
             manager: SyncDomainPersistentStateManager,
             crypto: SyncCryptoApiProvider,
-        ): PackageInspectionOps = {
+        ): PackageOps = {
           val client = new StoreBasedTopologySnapshot(
             CantonTimestamp.MaxValue,
             authorizedTopologyStore,
@@ -283,7 +284,7 @@ class ParticipantNodeBootstrap(
             StoreBasedDomainTopologyClient.NoPackageDependencies,
             loggerFactory,
           )
-          new PackageInspectionOpsImpl(
+          new PackageOpsImpl(
             participantId,
             client,
             manager,
@@ -328,6 +329,7 @@ class ParticipantNodeBootstrap(
         partyNotifierFactory,
         adminToken,
         topologyManager,
+        packageDependencyResolver,
         componentFactory,
         skipRecipientsCheck,
       ).map {
@@ -360,6 +362,7 @@ class ParticipantNodeBootstrap(
             recordSequencerInteractions,
             replaySequencerConfig,
             schedulers,
+            packageDependencyResolver,
             loggerFactory,
             nodeHealthService.dependencies.map(_.toComponentStatus),
           )
@@ -590,6 +593,7 @@ class ParticipantNode(
     val recordSequencerInteractions: AtomicReference[Option[RecordingConfig]],
     val replaySequencerConfig: AtomicReference[Option[ReplayConfig]],
     val schedulers: SchedulersWithPruning,
+    packageDependencyResolver: PackageDependencyResolver,
     val loggerFactory: NamedLoggerFactory,
     healthData: => Seq[ComponentStatus],
 ) extends ParticipantNodeCommon(sync)
@@ -656,6 +660,7 @@ class ParticipantNode(
       eventPublisher,
       topologyManager,
       sync,
+      packageDependencyResolver,
       storage,
     )(logger)
   }

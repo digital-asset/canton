@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.resource
 
-import cats.syntax.alternative.*
 import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import com.daml.nameof.NameOf.functionFullName
@@ -26,7 +25,10 @@ import scala.concurrent.{ExecutionContext, Future}
 sealed trait TransactionalStoreUpdate {
 
   /** Run the transactional update as a stand-alone update. */
-  def runStandalone()(implicit traceContext: TraceContext): Future[Unit]
+  def runStandalone()(implicit
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
+  ): Future[Unit]
 }
 
 object TransactionalStoreUpdate {
@@ -49,10 +51,10 @@ object TransactionalStoreUpdate {
       // We first execute all DB updates in a single DB transaction and, if successful, all in-memory updates afterwards.
       // This gives transactionality as the in-memory updates cannot fail by the requirement on `InMemoryTransactionalStoreUpdate`.
 
-      val (dbUpdates, inMemUpdates) = updates.toList.map {
+      val (dbUpdates, inMemUpdates) = updates.toList.partitionMap {
         case upd: InMemoryTransactionalStoreUpdate => Right(upd)
         case upd: DbTransactionalStoreUpdate => Left(upd)
-      }.separate
+      }
 
       // Make sure that all DB updates use the same Db storage object.
       // Otherwise we cannot combine the SQL updates into a single DB transaction.
@@ -91,7 +93,10 @@ object TransactionalStoreUpdate {
     */
   private[canton] class InMemoryTransactionalStoreUpdate(val perform: () => Unit)
       extends TransactionalStoreUpdate {
-    override def runStandalone()(implicit traceContext: TraceContext): Future[Unit] =
+    override def runStandalone()(implicit
+        traceContext: TraceContext,
+        callerCloseContext: CloseContext,
+    ): Future[Unit] =
       Future.successful(perform())
   }
 
@@ -110,13 +115,14 @@ object TransactionalStoreUpdate {
       val storage: DbStorage,
       val metric: Option[TimedLoadGauge],
       override protected val loggerFactory: NamedLoggerFactory,
-  )(implicit val ec: ExecutionContext, closeContext: CloseContext)
+  )(implicit val ec: ExecutionContext)
       extends TransactionalStoreUpdate
       with NamedLogging {
     override def runStandalone()(implicit
-        traceContext: TraceContext
+        traceContext: TraceContext,
+        callerCloseContext: CloseContext,
     ): Future[Unit] = {
-      lazy val runDbF = storage.update_(sql, functionFullName)
+      lazy val runDbF = storage.update_(sql, functionFullName)(traceContext, callerCloseContext)
       metric.fold(runDbF)(_.event(runDbF))
     }
   }

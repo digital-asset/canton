@@ -29,7 +29,6 @@ private[store] trait TopologyStoreXTestBase extends BaseTest with HasExecutionCo
       add: Seq[GenericSignedTopologyTransactionX] = Seq.empty,
       removeMapping: Set[MappingHash] = Set.empty,
       removeTxs: Set[TxHash] = Set.empty,
-      expiredAdditions: Set[TxHash] = Set.empty,
   )(implicit traceContext: TraceContext): Future[Unit] = {
     store.update(
       SequencedTime(ts),
@@ -37,7 +36,6 @@ private[store] trait TopologyStoreXTestBase extends BaseTest with HasExecutionCo
       removeMapping,
       removeTxs,
       add.map(ValidatedTopologyTransactionX(_)),
-      expiredAdditions,
     )
   }
 

@@ -23,6 +23,8 @@ import scala.concurrent.duration.*
   * @param activeInit how long a passive replica should wait for the initialization by the active replica
   * @param slowFutureWarn when using future supervision, when should we start to warn about a slow future
   * @param activeInitRetryDelay delay between attempts while waiting for initialization of the active replica
+  * @param sequencerInfo how long are we going to try to get the sequencer connection information. setting this high means that
+  *                      connect calls will take quite a while if one of the sequencers is offline.
   */
 final case class ProcessingTimeout(
     unbounded: NonNegativeDuration = DefaultProcessingTimeouts.unbounded,
@@ -39,6 +41,7 @@ final case class ProcessingTimeout(
     activeInit: NonNegativeDuration = DefaultProcessingTimeouts.activeInit,
     slowFutureWarn: NonNegativeDuration = DefaultProcessingTimeouts.slowFutureWarn,
     activeInitRetryDelay: NonNegativeDuration = DefaultProcessingTimeouts.activeInitRetryDelay,
+    sequencerInfo: NonNegativeDuration = DefaultProcessingTimeouts.sequencerInfo,
 )
 
 /** Reasonable default timeouts */
@@ -74,6 +77,8 @@ object DefaultProcessingTimeouts {
   val warnUnbounded: NonNegativeDuration = NonNegativeDuration.tryFromDuration(30.seconds)
 
   val slowFutureWarn: NonNegativeDuration = NonNegativeDuration.tryFromDuration(5.seconds)
+
+  val sequencerInfo: NonNegativeDuration = NonNegativeDuration.tryFromDuration(30.seconds)
 
   @VisibleForTesting
   lazy val testing: ProcessingTimeout = ProcessingTimeout()

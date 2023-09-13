@@ -11,6 +11,7 @@ import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.rpc.status.Status
 
+import java.time.Instant
 import scala.collection.immutable.Seq
 
 sealed trait SequencerDeliverError extends TransactionError {
@@ -112,6 +113,39 @@ object SequencerErrors extends SequencerErrorGroup {
     ): SequencerDeliverError =
       apply(
         s"Invalid signing timestamp $signingTimestamp. The signing timestamp must be before or at $sequencingTimestamp."
+      )
+  }
+
+  @Explanation(
+    """Timestamp of the signing key is missing on the submission request."""
+  )
+  @Resolution(
+    """This indicates a bug in Canton (a faulty node behaviour). Please contact customer support."""
+  )
+  object SigningTimestampMissing
+      extends SequencerDeliverErrorCode(
+        id = "SEQUENCER_SIGNING_TIMESTAMP_MISSING",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      )
+
+  @Explanation(
+    """Maximum sequencing time on the submission request is exceeding the maximum allowed interval into the future. Could be result of a concurrent dynamic domain parameter change for sequencerAggregateSubmissionTimeout."""
+  )
+  @Resolution(
+    """In case there was a recent concurrent dynamic domain parameter change, simply retry the submission. Otherwise this error code indicates a bug in Canton (a faulty node behaviour). Please contact customer support."""
+  )
+  object MaxSequencingTimeTooFar
+      extends SequencerDeliverErrorCode(
+        id = "SEQUENCER_MAX_SEQUENCING_TIME_TOO_FAR",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    def apply(
+        messageId: MessageId,
+        maxSequencingTime: CantonTimestamp,
+        maxSequencingTimeUpperBound: Instant,
+    ): SequencerDeliverError =
+      apply(
+        s"Max sequencing time $maxSequencingTime for submission with id $messageId is too far in the future, currently bounded at $maxSequencingTimeUpperBound"
       )
   }
 

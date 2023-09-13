@@ -62,7 +62,7 @@ object Dependencies {
   lazy val pprint = "com.lihaoyi" %% "pprint" % pprint_version
 
   lazy val h2 = "com.h2database" % "h2" % "2.1.210"
-  lazy val postgres = "org.postgresql" % "postgresql" % "42.3.8"
+  lazy val postgres = "org.postgresql" % "postgresql" % "42.6.0"
   lazy val flyway = "org.flywaydb" % "flyway-core" % "9.15.2"
   lazy val oracle = "com.oracle.database.jdbc" % "ojdbc8" % "19.18.0.0"
 

@@ -8,6 +8,7 @@ import com.daml.lf.data.Ref
 import com.digitalasset.canton.ledger.api.auth.AuthService.AUTHORIZATION_KEY
 import com.digitalasset.canton.ledger.api.domain.IdentityProviderId
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.Metadata
 import spray.json.*
 
@@ -25,7 +26,9 @@ class AuthServiceJWT(
 ) extends AuthService
     with NamedLogging {
 
-  override def decodeMetadata(headers: Metadata): CompletionStage[ClaimSet] =
+  override def decodeMetadata(
+      headers: Metadata
+  )(implicit traceContext: TraceContext): CompletionStage[ClaimSet] =
     CompletableFuture.completedFuture {
       getAuthorizationHeader(headers) match {
         case None => ClaimSet.Unauthenticated
@@ -36,10 +39,10 @@ class AuthServiceJWT(
   private[this] def getAuthorizationHeader(headers: Metadata): Option[String] =
     Option.apply(headers.get(AUTHORIZATION_KEY))
 
-  private[this] def parseHeader(header: String): ClaimSet =
+  private[this] def parseHeader(header: String)(implicit traceContext: TraceContext): ClaimSet =
     parseJWTPayload(header).fold(
       error => {
-        noTracingLogger.warn("Authorization error: " + error.message)
+        logger.warn("Authorization error: " + error.message)
         ClaimSet.Unauthenticated
       },
       token => payloadToClaims(token),

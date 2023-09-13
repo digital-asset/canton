@@ -3,11 +3,32 @@
 
 package com.digitalasset.canton.platform.config
 
-import com.digitalasset.canton.config.DeprecatedConfigUtils
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
+import com.digitalasset.canton.config.{DeprecatedConfigUtils, NonNegativeFiniteDuration}
+import com.digitalasset.canton.logging.ErrorLoggingContext
 
 import scala.concurrent.duration.{Duration, FiniteDuration}
 
+/** Ledger api index service specific configurations
+  *
+  * @param bufferedEventsProcessingParallelism     parallelism for loading and decoding ledger events for populating ledger api server's internal buffers
+  * @param bufferedStreamsPageSize                 the page size for streams created from ledger api server's in-memory buffers
+  * @param maxContractStateCacheSize               maximum caffeine cache size of mutable state cache of contracts
+  * @param maxContractKeyStateCacheSize            maximum caffeine cache size of mutable state cache of contract keys
+  * @param maxTransactionsInMemoryFanOutBufferSize maximum number of transactions to hold in the "in-memory fanout" (if enabled)
+  * @param apiStreamShutdownTimeout                shutdown timeout for a graceful completion of ledger api server's streams
+  * @param inMemoryStateUpdaterParallelism         the processing parallelism of the Ledger API server in-memory state updater
+  * @param inMemoryFanOutThreadPoolSize            size of the thread-pool backing the Ledger API in-memory fan-out.
+  *                                                If not set, defaults to ((number of thread)/4 + 1)
+  * @param preparePackageMetadataTimeOutWarning    timeout for package metadata preparation after which a warning will be logged
+  * @param completionsPageSize                     database / akka page size for batching of ledger api server index ledger completion queries
+  * @param activeContractsServiceStreams           configurations pertaining to the ledger api server's "active contracts service"
+  * @param transactionFlatStreams                  configurations pertaining to the ledger api server's streams of transaction trees
+  * @param transactionTreeStreams                  configurations pertaining to the ledger api server's streams of flat transactions
+  * @param globalMaxEventIdQueries                 maximum number of concurrent event id queries across all stream types
+  * @param globalMaxEventPayloadQueries            maximum number of concurrent event payload queries across all stream types
+  */
 final case class IndexServiceConfig(
     bufferedEventsProcessingParallelism: Int =
       IndexServiceConfig.DefaultBufferedEventsProcessingParallelism,
@@ -19,10 +40,10 @@ final case class IndexServiceConfig(
     apiStreamShutdownTimeout: Duration = IndexServiceConfig.DefaultApiStreamShutdownTimeout,
     inMemoryStateUpdaterParallelism: Int =
       IndexServiceConfig.DefaultInMemoryStateUpdaterParallelism,
-    inMemoryFanOutThreadPoolSize: Int = IndexServiceConfig.DefaultInMemoryFanOutThreadPoolSize,
-    preparePackageMetadataTimeOutWarning: FiniteDuration =
+    inMemoryFanOutThreadPoolSize: Option[Int] = None,
+    preparePackageMetadataTimeOutWarning: NonNegativeFiniteDuration =
       IndexServiceConfig.PreparePackageMetadataTimeOutWarning,
-    completionsPageSize: Int = 1000,
+    completionsPageSize: Int = IndexServiceConfig.DefaultCompletionsPageSize,
     activeContractsServiceStreams: ActiveContractsServiceStreamsConfig =
       ActiveContractsServiceStreamsConfig.default,
     transactionFlatStreams: TransactionFlatStreamsConfig = TransactionFlatStreamsConfig.default,
@@ -39,8 +60,15 @@ object IndexServiceConfig {
   val DefaultMaxTransactionsInMemoryFanOutBufferSize: Int = 10000
   val DefaultApiStreamShutdownTimeout: Duration = FiniteDuration(5, "seconds")
   val DefaultInMemoryStateUpdaterParallelism: Int = 2
-  val DefaultInMemoryFanOutThreadPoolSize: Int = 16
-  val PreparePackageMetadataTimeOutWarning: FiniteDuration = FiniteDuration(5, "second")
+  val PreparePackageMetadataTimeOutWarning: NonNegativeFiniteDuration =
+    NonNegativeFiniteDuration.ofSeconds(5)
+  val DefaultCompletionsPageSize = 1000
+
+  def DefaultInMemoryFanOutThreadPoolSize(implicit loggingContext: ErrorLoggingContext): Int = {
+    val numberOfThreads =
+      Threading.detectNumberOfThreads(loggingContext.logger)(loggingContext.traceContext)
+    numberOfThreads / 4 + 1
+  }
 }
 
 /** Ledger api active contracts service specific configurations

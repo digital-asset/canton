@@ -142,6 +142,7 @@ object SequencerRuntimeFactory {
               domainId,
               sequencerId,
               clock,
+              clock,
               syncCrypto,
               futureSupervisor,
               rateLimitManager,

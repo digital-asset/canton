@@ -21,6 +21,7 @@ import akka.stream.{
   UniqueKillSwitch,
 }
 import akka.{Done, NotUsed}
+import cats.Functor
 import com.daml.grpc.adapter.{AkkaExecutionSequencerPool, ExecutionSequencerFactory}
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, Threading}
@@ -194,14 +195,13 @@ object AkkaUtil extends HasLoggerName {
   }
 
   /** Defines the policy when [[restartSource]] should restart the source, and the state from which the source should be restarted from. */
-  trait RetrySourcePolicy[S, A, M] {
+  trait RetrySourcePolicy[S, -A] {
 
     /** Determines whether the source should be restarted, and if so (([[scala.Some$]])),
       * the backoff duration and the new state to restart from.
       * Called after the current source has terminated normally or with an error.
       *
       * @param lastState The state that was used to create the current source
-      * @param mat The materialized value returned by the current source
       * @param lastEmittedElement The last element emitted by the current source and passed downstream.
       *                           Downstream obviously need not yet have fully processed the element though.
       *                           [[scala.None$]] if the current source did not emit anything,
@@ -210,10 +210,21 @@ object AkkaUtil extends HasLoggerName {
       */
     def shouldRetry(
         lastState: S,
-        mat: M,
         lastEmittedElement: Option[A],
         lastFailure: Option[Throwable],
     ): Option[(FiniteDuration, S)]
+  }
+
+  object RetrySourcePolicy {
+    private val NEVER: RetrySourcePolicy[Any, Any] = new RetrySourcePolicy[Any, Any] {
+      override def shouldRetry(
+          lastState: Any,
+          lastEmittedElement: Option[Any],
+          lastFailure: Option[Throwable],
+      ): Option[Nothing] = None
+    }
+    @SuppressWarnings(Array("org.wartremover.wart.AsInstanceOf"))
+    def never[S, A]: RetrySourcePolicy[S, A] = NEVER.asInstanceOf[RetrySourcePolicy[S, A]]
   }
 
   /** Creates a source from `mkSource` from the `initial` state.
@@ -235,11 +246,11 @@ object AkkaUtil extends HasLoggerName {
     *         The materialized [[scala.concurrent.Future]] can be used to synchronize on the computations for restarts:
     *         if the source is stopped with the kill switch, the future completes after the computations have finished.
     */
-  def restartSource[S: Pretty, A, M](
+  def restartSource[S: Pretty, A](
       name: String,
       initial: S,
-      mkSource: S => Source[A, M],
-      policy: RetrySourcePolicy[S, A, M],
+      mkSource: S => Source[A, (KillSwitch, Future[Done])],
+      policy: RetrySourcePolicy[S, A],
   )(implicit
       loggingContext: NamedLoggingContext,
       materializer: Materializer,
@@ -258,7 +269,20 @@ object AkkaUtil extends HasLoggerName {
         case _: IllegalStateException =>
       }
 
-    class KillSwitchForRestartSource extends KillSwitch {
+    trait KillSwitchForRestartSource extends KillSwitch {
+      type Handle
+
+      /** Register a function to be executed when the kill switch is pulled.
+        *
+        * @return A handle with which the function can be removed again using [[removeOnClose]].
+        */
+      def runOnClose(f: () => Unit): Handle
+      def removeOnClose(handle: Handle): Unit
+    }
+
+    class KillSwitchForRestartSourceImpl extends KillSwitchForRestartSource {
+      override type Handle = AnyRef
+
       private val isClosing = new AtomicBoolean(false)
 
       private val completeOnClosing: scala.collection.concurrent.Map[Any, () => Unit] =
@@ -269,15 +293,15 @@ object AkkaUtil extends HasLoggerName {
         completeOnClosing.foreach { case (_, f) => f() }
       }
 
-      def runOnClose(f: () => Unit): Any = {
-        val key = new Object()
-        completeOnClosing.put(key, f).discard[Option[() => Unit]]
+      def runOnClose(f: () => Unit): Handle = {
+        val handle = new Object()
+        completeOnClosing.put(handle, f).discard[Option[() => Unit]]
         if (isClosing.get()) f()
-        key
+        handle
       }
 
-      def removeKey(key: Any): Unit =
-        completeOnClosing.remove(key).discard[Option[() => Unit]]
+      def removeOnClose(handle: Handle): Unit =
+        completeOnClosing.remove(handle).discard[Option[() => Unit]]
 
       override def shutdown(): Unit = {
         onClose()
@@ -293,7 +317,7 @@ object AkkaUtil extends HasLoggerName {
         }
       }
     }
-    val killSwitchForSourceQueue = new KillSwitchForRestartSource
+    val killSwitchForSourceQueue: KillSwitchForRestartSource = new KillSwitchForRestartSourceImpl
 
     def restartFrom(nextState: S): Unit = {
       loggingContext.debug(show"(Re)Starting the source $name from state $nextState")
@@ -334,23 +358,26 @@ object AkkaUtil extends HasLoggerName {
 
         // flatMapConcat swallows the materialized value of the inner sources
         // So we make them accessible to the retry directly.
-        def uponTermination(mat: M, doneF: Future[Done]): NotUsed = {
+        def uponTermination(handleKillSwitch: killSwitchForSourceQueue.Handle, doneF: Future[Done])
+            : NotUsed = {
           val afterTerminationF = doneF
             .thereafter { outcome =>
               ErrorUtil.requireArgument(
                 outcome.isSuccess,
                 s"RestartSource $name: recover did not catch the error $outcome",
               )
-              policy.shouldRetry(state, mat, lastObservedElem.get, lastObservedError.get) match {
+              // Deregister the inner streams kill switch upon termination to prevent memory leaks
+              killSwitchForSourceQueue.removeOnClose(handleKillSwitch)
+              policy.shouldRetry(state, lastObservedElem.get, lastObservedError.get) match {
                 case Some((backoff, nextState)) =>
                   implicit val ec: ExecutionContext = directExecutionContext
 
                   val delayedPromise = Promise[UnlessShutdown[Unit]]()
-                  val key = killSwitchForSourceQueue.runOnClose { () =>
+                  val handleDelayedPromise = killSwitchForSourceQueue.runOnClose { () =>
                     delayedPromise.trySuccess(AbortedDueToShutdown).discard[Boolean]
                   }
                   val delayedF = DelayUtil.delay(backoff).thereafter { _ =>
-                    killSwitchForSourceQueue.removeKey(key)
+                    killSwitchForSourceQueue.removeOnClose(handleDelayedPromise)
                     delayedPromise.trySuccess(Outcome(())).discard[Boolean]
                   }
                   FutureUtil.doNotAwait(
@@ -386,12 +413,25 @@ object AkkaUtil extends HasLoggerName {
         }
 
         mkSource(state)
+          // Register the kill switch of the new source with the kill switch of the restart source
+          .mapMaterializedValue { case (killSwitch, doneF) =>
+            val handle = killSwitchForSourceQueue.runOnClose(() => killSwitch.shutdown())
+            // The completion future terminates with an exception when the source itself aborts with the same exception
+            // Since it is the responsibility of the policy to triage such exceptions, we do not log it here.
+            flushFuture.addToFlushWithoutLogging(
+              show"RestartSource ${name.unquoted}: completion future of $state"
+            )(doneF)
+            handle
+          }
           .map(Success.apply)
           // Grab any upstream errors of the current source
           // before they escape to the concatenated source and bypass the restart logic
           .recover(observeError)
           // Observe elements only after recovering from errors so that the error cannot jump over the map.
           .map(observeSuccess)
+          // Do not use the `doneF` future from the source to initiate the retry
+          // because it is unclear how long `doneF` will take to complete after the source has terminated.
+          // Instead, decide on a retry eagerly as soon as we know that the last element of the source has been emitted
           .watchTermination()(uponTermination)
       }
       // Filter out the exceptions from the recover
@@ -465,6 +505,8 @@ object AkkaUtil extends HasLoggerName {
   final case class WithKillSwitch[+A](private val value: A, killSwitch: KillSwitch) {
     def unwrap: A = value
     def map[B](f: A => B): WithKillSwitch[B] = WithKillSwitch(f(value), killSwitch)
+    def traverse[F[_], B](f: A => F[B])(implicit F: Functor[F]): F[WithKillSwitch[B]] =
+      F.map(f(value))(WithKillSwitch(_, killSwitch))
   }
 
   /** Passes through all elements of the source until and including the first element that satisfies the condition.

@@ -52,6 +52,13 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
 
   private val topologyTransactionStore = ArrayBuffer[TopologyStoreEntry]()
 
+  def findTransactionsByTxHash(asOfExclusive: EffectiveTime, hashes: NonEmpty[Set[TxHash]])(implicit
+      traceContext: TraceContext
+  ): Future[Seq[GenericSignedTopologyTransactionX]] = findFilter(
+    asOfExclusive,
+    entry => hashes.contains(entry.transaction.transaction.hash),
+  )
+
   override def findProposalsByTxHash(
       asOfExclusive: EffectiveTime,
       hashes: NonEmpty[Set[TxHash]],
@@ -103,7 +110,6 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
       removeMapping: Set[TopologyMappingX.MappingHash],
       removeTxs: Set[TopologyTransactionX.TxHash],
       additions: Seq[GenericValidatedTopologyTransactionX],
-      expiredAdditions: Set[TopologyTransactionX.TxHash],
   )(implicit traceContext: TraceContext): Future[Unit] =
     blocking {
       synchronized {
@@ -128,7 +134,7 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
               from = effective,
               rejected = tx.rejectionReason.map(_.toString),
               until = Option.when(
-                tx.rejectionReason.nonEmpty || expiredAdditions(tx.transaction.transaction.hash)
+                tx.rejectionReason.nonEmpty || tx.expireImmediately
               )(effective),
             )
           )

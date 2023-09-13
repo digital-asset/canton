@@ -113,7 +113,7 @@ object ParallelIndexerFactory {
               // needs to be closed anyway.
               connection.setNetworkTimeout(
                 directExecutor,
-                haConfig.mainLockCheckerJdbcNetworkTimeoutMillis,
+                haConfig.mainLockCheckerJdbcNetworkTimeout.duration.toMillis.toInt,
               )
               connection
             },

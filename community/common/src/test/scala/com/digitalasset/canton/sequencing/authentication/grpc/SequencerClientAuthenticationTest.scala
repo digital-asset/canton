@@ -59,7 +59,7 @@ class SequencerClientAuthenticationTest extends FixtureAsyncWordSpec with BaseTe
     val authServerInterceptor = new AuthServerInterceptor(serverExpectedToken.get)
     val tokenManager =
       new AuthenticationTokenManager(
-        () =>
+        _ =>
           EitherT.pure[Future, Status](
             AuthenticationTokenWithExpiry(clientNextTokenRefresh.get(), CantonTimestamp.Epoch)
           ),

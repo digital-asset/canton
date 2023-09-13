@@ -8,13 +8,13 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{HashOps, Salt, TestHash, TestSalt}
 import com.digitalasset.canton.data.*
+import com.digitalasset.canton.domain.mediator.MediatorVerdict.MediatorApprove
 import com.digitalasset.canton.domain.mediator.ResponseAggregation.{
   ConsortiumVotingState,
   ViewState,
 }
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.messages.Verdict.ParticipantReject
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -27,6 +27,7 @@ import org.scalatest.funspec.PathAnyFunSpec
 
 import java.util.UUID
 import scala.concurrent.{ExecutionContext, Future}
+import scala.language.existentials
 
 class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
 
@@ -35,7 +36,7 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
     LocalVerdict.protocolVersionRepresentativeFor(testedProtocolVersion)
 
   if (testedProtocolVersion < ProtocolVersion.v5) {
-    describe(classOf[ResponseAggregationV0].getSimpleName) {
+    describe(classOf[ResponseAggregation[?]].getSimpleName) {
       def b[A](i: Int): BlindedNode[A] = BlindedNode(RootHash(TestHash.digest(i)))
 
       val hashOps: HashOps = new SymbolicPureCrypto
@@ -45,12 +46,26 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
       val domainId = DefaultTestIdentities.domainId
       val mediator = MediatorRef(DefaultTestIdentities.mediator)
 
-      val alice = ConfirmingParty(LfPartyId.assertFromString("alice"), 3, TrustLevel.Ordinary)
-      val aliceVip = ConfirmingParty(LfPartyId.assertFromString("alice"), 3, TrustLevel.Vip)
-      val bob = ConfirmingParty(LfPartyId.assertFromString("bob"), 2, TrustLevel.Ordinary)
-      val bobVip = ConfirmingParty(LfPartyId.assertFromString("bob"), 2, TrustLevel.Vip)
+      val alice = ConfirmingParty(
+        LfPartyId.assertFromString("alice"),
+        PositiveInt.tryCreate(3),
+        TrustLevel.Ordinary,
+      )
+      val aliceVip = ConfirmingParty(
+        LfPartyId.assertFromString("alice"),
+        PositiveInt.tryCreate(3),
+        TrustLevel.Vip,
+      )
+      val bob = ConfirmingParty(
+        LfPartyId.assertFromString("bob"),
+        PositiveInt.tryCreate(2),
+        TrustLevel.Ordinary,
+      )
+      val bobVip =
+        ConfirmingParty(LfPartyId.assertFromString("bob"), PositiveInt.tryCreate(2), TrustLevel.Vip)
       val charlie = PlainInformee(LfPartyId.assertFromString("charlie"))
-      val dave = ConfirmingParty(LfPartyId.assertFromString("dave"), 1, TrustLevel.Ordinary)
+      val dave =
+        ConfirmingParty(LfPartyId.assertFromString("dave"), PositiveInt.one, TrustLevel.Ordinary)
       val solo = ParticipantId("solo")
       val uno = ParticipantId("uno")
       val duo = ParticipantId("duo")
@@ -166,8 +181,6 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
               informeeMessage,
               testedProtocolVersion,
               topologySnapshot,
-            )(
-              loggerFactory
             )
             .futureValue
 
@@ -208,7 +221,7 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
           val responseTs = requestId.unwrap.plusSeconds(1)
           val result = loggerFactory.assertLogs(
             sut
-              .progress(responseTs, responseWithWrongRootHash, topologySnapshot)
+              .validateAndProgress(responseTs, responseWithWrongRootHash, topologySnapshot)
               .futureValue,
             _.shouldBeCantonError(
               MediatorError.MalformedMessage,
@@ -228,33 +241,29 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
             it("rejects the transaction") {
               val response1 = mkResponse(view1.viewHash, testReject(), Set(alice.party), rootHash)
               val rejected1 =
-                valueOrFail(sut.progress(changeTs1, response1, topologySnapshot).futureValue)(
-                  "Alice's rejection"
-                )
+                valueOrFail(
+                  sut.validateAndProgress(changeTs1, response1, topologySnapshot).futureValue
+                )("Alice's rejection")
 
-              rejected1 shouldBe ResponseAggregationV0(
+              rejected1 shouldBe ResponseAggregation[ViewHash](
                 requestId,
                 informeeMessage,
                 changeTs1,
                 Left(
-                  ParticipantReject(
-                    NonEmpty(List, Set(alice.party) -> testReject()),
-                    testedProtocolVersion,
+                  MediatorVerdict.ParticipantReject(
+                    NonEmpty(List, Set(alice.party) -> testReject())
                   )
                 ),
-              )(
-                testedProtocolVersion,
-                TraceContext.empty,
-              )(loggerFactory)
+              )(TraceContext.empty)
             }
           }
 
           describe("by a 'light-weight' party") {
             val response1 = mkResponse(view1.viewHash, testReject(), Set(bob.party), rootHash)
             lazy val rejected1 = loggerFactory.suppressWarningsAndErrors {
-              valueOrFail(sut.progress(changeTs1, response1, topologySnapshot).futureValue)(
-                "Bob's rejection"
-              )
+              valueOrFail(
+                sut.validateAndProgress(changeTs1, response1, topologySnapshot).futureValue
+              )("Bob's rejection")
             }
 
             it("leaves possibility of overall approval") {
@@ -286,30 +295,26 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
               val response2 = mkResponse(view1.viewHash, testReject(), Set(alice.party), rootHash)
               lazy val rejected2 =
                 valueOrFail(
-                  rejected1.progress(changeTs2, response2, topologySnapshot).futureValue
+                  rejected1.validateAndProgress(changeTs2, response2, topologySnapshot).futureValue
                 )("Alice's second rejection")
               val rejection =
-                ParticipantReject(
-                  NonEmpty(List, Set(alice.party) -> testReject(), Set(bob.party) -> testReject()),
-                  testedProtocolVersion,
+                MediatorVerdict.ParticipantReject(
+                  NonEmpty(List, Set(alice.party) -> testReject(), Set(bob.party) -> testReject())
                 )
               it("rejects the transaction") {
-                rejected2 shouldBe ResponseAggregationV0(
+                rejected2 shouldBe ResponseAggregation[ViewHash](
                   requestId,
                   informeeMessage,
                   changeTs2,
                   Left(rejection),
-                )(
-                  testedProtocolVersion,
-                  TraceContext.empty,
-                )(loggerFactory)
+                )(TraceContext.empty)
               }
 
               describe("further rejection") {
                 val changeTs3 = changeTs2.plusSeconds(1)
                 val response3 = mkResponse(view1.viewHash, testReject(), Set(bob.party), rootHash)
                 lazy val rejected3 =
-                  rejected2.progress(changeTs3, response3, topologySnapshot).futureValue
+                  rejected2.validateAndProgress(changeTs3, response3, topologySnapshot).futureValue
                 it("should not rejection after finalization") {
                   rejected3 shouldBe None
                 }
@@ -324,7 +329,7 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
                   rootHash,
                 )
                 lazy val rejected3 =
-                  rejected2.progress(changeTs3, response3, topologySnapshot).futureValue
+                  rejected2.validateAndProgress(changeTs3, response3, topologySnapshot).futureValue
                 it("should not allow approval after finalization") {
                   rejected3 shouldBe None
                 }
@@ -342,7 +347,7 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
             rootHash,
           )
           lazy val result =
-            valueOrFail(sut.progress(changeTs, response1, topologySnapshot).futureValue)(
+            valueOrFail(sut.validateAndProgress(changeTs, response1, topologySnapshot).futureValue)(
               "Bob's approval"
             )
           it("should update the pending confirming parties set") {
@@ -376,9 +381,9 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
               rootHash,
             )
             lazy val step2 =
-              valueOrFail(result.progress(changeTs, response2, topologySnapshot).futureValue)(
-                "Alice's approval"
-              )
+              valueOrFail(
+                result.validateAndProgress(changeTs, response2, topologySnapshot).futureValue
+              )("Alice's approval")
             val response3 = mkResponse(
               view2.viewHash,
               LocalApprove(testedProtocolVersion),
@@ -386,19 +391,16 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
               rootHash,
             )
             lazy val step3 =
-              valueOrFail(step2.progress(changeTs, response3, topologySnapshot).futureValue)(
-                "Bob's approval for view 2"
-              )
+              valueOrFail(
+                step2.validateAndProgress(changeTs, response3, topologySnapshot).futureValue
+              )("Bob's approval for view 2")
             it("should get an approved verdict") {
-              step3 shouldBe ResponseAggregationV0(
+              step3 shouldBe ResponseAggregation[ViewHash](
                 requestId,
                 informeeMessage,
                 changeTs,
-                Left(Verdict.Approve(testedProtocolVersion)),
-              )(
-                testedProtocolVersion,
-                TraceContext.empty,
-              )(loggerFactory)
+                Left(MediatorVerdict.MediatorApprove),
+              )(TraceContext.empty)
             }
 
             describe("further rejection") {
@@ -412,7 +414,7 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
                 )
               lazy val result = loggerFactory.assertLogs(
                 step3
-                  .progress(requestId.unwrap.plusSeconds(2), response4, topologySnapshot)
+                  .validateAndProgress(requestId.unwrap.plusSeconds(2), response4, topologySnapshot)
                   .futureValue,
                 _.shouldBeCantonErrorCode(LocalReject.MalformedRejects.Payloads),
               )
@@ -430,7 +432,7 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
               )
               lazy val result =
                 step3
-                  .progress(requestId.unwrap.plusSeconds(2), response4, topologySnapshot)
+                  .validateAndProgress(requestId.unwrap.plusSeconds(2), response4, topologySnapshot)
                   .futureValue
               it("should not allow repeated rejection") {
                 result shouldBe None
@@ -493,17 +495,14 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
         when(topologySnapshot.canConfirm(eqTo(solo), eqTo(alice.party), any[TrustLevel]))
           .thenReturn(Future.successful(false))
 
-        val sut =
-          ResponseAggregation
-            .fromRequest(
-              requestId,
-              informeeMessage,
-              testedProtocolVersion,
-              topologySnapshot,
-            )(
-              loggerFactory
-            )
-            .futureValue
+        val sut = ResponseAggregation
+          .fromRequest(
+            requestId,
+            informeeMessage,
+            testedProtocolVersion,
+            topologySnapshot,
+          )
+          .futureValue
 
         lazy val changeTs = requestId.unwrap.plusSeconds(1)
 
@@ -514,7 +513,9 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
           it("should update the pending confirming parties set for all hosted parties") {
             val response = mkResponse(view1.viewHash, testReject("malformed view"), Set.empty, None)
             val result = loggerFactory.assertLogs(
-              valueOrFail(sut.progress(changeTs, response, topologySnapshot).futureValue)(
+              valueOrFail(
+                sut.validateAndProgress(changeTs, response, topologySnapshot).futureValue
+              )(
                 "Malformed response for a view hash"
               ),
               _.shouldBeCantonError(
@@ -566,7 +567,9 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
                 testedProtocolVersion,
               )
             val result = loggerFactory.assertLogs(
-              valueOrFail(sut.progress(changeTs, response, topologySnapshot).futureValue)(
+              valueOrFail(
+                sut.validateAndProgress(changeTs, response, topologySnapshot).futureValue
+              )(
                 "Malformed response without view hash"
               ),
               _.shouldBeCantonError(
@@ -646,17 +649,14 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
         )
           .thenReturn(Future.successful(true))
 
-        val sut =
-          ResponseAggregation
-            .fromRequest(
-              requestId,
-              informeeMessage,
-              testedProtocolVersion,
-              topologySnapshotVip,
-            )(
-              loggerFactory
-            )
-            .futureValue
+        val sut = ResponseAggregation
+          .fromRequest(
+            requestId,
+            informeeMessage,
+            testedProtocolVersion,
+            topologySnapshotVip,
+          )
+          .futureValue
 
         val initialState =
           Map(
@@ -687,7 +687,7 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
           val responseTs = requestId.unwrap.plusSeconds(1)
           loggerFactory.assertLogs(
             sut
-              .progress(responseTs, response, topologySnapshotVip)
+              .validateAndProgress(responseTs, response, topologySnapshotVip)
               .futureValue shouldBe None,
             _.shouldBeCantonError(
               MediatorError.MalformedMessage,
@@ -715,7 +715,7 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
           val result = loggerFactory.assertLogs(
             valueOrFail(
               sut
-                .progress(requestId.unwrap.plusSeconds(1), response, topologySnapshotVip)
+                .validateAndProgress(requestId.unwrap.plusSeconds(1), response, topologySnapshotVip)
                 .futureValue
             )(s"$nonVip responds Malformed"),
             _.shouldBeCantonError(
@@ -738,7 +738,7 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
             rootHash,
           )
           val result = valueOrFail(
-            sut.progress(changeTs, response, topologySnapshotVip).futureValue
+            sut.validateAndProgress(changeTs, response, topologySnapshotVip).futureValue
           )("solo confirms with VIP trust level for alice")
 
           result.version shouldBe changeTs
@@ -847,17 +847,14 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
             )
           )
 
-        val sut =
-          ResponseAggregation
-            .fromRequest(
-              requestId,
-              informeeMessage,
-              testedProtocolVersion,
-              topologySnapshot,
-            )(
-              loggerFactory
-            )
-            .futureValue
+        val sut = ResponseAggregation
+          .fromRequest(
+            requestId,
+            informeeMessage,
+            testedProtocolVersion,
+            topologySnapshot,
+          )
+          .futureValue
 
         it("should correctly initialize the state") {
           sut.state shouldBe Right(
@@ -897,9 +894,9 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
             lazy val rejected1 = loggerFactory.suppressWarningsAndErrors {
               valueOrFail(
                 for {
-                  p1 <- sut.progress(changeTs1, response1a, topologySnapshot).futureValue
-                  p2 <- p1.progress(changeTs2, response1b, topologySnapshot).futureValue
-                  p3 <- p2.progress(changeTs3, response1c, topologySnapshot).futureValue
+                  p1 <- sut.validateAndProgress(changeTs1, response1a, topologySnapshot).futureValue
+                  p2 <- p1.validateAndProgress(changeTs2, response1b, topologySnapshot).futureValue
+                  p3 <- p2.validateAndProgress(changeTs3, response1c, topologySnapshot).futureValue
                 } yield p3
               )(
                 "Bob's rejections"
@@ -962,9 +959,9 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
             lazy val result =
               valueOrFail(
                 for {
-                  p1 <- sut.progress(changeTs1, response1a, topologySnapshot).futureValue
-                  p2 <- p1.progress(changeTs2, response1b, topologySnapshot).futureValue
-                  p3 <- p2.progress(changeTs3, response1c, topologySnapshot).futureValue
+                  p1 <- sut.validateAndProgress(changeTs1, response1a, topologySnapshot).futureValue
+                  p2 <- p1.validateAndProgress(changeTs2, response1b, topologySnapshot).futureValue
+                  p3 <- p2.validateAndProgress(changeTs3, response1c, topologySnapshot).futureValue
                 } yield p3
               )(
                 "Bob's approval"
@@ -1011,13 +1008,15 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
                 mkResponse(view1.viewHash, testReject(), Set(alice.party), rootHash, duo)
               val rejected1a =
                 valueOrFail(
-                  sut.progress(changeTs1, response1a, topologySnapshot).futureValue
+                  sut.validateAndProgress(changeTs1, response1a, topologySnapshot).futureValue
                 )(
                   "Alice's rejection (uno)"
                 )
               val rejected1b =
                 valueOrFail(
-                  rejected1a.progress(changeTs2, response1b, topologySnapshot).futureValue
+                  rejected1a
+                    .validateAndProgress(changeTs2, response1b, topologySnapshot)
+                    .futureValue
                 )(
                   "Alice's rejection (duo)"
                 )
@@ -1045,20 +1044,16 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
                 )
               )
 
-              rejected1b shouldBe ResponseAggregationV0(
+              rejected1b shouldBe ResponseAggregation[ViewHash](
                 requestId,
                 informeeMessage,
                 changeTs2,
                 Left(
-                  ParticipantReject(
-                    NonEmpty(List, Set(alice.party) -> testReject()),
-                    testedProtocolVersion,
+                  MediatorVerdict.ParticipantReject(
+                    NonEmpty(List, Set(alice.party) -> testReject())
                   )
                 ),
-              )(
-                testedProtocolVersion,
-                TraceContext.empty,
-              )(loggerFactory)
+              )(TraceContext.empty)
             }
           }
 
@@ -1069,9 +1064,9 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
             lazy val rejected1 = loggerFactory.suppressWarningsAndErrors {
               valueOrFail(
                 for {
-                  p1 <- sut.progress(changeTs1, response1a, topologySnapshot).futureValue
-                  p2 <- p1.progress(changeTs2, response1b, topologySnapshot).futureValue
-                  p3 <- p2.progress(changeTs3, response1c, topologySnapshot).futureValue
+                  p1 <- sut.validateAndProgress(changeTs1, response1a, topologySnapshot).futureValue
+                  p2 <- p1.validateAndProgress(changeTs2, response1b, topologySnapshot).futureValue
+                  p3 <- p2.validateAndProgress(changeTs3, response1c, topologySnapshot).futureValue
                 } yield p3
               )(
                 "Bob's rejections"
@@ -1116,33 +1111,31 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
                 valueOrFail(
                   for {
                     p1 <- rejected1
-                      .progress(changeTs4, response2a, topologySnapshot)
+                      .validateAndProgress(changeTs4, response2a, topologySnapshot)
                       .futureValue
-                    p2 <- p1.progress(changeTs5, response2b, topologySnapshot).futureValue
+                    p2 <- p1
+                      .validateAndProgress(changeTs5, response2b, topologySnapshot)
+                      .futureValue
                   } yield p2
                 )("Alice's second rejection")
               val rejection =
-                ParticipantReject(
-                  NonEmpty(List, Set(alice.party) -> testReject(), Set(bob.party) -> testReject()),
-                  testedProtocolVersion,
+                MediatorVerdict.ParticipantReject(
+                  NonEmpty(List, Set(alice.party) -> testReject(), Set(bob.party) -> testReject())
                 )
               it("rejects the transaction") {
-                rejected2 shouldBe ResponseAggregationV0(
+                rejected2 shouldBe ResponseAggregation[ViewHash](
                   requestId,
                   informeeMessage,
                   changeTs5,
                   Left(rejection),
-                )(
-                  testedProtocolVersion,
-                  TraceContext.empty,
-                )(loggerFactory)
+                )(TraceContext.empty)
               }
 
               describe("further rejection") {
                 val changeTs6 = changeTs5.plusSeconds(1)
                 val response3 = mkResponse(view1.viewHash, testReject(), Set(bob.party), rootHash)
                 lazy val rejected3 =
-                  rejected2.progress(changeTs6, response3, topologySnapshot).futureValue
+                  rejected2.validateAndProgress(changeTs6, response3, topologySnapshot).futureValue
                 it("should not rejection after finalization") {
                   rejected3 shouldBe None
                 }
@@ -1157,7 +1150,7 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
                   rootHash,
                 )
                 lazy val rejected3 =
-                  rejected2.progress(changeTs6, response3, topologySnapshot).futureValue
+                  rejected2.validateAndProgress(changeTs6, response3, topologySnapshot).futureValue
                 it("should not allow approval after finalization") {
                   rejected3 shouldBe None
                 }
@@ -1194,9 +1187,9 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
           lazy val result =
             valueOrFail(
               for {
-                p1 <- sut.progress(changeTs1, response1a, topologySnapshot).futureValue
-                p2 <- p1.progress(changeTs2, response1b, topologySnapshot).futureValue
-                p3 <- p2.progress(changeTs3, response1c, topologySnapshot).futureValue
+                p1 <- sut.validateAndProgress(changeTs1, response1a, topologySnapshot).futureValue
+                p2 <- p1.validateAndProgress(changeTs2, response1b, topologySnapshot).futureValue
+                p3 <- p2.validateAndProgress(changeTs3, response1c, topologySnapshot).futureValue
               } yield p3
             )(
               "Bob's approval"
@@ -1245,8 +1238,10 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
             lazy val step2 =
               valueOrFail(
                 for {
-                  p1 <- result.progress(changeTs2, response2a, topologySnapshot).futureValue
-                  p2 <- p1.progress(changeTs2, response2b, topologySnapshot).futureValue
+                  p1 <- result
+                    .validateAndProgress(changeTs2, response2a, topologySnapshot)
+                    .futureValue
+                  p2 <- p1.validateAndProgress(changeTs2, response2b, topologySnapshot).futureValue
                 } yield p2
               )(
                 "Alice's approval"
@@ -1275,23 +1270,22 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
             lazy val step3 =
               valueOrFail(
                 for {
-                  p1 <- step2.progress(changeTs2, response3a, topologySnapshot).futureValue
-                  p2 <- p1.progress(changeTs2, response3b, topologySnapshot).futureValue
-                  p3 <- p2.progress(changeTs2, response3c, topologySnapshot).futureValue
+                  p1 <- step2
+                    .validateAndProgress(changeTs2, response3a, topologySnapshot)
+                    .futureValue
+                  p2 <- p1.validateAndProgress(changeTs2, response3b, topologySnapshot).futureValue
+                  p3 <- p2.validateAndProgress(changeTs2, response3c, topologySnapshot).futureValue
                 } yield p3
               )(
                 "Bob's approval for view 2"
               )
             it("should get an approved verdict") {
-              step3 shouldBe ResponseAggregationV0(
+              step3 shouldBe ResponseAggregation[ViewHash](
                 requestId,
                 informeeMessage,
                 changeTs2,
-                Left(Verdict.Approve(testedProtocolVersion)),
-              )(
-                testedProtocolVersion,
-                TraceContext.empty,
-              )(loggerFactory)
+                Left(MediatorApprove),
+              )(TraceContext.empty)
             }
 
             describe("further rejection") {
@@ -1305,7 +1299,7 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
                 )
               lazy val result = loggerFactory.assertLogs(
                 step3
-                  .progress(requestId.unwrap.plusSeconds(2), response4, topologySnapshot)
+                  .validateAndProgress(requestId.unwrap.plusSeconds(2), response4, topologySnapshot)
                   .futureValue,
                 _.shouldBeCantonErrorCode(LocalReject.MalformedRejects.Payloads),
               )
@@ -1323,7 +1317,7 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
               )
               lazy val result =
                 step3
-                  .progress(requestId.unwrap.plusSeconds(2), response4, topologySnapshot)
+                  .validateAndProgress(requestId.unwrap.plusSeconds(2), response4, topologySnapshot)
                   .futureValue
               it("should not allow repeated rejection") {
                 result shouldBe None

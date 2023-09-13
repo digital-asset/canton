@@ -117,7 +117,7 @@ trait LocalInstanceReferenceCommon extends InstanceReferenceCommon with NoTracin
 
   val name: String
   val consoleEnvironment: ConsoleEnvironment
-  protected val nodes: Nodes[CantonNode, CantonNodeBootstrap[CantonNode]]
+  private[console] val nodes: Nodes[CantonNode, CantonNodeBootstrap[CantonNode]]
 
   @Help.Summary("Database related operations")
   @Help.Group("Database")
@@ -194,8 +194,9 @@ trait LocalInstanceReferenceCommon extends InstanceReferenceCommon with NoTracin
       .flatMap(_ => nodes.repairDatabaseMigration(name))
   }
 
-  protected def startInstance(): Either[StartupError, Unit] = nodes.start(name).map(_ => ())
-  protected def stopInstance(): Either[ShutdownError, Unit] = nodes.stop(name)
+  protected def startInstance(): Either[StartupError, Unit] =
+    nodes.startAndWait(name)
+  protected def stopInstance(): Either[ShutdownError, Unit] = nodes.stopAndWait(name)
   protected[canton] def crypto: Crypto
 
   protected def runCommandIfRunning[Result](
@@ -364,7 +365,7 @@ trait LocalDomainReference
     extends DomainReference
     with BaseInspection[Domain]
     with LocalInstanceReference {
-  override protected val nodes = consoleEnvironment.environment.domains
+  override private[console] val nodes = consoleEnvironment.environment.domains
 
   @Help.Summary("Returns the domain configuration")
   def config: consoleEnvironment.environment.config.DomainConfigType =
@@ -407,7 +408,7 @@ class ExternalLedgerApiClient(
     hostname: String,
     port: Port,
     tls: Option[TlsClientConfig],
-    token: Option[String] = None,
+    val token: Option[String] = None,
 )(implicit val consoleEnvironment: ConsoleEnvironment)
     extends BaseLedgerApiAdministration
     with LedgerApiCommandRunner
@@ -557,6 +558,8 @@ trait RemoteParticipantReferenceCommon
       config.token,
     )
 
+  override protected[console] def token: Option[String] = config.token
+
   private lazy val testing_ = new ParticipantTestingGroup(this, consoleEnvironment, loggerFactory)
   @Help.Summary("Commands used for development and testing", FeatureFlag.Testing)
   @Help.Group("Testing")
@@ -614,6 +617,8 @@ sealed trait LocalParticipantReferenceCommon
         .runCommand(name, command, config.clientLedgerApi, adminToken)
     )
 
+  override protected[console] def token: Option[String] = adminToken
+
   @Help.Summary("Commands to repair the local participant contract state", FeatureFlag.Repair)
   @Help.Group("Repair")
   def repair: LocalParticipantRepairAdministration
@@ -627,7 +632,7 @@ class LocalParticipantReference(
     with LocalInstanceReference
     with BaseInspection[ParticipantNode] {
 
-  override protected val nodes = consoleEnvironment.environment.participants
+  override private[console] val nodes = consoleEnvironment.environment.participants
 
   @Help.Summary("Return participant config")
   def config: LocalParticipantConfig =
@@ -757,7 +762,7 @@ class LocalParticipantReferenceX(
     with LocalInstanceReferenceX
     with BaseInspection[ParticipantNodeX] {
 
-  override protected val nodes = consoleEnvironment.environment.participantsX
+  override private[console] val nodes = consoleEnvironment.environment.participantsX
 
   @Help.Summary("Return participant config")
   def config: LocalParticipantConfig =

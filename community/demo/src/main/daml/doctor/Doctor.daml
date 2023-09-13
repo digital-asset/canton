@@ -22,18 +22,19 @@ template OfferAppointment
     patient : Party
   where
     signatory doctor
+    observer patient
 
-    controller patient can
-      {-
-        Accept the appointment
+    {-
+      Accept the appointment
 
-        The patient can accept an appointment by providing
-        his medical records and by showing his insurance policy.
-      -}
-      AcceptAppointment : (AppointmentId, MedicalRecord.RegisterId, HealthInsurance.PolicyId)
-        with
-          registerId : MedicalRecord.RegisterId
-          policyId : HealthInsurance.PolicyId
+      The patient can accept an appointment by providing
+      his medical records and by showing his insurance policy.
+    -}
+    choice AcceptAppointment : (AppointmentId, MedicalRecord.RegisterId, HealthInsurance.PolicyId)
+      with
+        registerId : MedicalRecord.RegisterId
+        policyId : HealthInsurance.PolicyId
+      controller patient
         do
           -- Add the doctor as an observer to the medical record and to the policy
           rId <- exercise registerId MedicalRecord.AddObserver with party = doctor
@@ -59,12 +60,12 @@ template Appointment
     {-
       Tick off this appointment by providing a description of the treatment
     -}
-    controller doctor can
-      TickOff : ( MedicalRecord.RegisterId, HealthInsurance.ClaimId)
-        with
-          description : Text
-          treatment : HealthInsurance.Treatment
-          fee : Bank.Amount
+    choice TickOff : ( MedicalRecord.RegisterId, HealthInsurance.ClaimId)
+      with
+        description : Text
+        treatment : HealthInsurance.Treatment
+        fee : Bank.Amount
+      controller doctor
         do
           {-
             Update medical records

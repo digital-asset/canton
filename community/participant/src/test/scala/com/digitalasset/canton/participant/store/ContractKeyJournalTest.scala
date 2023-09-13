@@ -48,8 +48,8 @@ trait ContractKeyJournalTest extends PrunableByTimeTest {
     val toc2 = TimeOfChange(rc + 2L, ts.plusMillis(1))
     val toc3 = TimeOfChange(rc, ts.plusMillis(2))
 
-    val keysWithStatus = keys.zipWithIndex.map { case (key, index) =>
-      key -> (if (index % 2 == 0) Assigned else Unassigned)
+    def keysWithStatus(toc: TimeOfChange) = keys.zipWithIndex.map { case (key, index) =>
+      key -> ((if (index % 2 == 0) Assigned else Unassigned), toc)
     }.toMap
 
     "fetchKeyStates" should {
@@ -83,7 +83,7 @@ trait ContractKeyJournalTest extends PrunableByTimeTest {
             for {
               _ <- MonadUtil.sequentialTraverse_(shuffledUpdates) { case (upd, updToc) =>
                 val updTocMoved = moveToc(updToc, iteration)
-                valueOrFail(ckj.addKeyStateUpdates(upd, updTocMoved))(
+                valueOrFail(ckj.addKeyStateUpdates(upd.view.mapValues(_ -> updTocMoved).toMap))(
                   show"Iteration $iteration: Add updates $upd at $updTocMoved"
                 )
               }
@@ -108,11 +108,13 @@ trait ContractKeyJournalTest extends PrunableByTimeTest {
       "store the updates" in {
         val ckj = mk()
         for {
-          _ <- valueOrFail(ckj.addKeyStateUpdates(keysWithStatus, toc))("add keys to empty journal")
+          _ <- valueOrFail(ckj.addKeyStateUpdates(keysWithStatus(toc)))("add keys to empty journal")
           found <- ckj.fetchStates(keys)
           notFound <- ckj.fetchStates(Seq(otherKey))
         } yield {
-          found shouldBe keysWithStatus.fmap(status => ContractKeyState(status, toc))
+          found shouldBe keysWithStatus(toc).fmap { case (status, toc) =>
+            ContractKeyState(status, toc)
+          }
           notFound shouldBe Map.empty[LfGlobalKey, ContractKeyState]
         }
       }
@@ -120,28 +122,32 @@ trait ContractKeyJournalTest extends PrunableByTimeTest {
       "be idempotent" in {
         val ckj = mk()
         for {
-          _ <- valueOrFail(ckj.addKeyStateUpdates(keysWithStatus, toc))("add keys to empty journal")
-          _ <- valueOrFail(ckj.addKeyStateUpdates(keysWithStatus, toc))(
+          _ <- valueOrFail(ckj.addKeyStateUpdates(keysWithStatus(toc)))("add keys to empty journal")
+          _ <- valueOrFail(ckj.addKeyStateUpdates(keysWithStatus(toc)))(
             "add same updates to journal"
           )
           found <- ckj.fetchStates(keys)
         } yield {
-          found shouldBe keysWithStatus.fmap(status => ContractKeyState(status, toc))
+          found shouldBe keysWithStatus(toc).fmap { case (status, toc) =>
+            ContractKeyState(status, toc)
+          }
         }
       }
 
       "complain about conflicting updates" in {
         val ckj = mk()
         for {
-          _ <- valueOrFail(ckj.addKeyStateUpdates(Map(key0 -> Assigned, key1 -> Unassigned), toc))(
+          _ <- valueOrFail(
+            ckj.addKeyStateUpdates(Map(key0 -> (Assigned, toc), key1 -> (Unassigned, toc)))
+          )(
             "add keys to empty journal"
           )
-          err1 <- leftOrFail(ckj.addKeyStateUpdates(Map(key1 -> Assigned), toc))(
+          err1 <- leftOrFail(ckj.addKeyStateUpdates(Map(key1 -> (Assigned, toc))))(
             "add single conflicting key"
           )
           find1 <- ckj.fetchStates(Seq(key1))
           err0 <- leftOrFail(
-            ckj.addKeyStateUpdates(Map(key0 -> Unassigned, key2 -> Assigned), toc)
+            ckj.addKeyStateUpdates(Map(key0 -> (Unassigned, toc), key2 -> (Assigned, toc)))
           )("one conflicting key and one conflict-free key")
           find2 <- ckj.fetchStates(Seq(key0, key2))
         } yield {
@@ -159,7 +165,7 @@ trait ContractKeyJournalTest extends PrunableByTimeTest {
       "allow empty updates" in {
         val ckj = mk()
         for {
-          _ <- valueOrFail(ckj.addKeyStateUpdates(Map.empty, toc))("empty update")
+          _ <- valueOrFail(ckj.addKeyStateUpdates(Map.empty))("empty update")
         } yield succeed
       }
     }
@@ -169,22 +175,30 @@ trait ContractKeyJournalTest extends PrunableByTimeTest {
         val ckj = mk()
         for {
           _ <- ckj.prune(CantonTimestamp.Epoch)
-          _ <- valueOrFail(ckj.addKeyStateUpdates(Map(key0 -> Assigned, key1 -> Assigned), toc))(
+          _ <- valueOrFail(
+            ckj.addKeyStateUpdates(Map(key0 -> (Assigned, toc), key1 -> (Assigned, toc)))
+          )(
             s"Add keys at $toc"
           )
-          _ <- valueOrFail(ckj.addKeyStateUpdates(Map(key1 -> Assigned, key2 -> Assigned), toc1))(
+          _ <- valueOrFail(
+            ckj.addKeyStateUpdates(Map(key1 -> (Assigned, toc1), key2 -> (Assigned, toc1)))
+          )(
             s"Add keys at $toc1"
           )
-          _ <- valueOrFail(ckj.addKeyStateUpdates(Map(key0 -> Assigned, key2 -> Assigned), toc2))(
+          _ <- valueOrFail(
+            ckj.addKeyStateUpdates(Map(key0 -> (Assigned, toc2), key2 -> (Assigned, toc2)))
+          )(
             s"Add keys at $toc2"
           )
           _ <- ckj.prune(toc1.timestamp)
           fetch1 <- ckj.fetchStates(keys012)
           count1 <- keys012.parTraverse(ckj.countUpdates)
-          _ <- valueOrFail(ckj.addKeyStateUpdates(Map(key1 -> Unassigned), toc2))(
+          _ <- valueOrFail(ckj.addKeyStateUpdates(Map(key1 -> (Unassigned, toc2))))(
             s"Add key $key1 at $toc2"
           )
-          _ <- valueOrFail(ckj.addKeyStateUpdates(Map(key0 -> Unassigned, key2 -> Assigned), toc3))(
+          _ <- valueOrFail(
+            ckj.addKeyStateUpdates(Map(key0 -> (Unassigned, toc3), key2 -> (Assigned, toc3)))
+          )(
             s"Add keys at $toc3"
           )
           _ <- ckj.prune(toc3.timestamp)
@@ -210,13 +224,19 @@ trait ContractKeyJournalTest extends PrunableByTimeTest {
         val ckj = mk()
         for {
           _ <- valueOrFail(ckj.deleteSince(toc))(s"Delete since $toc in the empty journal")
-          _ <- valueOrFail(ckj.addKeyStateUpdates(Map(key0 -> Unassigned, key1 -> Assigned), toc))(
+          _ <- valueOrFail(
+            ckj.addKeyStateUpdates(Map(key0 -> (Unassigned, toc), key1 -> (Assigned, toc)))
+          )(
             s"Add keys at $toc"
           )
-          _ <- valueOrFail(ckj.addKeyStateUpdates(Map(key1 -> Assigned, key2 -> Assigned), toc1))(
+          _ <- valueOrFail(
+            ckj.addKeyStateUpdates(Map(key1 -> (Assigned, toc1), key2 -> (Assigned, toc1)))
+          )(
             s"Add keys at $toc1"
           )
-          _ <- valueOrFail(ckj.addKeyStateUpdates(Map(key0 -> Assigned, key2 -> Assigned), toc2))(
+          _ <- valueOrFail(
+            ckj.addKeyStateUpdates(Map(key0 -> (Assigned, toc2), key2 -> (Assigned, toc2)))
+          )(
             s"Add keys at $toc2"
           )
           _ <- valueOrFail(ckj.deleteSince(toc1))(s"Delete since $toc1")

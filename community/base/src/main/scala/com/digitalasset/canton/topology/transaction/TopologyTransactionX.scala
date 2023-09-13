@@ -124,11 +124,6 @@ final case class TopologyTransactionX[+Op <: TopologyChangeOpX, +M <: TopologyMa
     mapping = Some(mapping.toProtoV2),
   )
 
-  def hasEquivalentVersion(protocolVersion: ProtocolVersion): Boolean =
-    representativeProtocolVersion == TopologyTransaction.protocolVersionRepresentativeFor(
-      protocolVersion
-    )
-
   def asVersion(
       protocolVersion: ProtocolVersion
   ): TopologyTransactionX[Op, M] = {

@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.store
 
 import cats.data.{EitherT, OptionT}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.RequestJournal.{RequestData, RequestState}
 import com.digitalasset.canton.store.CursorPrehead.RequestCounterCursorPrehead
@@ -84,7 +85,7 @@ class PreHookRequestJournalStore(
 
   override def advancePreheadCleanTo(
       newPrehead: RequestCounterCursorPrehead
-  )(implicit traceContext: TraceContext): Future[Unit] =
+  )(implicit traceContext: TraceContext, callerCloseContext: CloseContext): Future[Unit] =
     for {
       _ <- preCleanCounterHook.getAndSet(emptyCleanCounterHook)(newPrehead)
       _ <- backing.advancePreheadCleanTo(newPrehead)

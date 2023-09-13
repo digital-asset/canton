@@ -126,7 +126,7 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
     Future
       .traverse(entries) { case (key, toc, status) =>
         ckj
-          .addKeyStateUpdates(Map(key -> status), toc)
+          .addKeyStateUpdates(Map(key -> (status, toc)))
           .valueOr(err => throw new TestFailedException(_ => Some(err.toString), None, position))
       }
       .void

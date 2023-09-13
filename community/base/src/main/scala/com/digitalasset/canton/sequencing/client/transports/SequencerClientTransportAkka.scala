@@ -3,7 +3,10 @@
 
 package com.digitalasset.canton.sequencing.client.transports
 
-import com.digitalasset.canton.sequencing.client.SequencerSubscriptionAkka
+import com.digitalasset.canton.sequencing.client.{
+  SequencerSubscriptionAkka,
+  SubscriptionErrorRetryPolicyAkka,
+}
 import com.digitalasset.canton.sequencing.protocol.SubscriptionRequest
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -22,5 +25,8 @@ trait SequencerClientTransportAkka extends SequencerClientTransportCommon {
   def subscribeUnauthenticated(request: SubscriptionRequest)(implicit
       traceContext: TraceContext
   ): SequencerSubscriptionAkka[SubscriptionError]
+
+  /** The transport can decide which errors will cause the sequencer client to not try to reestablish a subscription */
+  def subscriptionRetryPolicyAkka: SubscriptionErrorRetryPolicyAkka[SubscriptionError]
 
 }

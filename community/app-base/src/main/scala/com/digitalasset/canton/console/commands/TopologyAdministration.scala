@@ -113,6 +113,13 @@ abstract class OwnerToKeyMappingsGroup(
       currentKey: PublicKey,
       newKey: PublicKey,
   ): Unit
+
+  def rotate_key(
+      nodeInstance: InstanceReferenceCommon,
+      owner: KeyOwner,
+      currentKey: PublicKey,
+      newKey: PublicKey,
+  ): Unit
 }
 
 trait InitNodeId extends ConsoleCommandGroup {
@@ -454,17 +461,26 @@ class TopologyAdministrationGroup(
       """Rotates the key for an existing owner to key mapping by issuing a new owner to key mapping with the new key
       |and removing the previous owner to key mapping with the previous key.
 
+      nodeInstance: The node instance that is used to verify that both current and new key pertain to this node.
+      |This avoids conflicts when there are different nodes with the same uuid (i.e., multiple sequencers).
       owner: The owner of the owner to key mapping
       currentKey: The current public key that will be rotated
       newKey: The new public key that has been generated
       |"""
     )
     def rotate_key(
+        nodeInstance: InstanceReferenceCommon,
         owner: KeyOwner,
         currentKey: PublicKey,
         newKey: PublicKey,
     ): Unit = {
 
+      val keysInStore = nodeInstance.keys.secret.list().map(_.publicKey)
+      require(
+        keysInStore.contains(currentKey),
+        "The current key must exist and pertain to this node",
+      )
+      require(keysInStore.contains(newKey), "The new key must exist and pertain to this node")
       require(currentKey.purpose == newKey.purpose, "The rotated keys must have the same purpose")
 
       // Authorize the new key
@@ -485,6 +501,15 @@ class TopologyAdministrationGroup(
         currentKey.purpose,
       ).discard
     }
+
+    def rotate_key(
+        owner: KeyOwner,
+        currentKey: PublicKey,
+        newKey: PublicKey,
+    ): Unit =
+      throw new IllegalArgumentException(
+        s"For this node use `rotate_key` where you specify the node instance"
+      )
   }
 
   @Help.Summary("Manage party to participant mappings")

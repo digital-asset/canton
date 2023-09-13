@@ -17,14 +17,13 @@ import java.util.concurrent.atomic.AtomicReference
   */
 class RepairProcessor(
     requestCounterAllocator: RequestCounterAllocator,
-    phase37Synchronizer: Phase37Synchronizer,
     override protected val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {
 
   private val remainingRepairRequests: AtomicReference[Seq[RequestData]] =
     new AtomicReference[Seq[RequestData]](RepairProcessor.noRepairRequests)
 
-  // Lazy initializaton of `remainingRepairRequests`
+  // Lazy initialization of `remainingRepairRequests`
   private[participant] def setRemainingRepairRequests(repairRequests: Seq[RequestData]): Unit = {
     val replaced =
       remainingRepairRequests.compareAndSet(RepairProcessor.noRepairRequests, repairRequests)

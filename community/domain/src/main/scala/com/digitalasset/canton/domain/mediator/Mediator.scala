@@ -25,7 +25,6 @@ import com.digitalasset.canton.protocol.messages.{
   ProtocolMessage,
   RootHashMessage,
   SerializedRootHashMessagePayload,
-  Verdict,
 }
 import com.digitalasset.canton.protocol.{DynamicDomainParametersWithValidity, RequestId}
 import com.digitalasset.canton.sequencing.*
@@ -45,11 +44,11 @@ import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessorCommon
 import com.digitalasset.canton.topology.{
   DomainId,
-  DomainOutboxCommon,
+  DomainOutboxStatus,
   MediatorId,
   TopologyManagerStatus,
 }
-import com.digitalasset.canton.tracing.{NoTracing, TraceContext, Traced}
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.FutureInstances.parallelFuture
 import com.digitalasset.canton.util.FutureUtil
@@ -70,7 +69,7 @@ private[mediator] class Mediator(
     private[canton] val syncCrypto: DomainSyncCryptoClient,
     topologyTransactionProcessor: TopologyTransactionProcessorCommon,
     val topologyManagerStatusO: Option[TopologyManagerStatus],
-    val domainOutboxO: Option[DomainOutboxCommon[?, ?, ?]],
+    val domainOutboxStatusO: Option[DomainOutboxStatus],
     timeTrackerConfig: DomainTimeTrackerConfig,
     state: MediatorState,
     private[canton] val sequencerCounterTrackerStore: SequencerCounterTrackerStore,
@@ -83,8 +82,7 @@ private[mediator] class Mediator(
 )(implicit ec: ExecutionContext, tracer: Tracer)
     extends NamedLogging
     with StartAndCloseable[Unit]
-    with HasCloseContext
-    with NoTracing {
+    with HasCloseContext {
 
   override protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
 
@@ -135,12 +133,15 @@ private[mediator] class Mediator(
     processor,
     deduplicator,
     protocolVersion,
+    metrics,
     loggerFactory,
   )
 
   val stateInspection: MediatorStateInspection = new MediatorStateInspection(state)
 
-  override protected def startAsync(): Future[Unit] = for {
+  override protected def startAsync()(implicit
+      initializationTraceContext: TraceContext
+  ): Future[Unit] = for {
 
     preheadO <- sequencerCounterTrackerStore.preheadSequencerCounter
     nextTs = preheadO.fold(CantonTimestamp.MinValue)(_.timestamp.immediateSuccessor)
@@ -158,7 +159,7 @@ private[mediator] class Mediator(
       newTracedPrehead: Traced[SequencerCounterCursorPrehead]
   ): Future[Unit] = newTracedPrehead.withTraceContext { implicit traceContext => newPrehead =>
     performUnlessClosingF("prune mediator deduplication store")(
-      state.deduplicationStore.prune(newPrehead.timestamp, this.closeContext)
+      state.deduplicationStore.prune(newPrehead.timestamp)
     ).onShutdown(logger.info("Not pruning the mediator deduplication store due to shutdown"))
   }
 
@@ -207,7 +208,7 @@ private[mediator] class Mediator(
       pruneAt: CantonTimestamp,
       cleanTimestamp: CantonTimestamp,
       domainParametersChanges: NonEmptySeq[DynamicDomainParametersWithValidity],
-  ): EitherT[Future, PruningError, Unit] = {
+  )(implicit tc: TraceContext): EitherT[Future, PruningError, Unit] = {
     val latestSafePruningTsO = Mediator.latestSafePruningTsBefore(
       domainParametersChanges,
       cleanTimestamp,
@@ -258,8 +259,8 @@ private[mediator] class Mediator(
       private def sendMalformedRejection(
           rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
           timestamp: CantonTimestamp,
-          verdict: Verdict.MediatorReject,
-      ): Future[Unit] = {
+          verdict: MediatorVerdict.MediatorReject,
+      )(implicit tc: TraceContext): Future[Unit] = {
         val requestId = RequestId(timestamp)
 
         for {
@@ -273,7 +274,7 @@ private[mediator] class Mediator(
             requestId,
             None,
             rootHashMessages,
-            verdict,
+            verdict.toVerdict(protocolVersion),
             decisionTime,
           )
         } yield ()
@@ -294,7 +295,7 @@ private[mediator] class Mediator(
             val rejectionsF = openingErrors.parTraverse_ { error =>
               val cause =
                 s"Received an envelope at ${closedEvent.timestamp} that cannot be opened. Discarding envelope... Reason: ${error}"
-              val alarm = MediatorError.MalformedMessage.Reject(cause, protocolVersion)
+              val alarm = MediatorError.MalformedMessage.Reject(cause)
               alarm.report()
 
               val rootHashMessages = openEvent.envelopes.mapFilter(
@@ -306,7 +307,7 @@ private[mediator] class Mediator(
                 sendMalformedRejection(
                   rootHashMessages,
                   closedEvent.timestamp,
-                  alarm,
+                  MediatorVerdict.MediatorReject(alarm),
                 )
               } else Future.unit
             }

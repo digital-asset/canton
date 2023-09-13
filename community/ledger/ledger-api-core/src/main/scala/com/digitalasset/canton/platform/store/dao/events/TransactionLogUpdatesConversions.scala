@@ -177,7 +177,7 @@ private[events] object TransactionLogUpdatesConversions {
               events = flatEvents,
               offset = ApiOffset.toApiString(transactionAccepted.offset),
               domainId = transactionAccepted.domainId.getOrElse(""),
-              traceContext = Some(SerializableTraceContext(traceContext).toDamlProto),
+              traceContext = SerializableTraceContext(traceContext).toDamlProtoOpt,
             )
           )
       }
@@ -378,7 +378,7 @@ private[events] object TransactionLogUpdatesConversions {
               eventsById = eventsById,
               rootEventIds = rootEventIds,
               domainId = transactionAccepted.domainId.getOrElse(""),
-              traceContext = Some(SerializableTraceContext(traceContext).toDamlProto),
+              traceContext = SerializableTraceContext(traceContext).toDamlProtoOpt,
             )
           }
       }
@@ -570,7 +570,7 @@ private[events] object TransactionLogUpdatesConversions {
               source = info.sourceDomain.unwrap.toProtoPrimitive,
               target = info.targetDomain.unwrap.toProtoPrimitive,
               unassignId = info.unassignId.toMicros.toString,
-              submitter = info.submitter.toString,
+              submitter = info.submitter.getOrElse(""),
               reassignmentCounter = info.reassignmentCounter,
               createdEvent = Some(createdEvent),
             )
@@ -584,7 +584,7 @@ private[events] object TransactionLogUpdatesConversions {
               source = info.sourceDomain.unwrap.toProtoPrimitive,
               target = info.targetDomain.unwrap.toProtoPrimitive,
               unassignId = info.unassignId.toMicros.toString,
-              submitter = info.submitter.toString,
+              submitter = info.submitter.getOrElse(""),
               reassignmentCounter = info.reassignmentCounter,
               contractId = unassign.contractId.coid,
               templateId = Some(LfEngineToApi.toApiIdentifier(unassign.templateId)),
@@ -605,7 +605,7 @@ private[events] object TransactionLogUpdatesConversions {
         workflowId = reassignmentAccepted.workflowId,
         offset = ApiOffset.toApiString(reassignmentAccepted.offset),
         event = event,
-        traceContext = Some(SerializableTraceContext(traceContext).toDamlProto),
+        traceContext = SerializableTraceContext(traceContext).toDamlProtoOpt,
       )
     )
   }

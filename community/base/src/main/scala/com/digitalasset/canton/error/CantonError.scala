@@ -153,6 +153,17 @@ object BaseCantonError {
   )(implicit override val code: ErrorCode)
       extends BaseCantonError {}
 
+  /** Custom matcher to extract [[com.google.rpc.error_details.ErrorInfo]] from [[com.google.protobuf.any.Any]] */
+  object AnyToErrorInfo {
+    def unapply(any: com.google.protobuf.any.Any): Option[ErrorInfo] =
+      if (any.is(ErrorInfo)) {
+        Try(any.unpack(ErrorInfo)).toOption
+      } else None
+  }
+
+  def statusErrorCodes(status: com.google.rpc.status.Status): Seq[String] =
+    status.details.collect { case AnyToErrorInfo(errorInfo) => errorInfo.reason }
+
   def isStatusErrorCode(errorCode: ErrorCode, status: com.google.rpc.status.Status): Boolean =
     extractStatusErrorCodeMessage(errorCode, status).isDefined
 
@@ -163,14 +174,9 @@ object BaseCantonError {
     val code = errorCode.category.grpcCode.getOrElse(
       throw new IllegalArgumentException(s"Error code $errorCode does not have a gRPC code")
     )
-    if (status.code == code.value()) {
-      status.details.collectFirst {
-        case any
-            if (any.is(ErrorInfo) && Try(any.unpack(ErrorInfo))
-              .fold(_ => false, _.reason == errorCode.id)) =>
-          status.message
-      }
-    } else None
+    Option.when(status.code == code.value() && statusErrorCodes(status).contains(errorCode.id))(
+      status.message
+    )
   }
 }
 

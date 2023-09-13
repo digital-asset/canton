@@ -615,7 +615,7 @@ private[transfer] class TransferInProcessingSteps(
     } yield LedgerSyncEvent.TransferredIn(
       updateId = updateId,
       optCompletionInfo = completionInfo,
-      submitter = submitterMetadata.submitter,
+      submitter = Option(submitterMetadata.submitter),
       recordTime = recordTime.toLf,
       ledgerCreateTime = contract.ledgerCreateTime.toLf,
       createNode = createNode,

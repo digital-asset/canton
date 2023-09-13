@@ -154,11 +154,11 @@ trait SequencerDriver extends AutoCloseable {
     * or the first block serveable.
     * Block heights must be consecutive.
     *
-    * Fails if `firstBlockHeight` refers to a block whose sequencing the sequencer node has not yet observed
-    * or that has already been pruned.
+    * If `firstBlockHeight` refers to a block whose sequencing number the sequencer node has not yet observed,
+    * returns a source that will eventually serve that block when it gets created.
     *
     * Must succeed if an earlier call to `subscribe` delivered a block with height `firstBlockHeight`
-    * unless the block has been pruned in between.
+    * unless the block has been pruned in between, in which case it fails
     *
     * This method will be called only once, so implementations do not have to try to create separate sources
     * on every call to this method. It is acceptable to for the driver to have one internal source and just return

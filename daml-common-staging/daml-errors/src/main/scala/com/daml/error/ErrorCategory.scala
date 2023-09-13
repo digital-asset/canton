@@ -14,7 +14,7 @@ import scala.concurrent.duration.*
   * error code is associated with an error category that defines how the error will appear
   * in the log file and on the api level.
   */
-sealed trait ErrorCategory {
+sealed trait ErrorCategory extends Product with Serializable {
 
   /** The Grpc code use to signal this error (in case it is signalled via API) */
   def grpcCode: Option[Code]
@@ -73,7 +73,7 @@ object ErrorCategory {
   @Resolution(
     "Expectation: transient failure that should be handled by retrying the request with appropriate backoff."
   )
-  object TransientServerFailure
+  case object TransientServerFailure
       extends ErrorCategoryImpl(
         grpcCode = Some(Code.UNAVAILABLE),
         logLevel = Level.INFO,
@@ -95,7 +95,7 @@ object ErrorCategory {
   @RetryStrategy("Retry quickly (indefinitely or limited), but do not retry in load balancer.")
   @Resolution("""Expectation: this is processing-flow level contention that should be handled by
                 |retrying the request with appropriate backoff.""")
-  object ContentionOnSharedResources
+  case object ContentionOnSharedResources
       extends ErrorCategoryImpl(
         grpcCode = Some(Code.ABORTED),
         logLevel = Level.INFO,
@@ -121,7 +121,7 @@ object ErrorCategory {
                 |The transient errors might be solved by the application retrying.
                 |The non-transient errors will require operator intervention to change the timeouts."""
   )
-  object DeadlineExceededRequestStateUnknown
+  case object DeadlineExceededRequestStateUnknown
       extends ErrorCategoryImpl(
         grpcCode = Some(Code.DEADLINE_EXCEEDED),
         logLevel = Level.INFO,
@@ -142,7 +142,7 @@ object ErrorCategory {
     """Expectation: this is due to a bug in the implementation or data corruption in the systems databases.
                 |Resolution will require operator intervention, and potentially vendor support."""
   )
-  object SystemInternalAssumptionViolated
+  case object SystemInternalAssumptionViolated
       extends ErrorCategoryImpl(
         grpcCode = Some(Code.INTERNAL),
         logLevel = Level.ERROR,
@@ -163,7 +163,7 @@ object ErrorCategory {
       |potentially vendor support. It means that the system has detected invalid information that can be attributed
       |to either faulty or malicious manipulation of data coming from a peer source."""
   )
-  object SecurityAlert
+  case object SecurityAlert
       extends ErrorCategoryImpl(
         grpcCode = Some(Code.INVALID_ARGUMENT),
         logLevel = Level.WARN,
@@ -184,7 +184,7 @@ object ErrorCategory {
     """Expectation: this is an application bug, application misconfiguration or ledger-level
                 |misconfiguration. Resolution requires application and/or ledger operator intervention."""
   )
-  object AuthInterceptorInvalidAuthenticationCredentials
+  case object AuthInterceptorInvalidAuthenticationCredentials
       extends ErrorCategoryImpl(
         grpcCode = Some(Code.UNAUTHENTICATED),
         logLevel = Level.WARN,
@@ -205,7 +205,7 @@ object ErrorCategory {
     """Expectation: this is an application bug or application misconfiguration. Resolution requires
                 |application operator intervention."""
   )
-  object InsufficientPermission
+  case object InsufficientPermission
       extends ErrorCategoryImpl(
         grpcCode = Some(Code.PERMISSION_DENIED),
         logLevel = Level.WARN,
@@ -224,7 +224,7 @@ object ErrorCategory {
     """Expectation: this is an application bug or ledger-level misconfiguration (e.g. request size limits).
                 |Resolution requires application and/or ledger operator intervention."""
   )
-  object InvalidIndependentOfSystemState
+  case object InvalidIndependentOfSystemState
       extends ErrorCategoryImpl(
         grpcCode = Some(Code.INVALID_ARGUMENT),
         logLevel = Level.INFO,
@@ -251,7 +251,7 @@ object ErrorCategory {
                 |application-level bugs, misconfiguration or contention on application-visible resources; and might be
                 |resolved by retrying later, or after changing the state of the system. Handling these errors requires
                 |an application-specific strategy and/or operator intervention.""")
-  object InvalidGivenCurrentSystemStateOther
+  case object InvalidGivenCurrentSystemStateOther
       extends ErrorCategoryImpl(
         grpcCode = Some(Code.FAILED_PRECONDITION),
         logLevel = Level.INFO,
@@ -271,7 +271,7 @@ object ErrorCategory {
                    |resource and application)."""
   )
   @Resolution("""Same as [[InvalidGivenCurrentSystemStateOther]].""")
-  object InvalidGivenCurrentSystemStateResourceExists
+  case object InvalidGivenCurrentSystemStateResourceExists
       extends ErrorCategoryImpl(
         grpcCode = Some(Code.ALREADY_EXISTS),
         logLevel = Level.INFO,
@@ -291,7 +291,7 @@ object ErrorCategory {
                    |resource and application)."""
   )
   @Resolution("""Same as [[InvalidGivenCurrentSystemStateOther]].""")
-  object InvalidGivenCurrentSystemStateResourceMissing
+  case object InvalidGivenCurrentSystemStateResourceMissing
       extends ErrorCategoryImpl(
         grpcCode = Some(Code.NOT_FOUND),
         logLevel = Level.INFO,
@@ -311,7 +311,7 @@ object ErrorCategory {
   @Resolution(
     """Expectation: this error is only used by the Ledger API server in connection with invalid offsets."""
   )
-  object InvalidGivenCurrentSystemStateSeekAfterEnd
+  case object InvalidGivenCurrentSystemStateSeekAfterEnd
       extends ErrorCategoryImpl(
         grpcCode = Some(Code.OUT_OF_RANGE),
         logLevel = Level.INFO,
@@ -329,7 +329,7 @@ object ErrorCategory {
   )
   @RetryStrategy("""Not an API error, therefore not retryable.""")
   @Resolution("""Inspect details of the specific error for more information.""")
-  object BackgroundProcessDegradationWarning
+  case object BackgroundProcessDegradationWarning
       extends ErrorCategoryImpl(
         grpcCode = None, // should not be used on the API level
         logLevel = Level.WARN,
@@ -348,7 +348,7 @@ object ErrorCategory {
     """This error is caused by a ledger-level misconfiguration or by an implementation bug.
       |Resolution requires participant operator intervention."""
   )
-  object InternalUnsupportedOperation
+  case object InternalUnsupportedOperation
       extends ErrorCategoryImpl(
         grpcCode = Some(Code.UNIMPLEMENTED),
         logLevel = Level.ERROR,

@@ -63,9 +63,6 @@ trait SequencerClientTransportCommon extends FlagCloseable with SupportsHandshak
   def downloadTopologyStateForInit(request: TopologyStateForInitRequest)(implicit
       traceContext: TraceContext
   ): EitherT[Future, String, TopologyStateForInitResponse]
-
-  /** The transport can decide which errors will cause the sequencer client to not try to reestablish a subscription */
-  def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy
 }
 
 /** Implementation dependent operations for a client to read and write to a domain sequencer. */
@@ -85,4 +82,7 @@ trait SequencerClientTransport extends SequencerClientTransportCommon {
   def subscribeUnauthenticated[E](request: SubscriptionRequest, handler: SerializedEventHandler[E])(
       implicit traceContext: TraceContext
   ): SequencerSubscription[E]
+
+  /** The transport can decide which errors will cause the sequencer client to not try to reestablish a subscription */
+  def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy
 }

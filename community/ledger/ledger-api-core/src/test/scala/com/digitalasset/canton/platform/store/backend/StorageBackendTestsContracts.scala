@@ -63,6 +63,48 @@ private[backend] trait StorageBackendTestsContracts
     archivedContracts.isEmpty shouldBe true
   }
 
+  it should "correctly find a contract from assigned table" in {
+    val contractId1 = hashCid("#1")
+    val contractId2 = hashCid("#2")
+    val contractId3 = hashCid("#3")
+    val signatory = Ref.Party.assertFromString("signatory")
+    val observer = Ref.Party.assertFromString("observer")
+    val observer2 = Ref.Party.assertFromString("observer2")
+
+    val dtos: Vector[DbDto] = Vector(
+      dtoAssign(offset(1), 1L, contractId1),
+      dtoAssign(offset(2), 2L, contractId1, observer = observer2),
+      dtoAssign(offset(3), 3L, contractId2),
+      dtoAssign(offset(4), 4L, contractId2, observer = observer2),
+    )
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(dtos, _))
+    executeSql(
+      updateLedgerEnd(offset(4), 4L)
+    )
+    val assignedContracts = executeSql(
+      backend.contract.assignedContracts(Seq(contractId1, contractId2, contractId3))
+    )
+    assignedContracts.size shouldBe 2
+    assignedContracts.get(contractId1).isDefined shouldBe true
+    assignedContracts.get(contractId1).foreach { raw =>
+      raw.templateId shouldBe someTemplateId.toString
+      raw.createArgumentCompression shouldBe Some(123)
+      raw.flatEventWitnesses shouldBe Set(signatory, observer)
+      raw.signatories shouldBe Set(signatory)
+      raw.agreementText shouldBe Some("agreement")
+    }
+    assignedContracts.get(contractId2).isDefined shouldBe true
+    assignedContracts.get(contractId2).foreach { raw =>
+      raw.templateId shouldBe someTemplateId.toString
+      raw.createArgumentCompression shouldBe Some(123)
+      raw.flatEventWitnesses shouldBe Set(signatory, observer)
+      raw.signatories shouldBe Set(signatory)
+      raw.agreementText shouldBe Some("agreement")
+    }
+  }
+
   it should "not find an archived contract" in {
     val contractId = hashCid("#1")
     val signatory = Ref.Party.assertFromString("signatory")

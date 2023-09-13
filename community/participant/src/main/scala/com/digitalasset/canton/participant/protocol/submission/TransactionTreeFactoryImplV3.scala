@@ -56,8 +56,8 @@ class TransactionTreeFactoryImplV3(
     s"${this.getClass.getSimpleName} can only be used with protocol version ${ProtocolVersion.v3} or higher, but not for $protocolVersion",
   )
 
-  private[TransactionTreeFactoryImplV3] val csm: ContractStateMachine[Unit] =
-    new ContractStateMachine[Unit](
+  private val initialCsmState: ContractStateMachine.State[Unit] =
+    ContractStateMachine.initial[Unit](
       if (uniqueContractKeys) ContractKeyUniquenessMode.Strict else ContractKeyUniquenessMode.Off
     )
 
@@ -87,7 +87,7 @@ class TransactionTreeFactoryImplV3(
       * 2. The iteration includes all processed nodes of the view. This includes the nodes of fully processed subviews.
       */
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
-    var csmState: csm.State = csm.initial
+    var csmState: ContractStateMachine.State[Unit] = initialCsmState
 
     /** This resolver is used to feed [[com.daml.lf.transaction.ContractStateMachine.State.handleLookupWith]]
       * if `uniqueContractKeys` is false.
@@ -169,7 +169,7 @@ class TransactionTreeFactoryImplV3(
     val previousCsmState = state.csmState
     val previousResolver = state.currentResolver
     state.currentResolver = state.csmState.projectKeyResolver(previousResolver)
-    state.csmState = csm.initial
+    state.csmState = initialCsmState
 
     // Process core nodes and subviews
     val coreCreatedBuilder =
@@ -338,7 +338,7 @@ class TransactionTreeFactoryImplV3(
     * Canton does not distinguish between the different com.daml.lf.transaction.Transaction.KeyInactive forms right now
     */
   private def checkCsmStateMatchesView(
-      csmState: ContractStateMachine[Unit]#State,
+      csmState: ContractStateMachine.State[Unit],
       transactionView: TransactionView,
       viewPosition: ViewPosition,
   )(implicit traceContext: TraceContext): Unit = {

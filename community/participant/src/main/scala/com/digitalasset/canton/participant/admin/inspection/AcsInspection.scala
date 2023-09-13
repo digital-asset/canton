@@ -4,14 +4,14 @@
 package com.digitalasset.canton.participant.admin.inspection
 
 import cats.data.EitherT
-import cats.syntax.bifunctor.*
+import cats.syntax.foldable.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.store.{StoredContract, SyncDomainPersistentState}
 import com.digitalasset.canton.protocol.ContractIdSyntax.orderingLfContractId
 import com.digitalasset.canton.protocol.{LfContractId, SerializableContract}
-import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.{DomainId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 
@@ -64,60 +64,80 @@ private[inspection] object AcsInspection {
     } yield snapshot
 
   // fetch acs, checking that the requested timestamp is clean
-  private def getSnapshotAt(state: SyncDomainPersistentState)(timestamp: CantonTimestamp)(implicit
+  private def getSnapshotAt(domainId: DomainId, state: SyncDomainPersistentState)(
+      timestamp: CantonTimestamp
+  )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): EitherT[Future, Error, SortedMap[LfContractId, CantonTimestamp]] =
     for {
-      _ <- TimestampValidation.beforePrehead(state.requestJournalStore.preheadClean, timestamp)
+      _ <- TimestampValidation.beforePrehead(
+        domainId,
+        state.requestJournalStore.preheadClean,
+        timestamp,
+      )
       snapshot <- EitherT.right(state.activeContractStore.snapshot(timestamp))
       // check after getting the snapshot in case a pruning was happening concurrently
-      _ <- TimestampValidation.afterPruning(state.activeContractStore.pruningStatus, timestamp)
+      _ <- TimestampValidation.afterPruning(
+        domainId,
+        state.activeContractStore.pruningStatus,
+        timestamp,
+      )
     } yield snapshot.map { case (id, (timestamp, _)) => id -> timestamp }
 
   // sort acs for easier comparison
-  private def getAcsSnapshot(state: SyncDomainPersistentState, timestamp: Option[CantonTimestamp])(
-      implicit
+  private def getAcsSnapshot(
+      domainId: DomainId,
+      state: SyncDomainPersistentState,
+      timestamp: Option[CantonTimestamp],
+  )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): EitherT[Future, Error, Iterator[Seq[LfContractId]]] =
     timestamp
-      .map(getSnapshotAt(state))
+      .map(getSnapshotAt(domainId, state))
       .getOrElse(EitherT.right(getCurrentSnapshot(state)))
       .map(_.keysIterator.toSeq.grouped(AcsInspection.BatchSize.value))
 
   def forEachVisibleActiveContract(
+      domainId: DomainId,
       state: SyncDomainPersistentState,
       parties: Set[LfPartyId],
       timestamp: Option[CantonTimestamp],
-  )(f: SerializableContract => Unit)(implicit
+  )(f: SerializableContract => Either[Error, Unit])(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): EitherT[Future, Error, Unit] =
     for {
-      acs <- getAcsSnapshot(state, timestamp)
-      unit <- MonadUtil.sequentialTraverse_(acs)(forEachBatch(state, parties, f))
+      acs <- getAcsSnapshot(domainId, state, timestamp)
+      unit <- MonadUtil.sequentialTraverse_(acs)(forEachBatch(domainId, state, parties, f))
     } yield unit
 
   private def forEachBatch(
+      domainId: DomainId,
       state: SyncDomainPersistentState,
       parties: Set[LfPartyId],
-      f: SerializableContract => Unit,
+      f: SerializableContract => Either[Error, Unit],
   )(batch: Seq[LfContractId])(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): EitherT[Future, Error, Unit] =
-    state.contractStore
+  ): EitherT[Future, Error, Unit] = for {
+    batch <- state.contractStore
       .lookupManyUncached(batch)
-      .leftMap(Error.InconsistentSnapshot)
-      .map(applyToBatch(parties, f))
-      .leftWiden[Error]
+      .leftMap(missingContract => Error.InconsistentSnapshot(domainId, missingContract))
+
+    _ <- EitherT.fromEither[Future](applyToBatch(parties, f)(batch))
+  } yield ()
 
   private def applyToBatch(
       parties: Set[LfPartyId],
-      f: SerializableContract => Unit,
-  )(batch: List[StoredContract]): Unit =
-    for (StoredContract(contract, _, _) <- batch if parties.exists(contract.metadata.stakeholders))
-      f(contract)
+      f: SerializableContract => Either[Error, Unit],
+  )(batch: List[StoredContract]): Either[Error, Unit] =
+    batch.traverse_ { storedContract =>
+      if (parties.exists(storedContract.contract.metadata.stakeholders))
+        f(storedContract.contract)
+      else
+        Right(())
+    }
 
 }

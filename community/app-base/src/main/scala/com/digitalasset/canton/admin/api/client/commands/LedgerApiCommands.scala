@@ -139,7 +139,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 object LedgerApiCommands {
 
-  final val applicationId = "CantonConsole"
+  final val defaultApplicationId = "CantonConsole"
 
   object TransactionService {
 
@@ -607,6 +607,7 @@ object LedgerApiCommands {
         observer: StreamObserver[Completion],
         parties: Seq[String],
         offset: Option[LedgerOffset],
+        applicationId: String,
     )(implicit loggingContext: ErrorLoggingContext)
         extends BaseCommand[CompletionStreamRequest, AutoCloseable, AutoCloseable] {
       // The subscription should never be cut short because of a gRPC timeout
@@ -693,6 +694,7 @@ object LedgerApiCommands {
     def submissionId: String
     def minLedgerTimeAbs: Option[Instant]
     def disclosedContracts: Seq[DisclosedContract]
+    def applicationId: String
 
     protected def mkCommand: CommandsV1 = CommandsV1(
       workflowId = workflowId,
@@ -727,6 +729,7 @@ object LedgerApiCommands {
         param("workflowId", _.workflowId.singleQuoted),
         param("submissionId", _.submissionId.singleQuoted),
         param("deduplicationPeriod", _.deduplicationPeriod),
+        param("applicationId", _.applicationId.singleQuoted),
         paramIfDefined("minLedgerTimeAbs", _.minLedgerTimeAbs),
         paramWithoutValue("commands"),
       )
@@ -749,6 +752,7 @@ object LedgerApiCommands {
         override val submissionId: String,
         override val minLedgerTimeAbs: Option[Instant],
         override val disclosedContracts: Seq[DisclosedContract],
+        override val applicationId: String,
     ) extends SubmitCommand
         with BaseCommand[SubmitRequest, Empty, Unit] {
       override def createRequest(): Either[String, SubmitRequest] = Right(
@@ -783,6 +787,7 @@ object LedgerApiCommands {
         override val submissionId: String,
         override val minLedgerTimeAbs: Option[Instant],
         override val disclosedContracts: Seq[DisclosedContract],
+        override val applicationId: String,
     ) extends SubmitCommand
         with BaseCommand[
           SubmitAndWaitRequest,
@@ -818,6 +823,7 @@ object LedgerApiCommands {
         override val submissionId: String,
         override val minLedgerTimeAbs: Option[Instant],
         override val disclosedContracts: Seq[DisclosedContract],
+        override val applicationId: String,
     ) extends SubmitCommand
         with BaseCommand[SubmitAndWaitRequest, SubmitAndWaitForTransactionResponse, Transaction] {
 

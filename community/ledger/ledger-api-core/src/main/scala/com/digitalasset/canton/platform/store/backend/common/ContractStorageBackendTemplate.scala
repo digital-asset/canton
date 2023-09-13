@@ -152,6 +152,42 @@ class ContractStorageBackendTemplate(
         .toMap
     }
 
+  override def assignedContracts(contractIds: Seq[ContractId])(
+      connection: Connection
+  ): Map[ContractId, RawCreatedContract] =
+    if (contractIds.isEmpty) Map.empty
+    else {
+      import com.digitalasset.canton.platform.store.backend.Conversions.OffsetToStatement
+      val ledgerEndOffset = ledgerEndCache()._1
+      SQL"""
+         WITH min_event_sequential_ids_of_assign AS (
+             SELECT MIN(event_sequential_id) min_event_sequential_id
+             FROM participant_events_assign
+             WHERE
+               contract_id ${queryStrategy.anyOfStrings(contractIds.map(_.coid))}
+               AND event_offset <= $ledgerEndOffset
+             GROUP BY contract_id
+           )
+         SELECT
+           contract_id,
+           template_id,
+           flat_event_witnesses,
+           create_argument,
+           create_argument_compression,
+           ledger_effective_time,
+           create_agreement_text,
+           create_signatories,
+           create_key_value,
+           create_key_value_compression,
+           create_key_maintainers,
+           driver_metadata
+         FROM participant_events_assign, min_event_sequential_ids_of_assign
+         WHERE
+           event_sequential_id = min_event_sequential_ids_of_assign.min_event_sequential_id"""
+        .as(createdContractRowParser.*)(connection)
+        .toMap
+    }
+
   private val contractRowParser: RowParser[ContractStorageBackend.RawContract] =
     (int("template_id")
       ~ byteArray("create_argument")

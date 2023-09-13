@@ -5,7 +5,7 @@ package com.digitalasset.canton.domain.block
 
 import akka.stream.scaladsl.Source
 import akka.stream.{KillSwitch, Materializer}
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.time.TimeProvider
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.google.protobuf.ByteString
@@ -53,7 +53,7 @@ object BlockOrderingSequencer {
     override def usesTimeProvider: Boolean = useTimeProvider
   }
 
-  class Driver(
+  private class Driver(
       blockOrderer: BlockOrderer,
       firstBlockHeight: Long,
       loggerFactory: NamedLoggerFactory,
@@ -81,31 +81,10 @@ object BlockOrderingSequencer {
 
     override def subscribe()(implicit
         traceContext: TraceContext
-    ): Source[RawLedgerBlock, KillSwitch] = {
+    ): Source[RawLedgerBlock, KillSwitch] =
       blockOrderer
         .subscribe(firstBlockHeight)
-        .map { case BlockOrderer.Block(blockHeight, requests) =>
-          RawLedgerBlock(
-            blockHeight,
-            requests.map {
-              case event @ Traced(BlockOrderer.OrderedRequest(orderingTime, tag, body)) =>
-                implicit val traceContext: TraceContext =
-                  event.traceContext // Preserve the request trace ID in the log
-                tag match {
-                  case RegisterMemberTag =>
-                    Traced(RawLedgerBlock.RawBlockEvent.AddMember(body.toStringUtf8))
-                  case AcknowledgeTag =>
-                    Traced(RawLedgerBlock.RawBlockEvent.Acknowledgment(body))
-                  case SendTag =>
-                    Traced(RawLedgerBlock.RawBlockEvent.Send(body, orderingTime))
-                  case _ =>
-                    logger.error(s"Unexpected tag $tag")
-                    sys.exit(1)
-                }
-            },
-          )
-        }
-    }
+        .map(blockOrdererBlockToRawLedgerBlock(logger))
 
     override def health(implicit
         traceContext: TraceContext
@@ -114,6 +93,32 @@ object BlockOrderingSequencer {
 
     override def close(): Unit = blockOrderer.close()
   }
+
+  def blockOrdererBlockToRawLedgerBlock(
+      logger: TracedLogger
+  )(block: BlockOrderer.Block): RawLedgerBlock =
+    block match {
+      case BlockOrderer.Block(blockHeight, requests) =>
+        RawLedgerBlock(
+          blockHeight,
+          requests.map {
+            case event @ Traced(BlockOrderer.OrderedRequest(orderingTime, tag, body)) =>
+              implicit val traceContext: TraceContext =
+                event.traceContext // Preserve the request trace ID in the log
+              tag match {
+                case RegisterMemberTag =>
+                  Traced(RawLedgerBlock.RawBlockEvent.AddMember(body.toStringUtf8))
+                case AcknowledgeTag =>
+                  Traced(RawLedgerBlock.RawBlockEvent.Acknowledgment(body))
+                case SendTag =>
+                  Traced(RawLedgerBlock.RawBlockEvent.Send(body, orderingTime))
+                case _ =>
+                  logger.error(s"Unexpected tag $tag")
+                  sys.exit(1)
+              }
+          },
+        )
+    }
 
   private[domain] val AcknowledgeTag = "acknowledge"
   private[domain] val RegisterMemberTag = "registerMember"

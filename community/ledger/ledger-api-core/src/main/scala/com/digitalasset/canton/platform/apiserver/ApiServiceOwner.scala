@@ -13,19 +13,25 @@ import com.daml.lf.data.Ref
 import com.daml.lf.engine.Engine
 import com.daml.metrics.Metrics
 import com.daml.tracing.Telemetry
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
+import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.ledger.api.auth.*
 import com.digitalasset.canton.ledger.api.auth.interceptor.AuthorizationInterceptor
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.health.HealthChecks
+import com.digitalasset.canton.ledger.api.tls.TlsConfiguration
 import com.digitalasset.canton.ledger.configuration.LedgerId
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexService
 import com.digitalasset.canton.ledger.participant.state.v2.ReadService
 import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
+import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
 import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportKey
 import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportKey.CommunityKey
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
+import com.digitalasset.canton.platform.config.{CommandServiceConfig, UserManagementServiceConfig}
+import com.digitalasset.canton.platform.localstore.IdentityProviderManagementConfig
 import com.digitalasset.canton.platform.localstore.api.{
   IdentityProviderConfigStore,
   PartyRecordStore,
@@ -43,14 +49,34 @@ import scala.concurrent.{ExecutionContextExecutor, Future}
 object ApiServiceOwner {
 
   def apply(
+      // configuration parameters
+      apiStreamShutdownTimeout: NonNegativeFiniteDuration =
+        ApiServiceOwner.DefaultApiStreamShutdownTimeout,
+      address: Option[String] = DefaultAddress, // This defaults to "localhost" when set to `None`.
+      maxInboundMessageSize: Int = DefaultMaxInboundMessageSize,
+      port: Port = DefaultPort,
+      tls: Option[TlsConfiguration] = DefaultTls,
+      seeding: Seeding = DefaultSeeding,
+      configurationLoadTimeout: NonNegativeFiniteDuration =
+        ApiServiceOwner.DefaultConfigurationLoadTimeout,
+      managementServiceTimeout: NonNegativeFiniteDuration =
+        ApiServiceOwner.DefaultManagementServiceTimeout,
+      ledgerFeatures: LedgerFeatures,
+      jwtTimestampLeeway: Option[JwtTimestampLeeway],
+      explicitDisclosureUnsafeEnabled: Boolean = false,
+      multiDomainEnabled: Boolean,
+      upgradingEnabled: Boolean,
+      // immutable configuration parameters
+      ledgerId: LedgerId,
+      participantId: Ref.ParticipantId,
+      meteringReportKey: MeteringReportKey = CommunityKey,
+      // objects
       indexService: IndexService,
       submissionTracker: SubmissionTracker,
       userManagementStore: UserManagementStore,
       identityProviderConfigStore: IdentityProviderConfigStore,
       partyRecordStore: PartyRecordStore,
-      ledgerId: LedgerId,
-      participantId: Ref.ParticipantId,
-      config: ApiServerConfig,
+      command: CommandServiceConfig = ApiServiceOwner.DefaultCommandServiceConfig,
       optWriteService: Option[state.WriteService],
       readService: ReadService,
       healthChecks: HealthChecks,
@@ -63,16 +89,11 @@ object ApiServiceOwner {
       servicesExecutionContext: ExecutionContextExecutor,
       checkOverloaded: TraceContext => Option[state.SubmissionResult] =
         _ => None, // Used for Canton rate-limiting,
-      ledgerFeatures: LedgerFeatures,
       authService: AuthService,
       jwtVerifierLoader: JwtVerifierLoader,
-      meteringReportKey: MeteringReportKey = CommunityKey,
-      jwtTimestampLeeway: Option[JwtTimestampLeeway],
-      explicitDisclosureUnsafeEnabled: Boolean = false,
+      userManagement: UserManagementServiceConfig = ApiServiceOwner.DefaultUserManagement,
       telemetry: Telemetry,
       loggerFactory: NamedLoggerFactory,
-      multiDomainEnabled: Boolean,
-      upgradingEnabled: Boolean,
   )(implicit
       actorSystem: ActorSystem,
       materializer: Materializer,
@@ -86,7 +107,7 @@ object ApiServiceOwner {
       participantId,
       userManagementStore,
       servicesExecutionContext,
-      userRightsCheckIntervalInSeconds = config.userManagement.cacheExpiryAfterWriteInSeconds,
+      userRightsCheckIntervalInSeconds = userManagement.cacheExpiryAfterWriteInSeconds,
       akkaScheduler = actorSystem.scheduler,
       jwtTimestampLeeway = jwtTimestampLeeway,
       telemetry = telemetry,
@@ -118,21 +139,21 @@ object ApiServiceOwner {
             TimeProviderType.Static
           ),
         submissionTracker = submissionTracker,
-        configurationLoadTimeout = config.configurationLoadTimeout,
-        commandConfig = config.command,
+        configurationLoadTimeout = configurationLoadTimeout.underlying,
+        commandConfig = command,
         optTimeServiceBackend = timeServiceBackend,
         servicesExecutionContext = servicesExecutionContext,
         metrics = metrics,
         healthChecks = healthChecksWithIndexService,
-        seedService = SeedService(config.seeding),
-        managementServiceTimeout = config.managementServiceTimeout,
+        seedService = SeedService(seeding),
+        managementServiceTimeout = managementServiceTimeout.underlying,
         checkOverloaded = checkOverloaded,
         userManagementStore = userManagementStore,
         identityProviderConfigStore = identityProviderConfigStore,
         partyRecordStore = partyRecordStore,
         ledgerFeatures = ledgerFeatures,
-        userManagementServiceConfig = config.userManagement,
-        apiStreamShutdownTimeout = config.apiStreamShutdownTimeout,
+        userManagementServiceConfig = userManagement,
+        apiStreamShutdownTimeout = apiStreamShutdownTimeout.underlying,
         meteringReportKey = meteringReportKey,
         explicitDisclosureUnsafeEnabled = explicitDisclosureUnsafeEnabled,
         telemetry = telemetry,
@@ -143,13 +164,13 @@ object ApiServiceOwner {
         .map(_.withServices(otherServices))
       apiService <- new LedgerApiService(
         apiServicesOwner,
-        config.port,
-        config.maxInboundMessageSize,
-        config.address,
-        config.tls,
+        port,
+        maxInboundMessageSize,
+        address,
+        tls,
         AuthorizationInterceptor(
           authService = authService,
-          Option.when(config.userManagement.enabled)(userManagementStore),
+          Option.when(userManagement.enabled)(userManagementStore),
           new IdentityProviderAwareAuthServiceImpl(
             identityProviderConfigLoader = identityProviderConfigLoader,
             jwtVerifierLoader = jwtVerifierLoader,
@@ -172,4 +193,21 @@ object ApiServiceOwner {
       apiService
     }
   }
+
+  val DefaultPort: Port = Port.tryCreate(6865)
+  val DefaultAddress: Option[String] = None
+  val DefaultTls: Option[TlsConfiguration] = None
+  val DefaultMaxInboundMessageSize: Int = 64 * 1024 * 1024
+  val DefaultConfigurationLoadTimeout: NonNegativeFiniteDuration =
+    NonNegativeFiniteDuration.ofSeconds(10)
+  val DefaultSeeding: Seeding = Seeding.Strong
+  val DefaultManagementServiceTimeout: NonNegativeFiniteDuration =
+    NonNegativeFiniteDuration.ofMinutes(2)
+  val DefaultUserManagement: UserManagementServiceConfig =
+    UserManagementServiceConfig.default(enabled = false)
+  val DefaultIdentityProviderManagementConfig: IdentityProviderManagementConfig =
+    IdentityProviderManagementConfig()
+  val DefaultCommandServiceConfig: CommandServiceConfig = CommandServiceConfig.Default
+  val DefaultApiStreamShutdownTimeout: NonNegativeFiniteDuration =
+    NonNegativeFiniteDuration.ofSeconds(5)
 }

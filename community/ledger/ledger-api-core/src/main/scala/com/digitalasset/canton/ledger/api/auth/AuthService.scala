@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.ledger.api.auth
 
+import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.Metadata
 
 import java.util.concurrent.CompletionStage
@@ -33,7 +34,9 @@ trait AuthService {
     * Return [[com.digitalasset.canton.ledger.api.auth.ClaimSet.Claims]] with only a single [[com.digitalasset.canton.ledger.api.auth.ClaimPublic]] claim to reject all non-public requests with a PERMISSION_DENIED status.
     * Return a failed future to reject requests with an INTERNAL error status.
     */
-  def decodeMetadata(headers: io.grpc.Metadata): CompletionStage[ClaimSet]
+  def decodeMetadata(headers: io.grpc.Metadata)(implicit
+      traceContext: TraceContext
+  ): CompletionStage[ClaimSet]
 
 }
 

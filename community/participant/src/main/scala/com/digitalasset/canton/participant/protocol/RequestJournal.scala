@@ -12,9 +12,10 @@ import com.digitalasset.canton.data.{
   PeanoQueue,
   SynchronizedPeanoTreeQueue,
 }
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.RepairService.RepairContext
+import com.digitalasset.canton.participant.admin.repair.RepairContext
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
 import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState.{Clean, Pending}
 import com.digitalasset.canton.participant.store.*
@@ -71,7 +72,7 @@ class RequestJournal(
     override protected val loggerFactory: NamedLoggerFactory,
     initRc: RequestCounter,
     futureSupervisor: FutureSupervisor,
-)(implicit ec: ExecutionContext)
+)(implicit ec: ExecutionContext, closeContext: CloseContext)
     extends RequestJournalReader
     with NamedLogging
     with HasFlushFuture {
@@ -200,7 +201,9 @@ class RequestJournal(
       requestTimestamp: CantonTimestamp,
       oldState: RequestState,
       newState: NonterminalRequestState,
-  )(implicit traceContext: TraceContext): Future[Option[Future[Unit]]] = {
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Option[Future[Unit]]] = {
     advanceTo(rc, requestTimestamp, oldState, newState, None)
   }
 
@@ -246,7 +249,9 @@ class RequestJournal(
       oldState: RequestState,
       newState: RequestState,
       commitTime: Option[CantonTimestamp],
-  )(implicit traceContext: TraceContext): Future[Option[Future[Unit]]] = {
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Option[Future[Unit]]] = {
     logger.debug(withRc(rc, s"Transitioning to state $newState"))
     ErrorUtil.requireArgument(
       newState.isSuccessorOf(oldState),
@@ -356,7 +361,9 @@ class RequestJournal(
     newPrehead.foreach { case (_prehead, completionPromise) => completionPromise.success(()) }
   }
 
-  private def drainClean(implicit traceContext: TraceContext): Future[Unit] = {
+  private def drainClean(implicit
+      traceContext: TraceContext
+  ): Future[Unit] = {
     for {
       newPrehead <- Future { drain(cleanCursor) }
       _ <- newPrehead.fold(Future.unit) { case (prehead, completionPromise) =>

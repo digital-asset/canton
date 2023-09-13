@@ -8,7 +8,6 @@ import com.daml.lf.value.Value
 import com.digitalasset.canton.crypto.{HashOps, Salt, TestSalt}
 import com.digitalasset.canton.data.ViewParticipantData.InvalidViewParticipantData
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.topology.transaction.TrustLevel
 import com.digitalasset.canton.util.LfTransactionBuilder
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
@@ -79,20 +78,6 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
           testedProtocolVersion,
         ) shouldEqual Left(
           s"The subview with index $firstSubviewIndex has an equal viewCommonData."
-        )
-      }
-    }
-  }
-
-  "A view common data" when {
-    "a weight is not positive" must {
-      "reject creation" in {
-        Informee.create(
-          ExampleTransactionFactory.signatory,
-          -1,
-          TrustLevel.Ordinary,
-        ) shouldEqual Left(
-          "Unable to create a confirming party with non-positive weight -1."
         )
       }
     }

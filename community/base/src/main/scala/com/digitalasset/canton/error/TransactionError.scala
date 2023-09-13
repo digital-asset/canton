@@ -6,7 +6,7 @@ package com.digitalasset.canton.error
 import com.daml.error.ErrorCode
 import com.digitalasset.canton.ledger.participant.state.v2.SubmissionResult
 import com.google.rpc.code.Code
-import com.google.rpc.status.{Status as RpcStatus}
+import com.google.rpc.status.Status as RpcStatus
 
 trait TransactionError extends BaseCantonError {
 

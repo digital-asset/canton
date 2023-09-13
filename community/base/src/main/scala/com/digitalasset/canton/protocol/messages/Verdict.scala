@@ -3,8 +3,10 @@
 
 package com.digitalasset.canton.protocol.messages
 
+import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.error.ErrorCategory
+import com.daml.error.utils.DeserializedCantonError
+import com.daml.error.{ContextualizedErrorLogger, ErrorCategory}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.{
@@ -22,21 +24,37 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.*
 import com.google.protobuf.empty
+import com.google.rpc.status.Status
 import pprint.Tree
 
+import scala.Ordered.orderingToOrdered
+
+trait TransactionRejection {
+  def logWithContext(extra: Map[String, String] = Map())(implicit
+      contextualizedErrorLogger: ContextualizedErrorLogger
+  ): Unit
+
+  def rpcStatusWithoutLoggingContext(): com.google.rpc.status.Status
+}
+
+/** Verdicts sent from the mediator to the participants inside the [[MediatorResult]] message */
 sealed trait Verdict
     extends Product
     with Serializable
     with PrettyPrinting
     with HasProtocolVersionedWrapper[Verdict] {
 
+  def isTimeoutDeterminedByMediator: Boolean
+
   @transient override protected lazy val companionObj: Verdict.type = Verdict
 
-  def toProtoV0: v0.Verdict
+  private[messages] def toProtoV0: v0.Verdict
 
-  def toProtoV1: v1.Verdict
+  private[messages] def toProtoV1: v1.Verdict
 
-  def toProtoV2: v2.Verdict
+  private[messages] def toProtoV2: v2.Verdict
+
+  private[messages] def toProtoV3: v3.Verdict
 }
 
 object Verdict
@@ -56,19 +74,28 @@ object Verdict
       supportedProtoVersion(_)(fromProtoV2),
       _.toProtoV2.toByteString,
     ),
+    ProtoVersion(3) -> VersionedProtoConverter(ProtocolVersion.v6)(v3.Verdict)(
+      supportedProtoVersion(_)(fromProtoV3),
+      _.toProtoV3.toByteString,
+    ),
   )
 
   final case class Approve()(
       override val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict.type]
   ) extends Verdict {
-    override def toProtoV0: v0.Verdict =
+    override def isTimeoutDeterminedByMediator: Boolean = false
+
+    private[messages] override def toProtoV0: v0.Verdict =
       v0.Verdict(someVerdict = v0.Verdict.SomeVerdict.Approve(empty.Empty()))
 
-    override def toProtoV1: v1.Verdict =
+    private[messages] override def toProtoV1: v1.Verdict =
       v1.Verdict(someVerdict = v1.Verdict.SomeVerdict.Approve(empty.Empty()))
 
-    override def toProtoV2: v2.Verdict =
+    private[messages] override def toProtoV2: v2.Verdict =
       v2.Verdict(someVerdict = v2.Verdict.SomeVerdict.Approve(empty.Empty()))
+
+    private[messages] override def toProtoV3: v3.Verdict =
+      v3.Verdict(someVerdict = v3.Verdict.SomeVerdict.Approve(empty.Empty()))
 
     override def pretty: Pretty[Verdict] = prettyOfString(_ => "Approve")
   }
@@ -79,86 +106,238 @@ object Verdict
     )
   }
 
-  trait MediatorReject extends Verdict with TransactionError {
+  sealed trait MediatorReject extends Verdict with TransactionRejection
 
-    /** The code from the v0 proto message format.
-      * Implementations should try to choose the most appropriate code (in doubt: TIMEOUT).
-      * DO NOT choose MISSING_CODE, because that will crash during deserialization.
-      */
-    // Name starts with _ to exclude from MDC.
-    def _v0CodeP: v0.MediatorRejection.Code
+  /** Used only with protocol version [[MediatorRejectV0.applicableProtocolVersion]] */
+  final case class MediatorRejectV0 private (code: v0.MediatorRejection.Code, reason: String)
+      extends MediatorReject {
+    import MediatorRejectV0.*
 
-    override def toProtoV0: v0.Verdict =
-      v0.Verdict(someVerdict = v0.Verdict.SomeVerdict.MediatorReject(toProtoMediatorRejectionV0))
-
-    def toProtoMediatorRejectionV0: v0.MediatorRejection =
-      v0.MediatorRejection(code = _v0CodeP, reason = cause)
-
-    override def toProtoV1: v1.Verdict =
-      v1.Verdict(someVerdict = v1.Verdict.SomeVerdict.MediatorReject(toProtoMediatorRejectV1))
-
-    def toProtoMediatorRejectV1: v1.MediatorReject = {
-      v1.MediatorReject(cause = cause, errorCode = code.id, errorCategory = code.category.asInt)
+    locally {
+      import v0.MediatorRejection.Code
+      val validCode = code match {
+        case Code.MissingCode | Code.Unrecognized(_) => false
+        case _ => true
+      }
+      require(validCode, s"Invalid mediator rejection code $code")
     }
 
-    override def toProtoV2: v2.Verdict =
-      v2.Verdict(someVerdict = v2.Verdict.SomeVerdict.MediatorReject(toProtoMediatorRejectV1))
+    override def representativeProtocolVersion: RepresentativeProtocolVersion[Verdict.type] =
+      Verdict.protocolVersionRepresentativeFor(ProtocolVersion.v3)
 
-    override def pretty: Pretty[MediatorReject] =
-      prettyOfClass(
-        param("id", _.code.id.unquoted),
-        param("cause", _.cause.unquoted),
-        paramIfDefined("throwable", _.throwableO),
-        param("v0CodeP", _._v0CodeP.name.unquoted),
-      )
+    def toProtoMediatorRejectionV0: v0.MediatorRejection =
+      v0.MediatorRejection(code = code, reason = reason)
+
+    private[messages] override def toProtoV0: v0.Verdict =
+      v0.Verdict(someVerdict = v0.Verdict.SomeVerdict.MediatorReject(toProtoMediatorRejectionV0))
+
+    private[messages] override def toProtoV1: v1.Verdict =
+      throw new UnsupportedOperationException(wrongProtocolVersion)
+
+    private[messages] override def toProtoV2: v2.Verdict =
+      throw new UnsupportedOperationException(wrongProtocolVersion)
+
+    private[messages] override def toProtoV3: v3.Verdict =
+      throw new UnsupportedOperationException(wrongProtocolVersion)
+
+    override def pretty: Pretty[MediatorRejectV0] = prettyOfClass(
+      param("code", _.code.toString.unquoted),
+      param("reason", _.reason.unquoted),
+    )
+
+    private def asError: BaseCantonError = {
+      import v0.MediatorRejection.Code
+      code match {
+        case Code.InformeesNotHostedOnActiveParticipant | Code.InvalidRootHashMessage =>
+          MediatorError.InvalidMessage.Reject(reason, code)
+        case Code.NotEnoughConfirmingParties | Code.ViewThresholdBelowMinimumThreshold |
+            Code.WrongDeclaredMediator | Code.NonUniqueRequestUuid =>
+          MediatorError.MalformedMessage.Reject(reason, code)
+        case Code.Timeout =>
+          MediatorError.Timeout.Reject(reason)
+        case Code.MissingCode | Code.Unrecognized(_) =>
+          throw new IllegalStateException(s"Code ${code} is forbidden by the class invariant")
+      }
+    }
+
+    override def logWithContext(extra: Map[String, String])(implicit
+        contextualizedErrorLogger: ContextualizedErrorLogger
+    ): Unit = asError.logWithContext(extra)
+
+    override def rpcStatusWithoutLoggingContext(): Status = asError.rpcStatusWithoutLoggingContext()
+
+    override def isTimeoutDeterminedByMediator: Boolean = code == v0.MediatorRejection.Code.Timeout
   }
+  object MediatorRejectV0 {
+    def applicableProtocolVersion: ProtocolVersion = ProtocolVersion.v3
 
-  object MediatorReject {
+    lazy val wrongProtocolVersion: String =
+      s"MediatorRejectV0 can only be used in protocol version ${applicableProtocolVersion}"
+
+    def tryCreate(code: v0.MediatorRejection.Code, reason: String): MediatorRejectV0 =
+      new MediatorRejectV0(code, reason)
+
+    def create(code: v0.MediatorRejection.Code, reason: String): Either[String, MediatorRejectV0] =
+      Either
+        .catchOnly[IllegalArgumentException](new MediatorRejectV0(code, reason))
+        .leftMap(_.getMessage)
 
     def fromProtoV0(
         value: v0.MediatorRejection
-    ): ParsingResult[MediatorReject] = {
-      val v0.MediatorRejection(codeP, reason) = value
-
-      val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtoVersion(0))
-
+    ): ParsingResult[MediatorRejectV0] = {
       import v0.MediatorRejection.Code
-      codeP match {
-        case Code.MissingCode => Left(FieldNotSet("MediatorReject.code"))
-        case Code.InformeesNotHostedOnActiveParticipant | Code.InvalidRootHashMessage =>
-          Right(MediatorError.InvalidMessage.Reject(reason, codeP)(representativeProtocolVersion))
-        case Code.NotEnoughConfirmingParties | Code.ViewThresholdBelowMinimumThreshold |
-            Code.WrongDeclaredMediator | Code.NonUniqueRequestUuid =>
-          Right(MediatorError.MalformedMessage.Reject(reason, codeP)(representativeProtocolVersion))
-        case Code.Timeout =>
-          Right(MediatorError.Timeout.Reject(reason)(representativeProtocolVersion))
-        case Code.Unrecognized(code) =>
-          Left(
-            ValueDeserializationError(
-              "reject",
-              s"Unknown mediator rejection error code ${code} with ${reason}",
+
+      val v0.MediatorRejection(codeP, reason) = value
+      for {
+        validCode <- codeP match {
+          case Code.MissingCode => Left(FieldNotSet("MediatorReject.code"))
+          case Code.Unrecognized(code) =>
+            Left(
+              ValueDeserializationError(
+                "reject",
+                s"Unknown mediator rejection error code ${code} with ${reason}",
+              )
             )
-          )
-      }
+          case _ => Right(codeP)
+        }
+      } yield new MediatorRejectV0(validCode, reason)
+    }
+  }
+
+  /** Used only with protocol versions from [[MediatorRejectV1.firstApplicableProtocolVersion]] to
+    * [[MediatorRejectV1.lastApplicableProtocolVersion]].
+    */
+  final case class MediatorRejectV1(cause: String, id: String, errorCategory: Int)(
+      override val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict.type]
+  ) extends MediatorReject {
+    import MediatorRejectV1.*
+
+    require(
+      representativeProtocolVersion >= protocolVersionRepresentativeFor(
+        firstApplicableProtocolVersion
+      ) &&
+        representativeProtocolVersion <= protocolVersionRepresentativeFor(
+          lastApplicableProtocolVersion
+        ),
+      wrongProtocolVersion,
+    )
+
+    private[messages] override def toProtoV0: v0.Verdict =
+      throw new UnsupportedOperationException(wrongProtocolVersion)
+
+    private[messages] override def toProtoV1: v1.Verdict =
+      v1.Verdict(someVerdict = v1.Verdict.SomeVerdict.MediatorReject(toProtoMediatorRejectV1))
+
+    private[messages] override def toProtoV2: v2.Verdict =
+      v2.Verdict(someVerdict = v2.Verdict.SomeVerdict.MediatorReject(toProtoMediatorRejectV1))
+
+    private[messages] override def toProtoV3: v3.Verdict =
+      throw new UnsupportedOperationException(wrongProtocolVersion)
+
+    def toProtoMediatorRejectV1: v1.MediatorReject =
+      v1.MediatorReject(cause = cause, errorCode = id, errorCategory = errorCategory)
+
+    override def pretty: Pretty[MediatorRejectV1] =
+      prettyOfClass(
+        param("id", _.id.unquoted),
+        param("cause", _.cause.unquoted),
+      )
+
+    override def logWithContext(extra: Map[String, String])(implicit
+        contextualizedErrorLogger: ContextualizedErrorLogger
+    ): Unit = asError.logWithContext(extra)
+
+    override def rpcStatusWithoutLoggingContext(): Status = asError.rpcStatusWithoutLoggingContext()
+
+    private def asError: BaseCantonError = id match {
+      case MediatorError.Timeout.id =>
+        MediatorError.Timeout.Reject(cause)
+      case MediatorError.InvalidMessage.id =>
+        MediatorError.InvalidMessage.Reject(cause)
+      case MediatorError.MalformedMessage.id =>
+        MediatorError.MalformedMessage.Reject(cause)
+      case id =>
+        val category = ErrorCategory
+          .fromInt(errorCategory)
+          .getOrElse(ErrorCategory.SystemInternalAssumptionViolated)
+        MediatorError.GenericError(cause, id, category)
     }
 
-    def fromProtoV1(mediatorRejectP: v1.MediatorReject): ParsingResult[MediatorReject] = {
-      val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtoVersion(1))
+    override def isTimeoutDeterminedByMediator: Boolean = id == MediatorError.Timeout.id
+  }
+  object MediatorRejectV1 {
+    def firstApplicableProtocolVersion: ProtocolVersion = ProtocolVersion.v4
+    def lastApplicableProtocolVersion: ProtocolVersion = ProtocolVersion.v5
 
+    lazy val wrongProtocolVersion: String =
+      s"MediatorRejectV1 can only be used in protocol versions from $firstApplicableProtocolVersion to $lastApplicableProtocolVersion"
+
+    def fromProtoV1(mediatorRejectP: v1.MediatorReject): ParsingResult[MediatorRejectV1] = {
+      val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtoVersion(1))
       val v1.MediatorReject(cause, errorCodeP, errorCategoryP) = mediatorRejectP
-      errorCodeP match {
-        case MediatorError.Timeout.id =>
-          Right(MediatorError.Timeout.Reject(cause)(representativeProtocolVersion))
-        case MediatorError.InvalidMessage.id =>
-          Right(MediatorError.InvalidMessage.Reject(cause)(representativeProtocolVersion))
-        case MediatorError.MalformedMessage.id =>
-          Right(MediatorError.MalformedMessage.Reject(cause)(representativeProtocolVersion))
-        case id =>
-          val category = ErrorCategory
-            .fromInt(errorCategoryP)
-            .getOrElse(ErrorCategory.SystemInternalAssumptionViolated)
-          Right(MediatorError.GenericError(cause, id, category)(representativeProtocolVersion))
+      Right(MediatorRejectV1(cause, errorCodeP, errorCategoryP)(representativeProtocolVersion))
+    }
+  }
+
+  /** Used only with protocol version [[MediatorRejectV2.firstApplicableProtocolVersion]] and higher */
+  final case class MediatorRejectV2(status: com.google.rpc.status.Status)(
+      override val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict.type]
+  ) extends MediatorReject {
+    import MediatorRejectV2.*
+
+    require(
+      representativeProtocolVersion >= Verdict.protocolVersionRepresentativeFor(
+        firstApplicableProtocolVersion
+      ),
+      wrongProtocolVersion,
+    )
+
+    private[messages] override def toProtoV0: v0.Verdict =
+      throw new UnsupportedOperationException(wrongProtocolVersion)
+
+    private[messages] override def toProtoV1: v1.Verdict =
+      throw new UnsupportedOperationException(wrongProtocolVersion)
+
+    private[messages] override def toProtoV2: v2.Verdict =
+      throw new UnsupportedOperationException(wrongProtocolVersion)
+
+    private[messages] override def toProtoV3: v3.Verdict =
+      v3.Verdict(v3.Verdict.SomeVerdict.MediatorReject(toProtoMediatorRejectV2))
+
+    def toProtoMediatorRejectV2: v2.MediatorReject = v2.MediatorReject(Some(status))
+
+    override def pretty: Pretty[MediatorRejectV2.this.type] = prettyOfClass(
+      unnamedParam(_.status)
+    )
+
+    override def logWithContext(extra: Map[String, String])(implicit
+        contextualizedErrorLogger: ContextualizedErrorLogger
+    ): Unit =
+      DeserializedCantonError.fromGrpcStatus(status) match {
+        case Right(error) => error.logWithContext(extra)
+        case Left(err) =>
+          contextualizedErrorLogger.warn(s"Failed to parse mediator rejection: $err")
       }
+
+    override def rpcStatusWithoutLoggingContext(): Status = status
+
+    override def isTimeoutDeterminedByMediator: Boolean =
+      DeserializedCantonError.fromGrpcStatus(status).exists(_.code.id == MediatorError.Timeout.id)
+  }
+
+  object MediatorRejectV2 {
+    def firstApplicableProtocolVersion: ProtocolVersion = ProtocolVersion.v6
+
+    lazy val wrongProtocolVersion: String =
+      s"MediatorRejectV2 can only be used in protocol versions $firstApplicableProtocolVersion and higher"
+
+    def fromProtoV2(mediatorRejectP: v2.MediatorReject): ParsingResult[MediatorRejectV2] = {
+      val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtoVersion(3))
+
+      val v2.MediatorReject(statusO) = mediatorRejectP
+      for {
+        status <- ProtoConverter.required("rejection_reason", statusO)
+      } yield MediatorRejectV2(status)(representativeProtocolVersion)
     }
   }
 
@@ -169,25 +348,32 @@ object Verdict
       override val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict.type]
   ) extends Verdict {
 
-    override def toProtoV0: v0.Verdict = {
+    private[messages] override def toProtoV0: v0.Verdict = {
       val reasonsP = v0.RejectionReasons(reasons.map { case (parties, message) =>
         v0.RejectionReason(parties.toSeq, Some(message.toLocalRejectProtoV0))
       })
       v0.Verdict(someVerdict = v0.Verdict.SomeVerdict.ValidatorReject(reasonsP))
     }
 
-    override def toProtoV1: v1.Verdict = {
+    private[messages] override def toProtoV1: v1.Verdict = {
       val reasonsP = v1.ParticipantReject(reasons.map { case (parties, message) =>
         v0.RejectionReason(parties.toSeq, Some(message.toLocalRejectProtoV0))
       })
       v1.Verdict(someVerdict = v1.Verdict.SomeVerdict.ParticipantReject(reasonsP))
     }
 
-    def toProtoV2: v2.Verdict = {
+    private[messages] override def toProtoV2: v2.Verdict = {
       val reasonsP = v2.ParticipantReject(reasons.map { case (parties, message) =>
         v2.RejectionReason(parties.toSeq, Some(message.toLocalRejectProtoV1))
       })
       v2.Verdict(someVerdict = v2.Verdict.SomeVerdict.ParticipantReject(reasonsP))
+    }
+
+    private[messages] override def toProtoV3: v3.Verdict = {
+      val reasonsP = v2.ParticipantReject(reasons.map { case (parties, message) =>
+        v2.RejectionReason(parties.toSeq, Some(message.toLocalRejectProtoV1))
+      })
+      v3.Verdict(someVerdict = v3.Verdict.SomeVerdict.ParticipantReject(reasonsP))
     }
 
     override def pretty: Pretty[ParticipantReject] = {
@@ -212,6 +398,8 @@ object Verdict
         .map(_._2)
         .maxBy1(_.code.category)
     }
+
+    override def isTimeoutDeterminedByMediator: Boolean = false
   }
 
   object ParticipantReject {
@@ -276,8 +464,13 @@ object Verdict
     someVerdictP match {
       case V.Approve(empty.Empty(_)) => Right(Approve()(representativeProtocolVersion))
       case V.Timeout(empty.Empty(_)) =>
-        Right(MediatorError.Timeout.Reject()(representativeProtocolVersion))
-      case V.MediatorReject(mediatorRejectionP) => MediatorReject.fromProtoV0(mediatorRejectionP)
+        Right(
+          MediatorRejectV0.tryCreate(
+            v0.MediatorRejection.Code.Timeout,
+            MediatorError.Timeout.Reject.defaultCause,
+          )
+        )
+      case V.MediatorReject(mediatorRejectionP) => MediatorRejectV0.fromProtoV0(mediatorRejectionP)
       case V.ValidatorReject(rejectionReasonsP) => ParticipantReject.fromProtoV0(rejectionReasonsP)
       case V.Empty => Left(NotImplementedYet("empty verdict type"))
     }
@@ -291,7 +484,7 @@ object Verdict
 
     someVerdictP match {
       case V.Approve(empty.Empty(_)) => Right(Approve()(representativeProtocolVersion))
-      case V.MediatorReject(mediatorRejectP) => MediatorReject.fromProtoV1(mediatorRejectP)
+      case V.MediatorReject(mediatorRejectP) => MediatorRejectV1.fromProtoV1(mediatorRejectP)
       case V.ParticipantReject(participantRejectP) =>
         ParticipantReject.fromProtoV1(participantRejectP)
       case V.Empty => Left(NotImplementedYet("empty verdict type"))
@@ -306,7 +499,21 @@ object Verdict
 
     someVerdictP match {
       case V.Approve(empty.Empty(_)) => Right(Approve()(representativeProtocolVersion))
-      case V.MediatorReject(mediatorRejectP) => MediatorReject.fromProtoV1(mediatorRejectP)
+      case V.MediatorReject(mediatorRejectP) => MediatorRejectV1.fromProtoV1(mediatorRejectP)
+      case V.ParticipantReject(participantRejectP) =>
+        ParticipantReject.fromProtoV2(participantRejectP)
+      case V.Empty => Left(OtherError("empty verdict type"))
+    }
+  }
+
+  def fromProtoV3(verdictP: v3.Verdict): ParsingResult[Verdict] = {
+    val v3.Verdict(someVerdictP) = verdictP
+    import v3.Verdict.{SomeVerdict as V}
+
+    val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtoVersion(3))
+    someVerdictP match {
+      case V.Approve(empty.Empty(_)) => Right(Approve()(representativeProtocolVersion))
+      case V.MediatorReject(mediatorRejectP) => MediatorRejectV2.fromProtoV2(mediatorRejectP)
       case V.ParticipantReject(participantRejectP) =>
         ParticipantReject.fromProtoV2(participantRejectP)
       case V.Empty => Left(OtherError("empty verdict type"))
