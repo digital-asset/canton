@@ -48,6 +48,15 @@ final case class SignedTopologyTransactionX[+Op <: TopologyChangeOpX, +M <: Topo
     with Serializable
     with PrettyPrinting {
 
+  lazy val hashOfSignatures: Hash = Hash.digest(
+    HashPurpose.TopologyTransactionSignature,
+    signatures.toList
+      .sortBy(_.signedBy.toProtoPrimitive)
+      .map(_.toProtoV0.toByteString)
+      .reduceLeft(_.concat(_)),
+    HashAlgorithm.Sha256,
+  )
+
   def addSignatures(add: Seq[Signature]): SignedTopologyTransactionX[Op, M] =
     SignedTopologyTransactionX(
       transaction,

@@ -427,7 +427,7 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
   override def findUpcomingEffectiveChanges(asOfInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Future[Seq[TopologyStore.Change]] = queryForTransactions(
-    sql"AND valid_from >= $asOfInclusive ",
+    sql" AND valid_from >= $asOfInclusive ",
     orderBy = " ORDER BY valid_from",
   ).map(res => TopologyStoreX.accumulateUpcomingEffectiveChanges(res.result))
 
@@ -456,7 +456,7 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
       traceContext: TraceContext
   ): Future[Option[GenericStoredTopologyTransactionX]] =
     findStoredSql(transaction.transaction, includeRejected = includeRejected).map(
-      _.result.headOption
+      _.result.lastOption
     )
 
   override def findStoredForVersion(
@@ -468,7 +468,7 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
     findStoredSql(
       transaction,
       subQuery = sql" AND representative_protocol_version = ${protocolVersion}",
-    ).map(_.result.headOption)
+    ).map(_.result.lastOption)
 
   override def findParticipantOnboardingTransactions(
       participantId: ParticipantId,
@@ -517,11 +517,12 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
       val txHash = signedTx.transaction.hash.hash.toLengthLimitedHexString
       val isProposal = signedTx.isProposal
       val representativeProtocolVersion = signedTx.transaction.representativeProtocolVersion
+      val hashOfSignatures = signedTx.hashOfSignatures.toLengthLimitedHexString
 
       storage.profile match {
         case _: DbStorage.Profile.Postgres | _: DbStorage.Profile.H2 =>
           sql"""($transactionStoreIdName, $sequencedTs, $validFrom, $validUntil, $transactionType, $namespace,
-           $identifier, $mappingHash, $serial, $operation, $signedTx, $txHash, $isProposal, $reason, $representativeProtocolVersion)"""
+           $identifier, $mappingHash, $serial, $operation, $signedTx, $txHash, $isProposal, $reason, $representativeProtocolVersion, $hashOfSignatures)"""
         case _: DbStorage.Profile.Oracle =>
           throw new IllegalStateException("Oracle not supported by daml 3.0/X yet")
       }
@@ -530,7 +531,7 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
     storage.profile match {
       case _: DbStorage.Profile.Postgres | _: DbStorage.Profile.H2 =>
         (sql"""INSERT INTO topology_transactions_x (store_id, sequenced, valid_from, valid_until, transaction_type, namespace,
-                  identifier, mapping_key_hash, serial_counter, operation, instance, tx_hash, is_proposal, rejection_reason, representative_protocol_version) VALUES""" ++
+                  identifier, mapping_key_hash, serial_counter, operation, instance, tx_hash, is_proposal, rejection_reason, representative_protocol_version, hash_of_signatures) VALUES""" ++
           transactions
             .map(sqlTransactionParameters)
             .toList

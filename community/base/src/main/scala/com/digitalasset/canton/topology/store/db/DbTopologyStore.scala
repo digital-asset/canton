@@ -409,7 +409,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       traceContext: TraceContext
   ): Future[StoredTopologyTransactions[TopologyChangeOp]] = {
     val query =
-      sql"SELECT id, instance, sequenced, valid_from, valid_until FROM topology_transactions WHERE store_id = $store" ++
+      sql"SELECT id, instance, sequenced, valid_from, valid_until FROM topology_transactions WHERE store_id = $store " ++
         subQuery ++ (if (!includeRejected) sql" AND ignore_reason IS NULL"
                      else sql"") ++ sql" #${orderBy} #${limit}"
     readTime.event {
@@ -521,7 +521,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
   ): Future[StoredTopologyTransactions[TopologyChangeOp.Positive]] =
     queryForTransactions(
       transactionStoreIdName,
-      sql"AND valid_until is NULL and (operation = ${TopologyChangeOp.Add} or operation = ${TopologyChangeOp.Replace})",
+      sql" AND valid_until is NULL and (operation = ${TopologyChangeOp.Add} or operation = ${TopologyChangeOp.Replace})",
     ).map(_.collectOfType[TopologyChangeOp.Positive])
 
   override def findRemovalTransactionForMappings(
@@ -539,7 +539,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
 
       queryForTransactions(
         transactionStoreIdName,
-        sql"AND operation = ${TopologyChangeOp.Remove} AND (" ++ mappingsQuery ++ sql")",
+        sql" AND operation = ${TopologyChangeOp.Remove} AND (" ++ mappingsQuery ++ sql")",
       ).map(
         _.result
           .map(_.transaction)
@@ -555,12 +555,12 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
     val tmp = TopologyElementId.tryCreate("1")
     val ns = mapping.uniquePath(tmp).namespace
     val query = mapping.uniquePath(tmp).maybeUid.map(_.id) match {
-      case None => sql"AND namespace = $ns"
-      case Some(identifier) => sql"AND namespace = $ns AND identifier = $identifier"
+      case None => sql" AND namespace = $ns"
+      case Some(identifier) => sql" AND namespace = $ns AND identifier = $identifier"
     }
     queryForTransactions(
       transactionStoreIdName,
-      sql"AND valid_until is NULL AND transaction_type = ${mapping.dbType}" ++ query,
+      sql" AND valid_until is NULL AND transaction_type = ${mapping.dbType}" ++ query,
     )
       .map { x =>
         x.positiveTransactions.combine.result.collect {
@@ -641,7 +641,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
         sql"" // The case below insert an additional `AND` that we don't want
       case TimeQuery.Range(from, until) =>
         sql" AND " ++ ((from.toList.map(ts => sql"valid_from >= $ts") ++ until.toList.map(ts =>
-          sql"valid_from <= $ts"
+          sql" valid_from <= $ts"
         ))
           .intercalate(sql" AND "))
     }
@@ -669,7 +669,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
   ): Future[StoredTopologyTransactions[TopologyChangeOp]] =
     queryForTransactions(
       transactionStoreIdName,
-      sql"AND" ++ pathQuery(
+      sql" AND" ++ pathQuery(
         transaction.element.uniquePath
       ) ++ sql" AND operation = ${transaction.op}" ++ subQuery,
       includeRejected = includeRejected,
@@ -787,7 +787,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
           val rangeQuery = asOfQuery(asOf, asOfInclusive)
           val opFilter = filterOps.map(op => sql"operation = $op").intercalate(sql" or ")
           val baseQuery =
-            sql"AND (" ++ opFilter ++ sql") AND transaction_type IN (" ++ types.toList
+            sql" AND (" ++ opFilter ++ sql") AND transaction_type IN (" ++ types.toList
               .map(s => sql"$s")
               .intercalate(sql", ") ++ sql")"
 
@@ -850,7 +850,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
         offset: Long,
         acc: Map[KeyOwner, Seq[PublicKey]],
     ): Future[(Boolean, Map[KeyOwner, Seq[PublicKey]])] = {
-      val query = sql"AND operation = ${TopologyChangeOp.Add}"
+      val query = sql" AND operation = ${TopologyChangeOp.Add}"
       val lm = storage.limit(batchNum, offset)
       val start = (false, 0, acc)
       queryForTransactions(transactionStoreIdName, query, lm)
@@ -907,7 +907,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
   ): Future[Seq[TopologyStore.Change]] = {
     queryForTransactions(
       transactionStoreIdName,
-      sql"AND valid_from >= $asOfInclusive ",
+      sql" AND valid_from >= $asOfInclusive ",
       orderBy = " ORDER BY valid_from",
     ).map(res =>
       TopologyStore.Change.accumulateUpcomingEffectiveChanges(
@@ -961,7 +961,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       limitO: Option[Int],
   )(implicit traceContext: TraceContext): Future[StoredTopologyTransactions[TopologyChangeOp]] = {
     val subQuery =
-      sql"AND valid_from > $timestampExclusive AND (valid_until is NULL OR operation = ${TopologyChangeOp.Remove})"
+      sql" AND valid_from > $timestampExclusive AND (valid_until is NULL OR operation = ${TopologyChangeOp.Remove})"
     val limitQ = limitO.fold("")(storage.limit(_))
     queryForTransactions(transactionStoreIdName, subQuery, limitQ)
   }
@@ -974,7 +974,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
   ): FutureUnlessShutdown[Seq[SignedTopologyTransaction[TopologyChangeOp]]] = {
     val ns = participantId.uid.namespace
     val subQuery =
-      sql"AND valid_until is NULL AND namespace = $ns AND transaction_type IN (" ++ TopologyStore.initialParticipantDispatchingSet.toList
+      sql" AND valid_until is NULL AND namespace = $ns AND transaction_type IN (" ++ TopologyStore.initialParticipantDispatchingSet.toList
         .map(s => sql"$s")
         .intercalate(sql", ") ++ sql")"
     performUnlessClosingF("query-for-transactions")(
@@ -1001,8 +1001,8 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
     val ns = participantId.uid.namespace
     val id = participantId.uid.id
     val subQuery = sql" AND valid_from < $beforeExclusive " ++
-      sql"AND transaction_type = ${DomainTopologyTransactionType.ParticipantState} " ++
-      sql"AND namespace = $ns AND identifier = $id "
+      sql" AND transaction_type = ${DomainTopologyTransactionType.ParticipantState} " ++
+      sql" AND namespace = $ns AND identifier = $id "
     val limitQ = storage.limit(limit)
     queryForTransactions(
       transactionStoreIdName,
@@ -1017,7 +1017,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       upToExclusive: CantonTimestamp,
   )(implicit traceContext: TraceContext): Future[StoredTopologyTransactions[TopologyChangeOp]] = {
     val subQuery =
-      sql"""AND valid_from > $asOfExclusive AND valid_from < $upToExclusive"""
+      sql""" AND valid_from > $asOfExclusive AND valid_from < $upToExclusive"""
     queryForTransactions(
       transactionStoreIdName,
       subQuery,
