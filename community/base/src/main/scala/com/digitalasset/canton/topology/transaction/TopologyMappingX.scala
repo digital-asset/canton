@@ -22,7 +22,7 @@ import com.digitalasset.canton.protocol.{DynamicDomainParameters, v2}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.transaction.TopologyChangeOpX.Replace
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.TopologyMappingX.RequiredAuthX.*
 import com.digitalasset.canton.topology.transaction.TopologyMappingX.{
   Code,
@@ -139,72 +139,136 @@ object TopologyMappingX {
 
   }
 
+  // Small wrapper to not have to work with (Set[Namespace], Set[Namespace], Set[Uid])
+  final case class RequiredAuthXAuthorizations(
+      namespacesWithRoot: Set[Namespace] = Set.empty,
+      namespaces: Set[Namespace] = Set.empty,
+      uids: Set[UniqueIdentifier] = Set.empty,
+  )
+
+  object RequiredAuthXAuthorizations {
+    implicit val monoid: Monoid[RequiredAuthXAuthorizations] =
+      new Monoid[RequiredAuthXAuthorizations] {
+        override def empty: RequiredAuthXAuthorizations = RequiredAuthXAuthorizations()
+
+        override def combine(
+            x: RequiredAuthXAuthorizations,
+            y: RequiredAuthXAuthorizations,
+        ): RequiredAuthXAuthorizations =
+          RequiredAuthXAuthorizations(
+            namespacesWithRoot = x.namespacesWithRoot ++ y.namespacesWithRoot,
+            namespaces = x.namespaces ++ y.namespaces,
+            uids = x.uids ++ y.uids,
+          )
+      }
+  }
+
   sealed trait RequiredAuthX {
-    def isRootDelegation: Boolean = false
+    def requireRootDelegation: Boolean = false
     def satisfiedByActualAuthorizers(
+        namespacesWithRoot: Set[Namespace],
         namespaces: Set[Namespace],
         uids: Set[UniqueIdentifier],
-    ): Boolean
+    ): Either[RequiredAuthXAuthorizations, Unit]
 
     final def and(next: RequiredAuthX): RequiredAuthX =
       RequiredAuthX.And(this, next)
     final def or(next: RequiredAuthX): RequiredAuthX =
       RequiredAuthX.Or(this, next)
 
-    def fold[T](
+    final def fold[T](
         namespaceCheck: RequiredNamespaces => T,
         uidCheck: RequiredUids => T,
-    )(implicit mon: Monoid[T]): T = {
+    )(implicit T: Monoid[T]): T = {
       def loop(x: RequiredAuthX): T = x match {
-        case ns @ RequiredNamespaces(_, _, _) => namespaceCheck(ns)
+        case ns @ RequiredNamespaces(_, _) => namespaceCheck(ns)
         case uids @ RequiredUids(_) => uidCheck(uids)
-        case EmptyAuthorization => mon.empty
-        case And(first, second) => mon.combine(loop(first), loop(second))
-        case Or(first, second) => mon.combine(loop(first), loop(second))
+        case EmptyAuthorization => T.empty
+        case And(first, second) => T.combine(loop(first), loop(second))
+        case Or(first, second) =>
+          val firstRes = loop(first)
+          if (firstRes == T.empty) loop(second)
+          else firstRes
       }
       loop(this)
     }
+
+    def authorizations: RequiredAuthXAuthorizations
   }
 
   object RequiredAuthX {
 
     private[transaction] case object EmptyAuthorization extends RequiredAuthX {
       override def satisfiedByActualAuthorizers(
+          namespacesWithRoot: Set[Namespace],
           namespaces: Set[Namespace],
           uids: Set[UniqueIdentifier],
-      ): Boolean = true
+      ): Either[RequiredAuthXAuthorizations, Unit] = Either.unit
+
+      override def authorizations: RequiredAuthXAuthorizations = RequiredAuthXAuthorizations()
     }
 
     final case class RequiredNamespaces(
-        required: Set[Namespace],
-        threshold: Option[PositiveInt] = None,
-        override val isRootDelegation: Boolean = false,
+        namespaces: Set[Namespace],
+        override val requireRootDelegation: Boolean = false,
     ) extends RequiredAuthX {
       override def satisfiedByActualAuthorizers(
-          namespaces: Set[Namespace],
+          providedNamespacesWithRoot: Set[Namespace],
+          providedNamespaces: Set[Namespace],
           uids: Set[UniqueIdentifier],
-      ): Boolean = {
-        val effectiveThreshold = threshold.map(_.unwrap).getOrElse(required.size)
-        required.intersect(namespaces).size >= effectiveThreshold
+      ): Either[RequiredAuthXAuthorizations, Unit] = {
+        val filter = if (requireRootDelegation) providedNamespacesWithRoot else providedNamespaces
+        val missing = namespaces.filter(ns => !filter(ns))
+        Either.cond(
+          missing.isEmpty,
+          (),
+          RequiredAuthXAuthorizations(
+            namespacesWithRoot = if (requireRootDelegation) missing else Set.empty,
+            namespaces = if (requireRootDelegation) Set.empty else missing,
+          ),
+        )
       }
+
+      override def authorizations: RequiredAuthXAuthorizations = RequiredAuthXAuthorizations(
+        namespacesWithRoot = if (requireRootDelegation) namespaces else Set.empty,
+        namespaces = if (requireRootDelegation) Set.empty else namespaces,
+      )
     }
-    final case class RequiredUids(required: Set[UniqueIdentifier]) extends RequiredAuthX {
+
+    final case class RequiredUids(uids: Set[UniqueIdentifier]) extends RequiredAuthX {
       override def satisfiedByActualAuthorizers(
+          namespacesWithRoot: Set[Namespace],
           namespaces: Set[Namespace],
-          uids: Set[UniqueIdentifier],
-      ): Boolean =
-        required.diff(uids).isEmpty
+          providedUids: Set[UniqueIdentifier],
+      ): Either[RequiredAuthXAuthorizations, Unit] = {
+        val missing = uids.filter(uid => !providedUids(uid) && !namespaces(uid.namespace))
+        Either.cond(missing.isEmpty, (), RequiredAuthXAuthorizations(uids = missing))
+      }
+
+      override def authorizations: RequiredAuthXAuthorizations = RequiredAuthXAuthorizations(
+        namespaces = uids.map(_.namespace),
+        uids = uids,
+      )
     }
+
     private[transaction] final case class And(
         first: RequiredAuthX,
         second: RequiredAuthX,
     ) extends RequiredAuthX {
       override def satisfiedByActualAuthorizers(
+          namespacesWithRoot: Set[Namespace],
           namespaces: Set[Namespace],
           uids: Set[UniqueIdentifier],
-      ): Boolean =
-        first.satisfiedByActualAuthorizers(namespaces, uids) &&
-          second.satisfiedByActualAuthorizers(namespaces, uids)
+      ): Either[RequiredAuthXAuthorizations, Unit] =
+        first
+          .satisfiedByActualAuthorizers(namespacesWithRoot, namespaces, uids)
+          .flatMap(_ =>
+            second
+              .satisfiedByActualAuthorizers(namespacesWithRoot, namespaces, uids)
+          )
+
+      override def authorizations: RequiredAuthXAuthorizations =
+        RequiredAuthXAuthorizations.monoid.combine(first.authorizations, second.authorizations)
     }
 
     private[transaction] final case class Or(
@@ -212,11 +276,79 @@ object TopologyMappingX {
         second: RequiredAuthX,
     ) extends RequiredAuthX {
       override def satisfiedByActualAuthorizers(
+          namespacesWithRoot: Set[Namespace],
           namespaces: Set[Namespace],
           uids: Set[UniqueIdentifier],
-      ): Boolean =
-        first.satisfiedByActualAuthorizers(namespaces, uids) ||
-          second.satisfiedByActualAuthorizers(namespaces, uids)
+      ): Either[RequiredAuthXAuthorizations, Unit] =
+        first
+          .satisfiedByActualAuthorizers(namespacesWithRoot, namespaces, uids)
+          .orElse(
+            second
+              .satisfiedByActualAuthorizers(namespacesWithRoot, namespaces, uids)
+          )
+
+      override def authorizations: RequiredAuthXAuthorizations =
+        RequiredAuthXAuthorizations.monoid.combine(first.authorizations, second.authorizations)
+    }
+
+    // small method to compute the delta between two MediatorDomainStateX or SequencerDomainStateX mappings
+    private[transaction] def requiredAuthForActivePassiveMembers(
+        current: ConsortiumLike,
+        previousState: Option[ConsortiumLike],
+    ) = previousState match {
+      case None =>
+        // this is the first transaction with serial=1
+        // domain owners and all new consortium members must sign
+        RequiredUids(
+          (Set(current.domain) ++ current.active.forgetNE ++ current.observers).map(_.uid)
+        )
+
+      case Some(previous) if previous.code == current.code && previous.domain == current.domain =>
+        val previousMembers =
+          (previous.active ++ previous.observers).map(_.uid).forgetNE.toSet
+        val currentMembers = (current.active ++ current.observers).map(_.uid).forgetNE.toSet
+        val added = currentMembers.diff(previousMembers)
+        val removed = previousMembers.diff(currentMembers)
+
+        val authForRemoval: RequiredAuthX = if (removed.nonEmpty) {
+          // mediators/sequencers can remove themselves unilaterally
+          RequiredUids(removed)
+            // or the domain operators remove them
+            .or(RequiredUids(Set(current.domain.uid)))
+        } else {
+          EmptyAuthorization
+        }
+
+        val authForAddition: RequiredAuthX = if (added.nonEmpty) {
+          // the domain owners and all new members must authorize
+          RequiredUids(added + current.domain.uid)
+        } else {
+          EmptyAuthorization
+        }
+
+        val authForThresholdChange: RequiredAuthX =
+          if (current.threshold != previous.threshold) {
+            // the threshold has changed, the domain must approve
+            RequiredUids(Set(current.domain.uid))
+          } else {
+            EmptyAuthorization
+          }
+
+        val authForActivePassiveChange: RequiredAuthX =
+          if (current.active != previous.active || current.observers != previous.observers) {
+            RequiredUids(Set(current.domain.uid))
+          } else {
+            EmptyAuthorization
+          }
+
+        authForAddition
+          .and(authForRemoval)
+          .and(authForThresholdChange)
+          .and(authForActivePassiveChange)
+
+      case Some(_unexpectedTopologyTransaction) =>
+        // TODO(#14048): proper error or ignore
+        sys.error(s"unexpected transaction data: $previousState")
     }
   }
 
@@ -285,8 +417,10 @@ final case class NamespaceDelegationX private (
 
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
-  ): RequiredAuthX =
-    RequiredNamespaces(Set(namespace), isRootDelegation = isRootDelegation)
+  ): RequiredAuthX = {
+    // All namespace delegation creations require the root delegation privilege.
+    RequiredNamespaces(Set(namespace), requireRootDelegation = true)
+  }
 
   override protected def addUniqueKeyToBuilder(builder: HashBuilder): HashBuilder =
     builder
@@ -310,14 +444,27 @@ object NamespaceDelegationX {
   def code: TopologyMappingX.Code = Code.NamespaceDelegationX
 
   /** Returns true if the given transaction is a self-signed root certificate */
-  def isRootCertificate(sit: SignedTopologyTransactionX[Replace, NamespaceDelegationX]): Boolean = {
-    sit.transaction.op == TopologyChangeOpX.Replace &&
-    sit.signatures.head1.signedBy == sit.transaction.mapping.namespace.fingerprint &&
-    sit.signatures.size == 1 &&
-    sit.transaction.mapping.isRootDelegation &&
-    sit.transaction.mapping.target.fingerprint == sit.transaction.mapping.namespace.fingerprint &&
-    // a root cert must be at serial 1
-    sit.transaction.serial == PositiveInt.one
+  def isRootCertificate(sit: GenericSignedTopologyTransactionX): Boolean = {
+    ((sit.transaction.op == TopologyChangeOpX.Replace && sit.transaction.serial == PositiveInt.one) ||
+      (sit.transaction.op == TopologyChangeOpX.Remove && sit.transaction.serial != PositiveInt.one)) &&
+    sit.transaction.mapping
+      .select[transaction.NamespaceDelegationX]
+      .exists(ns =>
+        sit.signatures.size == 1 &&
+          sit.signatures.head1.signedBy == ns.namespace.fingerprint &&
+          ns.isRootDelegation &&
+          ns.target.fingerprint == ns.namespace.fingerprint
+      )
+  }
+
+  /** Returns true if the given transaction is a root delegation */
+  def isRootDelegation(sit: GenericSignedTopologyTransactionX): Boolean = {
+    isRootCertificate(sit) || (
+      sit.transaction.op == TopologyChangeOpX.Replace &&
+        sit.transaction.mapping
+          .select[transaction.NamespaceDelegationX]
+          .exists(ns => ns.isRootDelegation)
+    )
   }
 
   def fromProtoV2(
@@ -387,8 +534,7 @@ final case class UnionspaceDefinitionX private (
           // and the quorum of existing owners
           .and(
             RequiredNamespaces(
-              previousOwners.forgetNE,
-              threshold = Some(previousThreshold),
+              previousOwners.forgetNE
             )
           )
       case Some(topoTx) =>
@@ -479,8 +625,7 @@ final case class IdentifierDelegationX(identifier: UniqueIdentifier, target: Sig
 
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
-  ): RequiredAuthX =
-    RequiredNamespaces(Set(namespace), isRootDelegation = false)
+  ): RequiredAuthX = RequiredUids(Set(identifier))
 
   override protected def addUniqueKeyToBuilder(builder: HashBuilder): HashBuilder =
     builder
@@ -637,20 +782,22 @@ object DomainTrustCertificateX {
 
 /* Participant domain permission
  */
-sealed trait ParticipantPermissionX extends Product with Serializable {
+sealed abstract class ParticipantPermissionX(val canConfirm: Boolean)
+    extends Product
+    with Serializable {
   def toProtoV2: v2.ParticipantPermissionX
   def toNonX: ParticipantPermission
 }
 object ParticipantPermissionX {
-  case object Submission extends ParticipantPermissionX {
+  case object Submission extends ParticipantPermissionX(canConfirm = true) {
     lazy val toProtoV2 = v2.ParticipantPermissionX.Submission
     override def toNonX: ParticipantPermission = ParticipantPermission.Submission
   }
-  case object Confirmation extends ParticipantPermissionX {
+  case object Confirmation extends ParticipantPermissionX(canConfirm = true) {
     lazy val toProtoV2 = v2.ParticipantPermissionX.Confirmation
     override def toNonX: ParticipantPermission = ParticipantPermission.Confirmation
   }
-  case object Observation extends ParticipantPermissionX {
+  case object Observation extends ParticipantPermissionX(canConfirm = false) {
     lazy val toProtoV2 = v2.ParticipantPermissionX.Observation
     override def toNonX: ParticipantPermission = ParticipantPermission.Observation
   }
@@ -664,6 +811,15 @@ object ParticipantPermissionX {
       case v2.ParticipantPermissionX.Observation => Right(Observation)
       case v2.ParticipantPermissionX.Unrecognized(x) => Left(UnrecognizedEnum(value.name, x))
     }
+
+  implicit val orderingParticipantPermissionX: Ordering[ParticipantPermissionX] = {
+    val participantPermissionXOrderMap = Seq[ParticipantPermissionX](
+      Observation,
+      Confirmation,
+      Submission,
+    ).zipWithIndex.toMap
+    Ordering.by[ParticipantPermissionX, Int](participantPermissionXOrderMap(_))
+  }
 }
 
 sealed trait TrustLevelX {
@@ -685,6 +841,12 @@ object TrustLevelX {
     case v2.TrustLevelX.Vip => Right(Vip)
     case v2.TrustLevelX.MissingTrustLevel => Left(FieldNotSet(value.name))
     case v2.TrustLevelX.Unrecognized(x) => Left(UnrecognizedEnum(value.name, x))
+  }
+
+  implicit val orderingTrustLevelX: Ordering[TrustLevelX] = {
+    val participantTrustLevelXOrderMap =
+      Seq[TrustLevelX](Ordinary, Vip).zipWithIndex.toMap
+    Ordering.by[TrustLevelX, Int](participantTrustLevelXOrderMap(_))
   }
 }
 
@@ -1122,7 +1284,8 @@ final case class MediatorDomainStateX private (
     threshold: PositiveInt,
     active: NonEmpty[Seq[MediatorId]],
     observers: Seq[MediatorId],
-) extends TopologyMappingX {
+) extends TopologyMappingX
+    with ConsortiumLike {
 
   lazy val allMediatorsInGroup = active ++ observers
 
@@ -1145,7 +1308,7 @@ final case class MediatorDomainStateX private (
       )
     )
 
-  def code: TopologyMappingX.Code = Code.MediatorDomainStateX
+  override def code: TopologyMappingX.Code = Code.MediatorDomainStateX
 
   override def namespace: Namespace = domain.uid.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(domain.uid)
@@ -1154,59 +1317,10 @@ final case class MediatorDomainStateX private (
 
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
-  ): RequiredAuthX = previous match {
-    case None =>
-      // this is the first transaction with serial=1
-      RequiredUids((Set(domain) ++ active.forgetNE ++ observers).map(_.uid))
-
-    case Some(
-          TopologyTransactionX(
-            _op,
-            _serial,
-            MediatorDomainStateX(
-              `domain`,
-              _group,
-              previousThreshold,
-              previouslyActive,
-              previousObservers,
-            ),
-          )
-        ) =>
-      val previousMediators = (previouslyActive ++ previousObservers).map(_.uid).forgetNE.toSet
-      val currentMediators = (this.active ++ this.observers).map(_.uid).forgetNE.toSet
-      val added = currentMediators.diff(previousMediators)
-      val removed = previousMediators.diff(currentMediators)
-
-      val authForRemoval: RequiredAuthX = if (removed.nonEmpty) {
-        // mediators can remove themselves unilaterally
-        RequiredUids(removed)
-          // or the domain operators remove them
-          .or(RequiredUids(Set(domain.uid)))
-      } else {
-        EmptyAuthorization
-      }
-
-      val authForAddition: RequiredAuthX = if (added.nonEmpty) {
-        // the domain owners and all new members must authorize
-        RequiredUids(added + domain.uid)
-      } else {
-        EmptyAuthorization
-      }
-
-      val authForThresholdChange: RequiredAuthX =
-        if (this.threshold != previousThreshold) {
-          // the threshold has changed, the domain must approve
-          RequiredUids(Set(domain.uid))
-        } else {
-          EmptyAuthorization
-        }
-
-      authForAddition.and(authForRemoval).and(authForThresholdChange)
-
-    case Some(_unexpectedTopologyTransaction) =>
-      // TODO(#14048): proper error or ignore
-      sys.error(s"unexpected transaction data: $previous")
-  }
+  ): RequiredAuthX = RequiredAuthX.requiredAuthForActivePassiveMembers(
+    this,
+    previous.flatMap(_.mapping.select[MediatorDomainStateX]),
+  )
 }
 
 object MediatorDomainStateX {
@@ -1254,6 +1368,14 @@ object MediatorDomainStateX {
 
 }
 
+trait ConsortiumLike {
+  def domain: DomainId
+  def threshold: PositiveInt
+  def active: NonEmpty[Seq[Member]]
+  def observers: Seq[Member]
+  def code: TopologyMappingX.Code
+}
+
 /** which sequencers are active on the given domain
   *
   * authorization: whoever controls the domain and all the owners of the active or observing sequencers that
@@ -1267,7 +1389,8 @@ final case class SequencerDomainStateX private (
     threshold: PositiveInt,
     active: NonEmpty[Seq[SequencerId]],
     observers: Seq[SequencerId],
-) extends TopologyMappingX {
+) extends TopologyMappingX
+    with ConsortiumLike {
 
   lazy val allSequencers = active ++ observers
 
@@ -1298,8 +1421,10 @@ final case class SequencerDomainStateX private (
 
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
-  ): RequiredAuthX = ???
-
+  ): RequiredAuthX = RequiredAuthX.requiredAuthForActivePassiveMembers(
+    this,
+    previous.flatMap(_.mapping.select[SequencerDomainStateX]),
+  )
 }
 
 object SequencerDomainStateX {

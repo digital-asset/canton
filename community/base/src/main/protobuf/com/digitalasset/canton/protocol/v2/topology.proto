@@ -36,6 +36,8 @@ enum ParticipantPermissionX {
 }
 
 // namespace delegation (equivalent to X509v3 CA root or intermediate CAs)
+// if is_root_delegation==false, the target key may sign all mappings requiring a signature
+// for the namespace except other NamespaceDelegationX mappings.
 // authorization: a namespace delegation is either signed by the root key, or is signed by
 //   a key for which there exists a series of properly authorized namespace delegations
 //   that are ultimately signed by the root key

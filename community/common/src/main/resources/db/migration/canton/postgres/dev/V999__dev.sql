@@ -71,8 +71,12 @@ CREATE TABLE topology_transactions_x (
     -- (redundant also embedded in instance)
     is_proposal boolean not null,
     representative_protocol_version integer not null,
+    -- the hash of the transaction's signatures. this disambiguates multiple transactions/proposals with the same
+    -- tx_hash but different signatures
+    hash_of_signatures varchar(300) collate "C" not null,
     -- index used for idempotency during crash recovery
-    unique (store_id, mapping_key_hash, serial_counter, valid_from, operation, representative_protocol_version)
+    -- TODO(#12390) should mapping_key_hash rather be tx_hash?
+    unique (store_id, mapping_key_hash, serial_counter, valid_from, operation, representative_protocol_version, hash_of_signatures)
 );
 CREATE INDEX topology_transactions_x_idx ON topology_transactions_x (store_id, transaction_type, namespace, identifier, valid_until, valid_from);
 -- TODO(#14061): Decide whether we want additional indices by mapping_key_hash and tx_hash (e.g. for update/removal and lookups)

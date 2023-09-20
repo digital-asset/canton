@@ -69,8 +69,8 @@ trait PostgresAround {
     }
   }
 
-  protected def createNewRandomDatabase(): PostgresDatabase =
-    executeAdminStatement(server.get()) { statement =>
+  protected def createNewRandomDatabase(): PostgresDatabase = {
+    val database = executeAdminStatement(server.get()) { statement =>
       val databaseName = UUID.randomUUID().toString
       statement.execute(s"CREATE DATABASE \"$databaseName\"")
       statement.execute(s"CREATE USER \"$databaseName-user\" WITH PASSWORD 'user'")
@@ -79,6 +79,11 @@ trait PostgresAround {
       )
       PostgresDatabase(server.get(), databaseName, s"$databaseName-user", "user")
     }
+    executeAdminStatement(server.get().copy(baseDatabase = database.databaseName))(
+      _.execute(s"GRANT ALL ON SCHEMA public TO \"${database.userName}\"")
+    )
+    database
+  }
 
   protected def dropDatabase(database: PostgresDatabase): Unit =
     executeAdminStatement(server.get()) { statement =>

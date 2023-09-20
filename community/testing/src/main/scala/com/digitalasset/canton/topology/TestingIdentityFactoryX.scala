@@ -605,7 +605,7 @@ class TestingOwnerWithKeysX(
 
   def mkTrans[Op <: TopologyChangeOpX, M <: TopologyMappingX](
       trans: TopologyTransactionX[Op, M],
-      signingKey: SigningPublicKey = SigningKeys.key1,
+      signingKeys: NonEmpty[Set[SigningPublicKey]] = NonEmpty(Set, SigningKeys.key1),
       isProposal: Boolean = false,
   )(implicit
       ec: ExecutionContext
@@ -615,7 +615,7 @@ class TestingOwnerWithKeysX(
         SignedTopologyTransactionX
           .create(
             trans,
-            NonEmpty(Set, signingKey.id),
+            signingKeys.map(_.id),
             isProposal,
             cryptoApi.crypto.pureCrypto,
             cryptoApi.crypto.privateCrypto,
@@ -634,6 +634,16 @@ class TestingOwnerWithKeysX(
   )(implicit
       ec: ExecutionContext
   ): SignedTopologyTransactionX[TopologyChangeOpX.Replace, M] =
+    mkAddMultiKey(mapping, NonEmpty(Set, signingKey), serial, isProposal)
+
+  def mkAddMultiKey[M <: TopologyMappingX](
+      mapping: M,
+      signingKeys: NonEmpty[Set[SigningPublicKey]] = NonEmpty(Set, SigningKeys.key1),
+      serial: PositiveInt = PositiveInt.one,
+      isProposal: Boolean = false,
+  )(implicit
+      ec: ExecutionContext
+  ): SignedTopologyTransactionX[TopologyChangeOpX.Replace, M] =
     mkTrans(
       TopologyTransactionX(
         TopologyChangeOpX.Replace,
@@ -641,7 +651,7 @@ class TestingOwnerWithKeysX(
         mapping,
         BaseTest.testedProtocolVersion,
       ),
-      signingKey,
+      signingKeys,
       isProposal,
     )
   private def genSignKey(name: String): SigningPublicKey =

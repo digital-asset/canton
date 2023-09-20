@@ -84,7 +84,10 @@ class TopologyAdministrationGroupX(
   @Help.Group("All Transactions")
   object transactions {
 
-    // TODO(#12390): add doc annotations
+    @Help.Summary("Downloads the node's topology identity transactions")
+    @Help.Description(
+      "The node's identity is defined by topology transactions of type NamespaceDelegationX and OwnerToKeyMappingX."
+    )
     def identity_transactions()
         : Seq[SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]] = {
       val txs = instance.topology.transactions.list()

@@ -20,10 +20,11 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.admin.grpc.PrivateKeyMetadata
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
 import com.digitalasset.canton.topology.{KeyOwner, KeyOwnerCode}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.BinaryFileUtil
+import com.digitalasset.canton.util.{BinaryFileUtil, OptionUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
@@ -44,12 +45,18 @@ class SecretKeyAdministration(
 
   import runner.*
 
-  protected def regenerateKey(currentKey: PublicKey): PublicKey = {
+  protected def regenerateKey(currentKey: PublicKey, name: Option[String]): PublicKey = {
     currentKey match {
       case encKey: EncryptionPublicKey =>
-        instance.keys.secret.generate_encryption_key(scheme = Some(encKey.scheme))
+        instance.keys.secret.generate_encryption_key(
+          scheme = Some(encKey.scheme),
+          name = OptionUtil.noneAsEmptyString(name),
+        )
       case signKey: SigningPublicKey =>
-        instance.keys.secret.generate_signing_key(scheme = Some(signKey.scheme))
+        instance.keys.secret.generate_signing_key(
+          scheme = Some(signKey.scheme),
+          name = OptionUtil.noneAsEmptyString(name),
+        )
       case unknown => throw new IllegalArgumentException(s"Invalid public key type: $unknown")
     }
   }
@@ -176,11 +183,19 @@ class SecretKeyAdministration(
       signing key CANNOT be rotated by this command.
       |The fingerprint of the key we want to rotate."""
   )
-  def rotate_node_key(fingerprint: String): PublicKey = {
+  def rotate_node_key(fingerprint: String, name: Option[String] = None): PublicKey = {
     val owner = instance.id.keyOwner
 
     val currentKey = findPublicKey(fingerprint, instance.topology, owner)
-    val newKey = regenerateKey(currentKey)
+
+    val newKey = name match {
+      case Some(_) => regenerateKey(currentKey, name)
+      case None =>
+        regenerateKey(
+          currentKey,
+          generateNewNameForRotatedKey(fingerprint, consoleEnvironment.environment.clock),
+        )
+    }
 
     // Rotate the key for the node in the topology management
     instance.topology.owner_to_key_mappings.rotate_key(
@@ -208,7 +223,14 @@ class SecretKeyAdministration(
     val currentKeys = findPublicKeys(instance.topology, owner)
 
     currentKeys.foreach { currentKey =>
-      val newKey = regenerateKey(currentKey)
+      val newKey =
+        regenerateKey(
+          currentKey,
+          generateNewNameForRotatedKey(
+            currentKey.fingerprint.unwrap,
+            consoleEnvironment.environment.clock,
+          ),
+        )
 
       // Rotate the key for the node in the topology management
       instance.topology.owner_to_key_mappings.rotate_key(
@@ -248,6 +270,29 @@ class SecretKeyAdministration(
           "Impossible to encounter topology admin group besides X and non-X"
         )
     }
+
+  /** Helper to name new keys generated during a rotation with a ...-rotated-<timestamp> tag to better identify
+    * the new keys after a rotation
+    */
+  protected def generateNewNameForRotatedKey(
+      currentKeyId: String,
+      clock: Clock,
+  ): Option[String] = {
+    val keyName = instance.keys.secret
+      .list()
+      .find(_.publicKey.fingerprint.unwrap == currentKeyId)
+      .flatMap(_.name)
+
+    val rotatedKeyRegExp = "(.*-rotated).*".r
+
+    keyName.map(_.unwrap) match {
+      case Some(rotatedKeyRegExp(currentName)) =>
+        Some(s"$currentName-${clock.now.show}")
+      case Some(currentName) =>
+        Some(s"$currentName-rotated-${clock.now.show}")
+      case None => None
+    }
+  }
 
   @Help.Summary("Change the wrapper key for encrypted private keys store")
   @Help.Description(

@@ -466,7 +466,7 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
       traceContext: TraceContext
   ): Future[Option[GenericStoredTopologyTransactionX]] =
     allTransactions(includeRejected).map(
-      _.result.find(_.transaction.transaction.hash == transaction.transaction.hash)
+      _.result.findLast(_.transaction.transaction.hash == transaction.transaction.hash)
     )
 
   override def findStoredForVersion(
@@ -476,7 +476,7 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
       traceContext: TraceContext
   ): Future[Option[GenericStoredTopologyTransactionX]] =
     allTransactions().map(
-      _.result.find(tx =>
+      _.result.findLast(tx =>
         tx.transaction.transaction == transaction && tx.transaction.representativeProtocolVersion == TopologyTransactionX
           .protocolVersionRepresentativeFor(protocolVersion)
       )

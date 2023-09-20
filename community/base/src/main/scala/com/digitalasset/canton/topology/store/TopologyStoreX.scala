@@ -204,8 +204,9 @@ abstract class TopologyStoreX[+StoreID <: TopologyStoreId](implicit
     findStored(transaction).map(_.forall { inStore =>
       // check whether source still could provide an additional signature
       transaction.signatures.diff(inStore.transaction.signatures.forgetNE).nonEmpty &&
-      // but only if the transaction in the target store is a proposal
-      inStore.transaction.isProposal
+      // but only if the transaction in the target store is a valid proposal
+      inStore.transaction.isProposal &&
+      inStore.validUntil.isEmpty
     })
   }
 
