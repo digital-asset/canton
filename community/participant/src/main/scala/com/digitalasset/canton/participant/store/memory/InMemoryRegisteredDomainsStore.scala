@@ -29,7 +29,7 @@ class InMemoryRegisteredDomainsStore(override protected val loggerFactory: Named
 
   private val lock = new Object()
 
-  private implicit val ec: ExecutionContext = DirectExecutionContext(logger)
+  private implicit val ec: ExecutionContext = DirectExecutionContext(noTracingLogger)
 
   override def addMapping(alias: DomainAlias, domainId: DomainId)(implicit
       traceContext: TraceContext

@@ -144,12 +144,17 @@ object TopologyMappingX {
       namespacesWithRoot: Set[Namespace] = Set.empty,
       namespaces: Set[Namespace] = Set.empty,
       uids: Set[UniqueIdentifier] = Set.empty,
-  )
+  ) {
+    def isEmpty: Boolean = namespacesWithRoot.isEmpty && namespaces.isEmpty && uids.isEmpty
+  }
 
   object RequiredAuthXAuthorizations {
+
+    val empty: RequiredAuthXAuthorizations = RequiredAuthXAuthorizations()
+
     implicit val monoid: Monoid[RequiredAuthXAuthorizations] =
       new Monoid[RequiredAuthXAuthorizations] {
-        override def empty: RequiredAuthXAuthorizations = RequiredAuthXAuthorizations()
+        override def empty: RequiredAuthXAuthorizations = RequiredAuthXAuthorizations.empty
 
         override def combine(
             x: RequiredAuthXAuthorizations,
@@ -176,7 +181,7 @@ object TopologyMappingX {
     final def or(next: RequiredAuthX): RequiredAuthX =
       RequiredAuthX.Or(this, next)
 
-    final def fold[T](
+    final def foldMap[T](
         namespaceCheck: RequiredNamespaces => T,
         uidCheck: RequiredUids => T,
     )(implicit T: Monoid[T]): T = {

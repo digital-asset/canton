@@ -515,8 +515,8 @@ class DbActiveContractStore(
     }
   }
 
-  override def doPrune(beforeAndIncluding: CantonTimestamp)(implicit
-      traceContext: TraceContext
+  override def doPrune(beforeAndIncluding: CantonTimestamp, lastPruning: Option[CantonTimestamp])(
+      implicit traceContext: TraceContext
   ): Future[Unit] = processingTime.event {
     // For each contract select the last deactivation before or at the timestamp.
     // If such a deactivation exists then delete all acs records up to and including the deactivation

@@ -140,12 +140,12 @@ class TransactionViewDecompositionTest
 
       val expected = List(
         RbNewTree(
-          rbScope(1),
+          rbScope(PositiveInt.one),
           Set(alice),
           List[RollbackDecomposition](
-            RbSameTree(rbScope(1)),
-            RbNewTree(rbScope(1, 1), Set(alice, carol)),
-            RbNewTree(rbScope(2), Set(alice, bob)),
+            RbSameTree(rbScope(PositiveInt.one)),
+            RbNewTree(rbScope(PositiveInt.one, PositiveInt.one), Set(alice, carol)),
+            RbNewTree(rbScope(PositiveInt.two), Set(alice, bob)),
           ),
         )
       )
@@ -166,6 +166,52 @@ class TransactionViewDecompositionTest
 
         actual shouldBe expected
       }
+    }
+
+    "new view counting" can {
+      object tif extends TestIdFactory
+      val node = exerciseNode(tif.newCid, signatories = Set.empty)
+      val sameView = SameView(node, LfNodeId(0), RollbackContext.empty)
+      var nextThreshold: NonNegativeInt = NonNegativeInt.zero
+      def newView(children: TransactionViewDecomposition*): NewView = {
+        // Trick: Use unique thresholds to get around NewView nesting check
+        // that requires informees or thresholds to differ.
+        nextThreshold = nextThreshold + NonNegativeInt.one
+        NewView(
+          node,
+          Set.empty,
+          nextThreshold,
+          None,
+          LfNodeId(0),
+          children,
+          RollbackContext.empty,
+        )
+      }
+
+      "deal with empty transactions" in {
+        TransactionViewDecomposition.countNestedViews(Seq.empty) shouldBe 0
+      }
+
+      "count single view" in {
+        TransactionViewDecomposition.countNestedViews(Seq(newView())) shouldBe 1
+      }
+
+      "not count same view" in {
+        TransactionViewDecomposition.countNestedViews(Seq(newView(sameView))) shouldBe 1
+      }
+
+      "count multiple sibling views" in {
+        TransactionViewDecomposition.countNestedViews(
+          Seq(newView(newView(), sameView, newView(), sameView, newView()))
+        ) shouldBe 4
+      }
+
+      "count nested views" in {
+        TransactionViewDecomposition.countNestedViews(
+          Seq(newView(newView(newView(newView())), sameView, newView(newView(), newView())))
+        ) shouldBe 7
+      }
+
     }
 
   }

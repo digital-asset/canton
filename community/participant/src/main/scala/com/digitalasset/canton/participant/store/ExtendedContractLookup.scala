@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.store
 
 import cats.data.{EitherT, OptionT}
 import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.protocol.{LfContractId, LfGlobalKey}
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -32,8 +31,6 @@ class ExtendedContractLookup(
       s"Tried to store contract $storedContract under the wrong id $id",
     )
   }
-
-  protected[store] override def logger: TracedLogger = backingContractLookup.logger
 
   override def lookup(
       id: LfContractId

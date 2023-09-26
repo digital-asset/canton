@@ -86,7 +86,7 @@ private[index] class IndexServiceImpl(
 ) extends IndexService
     with NamedLogging {
 
-  private val directEc = DirectExecutionContext(logger)
+  private val directEc = DirectExecutionContext(noTracingLogger)
 
   // An Akka stream buffer is added at the end of all streaming queries,
   // allowing to absorb temporary downstream backpressure.

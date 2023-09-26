@@ -9,6 +9,8 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.*
 
+import scala.annotation.tailrec
+
 /** Wrapper type for elements of a view decomposition
   */
 sealed trait TransactionViewDecomposition extends Product with Serializable with PrettyPrinting {
@@ -90,5 +92,21 @@ object TransactionViewDecomposition {
       param("node ID", _.nodeId),
       param("rollback context", _.rbContext),
     )
+  }
+
+  // Count all the NewViews representing actual views (in contrast to SameViews that are part of their parent)
+  @tailrec
+  def countNestedViews(views: Seq[TransactionViewDecomposition], count: Int = 0): Int = {
+    views match {
+      case head +: rest =>
+        head match {
+          case (newView: TransactionViewDecomposition.NewView) =>
+            countNestedViews(newView.tailNodes ++ rest, count + 1)
+          case (_: TransactionViewDecomposition.SameView) =>
+            countNestedViews(rest, count)
+        }
+      case _ => // scala compiler is not happy matching on Seq() thinking that there is some other missing case
+        count
+    }
   }
 }

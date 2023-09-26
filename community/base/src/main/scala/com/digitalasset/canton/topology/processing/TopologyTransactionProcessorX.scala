@@ -8,7 +8,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto.CryptoPureApi
+import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -36,9 +36,10 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class TopologyTransactionProcessorX(
     domainId: DomainId,
-    cryptoPureApi: CryptoPureApi,
+    crypto: Crypto,
     store: TopologyStoreX[TopologyStoreId.DomainStore],
     acsCommitmentScheduleEffectiveTime: Traced[CantonTimestamp] => Unit,
+    enableTopologyTransactionValidation: Boolean,
     futureSupervisor: FutureSupervisor,
     timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
@@ -54,7 +55,13 @@ class TopologyTransactionProcessorX(
 
   override type SubscriberType = TopologyTransactionProcessingSubscriberX
 
-  private val stateProcessor = new TopologyStateProcessorX(store, None, loggerFactory)
+  private val stateProcessor = new TopologyStateProcessorX(
+    store,
+    None,
+    enableTopologyTransactionValidation,
+    crypto,
+    loggerFactory,
+  )
 
   override def onClosed(): Unit = {
     super.onClosed()
@@ -102,7 +109,6 @@ class TopologyTransactionProcessorX(
           effectiveTimestamp,
           tx,
           abortIfCascading = false,
-          abortOnError = false,
           expectFullAuthorization = false,
         )
     ).merge
@@ -179,8 +185,9 @@ object TopologyTransactionProcessorX {
       topologyStore: TopologyStoreX[TopologyStoreId.DomainStore],
       domainId: DomainId,
       protocolVersion: ProtocolVersion,
-      pureCrypto: CryptoPureApi,
+      crypto: Crypto,
       parameters: CantonNodeParameters,
+      enableTopologyTransactionValidation: Boolean,
       clock: Clock,
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
@@ -189,9 +196,10 @@ object TopologyTransactionProcessorX {
   ): Future[(TopologyTransactionProcessorX, DomainTopologyClientWithInitX)] = {
     val processor = new TopologyTransactionProcessorX(
       domainId,
-      pureCrypto,
+      crypto,
       topologyStore,
       _ => (),
+      enableTopologyTransactionValidation,
       futureSupervisor,
       parameters.processingTimeouts,
       loggerFactory,

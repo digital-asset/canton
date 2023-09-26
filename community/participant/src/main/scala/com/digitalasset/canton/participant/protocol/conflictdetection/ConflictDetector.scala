@@ -123,7 +123,8 @@ private[participant] class ConflictDetector(
     */
   private[this] val pendingEvictions: TrieMap[RequestCounter, PendingEvictions] = new TrieMap()
 
-  private[this] val directExecutionContext: DirectExecutionContext = DirectExecutionContext(logger)
+  private[this] val directExecutionContext: DirectExecutionContext =
+    DirectExecutionContext(noTracingLogger)
 
   /** Registers a pending activeness set.
     * This marks all contracts and keys in the `activenessSet` with a pending activeness check.

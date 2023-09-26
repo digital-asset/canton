@@ -10,7 +10,7 @@ import "google/protobuf/timestamp.proto";
 
 // Supports transferring contracts from one domain to another
 service TransferService {
-  // transfer out a contract
+  // transfer-out a contract
   rpc TransferOut(AdminTransferOutRequest) returns (AdminTransferOutResponse);
 
   // transfer-in a contract

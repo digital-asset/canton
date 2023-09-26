@@ -120,7 +120,9 @@ final class IndexerStabilityTestFixture(loggerFactory: NamedLoggerFactory) {
           loggerFactory = loggerFactoryForIteration,
           multiDomainEnabled = false,
           startupMode = IndexerStartupMode.MigrateAndStart,
-          dataSourceProperties = None,
+          dataSourceProperties = IndexerConfig.createDataSourcePropertiesForTesting(
+            indexerConfig.ingestionParallelism.unwrap
+          ),
           highAvailability = HaConfig(
             indexerLockId = lockIdSeed,
             indexerWorkerLockId = lockIdSeed + 1,

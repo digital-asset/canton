@@ -67,7 +67,7 @@ message TransferResult {
 
   google.protobuf.Timestamp request_id = 1;
   oneof domain {
-    string origin_domain = 2; // result for transfer out request
+    string origin_domain = 2; // result for transfer-out request
     string target_domain = 3; // result for transfer-in request
   }
   repeated string informees = 4;

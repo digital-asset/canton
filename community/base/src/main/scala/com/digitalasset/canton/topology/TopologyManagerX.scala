@@ -42,6 +42,7 @@ class DomainTopologyManagerX(
     crypto: Crypto,
     override val store: TopologyStoreX[DomainStore],
     val outboxQueue: DomainOutboxQueue,
+    enableTopologyTransactionValidation: Boolean,
     timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
     loggerFactory: NamedLoggerFactory,
@@ -55,13 +56,25 @@ class DomainTopologyManagerX(
       loggerFactory,
     ) {
   override protected val processor: TopologyStateProcessorX =
-    new TopologyStateProcessorX(store, Some(outboxQueue), loggerFactory)
+    new TopologyStateProcessorX(
+      store,
+      Some(outboxQueue),
+      enableTopologyTransactionValidation,
+      crypto,
+      loggerFactory,
+    )
+
+  // When evaluating transactions against the domain store, we want to validate against
+  // the head state. We need to take all previously sequenced transactions into account, because
+  // we don't know when the submitted transaction actually gets sequenced.
+  override def timestampForValidation(): CantonTimestamp = CantonTimestamp.MaxValue
 }
 
 class AuthorizedTopologyManagerX(
     clock: Clock,
     crypto: Crypto,
     store: TopologyStoreX[AuthorizedStore],
+    enableTopologyTransactionValidation: Boolean,
     timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
     loggerFactory: NamedLoggerFactory,
@@ -75,7 +88,17 @@ class AuthorizedTopologyManagerX(
       loggerFactory,
     ) {
   override protected val processor: TopologyStateProcessorX =
-    new TopologyStateProcessorX(store, None, loggerFactory)
+    new TopologyStateProcessorX(
+      store,
+      None,
+      enableTopologyTransactionValidation,
+      crypto,
+      loggerFactory,
+    )
+
+  // for the authorized store, we take the next unique timestamp, because transactions
+  // are directly persisted into the store.
+  override def timestampForValidation(): CantonTimestamp = clock.uniqueTime()
 }
 
 abstract class TopologyManagerX[+StoreID <: TopologyStoreId](
@@ -89,6 +112,8 @@ abstract class TopologyManagerX[+StoreID <: TopologyStoreId](
     extends TopologyManagerStatus
     with NamedLogging
     with FlagCloseable {
+
+  def timestampForValidation(): CantonTimestamp
 
   // sequential queue to run all the processing that does operate on the state
   protected val sequentialQueue = new SimpleExecutionQueue(
@@ -339,13 +364,12 @@ abstract class TopologyManagerX[+StoreID <: TopologyStoreId](
       transactions: Seq[GenericSignedTopologyTransactionX],
       force: Boolean,
       expectFullAuthorization: Boolean,
-      abortOnError: Boolean = true,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
     sequentialQueue.executeE(
       {
-        val ts = clock.uniqueTime()
+        val ts = timestampForValidation()
         for {
           // validate incrementally and apply to in-memory state
           _ <- processor
@@ -354,11 +378,11 @@ abstract class TopologyManagerX[+StoreID <: TopologyStoreId](
               EffectiveTime(ts),
               transactions,
               abortIfCascading = !force,
-              abortOnError = abortOnError,
               expectFullAuthorization,
             )
             .leftMap { res =>
-              res.flatMap(_.rejectionReason).headOption match {
+              // a "duplicate rejection" is not a reason to report an error as it's just a no-op
+              res.flatMap(_.nonDuplicateRejectionReason).headOption match {
                 case Some(rejection) => rejection.toTopologyManagerError
                 case None =>
                   TopologyManagerError.InternalError

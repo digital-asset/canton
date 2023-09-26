@@ -44,7 +44,7 @@ class PingServiceTest
 
     def setupTest(recipients: Set[String], pingTimeoutMs: Long, gracePeriod: Long, tag: Int) = {
       val submitter = new MockLedgerAcs(logger, alice)
-      scheduler = Threading.singleThreadScheduledExecutor("ping-service-tests", logger)
+      scheduler = Threading.singleThreadScheduledExecutor("ping-service-tests", noTracingLogger)
       service = new PingService(
         submitter,
         aliceId,

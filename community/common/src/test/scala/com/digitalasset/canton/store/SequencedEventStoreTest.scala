@@ -476,7 +476,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest {
         fail2 <- leftOrFail(store.findRange(criterionAt, None))("at pruning point")
         failBelow <- leftOrFail(store.findRange(criterionBelow, None))("before pruning point")
       } yield {
-        val pruningStatus = PruningStatus(PruningPhase.Completed, tsPrune)
+        val pruningStatus = PruningStatus(PruningPhase.Completed, tsPrune, Some(tsPrune))
         fail2 shouldBe SequencedEventRangeOverlapsWithPruning(
           criterionAt,
           pruningStatus,

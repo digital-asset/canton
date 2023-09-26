@@ -668,7 +668,7 @@ object TopologyAdminCommandsX {
           store: String,
           serial: Option[PositiveInt] = None,
           change: TopologyChangeOpX = TopologyChangeOpX.Replace,
-          mustFullyAuthorize: Boolean = true,
+          mustFullyAuthorize: Boolean = false,
       ): Propose[M] =
         Propose(Right(mapping), signedBy, change, serial, mustFullyAuthorize, store)
 

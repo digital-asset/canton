@@ -53,7 +53,8 @@ class BaseDomainTopologyClientTest extends BaseTestWordSpec {
         .failOnShutdown(s"advance to $ts")
         .futureValue
     }
-    override implicit val executionContext: ExecutionContext = DirectExecutionContext(logger)
+    override implicit val executionContext: ExecutionContext =
+      DirectExecutionContext(noTracingLogger)
     override protected def loggerFactory: NamedLoggerFactory =
       BaseDomainTopologyClientTest.this.loggerFactory
     override protected def clock: Clock = ???

@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.store
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout}
+import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout, TopologyXConfig}
 import com.digitalasset.canton.crypto.{Crypto, CryptoPureApi}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.config.ParticipantStoreConfig
@@ -123,6 +123,7 @@ object SyncDomainPersistentState {
       clock: Clock,
       crypto: Crypto,
       parameters: ParticipantStoreConfig,
+      topologyXConfig: TopologyXConfig,
       caching: CachingConfigs,
       maxDbConnections: PositiveInt,
       processingTimeouts: ProcessingTimeout,
@@ -140,6 +141,7 @@ object SyncDomainPersistentState {
           domainId,
           protocolVersion,
           enableAdditionalConsistencyChecks,
+          topologyXConfig.enableTopologyTransactionValidation,
           domainLoggerFactory,
           processingTimeouts,
           futureSupervisor,
@@ -156,6 +158,7 @@ object SyncDomainPersistentState {
           maxDbConnections,
           processingTimeouts,
           enableAdditionalConsistencyChecks,
+          topologyXConfig.enableTopologyTransactionValidation,
           indexedStringStore,
           domainLoggerFactory,
           futureSupervisor,

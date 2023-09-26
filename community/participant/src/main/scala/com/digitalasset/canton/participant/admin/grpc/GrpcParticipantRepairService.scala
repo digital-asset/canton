@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.admin.grpc
 import better.files.*
 import cats.data.EitherT
 import cats.syntax.all.*
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
@@ -20,9 +21,13 @@ import com.digitalasset.canton.participant.admin.grpc.GrpcParticipantRepairServi
 import com.digitalasset.canton.participant.admin.inspection
 import com.digitalasset.canton.participant.admin.repair.RepairServiceError
 import com.digitalasset.canton.participant.admin.v0.*
-import com.digitalasset.canton.participant.domain.{DomainAliasManager, DomainConnectionConfig}
+import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.participant.sync.CantonSyncService
-import com.digitalasset.canton.protocol.{SerializableContract, SerializableContractWithWitnesses}
+import com.digitalasset.canton.protocol.{
+  LfContractId,
+  SerializableContract,
+  SerializableContractWithWitnesses,
+}
 import com.digitalasset.canton.topology.{DomainId, PartyId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, OptionUtil, ResourceUtil}
@@ -181,7 +186,6 @@ object GrpcParticipantRepairService {
 
 final class GrpcParticipantRepairService(
     sync: CantonSyncService,
-    aliasManager: DomainAliasManager,
     processingTimeout: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -224,6 +228,35 @@ final class GrpcParticipantRepairService(
     }
 
   private final val AcsSnapshotTemporaryFileNamePrefix = "temporary-canton-acs-snapshot"
+
+  /** purge contracts
+    */
+  override def purgeContracts(request: PurgeContractsRequest): Future[PurgeContractsResponse] = {
+    TraceContext.withNewTraceContext { implicit traceContext =>
+      val res: Either[RepairServiceError, Unit] = for {
+        cids <- request.contractIds
+          .traverse(LfContractId.fromString)
+          .leftMap(RepairServiceError.InvalidArgument.Error(_))
+        domain <- DomainAlias
+          .fromProtoPrimitive(request.domain)
+          .leftMap(_.toString)
+          .leftMap(RepairServiceError.InvalidArgument.Error(_))
+
+        cidsNE <- NonEmpty
+          .from(cids)
+          .toRight(RepairServiceError.InvalidArgument.Error("Missing contract ids to purge"))
+
+        _ <- sync.repairService
+          .purgeContracts(domain, cidsNE, request.ignoreAlreadyPurged)
+          .leftMap(RepairServiceError.ContractPurgeError.Error(domain, _))
+      } yield ()
+
+      res.fold(
+        err => Future.failed(err.asGrpcError),
+        _ => Future.successful(PurgeContractsResponse()),
+      )
+    }
+  }
 
   /** get contracts for a party
     */
@@ -461,7 +494,7 @@ final class GrpcParticipantRepairService(
               .from(grouped)
               .traverse(_.toList.traverse { case (domainId, contracts) =>
                 for {
-                  alias <- aliasManager
+                  alias <- sync.aliasManager
                     .aliasForDomainId(domainId)
                     .toRight(s"Not able to find domain alias for ${domainId.filterString}")
                   _ <- sync.repairService.addContracts(
@@ -570,7 +603,7 @@ final class GrpcParticipantRepairService(
       implicit traceContext: TraceContext
   ): Either[String, Unit] = {
     for {
-      alias <- aliasManager
+      alias <- sync.aliasManager
         .aliasForDomainId(domainId)
         .toRight(s"Not able to find domain alias for ${domainId.filterString}")
       _ <- sync.repairService.addContracts(

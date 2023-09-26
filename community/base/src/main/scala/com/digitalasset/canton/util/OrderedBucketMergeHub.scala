@@ -662,7 +662,7 @@ class OrderedBucketMergeHub[Name: Pretty, A, Config, Offset: Pretty](
           orderedSources.foreach { case (_id, source) => source.inlet.cancel() }
         }
         cause.fold(completeStage())(failStage)
-        val directExecutionContext = DirectExecutionContext(logger)
+        val directExecutionContext = DirectExecutionContext(noTracingLogger)
         completionPromise.completeWith(
           flushFutureForOrderedSources.flush().map(_ => Done)(directExecutionContext)
         )

@@ -28,11 +28,11 @@ import com.digitalasset.canton.concurrent.{DirectExecutionContext, Threading}
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext, TracedLogger}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.typesafe.config.ConfigFactory
+import com.typesafe.scalalogging.Logger
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.collection.concurrent.TrieMap
@@ -76,9 +76,8 @@ object AkkaUtil extends HasLoggerName {
 
   /** Create a new execution sequencer factory (mainly used to create a ledger client) with the existing actor system `actorSystem`
     */
-  def createExecutionSequencerFactory(namePrefix: String, logger: TracedLogger)(implicit
-      actorSystem: ActorSystem,
-      traceContext: TraceContext,
+  def createExecutionSequencerFactory(namePrefix: String, logger: Logger)(implicit
+      actorSystem: ActorSystem
   ): ExecutionSequencerFactory =
     new AkkaExecutionSequencerPool(
       namePrefix + "-execution-sequencer",

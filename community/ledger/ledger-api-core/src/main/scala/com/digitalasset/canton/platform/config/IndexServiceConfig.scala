@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.config
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
 import com.digitalasset.canton.config.{DeprecatedConfigUtils, NonNegativeFiniteDuration}
-import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.typesafe.scalalogging.Logger
 
 import scala.concurrent.duration.{Duration, FiniteDuration}
 
@@ -55,18 +55,17 @@ final case class IndexServiceConfig(
 object IndexServiceConfig {
   val DefaultBufferedEventsProcessingParallelism: Int = 8
   val DefaultBufferedStreamsPageSize: Int = 100
-  val DefaultMaxContractStateCacheSize: Long = 100000L
-  val DefaultMaxContractKeyStateCacheSize: Long = 100000L
-  val DefaultMaxTransactionsInMemoryFanOutBufferSize: Int = 10000
+  val DefaultMaxContractStateCacheSize: Long = 10000L
+  val DefaultMaxContractKeyStateCacheSize: Long = 10000L
+  val DefaultMaxTransactionsInMemoryFanOutBufferSize: Int = 1000
   val DefaultApiStreamShutdownTimeout: Duration = FiniteDuration(5, "seconds")
   val DefaultInMemoryStateUpdaterParallelism: Int = 2
   val PreparePackageMetadataTimeOutWarning: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(5)
   val DefaultCompletionsPageSize = 1000
 
-  def DefaultInMemoryFanOutThreadPoolSize(implicit loggingContext: ErrorLoggingContext): Int = {
-    val numberOfThreads =
-      Threading.detectNumberOfThreads(loggingContext.logger)(loggingContext.traceContext)
+  def DefaultInMemoryFanOutThreadPoolSize(logger: Logger): Int = {
+    val numberOfThreads = Threading.detectNumberOfThreads(logger)
     numberOfThreads / 4 + 1
   }
 }

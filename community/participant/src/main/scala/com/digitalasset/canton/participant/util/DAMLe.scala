@@ -199,7 +199,9 @@ class DAMLe(
         ledgerEffectiveTime = ledgerEffectiveTime.underlying,
       )
       for {
-        txWithMetadata <- EitherT(handleResult(ContractAndKeyLookup.noContracts(logger), result))
+        txWithMetadata <- EitherT(
+          handleResult(ContractAndKeyLookup.noContracts(noTracingLogger), result)
+        )
         (tx, _) = txWithMetadata
         singleCreate = tx.nodes.values.toList match {
           case (create: LfNodeCreate) :: Nil => create
@@ -222,7 +224,7 @@ class DAMLe(
 
     for {
       transactionWithMetadata <- reinterpret(
-        ContractAndKeyLookup.noContracts(logger),
+        ContractAndKeyLookup.noContracts(noTracingLogger),
         supersetOfSignatories,
         create,
         CantonTimestamp.Epoch,

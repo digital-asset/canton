@@ -265,9 +265,18 @@ class DbCommandDeduplicationStore(
         if (
           data.latestDefiniteAnswer == definiteAnswerEvent && (!accepted || data.latestAcceptance == definiteAnswerEvent.some)
         ) {
-          logger.debug(
-            s"Looked and found expected command deduplication data for ${changeId.hash}."
-          )
+          if (data.latestDefiniteAnswer.traceContext == definiteAnswerEvent.traceContext) {
+            logger.debug(
+              s"Looked and found expected command deduplication data for ${changeId.hash}."
+            )
+          } else {
+            // this happened after 2 years for the first time with a client, but we don't know why
+            // adding therefore this warning so maybe we can get at some point a flake to reproduce
+            // and tackle it.
+            logger.warn(
+              s"Looked and found expected command deduplication data for ${changeId.hash} but with different trace contexts ${data.latestDefiniteAnswer.traceContext} vs ${definiteAnswerEvent.traceContext}. Not a problem but unexpected."
+            )
+          }
         } else {
           def error(): Unit = {
             ErrorUtil.internalError(

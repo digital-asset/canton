@@ -17,7 +17,8 @@ class InMemoryCursorPreheadStore[Discr](protected val loggerFactory: NamedLogger
     extends CursorPreheadStore[Discr]
     with NamedLogging {
 
-  override private[store] implicit val ec: ExecutionContext = DirectExecutionContext(logger)
+  override private[store] implicit val ec: ExecutionContext =
+    DirectExecutionContext(noTracingLogger)
 
   private val preheadRef = new AtomicReference[Option[CursorPrehead[Discr]]](None)
 

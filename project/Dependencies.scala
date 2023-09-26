@@ -44,8 +44,12 @@ object Dependencies {
   lazy val netty_version = "4.1.72.Final"
 
   lazy val reflections = "org.reflections" % "reflections" % "0.9.12"
-  lazy val pureconfig = "com.github.pureconfig" %% "pureconfig" % pureconfig_version
+  lazy val pureconfig_core =
+    "com.github.pureconfig" %% "pureconfig-core" % pureconfig_version exclude ("com.chuusai", s"shapeless_$scala_version_short")
   lazy val pureconfig_cats = "com.github.pureconfig" %% "pureconfig-cats" % pureconfig_version
+  lazy val pureconfig_generic =
+    "com.github.pureconfig" %% "pureconfig-generic" % pureconfig_version exclude ("com.chuusai", s"shapeless_$scala_version_short")
+  lazy val pureconfig_macros = "com.github.pureconfig" %% "pureconfig-macros" % pureconfig_version
 
   lazy val scala_collection_contrib =
     "org.scala-lang.modules" %% "scala-collection-contrib" % "0.2.2"
@@ -53,7 +57,7 @@ object Dependencies {
   lazy val scala_compiler = "org.scala-lang" % "scala-compiler" % scala_version
   lazy val shapeless = "com.chuusai" %% "shapeless" % "2.3.6"
 
-  lazy val monocle_version = "3.1.0"
+  lazy val monocle_version = "3.2.0"
   lazy val monocle_core = "dev.optics" %% "monocle-core" % monocle_version
   lazy val monocle_macro = "dev.optics" %% "monocle-macro" % monocle_version
 
@@ -108,7 +112,7 @@ object Dependencies {
   lazy val akka_http_testkit = "com.typesafe.akka" %% "akka-http-testkit" % akka_http_version
 
   lazy val spray_json_derived_codecs =
-    "io.github.paoloboni" %% "spray-json-derived-codecs" % "2.3.10"
+    "io.github.paoloboni" %% "spray-json-derived-codecs" % "2.3.10" exclude ("com.chuusai", s"shapeless_$scala_version_short")
 
   lazy val scala_logging =
     "com.typesafe.scala-logging" %% "scala-logging" % "3.9.5" excludeAll (incompatibleLogging: _*)
@@ -136,20 +140,24 @@ object Dependencies {
   lazy val janino = "org.codehaus.janino" % "janino" % "3.1.4"
   lazy val logstash = "net.logstash.logback" % "logstash-logback-encoder" % "6.6"
 
-  lazy val cats = "org.typelevel" %% "cats-core" % "2.8.0"
-  lazy val cats_law = "org.typelevel" %% "cats-laws" % "2.8.0"
+  lazy val cats = "org.typelevel" %% "cats-core" % "2.9.0"
+  lazy val cats_law = "org.typelevel" %% "cats-laws" % "2.9.0"
   lazy val cats_scalacheck = "io.chrisdavenport" %% "cats-scalacheck" % "0.3.2"
 
   lazy val chimney = "io.scalaland" %% "chimney" % "0.6.1"
 
   lazy val magnolia = "com.softwaremill.magnolia1_2" %% "magnolia" % "1.1.3"
-  lazy val magnolifyShared = "com.spotify" % "magnolify-shared_2.13" % "0.6.2"
-  lazy val magnolifyScalacheck = "com.spotify" % "magnolify-scalacheck_2.13" % "0.6.2"
+  lazy val magnolifyShared =
+    "com.spotify" % "magnolify-shared_2.13" % "0.6.2" exclude ("com.chuusai", s"shapeless_$scala_version_short")
+  lazy val magnolifyScalacheck =
+    "com.spotify" % "magnolify-scalacheck_2.13" % "0.6.2" exclude ("com.chuusai", s"shapeless_$scala_version_short")
 
   // TODO(#10852) yet another json library
   lazy val circe_core = "io.circe" %% "circe-core" % circe_version
-  lazy val circe_generic = "io.circe" %% "circe-generic" % circe_version
-  lazy val circe_generic_extras = "io.circe" %% "circe-generic-extras" % circe_version
+  lazy val circe_generic =
+    "io.circe" %% "circe-generic" % circe_version exclude ("com.chuusai", s"shapeless_$scala_version_short")
+  lazy val circe_generic_extras =
+    "io.circe" %% "circe-generic-extras" % circe_version exclude ("com.chuusai", s"shapeless_$scala_version_short")
   lazy val circe_parser = "io.circe" %% "circe-parser" % circe_version
   lazy val circe_yaml = "io.circe" %% "circe-yaml" % circe_version
 

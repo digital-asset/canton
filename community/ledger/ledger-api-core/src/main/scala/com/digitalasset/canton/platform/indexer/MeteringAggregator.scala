@@ -95,7 +95,7 @@ class MeteringAggregator(
 )(implicit traceContext: TraceContext)
     extends NamedLogging {
 
-  private val directEc = DirectExecutionContext(logger)
+  private val directEc = DirectExecutionContext(noTracingLogger)
 
   private implicit val loggingContext: LoggingContextWithTrace =
     LoggingContextWithTrace(traceContext)(LoggingContext.empty)

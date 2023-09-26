@@ -171,14 +171,14 @@ object ArbitraryConfig {
 
   val postgresDataSourceConfig = for {
     synchronousCommit <- Gen.option(Gen.oneOf(SynchronousCommitValue.All))
-    tcpKeepalivesIdle <- Gen.option(Gen.chooseNum(0, Int.MaxValue))
-    tcpKeepalivesInterval <- Gen.option(Gen.chooseNum(0, Int.MaxValue))
-    tcpKeepalivesCount <- Gen.option(Gen.chooseNum(0, Int.MaxValue))
+    tcpKeepalivesIdle <- Gen.chooseNum(0, Int.MaxValue)
+    tcpKeepalivesInterval <- Gen.chooseNum(0, Int.MaxValue)
+    tcpKeepalivesCount <- Gen.chooseNum(0, Int.MaxValue)
   } yield PostgresDataSourceConfig(
     synchronousCommit,
-    tcpKeepalivesIdle,
-    tcpKeepalivesInterval,
-    tcpKeepalivesCount,
+    Some(tcpKeepalivesIdle),
+    Some(tcpKeepalivesInterval),
+    Some(tcpKeepalivesCount),
   )
 
   val dataSourceProperties = for {

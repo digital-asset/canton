@@ -402,7 +402,7 @@ class DbMultiDomainEventLog private[db] (
           .map { case (_rc, tse) =>
             PendingEventPublish(tse, tse.timestamp, id)
           }
-          .sortBy(pending => pending.rc)
+          .sortBy(_.event.localOffset)
       }
     }
   }

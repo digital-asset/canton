@@ -88,9 +88,7 @@ final class IndexServiceOwner(
       inMemoryFanOutExecutionContext <- buildInMemoryFanOutExecutionContext(
         metrics = metrics,
         threadPoolSize = config.inMemoryFanOutThreadPoolSize.getOrElse(
-          IndexServiceConfig.DefaultInMemoryFanOutThreadPoolSize(
-            errorLoggingContext(TraceContext.empty)
-          )
+          IndexServiceConfig.DefaultInMemoryFanOutThreadPoolSize(noTracingLogger)
         ),
       ).acquire()
 

@@ -107,7 +107,7 @@ trait TestEssentials
     * As there are many implementations of DirectExecutionContext, this is provided as a convenience field,
     * so that tests don't have to deal with imports.
     */
-  lazy val directExecutionContext: ExecutionContext = DirectExecutionContext(logger)
+  lazy val directExecutionContext: ExecutionContext = DirectExecutionContext(noTracingLogger)
 }
 
 /** Base traits for tests. Makes syntactic sugar and logging available.

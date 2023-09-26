@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.admin.repair
 
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
+import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.RepairServiceErrorGroup
 import com.digitalasset.canton.error.{BaseCantonError, CantonError}
@@ -134,4 +135,20 @@ object RepairServiceError extends RepairServiceErrorGroup {
         with RepairServiceError
   }
 
+  @Explanation(
+    "A contract cannot be purged due to an error."
+  )
+  @Resolution(
+    "Retry after operator intervention."
+  )
+  object ContractPurgeError
+      extends ErrorCode(
+        id = "CONTRACT_PURGE_ERROR",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    final case class Error(domain: DomainAlias, reason: String)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(cause = reason)
+        with RepairServiceError
+  }
 }

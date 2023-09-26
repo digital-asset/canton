@@ -79,6 +79,7 @@ trait IndexComponentTest extends AkkaBeforeAndAfterAll with BaseTest {
     implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
 
     val testReadService = new TestReadService()
+    val indexerConfig = IndexerConfig()
 
     val indexResourceOwner =
       for {
@@ -95,7 +96,7 @@ trait IndexComponentTest extends AkkaBeforeAndAfterAll with BaseTest {
           participantId = Ref.ParticipantId.assertFromString("index-component-test-participant-id"),
           participantDataSourceConfig = ParticipantDataSourceConfig(jdbcUrl),
           readService = testReadService,
-          config = IndexerConfig(),
+          config = indexerConfig,
           metrics = Metrics.ForTesting,
           inMemoryState = inMemoryState,
           inMemoryStateUpdaterFlow = updaterFlow,
@@ -104,7 +105,9 @@ trait IndexComponentTest extends AkkaBeforeAndAfterAll with BaseTest {
           loggerFactory = loggerFactory,
           multiDomainEnabled = multiDomainEnabled,
           startupMode = DefaultIndexerStartupMode,
-          dataSourceProperties = None,
+          dataSourceProperties = IndexerConfig.createDataSourcePropertiesForTesting(
+            indexerConfig.ingestionParallelism.unwrap
+          ),
           highAvailability = HaConfig(),
         )
         dbSupport <- DbSupport

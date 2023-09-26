@@ -9,6 +9,7 @@ import cats.syntax.bifunctor.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.TopologyXConfig
 import com.digitalasset.canton.crypto.{Crypto, CryptoPureApi}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.environment.{
@@ -370,6 +371,7 @@ class SyncDomainPersistentStateManagerX(
     storage: Storage,
     indexedStringStore: IndexedStringStore,
     parameters: ParticipantNodeParameters,
+    topologyXConfig: TopologyXConfig,
     crypto: Crypto,
     clock: Clock,
     futureSupervisor: FutureSupervisor,
@@ -395,6 +397,7 @@ class SyncDomainPersistentStateManagerX(
       clock,
       crypto,
       parameters.stores,
+      topologyXConfig,
       parameters.cachingConfigs,
       parameters.maxDbConnections,
       parameters.processingTimeouts,
@@ -408,11 +411,12 @@ class SyncDomainPersistentStateManagerX(
     get(domainId).map(state =>
       new TopologyComponentFactoryX(
         domainId,
-        crypto.pureCrypto,
+        crypto,
         clock,
         parameters.processingTimeouts,
         futureSupervisor,
         parameters.cachingConfigs,
+        topologyXConfig,
         state.topologyStore,
         loggerFactory.append("domainId", domainId.toString),
       )

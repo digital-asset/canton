@@ -37,8 +37,8 @@ class ThrowingCkj[T <: Throwable](mk: String => T)(override implicit val ec: Exe
   ): EitherT[Future, ContractKeyJournalError, Unit] =
     EitherT(Future.failed[M](mk(show"addKeyStateUpdates($updates)")))
 
-  override def doPrune(beforeAndIncluding: CantonTimestamp)(implicit
-      traceContext: TraceContext
+  override def doPrune(beforeAndIncluding: CantonTimestamp, lastPruning: Option[CantonTimestamp])(
+      implicit traceContext: TraceContext
   ): Future[Unit] =
     Future.failed(mk(show"doPrune($beforeAndIncluding)"))
 

@@ -271,7 +271,8 @@ class InMemoryAcsCommitmentStore(protected val loggerFactory: NamedLoggerFactory
   }
 
   override def doPrune(
-      before: CantonTimestamp
+      before: CantonTimestamp,
+      lastPruning: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): Future[Unit] =
     Future.successful {
       computed.foreach { case (p, periods) =>

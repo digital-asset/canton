@@ -29,7 +29,7 @@ object FutureUtil {
       level: => Level = Level.ERROR,
       closeContext: Option[CloseContext] = None,
   )(implicit loggingContext: ErrorLoggingContext): Future[T] = {
-    implicit val ec: ExecutionContext = DirectExecutionContext(loggingContext.logger)
+    implicit val ec: ExecutionContext = DirectExecutionContext(loggingContext.noTracingLogger)
     future.recover {
       // Catching NonFatal only, because a future cannot fail with fatal throwables.
       // Also, it may be a bad idea to run a callback after an OutOfMemoryError.

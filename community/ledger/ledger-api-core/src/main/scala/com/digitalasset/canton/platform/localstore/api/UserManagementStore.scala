@@ -39,7 +39,7 @@ object ObjectMetaUpdate {
 
 trait UserManagementStore { self: NamedLogging =>
 
-  private val directEc = DirectExecutionContext(logger)
+  private val directEc = DirectExecutionContext(noTracingLogger)
 
   import UserManagementStore.*
 

@@ -7,7 +7,7 @@ import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
-import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
+import com.digitalasset.canton.tracing.NoTracing
 import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}
 
 import scala.jdk.CollectionConverters.*
@@ -89,7 +89,7 @@ trait StorageConfig {
     // https://github.com/brettwooldridge/HikariCP/wiki/About-Pool-Sizing
     parameters.maxConnections match {
       case Some(value) if value > 0 => value
-      case _ => Threading.detectNumberOfThreads(NamedLogging.noopLogger)(TraceContext.empty)
+      case _ => Threading.detectNumberOfThreads(NamedLogging.noopNoTracingLogger)
     }
   }
 

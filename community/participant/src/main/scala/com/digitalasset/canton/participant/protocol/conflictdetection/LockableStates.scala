@@ -55,7 +55,7 @@ private[conflictdetection] class LockableStates[
   private val states: concurrent.Map[Key, MutableLockableState[Status]] =
     new TrieMap[Key, MutableLockableState[Status]]()
 
-  private val directExecutionContext = DirectExecutionContext(logger)
+  private val directExecutionContext = DirectExecutionContext(noTracingLogger)
 
   /** Registers the activeness check as pending for the given request.
     *

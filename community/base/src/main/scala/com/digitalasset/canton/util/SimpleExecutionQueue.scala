@@ -39,7 +39,8 @@ class SimpleExecutionQueue(
     with NamedLogging
     with FlagCloseableAsync {
 
-  protected val directExecutionContext: DirectExecutionContext = DirectExecutionContext(logger)
+  protected val directExecutionContext: DirectExecutionContext =
+    DirectExecutionContext(noTracingLogger)
 
   /** Will execute the given function after all previous executions have completed successfully and return the
     * future with the result of this execution.

@@ -168,7 +168,7 @@ abstract class TopologyTransactionProcessorCommonImpl[M](
         .getOrElse(ApproximateTime.MaxValue)
       listenersUpdateHead(maxEffective, minApproximate, potentialChanges = true)
 
-      val directExecutionContext = DirectExecutionContext(logger)
+      val directExecutionContext = DirectExecutionContext(noTracingLogger)
       clientInitTimes.foreach { case (effective, approximate) =>
         // if the effective time is in the future, schedule a clock to update the time accordingly
         domainTimeTracker.awaitTick(effective.value) match {

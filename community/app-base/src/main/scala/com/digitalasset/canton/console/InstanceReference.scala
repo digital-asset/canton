@@ -456,7 +456,7 @@ object ParticipantReference {
   val InstanceType = "Participant"
 }
 
-trait ParticipantReferenceCommon
+sealed trait ParticipantReferenceCommon
     extends ConsoleCommandGroup
     with ParticipantAdministration
     with LedgerApiAdministration
@@ -493,6 +493,9 @@ trait ParticipantReferenceCommon
   lazy private val replicationGroup =
     new ParticipantReplicationAdministrationGroup(this, consoleEnvironment)
 
+  @Help.Summary("Commands to repair the participant contract state", FeatureFlag.Repair)
+  @Help.Group("Repair")
+  def repair: ParticipantRepairAdministration
 }
 
 abstract class ParticipantReference(
@@ -542,7 +545,7 @@ abstract class ParticipantReference(
   ): Boolean = topology.participant_domain_states.active(domainId, participantId)
 }
 
-trait RemoteParticipantReferenceCommon
+sealed trait RemoteParticipantReferenceCommon
     extends LedgerApiCommandRunner
     with ParticipantReferenceCommon {
 

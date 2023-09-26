@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.pruning
 
 import cats.data.{EitherT, NonEmptyList, ValidatedNec}
 import cats.syntax.contravariantSemigroupal.*
-import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
@@ -169,9 +168,8 @@ class AcsCommitmentProcessor(
 
   /** The parallelism to use when computing commitments */
   private val threadCount: PositiveNumeric[Int] = {
-    implicit val traceContext = TraceContext.empty
-    val count = Threading.detectNumberOfThreads(logger)
-    logger.info(s"Will use parallelism $count when computing ACS commitments")
+    val count = Threading.detectNumberOfThreads(noTracingLogger)
+    noTracingLogger.info(s"Will use parallelism $count when computing ACS commitments")
     PositiveNumeric.tryCreate(count)
   }
 
@@ -407,10 +405,15 @@ class AcsCommitmentProcessor(
         //   otherwise, we lose the ability to compute the commitments at t'
         // Hence, the order here is critical for correctness; if the change moves us beyond t', first compute
         // the commitments at t', and only then update the snapshot
-        _ <- completedPeriodAndCryptoO.traverse_ { case (commitmentPeriod, cryptoSnapshot) =>
-          performUnlessClosingF(functionFullName)(
-            processCompletedPeriod(acsSnapshot)(commitmentPeriod, cryptoSnapshot)
-          )
+        _ <- completedPeriodAndCryptoO match {
+          case Some((commitmentPeriod, cryptoSnapshot)) =>
+            performUnlessClosingF(functionFullName)(
+              processCompletedPeriod(acsSnapshot)(commitmentPeriod, cryptoSnapshot)
+            )
+          case None =>
+            FutureUnlessShutdown.pure(
+              logger.debug("This change does not lead to a new commitment period.")
+            )
         }
 
         _ <- FutureUnlessShutdown.outcomeF(updateSnapshot(toc, acsChange))

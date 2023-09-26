@@ -26,16 +26,10 @@ final case class ActiveContract private (
     with HasDomainId
     with HasSerializableContract {
 
-  override protected val companionObj: ActiveContract.type = ActiveContract
-
   // invariant
   // TODO(#12373) Adapt when releasing BFT
   // Ensures the invariants related to default values hold
   validateInstance().valueOr(err => throw new IllegalArgumentException(err))
-  require(
-    (representativeProtocolVersion.representative < ProtocolVersion.dev) == transferCounter.isEmpty,
-    s"The reassignment counter must be defined for protocol version '${ProtocolVersion.dev}' or higher",
-  )
 
   private def toProtoV0: v0.ActiveContract = {
     v0.ActiveContract(
@@ -57,6 +51,8 @@ final case class ActiveContract private (
         .toProtoPrimitive,
     )
   }
+
+  override protected lazy val companionObj: ActiveContract.type = ActiveContract
 
   override def representativeProtocolVersion: RepresentativeProtocolVersion[ActiveContract.type] =
     ActiveContract.protocolVersionRepresentativeFor(protocolVersion)
@@ -85,18 +81,14 @@ private[canton] object ActiveContract extends HasProtocolVersionedCompanion[Acti
     ),
   )
 
-  override lazy val invariants = Seq(
-    reassignmentCounterInvariant
-  )
+  override lazy val invariants = Seq(transferCounterInvariant)
 
-  lazy val reassignmentCounterInvariant: InvariantFromInclusive[TransferCounterO] =
-    InvariantFromInclusive[TransferCounterO](
-      _.transferCounter,
-      _.nonEmpty,
-      "reassignment counter must not be empty",
-      // TODO(#12373) Adapt when releasing BFT
-      protocolVersionRepresentativeFor(ProtocolVersion.dev),
-    )
+  lazy val transferCounterInvariant = EmptyOptionExactlyUntilExclusive(
+    _.transferCounter,
+    "transferCounter",
+    // TODO(#12373) Adapt when releasing BFT
+    protocolVersionRepresentativeFor(ProtocolVersion.dev),
+  )
 
   private def fromProtoV0(
       proto: v0.ActiveContract

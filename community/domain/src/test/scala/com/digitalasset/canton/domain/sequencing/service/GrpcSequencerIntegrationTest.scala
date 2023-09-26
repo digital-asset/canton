@@ -89,7 +89,7 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
     with Matchers {
   implicit val actorSystem = AkkaUtil.createActorSystem("GrpcSequencerIntegrationTest")
   implicit val executionSequencerFactory =
-    AkkaUtil.createExecutionSequencerFactory("GrpcSequencerIntegrationTest", logger)
+    AkkaUtil.createExecutionSequencerFactory("GrpcSequencerIntegrationTest", noTracingLogger)
   val sequencer = mock[Sequencer]
   private val participant = ParticipantId("testing")
   private val domainId = DefaultTestIdentities.domainId

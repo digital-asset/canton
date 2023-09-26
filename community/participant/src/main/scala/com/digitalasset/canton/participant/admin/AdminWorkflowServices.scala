@@ -12,13 +12,17 @@ import com.daml.error.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.refinements.ApiTypes as A
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
+import com.daml.ledger.api.v1.transaction.Transaction
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.language.Ast
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.AdminWorkflowServicesErrorGroup
 import com.digitalasset.canton.error.{CantonError, DecodedRpcStatus}
 import com.digitalasset.canton.ledger.client.configuration.CommandClientConfiguration
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
@@ -36,15 +40,21 @@ import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, Spanning, TraceContext, TracerProvider}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ResourceUtil.withResource
-import com.digitalasset.canton.util.{DamlPackageLoader, EitherTUtil}
+import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
+import com.digitalasset.canton.util.{DamlPackageLoader, EitherTUtil, FutureUtil, retry}
 import com.google.protobuf.ByteString
 import com.google.rpc.status.Status
+import io.grpc.StatusRuntimeException
 import io.opentelemetry.api.trace.Tracer
+import org.slf4j.event.Level
 
 import java.io.InputStream
 import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.atomic.AtomicReference
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContextExecutor, Future}
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Success, Try}
 
 /** Manages our admin workflow applications (ping, dar distribution).
   * Currently each is individual application with their own ledger connection and acting independently.
@@ -235,25 +245,19 @@ class AdminWorkflowServices(
 
   private def createService[S <: AdminWorkflowService](
       applicationId: String
-  )(createService: LedgerConnection => S): (LedgerSubscription, S) = {
+  )(createService: LedgerConnection => S): (ResilientTransactionsSubscription, S) = {
     val (offset, connection) = createConnection(applicationId, applicationId)
     val service = createService(connection)
+    logger.debug(s"Created connection for service $service")
 
-    val subscription = connection.subscribe(subscriptionName = applicationId, offset)(tx =>
-      withSpan(s"$applicationId.processTransaction") { implicit traceContext => _ =>
-        service.processTransaction(tx)
-      }
-    )
-
-    subscription.completed onComplete {
-      case Success(_) =>
-        logger.debug(s"ledger subscription for admin service [$service] has completed normally")
-      case Failure(ex) =>
-        logger.warn(
-          s"ledger subscription for admin service [$service] has completed with error",
-          ex,
-        )
-    }
+    val subscription = new ResilientTransactionsSubscription(
+      connection = connection,
+      serviceName = service.getClass.getSimpleName,
+      initialOffset = offset,
+      subscriptionName = applicationId,
+      timeouts = timeouts,
+      loggerFactory = loggerFactory,
+    )(service.processTransaction(_)(_: TraceContext))
 
     (subscription, service)
   }
@@ -313,5 +317,140 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
         )
 
   }
+}
 
+/** Resilient ledger transaction listener, which keeps continuously
+  * re-subscribing (on failure) to the Ledger API transaction stream
+  * and applies the received transactions to the `processTransaction` function.
+  *
+  * `processTransaction` must not throw. If it does, it must be idempotent
+  * (i.e. allow re-processing the same transaction twice).
+  */
+private[admin] class ResilientTransactionsSubscription(
+    connection: LedgerConnection,
+    serviceName: String,
+    initialOffset: LedgerOffset,
+    subscriptionName: String,
+    val timeouts: ProcessingTimeout,
+    val loggerFactory: NamedLoggerFactory,
+)(processTransaction: (Transaction, TraceContext) => Unit)(implicit
+    ec: ExecutionContextExecutor,
+    tracer: Tracer,
+) extends FlagCloseableAsync
+    with NamedLogging
+    with Spanning
+    with NoTracing {
+  private val offsetRef = new AtomicReference[LedgerOffset](initialOffset)
+  private implicit val policyRetry: retry.Success[Any] = retry.Success.always
+
+  private val ledgerSubscriptionRef = new AtomicReference[Option[LedgerSubscription]](None)
+
+  private[admin] val subscriptionF = retry
+    .Backoff(
+      logger = logger,
+      flagCloseable = this,
+      maxRetries = retry.Forever,
+      initialDelay = 1.second,
+      maxDelay = 5.seconds,
+      operationName = s"restartable-$serviceName-$subscriptionName",
+    )
+    .apply(resilientSubscription(), AllExnRetryable)
+
+  runOnShutdown_(new RunOnShutdown {
+    override def name: String = s"$serviceName-$subscriptionName-shutdown"
+    override def done: Boolean = {
+      // Use isClosing to avoid task eviction at the beginning (see runOnShutdown)
+      isClosing && ledgerSubscriptionRef.get().forall(_.completed.isCompleted)
+    }
+
+    override def run(): Unit =
+      ledgerSubscriptionRef.getAndSet(None).foreach(Lifecycle.close(_)(logger))
+  })
+
+  override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
+    val name = s"wait-for-$serviceName-$subscriptionName-completed"
+    Seq(
+      AsyncCloseable(
+        name,
+        subscriptionF.recover { error =>
+          logger.warn(s"$name finished with an error", error)
+          ()
+        },
+        timeouts.closing.duration,
+      )
+    )
+  }
+
+  private def resilientSubscription(): Future[Unit] =
+    FutureUtil.logOnFailure(
+      future = {
+        val newSubscription = createLedgerSubscription()
+        ledgerSubscriptionRef.set(Some(newSubscription))
+        // Check closing again to ensure closing of the new subscription
+        // in case the shutdown happened before the after the first closing check
+        // but before the previous reference update
+        if (isClosing) {
+          ledgerSubscriptionRef.getAndSet(None).foreach(closeSubscription)
+          newSubscription.completed.map(_ => ())
+        } else {
+          newSubscription.completed
+            .map(_ => ())
+            .thereafter { result =>
+              // This closing races with the one from runOnShutdown so use getAndSet
+              // to ensure calling close only once on a subscription
+              ledgerSubscriptionRef.getAndSet(None).foreach(closeSubscription)
+              result.failed.foreach(handlePrunedDataAccessed)
+            }
+        }
+      },
+      failureMessage = s"${subject(capitalized = true)} failed with an error",
+      level = Level.WARN,
+    )
+
+  private def closeSubscription(ledgerSubscription: LedgerSubscription): Unit =
+    Try(ledgerSubscription.close()) match {
+      case Failure(exception) =>
+        logger.warn(
+          s"${subject(capitalized = true)} [$ledgerSubscription] failed to close successfully",
+          exception,
+        )
+      case Success(_) =>
+        logger.info(
+          s"Successfully closed ${subject(capitalized = false)} [$ledgerSubscription] closed successfully"
+        )
+    }
+
+  private def subject(capitalized: Boolean) =
+    s"${if (capitalized) "Ledger" else "ledger"} subscription $subscriptionName for $serviceName"
+
+  private def createLedgerSubscription(): LedgerSubscription = {
+    val currentOffset = offsetRef.get()
+    logger.debug(
+      s"Creating new transactions ${subject(capitalized = false)} starting at offset $currentOffset"
+    )
+    connection.subscribe(subscriptionName, currentOffset)(tx =>
+      // TODO(i14763): This Span has no effect now
+      withSpan(s"$subscriptionName.processTransaction") { traceContext => _ =>
+        processTransaction(tx, traceContext)
+        offsetRef.set(LedgerOffset(LedgerOffset.Value.Absolute(tx.offset)))
+      }
+    )
+  }
+
+  private def handlePrunedDataAccessed: Throwable => Unit = {
+    case sre: StatusRuntimeException =>
+      DecodedRpcStatus
+        .fromStatusRuntimeException(sre)
+        .filter(_.id == RequestValidationErrors.ParticipantPrunedDataAccessed.id)
+        .flatMap(_.context.get(LedgerApiErrors.EarliestOffsetMetadataKey))
+        .foreach { earliestOffset =>
+          logger.warn(
+            s"Setting the ${subject(capitalized = false)} offset to a later offset [$earliestOffset] due to pruning. Some commands might timeout or events might become stale."
+          )
+          offsetRef.set(LedgerOffset(LedgerOffset.Value.Absolute(earliestOffset)))
+        }
+    case _ =>
+      // Do nothing for other errors
+      ()
+  }
 }

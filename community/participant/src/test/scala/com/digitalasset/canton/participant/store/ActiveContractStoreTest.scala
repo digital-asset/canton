@@ -1144,7 +1144,7 @@ trait ActiveContractStoreTest extends PrunableByTimeTest {
         _ <- acs.prune(ts3)
         fetcha <- acs.fetchStates(Seq(coid20, coid21))
       } yield {
-        status shouldBe Some(PruningStatus(PruningPhase.Completed, ts2))
+        status shouldBe Some(PruningStatus(PruningPhase.Completed, ts2, Some(ts2)))
         fetch shouldBe Map(
           // pruned the first contract
           coid01 -> ContractState(

@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.logging
 
-import org.slf4j.{Logger, LoggerFactory}
+import com.typesafe.scalalogging.Logger
+import org.slf4j.LoggerFactory
 
 import scala.collection.immutable.ListMap
 
@@ -102,7 +103,8 @@ private[logging] final class SimpleNamedLoggerFactory(
       )
   }
 
-  override private[logging] def getLogger(fullName: String) = LoggerFactory.getLogger(fullName)
+  override private[logging] def getLogger(fullName: String): Logger =
+    Logger(LoggerFactory.getLogger(fullName))
 
   private[logging] def concat(a: String*) =
     a.filter(_.nonEmpty)

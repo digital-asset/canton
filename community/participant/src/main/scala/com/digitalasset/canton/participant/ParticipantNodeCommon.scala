@@ -571,7 +571,6 @@ trait ParticipantNodeBootstrapCommon {
           ParticipantRepairServiceGrpc.bindService(
             new GrpcParticipantRepairService(
               sync,
-              domainAliasManager,
               parameterConfig.processingTimeouts,
               loggerFactory,
             ),

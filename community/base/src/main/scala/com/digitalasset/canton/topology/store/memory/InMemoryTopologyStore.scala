@@ -130,19 +130,8 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
     def toStoredTransaction: StoredTopologyTransaction[Op] =
       StoredTopologyTransaction(sequenced, from, until, transaction)
 
-    // TODO(i9591) clean me up and remove duplication
-    def secondaryUid: Option[UniqueIdentifier] = transaction match {
-      case SignedTopologyTransaction(
-            TopologyStateUpdate(
-              _,
-              TopologyStateUpdateElement(_, PartyToParticipant(side, _, participant, _)),
-            ),
-            _,
-            _,
-          ) if (side != RequestSide.From) =>
-        Some(participant.uid)
-      case _ => None
-    }
+    def secondaryUid: Option[UniqueIdentifier] =
+      transaction.transaction.element.mapping.secondaryUid
 
   }
 

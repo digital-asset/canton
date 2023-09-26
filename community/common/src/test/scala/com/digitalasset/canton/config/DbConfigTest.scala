@@ -38,7 +38,7 @@ class DbConfigTest extends AnyWordSpec with BaseTest {
                                     |}
     """.stripMargin))
 
-  lazy val numCores = Threading.detectNumberOfThreads(logger)
+  lazy val numCores = Threading.detectNumberOfThreads(noTracingLogger)
   lazy val numThreads = Math.max(1, numCores / 2)
   lazy val connTimeout = DbConfig.defaultConnectionTimeout.unwrap.toMillis
 

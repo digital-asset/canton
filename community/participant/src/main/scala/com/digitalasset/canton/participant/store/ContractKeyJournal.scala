@@ -55,8 +55,8 @@ trait ContractKeyJournal extends ConflictDetectionStore[LfGlobalKey, ContractKey
   /** Deletes all journal entries whose timestamp is before or at the given timestamp.
     * This operation need not execute atomically.
     */
-  override def doPrune(beforeAndIncluding: CantonTimestamp)(implicit
-      traceContext: TraceContext
+  override def doPrune(beforeAndIncluding: CantonTimestamp, lastPruning: Option[CantonTimestamp])(
+      implicit traceContext: TraceContext
   ): Future[Unit]
 
   /** Deletes all journal entries whose time of change is at least `inclusive`.

@@ -6,6 +6,7 @@ package com.digitalasset.canton.logging
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.typesafe.scalalogging.Logger
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j
@@ -84,9 +85,10 @@ class SuppressingLoggerTest extends AnyWordSpec with BaseTest with HasExecutionC
       )
 
       ex.getMessage() should startWith regex
-        """forEvery failed, because: 
+        // The ( ) here are pointless groups in the regex that ensure that the trailing whitespace is not removed automatically by the setting in editorconfig
+        """forEvery failed, because:( )
           |  at index 1, "\[foo\]" was not equal to "\[Test2\]"
-          |  
+          |(  )
           |  Remaining log entries:
           |  	## ERROR c\.d\.c\.l\.SuppressingLoggerTest.*:TestLogger - Test3
           |  	## ERROR c\.d\.c\.l\.SuppressingLoggerTest.*:TestLogger - Test4
@@ -468,6 +470,6 @@ class SuppressingLoggerTest extends AnyWordSpec with BaseTest with HasExecutionC
     override val properties: ListMap[String, String] = ListMap.empty
     override def appendUnnamedKey(key: String, value: String): NamedLoggerFactory = this
     override def append(key: String, value: String): NamedLoggerFactory = this
-    override private[logging] def getLogger(fullName: String): slf4j.Logger = logger
+    override private[logging] def getLogger(fullName: String): Logger = Logger(logger)
   }
 }

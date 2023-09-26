@@ -28,6 +28,21 @@ sealed trait TopologyMapping extends Product with Serializable with PrettyPrinti
   def dbType: DomainTopologyTransactionType
   def requiredAuth: RequiredAuth
 
+  /** Secondary uid for cascading namespace updates
+    *
+    * During topology processing (in 2.x), we need in case of cascading updates to fetch
+    * all transactions that might be affected due to a new namespace or identifier mapping.
+    *
+    * Now, the topology transactions have a primary uid (i.e. the party id) within the unique path
+    * which is used to index the data, but can have a secondary uid (the participant). We store them by
+    * the primary uid but during cascading updates, we actually have to fetch them using the secondary uid.
+    *
+    * Only txs with RequestSide can have a secondary uid.
+    *
+    * In 3.x this is simpler, as we removed cascading additions. So all this logic can be deleted soon again ...
+    */
+  def secondaryUid: Option[UniqueIdentifier] = None
+
   /** Returns true if the new mapping would be a replacement for the given mapping */
   def isReplacedBy(mapping: TopologyMapping): Boolean = false
 
@@ -409,6 +424,9 @@ final case class ParticipantState(
   override def dbType: DomainTopologyTransactionType = ParticipantState.dbType
   override def requiredAuth: RequiredAuth = side.requiredAuth(domain.unwrap, participant.uid)
 
+  override def secondaryUid: Option[UniqueIdentifier] =
+    if (side != RequestSide.To) domain.uid.some else None
+
   override def isReplacedBy(mapping: TopologyMapping): Boolean = mapping match {
     case other: ParticipantState =>
       def subset(mp: ParticipantState) = (mp.side, mp.domain, mp.participant)
@@ -459,6 +477,9 @@ final case class MediatorDomainState(
     UniquePathSignedTopologyTransaction(mediator.uid, dbType, id)
   }
 
+  override def secondaryUid: Option[UniqueIdentifier] =
+    if (side != RequestSide.From) mediator.uid.some else None
+
   override def dbType: DomainTopologyTransactionType = MediatorDomainState.dbType
   override def requiredAuth: RequiredAuth = side.requiredAuth(domain.unwrap, mediator.uid)
 
@@ -502,8 +523,6 @@ final case class PartyToParticipant(
 ) extends TopologyStateUpdateMapping {
   // architecture-handbook-entry-end: PartyToParticipant
 
-  // TODO(i10809) maybe support "list of participants" to reduce number of topology transactions necessary ..
-
   require(
     party.uid != participant.uid,
     s"Unable to allocate party ${party.uid}, as it has the same name as the participant's admin party.",
@@ -525,6 +544,9 @@ final case class PartyToParticipant(
 
   override def requiredAuth: RequiredAuth = side.requiredAuth(party.uid, participant.uid)
 
+  override def secondaryUid: Option[UniqueIdentifier] =
+    if (side != RequestSide.From) participant.uid.some else None
+
   override def isReplacedBy(mapping: TopologyMapping): Boolean = mapping match {
     case other: PartyToParticipant =>
       def subset(mp: PartyToParticipant) = (mp.side, mp.party, mp.participant)
@@ -538,7 +560,7 @@ object PartyToParticipant {
 
   def dbType: DomainTopologyTransactionType = DomainTopologyTransactionType.PartyToParticipant
 
-  def computePermission(
+  private def computePermission(
       elements: Seq[(RequestSide, ParticipantPermission)],
       ofParticipant: Option[ParticipantPermission],
   ): ParticipantPermission = {

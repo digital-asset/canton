@@ -756,7 +756,7 @@ class GenTransactionTreeTest
       val actionDescription = mkActionDescription(protocolVersion)(createdId)
       val createdContracts = mkCreatedContracts(protocolVersion)(createdId)
 
-      ViewParticipantData(factory.cryptoOps)(
+      ViewParticipantData.tryCreate(factory.cryptoOps)(
         Map.empty,
         createdContracts,
         Set.empty,

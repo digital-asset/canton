@@ -4,8 +4,8 @@
 package com.digitalasset.canton.logging
 
 import com.digitalasset.canton.BaseTest
+import com.typesafe.scalalogging.Logger
 import org.scalatest.wordspec.AnyWordSpec
-import org.slf4j.Logger
 
 import scala.collection.immutable.ListMap
 
@@ -87,9 +87,9 @@ class NamedLoggingTest extends AnyWordSpec with BaseTest {
 
       override def appendUnnamedKey(key: String, value: String): NamedLoggerFactory = ???
       override def append(key: String, value: String): NamedLoggerFactory = ???
-      override private[logging] def getLogger(fullName: String) = {
+      override private[logging] def getLogger(fullName: String): Logger = {
         createLoggerFullName = Some(fullName)
-        mock[Logger]
+        Logger(mock[org.slf4j.Logger])
       }
     }
   }

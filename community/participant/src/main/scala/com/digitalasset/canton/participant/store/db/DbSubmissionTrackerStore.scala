@@ -96,7 +96,8 @@ class DbSubmissionTrackerStore(
     storage.metrics.loadGaugeM("submission-tracker-store")
 
   override protected[canton] def doPrune(
-      beforeAndIncluding: CantonTimestamp
+      beforeAndIncluding: CantonTimestamp,
+      lastPruning: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): Future[Unit] = {
     processingTime.event {
       val deleteQuery =

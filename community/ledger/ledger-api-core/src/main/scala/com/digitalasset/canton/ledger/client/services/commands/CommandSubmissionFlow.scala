@@ -35,7 +35,7 @@ object CommandSubmissionFlow {
                     telemetryContext,
                   )
                 )
-              }(DirectExecutionContext(loggerFactory.getTracedLogger(getClass)))
+              }(DirectExecutionContext(loggerFactory.getLogger(getClass)))
           }
       }
   }

@@ -46,6 +46,7 @@ object GeneratorsMessages {
   import com.digitalasset.canton.topology.GeneratorsTopology.*
   import com.digitalasset.canton.version.GeneratorsVersion.*
   import com.digitalasset.canton.Generators.*
+  import com.digitalasset.canton.GeneratorsLf.*
   import com.digitalasset.canton.data.GeneratorsData.*
 
   implicit val acsCommitmentArb = Arbitrary(
@@ -94,7 +95,7 @@ object GeneratorsMessages {
     cause <- Gen.alphaNumStr
     id <- Gen.alphaNumStr
     damlError <- GeneratorsError.damlErrorCategoryArb.arbitrary
-  } yield Verdict.MediatorRejectV1(cause, id, damlError.asInt)(pv)
+  } yield Verdict.MediatorRejectV1.tryCreate(cause, id, damlError.asInt, pv)
 
   private def mediatorRejectV2Gen(
       pv: RepresentativeProtocolVersion[Verdict.type]
@@ -102,7 +103,7 @@ object GeneratorsMessages {
     // TODO(#14515): do we want randomness here?
     Gen.const {
       val status = com.google.rpc.status.Status()
-      Verdict.MediatorRejectV2(status)(pv)
+      Verdict.MediatorRejectV2.tryCreate(status, pv)
     }
 
   private def mediatorRejectGen(

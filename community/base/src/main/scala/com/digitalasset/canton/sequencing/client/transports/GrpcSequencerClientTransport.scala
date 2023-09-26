@@ -315,7 +315,7 @@ private[transports] abstract class GrpcSequencerClientTransportCommon(
       .subflatMap(TopologyStateForInitResponse.fromProtoV0(_).leftMap(_.toString))
       .map { response =>
         logger.debug(
-          s"Downloaded topology state for initialization with last change timestamp at ${response.topologyTransactions.value.lastChangeTimestamp}"
+          s"Downloaded topology state for initialization with last change timestamp at ${response.topologyTransactions.value.lastChangeTimestamp}:\n${response.topologyTransactions.value.result}"
         )
         response
       }

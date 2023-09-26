@@ -10,6 +10,7 @@ import com.digitalasset.canton.logging.{NamedEventCapturingLogger, TracedLogger}
 import com.digitalasset.canton.sequencing.authentication.grpc.Constant
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.typesafe.scalalogging.Logger
 import io.grpc.*
 import io.grpc.inprocess.{InProcessChannelBuilder, InProcessServerBuilder}
 import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
@@ -159,10 +160,11 @@ class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecutionCo
       outputLogger = Some(progressLogger),
     )
 
-  // need to override this logger as we want the execution context to pick up the capturing logger
-  override protected val logger: TracedLogger = TracedLogger(
+  // need to override these loggers as we want the execution context to pick up the capturing logger
+  override protected val noTracingLogger: Logger =
     capturingLogger.getLogger(classOf[ApiRequestLoggerTest])
-  )
+  override protected val logger: TracedLogger = TracedLogger(noTracingLogger)
+
   class Env(logMessagePayloads: Boolean, maxStringLenth: Int, maxMetadataSize: Int) {
     val service: HelloService = mock[HelloService]
 

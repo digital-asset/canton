@@ -242,6 +242,7 @@ class RecoveringIndexerIntegrationSpec
       s"jdbc:h2:mem:${getClass.getSimpleName.toLowerCase()}-$testId;db_close_delay=-1;db_close_on_exit=false"
     val metrics = Metrics.ForTesting
     val participantDataSourceConfig = ParticipantDataSourceConfig(jdbcUrl)
+    val indexerConfig = IndexerConfig(restartDelay = restartDelay)
     for {
       actorSystem <- ResourceOwner.forActorSystem(() => ActorSystem())
       materializer <- ResourceOwner.forMaterializer(() => Materializer(actorSystem))
@@ -263,9 +264,7 @@ class RecoveringIndexerIntegrationSpec
       _ <- new IndexerServiceOwner(
         readService = participantState._1,
         participantId = participantId,
-        config = IndexerConfig(
-          restartDelay = restartDelay
-        ),
+        config = indexerConfig,
         metrics = metrics,
         participantDataSourceConfig = participantDataSourceConfig,
         inMemoryState = inMemoryState,
@@ -275,7 +274,9 @@ class RecoveringIndexerIntegrationSpec
         loggerFactory = loggerFactory,
         multiDomainEnabled = false,
         startupMode = MigrateAndStart,
-        dataSourceProperties = None,
+        dataSourceProperties = IndexerConfig.createDataSourcePropertiesForTesting(
+          indexerConfig.ingestionParallelism.unwrap
+        ),
         highAvailability = HaConfig(),
       )(materializer, traceContext)
     } yield participantState._2

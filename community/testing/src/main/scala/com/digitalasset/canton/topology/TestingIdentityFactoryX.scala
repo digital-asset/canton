@@ -199,7 +199,8 @@ class TestingIdentityFactoryX(
 ) extends TestingIdentityFactoryBase
     with NamedLogging {
 
-  private implicit val directExecutionContext: ExecutionContext = DirectExecutionContext(logger)
+  private implicit val directExecutionContext: ExecutionContext =
+    DirectExecutionContext(noTracingLogger)
   private val defaultProtocolVersion = BaseTest.testedProtocolVersion
 
   def forOwner(owner: KeyOwner): SyncCryptoApiProvider = {

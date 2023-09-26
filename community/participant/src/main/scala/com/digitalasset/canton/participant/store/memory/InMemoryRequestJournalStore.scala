@@ -24,7 +24,8 @@ class InMemoryRequestJournalStore(protected val loggerFactory: NamedLoggerFactor
     extends RequestJournalStore
     with NamedLogging {
 
-  override private[store] implicit val ec: ExecutionContext = DirectExecutionContext(logger)
+  override private[store] implicit val ec: ExecutionContext =
+    DirectExecutionContext(noTracingLogger)
 
   private val requestTable = new TrieMap[RequestCounter, RequestData]
 

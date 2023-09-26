@@ -13,7 +13,6 @@ import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.{BeforeAndAfterAll, Suite}
 
 import java.util.concurrent.ScheduledExecutorService
@@ -51,18 +50,19 @@ trait HasExecutorServiceGeneric extends NamedLogging with TestMetrics {
   private def createScheduler(): ScheduledExecutorService = {
     Threading.singleThreadScheduledExecutor(
       loggerFactory.threadName + "-test-execution-context-monitor",
-      logger,
+      noTracingLogger,
     )
   }
 
   private def createExecutor(
       scheduler: ScheduledExecutorService
   ): (ExecutionContextIdlenessExecutorService, ExecutionContextMonitor) = {
+    val threads = Threading.detectNumberOfThreads(noTracingLogger)
     val service = Threading.newExecutionContext(
       executionContextName,
-      logger,
+      noTracingLogger,
       executorServiceMetrics,
-      Threading.detectNumberOfThreads(logger)(TraceContext.empty),
+      threads,
       exitOnFatal = exitOnFatal,
     )
     val monitor =

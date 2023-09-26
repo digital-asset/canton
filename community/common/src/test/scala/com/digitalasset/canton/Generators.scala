@@ -28,9 +28,6 @@ object Generators {
   implicit val ledgerSubmissionIdArb: Arbitrary[LedgerSubmissionId] = Arbitrary(
     Gen.stringOfN(32, Gen.alphaNumChar).map(LedgerSubmissionId.assertFromString)
   )
-  implicit val lfPartyIdArb: Arbitrary[LfPartyId] = Arbitrary(
-    com.digitalasset.canton.topology.GeneratorsTopology.partyIdArb.arbitrary.map(_.toLf)
-  )
   implicit val workflowIdArb: Arbitrary[WorkflowId] = Arbitrary(
     Gen.stringOfN(32, Gen.alphaNumChar).map(WorkflowId.assertFromString)
   )

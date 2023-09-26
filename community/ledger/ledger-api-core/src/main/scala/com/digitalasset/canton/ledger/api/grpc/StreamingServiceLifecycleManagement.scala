@@ -21,7 +21,7 @@ import scala.concurrent.blocking
 
 trait StreamingServiceLifecycleManagement extends AutoCloseable with NamedLogging {
 
-  private val directEc = DirectExecutionContext(logger)
+  private val directEc = DirectExecutionContext(noTracingLogger)
 
   @volatile private var _closed = false
   private val _killSwitches = TrieMap.empty[KillSwitch, Object]

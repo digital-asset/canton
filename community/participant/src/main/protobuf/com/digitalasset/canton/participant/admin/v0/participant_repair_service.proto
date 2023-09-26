@@ -26,6 +26,9 @@ service ParticipantRepairService {
   // upload contracts for a party
   rpc ImportAcs(stream ImportAcsRequest) returns (ImportAcsResponse);
 
+  // purge contracts
+  rpc PurgeContracts(PurgeContractsRequest) returns (PurgeContractsResponse);
+
   rpc MigrateDomain(MigrateDomainRequest) returns (MigrateDomainResponse);
 }
 
@@ -44,6 +47,19 @@ message DownloadRequest {
   // NOTE: This is not a proper domain migration of contracts.
   map<string, string> contract_domain_renames = 7;
 }
+
+message PurgeContractsRequest {
+  // Alias of the domain on which the contracts are currently assigned
+  string domain = 1;
+
+  // Contracts to be purged
+  repeated string contract_ids = 2;
+
+  // If true, will ignore already purged contract; if false, will return an error if a contract is already purged
+  bool ignore_already_purged = 3;
+}
+
+message PurgeContractsResponse {}
 
 // TODO(i14441): Remove deprecated ACS download / upload functionality
 message AcsSnapshotChunk {

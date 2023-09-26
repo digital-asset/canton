@@ -74,7 +74,7 @@ object SubmissionTracker {
       with Spanning
       with NamedLogging {
 
-    private val directEc = DirectExecutionContext(logger)
+    private val directEc = DirectExecutionContext(noTracingLogger)
 
     private[tracking] val pending =
       TrieMap.empty[SubmissionKey, (ContextualizedErrorLogger, Promise[CompletionResponse])]

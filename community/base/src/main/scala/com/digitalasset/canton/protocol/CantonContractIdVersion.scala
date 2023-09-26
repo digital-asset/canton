@@ -63,6 +63,8 @@ sealed trait CantonContractIdVersion extends Serializable with Product {
     s"Version prefix of size ${versionPrefixBytes.length} should have size ${CantonContractIdVersion.versionPrefixBytesSize}",
   )
 
+  def isAuthenticated: Boolean
+
   def versionPrefixBytes: Bytes
 
   def fromDiscriminator(discriminator: LfHash, unicum: Unicum): LfContractId.V1 =
@@ -72,16 +74,22 @@ sealed trait CantonContractIdVersion extends Serializable with Product {
 case object NonAuthenticatedContractIdVersion extends CantonContractIdVersion {
   // The prefix for the suffix of non-authenticated (legacy) Canton contract IDs
   lazy val versionPrefixBytes: Bytes = Bytes.fromByteArray(Array(0xca.toByte, 0x00.toByte))
+
+  val isAuthenticated: Boolean = false
 }
 
 case object AuthenticatedContractIdVersion extends CantonContractIdVersion {
   // The prefix for the suffix of Canton contract IDs for contracts that can be authenticated (created in Protocol V4)
   lazy val versionPrefixBytes: Bytes = Bytes.fromByteArray(Array(0xca.toByte, 0x01.toByte))
+
+  val isAuthenticated: Boolean = true
 }
 
 case object AuthenticatedContractIdVersionV2 extends CantonContractIdVersion {
   // The prefix for the suffix of Canton contract IDs for contracts that can be authenticated (created in Protocol V5+)
   lazy val versionPrefixBytes: Bytes = Bytes.fromByteArray(Array(0xca.toByte, 0x02.toByte))
+
+  val isAuthenticated: Boolean = true
 }
 
 object ContractIdSyntax {

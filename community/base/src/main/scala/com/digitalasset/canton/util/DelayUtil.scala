@@ -28,7 +28,7 @@ object DelayUtil extends NamedLogging {
 
   // use a daemon thread for the executor as it doesn't get explicitly shutdown
   private val scheduledExecutorService =
-    Threading.singleThreadScheduledExecutor("delay-util", logger, daemon = true)
+    Threading.singleThreadScheduledExecutor("delay-util", noTracingLogger, daemon = true)
 
   /** Creates a future that succeeds after the given delay.
     * The caller must make sure that the future is used only in execution contexts that have not yet been closed.

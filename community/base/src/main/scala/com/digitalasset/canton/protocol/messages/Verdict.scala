@@ -44,6 +44,7 @@ sealed trait Verdict
     with PrettyPrinting
     with HasProtocolVersionedWrapper[Verdict] {
 
+  /** Whether the verdict represents a timeout that the mediator has determined. */
   def isTimeoutDeterminedByMediator: Boolean
 
   @transient override protected lazy val companionObj: Verdict.type = Verdict
@@ -207,7 +208,7 @@ object Verdict
   /** Used only with protocol versions from [[MediatorRejectV1.firstApplicableProtocolVersion]] to
     * [[MediatorRejectV1.lastApplicableProtocolVersion]].
     */
-  final case class MediatorRejectV1(cause: String, id: String, errorCategory: Int)(
+  final case class MediatorRejectV1 private (cause: String, id: String, errorCategory: Int)(
       override val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict.type]
   ) extends MediatorReject {
     import MediatorRejectV1.*
@@ -272,6 +273,21 @@ object Verdict
     lazy val wrongProtocolVersion: String =
       s"MediatorRejectV1 can only be used in protocol versions from $firstApplicableProtocolVersion to $lastApplicableProtocolVersion"
 
+    private[messages] def tryCreate(
+        cause: String,
+        id: String,
+        errorCategory: Int,
+        rpv: RepresentativeProtocolVersion[Verdict.type],
+    ): MediatorRejectV1 = new MediatorRejectV1(cause, id, errorCategory)(rpv)
+
+    def tryCreate(
+        cause: String,
+        id: String,
+        errorCategory: Int,
+        protocolVersion: ProtocolVersion,
+    ): MediatorRejectV1 =
+      tryCreate(cause, id, errorCategory, Verdict.protocolVersionRepresentativeFor(protocolVersion))
+
     def fromProtoV1(mediatorRejectP: v1.MediatorReject): ParsingResult[MediatorRejectV1] = {
       val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtoVersion(1))
       val v1.MediatorReject(cause, errorCodeP, errorCategoryP) = mediatorRejectP
@@ -280,7 +296,7 @@ object Verdict
   }
 
   /** Used only with protocol version [[MediatorRejectV2.firstApplicableProtocolVersion]] and higher */
-  final case class MediatorRejectV2(status: com.google.rpc.status.Status)(
+  final case class MediatorRejectV2 private (status: com.google.rpc.status.Status)(
       override val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict.type]
   ) extends MediatorReject {
     import MediatorRejectV2.*
@@ -291,6 +307,8 @@ object Verdict
       ),
       wrongProtocolVersion,
     )
+
+    require(status.code != com.google.rpc.Code.OK_VALUE, "Rejection must not use status code OK")
 
     private[messages] override def toProtoV0: v0.Verdict =
       throw new UnsupportedOperationException(wrongProtocolVersion)
@@ -331,7 +349,23 @@ object Verdict
     lazy val wrongProtocolVersion: String =
       s"MediatorRejectV2 can only be used in protocol versions $firstApplicableProtocolVersion and higher"
 
-    def fromProtoV2(mediatorRejectP: v2.MediatorReject): ParsingResult[MediatorRejectV2] = {
+    private[messages] def tryCreate(
+        status: com.google.rpc.status.Status,
+        rpv: RepresentativeProtocolVersion[Verdict.type],
+    ): MediatorRejectV2 =
+      MediatorRejectV2(status)(rpv)
+
+    def tryCreate(
+        status: com.google.rpc.status.Status,
+        protocolVersion: ProtocolVersion,
+    ): MediatorRejectV2 =
+      tryCreate(status, Verdict.protocolVersionRepresentativeFor(protocolVersion))
+
+    private[messages] def fromProtoV2(
+        mediatorRejectP: v2.MediatorReject
+    ): ParsingResult[MediatorRejectV2] = {
+      // Proto version 3 because mediator rejections are versioned according to verdicts
+      // and verdicts use mediator reject V2 in proto version 3.
       val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtoVersion(3))
 
       val v2.MediatorReject(statusO) = mediatorRejectP

@@ -6,6 +6,7 @@ package com.digitalasset.canton.version
 import com.digitalasset.canton.SerializationDeserializationTestHelpers.DefaultValueUntilExclusive
 import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.data.{
+  ActionDescription,
   CommonMetadata,
   ParticipantMetadata,
   SubmitterMetadata,
@@ -14,12 +15,14 @@ import com.digitalasset.canton.data.{
   TransferOutCommonData,
   TransferOutView,
   ViewCommonData,
+  ViewParticipantData,
 }
 import com.digitalasset.canton.protocol.messages.AcsCommitment
 import com.digitalasset.canton.protocol.{
   ConfirmationPolicy,
   ContractMetadata,
   DynamicDomainParameters,
+  GeneratorsProtocol,
   SerializableContract,
   StaticDomainParameters,
 }
@@ -45,7 +48,6 @@ class SerializationDeserializationTest
 
   "Serialization and deserialization methods" should {
     "compose to the identity" in {
-
       testProtocolVersioned(StaticDomainParameters)
       testProtocolVersioned(DynamicDomainParameters)
       testProtocolVersioned(AcknowledgeRequest)
@@ -53,11 +55,15 @@ class SerializationDeserializationTest
       testProtocolVersioned(AcsCommitment)
       testProtocolVersioned(ClosedEnvelope)
 
-      testVersioned(ContractMetadata)
+      testVersioned(ContractMetadata)(
+        GeneratorsProtocol.contractMetadataArb(canHaveEmptyKey = true)
+      )
       testVersioned[SerializableContract](
         SerializableContract,
         List(DefaultValueUntilExclusive(_.copy(contractSalt = None), ProtocolVersion.v4)),
-      )
+      )(GeneratorsProtocol.serializableContractArb(canHaveEmptyKey = true))
+
+      testProtocolVersioned(ActionDescription)
 
       // Merkle tree leaves
       testProtocolVersionedWithContext(CommonMetadata, TestHash)
@@ -72,7 +78,7 @@ class SerializationDeserializationTest
         testProtocolVersionedWithContext(ViewCommonData, (TestHash, confirmationPolicy))
       }
 
-      // ViewParticipantData
+      testProtocolVersionedWithContext(ViewParticipantData, TestHash)
     }
   }
 }

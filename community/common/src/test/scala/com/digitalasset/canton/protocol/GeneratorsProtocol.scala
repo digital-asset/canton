@@ -5,11 +5,12 @@ package com.digitalasset.canton.protocol
 
 import com.daml.lf.transaction.Versioned
 import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
+import com.digitalasset.canton.data.{CantonTimestamp, ViewPosition}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.util.LfTransactionBuilder
+import com.digitalasset.canton.topology.{DomainId, MediatorId, MediatorRef}
 import com.digitalasset.canton.version.{GeneratorsVersion, ProtocolVersion}
 import magnolify.scalacheck.auto.*
 import org.scalacheck.{Arbitrary, Gen}
@@ -17,10 +18,12 @@ import org.scalacheck.{Arbitrary, Gen}
 object GeneratorsProtocol {
 
   import com.digitalasset.canton.Generators.*
+  import com.digitalasset.canton.GeneratorsLf.*
   import com.digitalasset.canton.config.GeneratorsConfig.*
   import com.digitalasset.canton.crypto.GeneratorsCrypto.*
   import com.digitalasset.canton.data.GeneratorsData.*
   import com.digitalasset.canton.time.GeneratorsTime.*
+  import com.digitalasset.canton.topology.GeneratorsTopology.*
   import com.digitalasset.canton.version.GeneratorsVersion.*
   import org.scalatest.EitherValues.*
 
@@ -103,6 +106,7 @@ object GeneratorsProtocol {
       else
         ledgerTimeRecordTimeTolerance * NonNegativeInt.tryCreate(2)
 
+    // TODO(#14691) Use generator properly when dynamic domain parameters are properly versioned
     sequencerAggregateSubmissionTimeout =
       DynamicDomainParameters.defaultSequencerAggregateSubmissionTimeoutUntilExclusive.defaultValue
 
@@ -131,43 +135,105 @@ object GeneratorsProtocol {
       } yield SerializableRawContractInstance.create(contractInstance, agreementText).value
     )
 
-  implicit val serializableContractArb: Arbitrary[SerializableContract] = Arbitrary(
-    for {
-      contractId <- Arbitrary.arbitrary[LfContractId]
-      rawContractInstance <- Arbitrary.arbitrary[SerializableRawContractInstance]
-      metadata <- Arbitrary.arbitrary[ContractMetadata]
-      ledgerCreateTime <- Arbitrary.arbitrary[CantonTimestamp]
-      contractSalt <- Gen.option(Arbitrary.arbitrary[Salt])
-    } yield SerializableContract(
-      contractId,
-      rawContractInstance,
-      metadata,
-      ledgerCreateTime,
-      contractSalt,
+  private lazy val unicumGenerator: UnicumGenerator = new UnicumGenerator(new SymbolicPureCrypto())
+
+  {
+    // If this pattern match is not exhaustive anymore, update the method below
+    ((_: CantonContractIdVersion) match {
+      case NonAuthenticatedContractIdVersion => ()
+      case AuthenticatedContractIdVersion => ()
+      case AuthenticatedContractIdVersionV2 => ()
+    }).discard
+  }
+  def serializableContractArb(
+      canHaveEmptyKey: Boolean,
+      protocolVersion: Option[ProtocolVersion] = None,
+  ): Arbitrary[SerializableContract] = {
+
+    val allContractIdVersions = List(
+      NonAuthenticatedContractIdVersion,
+      AuthenticatedContractIdVersion,
+      AuthenticatedContractIdVersionV2,
     )
-  )
+
+    val contractIdVersions = protocolVersion match {
+      case Some(ProtocolVersion.v3) => List(NonAuthenticatedContractIdVersion)
+      case Some(ProtocolVersion.v4) => List(AuthenticatedContractIdVersion)
+      case Some(pv) if pv >= ProtocolVersion.v5 => List(AuthenticatedContractIdVersionV2)
+      case _ => allContractIdVersions
+    }
+
+    Arbitrary(
+      for {
+        rawContractInstance <- Arbitrary.arbitrary[SerializableRawContractInstance]
+        metadata <- contractMetadataArb(canHaveEmptyKey).arbitrary
+        ledgerCreateTime <- Arbitrary.arbitrary[CantonTimestamp]
+
+        contractIdVersion <- Gen.oneOf(contractIdVersions)
+
+        domainId <- Arbitrary.arbitrary[DomainId]
+        mediatorId <- Arbitrary.arbitrary[MediatorId]
+
+        saltIndex <- Gen.choose(Int.MinValue, Int.MaxValue)
+        transactionUUID <- Gen.uuid
+
+        (computedSalt, unicum) = unicumGenerator.generateSaltAndUnicum(
+          domainId = domainId,
+          mediator = MediatorRef(mediatorId),
+          transactionUuid = transactionUUID,
+          viewPosition = ViewPosition(List.empty),
+          viewParticipantDataSalt = TestSalt.generateSalt(saltIndex),
+          createIndex = 0,
+          ledgerTime = ledgerCreateTime,
+          metadata = metadata,
+          suffixedContractInstance = rawContractInstance,
+          contractIdVersion = contractIdVersion,
+        )
+
+        index <- Gen.posNum[Int]
+        contractIdDiscriminator = ExampleTransactionFactory.lfHash(index)
+
+        contractId = contractIdVersion.fromDiscriminator(
+          contractIdDiscriminator,
+          unicum,
+        )
+
+        contractSalt = if (contractIdVersion.isAuthenticated) Some(computedSalt.unwrap) else None
+
+      } yield SerializableContract(
+        contractId,
+        rawContractInstance,
+        metadata,
+        ledgerCreateTime,
+        contractSalt,
+      )
+    )
+  }
 
   // TODO(#12373) Adapt when releasing BFT
   // Salt not supported for pv < 4
   def serializableContractGen(pv: ProtocolVersion): Gen[SerializableContract] =
     if (pv < ProtocolVersion.v4)
-      serializableContractArb.arbitrary.map(_.copy(contractSalt = None))
+      serializableContractArb(canHaveEmptyKey = true).arbitrary.map(_.copy(contractSalt = None))
     else
-      serializableContractArb.arbitrary
+      serializableContractArb(canHaveEmptyKey = true).arbitrary
 
   implicit val globalKeyWithMaintainersArb: Arbitrary[Versioned[LfGlobalKeyWithMaintainers]] =
     Arbitrary(
       for {
         maintainers <- Gen.containerOf[Set, LfPartyId](Arbitrary.arbitrary[LfPartyId])
+        key <- Arbitrary.arbitrary[LfGlobalKey]
       } yield ExampleTransactionFactory.globalKeyWithMaintainers(
-        LfTransactionBuilder.defaultGlobalKey,
+        key,
         maintainers,
       )
     )
 
-  implicit val contractMetadataArb: Arbitrary[ContractMetadata] = Arbitrary(
+  def contractMetadataArb(canHaveEmptyKey: Boolean): Arbitrary[ContractMetadata] = Arbitrary(
     for {
-      maybeKeyWithMaintainers <- Gen.option(globalKeyWithMaintainersArb.arbitrary)
+      maybeKeyWithMaintainers <-
+        if (canHaveEmptyKey) Gen.option(globalKeyWithMaintainersArb.arbitrary)
+        else Gen.some(globalKeyWithMaintainersArb.arbitrary)
       maintainers = maybeKeyWithMaintainers.fold(Set.empty[LfPartyId])(_.unversioned.maintainers)
 
       signatories <- Gen.containerOf[Set, LfPartyId](Arbitrary.arbitrary[LfPartyId])
@@ -184,26 +250,24 @@ object GeneratorsProtocol {
     )
   )
 
-  implicit val lfContractIdArb: Arbitrary[LfContractId] = Arbitrary(
-    for {
-      index <- Gen.posNum[Int]
-      contractIdDiscriminator = ExampleTransactionFactory.lfHash(index)
+  implicit val requestIdArb: Arbitrary[RequestId] = genArbitrary
 
-      suffix <- Gen.posNum[Int]
-      contractIdSuffix = Unicum(
-        Hash.build(TestHash.testHashPurpose, HashAlgorithm.Sha256).add(suffix).finish()
+  implicit val rollbackContextArb: Arbitrary[RollbackContext] =
+    Arbitrary(Gen.listOf(Arbitrary.arbitrary[PositiveInt]).map(RollbackContext.apply))
+
+  implicit val createdContractArb: Arbitrary[CreatedContract] = Arbitrary(
+    for {
+      contract <- serializableContractArb(canHaveEmptyKey = true).arbitrary
+      consumedInCore <- Gen.oneOf(true, false)
+      rolledBack <- Gen.oneOf(true, false)
+    } yield CreatedContract
+      .create(
+        contract,
+        consumedInCore,
+        rolledBack,
+        checkContractIdVersion = _ => Right(NonAuthenticatedContractIdVersion),
       )
-    } yield AuthenticatedContractIdVersion.fromDiscriminator(
-      contractIdDiscriminator,
-      contractIdSuffix,
-    )
+      .value
   )
 
-  implicit val lfTemplateIdArb: Arbitrary[LfTemplateId] = Arbitrary(for {
-    packageName <- Gen.stringOfN(8, Gen.alphaChar)
-    moduleName <- Gen.stringOfN(8, Gen.alphaChar)
-    scriptName <- Gen.stringOfN(8, Gen.alphaChar)
-  } yield LfTemplateId.assertFromString(s"$packageName:$moduleName:$scriptName"))
-
-  implicit val requestIdArb: Arbitrary[RequestId] = genArbitrary
 }

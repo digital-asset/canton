@@ -99,11 +99,10 @@ final case class SortedReconciliationIntervals private (
 
   /** Returns the commitment period with endpoints (start, end) that satisfy:
     *
-    * - `start < end < ts`
-    * - `start = endOfPreviousPeriod | CantonTimestamp.MinValue`
+    *   - `start < end <= periodEnd`
+    *   - `start = endOfPreviousPeriod | CantonTimestamp.MinValue`
     *
-    * If no such period exist (e.g., because `ts <= endOfPreviousPeriod`), Right(None) is returned
-    * If an error occurs during tick computation, Left is returned.
+    * If no such period exists (e.g., because `periodEnd <= endOfPreviousPeriod`), None is returned.
     */
   def commitmentPeriodPreceding(
       periodEnd: CantonTimestampSecond,

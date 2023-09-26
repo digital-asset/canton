@@ -29,7 +29,12 @@ import com.digitalasset.canton.participant.admin.v0.PingServiceGrpc.PingServiceS
 import com.digitalasset.canton.participant.admin.v0.PruningServiceGrpc.PruningServiceStub
 import com.digitalasset.canton.participant.admin.v0.ResourceManagementServiceGrpc.ResourceManagementServiceStub
 import com.digitalasset.canton.participant.admin.v0.TransferServiceGrpc.TransferServiceStub
-import com.digitalasset.canton.participant.admin.v0.{ResourceLimits as _, *}
+import com.digitalasset.canton.participant.admin.v0.{
+  PurgeContractsRequest,
+  PurgeContractsResponse,
+  ResourceLimits as _,
+  *,
+}
 import com.digitalasset.canton.participant.admin.{ResourceLimits, v0}
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig as CDomainConnectionConfig
 import com.digitalasset.canton.participant.sync.UpstreamOffsetConvert
@@ -162,7 +167,7 @@ object ParticipantAdminCommands {
       ): Either[String, Unit] = {
         response.success match {
           case None => Left("unexpected empty response")
-          case Some(success) => Right(())
+          case Some(_success) => Right(())
         }
       }
 
@@ -532,6 +537,36 @@ object ParticipantAdminCommands {
       override def handleResponse(response: ImportAcsResponse): Either[String, Unit] = {
         Right(())
       }
+    }
+
+    final case class PurgeContracts(
+        domain: DomainAlias,
+        contracts: Seq[LfContractId],
+        ignoreAlreadyPurged: Boolean,
+    ) extends GrpcAdminCommand[PurgeContractsRequest, PurgeContractsResponse, Unit] {
+
+      override type Svc = ParticipantRepairServiceStub
+
+      override def createService(channel: ManagedChannel): ParticipantRepairServiceStub =
+        ParticipantRepairServiceGrpc.stub(channel)
+
+      override def createRequest(): Either[String, PurgeContractsRequest] = {
+        Right(
+          PurgeContractsRequest(
+            domain = domain.toProtoPrimitive,
+            contractIds = contracts.map(_.coid),
+            ignoreAlreadyPurged = ignoreAlreadyPurged,
+          )
+        )
+      }
+
+      override def submitRequest(
+          service: ParticipantRepairServiceStub,
+          request: PurgeContractsRequest,
+      ): Future[PurgeContractsResponse] = service.purgeContracts(request)
+
+      override def handleResponse(response: PurgeContractsResponse): Either[String, Unit] =
+        Right(())
     }
 
     final case class MigrateDomain(

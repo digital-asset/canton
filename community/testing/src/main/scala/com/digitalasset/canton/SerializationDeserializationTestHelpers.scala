@@ -97,6 +97,7 @@ trait SerializationDeserializationTestHelpers extends BaseTest with ScalaCheckPr
       withClue(
         s"Comparing ${companion.name} with representative ${instance.representativeProtocolVersion}"
       ) {
+
         instance shouldBe deserializedInstance
         instance.representativeProtocolVersion shouldBe deserializedInstance.representativeProtocolVersion
       }

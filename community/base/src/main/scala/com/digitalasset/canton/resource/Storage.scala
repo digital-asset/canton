@@ -690,7 +690,7 @@ object DbStorage {
             logQueryCost,
             scheduler,
             config.parameters,
-            Logger(baseLogger),
+            baseLogger,
           )
           _ <- Either
             .catchOnly[SQLException](db.createSession().close())

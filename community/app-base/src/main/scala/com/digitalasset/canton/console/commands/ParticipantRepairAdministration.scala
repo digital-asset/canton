@@ -52,6 +52,35 @@ class ParticipantRepairAdministration(
     with NoTracing
     with Helpful {
 
+  @Help.Summary("Purge contracts with specified Contract IDs from local participant.")
+  @Help.Description(
+    """This is a last resort command to recover from data corruption, e.g. in scenarios in which participant
+      |contracts have somehow gotten out of sync and need to be manually purged, or in situations in which
+      |stakeholders are no longer available to agree to their archival. The participant needs to be disconnected from
+      |the domain on which the contracts with "contractIds" reside at the time of the call, and as of now the domain
+      |cannot have had any inflight requests.
+      |The "ignoreAlreadyPurged" flag makes it possible to invoke the command multiple times with the same
+      |parameters in case an earlier command invocation has failed.
+      |As repair commands are powerful tools to recover from unforeseen data corruption, but dangerous under normal
+      |operation, use of this command requires (temporarily) enabling the "features.enable-repair-commands"
+      |configuration. In addition repair commands can run for an unbounded time depending on the number of
+      |contract ids passed in. Be sure to not connect the participant to the domain until the call returns."""
+  )
+  def purge(
+      domain: DomainAlias,
+      contractIds: Seq[LfContractId],
+      ignoreAlreadyPurged: Boolean = true,
+  ): Unit =
+    consoleEnvironment.run {
+      runner.adminCommand(
+        ParticipantAdminCommands.ParticipantRepairManagement.PurgeContracts(
+          domain = domain,
+          contracts = contractIds,
+          ignoreAlreadyPurged = ignoreAlreadyPurged,
+        )
+      )
+    }
+
   @Help.Summary("Migrate contracts from one domain to another one.")
   @Help.Description(
     """This method can be used to migrate all the contracts associated with a domain to a new domain connection.
@@ -319,29 +348,6 @@ abstract class LocalParticipantRepairAdministration(
         }
       }
     }
-
-  @Help.Summary("Purge contracts with specified Contract IDs from local participant.")
-  @Help.Description(
-    """This is a last resort command to recover from data corruption, e.g. in scenarios in which participant
-      |contracts have somehow gotten out of sync and need to be manually purged, or in situations in which
-      |stakeholders are no longer available to agree to their archival. The participant needs to be disconnected from
-      |the domain on which the contracts with "contractIds" reside at the time of the call, and as of now the domain
-      |cannot have had any inflight requests.
-      |The "ignoreAlreadyPurged" flag makes it possible to invoke the command multiple times with the same
-      |parameters in case an earlier command invocation has failed.
-      |As repair commands are powerful tools to recover from unforeseen data corruption, but dangerous under normal
-      |operation, use of this command requires (temporarily) enabling the "features.enable-repair-commands"
-      |configuration. In addition repair commands can run for an unbounded time depending on the number of
-      |contract ids passed in. Be sure to not connect the participant to the domain until the call returns."""
-  )
-  def purge(
-      domain: DomainAlias,
-      contractIds: Seq[LfContractId],
-      ignoreAlreadyPurged: Boolean = true,
-  ): Unit =
-    runRepairCommand(tc =>
-      access(_.sync.repairService.purgeContracts(domain, contractIds, ignoreAlreadyPurged)(tc))
-    )
 
   @Help.Summary("Move contracts with specified Contract IDs from one domain to another.")
   @Help.Description(

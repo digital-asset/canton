@@ -12,3 +12,10 @@ ALTER TABLE sequencer_state_manager_events ADD CONSTRAINT chk_content_xor_tombst
 -- track the age of the initial topology's timestamp or NULL if not available
 -- when available, the timestamp limits how long the sequencer creates tombstones.
 ALTER TABLE sequencer_state_manager_lower_bound ADD COLUMN ts_initial_topology BIGINT NULL;
+
+ALTER TABLE fresh_submitted_transaction_pruning ADD COLUMN succeeded bigint null;
+ALTER TABLE active_contract_pruning ADD COLUMN succeeded bigint null;
+ALTER TABLE commitment_pruning ADD COLUMN succeeded bigint null;
+ALTER TABLE contract_key_pruning ADD COLUMN succeeded bigint null;
+ALTER TABLE sequenced_event_store_pruning ADD COLUMN succeeded bigint null;
+

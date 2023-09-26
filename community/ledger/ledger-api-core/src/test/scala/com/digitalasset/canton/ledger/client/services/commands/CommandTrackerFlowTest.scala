@@ -109,9 +109,8 @@ class CommandTrackerFlowTest
         startOffset: LedgerOffset,
     )
 
-    private implicit val directEc: ExecutionContext[Nothing] = ExecutionContext(
-      DirectExecutionContext(logger)
-    )
+    private implicit val directEc: ExecutionContext[Nothing] =
+      ExecutionContext(DirectExecutionContext(noTracingLogger))
 
     private val stateRef = new AtomicReference[Promise[State]](Promise[State]())
 

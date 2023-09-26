@@ -50,7 +50,7 @@ class SpanningTest extends AnyWordSpec with BaseTest with BeforeAndAfterEach {
     def nestedFuture(
         inner: Future[Unit]
     ): EitherT[OptionT[CheckedT[FutureUnlessShutdown, Int, Int, *], *], String, HandlerResult] = {
-      implicit val directExecutionContext = DirectExecutionContext(logger)
+      implicit val directExecutionContext = DirectExecutionContext(noTracingLogger)
       withNewTrace("Outer.nestedFuture") { traceContext => span =>
         span.addEvent("running Outer.foo")
         EitherT.pure(

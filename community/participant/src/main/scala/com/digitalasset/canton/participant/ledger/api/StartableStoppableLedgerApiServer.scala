@@ -211,15 +211,13 @@ class StartableStoppableLedgerApiServer(
         loggerFactory,
         multiDomainEnabled = multiDomainEnabled,
         startupMode = overrideIndexerStartupMode.getOrElse(DefaultIndexerStartupMode),
-        dataSourceProperties = Some(
-          DbSupport.DataSourceProperties(
-            connectionPool = IndexerConfig
-              .createConnectionPoolConfig(
-                ingestionParallelism = config.indexerConfig.ingestionParallelism.unwrap,
-                connectionTimeout = config.serverConfig.databaseConnectionTimeout.underlying,
-              ),
-            postgres = config.serverConfig.postgresDataSource,
-          )
+        dataSourceProperties = DbSupport.DataSourceProperties(
+          connectionPool = IndexerConfig
+            .createConnectionPoolConfig(
+              ingestionParallelism = config.indexerConfig.ingestionParallelism.unwrap,
+              connectionTimeout = config.serverConfig.databaseConnectionTimeout.underlying,
+            ),
+          postgres = config.serverConfig.postgresDataSource,
         ),
         highAvailability = config.indexerHaConfig,
       )

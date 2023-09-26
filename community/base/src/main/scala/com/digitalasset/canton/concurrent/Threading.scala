@@ -6,11 +6,10 @@ package com.digitalasset.canton.concurrent
 import cats.syntax.either.*
 import com.daml.metrics.ExecutorServiceMetrics
 import com.digitalasset.canton.lifecycle.ClosingException
-import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil.*
 import com.google.common.util.concurrent.ThreadFactoryBuilder
+import com.typesafe.scalalogging.Logger
 
 import java.util.concurrent.*
 import java.util.function.Predicate
@@ -18,7 +17,7 @@ import scala.concurrent.{ExecutionContext, blocking}
 
 /** Factories and utilities for dealing with threading.
   */
-object Threading extends NoTracing {
+object Threading {
 
   /** Creates a singled threaded scheduled executor.
     * @param name used for created threads. Prefer dash separated names. `-{n}` will be appended.
@@ -26,7 +25,7 @@ object Threading extends NoTracing {
     */
   def singleThreadScheduledExecutor(
       name: String,
-      logger: TracedLogger,
+      logger: Logger,
       daemon: Boolean = false,
   ): ScheduledExecutorService = {
     val executor = new ScheduledThreadPoolExecutor(
@@ -44,7 +43,7 @@ object Threading extends NoTracing {
     */
   def singleThreadedExecutor(
       name: String,
-      logger: TracedLogger,
+      logger: Logger,
   ): ExecutionContextIdlenessExecutorService = {
     val executor = new ThreadPoolExecutor(
       1,
@@ -66,7 +65,7 @@ object Threading extends NoTracing {
     */
   private def threadFactory(
       name: String,
-      logger: TracedLogger,
+      logger: Logger,
       exitOnFatal: Boolean,
       daemon: Boolean = false,
   ): ThreadFactory =
@@ -80,7 +79,7 @@ object Threading extends NoTracing {
     *                    termination of specific threads.
     */
   private def createUncaughtExceptionHandler(
-      logger: TracedLogger,
+      logger: Logger,
       exitOnFatal: Boolean,
   ): Thread.UncaughtExceptionHandler =
     (t: Thread, e: Throwable) => createReporter(t.getName, logger, exitOnFatal)(e)
@@ -88,7 +87,7 @@ object Threading extends NoTracing {
   /** @param exitOnFatal terminate the JVM on fatal errors. Enable this in production to prevent data corruption by
     *                    termination of specific threads.
     */
-  def createReporter(name: String, logger: TracedLogger, exitOnFatal: Boolean)(
+  def createReporter(name: String, logger: Logger, exitOnFatal: Boolean)(
       throwable: Throwable
   ): Unit = {
     if (exitOnFatal) doExitOnFatal(name, logger)(throwable)
@@ -103,7 +102,7 @@ object Threading extends NoTracing {
     }
   }
 
-  private def doExitOnFatal(name: String, logger: TracedLogger)(throwable: Throwable): Unit =
+  private def doExitOnFatal(name: String, logger: Logger)(throwable: Throwable): Unit =
     throwable match {
       case _: LinkageError | _: VirtualMachineError =>
         // Output the error reason both to stderr and the logger,
@@ -119,7 +118,7 @@ object Threading extends NoTracing {
 
   def newExecutionContext(
       name: String,
-      logger: TracedLogger,
+      logger: Logger,
       metrics: ExecutorServiceMetrics,
   ): ExecutionContextIdlenessExecutorService =
     newExecutionContext(name, logger, metrics, detectNumberOfThreads(logger))
@@ -133,7 +132,7 @@ object Threading extends NoTracing {
   @SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.AsInstanceOf"))
   def newExecutionContext(
       name: String,
-      logger: TracedLogger,
+      logger: Logger,
       metrics: ExecutorServiceMetrics,
       parallelism: Int,
       maxExtraThreads: Int = 256,
@@ -171,8 +170,8 @@ object Threading extends NoTracing {
       parallelism: Int,
       threadFactory: ForkJoinPool.ForkJoinWorkerThreadFactory,
       handler: Thread.UncaughtExceptionHandler,
-      logger: TracedLogger,
-  )(implicit traceContext: TraceContext): ForkJoinPool = {
+      logger: Logger,
+  ): ForkJoinPool = {
     val tunedParallelism =
       if (parallelism >= minParallelism) parallelism
       else {
@@ -225,7 +224,7 @@ object Threading extends NoTracing {
     }
   }
 
-  def directExecutionContext(logger: TracedLogger): ExecutionContext = DirectExecutionContext(
+  def directExecutionContext(logger: Logger): ExecutionContext = DirectExecutionContext(
     logger
   )
 
@@ -233,7 +232,7 @@ object Threading extends NoTracing {
     * except that system property values like 'x2' are not supported.
     */
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
-  def detectNumberOfThreads(logger: TracedLogger)(implicit traceContext: TraceContext): Int = {
+  def detectNumberOfThreads(logger: Logger): Int = {
     def getIntProperty(name: String): Option[Int] =
       for {
         strProperty <- Option(System.getProperty(name))

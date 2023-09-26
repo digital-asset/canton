@@ -164,13 +164,16 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
   logger.debug(config.portDescription)
 
   implicit val scheduler: ScheduledExecutorService =
-    Threading.singleThreadScheduledExecutor(loggerFactory.threadName + "-env-scheduler", logger)
+    Threading.singleThreadScheduledExecutor(
+      loggerFactory.threadName + "-env-scheduler",
+      noTracingLogger,
+    )
 
-  private val numThreads = Threading.detectNumberOfThreads(logger)
+  private val numThreads = Threading.detectNumberOfThreads(noTracingLogger)
   implicit val executionContext: ExecutionContextIdlenessExecutorService =
     Threading.newExecutionContext(
       loggerFactory.threadName + "-env-execution-context",
-      logger,
+      noTracingLogger,
       metricsFactory.executionServiceMetrics,
       numThreads,
     )
@@ -200,7 +203,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
     AkkaUtil.createExecutionSequencerFactory(
       loggerFactory.threadName + "-admin-workflow-services",
       // don't log the number of threads twice, as we log it already when creating the first pool
-      NamedLogging.noopLogger,
+      NamedLogging.noopNoTracingLogger,
     )
 
   // additional closeables

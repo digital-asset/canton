@@ -410,7 +410,6 @@ class TopologyTransactionProcessor(
             revoked, the domain parameters stay valid.
            */
           val isAuthorized = authValidator.isCurrentlyAuthorized(tx) || isDomainGovernance
-
           cascadingFilter(tx) && isAuthorized
         }
 
