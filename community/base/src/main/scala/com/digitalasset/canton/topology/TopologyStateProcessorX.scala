@@ -4,10 +4,18 @@
 package com.digitalasset.canton.topology
 
 import cats.data.EitherT
+import cats.instances.seq.*
+import cats.syntax.foldable.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.crypto.Crypto
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
+import com.digitalasset.canton.topology.processing.{
+  EffectiveTime,
+  IncomingTopologyTransactionAuthorizationValidatorX,
+  SequencedTime,
+}
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransactionX.GenericValidatedTopologyTransactionX
 import com.digitalasset.canton.topology.store.{
   TopologyStoreId,
@@ -15,7 +23,6 @@ import com.digitalasset.canton.topology.store.{
   TopologyTransactionRejection,
   ValidatedTopologyTransactionX,
 }
-import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.TopologyMappingX.MappingHash
 import com.digitalasset.canton.topology.transaction.TopologyTransactionX.TxHash
@@ -26,9 +33,16 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 
+/** @param outboxQueue If a [[DomainOutboxQueue]] is provided, the processed transactions are not directly stored,
+  *                    but rather sent to the domain via an ephemeral queue (i.e. no persistence).
+  * @param enableTopologyTransactionValidation If disabled, all of the authorization validation logic in
+  *                                            IncomingTopologyTransactionAuthorizationValidatorX is skipped.
+  */
 class TopologyStateProcessorX(
     val store: TopologyStoreX[TopologyStoreId],
     outboxQueue: Option[DomainOutboxQueue],
+    enableTopologyTransactionValidation: Boolean,
+    crypto: Crypto,
     loggerFactoryParent: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
@@ -53,6 +67,14 @@ class TopologyStateProcessorX(
   private val proposalsByMapping = TrieMap[MappingHash, Seq[TxHash]]()
   private val proposalsForTx = TrieMap[TxHash, MaybePending]()
 
+  private val authValidator =
+    new IncomingTopologyTransactionAuthorizationValidatorX(
+      crypto.pureCrypto,
+      store,
+      None,
+      loggerFactory.append("role", "incoming"),
+    )
+
   // compared to the old topology stores, the x stores don't distinguish between
   // state & transaction store. cascading deletes are irrevocable and delete everything
   // that depended on a certificate.
@@ -67,21 +89,17 @@ class TopologyStateProcessorX(
       transactions: Seq[GenericSignedTopologyTransactionX],
       // TODO(#12390) propagate and abort unless we use force
       abortIfCascading: Boolean,
-      abortOnError: Boolean,
       expectFullAuthorization: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, Seq[GenericValidatedTopologyTransactionX], Seq[
     GenericValidatedTopologyTransactionX
   ]] = {
+    // if transactions aren't persisted in the store but rather enqueued in the domain outbox queue,
+    // the processing should abort on errors, because we don't want to enqueue rejected transactions.
+    val abortOnError = outboxQueue.nonEmpty
 
     type Lft = Seq[GenericValidatedTopologyTransactionX]
-
-    // TODO(#12390): check why tests like TrafficControlTest doesn't work anymore without always resetting the caches.
-    //               as this is "only a performance optimization", it is safe to do so, but we'd prefer not to.
-    txForMapping.clear()
-    proposalsByMapping.clear()
-    proposalsForTx.clear()
 
     // first, pre-load the currently existing mappings and proposals for the given transactions
     val preloadTxsForMappingF = preloadTxsForMapping(EffectiveTime.MaxValue, transactions)
@@ -91,24 +109,32 @@ class TopologyStateProcessorX(
       _ <- EitherT.right[Lft](preloadProposalsForTxF)
       _ <- EitherT.right[Lft](preloadTxsForMappingF)
       // compute / collapse updates
-      ((mappingRemoves, txRemoves), pendingWrites) = {
+      (removesF, pendingWrites) = {
         val pendingWrites = transactions.map(MaybePending)
         val removes = pendingWrites
-          .foldLeft((Set.empty[MappingHash], Set.empty[TxHash])) {
+          .foldLeftM((Set.empty[MappingHash], Set.empty[TxHash])) {
             case ((removeMappings, removeTxs), tx) =>
-              val finalTx = validateAndMerge(tx.originalTx, expectFullAuthorization)
-              tx.adjusted.set(Some(finalTx.transaction))
-              tx.rejection.set(finalTx.rejectionReason)
-              determineRemovesAndUpdatePending(tx, removeMappings, removeTxs)
+              validateAndMerge(
+                effective,
+                tx.originalTx,
+                expectFullAuthorization || !tx.originalTx.isProposal,
+              ).map { finalTx =>
+                tx.adjusted.set(Some(finalTx.transaction))
+                tx.rejection.set(finalTx.rejectionReason)
+                determineRemovesAndUpdatePending(tx, removeMappings, removeTxs)
+              }
           }
         (removes, pendingWrites)
       }
+      removes <- EitherT.right[Lft](removesF)
+      (mappingRemoves, txRemoves) = removes
       validatedTx = pendingWrites.map(pw => pw.validatedTx)
       _ <- EitherT.cond[Future](
         // TODO(#12390) differentiate error reason and only abort actual errors, not in-batch merges
-        !abortOnError || validatedTx.forall(_.rejectionReason.isEmpty),
+        !abortOnError || validatedTx.forall(_.nonDuplicateRejectionReason.isEmpty),
         (), {
-          // TODO(#14064) reset authorization state too
+          // reset caches as they are broken now if we abort
+          clearCaches()
           validatedTx
         }: Lft,
       ): EitherT[Future, Lft, Unit]
@@ -117,10 +143,7 @@ class TopologyStateProcessorX(
         case Some(queue) =>
           // if we use the domain outbox queue, we must also reset the caches, because the local validation
           // doesn't automatically imply successful validation once the transactions have been sequenced.
-          // reset caches as they are broken now if we abort
-          txForMapping.clear()
-          proposalsByMapping.clear()
-          proposalsForTx.clear()
+          clearCaches()
           EitherT.rightT[Future, Lft](queue.enqueue(validatedTx.map(_.transaction)))
 
         case None =>
@@ -141,17 +164,24 @@ class TopologyStateProcessorX(
         failed
       },
       success => {
-        if (outboxQueue.isEmpty)
+        if (outboxQueue.isEmpty) {
           logger.info(
             s"Persisted topology transactions ($sequenced, $effective):\n" + success
               .mkString(
                 ",\n"
               )
           )
-        else logger.info("Enqueued topology transactions:\n" + success.mkString((",\n")))
+        } else logger.info("Enqueued topology transactions:\n" + success.mkString((",\n")))
         success
       },
     )
+  }
+
+  private def clearCaches(): Unit = {
+    txForMapping.clear()
+    proposalsForTx.clear()
+    proposalsByMapping.clear()
+    authValidator.reset()
   }
 
   private def preloadTxsForMapping(
@@ -188,7 +218,10 @@ class TopologyStateProcessorX(
   )(implicit traceContext: TraceContext): Future[Unit] = {
     val hashes =
       NonEmpty.from(
-        transactions.map(x => x.transaction.hash).filterNot(proposalsForTx.contains).toSet
+        transactions
+          .map(x => x.transaction.hash)
+          .filterNot(proposalsForTx.contains)
+          .toSet
       )
 
     hashes.fold(Future.unit) {
@@ -205,104 +238,119 @@ class TopologyStateProcessorX(
   }
 
   private def serialIsMonotonicallyIncreasing(
-      previous: Option[GenericSignedTopologyTransactionX],
-      current: GenericSignedTopologyTransactionX,
-  ): Either[TopologyTransactionRejection, Unit] = previous match {
+      inStore: Option[GenericSignedTopologyTransactionX],
+      toValidate: GenericSignedTopologyTransactionX,
+  ): Either[TopologyTransactionRejection, Unit] = inStore match {
     case Some(value) =>
       val expected = value.transaction.serial + PositiveInt.one
       Either.cond(
-        expected == current.transaction.serial,
+        expected == toValidate.transaction.serial,
         (),
-        TopologyTransactionRejection.SerialMismatch(expected, current.transaction.serial),
+        TopologyTransactionRejection.SerialMismatch(expected, toValidate.transaction.serial),
       )
     case None => Right(())
   }
 
   private def transactionIsAuthorized(
-      previous: Option[GenericSignedTopologyTransactionX],
-      current: GenericSignedTopologyTransactionX,
+      effective: EffectiveTime,
+      inStore: Option[GenericSignedTopologyTransactionX],
+      toValidate: GenericSignedTopologyTransactionX,
       expectFullAuthorization: Boolean,
-  ): Either[String, GenericSignedTopologyTransactionX] = {
-    // if it is a proposal, then each signature must be valid, but we don't need
-    // the signatures to be sufficient
-    // if the tx is a proposal but has enough signatures, emit log message
-    // that it is now fully authorized and counts as state now
-    // TODO(#12390) @gerolf: have fun
-    //  - check that signatures are correct
-    //  - check whether the keys are allowed to sign the tx
-    //  - check if there are enough signatures
-    Right(
-      SignedTopologyTransactionX(
-        current.transaction,
-        current.signatures,
-        isProposal = false, // TODO(#12390) only set to false if it is authorized
-      )(current.representativeProtocolVersion)
-    )
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, TopologyTransactionRejection, GenericSignedTopologyTransactionX] = {
+    if (enableTopologyTransactionValidation) {
+      EitherT(
+        authValidator
+          .validateAndUpdateHeadAuthState(
+            effective.value,
+            Seq(toValidate),
+            inStore.map(tx => tx.transaction.mapping.uniqueKey -> tx).toList.toMap,
+            expectFullAuthorization,
+          )
+          // TODO(#12390) proper error
+          .map { case (_, txs) =>
+            txs.headOption.getOrElse(sys.error("expected validation result doesn't exist"))
+          }
+          .map(tx => tx.rejectionReason.toLeft(tx.transaction))
+      )
+    } else {
+      EitherT.rightT(toValidate.copy(isProposal = false))
+    }
   }
 
-  private def potentiallyMergeWithLast(
-      previous: Option[GenericSignedTopologyTransactionX],
-      current: GenericSignedTopologyTransactionX,
-  ): (Boolean, GenericSignedTopologyTransactionX) = previous match {
-    case Some(value) if value.transaction.hash == current.transaction.hash =>
-      // TODO(#12390) deduplicate if no new signatures are being added
-      // => DuplicateTransaction -> reject or ignore
-      (true, value.addSignatures(current.signatures.toSeq))
-    case _ => (false, current)
-  }
+  private def deduplicateAndMergeSignatures(
+      inStore: Option[GenericSignedTopologyTransactionX],
+      toValidate: GenericSignedTopologyTransactionX,
+  ): Either[TopologyTransactionRejection, (Boolean, GenericSignedTopologyTransactionX)] =
+    inStore match {
+      case Some(value) if value.transaction.hash == toValidate.transaction.hash =>
+        if (toValidate.signatures.diff(value.signatures).isEmpty) {
+          // the new transaction doesn't provide any new signatures => Duplicate
+          // TODO(#12390) use proper timestamp or remove the timestamp from the error?
+          Left(TopologyTransactionRejection.Duplicate(CantonTimestamp.MinValue))
+        } else Right((true, value.addSignatures(toValidate.signatures.toSeq)))
 
-  private def fetchPendingProposalAndMerge(
-      current: GenericSignedTopologyTransactionX
+      case _ => Right((false, toValidate))
+    }
+
+  private def mergeWithPendingProposal(
+      toValidate: GenericSignedTopologyTransactionX
   ): GenericSignedTopologyTransactionX = {
-    proposalsForTx.get(current.transaction.hash) match {
-      case None => current
-      case Some(previous) =>
-        SignedTopologyTransactionX(
-          current.transaction,
-          signatures = current.signatures ++ previous.currentTx.signatures,
-          isProposal = current.isProposal,
-        )(current.representativeProtocolVersion)
+    proposalsForTx.get(toValidate.transaction.hash) match {
+      case None => toValidate
+      case Some(existingProposal) =>
+        toValidate.addSignatures(existingProposal.validatedTx.transaction.signatures.toSeq)
     }
   }
 
   private def validateAndMerge(
+      effective: EffectiveTime,
       txA: GenericSignedTopologyTransactionX,
       expectFullAuthorization: Boolean,
-  ): GenericValidatedTopologyTransactionX = {
+  )(implicit traceContext: TraceContext): Future[GenericValidatedTopologyTransactionX] = {
     // get current valid transaction for the given mapping
-    val last = txForMapping.get(txA.transaction.mapping.uniqueKey).map(_.currentTx)
+    val tx_inStore = txForMapping.get(txA.transaction.mapping.uniqueKey).map(_.currentTx)
     // first, merge a pending proposal with this transaction. we do this as it might
     // subsequently activate the given transaction
-    val txB = fetchPendingProposalAndMerge(txA)
+    val tx_mergedProposalSignatures = mergeWithPendingProposal(txA)
     // TODO(#12390) add a check here for consistency. these checks should reject on the mediator / topology
     //   manager, but only warn on the processor.
     //   things we need to catch are:
     //     - a party to participant mapping mentioning a participant who is not on the domain
     //       (no trust certificate or no owner keys)
     //     - a mediator or sequencer who doesn't have keys
-    //     - a domain parameter change (in particular changes to the topology change delay) that coudl confuse the future dating logic.
+    //     - a domain parameter change (in particular changes to the topology change delay) that could confuse the future dating logic.
     val ret = for {
+      mergeResult <- EitherT.fromEither[Future](
+        deduplicateAndMergeSignatures(tx_inStore, tx_mergedProposalSignatures)
+      )
+      (isMerge, tx_deduplicatedAndMerged) = mergeResult
       // we check if the transaction is properly authorized given the current topology state
       // if it is a proposal, then we demand that all signatures are appropriate (but
       // not necessarily sufficient)
-      // TODO(#12390) emit appropriate log message
-      txC <- transactionIsAuthorized(last, txB, expectFullAuthorization).left.map(
-        TopologyTransactionRejection.Other
+      tx_authorized <- transactionIsAuthorized(
+        effective,
+        tx_inStore,
+        tx_deduplicatedAndMerged,
+        expectFullAuthorization,
       )
       // we potentially merge the transaction with the currently active if this is just a signature update
-      (isMerge, txD) = potentiallyMergeWithLast(last, txC)
       // now, check if the serial is monotonically increasing
-      _ <-
+      fullyValidated <-
         if (isMerge)
-          Right(())
-        else serialIsMonotonicallyIncreasing(last, txD)
-    } yield txD
-    ret match {
-      case Right(value) => ValidatedTopologyTransactionX(value, None)
-      case Left(rejectionReason) =>
-        // TODO(#12390) emit appropriate log message
-        ValidatedTopologyTransactionX(txA, Some(rejectionReason))
-    }
+          EitherT.rightT[Future, TopologyTransactionRejection](tx_authorized)
+        else {
+          EitherT.fromEither[Future](
+            serialIsMonotonicallyIncreasing(tx_inStore, tx_authorized).map(_ => tx_authorized)
+          )
+        }
+    } yield fullyValidated
+    ret.fold(
+      // TODO(#12390) emit appropriate log message and use correct rejection reason
+      rejection => ValidatedTopologyTransactionX(txA, Some(rejection)),
+      tx => ValidatedTopologyTransactionX(tx, None),
+    )
   }
 
   private def determineRemovesAndUpdatePending(
@@ -321,12 +369,14 @@ class TopologyStateProcessorX(
       // if this is a proposal, we only delete the "previously existing proposal"
       // AND ((tx_hash = ..))
       val txHash = finalTx.transaction.hash
-      proposalsForTx.put(txHash, tx).foreach { previous =>
-        // update currently pending (this is relevant in case if we have within a batch proposals for the
-        // same txs)
-        val cur = previous.rejection.get()
-        previous.expireImmediately.set(true)
-        ErrorUtil.requireState(cur.isEmpty, s"Error state should be empty for ${previous}")
+      proposalsForTx.put(txHash, tx).foreach { existingProposal =>
+        // update currently pending (this is relevant in case we have proposals for the
+        // same txs within a batch)
+        existingProposal.expireImmediately.set(true)
+        ErrorUtil.requireState(
+          existingProposal.rejection.get().isEmpty,
+          s"Error state should be empty for ${existingProposal}",
+        )
       }
       trackProposal(txHash, finalTx.transaction.mapping.uniqueKey)
       (removeMappings, removeTxs + txHash)
@@ -336,11 +386,13 @@ class TopologyStateProcessorX(
       //  monotonically increasing check
       // AND ((mapping_key = ...) )
       val mappingHash = finalTx.transaction.mapping.uniqueKey
-      txForMapping.put(mappingHash, tx).foreach { previous =>
+      txForMapping.put(mappingHash, tx).foreach { existingMapping =>
         // replace previous tx in case we have concurrent updates within the same timestamp
-        val cur = previous.rejection.get()
-        previous.expireImmediately.set(true)
-        ErrorUtil.requireState(cur.isEmpty, s"Error state should be empty for ${previous}")
+        existingMapping.expireImmediately.set(true)
+        ErrorUtil.requireState(
+          existingMapping.rejection.get().isEmpty,
+          s"Error state should be empty for ${existingMapping}",
+        )
       }
       // remove all pending proposals for this mapping
       proposalsByMapping

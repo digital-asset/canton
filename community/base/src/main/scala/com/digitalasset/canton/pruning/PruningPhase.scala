@@ -45,11 +45,15 @@ object PruningPhase {
     pp >> d.toDbPrimitive
 }
 
-final case class PruningStatus(phase: PruningPhase, timestamp: CantonTimestamp)
-    extends PrettyPrinting {
+final case class PruningStatus(
+    phase: PruningPhase,
+    timestamp: CantonTimestamp,
+    lastSuccess: Option[CantonTimestamp],
+) extends PrettyPrinting {
   override def pretty: Pretty[PruningStatus] = prettyOfClass(
     param("phase", _.phase),
     param("timestamp", _.timestamp),
+    param("lastSuccess", _.lastSuccess),
   )
 }
 
@@ -60,6 +64,10 @@ object PruningStatus {
     )
 
   implicit val getResultPruningStatus: GetResult[PruningStatus] = GetResult(r =>
-    PruningStatus(PruningPhase.getResultPruningPhase(r), GetResult[CantonTimestamp].apply(r))
+    PruningStatus(
+      PruningPhase.getResultPruningPhase(r),
+      GetResult[CantonTimestamp].apply(r),
+      GetResult[Option[CantonTimestamp]].apply(r),
+    )
   )
 }

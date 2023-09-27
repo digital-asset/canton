@@ -66,7 +66,7 @@ class StringInterningView(override protected val loggerFactory: NamedLoggerFacto
     with UpdatingStringInterningView
     with NamedLogging {
 
-  private val directEc = DirectExecutionContext(logger)
+  private val directEc = DirectExecutionContext(noTracingLogger)
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   @volatile private var raw: RawStringInterning = RawStringInterning.from(Nil)

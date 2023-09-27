@@ -189,7 +189,7 @@ class GrpcTopologyManagerWriteServiceX(
         .add(signedTxs, force = request.forceChange, expectFullAuthorization = false)
         .leftWiden[CantonError]
     } yield v1.AddTransactionsResponse()
-    CantonGrpcUtil.mapErrNewEUS(res).andThen(_ => topologyStoreX.dumpStoreContent())
+    CantonGrpcUtil.mapErrNewEUS(res)
   }
 
   private def targetManagerET(

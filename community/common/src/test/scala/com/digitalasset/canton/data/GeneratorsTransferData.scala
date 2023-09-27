@@ -23,6 +23,7 @@ import scala.concurrent.ExecutionContext
 
 object GeneratorsTransferData {
   import com.digitalasset.canton.Generators.*
+  import com.digitalasset.canton.GeneratorsLf.*
   import com.digitalasset.canton.crypto.GeneratorsCrypto.*
   import com.digitalasset.canton.data.GeneratorsData.*
   import com.digitalasset.canton.protocol.GeneratorsProtocol.*

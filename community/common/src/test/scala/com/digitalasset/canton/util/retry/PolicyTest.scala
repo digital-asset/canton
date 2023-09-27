@@ -13,7 +13,6 @@ import com.digitalasset.canton.lifecycle.{
   Lifecycle,
   UnlessShutdown,
 }
-import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.retry.Jitter.RandomSource
 import com.digitalasset.canton.util.retry.RetryUtil.{
@@ -726,9 +725,9 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService with
 
       val closeableEc = Threading.newExecutionContext(
         executionContextName,
-        logger,
+        noTracingLogger,
         executorServiceMetrics,
-        Threading.detectNumberOfThreads(logger)(TraceContext.empty),
+        Threading.detectNumberOfThreads(noTracingLogger),
         exitOnFatal = exitOnFatal,
       )
 

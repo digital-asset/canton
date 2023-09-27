@@ -220,17 +220,17 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
         lookup3 <- valueOrFail(fix.store.lookup(changeId1Hash))("find event1")
       } yield {
         val definiteAnswerEvent1 =
-          DefiniteAnswerEvent(offset1, publicationTime1, submissionId1, TraceContext.empty)
+          DefiniteAnswerEvent(offset1, publicationTime1, submissionId1)(TraceContext.empty)
         lookup1 shouldBe CommandDeduplicationData.tryCreate(
           changeId1,
           definiteAnswerEvent1,
           definiteAnswerEvent1.some,
         )
         val definiteAnswerEvent2 =
-          DefiniteAnswerEvent(offset2, publicationTime2, None, TraceContext.empty)
+          DefiniteAnswerEvent(offset2, publicationTime2, None)(TraceContext.empty)
         lookup2 shouldBe CommandDeduplicationData.tryCreate(changeId3, definiteAnswerEvent2, None)
         val definiteAnswerEvent3 =
-          DefiniteAnswerEvent(offset3, publicationTime3, submissionId1, TraceContext.empty)
+          DefiniteAnswerEvent(offset3, publicationTime3, submissionId1)(TraceContext.empty)
         lookup3 shouldBe CommandDeduplicationData.tryCreate(
           changeId1,
           definiteAnswerEvent3,

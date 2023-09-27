@@ -616,7 +616,7 @@ class ExampleTransactionFactory(
         protocolVersion,
       )
 
-    val viewParticipantData = ViewParticipantData(cryptoOps)(
+    val viewParticipantData = ViewParticipantData.tryCreate(cryptoOps)(
       coreInputContracts,
       createWithSerialization,
       createdInSubviewArchivedInCore,

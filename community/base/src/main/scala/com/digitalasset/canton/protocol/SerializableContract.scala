@@ -50,6 +50,7 @@ case class SerializableContract(
     extends HasVersionedWrapper[SerializableContract]
     // Even if implementing HasVersionedWrapper, we should still implement HasProtoV0
     with PrettyPrinting {
+
   def contractInstance: LfContractInst = rawContractInstance.contractInstance
 
   override protected def companionObj = SerializableContract

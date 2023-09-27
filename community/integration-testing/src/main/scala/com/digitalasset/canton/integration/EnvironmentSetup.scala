@@ -53,6 +53,11 @@ sealed trait EnvironmentSetup[E <: Environment, TCE <: TestConsoleEnvironment[E]
 
   def logsToBeHandledAtStartup: Option[Seq[LogEntry] => Assertion] = None
 
+  protected def handleStartupLogs[T](start: => T): T =
+    logsToBeHandledAtStartup
+      .map(assertion => loggerFactory.assertLoggedWarningsAndErrorsSeq(start, assertion))
+      .getOrElse(start)
+
   /** Creates a new environment manually for a test without concurrent environment limitation and with optional config transformation.
     *
     * @param initialConfig specifies which configuration to start from with the default being a NEW one created
@@ -107,17 +112,8 @@ sealed trait EnvironmentSetup[E <: Environment, TCE <: TestConsoleEnvironment[E]
         if (runPlugins(plugin)) plugin.afterEnvironmentCreated(finalConfig, testEnvironment)
       )
 
-      if (!finalConfig.parameters.manualStart) {
-        logsToBeHandledAtStartup
-          .map { assertion =>
-            loggerFactory.assertLoggedWarningsAndErrorsSeq(
-              testEnvironment.startAll(),
-              assertion,
-            )
-          }
-          .getOrElse(testEnvironment.startAll())
-
-      }
+      if (!finalConfig.parameters.manualStart)
+        handleStartupLogs(testEnvironment.startAll())
 
       envDef.setups.foreach(setup => setup(testEnvironment))
 

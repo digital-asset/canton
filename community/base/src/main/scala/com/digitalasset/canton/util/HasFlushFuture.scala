@@ -62,7 +62,7 @@ trait HasFlushFuture
   private val tasks: TrieMap[HasFlushFuture.NamedTask, Unit] =
     TrieMap.empty[HasFlushFuture.NamedTask, Unit]
 
-  private val directExecutionContext: ExecutionContext = DirectExecutionContext(logger)
+  private val directExecutionContext: ExecutionContext = DirectExecutionContext(noTracingLogger)
 
   /** Returns the list of currently incomplete tasks.
     * Use only for inspection and debugging.

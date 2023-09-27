@@ -103,8 +103,7 @@ class CommandDeduplicatorImpl(
               globalOffset,
               publicationTime,
               dedupInfo.submissionId,
-              dedupInfo.eventTraceContext,
-            ),
+            )(dedupInfo.eventTraceContext),
             dedupInfo.acceptance,
           )
         }

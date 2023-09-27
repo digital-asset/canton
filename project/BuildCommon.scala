@@ -524,7 +524,7 @@ object BuildCommon {
           cats,
           jul_to_slf4j % Test,
           monocle_macro, // Include it here, even if unused, so that it can be used everywhere
-          pureconfig, // Only dependencies may be needed, but it is simplest to include it like this
+          pureconfig_core,
         ),
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
@@ -632,6 +632,7 @@ object BuildCommon {
           ammonite,
           jul_to_slf4j,
           pureconfig_cats,
+          pureconfig_core,
         ),
       )
 
@@ -734,6 +735,7 @@ object BuildCommon {
           magnolifyShared % Test,
           cats_law % Test,
           circe_generic_extras,
+          circe_core,
           jul_to_slf4j % Test,
           grpc_netty,
           netty_boring_ssl,
@@ -750,7 +752,7 @@ object BuildCommon {
           sttp,
           sttp_circe,
           monocle_macro, // Include it here, even if unused, so that it can be used everywhere
-          pureconfig, // Only dependencies may be needed, but it is simplest to include it like this
+          pureconfig_core,
           dropwizard_metrics_core,
           prometheus_dropwizard, // Include it here to overwrite transitive dependencies by DAML libraries
           prometheus_httpserver, // Include it here to overwrite transitive dependencies by DAML libraries
@@ -957,7 +959,7 @@ object BuildCommon {
           log4j_core,
           log4j_api,
           monocle_macro, // Include it here, even if unused, so that it can be used everywhere
-          pureconfig,
+          pureconfig_core,
         ),
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
         JvmRulesPlugin.damlRepoHeaderSettings,
@@ -1492,10 +1494,13 @@ object BuildCommon {
           typelevel_paiges,
           commons_io,
           commons_codec,
-          pureconfig,
+          pureconfig_core,
+          pureconfig_generic,
+          pureconfig_macros,
           auth0_java,
           auth0_jwks,
           scala_logging,
+          shapeless,
         ),
         Compile / unmanagedSourceDirectories ++=
           Seq(

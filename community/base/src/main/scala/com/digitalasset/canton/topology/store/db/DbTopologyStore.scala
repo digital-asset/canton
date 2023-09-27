@@ -343,15 +343,12 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
         val elementId =
           transaction.uniquePath.maybeElementId.fold(String255.empty)(_.toLengthLimitedString)
         val reason = reasonT.map(_.asString1GB)
-        // TODO(i9591) clean me up and remove duplication
-        val secondary = transaction match {
-          case SignedTopologyTransaction(
-                TopologyStateUpdate(_, TopologyStateUpdateElement(_, mapping: PartyToParticipant)),
-                _,
-                _,
-              ) if mapping.side != RequestSide.From =>
-            Some((mapping.participant.uid.id, mapping.participant.uid.namespace))
-          case _ => None
+        val secondary =
+          transaction.transaction.element.mapping.secondaryUid.map(x => (x.id, x.namespace))
+        if (
+          transaction.transaction.element.mapping.requiredAuth.uids.length > 1 && secondary.isEmpty
+        ) {
+          logger.warn("I would expect to see a secondary uid here, but there is none.")
         }
         val representativeProtocolVersion = transaction.transaction.representativeProtocolVersion
         val (secondaryId, secondaryNs) = secondary.unzip

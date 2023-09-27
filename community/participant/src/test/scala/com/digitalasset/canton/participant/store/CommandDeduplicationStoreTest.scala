@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.store
 import cats.syntax.option.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.v2.ChangeId
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.participant.protocol.submission.ChangeIdHash
 import com.digitalasset.canton.participant.store.CommandDeduplicationStore.OffsetAndPublicationTime
 import com.digitalasset.canton.tracing.TraceContext
@@ -30,19 +31,18 @@ trait CommandDeduplicationStoreTest extends BaseTest { this: AsyncWordSpec =>
     1L,
     CantonTimestamp.ofEpochSecond(1),
     DefaultDamlValues.submissionId(1).some,
-    TraceContext.withNewTraceContext(Predef.identity),
+  )(
+    TraceContext.withNewTraceContext(Predef.identity)
   )
   lazy val answer2 = DefiniteAnswerEvent(
     2L,
     CantonTimestamp.ofEpochSecond(2),
     DefaultDamlValues.submissionId(2).some,
-    TraceContext.withNewTraceContext(Predef.identity),
+  )(
+    TraceContext.withNewTraceContext(Predef.identity)
   )
-  lazy val answer3 = DefiniteAnswerEvent(
-    3L,
-    CantonTimestamp.ofEpochSecond(3),
-    None,
-    TraceContext.withNewTraceContext(Predef.identity),
+  lazy val answer3 = DefiniteAnswerEvent(3L, CantonTimestamp.ofEpochSecond(3), None)(
+    TraceContext.withNewTraceContext(Predef.identity)
   )
 
   def commandDeduplicationStore(mk: () => CommandDeduplicationStore): Unit = {
@@ -96,6 +96,35 @@ trait CommandDeduplicationStoreTest extends BaseTest { this: AsyncWordSpec =>
           lookup1a shouldBe CommandDeduplicationData.tryCreate(changeId1a, answer1, answer1.some)
           lookup2 shouldBe CommandDeduplicationData.tryCreate(changeId2, answer2, answer2.some)
           lookupOther shouldBe None
+        }
+      }
+
+      "idempotent store of acceptances" in {
+        val store = mk()
+        val answer1WithDifferentTC =
+          answer1.copy()(traceContext = TraceContext.withNewTraceContext(Predef.identity))
+        for {
+          _ <- store.storeDefiniteAnswers(
+            Seq(
+              (changeId1a, answer1, true)
+            )
+          )
+          _ <- loggerFactory.assertLogsUnorderedOptional(
+            store.storeDefiniteAnswers(
+              Seq(
+                (
+                  changeId1a,
+                  answer1WithDifferentTC,
+                  true,
+                )
+              )
+            ),
+            (LogEntryOptionality.Optional -> (_.warningMessage should include(
+              "Looked and found expected command deduplication data"
+            ))),
+          )
+        } yield {
+          succeed
         }
       }
 

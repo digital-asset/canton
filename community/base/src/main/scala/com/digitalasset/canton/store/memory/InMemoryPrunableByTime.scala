@@ -36,7 +36,9 @@ trait InMemoryPrunableByTime extends PrunableByTime { this: NamedLogging =>
   ): Future[Unit] = Future.successful {
     val previousO =
       pruningStatusF.getAndAccumulate(
-        Some(PruningStatus(phase, timestamp)),
+        Some(
+          PruningStatus(phase, timestamp, Option.when(phase == PruningPhase.Completed)(timestamp))
+        ),
         OptionUtil.mergeWith(_, _)(Ordering[PruningStatus].max),
       )
     if (logger.underlying.isDebugEnabled && phase == PruningPhase.Started) {

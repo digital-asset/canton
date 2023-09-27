@@ -12,7 +12,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 trait IdentityProviderConfigStore { self: NamedLogging =>
 
-  protected val directEc: ExecutionContext = DirectExecutionContext(logger)
+  protected val directEc: ExecutionContext = DirectExecutionContext(noTracingLogger)
 
   def createIdentityProviderConfig(identityProviderConfig: IdentityProviderConfig)(implicit
       loggingContext: LoggingContextWithTrace

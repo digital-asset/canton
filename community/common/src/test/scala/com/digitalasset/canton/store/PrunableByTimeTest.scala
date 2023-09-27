@@ -41,23 +41,26 @@ trait PrunableByTimeTest {
       } yield {
         assert(status0 == None, "No pruning status initially")
         assert(
-          status1.contains(PruningStatus(PruningPhase.Completed, ts)),
+          status1.contains(PruningStatus(PruningPhase.Completed, ts, Some(ts))),
           s"Pruning status at $ts",
         )
         assert(
-          status2.contains(PruningStatus(PruningPhase.Completed, ts3)),
+          status2.contains(PruningStatus(PruningPhase.Completed, ts3, Some(ts3))),
           s"Pruniadvances to $ts3",
         )
         assert(
-          status3.contains(PruningStatus(PruningPhase.Completed, ts3)),
+          status3.contains(PruningStatus(PruningPhase.Completed, ts3, Some(ts3))),
           s"Pruning status remains at $ts3",
         )
       }
     }
 
     "pruning timestamps advance under concurrent pruning" in {
-      val parallelEc =
-        Threading.newExecutionContext("pruning-parallel-ec", logger, executorServiceMetrics)
+      val parallelEc = Threading.newExecutionContext(
+        "pruning-parallel-ec",
+        noTracingLogger,
+        executorServiceMetrics,
+      )
       val prunable = mkPrunable(parallelEc)
       val iterations = 100
 
@@ -91,8 +94,9 @@ trait PrunableByTimeTest {
         statusEnd <- prunable.pruningStatus
       } yield {
         logger.info(s"concurrent pruning test had ${readings.sum} intermediate readings")
+        val ts = timestampForIter(iterations)
         assert(
-          statusEnd.contains(PruningStatus(PruningPhase.Completed, timestampForIter(iterations)))
+          statusEnd.contains(PruningStatus(PruningPhase.Completed, ts, Some(ts)))
         )
       }
       testF.thereafter { _ =>

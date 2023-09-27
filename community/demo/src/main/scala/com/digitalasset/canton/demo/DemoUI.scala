@@ -694,15 +694,12 @@ class DemoUI(script: BaseScript, val loggerFactory: NamedLoggerFactory)
   private implicit val executionContext: ExecutionContextExecutor =
     Threading.newExecutionContext(
       "demo-ui",
-      logger,
+      noTracingLogger,
       new ExecutorServiceMetrics(NoOpMetricsFactory),
     )
   private implicit val actorSystem: ActorSystem = AkkaUtil.createActorSystem("demo-ui")
   private implicit val sequencerPool: ExecutionSequencerFactory =
-    AkkaUtil.createExecutionSequencerFactory("demo-ui", logger)(
-      actorSystem,
-      TraceContext.empty,
-    )
+    AkkaUtil.createExecutionSequencerFactory("demo-ui", noTracingLogger)(actorSystem)
 
   protected val participantTabs = mutable.HashMap[String, ParticipantTab]()
 

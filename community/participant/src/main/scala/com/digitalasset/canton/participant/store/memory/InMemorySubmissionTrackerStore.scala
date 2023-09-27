@@ -50,7 +50,8 @@ class InMemorySubmissionTrackerStore(
   }
 
   override protected[canton] def doPrune(
-      beforeAndIncluding: CantonTimestamp
+      beforeAndIncluding: CantonTimestamp,
+      lastPruning: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): Future[Unit] =
     Future.successful {
       freshSubmittedTransactions.filterInPlace {

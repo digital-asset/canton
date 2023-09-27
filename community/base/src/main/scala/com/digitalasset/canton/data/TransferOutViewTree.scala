@@ -402,10 +402,6 @@ final case class TransferOutView private (
   // TODO(#12373) Adapt when releasing BFT
   // Ensures the invariants related to default values hold
   validateInstance().valueOr(err => throw new IllegalArgumentException(err))
-  require(
-    (representativeProtocolVersion.representative < ProtocolVersion.dev) == transferCounter.isEmpty,
-    s"Transfer counter must be defined only in protocol version ${ProtocolVersion.dev} or higher",
-  )
 
   val submitter: LfPartyId = submitterMetadata.submitter
   val submittingParticipant: LedgerParticipantId = submitterMetadata.submittingParticipant
@@ -548,13 +544,11 @@ object TransferOutView
   private lazy val rpvDev: RepresentativeProtocolVersion[TransferOutView.type] =
     protocolVersionRepresentativeFor(ProtocolVersion.dev)
 
-  lazy val transferCounterInvariant: InvariantFromInclusive[TransferCounterO] =
-    InvariantFromInclusive[TransferCounterO](
-      _.transferCounter,
-      _.nonEmpty,
-      "transferCounter should not be empty",
-      protocolVersionRepresentativeFor(TransferCommonData.minimumPvForTransferCounter),
-    )
+  lazy val transferCounterInvariant = EmptyOptionExactlyUntilExclusive(
+    _.transferCounter,
+    "transferCounter",
+    protocolVersionRepresentativeFor(TransferCommonData.minimumPvForTransferCounter),
+  )
 
   lazy val submittingParticipantDefaultValue: DefaultValueUntilExclusive[LedgerParticipantId] =
     DefaultValueUntilExclusive(

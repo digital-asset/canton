@@ -39,12 +39,12 @@ class IndexerBenchmark extends NamedLogging {
 
   override val loggerFactory: NamedLoggerFactory = NamedLoggerFactory.root
 
-  private val directEc = DirectExecutionContext(logger)
+  private val directEc = DirectExecutionContext(noTracingLogger)
 
   def run(
       createUpdates: () => Future[Source[(Offset, Traced[Update]), NotUsed]],
       config: Config,
-      dataSourceProperties: Option[DataSourceProperties],
+      dataSourceProperties: DataSourceProperties,
       highAvailability: HaConfig,
   ): Future[Unit] = {
     withNewTraceContext { implicit traceContext =>
@@ -192,7 +192,7 @@ class IndexerBenchmark extends NamedLogging {
 
   def runAndExit(
       config: Config,
-      dataSourceProperties: Option[DataSourceProperties],
+      dataSourceProperties: DataSourceProperties,
       highAvailability: HaConfig,
       updates: () => Future[Source[(Offset, Traced[Update]), NotUsed]],
   ): Unit = {

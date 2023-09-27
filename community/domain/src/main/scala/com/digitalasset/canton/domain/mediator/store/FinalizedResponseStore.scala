@@ -92,7 +92,7 @@ private[mediator] class InMemoryFinalizedResponseStore(
     override protected val loggerFactory: NamedLoggerFactory
 ) extends FinalizedResponseStore
     with NamedLogging {
-  private implicit val ec: ExecutionContext = DirectExecutionContext(logger)
+  private implicit val ec: ExecutionContext = DirectExecutionContext(noTracingLogger)
 
   import scala.jdk.CollectionConverters.*
   private val finalizedRequests =

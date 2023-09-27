@@ -4,11 +4,12 @@
 package com.digitalasset.canton.logging
 
 import com.digitalasset.canton.util.ErrorUtil
+import com.typesafe.scalalogging.Logger
 import org.scalactic.source
 import org.scalatest.Assertion
 import org.scalatest.matchers.should.Matchers.*
 import org.slf4j.event.{Level, SubstituteLoggingEvent}
-import org.slf4j.{Logger, helpers}
+import org.slf4j.helpers
 
 import java.util.concurrent.TimeUnit
 import scala.collection.immutable.ListMap
@@ -46,7 +47,7 @@ class NamedEventCapturingLogger(
   override def appendUnnamedKey(key: String, value: String): NamedLoggerFactory = this
   override def append(key: String, value: String): NamedLoggerFactory = this
 
-  override private[logging] def getLogger(fullName: String) = logger
+  override private[logging] def getLogger(fullName: String): Logger = Logger(logger)
 
   def tryToPollMessage(
       expectedMessage: String,

@@ -24,10 +24,9 @@ trait NamedLogging {
 
   protected def loggerFactory: NamedLoggerFactory
 
-  private[this] lazy val underlying: slf4j.Logger = loggerFactory.getLogger(getClass)
+  private[this] lazy val underlying: slf4j.Logger = theLogger.underlying
 
-  private[this] lazy val theLogger: Logger =
-    Logger(underlying)
+  private[this] lazy val theLogger: Logger = loggerFactory.getLogger(getClass)
 
   private[this] lazy val theLoggerWithContext: TracedLogger =
     Logger.takingImplicit[TraceContext](underlying)
@@ -41,5 +40,6 @@ object NamedLogging {
 
   def loggerWithoutTracing(logger: TracedLogger): Logger = Logger(logger.underlying)
 
-  lazy val noopLogger = Logger.takingImplicit[TraceContext](NOPLogger.NOP_LOGGER)
+  lazy val noopLogger: TracedLogger = Logger.takingImplicit[TraceContext](NOPLogger.NOP_LOGGER)
+  lazy val noopNoTracingLogger: Logger = loggerWithoutTracing(noopLogger)
 }

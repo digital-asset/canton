@@ -26,7 +26,7 @@ class CounterCapture(
     *  It only makes sense to wrap a single handler however this is not enforced.
     */
   def apply[E](handler: SerializedEventHandler[E]): SerializedEventHandler[E] = {
-    implicit val ec: ExecutionContext = DirectExecutionContext(logger)
+    implicit val ec: ExecutionContext = DirectExecutionContext(noTracingLogger)
     event => {
       implicit val traceContext: TraceContext = event.traceContext
       for {

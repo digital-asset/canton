@@ -11,8 +11,6 @@ import com.digitalasset.canton.participant.store.{
   DomainAliasAndIdStore,
   DomainConnectionConfigStore,
 }
-import com.digitalasset.canton.participant.sync.SyncServiceError
-import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceUnknownDomain
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.collect.{BiMap, HashBiMap}
@@ -54,11 +52,6 @@ class DomainAliasManager private (
       case None => addMapping(domainAlias, domainId)
       case _ => EitherT.rightT[Future, DomainAliasManager.Error](())
     }
-
-  def domainIdForAliasE(alias: DomainAlias)(implicit
-      traceContext: TraceContext
-  ): Either[SyncServiceError, DomainId] =
-    domainIdForAlias(alias).toRight(SyncServiceUnknownDomain.Error(alias))
 
   def domainIdForAlias(alias: String): Option[DomainId] =
     DomainAlias.create(alias).toOption.flatMap(al => Option(domainAliasMap.get().get(al)))

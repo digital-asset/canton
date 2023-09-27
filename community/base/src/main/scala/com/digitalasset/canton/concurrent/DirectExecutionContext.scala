@@ -3,14 +3,15 @@
 
 package com.digitalasset.canton.concurrent
 
-import com.digitalasset.canton.logging.TracedLogger
+import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
+import com.typesafe.scalalogging.Logger
 
 import scala.concurrent.{BatchingExecutorCanton, ExecutionContextExecutor}
 
 /** A light-weight execution context that runs tasks on the thread calling `execute`.
   * Only use this for running tasks that will terminate very quickly.
   */
-final case class DirectExecutionContext(logger: TracedLogger)
+final case class DirectExecutionContext(logger: Logger)
     extends ExecutionContextExecutor
     with BatchingExecutorCanton {
 
@@ -27,4 +28,8 @@ final case class DirectExecutionContext(logger: TracedLogger)
     // If this method throws an exception, the exception would ultimately be reported by a different EC,
     // but this leads to a messy repetition of error messages in the log file.
   }
+}
+object DirectExecutionContext {
+  def apply(tracedLogger: TracedLogger): DirectExecutionContext =
+    DirectExecutionContext(NamedLogging.loggerWithoutTracing(tracedLogger))
 }

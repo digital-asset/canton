@@ -41,10 +41,10 @@ class PreUpdateHookCkj(private val ckj: ContractKeyJournal)(
     preUpdate(updates).flatMap(_ => ckj.addKeyStateUpdates(updates))
   }
 
-  override def doPrune(beforeAndIncluding: CantonTimestamp)(implicit
-      traceContext: TraceContext
+  override def doPrune(beforeAndIncluding: CantonTimestamp, lastPruning: Option[CantonTimestamp])(
+      implicit traceContext: TraceContext
   ): Future[Unit] =
-    ckj.doPrune(beforeAndIncluding)
+    ckj.doPrune(beforeAndIncluding, lastPruning)
 
   override def deleteSince(inclusive: TimeOfChange)(implicit
       traceContext: TraceContext

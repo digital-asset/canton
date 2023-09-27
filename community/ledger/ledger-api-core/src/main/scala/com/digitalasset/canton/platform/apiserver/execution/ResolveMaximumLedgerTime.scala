@@ -28,7 +28,7 @@ class ResolveMaximumLedgerTime(
     override protected val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {
 
-  private val directEc = DirectExecutionContext(logger)
+  private val directEc = DirectExecutionContext(noTracingLogger)
 
   def apply(
       processedDisclosedContracts: ImmArray[ProcessedDisclosedContract],

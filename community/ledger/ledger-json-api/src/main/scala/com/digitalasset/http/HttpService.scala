@@ -66,7 +66,7 @@ class HttpService(
 
   private type ET[A] = EitherT[Future, HttpService.Error, A]
 
-  private val directEc = DirectExecutionContext(logger)
+  private val directEc = DirectExecutionContext(noTracingLogger)
 
   private def isLogLevelEqualOrBelowDebug(logLevel: Option[LogLevel]) =
     logLevel.exists(!_.isGreaterOrEqual(LogLevel.INFO))

@@ -92,7 +92,10 @@ class ThrowingAcs[T <: Throwable](mk: String => T)(override implicit val ec: Exe
       )
     )
 
-  override protected[canton] def doPrune(beforeAndIncluding: CantonTimestamp)(implicit
+  override protected[canton] def doPrune(
+      beforeAndIncluding: CantonTimestamp,
+      lastPruning: Option[CantonTimestamp],
+  )(implicit
       traceContext: TraceContext
   ): Future[Unit] =
     Future.failed(mk(s"doPrune at $beforeAndIncluding"))

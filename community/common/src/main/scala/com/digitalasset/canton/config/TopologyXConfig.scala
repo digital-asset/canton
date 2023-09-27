@@ -9,7 +9,9 @@ import scala.concurrent.duration.Duration
 
 final case class TopologyXConfig(
     topologyTransactionRegistrationTimeout: NonNegativeDuration =
-      defaultTopologyTransactionRegistrationTimeout
+      defaultTopologyTransactionRegistrationTimeout,
+    // temporary flag to ease migration to topology validation being turned on
+    enableTopologyTransactionValidation: Boolean = true,
 )
 
 object TopologyXConfig {

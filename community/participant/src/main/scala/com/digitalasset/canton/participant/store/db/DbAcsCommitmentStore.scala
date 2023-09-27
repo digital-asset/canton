@@ -403,7 +403,8 @@ class DbAcsCommitmentStore(
   }
 
   override def doPrune(
-      before: CantonTimestamp
+      before: CantonTimestamp,
+      lastPruning: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): Future[Unit] =
     processingTime.event {
       val query1 =

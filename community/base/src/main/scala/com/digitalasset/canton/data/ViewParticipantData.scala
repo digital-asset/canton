@@ -108,7 +108,9 @@ final case class ViewParticipantData private (
 
     val createdIds = createdCore.map(_.contract.contractId)
     requireDistinct(createdIds) { id =>
-      val indices = createdIds.zipWithIndex.filter(_._1 == id).map(_._2)
+      val indices = createdIds.zipWithIndex.collect {
+        case (createdId, idx) if createdId == id => idx
+      }
       s"createdCore contains the contract id $id multiple times at indices ${indices.mkString(", ")}"
     }
 
@@ -130,7 +132,7 @@ final case class ViewParticipantData private (
         s"Contract created in a subview are also created in the core: $transientOverlap"
       )
 
-    def inconsistentAssignedKey(
+    def isAssignedKeyInconsistent(
         keyWithResolution: (LfGlobalKey, SerializableKeyResolution)
     ): Boolean = {
       val (key, resolution) = keyWithResolution
@@ -142,7 +144,8 @@ final case class ViewParticipantData private (
         inconsistent.getOrElse(true)
       }
     }
-    val keyInconsistencies = resolvedKeys.filter(inconsistentAssignedKey)
+    val keyInconsistencies = resolvedKeys.filter(isAssignedKeyInconsistent)
+
     if (keyInconsistencies.nonEmpty) {
       throw InvalidViewParticipantData(show"Inconsistencies for resolved keys: $keyInconsistencies")
     }
@@ -388,7 +391,7 @@ object ViewParticipantData
     * @throws com.digitalasset.canton.serialization.SerializationCheckFailed if this instance cannot be serialized
     */
   @throws[SerializationCheckFailed[com.daml.lf.value.ValueCoder.EncodeError]]
-  def apply(hashOps: HashOps)(
+  def tryCreate(hashOps: HashOps)(
       coreInputs: Map[LfContractId, InputContract],
       createdCore: Seq[CreatedContract],
       createdInSubviewArchivedInCore: Set[LfContractId],
@@ -435,7 +438,7 @@ object ViewParticipantData
       protocolVersion: ProtocolVersion,
   ): Either[String, ViewParticipantData] =
     returnLeftWhenInitializationFails(
-      ViewParticipantData(hashOps)(
+      ViewParticipantData.tryCreate(hashOps)(
         coreInputs,
         createdCore,
         createdInSubviewArchivedInCore,

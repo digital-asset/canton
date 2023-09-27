@@ -26,6 +26,7 @@ import com.digitalasset.canton.platform.indexer.ha.HaConfig
 import com.digitalasset.canton.platform.indexer.{IndexerConfig, PackageMetadataViewConfig}
 import com.digitalasset.canton.platform.services.time.TimeProviderType
 import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
+import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig.SynchronousCommitValue
 import com.typesafe.config.ConfigFactory
 import com.typesafe.config.ConfigValueFactory.fromAnyRef
@@ -381,6 +382,58 @@ class PureConfigReaderWriterSpec
     )
   }
 
+  behavior of "PostgresDataSourceConfig"
+
+  val validPostgresDataSourceConfigValue =
+    """
+      |  tcp-keepalives-idle = 10
+      |  tcp-keepalives-interval = 1
+      |  tcp-keepalives-count = 5""".stripMargin
+
+  it should "support current defaults" in {
+    val value = validPostgresDataSourceConfigValue
+    convert(
+      dbConfigPostgresDataSourceConfigConvert,
+      value,
+    ).value shouldBe PostgresDataSourceConfig()
+  }
+
+  it should "not support invalid keys" in {
+    val value = "unknown-key=yes\n" + validPostgresDataSourceConfigValue
+    convert(dbConfigPostgresDataSourceConfigConvert, value).left.value
+      .prettyPrint(0) should include("Unknown key")
+  }
+
+  it should "read/write against predefined values" in {
+    val value =
+      """
+        |  synchronous-commit = on
+        |  tcp-keepalives-idle = 9
+        |  tcp-keepalives-interval = 99
+        |  tcp-keepalives-count = 999""".stripMargin
+
+    convert(dbConfigPostgresDataSourceConfigConvert, value).value shouldBe PostgresDataSourceConfig(
+      synchronousCommit = Some(SynchronousCommitValue.On),
+      tcpKeepalivesIdle = Some(9),
+      tcpKeepalivesInterval = Some(99),
+      tcpKeepalivesCount = Some(999),
+    )
+  }
+
+  it should "read/write against some predefined values and some defaults" in {
+    val value =
+      """
+        |  synchronous-commit = on
+        |  tcp-keepalives-idle = 9""".stripMargin
+
+    convert(dbConfigPostgresDataSourceConfigConvert, value).value shouldBe PostgresDataSourceConfig(
+      synchronousCommit = Some(SynchronousCommitValue.On),
+      tcpKeepalivesIdle = Some(9),
+      tcpKeepalivesInterval = PostgresDataSourceConfig().tcpKeepalivesInterval,
+      tcpKeepalivesCount = PostgresDataSourceConfig().tcpKeepalivesCount,
+    )
+  }
+
   behavior of "CommandServiceConfig"
 
   val validCommandConfigurationValue =
@@ -541,9 +594,9 @@ class PureConfigReaderWriterSpec
       |global-max-event-id-queries=20
       |global-max-event-payload-queries=10
       |in-memory-state-updater-parallelism=2
-      |max-contract-key-state-cache-size=100000
-      |max-contract-state-cache-size=100000
-      |max-transactions-in-memory-fan-out-buffer-size=10000
+      |max-contract-key-state-cache-size=10000
+      |max-contract-state-cache-size=10000
+      |max-transactions-in-memory-fan-out-buffer-size=1000
       |prepare-package-metadata-time-out-warning="5s"
       |transaction-flat-streams {
       |    max-ids-per-id-page=20000

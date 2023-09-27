@@ -54,7 +54,7 @@ class PersistentPartyRecordStore(
 
   private implicit val ec: ExecutionContext = executionContext
 
-  private val directEc = DirectExecutionContext(logger)
+  private val directEc = DirectExecutionContext(noTracingLogger)
 
   private val backend = dbSupport.storageBackendFactory.createPartyRecordStorageBackend
   private val dbDispatcher = dbSupport.dbDispatcher

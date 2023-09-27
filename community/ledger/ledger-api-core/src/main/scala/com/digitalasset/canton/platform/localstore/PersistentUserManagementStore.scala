@@ -37,7 +37,7 @@ class PersistentUserManagementStore(
 ) extends UserManagementStore
     with NamedLogging {
 
-  private val directEc = DirectExecutionContext(logger)
+  private val directEc = DirectExecutionContext(noTracingLogger)
 
   private val backend = dbSupport.storageBackendFactory.createUserManagementStorageBackend
   private val dbDispatcher = dbSupport.dbDispatcher

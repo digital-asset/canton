@@ -7,7 +7,6 @@ import cats.data.{EitherT, OptionT}
 import cats.syntax.parallel.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.DirectExecutionContext
-import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.protocol.{
   LfContractId,
   LfContractInst,
@@ -16,14 +15,13 @@ import com.digitalasset.canton.protocol.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
+import com.typesafe.scalalogging.Logger
 
 import scala.concurrent.{ExecutionContext, Future}
 
 trait ContractLookup {
 
   protected implicit def ec: ExecutionContext
-
-  protected[store] def logger: TracedLogger
 
   def lookup(id: LfContractId)(implicit traceContext: TraceContext): OptionT[Future, StoredContract]
 
@@ -63,7 +61,7 @@ trait ContractLookup {
 }
 
 object ContractLookup {
-  def noContracts(logger: TracedLogger): ContractLookup =
+  def noContracts(logger: Logger): ContractLookup =
     ContractAndKeyLookup.noContracts(logger)
 
 }
@@ -86,10 +84,9 @@ object ContractAndKeyLookup {
   /** An empty contract and key lookup interface that fails to find any contracts and keys when asked,
     * but allows any key to be asked
     */
-  def noContracts(logger1: TracedLogger): ContractAndKeyLookup = {
+  def noContracts(logger: Logger): ContractAndKeyLookup = {
     new ContractAndKeyLookup {
-      implicit val ec: ExecutionContext = DirectExecutionContext(logger1)
-      override def logger: TracedLogger = logger1
+      implicit val ec: ExecutionContext = DirectExecutionContext(logger)
 
       override def lookup(id: LfContractId)(implicit
           traceContext: TraceContext

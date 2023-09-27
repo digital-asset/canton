@@ -65,7 +65,7 @@ object StaticTime {
     val killSwitchExternal = KillSwitches.single[Instant]
     val sinkExternal = Sink.head[Instant]
 
-    val logger = loggerFactory.getTracedLogger(getClass)
+    val logger = loggerFactory.getLogger(getClass)
     val directEc = DirectExecutionContext(logger)
 
     RunnableGraph

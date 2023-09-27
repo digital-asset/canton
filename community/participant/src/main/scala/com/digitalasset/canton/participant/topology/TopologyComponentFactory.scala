@@ -6,8 +6,8 @@ package com.digitalasset.canton.participant.topology
 import cats.data.EitherT
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout}
-import com.digitalasset.canton.crypto.{CryptoPureApi, DomainSyncCryptoClient}
+import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout, TopologyXConfig}
+import com.digitalasset.canton.crypto.{Crypto, DomainSyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
@@ -194,11 +194,12 @@ class TopologyComponentFactoryOld(
 
 class TopologyComponentFactoryX(
     domainId: DomainId,
-    pureCryptoApi: CryptoPureApi,
+    crypto: Crypto,
     clock: Clock,
     timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
     caching: CachingConfigs,
+    topologyXConfig: TopologyXConfig,
     topologyStore: TopologyStoreX[DomainStore],
     loggerFactory: NamedLoggerFactory,
 ) extends TopologyComponentFactory {
@@ -216,9 +217,10 @@ class TopologyComponentFactoryX(
     )(implicit executionContext: ExecutionContext): TopologyTransactionProcessorCommon = {
       val processor = new TopologyTransactionProcessorX(
         domainId,
-        pureCryptoApi,
+        crypto,
         topologyStore,
         acsCommitmentScheduleEffectiveTime,
+        topologyXConfig.enableTopologyTransactionValidation,
         futureSupervisor,
         timeouts,
         loggerFactory,

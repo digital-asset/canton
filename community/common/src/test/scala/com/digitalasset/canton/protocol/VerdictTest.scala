@@ -74,15 +74,17 @@ class VerdictTest extends AnyWordSpec with BaseTest {
 object VerdictTest {
   def timeoutVerdict(protocolVersion: ProtocolVersion): Verdict.MediatorReject =
     if (protocolVersion >= Verdict.MediatorRejectV2.firstApplicableProtocolVersion)
-      MediatorRejectV2(
-        MediatorError.MalformedMessage.Reject("").rpcStatusWithoutLoggingContext()
-      )(Verdict.protocolVersionRepresentativeFor(protocolVersion))
+      MediatorRejectV2.tryCreate(
+        MediatorError.MalformedMessage.Reject("").rpcStatusWithoutLoggingContext(),
+        protocolVersion,
+      )
     else if (protocolVersion >= Verdict.MediatorRejectV1.firstApplicableProtocolVersion)
-      MediatorRejectV1(
+      MediatorRejectV1.tryCreate(
         "",
         MediatorError.MalformedMessage.id,
         MediatorError.MalformedMessage.category.asInt,
-      )(Verdict.protocolVersionRepresentativeFor(protocolVersion))
+        protocolVersion,
+      )
     else
       MediatorRejectV0.tryCreate(
         com.digitalasset.canton.protocol.v0.MediatorRejection.Code.Timeout,
@@ -91,15 +93,17 @@ object VerdictTest {
 
   def malformedVerdict(protocolVersion: ProtocolVersion): Verdict.MediatorReject =
     if (protocolVersion >= Verdict.MediatorRejectV2.firstApplicableProtocolVersion)
-      MediatorRejectV2(
-        MediatorError.MalformedMessage.Reject("").rpcStatusWithoutLoggingContext()
-      )(Verdict.protocolVersionRepresentativeFor(protocolVersion))
+      MediatorRejectV2.tryCreate(
+        MediatorError.MalformedMessage.Reject("").rpcStatusWithoutLoggingContext(),
+        protocolVersion,
+      )
     else if (protocolVersion >= Verdict.MediatorRejectV1.firstApplicableProtocolVersion)
-      MediatorRejectV1(
+      MediatorRejectV1.tryCreate(
         "",
         MediatorError.MalformedMessage.id,
         MediatorError.MalformedMessage.category.asInt,
-      )(Verdict.protocolVersionRepresentativeFor(protocolVersion))
+        protocolVersion,
+      )
     else
       MediatorRejectV0.tryCreate(
         com.digitalasset.canton.protocol.v0.MediatorRejection.Code.Timeout,

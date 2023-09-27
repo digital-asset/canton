@@ -49,7 +49,7 @@ object JdbcIndexer {
       tracer: Tracer,
       loggerFactory: NamedLoggerFactory,
       multiDomainEnabled: Boolean,
-      dataSourceProperties: Option[DataSourceProperties],
+      dataSourceProperties: DataSourceProperties,
       highAvailability: HaConfig,
   )(implicit materializer: Materializer) {
 
@@ -67,7 +67,7 @@ object JdbcIndexer {
       val meteringParameterStorageBackend = factory.createMeteringParameterStorageBackend
       val DBLockStorageBackend = factory.createDBLockStorageBackend
       val stringInterningStorageBackend = factory.createStringInterningStorageBackend
-      val dbConfig = IndexerConfig.dataSourceProperties(dataSourceProperties, config)
+      val dbConfig = dataSourceProperties
       val indexer = ParallelIndexerFactory(
         inputMappingParallelism = config.inputMappingParallelism.unwrap,
         batchingParallelism = config.batchingParallelism.unwrap,

@@ -136,7 +136,7 @@ class CantonSyncService(
     val participantId: ParticipantId,
     private[participant] val domainRegistry: DomainRegistry,
     private[canton] val domainConnectionConfigStore: DomainConnectionConfigStore,
-    private[participant] val aliasManager: DomainAliasManager,
+    private[canton] val aliasManager: DomainAliasManager,
     private[canton] val participantNodePersistentState: Eval[ParticipantNodePersistentState],
     participantNodeEphemeralState: ParticipantNodeEphemeralState,
     private[canton] val syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
@@ -696,9 +696,9 @@ class CantonSyncService(
           None,
         )
         unpublishedEvents = unpublished.mapFilter {
-          case RecordOrderPublisher.PendingTransferPublish(rc, ts, eventLogId) =>
+          case RecordOrderPublisher.PendingTransferPublish(ts, eventLogId) =>
             logger.error(
-              s"Pending transfer event with rc $rc timestamp $ts found in participant event log " +
+              s"Pending transfer event with timestamp $ts found in participant event log " +
                 s"$participantEventLogId. Participant event log should not contain transfers."
             )
             None

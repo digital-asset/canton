@@ -9,6 +9,7 @@ import com.digitalasset.canton.concurrent.{DirectExecutionContext, ExecutionCont
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.typesafe.scalalogging.Logger
 import org.scalactic.source
 import org.scalatest.AppendedClues.*
 import org.scalatest.Assertion
@@ -16,7 +17,6 @@ import org.scalatest.Checkpoints.Checkpoint
 import org.scalatest.Inside.*
 import org.scalatest.Inspectors.*
 import org.scalatest.matchers.should.Matchers.*
-import org.slf4j.Logger
 import org.slf4j.event.Level
 import org.slf4j.event.Level.{ERROR, WARN}
 
@@ -48,7 +48,7 @@ import scala.util.{Failure, Success, Try}
   * @param skipLogEntry Log entries satisfying this predicate are suppressed, but not included in the queue of suppressed log entries.
   */
 class SuppressingLogger private[logging] (
-    underlyingLogger: NamedLoggerFactory,
+    underlyingLoggerFactory: NamedLoggerFactory,
     pollTimeout: FiniteDuration,
     skipLogEntry: LogEntry => Boolean,
     activeSuppressionRule: AtomicReference[SuppressionRule] =
@@ -59,21 +59,19 @@ class SuppressingLogger private[logging] (
 
   /** Logger used to log internal problems of this class.
     */
-  private val internalLogger: Logger = underlyingLogger.getLogger(getClass)
+  private val internalLogger: Logger = underlyingLoggerFactory.getLogger(getClass)
 
-  private val directExecutionContext: ExecutionContext = DirectExecutionContext(
-    TracedLogger(internalLogger)
-  )
+  private val directExecutionContext: ExecutionContext = DirectExecutionContext(internalLogger)
 
   private val SuppressionPrefix: String = "Suppressed %s: %s"
 
-  override val name: String = underlyingLogger.name
-  override val properties: ListMap[String, String] = underlyingLogger.properties
+  override val name: String = underlyingLoggerFactory.name
+  override val properties: ListMap[String, String] = underlyingLoggerFactory.properties
 
   override def appendUnnamedKey(key: String, value: String): NamedLoggerFactory =
     // intentionally share suppressedLevel and queues so suppression on a parent logger will effect a child and collect all suppressed messages
     new SuppressingLogger(
-      underlyingLogger.appendUnnamedKey(key, value),
+      underlyingLoggerFactory.appendUnnamedKey(key, value),
       pollTimeout,
       skipLogEntry,
       activeSuppressionRule,
@@ -83,7 +81,7 @@ class SuppressingLogger private[logging] (
   override def append(key: String, value: String): SuppressingLogger =
     // intentionally share suppressedLevel and queues so suppression on a parent logger will effect a child and collect all suppressed messages
     new SuppressingLogger(
-      underlyingLogger.append(key, value),
+      underlyingLoggerFactory.append(key, value),
       pollTimeout,
       skipLogEntry,
       activeSuppressionRule,
@@ -91,18 +89,18 @@ class SuppressingLogger private[logging] (
     )
 
   override private[logging] def getLogger(fullName: String): Logger = {
-    val actualLogger = underlyingLogger.getLogger(fullName)
+    val actualLogger = underlyingLoggerFactory.getLogger(fullName)
     val suppressedMessageLogger = new BufferingLogger(recordedLogEntries, fullName, skipLogEntry(_))
 
     val logger =
       new SuppressingLoggerDispatcher(
-        actualLogger.getName,
+        actualLogger.underlying.getName,
         suppressedMessageLogger,
         activeSuppressionRule,
         SuppressionPrefix,
       )
-    logger.setDelegate(actualLogger)
-    logger
+    logger.setDelegate(actualLogger.underlying)
+    Logger(logger)
   }
 
   def assertThrowsAndLogs[T <: Throwable](

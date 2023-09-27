@@ -65,7 +65,10 @@ class ThrowOnWriteCommitmentStore()(override implicit val ec: ExecutionContext)
   )(implicit traceContext: TraceContext): Future[Unit] =
     incrementCounterAndErrF()
 
-  override protected[canton] def doPrune(limit: CantonTimestamp)(implicit
+  override protected[canton] def doPrune(
+      limit: CantonTimestamp,
+      lastPruning: Option[CantonTimestamp],
+  )(implicit
       traceContext: TraceContext
   ): Future[Unit] =
     incrementCounterAndErrF()

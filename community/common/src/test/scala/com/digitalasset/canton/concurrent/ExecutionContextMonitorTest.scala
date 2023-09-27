@@ -4,7 +4,7 @@
 package com.digitalasset.canton.concurrent
 
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
-import com.digitalasset.canton.logging.{LogEntry, SuppressingLogger, TracedLogger}
+import com.digitalasset.canton.logging.{LogEntry, SuppressingLogger}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.{BaseTest, TestMetrics}
 import org.scalatest.Assertion
@@ -18,12 +18,14 @@ import scala.concurrent.{Await, Future}
 class ExecutionContextMonitorTest extends AnyWordSpec with BaseTest with TestMetrics {
 
   def runAndCheck(loggerFactory: SuppressingLogger, check: Seq[LogEntry] => Assertion): Unit = {
-    val logger = TracedLogger(loggerFactory.getLogger(getClass))
     implicit val scheduler: ScheduledExecutorService =
-      Threading.singleThreadScheduledExecutor(loggerFactory.threadName + "-test-scheduler", logger)
+      Threading.singleThreadScheduledExecutor(
+        loggerFactory.threadName + "-test-scheduler",
+        noTracingLogger,
+      )
 
     val ecName = loggerFactory.threadName + "test-my-ec"
-    implicit val ec = Threading.newExecutionContext(ecName, logger, executorServiceMetrics)
+    implicit val ec = Threading.newExecutionContext(ecName, noTracingLogger, executorServiceMetrics)
     val monitor =
       new ExecutionContextMonitor(
         loggerFactory,
@@ -36,7 +38,7 @@ class ExecutionContextMonitorTest extends AnyWordSpec with BaseTest with TestMet
     // As we are setting min num threads in fork join pool to 2, we also need to
     // set this to 2 here as otherwise this test becomes flaky when running in the
     // sequential test
-    val numThreads = Math.max(2, Threading.detectNumberOfThreads(logger))
+    val numThreads = Math.max(2, Threading.detectNumberOfThreads(noTracingLogger))
 
     loggerFactory.assertLoggedWarningsAndErrorsSeq(
       {

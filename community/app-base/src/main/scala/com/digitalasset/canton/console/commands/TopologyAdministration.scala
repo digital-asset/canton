@@ -231,11 +231,20 @@ class TopologyAdministrationGroup(
         synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
+        // intentionally not documented force flag, as it is dangerous
+        force: Boolean = false,
     ): ByteString =
       synchronisation.run(synchronize)(consoleEnvironment.run {
         adminCommand(
           TopologyAdminCommands.Write
-            .AuthorizeNamespaceDelegation(ops, signedBy, namespace, authorizedKey, isRootDelegation)
+            .AuthorizeNamespaceDelegation(
+              ops,
+              signedBy,
+              namespace,
+              authorizedKey,
+              isRootDelegation,
+              force,
+            )
         )
       })
 

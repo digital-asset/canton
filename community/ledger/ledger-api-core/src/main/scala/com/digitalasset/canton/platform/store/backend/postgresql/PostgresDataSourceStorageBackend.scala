@@ -22,9 +22,9 @@ import javax.sql.DataSource
 final case class PostgresDataSourceConfig(
     synchronousCommit: Option[SynchronousCommitValue] = None,
     // TCP keepalive configuration for postgres. See https://www.postgresql.org/docs/13/runtime-config-connection.html#RUNTIME-CONFIG-CONNECTION-SETTINGS for details
-    tcpKeepalivesIdle: Option[Int] = None, // corresponds to: tcp_keepalives_idle
-    tcpKeepalivesInterval: Option[Int] = None, // corresponds to: tcp_keepalives_interval
-    tcpKeepalivesCount: Option[Int] = None, // corresponds to: tcp_keepalives_count
+    tcpKeepalivesIdle: Option[Int] = Some(10), // corresponds to: tcp_keepalives_idle
+    tcpKeepalivesInterval: Option[Int] = Some(1), // corresponds to: tcp_keepalives_interval
+    tcpKeepalivesCount: Option[Int] = Some(5), // corresponds to: tcp_keepalives_count
 )
 
 object PostgresDataSourceConfig {

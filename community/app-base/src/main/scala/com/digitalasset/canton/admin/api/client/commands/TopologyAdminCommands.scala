@@ -154,12 +154,13 @@ object TopologyAdminCommands {
         namespace: Fingerprint,
         authorizedKey: Fingerprint,
         isRootDelegation: Boolean,
+        force: Boolean,
     ) extends BaseCommand[v0.NamespaceDelegationAuthorization] {
 
       override def createRequest(): Either[String, v0.NamespaceDelegationAuthorization] =
         Right(
           v0.NamespaceDelegationAuthorization(
-            authData(ops, signedBy, replaceExisting = false, force = false),
+            authData(ops, signedBy, replaceExisting = false, force = force),
             namespace.toProtoPrimitive,
             authorizedKey.toProtoPrimitive,
             isRootDelegation,

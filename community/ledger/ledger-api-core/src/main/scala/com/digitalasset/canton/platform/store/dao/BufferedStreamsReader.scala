@@ -40,7 +40,7 @@ class BufferedStreamsReader[PERSISTENCE_FETCH_ARGS, API_RESPONSE](
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging {
 
-  private val directEc = DirectExecutionContext(logger)
+  private val directEc = DirectExecutionContext(noTracingLogger)
 
   private val bufferReaderMetrics = metrics.daml.services.index.BufferedReader(streamName)
 

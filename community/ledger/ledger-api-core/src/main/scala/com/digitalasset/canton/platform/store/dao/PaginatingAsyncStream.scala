@@ -18,7 +18,7 @@ private[platform] class PaginatingAsyncStream(
 
   import PaginatingAsyncStream.*
 
-  private val directEc = DirectExecutionContext(logger)
+  private val directEc = DirectExecutionContext(noTracingLogger)
 
   /** Concatenates the results of multiple asynchronous calls into
     * a single [[Source]], injecting the offset of the next page to

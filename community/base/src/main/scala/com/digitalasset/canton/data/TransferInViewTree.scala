@@ -355,10 +355,6 @@ final case class TransferInView private (
   // TODO(#12373) Adapt when releasing BFT
   // Ensures the invariants related to default values hold
   validateInstance().valueOr(err => throw new IllegalArgumentException(err))
-  require(
-    (representativeProtocolVersion.representative < ProtocolVersion.dev) == transferCounter.isEmpty,
-    s"Transfer counter must be defined only in protocol version ${ProtocolVersion.dev} or higher",
-  )
 
   override def hashPurpose: HashPurpose = HashPurpose.TransferInView
 
@@ -503,10 +499,9 @@ object TransferInView
   private lazy val rpvDev: RepresentativeProtocolVersion[TransferInView.type] =
     protocolVersionRepresentativeFor(ProtocolVersion.dev)
 
-  lazy val transferCounterInvariant = InvariantFromInclusive[TransferCounterO](
+  lazy val transferCounterInvariant = EmptyOptionExactlyUntilExclusive(
     _.transferCounter,
-    _.nonEmpty,
-    "transferCounter should not be empty",
+    "transferCounter",
     protocolVersionRepresentativeFor(TransferCommonData.minimumPvForTransferCounter),
   )
 

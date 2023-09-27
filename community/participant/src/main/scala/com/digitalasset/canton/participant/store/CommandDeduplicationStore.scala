@@ -40,7 +40,7 @@ trait CommandDeduplicationStore extends AutoCloseable {
 
   /** Updates the [[com.digitalasset.canton.participant.protocol.submission.ChangeIdHash]]'s for the given
     * [[com.digitalasset.canton.ledger.participant.state.v2.ChangeId]]s with the given [[DefiniteAnswerEvent]]s.
-    * The [[scala.Boolean]] specifies whether the definite answer is an acceptance.
+    * The [[scala.Boolean]] specifies whether the definite answer is an acceptance (or rejection) of the command.
     *
     * Does not overwrite the data if the existing data has a higher [[DefiniteAnswerEvent.offset]]. This should never
     * happen in practice.
@@ -189,9 +189,9 @@ final case class DefiniteAnswerEvent(
     offset: GlobalOffset,
     publicationTime: CantonTimestamp,
     submissionIdO: Option[LedgerSubmissionId],
-    traceContext: TraceContext,
     // TODO(#7348) add submission rank
-) extends PrettyPrinting {
+)(val traceContext: TraceContext)
+    extends PrettyPrinting {
 
   def serializableSubmissionId: Option[SerializableSubmissionId] =
     submissionIdO.map(SerializableSubmissionId(_))
@@ -216,8 +216,7 @@ object DefiniteAnswerEvent {
       offset,
       publicationTime,
       submissionIdO.map(_.submissionId),
-      traceContext.unwrap,
-    )
+    )(traceContext.unwrap)
   }
 
   implicit def getResultDefinitionAnswerEventOption(implicit
@@ -234,8 +233,7 @@ object DefiniteAnswerEvent {
             offset,
             publicationTime,
             submissionId.map(_.submissionId),
-            traceContext.unwrap,
-          ).some
+          )(traceContext.unwrap).some
         case (None, None, None, None) => None
         case _ =>
           throw new DbDeserializationException(

@@ -47,21 +47,16 @@ object MediatorVerdict {
 
   final case class MediatorReject(reason: MediatorError) extends MediatorVerdict {
     override def toVerdict(protocolVersion: ProtocolVersion): Verdict.MediatorReject = {
-      val representativeProtocolVersion = Verdict.protocolVersionRepresentativeFor(protocolVersion)
       if (protocolVersion >= Verdict.MediatorRejectV2.firstApplicableProtocolVersion) {
         val error = reason match {
           case timeout: Timeout.Reject => timeout
           case invalid: InvalidMessage.Reject => invalid
           case malformed: MalformedMessage.Reject => malformed
         }
-        Verdict.MediatorRejectV2(error.rpcStatusWithoutLoggingContext())(
-          representativeProtocolVersion
-        )
+        Verdict.MediatorRejectV2.tryCreate(error.rpcStatusWithoutLoggingContext(), protocolVersion)
       } else if (protocolVersion >= Verdict.MediatorRejectV1.firstApplicableProtocolVersion) {
-        def from(cause: String, code: ErrorCode) =
-          Verdict.MediatorRejectV1(cause, code.id, code.category.asInt)(
-            representativeProtocolVersion
-          )
+        def from(cause: String, code: ErrorCode): Verdict.MediatorRejectV1 =
+          Verdict.MediatorRejectV1.tryCreate(cause, code.id, code.category.asInt, protocolVersion)
 
         reason match {
           case timeout @ Timeout.Reject(cause, unresponsiveParties) => from(cause, timeout.code)

@@ -27,7 +27,7 @@ class DelayUtilTest extends AnyWordSpec with BaseTest {
 
     "not prevent termination" in {
       val executorService =
-        Threading.singleThreadScheduledExecutor("delay-util-test-executor", logger)
+        Threading.singleThreadScheduledExecutor("delay-util-test-executor", noTracingLogger)
 
       val delayed = DelayUtil.delay(executorService, 1.minute, _.success(()))
 

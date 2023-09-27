@@ -257,18 +257,16 @@ final class RepairService(
     */
   def purgeContracts(
       domain: DomainAlias,
-      contractIds: Seq[LfContractId],
+      contractIds: NonEmpty[Seq[LfContractId]],
       ignoreAlreadyPurged: Boolean,
   )(implicit traceContext: TraceContext): Either[String, Unit] = {
     logger.info(
-      s"Purging ${contractIds.length} contracts from ${domain} with ignoreAlreadyPurged=${ignoreAlreadyPurged}"
+      s"Purging ${contractIds.length} contracts from $domain with ignoreAlreadyPurged=$ignoreAlreadyPurged"
     )
     lockAndAwaitEitherT(
       "repair.purge", {
         for {
           domainId <- aliasToUnconnectedDomainId(domain)
-          _ <- EitherTUtil.condUnitET[Future](contractIds.nonEmpty, "Missing contract ids to purge")
-
           repair <- initRepairRequestAndVerifyPreconditions(domainId)
 
           // Note the following purposely fails if any contract fails which results in not all contracts being processed.

@@ -145,10 +145,10 @@ private[participant] class HookedAcs(private val acs: ActiveContractStore)(impli
   ): Future[Map[LfContractId, TransferCounterO]] =
     acs.bulkContractsTransferCounterSnapshot(contractIds, requestCounter)
 
-  override def doPrune(beforeAndIncluding: CantonTimestamp)(implicit
-      traceContext: TraceContext
+  override def doPrune(beforeAndIncluding: CantonTimestamp, lastPruning: Option[CantonTimestamp])(
+      implicit traceContext: TraceContext
   ): Future[Unit] =
-    acs.doPrune(beforeAndIncluding)
+    acs.doPrune(beforeAndIncluding, lastPruning: Option[CantonTimestamp])
 
   override protected[canton] def advancePruningTimestamp(
       phase: PruningPhase,

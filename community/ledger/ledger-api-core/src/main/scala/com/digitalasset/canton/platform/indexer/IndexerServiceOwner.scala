@@ -37,7 +37,7 @@ final class IndexerServiceOwner(
     val loggerFactory: NamedLoggerFactory,
     multiDomainEnabled: Boolean,
     startupMode: IndexerStartupMode,
-    dataSourceProperties: Option[DataSourceProperties],
+    dataSourceProperties: DataSourceProperties,
     highAvailability: HaConfig,
 )(implicit materializer: Materializer, traceContext: TraceContext)
     extends ResourceOwner[ReportsHealth]

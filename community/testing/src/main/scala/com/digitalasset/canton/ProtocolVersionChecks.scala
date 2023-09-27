@@ -197,6 +197,10 @@ trait ProtocolVersionChecksAsyncWordSpec {
     def in(testFun: => Future[Assertion])(implicit pos: source.Position): Unit = {
       if (condition) verb.in(testFun) else verb.ignore(testFun)
     }
+
+    def when(testFun: => Unit)(implicit pos: source.Position): Unit = {
+      if (condition) verb.when(testFun)
+    }
   }
 }
 

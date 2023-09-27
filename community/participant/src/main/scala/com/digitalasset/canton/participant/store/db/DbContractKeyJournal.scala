@@ -124,25 +124,25 @@ class DbContractKeyJournal(
               storage.profile match {
                 case _: DbStorage.Profile.Oracle =>
                   remainingKeys
-                    .map(key => {
+                    .map { key =>
                       val (status, toc) = updates(key)
                       sql"select $domainId domain_id, $key contract_key_hash, ${checked(
                           status
                         )} status, ${toc.timestamp} ts, ${toc.rc} request_counter from dual"
-                    })
+                    }
                     .intercalate(sql" union all ")
                 case _ =>
                   remainingKeys
-                    .map(key => {
+                    .map { key =>
                       val (status, toc) = updates(key)
                       sql"""($domainId, $key, CAST(${checked(
                           status
                         )} as key_status), ${toc.timestamp}, ${toc.rc})"""
-                    })
+                    }
                     .intercalate(sql", ")
               }
 
-            val updCount = remainingKeys.length
+            val updatesCount = remainingKeys.length
             val query = storage.profile match {
               case _: DbStorage.Profile.H2 =>
                 sql"""
@@ -175,7 +175,7 @@ class DbContractKeyJournal(
             }
 
             storage.update(query.asUpdate, functionFullName).flatMap { rowCount =>
-              if (rowCount == updCount) Future.successful(Either.right(Either.right(())))
+              if (rowCount == updatesCount) Future.successful(Either.right(Either.right(())))
               else {
                 val keysQ = remainingKeys.map(key => sql"$key").intercalate(sql", ")
                 val (tss, rcs) =
@@ -224,9 +224,11 @@ class DbContractKeyJournal(
     }
 
   override def doPrune(
-      beforeAndIncluding: CantonTimestamp
+      beforeAndIncluding: CantonTimestamp,
+      lastPruning: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): Future[Unit] =
     processingTime.event {
+      val lastPruningTs = lastPruning.getOrElse(CantonTimestamp.MinValue)
       val query = storage.profile match {
         case _: DbStorage.Profile.H2 =>
           sqlu"""
@@ -245,35 +247,26 @@ class DbContractKeyJournal(
             );
           """
         case _: DbStorage.Profile.Postgres =>
-          val deleteAssignedSql = sqlu"""
-            delete from contract_key_journal ckj1
-            where domain_id = $domainId
-            and ts <=  $beforeAndIncluding
-            and status = CAST(${ContractKeyJournal.Assigned} as key_status)
-            and exists (
-                select 1 from contract_key_journal ckj2
-                where ckj2.domain_id = ckj1.domain_id
-                and ckj2.contract_key_hash = ckj1.contract_key_hash
-                and (ckj2.ts, ckj2.request_counter) > (ckj1.ts, ckj1.request_counter)
-                and ckj2.ts <= $beforeAndIncluding
-            );
+          // Delete old key journal entries for which we have a newer entry
+          // We restrict the deletion to keys that have been updated since the last pruning as anything else remains unchanged,
+          // so doesn't need to be considered.
+          // Note that the last condition is <= and has a "unassigned" as a comparison in there
+          // This means that if the last statement is unassigned, then we'll delete that too, as
+          // Absent is equal to unassigned. If it is an assign statement, then it will be filtered
+          // out and won't be deleted.
+          sqlu"""
+            with recent_changes(domain_id, contract_key_hash, status, ts, request_counter) as (
+              select domain_id, contract_key_hash, status, ts, request_counter from contract_key_journal
+                  where domain_id = $domainId
+                  and ts <= $beforeAndIncluding
+                  and ts >= $lastPruningTs
+          )
+          delete from contract_key_journal as ckj
+          using recent_changes as rc where
+              ckj.domain_id = rc.domain_id and
+              ckj.contract_key_hash = rc.contract_key_hash and
+              (ckj.ts, ckj.request_counter, ckj.status) <= (rc.ts, rc.request_counter, CAST('unassigned' as key_status));
           """
-
-          val deleteUnassignedSql = sqlu"""
-            delete from contract_key_journal ckj1
-            where domain_id = $domainId
-            and ts <=  $beforeAndIncluding
-            and status = CAST(${ContractKeyJournal.Unassigned} as key_status)
-            and not exists (
-              select 1 from contract_key_journal ckj2
-              where ckj2.domain_id = ckj1.domain_id
-              and ckj2.contract_key_hash = ckj1.contract_key_hash
-              and (ckj2.ts, ckj2.request_counter) < (ckj1.ts, ckj1.request_counter)
-              and ckj2.status = CAST(${ContractKeyJournal.Assigned} as key_status)
-            );
-          """
-
-          deleteAssignedSql.andThen(deleteUnassignedSql)
 
         case _: DbStorage.Profile.Oracle =>
           sqlu"""

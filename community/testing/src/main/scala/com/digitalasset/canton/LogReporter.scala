@@ -4,9 +4,9 @@
 package com.digitalasset.canton
 
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.typesafe.scalalogging.Logger
 import org.scalatest.Reporter
 import org.scalatest.events.*
-import org.slf4j
 
 /** Logs when a test case or suite is started or completed.
   * To use it, register this class with "-C" when ScalaTest is started.
@@ -19,7 +19,7 @@ class LogReporter extends Reporter {
   // INFO  c.d.c.LogReporter:reporter=scala-test - Starting test run...
   // and the colon after the class name does not fit lnav's predefined
   // `java_log` format.
-  private[this] val logger: slf4j.Logger =
+  private[this] val logger: Logger =
     NamedLoggerFactory("reporter", "scala-test").getLogger(getClass)
 
   override def apply(event: Event): Unit = event match {

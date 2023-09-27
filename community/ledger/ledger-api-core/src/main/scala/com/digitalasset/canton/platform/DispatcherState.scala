@@ -34,7 +34,7 @@ class DispatcherState(
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var dispatcherStateRef: DispatcherState.State = DispatcherNotRunning
 
-  private val directEc = DirectExecutionContext(logger)
+  private val directEc = DirectExecutionContext(noTracingLogger)
 
   def isRunning: Boolean = blocking(synchronized {
     dispatcherStateRef match {

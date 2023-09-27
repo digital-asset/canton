@@ -104,7 +104,7 @@ message DomainTrustCertificateX {
   string participant = 1;
   // the uid of the domain that the participant trusts
   string domain = 2;
-  // if true, the participant restricts the domains to which it accepts transfer outs
+  // if true, the participant restricts the domains to which it accepts transfer-outs
   // TODO(#1252) implement transfer permissions
   bool transfer_only_to_given_target_domains = 3;
   // the uids of the target domains that this participants supports for transfer if transfer

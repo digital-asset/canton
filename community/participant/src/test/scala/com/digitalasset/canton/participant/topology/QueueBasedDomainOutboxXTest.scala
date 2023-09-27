@@ -86,6 +86,8 @@ class QueueBasedDomainOutboxXTest
       crypto,
       target,
       queue,
+      // we don't need the validation logic to run, because we control the outcome of transactions manually
+      enableTopologyTransactionValidation = false,
       timeouts,
       futureSupervisor,
       loggerFactory,

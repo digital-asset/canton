@@ -17,7 +17,7 @@ import scala.concurrent.{ExecutionContext, Future, blocking}
 @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
 class ThreadingTest extends AnyWordSpec with BaseTest with TestMetrics {
 
-  lazy val configuredNumerOfThreads: Int = Threading.detectNumberOfThreads(logger)
+  lazy val configuredNumerOfThreads: Int = Threading.detectNumberOfThreads(noTracingLogger)
   lazy val expectedNumberOfParallelTasks: Int =
     configuredNumerOfThreads max Threading.minParallelism
   val expectedNumberOfParallelTasksWrappedInBlocking: Int = 200
@@ -235,7 +235,7 @@ class ThreadingTest extends AnyWordSpec with BaseTest with TestMetrics {
       val parallelExecutionContext =
         Threading.newExecutionContext(
           "threading-test-execution-context",
-          logger,
+          noTracingLogger,
           executorServiceMetrics,
         )
 
@@ -344,7 +344,7 @@ class ThreadingTest extends AnyWordSpec with BaseTest with TestMetrics {
       ExecutorServiceExtensions(
         Threading.newExecutionContext(
           "threading-test-execution-context",
-          logger,
+          noTracingLogger,
           executorServiceMetrics,
         )
       )(logger, DefaultProcessingTimeouts.testing)

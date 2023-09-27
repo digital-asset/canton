@@ -8,7 +8,7 @@ import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
@@ -28,9 +28,7 @@ object TransferResultHelpers {
     val protocolVersion = BaseTest.testedProtocolVersion
 
     implicit val ec: ExecutionContext = DirectExecutionContext(
-      TracedLogger(
-        NamedLoggerFactory("test-area", "transfer").getLogger(TransferResultHelpers.getClass)
-      )
+      NamedLoggerFactory("test-area", "transfer").getLogger(TransferResultHelpers.getClass)
     )
 
     val result =

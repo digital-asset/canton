@@ -261,8 +261,10 @@ class WallClock(
 
   // Keeping a dedicated scheduler, as it may have to run long running tasks.
   // Once all tasks are guaranteed to be "light", the environment scheduler can be used.
-  private val scheduler =
-    Threading.singleThreadScheduledExecutor(loggerFactory.threadName + "-wallclock", logger)
+  private val scheduler = Threading.singleThreadScheduledExecutor(
+    loggerFactory.threadName + "-wallclock",
+    noTracingLogger,
+  )
   private val running = new AtomicBoolean(true)
 
   override def close(): Unit = {
@@ -384,8 +386,10 @@ class RemoteClock(
     with NamedLogging {
 
   // same as wall-clock: we might use the normal execution context if the tasks are guaranteed to be light
-  private val scheduler =
-    Threading.singleThreadScheduledExecutor(loggerFactory.threadName + "-remoteclock", logger)
+  private val scheduler = Threading.singleThreadScheduledExecutor(
+    loggerFactory.threadName + "-remoteclock",
+    noTracingLogger,
+  )
   private val channel = ClientChannelBuilder.createChannelToTrustedServer(config)
   private val service = InitializationServiceGrpc.stub(channel)
   private val running = new AtomicBoolean(true)

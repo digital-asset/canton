@@ -665,7 +665,7 @@ trait MultiDomainEventLogTest
             val unpublishedEvents = unpublished.map {
               case PendingEventPublish(event, _ts, eventLogId) =>
                 PublicationData(eventLogId, event, None)
-              case PendingTransferPublish(_rc, ts, _eventLogId) =>
+              case PendingTransferPublish(ts, _eventLogId) =>
                 fail("Cannot publish a transfer")
             }
             unpublishedEvents shouldBe expectedUnpublished

@@ -218,16 +218,15 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
     }
 
   private def fromCreateProtoV0(
-      c: v0.ActionDescription.CreateActionDescription
+      c: v0.ActionDescription.CreateActionDescription,
+      pv: RepresentativeProtocolVersion[ActionDescription.type],
   ): ParsingResult[CreateActionDescription] = {
     val v0.ActionDescription.CreateActionDescription(contractIdP, seedP, versionP) = c
     for {
       contractId <- ProtoConverter.parseLfContractId(contractIdP)
       seed <- LfHash.fromProtoPrimitive("node_seed", seedP)
       version <- lfVersionFromProtoVersioned(versionP)
-    } yield CreateActionDescription(contractId, seed, version)(
-      protocolVersionRepresentativeFor(ProtoVersion(0))
-    )
+    } yield CreateActionDescription(contractId, seed, version)(pv)
   }
 
   private def choiceFromProto(choiceP: String): ParsingResult[LfChoiceName] =
@@ -236,7 +235,8 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
       .leftMap(err => ValueDeserializationError("choice", err))
 
   private def fromExerciseProtoV0(
-      e: v0.ActionDescription.ExerciseActionDescription
+      e: v0.ActionDescription.ExerciseActionDescription,
+      pv: RepresentativeProtocolVersion[ActionDescription.type],
   ): ParsingResult[ExerciseActionDescription] = {
     val v0.ActionDescription
       .ExerciseActionDescription(
@@ -271,14 +271,15 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
           seed,
           version,
           failed,
-          protocolVersionRepresentativeFor(ProtoVersion(0)),
+          pv,
         )
         .leftMap(err => OtherError(err.message))
     } yield actionDescription
   }
 
   private def fromExerciseProtoV1(
-      e: v1.ActionDescription.ExerciseActionDescription
+      e: v1.ActionDescription.ExerciseActionDescription,
+      pv: RepresentativeProtocolVersion[ActionDescription.type],
   ): ParsingResult[ExerciseActionDescription] = {
     val v1.ActionDescription
       .ExerciseActionDescription(
@@ -314,14 +315,15 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
           seed,
           version,
           failed,
-          protocolVersionRepresentativeFor(ProtoVersion(1)),
+          pv,
         )
         .leftMap(err => OtherError(err.message))
     } yield actionDescription
   }
 
   private def fromExerciseProtoV2(
-      e: v2.ActionDescription.ExerciseActionDescription
+      e: v2.ActionDescription.ExerciseActionDescription,
+      pv: RepresentativeProtocolVersion[ActionDescription.type],
   ): ParsingResult[ExerciseActionDescription] = {
     val v2.ActionDescription.ExerciseActionDescription(
       inputContractIdP,
@@ -358,14 +360,15 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
           seed,
           version,
           failed,
-          protocolVersionRepresentativeFor(ProtoVersion(2)),
+          pv,
         )
         .leftMap(err => OtherError(err.message))
     } yield actionDescription
   }
 
   private def fromLookupByKeyProtoV0(
-      k: v0.ActionDescription.LookupByKeyActionDescription
+      k: v0.ActionDescription.LookupByKeyActionDescription,
+      pv: RepresentativeProtocolVersion[ActionDescription.type],
   ): ParsingResult[LookupByKeyActionDescription] = {
     val v0.ActionDescription.LookupByKeyActionDescription(keyP) = k
     for {
@@ -373,22 +376,21 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
         .required("key", keyP)
         .flatMap(GlobalKeySerialization.fromProtoV0)
       actionDescription <- LookupByKeyActionDescription
-        .create(key.unversioned, key.version, protocolVersionRepresentativeFor(ProtoVersion(0)))
+        .create(key.unversioned, key.version, pv)
         .leftMap(err => OtherError(err.message))
     } yield actionDescription
   }
 
   private def fromFetchProtoV0(
-      f: v0.ActionDescription.FetchActionDescription
+      f: v0.ActionDescription.FetchActionDescription,
+      pv: RepresentativeProtocolVersion[ActionDescription.type],
   ): ParsingResult[FetchActionDescription] = {
     val v0.ActionDescription.FetchActionDescription(inputContractIdP, actorsP, byKey, versionP) = f
     for {
       inputContractId <- ProtoConverter.parseLfContractId(inputContractIdP)
       actors <- actorsP.traverse(ProtoConverter.parseLfPartyId).map(_.toSet)
       version <- lfVersionFromProtoVersioned(versionP)
-    } yield FetchActionDescription(inputContractId, actors, byKey, version)(
-      protocolVersionRepresentativeFor(ProtoVersion(0))
-    )
+    } yield FetchActionDescription(inputContractId, actors, byKey, version)(pv)
   }
 
   private[data] def fromProtoV0(
@@ -396,11 +398,14 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
   ): ParsingResult[ActionDescription] = {
     import v0.ActionDescription.Description.*
     val v0.ActionDescription(description) = actionDescriptionP
+
+    val pv = protocolVersionRepresentativeFor(ProtoVersion(0))
+
     description match {
-      case Create(create) => fromCreateProtoV0(create)
-      case Exercise(exercise) => fromExerciseProtoV0(exercise)
-      case Fetch(fetch) => fromFetchProtoV0(fetch)
-      case LookupByKey(lookup) => fromLookupByKeyProtoV0(lookup)
+      case Create(create) => fromCreateProtoV0(create, pv)
+      case Exercise(exercise) => fromExerciseProtoV0(exercise, pv)
+      case Fetch(fetch) => fromFetchProtoV0(fetch, pv)
+      case LookupByKey(lookup) => fromLookupByKeyProtoV0(lookup, pv)
       case Empty => Left(FieldNotSet("description"))
     }
   }
@@ -410,11 +415,14 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
   ): ParsingResult[ActionDescription] = {
     import v1.ActionDescription.Description.*
     val v1.ActionDescription(description) = actionDescriptionP
+
+    val pv = protocolVersionRepresentativeFor(ProtoVersion(1))
+
     description match {
-      case Create(create) => fromCreateProtoV0(create)
-      case Exercise(exercise) => fromExerciseProtoV1(exercise)
-      case Fetch(fetch) => fromFetchProtoV0(fetch)
-      case LookupByKey(lookup) => fromLookupByKeyProtoV0(lookup)
+      case Create(create) => fromCreateProtoV0(create, pv)
+      case Exercise(exercise) => fromExerciseProtoV1(exercise, pv)
+      case Fetch(fetch) => fromFetchProtoV0(fetch, pv)
+      case LookupByKey(lookup) => fromLookupByKeyProtoV0(lookup, pv)
       case Empty => Left(FieldNotSet("description"))
     }
   }
@@ -424,11 +432,14 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
   ): ParsingResult[ActionDescription] = {
     import v2.ActionDescription.Description.*
     val v2.ActionDescription(description) = actionDescriptionP
+
+    val pv = protocolVersionRepresentativeFor(ProtoVersion(2))
+
     description match {
-      case Create(create) => fromCreateProtoV0(create)
-      case Exercise(exercise) => fromExerciseProtoV2(exercise)
-      case Fetch(fetch) => fromFetchProtoV0(fetch)
-      case LookupByKey(lookup) => fromLookupByKeyProtoV0(lookup)
+      case Create(create) => fromCreateProtoV0(create, pv)
+      case Exercise(exercise) => fromExerciseProtoV2(exercise, pv)
+      case Fetch(fetch) => fromFetchProtoV0(fetch, pv)
+      case LookupByKey(lookup) => fromLookupByKeyProtoV0(lookup, pv)
       case Empty => Left(FieldNotSet("description"))
     }
   }
@@ -565,6 +576,13 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
   }
 
   object ExerciseActionDescription {
+    private[data] val interfaceSupportedSince
+        : RepresentativeProtocolVersion[ActionDescription.type] =
+      protocolVersionRepresentativeFor(ProtocolVersion.v4)
+    private[data] val templateIdSupportedSince
+        : RepresentativeProtocolVersion[ActionDescription.type] =
+      protocolVersionRepresentativeFor(ProtocolVersion.v5)
+
     def tryCreate(
         inputContractId: LfContractId,
         templateId: Option[LfTemplateId],
@@ -604,12 +622,8 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
         failed: Boolean,
         protocolVersion: RepresentativeProtocolVersion[ActionDescription.type],
     ): Either[InvalidActionDescription, ExerciseActionDescription] = {
-      val interfaceSupportedSince = ProtocolVersion.v4
-      val canHaveInterface =
-        protocolVersion >= protocolVersionRepresentativeFor(interfaceSupportedSince)
-      val templateIdSupportedSince = ProtocolVersion.v5
-      val canHaveTemplateId =
-        protocolVersion >= protocolVersionRepresentativeFor(templateIdSupportedSince)
+      val canHaveInterface = protocolVersion >= interfaceSupportedSince
+      val canHaveTemplateId = protocolVersion >= templateIdSupportedSince
 
       for {
         _ <- Either.cond(

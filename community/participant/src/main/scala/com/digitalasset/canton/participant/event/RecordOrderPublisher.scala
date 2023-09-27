@@ -148,7 +148,7 @@ class RecordOrderPublisher(
         logger.info(s"Recover pending causality update $pendingPublish")
 
         val eventO = pendingPublish match {
-          case RecordOrderPublisher.PendingTransferPublish(rc, ts, eventLogId) => None
+          case RecordOrderPublisher.PendingTransferPublish(ts, eventLogId) => None
           case RecordOrderPublisher.PendingEventPublish(event, ts, eventLogId) => Some(event)
         }
 
@@ -161,7 +161,7 @@ class RecordOrderPublisher(
           )
         )
 
-        publishEvent(eventO, pendingPublish.rc, inFlightRef)
+        publishEvent(eventO, inFlightRef)
     }
 
     recovered.completeWith(recoverF)
@@ -300,13 +300,10 @@ class RecordOrderPublisher(
   )(implicit val traceContext: TraceContext)
       extends PublicationTask {
 
-    def recordTime: RecordTime = RecordTime(timestamp, tieBreaker = requestCounter.unwrap)
-    def tieBreaker: Long = requestCounter.unwrap
-
     override def perform(): FutureUnlessShutdown[Unit] = {
       for {
         _recovered <- recovered.futureUS
-        _unit <- publishEvent(eventO, requestCounter, inFlightReference)
+        _unit <- publishEvent(eventO, inFlightReference)
       } yield ()
     }
 
@@ -322,13 +319,12 @@ class RecordOrderPublisher(
 
   private def publishEvent(
       eventO: Option[TimestampedEvent],
-      requestCounter: RequestCounter,
       inFlightRef: Option[InFlightReference],
   )(implicit tc: TraceContext): FutureUnlessShutdown[Unit] =
     performUnlessClosingUSF("publish-event") {
-      logger.debug(s"Publish event with request counter $requestCounter")
       for {
         _published <- eventO.fold(FutureUnlessShutdown.unit) { event =>
+          logger.debug(s"Publish event with request counter ${event.localOffset}")
           val data = PublicationData(eventLog.id, event, inFlightRef)
           FutureUnlessShutdown.outcomeF(multiDomainEventLog.value.publish(data))
         }
@@ -352,12 +348,6 @@ class RecordOrderPublisher(
   )(val requestCounterCommitSetPairO: Option[(RequestCounter, CommitSet)])(implicit
       val traceContext: TraceContext
   ) extends PublicationTask {
-
-    def recordTime: RecordTime =
-      RecordTime(
-        timestamp,
-        requestCounterCommitSetPairO.map(_._1.unwrap).getOrElse(RecordTime.lowestTiebreaker),
-      )
 
     override def perform(): FutureUnlessShutdown[Unit] = {
       // If the requestCounterCommitSetPairO is not set, then by default the commit set is empty, and
@@ -384,6 +374,11 @@ class RecordOrderPublisher(
           logger.debug(
             s"Computed ACS change activations ${acsChange.activations} deactivations ${acsChange.deactivations}"
           )
+          def recordTime: RecordTime =
+            RecordTime(
+              timestamp,
+              requestCounterCommitSetPairO.map(_._1.unwrap).getOrElse(RecordTime.lowestTiebreaker),
+            )
           acsChangeListener.get.foreach(_.publish(recordTime, acsChange))
         }
       FutureUnlessShutdown.outcomeF(acsChangePublish)
@@ -412,14 +407,12 @@ class RecordOrderPublisher(
 }
 object RecordOrderPublisher {
   sealed trait PendingPublish {
-    def rc: RequestCounter // TODO(#10497) should that be a localOffset ?
     val ts: CantonTimestamp
     val createsEvent: Boolean
     val eventLogId: EventLogId
   }
 
   final case class PendingTransferPublish(
-      override val rc: RequestCounter,
       ts: CantonTimestamp,
       eventLogId: EventLogId,
   ) extends PendingPublish {
@@ -431,7 +424,6 @@ object RecordOrderPublisher {
       ts: CantonTimestamp,
       eventLogId: EventLogId,
   ) extends PendingPublish {
-    override def rc = RequestCounter(event.localOffset)
     override val createsEvent: Boolean = true
   }
 

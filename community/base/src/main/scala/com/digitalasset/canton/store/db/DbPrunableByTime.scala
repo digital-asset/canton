@@ -50,7 +50,7 @@ trait DbPrunableByTime[PartitionKey] extends PrunableByTime {
   ): Future[Option[PruningStatus]] =
     processingTime.event {
       val query = sql"""
-        select phase, ts from #$pruning_status_table
+        select phase, ts, succeeded from #$pruning_status_table
         where #$partitionColumn = $partitionKey
         """.as[PruningStatus].headOption
       storage.query(query, functionFullName)
@@ -59,25 +59,36 @@ trait DbPrunableByTime[PartitionKey] extends PrunableByTime {
   protected[canton] def advancePruningTimestamp(phase: PruningPhase, timestamp: CantonTimestamp)(
       implicit traceContext: TraceContext
   ): Future[Unit] = processingTime.event {
-    val query = storage.profile match {
-      case _: DbStorage.Profile.H2 =>
+
+    val query = (storage.profile, phase) match {
+      case (_: DbStorage.Profile.Postgres, PruningPhase.Completed) =>
+        sqlu"""
+          UPDATE #$pruning_status_table SET phase = CAST($phase as pruning_phase), succeeded = $timestamp
+          WHERE #$partitionColumn = $partitionKey AND ts = $timestamp
+        """
+      case (_, PruningPhase.Completed) =>
+        sqlu"""
+          UPDATE #$pruning_status_table SET phase = $phase, succeeded = $timestamp
+          WHERE #$partitionColumn = $partitionKey AND ts = $timestamp
+        """
+      case (_: DbStorage.Profile.H2, PruningPhase.Started) =>
         sqlu"""
           merge into #$pruning_status_table as pruning_status
           using dual
           on pruning_status.#$partitionColumn = $partitionKey
-            when matched and (pruning_status.ts < $timestamp or (pruning_status.ts = $timestamp and $phase = ${PruningPhase.Completed}))
+            when matched and (pruning_status.ts < $timestamp)
               then update set pruning_status.phase = $phase, pruning_status.ts = $timestamp
             when not matched then insert (#$partitionColumn, phase, ts) values ($partitionKey, $phase, $timestamp)
           """
-      case _: DbStorage.Profile.Postgres =>
+      case (_: DbStorage.Profile.Postgres, PruningPhase.Started) =>
         sqlu"""
           insert into #$pruning_status_table as pruning_status (#$partitionColumn, phase, ts)
           values ($partitionKey, CAST($phase as pruning_phase), $timestamp)
           on conflict (#$partitionColumn) do
             update set phase = CAST($phase as pruning_phase), ts = $timestamp
-            where pruning_status.ts < $timestamp or (pruning_status.ts = $timestamp and CAST($phase as pruning_phase) = CAST(${PruningPhase.Completed} as pruning_phase))
+            where pruning_status.ts < $timestamp
           """
-      case _: DbStorage.Profile.Oracle =>
+      case (_: DbStorage.Profile.Oracle, PruningPhase.Started) =>
         sqlu"""
           merge into #$pruning_status_table pruning_status
           using (
@@ -91,7 +102,7 @@ trait DbPrunableByTime[PartitionKey] extends PrunableByTime {
           on (pruning_status.#$partitionColumn = val.partitionKey)
             when matched then
                 update set pruning_status.phase = val.phase, pruning_status.ts = val.timestamp
-                where (pruning_status.ts < val.timestamp or (pruning_status.ts = val.timestamp and val.phase = ${PruningPhase.Completed}))
+                where pruning_status.ts < val.timestamp
             when not matched then
               insert (#$partitionColumn, phase, ts) values (val.partitionKey, val.phase, val.timestamp)
           """

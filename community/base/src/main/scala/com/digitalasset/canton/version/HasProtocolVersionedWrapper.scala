@@ -250,32 +250,6 @@ trait HasSupportedProtoVersions[ValueClass] {
       validate(attribute(v), rpv)
   }
 
-  /* Starting from `startInclusive`, the predicate must hold */
-  case class InvariantFromInclusive[T](
-      attribute: ValueClass => T,
-      predicate: T => Boolean,
-      onFailure: String,
-      startInclusive: ThisRepresentativeProtocolVersion,
-  ) extends InvariantImpl[T] {
-    override def validate(
-        v: T,
-        rpv: ThisRepresentativeProtocolVersion,
-    ): Either[String, Unit] = Either.cond(
-      rpv < startInclusive || predicate(v),
-      (),
-      s"invariant violation for representative protocol version $rpv: $onFailure. Found: $v",
-    )
-
-    override def validate(
-        v: T,
-        pv: ProtocolVersion,
-    ): Either[String, Unit] = Either.cond(
-      pv < startInclusive.representative || predicate(v),
-      (),
-      s"invariant violation for protocol version $pv: $onFailure. Found: $v",
-    )
-  }
-
   /*
     This trait encodes a default value starting (or ending) at a specific protocol version.
    */
@@ -345,6 +319,30 @@ trait HasSupportedProtoVersions[ValueClass] {
         s"expected default value for $attributeName in $name but found $v",
       )
     }
+  }
+
+  case class EmptyOptionExactlyUntilExclusive[T](
+      attribute: ValueClass => Option[T],
+      attributeName: String,
+      untilExclusive: ThisRepresentativeProtocolVersion,
+  ) extends DefaultValue[Option[T]] {
+    val defaultValue: Option[T] = None
+
+    def orValue(v: Option[T], protocolVersion: ProtocolVersion): Option[T] =
+      if (protocolVersion < untilExclusive.representative) defaultValue else v
+
+    def orValue(v: Option[T], protocolVersion: ThisRepresentativeProtocolVersion): Option[T] =
+      if (protocolVersion < untilExclusive) defaultValue else v
+
+    override def validate(
+        v: Option[T],
+        pv: ProtocolVersion,
+    ): Either[String, Unit] =
+      Either.cond(
+        v.isEmpty == pv < untilExclusive.representative,
+        (),
+        s"expecting None if and only if $pv < ${untilExclusive.representative}; found: $v",
+      )
   }
 
   def invariants: Seq[Invariant] = Nil

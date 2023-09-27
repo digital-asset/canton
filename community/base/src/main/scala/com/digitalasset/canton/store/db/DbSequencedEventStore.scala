@@ -311,7 +311,8 @@ class DbSequencedEventStore(
   }
 
   override protected[canton] def doPrune(
-      beforeAndIncluding: CantonTimestamp
+      beforeAndIncluding: CantonTimestamp,
+      lastPruning: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): Future[Unit] =
     processingTime.event {
       val query =

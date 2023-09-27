@@ -5,6 +5,7 @@ package com.digitalasset.canton.protocol
 
 import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.RollbackContext.{RollbackScope, RollbackSibling, firstChild}
 import com.digitalasset.canton.protocol.v0.ViewParticipantData
@@ -37,7 +38,7 @@ final case class RollbackContext private (
         throw new IllegalStateException("Attempt to exit rollback on empty rollback context")
       )
 
-    new RollbackContext(rbScope.dropRight(1), lastChild + 1)
+    new RollbackContext(rbScope.dropRight(1), lastChild + PositiveInt.one)
   }
 
   def rollbackScope: RollbackScope = rbScope
@@ -46,21 +47,17 @@ final case class RollbackContext private (
 
   def isEmpty: Boolean = equals(RollbackContext.empty)
 
-  /** Checks if the rollback scope passed in embeds/contains or matches this rollback scope, i.e. if this rollback
-    * scope starts with the provided rollback scope.
-    */
-  def embeddedInScope(rbScopeToCheck: RollbackScope): Boolean =
-    rollbackScope.startsWith(rbScopeToCheck)
-
-  def toProtoV0: ViewParticipantData.RollbackContext =
-    ViewParticipantData.RollbackContext(rollbackScope = rollbackScope, nextChild = nextChild)
+  def toProtoV0: ViewParticipantData.RollbackContext = ViewParticipantData.RollbackContext(
+    rollbackScope = rollbackScope.map(_.unwrap),
+    nextChild = nextChild.unwrap,
+  )
 
   override def pretty: Pretty[RollbackContext] = prettyOfClass(
     param("rollback scope", _.rollbackScope),
     param("next child", _.nextChild),
   )
 
-  private lazy val sortKey: Vector[Int] = rbScope :+ nextChild
+  private lazy val sortKey: Vector[PositiveInt] = rbScope :+ nextChild
   override def compare(that: RollbackContext): Int = sortKey.compare(that.sortKey)
 
 }
@@ -68,8 +65,8 @@ final case class RollbackContext private (
 final case class WithRollbackScope[T](rbScope: RollbackScope, unwrap: T)
 
 object RollbackContext {
-  type RollbackSibling = Int
-  val firstChild: RollbackSibling = 1
+  type RollbackSibling = PositiveInt
+  private val firstChild: RollbackSibling = PositiveInt.one
 
   type RollbackScope = Seq[RollbackSibling]
 
@@ -97,30 +94,29 @@ object RollbackContext {
   ): ParsingResult[RollbackContext] =
     maybeRbContext.fold(Either.right[ProtoDeserializationError, RollbackContext](empty)) {
       case com.digitalasset.canton.protocol.v0.ViewParticipantData
-            .RollbackContext(rbScope, nextChild) =>
+            .RollbackContext(rbScope, nextChildP) =>
         import cats.syntax.traverse.*
 
-        val rbScopeVector = rbScope.toVector
-
         for {
-          _ <- Either.cond(
-            nextChild > 0,
-            (),
-            ProtoDeserializationError.ValueConversionError(
-              "next_child",
-              s"Next rollback child must be positive and not ${nextChild}",
-            ),
-          )
-          _ <- rbScopeVector.traverse { i =>
-            Either.cond(
-              i > 0,
-              (),
+          nextChild <- PositiveInt
+            .create(nextChildP)
+            .leftMap(_ =>
               ProtoDeserializationError.ValueConversionError(
-                "rollback_scope",
-                s"Rollback scope elements must be positive and not ${i}",
-              ),
+                "next_child",
+                s"positive value expected; found: $nextChildP",
+              )
             )
-          }
+
+          rbScopeVector <- rbScope.toVector.zipWithIndex
+            .traverse { case (value, idx) =>
+              PositiveInt.create(value).leftMap { _ =>
+                s"positive value expected; found $value at position $idx"
+              }
+            }
+            .leftMap(
+              ProtoDeserializationError.ValueConversionError("rollback_scope", _)
+            )
+
         } yield new RollbackContext(rbScopeVector, nextChild)
     }
 

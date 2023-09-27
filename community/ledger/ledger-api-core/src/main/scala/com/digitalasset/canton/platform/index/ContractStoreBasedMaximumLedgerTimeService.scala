@@ -24,7 +24,7 @@ class ContractStoreBasedMaximumLedgerTimeService(
 ) extends MaximumLedgerTimeService
     with NamedLogging {
 
-  private val directEc = DirectExecutionContext(logger)
+  private val directEc = DirectExecutionContext(noTracingLogger)
 
   override def lookupMaximumLedgerTimeAfterInterpretation(
       ids: Set[Value.ContractId]

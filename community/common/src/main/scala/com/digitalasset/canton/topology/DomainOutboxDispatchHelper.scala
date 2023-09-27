@@ -256,7 +256,9 @@ trait DomainOutboxDispatch[
       )
       .unlessShutdown(
         {
-          logger.debug(s"Attempting to push ${transactions.size} topology transactions to $domain")
+          logger.debug(
+            s"Attempting to push ${transactions.size} topology transactions to $domain: $transactions"
+          )
           FutureUtil.logOnFailureUnlessShutdown(
             handle.submit(transactions),
             s"Pushing topology transactions to $domain",

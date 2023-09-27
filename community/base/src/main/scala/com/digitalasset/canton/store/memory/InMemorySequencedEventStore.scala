@@ -115,7 +115,8 @@ class InMemorySequencedEventStore(protected val loggerFactory: NamedLoggerFactor
     })
 
   override def doPrune(
-      beforeAndIncluding: CantonTimestamp
+      beforeAndIncluding: CantonTimestamp,
+      lastPruning: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): Future[Unit] = Future.successful {
     blocking(lock.synchronized {
       eventByTimestamp.rangeTo(beforeAndIncluding).foreach { case (ts, e) =>

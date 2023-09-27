@@ -198,14 +198,45 @@ class DbRequestJournalStore(
   override def firstRequestWithCommitTimeAfter(commitTimeExclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Future[Option[RequestData]] = processingTime.event {
-    storage.query(
-      sql"""
-            select request_counter, request_state_index, request_timestamp, commit_time, repair_context
-            from journal_requests where domain_id = $domainId and commit_time > $commitTimeExclusive
-            order by request_counter #${storage.limit(1)}
-        """.as[RequestData].headOption,
-      functionFullName,
-    )
+    storage.profile match {
+      case _: Profile.Postgres =>
+        for {
+          // Postgres needs to be motivated to use the idx_journal_request_commit_time index by this peculiar
+          // initial query. Combining the two queries or modifying the initial query even slightly results
+          // in Postgres choosing the primary key index running orders of magnitudes slower. Details in #14682
+          rcMinCommittedAfterO <- storage.query(
+            sql"""
+                  with committed_after(request_counter) as (
+                    select request_counter
+                    from journal_requests
+                    where domain_id = $domainId and commit_time > $commitTimeExclusive)
+                  select min(request_counter) from committed_after;
+              """.as[Option[RequestCounter]].headOption.map(_.flatten),
+            functionFullName + ".committed_after",
+          )
+          requestData <- rcMinCommittedAfterO.fold(Future.successful(Option.empty[RequestData]))(
+            rc =>
+              storage.query(
+                sql"""
+                    select request_counter, request_state_index, request_timestamp, commit_time, repair_context
+                    from journal_requests
+                    where domain_id = $domainId and request_counter = $rc
+                """.as[RequestData].headOption,
+                functionFullName,
+              )
+          )
+        } yield requestData
+      case _: Profile.Oracle | _: Profile.H2 =>
+        storage.query(
+          sql"""
+                select request_counter, request_state_index, request_timestamp, commit_time, repair_context
+                from journal_requests where domain_id = $domainId and commit_time > $commitTimeExclusive
+                order by request_counter #${storage.limit(1)}
+            """.as[RequestData].headOption,
+          functionFullName,
+        )
+    }
+
   }
 
   override def replace(

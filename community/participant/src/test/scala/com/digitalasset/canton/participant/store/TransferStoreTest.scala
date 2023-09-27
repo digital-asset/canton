@@ -14,7 +14,7 @@ import com.digitalasset.canton.data.{
   TransferOutView,
   TransferSubmitterMetadata,
 }
-import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.protocol.submission.SeedGenerator
 import com.digitalasset.canton.participant.protocol.transfer.TransferData.*
@@ -1302,7 +1302,7 @@ object TransferStoreTest extends EitherValues with NoTracing {
 
   val loggerFactoryNotUsed = NamedLoggerFactory.unnamedKey("test", "NotUsed-TransferStoreTest")
   implicit val ec = DirectExecutionContext(
-    TracedLogger(loggerFactoryNotUsed.getLogger(TransferStoreTest.getClass))
+    loggerFactoryNotUsed.getLogger(TransferStoreTest.getClass)
   )
   val cryptoFactory =
     TestingIdentityFactory(loggerFactoryNotUsed).forOwnerAndDomain(

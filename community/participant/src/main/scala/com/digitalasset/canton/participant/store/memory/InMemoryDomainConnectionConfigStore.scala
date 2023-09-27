@@ -25,7 +25,7 @@ import scala.jdk.CollectionConverters.*
 class InMemoryDomainConnectionConfigStore(protected override val loggerFactory: NamedLoggerFactory)
     extends DomainConnectionConfigStore
     with NamedLogging {
-  private implicit val ec: ExecutionContext = DirectExecutionContext(logger)
+  private implicit val ec: ExecutionContext = DirectExecutionContext(noTracingLogger)
 
   private val configuredDomainMap =
     new ConcurrentHashMap[DomainAlias, StoredDomainConnectionConfig].asScala

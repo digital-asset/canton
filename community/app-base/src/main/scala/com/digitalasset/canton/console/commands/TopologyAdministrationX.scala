@@ -324,8 +324,7 @@ class TopologyAdministrationGroupX(
                   signedBy = signedBy.toList,
                   serial = serial,
                   change = TopologyChangeOpX.Replace,
-                  // TODO(#12390): change to false when activating topology transaction validation
-                  mustFullyAuthorize = true,
+                  mustFullyAuthorize = false,
                   store = store,
                 )
               }
@@ -521,8 +520,7 @@ class TopologyAdministrationGroupX(
         domainId: Option[DomainId] = None,
         serial: Option[PositiveInt] = None,
         groupAddressing: Boolean = false,
-        // TODO(#12390): change to false when activating topology transaction validation
-        mustFullyAuthorize: Boolean = true,
+        mustFullyAuthorize: Boolean = false,
         store: String = AuthorizedStore.filterName,
     ): SignedTopologyTransactionX[TopologyChangeOpX, PartyToParticipantX] = {
       val op = NonEmpty.from(newParticipants) match {
@@ -908,8 +906,7 @@ class TopologyAdministrationGroupX(
             signedBy = signedBy.toList,
             serial = serial,
             change = TopologyChangeOpX.Replace,
-            // TODO(#12390): change to false when activating topology transaction validation
-            mustFullyAuthorize = true,
+            mustFullyAuthorize = false,
             store = store.getOrElse(domainId.filterString),
           )
         )
@@ -961,8 +958,7 @@ class TopologyAdministrationGroupX(
             signedBy = signedBy.toList,
             serial = serial,
             change = TopologyChangeOpX.Replace,
-            // TODO(#12390): change to false when activating topology transaction validation
-            mustFullyAuthorize = true,
+            mustFullyAuthorize = false,
             store = store.getOrElse(domainId.filterString),
           )
         )
@@ -1015,8 +1011,7 @@ class TopologyAdministrationGroupX(
             ),
             signedBy.toList,
             serial = serial,
-            // TODO(#12390): change to false when activating topology transaction validation
-            mustFullyAuthorize = true,
+            mustFullyAuthorize = false,
             store = store.getOrElse(domain.filterString),
           )
         )

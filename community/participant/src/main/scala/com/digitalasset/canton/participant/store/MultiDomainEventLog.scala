@@ -415,6 +415,8 @@ object MultiDomainEventLog {
     }
   }
 
+  /** @param acceptance if true, then the command was accepted, if false, it was rejected
+    */
   final case class DeduplicationInfo(
       changeId: ChangeId,
       submissionId: Option[LedgerSubmissionId],

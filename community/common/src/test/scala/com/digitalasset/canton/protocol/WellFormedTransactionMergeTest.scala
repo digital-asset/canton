@@ -8,6 +8,7 @@ import com.daml.lf.transaction.test.TestNodeBuilder.CreateKey
 import com.daml.lf.transaction.test.{TestNodeBuilder, TransactionBuilder}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ComparesLfTransactions.{TxTree, buildLfTransaction}
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.Iou
 import com.digitalasset.canton.protocol.RollbackContext.RollbackScope
@@ -89,6 +90,9 @@ class WellFormedTransactionMergeTest
   )
 
   "WellFormedTransaction.merge" should {
+    import scala.language.implicitConversions
+    implicit def toPositiveInt(i: Int): PositiveInt = PositiveInt.tryCreate(i)
+
     "wrap transactions under common rollback" when {
       "single transaction has multiple roots" in {
         val actual = merge(inputTransaction(Seq(1), Seq(subTxTree1) ++ subTxTree2: _*))
@@ -111,13 +115,12 @@ class WellFormedTransactionMergeTest
         val levels = 5
 
         val actual = merge(
-          inputTransaction(1 to levels, subTxTree1),
-          inputTransaction(1 to levels, subTxTree2: _*),
+          inputTransaction((1 to levels).map(PositiveInt.tryCreate), subTxTree1),
+          inputTransaction((1 to levels).map(PositiveInt.tryCreate), subTxTree2: _*),
         )
         val expected = expectedTransaction(
           (2 to levels).foldLeft(TxTree(tb.rollback(), Seq(subTxTree1) ++ subTxTree2: _*)) {
-            case (a, _) =>
-              TxTree(tb.rollback(), a)
+            case (a, _) => TxTree(tb.rollback(), a)
           }
         )
 

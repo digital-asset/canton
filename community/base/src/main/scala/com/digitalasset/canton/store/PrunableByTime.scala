@@ -24,10 +24,15 @@ trait PrunableByTime {
       limit: CantonTimestamp
   )(implicit traceContext: TraceContext): Future[Unit] =
     for {
+      lastTs <- getLastPruningTs
       _ <- advancePruningTimestamp(PruningPhase.Started, limit)
-      _ <- doPrune(limit)
+      _ <- doPrune(limit, lastTs)
       _ <- advancePruningTimestamp(PruningPhase.Completed, limit)
     } yield ()
+
+  private def getLastPruningTs(implicit
+      traceContext: TraceContext
+  ): Future[Option[CantonTimestamp]] = pruningStatus.map(_.flatMap(_.lastSuccess))
 
   /** Returns the latest timestamp at which pruning was started or completed.
     * For [[com.digitalasset.canton.pruning.PruningPhase.Started]], it is guaranteed
@@ -45,8 +50,8 @@ trait PrunableByTime {
   ): Future[Unit]
 
   @VisibleForTesting
-  protected[canton] def doPrune(limit: CantonTimestamp)(implicit
-      traceContext: TraceContext
+  protected[canton] def doPrune(limit: CantonTimestamp, lastPruning: Option[CantonTimestamp])(
+      implicit traceContext: TraceContext
   ): Future[Unit]
 
 }

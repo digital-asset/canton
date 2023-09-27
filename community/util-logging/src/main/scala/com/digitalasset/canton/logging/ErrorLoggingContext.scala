@@ -5,6 +5,7 @@ package com.digitalasset.canton.logging
 
 import com.daml.error.{BaseError, ContextualizedErrorLogger}
 import com.digitalasset.canton.tracing.TraceContext
+import com.typesafe.scalalogging.Logger
 import org.slf4j.MDC
 import org.slf4j.event.Level
 
@@ -87,6 +88,7 @@ final case class ErrorLoggingContext(
     traceContext: TraceContext,
 ) extends ErrorLoggingContextBase(logger, properties, traceContext) {
   override def correlationId: Option[String] = traceContext.traceId
+  def noTracingLogger: Logger = NamedLogging.loggerWithoutTracing(logger)
 }
 
 final case class LedgerErrorLoggingContext(

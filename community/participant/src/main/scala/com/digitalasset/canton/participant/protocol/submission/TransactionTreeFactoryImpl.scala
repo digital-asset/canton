@@ -158,6 +158,14 @@ abstract class TransactionTreeFactoryImpl(
       )
       rootViewDecompositions <- EitherT.liftF(rootViewDecompositionsF)
 
+      _ = if (logger.underlying.isDebugEnabled) {
+        val numRootViews = rootViewDecompositions.length
+        val numViews = TransactionViewDecomposition.countNestedViews(rootViewDecompositions)
+        logger.debug(
+          s"Computed transaction tree with total=${numViews} for #root-nodes=${numRootViews}"
+        )
+      }
+
       _ <-
         if (validatePackageVettings)
           UsableDomain

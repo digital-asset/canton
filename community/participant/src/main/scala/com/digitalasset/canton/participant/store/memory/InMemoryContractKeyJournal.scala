@@ -69,8 +69,8 @@ class InMemoryContractKeyJournal(override protected val loggerFactory: NamedLogg
       }
     }
 
-  override def doPrune(beforeAndIncluding: CantonTimestamp)(implicit
-      traceContext: TraceContext
+  override def doPrune(beforeAndIncluding: CantonTimestamp, lastPruning: Option[CantonTimestamp])(
+      implicit traceContext: TraceContext
   ): Future[Unit] =
     Future.successful(mapWithCleanup(_.prune(beforeAndIncluding)))
 

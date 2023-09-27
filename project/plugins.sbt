@@ -1,6 +1,6 @@
 // Linting plugins
-addSbtPlugin("org.wartremover" % "sbt-wartremover" % "2.4.20")
-addSbtPlugin("org.wartremover" % "sbt-wartremover-contrib" % "2.0.1")
+addSbtPlugin("org.wartremover" % "sbt-wartremover" % "3.1.4")
+addSbtPlugin("org.wartremover" % "sbt-wartremover-contrib" % "2.1.0")
 addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.4.6")
 addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.10.3")
 
@@ -44,7 +44,7 @@ addDependencyTreePlugin
 addSbtPlugin("com.github.cb372" % "sbt-explicit-dependencies" % "0.2.16")
 
 // Allows using some convenient Cats syntax in build files
-libraryDependencies += "org.typelevel" %% "cats-core" % "2.6.1"
+libraryDependencies += "org.typelevel" %% "cats-core" % "2.9.0"
 
 libraryDependencies ++= Seq(
   "io.circe" %% "circe-core" % "0.14.2",

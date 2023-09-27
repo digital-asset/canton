@@ -12,16 +12,15 @@ import com.digitalasset.canton.crypto.store.memory.{
   InMemoryCryptoPrivateStore,
   InMemoryCryptoPublicStore,
 }
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import com.google.protobuf.ByteString
-import com.typesafe.scalalogging.LazyLogging
 import org.bouncycastle.asn1.x509.AlgorithmIdentifier
 
 import java.security.{PublicKey as JPublicKey}
 import scala.concurrent.{ExecutionContext, Future}
 
-object SymbolicCrypto extends LazyLogging {
+object SymbolicCrypto {
 
   private val keyData: ByteString = ByteString.copyFromUtf8("symbolic_crypto_key_data")
 
@@ -81,7 +80,8 @@ object SymbolicCrypto extends LazyLogging {
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   ): Crypto = {
-    implicit val ec: ExecutionContext = DirectExecutionContext(TracedLogger(logger))
+    implicit val ec: ExecutionContext =
+      DirectExecutionContext(loggerFactory.getLogger(this.getClass))
 
     val pureCrypto = new SymbolicPureCrypto()
     val cryptoPublicStore = new InMemoryCryptoPublicStore

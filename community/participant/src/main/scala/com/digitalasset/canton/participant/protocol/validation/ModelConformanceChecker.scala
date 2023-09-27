@@ -249,7 +249,8 @@ class ModelConformanceChecker(
 
       lookupWithKeys =
         new ExtendedContractLookup(
-          ContractLookup.noContracts(logger), // all contracts and keys specified explicitly
+          // all contracts and keys specified explicitly
+          ContractLookup.noContracts(noTracingLogger),
           viewInputContracts,
           resolverFromView,
         )

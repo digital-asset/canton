@@ -179,7 +179,8 @@ class InMemoryActiveContractStore(
     })
 
   override def doPrune(
-      beforeAndIncluding: CantonTimestamp
+      beforeAndIncluding: CantonTimestamp,
+      lastPruning: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): Future[Unit] = {
     table.foreach { case (coid, status) =>
       status.prune(beforeAndIncluding) match {
