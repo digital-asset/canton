@@ -117,12 +117,22 @@ object StoredTopologyTransactionsX
     StoredTopologyTransactionsX[TopologyChangeOpX.Replace, TopologyMappingX]
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(-1) -> ProtoCodec(
+      ProtocolVersion.minimum,
+      _ =>
+        throw new UnsupportedOperationException(
+          s"Cannot deserialize: StoredTopologyTransactionsX are only supported from protocol version ${ProtocolVersion.CNTestNet}"
+        ),
+      _ =>
+        throw new UnsupportedOperationException(
+          s"Cannot serialize: StoredTopologyTransactionsX are only supported from protocol version ${ProtocolVersion.CNTestNet}"
+        ),
+    ),
     ProtoVersion(0) -> ProtoCodec(
-      // TODO(#12373) Adapt when releasing BFT
-      ProtocolVersion.v3,
+      ProtocolVersion.CNTestNet,
       supportedProtoVersion(v0.TopologyTransactions)(fromProtoV0),
       _.toProtoV0.toByteString,
-    )
+    ),
   )
 
   def fromProtoV0(

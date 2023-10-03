@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.instances.seq.*
 import cats.syntax.foldable.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -242,7 +241,7 @@ class TopologyStateProcessorX(
       toValidate: GenericSignedTopologyTransactionX,
   ): Either[TopologyTransactionRejection, Unit] = inStore match {
     case Some(value) =>
-      val expected = value.transaction.serial + PositiveInt.one
+      val expected = value.transaction.serial.increment
       Either.cond(
         expected == toValidate.transaction.serial,
         (),
@@ -260,20 +259,24 @@ class TopologyStateProcessorX(
       traceContext: TraceContext
   ): EitherT[Future, TopologyTransactionRejection, GenericSignedTopologyTransactionX] = {
     if (enableTopologyTransactionValidation) {
-      EitherT(
-        authValidator
-          .validateAndUpdateHeadAuthState(
-            effective.value,
-            Seq(toValidate),
-            inStore.map(tx => tx.transaction.mapping.uniqueKey -> tx).toList.toMap,
-            expectFullAuthorization,
-          )
+      EitherT
+        .right(
+          authValidator
+            .validateAndUpdateHeadAuthState(
+              effective.value,
+              Seq(toValidate),
+              inStore.map(tx => tx.transaction.mapping.uniqueKey -> tx).toList.toMap,
+              expectFullAuthorization,
+            )
+        )
+        .subflatMap { case (_, txs) =>
           // TODO(#12390) proper error
-          .map { case (_, txs) =>
-            txs.headOption.getOrElse(sys.error("expected validation result doesn't exist"))
-          }
-          .map(tx => tx.rejectionReason.toLeft(tx.transaction))
-      )
+          txs.headOption
+            .toRight[TopologyTransactionRejection](
+              TopologyTransactionRejection.Other("expected validation result doesn't exist")
+            )
+            .flatMap(tx => tx.rejectionReason.toLeft(tx.transaction))
+        }
     } else {
       EitherT.rightT(toValidate.copy(isProposal = false))
     }
@@ -314,7 +317,7 @@ class TopologyStateProcessorX(
     // first, merge a pending proposal with this transaction. we do this as it might
     // subsequently activate the given transaction
     val tx_mergedProposalSignatures = mergeWithPendingProposal(txA)
-    // TODO(#12390) add a check here for consistency. these checks should reject on the mediator / topology
+    // TODO(#14810) add a check here for consistency. these checks should reject on the mediator / topology
     //   manager, but only warn on the processor.
     //   things we need to catch are:
     //     - a party to participant mapping mentioning a participant who is not on the domain

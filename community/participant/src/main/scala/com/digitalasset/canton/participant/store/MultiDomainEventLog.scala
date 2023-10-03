@@ -11,7 +11,7 @@ import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveLong}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.v2.ChangeId
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
@@ -314,7 +314,7 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
 
 object MultiDomainEventLog {
 
-  val ledgerFirstOffset: GlobalOffset = 1L
+  val ledgerFirstOffset: GlobalOffset = GlobalOffset(PositiveLong.one)
 
   def create(
       syncDomainPersistentStates: SyncDomainPersistentStateLookup,

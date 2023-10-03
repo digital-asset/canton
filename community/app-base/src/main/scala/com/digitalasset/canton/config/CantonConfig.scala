@@ -13,13 +13,10 @@ import cats.Order
 import cats.data.Validated
 import cats.syntax.either.*
 import cats.syntax.functor.*
-import com.daml.http.{HttpApiConfig, StaticContentConfig, WebsocketConfig}
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.metrics.HistogramDefinition
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
-import com.daml.pureconfigutils.HttpServerConfig
-import com.daml.pureconfigutils.SharedConfigReaders.catchConvertError
 import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.{
   InvalidLengthString,
   defaultMaxLength,
@@ -42,6 +39,7 @@ import com.digitalasset.canton.domain.DomainNodeParameters
 import com.digitalasset.canton.domain.config.*
 import com.digitalasset.canton.domain.sequencing.sequencer.*
 import com.digitalasset.canton.environment.CantonNodeParameters
+import com.digitalasset.canton.http.{HttpApiConfig, StaticContentConfig, WebsocketConfig}
 import com.digitalasset.canton.ledger.runner.common.PureConfigReaderWriter.Secure.{
   commandConfigurationConvert,
   dbConfigPostgresDataSourceConfigConvert,
@@ -64,6 +62,8 @@ import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConf
 import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfig
 import com.digitalasset.canton.platform.indexer.PackageMetadataViewConfig
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
+import com.digitalasset.canton.pureconfigutils.HttpServerConfig
+import com.digitalasset.canton.pureconfigutils.SharedConfigReaders.catchConvertError
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.tracing.TracingConfig

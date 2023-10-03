@@ -18,8 +18,6 @@ import com.daml.ledger.api.v1.command_submission_service.CommandSubmissionServic
 import com.daml.ledger.api.v1.command_submission_service.SubmitRequest
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.metrics.api.dropwizard.DropwizardCounter
-import com.daml.util.Ctx
-import com.daml.util.akkastreams.MaxInFlight
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.validation.CommandsValidator
@@ -33,6 +31,8 @@ import com.digitalasset.canton.ledger.client.services.commands.tracker.Completio
 }
 import com.digitalasset.canton.ledger.client.services.commands.tracker.TrackedCommandKey
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.util.Ctx
+import com.digitalasset.canton.util.akkastreams.MaxInFlight
 import com.google.protobuf.empty.Empty
 import scalaz.syntax.tag.*
 

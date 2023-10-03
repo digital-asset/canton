@@ -9,7 +9,6 @@ import com.daml.grpc.{GrpcException, GrpcStatus}
 import com.daml.ledger.api.v1.command_completion_service.Checkpoint
 import com.daml.ledger.api.v1.completion.Completion
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
-import com.daml.util.Ctx
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.ledger.client.services.commands.tracker.CommandTracker.*
 import com.digitalasset.canton.ledger.client.services.commands.tracker.CompletionResponse.{
@@ -21,8 +20,9 @@ import com.digitalasset.canton.ledger.client.services.commands.{
   CompletionStreamElement,
   tracker,
 }
+import com.digitalasset.canton.util.Ctx
 import com.google.protobuf.empty.Empty
-import com.google.rpc.status.{Status as StatusProto}
+import com.google.rpc.status.Status as StatusProto
 import io.grpc.Status
 import org.slf4j.LoggerFactory
 

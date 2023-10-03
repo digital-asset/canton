@@ -14,20 +14,16 @@ import com.daml.ledger.api.v2.update_service.{
   GetTransactionTreeResponse,
 }
 import com.daml.tracing.Telemetry
+import com.digitalasset.canton.config
 import com.digitalasset.canton.ledger.api.validation.{
   CommandsValidator,
   SubmitAndWaitRequestValidator,
 }
 import com.digitalasset.canton.ledger.api.{SubmissionIdGenerator, ValidationLogger}
 import com.digitalasset.canton.ledger.error.CommonErrors
-import com.digitalasset.canton.logging.{
-  ErrorLoggingContext,
-  LedgerErrorLoggingContext,
-  LoggingContextWithTrace,
-  NamedLoggerFactory,
-  NamedLogging,
-}
+import com.digitalasset.canton.logging.*
 import com.digitalasset.canton.platform.apiserver.services.ApiCommandServiceV2.TransactionServices
+import com.digitalasset.canton.platform.apiserver.services.command.CommandServiceImpl
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker.SubmissionKey
 import com.digitalasset.canton.platform.apiserver.services.tracking.{
   CompletionResponse,
@@ -38,7 +34,6 @@ import com.google.protobuf.empty.Empty
 import io.grpc.Context
 
 import java.time.{Duration, Instant}
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -47,7 +42,7 @@ final class ApiCommandServiceV2(
     commandsValidator: CommandsValidator,
     submissionTracker: SubmissionTracker,
     submit: Traced[SubmitRequest] => Future[Any],
-    defaultTrackingTimeout: Duration,
+    defaultTrackingTimeout: config.NonNegativeFiniteDuration,
     currentLedgerTime: () => Instant,
     currentUtcTime: () => Instant,
     maxDeduplicationDuration: () => Option[Duration],
@@ -140,24 +135,33 @@ final class ApiCommandServiceV2(
       loggingContextWithTrace: LoggingContextWithTrace,
   ): Future[CompletionResponse] =
     if (running.get()) {
+      // Capture deadline before thread switching in Future for-comprehension
+      val deadlineO = Option(Context.current().getDeadline)
       enrichRequestAndSubmit(req) { request =>
-        val timeout = Option(Context.current().getDeadline)
-          .map(deadline => Duration.ofNanos(deadline.timeRemaining(TimeUnit.NANOSECONDS)))
-          .getOrElse(defaultTrackingTimeout)
-
-        val commands = request.commands.getOrElse(
-          throw new IllegalArgumentException("Missing commands field in request")
-        )
-        submissionTracker.track(
-          submissionKey = SubmissionKey(
-            commandId = commands.commandId,
-            submissionId = commands.submissionId,
-            applicationId = commands.applicationId,
-            parties = CommandsValidator.effectiveActAs(commands),
-          ),
-          timeout = timeout,
-          submit = childContext => submit(Traced(SubmitRequest(Some(commands)))(childContext)),
-        )(errorLogger, loggingContextWithTrace.traceContext)
+        for {
+          _ <- Future.unit
+          commands = request.commands.getOrElse(
+            throw new IllegalArgumentException("Missing commands field in request")
+          )
+          nonNegativeTimeout <- Future.fromTry(
+            CommandServiceImpl.validateRequestTimeout(
+              deadlineO,
+              commands.commandId,
+              commands.submissionId,
+              defaultTrackingTimeout,
+            )
+          )
+          result <- submissionTracker.track(
+            submissionKey = SubmissionKey(
+              commandId = commands.commandId,
+              submissionId = commands.submissionId,
+              applicationId = commands.applicationId,
+              parties = CommandsValidator.effectiveActAs(commands),
+            ),
+            timeout = nonNegativeTimeout,
+            submit = childContext => submit(Traced(SubmitRequest(Some(commands)))(childContext)),
+          )(errorLogger, loggingContextWithTrace.traceContext)
+        } yield result
       }
     } else
       Future.failed(

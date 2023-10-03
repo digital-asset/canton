@@ -4,10 +4,10 @@
 package com.digitalasset.canton.platform.apiserver
 
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
-import com.daml.metrics.Metrics
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.ledger.api.tls.TlsConfiguration
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.ServerInterceptor
 

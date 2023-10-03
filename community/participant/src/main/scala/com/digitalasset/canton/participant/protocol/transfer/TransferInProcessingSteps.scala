@@ -16,6 +16,7 @@ import com.digitalasset.canton.data.*
 import com.digitalasset.canton.ledger.participant.state.v2.CompletionInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.RichRequestCounter
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.PendingRequestData
 import com.digitalasset.canton.participant.protocol.conflictdetection.{
   ActivenessCheck,
@@ -672,7 +673,7 @@ object TransferInProcessingSteps {
       submitterMetadata: TransferSubmitterMetadata,
       stakeholders: Set[LfPartyId],
       contract: SerializableContract,
-      transferCounterO: TransferCounterO,
+      transferCounter: TransferCounterO,
       creatingTransactionId: TransactionId,
       targetDomain: TargetDomainId,
       targetMediator: MediatorRef,
@@ -694,7 +695,7 @@ object TransferInProcessingSteps {
       // support them, we omit it
       // Otherwise, due to the PV compatibility check above, both domains must support transfer counters and we
       // keep the transfer counter unchanged
-      transferCounter = {
+      revisedTransferCounter = {
         if (
           sourceProtocolVersion.v < TransferCommonData.minimumPvForTransferCounter &&
           targetProtocolVersion.v >= TransferCommonData.minimumPvForTransferCounter
@@ -705,7 +706,7 @@ object TransferInProcessingSteps {
         ) None
         else if (
           targetProtocolVersion.v >= TransferCommonData.minimumPvForTransferCounter && sourceProtocolVersion.v >= TransferCommonData.minimumPvForTransferCounter
-        ) transferCounterO
+        ) transferCounter
         else
           ErrorUtil.invalidState(
             s"The source domain PV ${sourceProtocolVersion.v} and target domains PV ${targetProtocolVersion.v} are incompatible"
@@ -731,7 +732,7 @@ object TransferInProcessingSteps {
           transferOutResult,
           sourceProtocolVersion,
           targetProtocolVersion,
-          transferCounter,
+          revisedTransferCounter,
         )
         .leftMap(reason => InvalidTransferView(reason))
       tree = TransferInViewTree(commonData, view)(pureCrypto)

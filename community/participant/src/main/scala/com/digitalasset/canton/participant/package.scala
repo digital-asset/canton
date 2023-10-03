@@ -4,6 +4,7 @@
 package com.digitalasset.canton
 
 import com.daml.lf.data.Time
+import com.digitalasset.canton.data.{Counter, CounterCompanion}
 import com.digitalasset.canton.ledger.offset
 
 package object participant {
@@ -12,9 +13,22 @@ package object participant {
   type LedgerSyncOffset = offset.Offset
   val LedgerSyncOffset: offset.Offset.type = offset.Offset
 
-  // A Long serves as the ledger offset in a single domain and for the multi domain event log
-  type GlobalOffset = Long
-  type LocalOffset = Long
+  implicit class RichRequestCounter(val rc: RequestCounter) extends AnyVal {
+
+    /** Use this method to indicate that unwrapping to use the request counter as
+      * a local offset is fine.
+      */
+    def asLocalOffset: LocalOffset = LocalOffset(rc.unwrap)
+  }
+
+  type LocalOffsetDiscriminator
+  type LocalOffset = Counter[LocalOffsetDiscriminator]
+  val LocalOffset: CounterCompanion[LocalOffsetDiscriminator] =
+    new CounterCompanion[LocalOffsetDiscriminator] {}
+
+  implicit class RichLocalOffset(val offset: LocalOffset) extends AnyVal {
+    def asRequestCounter: RequestCounter = RequestCounter(offset.unwrap)
+  }
 
   // Ledger record time is "single-dimensional"
   type LedgerSyncRecordTime = Time.Timestamp

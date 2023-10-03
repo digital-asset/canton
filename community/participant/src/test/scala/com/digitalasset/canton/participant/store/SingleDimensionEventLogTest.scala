@@ -11,7 +11,7 @@ import com.digitalasset.canton.participant.store.db.DbEventLogTestResources
 import com.digitalasset.canton.participant.sync.LedgerSyncEvent.PublicPackageUploadRejected
 import com.digitalasset.canton.participant.sync.TimestampedEvent.TimelyRejectionEventId
 import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, TimestampedEvent}
-import com.digitalasset.canton.participant.{LedgerSyncRecordTime, LocalOffset}
+import com.digitalasset.canton.participant.{LedgerSyncRecordTime, LocalOffset, RichRequestCounter}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
@@ -29,14 +29,17 @@ import org.scalatest.{Assertion, BeforeAndAfterAll}
 import java.util.UUID
 import scala.collection.immutable.HashMap
 import scala.concurrent.Future
+import scala.language.implicitConversions
 
 trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
   this: AsyncWordSpec =>
   import SingleDimensionEventLogTest.*
 
-  lazy val id: EventLogId = DbEventLogTestResources.dbSingleDimensionEventLogEventLogId
+  private implicit def toLocalOffset(i: Long): LocalOffset = LocalOffset(i)
 
-  def generateEventWithTransactionId(
+  protected lazy val id: EventLogId = DbEventLogTestResources.dbSingleDimensionEventLogEventLogId
+
+  private def generateEventWithTransactionId(
       localOffset: LocalOffset,
       idString: String,
   ): TimestampedEvent = {

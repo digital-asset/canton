@@ -7,8 +7,8 @@ import akka.stream.scaladsl.{Keep, Sink, Source}
 import akka.stream.{BoundedSourceQueue, Materializer, QueueOfferResult}
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.lf.value.Value.ContractId
+import com.daml.metrics.InstrumentedGraph
 import com.daml.metrics.api.MetricsContext
-import com.daml.metrics.{InstrumentedGraph, Metrics}
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.logging.{
@@ -17,6 +17,7 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
 }
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.indexer.parallel.BatchN
 import com.digitalasset.canton.platform.store.backend.ContractStorageBackend
 import com.digitalasset.canton.platform.store.backend.ContractStorageBackend.{

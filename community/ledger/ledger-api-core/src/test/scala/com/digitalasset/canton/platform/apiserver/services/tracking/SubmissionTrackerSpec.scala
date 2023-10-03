@@ -6,30 +6,29 @@ package com.digitalasset.canton.platform.apiserver.services.tracking
 import com.daml.error.{ContextualizedErrorLogger, ErrorsAssertions}
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.api.v2.completion.Completion
-import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors
 import com.digitalasset.canton.ledger.error.{CommonErrors, LedgerApiErrors}
 import com.digitalasset.canton.logging.LedgerErrorLoggingContext
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker.{
   SubmissionKey,
   SubmissionTrackerImpl,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, config}
 import com.google.rpc.status.Status
 import io.grpc.StatusRuntimeException
 import org.scalatest.concurrent.{Eventually, IntegrationPatience, ScalaFutures}
 import org.scalatest.flatspec.AnyFlatSpec
-import org.scalatest.{Assertion, Inside, Succeeded}
+import org.scalatest.{Assertion, Succeeded}
 
-import java.time.Duration
 import java.util.Timer
-import scala.concurrent.Future
+import scala.concurrent.{Future, Promise}
+import scala.util.Try
 
 class SubmissionTrackerSpec
     extends AnyFlatSpec
     with ScalaFutures
-    with Inside
     with ErrorsAssertions
     with IntegrationPatience
     with Eventually
@@ -200,6 +199,28 @@ class SubmissionTrackerSpec
       )
   }
 
+  it should "gracefully handle errors in the cancellable timeout creation" in new SubmissionTrackerFixture {
+    private lazy val thrownException = new RuntimeException("scheduleOnce throws")
+    override def timeoutSupport: CancellableTimeoutSupport = new CancellableTimeoutSupport {
+      override def scheduleOnce[T](
+          duration: config.NonNegativeFiniteDuration,
+          promise: Promise[T],
+          onTimeout: => Try[T],
+      )(implicit traceContext: TraceContext): AutoCloseable =
+        throw thrownException
+    }
+    override def run: Future[Assertion] = for {
+      _ <- Future.unit
+      // Track new submission
+      trackedSubmissionF = loggerFactory.suppressErrors(
+        submissionTracker.track(submissionKey, `1 day timeout`, submitFails)
+      )
+      failure <- trackedSubmissionF.failed
+    } yield {
+      failure shouldBe thrownException
+    }
+  }
+
   it should "fail after exceeding the max-commands-in-flight" in new SubmissionTrackerFixture {
     override def run: Future[Assertion] = for {
       _ <- Future.unit
@@ -297,9 +318,65 @@ class SubmissionTrackerSpec
     }
   }
 
+  it should "gracefully complete the completion promises on races" in new SubmissionTrackerFixture {
+    private def noConcurrentSubmissions = 100
+    private def concurrentSubmissionKeys =
+      (1 to noConcurrentSubmissions).map(id => submissionKey.copy(commandId = s"cmd-$id"))
+
+    override def run: Future[Assertion] = for {
+      _ <- Future.unit
+      submissionTracker = new SubmissionTrackerImpl(
+        timeoutSupport,
+        maxCommandsInFlight = 100,
+        Metrics.ForTesting,
+        loggerFactory,
+      )
+      // Track concurrent submissions
+      submissions = concurrentSubmissionKeys.map(sk =>
+        sk -> submissionTracker.track(sk, `1 day timeout`, submitSucceeds)
+      )
+
+      onCompletions = submissions.map { case (key, _) =>
+        () =>
+          Future {
+            submissionTracker.onCompletion(
+              CompletionStreamResponse(completion =
+                Some(completionOk.copy(commandId = key.commandId))
+              ) -> submitters
+            )
+          }
+      }
+
+      (firstHalfOnComplete, secondHalfOnComplete) = onCompletions.splitAt(
+        noConcurrentSubmissions / 2
+      )
+
+      f1 = Future.traverse(firstHalfOnComplete)(_.apply())
+      s_close = Future(submissionTracker.close())
+      f2 = Future.traverse(secondHalfOnComplete)(_.apply())
+
+      _ <- f2
+      _ <- s_close
+      _ <- f1
+      _ <- Future.traverse(submissions)(
+        _._2
+          .map(_ => ())
+          .recover(inside(_) { case actualStatusRuntimeException: StatusRuntimeException =>
+            assertError(
+              actual = actualStatusRuntimeException,
+              expected = CommonErrors.ServerIsShuttingDown.Reject().asGrpcError,
+            )
+          })
+      )
+    } yield {
+      succeed
+    }
+  }
+
   abstract class SubmissionTrackerFixture extends BaseTest with Eventually {
     private val timer = new Timer("test-timer")
-    val timeoutSupport = new CancellableTimeoutSupportImpl(timer, loggerFactory)
+    def timeoutSupport: CancellableTimeoutSupport =
+      new CancellableTimeoutSupportImpl(timer, loggerFactory)
     val submissionTracker =
       new SubmissionTrackerImpl(
         timeoutSupport,
@@ -308,8 +385,9 @@ class SubmissionTrackerSpec
         loggerFactory,
       )
 
-    val zeroTimeout: Duration = Duration.ZERO
-    val `1 day timeout`: Duration = Duration.ofDays(1L)
+    val zeroTimeout: config.NonNegativeFiniteDuration = config.NonNegativeFiniteDuration.Zero
+    val `1 day timeout`: config.NonNegativeFiniteDuration =
+      config.NonNegativeFiniteDuration.ofDays(1L)
 
     val submissionId = "sId_1"
     val commandId = "cId_1"

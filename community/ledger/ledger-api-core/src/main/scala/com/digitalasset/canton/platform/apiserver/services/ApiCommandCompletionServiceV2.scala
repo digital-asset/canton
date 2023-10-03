@@ -12,7 +12,6 @@ import com.daml.ledger.api.v2.command_completion_service.{
   CompletionStreamResponse,
 }
 import com.daml.logging.entries.LoggingEntries
-import com.daml.metrics.Metrics
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.domain.LedgerOffset
 import com.digitalasset.canton.ledger.api.grpc.StreamingServiceLifecycleManagement
@@ -30,6 +29,7 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
 }
+import com.digitalasset.canton.metrics.Metrics
 import io.grpc.stub.StreamObserver
 
 final class ApiCommandCompletionServiceV2(

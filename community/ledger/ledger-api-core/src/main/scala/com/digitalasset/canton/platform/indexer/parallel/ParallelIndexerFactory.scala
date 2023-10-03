@@ -6,9 +6,9 @@ package com.digitalasset.canton.platform.indexer.parallel
 import akka.stream.{KillSwitch, Materializer}
 import com.daml.executors.InstrumentedExecutors
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
-import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.participant.state.v2.ReadService
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.config.ServerRole
 import com.digitalasset.canton.platform.indexer.Indexer
 import com.digitalasset.canton.platform.indexer.ha.{

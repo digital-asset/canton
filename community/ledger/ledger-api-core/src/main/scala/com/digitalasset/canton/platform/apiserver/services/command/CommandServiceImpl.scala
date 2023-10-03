@@ -15,6 +15,7 @@ import com.daml.ledger.api.v1.transaction_service.{
   GetTransactionResponse,
 }
 import com.daml.tracing.Telemetry
+import com.digitalasset.canton.config
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.services.CommandService
@@ -36,18 +37,20 @@ import com.digitalasset.canton.platform.apiserver.services.tracking.{
 import com.digitalasset.canton.platform.apiserver.services.{ApiCommandService, logging}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.google.protobuf.empty.Empty
-import io.grpc.Context
+import io.grpc.{Context, Deadline}
 
-import java.time.{Duration, Instant}
+import java.time.Instant
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success, Try}
 
 private[apiserver] final class CommandServiceImpl private[services] (
     transactionServices: TransactionServices,
     submissionTracker: SubmissionTracker,
     submit: Traced[SubmitRequest] => Future[Empty],
-    defaultTrackingTimeout: Duration,
+    defaultTrackingTimeout: config.NonNegativeFiniteDuration,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
     executionContext: ExecutionContext
@@ -135,15 +138,23 @@ private[apiserver] final class CommandServiceImpl private[services] (
   )(implicit
       errorLogger: ContextualizedErrorLogger,
       traceContext: TraceContext,
-  ): Future[CompletionResponse] =
-    if (running.get()) {
-      val timeout = Option(Context.current().getDeadline)
-        .map(deadline => Duration.ofNanos(deadline.timeRemaining(TimeUnit.NANOSECONDS)))
-        .getOrElse(defaultTrackingTimeout)
+  ): Future[CompletionResponse] = {
+    def ifServiceRunning: Future[Unit] =
+      if (!running.get())
+        Future.failed(
+          CommonErrors.ServiceNotRunning.Reject("Command Service")(errorLogger).asGrpcError
+        )
+      else Future.unit
 
-      val commands = request.commands.getOrElse(
+    def ensureCommandsPopulated: Commands =
+      request.commands.getOrElse(
         throw new IllegalArgumentException("Missing commands field in request")
       )
+
+    def submitAndTrack(
+        commands: Commands,
+        nonNegativeTimeout: config.NonNegativeFiniteDuration,
+    ): Future[CompletionResponse] =
       submissionTracker.track(
         submissionKey = SubmissionKey(
           commandId = commands.commandId,
@@ -151,13 +162,28 @@ private[apiserver] final class CommandServiceImpl private[services] (
           applicationId = commands.applicationId,
           parties = CommandsValidator.effectiveActAs(commands),
         ),
-        timeout = timeout,
+        timeout = nonNegativeTimeout,
         submit = childContext => submit(Traced(SubmitRequest(Some(commands)))(childContext)),
       )(errorLogger, traceContext)
-    } else
-      Future.failed(
-        CommonErrors.ServiceNotRunning.Reject("Command Service")(errorLogger).asGrpcError
+
+    // Capture deadline before thread switching in Future for-comprehension
+    val deadlineO = Option(Context.current().getDeadline)
+    for {
+      _ <- ifServiceRunning
+      commands = ensureCommandsPopulated
+      nonNegativeTimeout <- Future.fromTry(
+        validateRequestTimeout(
+          deadlineO,
+          commands.commandId,
+          commands.submissionId,
+          defaultTrackingTimeout,
+        )(
+          errorLogger
+        )
       )
+      result <- submitAndTrack(commands, nonNegativeTimeout)
+    } yield result
+  }
 
   private def withCommandsLoggingContext[T](
       commands: Commands,
@@ -191,7 +217,7 @@ private[apiserver] object CommandServiceImpl {
       submissionTracker: SubmissionTracker,
       commandsValidator: CommandsValidator,
       submit: Traced[SubmitRequest] => Future[Empty],
-      defaultTrackingTimeout: Duration,
+      defaultTrackingTimeout: config.NonNegativeFiniteDuration,
       transactionServices: TransactionServices,
       timeProvider: TimeProvider,
       ledgerConfigurationSubscription: LedgerConfigurationSubscription,
@@ -222,4 +248,28 @@ private[apiserver] object CommandServiceImpl {
       val getTransactionById: GetTransactionByIdRequest => Future[GetTransactionResponse],
       val getFlatTransactionById: GetTransactionByIdRequest => Future[GetFlatTransactionResponse],
   )
+
+  private[apiserver] def validateRequestTimeout(
+      grpcRequestDeadline: Option[Deadline],
+      commandId: String,
+      submissionId: String,
+      defaultTrackingTimeout: config.NonNegativeFiniteDuration,
+  )(implicit errorLogger: ContextualizedErrorLogger): Try[config.NonNegativeFiniteDuration] =
+    grpcRequestDeadline.map(_.timeRemaining(TimeUnit.NANOSECONDS)) match {
+      case None => Success(defaultTrackingTimeout)
+      case Some(remainingDeadlineNanos) if remainingDeadlineNanos >= 0 =>
+        Success(
+          config.NonNegativeFiniteDuration(Duration(remainingDeadlineNanos, TimeUnit.NANOSECONDS))
+        )
+      case Some(remainingDeadlineNanos) =>
+        Failure(
+          CommonErrors.RequestDeadlineExceeded
+            .Reject(
+              Duration.fromNanos(Math.abs(remainingDeadlineNanos)),
+              commandId = commandId,
+              submissionId = submissionId,
+            )(errorLogger)
+            .asGrpcError
+        )
+    }
 }

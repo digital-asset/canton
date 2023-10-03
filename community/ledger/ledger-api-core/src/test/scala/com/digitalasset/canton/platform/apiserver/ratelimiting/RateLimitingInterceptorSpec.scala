@@ -10,7 +10,6 @@ import com.daml.grpc.sampleservice.implementations.HelloServiceReferenceImplemen
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.ledger.api.testing.utils.TestingServerInterceptors.serverOwner
 import com.daml.ledger.resources.{ResourceOwner, TestResourceContext}
-import com.daml.metrics.Metrics
 import com.daml.platform.hello.{HelloRequest, HelloResponse, HelloServiceGrpc}
 import com.daml.ports.Port
 import com.daml.scalautil.Statement.discard
@@ -20,6 +19,7 @@ import com.digitalasset.canton.ledger.api.grpc.{GrpcClientResource, GrpcHealthSe
 import com.digitalasset.canton.ledger.api.health.HealthChecks.ComponentName
 import com.digitalasset.canton.ledger.api.health.{HealthChecks, ReportsHealth}
 import com.digitalasset.canton.logging.SuppressingLogger
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.apiserver.ratelimiting.LimitResult.LimitResultCheck
 import com.google.protobuf.ByteString

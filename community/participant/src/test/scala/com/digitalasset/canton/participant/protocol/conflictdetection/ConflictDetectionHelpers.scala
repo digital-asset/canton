@@ -109,7 +109,7 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
       .traverse(entries) {
         case (coid, toc, Active(_transferCounter)) =>
           acs
-            .createContract(coid, toc)
+            .markContractActive(coid -> initialTransferCounter, toc)
             .value
         case (coid, toc, Archived) =>
           acs.archiveContract(coid, toc).value
@@ -261,12 +261,12 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
           )
         )
         .toMap,
-      transferOuts = tfOut.fmap { case (id, transferCounterO) =>
+      transferOuts = tfOut.fmap { case (id, transferCounter) =>
         WithContractHash(
           CommitSet.TransferOutCommit(
             TargetDomainId(id),
             Set.empty,
-            transferCounterO,
+            transferCounter,
           ),
           contractHash,
         )

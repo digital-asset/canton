@@ -62,7 +62,7 @@ final case class SequencerConnections private (
   def nonBftSetup: Boolean = {
     import scala.math.Ordered.orderingToOrdered
     representativeProtocolVersion < SequencerConnections.protocolVersionRepresentativeFor(
-      ProtocolVersion.dev // TODO(i12373): Change to a specific ProtocolVersion when `dev` is released.
+      ProtocolVersion.CNTestNet
     )
   }
 
@@ -142,7 +142,7 @@ object SequencerConnections
         connections.map(conn => (conn.sequencerAlias, conn)).toMap,
         sequencerTrustThreshold,
       )(
-        protocolVersionRepresentativeFor(ProtocolVersion.dev)
+        protocolVersionRepresentativeFor(ProtocolVersion.CNTestNet)
       )
   }
 
@@ -221,7 +221,7 @@ object SequencerConnections
         element => element.default.toProtoV0.toByteString,
       ),
     ProtoVersion(1) -> VersionedProtoConverter
-      .storage(ReleaseProtocolVersion(ProtocolVersion.dev), v1.SequencerConnections)(
+      .storage(ReleaseProtocolVersion(ProtocolVersion.CNTestNet), v1.SequencerConnections)(
         supportedProtoVersion(_)(fromProtoV1),
         _.toProtoV1.toByteString,
       ),

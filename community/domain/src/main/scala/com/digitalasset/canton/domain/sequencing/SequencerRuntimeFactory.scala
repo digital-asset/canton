@@ -6,6 +6,7 @@ package com.digitalasset.canton.domain.sequencing
 import akka.actor.ActorSystem
 import cats.data.EitherT
 import cats.syntax.option.*
+import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveDouble
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
@@ -72,6 +73,7 @@ trait SequencerRuntimeFactory {
       logger: TracedLogger,
   )(implicit
       executionContext: ExecutionContextExecutor,
+      esf: ExecutionSequencerFactory,
       scheduler: ScheduledExecutorService,
       tracer: Tracer,
       system: ActorSystem,
@@ -108,6 +110,7 @@ object SequencerRuntimeFactory {
         logger: TracedLogger,
     )(implicit
         executionContext: ExecutionContextExecutor,
+        esf: ExecutionSequencerFactory,
         scheduler: ScheduledExecutorService,
         tracer: Tracer,
         system: ActorSystem,

@@ -4,9 +4,9 @@
 package com.digitalasset.canton.platform.apiserver.tls
 
 import com.daml.ledger.resources.TestResourceContext
-import com.daml.testing.utils.TestResourceUtils
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.platform.apiserver.LedgerApiService
+import com.digitalasset.canton.testing.utils.TestResourceUtils
 import io.netty.handler.ssl.ClientAuth
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AsyncWordSpec

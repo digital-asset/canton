@@ -6,6 +6,8 @@ package com.digitalasset.canton.ledger.error
 import com.daml.error.*
 import com.digitalasset.canton.ledger.error.ParticipantErrorGroup.CommonErrorGroup
 
+import scala.concurrent.duration.Duration
+
 @Explanation(
   "Common errors raised in Daml services and components."
 )
@@ -46,6 +48,24 @@ object CommonErrors extends CommonErrorGroup {
     ) extends DamlErrorWithDefiniteAnswer(
           cause = message,
           definiteAnswer = definiteAnswer,
+        )
+  }
+
+  @Explanation(
+    "The request has not been submitted for processing as its predefined deadline has expired."
+  )
+  @Resolution("Retry the request with a greater deadline.")
+  object RequestDeadlineExceeded
+      extends ErrorCode(
+        id = "REQUEST_DEADLINE_EXCEEDED",
+        ErrorCategory.DeadlineExceededRequestStateUnknown,
+      ) {
+    final case class Reject(deadlineExceededBy: Duration, commandId: String, submissionId: String)(
+        implicit loggingContext: ContextualizedErrorLogger
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause =
+            s"The gRPC deadline for request with commandId=$commandId and submissionId=$submissionId has expired by $deadlineExceededBy. The request will not be processed further.",
+          definiteAnswer = false,
         )
   }
 

@@ -18,7 +18,7 @@ import com.digitalasset.canton.sequencing.client.transports.SequencerClientTrans
 import com.digitalasset.canton.sequencing.protocol.SubscriptionRequest
 import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.AkkaUtil.RetrySourcePolicy
+import com.digitalasset.canton.util.AkkaUtil.{RetrySourcePolicy, WithKillSwitch}
 import com.digitalasset.canton.util.{AkkaUtil, LoggerUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -37,7 +37,7 @@ import scala.concurrent.duration.FiniteDuration
   * The recreated subscription starts at the last event received,
   * or at the starting counter that was given initially if no event was received at all.
   *
-  * The emitted events stutter whenever the subscription is recreated
+  * The emitted events stutter whenever the subscription is recreated.
   */
 class ResilientSequencerSubscriberAkka[E](
     domainId: DomainId,
@@ -61,10 +61,10 @@ class ResilientSequencerSubscriberAkka[E](
       .restartSource("resilient-sequencer-subscription", initial, mkSource, policy)
       // Filter out retried errors
       .filter {
-        case Left(triaged) => !triaged.retryable
-        case Right(_) => true
+        case WithKillSwitch(Left(triaged)) => !triaged.retryable
+        case WithKillSwitch(Right(_)) => true
       }
-      .map(_.leftMap(_.error))
+      .map(_.map(_.leftMap(_.error)))
     SequencerSubscriptionAkka(source)
   }
 
@@ -149,10 +149,11 @@ class ResilientSequencerSubscriberAkka[E](
 
   private def triageError(
       state: (Boolean, SequencerCounter),
-      element: Either[E, OrdinarySerializedEvent],
+      elementWithKillSwitch: WithKillSwitch[Either[E, OrdinarySerializedEvent]],
   )(implicit
       traceContext: TraceContext
   ): ((Boolean, SequencerCounter), Either[TriagedError[E], OrdinarySerializedEvent]) = {
+    val element = elementWithKillSwitch.unwrap
     val (hasPreviouslyReceivedEvents, lastSequencerCounter) = state
     val hasReceivedEvents = hasPreviouslyReceivedEvents || element.isRight
     val triaged = element.leftMap { err =>
@@ -230,5 +231,4 @@ object SequencerSubscriptionFactoryAkka {
       override def retryPolicy: SubscriptionErrorRetryPolicyAkka[transport.SubscriptionError] =
         transport.subscriptionRetryPolicyAkka
     }
-
 }

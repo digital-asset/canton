@@ -12,7 +12,7 @@ import com.daml.ledger.api.v2.command_submission_service.{
   SubmitRequest,
   SubmitResponse,
 }
-import com.daml.metrics.{Metrics, Timed}
+import com.daml.metrics.Timed
 import com.daml.scalautil.future.FutureConversion.CompletionStageConversionOps
 import com.daml.tracing.{SpanAttribute, Telemetry, TelemetryContext}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -29,6 +29,7 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
 }
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.tracing.Traced
 
 import java.time.{Duration, Instant}

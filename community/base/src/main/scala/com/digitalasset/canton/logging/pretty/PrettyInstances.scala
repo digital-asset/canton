@@ -11,9 +11,13 @@ import com.daml.ledger.client.binding.Primitive
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.{DottedName, PackageId, QualifiedName}
 import com.daml.lf.transaction.ContractStateMachine.ActiveLedgerState
-import com.daml.lf.transaction.Transaction.{
+import com.daml.lf.transaction.TransactionErrors.{
+  DuplicateContractId,
+  DuplicateContractIdKIError,
   DuplicateContractKey,
+  DuplicateContractKeyKIError,
   InconsistentContractKey,
+  InconsistentContractKeyKIError,
   KeyInputError,
 }
 import com.daml.lf.value.Value
@@ -311,10 +315,12 @@ trait PrettyInstances {
   )
 
   implicit val prettyKeyInputError: Pretty[KeyInputError] = {
-    case Left(e: InconsistentContractKey) =>
+    case InconsistentContractKeyKIError(e: InconsistentContractKey) =>
       prettyOfClass[InconsistentContractKey](unnamedParam(_.key)).treeOf(e)
-    case Right(e: DuplicateContractKey) =>
+    case DuplicateContractKeyKIError(e: DuplicateContractKey) =>
       prettyOfClass[DuplicateContractKey](unnamedParam(_.key)).treeOf(e)
+    case DuplicateContractIdKIError(e: DuplicateContractId) =>
+      prettyOfClass[DuplicateContractId](unnamedParam(_.contractId)).treeOf(e)
   }
 
   implicit def prettyActiveLedgerState[T: Pretty]: Pretty[ActiveLedgerState[T]] =

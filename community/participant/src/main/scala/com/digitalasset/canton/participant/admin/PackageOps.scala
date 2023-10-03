@@ -10,7 +10,6 @@ import com.daml.lf.data.Ref.PackageId
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
@@ -256,7 +255,7 @@ class PackageOpsX(
       currentPackages = currentMapping
         .map(_.transaction.transaction.mapping.packageIds)
         .getOrElse(Seq.empty)
-      nextSerial = currentMapping.map(_.transaction.transaction.serial + PositiveInt.one)
+      nextSerial = currentMapping.map(_.transaction.transaction.serial.increment)
       newVettedPackagesState = action(currentPackages)
       _ <- EitherTUtil.ifThenET(newVettedPackagesState != currentPackages) {
         performUnlessClosingEitherUSF(functionFullName)(

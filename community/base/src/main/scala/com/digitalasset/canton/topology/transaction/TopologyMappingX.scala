@@ -295,66 +295,6 @@ object TopologyMappingX {
       override def authorizations: RequiredAuthXAuthorizations =
         RequiredAuthXAuthorizations.monoid.combine(first.authorizations, second.authorizations)
     }
-
-    // small method to compute the delta between two MediatorDomainStateX or SequencerDomainStateX mappings
-    private[transaction] def requiredAuthForActivePassiveMembers(
-        current: ConsortiumLike,
-        previousState: Option[ConsortiumLike],
-    ) = previousState match {
-      case None =>
-        // this is the first transaction with serial=1
-        // domain owners and all new consortium members must sign
-        RequiredUids(
-          (Set(current.domain) ++ current.active.forgetNE ++ current.observers).map(_.uid)
-        )
-
-      case Some(previous) if previous.code == current.code && previous.domain == current.domain =>
-        val previousMembers =
-          (previous.active ++ previous.observers).map(_.uid).forgetNE.toSet
-        val currentMembers = (current.active ++ current.observers).map(_.uid).forgetNE.toSet
-        val added = currentMembers.diff(previousMembers)
-        val removed = previousMembers.diff(currentMembers)
-
-        val authForRemoval: RequiredAuthX = if (removed.nonEmpty) {
-          // mediators/sequencers can remove themselves unilaterally
-          RequiredUids(removed)
-            // or the domain operators remove them
-            .or(RequiredUids(Set(current.domain.uid)))
-        } else {
-          EmptyAuthorization
-        }
-
-        val authForAddition: RequiredAuthX = if (added.nonEmpty) {
-          // the domain owners and all new members must authorize
-          RequiredUids(added + current.domain.uid)
-        } else {
-          EmptyAuthorization
-        }
-
-        val authForThresholdChange: RequiredAuthX =
-          if (current.threshold != previous.threshold) {
-            // the threshold has changed, the domain must approve
-            RequiredUids(Set(current.domain.uid))
-          } else {
-            EmptyAuthorization
-          }
-
-        val authForActivePassiveChange: RequiredAuthX =
-          if (current.active != previous.active || current.observers != previous.observers) {
-            RequiredUids(Set(current.domain.uid))
-          } else {
-            EmptyAuthorization
-          }
-
-        authForAddition
-          .and(authForRemoval)
-          .and(authForThresholdChange)
-          .and(authForActivePassiveChange)
-
-      case Some(_unexpectedTopologyTransaction) =>
-        // TODO(#14048): proper error or ignore
-        sys.error(s"unexpected transaction data: $previousState")
-    }
   }
 
   def fromProtoV2(proto: v2.TopologyMappingX): ParsingResult[TopologyMappingX] =
@@ -1289,8 +1229,7 @@ final case class MediatorDomainStateX private (
     threshold: PositiveInt,
     active: NonEmpty[Seq[MediatorId]],
     observers: Seq[MediatorId],
-) extends TopologyMappingX
-    with ConsortiumLike {
+) extends TopologyMappingX {
 
   lazy val allMediatorsInGroup = active ++ observers
 
@@ -1322,10 +1261,7 @@ final case class MediatorDomainStateX private (
 
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
-  ): RequiredAuthX = RequiredAuthX.requiredAuthForActivePassiveMembers(
-    this,
-    previous.flatMap(_.mapping.select[MediatorDomainStateX]),
-  )
+  ): RequiredAuthX = RequiredUids(Set(domain.uid))
 }
 
 object MediatorDomainStateX {
@@ -1373,14 +1309,6 @@ object MediatorDomainStateX {
 
 }
 
-trait ConsortiumLike {
-  def domain: DomainId
-  def threshold: PositiveInt
-  def active: NonEmpty[Seq[Member]]
-  def observers: Seq[Member]
-  def code: TopologyMappingX.Code
-}
-
 /** which sequencers are active on the given domain
   *
   * authorization: whoever controls the domain and all the owners of the active or observing sequencers that
@@ -1394,8 +1322,7 @@ final case class SequencerDomainStateX private (
     threshold: PositiveInt,
     active: NonEmpty[Seq[SequencerId]],
     observers: Seq[SequencerId],
-) extends TopologyMappingX
-    with ConsortiumLike {
+) extends TopologyMappingX {
 
   lazy val allSequencers = active ++ observers
 
@@ -1426,10 +1353,7 @@ final case class SequencerDomainStateX private (
 
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
-  ): RequiredAuthX = RequiredAuthX.requiredAuthForActivePassiveMembers(
-    this,
-    previous.flatMap(_.mapping.select[SequencerDomainStateX]),
-  )
+  ): RequiredAuthX = RequiredUids(Set(domain.uid))
 }
 
 object SequencerDomainStateX {

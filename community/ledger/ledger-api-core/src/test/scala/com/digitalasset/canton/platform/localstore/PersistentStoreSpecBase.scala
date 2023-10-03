@@ -4,9 +4,10 @@
 package com.digitalasset.canton.platform.localstore
 
 import com.daml.ledger.resources.ResourceContext
-import com.daml.metrics.{DatabaseMetrics, Metrics}
+import com.daml.metrics.DatabaseMetrics
 import com.daml.resources.Resource
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, SuppressingLogger}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.config.ServerRole
 import com.digitalasset.canton.platform.store.DbSupport.{ConnectionPoolConfig, DbConfig}
 import com.digitalasset.canton.platform.store.backend.StorageBackendProvider

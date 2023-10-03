@@ -9,7 +9,6 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
@@ -35,6 +34,8 @@ import com.digitalasset.canton.protocol.{LfContractId, LfGlobalKey, TransferId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{CheckedT, ErrorUtil, MonadUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{RequestCounter, TransferCounter}
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap
@@ -65,6 +66,7 @@ private[participant] class ConflictDetector(
     private val executionContext: ExecutionContext,
     override protected val timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
+    private val protocolVersion: ProtocolVersion,
 ) extends NamedLogging
     with FlagCloseable {
   import ConflictDetector.*
@@ -125,6 +127,8 @@ private[participant] class ConflictDetector(
 
   private[this] val directExecutionContext: DirectExecutionContext =
     DirectExecutionContext(noTracingLogger)
+
+  private[this] val initialTransferCounter = TransferCounter.forCreatedContract(protocolVersion)
 
   /** Registers a pending activeness set.
     * This marks all contracts and keys in the `activenessSet` with a pending activeness check.
@@ -493,7 +497,10 @@ private[participant] class ConflictDetector(
            */
           logger.trace(withRC(rc, s"About to write commit set to the conflict detection stores"))
           val archivalWrites = acs.archiveContracts(archivals.keySet.to(LazyList), toc)
-          val creationWrites = acs.createContracts(creations.keySet.to(LazyList), toc)
+          val creationWrites = acs.markContractsActive(
+            creations.keySet.map(cid => cid -> initialTransferCounter).to(LazyList),
+            toc,
+          )
           val transferOutWrites =
             acs.transferOutContracts(
               transferOuts

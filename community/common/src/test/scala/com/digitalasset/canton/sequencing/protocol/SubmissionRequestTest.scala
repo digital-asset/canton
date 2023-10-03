@@ -42,8 +42,7 @@ class SubmissionRequestTest extends BaseTestWordSpec {
 
   "aggregation id" should {
     "authenticate the relevant fields" in {
-      // TODO(#12373) Adapt when releasing BFT domain
-      if (testedProtocolVersion >= ProtocolVersion.dev) {
+      if (testedProtocolVersion >= ProtocolVersion.CNTestNet) {
 
         val envelope1 = ClosedEnvelope.tryCreate(
           ByteString.copyFromUtf8("Content1"),
@@ -103,8 +102,7 @@ class SubmissionRequestTest extends BaseTestWordSpec {
     }
 
     "ignore sender-specific fields" in {
-      // TODO(#12373) Adapt when releasing BFT domain
-      if (testedProtocolVersion >= ProtocolVersion.dev) {
+      if (testedProtocolVersion >= ProtocolVersion.CNTestNet) {
         val envelope1 = ClosedEnvelope.tryCreate(
           ByteString.copyFromUtf8("some-content"),
           Recipients.cc(DefaultTestIdentities.participant1, DefaultTestIdentities.participant3),

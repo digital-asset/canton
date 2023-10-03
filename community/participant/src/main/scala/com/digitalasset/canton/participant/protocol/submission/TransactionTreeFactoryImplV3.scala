@@ -356,6 +356,12 @@ class TransactionTreeFactoryImplV3(
       viewLocallyCreated == stateLocallyCreated,
       show"Failed to reconstruct created contracts for the view at position $viewPosition.\n  Reconstructed: $viewLocallyCreated\n  Expected: $stateLocallyCreated",
     )
+    val viewInputContractIds = transactionView.inputContracts.keySet
+    val stateInputContractIds = csmState.inputContractIds
+    ErrorUtil.requireState(
+      viewInputContractIds == stateInputContractIds,
+      s"Failed to reconstruct input contracts for the view at position $viewPosition.\n  Reconstructed: $viewInputContractIds\n  Expected: $stateInputContractIds",
+    )
     // Reconstruction of the active ledger state works currently only in UCK mode
     if (uniqueContractKeys) {
       // The locally created contracts should also be computable in non-UCK mode from the view data.

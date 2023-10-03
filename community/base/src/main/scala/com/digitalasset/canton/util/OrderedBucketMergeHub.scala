@@ -21,6 +21,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
+import com.digitalasset.canton.util.OrderedBucketMergeHub.OutputElement
 import com.digitalasset.canton.util.ShowUtil.*
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -34,7 +35,7 @@ import scala.concurrent.{Future, Promise}
   * For a given threshold `t`, whenever `t` different sources have produced equivalent elements for an offset
   * that is higher than the previous offset, the [[OrderedBucketMergeHub]] emits the map of all these equivalent elements
   * as the next [[com.digitalasset.canton.util.OrderedBucketMergeHub.OutputElement]] to downstream.
-  * Elements from the other ordered sources with lower or equal offset that have not yet reached are dropped.
+  * Elements from the other ordered sources with lower or equal offset that have not yet reached the threshold are dropped.
   *
   * Every correct ordered source should produce the same sequence of offsets.
   * Faulty sources can produce any sequence of elements as they like.
@@ -303,6 +304,11 @@ class OrderedBucketMergeHub[Name: Pretty, A, Config, Offset: Pretty](
     /** Exclusive lower bound for the next offset to emit. */
     private[this] var lowerBoundNextOffsetExclusive: Offset = ops.exclusiveLowerBoundForBegin
 
+    /** Caches the last value that was queued for emission, if any.
+      * If so, its offset is at most [[lowerBoundNextOffsetExclusive]].
+      */
+    private[this] var lastBucketQueuedForEmission: Option[OutputElement[Name, A]] = None
+
     /** Contains the equivalence classes of the inspected elements from the ordered sources so far.
       *
       * This is somewhat inefficient: whenever we emit an element,
@@ -436,6 +442,11 @@ class OrderedBucketMergeHub[Name: Pretty, A, Config, Offset: Pretty](
       pull(in)
     }
 
+    override def postStop(): Unit = {
+      // Remove references to avoid memory leak
+      lastBucketQueuedForEmission = None
+    }
+
     /** Callback used to receive signals from the ordered sources.
       * Avoids that we have to access the mutable states from the ordered source's handlers.
       */
@@ -540,13 +551,15 @@ class OrderedBucketMergeHub[Name: Pretty, A, Config, Offset: Pretty](
       logger.debug(
         s"Bucket $bucket for offset $offset has reached the threshold of $currentThreshold. Emitting next element."
       )
-      lowerBoundNextOffsetExclusive = offset
       buckets.remove(bucket).discard[Option[NonEmpty[Seq[BucketElement[OrderedSource, A]]]]]
       removeFromBuckets(elems)
       val merged = elems.map { case BucketElement(_id, source, elem) => source.name -> elem }.toMap
+      val output = OutputElement(merged)
+      lowerBoundNextOffsetExclusive = offset
+      lastBucketQueuedForEmission = Some(output)
       emit(
         out,
-        OutputElement(merged),
+        output,
         // Crucially, pull only after the emission.
         // This ensures that the emission buffer for OutputElements remains bounded
         () => pullMultipleIfNotCompleted(elems),
@@ -707,7 +720,12 @@ class OrderedBucketMergeHub[Name: Pretty, A, Config, Offset: Pretty](
 
     private[this] def createActiveSource(name: Name, config: Config): Unit = {
       val id = nextOrderedSourceId
-      val newSource = ops.makeSource(name, config, lowerBoundNextOffsetExclusive)
+      val newSource = ops.makeSource(
+        name,
+        config,
+        lowerBoundNextOffsetExclusive,
+        lastBucketQueuedForEmission.map(ops.toPriorElement),
+      )
       val subsink = new SubSinkInlet[A](s"OrderedMergeHub.sink($name-$id)")
       subsink.setHandler(
         new ActiveSourceInHandler(id, name, () => subsink.grab(), orderedSourceCallback)
@@ -856,12 +874,30 @@ class OrderedBucketMergeHub[Name: Pretty, A, Config, Offset: Pretty](
         }
       }
 
+      def lastBucketQueuedForEmissionInvariant(): Unit = {
+        lastBucketQueuedForEmission.foreach { case OutputElement(elems) =>
+          val buckets = elems.values.map(ops.bucketOf).toSeq
+          ErrorUtil.requireState(
+            buckets.distinct.sizeIs == 1,
+            s"[$context] Last bucket queued for emission contains elements from different buckets: $buckets",
+          )
+
+          val (_, elem) = elems.head1
+          val offset = ops.offsetOf(elem)
+          ErrorUtil.requireState(
+            ops.orderingOffset.compare(offset, lowerBoundNextOffsetExclusive) <= 0,
+            s"[$context] Last bucket queued for emission with offset $offset must at most be the lower bound at $lowerBoundNextOffsetExclusive",
+          )
+        }
+      }
+
       sourcesInBucketsConsistent()
       uniqueBucketedSources()
       lastBucketExists()
       lastBucketComplete()
       bucketsBelowThreshold()
       orderedSourceInvariant()
+      lastBucketQueuedForEmissionInvariant()
     }
   }
 
@@ -1000,6 +1036,19 @@ trait OrderedBucketMergeHubOps[Name, A, Config, Offset] {
   /** The initial offset to start from */
   def exclusiveLowerBoundForBegin: Offset
 
+  /** The type of prior elements that is passed to [[makeSource]].
+    * [[toPriorElement]] defines an abstraction function from
+    * [[com.digitalasset.canton.util.OrderedBucketMergeHub.OutputElement]]s.
+    */
+  type PriorElement
+
+  /** The prior element to be passed to [[makeSource]] at the start */
+  def priorElement: Option[PriorElement]
+
+  /** An abstraction function from [[com.digitalasset.canton.util.OrderedBucketMergeHub.OutputElement]] to [[PriorElement]]
+    */
+  def toPriorElement(output: OutputElement[Name, A]): PriorElement
+
   def traceContextOf(x: A): TraceContext
 
   /** Creates a new source upon a config change.
@@ -1009,11 +1058,14 @@ trait OrderedBucketMergeHubOps[Name, A, Config, Offset] {
     * The materialized [[scala.concurrent.Future]] should complete when all internal computations have stopped.
     * The [[OrderedBucketMergeHub]]'s materialized [[scala.concurrent.Future]] completes only after
     * these materialized futures of all created ordered sources have completed.
+    *
+    * @param priorElement The prior element that last reached the threshold or [[priorElement]] if there was none.
     */
   def makeSource(
       name: Name,
       config: Config,
       exclusiveStart: Offset,
+      priorElement: Option[PriorElement],
   ): Source[A, (KillSwitch, Future[Done])]
 }
 
@@ -1022,9 +1074,10 @@ object OrderedBucketMergeHubOps {
       toBucket: A => B,
       toOffset: B => Offset,
   )(
-      mkSource: (Name, Config, Offset) => Source[A, (KillSwitch, Future[Done])]
+      mkSource: (Name, Config, Offset, Option[A]) => Source[A, (KillSwitch, Future[Done])]
   ): OrderedBucketMergeHubOps[Name, A, Config, Offset] =
     new OrderedBucketMergeHubOps[Name, A, Config, Offset] {
+      override type PriorElement = A
       override type Bucket = B
       override def prettyBucket: Pretty[Bucket] = implicitly
       override def bucketOf(x: A): Bucket = toBucket(x)
@@ -1036,6 +1089,10 @@ object OrderedBucketMergeHubOps {
           name: Name,
           config: Config,
           exclusiveStart: Offset,
-      ): Source[A, (KillSwitch, Future[Done])] = mkSource(name, config, exclusiveStart)
+          priorElement: Option[PriorElement],
+      ): Source[A, (KillSwitch, Future[Done])] =
+        mkSource(name, config, exclusiveStart, priorElement)
+      override def priorElement: Option[A] = None
+      override def toPriorElement(output: OutputElement[Name, A]): A = output.elem.head1._2
     }
 }

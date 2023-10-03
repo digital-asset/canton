@@ -5,10 +5,11 @@ package com.digitalasset.canton.platform.store.dao.events
 
 import com.daml.lf.transaction.GlobalKey
 import com.daml.lf.value.Value.VersionedValue
+import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricHandle.Timer
-import com.daml.metrics.{Metrics, Timed}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.store.backend.ContractStorageBackend
 import com.digitalasset.canton.platform.store.backend.ContractStorageBackend.{
   RawArchivedContract,

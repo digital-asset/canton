@@ -12,7 +12,8 @@ import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
+import com.digitalasset.canton.protocol.messages
+import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcastX
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.store.{TopologyStoreId, TopologyStoreX}
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
@@ -31,7 +32,10 @@ class QueueBasedDomainOutboxX(
     val domainId: DomainId,
     val memberId: Member,
     val protocolVersion: ProtocolVersion,
-    val handle: RegisterTopologyTransactionHandleCommon[GenericSignedTopologyTransactionX],
+    val handle: RegisterTopologyTransactionHandleCommon[
+      GenericSignedTopologyTransactionX,
+      TopologyTransactionsBroadcastX.State,
+    ],
     val targetClient: DomainTopologyClientWithInit,
     val domainOutboxQueue: DomainOutboxQueue,
     val targetStore: TopologyStoreX[TopologyStoreId.DomainStore],
@@ -249,8 +253,8 @@ class QueueBasedDomainOutboxX(
           _ <- dispatch(domain, transactions = convertedTxs)
           observed <- EitherT.right[String](
             // for x-nodes, we either receive
-            // * RegisterTopologyTransactionResponseResult.State.Accepted: SendTracker returned Success
-            // * RegisterTopologyTransactionResponseResult.State.Failed: SendTracker returned Timeout or Error
+            // * TopologyTransactionsBroadcastX.State.Accepted: SendTracker returned Success
+            // * TopologyTransactionsBroadcastX.State.Failed: SendTracker returned Timeout or Error
             // for all transactions in a submission batch.
             // Failed submissions are turned into a Left in dispatch. Therefore it's safe to await without additional checks.
             convertedTxs.headOption
@@ -292,52 +296,53 @@ class QueueBasedDomainOutboxX(
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, String, Seq[
-    RegisterTopologyTransactionResponseResult.State
-  ]] = if (transactions.isEmpty) EitherT.rightT(Seq.empty)
-  else {
-    implicit val success = retry.Success.always
-    val ret = retry
-      .Backoff(
-        logger,
-        this,
-        timeouts.unbounded.retries(1.second),
-        1.second,
-        10.seconds,
-        "push topology transaction",
-      )
-      .unlessShutdown(
-        {
-          logger.debug(s"Attempting to push ${transactions.size} topology transactions to $domain")
-          FutureUtil.logOnFailureUnlessShutdown(
-            handle.submit(transactions),
-            s"Pushing topology transactions to $domain",
+  ): EitherT[FutureUnlessShutdown, String, Seq[messages.TopologyTransactionsBroadcastX.State]] =
+    if (transactions.isEmpty) EitherT.rightT(Seq.empty)
+    else {
+      implicit val success = retry.Success.always
+      val ret = retry
+        .Backoff(
+          logger,
+          this,
+          timeouts.unbounded.retries(1.second),
+          1.second,
+          10.seconds,
+          "push topology transaction",
+        )
+        .unlessShutdown(
+          {
+            logger.debug(
+              s"Attempting to push ${transactions.size} topology transactions to $domain"
+            )
+            FutureUtil.logOnFailureUnlessShutdown(
+              handle.submit(transactions),
+              s"Pushing topology transactions to $domain",
+            )
+          },
+          AllExnRetryable,
+        )
+        .map { responses =>
+          if (responses.length != transactions.length) {
+            logger.error(
+              s"Topology request contained ${transactions.length} txs, but I received responses for ${responses.length}"
+            )
+          }
+          logger.debug(
+            s"$domain responded the following for the given topology transactions: $responses"
           )
-        },
-        AllExnRetryable,
-      )
-      .map { responses =>
-        if (responses.length != transactions.length) {
-          logger.error(
-            s"Topology request contained ${transactions.length} txs, but I received responses for ${responses.length}"
+          val failedResponses =
+            responses.zip(transactions).collect {
+              case (TopologyTransactionsBroadcastX.State.Failed, tx) => tx
+            }
+
+          Either.cond(
+            failedResponses.isEmpty,
+            responses,
+            s"The domain $domain failed the following topology transactions: $failedResponses",
           )
         }
-        logger.debug(
-          s"$domain responded the following for the given topology transactions: $responses"
-        )
-        val failedResponses =
-          responses.zip(transactions).collect {
-            case (RegisterTopologyTransactionResponseResult.State.Failed, tx) => tx
-          }
-
-        Either.cond(
-          failedResponses.isEmpty,
-          responses,
-          s"The domain $domain failed the following topology transactions: $failedResponses",
-        )
-      }
-    EitherT(
-      ret
-    )
-  }
+      EitherT(
+        ret
+      )
+    }
 }

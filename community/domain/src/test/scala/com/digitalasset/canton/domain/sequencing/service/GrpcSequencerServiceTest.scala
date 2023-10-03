@@ -32,12 +32,24 @@ import com.digitalasset.canton.serialization.BytestringWithCryptographicEvidence
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySnapshot}
+import com.digitalasset.canton.topology.processing.{
+  EffectiveTime,
+  SequencedTime,
+  TopologyTransactionXTestFactory,
+}
+import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX.GenericStoredTopologyTransactionsX
+import com.digitalasset.canton.topology.store.{
+  StoredTopologyTransactionX,
+  StoredTopologyTransactionsX,
+  TopologyStateForInitializationService,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.{ProtocolVersion, VersionedMessage}
 import com.digitalasset.canton.{
   BaseTest,
+  HasExecutionContext,
   ProtocolVersionChecksFixtureAsyncWordSpec,
   SequencerCounter,
 }
@@ -52,13 +64,14 @@ import org.scalatest.wordspec.FixtureAsyncWordSpec
 import org.scalatest.{Assertion, FutureOutcome}
 
 import scala.collection.mutable
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 
 @SuppressWarnings(Array("org.wartremover.warts.Null"))
 class GrpcSequencerServiceTest
     extends FixtureAsyncWordSpec
     with BaseTest
-    with ProtocolVersionChecksFixtureAsyncWordSpec {
+    with ProtocolVersionChecksFixtureAsyncWordSpec
+    with HasExecutionContext {
   type Subscription = GrpcManagedSubscription[_]
 
   sealed trait StreamItem
@@ -150,6 +163,35 @@ class GrpcSequencerServiceTest
       override def maxBurstFactor: PositiveDouble = PositiveDouble.tryCreate(1e-6)
       override def processingTimeouts: ProcessingTimeout = timeouts
     }
+
+    val maxItemsInTopologyBatch = 5
+    private val numBatches = 3
+    private val topologyInitService: Option[TopologyStateForInitializationService] =
+      if (testedProtocolVersion < ProtocolVersion.CNTestNet) None
+      else
+        Some(new TopologyStateForInitializationService {
+          val factoryX =
+            new TopologyTransactionXTestFactory(loggerFactory, initEc = parallelExecutionContext)
+
+          override def initialSnapshot(member: Member)(implicit
+              executionContext: ExecutionContext,
+              traceContext: TraceContext,
+          ): Future[GenericStoredTopologyTransactionsX] = Future.successful(
+            StoredTopologyTransactionsX(
+              // As we don't expect the actual transactions in this test, we can repeat the same transaction a bunch of times
+              List
+                .fill(maxItemsInTopologyBatch * numBatches)(factoryX.ns1k1_k1)
+                .map(
+                  StoredTopologyTransactionX(
+                    SequencedTime.MinValue,
+                    EffectiveTime.MinValue,
+                    None,
+                    _,
+                  )
+                )
+            )
+          )
+        })
     val service =
       new GrpcSequencerService(
         sequencer,
@@ -163,9 +205,10 @@ class GrpcSequencerServiceTest
         sequencerSubscriptionFactory,
         domainParamLookup,
         params,
-        None,
+        topologyInitService,
         BaseTest.testedProtocolVersion,
         enableBroadcastOfUnauthenticatedMessages = false,
+        maxItemsInTopologyResponse = PositiveInt.tryCreate(maxItemsInTopologyBatch),
       )
   }
 
@@ -611,8 +654,7 @@ class GrpcSequencerServiceTest
           ),
         )
 
-        // TODO(#12373) Adapt when releasing BFT
-        "reject sending to multiple mediator groups iff the sender is a participant" onlyRunWithOrGreaterThan (ProtocolVersion.dev) in multipleMediatorTestCase(
+        "reject sending to multiple mediator groups iff the sender is a participant" onlyRunWithOrGreaterThan (ProtocolVersion.CNTestNet) in multipleMediatorTestCase(
           RecipientsTree(
             NonEmpty.mk(
               Set,
@@ -661,8 +703,7 @@ class GrpcSequencerServiceTest
             )
         }
 
-        // TODO(#12373) Adapt when releasing BFT
-        "reject unauthenticated eligible members in aggregation rule" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+        "reject unauthenticated eligible members in aggregation rule" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
           implicit env =>
             val request = defaultRequest
               .focus(_.timestampOfSigningKey)
@@ -689,8 +730,7 @@ class GrpcSequencerServiceTest
             )
         }
 
-        // TODO(#12373) Adapt when releasing BFT
-        "reject unachievable threshold in aggregation rule" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+        "reject unachievable threshold in aggregation rule" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
           implicit env =>
             val request = defaultRequest
               .focus(_.timestampOfSigningKey)
@@ -713,8 +753,7 @@ class GrpcSequencerServiceTest
             )
         }
 
-        // TODO(#12373) Adapt when releasing BFT
-        "reject uneligible sender in aggregation rule" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+        "reject uneligible sender in aggregation rule" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
           implicit env =>
             val request = defaultRequest
               .focus(_.timestampOfSigningKey)
@@ -754,9 +793,8 @@ class GrpcSequencerServiceTest
           .focus(_.sender)
           .replace(unauthenticatedMember)
 
-        // TODO(#12373) Adapt when releasing BFT
         val errorMsg =
-          if (testedProtocolVersion >= ProtocolVersion.dev)
+          if (testedProtocolVersion >= ProtocolVersion.CNTestNet)
             "Unauthenticated member is trying to send message to members other than the topology broadcast address All"
           else
             "Unauthenticated member is trying to send message to members other than the domain manager"
@@ -1245,6 +1283,42 @@ class GrpcSequencerServiceTest
           }
         }
       }
+    }
+  }
+
+  "downloadTopologyStateForInit" should {
+    "stream batches of topology transactions" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
+      env =>
+        val observer = new MockStreamObserver[v0.TopologyStateForInitResponse]()
+        env.service.downloadTopologyStateForInit(
+          TopologyStateForInitRequest(participant, testedProtocolVersion).toProtoV0,
+          observer,
+        )
+
+        eventually() {
+          // wait for the steam to be complete
+          observer.items.lastOption shouldBe Some(StreamComplete)
+        }
+        val parsed = observer.items.toSeq.map {
+          case StreamNext(response: v0.TopologyStateForInitResponse) =>
+            StreamNext(
+              TopologyStateForInitResponse
+                .fromProtoV0(response)
+                .getOrElse(sys.error("error converting response from protobuf"))
+            )
+          case otherwise => otherwise
+        }
+        parsed should matchPattern {
+          case Seq(
+                StreamNext(batch1: TopologyStateForInitResponse),
+                StreamNext(batch2: TopologyStateForInitResponse),
+                StreamNext(batch3: TopologyStateForInitResponse),
+                StreamComplete,
+              )
+              if Seq(batch1, batch2, batch3).forall(
+                _.topologyTransactions.value.result.size == env.maxItemsInTopologyBatch
+              ) =>
+        }
     }
   }
 }

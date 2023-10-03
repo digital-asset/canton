@@ -61,7 +61,7 @@ final case class Hmac private (private val hmac: ByteString, private val algorit
 
   override def pretty: Pretty[Hmac] = {
     implicit val ps = PrettyInstances.prettyString
-    PrettyUtil.prettyInfix[Hmac, String, ByteString](_.algorithm.name, ":", _.hmac)
+    PrettyUtil.prettyInfix[Hmac](_.algorithm.name, ":", _.hmac)
   }
 
   /** Access to the raw HMAC, should NOT be used for serialization. */

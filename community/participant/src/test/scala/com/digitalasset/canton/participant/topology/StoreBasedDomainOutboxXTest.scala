@@ -10,8 +10,8 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
-import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult.State
+import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcastX
+import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcastX.State
 import com.digitalasset.canton.time.WallClock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{
@@ -73,8 +73,8 @@ class StoreBasedDomainOutboxXTest
 
   private def mk(
       expect: Int,
-      responses: Iterator[RegisterTopologyTransactionResponseResult.State] =
-        Iterator.continually(RegisterTopologyTransactionResponseResult.State.Accepted),
+      responses: Iterator[TopologyTransactionsBroadcastX.State] =
+        Iterator.continually(TopologyTransactionsBroadcastX.State.Accepted),
       rejections: Iterator[Option[TopologyTransactionRejection]] = Iterator.continually(None),
   ) = {
     val source = new InMemoryTopologyStoreX(
@@ -123,7 +123,10 @@ class StoreBasedDomainOutboxXTest
       store: TopologyStoreX[TopologyStoreId],
       targetClient: StoreBasedDomainTopologyClientX,
       rejections: Iterator[Option[TopologyTransactionRejection]] = Iterator.continually(None),
-  ) extends RegisterTopologyTransactionHandleCommon[GenericSignedTopologyTransactionX] {
+  ) extends RegisterTopologyTransactionHandleCommon[
+        GenericSignedTopologyTransactionX,
+        TopologyTransactionsBroadcastX.State,
+      ] {
     val buffer = ListBuffer[GenericSignedTopologyTransactionX]()
     val promise = new AtomicReference[Promise[Unit]](Promise[Unit]())
     val expect = new AtomicInteger(expectI)
@@ -131,7 +134,7 @@ class StoreBasedDomainOutboxXTest
         transactions: Seq[GenericSignedTopologyTransactionX]
     )(implicit
         traceContext: TraceContext
-    ): FutureUnlessShutdown[Seq[RegisterTopologyTransactionResponseResult.State]] =
+    ): FutureUnlessShutdown[Seq[TopologyTransactionsBroadcastX.State]] =
       FutureUnlessShutdown.outcomeF {
         logger.debug(s"Observed ${transactions.length} transactions")
         buffer ++= transactions
@@ -212,7 +215,10 @@ class StoreBasedDomainOutboxXTest
 
   private def outboxConnected(
       manager: AuthorizedTopologyManagerX,
-      handle: RegisterTopologyTransactionHandleCommon[GenericSignedTopologyTransactionX],
+      handle: RegisterTopologyTransactionHandleCommon[
+        GenericSignedTopologyTransactionX,
+        TopologyTransactionsBroadcastX.State,
+      ],
       client: DomainTopologyClientWithInit,
       source: TopologyStoreX[TopologyStoreId.AuthorizedStore],
       target: TopologyStoreX[TopologyStoreId.DomainStore],
@@ -274,9 +280,7 @@ class StoreBasedDomainOutboxXTest
     .map(x => StoredTopologyTransactionsX(x.result.filter(_.validUntil.isEmpty)))
 
   "dispatcher" should {
-
-    // TODO(#12373) Adapt version when releasing BFT here and below
-    "dispatch transaction on new connect" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "dispatch transaction on new connect" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
       val (source, target, manager, handle, client) =
         mk(transactions.length)
       for {
@@ -289,7 +293,7 @@ class StoreBasedDomainOutboxXTest
       }
     }
 
-    "dispatch transaction on existing connections" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "dispatch transaction on existing connections" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
       val (source, target, manager, handle, client) =
         mk(transactions.length)
       for {
@@ -302,7 +306,7 @@ class StoreBasedDomainOutboxXTest
       }
     }
 
-    "dispatch transactions continuously" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "dispatch transactions continuously" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
       val (source, target, manager, handle, client) = mk(slice1.length)
       for {
         _res <- push(manager, slice1)
@@ -317,7 +321,7 @@ class StoreBasedDomainOutboxXTest
       }
     }
 
-    "not dispatch old data when reconnected" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "not dispatch old data when reconnected" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
       val (source, target, manager, handle, client) = mk(slice1.length)
       for {
         _ <- outboxConnected(manager, handle, client, source, target)
@@ -334,7 +338,7 @@ class StoreBasedDomainOutboxXTest
       }
     }
 
-    "correctly find a remove in source store" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "correctly find a remove in source store" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
 
       val (source, target, manager, handle, client) =
         mk(transactions.length)
@@ -374,7 +378,7 @@ class StoreBasedDomainOutboxXTest
       }
     }
 
-    "also push deprecated transactions" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "also push deprecated transactions" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
       val (source, target, manager, handle, client) =
         mk(transactions.length - 1)
       val midRevertSerialBumped = transactions(2).reverse
@@ -401,7 +405,7 @@ class StoreBasedDomainOutboxXTest
       }
     }
 
-    "handle rejected transactions" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "handle rejected transactions" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
       val (source, target, manager, handle, client) =
         mk(
           transactions.size,
@@ -417,7 +421,7 @@ class StoreBasedDomainOutboxXTest
       }
     }
 
-    "handle failed transactions" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "handle failed transactions" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
       val (source, target, manager, handle, client) =
         mk(
           2,

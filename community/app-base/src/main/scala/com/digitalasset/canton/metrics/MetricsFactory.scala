@@ -43,6 +43,7 @@ import scala.collection.concurrent.TrieMap
 final case class MetricsConfig(
     reporters: Seq[MetricsReporterConfig] = Seq.empty,
     reportJvmMetrics: Boolean = false,
+    reportExecutionContextMetrics: Boolean = false,
     histograms: Seq[HistogramDefinition] = Seq.empty,
 )
 

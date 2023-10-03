@@ -246,16 +246,6 @@ object RegisterTopologyTransactionResponseResult {
 
     /** Unnecessary removes are marked as obsolete */
     case object Obsolete extends State
-
-    def isExpectedState(state: State): Boolean = state match {
-      case State.Requested => false
-      case State.Failed => false
-      case State.Rejected => false
-      case State.Accepted => true
-      case State.Duplicate => true
-      case State.Obsolete => true
-
-    }
   }
 
   private[messages] sealed abstract case class V0(uniquePathProtoPrimitive: String, state: State)

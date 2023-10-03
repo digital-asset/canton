@@ -120,8 +120,8 @@ class InMemorySingleDimensionEventLog[+Id <: EventLogId](
     Future.successful {
       val allEvents = state.get().eventsByOffset
       val filteredEvents = allEvents
-        .rangeFrom(fromInclusive.getOrElse(Long.MinValue))
-        .rangeTo(toInclusive.getOrElse(Long.MaxValue))
+        .rangeFrom(fromInclusive.getOrElse(LocalOffset.MinValue))
+        .rangeTo(toInclusive.getOrElse(LocalOffset.MaxValue))
         .filter { case (_, event) =>
           fromTimestampInclusive.forall(_ <= event.timestamp) && toTimestampInclusive.forall(
             event.timestamp <= _

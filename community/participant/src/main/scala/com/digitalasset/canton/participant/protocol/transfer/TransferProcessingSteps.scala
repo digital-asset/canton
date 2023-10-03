@@ -22,6 +22,7 @@ import com.digitalasset.canton.ledger.participant.state.v2.CompletionInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
+import com.digitalasset.canton.participant.RichRequestCounter
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.WrapsProcessorError
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
   MalformedPayload,
@@ -533,7 +534,6 @@ object TransferProcessingSteps {
 
   // Disallow reassignments from a source domains that support transfer counters to a
   // destination domain that does not support them
-  // TODO(#12373) Adapt when releasing BFT
   def incompatibleProtocolVersionsBetweenSourceAndDestinationDomains(
       sourcePV: SourceProtocolVersion,
       targetPV: TargetProtocolVersion,

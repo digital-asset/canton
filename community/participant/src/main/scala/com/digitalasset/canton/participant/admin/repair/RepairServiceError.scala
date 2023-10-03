@@ -151,4 +151,5 @@ object RepairServiceError extends RepairServiceErrorGroup {
     ) extends CantonError.Impl(cause = reason)
         with RepairServiceError
   }
+
 }

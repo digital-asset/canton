@@ -10,10 +10,10 @@ import com.daml.lf.data.Ref.IdString
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.transaction.{GlobalKey, TransactionVersion, Versioned}
 import com.daml.lf.value.Value.{ContractInstance, ValueRecord, ValueText}
-import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.ContractState
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractStoreSpec.*
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader

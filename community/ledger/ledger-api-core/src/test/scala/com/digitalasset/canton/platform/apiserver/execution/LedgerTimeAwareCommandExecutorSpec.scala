@@ -11,7 +11,6 @@ import com.daml.lf.transaction.TransactionVersion
 import com.daml.lf.transaction.test.{TestNodeBuilder, TransactionBuilder}
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.ContractId
-import com.daml.metrics.Metrics
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
@@ -21,6 +20,7 @@ import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeMo
 import com.digitalasset.canton.ledger.participant.state.index.v2.MaximumLedgerTime
 import com.digitalasset.canton.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause.LedgerTime
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}

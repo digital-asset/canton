@@ -151,8 +151,7 @@ object EnterpriseSequencerAdminCommands {
         domainParameters: StaticDomainParameters,
         snapshotO: Option[SequencerSnapshot] = None,
     ): Initialize[_] = {
-      // TODO(#12373) Adapt when releasing BFT
-      if (domainParameters.protocolVersion >= ProtocolVersion.dev)
+      if (domainParameters.protocolVersion >= ProtocolVersion.CNTestNet)
         V2(domainId, topologySnapshot, domainParameters, snapshotO)
       else if (domainParameters.protocolVersion >= ProtocolVersion.v4)
         V1(domainId, topologySnapshot, domainParameters, snapshotO)

@@ -33,18 +33,18 @@ class TopologyStoreXTestData(
         op,
         serial,
         mapping,
-        ProtocolVersion.dev,
+        ProtocolVersion.CNTestNet,
       ),
       signatures = NonEmpty(Set, Signature.noSignature),
       isProposal = isProposal,
     )(
       SignedTopologyTransactionX.supportedProtoVersions
         .protocolVersionRepresentativeFor(
-          ProtocolVersion.dev
+          ProtocolVersion.CNTestNet
         )
     )
 
-  val timestamps @ Seq(ts1, ts2, ts3, ts4, ts5, ts6, ts7, ts8, ts9, ts10) =
+  val Seq(ts1, ts2, ts3, ts4, ts5, ts6, ts7, ts8, ts9, ts10) =
     (1L to 10L).map(CantonTimestamp.Epoch.plusSeconds)
 
   val factory: TestingOwnerWithKeys =

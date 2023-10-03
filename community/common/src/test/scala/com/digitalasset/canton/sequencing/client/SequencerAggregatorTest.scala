@@ -7,6 +7,7 @@ import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.SequencerAggregator.SequencerAggregatorError
 import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, SequencerAggregator}
+import com.digitalasset.canton.util.ResourceUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
@@ -29,15 +30,15 @@ class SequencerAggregatorTest
 
   override type FixtureParam = SequencedEventTestFixture
 
-  override def withFixture(test: OneArgTest): Outcome = {
-    val env = new SequencedEventTestFixture(
-      loggerFactory,
-      testedProtocolVersion,
-      timeouts,
-      futureSupervisor,
-    )
-    withFixture(test.toNoArgTest(env))
-  }
+  override def withFixture(test: OneArgTest): Outcome =
+    ResourceUtil.withResource(
+      new SequencedEventTestFixture(
+        loggerFactory,
+        testedProtocolVersion,
+        timeouts,
+        futureSupervisor,
+      )
+    ) { env => withFixture(test.toNoArgTest(env)) }
 
   "Single sequencer aggregator" should {
     "pass-through the event" in { fixture =>
@@ -106,7 +107,7 @@ class SequencerAggregatorTest
       }
     }
 
-    "support reconfiguration to 2 out of 3" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "support reconfiguration to 2 out of 3" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
       fixture =>
         import fixture.*
 
@@ -178,8 +179,7 @@ class SequencerAggregatorTest
   }
 
   "Sequencer aggregator with two expected sequencers" should {
-    // TODO(#12373) Adapt PV when releasing BFT
-    "pass-through the combined event only if both sequencers emitted it" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "pass-through the combined event only if both sequencers emitted it" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
       fixture =>
         import fixture.*
         val event1 = createEvent().futureValue
@@ -259,7 +259,7 @@ class SequencerAggregatorTest
         .futureValueUS shouldBe Left(SequencerAggregatorError.NotTheSameContentHash(hashes))
     }
 
-    "emit events in order when all sequencers confirmed" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "emit events in order when all sequencers confirmed" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
       fixture =>
         import fixture.*
         val events = (1 to 2).map(s =>
@@ -289,7 +289,7 @@ class SequencerAggregatorTest
         futures(1).futureValueUS shouldBe Right(true)
     }
 
-    "support reconfiguration to another sequencer" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "support reconfiguration to another sequencer" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
       fixture =>
         import fixture.*
 
@@ -322,8 +322,7 @@ class SequencerAggregatorTest
   }
 
   "Sequencer aggregator with two out of 3 expected sequencers" should {
-    // TODO(#12373) Adapt PV when releasing BFT
-    "pass-through the combined event only if both sequencers emitted it" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "pass-through the combined event only if both sequencers emitted it" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
       fixture =>
         import fixture.*
 
@@ -361,43 +360,44 @@ class SequencerAggregatorTest
         f3.futureValueUS shouldBe Right(false)
     }
 
-    "recover after skipping an event" onlyRunWithOrGreaterThan ProtocolVersion.dev in { fixture =>
-      import fixture.*
+    "recover after skipping an event" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
+      fixture =>
+        import fixture.*
 
-      val aggregator = mkAggregator(
-        config(Set(sequencerAlice, sequencerBob, sequencerCarlos), sequencerTrustThreshold = 2)
-      )
+        val aggregator = mkAggregator(
+          config(Set(sequencerAlice, sequencerBob, sequencerCarlos), sequencerTrustThreshold = 2)
+        )
 
-      assertNoMessageDownstream(aggregator)
+        assertNoMessageDownstream(aggregator)
 
-      aggregator
-        .combineAndMergeEvent(sequencerAlice, aliceEvents(0))
-        .discard
-      aggregator
-        .combineAndMergeEvent(sequencerBob, bobEvents(0))
-        .discard
+        aggregator
+          .combineAndMergeEvent(sequencerAlice, aliceEvents(0))
+          .discard
+        aggregator
+          .combineAndMergeEvent(sequencerBob, bobEvents(0))
+          .discard
 
-      assertCombinedDownstreamMessage(aggregator, aliceEvents(0), bobEvents(0))
+        assertCombinedDownstreamMessage(aggregator, aliceEvents(0), bobEvents(0))
 
-      aggregator
-        .combineAndMergeEvent(sequencerCarlos, carlosEvents(0))
-        .discard // late event
+        aggregator
+          .combineAndMergeEvent(sequencerCarlos, carlosEvents(0))
+          .discard // late event
 
-      aggregator
-        .combineAndMergeEvent(sequencerAlice, aliceEvents(1))
-        .discard
-      aggregator
-        .combineAndMergeEvent(sequencerCarlos, carlosEvents(1))
-        .discard
+        aggregator
+          .combineAndMergeEvent(sequencerAlice, aliceEvents(1))
+          .discard
+        aggregator
+          .combineAndMergeEvent(sequencerCarlos, carlosEvents(1))
+          .discard
 
-      assertCombinedDownstreamMessage(
-        aggregator,
-        aliceEvents(1),
-        carlosEvents(1),
-      )
+        assertCombinedDownstreamMessage(
+          aggregator,
+          aliceEvents(1),
+          carlosEvents(1),
+        )
     }
 
-    "support reconfiguration to 1 out of 3" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "support reconfiguration to 1 out of 3" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
       fixture =>
         import fixture.*
 
@@ -437,7 +437,7 @@ class SequencerAggregatorTest
         assertDownstreamMessage(aggregator, aliceEvents(1))
     }
 
-    "support reconfiguration to 1 out of 3 while incomplete consensus" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "support reconfiguration to 1 out of 3 while incomplete consensus" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
       fixture =>
         import fixture.*
 
@@ -464,7 +464,7 @@ class SequencerAggregatorTest
   }
 
   "Sequencer aggregator with 3 out of 3 expected sequencers" should {
-    "support reconfiguration to 1 out of 3 while overfulfilled consensus" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "support reconfiguration to 1 out of 3 while overfulfilled consensus" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
       fixture =>
         import fixture.*
 

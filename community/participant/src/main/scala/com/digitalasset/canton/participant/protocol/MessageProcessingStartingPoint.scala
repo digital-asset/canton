@@ -7,8 +7,8 @@ import cats.syntax.either.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.protocol.ProcessingStartingPoints.InvalidStartingPointsException
+import com.digitalasset.canton.participant.{LocalOffset, RichRequestCounter}
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
 
 /** Summarizes the counters and timestamps where request processing or replay can start

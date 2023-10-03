@@ -27,7 +27,6 @@ final case class ActiveContract private (
     with HasSerializableContract {
 
   // invariant
-  // TODO(#12373) Adapt when releasing BFT
   // Ensures the invariants related to default values hold
   validateInstance().valueOr(err => throw new IllegalArgumentException(err))
 
@@ -71,10 +70,9 @@ private[canton] object ActiveContract extends HasProtocolVersionedCompanion[Acti
         _.toProtoV0.toByteString,
       ),
     ),
-    // TODO(#12373) Adapt when releasing BFT
     (
       ProtoVersion(1),
-      VersionedProtoConverter(ProtocolVersion.dev)(v1.ActiveContract)(
+      VersionedProtoConverter(ProtocolVersion.CNTestNet)(v1.ActiveContract)(
         supportedProtoVersion(_)(fromProtoV1),
         _.toProtoV1.toByteString,
       ),
@@ -86,8 +84,7 @@ private[canton] object ActiveContract extends HasProtocolVersionedCompanion[Acti
   lazy val transferCounterInvariant = EmptyOptionExactlyUntilExclusive(
     _.transferCounter,
     "transferCounter",
-    // TODO(#12373) Adapt when releasing BFT
-    protocolVersionRepresentativeFor(ProtocolVersion.dev),
+    protocolVersionRepresentativeFor(ProtocolVersion.CNTestNet),
   )
 
   private def fromProtoV0(

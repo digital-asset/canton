@@ -4,7 +4,7 @@
 package com.digitalasset.canton.caching
 
 import com.daml.metrics.CacheMetrics
-import com.github.benmanes.caffeine.{cache as caffeine}
+import com.github.benmanes.caffeine.cache as caffeine
 
 object SizedCache {
 

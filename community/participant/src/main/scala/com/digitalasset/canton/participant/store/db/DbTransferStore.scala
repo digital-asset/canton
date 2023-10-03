@@ -138,7 +138,10 @@ class DbTransferStore(
       creatingTransactionId = GetResult[TransactionId].apply(r),
       transferOutResult = getResultDeliveredTransferOutResult(fixedSourceProtocolVersion).apply(r),
       transferGlobalOffset = TransferGlobalOffset
-        .create(r.nextLongOption(), r.nextLongOption())
+        .create(
+          r.nextLongOption().map(GlobalOffset.tryFromLong),
+          r.nextLongOption().map(GlobalOffset.tryFromLong),
+        )
         .valueOr(err => throw new DbDeserializationException(err)),
     )
   }

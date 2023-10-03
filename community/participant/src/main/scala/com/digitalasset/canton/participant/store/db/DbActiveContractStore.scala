@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.participant.store.db
 
-import cats.data.Chain
+import cats.data.{Chain, EitherT}
+import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.parallel.*
 import com.daml.lf.data.Ref.PackageId
@@ -16,6 +17,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
+import com.digitalasset.canton.participant.store.data.ActiveContractsData
 import com.digitalasset.canton.participant.store.db.DbActiveContractStore.*
 import com.digitalasset.canton.participant.store.{
   ActiveContractStore,
@@ -143,15 +145,20 @@ class DbActiveContractStore(
   override protected val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("active-contract-store")
 
-  def createContracts(contractIds: Seq[LfContractId], toc: TimeOfChange)(implicit
-      traceContext: TraceContext
-  ): CheckedT[Future, AcsError, AcsWarning, Unit] =
+  def markContractsActive(contracts: Seq[(LfContractId, TransferCounterO)], toc: TimeOfChange)(
+      implicit traceContext: TraceContext
+  ): CheckedT[Future, AcsError, AcsWarning, Unit] = {
     processingTime.checkedTEvent {
-      val transferCounter = TransferCounter.forCreatedContract(protocolVersion)
-      val contractIdAndTransferCounter = contractIds.map(_ -> (transferCounter, toc)).toMap
       for {
+        activeContractsData <- CheckedT.fromEitherT(
+          EitherT.fromEither[Future](
+            ActiveContractsData
+              .create(protocolVersion, toc, contracts)
+              .leftMap(errorMessage => ActiveContractsDataInvariantViolation(errorMessage))
+          )
+        )
         _ <- bulkInsert(
-          contractIdAndTransferCounter,
+          activeContractsData.asMap,
           ChangeType.Activation,
           remoteDomain = None,
         )
@@ -165,11 +172,15 @@ class DbActiveContractStore(
                 )
               ),
             ) {
-              contractIds.parTraverse_ { contractId =>
+              activeContractsData.asSeq.parTraverse_ { tc =>
                 for {
-                  _ <- checkCreateArchiveAtUnique(contractId, toc, ChangeType.Activation)
-                  _ <- checkChangesBeforeCreation(contractId, toc)
-                  _ <- checkTocAgainstEarliestArchival(contractId, toc)
+                  _ <- checkCreateArchiveAtUnique(
+                    tc.contractId,
+                    activeContractsData.toc,
+                    ChangeType.Activation,
+                  )
+                  _ <- checkChangesBeforeCreation(tc.contractId, activeContractsData.toc)
+                  _ <- checkTocAgainstEarliestArchival(tc.contractId, activeContractsData.toc)
                 } yield ()
               }
             }
@@ -178,6 +189,7 @@ class DbActiveContractStore(
           }
       } yield ()
     }
+  }
 
   def archiveContracts(contracts: Seq[LfContractId], toc: TimeOfChange)(implicit
       traceContext: TraceContext
@@ -727,9 +739,7 @@ class DbActiveContractStore(
         )
         // retrieves the transfer counters for archived contracts that were activated between (`fromExclusive`, `toInclusive`]
         maxTransferCountersPerCidUpToRc =
-          if (
-            protocolVersion >= ProtocolVersion.dev
-          ) // TODO(i12373): Change when we release multi-domain
+          if (protocolVersion >= ProtocolVersion.CNTestNet)
             transferCounterForArchivals(retrievedChangesBetween)
           else Map.empty[(RequestCounter, LfContractId), TransferCounterO]
         /*
@@ -740,7 +750,7 @@ class DbActiveContractStore(
          */
         // retrieves the transfer counters for archived contracts that were activated at time <= `fromExclusive`
         maxTransferCountersPerRemainingCidUpToRc <- {
-          if (protocolVersion >= ProtocolVersion.dev) { // TODO(i12373): Change when we release multi-domain
+          if (protocolVersion >= ProtocolVersion.CNTestNet) {
             val archivalsWithoutTransferCounters =
               maxTransferCountersPerCidUpToRc.filter(_._2.isEmpty)
             NonEmpty
@@ -1158,8 +1168,8 @@ class DbActiveContractStore(
       CheckedT(results.map { presentWithOtherValues =>
         val isActivation = change == ChangeType.Activation
         presentWithOtherValues.traverse_ { case (contractId, previousDetail, toc) =>
-          val transferCounterO = contractIdsWithTransferCounter.get(contractId).flatMap(_._1)
-          val detail = ActivenessChangeDetail(remoteDomain.map(_.item), transferCounterO)
+          val transferCounter = contractIdsWithTransferCounter.get(contractId).flatMap(_._1)
+          val detail = ActivenessChangeDetail(remoteDomain.map(_.item), transferCounter)
           val warn =
             if (isActivation)
               SimultaneousActivation(

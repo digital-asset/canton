@@ -567,8 +567,8 @@ final class TransferOutProcessingStepsTest
           Seq(WithTransactionId(contract, transactionId)),
         )
         _ <- persistentState.activeContractStore
-          .createContracts(
-            Seq(contractId),
+          .markContractsActive(
+            Seq(contractId -> initialTransferCounter),
             TimeOfChange(RequestCounter(1), timeEvent.timestamp),
           )
           .value
@@ -644,8 +644,8 @@ final class TransferOutProcessingStepsTest
           Seq(WithTransactionId(contract, transactionId)),
         )
         _ <- persistentState.activeContractStore
-          .createContracts(
-            Seq(contractId),
+          .markContractsActive(
+            Seq(contractId -> initialTransferCounter),
             TimeOfChange(RequestCounter(1), timeEvent.timestamp),
           )
           .value
@@ -660,8 +660,7 @@ final class TransferOutProcessingStepsTest
             .value
             .failOnShutdown
       } yield {
-        // TODO(#12373) Adapt when releasing BFT
-        if (outProcessingSteps.sourceDomainProtocolVersion.v == ProtocolVersion.dev) {
+        if (outProcessingSteps.sourceDomainProtocolVersion.v >= ProtocolVersion.CNTestNet) {
           submissionResult shouldBe Left(
             IncompatibleProtocolVersions(
               contractId,

@@ -39,17 +39,14 @@ import scala.collection.concurrent
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.jdk.CollectionConverters.*
 
-trait RegisterTopologyTransactionHandleCommon[TX] extends FlagCloseable {
-  def submit(
-      transactions: Seq[TX]
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Seq[
-    // TODO(#14051): Switch to RegisterTopologyTransactionResponseResultX once non-proto version exists
-    RegisterTopologyTransactionResponseResult.State
-  ]]
+trait RegisterTopologyTransactionHandleCommon[TX, State] extends FlagCloseable {
+  def submit(transactions: Seq[TX])(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[State]]
 }
 
-trait RegisterTopologyTransactionHandleWithProcessor[TX]
-    extends RegisterTopologyTransactionHandleCommon[TX] {
+trait RegisterTopologyTransactionHandleWithProcessor[TX, State]
+    extends RegisterTopologyTransactionHandleCommon[TX, State] {
   def processor: EnvelopeHandler
 }
 
@@ -70,7 +67,8 @@ class SequencerBasedRegisterTopologyTransactionHandle(
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends RegisterTopologyTransactionHandleWithProcessor[
-      SignedTopologyTransaction[TopologyChangeOp]
+      SignedTopologyTransaction[TopologyChangeOp],
+      RegisterTopologyTransactionResponseResult.State,
     ]
     with NamedLogging {
 
@@ -113,7 +111,8 @@ class SequencerBasedRegisterTopologyTransactionHandleX(
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends RegisterTopologyTransactionHandleWithProcessor[
-      GenericSignedTopologyTransactionX
+      GenericSignedTopologyTransactionX,
+      TopologyTransactionsBroadcastX.State,
     ]
     with NamedLogging
     with PrettyPrinting {
@@ -136,7 +135,7 @@ class SequencerBasedRegisterTopologyTransactionHandleX(
       transactions: Seq[GenericSignedTopologyTransactionX]
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Seq[RegisterTopologyTransactionResponseResult.State]] = {
+  ): FutureUnlessShutdown[Seq[TopologyTransactionsBroadcastX.State]] = {
     service.registerTopologyTransaction(
       TopologyTransactionsBroadcastX.create(
         domainId,
@@ -288,7 +287,7 @@ class DomainTopologyServiceX(
       request: TopologyTransactionsBroadcastX
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Seq[RegisterTopologyTransactionResponseResult.State]] = {
+  ): FutureUnlessShutdown[Seq[TopologyTransactionsBroadcastX.State]] = {
     val sendCallback = SendCallback.future
 
     performUnlessClosingEitherUSF(
@@ -299,20 +298,20 @@ class DomainTopologyServiceX(
         .biSemiflatMap(
           sendAsyncClientError => {
             logger.error(s"Failed broadcasting topology transactions: $sendAsyncClientError")
-            FutureUnlessShutdown.pure[RegisterTopologyTransactionResponseResult.State](
-              RegisterTopologyTransactionResponseResult.State.Failed
+            FutureUnlessShutdown.pure[TopologyTransactionsBroadcastX.State](
+              TopologyTransactionsBroadcastX.State.Failed
             )
           },
           _result =>
             sendCallback.future
               .map {
                 case SendResult.Success(_) =>
-                  RegisterTopologyTransactionResponseResult.State.Accepted
+                  TopologyTransactionsBroadcastX.State.Accepted
                 case notSequenced @ (_: SendResult.Timeout | _: SendResult.Error) =>
                   logger.info(
                     s"The submitted topology transactions were not sequenced. Error=[$notSequenced]. Transactions=${request.broadcasts}"
                   )
-                  RegisterTopologyTransactionResponseResult.State.Failed
+                  TopologyTransactionsBroadcastX.State.Failed
               },
         )
     ).merge

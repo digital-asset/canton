@@ -14,11 +14,12 @@ import com.daml.lf.transaction.{
   TransactionVersion,
   VersionedTransaction,
 }
-import com.daml.metrics.{DatabaseMetrics, Metrics}
+import com.daml.metrics.DatabaseMetrics
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.Update
 import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLogging, SuppressingLogger}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.indexer.ha.TestConnection
 import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscription.Batch
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd

@@ -34,7 +34,10 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.participant.sync.SyncDomainPersistentStateManagerImpl
 import com.digitalasset.canton.protocol.StaticDomainParameters
-import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
+import com.digitalasset.canton.protocol.messages.{
+  RegisterTopologyTransactionResponseResult,
+  TopologyTransactionsBroadcastX,
+}
 import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerClientFactory}
 import com.digitalasset.canton.sequencing.protocol.Batch
 import com.digitalasset.canton.sequencing.{EnvelopeHandler, SequencerConnections}
@@ -529,7 +532,10 @@ private class DomainOnboardingOutbox(
     val domainId: DomainId,
     val protocolVersion: ProtocolVersion,
     participantId: ParticipantId,
-    val handle: RegisterTopologyTransactionHandleCommon[GenericSignedTopologyTransaction],
+    val handle: RegisterTopologyTransactionHandleCommon[
+      GenericSignedTopologyTransaction,
+      RegisterTopologyTransactionResponseResult.State,
+    ],
     val authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
     val targetStore: TopologyStore[TopologyStoreId.DomainStore],
     val timeouts: ProcessingTimeout,
@@ -537,7 +543,11 @@ private class DomainOnboardingOutbox(
     override protected val crypto: Crypto,
 ) extends DomainOutboxDispatch[
       GenericSignedTopologyTransaction,
-      RegisterTopologyTransactionHandleCommon[GenericSignedTopologyTransaction],
+      RegisterTopologyTransactionResponseResult.State,
+      RegisterTopologyTransactionHandleCommon[
+        GenericSignedTopologyTransaction,
+        RegisterTopologyTransactionResponseResult.State,
+      ],
       TopologyStore[
         TopologyStoreId.DomainStore
       ],
@@ -557,7 +567,7 @@ private class DomainOnboardingOutbox(
       DomainRegistryError.DomainRegistryInternalError.InitialOnboardingError(_)
     )
   } yield {
-    result.forall(res => RegisterTopologyTransactionResponseResult.State.isExpectedState(res))
+    result.forall(res => isExpectedState(res))
   }).thereafter { _ =>
     close()
   }
@@ -620,7 +630,10 @@ object DomainOnboardingOutbox {
       domainId: DomainId,
       protocolVersion: ProtocolVersion,
       participantId: ParticipantId,
-      handle: RegisterTopologyTransactionHandleCommon[GenericSignedTopologyTransaction],
+      handle: RegisterTopologyTransactionHandleCommon[
+        GenericSignedTopologyTransaction,
+        RegisterTopologyTransactionResponseResult.State,
+      ],
       authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
       targetStore: TopologyStore[TopologyStoreId.DomainStore],
       timeouts: ProcessingTimeout,
@@ -661,7 +674,10 @@ private class DomainOnboardingOutboxX(
     val domainId: DomainId,
     val protocolVersion: ProtocolVersion,
     participantId: ParticipantId,
-    val handle: RegisterTopologyTransactionHandleWithProcessor[GenericSignedTopologyTransactionX],
+    val handle: RegisterTopologyTransactionHandleWithProcessor[
+      GenericSignedTopologyTransactionX,
+      TopologyTransactionsBroadcastX.State,
+    ],
     val authorizedStore: TopologyStoreX[TopologyStoreId.AuthorizedStore],
     val targetStore: TopologyStoreX[TopologyStoreId.DomainStore],
     val timeouts: ProcessingTimeout,
@@ -669,7 +685,11 @@ private class DomainOnboardingOutboxX(
     override protected val crypto: Crypto,
 ) extends DomainOutboxDispatch[
       GenericSignedTopologyTransactionX,
-      RegisterTopologyTransactionHandleWithProcessor[GenericSignedTopologyTransactionX],
+      TopologyTransactionsBroadcastX.State,
+      RegisterTopologyTransactionHandleWithProcessor[
+        GenericSignedTopologyTransactionX,
+        TopologyTransactionsBroadcastX.State,
+      ],
       TopologyStoreX[TopologyStoreId.DomainStore],
     ]
     with StoreBasedDomainOutboxDispatchHelperX {
@@ -688,7 +708,7 @@ private class DomainOnboardingOutboxX(
       DomainRegistryError.DomainRegistryInternalError.InitialOnboardingError(_)
     )
   } yield {
-    result.forall(res => RegisterTopologyTransactionResponseResult.State.isExpectedState(res))
+    result.forall(res => isExpectedState(res))
   }).thereafter { _ =>
     close()
   }
@@ -754,7 +774,10 @@ object DomainOnboardingOutboxX {
       domainId: DomainId,
       protocolVersion: ProtocolVersion,
       participantId: ParticipantId,
-      handle: RegisterTopologyTransactionHandleWithProcessor[GenericSignedTopologyTransactionX],
+      handle: RegisterTopologyTransactionHandleWithProcessor[
+        GenericSignedTopologyTransactionX,
+        TopologyTransactionsBroadcastX.State,
+      ],
       authorizedStore: TopologyStoreX[TopologyStoreId.AuthorizedStore],
       targetStore: TopologyStoreX[TopologyStoreId.DomainStore],
       timeouts: ProcessingTimeout,

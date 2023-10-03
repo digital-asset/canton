@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.admin
 
 import com.daml.ledger.api.refinements.ApiTypes.WorkflowId
 import com.daml.ledger.api.v1.commands.Command as ScalaCommand
-import com.daml.ledger.api.v1.completion.Completion
 import com.daml.ledger.api.v1.event.CreatedEvent
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.package_service.{GetPackageStatusResponse, PackageStatus}
@@ -14,10 +13,11 @@ import com.daml.ledger.client.binding.Primitive
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.lifecycle.AsyncOrSyncCloseable
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.participant.ledger.api.client.{CommandSubmitterWithRetry, LedgerAcs}
+import com.digitalasset.canton.participant.ledger.api.client.{CommandResult, LedgerAcs}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.tracing.TraceContext
 
+import java.time.Duration
 import scala.concurrent.{Future, Promise}
 
 /** Mock for capturing a single submitted command.
@@ -33,9 +33,10 @@ class MockLedgerAcs(override val logger: TracedLogger, override val sender: Prim
       commandId: Option[String] = None,
       workflowId: Option[WorkflowId] = None,
       deduplictionTime: Option[NonNegativeFiniteDuration] = None,
-  )(implicit traceContext: TraceContext): Future[CommandSubmitterWithRetry.CommandResult] = {
+      timeout: Option[Duration] = None,
+  )(implicit traceContext: TraceContext): Future[CommandResult] = {
     command.headOption.foreach(lastCommandPromise.trySuccess)
-    Future.successful(CommandSubmitterWithRetry.Success(Completion()))
+    Future.successful(CommandResult.Success("someTxId"))
   }
 
   override def submitAsync(

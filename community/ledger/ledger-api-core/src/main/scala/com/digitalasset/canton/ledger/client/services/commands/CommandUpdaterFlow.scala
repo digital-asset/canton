@@ -6,10 +6,10 @@ package com.digitalasset.canton.ledger.client.services.commands
 import akka.NotUsed
 import akka.stream.scaladsl.Flow
 import com.daml.ledger.api.v1.commands.Commands.DeduplicationPeriod
-import com.daml.util.Ctx
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.client.configuration.CommandClientConfiguration
+import com.digitalasset.canton.util.Ctx
 import com.google.protobuf.duration.Duration
 
 import scala.annotation.nowarn

@@ -3,11 +3,12 @@
 
 package com.digitalasset.canton.platform.localstore
 
-import com.daml.metrics.{DatabaseMetrics, Metrics}
+import com.daml.metrics.DatabaseMetrics
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderConfig, IdentityProviderId}
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.localstore.Ops.*
 import com.digitalasset.canton.platform.localstore.api.IdentityProviderConfigStore.*
 import com.digitalasset.canton.platform.localstore.api.{

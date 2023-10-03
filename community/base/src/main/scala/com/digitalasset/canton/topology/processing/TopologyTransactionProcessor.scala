@@ -72,10 +72,11 @@ final case class SequencedTime(value: CantonTimestamp) {
   def toProtoPrimitive: ProtoTimestamp = value.toProtoPrimitive
 }
 object SequencedTime {
-  def fromProtoPrimitive(ts: ProtoTimestamp): ParsingResult[SequencedTime] =
-    CantonTimestamp.fromProtoPrimitive(ts).map(SequencedTime(_))
+  val MinValue: SequencedTime = SequencedTime(CantonTimestamp.MinValue)
   implicit val orderingSequencedTime: Ordering[SequencedTime] =
     Ordering.by[SequencedTime, CantonTimestamp](_.value)
+  def fromProtoPrimitive(ts: ProtoTimestamp): ParsingResult[SequencedTime] =
+    CantonTimestamp.fromProtoPrimitive(ts).map(SequencedTime(_))
 }
 
 /** Main incoming topology transaction validation and processing
@@ -98,8 +99,6 @@ class TopologyTransactionProcessor(
     timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
-// TODO(#14051) gerolf: changed this back to SignedTopologyTransaction to make the existing test work again.
-//                      creating a DomainTopologyTransactionMessage seems more involved than what I want to get into now
     extends TopologyTransactionProcessorCommonImpl[SignedTopologyTransaction[TopologyChangeOp]](
       domainId,
       futureSupervisor,

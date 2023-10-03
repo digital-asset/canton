@@ -69,8 +69,7 @@ object InitializeSequencerRequest
       supportedProtoVersion(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
-    // TODO(#12373) Adapt when releasing BFT
-    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.dev)(v2.InitRequest)(
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.CNTestNet)(v2.InitRequest)(
       supportedProtoVersion(_)(fromProtoV2),
       _.toProtoV2.toByteString,
     ),

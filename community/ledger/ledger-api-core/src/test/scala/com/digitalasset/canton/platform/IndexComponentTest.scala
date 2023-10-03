@@ -11,7 +11,6 @@ import com.daml.ledger.resources.{Resource, ResourceContext}
 import com.daml.lf.data.Ref
 import com.daml.lf.engine.Engine
 import com.daml.lf.transaction.test.{NodeIdTransactionBuilder, TestNodeBuilder}
-import com.daml.metrics.Metrics
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.health.HealthStatus
@@ -19,6 +18,7 @@ import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexService
 import com.digitalasset.canton.ledger.participant.state.v2.{ReadService, Update}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.IndexComponentTest.{TestReadService, TestServices}
 import com.digitalasset.canton.platform.config.{IndexServiceConfig, ServerRole}
 import com.digitalasset.canton.platform.index.IndexServiceOwner

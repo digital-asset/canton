@@ -5,9 +5,9 @@ package com.digitalasset.canton.platform.apiserver.tls
 
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.ledger.resources.TestResourceContext
-import com.daml.testing.utils.TestResourceUtils
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.platform.apiserver.LedgerApiService
+import com.digitalasset.canton.testing.utils.TestResourceUtils
 import org.mockito.MockitoSugar
 import org.scalatest.wordspec.AsyncWordSpec
 

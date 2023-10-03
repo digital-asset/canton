@@ -102,6 +102,7 @@ class SyncDomainEphemeralState(
       executionContext,
       timeouts,
       futureSupervisor,
+      persistentState.protocolVersion,
     )
 
     new NaiveRequestTracker(

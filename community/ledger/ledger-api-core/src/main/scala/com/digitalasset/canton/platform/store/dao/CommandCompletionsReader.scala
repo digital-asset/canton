@@ -6,9 +6,9 @@ package com.digitalasset.canton.platform.store.dao
 import akka.NotUsed
 import akka.stream.scaladsl.Source
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
-import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.store.backend.CompletionStorageBackend
 import com.digitalasset.canton.platform.store.dao.events.QueryNonPruned
 import com.digitalasset.canton.platform.{ApiOffset, ApplicationId, Party}

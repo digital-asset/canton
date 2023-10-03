@@ -172,7 +172,7 @@ abstract class ErrorCode(val id: String, val category: ErrorCategory)(implicit
   }
 
   /** The error conveyance doc string provides a statement about the form this error will be returned to the user */
-  private[error] def errorConveyanceDocString: Option[String] = {
+  def errorConveyanceDocString: Option[String] = {
     val loggedAs = s"This error is logged with log-level $logLevel on the server side"
     val apiLevel = (category.grpcCode, exposedViaApi) match {
       case (Some(code), true) =>

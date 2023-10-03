@@ -4,7 +4,7 @@
 package com.digitalasset.canton.util
 
 import akka.actor.ActorSystem
-import akka.stream.scaladsl.{Keep, RunnableGraph, Source}
+import akka.stream.scaladsl.{FlowOps, FlowOpsMat, Keep, RunnableGraph, Source}
 import akka.stream.stage.{GraphStageLogic, GraphStageWithMaterializedValue, InHandler, OutHandler}
 import akka.stream.{
   ActorAttributes,
@@ -21,10 +21,12 @@ import akka.stream.{
   UniqueKillSwitch,
 }
 import akka.{Done, NotUsed}
-import cats.Functor
+import cats.{Applicative, Eval, Functor, Traverse}
 import com.daml.grpc.adapter.{AkkaExecutionSequencerPool, ExecutionSequencerFactory}
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, Threading}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.pretty.Pretty
@@ -38,6 +40,7 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.language.implicitConversions
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 
@@ -84,15 +87,45 @@ object AkkaUtil extends HasLoggerName {
       actorCount = Threading.detectNumberOfThreads(logger),
     )
 
+  /** Remembers the last `memory` many elements that have already been emitted previously.
+    * Passes those remembered elements downstream with each new element.
+    * The current element is the [[com.daml.nonempty.NonEmptyCollInstances.NEPreservingOps.last1]]
+    * of the sequence.
+    *
+    * [[remember]] differs from [[akka.stream.scaladsl.FlowOps.sliding]] in
+    * that [[remember]] emits elements immediately when the given source emits,
+    * whereas [[akka.stream.scaladsl.FlowOps.sliding]] only after the source has emitted enough elements to fill the window.
+    */
+  def remember[A, Mat](
+      graph: FlowOps[A, Mat],
+      memory: NonNegativeInt,
+  ): graph.Repr[NonEmpty[Seq[A]]] = {
+    // Prepend window many None to the given source
+    // so that sliding starts emitting upon the first element received
+    graph
+      .map(Some(_))
+      .prepend(Source(Seq.fill(memory.value)(None)))
+      .sliding(memory.value + 1)
+      .mapConcat { noneOrElems =>
+        // dropWhile is enough because None can only appear in the prefix
+        val elems = noneOrElems
+          .dropWhile(_.isEmpty)
+          .map(_.getOrElse(throw new NoSuchElementException("Some did not contain a value")))
+        // Do not emit anything if `noneOrElems` is all Nones,
+        // because then the source completed before emitting any elements
+        NonEmpty.from(elems)
+      }
+  }
+
   /** A version of [[akka.stream.scaladsl.FlowOps.mapAsync]] that additionally allows to pass state of type `S` between
     * every subsequent element. Unlike [[akka.stream.scaladsl.FlowOps.statefulMapConcat]], the state is passed explicitly.
     * Must not be run with supervision strategies [[akka.stream.Supervision.Restart]] nor [[akka.stream.Supervision.Resume]]
     */
-  def statefulMapAsync[Out, Mat, S, T](source: Source[Out, Mat], initial: S)(
+  def statefulMapAsync[Out, Mat, S, T](graph: FlowOps[Out, Mat], initial: S)(
       f: (S, Out) => Future[(S, T)]
-  )(implicit loggingContext: NamedLoggingContext): Source[T, Mat] = {
+  )(implicit loggingContext: NamedLoggingContext): graph.Repr[T] = {
     val directExecutionContext = DirectExecutionContext(loggingContext.tracedLogger)
-    source
+    graph
       .scanAsync((initial, Option.empty[T])) { case ((state, _), next) =>
         f(state, next)
           .map { case (newState, out) => (newState, Some(out)) }(directExecutionContext)
@@ -130,9 +163,9 @@ object AkkaUtil extends HasLoggerName {
     * @param parallelism The parallelism level. Must be at least 1.
     * @throws java.lang.IllegalArgumentException if `parallelism` is not positive.
     */
-  def mapAsyncUS[A, Mat, B](source: Source[A, Mat], parallelism: Int)(
+  def mapAsyncUS[A, Mat, B](graph: FlowOps[A, Mat], parallelism: Int)(
       f: A => FutureUnlessShutdown[B]
-  )(implicit loggingContext: NamedLoggingContext): Source[UnlessShutdown[B], Mat] = {
+  )(implicit loggingContext: NamedLoggingContext): graph.Repr[UnlessShutdown[B]] = {
     require(parallelism > 0, "Parallelism must be positive")
     // If parallelism is 1, then the caller expects that the futures run in sequential order,
     // so if one of them aborts due to shutdown we must not run the subsequent ones.
@@ -141,7 +174,7 @@ object AkkaUtil extends HasLoggerName {
     // So we just need to throw away the results of the futures and convert them into aborts.
     if (parallelism == 1) {
       val directExecutionContext = DirectExecutionContext(loggingContext.tracedLogger)
-      statefulMapAsync(source, initial = false) { (aborted, next) =>
+      statefulMapAsync(graph, initial = false) { (aborted, next) =>
         if (aborted) Future.successful(true -> AbortedDueToShutdown)
         else f(next).unwrap.map(us => !us.isOutcome -> us)(directExecutionContext)
       }
@@ -149,7 +182,7 @@ object AkkaUtil extends HasLoggerName {
       val discardedInitial: UnlessShutdown[B] = AbortedDueToShutdown
       // Mutable reference to short-circuit one we've observed the first aborted due to shutdown.
       val abortedFlag = new AtomicBoolean(false)
-      source
+      graph
         .mapAsync(parallelism)(elem =>
           if (abortedFlag.get()) Future.successful(AbortedDueToShutdown)
           else f(elem).unwrap
@@ -171,13 +204,16 @@ object AkkaUtil extends HasLoggerName {
     *
     * '''Completes when''' upstream completes and all futures have been completed and all elements have been emitted.
     */
-  def mapAsyncAndDrainUS[A, Mat, B](source: Source[A, Mat], parallelism: Int)(
+  def mapAsyncAndDrainUS[A, Mat, B](graph: FlowOps[A, Mat], parallelism: Int)(
       f: A => FutureUnlessShutdown[B]
-  )(implicit loggingContext: NamedLoggingContext): Source[B, Mat] =
-    mapAsyncUS(source, parallelism)(f)
+  )(implicit loggingContext: NamedLoggingContext): graph.Repr[B] = {
+    import syntax.*
+    graph
+      .mapAsyncUS(parallelism)(f)
       // Important to use `collect` instead of `takeWhile` here
       // so that the return source completes only after all `source`'s elements have been consumed.
       .collect { case Outcome(x) => x }
+  }
 
   /** Combines two kill switches into one */
   class CombinedKillSwitch(private val killSwitch1: KillSwitch, private val killSwitch2: KillSwitch)
@@ -253,7 +289,7 @@ object AkkaUtil extends HasLoggerName {
   )(implicit
       loggingContext: NamedLoggingContext,
       materializer: Materializer,
-  ): Source[A, (KillSwitch, Future[Done])] = {
+  ): Source[WithKillSwitch[A], (KillSwitch, Future[Done])] = {
     val directExecutionContext = DirectExecutionContext(loggingContext.tracedLogger)
 
     // Use immediate acknowledgements and buffer size 1 to minimize the risk that
@@ -434,7 +470,7 @@ object AkkaUtil extends HasLoggerName {
           .watchTermination()(uponTermination)
       }
       // Filter out the exceptions from the recover
-      .mapConcat(_.toOption)
+      .mapConcat(_.toOption.map(WithKillSwitch(_)(killSwitchForSourceQueue)))
       .watchTermination() { case (NotUsed, doneF) =>
         val everythingTerminatedF =
           doneF.thereafterF { _ =>
@@ -455,22 +491,35 @@ object AkkaUtil extends HasLoggerName {
     * and injects the created kill switch into the stream
     */
   def withUniqueKillSwitch[A, Mat, Mat2](
-      source: Source[A, Mat]
-  )(mat: (Mat, UniqueKillSwitch) => Mat2): Source[WithKillSwitch[A], Mat2] = {
+      graph: FlowOpsMat[A, Mat]
+  )(mat: (Mat, UniqueKillSwitch) => Mat2): graph.ReprMat[WithKillSwitch[A], Mat2] = {
     import syntax.*
-    source
+    graph
       .withMaterializedValueMat(new AtomicReference[UniqueKillSwitch])(Keep.both)
       .viaMat(KillSwitches.single) { case ((m, ref), killSwitch) =>
         ref.set(killSwitch)
         mat(m, killSwitch)
       }
-      .map { case (a, ref) => WithKillSwitch(a, ref.get()) }
+      .map { case (a, ref) => WithKillSwitch(a)(ref.get()) }
   }
 
-  private[util] def withMaterializedValueMat[M, A, Mat, Mat2](create: => M)(source: Source[A, Mat])(
-      combine: (Mat, M) => Mat2
-  ): Source[(A, M), Mat2] =
-    source.viaMat(new WithMaterializedValue[M, A](() => create))(combine)
+  def injectKillSwitch[A, Mat](
+      graph: FlowOpsMat[A, Mat]
+  )(killSwitch: Mat => KillSwitch): graph.ReprMat[WithKillSwitch[A], Mat] = {
+    import syntax.*
+    graph
+      .withMaterializedValueMat(new AtomicReference[KillSwitch])(Keep.both)
+      .mapMaterializedValue { case (mat, ref) =>
+        ref.set(killSwitch(mat))
+        mat
+      }
+      .map { case (a, ref) => WithKillSwitch(a)(ref.get()) }
+  }
+
+  private[util] def withMaterializedValueMat[M, A, Mat, Mat2](create: => M)(
+      graph: FlowOpsMat[A, Mat]
+  )(combine: (Mat, M) => Mat2): graph.ReprMat[(A, M), Mat2] =
+    graph.viaMat(new WithMaterializedValue[M, A](() => create))(combine)
 
   /** Creates a value upon materialization that is added to every element of the stream.
     *
@@ -501,11 +550,31 @@ object AkkaUtil extends HasLoggerName {
     }
   }
 
-  final case class WithKillSwitch[+A](private val value: A, killSwitch: KillSwitch) {
+  /** Container class for adding a [[akka.stream.KillSwitch]] to a single value.
+    * Two containers are equal if their contained values are equal.
+    *
+    * (Equality ignores the [[akka.stream.KillSwitch]]es because it is usually not very meaningful.
+    * The [[akka.stream.KillSwitch]] is therefore in the second argument list.)
+    */
+  final case class WithKillSwitch[+A](private val value: A)(val killSwitch: KillSwitch) {
     def unwrap: A = value
-    def map[B](f: A => B): WithKillSwitch[B] = WithKillSwitch(f(value), killSwitch)
+    def map[B](f: A => B): WithKillSwitch[B] = copy(f(value))
     def traverse[F[_], B](f: A => F[B])(implicit F: Functor[F]): F[WithKillSwitch[B]] =
-      F.map(f(value))(WithKillSwitch(_, killSwitch))
+      F.map(f(value))(copy)
+    def copy[B](value: B = this.value): WithKillSwitch[B] = WithKillSwitch(value)(killSwitch)
+  }
+  object WithKillSwitch {
+    implicit val traverseWithKillSwitch: Traverse[WithKillSwitch] = new Traverse[WithKillSwitch] {
+      override def traverse[F[_], A, B](fa: WithKillSwitch[A])(f: A => F[B])(implicit
+          F: Applicative[F]
+      ): F[WithKillSwitch[B]] = fa.traverse(f)
+
+      override def foldLeft[A, B](fa: WithKillSwitch[A], b: B)(f: (B, A) => B): B = f(b, fa.unwrap)
+
+      override def foldRight[A, B](fa: WithKillSwitch[A], lb: Eval[B])(
+          f: (A, Eval[B]) => Eval[B]
+      ): Eval[B] = f(fa.unwrap, lb)
+    }
   }
 
   /** Passes through all elements of the source until and including the first element that satisfies the condition.
@@ -520,10 +589,10 @@ object AkkaUtil extends HasLoggerName {
     * '''Cancels when''' downstream cancels
     */
   def takeUntilThenDrain[A, Mat](
-      source: Source[WithKillSwitch[A], Mat],
+      graph: FlowOps[WithKillSwitch[A], Mat],
       condition: A => Boolean,
-  ): Source[WithKillSwitch[A], Mat] =
-    source.statefulMapConcat(() => {
+  ): graph.Repr[WithKillSwitch[A]] =
+    graph.statefulMapConcat(() => {
       @SuppressWarnings(Array("org.wartremover.warts.Var"))
       var draining = false
       elem => {
@@ -540,39 +609,83 @@ object AkkaUtil extends HasLoggerName {
 
   object syntax {
 
-    /** Defines extension methods for [[akka.stream.scaladsl.Source]] that map to the methods defined in this class */
-    implicit class AkkaUtilSyntaxForSource[A, Mat](private val source: Source[A, Mat])
+    /** Defines extension methods for [[akka.stream.scaladsl.FlowOpsMat]] that map to the methods defined in this class.
+      *
+      * The construction with type parameter `U` follows
+      * <a href="https://typelevel.org/blog/2017/03/01/four-ways-to-escape-a-cake.html">Stephen's blog post about relatable variables</a>
+      * to ensure that we can uniformly abstract over [[akka.stream.scaladsl.Source]]s and [[akka.stream.scaladsl.Flow]]s.
+      * In particular, we cannot use an implicit class here. Unlike in the blog post, the implicit conversion [[akkaUtilSyntaxForFlowOps]]
+      * does not extract [[akka.stream.scaladsl.FlowOpsMat]] into a separate type parameter because this would confuse
+      * type inference.
+      */
+    private[util] class AkkaUtilSyntaxForFlowOps[A, Mat, U <: FlowOps[A, Mat]](private val graph: U)
         extends AnyVal {
+      def remember(window: NonNegativeInt): U#Repr[NonEmpty[Seq[A]]] =
+        AkkaUtil.remember(graph, window)
+
       def statefulMapAsync[S, T](initial: S)(
           f: (S, A) => Future[(S, T)]
-      )(implicit loggingContext: NamedLoggingContext): Source[T, Mat] =
-        AkkaUtil.statefulMapAsync(source, initial)(f)
+      )(implicit loggingContext: NamedLoggingContext): U#Repr[T] =
+        AkkaUtil.statefulMapAsync(graph, initial)(f)
 
       def mapAsyncUS[B](parallelism: Int)(f: A => FutureUnlessShutdown[B])(implicit
           loggingContext: NamedLoggingContext
-      ): Source[UnlessShutdown[B], Mat] =
-        AkkaUtil.mapAsyncUS(source, parallelism)(f)
+      ): U#Repr[UnlessShutdown[B]] =
+        AkkaUtil.mapAsyncUS(graph, parallelism)(f)
 
       def mapAsyncAndDrainUS[B](parallelism: Int)(
           f: A => FutureUnlessShutdown[B]
-      )(implicit loggingContext: NamedLoggingContext): Source[B, Mat] =
-        AkkaUtil.mapAsyncAndDrainUS(source, parallelism)(f)
+      )(implicit loggingContext: NamedLoggingContext): U#Repr[B] =
+        AkkaUtil.mapAsyncAndDrainUS(graph, parallelism)(f)
+    }
+    implicit def akkaUtilSyntaxForFlowOps[A, Mat](
+        graph: FlowOps[A, Mat]
+    ): AkkaUtilSyntaxForFlowOps[A, Mat, graph.type] =
+      new AkkaUtilSyntaxForFlowOps(graph)
+
+    private[util] class AkkaUtilSyntaxForFLowOpsWithKillSwitch[
+        A,
+        Mat,
+        U <: FlowOps[WithKillSwitch[A], Mat],
+    ](private val graph: U)
+        extends AnyVal {
+      def takeUntilThenDrain(condition: A => Boolean): U#Repr[WithKillSwitch[A]] =
+        AkkaUtil.takeUntilThenDrain(graph, condition)
+    }
+    implicit def akkaUtilSyntaxForFlowOpsWithKillSwitch[A, Mat](
+        graph: FlowOps[WithKillSwitch[A], Mat]
+    ): AkkaUtilSyntaxForFLowOpsWithKillSwitch[A, Mat, graph.type] =
+      new AkkaUtilSyntaxForFLowOpsWithKillSwitch(graph)
+
+    /** Defines extension methods for [[akka.stream.scaladsl.FlowOpsMat]] that map to the methods defined in this class.
+      *
+      * The construction with type parameter `U` follows
+      * <a href="https://typelevel.org/blog/2017/03/01/four-ways-to-escape-a-cake.html">Stephen's blog post about relatable variables</a>
+      * to ensure that we can uniformly abstract over [[akka.stream.scaladsl.Source]]s and [[akka.stream.scaladsl.Flow]]s.
+      * In particular, we cannot use an implicit class here. Unlike in the blog post, the implicit conversion [[akkaUtilSyntaxForFlowOpsMat]]
+      * does not extract [[akka.stream.scaladsl.FlowOpsMat]] into a separate type parameter because this would confuse
+      * type inference.
+      */
+    private[util] class AkkaUtilSyntaxForFlowOpsMat[A, Mat, U <: FlowOpsMat[A, Mat]](
+        private val graph: U
+    ) extends AnyVal {
 
       private[util] def withMaterializedValueMat[M, Mat2](create: => M)(
           mat: (Mat, M) => Mat2
-      ): Source[(A, M), Mat2] =
-        AkkaUtil.withMaterializedValueMat(create)(source)(mat)
+      ): U#ReprMat[(A, M), Mat2] =
+        AkkaUtil.withMaterializedValueMat(create)(graph)(mat)
 
       def withUniqueKillSwitchMat[Mat2](
-      )(mat: (Mat, UniqueKillSwitch) => Mat2): Source[WithKillSwitch[A], Mat2] =
-        AkkaUtil.withUniqueKillSwitch(source)(mat)
+      )(mat: (Mat, UniqueKillSwitch) => Mat2): U#ReprMat[WithKillSwitch[A], Mat2] =
+        AkkaUtil.withUniqueKillSwitch(graph)(mat)
+
+      def injectKillSwitch(killSwitch: Mat => KillSwitch): U#ReprMat[WithKillSwitch[A], Mat] =
+        AkkaUtil.injectKillSwitch(graph)(killSwitch)
     }
 
-    implicit class AkkaUtilSyntaxForSourceWithKillSwitch[A, Mat](
-        private val source: Source[WithKillSwitch[A], Mat]
-    ) extends AnyVal {
-      def takeUntilThenDrain(condition: A => Boolean): Source[WithKillSwitch[A], Mat] =
-        AkkaUtil.takeUntilThenDrain(source, condition)
-    }
+    implicit def akkaUtilSyntaxForFlowOpsMat[A, Mat](
+        graph: FlowOpsMat[A, Mat]
+    ): AkkaUtilSyntaxForFlowOpsMat[A, Mat, graph.type] =
+      new AkkaUtilSyntaxForFlowOpsMat(graph)
   }
 }

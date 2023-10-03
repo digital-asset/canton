@@ -195,8 +195,7 @@ final case class DeliverErrorStoreEvent(
 object DeliverErrorStoreEvent {
   def serializeError(error: SequencerDeliverError, protocolVersion: ProtocolVersion): String256M = {
     String256M(
-      // TODO(#12373) Adapt when releasing BFT
-      if (protocolVersion >= ProtocolVersion.dev) {
+      if (protocolVersion >= ProtocolVersion.CNTestNet) {
         Base64.getUrlEncoder.encodeToString(
           VersionedStatus
             .create(error.rpcStatusWithoutLoggingContext(), protocolVersion)
@@ -213,8 +212,7 @@ object DeliverErrorStoreEvent {
       serializedError: String256M,
       protocolVersion: ProtocolVersion,
   ): ParsingResult[Status] = {
-    // TODO(#12373) Adapt when releasing BFT
-    if (protocolVersion >= ProtocolVersion.dev) {
+    if (protocolVersion >= ProtocolVersion.CNTestNet) {
       VersionedStatus
         .fromByteArray(Base64.getDecoder.decode(serializedError.unwrap))
         .map(_.status)

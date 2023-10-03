@@ -97,7 +97,9 @@ class DomainOutboxTest extends AsyncWordSpec with BaseTest {
       expectI: Int,
       response: State = State.Accepted,
       store: TopologyStore[TopologyStoreId],
-  ) extends RegisterTopologyTransactionHandleCommon[SignedTopologyTransaction[TopologyChangeOp]] {
+  ) extends RegisterTopologyTransactionHandleCommon[SignedTopologyTransaction[
+        TopologyChangeOp
+      ], RegisterTopologyTransactionResponseResult.State] {
     val buffer = ListBuffer[SignedTopologyTransaction[TopologyChangeOp]]()
     val promise = new AtomicReference[Promise[Unit]](Promise[Unit]())
     val expect = new AtomicInteger(expectI)
@@ -157,7 +159,9 @@ class DomainOutboxTest extends AsyncWordSpec with BaseTest {
 
   private def outboxConnected(
       manager: ParticipantTopologyManager,
-      handle: RegisterTopologyTransactionHandleCommon[SignedTopologyTransaction[TopologyChangeOp]],
+      handle: RegisterTopologyTransactionHandleCommon[SignedTopologyTransaction[
+        TopologyChangeOp
+      ], RegisterTopologyTransactionResponseResult.State],
       client: DomainTopologyClientWithInit,
       source: TopologyStore[TopologyStoreId.AuthorizedStore],
       target: TopologyStore[TopologyStoreId.DomainStore],

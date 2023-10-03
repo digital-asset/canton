@@ -20,46 +20,37 @@ object UpstreamOffsetConvert {
   private val versionUpstreamOffsetsAsLong: Byte = 0
   private val longBasedByteLength: Int = 9 // One byte for the version plus 8 bytes for Long
 
-  def fromGlobalOffset(offset: GlobalOffset): LedgerSyncOffset = {
-    // Ensure we don't get negative values as the 2s-complement of Long/math.BigInt would violate lexicographic
-    // ordering required upstream.
-    if (offset <= 0L) {
-      throw new IllegalArgumentException(s"Offset has to be positive and not $offset")
-    }
+  def fromGlobalOffset(offset: GlobalOffset): LedgerSyncOffset =
+    fromGlobalOffset(offset.toLong)
 
-    LedgerSyncOffset(
-      LfBytes.fromByteString(
-        ByteString.copyFrom(
-          ByteBuffer
-            .allocate(longBasedByteLength)
-            .order(ByteOrder.BIG_ENDIAN)
-            .put(0, versionUpstreamOffsetsAsLong)
-            .putLong(1, offset)
-        )
+  def fromGlobalOffset(i: Long) = LedgerSyncOffset(
+    LfBytes.fromByteString(
+      ByteString.copyFrom(
+        ByteBuffer
+          .allocate(longBasedByteLength)
+          .order(ByteOrder.BIG_ENDIAN)
+          .put(0, versionUpstreamOffsetsAsLong)
+          .putLong(1, i)
       )
     )
-  }
+  )
 
   def toGlobalOffset(offset: LedgerSyncOffset): Either[String, GlobalOffset] = {
     val bytes = offset.bytes.toByteArray
     if (bytes.lengthCompare(longBasedByteLength) != 0) {
       if (offset == LedgerSyncOffset.beforeBegin) {
-        Right(0L)
+        Left(s"Invalid canton offset: before ledger begin is not allowed")
       } else {
-        Left(s"Invalid canton offset length: Expected $longBasedByteLength, actual ${bytes.length}")
+        Left(s"Invalid canton offset length: expected $longBasedByteLength, actual ${bytes.length}")
       }
     } else if (!bytes.headOption.contains(versionUpstreamOffsetsAsLong)) {
       Left(
         s"Unknown canton offset version: Expected $versionUpstreamOffsetsAsLong, actual ${bytes.headOption}"
       )
     } else {
-      val offset =
-        ByteBuffer.wrap(bytes).getLong(1) // does not throw as size check has been performed earlier
-      if (offset <= 0L) {
-        Left(s"Canton offsets need to be positive and not $offset")
-      } else {
-        Right(offset)
-      }
+      val rawOffset = ByteBuffer.wrap(bytes).getLong(1)
+
+      GlobalOffset.fromLong(rawOffset)
     }
   }
 
@@ -90,5 +81,4 @@ object UpstreamOffsetConvert {
     ledgerSyncOffset <- toLedgerSyncOffset(ledgerOffset)
     globalOffset <- toGlobalOffset(ledgerSyncOffset)
   } yield globalOffset
-
 }

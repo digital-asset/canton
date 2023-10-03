@@ -38,9 +38,9 @@ import scala.math.Ordered.orderingToOrdered
 /** @param timestampOfSigningKey The timestamp of the topology snapshot that was used for signing the content.
   *                              [[scala.None$]] if the signing timestamp can be derived from the content.
   * @param signatures            Signatures of the content provided by the different sequencers. For protocol versions
-  *                              before [[com.digitalasset.canton.version.ProtocolVersion.dev]] must not look at signatures except for the last one.
+  *                              before [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]] must not look at signatures except for the last one.
   */
-// TODO(#12373) Adapt comment regarding PV=dev when releasing BFT
+// TODO(#12373) Adapt comment regarding PV=CNTestNet when releasing BFT
 final case class SignedContent[+A <: HasCryptographicEvidence] private (
     content: A,
     signatures: NonEmpty[Seq[Signature]],
@@ -118,16 +118,14 @@ object SignedContent
       supportedProtoVersion(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    // TODO(#12373) Adapt when releasing BFT
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.dev)(v1.SignedContent)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.CNTestNet)(v1.SignedContent)(
       supportedProtoVersion(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
   )
 
-  // TODO(#12373) Adapt when releasing BFT
   val multipleSignaturesSupportedSince: RepresentativeProtocolVersion[SignedContent.type] =
-    protocolVersionRepresentativeFor(ProtocolVersion.dev)
+    protocolVersionRepresentativeFor(ProtocolVersion.CNTestNet)
 
   // TODO(i12076): Start using multiple signatures
   def apply[A <: HasCryptographicEvidence](
@@ -203,11 +201,11 @@ object SignedContent
   }
 
   def hashContent(
-      cryptoApi: CryptoPureApi,
+      hashOps: HashOps,
       content: HasCryptographicEvidence,
       purpose: HashPurpose,
   ): Hash =
-    cryptoApi.digest(purpose, content.getCryptographicEvidence)
+    hashOps.digest(purpose, content.getCryptographicEvidence)
 
   def tryCreate[A <: HasCryptographicEvidence](
       cryptoApi: CryptoPureApi,

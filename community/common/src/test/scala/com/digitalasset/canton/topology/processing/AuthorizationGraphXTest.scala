@@ -70,8 +70,7 @@ class AuthorizationGraphXTest
     graph.areValidAuthorizationKeys(Set(key.fingerprint), requireRoot = requireRoot) shouldBe valid
   }
 
-  // TODO(#12373) Adapt when releasing BFT
-  "authorization graph" onlyRunWithOrGreaterThan ProtocolVersion.dev when {
+  "authorization graph" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet when {
     import fixture.*
     import fixture.factory.SigningKeys.*
 

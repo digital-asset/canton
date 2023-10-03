@@ -148,14 +148,14 @@ class TransferOutValidationTest
       res <- validation.failOnShutdown
       // leftOrFailShutdown("couldn't get left from transfer out validation")
     } yield {
-      if (sourcePV.v < ProtocolVersion.dev) {
+      if (sourcePV.v < ProtocolVersion.CNTestNet) {
         res shouldBe Right(())
       } else res shouldBe Left(TemplateIdMismatch(wrongTemplateId.leftSide, templateId.leftSide))
     }
   }
 
   "disallow transfers between domains with incompatible protocol versions" in {
-    val newSourcePV = SourceProtocolVersion(ProtocolVersion.dev)
+    val newSourcePV = SourceProtocolVersion(ProtocolVersion.CNTestNet)
     val transferCounter = TransferCounter.forCreatedContract(newSourcePV.v)
     val validation = mkTransferOutValidation(
       stakeholders,

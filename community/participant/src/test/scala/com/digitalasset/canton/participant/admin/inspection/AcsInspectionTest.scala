@@ -203,9 +203,10 @@ object AcsInspectionTest extends MockitoSugar with ArgumentMatchersSugar {
     TraceContext.withNewTraceContext { implicit tc =>
       val builder = Vector.newBuilder[SerializableContract]
       AcsInspection
-        .forEachVisibleActiveContract(FakeDomainId, state, parties, timestamp = None) { contract =>
-          builder += contract
-          Right(())
+        .forEachVisibleActiveContract(FakeDomainId, state, parties, timestamp = None) {
+          case (contract, _) =>
+            builder += contract
+            Right(())
         }
         .map(_ => builder.result())
         .value

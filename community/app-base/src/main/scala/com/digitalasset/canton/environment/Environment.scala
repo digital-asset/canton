@@ -174,7 +174,9 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
     Threading.newExecutionContext(
       loggerFactory.threadName + "-env-execution-context",
       noTracingLogger,
-      metricsFactory.executionServiceMetrics,
+      Option.when(config.monitoring.metrics.reportExecutionContextMetrics)(
+        metricsFactory.executionServiceMetrics
+      ),
       numThreads,
     )
 

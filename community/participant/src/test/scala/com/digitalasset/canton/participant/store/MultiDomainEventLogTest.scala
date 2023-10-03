@@ -53,6 +53,7 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.*
 import scala.concurrent.{Future, blocking}
+import scala.language.implicitConversions
 
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
 trait MultiDomainEventLogTest
@@ -60,6 +61,9 @@ trait MultiDomainEventLogTest
     with BaseTest
     with HasExecutionContext
     with BeforeAndAfterAll {
+
+  private implicit def toGlobalOffset(i: Long): GlobalOffset = GlobalOffset.tryFromLong(i)
+  private implicit def toLocalOffset(i: Long): LocalOffset = LocalOffset(i)
 
   protected lazy val indexedStringStore: InMemoryIndexedStringStore =
     DbEventLogTestResources.dbMultiDomainEventLogTestIndexedStringStore
@@ -78,7 +82,8 @@ trait MultiDomainEventLogTest
 
   protected def transferStores: Map[TargetDomainId, TransferStore]
 
-  private def timestampAtRc(rc: Long): CantonTimestamp = CantonTimestamp.assertFromLong(rc * 1000)
+  private def timestampAtOffset(offset: LocalOffset): CantonTimestamp =
+    CantonTimestamp.assertFromLong(offset.unwrap * 1000)
 
   private def timestampedEvent(
       eventLogIndex: Int,
@@ -86,7 +91,7 @@ trait MultiDomainEventLogTest
       maybeEventId: Option[EventId] = None,
   ): TimestampedEvent =
     TimestampedEvent(
-      DefaultLedgerSyncEvent.dummyStateUpdate(timestampAtRc(localOffset)),
+      DefaultLedgerSyncEvent.dummyStateUpdate(timestampAtOffset(localOffset)),
       localOffset,
       None,
       Some(
@@ -334,12 +339,10 @@ trait MultiDomainEventLogTest
 
       storedOffsets.toSet should have size storedOffsets.size.toLong
 
-      if (!upToInclusive.exists(_ <= 0L)) {
-        val firstOffset = eventLog.locateOffset(0).value.futureValue
-        firstOffset shouldBe storedOffsets.headOption
-        val lastOffset = eventLog.locateOffset(storedOffsets.size.toLong - 1L).value.futureValue
-        lastOffset shouldBe storedOffsets.lastOption
-      }
+      val firstOffset = eventLog.locateOffset(0).value.futureValue
+      firstOffset shouldBe storedOffsets.headOption
+      val lastOffset = eventLog.locateOffset(storedOffsets.size.toLong - 1L).value.futureValue
+      lastOffset shouldBe storedOffsets.lastOption
     }
 
     def checkOffsetByTime(
@@ -384,8 +387,6 @@ trait MultiDomainEventLogTest
           None,
           Some(42),
           Some(MultiDomainEventLog.ledgerFirstOffset),
-          Some(-42),
-          Some(Long.MinValue),
           Some(Long.MaxValue),
         )
         lazy val bounds = optionalBounds.collect { case Some(x) => x }
@@ -484,7 +485,7 @@ trait MultiDomainEventLogTest
               initialTestEvents,
             ),
             "after last offset" -> subscribeAndCheckEvents(
-              globalOffsets.lastOption.map(_ + 1),
+              globalOffsets.lastOption.map(_.increment),
               Seq.empty,
             ),
             "max value" -> subscribeAndCheckEvents(Some(Long.MaxValue), Seq.empty),
@@ -506,9 +507,6 @@ trait MultiDomainEventLogTest
           forEvery(globalOffsets.zipWithIndex) { case (upToInclusive, index) =>
             lookupEventRangeAndCheckEvents(Some(upToInclusive), initialTestEvents.take(index + 1))
           }
-
-          lookupEventRangeAndCheckEvents(Some(MultiDomainEventLog.ledgerFirstOffset - 1), Seq.empty)
-          lookupEventRangeAndCheckEvents(Some(Long.MinValue), Seq.empty)
 
           lookupEventRangeAndCheckEvents(None, initialTestEvents)
           lookupEventRangeAndCheckEvents(Some(Long.MaxValue), initialTestEvents)
@@ -535,22 +533,6 @@ trait MultiDomainEventLogTest
 
           eventLog
             .lastDomainOffsetsBeforeOrAtGlobalOffset(
-              Long.MinValue,
-              domainIds,
-              participantEventLogId,
-            )
-            .futureValue shouldBe ((Map.empty, None))
-          eventLog
-            .lastDomainOffsetsBeforeOrAtGlobalOffset(
-              MultiDomainEventLog.ledgerFirstOffset - 1,
-              domainIds,
-              participantEventLogId,
-            )
-            .futureValue shouldBe
-            ((Map.empty, None))
-
-          eventLog
-            .lastDomainOffsetsBeforeOrAtGlobalOffset(
               Long.MaxValue,
               domainIds,
               participantEventLogId,
@@ -569,7 +551,7 @@ trait MultiDomainEventLogTest
             )
             .futureValue shouldBe
             ((lastOffsetOfFirstDomain, lastParticipantOffset))
-          forEvery(eventLogIds.toSeq.collect { case eventLogId @ DomainEventLogId(domainId) =>
+          forEvery(eventLogIds.collect { case eventLogId @ DomainEventLogId(domainId) =>
             eventLogId -> domainId
           }) { case (eventLogId, domainId) =>
             eventLog.lastLocalOffset(eventLogId).futureValue shouldBe lastDomainOffsets.get(
@@ -584,9 +566,6 @@ trait MultiDomainEventLogTest
             eventLog.lastGlobalOffset(Some(globalOffset)).value.futureValue shouldBe Some(
               globalOffset
             )
-          }
-          globalOffsets.headOption.foreach { firstGlobalOffset =>
-            eventLog.lastGlobalOffset(Some(firstGlobalOffset - 1L)).value.futureValue shouldBe None
           }
         }
 

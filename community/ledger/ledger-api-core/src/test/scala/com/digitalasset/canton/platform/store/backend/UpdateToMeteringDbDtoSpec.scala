@@ -12,12 +12,12 @@ import com.daml.lf.transaction.{
   TransactionVersion,
   VersionedTransaction,
 }
-import com.daml.metrics.IndexedUpdatesMetrics
 import com.daml.metrics.api.testing.{InMemoryMetricsFactory, MetricValues}
 import com.daml.metrics.api.{MetricName, MetricsContext}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.Update
 import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.metrics.IndexedUpdatesMetrics
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import org.scalatest.wordspec.AnyWordSpec
 

@@ -4,8 +4,8 @@
 package com.digitalasset.canton.platform
 
 import com.daml.ledger.resources.ResourceOwner
-import com.daml.metrics.Metrics
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.config.IndexServiceConfig
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater
 import com.digitalasset.canton.tracing.TraceContext

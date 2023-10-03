@@ -3,28 +3,33 @@
 
 package com.digitalasset.canton.participant.ledger.api.client
 
-import akka.actor.ActorSystem
-import akka.stream.Materializer
-import akka.stream.scaladsl.Flow
 import com.daml.error.{ErrorCategory, ErrorClass, ErrorCode}
+import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
+import com.daml.ledger.api.v1.command_service.{
+  SubmitAndWaitForTransactionIdResponse,
+  SubmitAndWaitRequest,
+}
 import com.daml.ledger.api.v1.commands.Commands
-import com.daml.ledger.api.v1.completion.Completion
-import com.daml.util.Ctx
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
-import com.digitalasset.canton.ledger.client.services.commands.CommandSubmission
-import com.digitalasset.canton.participant.ledger.api.client.CommandSubmitterWithRetry.CommandsCtx
+import com.digitalasset.canton.ledger.client.services.commands.SynchronousCommandClient
 import com.google.rpc.code.Code
 import com.google.rpc.status.Status
+import io.grpc.protobuf.StatusProto
 import org.scalatest.*
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 
-import scala.concurrent.Await
-import scala.concurrent.duration.*
+import scala.concurrent.Future
+import scala.concurrent.duration.Duration
 
 @SuppressWarnings(Array("org.wartremover.warts.Var", "org.wartremover.warts.Null"))
-class CommandSubmitterWithRetryTest extends FixtureAsyncWordSpec with BaseTest {
+class CommandSubmitterWithRetryTest
+    extends FixtureAsyncWordSpec
+    with BaseTest
+    with AkkaBeforeAndAfterAll {
   private val maxRetries = 10
+  private val timeout = Duration.fromNanos(1337L)
   private val commands = Commands(
     ledgerId = "ledgerId",
     workflowId = "workflowId",
@@ -35,25 +40,40 @@ class CommandSubmitterWithRetryTest extends FixtureAsyncWordSpec with BaseTest {
   )
 
   final class Fixture {
-    implicit val system: ActorSystem = ActorSystem(
-      classOf[CommandSubmitterWithRetryTest].getSimpleName
-    )
-    implicit val materializer: Materializer = Materializer(system)
     private var sut: CommandSubmitterWithRetry = _
 
-    def createSut(completion: => Completion): CommandSubmitterWithRetry = {
-      val flow = Flow[Ctx[CommandsCtx, CommandSubmission]]
-        .map[Ctx[CommandsCtx, Completion]](ctx => Ctx(ctx.context, completion))
-      sut =
-        new CommandSubmitterWithRetry(10, flow, DefaultProcessingTimeouts.testing, loggerFactory)
-      sut
+    def runTest(
+        expectedCommands: Commands,
+        result: Future[Either[Status, String]],
+    )(
+        test: (CommandSubmitterWithRetry, SynchronousCommandClient) => Future[Assertion]
+    ): Future[Assertion] = {
+      val synchronousCommandClient = mock[SynchronousCommandClient]
+      val request = SubmitAndWaitRequest(Some(expectedCommands))
+      when(synchronousCommandClient.submitAndWaitForTransactionId(request, None, Some(timeout)))
+        .thenReturn(
+          result.flatMap(
+            _.fold(
+              nonZeroStatus =>
+                Future.failed(
+                  StatusProto.toStatusRuntimeException(Status.toJavaProto(nonZeroStatus))
+                ),
+              tId => Future.successful(SubmitAndWaitForTransactionIdResponse(transactionId = tId)),
+            )
+          )
+        )
+      sut = new CommandSubmitterWithRetry(
+        10,
+        synchronousCommandClient,
+        FutureSupervisor.Noop,
+        DefaultProcessingTimeouts.testing,
+        loggerFactory,
+      )
+
+      test(sut, synchronousCommandClient)
     }
 
-    def close(): Unit = {
-      sut.close()
-      materializer.shutdown()
-      Await.result(system.terminate(), 10.seconds)
-    }
+    def close(): Unit = sut.close()
   }
 
   override type FixtureParam = Fixture
@@ -69,72 +89,64 @@ class CommandSubmitterWithRetryTest extends FixtureAsyncWordSpec with BaseTest {
   }
 
   "CommandSubmitterWithRetry" should {
+    val transactionId = "txId"
     "complete successfully" in { f =>
-      val completion = Completion("commandId", Some(Status(Code.OK.value, "all good", Nil)), "txId")
-      val sut = f.createSut(completion)
-      for {
-        result <- sut.submitCommands(commands)
-      } yield result shouldBe CommandSubmitterWithRetry.Success(completion)
+      f.runTest(commands, Future.successful(Right(transactionId))) { (sut, _) =>
+        for {
+          result <- sut.submitCommands(commands, timeout)
+        } yield result shouldBe CommandResult.Success(transactionId)
+      }
     }
 
     "complete with failure" in { f =>
-      val completion =
-        Completion(
-          "commandId",
-          Some(Status(Code.FAILED_PRECONDITION.value, "oh no man", Nil)),
-          "txId",
-        )
-      val sut = f.createSut(completion)
-      for {
-        result <- sut.submitCommands(commands)
-      } yield result shouldBe CommandSubmitterWithRetry.Failed(completion)
+      val errorStatus = Status(Code.FAILED_PRECONDITION.value, "oh no man", Nil)
+      f.runTest(commands, Future.successful(Left(errorStatus))) { (sut, _) =>
+        for {
+          result <- sut.submitCommands(commands, timeout)
+        } yield result shouldBe CommandResult.Failed(commands.commandId, errorStatus)
+      }
     }
 
     "retry on timeouts at most given maxRetries" in { f =>
-      var timesCalled = 0
       val code =
         new ErrorCode(id = "TIMEOUT", ErrorCategory.ContentionOnSharedResources)(
           new ErrorClass(Nil)
         ) {
           override def errorConveyanceDocString: Option[String] = None
         }
-      val completion =
-        Completion(
-          "commandId",
-          Some(Status(Code.ABORTED.value, code.toMsg(s"now try that", None), Nil)),
-          "txId",
-        )
-      val sut = f.createSut({
-        timesCalled = timesCalled + 1
-        completion
-      })
-      loggerFactory.suppressWarningsAndErrors {
-        for {
-          result <- sut.submitCommands(commands)
-        } yield {
-          result shouldBe CommandSubmitterWithRetry.MaxRetriesReached(completion)
-          timesCalled shouldBe maxRetries + 1
+      val errorStatus = Status(Code.ABORTED.value, code.toMsg(s"now try that", None), Nil)
+
+      f.runTest(commands, Future.successful(Left(errorStatus))) { (sut, commandClient) =>
+        loggerFactory.suppressWarningsAndErrors {
+          for {
+            result <- sut.submitCommands(commands, timeout)
+          } yield {
+            verify(commandClient, times(maxRetries + 1))
+              .submitAndWaitForTransactionId(
+                SubmitAndWaitRequest(Some(commands)),
+                None,
+                Some(timeout),
+              )
+            result shouldBe CommandResult.MaxRetriesReached(commands.commandId, errorStatus)
+          }
         }
       }
     }
 
     "Gracefully reject commands submitted after closing" in { f =>
-      val sut = f.createSut(fail("The command should not be submitted."))
-      sut.close()
-      for {
-        result <- sut.submitCommands(commands)
-      } yield {
-        val status =
-          Status(
-            code = Code.UNAVAILABLE.value,
-            message = "Command rejected, as the participant is shutting down.",
-          )
-        val completion = Completion(commandId = commands.commandId, status = Some(status))
-
-        result shouldBe CommandSubmitterWithRetry.Failed(completion)
+      f.runTest(commands, Future.never) { (sut, _) =>
+        sut.close()
+        sut.submitCommands(commands, timeout).map(_ shouldBe CommandResult.AbortedDueToShutdown)
       }
     }
 
+    "Gracefully reject pending commands when closing" in { f =>
+      f.runTest(commands, Future.never) { (sut, _) =>
+        val result =
+          sut.submitCommands(commands, timeout).map(_ shouldBe CommandResult.AbortedDueToShutdown)
+        sut.close()
+        result
+      }
+    }
   }
-
 }

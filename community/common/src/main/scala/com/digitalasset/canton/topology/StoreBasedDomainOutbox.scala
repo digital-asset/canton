@@ -22,7 +22,10 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
   TracedLogger,
 }
-import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
+import com.digitalasset.canton.protocol.messages.{
+  RegisterTopologyTransactionResponseResult,
+  TopologyTransactionsBroadcastX,
+}
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, DomainTopologyClientWithInit}
@@ -55,7 +58,10 @@ class StoreBasedDomainOutbox(
     domainId: DomainId,
     memberId: Member,
     protocolVersion: ProtocolVersion,
-    val handle: RegisterTopologyTransactionHandleCommon[GenericSignedTopologyTransaction],
+    val handle: RegisterTopologyTransactionHandleCommon[
+      GenericSignedTopologyTransaction,
+      RegisterTopologyTransactionResponseResult.State,
+    ],
     targetClient: DomainTopologyClientWithInit,
     val authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
     val targetStore: TopologyStore[TopologyStoreId.DomainStore],
@@ -67,7 +73,11 @@ class StoreBasedDomainOutbox(
 )(implicit ec: ExecutionContext)
     extends StoreBasedDomainOutboxCommon[
       GenericSignedTopologyTransaction,
-      RegisterTopologyTransactionHandleCommon[GenericSignedTopologyTransaction],
+      RegisterTopologyTransactionResponseResult.State,
+      RegisterTopologyTransactionHandleCommon[
+        GenericSignedTopologyTransaction,
+        RegisterTopologyTransactionResponseResult.State,
+      ],
       TopologyStore[TopologyStoreId.DomainStore],
     ](
       domain,
@@ -118,7 +128,10 @@ class StoreBasedDomainOutboxX(
     domainId: DomainId,
     memberId: Member,
     protocolVersion: ProtocolVersion,
-    val handle: RegisterTopologyTransactionHandleCommon[GenericSignedTopologyTransactionX],
+    val handle: RegisterTopologyTransactionHandleCommon[
+      GenericSignedTopologyTransactionX,
+      TopologyTransactionsBroadcastX.State,
+    ],
     targetClient: DomainTopologyClientWithInit,
     val authorizedStore: TopologyStoreX[TopologyStoreId.AuthorizedStore],
     val targetStore: TopologyStoreX[TopologyStoreId.DomainStore],
@@ -130,7 +143,11 @@ class StoreBasedDomainOutboxX(
 )(implicit ec: ExecutionContext)
     extends StoreBasedDomainOutboxCommon[
       GenericSignedTopologyTransactionX,
-      RegisterTopologyTransactionHandleCommon[GenericSignedTopologyTransactionX],
+      TopologyTransactionsBroadcastX.State,
+      RegisterTopologyTransactionHandleCommon[
+        GenericSignedTopologyTransactionX,
+        TopologyTransactionsBroadcastX.State,
+      ],
       TopologyStoreX[TopologyStoreId.DomainStore],
     ](
       domain,
@@ -198,7 +215,8 @@ abstract class DomainOutboxCommon extends DomainOutboxHandle {
 
 abstract class StoreBasedDomainOutboxCommon[
     TX,
-    +H <: RegisterTopologyTransactionHandleCommon[TX],
+    State,
+    +H <: RegisterTopologyTransactionHandleCommon[TX, State],
     +DTS <: TopologyStoreCommon[TopologyStoreId.DomainStore, ?, ?, TX],
 ](
     domain: DomainAlias,
@@ -212,7 +230,8 @@ abstract class StoreBasedDomainOutboxCommon[
     syncTransactionAfterDispatch: Boolean,
 )(implicit val ec: ExecutionContext)
     extends DomainOutboxCommon
-    with DomainOutboxDispatch[TX, H, DTS] {
+    with DomainOutboxDispatch[TX, State, H, DTS] {
+  this: DomainOutboxDispatchStoreSpecific[TX, State] =>
 
   def handle: H
   def targetStore: DTS
@@ -463,13 +482,11 @@ abstract class StoreBasedDomainOutboxCommon[
   private def updateWatermark(
       found: PendingTransactions[TX],
       applicable: Seq[TX],
-      responses: Seq[RegisterTopologyTransactionResponseResult.State],
+      responses: Seq[State],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val valid = applicable.zipWithIndex.zip(responses).foldLeft(true) {
       case (valid, ((item, idx), response)) =>
-        val expectedResult =
-          RegisterTopologyTransactionResponseResult.State.isExpectedState(response)
-        if (!expectedResult) {
+        if (!isExpectedState(response)) {
           logger.warn(
             s"Topology transaction ${topologyTransaction(item)} got ${response}. Will not update watermark."
           )

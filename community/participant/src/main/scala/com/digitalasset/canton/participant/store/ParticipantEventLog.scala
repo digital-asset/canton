@@ -52,7 +52,7 @@ trait ParticipantEventLog
 }
 
 object ParticipantEventLog {
-  val InitialLocalOffset: LocalOffset = 0L
+  val InitialLocalOffset: LocalOffset = LocalOffset.Genesis
 
   val ProductionParticipantEventLogId: ParticipantEventLogId = checked(
     ParticipantEventLogId.tryCreate(0)

@@ -191,7 +191,6 @@ private[transfer] class TransferInValidation(
 
           // Disallow reassignments from a source domains that support transfer counters to a
           // destination domain that does not support them
-          // TODO(#12373) Adapt when releasing BFT
           _ <- condUnitET[Future](
             !incompatibleProtocolVersionsBetweenSourceAndDestinationDomains(
               transferData.sourceProtocolVersion,
@@ -256,8 +255,8 @@ object TransferInValidation {
       sourceProtocolVersion: SourceProtocolVersion,
       targetProtocolVersion: TargetProtocolVersion,
   ): Boolean =
-    // TODO(#12373) Adapt when releasing BFT
-    sourceProtocolVersion.v < ProtocolVersion.dev && targetProtocolVersion.v >= ProtocolVersion.dev
+    // TODO(#12373) Review the question above when releasing BFT
+    sourceProtocolVersion.v < ProtocolVersion.CNTestNet && targetProtocolVersion.v >= ProtocolVersion.CNTestNet
 
   final case class TransferInValidationResult(confirmingParties: Set[LfPartyId])
 

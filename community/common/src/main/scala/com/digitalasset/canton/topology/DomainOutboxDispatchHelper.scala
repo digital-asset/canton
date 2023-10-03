@@ -16,7 +16,10 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.logging.pretty.PrettyPrinting
-import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
+import com.digitalasset.canton.protocol.messages.{
+  RegisterTopologyTransactionResponseResult,
+  TopologyTransactionsBroadcastX,
+}
 import com.digitalasset.canton.topology.store.{
   TopologyStore,
   TopologyStoreCommon,
@@ -39,7 +42,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 
-trait DomainOutboxDispatchStoreSpecific[TX] extends NamedLogging {
+trait DomainOutboxDispatchStoreSpecific[TX, State] extends NamedLogging {
   protected def domainId: DomainId
   protected def memberId: Member
   protected def protocolVersion: ProtocolVersion
@@ -57,11 +60,19 @@ trait DomainOutboxDispatchStoreSpecific[TX] extends NamedLogging {
   protected def convertTransactions(transactions: Seq[TX])(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
-  ): EitherT[Future, /*DomainRegistryError*/ String, Seq[TX]]
+  ): EitherT[Future, String, Seq[TX]]
+
+  protected def isFailedState(response: State): Boolean
+
+  protected def isExpectedState(state: State): Boolean
+
 }
 
 trait DomainOutboxDispatchHelperOld
-    extends DomainOutboxDispatchStoreSpecific[GenericSignedTopologyTransaction] {
+    extends DomainOutboxDispatchStoreSpecific[
+      GenericSignedTopologyTransaction,
+      RegisterTopologyTransactionResponseResult.State,
+    ] {
   def authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore]
 
   override protected def filterTransactions(
@@ -120,6 +131,19 @@ trait DomainOutboxDispatchHelperOld
       }
   }
 
+  override protected def isFailedState(
+      response: RegisterTopologyTransactionResponseResult.State
+  ): Boolean = response == RegisterTopologyTransactionResponseResult.State.Failed
+
+  override def isExpectedState(state: RegisterTopologyTransactionResponseResult.State): Boolean =
+    state match {
+      case RegisterTopologyTransactionResponseResult.State.Requested => false
+      case RegisterTopologyTransactionResponseResult.State.Failed => false
+      case RegisterTopologyTransactionResponseResult.State.Rejected => false
+      case RegisterTopologyTransactionResponseResult.State.Accepted => true
+      case RegisterTopologyTransactionResponseResult.State.Duplicate => true
+      case RegisterTopologyTransactionResponseResult.State.Obsolete => true
+    }
 }
 
 trait StoreBasedDomainOutboxDispatchHelperX extends DomainOutboxDispatchHelperX {
@@ -171,7 +195,10 @@ trait QueueBasedDomainOutboxDispatchHelperX extends DomainOutboxDispatchHelperX 
 }
 
 trait DomainOutboxDispatchHelperX
-    extends DomainOutboxDispatchStoreSpecific[GenericSignedTopologyTransactionX] {
+    extends DomainOutboxDispatchStoreSpecific[
+      GenericSignedTopologyTransactionX,
+      TopologyTransactionsBroadcastX.State,
+    ] {
 
   override protected def filterTransactions(
       transactions: Seq[GenericSignedTopologyTransactionX],
@@ -203,15 +230,24 @@ trait DomainOutboxDispatchHelperX
       transactions.filter(x => notAlien(x) && domainRestriction(x))
     )
   }
+
+  override protected def isFailedState(response: TopologyTransactionsBroadcastX.State): Boolean =
+    response == TopologyTransactionsBroadcastX.State.Failed
+
+  override def isExpectedState(state: TopologyTransactionsBroadcastX.State): Boolean = state match {
+    case TopologyTransactionsBroadcastX.State.Failed => false
+    case TopologyTransactionsBroadcastX.State.Accepted => true
+  }
+
 }
 
 trait DomainOutboxDispatch[
     TX,
-    +H <: RegisterTopologyTransactionHandleCommon[TX],
+    State,
+    +H <: RegisterTopologyTransactionHandleCommon[TX, State],
     +TS <: TopologyStoreCommon[TopologyStoreId.DomainStore, ?, ?, TX],
-] extends DomainOutboxDispatchStoreSpecific[TX]
-    with NamedLogging
-    with FlagCloseable {
+] extends NamedLogging
+    with FlagCloseable { this: DomainOutboxDispatchStoreSpecific[TX, State] =>
 
   protected def targetStore: TS
   protected def handle: H
@@ -240,54 +276,53 @@ trait DomainOutboxDispatch[
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, /*DomainRegistryError*/ String, Seq[
-    RegisterTopologyTransactionResponseResult.State
-  ]] = if (transactions.isEmpty) EitherT.rightT(Seq.empty)
-  else {
-    implicit val success = retry.Success.always
-    val ret = retry
-      .Backoff(
-        logger,
-        this,
-        timeouts.unbounded.retries(1.second),
-        1.second,
-        10.seconds,
-        "push topology transaction",
-      )
-      .unlessShutdown(
-        {
+  ): EitherT[FutureUnlessShutdown, String, Seq[State]] =
+    if (transactions.isEmpty) EitherT.rightT(Seq.empty)
+    else {
+      implicit val success = retry.Success.always
+      val ret = retry
+        .Backoff(
+          logger,
+          this,
+          timeouts.unbounded.retries(1.second),
+          1.second,
+          10.seconds,
+          "push topology transaction",
+        )
+        .unlessShutdown(
+          {
+            logger.debug(
+              s"Attempting to push ${transactions.size} topology transactions to $domain: $transactions"
+            )
+            FutureUtil.logOnFailureUnlessShutdown(
+              handle.submit(transactions),
+              s"Pushing topology transactions to $domain",
+            )
+          },
+          AllExnRetryable,
+        )
+        .map { responses =>
+          if (responses.length != transactions.length) {
+            logger.error(
+              s"Topology request contained ${transactions.length} txs, but I received responses for ${responses.length}"
+            )
+          }
           logger.debug(
-            s"Attempting to push ${transactions.size} topology transactions to $domain: $transactions"
+            s"$domain responded the following for the given topology transactions: $responses"
           )
-          FutureUtil.logOnFailureUnlessShutdown(
-            handle.submit(transactions),
-            s"Pushing topology transactions to $domain",
-          )
-        },
-        AllExnRetryable,
-      )
-      .map { responses =>
-        if (responses.length != transactions.length) {
-          logger.error(
-            s"Topology request contained ${transactions.length} txs, but I received responses for ${responses.length}"
+          val failedResponses =
+            responses.zip(transactions).collect {
+              case (response, tx) if isFailedState(response) => tx
+            }
+
+          Either.cond(
+            failedResponses.isEmpty,
+            responses,
+            s"The domain $domain failed the following topology transactions: $failedResponses",
           )
         }
-        logger.debug(
-          s"$domain responded the following for the given topology transactions: $responses"
-        )
-        val failedResponses =
-          responses.zip(transactions).collect {
-            case (RegisterTopologyTransactionResponseResult.State.Failed, tx) => tx
-          }
-
-        Either.cond(
-          failedResponses.isEmpty,
-          responses,
-          s"The domain $domain failed the following topology transactions: $failedResponses",
-        )
-      }
-    EitherT(
-      ret
-    ) // .leftMap(DomainRegistryError.DomainRegistryInternalError.InitialOnboardingError(_))
-  }
+      EitherT(
+        ret
+      )
+    }
 }

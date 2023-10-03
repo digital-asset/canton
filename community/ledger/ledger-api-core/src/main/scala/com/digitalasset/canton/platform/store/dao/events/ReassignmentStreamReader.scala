@@ -9,10 +9,11 @@ import akka.stream.scaladsl.Source
 import com.daml.ledger.api.v2.reassignment.Reassignment
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.Party
-import com.daml.metrics.{DatabaseMetrics, Metrics, Timed}
+import com.daml.metrics.{DatabaseMetrics, Timed}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.indexer.parallel.BatchN
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{

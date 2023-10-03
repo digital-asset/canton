@@ -19,6 +19,7 @@ import com.daml.ledger.api.v1.transaction.{Transaction, TransactionTree}
 import com.daml.ledger.api.v1.transaction_filter.{Filters, InclusiveFilters, TransactionFilter}
 import com.daml.ledger.api.v1.value.Identifier
 import com.daml.ledger.client.binding.Primitive as P
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{ClientConfig, ProcessingTimeout}
 import com.digitalasset.canton.ledger.client.LedgerClient
 import com.digitalasset.canton.ledger.client.configuration.{
@@ -27,7 +28,6 @@ import com.digitalasset.canton.ledger.client.configuration.{
   LedgerClientConfiguration,
   LedgerIdRequirement,
 }
-import com.digitalasset.canton.ledger.client.services.commands.tracker.CompletionResponse
 import com.digitalasset.canton.lifecycle.{
   AsyncCloseable,
   AsyncOrSyncCloseable,
@@ -40,15 +40,18 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.tracing.{TraceContext, TracerProvider}
 import com.digitalasset.canton.util.AkkaUtil
+import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.google.rpc.status.Status
 import io.grpc.StatusRuntimeException
-import io.opentelemetry.api.trace.Tracer
 import io.opentelemetry.instrumentation.grpc.v1_6.GrpcTracing
 import org.slf4j.event.Level
 import scalaz.syntax.tag.*
 
+import java.time.Duration
 import java.util.UUID
 import scala.concurrent.{ExecutionContextExecutor, Future}
+import scala.jdk.DurationConverters.*
 import scala.util.{Failure, Success}
 
 /** Extract from connection for only submitting functionality */
@@ -58,7 +61,8 @@ trait LedgerSubmit extends FlagCloseableAsync {
       commandId: Option[String] = None,
       workflowId: Option[WorkflowId] = None,
       deduplicationTime: Option[NonNegativeFiniteDuration] = None,
-  )(implicit traceContext: TraceContext): Future[CommandSubmitterWithRetry.CommandResult]
+      timeout: Option[Duration] = None,
+  )(implicit traceContext: TraceContext): Future[CommandResult]
 
   def submitAsync(
       commands: Seq[Command],
@@ -167,26 +171,17 @@ object LedgerConnection {
       processingTimeouts: ProcessingTimeout,
       loggerFactoryForLedgerConnectionOverride: NamedLoggerFactory,
       tracerProvider: TracerProvider,
+      futureSupervisor: FutureSupervisor,
       overrideRetryable: PartialFunction[Status, Boolean] = PartialFunction.empty,
   )(implicit
       ec: ExecutionContextExecutor,
       as: ActorSystem,
-      tracer: Tracer,
       sequencerPool: ExecutionSequencerFactory,
   ): LedgerConnection with NamedLogging =
     new LedgerConnection with NamedLogging {
       protected val loggerFactory: NamedLoggerFactory = loggerFactoryForLedgerConnectionOverride
 
       override protected def timeouts: ProcessingTimeout = processingTimeouts
-
-      if (commandClientConfiguration.maxParallelSubmissions < 100) {
-        import TraceContext.Implicits.Empty.*
-        // We need a high value to work around https://github.com/digital-asset/daml/issues/8017
-        logger.warn(
-          s"Creating command client with maxParallelSubmissions = ${commandClientConfiguration.maxParallelSubmissions}.\n" +
-            "It is recommended to choose a value of at least 100 to avoid deadlocks and performance degradation."
-        )
-      }
 
       private val client = {
         import TraceContext.Implicits.Empty.*
@@ -209,22 +204,11 @@ object LedgerConnection {
 
       private val transactionClient = client.transactionClient
 
-      private val commandTracker = {
-        import TraceContext.Implicits.Empty.*
-        processingTimeouts.unbounded.await(s"Creation of the command tracker")(
-          commandClient.trackCommandsUnbounded[CommandSubmitterWithRetry.CommandsCtx](
-            Seq(sender.unwrap)
-          )
-        )
-      }.map(
-        // Convert either-based results to completion after upstream api change https://github.com/digital-asset/daml/pull/10503
-        _.map(CompletionResponse.toCompletion)
-      )
-
       private val commandSubmitterWithRetry =
         new CommandSubmitterWithRetry(
           maxRetries,
-          commandTracker,
+          client.commandServiceClient,
+          futureSupervisor,
           processingTimeouts,
           loggerFactoryForLedgerConnectionOverride,
           overrideRetryable,
@@ -259,7 +243,8 @@ object LedgerConnection {
           commandId: Option[String] = None,
           workflowId: Option[WorkflowId] = None,
           deduplicationTime: Option[NonNegativeFiniteDuration] = None,
-      )(implicit traceContext: TraceContext): Future[CommandSubmitterWithRetry.CommandResult] = {
+          timeout: Option[Duration] = None,
+      )(implicit traceContext: TraceContext): Future[CommandResult] = {
         val fullCommand =
           commandsOf(
             sender,
@@ -270,26 +255,33 @@ object LedgerConnection {
           )
         val commandIdA = fullCommand.commandId
         logger.debug(s"Submitting command [$commandIdA]")
-        val result = commandSubmitterWithRetry.submitCommands(fullCommand)
+        val defaultTimeout = commandClientConfiguration.defaultDeduplicationTime
+        val commandTimeout = timeout
+          .map(Ordering[java.time.Duration].min(_, defaultTimeout))
+          .getOrElse(defaultTimeout)
+          .toScala
 
-        result onComplete { outcome =>
-          outcome.fold(
-            e => logger.error(s"Command failed [$commandIdA] badly due to an exception", e),
-            {
-              case CommandSubmitterWithRetry.Success(completion) =>
-                logger.debug(
-                  s"Command [$commandIdA] succeeded with transaction=${completion.transactionId}"
-                )
-              case CommandSubmitterWithRetry.Failed(completion) =>
-                logger.debug(s"Command [$commandIdA] failed with status=${completion.status}")
-              case CommandSubmitterWithRetry.MaxRetriesReached(completion) =>
-                logger.debug(
-                  s"Command [$commandIdA] reached max-retries with status=${completion.status}"
-                )
-            },
-          )
-        }
-        result
+        commandSubmitterWithRetry
+          .submitCommands(fullCommand, commandTimeout)
+          .thereafter { outcome =>
+            outcome.fold(
+              e => logger.error(s"Command failed [$commandIdA] badly due to an exception", e),
+              {
+                case CommandResult.Success(transactionId) =>
+                  logger.debug(
+                    s"Command [$commandIdA] succeeded with transactionId=$transactionId"
+                  )
+                case CommandResult.Failed(commandId, errorStatus) =>
+                  logger.info(show"Command [$commandId] failed with status=$errorStatus")
+                case CommandResult.MaxRetriesReached(commandId, lastErrorStatus) =>
+                  logger.info(
+                    show"Command [$commandId] reached max-retries. Last error status=$lastErrorStatus"
+                  )
+                case CommandResult.AbortedDueToShutdown =>
+                  logger.info(s"Command [$commandIdA] was aborted due to service shutdown")
+              },
+            )
+          }
       }
 
       override def submitAsync(
@@ -364,7 +356,7 @@ object LedgerConnection {
           filter: TransactionFilter = transactionFilter(sender),
       )(mapOperator: Flow[Transaction, Any, _]): LedgerSubscription =
         makeSubscription(
-          transactionClient.getTransactions(offset, None, transactionFilter(sender)),
+          transactionClient.getTransactions(offset, None, filter),
           mapOperator,
           subscriptionName,
         )

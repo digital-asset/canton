@@ -16,7 +16,7 @@ import com.daml.lf.ledger.EventId
 import com.daml.lf.transaction.Node.{Create, Exercise}
 import com.daml.lf.transaction.Transaction.ChildrenRecursion
 import com.daml.lf.transaction.{Node, NodeId}
-import com.daml.metrics.{Metrics, Timed}
+import com.daml.metrics.Timed
 import com.daml.timer.FutureCheck.*
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod.{
   DeduplicationDuration,
@@ -25,6 +25,7 @@ import com.digitalasset.canton.ledger.api.DeduplicationPeriod.{
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.{CompletionInfo, Reassignment, Update}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater.{PrepareResult, UpdaterFlow}
 import com.digitalasset.canton.platform.store.CompletionFromTransaction
@@ -222,7 +223,7 @@ private[platform] object InMemoryStateUpdater {
       lastEventSequentialId: Long,
       logger: TracedLogger,
   )(implicit
-      traceConext: TraceContext
+      traceContext: TraceContext
   ): Unit = {
     inMemoryState.ledgerEndCache.set((lastOffset, lastEventSequentialId))
     // the order here is very important: first we need to make data available for point-wise lookups

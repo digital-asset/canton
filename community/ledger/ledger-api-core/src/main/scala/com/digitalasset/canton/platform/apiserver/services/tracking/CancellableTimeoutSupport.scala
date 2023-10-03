@@ -4,11 +4,10 @@
 package com.digitalasset.canton.platform.apiserver.services.tracking
 
 import com.daml.ledger.resources.ResourceOwner
-import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{DiscardOps, config}
 
-import java.time.Duration
 import java.util.{Timer, TimerTask}
 import scala.concurrent.Promise
 import scala.util.Try
@@ -16,7 +15,7 @@ import scala.util.control.NonFatal
 
 trait CancellableTimeoutSupport {
   def scheduleOnce[T](
-      duration: Duration,
+      duration: config.NonNegativeFiniteDuration,
       promise: Promise[T],
       onTimeout: => Try[T],
   )(implicit traceContext: TraceContext): AutoCloseable
@@ -38,7 +37,7 @@ private[tracking] class CancellableTimeoutSupportImpl(
 ) extends CancellableTimeoutSupport
     with NamedLogging {
   override def scheduleOnce[T](
-      duration: Duration,
+      duration: config.NonNegativeFiniteDuration,
       promise: Promise[T],
       onTimeout: => Try[T],
   )(implicit traceContext: TraceContext): AutoCloseable = {
@@ -53,7 +52,7 @@ private[tracking] class CancellableTimeoutSupportImpl(
             logger.error(exceptionMessage, e)
         }
     }
-    timer.schedule(timerTask, duration.toMillis)
+    timer.schedule(timerTask, duration.underlying.toMillis)
     () => timerTask.cancel().discard
   }
 }

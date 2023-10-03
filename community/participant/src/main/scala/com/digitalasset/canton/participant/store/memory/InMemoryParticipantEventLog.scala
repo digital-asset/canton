@@ -13,7 +13,7 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 
-import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
 
 class InMemoryParticipantEventLog(id: ParticipantEventLogId, loggerFactory: NamedLoggerFactory)(
@@ -21,7 +21,8 @@ class InMemoryParticipantEventLog(id: ParticipantEventLogId, loggerFactory: Name
 ) extends InMemorySingleDimensionEventLog[ParticipantEventLogId](id, loggerFactory)
     with ParticipantEventLog {
 
-  private val nextLocalOffsetRef = new AtomicLong(ParticipantEventLog.InitialLocalOffset)
+  private val nextLocalOffsetRef =
+    new AtomicReference[LocalOffset](ParticipantEventLog.InitialLocalOffset)
 
   override def nextLocalOffsets(
       count: Int

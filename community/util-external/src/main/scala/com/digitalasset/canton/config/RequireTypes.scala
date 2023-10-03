@@ -85,9 +85,13 @@ object RequireTypes {
       extends RefinedNumeric[T] {
     import num.*
 
-    def +(other: NonNegativeNumeric[T]) = NonNegativeNumeric.tryCreate(value + other.value)
-    def *(other: NonNegativeNumeric[T]) = NonNegativeNumeric.tryCreate(value * other.value)
-    def tryAdd(other: T) = NonNegativeNumeric.tryCreate(value + other)
+    def increment: PositiveNumeric[T] = PositiveNumeric.tryCreate(value + num.one)
+
+    def +(other: NonNegativeNumeric[T]): NonNegativeNumeric[T] =
+      NonNegativeNumeric.tryCreate(value + other.value)
+    def *(other: NonNegativeNumeric[T]): NonNegativeNumeric[T] =
+      NonNegativeNumeric.tryCreate(value * other.value)
+    def tryAdd(other: T): NonNegativeNumeric[T] = NonNegativeNumeric.tryCreate(value + other)
   }
 
   object NonNegativeNumeric {
@@ -104,6 +108,10 @@ object RequireTypes {
           s"Received the negative $t as argument, but we require a non-negative value here."
         ),
       )
+    }
+
+    implicit val readNonNegativeLong: GetResult[NonNegativeLong] = GetResult { r =>
+      NonNegativeLong.tryCreate(r.nextLong())
     }
 
     implicit val readNonNegativeInt: GetResult[NonNegativeInt] = GetResult { r =>
@@ -185,6 +193,9 @@ object RequireTypes {
 
     def *(other: PositiveNumeric[T]): PositiveNumeric[T] =
       PositiveNumeric.tryCreate(value * other.value)
+
+    def increment: PositiveNumeric[T] = PositiveNumeric.tryCreate(value + num.one)
+    def decrement: NonNegativeNumeric[T] = NonNegativeNumeric.tryCreate(value - num.one)
 
     def tryAdd(other: T): PositiveNumeric[T] = PositiveNumeric.tryCreate(value + other)
 

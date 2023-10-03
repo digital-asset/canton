@@ -10,8 +10,8 @@ import com.daml.ledger.api.v1.admin.participant_pruning_service.{
   PruneResponse,
 }
 import com.daml.lf.data.Ref
+import com.daml.metrics.Tracked
 import com.daml.metrics.api.MetricsContext
-import com.daml.metrics.{Metrics, Tracked}
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
@@ -34,6 +34,7 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
 }
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.ApiOffset
 import com.digitalasset.canton.platform.ApiOffset.ApiOffsetConverter
 import com.digitalasset.canton.platform.apiserver.ApiException

@@ -104,8 +104,9 @@ service SequencerService {
   // pruning).
   rpc AcknowledgeSigned(com.digitalasset.canton.protocol.v0.SignedContent) returns (google.protobuf.Empty);
 
-  // TODO(#14059) use a streaming response to avoid running into the grpc message size limit
-  rpc DownloadTopologyStateForInit(TopologyStateForInitRequest) returns (TopologyStateForInitResponse);
+  // Download the topology state for a member up to including the topology transaction that made the member
+  // known on the domain.
+  rpc DownloadTopologyStateForInit(TopologyStateForInitRequest) returns (stream TopologyStateForInitResponse);
 }
 
 message SendAsyncVersionedRequest {

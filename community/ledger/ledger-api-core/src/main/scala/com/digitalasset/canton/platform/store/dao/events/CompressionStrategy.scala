@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
-import com.daml.metrics.Metrics
 import com.daml.metrics.api.MetricsContext
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.store.serialization.Compression
 
 import java.io.ByteArrayOutputStream

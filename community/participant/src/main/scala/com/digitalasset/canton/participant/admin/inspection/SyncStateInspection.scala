@@ -61,7 +61,6 @@ import com.digitalasset.canton.{
   LedgerTransactionId,
   LfPartyId,
   RequestCounter,
-  TransferCounter,
   TransferCounterO,
 }
 
@@ -119,13 +118,13 @@ final class SyncStateInspection(
       domainAlias: DomainAlias
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, AcsError, Map[LfContractId, CantonTimestamp]] =
+  ): EitherT[Future, AcsError, Map[LfContractId, (CantonTimestamp, TransferCounterO)]] =
     OptionT(
       syncDomainPersistentStateManager
         .getByAlias(domainAlias)
         .map(AcsInspection.getCurrentSnapshot)
         .sequence
-    ).widen[Map[LfContractId, CantonTimestamp]]
+    ).widen[Map[LfContractId, (CantonTimestamp, TransferCounterO)]]
       .toRight(SyncStateInspection.NoSuchDomain(domainAlias))
 
   /** searches the pcs and returns the contract and activeness flag */
@@ -146,13 +145,6 @@ final class SyncStateInspection(
       domain,
     )
 
-  private def getProtocolVersion[A](state: SyncDomainPersistentState)(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, A, ProtocolVersion] =
-    EitherT.right[A](
-      state.parameterStore.lastParameters.map(_.fold(ProtocolVersion.latest)(_.protocolVersion))
-    )
-
   // TODO(i14441): Remove deprecated ACS download / upload functionality
   @deprecated("Use exportAcsDumpActiveContracts", since = "2.8.0")
   def dumpActiveContracts(
@@ -168,56 +160,58 @@ final class SyncStateInspection(
     MonadUtil.sequentialTraverse_(syncDomainPersistentStateManager.getAll) {
       case (domainId, state) if filterDomain(domainId) =>
         val domainIdForExport = contractDomainRenames.getOrElse(domainId, domainId)
+        val useProtocolVersion = protocolVersion.getOrElse(state.protocolVersion)
         for {
-          useProtocolVersion <- protocolVersion.fold(getProtocolVersion(state))(EitherT.rightT(_))
           _ <- AcsInspection
-            .forEachVisibleActiveContract(domainId, state, parties, timestamp) { contract =>
-              val domainToContract = SerializableContractWithDomainId(domainIdForExport, contract)
-              val encodedContract = domainToContract.encode(useProtocolVersion)
-              outputStream.write(encodedContract.getBytes)
-              Right(outputStream.flush())
+            .forEachVisibleActiveContract(domainId, state, parties, timestamp) {
+              case (contract, _) =>
+                val domainToContract = SerializableContractWithDomainId(domainIdForExport, contract)
+                val encodedContract = domainToContract.encode(useProtocolVersion)
+                outputStream.write(encodedContract.getBytes)
+                Right(outputStream.flush())
             }
         } yield ()
       case _ =>
         EitherTUtil.unit
     }
 
+  def allProtocolVersions: Map[DomainId, ProtocolVersion] =
+    syncDomainPersistentStateManager.getAll.view.mapValues(_.protocolVersion).toMap
+
   def exportAcsDumpActiveContracts(
       outputStream: OutputStream,
       filterDomain: DomainId => Boolean,
       parties: Set[LfPartyId],
       timestamp: Option[CantonTimestamp],
-      protocolVersion: Option[ProtocolVersion],
-      contractDomainRenames: Map[DomainId, DomainId],
+      contractDomainRenames: Map[DomainId, (DomainId, ProtocolVersion)],
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, Error, Unit] =
     MonadUtil.sequentialTraverse_(syncDomainPersistentStateManager.getAll) {
       case (domainId, state) if filterDomain(domainId) =>
-        val domainIdForExport = contractDomainRenames.getOrElse(domainId, domainId)
-        for {
-          useProtocolVersion <- protocolVersion.fold(getProtocolVersion(state))(EitherT.rightT(_))
-          _ <- AcsInspection
-            .forEachVisibleActiveContract(domainId, state, parties, timestamp) { contract =>
-              // TODO(i13573): The transferCounter in the RepairService should be passed in as part of the RepairRequest
-              val todoCounter: TransferCounterO =
-                TransferCounter.forCreatedContract(ProtocolVersion.dev)
-              val activeContractE =
-                ActiveContract.create(domainIdForExport, contract, todoCounter)(
-                  useProtocolVersion
-                )
+        val (domainIdForExport, protocolVersion) =
+          contractDomainRenames.getOrElse(domainId, (domainId, state.protocolVersion))
 
-              activeContractE match {
-                case Left(e) => Left(InvariantIssue(domainId, contract, e.getMessage))
-                case Right(bundle) =>
-                  bundle.writeDelimitedTo(outputStream) match {
-                    case Left(errorMessage) =>
-                      Left(SerializationIssue(domainId, contract, errorMessage))
-                    case Right(_) =>
-                      outputStream.flush()
-                      Right(())
-                  }
-              }
+        for {
+          _ <- AcsInspection
+            .forEachVisibleActiveContract(domainId, state, parties, timestamp) {
+              case (contract, transferCounter) =>
+                val activeContractE =
+                  ActiveContract.create(domainIdForExport, contract, transferCounter)(
+                    protocolVersion
+                  )
+
+                activeContractE match {
+                  case Left(e) => Left(InvariantIssue(domainId, contract.contractId, e.getMessage))
+                  case Right(bundle) =>
+                    bundle.writeDelimitedTo(outputStream) match {
+                      case Left(errorMessage) =>
+                        Left(SerializationIssue(domainId, contract.contractId, errorMessage))
+                      case Right(_) =>
+                        outputStream.flush()
+                        Right(())
+                    }
+                }
 
             }
         } yield ()

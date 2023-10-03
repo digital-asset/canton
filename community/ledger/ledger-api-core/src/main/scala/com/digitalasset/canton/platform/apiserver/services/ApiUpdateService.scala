@@ -11,7 +11,6 @@ import com.daml.ledger.api.v1.transaction_service.GetTransactionsRequest
 import com.daml.ledger.api.v2.update_service.*
 import com.daml.lf.ledger.EventId
 import com.daml.logging.entries.LoggingEntries
-import com.daml.metrics.Metrics
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.domain.TransactionId
@@ -30,6 +29,7 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
 }
+import com.digitalasset.canton.metrics.Metrics
 import io.grpc.stub.StreamObserver
 import scalaz.syntax.tag.*
 

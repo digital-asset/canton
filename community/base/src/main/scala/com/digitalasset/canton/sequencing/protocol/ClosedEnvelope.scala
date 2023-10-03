@@ -140,8 +140,7 @@ object ClosedEnvelope extends HasProtocolVersionedCompanion[ClosedEnvelope] {
       _.toProtoV0.toByteString,
     ),
     ProtoVersion(1) -> VersionedProtoConverter(
-      // TODO(#12373) Adapt when releasing BFT
-      ProtocolVersion.dev
+      ProtocolVersion.CNTestNet
     )(v1.Envelope)(
       protoCompanion =>
         ProtoConverter.protoParser(protoCompanion.parseFrom)(_).flatMap(fromProtoV1),
@@ -177,7 +176,6 @@ object ClosedEnvelope extends HasProtocolVersionedCompanion[ClosedEnvelope] {
           s"Signatures on closed envelopes are supported only from protocol version ${signaturesSupportedSince} on."
         ),
       )
-      // TODO(#12373) Adapt when releasing BFT
       _ <- Either.cond(
         representativeProtocolVersion >= groupAddressesSupportedSince || !recipients.allRecipients
           .exists {
@@ -296,7 +294,7 @@ object ClosedEnvelope extends HasProtocolVersionedCompanion[ClosedEnvelope] {
   }
 
   // TODO(#12373) Adapt comment when releasing BFT
-  /** Use only in protocol version [[com.digitalasset.canton.version.ProtocolVersion.dev]] or later */
+  /** Use only in protocol version [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]] or later */
   def verifySignatures(
       snapshot: SyncCryptoApi,
       sender: Member,
@@ -308,7 +306,7 @@ object ClosedEnvelope extends HasProtocolVersionedCompanion[ClosedEnvelope] {
   }
 
   // TODO(#12373) Adapt comment when releasing BFT
-  /** Use only in protocol version [[com.digitalasset.canton.version.ProtocolVersion.dev]] or later */
+  /** Use only in protocol version [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]] or later */
   def verifySignatures(
       snapshot: SyncCryptoApi,
       mediatorGroupIndex: MediatorGroupIndex,

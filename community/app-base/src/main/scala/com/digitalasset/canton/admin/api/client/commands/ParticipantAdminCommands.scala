@@ -467,9 +467,8 @@ object ParticipantAdminCommands {
         parties: Set[PartyId],
         filterDomainId: Option[DomainId],
         timestamp: Option[Instant],
-        protocolVersion: Option[ProtocolVersion],
         observer: StreamObserver[ExportAcsResponse],
-        contractDomainRenames: Map[DomainId, DomainId],
+        contractDomainRenames: Map[DomainId, (DomainId, ProtocolVersion)],
     ) extends GrpcAdminCommand[
           ExportAcsRequest,
           CancellableContext,
@@ -487,9 +486,13 @@ object ParticipantAdminCommands {
             parties.map(_.toLf).toSeq,
             filterDomainId.map(_.toProtoPrimitive).getOrElse(""),
             timestamp.map(Timestamp.apply),
-            protocolVersion.map(_.toProtoPrimitive),
-            contractDomainRenames.map { case (source, target) =>
-              (source.toProtoPrimitive, target.toProtoPrimitive)
+            contractDomainRenames.map { case (source, (targetDomainId, targetProtocolVersion)) =>
+              val targetDomain = ExportAcsRequest.TargetDomain(
+                domainId = targetDomainId.toProtoPrimitive,
+                protocolVersion = targetProtocolVersion.toProtoPrimitive,
+              )
+
+              (source.toProtoPrimitive, targetDomain)
             },
           )
         )

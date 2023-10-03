@@ -14,7 +14,7 @@ import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -55,7 +55,7 @@ import com.digitalasset.canton.util.*
 import com.digitalasset.canton.{DiscardOps, LedgerTransactionId}
 import com.google.common.annotations.VisibleForTesting
 
-import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
+import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future, Promise}
@@ -110,18 +110,23 @@ class DbMultiDomainEventLog private[db] (
   private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("multi-domain-event-log")
 
-  private val dispatcher: Dispatcher[GlobalOffset] =
+  /*
+    Ideally, we would like the Index of the dispatcher to be a GlobalOffset.
+    However, since the `zeroIndex` is exclusive, we cannot guarantee that it is positive (and need to be able to represent 0).
+    Hence, we use a `NonNegativeLong` and refine it when we have more knowledge.
+   */
+  private val dispatcher: Dispatcher[NonNegativeLong] =
     Dispatcher(
       loggerFactory.name,
-      MultiDomainEventLog.ledgerFirstOffset - 1, // start index is exclusive
-      initialLastGlobalOffset.getOrElse(
-        MultiDomainEventLog.ledgerFirstOffset - 1
+      MultiDomainEventLog.ledgerFirstOffset.unwrap.decrement, // start index is exclusive
+      initialLastGlobalOffset.fold(MultiDomainEventLog.ledgerFirstOffset.unwrap.decrement)(
+        _.toNonNegative
       ), // end index is inclusive
     )
 
   /** Lower bound on the last offset that we have signalled to the dispatcher. */
-  private val lastPublishedOffset: AtomicLong = new AtomicLong(
-    initialLastGlobalOffset.getOrElse(MultiDomainEventLog.ledgerFirstOffset - 1)
+  private val lastPublishedOffset = new AtomicReference[Option[GlobalOffset]](
+    initialLastGlobalOffset
   )
 
   /** Non-strict upper bound on the publication time of all previous events.
@@ -185,17 +190,24 @@ class DbMultiDomainEventLog private[db] (
     }
   }
 
-  /* `insert` assigns global offsets in ascending order, but some events may be skipped because they are already there.
-   * So we go through the events in reverse order and try to match them against the found global offsets,
-   * stopping at the global offset that was known previously.
-   */
+  /** `insert` assigns global offsets in ascending order, but some events may be skipped because they are already there.
+    * So we go through the events in reverse order and try to match them against the found global offsets,
+    * stopping at the global offset that was known previously.
+    *
+    * @param eventsToPublish
+    * @param globalOffsetStrictLowerBound Strict lower bound on the global offset for the events
+    * @param lastEvents
+    * @return
+    */
   private def publications(
       eventsToPublish: Seq[PublicationData],
-      cap: GlobalOffset,
+      globalOffsetStrictLowerBound: Option[GlobalOffset],
       lastEvents: NonEmpty[Seq[(GlobalOffset, EventLogId, LocalOffset, CantonTimestamp)]],
   ): Seq[OnPublish.Publication] = {
+    val bound = globalOffsetStrictLowerBound.fold(0L)(_.toLong)
     val cappedLastEvents = lastEvents.forgetNE.iterator.takeWhile {
-      case (globalOffset, _eventLogId, _localOffset, _publicationTime) => globalOffset > cap
+      case (globalOffset, _eventLogId, _localOffset, _publicationTime) =>
+        globalOffset.toLong > bound
     }
     IterableUtil
       .subzipBy(cappedLastEvents, eventsToPublish.reverseIterator) {
@@ -275,7 +287,11 @@ class DbMultiDomainEventLog private[db] (
       }
       (newGlobalOffset, _, _, _) = foundEvents.head1
 
-      published = publications(eventsToPublish, previousGlobalOffset, foundEvents)
+      published = publications(
+        eventsToPublish = eventsToPublish,
+        globalOffsetStrictLowerBound = previousGlobalOffset,
+        lastEvents = foundEvents,
+      )
 
       transferEvents = published.mapFilter { publication =>
         publication.event match {
@@ -291,9 +307,9 @@ class DbMultiDomainEventLog private[db] (
     } yield {
       logger.debug(show"Signalling global offset $newGlobalOffset.")
 
-      dispatcher.signalNewHead(newGlobalOffset)
+      dispatcher.signalNewHead(newGlobalOffset.toNonNegative)
 
-      lastPublishedOffset.set(newGlobalOffset)
+      lastPublishedOffset.set(newGlobalOffset.some)
       // Advance the publication time lower bound to `publicationTime`
       // only if it was actually stored for at least one event.
       if (published.nonEmpty) {
@@ -382,8 +398,8 @@ class DbMultiDomainEventLog private[db] (
   override def fetchUnpublished(id: EventLogId, upToInclusiveO: Option[LocalOffset])(implicit
       traceContext: TraceContext
   ): Future[List[PendingPublish]] = {
-    val fromExclusive = lastLocalOffsets.getOrElse(id.index, Long.MinValue)
-    val upToInclusive = upToInclusiveO.getOrElse(Long.MaxValue)
+    val fromExclusive = lastLocalOffsets.getOrElse(id.index, LocalOffset.MinValue)
+    val upToInclusive = upToInclusiveO.getOrElse(LocalOffset.MaxValue)
     logger.info(s"Fetch unpublished from $id up to ${upToInclusiveO}")
 
     processingTime.event {
@@ -422,27 +438,34 @@ class DbMultiDomainEventLog private[db] (
   override def subscribe(startInclusive: Option[GlobalOffset])(implicit
       traceContext: TraceContext
   ): Source[(GlobalOffset, Traced[LedgerSyncEvent]), NotUsed] = {
-    dispatcher.startingAt(
-      startInclusive.getOrElse(
-        MultiDomainEventLog.ledgerFirstOffset
-      ) - 1, // start index is exclusive
-      RangeSource { (fromExcl, toIncl) =>
-        Source(RangeUtil.partitionIndexRange(fromExcl, toIncl, maxBatchSize.unwrap.toLong))
-          .mapAsync(1) { case (batchFromExcl, batchToIncl) =>
-            storage.query(
-              sql"""select /*+ INDEX (linearized_event_log pk_linearized_event_log, event_log pk_event_log) */ global_offset, content, trace_context
+    dispatcher
+      .startingAt(
+        // start index is exclusive
+        startInclusive.getOrElse(MultiDomainEventLog.ledgerFirstOffset).unwrap.decrement,
+        RangeSource { (fromExcl, toIncl) =>
+          Source(
+            RangeUtil
+              .partitionIndexRange(fromExcl.unwrap, toIncl.unwrap, maxBatchSize.unwrap.toLong)
+          )
+            .mapAsync(1) { case (batchFromExcl, batchToIncl) =>
+              storage.query(
+                sql"""select /*+ INDEX (linearized_event_log pk_linearized_event_log, event_log pk_event_log) */ global_offset, content, trace_context
                   from linearized_event_log lel join event_log el on lel.log_id = el.log_id and lel.local_offset = el.local_offset
                   where global_offset > $batchFromExcl and global_offset <= $batchToIncl
                   order by global_offset asc"""
-                .as[
-                  (GlobalOffset, Traced[LedgerSyncEvent])
-                ],
-              functionFullName,
-            )
-          }
-          .mapConcat(identity)
-      },
-    )
+                  .as[
+                    (NonNegativeLong, Traced[LedgerSyncEvent])
+                  ],
+                functionFullName,
+              )
+            }
+            .mapConcat(identity)
+        },
+      )
+      .map { case (offset, event) =>
+        // by construction, the offset is positive
+        GlobalOffset.tryFromLong(offset.unwrap) -> event
+      }
   }
 
   override def lookupEventRange(upToInclusive: Option[GlobalOffset], limit: Option[Int])(implicit
@@ -453,7 +476,7 @@ class DbMultiDomainEventLog private[db] (
         .query(
           sql"""select global_offset, el.local_offset, request_sequencer_counter, el.event_id, content, trace_context
                 from linearized_event_log lel join event_log el on lel.log_id = el.log_id and lel.local_offset = el.local_offset
-                where global_offset <= ${upToInclusive.getOrElse(Long.MaxValue)}
+                where global_offset <= ${upToInclusive.fold(Long.MaxValue)(_.toLong)}
                 order by global_offset asc #${storage.limit(limit.getOrElse(Int.MaxValue))}"""
             .as[(GlobalOffset, TimestampedEvent)],
           functionFullName,
@@ -534,7 +557,7 @@ class DbMultiDomainEventLog private[db] (
   }
 
   override def locateOffset(
-      deltaFromBeginning: GlobalOffset
+      deltaFromBeginning: Long
   )(implicit traceContext: TraceContext): OptionT[Future, GlobalOffset] =
     processingTime.optionTEvent {
       // The following query performs a table scan which can in theory become a problem if deltaFromBeginning is large.
@@ -542,7 +565,8 @@ class DbMultiDomainEventLog private[db] (
       // However as we are planning to prune in batches, deltaFromBeginning will be limited by the batch size and be
       // reasonable.
       storage.querySingle(
-        sql"select global_offset from linearized_event_log order by global_offset #${storage.limit(1, deltaFromBeginning)}"
+        sql"select global_offset from linearized_event_log order by global_offset #${storage
+            .limit(1, deltaFromBeginning)}"
           .as[GlobalOffset]
           .headOption,
         functionFullName,
@@ -661,8 +685,13 @@ class DbMultiDomainEventLog private[db] (
       case Some(upToInclusive) => OptionT(query(upToInclusive))
 
       case None =>
-        val head = dispatcher.getHead()
-        OptionT.fromOption(Option.when(head > MultiDomainEventLog.ledgerFirstOffset)(head))
+        val head: NonNegativeLong = dispatcher.getHead()
+
+        OptionT.fromOption(
+          Option.when(head > MultiDomainEventLog.ledgerFirstOffset.toNonNegative)(
+            GlobalOffset.tryFromLong(head.unwrap) // head is at least 1
+          )
+        )
     }
   }
 
@@ -765,7 +794,7 @@ object DbMultiDomainEventLog {
   @VisibleForTesting
   private[db] def lastOffsetAndPublicationTime(
       storage: DbStorage,
-      upToInclusive: GlobalOffset = Long.MaxValue,
+      upToInclusive: GlobalOffset = GlobalOffset.MaxValue,
   )(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,

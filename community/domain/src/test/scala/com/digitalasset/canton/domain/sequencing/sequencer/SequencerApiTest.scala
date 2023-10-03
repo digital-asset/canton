@@ -238,8 +238,7 @@ abstract class SequencerApiTest
       }
 
       def testAggregation: Boolean =
-        // TODO(#12373) Adapt when releasing BFT
-        testedProtocolVersion >= ProtocolVersion.dev && supportAggregation
+        testedProtocolVersion >= ProtocolVersion.CNTestNet && supportAggregation
 
       "aggregate submission requests" onlyRunWhen testAggregation in { env =>
         import env.*

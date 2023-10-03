@@ -31,7 +31,9 @@ object TopologyStateForInitRequest
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.v3),
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.dev)(v0.TopologyStateForInitRequest)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.CNTestNet)(
+      v0.TopologyStateForInitRequest
+    )(
       supportedProtoVersion(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),

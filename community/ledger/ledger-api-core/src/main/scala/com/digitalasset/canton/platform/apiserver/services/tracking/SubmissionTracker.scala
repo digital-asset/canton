@@ -6,19 +6,20 @@ package com.digitalasset.canton.platform.apiserver.services.tracking
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.resources.ResourceOwner
-import com.daml.metrics.Metrics
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.ledger.error.{CommonErrors, LedgerApiErrors}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker.{
   SubmissionKey,
   Submitters,
 }
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
+import com.digitalasset.canton.{DiscardOps, config}
 import io.opentelemetry.api.trace.Tracer
 
-import java.time.Duration
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{Future, Promise}
 import scala.util.{Failure, Success, Try}
@@ -26,7 +27,7 @@ import scala.util.{Failure, Success, Try}
 trait SubmissionTracker extends AutoCloseable {
   def track(
       submissionKey: SubmissionKey,
-      timeout: Duration,
+      timeout: NonNegativeFiniteDuration,
       submit: TraceContext => Future[Any],
   )(implicit
       errorLogger: ContextualizedErrorLogger,
@@ -84,12 +85,12 @@ object SubmissionTracker {
 
     override def track(
         submissionKey: SubmissionKey,
-        timeout: Duration,
+        timeout: NonNegativeFiniteDuration,
         submit: TraceContext => Future[Any],
     )(implicit
         errorLogger: ContextualizedErrorLogger,
         traceContext: TraceContext,
-    ): Future[CompletionResponse] = {
+    ): Future[CompletionResponse] =
       ensuringSubmissionIdPopulated(submissionKey) {
         ensuringMaximumInFlight {
           val promise = Promise[CompletionResponse]()
@@ -100,39 +101,14 @@ object SubmissionTracker {
               )
 
             case None =>
-              // Start the timeout timer before submit to ensure that the timer scheduling
-              // happens before its cancellation (on submission failure OR onCompletion)
-              val cancelTimeout = cancellableTimeoutSupport.scheduleOnce(
-                duration = timeout,
-                promise = promise,
-                onTimeout =
-                  CompletionResponse.timeout(submissionKey.commandId, submissionKey.submissionId)(
-                    errorLogger
-                  ),
-              )(traceContext)
-
-              withSpan("SubmissionTracker.track") { childContext => _ =>
-                submit(childContext)
-                  .onComplete {
-                    case Success(_) => // succeeded, nothing to do
-                    case Failure(throwable) =>
-                      // Submitting command failed, finishing entry with the very same error
-                      promise.tryComplete(Failure(throwable))
-                  }(directEc)
-              }
-
-              promise.future.onComplete { _ =>
-                // register timeout cancellation and removal from map
-                withSpan("SubmissionTracker.complete") { _ => _ =>
-                  cancelTimeout.close()
-                  pending.remove(submissionKey)
-                }(traceContext, tracer)
-              }(directEc)
+              trackWithCancelTimeout(submissionKey, timeout, promise, submit)(
+                errorLogger,
+                traceContext,
+              )
           }
           promise.future
         }(errorLogger)
       }(errorLogger)
-    }
 
     override def onCompletion(completionResult: (CompletionStreamResponse, Submitters)): Unit = {
       val (completionStreamResponse, submitters) = completionResult
@@ -143,14 +119,61 @@ object SubmissionTracker {
       }
     }
 
-    override def close(): Unit = {
-      pending.values.foreach(p => p._2.complete(CompletionResponse.closing(p._1)))
-    }
+    override def close(): Unit =
+      pending.values.foreach(p => p._2.tryComplete(CompletionResponse.closing(p._1)).discard)
 
     private def attemptFinish(submissionKey: SubmissionKey)(
         result: ContextualizedErrorLogger => Try[CompletionResponse]
     ): Unit =
-      pending.get(submissionKey).foreach(p => p._2.complete(result(p._1)))
+      pending.get(submissionKey).foreach(p => p._2.tryComplete(result(p._1)).discard)
+
+    private def trackWithCancelTimeout(
+        submissionKey: SubmissionKey,
+        timeout: config.NonNegativeFiniteDuration,
+        promise: Promise[CompletionResponse],
+        submit: TraceContext => Future[Any],
+    )(implicit
+        errorLogger: ContextualizedErrorLogger,
+        traceContext: TraceContext,
+    ): Unit =
+      Try(
+        // Start the timeout timer before submit to ensure that the timer scheduling
+        // happens before its cancellation (on submission failure OR onCompletion)
+        cancellableTimeoutSupport.scheduleOnce(
+          duration = timeout,
+          promise = promise,
+          onTimeout =
+            CompletionResponse.timeout(submissionKey.commandId, submissionKey.submissionId)(
+              errorLogger
+            ),
+        )(traceContext)
+      ) match {
+        case Failure(err) =>
+          logger.error(
+            "An internal error occurred while trying to register the cancellation timeout. Aborting submission..",
+            err,
+          )
+          pending.remove(submissionKey).discard
+          promise.tryFailure(err).discard
+        case Success(cancelTimeout) =>
+          withSpan("SubmissionTracker.track") { childContext => _ =>
+            submit(childContext)
+              .onComplete {
+                case Success(_) => // succeeded, nothing to do
+                case Failure(throwable) =>
+                  // Submitting command failed, finishing entry with the very same error
+                  promise.tryComplete(Failure(throwable))
+              }(directEc)
+          }
+
+          promise.future.onComplete { _ =>
+            // register timeout cancellation and removal from map
+            withSpan("SubmissionTracker.complete") { _ => _ =>
+              cancelTimeout.close()
+              pending.remove(submissionKey)
+            }(traceContext, tracer)
+          }(directEc)
+      }
 
     private def ensuringMaximumInFlight[T](
         f: => Future[T]

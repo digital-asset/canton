@@ -12,7 +12,7 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.LedgerTransactionId
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{
   AsyncCloseable,
@@ -76,7 +76,6 @@ class InMemoryMultiDomainEventLog(
         LocalOffset,
     ) => Future[Seq[LocalOffset]],
     byEventId: NamedLoggingContext => EventId => OptionT[Future, (EventLogId, LocalOffset)],
-    participantEventLogId: ParticipantEventLogId,
     clock: Clock,
     metrics: ParticipantMetrics,
     override val transferStoreFor: TargetDomainId => Either[String, TransferStore],
@@ -110,10 +109,15 @@ class InMemoryMultiDomainEventLog(
       )
     )
 
-  private val dispatcher: Dispatcher[GlobalOffset] = Dispatcher[GlobalOffset](
+  /*
+    Ideally, we would like the Index of the dispatcher to be a GlobalOffset.
+    However, since the `zeroIndex` is exclusive, we cannot guarantee that it is positive (and need to be able to represent 0).
+    Hence, we use a `NonNegativeLong` and refine it when we have more knowledge.
+   */
+  private val dispatcher: Dispatcher[NonNegativeLong] = Dispatcher[NonNegativeLong](
     loggerFactory.name,
-    ledgerFirstOffset - 1, // start index is exclusive
-    ledgerFirstOffset - 1, // end index is inclusive
+    ledgerFirstOffset.unwrap.decrement, // start index is exclusive
+    ledgerFirstOffset.unwrap.decrement, // end index is inclusive
   )
 
   private val executionQueue = new SimpleExecutionQueue(
@@ -145,8 +149,11 @@ class InMemoryMultiDomainEventLog(
       )
       Future.unit
     } else if (lastLocalOffsets.get(id).forall(_ < localOffset)) {
-      val lastOffset = lastOffsetO.getOrElse(ledgerFirstOffset - 1)
-      val nextOffset = lastOffset + 1
+      val nextOffset = lastOffsetO match {
+        case Some(lastOffset) => lastOffset.increment
+        case None => ledgerFirstOffset
+      }
+
       val now = clock.monotonicTime()
       val publicationTime = Ordering[CantonTimestamp].max(now, publicationTimeUpperBound)
       if (now < publicationTime) {
@@ -176,7 +183,7 @@ class InMemoryMultiDomainEventLog(
       }
 
       notifyTransferF.map { _ =>
-        dispatcher.signalNewHead(nextOffset) // new end index is inclusive
+        dispatcher.signalNewHead(nextOffset.toNonNegative) // new end index is inclusive
         val deduplicationInfo = DeduplicationInfo.fromTimestampedEvent(event)
         val publication = OnPublish.Publication(
           nextOffset,
@@ -216,8 +223,8 @@ class InMemoryMultiDomainEventLog(
   override def fetchUnpublished(id: EventLogId, upToInclusiveO: Option[LocalOffset])(implicit
       traceContext: TraceContext
   ): Future[Seq[PendingPublish]] = {
-    val fromExclusive = entriesRef.get().lastLocalOffsets.getOrElse(id, Long.MinValue)
-    val upToInclusive = upToInclusiveO.getOrElse(Long.MaxValue)
+    val fromExclusive = entriesRef.get().lastLocalOffsets.getOrElse(id, LocalOffset.MinValue)
+    val upToInclusive = upToInclusiveO.getOrElse(LocalOffset.MaxValue)
     for {
       unpublishedOffsets <- lookupOffsetsBetween(namedLoggingContext)(id)(
         fromExclusive + 1,
@@ -250,8 +257,8 @@ class InMemoryMultiDomainEventLog(
           }
           val newReferencesByOffset = referencesByOffset -- pruned.keys
           Entries(
-            firstOffset = firstOffset.max(upToInclusive + 1),
-            lastOffset = nextOffsetO.map(_.max(upToInclusive + 1)),
+            firstOffset = firstOffset.max(upToInclusive.increment),
+            lastOffset = nextOffsetO.map(_.max(upToInclusive.increment)),
             lastLocalOffsets = lastLocalOffsets,
             references = newReferences,
             referencesByOffset = newReferencesByOffset,
@@ -267,27 +274,38 @@ class InMemoryMultiDomainEventLog(
   )(implicit tc: TraceContext): Source[(GlobalOffset, Traced[LedgerSyncEvent]), NotUsed] = {
     logger.debug(show"Subscribing at ${startInclusive.showValueOrNone}...")
 
-    dispatcher.startingAt(
-      startInclusive.getOrElse(entriesRef.get.firstOffset) - 1, // start index is exclusive
-      RangeSource { (fromExcl, toIncl) =>
-        Source(entriesRef.get.referencesByOffset.range(fromExcl + 1, toIncl + 1))
-          .mapAsync(1) { // Parallelism 1 is ok, as the lookup operation are quite fast with in memory stores.
-            case (globalOffset, (id, localOffset, _processingTime)) =>
-              for {
-                event <- lookupEvent(namedLoggingContext)(id, localOffset)
-              } yield globalOffset -> Traced(event.event)(
-                event.traceContext
-              )
-          }
-      },
-    )
+    dispatcher
+      .startingAt(
+        startInclusive
+          .getOrElse(entriesRef.get.firstOffset)
+          .unwrap
+          .decrement, // start index is exclusive
+        RangeSource { (fromExcl, toIncl) =>
+          Source(
+            entriesRef.get.referencesByOffset
+              .range(GlobalOffset(fromExcl.increment), GlobalOffset(toIncl.increment))
+          )
+            .mapAsync(1) { // Parallelism 1 is ok, as the lookup operation are quite fast with in memory stores.
+              case (globalOffset, (id, localOffset, _processingTime)) =>
+                for {
+                  event <- lookupEvent(namedLoggingContext)(id, localOffset)
+                } yield globalOffset.toNonNegative -> Traced(event.event)(
+                  event.traceContext
+                )
+            }
+        },
+      )
+      .map { case (offset, event) =>
+        // by construction, the offset is positive
+        GlobalOffset.tryFromLong(offset.unwrap) -> event
+      }
   }
 
   override def lookupEventRange(upToInclusive: Option[GlobalOffset], limit: Option[Int])(implicit
       traceContext: TraceContext
   ): Future[Seq[(GlobalOffset, TimestampedEvent)]] = {
     val referencesInRange =
-      entriesRef.get().referencesByOffset.rangeTo(upToInclusive.getOrElse(Long.MaxValue))
+      entriesRef.get().referencesByOffset.rangeTo(upToInclusive.getOrElse(GlobalOffset.MaxValue))
     val limitedReferencesInRange = limit match {
       case Some(n) => referencesInRange.take(n)
       case None => referencesInRange
@@ -347,7 +365,7 @@ class InMemoryMultiDomainEventLog(
   }
 
   override def locateOffset(
-      deltaFromBeginning: GlobalOffset
+      deltaFromBeginning: Long
   )(implicit traceContext: TraceContext): OptionT[Future, GlobalOffset] =
     OptionT.fromOption(
       entriesRef.get().referencesByOffset.drop(deltaFromBeginning.toInt).headOption.map {
@@ -489,7 +507,6 @@ object InMemoryMultiDomainEventLog extends HasLoggerName {
       lookupEvent(allEventLogs),
       lookupOffsetsBetween(allEventLogs),
       byEventId(allEventLogs),
-      participantEventLog.id,
       clock,
       metrics,
       transferStoreFor,

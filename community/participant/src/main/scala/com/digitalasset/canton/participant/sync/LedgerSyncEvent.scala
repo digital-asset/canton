@@ -312,7 +312,6 @@ object LedgerSyncEvent {
       s"transferred-$kind $contractId from $sourceDomain to $targetDomain"
   }
 
-  // TODO(#12373) Adapt when releasing BFT
   /** Signal the transfer-out of a contract from source to target domain.
     *
     * @param updateId              Uniquely identifies the update.
@@ -328,7 +327,7 @@ object LedgerSyncEvent {
     * @param isTransferringParticipant True if the participant is transferring.
     *                                  Note: false if the data comes from an old serialized event
     * @param transferCounter        The [[com.digitalasset.canton.TransferCounter]] of the contract.
-    *                               For protocol version earlier than [[com.digitalasset.canton.version.ProtocolVersion.dev]],
+    *                               For protocol version earlier than [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]],
     *                               its value is Long.MinValue
     */
   final case class TransferredOut(
@@ -398,7 +397,6 @@ object LedgerSyncEvent {
       }
   }
 
-  // TODO(#12373) Adapt when releasing BFT
   /**  Signal the transfer-in of a contract from the source domain to the target domain.
     *
     * @param updateId                  Uniquely identifies the update.
@@ -416,7 +414,7 @@ object LedgerSyncEvent {
     * @param isTransferringParticipant True if the participant is transferring.
     *                                  Note: false if the data comes from an old serialized event
     * @param transferCounter The [[com.digitalasset.canton.TransferCounter]] of the contract.
-    *                        For protocol version earlier than [[com.digitalasset.canton.version.ProtocolVersion.dev]],
+    *                        For protocol version earlier than [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]],
     *                        its value is Long.MinValue
     */
   final case class TransferredIn(

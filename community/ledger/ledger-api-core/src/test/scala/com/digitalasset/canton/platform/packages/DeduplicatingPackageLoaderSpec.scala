@@ -10,8 +10,8 @@ import com.daml.ledger.resources.TestResourceContext
 import com.daml.lf.archive.DarParser
 import com.daml.lf.data.Ref.PackageId
 import com.daml.metrics.api.dropwizard.DropwizardTimer
-import com.daml.testing.utils.{TestModels, TestResourceUtils}
 import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.testing.utils.{TestModels, TestResourceUtils}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec

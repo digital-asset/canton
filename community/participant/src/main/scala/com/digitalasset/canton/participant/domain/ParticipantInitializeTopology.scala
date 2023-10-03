@@ -22,6 +22,10 @@ import com.digitalasset.canton.participant.topology.{
   DomainOnboardingOutbox,
   DomainOnboardingOutboxX,
 }
+import com.digitalasset.canton.protocol.messages.{
+  RegisterTopologyTransactionResponseResult,
+  TopologyTransactionsBroadcastX,
+}
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.RequestSigner.UnauthenticatedRequestSigner
 import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerClientFactory}
@@ -54,7 +58,7 @@ import scala.util.{Failure, Success}
   * authenticate without the IDM having approved the transactions. Because of that, this initial request is sent by
   * a dynamically created unauthenticated member whose sole purpose is to send this request and wait for the response.
   */
-abstract class ParticipantInitializeTopologyCommon[TX](
+abstract class ParticipantInitializeTopologyCommon[TX, State](
     alias: DomainAlias,
     participantId: ParticipantId,
     clock: Clock,
@@ -71,10 +75,11 @@ abstract class ParticipantInitializeTopologyCommon[TX](
   protected def createHandler(
       client: SequencerClient,
       member: UnauthenticatedMemberId,
-  )(implicit ec: ExecutionContext): RegisterTopologyTransactionHandleWithProcessor[TX]
+  )(implicit ec: ExecutionContext): RegisterTopologyTransactionHandleWithProcessor[TX, State]
 
-  protected def initiateOnboarding(handle: RegisterTopologyTransactionHandleWithProcessor[TX])(
-      implicit
+  protected def initiateOnboarding(
+      handle: RegisterTopologyTransactionHandleWithProcessor[TX, State]
+  )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean]
@@ -218,7 +223,9 @@ class ParticipantInitializeTopology(
     crypto: Crypto,
     protocolVersion: ProtocolVersion,
     expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
-) extends ParticipantInitializeTopologyCommon[SignedTopologyTransaction[TopologyChangeOp]](
+) extends ParticipantInitializeTopologyCommon[SignedTopologyTransaction[
+      TopologyChangeOp
+    ], RegisterTopologyTransactionResponseResult.State](
       alias,
       participantId,
       clock,
@@ -237,7 +244,9 @@ class ParticipantInitializeTopology(
       member: UnauthenticatedMemberId,
   )(implicit
       ec: ExecutionContext
-  ): RegisterTopologyTransactionHandleWithProcessor[SignedTopologyTransaction[TopologyChangeOp]] =
+  ): RegisterTopologyTransactionHandleWithProcessor[SignedTopologyTransaction[
+    TopologyChangeOp
+  ], RegisterTopologyTransactionResponseResult.State] =
     new SequencerBasedRegisterTopologyTransactionHandle(
       (traceContext, env) =>
         client.sendAsyncUnauthenticated(
@@ -253,7 +262,8 @@ class ParticipantInitializeTopology(
 
   protected def initiateOnboarding(
       handle: RegisterTopologyTransactionHandleWithProcessor[
-        SignedTopologyTransaction[TopologyChangeOp]
+        SignedTopologyTransaction[TopologyChangeOp],
+        RegisterTopologyTransactionResponseResult.State,
       ]
   )(implicit
       traceContext: TraceContext,
@@ -291,7 +301,10 @@ class ParticipantInitializeTopologyX(
     config: TopologyXConfig,
     protocolVersion: ProtocolVersion,
     expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
-) extends ParticipantInitializeTopologyCommon[GenericSignedTopologyTransactionX](
+) extends ParticipantInitializeTopologyCommon[
+      GenericSignedTopologyTransactionX,
+      TopologyTransactionsBroadcastX.State,
+    ](
       alias,
       participantId,
       clock,
@@ -310,7 +323,10 @@ class ParticipantInitializeTopologyX(
       member: UnauthenticatedMemberId,
   )(implicit
       ec: ExecutionContext
-  ): RegisterTopologyTransactionHandleWithProcessor[GenericSignedTopologyTransactionX] =
+  ): RegisterTopologyTransactionHandleWithProcessor[
+    GenericSignedTopologyTransactionX,
+    TopologyTransactionsBroadcastX.State,
+  ] =
     new SequencerBasedRegisterTopologyTransactionHandleX(
       client,
       domainId,
@@ -323,7 +339,10 @@ class ParticipantInitializeTopologyX(
     )
 
   protected def initiateOnboarding(
-      handle: RegisterTopologyTransactionHandleWithProcessor[GenericSignedTopologyTransactionX]
+      handle: RegisterTopologyTransactionHandleWithProcessor[
+        GenericSignedTopologyTransactionX,
+        TopologyTransactionsBroadcastX.State,
+      ]
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,

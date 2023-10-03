@@ -11,7 +11,6 @@ import com.daml.lf.engine.{Engine, ResultDone}
 import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.transaction.{SubmittedTransaction, Transaction}
 import com.daml.logging.LoggingContext
-import com.daml.metrics.Metrics
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.api.domain.{CommandId, Commands, LedgerId}
@@ -21,6 +20,7 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
   IndexPackagesService,
 }
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.metrics.Metrics
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.wordspec.AsyncWordSpec
 

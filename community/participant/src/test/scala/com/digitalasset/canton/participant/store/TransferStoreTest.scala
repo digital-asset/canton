@@ -15,7 +15,6 @@ import com.digitalasset.canton.data.{
   TransferSubmitterMetadata,
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.protocol.submission.SeedGenerator
 import com.digitalasset.canton.participant.protocol.transfer.TransferData.*
 import com.digitalasset.canton.participant.protocol.transfer.{
@@ -25,6 +24,7 @@ import com.digitalasset.canton.participant.protocol.transfer.{
 }
 import com.digitalasset.canton.participant.store.TransferStore.*
 import com.digitalasset.canton.participant.util.TimeOfChange
+import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset, RichRequestCounter}
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   asSerializable,
   contractInstance,
@@ -67,11 +67,14 @@ import org.scalatest.{Assertion, EitherValues}
 import java.util.UUID
 import scala.concurrent.duration.*
 import scala.concurrent.{Await, Future}
+import scala.language.implicitConversions
 
 trait TransferStoreTest {
   this: AsyncWordSpec with BaseTest =>
 
   import TransferStoreTest.*
+
+  private implicit def toGlobalOffset(i: Long): GlobalOffset = GlobalOffset.tryFromLong(i)
 
   protected def transferStore(mk: TargetDomainId => TransferStore): Unit = {
     val transferData = FutureUtil.noisyAwaitResult(
@@ -356,7 +359,7 @@ trait TransferStoreTest {
       "allow batch updates" in {
         val store = mk(targetDomain)
 
-        val data = (0L until 12).flatMap { i =>
+        val data = (1L until 13).flatMap { i =>
           val tid = transferId.copy(transferOutTimestamp = CantonTimestamp.ofEpochSecond(i))
           val transferData = transferDataFor(tid, contract)
 
@@ -526,7 +529,11 @@ trait TransferStoreTest {
             .failOnShutdown
           failedAddOutOffset <- store
             .addTransfersOffsets(
-              Map(transferId -> TransferOutGlobalOffset(transferOutOffset.offset - 1))
+              Map(
+                transferId -> TransferOutGlobalOffset(
+                  GlobalOffset.tryFromLong(transferOutOffset.offset.toLong - 1)
+                )
+              )
             )
             .value
             .failOnShutdown
@@ -537,7 +544,11 @@ trait TransferStoreTest {
             .failOnShutdown
           failedAddInOffset <- store
             .addTransfersOffsets(
-              Map(transferId -> TransferInGlobalOffset(transferInOffset.offset - 1))
+              Map(
+                transferId -> TransferInGlobalOffset(
+                  GlobalOffset.tryFromLong(transferInOffset.offset.toLong - 1)
+                )
+              )
             )
             .value
             .failOnShutdown
@@ -801,7 +812,7 @@ trait TransferStoreTest {
 
         for {
           _ <- valueOrFail(store.addTransfer(transferData))("add failed")
-          lookup <- store.findInFlight(sourceDomain1, true, Long.MaxValue, None, limit)
+          lookup <- store.findInFlight(sourceDomain1, true, LocalOffset.MaxValue, None, limit)
         } yield {
           lookup shouldBe empty
         }
@@ -833,17 +844,29 @@ trait TransferStoreTest {
         for {
           _ <- valueOrFail(addTransfersET)("add failed")
 
-          lookupNone <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, limit)
+          lookupNone <- store.findInFlight(sourceDomain1, false, LocalOffset.MaxValue, None, limit)
           lookupAll <- store.findInFlight(
             sourceDomain1,
             false,
-            Long.MaxValue,
+            LocalOffset.MaxValue,
             lift(alice, bob),
             limit,
           )
 
-          lookupAlice <- store.findInFlight(sourceDomain1, false, Long.MaxValue, lift(alice), limit)
-          lookupBob <- store.findInFlight(sourceDomain1, false, Long.MaxValue, lift(bob), limit)
+          lookupAlice <- store.findInFlight(
+            sourceDomain1,
+            false,
+            LocalOffset.MaxValue,
+            lift(alice),
+            limit,
+          )
+          lookupBob <- store.findInFlight(
+            sourceDomain1,
+            false,
+            LocalOffset.MaxValue,
+            lift(bob),
+            limit,
+          )
         } yield {
 
           lookupNone shouldBe transfersData
@@ -860,12 +883,12 @@ trait TransferStoreTest {
 
         for {
           _ <- valueOrFail(store.addTransfer(transferData))("add failed")
-          lookup1a <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, limit)
-          lookup1b <- store.findInFlight(sourceDomain1, true, Long.MaxValue, None, limit)
+          lookup1a <- store.findInFlight(sourceDomain1, false, LocalOffset.MaxValue, None, limit)
+          lookup1b <- store.findInFlight(sourceDomain1, true, LocalOffset.MaxValue, None, limit)
 
           _ <- valueOrFail(store.addTransferOutResult(transferOutResult))("addResult failed")
-          lookup2a <- store.findInFlight(sourceDomain1, true, Long.MaxValue, None, limit)
-          lookup2b <- store.findInFlight(sourceDomain1, true, Long.MaxValue, None, limit)
+          lookup2a <- store.findInFlight(sourceDomain1, true, LocalOffset.MaxValue, None, limit)
+          lookup2b <- store.findInFlight(sourceDomain1, true, LocalOffset.MaxValue, None, limit)
         } yield {
           lookup1a shouldBe Seq(transferData)
           lookup1b shouldBe Seq()
@@ -905,8 +928,8 @@ trait TransferStoreTest {
         for {
           _ <- valueOrFail(store.addTransfer(transferData))("add failed")
 
-          lookup1a <- store.findInFlight(sourceDomain2, false, Long.MaxValue, None, limit)
-          lookup1b <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, limit)
+          lookup1a <- store.findInFlight(sourceDomain2, false, LocalOffset.MaxValue, None, limit)
+          lookup1b <- store.findInFlight(sourceDomain1, false, LocalOffset.MaxValue, None, limit)
         } yield {
           lookup1a shouldBe Seq()
           lookup1b shouldBe Seq(transferData)
@@ -918,13 +941,13 @@ trait TransferStoreTest {
 
         for {
           _ <- valueOrFail(store.addTransfer(transferData))("add failed")
-          lookup1 <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, limit)
+          lookup1 <- store.findInFlight(sourceDomain1, false, LocalOffset.MaxValue, None, limit)
 
           _ <- valueOrFail(store.addTransferOutResult(transferOutResult))("addResult failed")
-          lookup2 <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, limit)
+          lookup2 <- store.findInFlight(sourceDomain1, false, LocalOffset.MaxValue, None, limit)
 
           _ <- store.completeTransfer(transferData.transferId, toc).value
-          lookup3 <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, limit)
+          lookup3 <- store.findInFlight(sourceDomain1, false, LocalOffset.MaxValue, None, limit)
         } yield {
           lookup1 shouldBe Seq(transferData)
 
@@ -943,14 +966,14 @@ trait TransferStoreTest {
           lookup11 <- store.findInFlight(
             sourceDomain1,
             false,
-            Long.MaxValue,
+            LocalOffset.MaxValue,
             None,
             NonNegativeInt.one,
           )
           lookup10 <- store.findInFlight(
             sourceDomain1,
             false,
-            Long.MaxValue,
+            LocalOffset.MaxValue,
             None,
             NonNegativeInt.zero,
           )
@@ -959,14 +982,14 @@ trait TransferStoreTest {
           lookup21 <- store.findInFlight(
             sourceDomain1,
             true,
-            Long.MaxValue,
+            LocalOffset.MaxValue,
             None,
             NonNegativeInt.one,
           )
           lookup20 <- store.findInFlight(
             sourceDomain1,
             true,
-            Long.MaxValue,
+            LocalOffset.MaxValue,
             None,
             NonNegativeInt.zero,
           )

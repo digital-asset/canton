@@ -94,14 +94,19 @@ message ActiveContract {
 }
 
 message ExportAcsRequest {
+  message TargetDomain {
+    string domain_id = 1;
+    // Protocol version of the target domain
+    int32 protocol_version = 2;
+  }
+
   repeated string parties = 1;
   string filter_domain_id = 2; // optional; exact match if set
   google.protobuf.Timestamp timestamp = 3; // optional; take acs state for this timestamp
-  google.protobuf.UInt32Value protocol_version = 4; // optional; version of serialization to use
 
   // Optional mapping from one domain id to another to rename the associated domain of contracts in the export
   // NOTE: This is not a proper domain migration of contracts.
-  map<string, string> contract_domain_renames = 5;
+  map<string, TargetDomain> contract_domain_renames = 4;
 }
 
 message ExportAcsResponse {

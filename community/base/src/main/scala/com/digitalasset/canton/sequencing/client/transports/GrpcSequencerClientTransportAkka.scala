@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.sequencing.client.transports
 
+import akka.stream.Materializer
 import akka.stream.scaladsl.{Keep, Source}
 import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
@@ -39,7 +40,11 @@ class GrpcSequencerClientTransportAkka(
     timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
     protocolVersion: ProtocolVersion,
-)(implicit executionContext: ExecutionContext, executionSequencerFactory: ExecutionSequencerFactory)
+)(implicit
+    executionContext: ExecutionContext,
+    executionSequencerFactory: ExecutionSequencerFactory,
+    materializer: Materializer,
+)
 // TODO(#13789) Extend GrpcSequencerClientTransportCommon and drop support for non-Akka subscriptions
     extends GrpcSequencerClientTransport(
       channel,
@@ -119,7 +124,6 @@ class GrpcSequencerClientTransportAkka(
         )
         // Stop emitting after the first parse error
         .takeUntilThenDrain(_.isLeft)
-        .map(_.unwrap)
         .watchTermination()(Keep.both)
       SequencerSubscriptionAkka(source)
     }

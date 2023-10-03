@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.localstore
 
-import com.daml.metrics.Metrics
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.store.backend.StorageBackendProvider
 import org.scalatest.freespec.AsyncFreeSpec
 

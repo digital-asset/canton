@@ -61,13 +61,13 @@ class ResilientTransactionsSubscriptionTest
 
           // Wait for restart
           sut.subscriptionF.futureValue shouldBe ()
-          verify(connection).subscribe(any[String], eqTo(initialOffset), any[TransactionFilter])(
+          verify(connection).subscribe(any[String], eqTo(initialOffset), transactionFilterMatcher)(
             any[Transaction => Unit]
           )
           verify(connection).subscribe(
             any[String],
             eqTo(reSubscriptionOffset),
-            any[TransactionFilter],
+            transactionFilterMatcher,
           )(any[Transaction => Unit])
 
           sut.close()
@@ -87,7 +87,7 @@ class ResilientTransactionsSubscriptionTest
           connection.subscribe(
             subscriptionName = eqTo("SubscriptionForTestService"),
             offset = eqTo(nextOffsetAfterPruned),
-            filter = eqTo(LedgerConnection.transactionFilter(sender)),
+            filter = transactionFilterMatcher,
           )(any[Transaction => Unit])
         ).thenReturn(s2)
 
@@ -99,13 +99,13 @@ class ResilientTransactionsSubscriptionTest
 
           // Wait for restart
           sut.subscriptionF.futureValue shouldBe ()
-          verify(connection).subscribe(any[String], eqTo(initialOffset), any[TransactionFilter])(
+          verify(connection).subscribe(any[String], eqTo(initialOffset), transactionFilterMatcher)(
             any[Transaction => Unit]
           )
           verify(connection).subscribe(
             any[String],
             eqTo(nextOffsetAfterPruned),
-            any[TransactionFilter],
+            transactionFilterMatcher,
           )(any[Transaction => Unit])
 
           sut.close()
@@ -124,30 +124,33 @@ class ResilientTransactionsSubscriptionTest
     val serviceName = "TestServiceForResilientTransactionSubscription"
     val subscriptionName = "SubscriptionForTestService"
     val connection = mock[LedgerConnection]
-    val ledgerSubscription = mock[LedgerSubscription]
-    val ledgerSubscriptionPromise = Promise[Done]()
     val sender = Primitive.Party("alice")
-    when(connection.sender).thenReturn(sender)
     val argCaptor = ArgCaptor[Transaction => Unit]
     val initialOffset: LedgerOffset = LedgerOffset(LedgerOffset.Value.Absolute("00"))
     val reSubscriptionOffset = LedgerOffset(LedgerOffset.Value.Absolute("07"))
-    val offsetThatThrows = "FF"
     val tx = Transaction(offset = "07")
-    val processTransactionException = new RuntimeException("processTxException")
     val s1, s2 = mock[LedgerSubscription]
 
+    // If used with specific argument matching, this throws a NPE when run with Java 17
+    // protected def transactionFilterMatcher: TransactionFilter = eqTo(LedgerConnection.transactionFilter(sender))
+
+    // Since the test and implementation doesn't interact with the transactionFilter,
+    // avoid the exception by using any[TransactionFilter] as below
+    protected def transactionFilterMatcher: TransactionFilter = any[TransactionFilter]
+
+    when(connection.sender).thenReturn(sender)
     when(
       connection.subscribe(
         subscriptionName = eqTo("SubscriptionForTestService"),
         offset = eqTo(initialOffset),
-        filter = eqTo(LedgerConnection.transactionFilter(sender)),
+        filter = transactionFilterMatcher,
       )(argCaptor.capture)
     ).thenReturn(s1)
     when(
       connection.subscribe(
         subscriptionName = eqTo("SubscriptionForTestService"),
         offset = eqTo(reSubscriptionOffset),
-        filter = eqTo(LedgerConnection.transactionFilter(sender)),
+        filter = transactionFilterMatcher,
       )(any[Transaction => Unit])
     ).thenReturn(s2)
 

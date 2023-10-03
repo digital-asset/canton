@@ -12,7 +12,6 @@ import com.daml.ledger.api.v1.command_completion_service.CompletionEndResponse
 import com.daml.ledger.api.v1.command_submission_service.CommandSubmissionServiceGrpc.CommandSubmissionServiceStub
 import com.daml.ledger.api.v1.command_submission_service.SubmitRequest
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
-import com.daml.util.Ctx
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.client.configuration.CommandClientConfiguration
 import com.digitalasset.canton.ledger.client.services.commands.CommandTrackerFlow.Materialized
@@ -21,6 +20,7 @@ import com.digitalasset.canton.ledger.client.services.commands.tracker.Completio
   CompletionSuccess,
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.util.Ctx
 import com.google.protobuf.empty.Empty
 
 import scala.concurrent.{ExecutionContext, Future}

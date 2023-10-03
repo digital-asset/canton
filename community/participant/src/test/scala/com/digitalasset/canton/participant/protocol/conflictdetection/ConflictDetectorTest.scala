@@ -126,6 +126,7 @@ class ConflictDetectorTest
       parallelExecutionContext,
       timeouts,
       futureSupervisor,
+      testedProtocolVersion,
     )
 
   "ConflictDetector" should {
@@ -374,7 +375,7 @@ class ConflictDetectorTest
         toc = TimeOfChange(rc, ofEpochMilli(2))
         _ = acs.setCreateHook { (coids, ToC) =>
           Future.successful {
-            assert(coids.toSet == Set(coid21) && ToC == toc)
+            assert(coids.toSet == Set(coid21 -> initialTransferCounter) && ToC == toc)
             checkContractState(cd, coid21, active, toc, 0, 0, 1)(s"Contract $coid01 is active")
             checkContractStateAbsent(cd, coid22)(
               s"Rolled-back creation for contract $coid22 is evicted"

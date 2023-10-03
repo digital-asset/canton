@@ -130,7 +130,7 @@ object SignedTopologyTransactionX
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.minimum),
-    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.dev)(
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.CNTestNet)(
       v2.SignedTopologyTransactionX
     )(
       supportedProtoVersion(_)(fromProtoV2),

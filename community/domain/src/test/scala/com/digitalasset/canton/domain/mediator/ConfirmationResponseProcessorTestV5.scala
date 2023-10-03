@@ -1292,7 +1292,7 @@ class ConfirmationResponseProcessorTestV5
 }
 
 class ConfirmationResponseProcessorTestV5X
-    extends ConfirmationResponseProcessorTestV5Base(ProtocolVersion.dev) { // TODO(#12373) Adapt when releasing BFT
+    extends ConfirmationResponseProcessorTestV5Base(ProtocolVersion.CNTestNet) {
   override lazy val mediatorRef: MediatorRef = MediatorRef(mediatorGroup)
   override lazy val mediatorId: MediatorId = activeMediator2
 
