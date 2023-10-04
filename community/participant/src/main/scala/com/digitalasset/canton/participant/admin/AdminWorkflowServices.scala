@@ -222,17 +222,13 @@ class AdminWorkflowServices(
       adminParty,
       A.WorkflowId(workflowId),
       CommandClientConfiguration.default.copy(
-        maxCommandsInFlight = 0, // set this to a silly value, to enforce it is never used
-        maxParallelSubmissions =
-          1000000, // We need a high value to work around https://github.com/digital-asset/daml/issues/8017
-        // This defines the maximum timeout that can be specified on admin workflow services such as the ping command
-        // The parameter name is misleading; it does not affect the deduplication period for the commands.
-        defaultDeduplicationTime = parameters.adminWorkflow.submissionTimeout.asJava,
+        defaultDeduplicationTime = parameters.adminWorkflow.submissionTimeout.asJava
       ),
       Some(adminToken.secret),
       parameters.processingTimeouts,
       loggerFactory,
       tracerProvider,
+      futureSupervisor,
       noRetryOnPassiveReplica,
     )
     (

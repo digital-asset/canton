@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.protocol.transfer
 
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.protocol.transfer.IncompleteTransferData.TransferEventGlobalOffset
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -15,6 +16,9 @@ class IncompleteTransferDataTest extends AnyWordSpec with BaseTest {
         TransferInEventGlobalOffset as In,
         TransferOutEventGlobalOffset as Out,
       }
+      import scala.language.implicitConversions
+
+      implicit def toGlobalOffset(i: Int) = GlobalOffset.tryFromLong(i.toLong)
 
       create(9, Some(10), None).left.value shouldBe a[String] // No event emitted
       create(10, Some(10), None).value shouldBe Out(10)

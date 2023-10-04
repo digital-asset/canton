@@ -4,10 +4,11 @@
 package com.digitalasset.canton.platform.apiserver.execution
 
 import com.daml.lf.crypto
-import com.daml.metrics.{Metrics, Timed}
+import com.daml.metrics.Timed
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 
 import scala.concurrent.Future

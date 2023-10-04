@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.ledger.api.tls
 
-import com.daml.testing.utils.TestResourceUtils
 import com.digitalasset.canton.ledger.api.tls.TlsVersion.TlsVersion
+import com.digitalasset.canton.testing.utils.TestResourceUtils
 import io.netty.handler.ssl.{OpenSslServerContext, SslContext}
 import org.apache.commons.io.IOUtils
 import org.scalatest.BeforeAndAfterEach

@@ -6,10 +6,11 @@ package com.digitalasset.canton.participant.admin.grpc
 import better.files.*
 import cats.data.EitherT
 import cats.syntax.all.*
+import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, RepairContract}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.data.ActiveContract.loadFromByteString
 import com.digitalasset.canton.participant.admin.data.SerializableContractWithDomainId
@@ -23,13 +24,9 @@ import com.digitalasset.canton.participant.admin.repair.RepairServiceError
 import com.digitalasset.canton.participant.admin.v0.*
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.participant.sync.CantonSyncService
-import com.digitalasset.canton.protocol.{
-  LfContractId,
-  SerializableContract,
-  SerializableContractWithWitnesses,
-}
+import com.digitalasset.canton.protocol.{LfContractId, SerializableContract}
 import com.digitalasset.canton.topology.{DomainId, PartyId, UniqueIdentifier}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, OptionUtil, ResourceUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DomainAlias, LfPartyId}
@@ -126,19 +123,43 @@ object GrpcParticipantRepairService {
   private object ValidExportAcsRequest {
 
     private def validateContractDomainRenames(
-        contractDomainRenames: Map[String, String]
-    ): Either[String, List[(DomainId, DomainId)]] =
-      contractDomainRenames.toList.traverse { case (source, target) =>
-        for {
-          sourceId <- DomainId.fromProtoPrimitive(source, "source domain id").leftMap(_.message)
-          targetId <- DomainId.fromProtoPrimitive(target, "target domain id").leftMap(_.message)
-        } yield (sourceId, targetId)
+        contractDomainRenames: Map[String, ExportAcsRequest.TargetDomain],
+        allProtocolVersions: Map[DomainId, ProtocolVersion],
+    )(implicit
+        elc: ErrorLoggingContext
+    ): Either[String, List[(DomainId, (DomainId, ProtocolVersion))]] =
+      contractDomainRenames.toList.traverse {
+        case (source, ExportAcsRequest.TargetDomain(targetDomain, targetProtocolVersionRaw)) =>
+          for {
+            sourceId <- DomainId.fromProtoPrimitive(source, "source domain id").leftMap(_.message)
+
+            targetDomainId <- DomainId
+              .fromProtoPrimitive(targetDomain, "target domain id")
+              .leftMap(_.message)
+            targetProtocolVersion = ProtocolVersion.fromProtoPrimitive(targetProtocolVersionRaw)
+
+            /*
+            target protocol version should be supported
+            Moreover, the participant is connected to this domain, it should correspond to the stored version
+             */
+            _ <- isSupported(targetProtocolVersion).leftMap(_.toString)
+            _ <- allProtocolVersions
+              .get(targetDomainId)
+              .map { foundProtocolVersion =>
+                EitherUtil.condUnitE(
+                  foundProtocolVersion == targetProtocolVersion,
+                  s"Inconsistent protocol versions for domain $targetDomainId: found version is $foundProtocolVersion, passed is $targetProtocolVersion",
+                )
+              }
+              .getOrElse(Right(()))
+
+          } yield (sourceId, (targetDomainId, targetProtocolVersion))
       }
 
     private def validateRequest(
-        request: ExportAcsRequest
-    ): Either[String, ValidExportAcsRequest] = {
-      val protocolVersion = request.protocolVersion.map(p => ProtocolVersion.fromProtoPrimitive(p))
+        request: ExportAcsRequest,
+        allProtocolVersions: Map[DomainId, ProtocolVersion],
+    )(implicit elc: ErrorLoggingContext): Either[String, ValidExportAcsRequest] = {
       for {
         parties <- request.parties.traverse(party =>
           UniqueIdentifier.fromProtoPrimitive_(party).map(PartyId(_).toLf)
@@ -146,23 +167,24 @@ object GrpcParticipantRepairService {
         timestamp <- request.timestamp
           .traverse(CantonTimestamp.fromProtoPrimitive)
           .leftMap(_.message)
-        contractDomainRenames <- validateContractDomainRenames(request.contractDomainRenames)
+        contractDomainRenames <- validateContractDomainRenames(
+          request.contractDomainRenames,
+          allProtocolVersions,
+        )
       } yield ValidExportAcsRequest(
         parties.toSet,
         timestamp,
-        protocolVersion,
         contractDomainRenames.toMap,
       )
     }
 
-    def apply(request: ExportAcsRequest)(implicit
-        elc: ErrorLoggingContext
+    def apply(request: ExportAcsRequest, allProtocolVersions: Map[DomainId, ProtocolVersion])(
+        implicit elc: ErrorLoggingContext
     ): Either[RepairServiceError, ValidExportAcsRequest] =
       for {
-        validRequest <- validateRequest(request).leftMap(
+        validRequest <- validateRequest(request, allProtocolVersions).leftMap(
           RepairServiceError.InvalidArgument.Error(_)
         )
-        _ <- validRequest.protocolVersion.traverse_(isSupported)
       } yield validRequest
 
   }
@@ -170,8 +192,7 @@ object GrpcParticipantRepairService {
   private final case class ValidExportAcsRequest private (
       parties: Set[LfPartyId],
       timestamp: Option[CantonTimestamp],
-      protocolVersion: Option[ProtocolVersion],
-      contractDomainRenames: Map[DomainId, DomainId],
+      contractDomainRenames: Map[DomainId, (DomainId, ProtocolVersion)],
   )
 
   private def isSupported(protocolVersion: ProtocolVersion)(implicit
@@ -215,16 +236,16 @@ final class GrpcParticipantRepairService(
           s"Inconsistent ACS snapshot for domain $domainId. Contract $missingContract (and possibly others) is missing."
         )
         RepairServiceError.InconsistentAcsSnapshot.Error(domainId)
-      case inspection.Error.SerializationIssue(domainId, contract, errorMessage) =>
+      case inspection.Error.SerializationIssue(domainId, contractId, errorMessage) =>
         logger.error(
-          s"Contract ${contract.contractId} for domain $domainId cannot be serialized due to: $errorMessage"
+          s"Contract $contractId for domain $domainId cannot be serialized due to: $errorMessage"
         )
-        RepairServiceError.SerializationError.Error(domainId, contract.contractId)
-      case inspection.Error.InvariantIssue(domainId, contract, errorMessage) =>
+        RepairServiceError.SerializationError.Error(domainId, contractId)
+      case inspection.Error.InvariantIssue(domainId, contractId, errorMessage) =>
         logger.error(
-          s"Contract ${contract.contractId} for domain $domainId cannot be serialized due to an invariant violation: $errorMessage"
+          s"Contract $contractId for domain $domainId cannot be serialized due to an invariant violation: $errorMessage"
         )
-        RepairServiceError.SerializationError.Error(domainId, contract.contractId)
+        RepairServiceError.SerializationError.Error(domainId, contractId)
     }
 
   private final val AcsSnapshotTemporaryFileNamePrefix = "temporary-canton-acs-snapshot"
@@ -342,7 +363,7 @@ final class GrpcParticipantRepairService(
 
   private final val ExportAcsTemporaryFileNamePrefix = "temporary-canton-acs-snapshot-versioned"
 
-  /** copy of the download above
+  /** originates from download above
     */
   override def exportAcs(
       request: ExportAcsRequest,
@@ -367,7 +388,6 @@ final class GrpcParticipantRepairService(
                 _.filterString.startsWith(request.filterDomainId),
                 validRequest.parties,
                 validRequest.timestamp,
-                validRequest.protocolVersion,
                 validRequest.contractDomainRenames,
               )
           )
@@ -380,7 +400,9 @@ final class GrpcParticipantRepairService(
       context.run { () =>
         val result =
           for {
-            validRequest <- EitherT.fromEither[Future](ValidExportAcsRequest(request))
+            validRequest <- EitherT.fromEither[Future](
+              ValidExportAcsRequest(request, sync.stateInspection.allProtocolVersions)
+            )
             _ <- createAcsSnapshotTemporaryFile(validRequest)
           } yield {
             temporaryFile.newInputStream
@@ -486,29 +508,46 @@ final class GrpcParticipantRepairService(
       override def onCompleted(): Unit = {
         val res = TraceContext.withNewTraceContext { implicit traceContext =>
           val resultE = for {
-            contracts <- loadFromByteString(ByteString.copyFrom(outputStream.toByteArray))
-            grouped = contracts
+            activeContracts <- EitherT.fromEither[Future](
+              loadFromByteString(ByteString.copyFrom(outputStream.toByteArray))
+            )
+            contractsByDomain = activeContracts
               .grouped(GrpcParticipantRepairService.DefaultBatchSize)
-              .map(_.groupMap(_.domainId)(_.contract))
+              .map(_.groupBy(_.domainId)) // TODO(#14822): group by domain first, and then batch
             _ <- LazyList
-              .from(grouped)
-              .traverse(_.toList.traverse { case (domainId, contracts) =>
-                for {
-                  alias <- sync.aliasManager
-                    .aliasForDomainId(domainId)
-                    .toRight(s"Not able to find domain alias for ${domainId.filterString}")
-                  _ <- sync.repairService.addContracts(
-                    alias,
-                    contracts.map(SerializableContractWithWitnesses(_, Set.empty)),
-                    ignoreAlreadyAdded = true,
-                    ignoreStakeholderCheck = true,
-                  )
-                } yield ()
+              .from(contractsByDomain)
+              .parTraverse(_.toList.parTraverse {
+                case (
+                      domainId,
+                      contracts,
+                    ) => // TODO(#12481): large number of groups = large number of requests
+                  for {
+                    alias <- EitherT.fromEither[Future](
+                      sync.aliasManager
+                        .aliasForDomainId(domainId)
+                        .toRight(s"Not able to find domain alias for ${domainId.toString}")
+                    )
+                    _ <- EitherT.fromEither[Future](
+                      sync.repairService.addContracts(
+                        alias,
+                        contracts.map(c =>
+                          RepairContract(
+                            c.contract,
+                            Set.empty,
+                            c.transferCounter,
+                          )
+                        ),
+                        ignoreAlreadyAdded = true,
+                        ignoreStakeholderCheck = true,
+                      )
+                    )
+                  } yield ()
               })
           } yield ()
 
-          resultE match {
-            case Left(error) => Future.failed(new RuntimeException(error))
+          resultE.value.flatMap {
+            case Left(error) =>
+              Future.failed(new RuntimeException(error)) // TODO(#14817): use Canton errors instead
             case Right(_) => Future.successful(UploadResponse())
           }
         }
@@ -576,22 +615,32 @@ final class GrpcParticipantRepairService(
       gzip: Boolean,
   ): Future[UploadResponse] = {
     TraceContext.withNewTraceContext { implicit traceContext =>
-      val resultE = for {
-        lazyContracts <- SerializableContractWithDomainId.loadFromByteString(content, gzip)
+      val resultE: EitherT[Future, String, Unit] = for {
+        lazyContracts <- EitherT.fromEither[Future](
+          SerializableContractWithDomainId.loadFromByteString(content, gzip)
+        )
         grouped = lazyContracts
           .grouped(GrpcParticipantRepairService.DefaultBatchSize)
-          .map(_.groupMap(_.domainId)(_.contract))
+          .map(
+            _.groupMap(_.domainId)(_.contract)
+          ) // TODO(#14822): group by domain first, and then batch
         _ <- LazyList
           .from(grouped)
-          .traverse(_.toList.traverse { case (domainId, contracts) =>
-            addContractToStore(domainId, contracts)
+          .parTraverse(_.toList.parTraverse {
+            case (
+                  domainId,
+                  contracts,
+                ) => // TODO(#12481): large number of groups = large number of requests
+              addContractToStore(domainId, contracts)
           })
       } yield ()
 
-      resultE match {
-        case Left(error) => Future.failed(new RuntimeException(error))
+      resultE.value.flatMap {
+        case Left(error) =>
+          Future.failed(new RuntimeException(error)) // TODO(#14817): use Canton errors instead
         case Right(_) => Future.successful(UploadResponse())
       }
+
     }
   }
 
@@ -601,16 +650,29 @@ final class GrpcParticipantRepairService(
   ) // TODO(i14441): Remove deprecated ACS download / upload functionality
   private def addContractToStore(domainId: DomainId, contracts: LazyList[SerializableContract])(
       implicit traceContext: TraceContext
-  ): Either[String, Unit] = {
+  ): EitherT[Future, String, Unit] = {
     for {
-      alias <- sync.aliasManager
-        .aliasForDomainId(domainId)
-        .toRight(s"Not able to find domain alias for ${domainId.filterString}")
-      _ <- sync.repairService.addContracts(
-        alias,
-        contracts.map(SerializableContractWithWitnesses(_, Set.empty)),
-        ignoreAlreadyAdded = true,
-        ignoreStakeholderCheck = true,
+      protocolVersion <- EitherT.fromOptionF(
+        sync.protocolVersionGetter(Traced(domainId)),
+        ifNone = s"Domain ID's protocol version not found: $domainId",
+      )
+      _ <- EitherT.cond[Future](
+        protocolVersion < ProtocolVersion.CNTestNet,
+        (),
+        s"Refusing to add contracts for a domain running on ${ProtocolVersion.CNTestNet} or higher. Please use export_acs and import_acs commands instead.",
+      )
+      alias <- EitherT.fromEither[Future](
+        sync.aliasManager
+          .aliasForDomainId(domainId)
+          .toRight(s"Not able to find domain alias for ${domainId.toString}")
+      )
+      _ <- EitherT.fromEither[Future](
+        sync.repairService.addContracts(
+          alias,
+          contracts.map(contract => RepairContract(contract, Set.empty, None)),
+          ignoreAlreadyAdded = true,
+          ignoreStakeholderCheck = true,
+        )
       )
     } yield ()
   }

@@ -179,8 +179,7 @@ trait SequencerStoreTest
       CounterCheckpoint(counter, ts, latestTopologyClientTs)
 
     "DeliverErrorStoreEvent" should {
-      // TODO(#12373) Adapt when releasing BFT
-      "be able to serialize to and deserialize the error from protobuf" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+      "be able to serialize to and deserialize the error from protobuf" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
         val error = SequencerErrors.SigningTimestampTooEarly("too early!")
         val errorStatus = error.rpcStatusWithoutLoggingContext()
         val serialized = DeliverErrorStoreEvent.serializeError(error, testedProtocolVersion)

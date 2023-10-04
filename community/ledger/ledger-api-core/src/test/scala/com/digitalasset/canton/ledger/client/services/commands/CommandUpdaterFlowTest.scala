@@ -9,9 +9,9 @@ import com.daml.ledger.api.v1.commands.Commands
 import com.daml.ledger.api.v1.commands.Commands.DeduplicationPeriod
 import com.daml.lf.data.Ref
 import com.daml.tracing.NoOpTelemetryContext
-import com.daml.util.Ctx
 import com.digitalasset.canton.ledger.api.{SubmissionIdGenerator, domain}
 import com.digitalasset.canton.ledger.client.configuration.CommandClientConfiguration
+import com.digitalasset.canton.util.Ctx
 import com.google.protobuf.duration.Duration
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec

@@ -13,9 +13,9 @@ import com.daml.ledger.api.v2.update_service.{
   GetUpdatesResponse,
 }
 import com.daml.lf.data.Ref.TransactionId
-import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReader.FetchFromPersistence

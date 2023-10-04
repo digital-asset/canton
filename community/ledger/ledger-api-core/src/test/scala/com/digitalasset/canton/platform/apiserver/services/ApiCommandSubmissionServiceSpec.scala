@@ -7,7 +7,6 @@ import com.daml.ledger.api.testing.utils.MockMessages.*
 import com.daml.ledger.api.v1.commands.{Command, CreateCommand, DisclosedContract}
 import com.daml.ledger.api.v1.value.{Identifier, Record, RecordField, Value}
 import com.daml.lf.data.Ref
-import com.daml.metrics.Metrics
 import com.daml.tracing.{DefaultOpenTelemetry, SpanAttribute}
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.domain.LedgerId
@@ -15,6 +14,7 @@ import com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequ
 import com.digitalasset.canton.ledger.api.services.CommandSubmissionService
 import com.digitalasset.canton.ledger.api.validation.{CommandsValidator, ValidateDisclosedContracts}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.tracing.TestTelemetrySetup
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import org.mockito.captor.ArgCaptor

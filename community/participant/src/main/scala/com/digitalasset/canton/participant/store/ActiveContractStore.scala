@@ -50,7 +50,7 @@ import scala.concurrent.Future
   * If the future returned by a call completes and observing the completion happens before another call,
   * then all changes of the former call must be ordered before all changes of the later call.</p>
   *
-  * <p>Bulk methods like [[ActiveContractStore.createContracts]] and [[ActiveContractStore.archiveContracts]]
+  * <p>Bulk methods like [[ActiveContractStore.markContractsActive]] and [[ActiveContractStore.archiveContracts]]
   * generate one individual change for each contract.
   * So their changes may be interleaved with other calls.</p>
   *
@@ -63,7 +63,7 @@ trait ActiveContractStore
 
   /** Marks the given contracts as active from `timestamp` (inclusive) onwards.
     *
-    * @param contractIds The contract IDs of the created contracts
+    * @param contracts The contracts represented as a tuple of contract id and reassignment counter
     * @param toc The time of change consisting of
     *            <ul>
     *              <li>The request counter of the confirmation request that created the contracts</li>
@@ -80,15 +80,15 @@ trait ActiveContractStore
     *           <li>[[ActiveContractStore.ChangeAfterArchival]] if this creation is later than the earliest archival of the contract.</li>
     *         </ul>
     */
-  def createContracts(contractIds: Seq[LfContractId], toc: TimeOfChange)(implicit
-      traceContext: TraceContext
+  def markContractsActive(contracts: Seq[(LfContractId, TransferCounterO)], toc: TimeOfChange)(
+      implicit traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit]
 
-  /** Shorthand for `createContracts(Seq(contractId), toc)` */
-  def createContract(contractId: LfContractId, toc: TimeOfChange)(implicit
+  /** Shorthand for `markContractsActive(Seq(contractId), toc)` */
+  def markContractActive(contract: (LfContractId, TransferCounterO), toc: TimeOfChange)(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
-    createContracts(Seq(contractId), toc)
+    markContractsActive(Seq(contract), toc)
 
   /** Marks the given contracts as archived from `toc`'s timestamp (inclusive) onwards.
     *
@@ -252,8 +252,7 @@ object ActiveContractStore {
     val transferCounter: TransferCounterO
   }
 
-  // TODO(#12373) Adapt when releasing BFT
-  /** Starting protocol version [[com.digitalasset.canton.version.ProtocolVersion.dev]],
+  /** Starting protocol version [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]],
     * transfer counter should be defined for Creations.
     */
   final case class TransferDetails(
@@ -273,19 +272,18 @@ object ActiveContractStore {
 
     def apply(
         domainIdO: Option[DomainId],
-        transferCounterO: TransferCounterO,
+        transferCounter: TransferCounterO,
     ): ActivenessChangeDetail =
       domainIdO match {
-        case None => CreationArchivalDetail(transferCounterO)
-        case Some(domainId) => TransferDetails(domainId, transferCounterO)
+        case None => CreationArchivalDetail(transferCounter)
+        case Some(domainId) => TransferDetails(domainId, transferCounter)
       }
 
     private[store] implicit val orderForActivenessChangeDetail: Order[ActivenessChangeDetail] =
       Order.by[ActivenessChangeDetail, Option[DomainId]](_.unwrap)
   }
 
-  // TODO(#12373) Adapt when releasing BFT
-  /** Starting protocol version [[com.digitalasset.canton.version.ProtocolVersion.dev]],
+  /** Starting protocol version [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]],
     * transfer counter should be defined for creations.
     *
     * The transfer counter for archivals stored in the acs is always None, because we cannot
@@ -307,6 +305,10 @@ object ActiveContractStore {
 
   /** Error cases returned by the operations on the [[ActiveContractStore!]] */
   trait AcsError extends AcsBaseError
+
+  final case class ActiveContractsDataInvariantViolation(
+      errorMessage: String
+  ) extends AcsError
 
   /** A contract is simultaneously created and/or transferred from possibly several source domains */
   final case class SimultaneousActivation(
@@ -431,7 +433,7 @@ object ActiveContractStore {
   }
   private[store] final case class TransferCounterAtChangeInfo(
       timeOfChange: TimeOfChange,
-      transferCounterO: TransferCounterO,
+      transferCounter: TransferCounterO,
   )
 
   private[store] def checkTransferCounterAgainstLatestBefore(
@@ -442,7 +444,7 @@ object ActiveContractStore {
       transferType: TransferType,
   ): Checked[Nothing, TransferCounterShouldIncrease, Unit] =
     latestBeforeO.flatMap { latestBefore =>
-      latestBefore.transferCounterO.map { previousTransferCounter =>
+      latestBefore.transferCounter.map { previousTransferCounter =>
         if (previousTransferCounter < transferCounter) Checked.unit
         else {
           val error = TransferCounterShouldIncrease(
@@ -466,7 +468,7 @@ object ActiveContractStore {
       transferType: TransferType,
   ): Checked[Nothing, TransferCounterShouldIncrease, Unit] =
     earliestAfterO.flatMap { earliestAfter =>
-      earliestAfter.transferCounterO.map { nextTransferCounter =>
+      earliestAfter.transferCounter.map { nextTransferCounter =>
         val (condition, strict) = transferType match {
           case TransferType.TransferIn =>
             (transferCounter <= nextTransferCounter) -> false

@@ -3,214 +3,184 @@
 
 package com.digitalasset.canton.participant.ledger.api.client
 
-import akka.NotUsed
-import akka.stream.QueueOfferResult.{Dropped, Enqueued, Failure, QueueClosed}
-import akka.stream.scaladsl.{Broadcast, Flow, GraphDSL, Keep, MergePreferred, Sink, Source}
-import akka.stream.{FlowShape, KillSwitches, Materializer, OverflowStrategy}
+import com.daml.ledger.api.v1.command_service.SubmitAndWaitRequest
 import com.daml.ledger.api.v1.commands.Commands
-import com.daml.ledger.api.v1.completion.Completion
-import com.daml.nameof.NameOf.functionFullName
-import com.daml.util.Ctx
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.error
-import com.digitalasset.canton.ledger.client.services.commands.CommandSubmission
+import com.digitalasset.canton.error.ErrorCodeUtils
+import com.digitalasset.canton.ledger.client.services.commands.SynchronousCommandClient
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
-import com.digitalasset.canton.participant.ledger.api.client.CommandSubmitterWithRetry.{
-  CommandResult,
-  CommandsCtx,
-  Failed,
-  retryCommandFlow,
-}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.AkkaUtil
+import com.digitalasset.canton.util.DelayUtil
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.google.rpc.code.Code
 import com.google.rpc.status.Status
-import io.opentelemetry.api.trace.Tracer
+import io.grpc.protobuf.StatusProto
 
-import scala.annotation.nowarn
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.duration.{Duration, FiniteDuration, *}
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.Failure
 
-/** Wraps a command tracker with the ability to retry timed out commands up to a given max number of retries
+/** Wraps a synchronous command client with the ability to retry commands that failed with retryable errors
+  *  up to a given max number of retries.
   */
 class CommandSubmitterWithRetry(
     maxRetries: Int,
-    cmdTracker: Flow[Ctx[CommandsCtx, CommandSubmission], Ctx[CommandsCtx, Completion], _],
+    synchronousCommandClient: SynchronousCommandClient,
+    futureSupervisor: FutureSupervisor,
     protected override val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
     overrideRetryable: PartialFunction[Status, Boolean] = PartialFunction.empty,
-)(implicit mat: Materializer, ec: ExecutionContext, tracer: Tracer)
+)(implicit ec: ExecutionContext)
     extends NamedLogging
     with FlagCloseableAsync {
-  private val retryFlow = retryCommandFlow(maxRetries, cmdTracker, logger, overrideRetryable)
-  @nowarn("msg=method dropNew in object OverflowStrategy is deprecated")
-  private val source =
-    Source.queue[Ctx[CommandsCtx, CommandSubmission]](
-      bufferSize = 10000,
-      overflowStrategy = OverflowStrategy.dropNew,
-    )
-  private val ((queue, killSwitch), done) = {
-    import TraceContext.Implicits.Empty.*
 
-    AkkaUtil.runSupervised(
-      logger.error("Fatally failed to handle retry flow", _),
-      source
-        .via(retryFlow)
-        .viaMat(KillSwitches.single)(Keep.both)
-        .toMat(Sink.ignore)(Keep.both),
-    )
-  }
+  private val DefaultRetryableDelay = 1.second
 
   /** Submits commands and retries timed out ones (at most the amount given by `maxRetries`)
+    *
     * @param commands to be submitted
-    * @return Future with the result of the submission. The result can signal success, failure or max retries reached
+    * @return Future with the result of the submission. The result can signal success, failure, max retries reached
+    *         or aborted due to shutdown.
     */
   def submitCommands(
-      commands: Commands
-  )(implicit traceContext: TraceContext): Future[CommandResult] = {
-    val resultPromise = Promise[CommandResult]()
-    val ctx =
-      Ctx(
-        CommandsCtx(commands, resultPromise),
-        CommandSubmission(commands),
-        traceContext.toDamlTelemetryContext,
-      )
-    for {
-      queueOfferResult <-
-        // The performUnlessClosing has been introduced
-        // because we have observed exceptions in case a command was submitted after shutdown.
-        performUnlessClosingF(functionFullName) { queue.offer(ctx) }.unwrap
-
-      result <- queueOfferResult match {
-        case UnlessShutdown.Outcome(Enqueued) => resultPromise.future
-        case UnlessShutdown.Outcome(Failure(cause)) => Future.failed(cause)
-        case UnlessShutdown.Outcome(Dropped) =>
-          Future.successful(
-            Failed(
-              Completion()
-                .withCommandId(commands.commandId)
-                .withStatus(
-                  Status()
-                    .withCode(Code.ABORTED.value)
-                    .withMessage("Client side backpressure on command submission")
-                )
-            )
-          )
-        case UnlessShutdown.Outcome(QueueClosed) | UnlessShutdown.AbortedDueToShutdown =>
-          logger.info(
-            s"Rejected command ${commands.commandId} as the participant is shutting down."
-          )
-          val status =
-            Status(
-              code = Code.UNAVAILABLE.value,
-              message = "Command rejected, as the participant is shutting down.",
-            )
-          val completion = Completion(commandId = commands.commandId, status = Some(status))
-          Future.successful(Failed(completion))
+      commands: Commands,
+      timeout: Duration,
+  )(implicit traceContext: TraceContext): Future[CommandResult] =
+    submitCommandsInternal(commands, timeout).unwrap
+      .map {
+        case UnlessShutdown.Outcome(commandResult) => commandResult
+        case UnlessShutdown.AbortedDueToShutdown => CommandResult.AbortedDueToShutdown
       }
-    } yield result
+      .thereafter {
+        case Failure(ex) =>
+          logger.warn(s"Command failed [${commands.commandId}] badly due to an exception", ex)
+        case _ => ()
+      }
+
+  private def submitCommandsInternal(commands: Commands, timeout: Duration)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[CommandResult] = {
+    val commandId = commands.commandId
+
+    def go(retriesLeft: Int): FutureUnlessShutdown[CommandResult] =
+      runWithAbortOnShutdown(submitAndWait(commands, timeout))
+        .flatMap {
+          case Left(status) =>
+            getErrorRetryability(status)
+              .map { retryAfter =>
+                if (retriesLeft > 0) {
+                  logger.info(
+                    s"Command with id = $commandId failed with a retryable error. Retrying (attempt ${maxRetries - retriesLeft + 1}/$maxRetries)"
+                  )
+                  DelayUtil
+                    .delayIfNotClosing("command-retry-delay", retryAfter, this)
+                    .flatMap(_ => performUnlessClosingUSF("retry-command")(go(retriesLeft - 1)))
+                } else {
+                  logger.info(
+                    s"Command with id = $commandId failed after reaching max retries of $maxRetries."
+                  )
+                  FutureUnlessShutdown.pure(CommandResult.MaxRetriesReached(commandId, status))
+                }
+              }
+              .getOrElse {
+                logger.info(s"Command with id = $commandId failed.")
+                FutureUnlessShutdown.pure(CommandResult.Failed(commandId, status))
+              }
+          case Right(transactionId) =>
+            FutureUnlessShutdown.pure(CommandResult.Success(transactionId))
+        }
+
+    go(maxRetries)
   }
 
-  override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    import TraceContext.Implicits.Empty.*
-    List[AsyncOrSyncCloseable](
-      SyncCloseable("queue.complete", queue.complete()),
-      SyncCloseable("killSwitch.shutdown", killSwitch.shutdown()),
-      AsyncCloseable("queue.completion", queue.watchCompletion(), timeouts.shutdownShort.unwrap),
-      AsyncCloseable("done", done, timeouts.shutdownShort.unwrap),
+  /** Decides on error retryabillity and if positive, the backoff delay to be followed until retry:
+    * * `overrideRetryable` has highest precedence
+    * * then, the extracted error category
+    * * and last, whether an error is a DEADLINE_EXCEEDED status. We look for DEADLINE_EXCEEDED
+    * since it can be returned directly by the gRPC server and does not conform to our
+    * self-service error codes shape.
+    */
+  private def getErrorRetryability(status: Status): Option[FiniteDuration] =
+    overrideRetryable
+      .andThen(retryableOverride => Option.when(retryableOverride)(DefaultRetryableDelay))
+      .applyOrElse(
+        status,
+        { status: Status =>
+          ErrorCodeUtils
+            .errorCategoryFromString(status.message)
+            .flatMap(_.retryable)
+            .map(_.duration)
+            .orElse(Option.when(status.code == Code.DEADLINE_EXCEEDED.value)(DefaultRetryableDelay))
+        },
+      )
+
+  private def runWithAbortOnShutdown(f: => Future[Either[Status, String]])(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Either[Status, String]] = {
+    val promise = new PromiseUnlessShutdown[Either[Status, String]](
+      description = "submit-command-with-retry",
+      futureSupervisor = futureSupervisor,
+    )
+
+    val taskId = runOnShutdown(promise)
+    promise.completeWith(FutureUnlessShutdown.outcomeF(f))
+    promise.futureUS.thereafter(_ => cancelShutdownTask(taskId))
+  }
+
+  private def submitAndWait(
+      commands: Commands,
+      timeout: Duration,
+  )(implicit traceContext: TraceContext): Future[Either[Status, String]] =
+    synchronousCommandClient
+      .submitAndWaitForTransactionId(SubmitAndWaitRequest(Some(commands)), timeout = Some(timeout))
+      .map(response => Right(response.transactionId))
+      .recoverWith { case throwable =>
+        Option(StatusProto.fromThrowable(throwable))
+          .map(Status.fromJavaProto)
+          .map(errStatus => Future.successful(Left(errStatus)))
+          .getOrElse {
+            logger.info(s"Could not decode submission result error", throwable)
+            Future.failed(throwable)
+          }
+      }
+
+  override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = Nil
+}
+
+sealed trait CommandResult extends PrettyPrinting with Product with Serializable
+
+object CommandResult {
+  final case class Success(transactionId: String) extends CommandResult {
+    override def pretty: Pretty[Success.this.type] = prettyOfClass(
+      param("transactionId", _.transactionId.doubleQuoted)
+    )
+  }
+
+  final case class Failed(commandId: String, errorStatus: Status) extends CommandResult {
+    override def pretty: Pretty[Failed] = prettyOfClass(
+      param("commandId", _.commandId.doubleQuoted),
+      param("errorStatus", _.errorStatus),
+    )
+  }
+
+  final case object AbortedDueToShutdown extends CommandResult {
+    override def pretty: Pretty[AbortedDueToShutdown.this.type] =
+      prettyOfObject[AbortedDueToShutdown.this.type]
+  }
+
+  final case class MaxRetriesReached(commandId: String, lastErrorStatus: Status)
+      extends CommandResult {
+    override def pretty: Pretty[MaxRetriesReached] = prettyOfClass(
+      param("commandId", _.commandId.doubleQuoted),
+      param("lastError", _.lastErrorStatus),
     )
   }
 }
 
 object CommandSubmitterWithRetry {
-  sealed trait CommandResult extends PrettyPrinting
-
-  final case class Success(completion: Completion) extends CommandResult {
-    override def pretty: Pretty[Success.this.type] = prettyOfClass(unnamedParam(_.completion))
-  }
-
-  final case class Failed(completion: Completion) extends CommandResult {
-    override def pretty: Pretty[Failed] = prettyOfClass(unnamedParam(_.completion))
-  }
-
-  final case class MaxRetriesReached(completion: Completion) extends CommandResult {
-    override def pretty: Pretty[MaxRetriesReached] = prettyOfClass(unnamedParam(_.completion))
-  }
-
-  final case class CommandsCtx(
-      commands: Commands,
-      promise: Promise[CommandResult],
-      retries: Int = 0,
-  )
-
-  def retryCommandFlow(
-      maxRetries: Int,
-      cmdTracker: Flow[Ctx[CommandsCtx, CommandSubmission], Ctx[CommandsCtx, Completion], _],
-      logger: TracedLogger,
-      overrideRetryable: PartialFunction[Status, Boolean] = PartialFunction.empty,
-  ): Flow[Ctx[CommandsCtx, CommandSubmission], Ctx[CommandsCtx, CommandSubmission], NotUsed] =
-    Flow.fromGraph(GraphDSL.create() { implicit b =>
-      import GraphDSL.Implicits.*
-
-      val merge =
-        b.add(MergePreferred[Ctx[CommandsCtx, CommandSubmission]](1, eagerComplete = true))
-      val bcast = b.add(Broadcast[Ctx[CommandsCtx, CommandSubmission]](2))
-
-      (merge ~> cmdTracker
-        .map(stopOrRetry(maxRetries, logger, overrideRetryable))
-        .collect { case Some(ctx) =>
-          ctx
-        } ~> bcast).discard
-
-      bcast ~> merge.preferred // retry
-
-      FlowShape(merge.in(0), bcast.out(1))
-    })
-
-  def stopOrRetry(
-      maxRetries: Int,
-      logger: TracedLogger,
-      overrideRetryable: PartialFunction[Status, Boolean] = PartialFunction.empty,
-  )(c: Ctx[CommandsCtx, Completion]): Option[Ctx[CommandsCtx, CommandSubmission]] = {
-    import TraceContext.Implicits.Empty.*
-    val statusO = c.value.status
-    val result: Either[CommandResult, CommandsCtx] = statusO match {
-      case None =>
-        logger.info(s"Command with id = ${c.value.commandId} failed without a status. Giving up.")
-        Left(Failed(c.value))
-      case Some(status) =>
-        if (isSuccess(status)) {
-          logger.debug(s"Command with id = ${c.value.commandId} completed successfully.")
-          Left(Success(c.value))
-        } else if (!isRetryable(status, overrideRetryable)) {
-          logger.info(
-            s"Command with id = ${c.value.commandId} failed with status $status. Giving up."
-          )
-          Left(Failed(c.value))
-        } else if (c.context.retries >= maxRetries) {
-          logger.info(
-            s"Command with id = ${c.value.commandId} failed after reaching max retries of $maxRetries with status $status."
-          )
-          Left(MaxRetriesReached(c.value))
-        } else {
-          val newRetries = c.context.retries + 1
-          val newCtxt = c.context.copy(retries = newRetries)
-          logger.info(
-            s"Command with id = ${c.value.commandId} failed with status $status. Retrying (attempt: $newRetries)."
-          )
-          Right(newCtxt)
-        }
-    }
-
-    result.fold(
-      result => {
-        c.context.promise.success(result)
-        None
-      },
-      ctx => Some(Ctx(ctx, CommandSubmission(ctx.commands), c.telemetryContext)),
-    )
-  }
 
   def isSuccess(status: Status): Boolean = status.code == Code.OK.value
 
@@ -220,8 +190,6 @@ object CommandSubmitterWithRetry {
   ): Boolean =
     overrideRetryable.applyOrElse(
       status,
-      (s: Status) =>
-        error.ErrorCodeUtils.errorCategoryFromString(s.message).exists(_.retryable.nonEmpty),
+      (s: Status) => ErrorCodeUtils.errorCategoryFromString(s.message).exists(_.retryable.nonEmpty),
     )
-
 }

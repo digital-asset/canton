@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.store
 import cats.data.OptionT
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.admin.repair.{RepairContext, RepairService}
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.protocol.MessageProcessingStartingPoint
@@ -18,6 +17,7 @@ import com.digitalasset.canton.participant.store.memory.{
   InMemoryRequestJournalStore,
 }
 import com.digitalasset.canton.participant.sync.{DefaultLedgerSyncEvent, TimestampedEvent}
+import com.digitalasset.canton.participant.{LocalOffset, RichRequestCounter}
 import com.digitalasset.canton.sequencing.protocol.SignedContent
 import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, SequencerTestUtils}
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
@@ -65,7 +65,6 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest wi
           ),
       lookupOffsetsBetween = _ => _ => (_, _) => Future.successful(Seq.empty),
       byEventId = _ => _ => OptionT(Future.successful(Option.empty)),
-      participantEventLogId = ParticipantEventLog.ProductionParticipantEventLogId,
       clock = new SimClock(loggerFactory = loggerFactory),
       metrics = ParticipantTestMetrics,
       transferStoreFor = _ => Left("transferStoreFor is not implemented"),

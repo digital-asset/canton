@@ -390,4 +390,4 @@ object ErrorCategory {
   * Every error category has a default retryability classification.
   * An error code may adjust the retry duration.
   */
-final case class ErrorCategoryRetry(duration: Duration)
+final case class ErrorCategoryRetry(duration: FiniteDuration)

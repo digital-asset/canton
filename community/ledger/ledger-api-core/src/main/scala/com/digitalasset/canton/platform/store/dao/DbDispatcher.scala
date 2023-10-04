@@ -12,9 +12,9 @@ import com.daml.executors.executors.{
 }
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.logging.entries.LoggingEntry
+import com.daml.metrics.DatabaseMetrics
 import com.daml.metrics.api.MetricHandle.Timer
 import com.daml.metrics.api.MetricName
-import com.daml.metrics.{DatabaseMetrics, Metrics}
 import com.digitalasset.canton.ledger.api.health.{HealthStatus, ReportsHealth}
 import com.digitalasset.canton.logging.LoggingContextWithTrace.{
   implicitExtractTraceContext,
@@ -26,6 +26,7 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
 }
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.config.ServerRole
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.util.concurrent.ThreadFactoryBuilder

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.console.commands
 
 import cats.syntax.either.*
+import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.commands.{
   TopologyAdminCommands,
@@ -205,50 +206,35 @@ class TopologyAdministrationGroupX(
 
   object domain_bootstrap {
 
-    // TODO(#14048) break individual bits out into separate admin functions, and have this only be the default wrapper
+    @Help.Summary(
+      """Creates and returns proposals of topology transactions to bootstrap a domain, specifically
+        |DomainParametersStateX, SequencerDomainStateX, and MediatorDomainStateX.""".stripMargin
+    )
     def generate_genesis_topology(
         domainId: DomainId,
         domainOwners: Seq[Member],
-        unionspaceFoundingTransactions: Seq[GenericSignedTopologyTransactionX],
         sequencers: Seq[SequencerId],
         mediators: Seq[MediatorId],
     ): Seq[SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]] = {
+      val isDomainOwner = domainOwners.contains(instance.id)
+      require(isDomainOwner, s"Only domain owners should call $functionFullName.")
 
       val thisNodeRootKey = Some(instance.id.uid.namespace.fingerprint)
 
-      val isDomainOwner = domainOwners.contains(instance.id)
-      val isSequencer = sequencers.contains(instance.id)
-      val isMediator = mediators.contains(instance.id)
-
-      val codes = Set(NamespaceDelegationX.code, OwnerToKeyMappingX.code)
-      // provide the root namespace delegation and owner to key mapping
-      val namespace = instance.topology.transactions
-        .list(filterAuthorizedKey = thisNodeRootKey)
-        .result
-        .map(_.transaction)
-        .filter(x => codes.contains(x.transaction.mapping.code))
-
-      // load the unionspace founding transactions
-      unionspaceFoundingTransactions
-        .groupBy(_.transaction.mapping.code)
-        .toSeq
-        .sortBy(_._1.dbInt)
-        .foreach { case (_, txs) =>
-          instance.topology.transactions.load(txs, AuthorizedStore.filterName)
-        }
-
       // create and sign the initial domain parameters
-      val domainParameterState = Option.when(isDomainOwner)(
+      val domainParameterState =
         instance.topology.domain_parameters.propose(
           domainId,
           DynamicDomainParameters
-            .initialXValues(consoleEnvironment.environment.clock, ProtocolVersion.dev),
+            .initialXValues(
+              consoleEnvironment.environment.clock,
+              ProtocolVersion.CNTestNet,
+            ), // TODO(#12373): Review the PV here
           signedBy = thisNodeRootKey,
           store = Some(AuthorizedStore.filterName),
         )
-      )
 
-      val mediatorState = Option.when(isDomainOwner || isMediator)(
+      val mediatorState =
         instance.topology.mediators.propose(
           domainId,
           threshold = PositiveInt.one,
@@ -256,9 +242,8 @@ class TopologyAdministrationGroupX(
           signedBy = thisNodeRootKey,
           store = Some(AuthorizedStore.filterName),
         )
-      )
 
-      val sequencerState = Option.when(isDomainOwner || isSequencer)(
+      val sequencerState =
         instance.topology.sequencers.propose(
           domainId,
           threshold = PositiveInt.one,
@@ -266,9 +251,8 @@ class TopologyAdministrationGroupX(
           signedBy = thisNodeRootKey,
           store = Some(AuthorizedStore.filterName),
         )
-      )
 
-      namespace ++ unionspaceFoundingTransactions ++ domainParameterState ++ sequencerState ++ mediatorState
+      Seq(domainParameterState, sequencerState, mediatorState)
     }
   }
 
@@ -490,7 +474,7 @@ class TopologyAdministrationGroupX(
           val currentPermissions =
             current.item.participants.map(p => p.participantId -> p.permission).toMap
 
-          (newDomainId, currentPermissions, Some(current.context.serial + PositiveInt.one))
+          (newDomainId, currentPermissions, Some(current.context.serial.increment))
 
         case None =>
           (domainId, Map.empty[ParticipantId, ParticipantPermissionX], serial)

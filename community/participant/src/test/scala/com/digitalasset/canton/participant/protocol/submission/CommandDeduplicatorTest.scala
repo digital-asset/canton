@@ -14,7 +14,6 @@ import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicat
   DeduplicationPeriodTooEarly,
   MalformedOffset,
 }
-import com.digitalasset.canton.participant.store.EventLogId.DomainEventLogId
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
   InFlightByMessageId,
   InFlightReference,
@@ -35,7 +34,6 @@ import com.digitalasset.canton.participant.{
   LocalOffset,
 }
 import com.digitalasset.canton.sequencing.protocol.MessageId
-import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.tracing.TraceContext
@@ -49,6 +47,7 @@ import scala.annotation.nowarn
 
 @nowarn("msg=match may not be exhaustive")
 class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
+  import scala.language.implicitConversions
 
   private lazy val clock = new SimClock(loggerFactory = loggerFactory)
 
@@ -91,7 +90,6 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
 
   private lazy val domainId = DefaultTestIdentities.domainId
   private lazy val messageId = MessageId.fromUuid(new UUID(10, 10))
-  private lazy val eventLogId = DomainEventLogId(IndexedDomain.tryCreate(domainId, 1))
   private lazy val inFlightReference = InFlightByMessageId(domainId, messageId)
 
   class Fixture(
@@ -108,25 +106,30 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
     event3Offset,
   ) = eventsInLog.zipWithIndex.map(_._2.toLong)
 
-  def mk(lowerBound: CantonTimestamp = CantonTimestamp.MinValue): Fixture = {
+  private implicit def toGlobalOffset(i: Long): GlobalOffset = GlobalOffset.tryFromLong(i)
+
+  private implicit def toLocalOffset(i: Long): LocalOffset = LocalOffset(i)
+
+  private def mk(lowerBound: CantonTimestamp = CantonTimestamp.MinValue): Fixture = {
     val store = new InMemoryCommandDeduplicationStore(loggerFactory)
     val dedup =
       new CommandDeduplicatorImpl(Eval.now(store), clock, Eval.now(lowerBound), loggerFactory)
     new Fixture(dedup, store)
   }
 
-  def dedupOffset(globalOffset: GlobalOffset): DeduplicationPeriod.DeduplicationOffset =
+  private def dedupOffset(globalOffset: GlobalOffset): DeduplicationPeriod.DeduplicationOffset =
     DeduplicationPeriod.DeduplicationOffset(UpstreamOffsetConvert.fromGlobalOffset(globalOffset))
 
-  def mkPublication(
+  private def mkPublication(
       globalOffset: GlobalOffset,
       localOffset: LocalOffset,
       publicationTime: CantonTimestamp,
       inFlightReference: Option[InFlightReference] = this.inFlightReference.some,
   ): MultiDomainEventLog.OnPublish.Publication = {
-    val deduplicationInfo = if (0 <= localOffset && localOffset < eventsInLog.size) {
-      DeduplicationInfo.fromEvent(eventsInLog(localOffset.toInt), TraceContext.empty)
-    } else None
+    val deduplicationInfo =
+      if (LocalOffset.Genesis <= localOffset && localOffset.unwrap < eventsInLog.size) {
+        DeduplicationInfo.fromEvent(eventsInLog(localOffset.unwrap.toInt), TraceContext.empty)
+      } else None
 
     MultiDomainEventLog.OnPublish.Publication(
       globalOffset,
@@ -137,9 +140,9 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
     )
   }
 
-  lazy val dedupTime1Day: DeduplicationPeriod.DeduplicationDuration =
+  private lazy val dedupTime1Day: DeduplicationPeriod.DeduplicationDuration =
     DeduplicationPeriod.DeduplicationDuration(java.time.Duration.ofDays(1))
-  lazy val dedupTimeAlmost1Day: DeduplicationPeriod.DeduplicationDuration =
+  private lazy val dedupTimeAlmost1Day: DeduplicationPeriod.DeduplicationDuration =
     DeduplicationPeriod.DeduplicationDuration(java.time.Duration.ofDays(1).minusNanos(1000))
 
   "CommandDeduplicator" should {

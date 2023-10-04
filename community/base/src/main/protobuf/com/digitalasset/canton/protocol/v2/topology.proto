@@ -209,10 +209,7 @@ message DomainParametersStateX {
 }
 
 // which mediators and mediator groups are active on the given domain
-// authorization: whoever controls the domain and all the owners of the active or observing mediators that
-//   were not already present in the tx with serial = n - 1
-//   exception: a mediator can leave the consortium unilaterally as long as there are enough members
-//              to reach the threshold
+// authorization: whoever controls the domain
 // UNIQUE(domain, group)
 message MediatorDomainStateX {
   // the domain-id of the mediator group
@@ -228,10 +225,7 @@ message MediatorDomainStateX {
 }
 
 // which sequencers are active on the given domain
-// authorization: whoever controls the domain and all the owners of the active or observing sequencers that
-//   were not already present in the tx with serial = n - 1
-//   exception: a sequencer can leave the consortium unilaterally as long as there are enough members
-//              to reach the threshold
+// authorization: whoever controls the domain
 // UNIQUE(domain)
 message SequencerDomainStateX {
   // the domain-id of the sequencer group
@@ -313,15 +307,12 @@ message SignedTopologyTransactionX {
   // multiple signatures (at least one)
   repeated com.digitalasset.canton.crypto.v0.Signature signatures = 2;
   // if true, this transaction is just a proposal. this means that every signature is valid,
-  // but the signatures are insufficient to properly authorize the transaction
+  // but the signatures are insufficient to properly authorize the transaction.
   // proposals are distributed via the topology channel too. proposals will be pruned automatically
   // when the nodes are pruned
-  // TODO(#12945) implement proposal
   // TODO(#14045) implement pruning
   bool proposal = 3;
 }
-
-// TODO(#14051) move below classes into v2/protocol
 
 /** Accepted topology transaction
  *
@@ -329,7 +320,6 @@ message SignedTopologyTransactionX {
  * The transactions are validated by all members individually against their respective domain store,
  * including the member the submitted the broadcast.
  */
-// TODO(#14051) make this a signed protocol message
 message TopologyTransactionsBroadcastX {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
   message Broadcast {
@@ -338,5 +328,4 @@ message TopologyTransactionsBroadcastX {
   }
   string domain = 1;
   repeated Broadcast broadcasts = 2;
-  // TODO(#14051) include max-sequencing time (should be set to request timeout)
 }

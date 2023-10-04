@@ -4,12 +4,12 @@
 package com.digitalasset.canton.participant.config
 
 import cats.syntax.option.*
-import com.daml.http.HttpApiConfig
 import com.daml.jwt.JwtTimestampLeeway
 import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
 import com.digitalasset.canton.config.LocalNodeConfig.LocalNodeConfigDeprecationImplicits
 import com.digitalasset.canton.config.RequireTypes.*
 import com.digitalasset.canton.config.*
+import com.digitalasset.canton.http.HttpApiConfig
 import com.digitalasset.canton.ledger.api.tls.{SecretsUrl, TlsConfiguration, TlsVersion}
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig

@@ -88,7 +88,7 @@ final case class TopologyTransactionX[+Op <: TopologyChangeOpX, +M <: TopologyMa
       case TopologyChangeOpX.Replace => TopologyChangeOpX.Remove
       case TopologyChangeOpX.Remove => TopologyChangeOpX.Replace
     }
-    TopologyTransactionX(next, serial = serial + PositiveInt.one, mapping = mapping)(
+    TopologyTransactionX(next, serial = serial.increment, mapping = mapping)(
       representativeProtocolVersion,
       None,
     )
@@ -159,7 +159,7 @@ object TopologyTransactionX
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.minimum),
-    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.dev)(v2.TopologyTransactionX)(
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.CNTestNet)(v2.TopologyTransactionX)(
       supportedProtoVersionMemoized(_)(fromProtoV2),
       _.toProtoV2.toByteString,
     ),

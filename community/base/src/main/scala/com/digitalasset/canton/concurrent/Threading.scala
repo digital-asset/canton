@@ -121,7 +121,19 @@ object Threading {
       logger: Logger,
       metrics: ExecutorServiceMetrics,
   ): ExecutionContextIdlenessExecutorService =
-    newExecutionContext(name, logger, metrics, detectNumberOfThreads(logger))
+    newExecutionContext(name, logger, Some(metrics))
+
+  def newExecutionContext(
+      name: String,
+      logger: Logger,
+      maybeMetrics: Option[ExecutorServiceMetrics],
+  ): ExecutionContextIdlenessExecutorService =
+    newExecutionContext(
+      name,
+      logger,
+      maybeMetrics,
+      detectNumberOfThreads(logger),
+    )
 
   /** Yields an `ExecutionContext` like `scala.concurrent.ExecutionContext.global`,
     * except that it has its own thread pool.
@@ -133,7 +145,7 @@ object Threading {
   def newExecutionContext(
       name: String,
       logger: Logger,
-      metrics: ExecutorServiceMetrics,
+      maybeMetrics: Option[ExecutorServiceMetrics],
       parallelism: Int,
       maxExtraThreads: Int = 256,
       exitOnFatal: Boolean = true,
@@ -155,9 +167,12 @@ object Threading {
       .asInstanceOf[ForkJoinPool.ForkJoinWorkerThreadFactory]
 
     val forkJoinPool = createForkJoinPool(parallelism, threadFactory, handler, logger)
-    val monitoredExecutorService = metrics.monitorExecutorService(name, forkJoinPool)
+    val executorService =
+      maybeMetrics.fold(forkJoinPool: ExecutorService)(
+        _.monitorExecutorService(name, forkJoinPool)
+      )
 
-    new ForkJoinIdlenessExecutorService(forkJoinPool, monitoredExecutorService, reporter, name)
+    new ForkJoinIdlenessExecutorService(forkJoinPool, executorService, reporter, name)
   }
 
   /** Minimum parallelism of ForkJoinPool.

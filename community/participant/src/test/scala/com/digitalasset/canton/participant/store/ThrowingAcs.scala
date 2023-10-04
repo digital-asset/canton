@@ -25,10 +25,13 @@ class ThrowingAcs[T <: Throwable](mk: String => T)(override implicit val ec: Exe
     extends ActiveContractStore {
   private[this] type M = Checked[AcsError, AcsWarning, Unit]
 
-  override def createContracts(contractIds: Seq[LfContractId], toc: TimeOfChange)(implicit
+  override def markContractsActive(
+      contracts: Seq[(LfContractId, TransferCounterO)],
+      toc: TimeOfChange,
+  )(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
-    CheckedT(Future.failed[M](mk(s"createContracts for $contractIds at $toc")))
+    CheckedT(Future.failed[M](mk(s"createContracts for $contracts at $toc")))
 
   override def archiveContracts(
       contracts: Seq[LfContractId],

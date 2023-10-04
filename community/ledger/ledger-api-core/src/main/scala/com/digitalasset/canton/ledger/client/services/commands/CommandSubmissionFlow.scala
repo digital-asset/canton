@@ -6,9 +6,9 @@ package com.digitalasset.canton.ledger.client.services.commands
 import akka.NotUsed
 import akka.stream.scaladsl.Flow
 import com.daml.ledger.api.v1.command_submission_service.SubmitRequest
-import com.daml.util.Ctx
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.util.Ctx
 import com.google.protobuf.empty.Empty
 
 import scala.concurrent.Future

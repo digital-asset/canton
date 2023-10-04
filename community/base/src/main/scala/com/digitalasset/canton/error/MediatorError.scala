@@ -49,7 +49,8 @@ object MediatorError extends MediatorErrorGroup {
   @Explanation(
     """The mediator has received an invalid message (request or response).
       |The message will be discarded. As a consequence, the underlying request may be rejected.
-      |No corruption of the ledger is to be expected."""
+      |No corruption of the ledger is to be expected.
+      |This error is to be expected after a restart or failover of a mediator."""
   )
   @Resolution("Address the cause of the error. Let the submitter retry the command.")
   object InvalidMessage

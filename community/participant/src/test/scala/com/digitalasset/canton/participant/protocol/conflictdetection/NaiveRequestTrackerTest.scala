@@ -45,6 +45,7 @@ class NaiveRequestTrackerTest
         parallelExecutionContext,
         timeouts,
         futureSupervisor,
+        testedProtocolVersion,
       )
 
     new NaiveRequestTracker(

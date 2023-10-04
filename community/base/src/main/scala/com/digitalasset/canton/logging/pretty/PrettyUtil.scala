@@ -69,13 +69,7 @@ trait PrettyUtil {
         None
       }
 
-  def prettyInfix[T, U: Pretty, V: Pretty](
-      first: T => U,
-      infixOp: String,
-      second: T => V,
-  ): Pretty[T] = { inst =>
-    Tree.Infix(first(inst).toTree, infixOp, second(inst).toTree)
-  }
+  def prettyInfix[T] = new PrettyUtil.PrettyInfixPartiallyApplied[T](false)
 
   private def mkNameValue(name: String, valueTree: Tree): Tree =
     Tree.Infix(treeOfString(name), "=", valueTree)
@@ -159,4 +153,13 @@ trait PrettyUtil {
     )
 }
 
-object PrettyUtil extends PrettyUtil
+object PrettyUtil extends PrettyUtil {
+  private[pretty] final class PrettyInfixPartiallyApplied[T](private val dummy: Boolean)
+      extends AnyVal {
+    def apply[U: Pretty, V: Pretty](first: T => U, infixOp: String, second: T => V): Pretty[T] = {
+      inst =>
+        import Pretty.PrettyOps
+        Tree.Infix(first(inst).toTree, infixOp, second(inst).toTree)
+    }
+  }
+}

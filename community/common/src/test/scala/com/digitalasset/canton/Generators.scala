@@ -32,9 +32,8 @@ object Generators {
     Gen.stringOfN(32, Gen.alphaNumChar).map(WorkflowId.assertFromString)
   )
 
-  // TODO(#12373) Adapt when releasing BFT
   def transferCounterOGen(pv: ProtocolVersion): Gen[TransferCounterO] = if (
-    pv < ProtocolVersion.dev
+    pv < ProtocolVersion.CNTestNet
   ) Gen.const(None)
   else Gen.choose(0, Long.MaxValue).map(i => Some(TransferCounter(i)))
 

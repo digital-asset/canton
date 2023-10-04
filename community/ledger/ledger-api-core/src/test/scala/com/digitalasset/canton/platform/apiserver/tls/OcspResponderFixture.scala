@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.apiserver.tls
 import com.daml.ledger.api.testing.utils.{AkkaBeforeAndAfterAll, OwnedResource}
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.timer.RetryStrategy
-import com.daml.util.ConcurrentBufferedLogger
+import com.digitalasset.canton.util.ConcurrentBufferedLogger
 import org.scalatest.Suite
 import org.slf4j.LoggerFactory
 

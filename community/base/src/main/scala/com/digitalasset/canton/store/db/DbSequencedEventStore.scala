@@ -90,7 +90,7 @@ class DbSequencedEventStore(
       val ignore = r.<<[Boolean]
 
       val getTrafficState = {
-        if (protocolVersion >= ProtocolVersion.dev) {
+        if (protocolVersion >= ProtocolVersion.CNTestNet) {
           SequencedEventTrafficState.sequencedEventTrafficStateGetResult(r)
         } else None
       }
@@ -153,8 +153,7 @@ class DbSequencedEventStore(
   private def bulkInsertQuery(
       events: Seq[PossiblyIgnoredSerializedEvent]
   )(implicit traceContext: TraceContext): DBIOAction[Unit, NoStream, Effect.All] = {
-    // TODO(i13104): Move traffic control to stable release
-    if (protocolVersion >= ProtocolVersion.dev) {
+    if (protocolVersion >= ProtocolVersion.CNTestNet) {
       // DEV protocol version supports sequencer traffic control
       val insertSql = storage.profile match {
         case _: DbStorage.Profile.Oracle =>
@@ -214,8 +213,7 @@ class DbSequencedEventStore(
       traceContext: TraceContext
   ): EitherT[Future, SequencedEventNotFoundError, PossiblyIgnoredSerializedEvent] =
     processingTime.eitherTEvent {
-      // TODO(i13104): Move traffic control to stable release
-      val query = if (protocolVersion >= ProtocolVersion.dev) {
+      val query = if (protocolVersion >= ProtocolVersion.CNTestNet) {
         criterion match {
           case ByTimestamp(timestamp) =>
             // The implementation assumes that we timestamps on sequenced events increases monotonically with the sequencer counter
@@ -253,8 +251,7 @@ class DbSequencedEventStore(
         case ByTimestampRange(lowerInclusive, upperInclusive) =>
           for {
             events <-
-              // TODO(i13104): Move traffic control to stable release
-              if (protocolVersion >= ProtocolVersion.dev) {
+              if (protocolVersion >= ProtocolVersion.CNTestNet) {
                 storage.query(
                   sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore, extra_traffic_remainder, extra_traffic_consumed from sequenced_events
                     where client = $partitionKey and $lowerInclusive <= ts  and ts <= $upperInclusive
@@ -286,8 +283,7 @@ class DbSequencedEventStore(
   override def sequencedEvents(
       limit: Option[Int] = None
   )(implicit traceContext: TraceContext): Future[Seq[PossiblyIgnoredSerializedEvent]] = {
-    // TODO(i13104): Move traffic control to stable release
-    if (protocolVersion >= ProtocolVersion.dev) {
+    if (protocolVersion >= ProtocolVersion.CNTestNet) {
       processingTime.event {
         storage.query(
           sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore, extra_traffic_remainder, extra_traffic_consumed from sequenced_events

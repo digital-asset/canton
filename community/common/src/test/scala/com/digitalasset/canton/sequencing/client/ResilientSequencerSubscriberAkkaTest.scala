@@ -133,6 +133,7 @@ class ResilientSequencerSubscriberAkkaTest extends StreamSpec with BaseTest {
         subscriber
           .subscribeFrom(SequencerCounter.Genesis)
           .source
+          .map(_.unwrap)
           .toMat(TestSink.probe)(Keep.both)
           .run()
       sink.request(30)
@@ -268,7 +269,6 @@ class TestSequencerSubscriptionFactoryAkka(
         }
       }
       .takeUntilThenDrain(_.isLeft)
-      .map(_.unwrap)
       .watchTermination()(Keep.both)
 
     SequencerSubscriptionAkka[TestSubscriptionError](source)

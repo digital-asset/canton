@@ -134,7 +134,12 @@ sealed trait AcsCommitmentProcessorBaseTest
         for {
           _ <- {
             if (lifespan.assignTransferCounter.forall(_ == TransferCounter.Genesis))
-              acs.createContract(cid, TimeOfChange(RequestCounter(0), lifespan.createdTs)).value
+              acs
+                .markContractActive(
+                  cid -> initialTransferCounter,
+                  TimeOfChange(RequestCounter(0), lifespan.createdTs),
+                )
+                .value
             else
               acs
                 .transferInContract(
@@ -1384,8 +1389,7 @@ class AcsCommitmentProcessorTest
       val (activeCommitment1, deltaAddedCommitment1) =
         addCommonContractId(rc1, hash, initialTransferCounter)
       val (activeCommitment2, deltaAddedCommitment2) = addCommonContractId(rc2, hash, tc2)
-      // TODO(#12373) Adapt when releasing BFT
-      if (testedProtocolVersion < ProtocolVersion.dev) {
+      if (testedProtocolVersion < ProtocolVersion.CNTestNet) {
         activeCommitment1 shouldBe activeCommitment2
         deltaAddedCommitment1 shouldBe deltaAddedCommitment2
       } else {

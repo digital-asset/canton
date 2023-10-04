@@ -6,7 +6,6 @@ package com.digitalasset.canton.platform.apiserver
 import com.codahale.metrics.MetricRegistry
 import com.daml.grpc.sampleservice.implementations.HelloServiceReferenceImplementation
 import com.daml.ledger.resources.{ResourceOwner, TestResourceContext}
-import com.daml.metrics.Metrics
 import com.daml.metrics.api.testing.{InMemoryMetricsFactory, MetricValues}
 import com.daml.platform.hello.{HelloRequest, HelloResponse, HelloServiceGrpc}
 import com.digitalasset.canton.BaseTest
@@ -21,6 +20,7 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   SuppressingLogger,
 }
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.apiserver.GrpcServerSpec.*
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.apiserver.ratelimiting.{

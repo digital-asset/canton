@@ -239,8 +239,7 @@ class TransferInValidationTest
             )
             .value
       } yield {
-        // TODO(#12373) Adapt when releasing BFT
-        if (testedProtocolVersion < ProtocolVersion.dev) {
+        if (testedProtocolVersion < ProtocolVersion.CNTestNet) {
           result shouldBe Right(Some(TransferInValidationResult(Set(party1))))
         } else {
           result shouldBe Left(
@@ -255,28 +254,27 @@ class TransferInValidationTest
     }
 
     "disallow transfers from source domain supporting transfer counter to destination domain not supporting them" in {
-      val transferDataSourceDomainDev =
-        transferData.copy(sourceProtocolVersion = SourceProtocolVersion(ProtocolVersion.dev))
+      val transferDataSourceDomainPVCNTestNet =
+        transferData.copy(sourceProtocolVersion = SourceProtocolVersion(ProtocolVersion.CNTestNet))
       for {
         result <-
           transferInValidation
             .validateTransferInRequest(
               CantonTimestamp.Epoch,
               inRequest,
-              Some(transferDataSourceDomainDev),
+              Some(transferDataSourceDomainPVCNTestNet),
               cryptoSnapshot,
               transferringParticipant = true,
             )
             .value
       } yield {
-        // TODO(#12373) Adapt when releasing BFT
-        if (transferOutRequest.targetProtocolVersion.v == ProtocolVersion.dev) {
+        if (transferOutRequest.targetProtocolVersion.v >= ProtocolVersion.CNTestNet) {
           result shouldBe Right(Some(TransferInValidationResult(Set(party1))))
         } else {
           result shouldBe Left(
             IncompatibleProtocolVersions(
-              transferDataSourceDomainDev.contract.contractId,
-              transferDataSourceDomainDev.sourceProtocolVersion,
+              transferDataSourceDomainPVCNTestNet.contract.contractId,
+              transferDataSourceDomainPVCNTestNet.sourceProtocolVersion,
               transferOutRequest.targetProtocolVersion,
             )
           )

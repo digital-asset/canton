@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
-import com.daml.metrics.Metrics
 import com.daml.metrics.api.MetricHandle.Histogram
+import com.digitalasset.canton.metrics.Metrics
 
 object CompressionMetrics {
 

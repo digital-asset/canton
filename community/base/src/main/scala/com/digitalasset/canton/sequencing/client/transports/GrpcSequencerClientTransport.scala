@@ -3,8 +3,13 @@
 
 package com.digitalasset.canton.sequencing.client.transports
 
+import akka.stream.Materializer
+import akka.stream.scaladsl.Source
 import cats.data.EitherT
 import cats.syntax.either.*
+import com.daml.grpc.adapter.ExecutionSequencerFactory
+import com.daml.grpc.adapter.client.akka.ClientAdapter
+import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.api.v0.SequencerConnectServiceGrpc.SequencerConnectServiceStub
@@ -28,7 +33,10 @@ import com.digitalasset.canton.sequencing.client.{
 import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
+import com.digitalasset.canton.topology.store.StoredTopologyTransactionX.GenericStoredTopologyTransactionX
+import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc, Traced}
+import com.digitalasset.canton.util.EitherTUtil.syntax.*
 import com.digitalasset.canton.util.EitherUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.Context.CancellableContext
@@ -46,8 +54,11 @@ private[transports] abstract class GrpcSequencerClientTransportCommon(
     val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
     protocolVersion: ProtocolVersion,
-)(implicit executionContext: ExecutionContext)
-    extends SequencerClientTransportCommon
+)(implicit
+    executionContext: ExecutionContext,
+    esf: ExecutionSequencerFactory,
+    materializer: Materializer,
+) extends SequencerClientTransportCommon
     with NamedLogging {
 
   private val sequencerConnectServiceClient = new SequencerConnectServiceStub(channel)
@@ -299,25 +310,27 @@ private[transports] abstract class GrpcSequencerClientTransportCommon(
   override def downloadTopologyStateForInit(request: TopologyStateForInitRequest)(implicit
       traceContext: TraceContext
   ): EitherT[Future, String, TopologyStateForInitResponse] = {
-    val requestP = request.toProtoV0
-
     logger.debug("Downloading topology state for initialization")
-    CantonGrpcUtil
-      .sendGrpcRequest(sequencerServiceClient, "sequencer")(
-        _.downloadTopologyStateForInit(requestP),
-        requestDescription = s"download-topology-state-for-init/${request.member}",
-        timeout = timeouts.network.duration,
-        logger = logger,
-        logPolicy = noLoggingShutdownErrorsLogPolicy,
-        retryPolicy = retryPolicy(retryOnUnavailable = false),
-      )
-      .leftMap(_.toString)
-      .subflatMap(TopologyStateForInitResponse.fromProtoV0(_).leftMap(_.toString))
-      .map { response =>
-        logger.debug(
-          s"Downloaded topology state for initialization with last change timestamp at ${response.topologyTransactions.value.lastChangeTimestamp}:\n${response.topologyTransactions.value.result}"
+
+    ClientAdapter
+      .serverStreaming(request.toProtoV0, sequencerServiceClient.downloadTopologyStateForInit)
+      .map(TopologyStateForInitResponse.fromProtoV0(_))
+      .flatMapConcat { parsingResult =>
+        parsingResult.fold(
+          err => Source.failed(ProtoDeserializationFailure.Wrap(err).asGrpcError),
+          Source.single,
         )
-        response
+      }
+      .runFold(Vector.empty[GenericStoredTopologyTransactionX])((acc, txs) =>
+        acc ++ txs.topologyTransactions.value.result
+      )
+      .toEitherTRight[String]
+      .map { accumulated =>
+        val storedTxs = StoredTopologyTransactionsX(accumulated)
+        logger.debug(
+          s"Downloaded topology state for initialization with last change timestamp at ${storedTxs.lastChangeTimestamp}:\n${storedTxs.result}"
+        )
+        TopologyStateForInitResponse(Traced(storedTxs))
       }
   }
 
@@ -336,8 +349,11 @@ class GrpcSequencerClientTransport(
     timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
     protocolVersion: ProtocolVersion,
-)(implicit executionContext: ExecutionContext)
-    extends GrpcSequencerClientTransportCommon(
+)(implicit
+    executionContext: ExecutionContext,
+    esf: ExecutionSequencerFactory,
+    materializer: Materializer,
+) extends GrpcSequencerClientTransportCommon(
       channel,
       callOptions,
       clientAuth,

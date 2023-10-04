@@ -5,12 +5,12 @@ package com.digitalasset.canton.platform.localstore
 
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.UserId
-import com.daml.metrics.Metrics
 import com.digitalasset.canton.caching.CaffeineCache
 import com.digitalasset.canton.caching.CaffeineCache.FutureAsyncCacheLoader
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, User}
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.localstore.CachedUserManagementStore.CacheKey
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore.{Result, UserInfo}
 import com.digitalasset.canton.platform.localstore.api.{UserManagementStore, UserUpdate}

@@ -91,8 +91,7 @@ message Snapshot {
       // Used for sequencers running protocol versions up to v5
       Success success = 1;
       Failure failure = 2;
-      // TODO(#12373) Adapt when releasing BFT
-      // Used for sequencers running protocol version dev or higher.
+      // Used for sequencers running protocol version CNTestNet or higher.
       VersionedSuccess versionedSuccess = 3;
     }
   }

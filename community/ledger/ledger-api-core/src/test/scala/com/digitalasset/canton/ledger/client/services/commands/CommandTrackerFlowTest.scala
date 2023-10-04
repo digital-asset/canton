@@ -18,7 +18,6 @@ import com.daml.ledger.api.v1.completion.Completion
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset.LedgerBoundary.LEDGER_BEGIN
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset.Value.{Absolute, Boundary}
-import com.daml.util.Ctx
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.ledger.client.services.commands.tracker.CompletionResponse.{
   CompletionFailure,
@@ -30,6 +29,7 @@ import com.digitalasset.canton.ledger.client.services.commands.tracker.{
   TrackedCommandKey,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.util.Ctx
 import com.digitalasset.canton.{BaseTest, DiscardOps}
 import com.google.protobuf.empty.Empty
 import com.google.protobuf.timestamp.Timestamp

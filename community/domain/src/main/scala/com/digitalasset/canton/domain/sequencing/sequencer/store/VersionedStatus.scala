@@ -27,9 +27,11 @@ object VersionedStatus extends HasProtocolVersionedCompanion2[VersionedStatus, V
     */
   override def supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.minimum),
-    // TODO(#12373) Adapt when releasing BFT
     ProtoVersion(0) -> VersionedProtoConverter
-      .storage(ReleaseProtocolVersion(ProtocolVersion.dev), v0.VersionedStatus.messageCompanion)(
+      .storage(
+        ReleaseProtocolVersion(ProtocolVersion.CNTestNet),
+        v0.VersionedStatus.messageCompanion,
+      )(
         supportedProtoVersion(_)(fromProtoV0),
         _.toProtoV0.toByteString,
       ),

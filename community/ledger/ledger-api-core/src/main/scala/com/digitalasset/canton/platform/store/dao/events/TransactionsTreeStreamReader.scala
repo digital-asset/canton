@@ -8,7 +8,7 @@ import akka.stream.Attributes
 import akka.stream.scaladsl.Source
 import com.daml.ledger.api.v1.transaction.TreeEvent
 import com.daml.ledger.api.v2.update_service.GetUpdateTreesResponse
-import com.daml.metrics.{DatabaseMetrics, Metrics, Timed}
+import com.daml.metrics.{DatabaseMetrics, Timed}
 import com.daml.nameof.NameOf.qualifiedNameOfCurrentFunc
 import com.daml.tracing
 import com.daml.tracing.Spans
@@ -16,6 +16,7 @@ import com.digitalasset.canton.ledger.api.TraceIdentifiers
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.config.TransactionTreeStreamsConfig
 import com.digitalasset.canton.platform.indexer.parallel.BatchN
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend

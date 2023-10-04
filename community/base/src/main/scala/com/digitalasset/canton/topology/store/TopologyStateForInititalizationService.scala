@@ -55,43 +55,26 @@ final class StoreBasedTopologyStateForInitializationService(
       executionContext: ExecutionContext,
       traceContext: TraceContext,
   ): Future[GenericStoredTopologyTransactionsX] = {
-    member match {
+    val effectiveFromF = member match {
       case participant @ ParticipantId(_) =>
-        logger.debug(s"Fetching initial topology state for $participant")
-        for {
-          trustCert <- domainTopologyStore.findFirstTrustCertificateForParticipant(participant)
-          maybeEffectiveTime = trustCert.map(_.validFrom)
-          storedTopologyTransactions <- maybeEffectiveTime match {
-            case Some(effective) =>
-              domainTopologyStore.findEssentialStateForMember(participant, effective.value)
-            case None =>
-              // TODO(#12390) should this error out if nothing can be found?
-              Future.successful(StoredTopologyTransactionsX(Seq.empty))
-          }
-        } yield storedTopologyTransactions
-
+        domainTopologyStore
+          .findFirstTrustCertificateForParticipant(participant)
+          .map(_.map(_.validFrom))
       case mediator @ MediatorId(_) =>
-        logger.debug(s"Fetching initial topology state for $mediator")
-        for {
-          // find first MediatorDomainStateX mentioning mediator
-          mediatorState <- domainTopologyStore.findFirstMediatorStateForMediator(mediator)
-          // find the first one that mentions the member
-          maybeEffectiveTime = mediatorState.map(_.validFrom)
-          storedTopologyTransactions <- maybeEffectiveTime match {
-            case Some(effective) =>
-              domainTopologyStore.findEssentialStateForMember(mediator, effective.value)
-            case None =>
-              // TODO(#12390) should this error out if nothing can be found?
-              Future.successful(StoredTopologyTransactionsX(Seq.empty))
-          }
-
-        } yield {
-          storedTopologyTransactions
-        }
-
+        domainTopologyStore.findFirstMediatorStateForMediator(mediator).map(_.map(_.validFrom))
       case _ =>
         // TODO(#12390) proper error
         ???
+    }
+
+    effectiveFromF.flatMap { effectiveFromO =>
+      effectiveFromO
+        .map { effectiveFrom =>
+          logger.debug(s"Fetching initial topology state for $member at $effectiveFrom")
+          domainTopologyStore.findEssentialStateForMember(member, effectiveFrom.value)
+        }
+        // TODO(#12390) should this error out if nothing can be found?
+        .getOrElse(Future.successful(StoredTopologyTransactionsX.empty))
     }
   }
 }

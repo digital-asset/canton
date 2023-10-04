@@ -176,8 +176,7 @@ class ParticipantRepairAdministration(
       outputFile: String = ParticipantRepairAdministration.ExportAcsDefaultFile,
       filterDomainId: Option[DomainId] = None,
       timestamp: Option[Instant] = None,
-      protocolVersion: Option[ProtocolVersion] = None,
-      contractDomainRenames: Map[DomainId, DomainId] = Map.empty,
+      contractDomainRenames: Map[DomainId, (DomainId, ProtocolVersion)] = Map.empty,
   ): Unit = {
     check(FeatureFlag.Repair) {
       val collector = AcsSnapshotFileCollector[ExportAcsRequest, ExportAcsResponse](outputFile)
@@ -186,13 +185,10 @@ class ParticipantRepairAdministration(
           parties,
           filterDomainId,
           timestamp,
-          protocolVersion,
           collector.observer,
           contractDomainRenames,
         )
-
       collector.materializeFile(command)
-
     }
   }
 
@@ -335,7 +331,12 @@ abstract class LocalParticipantRepairAdministration(
     runRepairCommand(tc =>
       access(
         _.sync.repairService
-          .addContracts(domain, contractsToAdd, ignoreAlreadyAdded, ignoreStakeholderCheck)(tc)
+          .addContracts(
+            domain,
+            contractsToAdd,
+            ignoreAlreadyAdded,
+            ignoreStakeholderCheck,
+          )(tc)
       )
     )
 

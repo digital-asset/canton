@@ -10,8 +10,8 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
-import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult.State
+import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcastX
+import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcastX.State
 import com.digitalasset.canton.time.WallClock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{
@@ -72,8 +72,8 @@ class QueueBasedDomainOutboxXTest
 
   private def mk(
       expect: Int,
-      responses: Iterator[RegisterTopologyTransactionResponseResult.State] =
-        Iterator.continually(RegisterTopologyTransactionResponseResult.State.Accepted),
+      responses: Iterator[TopologyTransactionsBroadcastX.State] =
+        Iterator.continually(TopologyTransactionsBroadcastX.State.Accepted),
       rejections: Iterator[Option[TopologyTransactionRejection]] = Iterator.continually(None),
   ) = {
     val target = new InMemoryTopologyStoreX(
@@ -120,7 +120,10 @@ class QueueBasedDomainOutboxXTest
       store: TopologyStoreX[TopologyStoreId],
       targetClient: StoreBasedDomainTopologyClientX,
       rejections: Iterator[Option[TopologyTransactionRejection]] = Iterator.continually(None),
-  ) extends RegisterTopologyTransactionHandleCommon[GenericSignedTopologyTransactionX] {
+  ) extends RegisterTopologyTransactionHandleCommon[
+        GenericSignedTopologyTransactionX,
+        TopologyTransactionsBroadcastX.State,
+      ] {
     val buffer = ListBuffer[GenericSignedTopologyTransactionX]()
     val promise = new AtomicReference[Promise[Unit]](Promise[Unit]())
     val expect = new AtomicInteger(expectI)
@@ -128,7 +131,7 @@ class QueueBasedDomainOutboxXTest
         transactions: Seq[GenericSignedTopologyTransactionX]
     )(implicit
         traceContext: TraceContext
-    ): FutureUnlessShutdown[Seq[RegisterTopologyTransactionResponseResult.State]] =
+    ): FutureUnlessShutdown[Seq[TopologyTransactionsBroadcastX.State]] =
       FutureUnlessShutdown.outcomeF {
         logger.debug(s"Observed ${transactions.length} transactions")
         buffer ++= transactions
@@ -209,7 +212,10 @@ class QueueBasedDomainOutboxXTest
 
   private def outboxConnected(
       manager: DomainTopologyManagerX,
-      handle: RegisterTopologyTransactionHandleCommon[GenericSignedTopologyTransactionX],
+      handle: RegisterTopologyTransactionHandleCommon[
+        GenericSignedTopologyTransactionX,
+        TopologyTransactionsBroadcastX.State,
+      ],
       client: DomainTopologyClientWithInit,
       target: TopologyStoreX[TopologyStoreId.DomainStore],
   ): Future[QueueBasedDomainOutboxX] = {
@@ -271,8 +277,7 @@ class QueueBasedDomainOutboxXTest
 
   "dispatcher" should {
 
-    // TODO(#12373) Adapt version when releasing BFT here and below
-    "dispatch transaction on new connect" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "dispatch transaction on new connect" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
       val (target, manager, handle, client) =
         mk(transactions.length)
       for {
@@ -285,7 +290,7 @@ class QueueBasedDomainOutboxXTest
       }
     }
 
-    "dispatch transaction on existing connections" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "dispatch transaction on existing connections" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
       val (target, manager, handle, client) =
         mk(transactions.length)
       for {
@@ -298,7 +303,7 @@ class QueueBasedDomainOutboxXTest
       }
     }
 
-    "dispatch transactions continuously" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "dispatch transactions continuously" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
       val (target, manager, handle, client) = mk(slice1.length)
       for {
         _res <- push(manager, slice1)
@@ -313,7 +318,7 @@ class QueueBasedDomainOutboxXTest
       }
     }
 
-    "not dispatch old data when reconnected" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "not dispatch old data when reconnected" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
       val (target, manager, handle, client) = mk(slice1.length)
       for {
         _ <- outboxConnected(manager, handle, client, target)
@@ -330,7 +335,7 @@ class QueueBasedDomainOutboxXTest
       }
     }
 
-    "correctly find a remove in source store" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "correctly find a remove in source store" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
 
       val (target, manager, handle, client) =
         mk(transactions.length)
@@ -366,7 +371,7 @@ class QueueBasedDomainOutboxXTest
       }
     }
 
-    "handle rejected transactions" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "handle rejected transactions" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
       val (target, manager, handle, client) =
         mk(
           transactions.size,
@@ -382,7 +387,7 @@ class QueueBasedDomainOutboxXTest
       }
     }
 
-    "handle failed transactions" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "handle failed transactions" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
       logger.info("handle failed transactions")
       val (target, manager, handle, client) =
         mk(

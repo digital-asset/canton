@@ -514,10 +514,9 @@ final case class DynamicDomainParameters private (
   )
 
   override def pretty: Pretty[DynamicDomainParameters] = {
-    // TODO(#12373) change when releasing BFT Domain
     if (
       representativeProtocolVersion >= companionObj.protocolVersionRepresentativeFor(
-        ProtocolVersion.dev
+        ProtocolVersion.CNTestNet
       )
     ) {
       prettyOfClass(
@@ -579,8 +578,7 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
 
   private lazy val rpv4 = protocolVersionRepresentativeFor(ProtocolVersion.v4)
 
-  // TODO(#12373): Adjust when releasing BFT
-  private lazy val rpvDev = protocolVersionRepresentativeFor(ProtocolVersion.dev)
+  private lazy val rpvCNTestNet = protocolVersionRepresentativeFor(ProtocolVersion.CNTestNet)
 
   override lazy val invariants = Seq(
     defaultReconciliationIntervalUntil,
@@ -612,7 +610,7 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
   lazy val defaultSequencerAggregateSubmissionTimeoutUntilExclusive = DefaultValueUntilExclusive(
     _.sequencerAggregateSubmissionTimeout,
     "sequencerAggregateSubmissionTimeout",
-    rpvDev,
+    rpvCNTestNet,
     defaultSequencerAggregateSubmissionTimeout,
   )
 

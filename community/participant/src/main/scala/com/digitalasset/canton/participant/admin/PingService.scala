@@ -27,9 +27,8 @@ import com.digitalasset.canton.lifecycle.{
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.participant.admin.workflows.{PingPong as M, PingPongVacuum as V}
-import com.digitalasset.canton.participant.ledger.api.client.CommandSubmitterWithRetry.Failed
 import com.digitalasset.canton.participant.ledger.api.client.{
-  CommandSubmitterWithRetry,
+  CommandResult,
   DecodeUtil,
   LedgerAcs,
   LedgerConnection,
@@ -55,6 +54,7 @@ import com.digitalasset.canton.util.{
   retry,
 }
 import com.google.common.annotations.VisibleForTesting
+import com.google.rpc.code.Code.DEADLINE_EXCEEDED
 import org.slf4j.event.Level
 import scalaz.Tag
 
@@ -546,34 +546,37 @@ class PingService(
         Some(commandId),
         workflowId,
         deduplicationTime = Some(deduplicationDuration),
+        timeout = Some(Duration.ofMillis(timeoutMillis)),
       ),
       timeoutMillis,
     ).transform { res =>
       res match {
+        // Some failures are logged below at INFO level as we sometimes do a ping expecting that it will fail.
         case Failure(_: TimeoutException) =>
-          // Info log level as we sometimes do a ping expecting that it will fail.
           logger.info(s"$desc: no completion received within timeout of ${timeoutMillis.millis}.")
-        case Failure(ex) if NonFatal(ex) =>
-          logger.warn(s"$desc failed due to an internal error.", ex)
-        case Success(CommandSubmitterWithRetry.Success(_)) =>
+        case Success(CommandResult.Failed(_, status)) if status.code == DEADLINE_EXCEEDED.value =>
+          logger.info(s"$desc failed with reason $status")
+        case Success(CommandResult.Success(_)) =>
           logger.debug(s"$desc succeeded.")
-        case Success(Failed(completion)) if completion.status.exists { s =>
-              ErrorCodeUtils.isError(s.message, ContractNotFound) ||
-              ErrorCodeUtils.isError(s.message, InactiveContracts) ||
-              ErrorCodeUtils.isError(s.message, LockedContracts)
-            } =>
-          logger.info(s"$desc failed with reason ${completion.status}.")
-        case Success(Failed(completion)) if completion.status.exists { s =>
-              ErrorCodeUtils.isError(s.message, UnknownInformees)
-            } =>
+        case Success(CommandResult.Failed(_, errorStatus))
+            if Seq(ContractNotFound, InactiveContracts, LockedContracts).exists(
+              ErrorCodeUtils.isError(errorStatus.message, _)
+            ) =>
+          logger.info(s"$desc failed with reason $errorStatus.")
+        case Success(CommandResult.Failed(_, errorStatus))
+            if ErrorCodeUtils.isError(errorStatus.message, UnknownInformees) =>
           // UNKNOWN_INFORMEES can be triggered by the Ping vacuuming process in multi-domain settings.
           // In these situations, we should log it at a lower severity because it is expected.
           LoggerUtil.logAtLevel(
             unknownInformeesLogLevel,
-            s"$desc failed with reason $completion.status.",
+            s"$desc failed with reason $errorStatus.",
           )
+        case Success(CommandResult.AbortedDueToShutdown) =>
+          logger.info(s"$desc failed due to service shutdown")
         case Success(reason) =>
           logger.warn(s"$desc failed with reason $reason.")
+        case Failure(ex) if NonFatal(ex) =>
+          logger.warn(s"$desc failed due to an internal error.", ex)
       }
       Success(())
     }

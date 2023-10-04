@@ -7,7 +7,7 @@ import com.daml.executors.InstrumentedExecutors
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.MetricName
-import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.util.concurrent.ThreadFactoryBuilder
 
@@ -33,7 +33,7 @@ object AsyncSupport {
       withMetric: (MetricName, ExecutorServiceMetrics),
       loggerFactory: NamedLoggerFactory,
   )(implicit traceContext: TraceContext): ResourceOwner[Executor] = {
-    val logger = TracedLogger(loggerFactory.getLogger(getClass))
+    val logger = loggerFactory.getTracedLogger(getClass)
     ResourceOwner
       .forExecutorService { () =>
         val (executorName, executorServiceMetrics) = withMetric

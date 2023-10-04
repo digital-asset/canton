@@ -4,7 +4,6 @@
 package com.digitalasset.canton.ledger.indexerbenchmark
 
 import com.codahale.metrics.Snapshot
-import com.daml.metrics.Metrics
 import com.daml.metrics.api.MetricHandle.{Counter, Histogram, Timer}
 import com.daml.metrics.api.dropwizard.{DropwizardCounter, DropwizardHistogram, DropwizardTimer}
 import com.daml.metrics.api.noop.{NoOpCounter, NoOpTimer}
@@ -15,6 +14,7 @@ import com.daml.metrics.api.testing.InMemoryMetricsFactory.{
 }
 import com.daml.metrics.api.testing.MetricValues
 import com.daml.metrics.api.testing.ProxyMetricsFactory.{ProxyCounter, ProxyHistogram, ProxyTimer}
+import com.digitalasset.canton.metrics.Metrics
 
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.DurationDouble

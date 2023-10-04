@@ -14,8 +14,6 @@ import com.daml.ledger.api.v1.transaction_service.{
   TransactionServiceGrpc,
 }
 import com.daml.ledger.api.v1.value.{Record, Value}
-import com.daml.metrics.ExecutorServiceMetrics
-import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.console.ParticipantReference
@@ -695,7 +693,7 @@ class DemoUI(script: BaseScript, val loggerFactory: NamedLoggerFactory)
     Threading.newExecutionContext(
       "demo-ui",
       noTracingLogger,
-      new ExecutorServiceMetrics(NoOpMetricsFactory),
+      maybeMetrics = None,
     )
   private implicit val actorSystem: ActorSystem = AkkaUtil.createActorSystem("demo-ui")
   private implicit val sequencerPool: ExecutionSequencerFactory =

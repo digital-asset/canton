@@ -379,7 +379,7 @@ object TransferOutCommonData
   *                        whose timestamp defines the baseline for measuring time periods on the target domain
   * @param transferCounter The [[com.digitalasset.canton.TransferCounter]] of the contract.
   *                        The value is defined iff the protocol versions is at least
-  *                        [[com.digitalasset.canton.version.ProtocolVersion.dev]].
+  *                        [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]].
   */
 final case class TransferOutView private (
     override val salt: Salt,
@@ -399,7 +399,6 @@ final case class TransferOutView private (
     with HasProtocolVersionedWrapper[TransferOutView]
     with ProtocolVersionedMemoizedEvidence {
 
-  // TODO(#12373) Adapt when releasing BFT
   // Ensures the invariants related to default values hold
   validateInstance().valueOr(err => throw new IllegalArgumentException(err))
 
@@ -525,7 +524,7 @@ object TransferOutView
       supportedProtoVersionMemoized(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
-    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.dev)(v2.TransferOutView)(
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.CNTestNet)(v2.TransferOutView)(
       supportedProtoVersionMemoized(_)(fromProtoV2),
       _.toProtoV2.toByteString,
     ),
@@ -540,9 +539,8 @@ object TransferOutView
   private lazy val rpv4: RepresentativeProtocolVersion[TransferOutView.type] =
     protocolVersionRepresentativeFor(ProtocolVersion.v4)
 
-  // TODO(#12373) Adapt when releasing BFT
-  private lazy val rpvDev: RepresentativeProtocolVersion[TransferOutView.type] =
-    protocolVersionRepresentativeFor(ProtocolVersion.dev)
+  private lazy val rpvMultidomain: RepresentativeProtocolVersion[TransferOutView.type] =
+    protocolVersionRepresentativeFor(ProtocolVersion.CNTestNet)
 
   lazy val transferCounterInvariant = EmptyOptionExactlyUntilExclusive(
     _.transferCounter,
@@ -554,7 +552,7 @@ object TransferOutView
     DefaultValueUntilExclusive(
       _.submitterMetadata.submittingParticipant,
       "submitterMetadata.submittingParticipant",
-      rpvDev,
+      rpvMultidomain,
       LedgerParticipantId.assertFromString("no-participant-id"),
     )
 
@@ -562,7 +560,7 @@ object TransferOutView
     DefaultValueUntilExclusive(
       _.submitterMetadata.commandId,
       "submitterMetadata.commandId",
-      rpvDev,
+      rpvMultidomain,
       LedgerCommandId.assertFromString("no-command-id"),
     )
 
@@ -570,7 +568,7 @@ object TransferOutView
     DefaultValueUntilExclusive(
       _.submitterMetadata.applicationId,
       "submitterMetadata.applicationId",
-      rpvDev,
+      rpvMultidomain,
       LedgerApplicationId.assertFromString("no-application-id"),
     )
 
@@ -578,7 +576,7 @@ object TransferOutView
     DefaultValueUntilExclusive(
       _.submitterMetadata.submissionId,
       "submitterMetadata.submissionId",
-      rpvDev,
+      rpvMultidomain,
       None,
     )
 
@@ -586,7 +584,7 @@ object TransferOutView
     DefaultValueUntilExclusive(
       _.submitterMetadata.workflowId,
       "submitterMetadata.worfklowId",
-      rpvDev,
+      rpvMultidomain,
       None,
     )
 
@@ -594,7 +592,7 @@ object TransferOutView
     DefaultValueUntilExclusive(
       _.templateId,
       "templateId",
-      rpvDev,
+      rpvMultidomain,
       LfTemplateId.assertFromString("no-package-id:no.module.name:no.entity.name"),
     )
 

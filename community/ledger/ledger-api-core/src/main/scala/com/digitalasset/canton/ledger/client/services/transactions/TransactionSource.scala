@@ -13,7 +13,7 @@ import com.daml.ledger.api.v1.transaction_service.{
   GetTransactionsRequest,
   GetTransactionsResponse,
 }
-import com.daml.util.akkastreams.ImmutableIterable
+import com.digitalasset.canton.util.akkastreams.ImmutableIterable
 import io.grpc.stub.StreamObserver
 
 object TransactionSource {

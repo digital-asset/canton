@@ -66,7 +66,6 @@ final case class CommonMetadata private (
   }
 
   private def toProtoV1: v1.CommonMetadata = {
-    // TODO(#12373) Adapt when releasing BFT
     v1.CommonMetadata(
       confirmationPolicy = confirmationPolicy.toProtoPrimitive,
       domainId = domainId.toProtoPrimitive,
@@ -89,8 +88,7 @@ object CommonMetadata
       supportedProtoVersionMemoized(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    // TODO(#12373) Adapt when releasing BFT
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.dev)(v1.CommonMetadata)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.CNTestNet)(v1.CommonMetadata)(
       supportedProtoVersionMemoized(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),

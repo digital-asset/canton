@@ -7,8 +7,8 @@ import akka.stream.scaladsl.{Sink, Source}
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.ledger.api.v1.commands.Commands
 import com.daml.tracing.TelemetryContext
-import com.daml.util.Ctx
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.util.Ctx
 import com.google.protobuf.empty.Empty
 import org.mockito.captor.ArgCaptor
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}

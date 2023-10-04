@@ -5,7 +5,6 @@ package com.daml
 package http.perf
 
 import dbutils.ConnectionPool
-import http.dbbackend.{DbStartupMode, JdbcConfig}
 import testing.oracle.OracleAround
 
 import scala.util.{Success, Try}

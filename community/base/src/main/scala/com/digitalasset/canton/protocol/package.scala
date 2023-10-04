@@ -5,21 +5,10 @@ package com.digitalasset.canton
 
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.Ref
-import com.daml.lf.transaction.{
-  CommittedTransaction,
-  GlobalKey,
-  GlobalKeyWithMaintainers,
-  Node,
-  NodeId,
-  SubmittedTransaction,
-  Transaction,
-  TransactionNodeStatistics,
-  TransactionVersion,
-  VersionedTransaction,
-}
+import com.daml.lf.transaction.*
 import com.daml.lf.value.Value
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.data.ViewType
+import com.digitalasset.canton.data.{RepairContract, ViewType}
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessage
 import com.digitalasset.canton.sequencing.protocol.OpenEnvelope
 
@@ -42,6 +31,8 @@ package object protocol {
     */
   type LfTransaction = Transaction
   val LfTransaction: Transaction.type = Transaction
+
+  val LfTransactionErrors: TransactionErrors.type = TransactionErrors
 
   type LfVersionedTransaction = VersionedTransaction
   val LfVersionedTransaction: VersionedTransaction.type = VersionedTransaction
@@ -122,4 +113,9 @@ package object protocol {
 
   def maxTransactionVersion(versions: NonEmpty[Seq[LfTransactionVersion]]): LfTransactionVersion =
     versions.reduceLeft[LfTransactionVersion](LfTransactionVersion.Ordering.max)
+
+  // Enables backward-compatibility so that existing repair scripts do not break
+  // TODO(#9014): Catch-all issue to track backwards compatible changes that can be removed with 3.0
+  type SerializableContractWithWitnesses = RepairContract
+
 }

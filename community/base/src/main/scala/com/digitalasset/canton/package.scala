@@ -115,8 +115,7 @@ package object canton {
 
   object TransferCounter extends CounterCompanion[TransferCounterDiscriminator] {
     def forCreatedContract(protocolVersion: ProtocolVersion): TransferCounterO =
-      // TODO(#12373) Adapt when releasing BFT
-      if (protocolVersion >= ProtocolVersion.dev) Some(TransferCounter.Genesis)
+      if (protocolVersion >= ProtocolVersion.CNTestNet) Some(TransferCounter.Genesis)
       else None
 
     def encodeDeterministically(transferCounter: TransferCounter): ByteString = encodeLong(
@@ -125,7 +124,7 @@ package object canton {
   }
 
   /** A transfer counter if available. Transfer counters are defined from protocol version
-    * [[com.digitalasset.canton.version.ProtocolVersion.dev]] on
+    * [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]] on
     */
   type TransferCounterO = Option[TransferCounter]
 
@@ -133,16 +132,6 @@ package object canton {
 
     /** A strict lower bound on all request counters */
     val LowerBound: RequestCounter = RequestCounter(-1)
-  }
-
-  implicit class RichRequestCounter(val rc: RequestCounter) extends AnyVal {
-
-    /** Use this method to indicate that unwrapping to use the request counter as
-      * a local offset is fine.
-      *
-      * Note: type alias is not available here so using plain Long.
-      */
-    def asLocalOffset: Long = rc.unwrap
   }
 
   /** Wrap a method call with this method to document that the caller is sure that the callee's preconditions are met. */

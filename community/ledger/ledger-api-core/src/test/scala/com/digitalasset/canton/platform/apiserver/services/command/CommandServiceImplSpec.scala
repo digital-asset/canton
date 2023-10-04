@@ -26,18 +26,20 @@ import com.digitalasset.canton.platform.apiserver.services.tracking.{
 }
 import com.digitalasset.canton.platform.apiserver.services.{ApiCommandService, tracking}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, config}
 import com.google.protobuf.empty.Empty
 import com.google.rpc.Code
 import com.google.rpc.status.Status as StatusProto
 import io.grpc.inprocess.{InProcessChannelBuilder, InProcessServerBuilder}
-import io.grpc.{Deadline, Status}
+import io.grpc.{Context, Deadline, Status}
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
+import org.scalatest.Assertion
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
 
-import java.time.{Duration, Instant}
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import scala.concurrent.Future
@@ -55,32 +57,15 @@ class CommandServiceImplSpec
   private val telemetry = new DefaultOpenTelemetry(OpenTelemetrySdk.builder().build())
 
   s"the command service" should {
-    val trackerCompletionResponse = tracking.CompletionResponse(
-      completion = completion,
-      checkpoint =
-        Some(Checkpoint(offset = Some(LedgerOffset(LedgerOffset.Value.Absolute("offset"))))),
-    )
-    val commands = someCommands()
-    val submissionTracker = mock[SubmissionTracker]
-    val submit = mock[Traced[SubmitRequest] => Future[Empty]]
-    when(
-      submissionTracker.track(
-        eqTo(expectedSubmissionKey),
-        any[Duration],
-        any[TraceContext => Future[Any]],
-      )(
-        any[ContextualizedErrorLogger],
-        any[TraceContext],
-      )
-    ).thenReturn(Future.successful(trackerCompletionResponse))
+    "submit a request, and wait for a response" in withTestContext { testContext =>
+      import testContext.*
 
-    "submit a request, and wait for a response" in {
       openChannel(
         new CommandServiceImpl(
           UnimplementedTransactionServices,
           submissionTracker,
           submit,
-          Duration.ofSeconds(1000L),
+          config.NonNegativeFiniteDuration.ofSeconds(1000L),
           loggerFactory,
         )
       ).use { stub =>
@@ -88,7 +73,7 @@ class CommandServiceImplSpec
         stub.submitAndWaitForTransactionId(request).map { response =>
           verify(submissionTracker).track(
             eqTo(expectedSubmissionKey),
-            eqTo(Duration.ofSeconds(1000L)),
+            eqTo(config.NonNegativeFiniteDuration.ofSeconds(1000L)),
             any[TraceContext => Future[Any]],
           )(any[ContextualizedErrorLogger], any[TraceContext])
           response.transactionId should be("transaction ID")
@@ -97,7 +82,9 @@ class CommandServiceImplSpec
       }
     }
 
-    "pass the provided deadline to the tracker as a timeout" in {
+    "pass the provided deadline to the tracker as a timeout" in withTestContext { testContext =>
+      import testContext.*
+
       val now = Instant.parse("2021-09-01T12:00:00Z")
       val deadlineTicker = new Deadline.Ticker {
         override def nanoTime(): Long =
@@ -109,7 +96,7 @@ class CommandServiceImplSpec
           UnimplementedTransactionServices,
           submissionTracker,
           submit,
-          Duration.ofSeconds(1L),
+          config.NonNegativeFiniteDuration.ofSeconds(1L),
           loggerFactory,
         ),
         deadlineTicker,
@@ -121,7 +108,7 @@ class CommandServiceImplSpec
           .map { response =>
             verify(submissionTracker).track(
               eqTo(expectedSubmissionKey),
-              eqTo(Duration.ofSeconds(1000L)),
+              eqTo(config.NonNegativeFiniteDuration.ofSeconds(3600L)),
               any[TraceContext => Future[Any]],
             )(any[ContextualizedErrorLogger], any[TraceContext])
             response.transactionId should be("transaction ID")
@@ -130,11 +117,52 @@ class CommandServiceImplSpec
       }
     }
 
-    "time out if the tracker times out" in {
+    "reject and do not submit on deadline exceeded" in withTestContext { testContext =>
+      import testContext.*
+
+      val service = new CommandServiceImpl(
+        UnimplementedTransactionServices,
+        submissionTracker,
+        submit,
+        config.NonNegativeFiniteDuration.ofSeconds(1L),
+        loggerFactory,
+      )
+
+      val deadline = Context
+        .current()
+        .withDeadline(Deadline.after(0L, TimeUnit.NANOSECONDS), scheduledExecutor())
+
+      deadline
+        .call(() => {
+          service
+            .submitAndWaitForTransactionId(
+              SubmitAndWaitRequest.of(Some(commands.copy(submissionId = submissionId)))
+            )(
+              LoggingContextWithTrace.ForTesting
+            )
+            .transform { response =>
+              verify(submissionTracker, never).track(
+                any[SubmissionKey],
+                any[config.NonNegativeFiniteDuration],
+                any[TraceContext => Future[Any]],
+              )(any[ContextualizedErrorLogger], any[TraceContext])
+
+              response.failed.map(inside(_) { case RpcProtoExtractors.Exception(status) =>
+                status.getCode shouldBe Code.DEADLINE_EXCEEDED.getNumber
+                status.getMessage should fullyMatch regex s"REQUEST_DEADLINE_EXCEEDED\\(3,submissi\\)\\: The gRPC deadline for request with commandId=$commandId and submissionId=$submissionId has expired by .* The request will not be processed further\\."
+              })
+            }
+        })
+        .thereafter { _ => deadline.close() }
+    }
+
+    "time out if the tracker times out" in withTestContext { testContext =>
+      import testContext.*
+
       when(
         submissionTracker.track(
           eqTo(expectedSubmissionKey),
-          any[Duration],
+          any[config.NonNegativeFiniteDuration],
           any[TraceContext => Future[Any]],
         )(
           any[ContextualizedErrorLogger],
@@ -144,7 +172,7 @@ class CommandServiceImplSpec
         Future.fromTry(
           CompletionResponse.timeout("some-cmd-id", "some-submission-id")(
             ErrorLoggingContext(
-              loggerFactory.getTracedLogger(getClass),
+              loggerFactory.getTracedLogger(this.getClass),
               LoggingContextWithTrace.ForTesting,
             )
           )
@@ -155,7 +183,7 @@ class CommandServiceImplSpec
         UnimplementedTransactionServices,
         submissionTracker,
         submit,
-        Duration.ofSeconds(1337L),
+        config.NonNegativeFiniteDuration.ofSeconds(1337L),
         loggerFactory,
       )
 
@@ -171,13 +199,14 @@ class CommandServiceImplSpec
       }
     }
 
-    "close the supplied tracker when closed" in {
-      val submissionTracker = mock[SubmissionTracker]
+    "close the supplied tracker when closed" in withTestContext { testContext =>
+      import testContext.*
+
       val service = new CommandServiceImpl(
         UnimplementedTransactionServices,
         submissionTracker,
         submit,
-        Duration.ofSeconds(1337L),
+        config.NonNegativeFiniteDuration.ofSeconds(1337L),
         loggerFactory,
       )
 
@@ -188,6 +217,30 @@ class CommandServiceImplSpec
       succeed
     }
   }
+
+  private class TestContext {
+    val trackerCompletionResponse = tracking.CompletionResponse(
+      completion = completion,
+      checkpoint =
+        Some(Checkpoint(offset = Some(LedgerOffset(LedgerOffset.Value.Absolute("offset"))))),
+    )
+    val commands = someCommands()
+    val submissionTracker = mock[SubmissionTracker]
+    val submit = mock[Traced[SubmitRequest] => Future[Empty]]
+    when(
+      submissionTracker.track(
+        eqTo(expectedSubmissionKey),
+        any[config.NonNegativeFiniteDuration],
+        any[TraceContext => Future[Any]],
+      )(
+        any[ContextualizedErrorLogger],
+        any[TraceContext],
+      )
+    ).thenReturn(Future.successful(trackerCompletionResponse))
+  }
+
+  private def withTestContext(test: TestContext => Future[Assertion]): Future[Assertion] =
+    test(new TestContext)
 
   private def openChannel(
       service: CommandServiceImpl,
@@ -238,7 +291,7 @@ object CommandServiceImplSpec {
   val ledgerId: LedgerId = LedgerId("ledger ID")
   val commandId = "command ID"
   val applicationId = "application ID"
-  val submissionId = Ref.SubmissionId.assertFromString(s"submissionId")
+  val submissionId = Ref.SubmissionId.assertFromString("submissionId")
   val maxDeduplicationDuration = java.time.Duration.ofDays(1)
   val party = "Alice"
 
@@ -274,8 +327,6 @@ object CommandServiceImplSpec {
     commandId = commandId,
     applicationId = applicationId,
     party = party,
-    commands = Seq(
-      command
-    ),
+    commands = Seq(command),
   )
 }

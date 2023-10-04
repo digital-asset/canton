@@ -126,8 +126,7 @@ trait BaseTest
 
   import scala.language.implicitConversions
 
-  // TODO(#12373) Adapt when releasing BFT
-  protected val testTrafficState: Boolean = testedProtocolVersion >= ProtocolVersion.dev
+  protected val testTrafficState: Boolean = testedProtocolVersion >= ProtocolVersion.CNTestNet
 
   protected def whenTestTrafficState[K, V](m: Map[K, V]): Map[K, V] =
     if (testTrafficState) m else Map.empty

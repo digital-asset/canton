@@ -3,13 +3,16 @@
 
 package com.digitalasset.canton.util
 
-import akka.stream.scaladsl.{Keep, Sink, Source}
+import akka.stream.scaladsl.{Flow, Keep, Sink, Source}
 import akka.stream.testkit.StreamSpec
 import akka.stream.testkit.scaladsl.StreamTestKit.assertAllStagesStopped
 import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.stream.{KillSwitch, KillSwitches, OverflowStrategy}
 import akka.{Done, NotUsed}
+import cats.syntax.functorFilter.*
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.util.AkkaUtil.WithKillSwitch
 import com.digitalasset.canton.util.AkkaUtil.syntax.*
@@ -211,7 +214,7 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
         .restartSource("restart-upon-completion", 1, mkSource, policy)
         .toMat(Sink.seq)(Keep.both)
         .run()
-      retrievedElemsF.futureValue shouldBe (1 to 12)
+      retrievedElemsF.futureValue.map(_.unwrap) shouldBe (1 to 12)
 
       doneF.futureValue
       lastStates.get() shouldBe Seq(1, 4, 7, 10)
@@ -237,7 +240,7 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
 
       val start = System.nanoTime()
       val ((_killSwitch, doneF), retrievedElemsF) = stream.run()
-      retrievedElemsF.futureValue shouldBe (1 to 12)
+      retrievedElemsF.futureValue.map(_.unwrap) shouldBe (1 to 12)
       val stop = System.nanoTime()
       (stop - start) shouldBe >=(3 * delay.toNanos)
       doneF.futureValue
@@ -264,7 +267,7 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
         .restartSource("restart-with-delay", 1, mkSource, policy)
         .toMat(Sink.seq)(Keep.both)
         .run()
-      retrievedElemsF.futureValue shouldBe Seq(1, 2, 1, 2)
+      retrievedElemsF.futureValue.map(_.unwrap) shouldBe Seq(1, 2, 1, 2)
       doneF.futureValue
       shouldRetryCalls.get().foreach {
         case RetryCallArgs(lastState, lastEmittedElement, lastFailure) =>
@@ -297,7 +300,7 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
         .restartSource("restart-propagate-error", 1, mkSource, policy)
         .toMat(Sink.seq)(Keep.both)
         .run()
-      retrievedElemsF.futureValue shouldBe Seq(11, 13, 15)
+      retrievedElemsF.futureValue.map(_.unwrap) shouldBe Seq(11, 13, 15)
       doneF.futureValue
 
       shouldRetryCalls.get().foreach {
@@ -333,11 +336,35 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
         .toMat(Sink.seq)(Keep.both)
         .run()
       pullKillSwitch.putIfAbsent(killSwitch)
-      val retrievedElems = retrievedElemsF.futureValue
+      val retrievedElems = retrievedElemsF.futureValue.map(_.unwrap)
       val lastRetry = pulledKillSwitchAt.get.value
       lastRetry shouldBe >(10)
       retrievedElems shouldBe (1 to lastRetry)
       doneF.futureValue
+    }
+
+    "can pull the kill switch from within the stream" in assertAllStagesStopped {
+      def mkSource(s: Int): Source[Int, (KillSwitch, Future[Done])] =
+        Source
+          .fromIterator(() => Iterator.from(s))
+          .viaMat(KillSwitches.single)(Keep.right)
+          .watchTermination()(Keep.both)
+
+      val policy = AkkaUtil.RetrySourcePolicy.never[Int, Int]
+      val ((_killSwitch, doneF), sink) = AkkaUtil
+        .restartSource("close-inner-source", 1, mkSource, policy)
+        .map { case elemWithKillSwitch @ WithKillSwitch(elem) =>
+          if (elem == 4) elemWithKillSwitch.killSwitch.shutdown()
+          elem
+        }
+        .toMat(TestSink.probe)(Keep.both)
+        .run()
+      sink.request(4)
+      sink.expectNext(1).expectNext(2).expectNext(3).expectNext(4)
+      sink.request(10)
+      // There's still an element somewhere in the stream that gets delivered first
+      sink.expectNext(5)
+      sink.expectComplete()
     }
 
     "abort the delay when the KillSwitch is closed" in assertAllStagesStopped {
@@ -369,7 +396,7 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
       doneF.futureValue
       val stop = System.nanoTime()
       (stop - start) shouldBe <(longBackoff.toNanos)
-      retrievedElemsF.futureValue shouldBe (1 to 11)
+      retrievedElemsF.futureValue.map(_.unwrap) shouldBe (1 to 11)
     }
 
     "the completion future awaits the retry to finish" in assertAllStagesStopped {
@@ -419,6 +446,7 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
       val policy = AkkaUtil.RetrySourcePolicy.never[Int, Int]
       val ((killSwitch, doneF), sink) = AkkaUtil
         .restartSource("close-inner-source", 1, mkSource, policy)
+        .map(_.unwrap)
         .toMat(TestSink.probe)(Keep.both)
         .run()
       sink.request(4)
@@ -452,6 +480,7 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
 
       val ((killSwitch, doneF), sink) = AkkaUtil
         .restartSource("await completion of inner sources", 1, mkSource, policy)
+        .map(_.unwrap)
         .toMat(TestSink.probe)(Keep.both)
         .run()
 
@@ -517,7 +546,7 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
         // The log line from the flush
         _.errorMessage should include(s"RestartSource $name at state 4 failed"),
       )
-      retrievedElems shouldBe Seq(1, 2, 3, 4)
+      retrievedElems.map(_.unwrap) shouldBe Seq(1, 2, 3, 4)
     }
 
     "can pull the kill switch after retries have stopped" in assertAllStagesStopped {
@@ -641,7 +670,7 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
         .run()
       sink.request(3)
       source.sendNext(100)
-      sink.expectNext(WithKillSwitch(100, killSwitch))
+      sink.expectNext(WithKillSwitch(100)(killSwitch))
       killSwitch.shutdown()
       source.expectCancellation()
       sink.expectComplete()
@@ -707,7 +736,7 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
       val elemsF = Source(1 to 10)
         .map { i =>
           observed.getAndUpdate(_ :+ i)
-          WithKillSwitch(i, noOpKillSwitch)
+          withNoOpKillSwitch(i)
         }
         .takeUntilThenDrain(_ >= 5)
         .runWith(Sink.seq)
@@ -740,6 +769,67 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
       evaluated.get() shouldBe false
     }
   }
+
+  "remember" should {
+    "immediately emit elements" in assertAllStagesStopped {
+      val (source, sink) =
+        TestSource.probe[Int].remember(NonNegativeInt.one).toMat(TestSink.probe)(Keep.both).run()
+      sink.request(5)
+      source.sendNext(1)
+      sink.expectNext(NonEmpty(Seq, 1))
+      source.sendNext(2)
+      sink.expectNext(NonEmpty(Seq, 1, 2))
+      source.sendNext(3)
+      sink.expectNext(NonEmpty(Seq, 2, 3))
+      source.sendComplete()
+      sink.expectComplete()
+    }
+
+    "handle the empty source" in assertAllStagesStopped {
+      val sinkF = Source.empty[Int].remember(NonNegativeInt.one).toMat(Sink.seq)(Keep.right).run()
+      sinkF.futureValue shouldBe Seq.empty
+    }
+
+    "support no memory" in assertAllStagesStopped {
+      val sinkF = Source(1 to 10).remember(NonNegativeInt.zero).toMat(Sink.seq)(Keep.right).run()
+      sinkF.futureValue shouldBe ((1 to 10).map(NonEmpty(Seq, _)))
+    }
+
+    "support completion while the memory is not exhaused" in assertAllStagesStopped {
+      val sinkF =
+        Source(1 to 5).remember(NonNegativeInt.tryCreate(10)).toMat(Sink.seq)(Keep.right).run()
+      sinkF.futureValue shouldBe (1 to 5).inits.toSeq.reverse.mapFilter(NonEmpty.from)
+    }
+
+    "propagate errors" in assertAllStagesStopped {
+      val ex = new Exception("Remember failure")
+      val doneF =
+        Source.failed(ex).remember(NonNegativeInt.one).toMat(Sink.ignore)(Keep.right).run()
+      doneF.failed.futureValue shouldBe ex
+    }
+  }
+
+  "work for sources and flows" in {
+    // this is merely a compilation test, so no need to run the graphs
+    val flow = Flow[Int]
+      .remember(NonNegativeInt.tryCreate(5))
+      .mapAsyncAndDrainUS(1)(xs => FutureUnlessShutdown.pure(xs.size))
+      .withUniqueKillSwitchMat()(Keep.right)
+      .takeUntilThenDrain(_ > 0)
+
+    val source = Source
+      .empty[Int]
+      .remember(NonNegativeInt.tryCreate(5))
+      .mapAsyncAndDrainUS(1)(xs => FutureUnlessShutdown.pure(xs.size))
+      .withUniqueKillSwitchMat()(Keep.right)
+      .takeUntilThenDrain(_ > 0)
+      .map(_.unwrap)
+      .via(flow)
+
+    source.to(Sink.seq[WithKillSwitch[Int]])
+
+    succeed
+  }
 }
 
 object AkkaUtilTest {
@@ -747,4 +837,6 @@ object AkkaUtilTest {
     override def shutdown(): Unit = ()
     override def abort(ex: Throwable): Unit = ()
   }
+
+  def withNoOpKillSwitch[A](value: A): WithKillSwitch[A] = WithKillSwitch(value)(noOpKillSwitch)
 }

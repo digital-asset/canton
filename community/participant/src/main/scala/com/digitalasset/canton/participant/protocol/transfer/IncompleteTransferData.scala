@@ -109,7 +109,7 @@ object IncompleteTransferData {
   }
 
   object TransferEventGlobalOffset {
-    def create(
+    private[transfer] def create(
         queryOffset: GlobalOffset,
         transferOutGlobalOffset: Option[GlobalOffset],
         transferInGlobalOffset: Option[GlobalOffset],

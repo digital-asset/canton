@@ -79,8 +79,7 @@ object SequencedEvent
       supportedProtoVersionMemoized(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    // TODO(#12373) Adapt when releasing BFT
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.dev)(v1.SequencedEvent)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.CNTestNet)(v1.SequencedEvent)(
       supportedProtoVersionMemoized(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
@@ -315,7 +314,6 @@ object DeliverError {
       status: Status,
       protocolVersion: ProtocolVersion,
   ): DeliverError = {
-    // TODO(#12373) Adapt when releasing BFT
     if (SequencedEvent.protoVersionFor(protocolVersion) == ProtoVersion(0)) {
       DeliverErrorReason.tryFromStatus(status): Unit // enforce the invariant
     }

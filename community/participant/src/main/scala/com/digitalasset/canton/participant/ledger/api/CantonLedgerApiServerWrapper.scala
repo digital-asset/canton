@@ -6,21 +6,21 @@ package com.digitalasset.canton.participant.ledger.api
 import akka.actor.ActorSystem
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.daml.http.JsonApiConfig
-import com.daml.http.metrics.HttpApiMetrics
 import com.daml.ledger.resources.ResourceContext
 import com.daml.lf.engine.Engine
-import com.daml.metrics.Metrics
 import com.daml.tracing.DefaultOpenTelemetry
 import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
   FutureSupervisor,
 }
 import com.digitalasset.canton.config.{DbConfig, ProcessingTimeout, StorageConfig}
+import com.digitalasset.canton.http.JsonApiConfig
+import com.digitalasset.canton.http.metrics.HttpApiMetrics
 import com.digitalasset.canton.ledger.configuration.{LedgerId, LedgerTimeModel}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.config.LedgerApiServerConfig
 import com.digitalasset.canton.participant.sync.CantonSyncService

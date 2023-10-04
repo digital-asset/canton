@@ -73,8 +73,7 @@ object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[Envelope
       _.toByteStringUnversioned,
     ),
     ProtoVersion(3) -> VersionedProtoConverter(
-      // TODO(#12373) Adapt when releasing BFT
-      ProtocolVersion.dev
+      ProtocolVersion.CNTestNet
     )(v3.EnvelopeContent)(
       supportedProtoVersion(_)(fromProtoV3),
       _.toByteStringUnversioned,

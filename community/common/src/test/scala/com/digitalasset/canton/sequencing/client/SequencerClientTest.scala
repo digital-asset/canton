@@ -15,12 +15,8 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{CryptoPureApi, Fingerprint, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown, UnlessShutdown}
-import com.digitalasset.canton.logging.{
-  NamedLoggerFactory,
-  NamedLogging,
-  NamedLoggingContext,
-  TracedLogger,
-}
+import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NamedLoggingContext}
 import com.digitalasset.canton.metrics.MetricHandle.NoOpMetricsFactory
 import com.digitalasset.canton.metrics.{CommonMockMetrics, SequencerClientMetrics}
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
@@ -201,7 +197,6 @@ class SequencerClientTest
     "doesn't give prior event to the application handler" in {
       val validated = new AtomicBoolean()
       val processed = new AtomicBoolean()
-      val testLogger = logger
       val testF = for {
         env @ Env(_client, transport, _, _, _) <- Env.create(
           eventValidator = new SequencedEventValidator {
@@ -209,7 +204,7 @@ class SequencerClientTest
                 priorEvent: Option[PossiblyIgnoredSerializedEvent],
                 event: OrdinarySerializedEvent,
                 sequencerId: SequencerId,
-            ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit] = {
+            ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[Nothing], Unit] = {
               validated.set(true)
               Env.eventAlwaysValid.validate(priorEvent, event, sequencerId)
             }
@@ -218,11 +213,18 @@ class SequencerClientTest
                 priorEvent: Option[PossiblyIgnoredSerializedEvent],
                 reconnectEvent: OrdinarySerializedEvent,
                 sequencerId: SequencerId,
-            ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit] =
+            ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[Nothing], Unit] =
               validate(priorEvent, reconnectEvent, sequencerId)
 
-            override protected val timeouts: ProcessingTimeout = ProcessingTimeout()
-            override protected val logger: TracedLogger = testLogger
+            override def validateAkka[E: Pretty](
+                subscription: SequencerSubscriptionAkka[E],
+                priorReconnectEvent: Option[OrdinarySerializedEvent],
+                sequencerId: SequencerId,
+            )(implicit
+                traceContext: TraceContext
+            ): SequencerSubscriptionAkka[SequencedEventValidationError[E]] = ???
+
+            override def close(): Unit = ()
           },
           storedEvents = Seq(deliver),
         )
@@ -976,7 +978,6 @@ class SequencerClientTest
   private object Env {
     val eventAlwaysValid: SequencedEventValidator = SequencedEventValidator.noValidation(
       DefaultTestIdentities.domainId,
-      timeouts,
       warn = false,
     )
 

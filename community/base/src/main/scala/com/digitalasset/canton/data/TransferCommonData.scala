@@ -8,9 +8,9 @@ import com.digitalasset.canton.version.ProtocolVersion
 
 object TransferCommonData {
   val minimumPvForMediatorGroups: ProtocolVersion =
-    ProtocolVersion.dev // TODO(#12373) Adapt when releasing BFT
+    ProtocolVersion.CNTestNet
   val minimumPvForTransferCounter: ProtocolVersion =
-    ProtocolVersion.dev // TODO(#12373) Adapt when releasing BFT
+    ProtocolVersion.CNTestNet
 
   private[data] def isGroupMediatorSupported(
       protocolVersion: ProtocolVersion

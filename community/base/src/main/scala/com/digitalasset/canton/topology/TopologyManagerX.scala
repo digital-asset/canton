@@ -185,18 +185,30 @@ abstract class TopologyManagerX[+StoreID <: TopologyStoreId](
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TopologyManagerError, GenericSignedTopologyTransactionX] = {
-    // TODO(#12390): check that there is an existing topology transaction with the hash of the unique key
+    val effective = EffectiveTime(clock.now)
     for {
       transactionsForHash <- EitherT
         .right[TopologyManagerError](
-          store.findTransactionsByTxHash(EffectiveTime(clock.now), NonEmpty(Set, transactionHash))
+          store.findTransactionsByTxHash(effective, NonEmpty(Set, transactionHash))
         )
         .mapK(FutureUnlessShutdown.outcomeK)
-      existingTransaction =
-        (transactionsForHash match {
-          case Seq() => ??? // TODO(#12390) proper error
-          case Seq(tx) => tx
-          case _otherwise => ??? // TODO(#12390) proper error
+      existingTransaction <-
+        EitherT.fromEither[FutureUnlessShutdown][
+          TopologyManagerError,
+          GenericSignedTopologyTransactionX,
+        ](transactionsForHash match {
+          case Seq(tx) => Right(tx)
+          case Seq() =>
+            Left(
+              TopologyManagerError.TopologyTransactionNotFound.Failure(transactionHash, effective)
+            )
+          case tooManyActiveTransactionsWithSameHash =>
+            // TODO(#12390) proper error
+            Left(
+              TopologyManagerError.InternalError.ImplementMe(
+                s"found too many transactions for txHash=$transactionsForHash: $tooManyActiveTransactionsWithSameHash"
+              )
+            )
         })
       extendedTransaction <- extendSignature(existingTransaction, signingKeys).mapK(
         FutureUnlessShutdown.outcomeK
@@ -273,10 +285,10 @@ abstract class TopologyManagerX[+StoreID <: TopologyStoreId](
 
         case (Some((_, _, existingSerial, _)), None) =>
           // auto-select existing+1
-          EitherT.rightT(existingSerial + PositiveInt.one)
+          EitherT.rightT(existingSerial.increment)
         case (Some((_, _, existingSerial, _)), Some(proposed)) =>
           // check that the proposed serial matches existing+1
-          val next = existingSerial + PositiveInt.one
+          val next = existingSerial.increment
           EitherT.cond[Future](
             next == proposed,
             next,
@@ -297,10 +309,10 @@ abstract class TopologyManagerX[+StoreID <: TopologyStoreId](
       // find signing keys.
       keys <- (signingKeys match {
         case first +: rest =>
-          // TODO(#12390) should we check whether this node could sign with keys that are required in addition to the ones provided in signingKeys, and fetch those keys?
+          // TODO(#12945) should we check whether this node could sign with keys that are required in addition to the ones provided in signingKeys, and fetch those keys?
           EitherT.pure(NonEmpty.mk(Set, first, rest: _*))
         case _empty =>
-          // TODO(#12390) get signing keys for transaction.
+          // TODO(#12945) get signing keys for transaction.
           EitherT.leftT(
             TopologyManagerError.InternalError.ImplementMe(
               "Automatic signing key lookup not yet implemented. Please specify a signing explicitly."
@@ -336,10 +348,10 @@ abstract class TopologyManagerX[+StoreID <: TopologyStoreId](
       // find signing keys
       keys <- (signingKey match {
         case keys @ (_first +: _rest) =>
-          // TODO(#12390) filter signing keys relevant for the required authorization for this transaction
+          // TODO(#12945) filter signing keys relevant for the required authorization for this transaction
           EitherT.rightT(keys.toSet)
         case _ =>
-          // TODO(#12390) fetch signing keys that are relevant for the required authorization for this transaction
+          // TODO(#12945) fetch signing keys that are relevant for the required authorization for this transaction
           EitherT.leftT(
             TopologyManagerError.InternalError.ImplementMe(
               "Automatic signing key lookup not yet implemented. Please specify a signing explicitly."

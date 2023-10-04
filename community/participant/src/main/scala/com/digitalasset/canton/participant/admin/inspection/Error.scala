@@ -4,8 +4,8 @@
 package com.digitalasset.canton.participant.admin.inspection
 
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.protocol.messages.HasDomainId
-import com.digitalasset.canton.protocol.{LfContractId, SerializableContract}
 import com.digitalasset.canton.topology.DomainId
 
 sealed abstract class Error extends Product with Serializable with HasDomainId {}
@@ -31,13 +31,13 @@ private[admin] object Error {
 
   final case class InvariantIssue(
       override val domainId: DomainId,
-      contract: SerializableContract,
+      contract: LfContractId,
       errorMessage: String,
   ) extends Error
 
   final case class SerializationIssue(
       override val domainId: DomainId,
-      contract: SerializableContract,
+      contract: LfContractId,
       errorMessage: String,
   ) extends Error
 

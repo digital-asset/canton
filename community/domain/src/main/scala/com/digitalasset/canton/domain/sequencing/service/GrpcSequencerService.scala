@@ -12,7 +12,7 @@ import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeNumeric}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeNumeric, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
@@ -31,7 +31,10 @@ import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.{Clock, TimeProof}
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.store.TopologyStateForInitializationService
+import com.digitalasset.canton.topology.store.{
+  StoredTopologyTransactionsX,
+  TopologyStateForInitializationService,
+}
 import com.digitalasset.canton.tracing.{
   SerializableTraceContext,
   TraceContext,
@@ -48,6 +51,7 @@ import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success}
 
 /** Authenticate the current user can perform an operation on behalf of the given member */
 private[sequencing] trait AuthenticationCheck {
@@ -276,6 +280,7 @@ class GrpcSequencerService(
     topologyStateForInitializationService: Option[TopologyStateForInitializationService],
     protocolVersion: ProtocolVersion,
     enableBroadcastOfUnauthenticatedMessages: Boolean,
+    maxItemsInTopologyResponse: PositiveInt = PositiveInt.tryCreate(100),
 )(implicit ec: ExecutionContext)
     extends v0.SequencerServiceGrpc.SequencerService
     with NamedLogging
@@ -619,8 +624,7 @@ class GrpcSequencerService(
       nonIdmRecipients.isEmpty,
       (),
       refuse(request.messageId.toProtoPrimitive, unauthenticatedMember)(
-        // TODO(#12373) Adapt when releasing BFT
-        if (protocolVersion >= ProtocolVersion.dev)
+        if (protocolVersion >= ProtocolVersion.CNTestNet)
           s"Unauthenticated member is trying to send message to members other than the topology broadcast address ${TopologyBroadcastAddress.recipient}"
         else
           s"Unauthenticated member is trying to send message to members other than the domain manager: ${nonIdmRecipients.toSet
@@ -963,22 +967,36 @@ class GrpcSequencerService(
       }
 
   override def downloadTopologyStateForInit(
-      requestP: v0.TopologyStateForInitRequest
-  ): Future[v0.TopologyStateForInitResponse] = {
+      requestP: v0.TopologyStateForInitRequest,
+      responseObserver: StreamObserver[v0.TopologyStateForInitResponse],
+  ): Unit = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     topologyStateForInitializationService match {
       case Some(topologyStateForInitializationService) =>
         TopologyStateForInitRequest
           .fromProtoV0(requestP)
-          .map(request =>
+          .traverse(request =>
             topologyStateForInitializationService
               .initialSnapshot(request.member)
-              .map(txs => TopologyStateForInitResponse(Traced(txs)).toProtoV0)
           )
-          .fold(err => Future.failed(ProtoDeserializationFailure.Wrap(err).asGrpcError), identity)
+          .onComplete {
+            case Success(Left(parsingError)) =>
+              responseObserver.onError(ProtoDeserializationFailure.Wrap(parsingError).asGrpcError)
+
+            case Success(Right(initialSnapshot)) =>
+              initialSnapshot.result.grouped(maxItemsInTopologyResponse.value).foreach { batch =>
+                val response =
+                  TopologyStateForInitResponse(Traced(StoredTopologyTransactionsX(batch)))
+                responseObserver.onNext(response.toProtoV0)
+              }
+              responseObserver.onCompleted()
+
+            case Failure(exception) =>
+              responseObserver.onError(exception)
+          }
 
       case None =>
-        Future.failed(
+        responseObserver.onError(
           new UnsupportedOperationException(
             "service not implemented for non-x nodes. this is a coding bug"
           )

@@ -84,7 +84,7 @@ class ParticipantEventPublisherTest extends AsyncWordSpec with BaseTest {
           SingleDimensionEventLogTest
             .generateEvent(
               LedgerSyncRecordTime.assertFromLong(index.toLong * 1000 * 1000),
-              index.toLong,
+              LocalOffset(index.toLong),
             )
             .event
         eventId -> event

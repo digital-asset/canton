@@ -13,9 +13,9 @@ import com.daml.ledger.api.v1.active_contracts_service.{
   GetActiveContractsResponse,
 }
 import com.daml.ledger.api.v1.transaction_filter.TransactionFilter
-import com.daml.util.akkastreams.ExtractMaterializedValue
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.client.LedgerClient
+import com.digitalasset.canton.util.akkastreams.ExtractMaterializedValue
 import scalaz.syntax.tag.*
 
 import scala.concurrent.Future

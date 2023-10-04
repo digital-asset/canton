@@ -20,7 +20,7 @@ import com.daml.lf.engine.{
 }
 import com.daml.lf.transaction.{Node, SubmittedTransaction, Transaction}
 import com.daml.lf.value.Value
-import com.daml.metrics.{Metrics, Timed, Tracked}
+import com.daml.metrics.{Timed, Tracked}
 import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.api.domain.Commands as ApiCommands
 import com.digitalasset.canton.ledger.configuration.Configuration
@@ -31,6 +31,7 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
 import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 import com.digitalasset.canton.platform.packages.DeduplicatingPackageLoader
 import scalaz.syntax.tag.*

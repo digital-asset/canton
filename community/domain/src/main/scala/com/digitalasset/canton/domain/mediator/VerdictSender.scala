@@ -283,8 +283,7 @@ private[mediator] class DefaultVerdictSender(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, String, Option[AggregationRule]] = {
-    // TODO(#12373) Adapt when releasing BFT
-    if (protocolVersion >= ProtocolVersion.dev) {
+    if (protocolVersion >= ProtocolVersion.CNTestNet) {
       mediatorRef match {
         case MediatorRef.Group(MediatorsOfDomain(index)) =>
           for {

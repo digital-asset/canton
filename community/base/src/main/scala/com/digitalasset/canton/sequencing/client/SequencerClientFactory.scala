@@ -148,9 +148,7 @@ object SequencerClientFactory {
                 unauthenticated: Boolean
             )(implicit loggingContext: NamedLoggingContext): SequencedEventValidator =
               if (config.skipSequencedEventValidation) {
-                SequencedEventValidator.noValidation(domainId, processingTimeout)(
-                  NamedLoggingContext(loggerFactory, TraceContext.empty)
-                )
+                SequencedEventValidator.noValidation(domainId)
               } else {
                 new SequencedEventValidatorImpl(
                   unauthenticated,
@@ -313,7 +311,9 @@ object SequencerClientFactory {
       }
 
       private def grpcTransport(connection: GrpcSequencerConnection, member: Member)(implicit
-          executionContext: ExecutionContextExecutor
+          executionContext: ExecutionContextExecutor,
+          executionSequencerFactory: ExecutionSequencerFactory,
+          materializer: Materializer,
       ): SequencerClientTransport = {
         val channel = createChannel(connection)
         val auth = grpcSequencerClientAuth(connection, member)
@@ -332,6 +332,7 @@ object SequencerClientFactory {
       private def grpcTransportAkka(connection: GrpcSequencerConnection, member: Member)(implicit
           executionContext: ExecutionContextExecutor,
           executionSequencerFactory: ExecutionSequencerFactory,
+          materializer: Materializer,
       ): GrpcSequencerClientTransportAkka = {
         val channel = createChannel(connection)
         val auth = grpcSequencerClientAuth(connection, member)

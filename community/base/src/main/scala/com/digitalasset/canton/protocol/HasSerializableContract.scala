@@ -3,8 +3,12 @@
 
 package com.digitalasset.canton.protocol
 
+import com.digitalasset.canton.TransferCounterO
+
 trait HasSerializableContract {
 
   def contract: SerializableContract
+
+  def transferCounter: TransferCounterO
 
 }

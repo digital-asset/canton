@@ -20,7 +20,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Salt, SyncCryptoApiProvider}
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, RepairContract}
 import com.digitalasset.canton.ledger.api.validation.{
   FieldValidator as LedgerApiFieldValidations,
   StricterValueValidator as LedgerApiValueValidator,
@@ -38,7 +38,6 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
   NamedLoggingContext,
 }
-import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.PackageDependencyResolver
 import com.digitalasset.canton.participant.domain.DomainAliasManager
 import com.digitalasset.canton.participant.event.RecordTime
@@ -51,6 +50,7 @@ import com.digitalasset.canton.participant.sync.{
 }
 import com.digitalasset.canton.participant.util.DAMLe.ContractWithMetadata
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
+import com.digitalasset.canton.participant.{ParticipantNodeParameters, RichRequestCounter}
 import com.digitalasset.canton.platform.participant.util.LfEngineToApi
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.resource.TransactionalStoreUpdate
@@ -145,7 +145,7 @@ final class RepairService(
     */
   def addContracts(
       domain: DomainAlias,
-      contractsToAdd: Seq[SerializableContractWithWitnesses],
+      contractsToAdd: Seq[RepairContract],
       ignoreAlreadyAdded: Boolean,
       ignoreStakeholderCheck: Boolean,
   )(implicit traceContext: TraceContext): Either[String, Unit] = {
@@ -172,18 +172,23 @@ final class RepairService(
             repair.domainParameters.uniqueContractKeys
           ) {
             val keysWithContractIdsF = contractsToAdd
-              .parTraverseFilter { case SerializableContractWithWitnesses(contract, _witnesses) =>
-                // Only check for duplicates where the participant hosts a maintainer
-                getKeyIfOneMaintainerIsLocal(
-                  repair.topologySnapshot,
-                  contract.metadata.maybeKeyWithMaintainers,
-                  participantId,
-                ).map { lfKeyO =>
-                  lfKeyO.flatMap(_ => contract.metadata.maybeKeyWithMaintainers).map {
-                    keyWithMaintainers =>
-                      keyWithMaintainers.globalKey -> contract.contractId
+              .parTraverseFilter {
+                case RepairContract(
+                      contract,
+                      _witnesses,
+                      _transferCounter,
+                    ) =>
+                  // Only check for duplicates where the participant hosts a maintainer
+                  getKeyIfOneMaintainerIsLocal(
+                    repair.topologySnapshot,
+                    contract.metadata.maybeKeyWithMaintainers,
+                    participantId,
+                  ).map { lfKeyO =>
+                    lfKeyO.flatMap(_ => contract.metadata.maybeKeyWithMaintainers).map {
+                      keyWithMaintainers =>
+                        keyWithMaintainers.globalKey -> contract.contractId
+                    }
                   }
-                }
               }
               .map(x => x.groupBy { case (globalKey, _) => globalKey })
             EitherT(keysWithContractIdsF.map { keysWithContractIds =>
@@ -475,7 +480,7 @@ final class RepairService(
       ignoreAlreadyAdded: Boolean,
       ignoreStakeholderCheck: Boolean,
   )(
-      contractToAdd: SerializableContractWithWitnesses,
+      contractToAdd: RepairContract,
       timeOfChange: TimeOfChange,
   )(implicit
       traceContext: TraceContext
@@ -486,11 +491,18 @@ final class RepairService(
       if (ignoreStakeholderCheck) EitherT.rightT(()) else check
 
     // TODO(#4001) - performance of point-db lookups will be slow, add batching (also to purgeContract and moveContract)
-    def persistCreation(cid: LfContractId): EitherT[Future, String, Unit] =
+    def persistCreation(
+        cid: LfContractId,
+        transferCounter: TransferCounterO,
+    ): EitherT[Future, String, Unit] = {
       repair.domainPersistence.activeContractStore
-        .createContract(cid, timeOfChange)
+        .markContractActive(
+          cid -> transferCounter,
+          timeOfChange,
+        )
         .toEitherTWithNonaborts
-        .leftMap(e => log(s"Failed to create contract ${cid} in ActiveContractStore: ${e}"))
+        .leftMap(e => log(s"Failed to create contract $cid in ActiveContractStore: $e"))
+    }
 
     def useComputedContractAndMetadata(
         inputContract: SerializableContract,
@@ -693,7 +705,10 @@ final class RepairService(
 
       _persistedInAcs <- EitherTUtil.ifThenET(needToAddContract)(
         transferringFromAndTransferCounter.fold(
-          persistCreation(contractToPersistAndPublishUpstream.contractId)
+          persistCreation(
+            contractToPersistAndPublishUpstream.contractId,
+            contractToAdd.transferCounter,
+          )
         ) { case (sourceDomainId, transferCounter) =>
           persistTransferIn(
             repair,

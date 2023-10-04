@@ -7,7 +7,7 @@ import com.daml.daml_lf_dev.DamlLf
 import com.daml.lf.data.{ImmArray, Ref, Time}
 import com.daml.lf.transaction.{GlobalKey, SubmittedTransaction}
 import com.daml.lf.value.Value
-import com.daml.metrics.{Metrics, Timed}
+import com.daml.metrics.Timed
 import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.api.health.HealthStatus
 import com.digitalasset.canton.ledger.configuration.Configuration
@@ -20,6 +20,7 @@ import com.digitalasset.canton.ledger.participant.state.v2.{
   TransactionMeta,
   WriteService,
 }
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.concurrent.CompletionStage

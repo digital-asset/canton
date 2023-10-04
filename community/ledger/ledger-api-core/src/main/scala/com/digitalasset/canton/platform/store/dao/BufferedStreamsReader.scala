@@ -5,11 +5,12 @@ package com.digitalasset.canton.platform.store.dao
 
 import akka.NotUsed
 import akka.stream.scaladsl.Source
+import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricsContext
-import com.daml.metrics.{Metrics, Timed}
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer.BufferSlice
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReader.FetchFromPersistence

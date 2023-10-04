@@ -9,7 +9,7 @@ import com.daml.ledger.api.v1.command_submission_service.{
   CommandSubmissionServiceGrpc,
   SubmitRequest as ApiSubmitRequest,
 }
-import com.daml.metrics.{Metrics, Timed}
+import com.daml.metrics.Timed
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.services.CommandSubmissionService
@@ -21,6 +21,7 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
 }
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.tracing.{Spanning, Traced}
 import com.google.protobuf.empty.Empty
 import io.grpc.ServerServiceDefinition

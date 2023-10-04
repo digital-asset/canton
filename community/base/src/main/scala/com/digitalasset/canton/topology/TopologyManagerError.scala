@@ -13,7 +13,9 @@ import com.digitalasset.canton.error.CantonErrorGroups.TopologyManagementErrorGr
 import com.digitalasset.canton.error.{Alarm, AlarmErrorCode, CantonError}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransaction
+import com.digitalasset.canton.topology.transaction.TopologyTransactionX.TxHash
 import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
   TopologyMapping,
@@ -96,6 +98,24 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         with TopologyManagerError {
       override lazy val logOnCreation: Boolean = false
     }
+  }
+
+  @Explanation("This error indicates that a topology transaction could not be found.")
+  @Resolution(
+    "The topology transaction either has been rejected, is not valid anymore, is not yet valid, or does not yet exist."
+  )
+  object TopologyTransactionNotFound
+      extends ErrorCode(
+        id = "TOPOLOGY_TRANSACTION_NOT_FOUND",
+        ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
+      ) {
+    final case class Failure(txHash: TxHash, effective: EffectiveTime)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause =
+            s"Topology transaction with hash ${txHash} does not exist or is not active or is not an active proposal at $effective"
+        )
+        with TopologyManagerError
   }
 
   @Explanation(

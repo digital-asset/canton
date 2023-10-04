@@ -12,7 +12,6 @@ import com.daml.lf.transaction.test.TestNodeBuilder.CreateKey
 import com.daml.lf.transaction.test.{NodeIdTransactionBuilder, TestNodeBuilder, TransactionBuilder}
 import com.daml.lf.transaction.{BlindingInfo, GlobalKey}
 import com.daml.lf.value.Value
-import com.daml.metrics.Metrics
 import com.daml.metrics.api.MetricsContext
 import com.daml.platform.index.index.StatusDetails
 import com.digitalasset.canton.data.CantonTimestamp
@@ -25,6 +24,7 @@ import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.{Reassignment, ReassignmentInfo, Update}
 import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.store.dao.events.Raw.TreeEvent
 import com.digitalasset.canton.platform.store.dao.events.{
   CompressionStrategy,

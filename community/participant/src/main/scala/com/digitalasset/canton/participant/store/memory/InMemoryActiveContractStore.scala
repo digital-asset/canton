@@ -12,6 +12,7 @@ import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
+import com.digitalasset.canton.participant.store.data.{ActiveContractData, ActiveContractsData}
 import com.digitalasset.canton.participant.store.{
   ActiveContractStore,
   ContractChange,
@@ -53,15 +54,31 @@ class InMemoryActiveContractStore(
   /** Invariant: Never maps to [[ContractStatus.Nonexistent]] */
   private[this] val table = TrieMap.empty[LfContractId, ContractStatus]
 
-  override def createContracts(contractIds: Seq[LfContractId], toc: TimeOfChange)(implicit
+  override def markContractsActive(
+      contracts: Seq[(LfContractId, TransferCounterO)],
+      toc: TimeOfChange,
+  )(implicit
       traceContext: TraceContext
-  ): CheckedT[Future, AcsError, AcsWarning, Unit] =
-    CheckedT(Future.successful {
-      logger.trace(show"Creating contracts at $toc: $contractIds")
-      contractIds.to(LazyList).traverse_ { contractId =>
-        updateTable(contractId, _.addCreation(contractId, toc, protocolVersion))
-      }
-    })
+  ): CheckedT[Future, AcsError, AcsWarning, Unit] = {
+    val activeContractsDataE = ActiveContractsData.create(protocolVersion, toc, contracts)
+    activeContractsDataE match {
+      case Left(errorMessage) =>
+        CheckedT.abortT(ActiveContractsDataInvariantViolation(errorMessage))
+      case Right(activeContractsData) =>
+        CheckedT(Future.successful {
+          logger.trace(
+            show"Creating contracts at ${activeContractsData.toc}: ${activeContractsData.contractIds}"
+          )
+
+          activeContractsData.asSeq.to(LazyList).traverse_ { transferableContract =>
+            updateTable(
+              transferableContract.contractId,
+              _.addCreation(transferableContract, activeContractsData.toc),
+            )
+          }
+        })
+    }
+  }
 
   override def archiveContracts(archivals: Seq[LfContractId], toc: TimeOfChange)(implicit
       traceContext: TraceContext
@@ -91,8 +108,8 @@ class InMemoryActiveContractStore(
   ): Future[SortedMap[LfContractId, (CantonTimestamp, TransferCounterO)]] = Future.successful {
     val snapshot = SortedMap.newBuilder[LfContractId, (CantonTimestamp, TransferCounterO)]
     table.foreach { case (contractId, contractStatus) =>
-      contractStatus.activeBy(timestamp).foreach { case (activationTimestamp, transferCounterO) =>
-        snapshot += (contractId -> (activationTimestamp, transferCounterO))
+      contractStatus.activeBy(timestamp).foreach { case (activationTimestamp, transferCounter) =>
+        snapshot += (contractId -> (activationTimestamp, transferCounter))
       }
     }
     snapshot.result()
@@ -103,8 +120,8 @@ class InMemoryActiveContractStore(
   ): Future[SortedMap[LfContractId, (RequestCounter, TransferCounterO)]] = Future.successful {
     val snapshot = SortedMap.newBuilder[LfContractId, (RequestCounter, TransferCounterO)]
     table.foreach { case (contractId, contractStatus) =>
-      contractStatus.activeBy(rc).foreach { case (activationRc, transferCounterO) =>
-        snapshot += (contractId -> (activationRc, transferCounterO))
+      contractStatus.activeBy(rc).foreach { case (activationRc, transferCounter) =>
+        snapshot += (contractId -> (activationRc, transferCounter))
       }
     }
     snapshot.result()
@@ -427,10 +444,11 @@ object InMemoryActiveContractStore {
     import IndividualChange.{archive, create}
 
     private[InMemoryActiveContractStore] def addCreation(
-        contractId: LfContractId,
+        transferableContract: ActiveContractData,
         creation: TimeOfChange,
-        protocolVersion: ProtocolVersion,
     ): Checked[AcsError, AcsWarning, ContractStatus] = {
+      val contractId = transferableContract.contractId
+
       val nextLatestCreation = latestCreation match {
         case None => Checked.result(Some(creation))
         case old @ Some(oldToc) if oldToc == creation => Checked.result(old)
@@ -447,11 +465,10 @@ object InMemoryActiveContractStore {
           )
         else List.empty
 
-      val initialTransferCounter = TransferCounter.forCreatedContract(protocolVersion)
       for {
         nextChanges <- addIndividualChange(
           contractId,
-          create(creation, initialTransferCounter),
+          create(creation, transferableContract.transferCounter),
         )
         nextLatestCreation <- nextLatestCreation.appendNonaborts(Chain.fromSeq(earlierChanges))
         nextEarliestArchival <- checkTimestampAgainstArchival(contractId, creation)

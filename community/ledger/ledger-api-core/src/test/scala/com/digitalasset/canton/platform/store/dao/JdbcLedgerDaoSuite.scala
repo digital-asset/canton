@@ -14,7 +14,6 @@ import com.daml.lf.transaction.*
 import com.daml.lf.transaction.test.{NodeIdTransactionBuilder, TransactionBuilder}
 import com.daml.lf.value.Value.{ContractId, ContractInstance, ValueText, VersionedContractInstance}
 import com.daml.lf.value.Value as LfValue
-import com.daml.testing.utils.{TestModels, TestResourceUtils}
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2
@@ -22,6 +21,7 @@ import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.store.dao.JdbcLedgerDaoSuite.*
 import com.digitalasset.canton.platform.store.entries.LedgerEntry
+import com.digitalasset.canton.testing.utils.{TestModels, TestResourceUtils}
 import org.scalatest.{AsyncTestSuite, OptionValues}
 
 import java.time.Duration

@@ -26,6 +26,7 @@ import com.digitalasset.canton.ledger.participant.state.v2.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.*
+import com.digitalasset.canton.participant.RichRequestCounter
 import com.digitalasset.canton.participant.metrics.TransactionProcessingMetrics
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
   MalformedPayload,
@@ -66,8 +67,8 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.{
   WithSuffixesAndMerged,
   WithoutSuffixes,
 }
-import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
+import com.digitalasset.canton.protocol.{LfTransactionErrors, *}
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.*
@@ -256,7 +257,7 @@ class TransactionProcessingSteps(
             DeduplicationPeriod.DeduplicationOffset(
               // Extend the reported deduplication period to include the conflicting submission,
               // as deduplication offsets are exclusive
-              UpstreamOffsetConvert.fromGlobalOffset(completionOffset - 1L)
+              UpstreamOffsetConvert.fromGlobalOffset(completionOffset.toLong - 1L)
             )
         case CommandDeduplicator.DeduplicationPeriodTooEarly(requested, supported) =>
           val error: TransactionError = supported match {
@@ -315,13 +316,31 @@ class TransactionProcessingSteps(
         _ <-
           if (staticDomainParameters.uniqueContractKeys) {
             val result = wfTransaction.withoutVersion.contractKeyInputs match {
-              case Left(Right(LfTransaction.DuplicateContractKey(key))) =>
+              case Left(
+                    LfTransactionErrors.DuplicateContractIdKIError(
+                      LfTransactionErrors.DuplicateContractId(contractId)
+                    )
+                  ) =>
+                causeWithTemplate(
+                  "Domain with unique contract ID semantics",
+                  ContractIdDuplicateError(contractId),
+                ).asLeft
+
+              case Left(
+                    LfTransactionErrors.DuplicateContractKeyKIError(
+                      LfTransactionErrors.DuplicateContractKey(key)
+                    )
+                  ) =>
                 causeWithTemplate(
                   "Domain with unique contract keys semantics",
                   ContractKeyDuplicateError(key),
                 ).asLeft
 
-              case Left(Left(LfTransaction.InconsistentContractKey(key))) =>
+              case Left(
+                    LfTransactionErrors.InconsistentContractKeyKIError(
+                      LfTransactionErrors.InconsistentContractKey(key)
+                    )
+                  ) =>
                 causeWithTemplate(
                   "Domain with unique contract keys semantics",
                   ContractKeyConsistencyError(key),

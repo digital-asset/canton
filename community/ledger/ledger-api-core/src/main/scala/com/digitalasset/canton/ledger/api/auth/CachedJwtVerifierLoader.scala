@@ -5,11 +5,11 @@ package com.digitalasset.canton.ledger.api.auth
 
 import com.auth0.jwk.UrlJwkProvider
 import com.daml.jwt.{Error as JwtError, JwtTimestampLeeway, JwtVerifier, RSA256Verifier}
-import com.daml.metrics.Metrics
 import com.digitalasset.canton.caching.CaffeineCache
 import com.digitalasset.canton.caching.CaffeineCache.FutureAsyncCacheLoader
 import com.digitalasset.canton.ledger.api.auth.CachedJwtVerifierLoader.CacheKey
 import com.digitalasset.canton.ledger.api.domain.JwksUrl
+import com.digitalasset.canton.metrics.Metrics
 import com.github.benmanes.caffeine.cache as caffeine
 import scalaz.\/
 

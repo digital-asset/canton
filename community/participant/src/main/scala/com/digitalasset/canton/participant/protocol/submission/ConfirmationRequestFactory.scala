@@ -285,6 +285,16 @@ object ConfirmationRequestFactory {
       )
   }
 
+  /** Indicates that the given transaction yields a duplicate for a contract ID. */
+  final case class ContractIdDuplicateError(contractId: LfContractId)
+      extends ConfirmationRequestCreationError
+      with PrettyPrinting {
+    override def pretty: Pretty[ContractIdDuplicateError] =
+      prettyOfClass(
+        param("contractId", _.contractId)
+      )
+  }
+
   /** Indicates that the given transaction yields a duplicate for a key. */
   final case class ContractKeyDuplicateError(key: LfGlobalKey)
       extends ConfirmationRequestCreationError

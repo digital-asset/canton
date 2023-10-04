@@ -333,7 +333,7 @@ object TransferInCommonData
   * @param transferOutResultEvent The signed deliver event of the transfer-out result message
   * @param transferCounter The [[com.digitalasset.canton.TransferCounter]] of the contract.
   *                        The value is defined iff the protocol versions is at least
-  *                        [[com.digitalasset.canton.version.ProtocolVersion.dev]].
+  *                        [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]].
   */
 final case class TransferInView private (
     override val salt: Salt,
@@ -352,7 +352,6 @@ final case class TransferInView private (
     with HasProtocolVersionedWrapper[TransferInView]
     with ProtocolVersionedMemoizedEvidence {
 
-  // TODO(#12373) Adapt when releasing BFT
   // Ensures the invariants related to default values hold
   validateInstance().valueOr(err => throw new IllegalArgumentException(err))
 
@@ -481,7 +480,7 @@ object TransferInView
       supportedProtoVersionMemoized(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
-    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.dev)(v2.TransferInView)(
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.CNTestNet)(v2.TransferInView)(
       supportedProtoVersionMemoized(_)(fromProtoV2),
       _.toProtoV2.toByteString,
     ),
@@ -495,9 +494,8 @@ object TransferInView
   private lazy val rpv4: RepresentativeProtocolVersion[TransferInView.type] =
     protocolVersionRepresentativeFor(ProtocolVersion.v4)
 
-  // TODO(#12373) Adapt when releasing BFT
-  private lazy val rpvDev: RepresentativeProtocolVersion[TransferInView.type] =
-    protocolVersionRepresentativeFor(ProtocolVersion.dev)
+  private lazy val rpvMultidomain: RepresentativeProtocolVersion[TransferInView.type] =
+    protocolVersionRepresentativeFor(ProtocolVersion.CNTestNet)
 
   lazy val transferCounterInvariant = EmptyOptionExactlyUntilExclusive(
     _.transferCounter,
@@ -509,7 +507,7 @@ object TransferInView
     DefaultValueUntilExclusive(
       _.submitterMetadata.submittingParticipant,
       "submitterMetadata.submittingParticipant",
-      rpvDev,
+      rpvMultidomain,
       LedgerParticipantId.assertFromString("no-participant-id"),
     )
 
@@ -517,7 +515,7 @@ object TransferInView
     DefaultValueUntilExclusive(
       _.submitterMetadata.commandId,
       "submitterMetadata.commandId",
-      rpvDev,
+      rpvMultidomain,
       LedgerCommandId.assertFromString("no-command-id"),
     )
 
@@ -525,7 +523,7 @@ object TransferInView
     DefaultValueUntilExclusive(
       _.submitterMetadata.applicationId,
       "submitterMetadata.applicationId",
-      rpvDev,
+      rpvMultidomain,
       LedgerApplicationId.assertFromString("no-application-id"),
     )
 
@@ -533,7 +531,7 @@ object TransferInView
     DefaultValueUntilExclusive(
       _.submitterMetadata.submissionId,
       "submitterMetadata.submissionId",
-      rpvDev,
+      rpvMultidomain,
       None,
     )
 
@@ -541,7 +539,7 @@ object TransferInView
     DefaultValueUntilExclusive(
       _.submitterMetadata.workflowId,
       "submitterMetadata.worfklowId",
-      rpvDev,
+      rpvMultidomain,
       None,
     )
 

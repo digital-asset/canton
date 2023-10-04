@@ -7,7 +7,6 @@ import com.daml.executors.InstrumentedExecutors
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.lf.data.Ref
 import com.daml.lf.engine.Engine
-import com.daml.metrics.Metrics
 import com.daml.resources.ProgramResource.StartupException
 import com.daml.timer.RetryStrategy
 import com.digitalasset.canton.ledger.api.domain
@@ -17,6 +16,7 @@ import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexService
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.InMemoryState
 import com.digitalasset.canton.platform.apiserver.TimedIndexService
 import com.digitalasset.canton.platform.common.{MismatchException, ParticipantIdNotFoundException}

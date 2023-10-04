@@ -102,8 +102,7 @@ object Batch extends HasProtocolVersionedCompanion2[Batch[Envelope[_]], Batch[Cl
       _.toProtoV0.toByteString,
     ),
     ProtoVersion(1) -> VersionedProtoConverter(
-      // TODO(#12373) Adapt when releasing BFT
-      ProtocolVersion.dev
+      ProtocolVersion.CNTestNet
     )(v1.CompressedBatch)(
       supportedProtoVersion(_)(
         // TODO(i10428) Prevent zip bombing when decompressing the request

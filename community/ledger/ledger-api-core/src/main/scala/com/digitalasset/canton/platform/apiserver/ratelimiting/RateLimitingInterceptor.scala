@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.platform.apiserver.ratelimiting
 
-import com.daml.metrics.Metrics
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.apiserver.ratelimiting.LimitResult.{
   LimitResultCheck,

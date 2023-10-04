@@ -5,7 +5,6 @@ package com.digitalasset.canton.ledger.client.services.commands.tracker
 
 import akka.stream.{Inlet, Outlet, Shape}
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
-import com.daml.util.Ctx
 import com.digitalasset.canton.ledger.client.services.commands.tracker.CompletionResponse.{
   CompletionFailure,
   CompletionSuccess,
@@ -14,6 +13,7 @@ import com.digitalasset.canton.ledger.client.services.commands.{
   CommandSubmission,
   CompletionStreamElement,
 }
+import com.digitalasset.canton.util.Ctx
 import com.google.protobuf.empty.Empty
 
 import scala.collection.immutable

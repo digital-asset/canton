@@ -14,7 +14,7 @@ import io.grpc.Status
 import org.slf4j.event.Level
 import scalapb.{GeneratedMessage, GeneratedMessageCompanion}
 
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration.FiniteDuration
 import scala.jdk.DurationConverters.*
 import scala.util.Try
 
@@ -134,7 +134,7 @@ object DeserializedCantonError {
   private def extractErrorCategory(
       errorInfo: ErrorInfo,
       statusCode: Int,
-      retryableDuration: Option[Duration],
+      retryableDuration: Option[FiniteDuration],
   ): Either[String, ErrorCategory] = {
     def unknownCategory(categoryId: Int) =
       GenericErrorCategory(

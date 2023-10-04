@@ -245,7 +245,6 @@ final case class TopologyTransactionsBroadcastX private (
       TopologyTransactionsBroadcastX.type
     ]
 ) extends UnsignedProtocolMessage
-    // TODO(#14048) make me a SignedProtocolMessageContent
     with UnsignedProtocolMessageV3 {
 
   @transient override protected lazy val companionObj: TopologyTransactionsBroadcastX.type =
@@ -289,7 +288,7 @@ object TopologyTransactionsBroadcastX
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.minimum),
-    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.dev)(
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.CNTestNet)(
       v2.TopologyTransactionsBroadcastX
     )(
       supportedProtoVersion(_)(fromProtoV2),
@@ -328,5 +327,17 @@ object TopologyTransactionsBroadcastX
         broadcastId = broadcastId.toProtoPrimitive,
         transactions = transactions.map(_.toProtoV2),
       )
+  }
+
+  /** The state of the submission of a topology transaction broadcast. In combination with the sequencer client
+    * send tracker capability, State reflects that either the sequencer Accepted the submission or that the submission
+    * was Rejected due to an error or a timeout. See DomainTopologyServiceX.
+    */
+  sealed trait State extends Product with Serializable
+
+  object State {
+    case object Failed extends State
+
+    case object Accepted extends State
   }
 }

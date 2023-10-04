@@ -183,8 +183,7 @@ object SubmissionRequest
       _.toProtoV0.toByteString,
     ),
     ProtoVersion(1) -> VersionedProtoConverter(
-      // TODO(#12373) Adapt when releasing BFT
-      ProtocolVersion.dev
+      ProtocolVersion.CNTestNet
     )(v1.SubmissionRequest)(
       supportedProtoVersionMemoized(_)(fromProtoV1),
       _.toProtoV1.toByteString,

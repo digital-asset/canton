@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.ledger.configuration
 
-import com.daml.ledger.configuration.protobuf
+import com.digitalasset.canton.ledger.configuration.protobuf
 
 import java.time.Duration
 import scala.util.Try

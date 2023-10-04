@@ -8,8 +8,8 @@ import akka.stream.scaladsl.{Keep, Sink}
 import akka.stream.{KillSwitches, Materializer, UniqueKillSwitch}
 import com.daml.lf.data.Ref
 import com.daml.metrics.InstrumentedGraph.*
+import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricsContext
-import com.daml.metrics.{Metrics, Timed}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.Update
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
@@ -19,6 +19,7 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
   TracedLogger,
 }
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater
 import com.digitalasset.canton.platform.indexer.ha.Handle
 import com.digitalasset.canton.platform.indexer.parallel.AsyncSupport.*

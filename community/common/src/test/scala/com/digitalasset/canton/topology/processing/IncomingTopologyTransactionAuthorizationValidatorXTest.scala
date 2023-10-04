@@ -172,7 +172,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTestX
     with HasExecutionContext
     with ProtocolVersionChecksAsyncWordSpec {
 
-  "topology transaction authorization" onlyRunWithOrGreaterThan ProtocolVersion.dev when {
+  "topology transaction authorization" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet when {
 
     object Factory extends TopologyTransactionXTestFactory(loggerFactory, parallelExecutionContext)
 

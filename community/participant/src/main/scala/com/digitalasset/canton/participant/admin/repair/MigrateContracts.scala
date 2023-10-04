@@ -11,6 +11,7 @@ import com.daml.lf.data.Bytes
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.SyncCryptoApiProvider
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.RichRequestCounter
 import com.digitalasset.canton.participant.store.ActiveContractStore.ContractState
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, TimestampedEvent}
@@ -189,11 +190,11 @@ private final class MigrateContracts(
       _.parTraverse {
         case (
               serializedSource,
-              data @ MigrateContracts.Data((contractId, transferCounterO), _, _),
+              data @ MigrateContracts.Data((contractId, transferCounter), _, _),
             ) =>
           for {
             transferCounter <- EitherT.fromEither[Future](
-              transferCounterO.fold(TransferCounter.Genesis.increment)(Right(_))
+              transferCounter.fold(TransferCounter.Genesis.increment)(Right(_))
             )
             serializedTargetO <- EitherT.right(
               repairTarget.domainPersistence.contractStore.lookupContract(contractId).value
@@ -282,9 +283,8 @@ private final class MigrateContracts(
       traceContext: TraceContext,
   ): CheckedT[Future, String, ActiveContractStore.AcsWarning, Unit] = {
 
-    // TODO(#12373) change when releasing BFT Domain
     def whenTransferCounterIsSupported(r: RepairRequest)(tc: TransferCounter): TransferCounterO =
-      Option.when(r.domainParameters.protocolVersion >= ProtocolVersion.dev)(tc)
+      Option.when(r.domainParameters.protocolVersion >= ProtocolVersion.CNTestNet)(tc)
 
     val outF = repairSource.domainPersistence.activeContractStore
       .transferOutContracts(

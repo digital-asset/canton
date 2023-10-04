@@ -9,9 +9,10 @@ import akka.stream.scaladsl.{Sink, Source}
 import cats.Applicative
 import com.daml.lf.archive.ArchiveParser
 import com.daml.lf.data.Time
-import com.daml.metrics.{Metrics, Timed}
+import com.daml.metrics.Timed
 import com.daml.timer.FutureCheck.*
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.PackageId
 import com.digitalasset.canton.platform.store.backend.PackageStorageBackend
 import com.digitalasset.canton.platform.store.dao.DbDispatcher

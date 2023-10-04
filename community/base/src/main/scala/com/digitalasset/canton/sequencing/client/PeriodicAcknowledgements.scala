@@ -106,7 +106,10 @@ object PeriodicAcknowledgements {
         if (sigCheckSupported)
           client
             .acknowledgeSigned(ts)(tc)
-            .foldF(e => Future.failed(new RuntimeException(e)), _ => Future.unit)
+            .foldF(
+              e => if (client.isClosing) Future.unit else Future.failed(new RuntimeException(e)),
+              _ => Future.unit,
+            )
         else client.acknowledge(ts)(tc)
       ),
       clock,

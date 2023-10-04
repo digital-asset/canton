@@ -12,11 +12,11 @@ import com.daml.lf.data.{Ref, Time}
 import com.daml.lf.transaction.{GlobalKey, TransactionVersion, Versioned}
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.{ContractInstance, ValueInt64, VersionedValue}
-import com.daml.metrics.Metrics
 import com.digitalasset.canton.TestEssentials
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractStoreRaceTests.{
   IndexViewContractsReader,
   assert_sync_vs_async_race_contract,

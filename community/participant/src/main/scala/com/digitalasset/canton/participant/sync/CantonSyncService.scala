@@ -466,7 +466,7 @@ class CantonSyncService(
       case Left(err) =>
         logger.warn(s"Internal error while pruning: $err")
         Left(PruningServiceError.InternalServerError.Error(err.message))
-      case Right(_unit) => Right(())
+      case Right(()) => Right(())
     }
 
   private def submitTransactionF(
@@ -573,7 +573,7 @@ class CantonSyncService(
       logger.debug(s"Subscribing to stateUpdates from $beginAfterOffset")
       // Plus one since dispatchers use inclusive offsets.
       beginAfterOffset
-        .traverse(after => UpstreamOffsetConvert.toGlobalOffset(after).map(_ + 1L))
+        .traverse(after => UpstreamOffsetConvert.toGlobalOffset(after).map(_.increment))
         .fold(
           e => Source.failed(new IllegalArgumentException(e)),
           beginStartingAt =>

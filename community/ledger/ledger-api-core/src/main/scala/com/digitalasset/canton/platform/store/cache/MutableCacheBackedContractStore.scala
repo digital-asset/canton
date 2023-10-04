@@ -4,12 +4,12 @@
 package com.digitalasset.canton.platform.store.cache
 
 import com.daml.lf.transaction.GlobalKey
-import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2
 import com.digitalasset.canton.ledger.participant.state.index.v2.ContractStore
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.store.cache.ContractKeyStateValue.*
 import com.digitalasset.canton.platform.store.cache.ContractStateValue.*
 import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractStore.*

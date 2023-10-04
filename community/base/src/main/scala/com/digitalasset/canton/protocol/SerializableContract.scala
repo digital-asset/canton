@@ -14,14 +14,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.PartyId
-import com.digitalasset.canton.version.{
-  HasVersionedMessageCompanion,
-  HasVersionedMessageCompanionDbHelpers,
-  HasVersionedWrapper,
-  ProtoVersion,
-  ProtocolVersion,
-}
+import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 import com.google.protobuf.timestamp.Timestamp
 
@@ -100,16 +93,6 @@ case class SerializableContract(
   )
 
 }
-
-/** Serializable contract with witnesses for contract add/import used in admin repairs.
-  *
-  * @param contract serializable contract
-  * @param witnesses optional witnesses that observe the creation of the contract
-  */
-final case class SerializableContractWithWitnesses(
-    contract: SerializableContract,
-    witnesses: Set[PartyId],
-)
 
 object SerializableContract
     extends HasVersionedMessageCompanion[SerializableContract]

@@ -68,8 +68,7 @@ object TypedSignedProtocolMessageContent
   override def supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.v3),
     ProtoVersion(0) -> VersionedProtoConverter(
-      // TODO(#12373) Adapt when releasing BFT
-      ProtocolVersion.dev
+      ProtocolVersion.CNTestNet
     )(v0.TypedSignedProtocolMessageContent)(
       supportedProtoVersionMemoized(_)(fromProtoV0),
       _.toProtoV0.toByteString,

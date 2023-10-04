@@ -41,6 +41,5 @@ abstract class BftDomainSequencerApiTest extends SequencerApiTest {
 
   override protected final def createEnv(): FixtureParam = new BftEnv
 
-  // TODO(#12373) Adapt when releasing BFT
-  "BFT Domain" onlyRunWithOrGreaterThan ProtocolVersion.dev when runSequencerApiTests()
+  "BFT Domain" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet when runSequencerApiTests()
 }

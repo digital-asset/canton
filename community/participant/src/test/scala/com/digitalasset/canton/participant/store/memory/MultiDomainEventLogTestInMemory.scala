@@ -82,7 +82,6 @@ class MultiDomainEventLogTestInMemory extends MultiDomainEventLogTest {
         _ => lookupEvent,
         _ => lookupOffsetsBetween,
         _ => domainIdOfEventId,
-        participantEventLogId,
         _,
         ParticipantTestMetrics,
         domainId =>

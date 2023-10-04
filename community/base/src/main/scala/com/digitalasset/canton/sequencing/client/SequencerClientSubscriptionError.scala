@@ -15,7 +15,7 @@ object SequencerClientSubscriptionError {
   final case class EventAggregationError(error: SequencerAggregatorError)
       extends SequencerClientSubscriptionError
 
-  final case class EventValidationError(error: SequencedEventValidationError)
+  final case class EventValidationError(error: SequencedEventValidationError[Nothing])
       extends SequencerClientSubscriptionError
 
   sealed trait ApplicationHandlerFailure

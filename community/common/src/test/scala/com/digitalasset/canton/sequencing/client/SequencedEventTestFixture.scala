@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.sequencing.client
 
+import akka.actor.ActorSystem
+import akka.stream.Materializer
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.SequencerCounter
@@ -29,7 +31,8 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import org.scalatest.Assertions.fail
-import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.concurrent.{PatienceConfiguration, ScalaFutures}
+import org.scalatest.time.{Seconds, Span}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -38,8 +41,10 @@ class SequencedEventTestFixture(
     testedProtocolVersion: ProtocolVersion,
     timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
-)(implicit val traceContext: TraceContext, executionContext: ExecutionContext) {
+)(implicit private val traceContext: TraceContext, executionContext: ExecutionContext)
+    extends AutoCloseable {
   import ScalaFutures.*
+  def fixtureTraceContext: TraceContext = traceContext
   lazy val defaultDomainId: DomainId = DefaultTestIdentities.domainId
   private lazy val subscriberId: ParticipantId = ParticipantId("participant1-id")
   lazy val sequencerAlice: SequencerId = DefaultTestIdentities.sequencerId
@@ -54,6 +59,8 @@ class SequencedEventTestFixture(
   val sequencerCarlos: SequencerId = SequencerId(
     UniqueIdentifier(Identifier.tryCreate("da3"), namespace)
   )
+  val actorSystem = ActorSystem(classOf[SequencedEventTestFixture].getSimpleName)
+  implicit val materializer = Materializer(actorSystem)
 
   val alice = ParticipantId(UniqueIdentifier.tryCreate("participant", "alice"))
   val bob = ParticipantId(UniqueIdentifier.tryCreate("participant", "bob"))
@@ -215,4 +222,8 @@ class SequencedEventTestFixture(
   def hash(bytes: ByteString): Hash =
     sequencerCryptoApi.pureCrypto.digest(HashPurpose.SequencedEventSignature, bytes)
 
+  override def close(): Unit = {
+    actorSystem.terminate().futureValue(PatienceConfiguration.Timeout(Span(3, Seconds)))
+    materializer.shutdown()
+  }
 }

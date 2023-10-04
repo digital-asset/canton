@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.health
 
-import cats.Show.Shown
 import cats.implicits.catsSyntaxEitherId
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -89,11 +88,7 @@ object HealthReporting extends PrettyInstances with PrettyUtil {
     implicit val componentStatusEncoder: Encoder[ComponentStatus] = deriveEncoder[ComponentStatus]
 
     implicit val componentStatusPretty: Pretty[ComponentStatus] =
-      prettyInfix[ComponentStatus, Shown, ComponentHealthState](
-        _.name.unquoted,
-        ":",
-        _.state,
-      )
+      prettyInfix[ComponentStatus](_.name.unquoted, ":", _.state)
   }
 
   /** Simple representation of the health state of a component, easily (de)serializable (from)to protobuf or JSON

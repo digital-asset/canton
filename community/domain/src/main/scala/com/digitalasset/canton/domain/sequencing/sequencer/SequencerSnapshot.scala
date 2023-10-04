@@ -87,7 +87,7 @@ object SequencerSnapshot extends HasProtocolVersionedCompanion[SequencerSnapshot
       supportedProtoVersion(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.dev)(v1.SequencerSnapshot)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.CNTestNet)(v1.SequencerSnapshot)(
       supportedProtoVersion(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),

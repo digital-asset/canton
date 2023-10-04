@@ -3,13 +3,12 @@
 
 package com.digitalasset.canton.platform.apiserver.services.tracking
 
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.{BaseTest, config}
 import org.scalatest.concurrent.{Eventually, ScalaFutures}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.time.Duration
 import java.util.Timer
 import scala.concurrent.Promise
 import scala.util.Failure
@@ -25,7 +24,7 @@ class CancellableTimeoutSupportSpec
 
   it should "schedule a command entry task" in new TestFixture {
     override def run(): Unit = {
-      val timeoutDuration = Duration.ofMillis(10L)
+      val timeoutDuration = config.NonNegativeFiniteDuration.ofMillis(10L)
       val exception = new RuntimeException("on failure")
       val failure = Failure(exception)
       val promise = Promise[String]()
@@ -42,7 +41,7 @@ class CancellableTimeoutSupportSpec
 
   it should "cancel a scheduled task on close" in new TestFixture {
     override def run(): Unit = {
-      val timeoutDuration = Duration.ofMillis(10L)
+      val timeoutDuration = config.NonNegativeFiniteDuration.ofMillis(10L)
       val exception = new RuntimeException("on failure")
       val failure = Failure(exception)
       val promise = Promise[String]()

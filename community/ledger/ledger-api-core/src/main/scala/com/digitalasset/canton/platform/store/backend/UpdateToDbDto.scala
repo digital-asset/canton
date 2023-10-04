@@ -9,7 +9,6 @@ import com.daml.lf.ledger.EventId
 import com.daml.lf.transaction.Transaction.ChildrenRecursion
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.MetricsContext.{withExtraMetricLabels, withOptionalMetricLabels}
-import com.daml.metrics.{IndexedUpdatesMetrics, Metrics}
 import com.daml.platform.index.index.StatusDetails
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod.{
   DeduplicationDuration,
@@ -18,6 +17,7 @@ import com.digitalasset.canton.ledger.api.DeduplicationPeriod.{
 import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.{CompletionInfo, Reassignment, Update}
+import com.digitalasset.canton.metrics.{IndexedUpdatesMetrics, Metrics}
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.store.dao.JdbcLedgerDao
 import com.digitalasset.canton.platform.store.dao.events.*

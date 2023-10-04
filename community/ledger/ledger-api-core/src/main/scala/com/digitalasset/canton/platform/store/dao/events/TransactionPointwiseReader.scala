@@ -7,8 +7,9 @@ import com.daml.ledger.api.v1.event.Event
 import com.daml.ledger.api.v1.transaction.TreeEvent
 import com.daml.ledger.api.v2.update_service.{GetTransactionResponse, GetTransactionTreeResponse}
 import com.daml.lf.data.Ref
-import com.daml.metrics.{DatabaseMetrics, Metrics, Timed}
+import com.daml.metrics.{DatabaseMetrics, Timed}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.Party
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.Entry

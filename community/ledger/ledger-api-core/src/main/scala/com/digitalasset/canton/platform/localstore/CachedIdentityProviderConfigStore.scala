@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.platform.localstore
 
-import com.daml.metrics.Metrics
 import com.digitalasset.canton.caching.CaffeineCache
 import com.digitalasset.canton.caching.CaffeineCache.FutureAsyncCacheLoader
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderConfig, IdentityProviderId}
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.localstore.api.IdentityProviderConfigStore.Result
 import com.digitalasset.canton.platform.localstore.api.{
   IdentityProviderConfigStore,

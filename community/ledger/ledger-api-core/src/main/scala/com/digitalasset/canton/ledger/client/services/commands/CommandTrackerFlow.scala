@@ -7,7 +7,6 @@ import akka.NotUsed
 import akka.stream.scaladsl.{Concat, Flow, GraphDSL, Merge, Source}
 import akka.stream.{DelayOverflowStrategy, FlowShape, OverflowStrategy}
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
-import com.daml.util.Ctx
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.ledger.client.services.commands.tracker.CompletionResponse.{
   CompletionFailure,
@@ -17,6 +16,7 @@ import com.digitalasset.canton.ledger.client.services.commands.tracker.{
   CommandTracker,
   TrackedCommandKey,
 }
+import com.digitalasset.canton.util.Ctx
 import com.google.protobuf.empty.Empty
 import org.slf4j.LoggerFactory
 

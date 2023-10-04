@@ -68,8 +68,7 @@ private[transfer] final case class TransferOutValidation(
       executionContext: ExecutionContext
   ): EitherT[FutureUnlessShutdown, TransferProcessorError, Unit] = {
     EitherT.cond[FutureUnlessShutdown](
-      // TODO(#12373) Adapt when releasing BFT
-      sourceProtocolVersion.v < ProtocolVersion.dev || expectedTemplateId == request.templateId,
+      sourceProtocolVersion.v < ProtocolVersion.CNTestNet || expectedTemplateId == request.templateId,
       (),
       TemplateIdMismatch(
         declaredTemplateId = request.templateId,

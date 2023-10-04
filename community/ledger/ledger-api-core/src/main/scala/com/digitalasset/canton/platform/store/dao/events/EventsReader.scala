@@ -10,8 +10,8 @@ import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.{Identifier, Party}
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.ContractId
-import com.daml.metrics.Metrics
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform
 import com.digitalasset.canton.platform.store.backend.{EventStorageBackend, ParameterStorageBackend}
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache

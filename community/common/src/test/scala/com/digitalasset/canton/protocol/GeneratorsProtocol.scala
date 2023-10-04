@@ -210,7 +210,6 @@ object GeneratorsProtocol {
     )
   }
 
-  // TODO(#12373) Adapt when releasing BFT
   // Salt not supported for pv < 4
   def serializableContractGen(pv: ProtocolVersion): Gen[SerializableContract] =
     if (pv < ProtocolVersion.v4)

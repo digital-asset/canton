@@ -114,8 +114,7 @@ class UnionspaceAuthorizationGraphXTest
     ) shouldBe valid
   }
 
-  // TODO(#12373) Adapt when releasing BFT
-  "authorization graph for a unionspace" onlyRunWithOrGreaterThan ProtocolVersion.dev when {
+  "authorization graph for a unionspace" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet when {
 
     "only having namespace delegations for its constituents" should {
       import fixture.*

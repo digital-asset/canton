@@ -5,8 +5,8 @@ package com.digitalasset.canton.platform.localstore
 
 import com.daml.api.util.TimeProvider
 import com.daml.lf.data.Ref
-import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.api.domain.IdentityProviderConfig
+import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore
 import com.digitalasset.canton.platform.store.backend.StorageBackendProvider
 import com.digitalasset.canton.platform.store.backend.localstore.UserManagementStorageBackend.DbUserPayload

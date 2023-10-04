@@ -150,8 +150,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
   }
 
   private def getErrorMessage(message: String256M): String = {
-    // TODO(#12373) Adapt when releasing BFT
-    if (testedProtocolVersion >= ProtocolVersion.dev) {
+    if (testedProtocolVersion >= ProtocolVersion.CNTestNet) {
       DeliverErrorStoreEvent.deserializeError(message, testedProtocolVersion).toString
     } else {
       message.unwrap

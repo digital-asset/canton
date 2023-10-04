@@ -60,7 +60,7 @@ class OrderedBucketMergeHubTest extends StreamSpec with BaseTest {
     )
 
   private def mkOps(initial: Offset)(
-      mkSource: (Name, Config, Offset) => Source[Elem, (KillSwitch, Future[Done])]
+      mkSource: (Name, Config, Offset, Option[Elem]) => Source[Elem, (KillSwitch, Future[Done])]
   ): OrderedBucketMergeHubOps[Name, Elem, Config, Offset] =
     OrderedBucketMergeHubOps[Name, Elem, Config, Offset, Bucket](initial)(_.bucket, _.offset)(
       mkSource
@@ -72,7 +72,7 @@ class OrderedBucketMergeHubTest extends StreamSpec with BaseTest {
 
       val sourceCompletesPromise = Promise[Done]()
 
-      val ops = mkOps(100) { (_name, _config, _offset) =>
+      val ops = mkOps(100) { (_name, _config, _offset, _prior) =>
         Source(1 to 10).map(mkElem).watchTermination() { (_, doneF) =>
           sourceCompletesPromise.completeWith(doneF)
           (noOpKillSwitch, doneF)
@@ -109,7 +109,7 @@ class OrderedBucketMergeHubTest extends StreamSpec with BaseTest {
       }
       val killSwitchPulledAt = new AtomicInteger()
 
-      val ops = mkOps(100) { (name, config, offset) =>
+      val ops = mkOps(100) { (_name, _config, _offset, _prior) =>
         val completableSource = Source.queue[Int](11)
         completableSource.map(observeElem).map(mkElem).watchTermination() {
           (boundedSourceQueue, doneF) =>
@@ -165,7 +165,7 @@ class OrderedBucketMergeHubTest extends StreamSpec with BaseTest {
       tertiary -> tertiarySourceRef,
     )
 
-    val ops = mkOps(100) { (name, config, offset) =>
+    val ops = mkOps(100) { (name, _config, _offset, _prior) =>
       TestSource.probe[Elem].viaMat(KillSwitches.single)(Keep.both).watchTermination() {
         case ((probe, killSwitch), doneF) =>
           sources(name).set(probe)
@@ -273,7 +273,7 @@ class OrderedBucketMergeHubTest extends StreamSpec with BaseTest {
       i
     }
 
-    val ops = mkOps(0) { (name, config, offset) =>
+    val ops = mkOps(0) { (name, config, _offset, _prior) =>
       Source(1 to 100)
         .map(observeElem(name, _))
         .viaMat(KillSwitches.single)(Keep.right)
@@ -320,7 +320,7 @@ class OrderedBucketMergeHubTest extends StreamSpec with BaseTest {
   "complete only after draining the source" in assertAllStagesStopped {
     val promise = Promise[Elem]()
 
-    val ops = mkOps(0) { (name, config, offset) =>
+    val ops = mkOps(0) { (_name, _config, _offset, _prior) =>
       Source
         .single(())
         .viaMat(KillSwitches.single)(Keep.right)
@@ -351,7 +351,7 @@ class OrderedBucketMergeHubTest extends StreamSpec with BaseTest {
   "complete only after the completion future of the source" in assertAllStagesStopped {
     val promise = Promise[Done]()
 
-    val ops = mkOps(0) { (name, config, offset) =>
+    val ops = mkOps(0) { (_name, _config, _offset, _prior) =>
       Source.empty.mapMaterializedValue(_ => noOpKillSwitch -> promise.future)
     }
     val ((configQueue, doneF), sink) =
@@ -382,7 +382,7 @@ class OrderedBucketMergeHubTest extends StreamSpec with BaseTest {
 
     val probes = TrieMap.empty[String, TestPublisher.Probe[Elem]]
 
-    val ops = mkOps(0) { (name, config, offset) =>
+    val ops = mkOps(0) { (name, config, _offset, _prior) =>
       TestSource.probe[Elem].viaMat(KillSwitches.single)(Keep.both).watchTermination() {
         case ((probe, killSwitch), doneF) =>
           probes.put(s"$name-$config", probe)
@@ -537,7 +537,7 @@ class OrderedBucketMergeHubTest extends StreamSpec with BaseTest {
   "reconfiguration synchronizes with the completion future" in assertAllStagesStopped {
     val promise = Promise[Done]()
 
-    val ops = mkOps(0) { (name, config, offset) =>
+    val ops = mkOps(0) { (name, _config, offset, _prior) =>
       if (name == "slow-doneF-source") {
         Source.single(Elem(Bucket(offset + 1, 0), "")).viaMat(KillSwitches.single) {
           (_, killSwitch) => killSwitch -> promise.future
@@ -578,7 +578,7 @@ class OrderedBucketMergeHubTest extends StreamSpec with BaseTest {
   "propagate failures" in assertAllStagesStopped {
     val promise = Promise[Done]()
     val sourceEx = new Exception("Source failed")
-    val ops = mkOps(0) { (name, config, offset) =>
+    val ops = mkOps(0) { (_name, _config, _offset, _prior) =>
       Source
         .single(())
         .map(_ => throw sourceEx)
@@ -614,7 +614,7 @@ class OrderedBucketMergeHubTest extends StreamSpec with BaseTest {
       i
     }
 
-    val ops = mkOps(0) { (name, config, offset) =>
+    val ops = mkOps(0) { (_name, _config, _offset, _prior) =>
       Source(1 to 10).map(observeElem).map(mkElem).watchTermination() { (_, doneF) =>
         noOpKillSwitch -> doneF
       }
@@ -635,5 +635,66 @@ class OrderedBucketMergeHubTest extends StreamSpec with BaseTest {
     doneF.futureValue
     // We can't drain the sources upon cancellation :-(
     pulledElems.get() shouldBe (1 to 2)
+  }
+
+  "remember the prior element" in assertAllStagesStopped {
+    def mkElem(name: Name, i: Int): Elem = Elem(Bucket(i, 0), s"$name-$i")
+    val priors = new AtomicReference[Seq[(Name, Option[Elem])]](Seq.empty)
+
+    val ops = mkOps(10) { (name, _config, offset, prior) =>
+      priors.updateAndGet(_ :+ (name -> prior)).discard
+      Source(offset + 1 to offset + 2)
+        .map(mkElem(name, _))
+        .concat(Source.never)
+        .viaMat(KillSwitches.single)(Keep.right)
+        .watchTermination()(Keep.both)
+    }
+    val ((configQueue, doneF), sink) =
+      Source.queue(1).viaMat(mkHub(ops))(Keep.both).toMat(TestSink.probe)(Keep.both).run()
+
+    val config1 = OrderedBucketMergeConfig(PositiveInt.one, NonEmpty(Map, "one" -> 1))
+    configQueue.offer(config1) shouldBe Enqueued
+
+    sink.request(100)
+    sink.expectNext(NewConfiguration(config1, 10))
+    sink.expectNext(OutputElement(NonEmpty(Map, "one" -> mkElem("one", 11))))
+    sink.expectNext(OutputElement(NonEmpty(Map, "one" -> mkElem("one", 12))))
+
+    val config2 = OrderedBucketMergeConfig(PositiveInt.one, NonEmpty(Map, "one" -> 1, "two" -> 1))
+    configQueue.offer(config2) shouldBe Enqueued
+    sink.expectNext(NewConfiguration(config2, 12))
+    sink.expectNext(OutputElement(NonEmpty(Map, "two" -> mkElem("two", 13))))
+    sink.expectNext(OutputElement(NonEmpty(Map, "two" -> mkElem("two", 14))))
+
+    val config3 =
+      OrderedBucketMergeConfig(PositiveInt.tryCreate(2), NonEmpty(Map, "one" -> 2, "two" -> 2))
+    configQueue.offer(config3) shouldBe Enqueued
+    sink.expectNext(NewConfiguration(config3, 14))
+    sink.expectNext(
+      OutputElement(NonEmpty(Map, "one" -> mkElem("one", 15), "two" -> mkElem("two", 15)))
+    )
+    sink.expectNext(
+      OutputElement(NonEmpty(Map, "one" -> mkElem("one", 16), "two" -> mkElem("two", 16)))
+    )
+
+    configQueue.complete()
+    doneF.futureValue
+
+    priors.get() should (equal(
+      Seq(
+        "one" -> None,
+        "two" -> Some(mkElem("one", 12)),
+        "one" -> Some(mkElem("two", 14)),
+        "two" -> Some(mkElem("two", 14)),
+      )
+      // The order of the last two elements is non-deterministic
+    ) or equal(
+      Seq(
+        "one" -> None,
+        "two" -> Some(mkElem("one", 12)),
+        "two" -> Some(mkElem("two", 14)),
+        "one" -> Some(mkElem("two", 14)),
+      )
+    ))
   }
 }

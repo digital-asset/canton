@@ -73,7 +73,7 @@ object TimestampedEvent {
       getResultByteArray: GetResult[Array[Byte]],
   ): GetResult[TimestampedEvent] =
     GetResult { r =>
-      val localOffset = r.nextLong()
+      val localOffset = GetResult[LocalOffset].apply(r)
       val requestSequencerCounter = GetResult[Option[SequencerCounter]].apply(r)
       val eventId = GetResult[Option[EventId]].apply(r)
       val event = implicitly[GetResult[LedgerSyncEvent]].apply(r)

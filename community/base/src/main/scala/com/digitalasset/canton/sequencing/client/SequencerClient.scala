@@ -1168,12 +1168,12 @@ class SequencerClientImpl(
       // see comments above why we need two flushes
       flushCloseable("sequencer-client-flush-sync", timeouts.shutdownProcessing),
       flushCloseable("sequencer-client-flush-async", timeouts.shutdownProcessing),
+      SyncCloseable("sequencer-client-subscription", sequencersTransportState.close()),
+      SyncCloseable("handler-becomes-idle", waitForHandlerToComplete()),
       SyncCloseable(
         "sequencer-client-periodic-ack",
         toCloseableOption(periodicAcknowledgementsRef.get()).close(),
       ),
-      SyncCloseable("sequencer-client-subscription", sequencersTransportState.close()),
-      SyncCloseable("handler-becomes-idle", waitForHandlerToComplete()),
       SyncCloseable("sequencer-client-recorder", recorderO.foreach(_.close())),
       SyncCloseable("deferred-subscription-health", deferredSubscriptionHealth.close()),
     )

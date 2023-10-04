@@ -171,4 +171,12 @@ object EitherTUtil {
     FutureUnlessShutdown.pure(().asRight[A])
   )
 
+  object syntax {
+    implicit class FunctorToEitherT[F[_]: Functor, T](f: F[T]) {
+
+      /** Converts any F[T] into EitherT[F, A, T] */
+      def toEitherTRight[A]: EitherT[F, A, T] =
+        EitherT.right[A](f)
+    }
+  }
 }

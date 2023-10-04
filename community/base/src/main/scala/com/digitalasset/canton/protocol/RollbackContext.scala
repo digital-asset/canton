@@ -38,7 +38,7 @@ final case class RollbackContext private (
         throw new IllegalStateException("Attempt to exit rollback on empty rollback context")
       )
 
-    new RollbackContext(rbScope.dropRight(1), lastChild + PositiveInt.one)
+    new RollbackContext(rbScope.dropRight(1), lastChild.increment)
   }
 
   def rollbackScope: RollbackScope = rbScope

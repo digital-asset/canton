@@ -41,14 +41,14 @@ import com.google.common.annotations.VisibleForTesting
 import scala.concurrent.{ExecutionContext, Future}
 import scala.math.Ordered.orderingToOrdered
 
-/** In protocol versions prior to [[com.digitalasset.canton.version.ProtocolVersion.dev]],
+/** In protocol versions prior to [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]],
   * the `signatures` field contains a single signature over the `typeMessage`'s
   * [[com.digitalasset.canton.protocol.messages.TypedSignedProtocolMessageContent.content]].
-  * From [[com.digitalasset.canton.version.ProtocolVersion.dev]] on, there can be any number of signatures
+  * From [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]] on, there can be any number of signatures
   * and each signature covers the serialization of the `typedMessage` itself rather than just its
   * [[com.digitalasset.canton.protocol.messages.TypedSignedProtocolMessageContent.content]].
   */
-// TODO(#12373) Adapt comment regarding PV=dev when releasing BFT
+// TODO(#12373) Adapt comment regarding PV=CNTestNet when releasing BFT
 // sealed because this class is mocked in tests
 sealed case class SignedProtocolMessage[+M <: SignedProtocolMessageContent] private (
     typedMessage: TypedSignedProtocolMessageContent[M],
@@ -74,8 +74,7 @@ sealed case class SignedProtocolMessage[+M <: SignedProtocolMessageContent] priv
   ): EitherT[Future, SignatureCheckError, Unit] =
     if (
       representativeProtocolVersion >=
-        // TODO(#12373) Adapt when releasing BFT
-        companionObj.protocolVersionRepresentativeFor(ProtocolVersion.dev)
+        companionObj.protocolVersionRepresentativeFor(ProtocolVersion.CNTestNet)
     ) {
       // TODO(#12390) Properly check the signatures, i.e. there shouldn't be multiple signatures from the same member on the same envelope
       ClosedEnvelope.verifySignatures(
@@ -96,8 +95,7 @@ sealed case class SignedProtocolMessage[+M <: SignedProtocolMessageContent] priv
   )(implicit traceContext: TraceContext): EitherT[Future, SignatureCheckError, Unit] = {
     if (
       representativeProtocolVersion >=
-        // TODO(#12373) Adapt when releasing BFT
-        companionObj.protocolVersionRepresentativeFor(ProtocolVersion.dev)
+        companionObj.protocolVersionRepresentativeFor(ProtocolVersion.CNTestNet)
     ) {
 
       ClosedEnvelope.verifySignatures(
@@ -173,15 +171,13 @@ object SignedProtocolMessage
       _.toProtoV0.toByteString,
     ),
     ProtoVersion(1) -> VersionedProtoConverter(
-      // TODO(#12373) Adapt when releasing BFT
-      ProtocolVersion.dev
+      ProtocolVersion.CNTestNet
     )(v1.SignedProtocolMessage)(
       supportedProtoVersion(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
   )
 
-  // TODO(#12373) Adapt when releasing BFT
   val multipleSignaturesSupportedSince = protocolVersionRepresentativeFor(ProtoVersion(1))
 
   def create[M <: SignedProtocolMessageContent](
