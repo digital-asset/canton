@@ -788,7 +788,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
             // Sequencing ts, signing ts relative to ts0, recipients
             (1L, None, recipientsTopo),
             (signingToleranceInSec + 1L, Some(0L), recipientsTopo),
-          ) ++ (2L to 40L).map(i => (signingToleranceInSec + i, None, recipientsAlice))
+          ) ++ (2L to 60L).map(i => (signingToleranceInSec + i, None, recipientsAlice))
           batch = Batch.fromClosed(
             testedProtocolVersion,
             ClosedEnvelope.tryCreate(
@@ -816,7 +816,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           // take some events
           queue = readWithQueue(alice, SequencerCounter(0))
           // read a bunch of items
-          readEvents <- MonadUtil.sequentialTraverse(1L to 40L)(_ => pullFromQueue(queue))
+          readEvents <- MonadUtil.sequentialTraverse(1L to 61L)(_ => pullFromQueue(queue))
           // wait for a bit over the checkpoint interval (although I would expect because these actions are using the same scheduler the actions may be correctly ordered regardless)
           _ <- waitFor(testConfig.checkpointInterval.underlying * 3)
           // close the queue before we make any assertions

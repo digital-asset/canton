@@ -7,16 +7,11 @@ import cats.data.EitherT
 import cats.syntax.functor.*
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.BaseTest.testedReleaseProtocolVersion
-import com.digitalasset.canton.concurrent.{
-  DirectExecutionContext,
-  FutureSupervisor,
-  HasFutureSupervision,
-}
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{CachingConfigs, DefaultProcessingTimeouts}
 import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, SymbolicPureCrypto}
 import com.digitalasset.canton.crypto.{Crypto, *}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{
   DomainParameters,
@@ -26,9 +21,7 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.DefaultTestIdentities.*
 import com.digitalasset.canton.topology.client.{
-  DomainTopologyClient,
   DomainTopologyClientWithInit,
-  IdentityProvidingServiceClient,
   StoreBasedDomainTopologyClient,
   StoreBasedTopologySnapshot,
   TopologySnapshot,
@@ -189,86 +182,9 @@ class TestingIdentityFactory(
 ) extends TestingIdentityFactoryBase
     with NamedLogging {
 
-  private implicit val directExecutionContext: ExecutionContext =
-    DirectExecutionContext(logger)
   private val defaultProtocolVersion = BaseTest.testedProtocolVersion
 
-  def forOwner(owner: KeyOwner): SyncCryptoApiProvider = {
-    new SyncCryptoApiProvider(
-      owner,
-      ips(),
-      TestingIdentityFactory.newCrypto(loggerFactory)(owner),
-      CachingConfigs.testing,
-      DefaultProcessingTimeouts.testing,
-      FutureSupervisor.Noop,
-      loggerFactory,
-    )
-  }
-
-  def forOwnerAndDomain(
-      owner: KeyOwner,
-      domain: DomainId = DefaultTestIdentities.domainId,
-  ): DomainSyncCryptoClient =
-    forOwner(owner).tryForDomain(domain)
-
-  def ips(): IdentityProvidingServiceClient = {
-    val ips = new IdentityProvidingServiceClient()
-    topology.domains.foreach(dId =>
-      ips.add(new DomainTopologyClient() with HasFutureSupervision with NamedLogging {
-
-        override protected def loggerFactory: NamedLoggerFactory =
-          TestingIdentityFactory.this.loggerFactory
-
-        override protected def futureSupervisor: FutureSupervisor = FutureSupervisor.Noop
-
-        override protected def executionContext: ExecutionContext = directExecutionContext
-
-        override def await(condition: TopologySnapshot => Future[Boolean], timeout: Duration)(
-            implicit traceContext: TraceContext
-        ): FutureUnlessShutdown[Boolean] = ???
-        override def domainId: DomainId = dId
-        override def trySnapshot(timestamp: CantonTimestamp)(implicit
-            traceContext: TraceContext
-        ): TopologySnapshot =
-          topologySnapshot(domainId, timestampForDomainParameters = timestamp)
-        override def currentSnapshotApproximation(implicit
-            traceContext: TraceContext
-        ): TopologySnapshot =
-          topologySnapshot(
-            domainId,
-            timestampForDomainParameters = CantonTimestamp.Epoch,
-          )
-        override def snapshotAvailable(timestamp: CantonTimestamp): Boolean = true
-        override def awaitTimestamp(timestamp: CantonTimestamp, waitForEffectiveTime: Boolean)(
-            implicit traceContext: TraceContext
-        ): Option[Future[Unit]] = None
-
-        override def awaitTimestampUS(timestamp: CantonTimestamp, waitForEffectiveTime: Boolean)(
-            implicit traceContext: TraceContext
-        ): Option[FutureUnlessShutdown[Unit]] = None
-        override def approximateTimestamp: CantonTimestamp =
-          currentSnapshotApproximation(TraceContext.empty).timestamp
-        override def snapshot(timestamp: CantonTimestamp)(implicit
-            traceContext: TraceContext
-        ): Future[TopologySnapshot] = awaitSnapshot(timestamp)
-        override def awaitSnapshot(timestamp: CantonTimestamp)(implicit
-            traceContext: TraceContext
-        ): Future[TopologySnapshot] = Future.successful(trySnapshot(timestamp))
-
-        override def awaitSnapshotUS(timestamp: CantonTimestamp)(implicit
-            traceContext: TraceContext
-        ): FutureUnlessShutdown[TopologySnapshot] =
-          FutureUnlessShutdown.pure(trySnapshot(timestamp))
-        override def close(): Unit = ()
-        override def topologyKnownUntilTimestamp: CantonTimestamp = approximateTimestamp
-
-        override def snapshotUS(timestamp: CantonTimestamp)(implicit
-            traceContext: TraceContext
-        ): FutureUnlessShutdown[TopologySnapshot] = awaitSnapshotUS(timestamp)
-      })
-    )
-    ips
-  }
+  override protected def domains: Set[DomainId] = topology.domains
 
   def topologySnapshot(
       domainId: DomainId = DefaultTestIdentities.domainId,

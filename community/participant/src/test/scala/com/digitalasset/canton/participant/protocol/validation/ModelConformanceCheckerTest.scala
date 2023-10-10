@@ -11,9 +11,12 @@ import com.daml.lf.engine
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.data.{CantonTimestamp, TransactionView, TransactionViewTree}
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactoryImpl
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.*
+import com.digitalasset.canton.participant.protocol.{
+  SerializableContractAuthenticator,
+  TransactionProcessingSteps,
+}
 import com.digitalasset.canton.participant.store.ContractLookup
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{lfHash, submitterParticipant}
 import com.digitalasset.canton.protocol.*
@@ -107,6 +110,14 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
     )
   }
 
+  object dummyAuthenticator extends SerializableContractAuthenticator {
+    override def authenticate(contract: SerializableContract): Either[String, Unit] = Right(())
+    override def verifyMetadata(
+        contract: SerializableContract,
+        metadata: ContractMetadata,
+    ): Either[String, Unit] = Right(())
+  }
+
   def check(
       mcc: ModelConformanceChecker,
       views: NonEmpty[Seq[(TransactionViewTree, Seq[(TransactionView, LfKeyResolver)])]],
@@ -134,6 +145,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
             validateContractOk,
             transactionTreeFactory,
             submitterParticipant,
+            dummyAuthenticator,
             enableContractUpgrading = false,
             loggerFactory,
           )
@@ -183,6 +195,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
         validateContractOk,
         transactionTreeFactory,
         submitterParticipant,
+        dummyAuthenticator,
         enableContractUpgrading = false,
         loggerFactory,
       )
@@ -219,6 +232,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
         validateContractOk,
         transactionTreeFactory,
         submitterParticipant,
+        dummyAuthenticator,
         enableContractUpgrading = false,
         loggerFactory,
       )
@@ -257,6 +271,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
             validateContractOk,
             transactionTreeFactory,
             submitterParticipant,
+            dummyAuthenticator,
             enableContractUpgrading = true,
             loggerFactory,
           )
@@ -290,6 +305,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
           validateContractOk,
           transactionTreeFactory,
           submitterParticipant,
+          dummyAuthenticator,
           enableContractUpgrading = false,
           loggerFactory,
         )
@@ -333,10 +349,11 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
       import ExampleTransactionFactory.*
 
       val sut = new ModelConformanceChecker(
-        failOnReinterpret,
-        validateContractOk,
-        transactionTreeFactory,
-        submitterParticipant,
+        reinterpret = failOnReinterpret,
+        validateContract = validateContractOk,
+        transactionTreeFactory = transactionTreeFactory,
+        participantId = submitterParticipant,
+        serializableContractAuthenticator = dummyAuthenticator,
         enableContractUpgrading = false,
         loggerFactory,
       )

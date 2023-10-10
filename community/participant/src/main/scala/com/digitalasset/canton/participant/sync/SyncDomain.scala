@@ -16,8 +16,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata}
-import com.digitalasset.canton.health.ComponentHealthState
-import com.digitalasset.canton.health.HealthReporting.HealthComponent
+import com.digitalasset.canton.health.{ComponentHealthState, HealthComponent}
 import com.digitalasset.canton.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -417,13 +416,11 @@ class SyncDomain(
         changes <- contractIdChanges.parTraverse { case (toc, change) =>
           val changeWithAdjustedTransferCountersForUnassignments = ActiveContractIdsChange(
             change.activations,
-            change.deactivations.fmap(change =>
-              change match {
-                case StateChangeType(ContractChange.Unassigned, transferCounter) =>
-                  StateChangeType(ContractChange.Unassigned, transferCounter.map(_ - 1))
-                case _ => change
-              }
-            ),
+            change.deactivations.fmap {
+              case StateChangeType(ContractChange.Unassigned, transferCounter) =>
+                StateChangeType(ContractChange.Unassigned, transferCounter.map(_ - 1))
+              case change => change
+            },
           )
           lookupChangeMetadata(changeWithAdjustedTransferCountersForUnassignments).map(ch =>
             (RecordTime.fromTimeOfChange(toc), ch)
@@ -435,11 +432,12 @@ class SyncDomain(
         )
         logger.debug(
           s"Retrieved contract ID changes from changesBetween " +
-            s"${contractIdChanges.force
+            s"${contractIdChanges
                 .map { case (toc, activeContractsChange) =>
-                  s"at time ${toc} activations ${activeContractsChange.activations} deactivations ${activeContractsChange.deactivations} "
+                  s"at time $toc activations ${activeContractsChange.activations} deactivations ${activeContractsChange.deactivations} "
                 }
-                .toString()}"
+                .force
+                .mkString(", ")}"
         )
         changes
       })

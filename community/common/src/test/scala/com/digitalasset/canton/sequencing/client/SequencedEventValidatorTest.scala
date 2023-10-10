@@ -3,19 +3,17 @@
 
 package com.digitalasset.canton.sequencing.client
 
-import akka.stream.scaladsl.{Sink, Source}
+import akka.stream.scaladsl.{Keep, Sink, Source}
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.*
 import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, SequencedEvent}
 import com.digitalasset.canton.store.SequencedEventStore.IgnoredSequencedEvent
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.AkkaUtilTest.{noOpKillSwitch, withNoOpKillSwitch}
 import com.digitalasset.canton.util.ResourceUtil
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
@@ -39,9 +37,6 @@ class SequencedEventValidatorTest
         futureSupervisor,
       )
     ) { env => withFixture(test.toNoArgTest(env)) }
-
-  private implicit val errorLoggingContext: ErrorLoggingContext =
-    ErrorLoggingContext(logger, Map(), TraceContext.empty)
 
   "validate on reconnect" should {
     "accept the prior event" in { fixture =>
@@ -428,6 +423,78 @@ class SequencedEventValidatorTest
         Right(deliver2),
         Left(GapInSequencerCounter(deliver3.counter, deliver2.counter)),
       )
+    }
+
+    "stop upon a validation error on reconnect" in { fixture =>
+      import fixture.*
+
+      val validator = mkValidator()
+      val deliver1 = createEventWithCounterAndTs(1L, CantonTimestamp.Epoch).futureValue
+      val deliver1a =
+        createEventWithCounterAndTs(1L, CantonTimestamp.Epoch.immediateSuccessor).futureValue
+      val deliver2 = createEventWithCounterAndTs(2L, CantonTimestamp.ofEpochSecond(1)).futureValue
+
+      val source = Source(
+        Seq(deliver1, deliver2).map(event => withNoOpKillSwitch(Right(event)))
+      ).watchTermination()((_, doneF) => noOpKillSwitch -> doneF)
+      val subscription = SequencerSubscriptionAkka(source)
+      val validatedSubscription =
+        validator.validateAkka(subscription, Some(deliver1a), DefaultTestIdentities.sequencerId)
+      loggerFactory.assertLogs(
+        validatedSubscription.source.runWith(Sink.seq).futureValue.map(_.unwrap) shouldBe Seq(
+          Left(
+            ForkHappened(
+              SequencerCounter(1),
+              deliver1.signedEvent.content,
+              Some(deliver1a.signedEvent.content),
+            )
+          )
+        ),
+        // We get two log messages here: one from the validator that creates the error
+        // and one from the test case that creates the error again for the comparison
+        _.errorMessage should include(ResilientSequencerSubscription.ForkHappened.id),
+        _.errorMessage should include(ResilientSequencerSubscription.ForkHappened.id),
+      )
+    }
+
+    "not request a topology snapshot after a validation failure" in { fixture =>
+      import fixture.*
+
+      val syncCryptoApi = TestingIdentityFactory(loggerFactory)
+        .forOwnerAndDomain(subscriberId, defaultDomainId, CantonTimestamp.ofEpochSecond(2))
+      val validator = mkValidator(syncCryptoApi)
+      val deliver1 = createEventWithCounterAndTs(1L, CantonTimestamp.Epoch).futureValue
+      val deliver2 = createEventWithCounterAndTs(2L, CantonTimestamp.ofEpochSecond(1)).futureValue
+      val deliver3 = createEventWithCounterAndTs(4L, CantonTimestamp.ofEpochSecond(2)).futureValue
+      val deliver4 = createEventWithCounterAndTs(5L, CantonTimestamp.ofEpochSecond(300)).futureValue
+
+      // sanity-check that the topology for deliver4 is really not available
+      SyncCryptoClient
+        .getSnapshotForTimestamp(
+          syncCryptoApi,
+          deliver4.timestamp,
+          Some(deliver3.timestamp),
+          testedProtocolVersion,
+          warnIfApproximate = false,
+        )
+        .failed
+        .futureValue shouldBe a[IllegalArgumentException]
+
+      val source = Source(
+        Seq(deliver1, deliver2, deliver3, deliver4).map(event => withNoOpKillSwitch(Right(event)))
+      ).watchTermination()((_, doneF) => noOpKillSwitch -> doneF)
+      val subscription = SequencerSubscriptionAkka(source)
+      val validatedSubscription =
+        validator.validateAkka(subscription, Some(deliver1), DefaultTestIdentities.sequencerId)
+      val ((killSwitch, doneF), validatedEventsF) =
+        validatedSubscription.source.toMat(Sink.seq)(Keep.both).run()
+      // deliver1 should be filtered out because it's the prior event
+      validatedEventsF.futureValue.map(_.unwrap) shouldBe Seq(
+        Right(deliver2),
+        Left(GapInSequencerCounter(deliver3.counter, deliver2.counter)),
+      )
+      killSwitch.shutdown()
+      doneF.futureValue
     }
   }
 

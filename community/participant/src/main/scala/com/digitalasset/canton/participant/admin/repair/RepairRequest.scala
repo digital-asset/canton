@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.admin.repair
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.participant.protocol.ProcessingStartingPoints
 import com.digitalasset.canton.participant.protocol.RequestJournal.{RequestData, RequestState}
 import com.digitalasset.canton.participant.store.SyncDomainPersistentState
 import com.digitalasset.canton.participant.util.TimeOfChange
@@ -14,14 +15,14 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 
 private[repair] final case class RepairRequest(
-    domainId: DomainId,
-    domainAlias: String, // for logging
-    domainParameters: StaticDomainParameters,
+    domain: RepairRequest.DomainData,
     transactionId: TransactionId,
     requestCounters: NonEmpty[Seq[RequestCounter]],
-    timestamp: CantonTimestamp,
     context: RepairContext,
-)(val domainPersistence: SyncDomainPersistentState, val topologySnapshot: TopologySnapshot) {
+) {
+
+  val timestamp: CantonTimestamp = domain.startingPoints.processing.prenextTimestamp
+
   def timesOfChange: Seq[TimeOfChange] =
     requestCounters.map(rc => TimeOfChange(rc, timestamp))
 
@@ -29,14 +30,27 @@ private[repair] final case class RepairRequest(
     // Trace context persisted explicitly doubling as a marker for repair requests in the request journal
     requestCounters.map(rc => RequestData(rc, RequestState.Pending, timestamp, Some(context)))
 
-  def tryOneRequestCounter: RequestCounter =
+  def tryExactlyOneRequestCounter: RequestCounter =
     if (requestCounters.sizeIs == 1) requestCounters.head1
     else
       throw new RuntimeException(
         s"Expected 1 request counter, actual size is ${requestCounters.size}"
       )
 
-  def tryOneTimeOfChange: TimeOfChange =
-    TimeOfChange(tryOneRequestCounter, timestamp)
+  def tryExactlyOneTimeOfChange: TimeOfChange =
+    TimeOfChange(tryExactlyOneRequestCounter, timestamp)
+
+}
+
+private[repair] object RepairRequest {
+
+  final case class DomainData(
+      id: DomainId,
+      alias: String,
+      topologySnapshot: TopologySnapshot,
+      persistentState: SyncDomainPersistentState,
+      parameters: StaticDomainParameters,
+      startingPoints: ProcessingStartingPoints,
+  )
 
 }

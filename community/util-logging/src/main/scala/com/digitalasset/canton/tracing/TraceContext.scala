@@ -11,7 +11,7 @@ import com.digitalasset.canton.logging.TracedLogger
 import io.opentelemetry.api.trace.{Span, Tracer}
 import io.opentelemetry.context.Context as OpenTelemetryContext
 
-import scala.collection.{immutable, mutable}
+import scala.collection.mutable
 
 /** Container for values tracing operations through canton.
   */
@@ -112,9 +112,10 @@ object TraceContext {
 
   /** Where we use batching operations create a separate trace-context but mention this in a debug log statement
     * linking it to the trace ids of the contained items. This will allow manual tracing via logs if ever needed.
+    * If all non-empty trace contexts in `items` are the same, this trace context will be reused and no log line emitted.
     */
-  def ofBatch(items: immutable.Iterable[HasTraceContext])(logger: TracedLogger): TraceContext = {
-    val validTraces = items.map(_.traceContext).filter(_.traceId.isDefined)
+  def ofBatch(items: IterableOnce[HasTraceContext])(logger: TracedLogger): TraceContext = {
+    val validTraces = items.iterator.map(_.traceContext).filter(_.traceId.isDefined).toSeq.distinct
 
     NonEmpty.from(validTraces) match {
       case None => TraceContext.withNewTraceContext(identity) // just generate new trace context

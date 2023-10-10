@@ -14,8 +14,8 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.crypto.{CryptoPureApi, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.health.ComponentHealthState
-import com.digitalasset.canton.health.HealthReporting.{
+import com.digitalasset.canton.health.{
+  ComponentHealthState,
   DelegatingMutableHealthComponent,
   HealthComponent,
 }
@@ -119,7 +119,7 @@ trait SequencerClient extends SequencerClientSend with FlagCloseable {
     * starting at the last event found in the [[com.digitalasset.canton.store.SequencedEventStore]].
     *
     * @param priorTimestamp      The timestamp of the event prior to where the event processing starts.
-    *                            If [[scala.None$]], the subscription starts at the [[com.digitalasset.canton.data.CounterCompanion.Genesis]].
+    *                            If [[scala.None$]], the subscription starts at the [[initialCounterLowerBound]].
     * @param cleanPreheadTsO     The timestamp of the clean prehead sequencer counter, if known.
     * @param eventHandler        A function handling the events.
     * @param timeTracker         Tracker for operations requiring the current domain time. Only updated with received events and not previously stored events.
@@ -173,6 +173,9 @@ trait SequencerClient extends SequencerClientSend with FlagCloseable {
   def acknowledgeSigned(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): EitherT[Future, String, Unit]
+
+  /** The sequencer counter at which the first subscription starts */
+  protected def initialCounterLowerBound: SequencerCounter
 }
 
 /** The sequencer client facilitates access to the individual domain sequencer. A client centralizes the
@@ -200,7 +203,7 @@ class SequencerClientImpl(
     loggingConfig: LoggingConfig,
     val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
-    initialCounterLowerBound: SequencerCounter = SequencerCounter.Genesis,
+    override protected val initialCounterLowerBound: SequencerCounter,
 )(implicit executionContext: ExecutionContext, tracer: Tracer)
     extends SequencerClient
     with FlagCloseableAsync
@@ -251,10 +254,7 @@ class SequencerClientImpl(
           }
         ComponentHealthState.Degraded(
           ComponentHealthState.UnhealthyState(
-            description =
-              Some(s"Unhealthy sequencer subscriptions for [${unhealthySequencers.mkString(",")}]"),
-            error = None,
-            elc = None,
+            Some(s"Unhealthy sequencer subscriptions for [${unhealthySequencers.mkString(",")}]")
           )
         )
       }

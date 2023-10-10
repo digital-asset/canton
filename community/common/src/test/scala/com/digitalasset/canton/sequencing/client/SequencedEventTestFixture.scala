@@ -46,7 +46,7 @@ class SequencedEventTestFixture(
   import ScalaFutures.*
   def fixtureTraceContext: TraceContext = traceContext
   lazy val defaultDomainId: DomainId = DefaultTestIdentities.domainId
-  private lazy val subscriberId: ParticipantId = ParticipantId("participant1-id")
+  lazy val subscriberId: ParticipantId = ParticipantId("participant1-id")
   lazy val sequencerAlice: SequencerId = DefaultTestIdentities.sequencerId
   lazy val subscriberCryptoApi: DomainSyncCryptoClient =
     TestingIdentityFactory(loggerFactory).forOwnerAndDomain(subscriberId, defaultDomainId)
@@ -59,7 +59,7 @@ class SequencedEventTestFixture(
   val sequencerCarlos: SequencerId = SequencerId(
     UniqueIdentifier(Identifier.tryCreate("da3"), namespace)
   )
-  val actorSystem = ActorSystem(classOf[SequencedEventTestFixture].getSimpleName)
+  implicit val actorSystem = ActorSystem(classOf[SequencedEventTestFixture].getSimpleName)
   implicit val materializer = Materializer(actorSystem)
 
   val alice = ParticipantId(UniqueIdentifier.tryCreate("participant", "alice"))

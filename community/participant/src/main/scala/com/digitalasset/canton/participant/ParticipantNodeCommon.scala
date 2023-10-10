@@ -21,10 +21,7 @@ import com.digitalasset.canton.config.{DbConfig, H2DbConfig}
 import com.digitalasset.canton.crypto.{Crypto, SyncCryptoApiProvider}
 import com.digitalasset.canton.domain.api.v0.DomainTimeServiceGrpc
 import com.digitalasset.canton.environment.{CantonNode, CantonNodeBootstrapCommon}
-import com.digitalasset.canton.health.HealthReporting.{
-  BaseMutableHealthComponent,
-  MutableHealthComponent,
-}
+import com.digitalasset.canton.health.{BaseMutableHealthComponent, MutableHealthComponent}
 import com.digitalasset.canton.http.metrics.HttpApiMetrics
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}

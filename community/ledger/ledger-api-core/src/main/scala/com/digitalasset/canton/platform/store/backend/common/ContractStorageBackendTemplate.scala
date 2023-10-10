@@ -91,7 +91,8 @@ class ContractStorageBackendTemplate(
         .toMap
     }
 
-  private val createdContractRowParser: RowParser[(ContractId, RawCreatedContract)] =
+  private val rawCreatedContractRowParser
+      : RowParser[(ContractId, ContractStorageBackend.RawCreatedContract)] =
     (str("contract_id")
       ~ int("template_id")
       ~ array[Int]("flat_event_witnesses")
@@ -108,9 +109,8 @@ class ContractStorageBackendTemplate(
         case coid ~ internalTemplateId ~ flatEventWitnesses ~ createArgument ~ createArgumentCompression ~ ledgerEffectiveTime ~ agreementText ~ signatories ~ createKey ~ createKeyCompression ~ keyMaintainers ~ driverMetadata =>
           ContractId.assertFromString(coid) -> RawCreatedContract(
             templateId = stringInterning.templateId.unsafe.externalize(internalTemplateId),
-            flatEventWitnesses = flatEventWitnesses.view
-              .map(stringInterning.party.externalize)
-              .toSet,
+            flatEventWitnesses =
+              flatEventWitnesses.view.map(stringInterning.party.externalize).toSet,
             createArgument = createArgument,
             createArgumentCompression = createArgumentCompression,
             ledgerEffectiveTime = ledgerEffectiveTime,
@@ -148,7 +148,7 @@ class ContractStorageBackendTemplate(
          WHERE
            contract_id ${queryStrategy.anyOfStrings(contractIds.map(_.coid))}
            AND event_offset <= $before"""
-        .as(createdContractRowParser.*)(connection)
+        .as(rawCreatedContractRowParser.*)(connection)
         .toMap
     }
 
@@ -184,11 +184,11 @@ class ContractStorageBackendTemplate(
          FROM participant_events_assign, min_event_sequential_ids_of_assign
          WHERE
            event_sequential_id = min_event_sequential_ids_of_assign.min_event_sequential_id"""
-        .as(createdContractRowParser.*)(connection)
+        .as(rawCreatedContractRowParser.*)(connection)
         .toMap
     }
 
-  private val contractRowParser: RowParser[ContractStorageBackend.RawContract] =
+  private val rawContractRowParser: RowParser[ContractStorageBackend.RawContract] =
     (int("template_id")
       ~ byteArray("create_argument")
       ~ int("create_argument_compression").?)
@@ -301,7 +301,7 @@ class ContractStorageBackendTemplate(
       contractId: ContractId,
   )(connection: Connection): Option[ContractStorageBackend.RawContract] = {
     activeContract(
-      resultSetParser = contractRowParser.singleOpt,
+      resultSetParser = rawContractRowParser.singleOpt,
       resultColumns = List("template_id", "create_argument", "create_argument_compression"),
     )(
       readers = readers,

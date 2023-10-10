@@ -31,6 +31,7 @@ class ParticipantMetrics(
     ) val metricsFactory: MetricsFactory,
     val labeledMetricsFactory: LabeledMetricsFactory,
     registry: MetricRegistry,
+    reportExecutionContextMetrics: Boolean,
 ) extends BaseMetrics {
 
   override def grpcMetrics: GrpcServerMetrics = ledgerApiServer.daml.grpc
@@ -44,7 +45,12 @@ class ParticipantMetrics(
 
   @nowarn("cat=deprecation")
   val ledgerApiServer: LedgerApiServerMetrics =
-    new LedgerApiServerMetrics(metricsFactory, labeledMetricsFactory, registry)
+    new LedgerApiServerMetrics(
+      metricsFactory,
+      labeledMetricsFactory,
+      registry,
+      reportExecutionContextMetrics,
+    )
 
   @nowarn("cat=deprecation")
   val httpApiServer: HttpApiMetrics =

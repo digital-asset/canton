@@ -11,7 +11,7 @@ import com.digitalasset.canton.config.{LocalNodeConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.admin.v0.VaultServiceGrpc
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.health.{GrpcHealthReporter, HealthReporting}
+import com.digitalasset.canton.health.{GrpcHealthReporter, HealthService}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
@@ -59,7 +59,7 @@ abstract class CantonNodeBootstrapX[
       nodeId: UniqueIdentifier,
       manager: AuthorizedTopologyManagerX,
       healthReporter: GrpcHealthReporter,
-      healthService: HealthReporting.HealthService,
+      healthService: HealthService,
   ): BootstrapStageOrLeaf[T]
 
   /** member depends on node type */
@@ -138,7 +138,7 @@ abstract class CantonNodeBootstrapX[
   private class SetupCrypto(
       val storage: Storage,
       val healthReporter: GrpcHealthReporter,
-      healthService: HealthReporting.HealthService,
+      healthService: HealthService,
   ) extends BootstrapStage[T, SetupNodeId](
         description = "Init crypto module",
         bootstrapStageCallback,
@@ -185,7 +185,7 @@ abstract class CantonNodeBootstrapX[
       storage: Storage,
       val crypto: Crypto,
       healthReporter: GrpcHealthReporter,
-      healthService: HealthReporting.HealthService,
+      healthService: HealthService,
   ) extends BootstrapStageWithStorage[T, GenerateOrAwaitNodeTopologyTx, UniqueIdentifier](
         description = "Init node id",
         bootstrapStageCallback,
@@ -323,7 +323,7 @@ abstract class CantonNodeBootstrapX[
       storage: Storage,
       crypto: Crypto,
       healthReporter: GrpcHealthReporter,
-      healthService: HealthReporting.HealthService,
+      healthService: HealthService,
   ) extends BootstrapStageWithStorage[T, BootstrapStageOrLeaf[T], Unit](
         description = "generate-or-await-node-topology-tx",
         bootstrapStageCallback,

@@ -33,6 +33,7 @@ import com.digitalasset.canton.platform.apiserver.configuration.{
   LedgerConfigurationInitializer,
   LedgerConfigurationSubscription,
 }
+import com.digitalasset.canton.platform.apiserver.execution.StoreBackedCommandExecutor.AuthenticateContract
 import com.digitalasset.canton.platform.apiserver.execution.*
 import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportKey
 import com.digitalasset.canton.platform.apiserver.services.*
@@ -109,6 +110,7 @@ object ApiServices {
       apiStreamShutdownTimeout: FiniteDuration,
       meteringReportKey: MeteringReportKey,
       explicitDisclosureUnsafeEnabled: Boolean,
+      authenticateContract: AuthenticateContract,
       telemetry: Telemetry,
       val loggerFactory: NamedLoggerFactory,
       multiDomainEnabled: Boolean,
@@ -390,6 +392,7 @@ object ApiServices {
               packagesService,
               contractStore,
               authorityResolver,
+              authenticateContract,
               metrics,
               loggerFactory,
             ),

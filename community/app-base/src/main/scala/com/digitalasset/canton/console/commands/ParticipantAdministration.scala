@@ -1606,19 +1606,15 @@ trait ParticipantHealthAdministrationCommon extends FeatureFlagFilter {
 
   protected def runner: AdminCommandRunner
 
-  @Help.Summary(
-    "Sends a ping to the target participant over the ledger. " +
-      "Yields the duration in case of success and throws a RuntimeException in case of failure."
-  )
-  def ping(
+  // Single internal implementation so that `maybe_ping`
+  // can be hidden behind the `testing` feature flag
+  private def ping_internal(
       participantId: ParticipantId,
-      timeout: NonNegativeDuration = consoleEnvironment.commandTimeouts.ping,
-      workflowId: String = "",
-      id: String = "",
-  ): Duration = {
-    // duplicating the code from `maybe_ping` here so `maybe_ping` so ping doesn't depend on it and
-    // thus isn't affected by `maybe_ping` being marked as 'Testing'
-    val adminApiRes: Option[Duration] = consoleEnvironment.run {
+      timeout: NonNegativeDuration,
+      workflowId: String,
+      id: String,
+  ): Option[Duration] =
+    consoleEnvironment.run {
       runner.adminCommand(
         ParticipantAdminCommands.Ping
           .Ping(
@@ -1632,6 +1628,18 @@ trait ParticipantHealthAdministrationCommon extends FeatureFlagFilter {
           )
       )
     }
+
+  @Help.Summary(
+    "Sends a ping to the target participant over the ledger. " +
+      "Yields the duration in case of success and throws a RuntimeException in case of failure."
+  )
+  def ping(
+      participantId: ParticipantId,
+      timeout: NonNegativeDuration = consoleEnvironment.commandTimeouts.ping,
+      workflowId: String = "",
+      id: String = "",
+  ): Duration = {
+    val adminApiRes: Option[Duration] = ping_internal(participantId, timeout, workflowId, id)
     consoleEnvironment.runE(
       adminApiRes.toRight(
         s"Unable to ping $participantId within ${LoggerUtil.roundDurationForHumans(timeout.duration)}"
@@ -1650,20 +1658,7 @@ trait ParticipantHealthAdministrationCommon extends FeatureFlagFilter {
       workflowId: String = "",
       id: String = "",
   ): Option[Duration] = check(FeatureFlag.Testing) {
-    consoleEnvironment.run {
-      runner.adminCommand(
-        ParticipantAdminCommands.Ping
-          .Ping(
-            Set[String](participantId.adminParty.toLf),
-            Set(),
-            timeout.asFiniteApproximation.toMillis,
-            0,
-            0,
-            workflowId,
-            id,
-          )
-      )
-    }
+    ping_internal(participantId, timeout, workflowId, id)
   }
 }
 

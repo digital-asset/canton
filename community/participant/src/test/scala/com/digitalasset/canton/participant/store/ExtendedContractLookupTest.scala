@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.store
 import cats.syntax.parallel.*
 import com.daml.lf.value.Value.{ValueText, ValueUnit}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.participant.protocol.SerializableContractAuthenticator
 import com.digitalasset.canton.participant.store.memory.InMemoryContractStore
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   asSerializable,
@@ -23,6 +24,14 @@ import scala.concurrent.Future
 class ExtendedContractLookupTest extends AsyncWordSpec with BaseTest {
 
   import com.digitalasset.canton.protocol.ExampleTransactionFactory.suffixedId
+
+  object dummyAuthenticator extends SerializableContractAuthenticator {
+    override def authenticate(contract: SerializableContract): Either[String, Unit] = Right(())
+    override def verifyMetadata(
+        contract: SerializableContract,
+        metadata: ContractMetadata,
+    ): Either[String, Unit] = Right(())
+  }
 
   val coid00: LfContractId = suffixedId(0, 0)
   val coid01: LfContractId = suffixedId(0, 1)
@@ -130,6 +139,7 @@ class ExtendedContractLookupTest extends AsyncWordSpec with BaseTest {
         _,
         overwrites,
         Map(key00 -> Some(coid00), key1 -> None),
+        dummyAuthenticator,
       )
     )
 
@@ -191,7 +201,12 @@ class ExtendedContractLookupTest extends AsyncWordSpec with BaseTest {
         preloadedStore <- preloadedStoreF
       } yield {
         assertThrows[IllegalArgumentException](
-          new ExtendedContractLookup(preloadedStore, Map(coid10 -> contract), Map.empty)
+          new ExtendedContractLookup(
+            preloadedStore,
+            Map(coid10 -> contract),
+            Map.empty,
+            dummyAuthenticator,
+          )
         )
       }
     }

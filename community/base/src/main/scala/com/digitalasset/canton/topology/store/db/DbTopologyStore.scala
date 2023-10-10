@@ -321,7 +321,6 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
     updateAndInsert(transactionStoreIdName, sequenced, effective, updates.toSeq, appends)
   }
 
-  @SuppressWarnings(Array("com.digitalasset.canton.SlickString"))
   private def updateAndInsert(
       store: LengthLimitedString,
       sequenced: SequencedTime,

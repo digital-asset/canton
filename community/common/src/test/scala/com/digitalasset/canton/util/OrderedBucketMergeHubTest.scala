@@ -697,4 +697,47 @@ class OrderedBucketMergeHubTest extends StreamSpec with BaseTest {
       )
     ))
   }
+
+  "initially pass the prior element from Ops" in assertAllStagesStopped {
+    def mkElem(name: Name, i: Int): Elem = Elem(Bucket(i, 0), s"$name-$i")
+
+    val priors = new AtomicReference[Seq[(Name, Option[Elem])]](Seq.empty)
+
+    val ops = new OrderedBucketMergeHubOps[Name, Elem, Config, Offset] {
+      override type PriorElement = Elem
+      override type Bucket = OrderedBucketMergeHubTest.this.Bucket
+      override def prettyBucket: Pretty[Bucket] = implicitly[Pretty[Bucket]]
+      override def bucketOf(elem: Elem): Bucket = elem.bucket
+      override def orderingOffset: Ordering[Offset] = implicitly[Ordering[Offset]]
+      override def offsetOfBucket(bucket: Bucket): Offset = bucket.offset
+      override def exclusiveLowerBoundForBegin: Offset = 10
+      override def priorElement: Option[Elem] = Some(mkElem("prior", 10))
+      override def toPriorElement(output: OutputElement[Name, Elem]): Elem = output.elem.head1._2
+      override def traceContextOf(elem: Elem): TraceContext = TraceContext.empty
+      override def makeSource(
+          name: Name,
+          config: Config,
+          exclusiveStart: Offset,
+          priorElement: Option[Elem],
+      ): Source[Elem, (KillSwitch, Future[Done])] = {
+        priors.getAndUpdate(_ :+ (name -> priorElement)).discard
+        Source.empty[Elem].viaMat(KillSwitches.single)(Keep.right).watchTermination()(Keep.both)
+      }
+    }
+
+    val ((configQueue, doneF), sink) =
+      Source.queue(1).viaMat(mkHub(ops))(Keep.both).toMat(TestSink.probe)(Keep.both).run()
+
+    val config1 =
+      OrderedBucketMergeConfig(PositiveInt.one, NonEmpty(Map, "one" -> 1))
+    configQueue.offer(config1) shouldBe Enqueued
+
+    sink.request(10)
+    sink.expectNext(NewConfiguration(config1, 10))
+    sink.expectNext(ActiveSourceTerminated("one", None))
+    configQueue.complete()
+    doneF.futureValue
+
+    priors.get shouldBe Seq("one" -> Some(mkElem("prior", 10)))
+  }
 }

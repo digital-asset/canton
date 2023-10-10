@@ -11,7 +11,7 @@ import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NamedLoggingContext}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.sequencing.client.ResilientSequencerSubscription.LostSequencerSubscription
 import com.digitalasset.canton.sequencing.client.transports.SequencerClientTransportAkka
@@ -193,16 +193,40 @@ object ResilientSequencerSubscriberAkka {
       lastSequencerCounter: SequencerCounter,
       error: E,
   )
+
+  def factory[E](
+      domainId: DomainId,
+      retryDelayRule: SubscriptionRetryDelayRule,
+      subscriptionFactory: SequencerSubscriptionFactoryAkka[E],
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      materializer: Materializer
+  ): SequencerSubscriptionFactoryAkka[E] = {
+    val subscriber = new ResilientSequencerSubscriberAkka[E](
+      domainId,
+      retryDelayRule,
+      subscriptionFactory,
+      timeouts,
+      loggerFactory,
+    )
+    new SequencerSubscriptionFactoryAkka[E] {
+      override def create(startingCounter: SequencerCounter)(implicit
+          traceContext: TraceContext
+      ): SequencerSubscriptionAkka[E] = subscriber.subscribeFrom(startingCounter)
+
+      override val retryPolicy: SubscriptionErrorRetryPolicyAkka[E] =
+        SubscriptionErrorRetryPolicyAkka.never
+    }
+  }
 }
 
-trait SequencerSubscriptionFactoryAkka[HandlerError] {
+trait SequencerSubscriptionFactoryAkka[E] {
   def create(
       startingCounter: SequencerCounter
-  )(implicit
-      loggingContext: NamedLoggingContext
-  ): SequencerSubscriptionAkka[HandlerError]
+  )(implicit traceContext: TraceContext): SequencerSubscriptionAkka[E]
 
-  def retryPolicy: SubscriptionErrorRetryPolicyAkka[HandlerError]
+  def retryPolicy: SubscriptionErrorRetryPolicyAkka[E]
 }
 
 object SequencerSubscriptionFactoryAkka {
@@ -220,15 +244,14 @@ object SequencerSubscriptionFactoryAkka {
   ): SequencerSubscriptionFactoryAkka[transport.SubscriptionError] =
     new SequencerSubscriptionFactoryAkka[transport.SubscriptionError] {
       override def create(startingCounter: SequencerCounter)(implicit
-          loggingContext: NamedLoggingContext
+          traceContext: TraceContext
       ): SequencerSubscriptionAkka[transport.SubscriptionError] = {
-        implicit val traceContext: TraceContext = loggingContext.traceContext
         val request = SubscriptionRequest(member, startingCounter, protocolVersion)
         if (requiresAuthentication) transport.subscribe(request)
         else transport.subscribeUnauthenticated(request)
       }
 
-      override def retryPolicy: SubscriptionErrorRetryPolicyAkka[transport.SubscriptionError] =
+      override val retryPolicy: SubscriptionErrorRetryPolicyAkka[transport.SubscriptionError] =
         transport.subscriptionRetryPolicyAkka
     }
 }

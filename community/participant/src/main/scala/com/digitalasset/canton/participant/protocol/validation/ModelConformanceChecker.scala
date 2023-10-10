@@ -20,13 +20,14 @@ import com.digitalasset.canton.data.{
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.protocol.SerializableContractAuthenticator
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps.CommonData
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.TransactionTreeConversionError
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.*
 import com.digitalasset.canton.participant.store.{
-  ContractAndKeyLookup,
   ContractLookup,
+  ContractLookupAndVerification,
   ExtendedContractLookup,
   StoredContract,
 }
@@ -63,7 +64,7 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 class ModelConformanceChecker(
     val reinterpret: (
-        ContractAndKeyLookup,
+        ContractLookupAndVerification,
         Set[LfPartyId],
         LfCommand,
         CantonTimestamp,
@@ -83,6 +84,7 @@ class ModelConformanceChecker(
     ) => EitherT[Future, ContractValidationFailure, Unit],
     val transactionTreeFactory: TransactionTreeFactory,
     participantId: ParticipantId,
+    val serializableContractAuthenticator: SerializableContractAuthenticator,
     val enableContractUpgrading: Boolean,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -244,18 +246,17 @@ class ModelConformanceChecker(
     val seed = viewParticipantData.actionDescription.seedOption
     for {
       viewInputContracts <- validateInputContracts(view, requestCounter)
-
       _ <- validatePackageVettings(view, topologySnapshot)
-
-      lookupWithKeys =
+      contractLookupAndVerification =
         new ExtendedContractLookup(
           // all contracts and keys specified explicitly
-          ContractLookup.noContracts(noTracingLogger),
+          ContractLookup.noContracts(loggerFactory),
           viewInputContracts,
           resolverFromView,
+          serializableContractAuthenticator,
         )
       lfTxAndMetadata <- reinterpret(
-        lookupWithKeys,
+        contractLookupAndVerification,
         authorizers,
         cmd,
         ledgerTime,
@@ -290,7 +291,8 @@ class ModelConformanceChecker(
           salts = salts,
           transactionUuid = transactionUuid,
           topologySnapshot = topologySnapshot,
-          contractOfId = TransactionTreeFactory.contractInstanceLookup(lookupWithKeys),
+          contractOfId =
+            TransactionTreeFactory.contractInstanceLookup(contractLookupAndVerification),
           keyResolver = resolverFromReinterpretation,
         )
       ).leftMap(err => TransactionTreeError(err, view.viewHash))
@@ -340,13 +342,14 @@ object ModelConformanceChecker {
   def apply(
       damle: DAMLe,
       transactionTreeFactory: TransactionTreeFactory,
+      serializableContractAuthenticator: SerializableContractAuthenticator,
       protocolVersion: ProtocolVersion,
       participantId: ParticipantId,
       enableContractUpgrading: Boolean,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): ModelConformanceChecker = {
     def reinterpret(
-        contracts: ContractAndKeyLookup,
+        contracts: ContractLookupAndVerification,
         submitters: Set[LfPartyId],
         command: LfCommand,
         ledgerTime: CantonTimestamp,
@@ -374,6 +377,7 @@ object ModelConformanceChecker {
       else noSerializedContractValidation,
       transactionTreeFactory,
       participantId,
+      serializableContractAuthenticator,
       enableContractUpgrading,
       loggerFactory,
     )

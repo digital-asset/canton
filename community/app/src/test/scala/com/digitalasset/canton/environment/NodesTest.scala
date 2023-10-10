@@ -107,6 +107,8 @@ class NodesTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     // node should be properly closed and stop should succeed
     stop.value.futureValue shouldBe Right(())
     node.isClosing shouldBe true
+    // wait for start to be have completed all callbacks including removing n1 from nodes.
+    start.value.futureValue.discard
     nodes.isRunning("n1") shouldBe false
     startupResult match {
       case Left(value) => start.value.futureValue shouldBe Left(StartFailed("n1", value))

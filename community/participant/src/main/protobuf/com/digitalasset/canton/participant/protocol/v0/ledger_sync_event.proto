@@ -27,6 +27,8 @@ message LedgerSyncEvent {
     PublicPackageUploadRejected public_package_upload_rejected = 8;
     TransferredOut transferred_out = 9;
     TransferredIn transferred_in = 10;
+    ContractsAdded contracts_added = 11;
+    ContractsPurged contracts_purged = 12;
   }
 }
 
@@ -190,4 +192,22 @@ message TransferredIn {
   bool is_transferring_participant = 13;
   repeated string hosted_stakeholders = 14;
   int64 transfer_counter = 15;
+}
+
+message ContractsAdded {
+  string transaction_id = 1;
+  repeated bytes contracts = 2;
+  string domain_id = 3;
+  google.protobuf.Timestamp ledger_time = 4;
+  google.protobuf.Timestamp record_time = 5;
+  repeated string hosted_witnesses = 6;
+  map<string, bytes> contract_metadata = 7;
+}
+
+message ContractsPurged {
+  string transaction_id = 1;
+  repeated bytes contracts = 2;
+  string domain_id = 3;
+  google.protobuf.Timestamp record_time = 4;
+  repeated string hosted_witnesses = 5;
 }

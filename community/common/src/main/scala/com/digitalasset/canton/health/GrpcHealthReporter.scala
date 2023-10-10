@@ -4,7 +4,7 @@
 package com.digitalasset.canton.health
 
 import cats.implicits.showInterpolator
-import com.digitalasset.canton.health.HealthReporting.*
+import com.digitalasset.canton.health.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ShowUtil.showPretty

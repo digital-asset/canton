@@ -15,9 +15,8 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Crypto, CryptoPureApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.environment.*
-import com.digitalasset.canton.health.HealthReporting.ComponentStatus
 import com.digitalasset.canton.health.admin.data.ParticipantStatus
-import com.digitalasset.canton.health.{GrpcHealthReporter, HealthReporting}
+import com.digitalasset.canton.health.{ComponentStatus, GrpcHealthReporter, HealthService}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.ParticipantNodeBootstrap.CommunityParticipantFactoryCommon
@@ -115,7 +114,7 @@ class ParticipantNodeBootstrapX(
       nodeId: UniqueIdentifier,
       manager: AuthorizedTopologyManagerX,
       healthReporter: GrpcHealthReporter,
-      healthService: HealthReporting.HealthService,
+      healthService: HealthService,
   ): BootstrapStageOrLeaf[ParticipantNodeX] =
     new StartupNode(storage, crypto, nodeId, manager, healthReporter, healthService)
 
@@ -125,7 +124,7 @@ class ParticipantNodeBootstrapX(
       nodeId: UniqueIdentifier,
       topologyManager: AuthorizedTopologyManagerX,
       healthReporter: GrpcHealthReporter,
-      healthService: HealthReporting.HealthService,
+      healthService: HealthService,
   ) extends BootstrapStage[ParticipantNodeX, RunningNode[ParticipantNodeX]](
         description = "Startup participant node",
         bootstrapStageCallback,
@@ -342,8 +341,8 @@ class ParticipantNodeBootstrapX(
 
   override protected def member(uid: UniqueIdentifier): Member = ParticipantId(uid)
 
-  override protected def mkNodeHealthService(storage: Storage): HealthReporting.HealthService =
-    HealthReporting.HealthService(
+  override protected def mkNodeHealthService(storage: Storage): HealthService =
+    HealthService(
       "participant",
       criticalDependencies = Seq(storage),
       // The sync service won't be reporting Ok until the node is initialized, but that shouldn't prevent traffic from

@@ -10,10 +10,13 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.health.ComponentHealthState.UnhealthyState
-import com.digitalasset.canton.health.HealthReporting.ComponentStatus
 import com.digitalasset.canton.health.admin.data.NodeStatus.{multiline, portsString}
 import com.digitalasset.canton.health.admin.v0
-import com.digitalasset.canton.health.{ComponentHealthState, ToComponentHealthState}
+import com.digitalasset.canton.health.{
+  ComponentHealthState,
+  ComponentStatus,
+  ToComponentHealthState,
+}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyInstances, PrettyPrinting, PrettyUtil}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.{DurationConverter, ParsingResult}
@@ -145,7 +148,8 @@ object SimpleStatus {
   * @param isActive implementation specific flag indicating whether the sequencer is active
   */
 final case class SequencerHealthStatus(isActive: Boolean, details: Option[String] = None)
-    extends ToComponentHealthState {
+    extends ToComponentHealthState
+    with PrettyPrinting {
   def toProtoV0: v0.SequencerHealthStatus = v0.SequencerHealthStatus(isActive, details)
 
   override def toComponentHealthState: ComponentHealthState = if (isActive)

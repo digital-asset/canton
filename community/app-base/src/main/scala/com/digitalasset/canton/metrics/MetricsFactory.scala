@@ -128,6 +128,7 @@ final case class MetricsFactory(
     reportJVMMetrics: Boolean,
     meter: Meter,
     factoryType: MetricsFactoryType,
+    reportExecutionContextMetrics: Boolean,
 ) extends AutoCloseable {
 
   @deprecated("Use LabeledMetricsFactory", since = "2.7.0")
@@ -180,6 +181,7 @@ final case class MetricsFactory(
             participantMetricsContext
           ),
           participantRegistry,
+          reportExecutionContextMetrics,
         )
       },
     )
@@ -322,6 +324,7 @@ object MetricsFactory extends LazyLogging {
       config.reportJvmMetrics,
       openTelemetry.meterBuilder("canton").build(),
       metricsFactoryType,
+      config.reportExecutionContextMetrics,
     )
   }
 

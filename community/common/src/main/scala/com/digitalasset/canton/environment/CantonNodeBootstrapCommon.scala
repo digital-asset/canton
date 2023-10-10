@@ -22,11 +22,15 @@ import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService.GrpcVaultServi
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CryptoPrivateStoreFactory
 import com.digitalasset.canton.crypto.store.{CryptoPrivateStoreError, CryptoPublicStoreError}
 import com.digitalasset.canton.environment.CantonNodeBootstrap.HealthDumpFunction
-import com.digitalasset.canton.health.HealthReporting.{HealthService, ServiceHealthStatusManager}
 import com.digitalasset.canton.health.admin.data.NodeStatus
 import com.digitalasset.canton.health.admin.grpc.GrpcStatusService
 import com.digitalasset.canton.health.admin.v0.StatusServiceGrpc
-import com.digitalasset.canton.health.{GrpcHealthReporter, GrpcHealthServer, HealthReporting}
+import com.digitalasset.canton.health.{
+  GrpcHealthReporter,
+  GrpcHealthServer,
+  HealthService,
+  ServiceHealthStatusManager,
+}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.DbStorageMetrics
@@ -203,9 +207,9 @@ abstract class CantonNodeBootstrapCommon[
     (Lifecycle.toCloseableServer(server, logger, "AdminServer"), registry)
   }
 
-  protected def mkNodeHealthService(storage: Storage): HealthReporting.HealthService
+  protected def mkNodeHealthService(storage: Storage): HealthService
   protected def mkHealthComponents(
-      nodeHealthService: HealthReporting.HealthService
+      nodeHealthService: HealthService
   ): (GrpcHealthReporter, Option[GrpcHealthServer]) = {
     // Service that will always return `SERVING`. Useful to be targeted by k8s liveness probes.
     val livenessService = HealthService("liveness")
