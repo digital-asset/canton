@@ -13,8 +13,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.crypto.Salt
-import com.digitalasset.canton.health.ComponentHealthState
-import com.digitalasset.canton.health.HealthReporting.HealthComponent
+import com.digitalasset.canton.health.{ComponentHealthState, HealthComponent}
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
   FlagCloseable,

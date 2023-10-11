@@ -77,6 +77,7 @@ private[dao] trait JdbcLedgerDaoBackend extends AkkaBeforeAndAfterAll with BaseT
         new DropwizardMetricsFactory(registry),
         NoOpMetricsFactory,
         registry,
+        true,
       )
     }
     val dbType = DbType.jdbcType(jdbcUrl)

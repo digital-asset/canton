@@ -724,7 +724,7 @@ class OrderedBucketMergeHub[Name: Pretty, A, Config, Offset: Pretty](
         name,
         config,
         lowerBoundNextOffsetExclusive,
-        lastBucketQueuedForEmission.map(ops.toPriorElement),
+        lastBucketQueuedForEmission.map(ops.toPriorElement).orElse(ops.priorElement),
       )
       val subsink = new SubSinkInlet[A](s"OrderedMergeHub.sink($name-$id)")
       subsink.setHandler(

@@ -11,8 +11,8 @@ import com.daml.lf.value.ValueCoder.{DecodeError, EncodeError}
 import com.digitalasset.canton.protocol
 import com.digitalasset.canton.protocol.{
   AgreementText,
+  LfActionNode,
   LfContractInst,
-  LfNodeCreate,
   LfNodeId,
   LfVersionedTransaction,
 }
@@ -61,34 +61,55 @@ private[store] object DamlLfSerializers {
         TransactionOuterClass.ContractInstance.parseFrom(bytes),
       )
 
-  def deserializeCreateNode(
+  private def deserializeNode(
       proto: TransactionOuterClass.Node
-  ): Either[DecodeError, protocol.LfNodeCreate] = {
+  ): Either[DecodeError, protocol.LfNode] = {
     for {
       version <- TransactionCoder.decodeVersion(proto.getVersion)
-      nodeWithId <- CantonOnly.decodeVersionedNode(
+      idAndNode <- CantonOnly.decodeVersionedNode(
         TransactionCoder.NidDecoder,
         ValueCoder.CidDecoder,
         version,
         proto,
       )
-      createNode <- nodeWithId._2 match {
+      (_, node) = idAndNode
+    } yield node
+  }
+
+  def deserializeCreateNode(
+      proto: TransactionOuterClass.Node
+  ): Either[DecodeError, protocol.LfNodeCreate] = {
+    for {
+      node <- deserializeNode(proto)
+      createNode <- node match {
         case create: Node.Create => Right(create)
-        case node => Left(DecodeError(s"Failed deserialize Create Node $node"))
+        case _node => Left(DecodeError("Failed to deserialize create node: wrong node type"))
       }
     } yield createNode
   }
 
-  def serializeCreateNode(
-      create: LfNodeCreate
+  def deserializeExerciseNode(
+      proto: TransactionOuterClass.Node
+  ): Either[DecodeError, protocol.LfNodeExercises] = {
+    for {
+      node <- deserializeNode(proto)
+      exerciseNode <- node match {
+        case exercise: Node.Exercise => Right(exercise)
+        case _node => Left(DecodeError("Failed to deserialize exercise node: wrong node type"))
+      }
+    } yield exerciseNode
+  }
+
+  def serializeNode(
+      node: LfActionNode
   ): Either[EncodeError, ByteString] =
     CantonOnly
       .encodeNode(
         TransactionCoder.NidEncoder,
         ValueCoder.CidEncoder,
-        create.version,
+        node.version,
         LfNodeId(0),
-        create,
+        node,
       )
       .map(_.toByteString)
 

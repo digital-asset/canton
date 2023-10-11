@@ -1082,6 +1082,7 @@ class SequencerClientTest
         LoggingConfig(),
         loggerFactory,
         futureSupervisor,
+        SequencerCounter.Genesis,
       )(executionContext, tracer)
       val signedEvents = storedEvents.map(SequencerTestUtils.sign)
 

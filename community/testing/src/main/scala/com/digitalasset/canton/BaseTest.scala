@@ -399,6 +399,7 @@ object BaseTest {
   lazy val CantonLfDev: String = getResourcePath("CantonLfDev.dar")
   lazy val CantonLfV15: String = getResourcePath("CantonLfV15.dar")
   lazy val PerformanceTestPath: String = getResourcePath("PerformanceTest.dar")
+  lazy val DamlScript3TestFilesPath: String = getResourcePath("DamlScript3TestFiles.dar")
   lazy val DamlTestFilesPath: String = getResourcePath("DamlTestFiles.dar")
   lazy val DamlTestLfV15FilesPath: String = getResourcePath("DamlTestLfV15Files.dar")
   lazy val UpgradeV1: String = getResourcePath("upgrade-v1.dar")

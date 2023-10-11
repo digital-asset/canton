@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.apiserver.execution
 
+import cats.implicits.toBifunctorOps
 import com.daml.lf.crypto
 import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.engine.{
@@ -18,13 +19,16 @@ import com.daml.lf.engine.{
   ResultNeedPackage,
   ResultNeedUpgradeVerification,
 }
-import com.daml.lf.transaction.{Node, SubmittedTransaction, Transaction}
+import com.daml.lf.transaction.*
 import com.daml.lf.value.Value
+import com.daml.lf.value.Value.{ContractId, ContractInstance}
 import com.daml.metrics.{Timed, Tracked}
-import com.digitalasset.canton.data.ProcessedDisclosedContract
-import com.digitalasset.canton.ledger.api.domain.Commands as ApiCommands
+import com.digitalasset.canton.crypto.Salt
+import com.digitalasset.canton.data.{CantonTimestamp, ProcessedDisclosedContract}
+import com.digitalasset.canton.ledger.api.domain.{Commands as ApiCommands, DisclosedContract}
 import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
+  ContractState,
   ContractStore,
   IndexPackagesService,
 }
@@ -32,8 +36,15 @@ import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.Metrics
+import com.digitalasset.canton.platform.apiserver.execution.StoreBackedCommandExecutor.AuthenticateContract
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 import com.digitalasset.canton.platform.packages.DeduplicatingPackageLoader
+import com.digitalasset.canton.protocol.{
+  AgreementText,
+  ContractMetadata,
+  DriverContractMetadata,
+  SerializableContract,
+}
 import scalaz.syntax.tag.*
 
 import java.util.concurrent.TimeUnit
@@ -49,6 +60,7 @@ private[apiserver] final class StoreBackedCommandExecutor(
     packagesService: IndexPackagesService,
     contractStore: ContractStore,
     authorityResolver: AuthorityResolver,
+    authenticateContract: AuthenticateContract,
     metrics: Metrics,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
@@ -78,6 +90,7 @@ private[apiserver] final class StoreBackedCommandExecutor(
         commands.actAs,
         commands.readAs,
         submissionResult,
+        commands.disclosedContracts.toList.map(c => c.contractId -> c).toMap,
         interpretationTimeNanos,
       )
     } yield {
@@ -179,6 +192,7 @@ private[apiserver] final class StoreBackedCommandExecutor(
       actAs: Set[Ref.Party],
       readAs: Set[Ref.Party],
       result: Result[A],
+      disclosedContracts: Map[ContractId, DisclosedContract],
       interpretationTimeNanos: AtomicLong,
   )(implicit
       loggingContext: LoggingContextWithTrace
@@ -190,6 +204,116 @@ private[apiserver] final class StoreBackedCommandExecutor(
 
     val lookupContractKeyTime = new AtomicLong(0L)
     val lookupContractKeyCount = new AtomicLong(0L)
+
+    // By unused here we mean they are not used by the verification
+    val unusedTxVersion = TransactionVersion.StableVersions.max
+    val unusedAgreementText = AgreementText.empty
+
+    def extractSalt(dm: Array[Byte]): Either[String, Salt] =
+      DriverContractMetadata
+        .fromByteArray(dm)
+        .bimap(
+          e => s"Failed to build DriverContractMetadata ($e)",
+          m => m.salt,
+        )
+
+    def extractOptSalt(driverMetadata: Option[Array[Byte]]): Either[String, Salt] =
+      driverMetadata match {
+        case Some(dm) => extractSalt(dm)
+        case None => Left(s"Did not find salt")
+      }
+
+    def mapUpgradeResult(uvr: UpgradeVerificationResult): Option[String] = {
+      import UpgradeVerificationResult.*
+      uvr match {
+        case Valid =>
+          None
+        case UpgradeFailure(message) =>
+          Some(message)
+        case DivulgedContract =>
+          // During submission the ResultNeedUpgradeVerification should only be called
+          // for contracts that are being upgraded. We do not support the upgrading of
+          // divulged contracts.
+          Some("Divulged contracts cannot be upgraded")
+      }
+    }
+
+    def upgradableContractId(
+        coid: ContractId,
+        metadata: ContractMetadata,
+    ): Future[Option[String]] = {
+      val fResult = disclosedContracts.get(coid) match {
+        case Some(contract) => upgradableDisclosedContract(contract, metadata)
+        case None => upgradableNonDisclosedContract(coid, metadata)
+      }
+      fResult.map(mapUpgradeResult)
+    }
+
+    def upgradableDisclosedContract(
+        contract: DisclosedContract,
+        metadata: ContractMetadata,
+    ): Future[UpgradeVerificationResult] = {
+
+      import UpgradeVerificationResult.*
+
+      val result: Either[String, SerializableContract] = for {
+        salt <- extractSalt(contract.driverMetadata.toByteArray)
+        contract <- SerializableContract(
+          contractId = contract.contractId,
+          contractInstance =
+            Versioned(unusedTxVersion, ContractInstance(contract.templateId, contract.argument)),
+          metadata = metadata,
+          ledgerTime = CantonTimestamp(contract.createdAt),
+          contractSalt = Some(salt),
+          unvalidatedAgreementText = unusedAgreementText,
+        ).left.map(e => s"Failed to construct SerializableContract($e)")
+        _ <- authenticateContract(contract)
+      } yield contract
+
+      Future.successful(
+        result.fold[UpgradeVerificationResult](message => UpgradeFailure(message), _ => Valid)
+      )
+    }
+
+    def upgradableNonDisclosedContract(
+        coid: ContractId,
+        metadata: ContractMetadata,
+    ): Future[UpgradeVerificationResult] = {
+      import ContractState.*
+      import UpgradeVerificationResult.*
+
+      contractStore.lookupContractStateWithoutDivulgence(coid).flatMap {
+        case active: ContractState.Active => upgradableActiveContract(coid, active, metadata)
+        case Archived => Future.successful(UpgradeFailure("Contract archived"))
+        case NotFound => Future.successful(DivulgedContract)
+      }
+    }
+
+    def upgradableActiveContract(
+        contractId: ContractId,
+        active: ContractState.Active,
+        metadata: ContractMetadata,
+    ): Future[UpgradeVerificationResult] = {
+      import UpgradeVerificationResult.*
+
+      val result = for {
+        salt <- extractOptSalt(active.driverMetadata)
+        contract <- SerializableContract(
+          contractId = contractId,
+          contractInstance = active.contractInstance,
+          metadata = metadata,
+          ledgerTime = CantonTimestamp(active.ledgerEffectiveTime),
+          contractSalt = Some(salt),
+          unvalidatedAgreementText = unusedAgreementText,
+        ).left.map(e => s"Failed to construct SerializableContract($e)")
+        _ <- authenticateContract(contract)
+      } yield ()
+
+      Future.successful(
+        result.fold[UpgradeVerificationResult](message => UpgradeFailure(message), _ => Valid)
+      )
+
+    }
 
     def resolveStep(result: Result[A]): Future[Either[DamlLfError, A]] =
       result match {
@@ -280,13 +404,22 @@ private[apiserver] final class StoreBackedCommandExecutor(
                 )
               )
             }
-        case ResultNeedUpgradeVerification(_, _, _, _, resume) =>
-          resolveStep(
-            Tracked.value(
-              metrics.daml.execution.engineRunning,
-              trackSyncExecution(interpretationTimeNanos)(resume(None)),
-            )
+
+        case ResultNeedUpgradeVerification(coid, signatories, observers, keyOpt, resume) =>
+          val metadata = ContractMetadata.tryCreate(
+            signatories = signatories,
+            stakeholders = signatories ++ observers,
+            maybeKeyWithMaintainers = keyOpt.map(k => Versioned(unusedTxVersion, k)),
           )
+
+          upgradableContractId(coid, metadata).flatMap(result => {
+            resolveStep(
+              Tracked.value(
+                metrics.daml.execution.engineRunning,
+                trackSyncExecution(interpretationTimeNanos)(resume(result)),
+              )
+            )
+          })
       }
 
     resolveStep(result).andThen { case _ =>
@@ -309,4 +442,16 @@ private[apiserver] final class StoreBackedCommandExecutor(
     atomicNano.addAndGet(System.nanoTime() - start)
     result
   }
+}
+
+object StoreBackedCommandExecutor {
+  type AuthenticateContract = SerializableContract => Either[String, Unit]
+}
+
+private sealed trait UpgradeVerificationResult
+
+private object UpgradeVerificationResult {
+  case object Valid extends UpgradeVerificationResult
+  final case class UpgradeFailure(message: String) extends UpgradeVerificationResult
+  case object DivulgedContract extends UpgradeVerificationResult
 }

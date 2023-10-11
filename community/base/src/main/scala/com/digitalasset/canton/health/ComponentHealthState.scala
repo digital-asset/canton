@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.health
 
-import com.digitalasset.canton.error.CantonError
+import com.daml.error.BaseError
 import com.digitalasset.canton.health.ComponentHealthState.{Degraded, Failed, Ok}
 import com.digitalasset.canton.health.admin.v0 as proto
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyUtil}
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting, PrettyUtil}
 import com.digitalasset.canton.util.ShowUtil
 import io.circe.Encoder
 import io.circe.generic.semiauto.deriveEncoder
@@ -18,7 +18,7 @@ import scala.annotation.nowarn
   * This can be used as a base health state for most component.
   * However ComponentHealth (below) does not enforce the use of this class and a custom State class can be used instead
   */
-sealed trait ComponentHealthState extends ToComponentHealthState {
+sealed trait ComponentHealthState extends ToComponentHealthState with PrettyPrinting {
   def isOk: Boolean = this match {
     case ComponentHealthState.Ok(_) => true
     case _ => false
@@ -41,6 +41,7 @@ sealed trait ComponentHealthState extends ToComponentHealthState {
       proto.NodeStatus.ComponentStatus.Status.Failed(failed.toComponentStatusDataV0)
   }
 }
+
 object ComponentHealthState extends ShowUtil {
   import PrettyUtil.*
 
@@ -63,21 +64,62 @@ object ComponentHealthState extends ShowUtil {
     case unhealthy: HasUnhealthyState => HasUnhealthyState.prettyHasUnhealthyState.treeOf(unhealthy)
   }
 
-  object Unhealthy {
-    def unapply(state: ComponentHealthState): Option[UnhealthyState] = state match {
-      case _: Ok => None
-      case Degraded(degraded) => Some(degraded)
-      case Failed(failed) => Some(failed)
-    }
-  }
+  /** Ok state
+    */
+  final case class Ok(description: Option[String] = None) extends ComponentHealthState
 
   object Ok {
     implicit val okEncoder: Encoder[Ok.type] = Encoder.encodeString.contramap(_ => "ok")
   }
 
-  /** Ok state
+  def failed(description: String): Failed = Failed(UnhealthyState(Some(description)))
+
+  def degraded(description: String): Degraded = Degraded(UnhealthyState(Some(description)))
+
+  /** Degraded state, as in not fully but still functional. A degraded component will NOT cause a service
+    * to report NOT_SERVING
+    *
+    * @param state data
     */
-  final case class Ok(description: Option[String] = None) extends ComponentHealthState
+  final case class Degraded(state: UnhealthyState = UnhealthyState())
+      extends ComponentHealthState
+      with HasUnhealthyState
+
+  object Degraded {
+    @nowarn("cat=lint-byname-implicit") // https://github.com/scala/bug/issues/12072
+    implicit val degradedEncoder: Encoder[Degraded] = deriveEncoder[Degraded]
+  }
+
+  /** The component has failed, any service that depends on it will report NOT_SERVING
+    *
+    * @param state data
+    */
+  final case class Failed(state: UnhealthyState = UnhealthyState())
+      extends ComponentHealthState
+      with HasUnhealthyState
+
+  object Failed {
+    @nowarn("cat=lint-byname-implicit") // https://github.com/scala/bug/issues/12072
+    implicit val failedEncoder: Encoder[Failed] = deriveEncoder[Failed]
+  }
+
+  /** Unhealthy state data
+    *
+    * @param description description of the state
+    * @param error       associated canton error
+    */
+  final case class UnhealthyState(
+      description: Option[String] = None,
+      error: Option[BaseError] = None,
+      elc: Option[ErrorLoggingContext] = None,
+  ) {
+    val errorAsStringOpt: Option[String] = error.map { error =>
+      s"${error.code.codeStr(elc.flatMap(_.traceContext.traceId))}: ${error.cause}"
+    }
+
+    def toComponentStatusDataV0: proto.NodeStatus.ComponentStatus.StatusData =
+      proto.NodeStatus.ComponentStatus.StatusData(Some(this.show))
+  }
 
   object UnhealthyState {
     implicit val unhealthyStateEncoder: Encoder[UnhealthyState] =
@@ -88,22 +130,12 @@ object ComponentHealthState extends ShowUtil {
     }
   }
 
-  /** Unhealthy state data
-    *
-    * @param description description of the state
-    * @param error       associated canton error
-    */
-  final case class UnhealthyState(
-      description: Option[String] = None,
-      error: Option[CantonError] = None,
-      elc: Option[ErrorLoggingContext] = None,
-  ) {
-    val errorAsStringOpt: Option[String] = error.map { error =>
-      s"${error.code.codeStr(elc.flatMap(_.traceContext.traceId))}: ${error.cause}"
+  object Unhealthy {
+    def unapply(state: ComponentHealthState): Option[UnhealthyState] = state match {
+      case _: Ok => None
+      case Degraded(degraded) => Some(degraded)
+      case Failed(failed) => Some(failed)
     }
-
-    def toComponentStatusDataV0: proto.NodeStatus.ComponentStatus.StatusData =
-      proto.NodeStatus.ComponentStatus.StatusData(Some(this.show))
   }
 
   object HasUnhealthyState {
@@ -116,34 +148,4 @@ object ComponentHealthState extends ShowUtil {
       )
   }
   trait HasUnhealthyState { def state: UnhealthyState }
-
-  object Degraded {
-    @nowarn("cat=lint-byname-implicit") // https://github.com/scala/bug/issues/12072
-    implicit val degradedEncoder: Encoder[Degraded] = deriveEncoder[Degraded]
-  }
-
-  /** Degraded state, as in not fully but still functional. A degraded component will NOT cause a service
-    * to report NOT_SERVING
-    *
-    * @param state data
-    */
-  final case class Degraded(state: UnhealthyState = UnhealthyState())
-      extends ComponentHealthState
-      with HasUnhealthyState
-
-  object Failed {
-    @nowarn("cat=lint-byname-implicit") // https://github.com/scala/bug/issues/12072
-    implicit val failedEncoder: Encoder[Failed] = deriveEncoder[Failed]
-  }
-
-  /** The component has failed, any service that depends on it will report NOT_SERVING
-    *
-    * @param state data
-    */
-  final case class Failed(state: UnhealthyState = UnhealthyState())
-      extends ComponentHealthState
-      with HasUnhealthyState
-
-  def failed(description: String): Failed = Failed(UnhealthyState(Some(description)))
-  def degraded(description: String): Degraded = Degraded(UnhealthyState(Some(description)))
 }

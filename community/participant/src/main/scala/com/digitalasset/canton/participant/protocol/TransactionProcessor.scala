@@ -25,7 +25,10 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.metrics.TransactionProcessingMetrics
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.WrapsProcessorError
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.ProcessorError
-import com.digitalasset.canton.participant.protocol.TransactionProcessor.TransactionSubmitted
+import com.digitalasset.canton.participant.protocol.TransactionProcessor.{
+  TransactionSubmitted,
+  buildAuthenticator,
+}
 import com.digitalasset.canton.participant.protocol.submission.ConfirmationRequestFactory.ConfirmationRequestCreationError
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.PackageUnknownTo
 import com.digitalasset.canton.participant.protocol.submission.{
@@ -88,6 +91,7 @@ class TransactionProcessor(
         ModelConformanceChecker(
           damle,
           confirmationRequestFactory.transactionTreeFactory,
+          buildAuthenticator(crypto),
           staticDomainParameters.protocolVersion,
           participantId,
           enableContractUpgrading,
@@ -97,7 +101,7 @@ class TransactionProcessor(
         crypto,
         ephemeral.storedContractManager,
         metrics,
-        new SerializableContractAuthenticatorImpl(new UnicumGenerator(crypto.pureCrypto)),
+        buildAuthenticator(crypto),
         new AuthenticationValidator(),
         new AuthorizationValidator(participantId, enableContractUpgrading),
         new InternalConsistencyChecker(
@@ -146,6 +150,13 @@ class TransactionProcessor(
 }
 
 object TransactionProcessor {
+
+  private def buildAuthenticator(
+      crypto: DomainSyncCryptoClient
+  ): SerializableContractAuthenticatorImpl = new SerializableContractAuthenticatorImpl(
+    new UnicumGenerator(crypto.pureCrypto)
+  )
+
   sealed trait TransactionProcessorError
       extends WrapsProcessorError
       with Product

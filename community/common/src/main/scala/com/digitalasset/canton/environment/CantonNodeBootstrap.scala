@@ -15,7 +15,7 @@ import com.digitalasset.canton.config.{InitConfigBase, LocalNodeConfig, Processi
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.admin.v0.VaultServiceGrpc
 import com.digitalasset.canton.error.CantonError
-import com.digitalasset.canton.health.HealthReporting
+import com.digitalasset.canton.health.HealthService
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.store.IndexedStringStore
@@ -437,7 +437,7 @@ abstract class CantonNodeBootstrapBase[
 
   /** Health service component of the node
     */
-  protected lazy val nodeHealthService: HealthReporting.HealthService = mkNodeHealthService(storage)
+  protected lazy val nodeHealthService: HealthService = mkNodeHealthService(storage)
   protected val (healthReporter, grpcHealthServer) = mkHealthComponents(nodeHealthService)
 
   override protected def onClosed(): Unit = {

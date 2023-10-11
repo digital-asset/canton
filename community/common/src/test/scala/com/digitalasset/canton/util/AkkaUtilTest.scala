@@ -795,7 +795,7 @@ class AkkaUtilTest extends StreamSpec with BaseTest {
       sinkF.futureValue shouldBe ((1 to 10).map(NonEmpty(Seq, _)))
     }
 
-    "support completion while the memory is not exhaused" in assertAllStagesStopped {
+    "support completion while the memory is not exhausted" in assertAllStagesStopped {
       val sinkF =
         Source(1 to 5).remember(NonNegativeInt.tryCreate(10)).toMat(Sink.seq)(Keep.right).run()
       sinkF.futureValue shouldBe (1 to 5).inits.toSeq.reverse.mapFilter(NonEmpty.from)

@@ -36,8 +36,8 @@ private final class MigrateContracts(
     val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {
 
-  private val sourceDomainId = SourceDomainId(repairSource.domainId)
-  private val targetDomainId = TargetDomainId(repairTarget.domainId)
+  private val sourceDomainId = SourceDomainId(repairSource.domain.id)
+  private val targetDomainId = TargetDomainId(repairTarget.domain.id)
   private val transferId = TransferId(sourceDomainId, repairSource.timestamp)
 
   /** Migrate contracts from [[repairSource]] to [[repairTarget]]
@@ -48,14 +48,16 @@ private final class MigrateContracts(
   ): EitherT[Future, String, Unit] =
     for {
       contractStatusAtSource <- EitherT.right(
-        repairSource.domainPersistence.activeContractStore.fetchStates(contractIds.map(_.payload))
+        repairSource.domain.persistentState.activeContractStore
+          .fetchStates(contractIds.map(_.payload))
       )
       _ = logger.debug(s"Contracts status at source: $contractStatusAtSource")
       sourceContractsToMigrate <- determineSourceContractsToMigrate(contractStatusAtSource)
       sourceContractIdsToMigrate = sourceContractsToMigrate.map(_.payload._1)
       _ = logger.debug(s"Contracts to migrate from source: $sourceContractIdsToMigrate")
       contractStatusAtTarget <- EitherT.right(
-        repairTarget.domainPersistence.activeContractStore.fetchStates(sourceContractIdsToMigrate)
+        repairTarget.domain.persistentState.activeContractStore
+          .fetchStates(sourceContractIdsToMigrate)
       )
       _ = logger.debug(s"Contract status at target: $contractStatusAtTarget")
       contractIds <- determineTargetContractsToMigrate(
@@ -146,10 +148,10 @@ private final class MigrateContracts(
       executionContext: ExecutionContext,
       traceContext: TraceContext,
   ): EitherT[Future, String, Map[LfContractId, Set[LfPartyId]]] =
-    repairSource.domainPersistence.contractStore
+    repairSource.domain.persistentState.contractStore
       .lookupStakeholders(contractIds)
       .leftMap(e =>
-        s"Failed to look up stakeholder of contracts in domain ${repairSource.domainAlias}: $e"
+        s"Failed to look up stakeholder of contracts in domain ${repairSource.domain.alias}: $e"
       )
 
   private def atLeastOneHostedStakeholderAtTarget(
@@ -158,10 +160,10 @@ private final class MigrateContracts(
   )(implicit executionContext: ExecutionContext): EitherT[Future, String, Unit] =
     OptionT(
       stakeholders.toSeq
-        .findM(hostsParty(repairTarget.topologySnapshot, participantId))
+        .findM(hostsParty(repairTarget.domain.topologySnapshot, participantId))
     ).map(_.discard)
       .toRight(
-        show"Not allowed to move contract $contractId without at least one stakeholder of $stakeholders existing locally on the target domain asOf=${repairTarget.topologySnapshot.timestamp}"
+        show"Not allowed to move contract $contractId without at least one stakeholder of $stakeholders existing locally on the target domain asOf=${repairTarget.domain.topologySnapshot.timestamp}"
       )
 
   private def readContractsFromSource(
@@ -172,11 +174,11 @@ private final class MigrateContracts(
   ): EitherT[Future, String, List[
     (SerializableContract, MigrateContracts.Data[(LfContractId, TransferCounterO)])
   ]] =
-    repairSource.domainPersistence.contractStore
+    repairSource.domain.persistentState.contractStore
       .lookupManyUncached(contractIdsWithTransferCounters.map(_.payload._1))
       .map(_.map(_.contract).zip(contractIdsWithTransferCounters))
       .leftMap(contractId =>
-        s"Failed to look up contract $contractId in domain ${repairSource.domainAlias}"
+        s"Failed to look up contract $contractId in domain ${repairSource.domain.alias}"
       )
 
   private def readContracts(
@@ -197,7 +199,7 @@ private final class MigrateContracts(
               transferCounter.fold(TransferCounter.Genesis.increment)(Right(_))
             )
             serializedTargetO <- EitherT.right(
-              repairTarget.domainPersistence.contractStore.lookupContract(contractId).value
+              repairTarget.domain.persistentState.contractStore.lookupContract(contractId).value
             )
             _ <- serializedTargetO
               .map { serializedTarget =>
@@ -224,20 +226,20 @@ private final class MigrateContracts(
       executionContext: ExecutionContext,
       traceContext: TraceContext,
   ): EitherT[Future, String, Unit] =
-    if (!request.domainParameters.uniqueContractKeys)
+    if (!request.domain.parameters.uniqueContractKeys)
       EitherT.rightT(())
     else
       for {
         keys <- EitherT.right(
           contracts.parTraverseFilter(contract =>
             getKeyIfOneMaintainerIsLocal(
-              request.topologySnapshot,
+              request.domain.topologySnapshot,
               contract.payload._1.metadata.maybeKeyWithMaintainers,
               participantId,
             ).map(_.map(_ -> timeOfChange(contract)))
           )
         )
-        _ <- request.domainPersistence.contractKeyJournal
+        _ <- request.domain.persistentState.contractKeyJournal
           .addKeyStateUpdates(keys.map { case (key, toc) => key -> (newStatus, toc) }.toMap)
           .leftMap(_.toString)
       } yield ()
@@ -265,7 +267,7 @@ private final class MigrateContracts(
       _ <- EitherT.right {
         contracts.parTraverse_ { contract =>
           if (contract.payload._3)
-            repairTarget.domainPersistence.contractStore
+            repairTarget.domain.persistentState.contractStore
               .storeCreatedContract(
                 contract.targetTimeOfChange.rc,
                 transactionId,
@@ -284,9 +286,9 @@ private final class MigrateContracts(
   ): CheckedT[Future, String, ActiveContractStore.AcsWarning, Unit] = {
 
     def whenTransferCounterIsSupported(r: RepairRequest)(tc: TransferCounter): TransferCounterO =
-      Option.when(r.domainParameters.protocolVersion >= ProtocolVersion.CNTestNet)(tc)
+      Option.when(r.domain.parameters.protocolVersion >= ProtocolVersion.CNTestNet)(tc)
 
-    val outF = repairSource.domainPersistence.activeContractStore
+    val outF = repairSource.domain.persistentState.activeContractStore
       .transferOutContracts(
         contracts.map { contract =>
           (
@@ -299,7 +301,7 @@ private final class MigrateContracts(
       )
       .mapAbort(e => s"Failed to mark contracts as transferred out: $e")
 
-    val inF = repairTarget.domainPersistence.activeContractStore
+    val inF = repairTarget.domain.persistentState.activeContractStore
       .transferInContracts(
         contracts.map { contract =>
           (
@@ -352,7 +354,7 @@ private final class MigrateContracts(
       .flatMap(_.metadata.stakeholders)
       .distinct
       .parTraverseFilter(party =>
-        hostsParty(repair.topologySnapshot, participantId)(party).map(Option.when(_)(party))
+        hostsParty(repair.domain.topologySnapshot, participantId)(party).map(Option.when(_)(party))
       )
       .map(_.toSet)
 
@@ -360,7 +362,9 @@ private final class MigrateContracts(
       executionContext: ExecutionContext,
       traceContext: TraceContext,
   ): EitherT[Future, String, Unit] =
-    EitherT(repair.domainPersistence.eventLog.insertsUnlessEventIdClash(events).map(_.sequence))
+    EitherT(
+      repair.domain.persistentState.eventLog.insertsUnlessEventIdClash(events).map(_.sequence)
+    )
       .map(_.discard)
       .leftMap { event =>
         show"Unable to insert event with event ID ${event.eventId.showValue} already present at offset ${event.localOffset}"
@@ -403,7 +407,7 @@ private final class MigrateContracts(
         createNode = contract.payload._1.toLf,
         creatingTransactionId = transactionId.tryAsLedgerTransactionId,
         contractMetadata = Bytes.fromByteString(
-          contract.payload._1.metadata.toByteString(repairTarget.domainParameters.protocolVersion)
+          contract.payload._1.metadata.toByteString(repairTarget.domain.parameters.protocolVersion)
         ),
         transferId = transferId,
         targetDomain = targetDomainId,

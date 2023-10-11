@@ -7,6 +7,7 @@ import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTime
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, UnlessShutdown}
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.sequencing.client.ResilientSequencerSubscription.LostSequencerSubscription
 import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason.SubscriptionError
@@ -30,7 +31,13 @@ import scala.collection.mutable
 import scala.concurrent.duration.{FiniteDuration, *}
 import scala.concurrent.{Future, Promise}
 
-sealed trait TestSubscriptionError extends SubscriptionError
+sealed trait TestSubscriptionError
+    extends SubscriptionError
+    with Product
+    with Serializable
+    with PrettyPrinting {
+  override def pretty: Pretty[this.type] = prettyOfObject[this.type]
+}
 object TestSubscriptionError {
   case object RetryableError extends TestSubscriptionError
   case object UnretryableError extends TestSubscriptionError

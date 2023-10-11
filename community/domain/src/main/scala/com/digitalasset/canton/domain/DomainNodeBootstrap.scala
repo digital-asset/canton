@@ -43,17 +43,16 @@ import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.domain.topology.*
 import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.error.CantonError
-import com.digitalasset.canton.health.HealthReporting
-import com.digitalasset.canton.health.HealthReporting.{
-  BaseMutableHealthComponent,
-  ComponentStatus,
-  HealthService,
-  MutableHealthComponent,
-}
 import com.digitalasset.canton.health.admin.data.{
   DomainStatus,
   SequencerHealthStatus,
   TopologyQueueStatus,
+}
+import com.digitalasset.canton.health.{
+  BaseMutableHealthComponent,
+  ComponentStatus,
+  HealthService,
+  MutableHealthComponent,
 }
 import com.digitalasset.canton.lifecycle.Lifecycle.CloseableServer
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, Lifecycle}
@@ -152,11 +151,8 @@ class DomainNodeBootstrap(
     timeouts,
   )
 
-  override protected def mkNodeHealthService(storage: Storage): HealthReporting.HealthService =
-    HealthReporting.HealthService(
-      "domain",
-      Seq(storage),
-    )
+  override protected def mkNodeHealthService(storage: Storage): HealthService =
+    HealthService("domain", Seq(storage))
 
   // Holds the gRPC server started when the node is started, even when non initialized
   // If non initialized the server will expose the gRPC health service only

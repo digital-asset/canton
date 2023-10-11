@@ -6,7 +6,7 @@ package com.digitalasset.canton.health
 import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.error.TestGroup
 import com.digitalasset.canton.health.ComponentHealthState.UnhealthyState
-import com.digitalasset.canton.health.HealthReporting.ComponentStatus
+import com.digitalasset.canton.health.ComponentStatus
 import com.digitalasset.canton.logging.pretty.PrettyUtil
 
 class ComponentStatusTest extends BaseTestWordSpec with PrettyUtil {

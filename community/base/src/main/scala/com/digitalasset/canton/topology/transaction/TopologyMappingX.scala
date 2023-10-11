@@ -479,7 +479,7 @@ final case class UnionspaceDefinitionX private (
           // and the quorum of existing owners
           .and(
             RequiredNamespaces(
-              previousOwners.forgetNE
+              Set(unionspace)
             )
           )
       case Some(topoTx) =>
@@ -1075,7 +1075,23 @@ final case class PartyToParticipantX(
   ): RequiredAuthX = {
     // TODO(#12390): take into account the previous transaction and allow participants to unilaterally
     //   disassociate themselves from a party as long as the threshold can still be reached
-    RequiredUids(Set(partyId.uid) ++ participants.map(_.participantId.uid))
+    previous
+      .collect {
+        case TopologyTransactionX(
+              TopologyChangeOpX.Replace,
+              _,
+              PartyToParticipantX(partyId, _, _, previousParticipants, _),
+            ) =>
+          val addedParticipants = participants
+            .map(_.participantId.uid)
+            .diff(previousParticipants.map(_.participantId.uid))
+          RequiredUids(
+            Set(partyId.uid) ++ addedParticipants
+          )
+      }
+      .getOrElse(
+        RequiredUids(Set(partyId.uid) ++ participants.map(_.participantId.uid))
+      )
   }
 
   override protected def addUniqueKeyToBuilder(builder: HashBuilder): HashBuilder =

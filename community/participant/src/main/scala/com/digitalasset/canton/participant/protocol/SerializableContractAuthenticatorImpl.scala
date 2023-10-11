@@ -4,12 +4,17 @@
 package com.digitalasset.canton.participant.protocol
 
 import com.daml.lf.value.Value.ContractId
+import com.digitalasset.canton.crypto.Salt
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.{
   AuthenticatedContractIdVersion,
   AuthenticatedContractIdVersionV2,
   CantonContractIdVersion,
+  ContractMetadata,
+  LfContractId,
   NonAuthenticatedContractIdVersion,
   SerializableContract,
+  SerializableRawContractInstance,
   UnicumGenerator,
 }
 
@@ -21,26 +26,68 @@ trait SerializableContractAuthenticator {
     * @param contract the serializable contract
     */
   def authenticate(contract: SerializableContract): Either[String, Unit]
+
+  /** This method is used in contract upgrade verification to ensure that the metadata computed by the upgraded
+    * template matches the original metadata.
+    *
+    * @param contract the contract whose metadata has been re-calculated
+    * @param metadata the recalculated metadata
+    */
+  def verifyMetadata(
+      contract: SerializableContract,
+      metadata: ContractMetadata,
+  ): Either[String, Unit]
+
 }
 
 class SerializableContractAuthenticatorImpl(unicumGenerator: UnicumGenerator)
     extends SerializableContractAuthenticator {
+
   def authenticate(contract: SerializableContract): Either[String, Unit] = {
-    val ContractId.V1(_discriminator, cantonContractSuffix) = contract.contractId
+    authenticate(
+      contract.contractId,
+      contract.contractSalt,
+      contract.ledgerCreateTime,
+      contract.metadata,
+      contract.rawContractInstance,
+    )
+  }
+
+  def verifyMetadata(
+      contract: SerializableContract,
+      metadata: ContractMetadata,
+  ): Either[String, Unit] = {
+    authenticate(
+      contract.contractId,
+      contract.contractSalt,
+      contract.ledgerCreateTime,
+      metadata,
+      contract.rawContractInstance,
+    )
+  }
+
+  def authenticate(
+      contractId: LfContractId,
+      contractSalt: Option[Salt],
+      ledgerTime: CantonTimestamp,
+      metadata: ContractMetadata,
+      rawContractInstance: SerializableRawContractInstance,
+  ): Either[String, Unit] = {
+    val ContractId.V1(_discriminator, cantonContractSuffix) = contractId
     val optContractIdVersion = CantonContractIdVersion.fromContractSuffix(cantonContractSuffix)
     optContractIdVersion match {
       case Right(AuthenticatedContractIdVersionV2) | Right(AuthenticatedContractIdVersion) =>
         for {
           contractIdVersion <- optContractIdVersion
-          salt <- contract.contractSalt.toRight(
-            s"Contract salt missing in serializable contract with authenticating contract id (${contract.contractId})"
+          salt <- contractSalt.toRight(
+            s"Contract salt missing in serializable contract with authenticating contract id ($contractId)"
           )
           recomputedUnicum <- unicumGenerator
             .recomputeUnicum(
               contractSalt = salt,
-              ledgerTime = contract.ledgerCreateTime,
-              metadata = contract.metadata,
-              suffixedContractInstance = contract.rawContractInstance,
+              ledgerTime = ledgerTime,
+              metadata = metadata,
+              suffixedContractInstance = rawContractInstance,
               contractIdVersion = contractIdVersion,
             )
           recomputedSuffix = recomputedUnicum.toContractIdSuffix(contractIdVersion)

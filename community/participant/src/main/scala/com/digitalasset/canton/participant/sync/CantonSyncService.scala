@@ -35,10 +35,7 @@ import com.digitalasset.canton.data.{
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.SyncServiceErrorGroup
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.InjectionErrorGroup
 import com.digitalasset.canton.error.*
-import com.digitalasset.canton.health.HealthReporting.{
-  BaseMutableHealthComponent,
-  MutableHealthComponent,
-}
+import com.digitalasset.canton.health.{BaseMutableHealthComponent, MutableHealthComponent}
 import com.digitalasset.canton.ledger.api.health.HealthStatus
 import com.digitalasset.canton.ledger.configuration.*
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors

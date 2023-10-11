@@ -34,6 +34,7 @@ import com.digitalasset.canton.util.{ErrorUtil, HexString}
 import com.digitalasset.canton.{LedgerApplicationId, LfPartyId, LfTimestamp}
 import com.google.protobuf.ByteString
 import io.grpc.Status
+import io.grpc.health.v1.HealthCheckResponse.ServingStatus
 import pprint.Tree
 import slick.util.{DumpInfo, Dumpable}
 
@@ -126,7 +127,6 @@ trait PrettyInstances {
   implicit def prettyInstant: Pretty[Instant] = prettyOfString(_.toString)
 
   implicit val prettyUuid: Pretty[UUID] = prettyOfString(_.toString.readableHash.toString)
-
   // There is deliberately no instance for `String` to force clients
   // use ShowUtil.ShowStringSyntax instead.
   def prettyString: Pretty[String] = prettyOfString(identity)
@@ -333,6 +333,10 @@ trait PrettyInstances {
   implicit val prettyPort: Pretty[Port] = prettyOfString(_.unwrap.toString)
 
   implicit val prettyRefinedNumeric: Pretty[RefinedNumeric[_]] = prettyOfString(_.unwrap.toString)
+
+  implicit val prettyServingStatus: Pretty[ServingStatus] = prettyOfClass(
+    param("status", _.name().singleQuoted)
+  )
 }
 
 object PrettyInstances extends PrettyInstances

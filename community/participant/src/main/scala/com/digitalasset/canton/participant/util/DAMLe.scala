@@ -11,11 +11,11 @@ import com.daml.lf.engine.*
 import com.daml.lf.interpretation.Error as LfInterpretationError
 import com.daml.lf.language.Ast.Package
 import com.daml.lf.language.LanguageVersion
-import com.daml.lf.transaction.{ContractKeyUniquenessMode, Versioned}
+import com.daml.lf.transaction.{ContractKeyUniquenessMode, TransactionVersion, Versioned}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{LoggingContextUtil, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.PackageService
-import com.digitalasset.canton.participant.store.ContractAndKeyLookup
+import com.digitalasset.canton.participant.store.ContractLookupAndVerification
 import com.digitalasset.canton.participant.util.DAMLe.{ContractWithMetadata, PackageResolver}
 import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
 import com.digitalasset.canton.protocol.*
@@ -77,7 +77,8 @@ object DAMLe {
       )
   }
 
-  val zeroSeed: LfHash = LfHash.assertFromByteArray(new Array[Byte](LfHash.underlyingHashLength))
+  private val zeroSeed: LfHash =
+    LfHash.assertFromByteArray(new Array[Byte](LfHash.underlyingHashLength))
 
   // Helper to ensure the package service resolver uses the caller's trace context.
   def packageResolver(
@@ -106,7 +107,7 @@ class DAMLe(
   logger.debug(engine.info.show)(TraceContext.empty)
 
   def reinterpret(
-      contracts: ContractAndKeyLookup,
+      contracts: ContractLookupAndVerification,
       submitters: Set[LfPartyId],
       command: LfCommand,
       ledgerTime: CantonTimestamp,
@@ -159,7 +160,7 @@ class DAMLe(
             }
           case nonRollbackNode =>
             err(
-              s"Expected failure to be turned into a root rollback node, but encountered ${nonRollbackNode}"
+              s"Expected failure to be turned into a root rollback node, but encountered $nonRollbackNode"
             )
         }
       }
@@ -200,7 +201,7 @@ class DAMLe(
       )
       for {
         txWithMetadata <- EitherT(
-          handleResult(ContractAndKeyLookup.noContracts(noTracingLogger), result)
+          handleResult(ContractLookupAndVerification.noContracts(loggerFactory), result)
         )
         (tx, _) = txWithMetadata
         singleCreate = tx.nodes.values.toList match {
@@ -224,7 +225,7 @@ class DAMLe(
 
     for {
       transactionWithMetadata <- reinterpret(
-        ContractAndKeyLookup.noContracts(noTracingLogger),
+        ContractLookupAndVerification.noContracts(loggerFactory),
         supersetOfSignatories,
         create,
         CantonTimestamp.Epoch,
@@ -264,8 +265,8 @@ class DAMLe(
       contractAndMetadata <- contractWithMetadata(contractInstance, supersetOfSignatories)
     } yield contractAndMetadata.metadataWithGlobalKey
 
-  private[this] def handleResult[A](contracts: ContractAndKeyLookup, result: Result[A])(implicit
-      traceContext: TraceContext
+  private[this] def handleResult[A](contracts: ContractLookupAndVerification, result: Result[A])(
+      implicit traceContext: TraceContext
   ): Future[Either[Error, A]] = {
     @tailrec
     def iterateOverInterrupts(continue: () => Result[A]): Result[A] =
@@ -321,8 +322,16 @@ class DAMLe(
               handleResult(contracts, resume(false))
           }
 
-      case ResultNeedUpgradeVerification(_, _, _, _, resume) =>
-        handleResult(contracts, resume(None))
+      case ResultNeedUpgradeVerification(coid, signatories, observers, keyOpt, resume) =>
+        val unusedTxVersion = TransactionVersion.StableVersions.max
+        val metadata = ContractMetadata.tryCreate(
+          signatories = signatories,
+          stakeholders = signatories ++ observers,
+          maybeKeyWithMaintainers = keyOpt.map(k => Versioned(unusedTxVersion, k)),
+        )
+        contracts.verifyMetadata(coid, metadata).value.flatMap { verification =>
+          handleResult(contracts, resume(verification))
+        }
     }
   }
 

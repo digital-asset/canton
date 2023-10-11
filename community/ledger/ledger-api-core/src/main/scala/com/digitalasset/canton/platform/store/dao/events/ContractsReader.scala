@@ -20,7 +20,7 @@ import com.digitalasset.canton.platform.store.dao.events.ContractsReader.*
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader.*
 import com.digitalasset.canton.platform.store.serialization.{Compression, ValueSerializer}
-import com.digitalasset.canton.platform.{Contract, ContractId, Identifier, Key, Party, Value}
+import com.digitalasset.canton.platform.{Contract, ContractId, Value, *}
 
 import java.io.{ByteArrayInputStream, InputStream}
 import scala.concurrent.{ExecutionContext, Future}

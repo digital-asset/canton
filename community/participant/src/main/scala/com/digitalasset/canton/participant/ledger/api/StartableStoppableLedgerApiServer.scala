@@ -33,7 +33,9 @@ import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.{ApiRequestLogger, ClientChannelBuilder}
 import com.digitalasset.canton.participant.config.LedgerApiServerConfig
+import com.digitalasset.canton.participant.protocol.SerializableContractAuthenticatorImpl
 import com.digitalasset.canton.platform.LedgerApiServer
+import com.digitalasset.canton.platform.apiserver.execution.StoreBackedCommandExecutor.AuthenticateContract
 import com.digitalasset.canton.platform.apiserver.ratelimiting.{
   RateLimitingInterceptor,
   ThreadpoolCheck,
@@ -52,6 +54,7 @@ import com.digitalasset.canton.platform.localstore.api.UserManagementStore
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
 import com.digitalasset.canton.platform.store.dao.events.ContractLoader
+import com.digitalasset.canton.protocol.UnicumGenerator
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{FutureUtil, SimpleExecutionQueue}
 import io.grpc.ServerInterceptor
@@ -169,7 +172,8 @@ class StartableStoppableLedgerApiServer(
   private def buildLedgerApiServerOwner(
       overrideIndexerStartupMode: Option[IndexerStartupMode]
   )(implicit traceContext: TraceContext) = {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory)
+    implicit val loggingContextWithTrace: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory, telemetry)
 
     val indexServiceConfig = config.serverConfig.indexService
 
@@ -267,6 +271,13 @@ class StartableStoppableLedgerApiServer(
         loggerFactory = loggerFactory,
       )
 
+      serializableContractAuthenticator = new SerializableContractAuthenticatorImpl(
+        new UnicumGenerator(config.syncService.pureCryptoApi)
+      )
+
+      authenticateContract: AuthenticateContract = c =>
+        serializableContractAuthenticator.authenticate(c)
+
       timedWriteService = new TimedWriteService(config.syncService, config.metrics)
       _ <- ApiServiceOwner(
         submissionTracker = inMemoryState.submissionTracker,
@@ -317,6 +328,7 @@ class StartableStoppableLedgerApiServer(
         loggerFactory = loggerFactory,
         multiDomainEnabled = multiDomainEnabled,
         upgradingEnabled = config.cantonParameterConfig.enableContractUpgrading,
+        authenticateContract = authenticateContract,
       )
       _ <- startHttpApiIfEnabled
       _ <- {

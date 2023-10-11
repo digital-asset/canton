@@ -3,13 +3,11 @@
 
 package com.digitalasset.canton.health
 
-import com.digitalasset.canton.logging.pretty.PrettyPrinting
-
-/** Interface that provides conversion from a State type to ComponentHealthState
+/** Interface that provides conversion from a State type to [[ComponentHealthState]]
   */
-trait ToComponentHealthState extends PrettyPrinting {
+trait ToComponentHealthState {
 
-  /** Convert a state to ComponentHealthState
+  /** Convert a state to [[ComponentHealthState]]
     */
   def toComponentHealthState: ComponentHealthState
 }

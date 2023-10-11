@@ -214,7 +214,7 @@ class UnicumGenerator(cryptoOps: HashOps with HmacOps) {
   ): Hash = {
     val observers = metadata.stakeholders -- metadata.signatories
 
-    cryptoOps
+    val hash = cryptoOps
       .build(HashPurpose.Unicum)
       // The salt's length is determined by the hash algorithm and the contract ID version determines the hash algorithm,
       // so salts have fixed length.
@@ -249,5 +249,7 @@ class UnicumGenerator(cryptoOps: HashOps with HmacOps) {
       // The hash of the contract instance has a fixed length, so we do not need a length prefix
       .addWithoutLengthPrefix(suffixedContractInstance.contractHash.bytes.toByteString)
       .finish()
+
+    hash
   }
 }

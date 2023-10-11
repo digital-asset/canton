@@ -27,6 +27,7 @@ import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
   HasCloseContext,
+  UnlessShutdown,
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{
@@ -537,7 +538,7 @@ class SequencedEventValidatorImpl(
     val priorEvent = priorEvent0.getOrElse(
       ErrorUtil.internalError(
         new IllegalStateException(
-          "No prior event known even though the sequencer client reconnects"
+          s"No prior event known even though the sequencer client resubscribes to $sequencerId at sequencer counter ${reconnectEvent.counter}"
         )
       )
     )
@@ -597,14 +598,14 @@ class SequencedEventValidatorImpl(
       // TODO(i4933) once we have topology data on the sequencer api, we might fetch the domain keys
       //  and use the domain keys to validate anything here if we are unauthenticated
       logger.debug(
-        s"Skipping sequenced event validation for counter ${event.counter} and timestamp ${event.timestamp} in unauthenticated subscription"
+        s"Skipping sequenced event validation for counter ${event.counter} and timestamp ${event.timestamp} in unauthenticated subscription from $sequencerId"
       )
       EitherT.fromEither[FutureUnlessShutdown](checkNoTimestampOfSigningKey(event))
     } else if (event.counter == SequencerCounter.Genesis) {
       // TODO(#4933) This is a fresh subscription. Either fetch the domain keys via a future sequencer API and validate the signature
       //  or wait until the topology processor has processed the topology information in the first message and then validate the signature.
       logger.info(
-        s"Skipping signature verification of the first sequenced event due to a fresh subscription"
+        s"Skipping signature verification of the first sequenced event due to a fresh subscription from $sequencerId"
       )
       // The first sequenced event addressed to a member must not specify a signing key timestamp because
       // the member will only be able to compute snapshots for the current topology state and later.
@@ -679,7 +680,9 @@ class SequencedEventValidatorImpl(
         case Right(current) =>
           val validationEF =
             if (rememberedAndCurrent.sizeIs <= 1)
-              validateOnReconnect(priorReconnectEvent, current, sequencerId).value.map(_ => None)
+              validateOnReconnect(priorReconnectEvent, current, sequencerId).value.map(
+                _.traverse((_: Unit) => None)
+              )
             else {
               val previousEvent = rememberedAndCurrent.head1.unwrap.valueOr { previousErr =>
                 implicit val traceContext: TraceContext = current.traceContext
@@ -703,9 +706,25 @@ class SequencedEventValidatorImpl(
 
     val validatedSource = subscription.source
       .remember(NonNegativeInt.one)
-      .mapAsyncAndDrainUS(parallelism = 1)(performValidation)
+      .statefulMapAsyncUS(false) { (failedPreviously, event) =>
+        // Do not start the validation of the next event if the previous one failed.
+        // Otherwise, we may deadlock on the topology snapshot because the event with the failed validation
+        // may never reach the topology processor.
+        if (failedPreviously)
+          FutureUnlessShutdown.pure(failedPreviously -> event.last1.map(_ => None))
+        else
+          performValidation(event).map { validation =>
+            val failed = validation.unwrap.exists(_.isLeft)
+            failed -> validation
+          }
+      }
       // Filter out the stuttering
-      .mapConcat(_.sequence)
+      .mapConcat {
+        case UnlessShutdown.AbortedDueToShutdown =>
+          // TODO(#13789) should we pull a kill switch here?
+          None
+        case UnlessShutdown.Outcome(result) => result.sequence
+      }
       .takeUntilThenDrain(_.isLeft)
     SequencerSubscriptionAkka(validatedSource)
   }

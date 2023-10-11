@@ -328,13 +328,20 @@ object DamlPlugin extends AutoPlugin {
     // so far canton system dars depend on daml-script, but maybe daml-triggers or others some day?
     val damlLibsDependencyTypes = Seq("daml-script")
     val damlLibsDependencyVersions = damlLanguageVersions.foldLeft(Seq(""))(_ :+ "-" + _)
-    val damlLibsEnv = (for {
+    val damlScriptDars = for {
       depType <- damlLibsDependencyTypes
       depVersion <- damlLibsDependencyVersions
     } yield {
+      (depType, s"$depType$depVersion")
+    }
+    val daml3ScriptDars = ("daml-script", "daml3-script-2.dev")
+
+    val damlLibsEnv = (for {
+      (depType, artifactName) <- damlScriptDars :+ daml3ScriptDars
+    } yield {
       ensureArtifactAvailable(
-        url = url + s"${depType}/",
-        artifactFilename = s"${depType}${depVersion}.dar",
+        url = url + s"$depType/",
+        artifactFilename = s"$artifactName.dar",
         damlVersion = damlVersion,
         localSubdir = Some("daml-libs"),
       )

@@ -13,7 +13,7 @@ import com.digitalasset.canton.participant.protocol.TransactionProcessor.Transac
 import com.digitalasset.canton.participant.protocol.submission.ConfirmationRequestFactory
 import com.digitalasset.canton.participant.protocol.validation.*
 import com.digitalasset.canton.participant.store.StoredContractManager
-import com.digitalasset.canton.protocol.{LfContractId, SerializableContract}
+import com.digitalasset.canton.protocol.{ContractMetadata, LfContractId, SerializableContract}
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.Assertion
@@ -35,9 +35,16 @@ class TransactionProcessingStepsTest extends AsyncWordSpec with BaseTest {
     crypto = mock[DomainSyncCryptoClient],
     storedContractManager = mock[StoredContractManager],
     metrics = ParticipantTestMetrics.domain.transactionProcessing,
-    serializableContractAuthenticator = {
-      val behaviors = contractAuthenticatorBehaviors.toMap
-      behaviors(_)
+    serializableContractAuthenticator = new SerializableContractAuthenticator {
+      val behaviors: Map[SerializableContract, Either[String, Unit]] =
+        contractAuthenticatorBehaviors.toMap
+      override def authenticate(contract: SerializableContract): Either[String, Unit] = behaviors(
+        contract
+      )
+      override def verifyMetadata(
+          contract: SerializableContract,
+          metadata: ContractMetadata,
+      ): Either[String, Unit] = Right(())
     },
     new AuthenticationValidator(),
     new AuthorizationValidator(participantId, enableContractUpgrading = false),

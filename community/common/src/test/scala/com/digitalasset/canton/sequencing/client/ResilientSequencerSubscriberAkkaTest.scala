@@ -11,12 +11,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.{
-  ErrorLoggingContext,
-  NamedLoggerFactory,
-  NamedLogging,
-  NamedLoggingContext,
-}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.client.ResilientSequencerSubscription.LostSequencerSubscription
 import com.digitalasset.canton.sequencing.client.TestSubscriptionError.{
   FatalExn,
@@ -242,7 +237,7 @@ class TestSequencerSubscriptionFactoryAkka(
     sources.getAndUpdate(_ :+ subscribe).discard
 
   override def create(startingCounter: SequencerCounter)(implicit
-      loggingContext: NamedLoggingContext
+      traceContext: TraceContext
   ): SequencerSubscriptionAkka[TestSubscriptionError] = {
     val srcs = sources.getAndUpdate(_.drop(1))
     val subscribe = srcs.headOption.getOrElse(
@@ -252,7 +247,7 @@ class TestSequencerSubscriptionFactoryAkka(
     )
 
     val source = Source(subscribe(startingCounter))
-      // Add a incomplete unproductive source at the end to prevent automatic completion signals
+      // Add an incomplete unproductive source at the end to prevent automatic completion signals
       .concat(Source.never[Element])
       .withUniqueKillSwitchMat()(Keep.right)
       .mapConcat { withKillSwitch =>
@@ -274,7 +269,7 @@ class TestSequencerSubscriptionFactoryAkka(
     SequencerSubscriptionAkka[TestSubscriptionError](source)
   }
 
-  override def retryPolicy: SubscriptionErrorRetryPolicyAkka[TestSubscriptionError] =
+  override val retryPolicy: SubscriptionErrorRetryPolicyAkka[TestSubscriptionError] =
     new TestSubscriptionErrorRetryPolicyAkka
 }
 
@@ -284,11 +279,18 @@ object TestSequencerSubscriptionFactoryAkka {
   final case class Error(error: TestSubscriptionError) extends Element
   final case class Failure(exception: Exception) extends Element
   case object Complete extends Element
-  final case class Event(counter: SequencerCounter) extends Element {
-    def asOrdinarySerializedEvent: OrdinarySerializedEvent = mkOrdinarySerializedEvent(counter)
+  final case class Event(
+      counter: SequencerCounter,
+      signatures: NonEmpty[Set[Signature]] = Signature.noSignatures,
+  ) extends Element {
+    def asOrdinarySerializedEvent: OrdinarySerializedEvent =
+      mkOrdinarySerializedEvent(counter, signatures)
   }
 
-  def mkOrdinarySerializedEvent(counter: SequencerCounter): OrdinarySerializedEvent = {
+  def mkOrdinarySerializedEvent(
+      counter: SequencerCounter,
+      signatures: NonEmpty[Set[Signature]] = Signature.noSignatures,
+  ): OrdinarySerializedEvent = {
     val sequencedEvent = Deliver.create(
       counter,
       CantonTimestamp.Epoch.addMicros(counter.unwrap),
@@ -300,7 +302,7 @@ object TestSequencerSubscriptionFactoryAkka {
     val signedContent =
       SignedContent.tryCreate(
         sequencedEvent,
-        NonEmpty(Seq, Signature.noSignature),
+        signatures.toSeq,
         None,
         SignedContent.protocolVersionRepresentativeFor(BaseTest.testedProtocolVersion),
       )

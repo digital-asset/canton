@@ -4,7 +4,7 @@
 package com.digitalasset.canton.util
 
 import akka.actor.ActorSystem
-import akka.stream.scaladsl.{FlowOps, FlowOpsMat, Keep, RunnableGraph, Source}
+import akka.stream.scaladsl.{Flow, FlowOps, FlowOpsMat, Keep, RunnableGraph, Source}
 import akka.stream.stage.{GraphStageLogic, GraphStageWithMaterializedValue, InHandler, OutHandler}
 import akka.stream.{
   ActorAttributes,
@@ -207,12 +207,28 @@ object AkkaUtil extends HasLoggerName {
   def mapAsyncAndDrainUS[A, Mat, B](graph: FlowOps[A, Mat], parallelism: Int)(
       f: A => FutureUnlessShutdown[B]
   )(implicit loggingContext: NamedLoggingContext): graph.Repr[B] = {
-    import syntax.*
-    graph
-      .mapAsyncUS(parallelism)(f)
+    mapAsyncUS(graph, parallelism)(f)
       // Important to use `collect` instead of `takeWhile` here
       // so that the return source completes only after all `source`'s elements have been consumed.
+      // TODO(#13789) Should we cancel/pull a kill switch to signal upstream that no more elements are needed?
       .collect { case Outcome(x) => x }
+  }
+
+  /** Combines [[mapAsyncUS]] with [[statefulMapAsync]]. */
+  def statefulMapAsyncUS[Out, Mat, S, T](graph: FlowOps[Out, Mat], initial: S)(
+      f: (S, Out) => FutureUnlessShutdown[(S, T)]
+  )(implicit loggingContext: NamedLoggingContext): graph.Repr[UnlessShutdown[T]] = {
+    implicit val directExecutionContext: ExecutionContext =
+      DirectExecutionContext(loggingContext.tracedLogger)
+    statefulMapAsync(graph, initial = Option(initial)) {
+      case (Some(s), next) =>
+        f(s, next).unwrap.map {
+          case AbortedDueToShutdown => None -> AbortedDueToShutdown
+          case Outcome((nextS, t)) => Some(nextS) -> Outcome(t)
+        }
+      case (None, _next) =>
+        Future.successful(None -> AbortedDueToShutdown)
+    }
   }
 
   /** Combines two kill switches into one */
@@ -493,9 +509,7 @@ object AkkaUtil extends HasLoggerName {
   def withUniqueKillSwitch[A, Mat, Mat2](
       graph: FlowOpsMat[A, Mat]
   )(mat: (Mat, UniqueKillSwitch) => Mat2): graph.ReprMat[WithKillSwitch[A], Mat2] = {
-    import syntax.*
-    graph
-      .withMaterializedValueMat(new AtomicReference[UniqueKillSwitch])(Keep.both)
+    withMaterializedValueMat(new AtomicReference[UniqueKillSwitch])(graph)(Keep.both)
       .viaMat(KillSwitches.single) { case ((m, ref), killSwitch) =>
         ref.set(killSwitch)
         mat(m, killSwitch)
@@ -506,9 +520,7 @@ object AkkaUtil extends HasLoggerName {
   def injectKillSwitch[A, Mat](
       graph: FlowOpsMat[A, Mat]
   )(killSwitch: Mat => KillSwitch): graph.ReprMat[WithKillSwitch[A], Mat] = {
-    import syntax.*
-    graph
-      .withMaterializedValueMat(new AtomicReference[KillSwitch])(Keep.both)
+    withMaterializedValueMat(new AtomicReference[KillSwitch])(graph)(Keep.both)
       .mapMaterializedValue { case (mat, ref) =>
         ref.set(killSwitch(mat))
         mat
@@ -628,6 +640,11 @@ object AkkaUtil extends HasLoggerName {
       )(implicit loggingContext: NamedLoggingContext): U#Repr[T] =
         AkkaUtil.statefulMapAsync(graph, initial)(f)
 
+      def statefulMapAsyncUS[S, T](initial: S)(
+          f: (S, A) => FutureUnlessShutdown[(S, T)]
+      )(implicit loggingContext: NamedLoggingContext): U#Repr[UnlessShutdown[T]] =
+        AkkaUtil.statefulMapAsyncUS(graph, initial)(f)
+
       def mapAsyncUS[B](parallelism: Int)(f: A => FutureUnlessShutdown[B])(implicit
           loggingContext: NamedLoggingContext
       ): U#Repr[UnlessShutdown[B]] =
@@ -638,11 +655,20 @@ object AkkaUtil extends HasLoggerName {
       )(implicit loggingContext: NamedLoggingContext): U#Repr[B] =
         AkkaUtil.mapAsyncAndDrainUS(graph, parallelism)(f)
     }
-    implicit def akkaUtilSyntaxForFlowOps[A, Mat](
-        graph: FlowOps[A, Mat]
+    // Use separate implicit conversions for Sources and Flows to help IntelliJ
+    // Otherwise IntelliJ gets very resource hungry.
+    implicit def akkaUtilSyntaxForFlowOpsSource[A, Mat](
+        graph: Source[A, Mat]
     ): AkkaUtilSyntaxForFlowOps[A, Mat, graph.type] =
       new AkkaUtilSyntaxForFlowOps(graph)
+    implicit def akkaUtilSyntaxForFlowOpsFlow[A, B, Mat](
+        graph: Flow[A, B, Mat]
+    ): AkkaUtilSyntaxForFlowOps[B, Mat, graph.type] =
+      new AkkaUtilSyntaxForFlowOps(graph)
 
+    /** Defines extension methods for [[akka.stream.scaladsl.FlowOps]] with a [[akka.stream.KillSwitch]].
+      * @see AkkaUtilSyntaxForFlowOps for an explanation of the type parameter U
+      */
     private[util] class AkkaUtilSyntaxForFLowOpsWithKillSwitch[
         A,
         Mat,
@@ -652,19 +678,19 @@ object AkkaUtil extends HasLoggerName {
       def takeUntilThenDrain(condition: A => Boolean): U#Repr[WithKillSwitch[A]] =
         AkkaUtil.takeUntilThenDrain(graph, condition)
     }
-    implicit def akkaUtilSyntaxForFlowOpsWithKillSwitch[A, Mat](
-        graph: FlowOps[WithKillSwitch[A], Mat]
+    // Use separate implicit conversions for Sources and Flows to help IntelliJ
+    // Otherwise IntelliJ gets very resource hungry.
+    implicit def akkaUtilSyntaxForFlowOpsWithKillSwitchSource[A, Mat](
+        graph: Source[WithKillSwitch[A], Mat]
     ): AkkaUtilSyntaxForFLowOpsWithKillSwitch[A, Mat, graph.type] =
+      new AkkaUtilSyntaxForFLowOpsWithKillSwitch(graph)
+    implicit def akkaUtilSyntaxForFlowOpsWithKillSwitchFlow[A, B, Mat](
+        graph: Flow[A, WithKillSwitch[B], Mat]
+    ): AkkaUtilSyntaxForFLowOpsWithKillSwitch[B, Mat, graph.type] =
       new AkkaUtilSyntaxForFLowOpsWithKillSwitch(graph)
 
     /** Defines extension methods for [[akka.stream.scaladsl.FlowOpsMat]] that map to the methods defined in this class.
-      *
-      * The construction with type parameter `U` follows
-      * <a href="https://typelevel.org/blog/2017/03/01/four-ways-to-escape-a-cake.html">Stephen's blog post about relatable variables</a>
-      * to ensure that we can uniformly abstract over [[akka.stream.scaladsl.Source]]s and [[akka.stream.scaladsl.Flow]]s.
-      * In particular, we cannot use an implicit class here. Unlike in the blog post, the implicit conversion [[akkaUtilSyntaxForFlowOpsMat]]
-      * does not extract [[akka.stream.scaladsl.FlowOpsMat]] into a separate type parameter because this would confuse
-      * type inference.
+      * @see AkkaUtilSyntaxForFlowOps for an explanation of the type parameter U
       */
     private[util] class AkkaUtilSyntaxForFlowOpsMat[A, Mat, U <: FlowOpsMat[A, Mat]](
         private val graph: U
@@ -682,10 +708,15 @@ object AkkaUtil extends HasLoggerName {
       def injectKillSwitch(killSwitch: Mat => KillSwitch): U#ReprMat[WithKillSwitch[A], Mat] =
         AkkaUtil.injectKillSwitch(graph)(killSwitch)
     }
-
-    implicit def akkaUtilSyntaxForFlowOpsMat[A, Mat](
-        graph: FlowOpsMat[A, Mat]
+    // Use separate implicit conversions for Sources and Flows to help IntelliJ
+    // Otherwise IntelliJ gets very resource hungry.
+    implicit def akkaUtilSyntaxForFlowOpsMatSource[A, Mat](
+        graph: Source[A, Mat]
     ): AkkaUtilSyntaxForFlowOpsMat[A, Mat, graph.type] =
+      new AkkaUtilSyntaxForFlowOpsMat(graph)
+    implicit def akkaUtilSyntaxForFlowOpsMat[A, B, Mat](
+        graph: Flow[A, B, Mat]
+    ): AkkaUtilSyntaxForFlowOpsMat[B, Mat, graph.type] =
       new AkkaUtilSyntaxForFlowOpsMat(graph)
   }
 }

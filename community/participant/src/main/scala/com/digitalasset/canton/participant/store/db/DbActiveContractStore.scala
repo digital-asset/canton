@@ -1232,9 +1232,6 @@ class DbActiveContractStore(
   ): DbAction.ReadOnly[Option[StoredActiveContract]] =
     fetchContractStateQuery(contractId, operationFilter = None, tocFilter = Some(toc))
 
-  @SuppressWarnings(
-    Array("com.digitalasset.canton.SlickString")
-  ) // operation types are length limited
   private def fetchContractStateQuery(
       contractId: LfContractId,
       operationFilter: Option[OperationType] = None,

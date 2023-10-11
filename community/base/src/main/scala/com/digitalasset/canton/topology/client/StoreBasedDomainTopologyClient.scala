@@ -4,6 +4,7 @@
 package com.digitalasset.canton.topology.client
 
 import cats.data.EitherT
+import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import com.daml.lf.data.Ref.PackageId
@@ -347,10 +348,8 @@ class StoreBasedDomainTopologyClient(
 
 object StoreBasedDomainTopologyClient {
 
-  def NoPackageDependencies(implicit
-      executionContext: ExecutionContext
-  ): PackageId => EitherT[Future, PackageId, Set[PackageId]] = { _ =>
-    EitherT.pure[Future, PackageId](Set())
+  def NoPackageDependencies: PackageId => EitherT[Future, PackageId, Set[PackageId]] = { _ =>
+    EitherT(Future.successful(Either.right(Set.empty[PackageId])))
   }
 }
 

@@ -8,8 +8,11 @@ import com.daml.metrics.grpc.GrpcServerMetrics
 import com.digitalasset.canton.domain.config.PublicServerConfig
 import com.digitalasset.canton.domain.sequencing.SequencerRuntime
 import com.digitalasset.canton.environment.HasGeneralCantonNodeParameters
-import com.digitalasset.canton.health.GrpcHealthReporter
-import com.digitalasset.canton.health.HealthReporting.{HealthService, ServiceHealthStatusManager}
+import com.digitalasset.canton.health.{
+  GrpcHealthReporter,
+  HealthService,
+  ServiceHealthStatusManager,
+}
 import com.digitalasset.canton.lifecycle.Lifecycle.{CloseableServer, toCloseableServer}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.MetricHandle

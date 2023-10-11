@@ -3,20 +3,12 @@
 
 package com.digitalasset.canton.participant.admin
 
-import cats.data.EitherT
 import cats.syntax.foldable.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApiProvider}
-import com.digitalasset.canton.protocol.{
-  LfContractId,
-  LfGlobalKey,
-  LfGlobalKeyWithMaintainers,
-  SerializableContract,
-  TransactionId,
-}
+import com.digitalasset.canton.protocol.{LfGlobalKey, LfGlobalKeyWithMaintainers, TransactionId}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -41,14 +33,6 @@ package object repair {
       party: LfPartyId
   )(implicit executionContext: ExecutionContext): Future[Boolean] =
     snapshot.hostedOn(party, participantId).map(_.exists(_.permission.isActive))
-
-  private[repair] def readContract(repair: RepairRequest, cid: LfContractId)(implicit
-      traceContext: TraceContext,
-      executionContext: ExecutionContext,
-  ): EitherT[Future, String, SerializableContract] =
-    repair.domainPersistence.contractStore
-      .lookupContractE(cid)
-      .leftMap(e => s"Failed to look up contract $cid in domain ${repair.domainAlias}: $e")
 
   private[repair] def getKeyIfOneMaintainerIsLocal(
       snapshot: TopologySnapshot,

@@ -7,15 +7,10 @@ import cats.data.{EitherT, OptionT}
 import cats.syntax.parallel.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.DirectExecutionContext
-import com.digitalasset.canton.protocol.{
-  LfContractId,
-  LfContractInst,
-  LfGlobalKey,
-  SerializableContract,
-}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
-import com.typesafe.scalalogging.Logger
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -61,8 +56,8 @@ trait ContractLookup {
 }
 
 object ContractLookup {
-  def noContracts(logger: Logger): ContractLookup =
-    ContractAndKeyLookup.noContracts(logger)
+  def noContracts(logger: NamedLoggerFactory): ContractLookup =
+    ContractLookupAndVerification.noContracts(logger)
 
 }
 
@@ -79,14 +74,25 @@ trait ContractAndKeyLookup extends ContractLookup {
 
 }
 
-object ContractAndKeyLookup {
+trait ContractLookupAndVerification extends ContractAndKeyLookup {
+
+  /** Verify that the contract metadata associated with the contract id is consistent with the provided metadata */
+  def verifyMetadata(coid: LfContractId, metadata: ContractMetadata)(implicit
+      traceContext: TraceContext
+  ): OptionT[Future, String]
+
+}
+
+object ContractLookupAndVerification {
 
   /** An empty contract and key lookup interface that fails to find any contracts and keys when asked,
     * but allows any key to be asked
     */
-  def noContracts(logger: Logger): ContractAndKeyLookup = {
-    new ContractAndKeyLookup {
-      implicit val ec: ExecutionContext = DirectExecutionContext(logger)
+  def noContracts(namedLoggerFactory: NamedLoggerFactory): ContractLookupAndVerification = {
+    new ContractLookupAndVerification with NamedLogging {
+
+      val loggerFactory: NamedLoggerFactory = namedLoggerFactory
+      implicit val ec: ExecutionContext = DirectExecutionContext(noTracingLogger)
 
       override def lookup(id: LfContractId)(implicit
           traceContext: TraceContext
@@ -107,6 +113,11 @@ object ContractAndKeyLookup {
           traceContext: TraceContext
       ): EitherT[Future, UnknownContracts, Map[LfContractId, Set[LfPartyId]]] =
         EitherT.cond(ids.isEmpty, Map.empty, UnknownContracts(ids))
+
+      override def verifyMetadata(coid: LfContractId, metadata: ContractMetadata)(implicit
+          traceContext: TraceContext
+      ): OptionT[Future, String] =
+        OptionT.pure[Future]("Not expecting call to verifyMetadata")
 
     }
   }
