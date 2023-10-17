@@ -54,9 +54,11 @@ final case class ConcurrentHMap[R[_, _]] private (
 object ConcurrentHMap {
   def empty[R[_, _]]: ConcurrentHMap[R] = new ConcurrentHMap[R]()
 
-  def apply[R[_, _]]: ConcurrentHMapBuilder[R] = new ConcurrentHMapBuilder[R]()
+  def apply[R[_, _]]: ConcurrentHMapPartiallyApplied[R] =
+    new ConcurrentHMapPartiallyApplied[R](false)
 
-  class ConcurrentHMapBuilder[R[_, _]] {
+  private[data] class ConcurrentHMapPartiallyApplied[R[_, _]](private val dummy: Boolean)
+      extends AnyVal {
     @nowarn("msg=parameter value ev in method")
     def apply[K, V](values: (K, V)*)(implicit ev: R[K, V]) =
       new ConcurrentHMap[R](TrieMap.from(values))

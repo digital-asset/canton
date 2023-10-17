@@ -4,9 +4,10 @@
 package com.digitalasset.canton.health
 
 import cats.implicits.showInterpolator
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.health.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.tracing.NoTracing
+import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ShowUtil.showPretty
 import io.grpc.health.v1.HealthCheckResponse.ServingStatus
 import io.grpc.protobuf.services.HealthStatusManager
@@ -32,18 +33,18 @@ class GrpcHealthReporter(override val loggerFactory: NamedLoggerFactory)
     */
   private def updateHealthManager(
       healthStatusManager: ServiceHealthStatusManager,
-      servingStatus: ServingStatus,
       serviceHealth: HealthService,
   ): Unit = blocking {
     synchronized {
+      val status = serviceHealth.getState
       logger.debug(
-        show"$serviceHealth in ${healthStatusManager.name} is ${servingStatus.name()}"
+        show"${serviceHealth.name} in ${healthStatusManager.name} is ${status.name()}"
       )
 
-      healthStatusManager.manager.setStatus(serviceHealth.name, servingStatus)
+      healthStatusManager.manager.setStatus(serviceHealth.name, status)
 
       // Update the default service status
-      if (servingStatus != ServingStatus.SERVING) {
+      if (status != ServingStatus.SERVING) {
         logger.debug(
           s"${healthStatusManager.name} is ${ServingStatus.NOT_SERVING.name()}"
         )
@@ -77,9 +78,15 @@ class GrpcHealthReporter(override val loggerFactory: NamedLoggerFactory)
       healthStatusManager: ServiceHealthStatusManager
   ): Unit = {
     healthStatusManager.services.foreach(service =>
-      service.registerOnHealthChange((service: HealthService, status: ServingStatus, _) => {
-        updateHealthManager(healthStatusManager, status, service)
-      })
+      service
+        .registerOnHealthChange(new HealthListener {
+          override def name: String = "GrpcHealthReporter"
+
+          override def poke()(implicit traceContext: TraceContext): Unit = {
+            updateHealthManager(healthStatusManager, service)
+          }
+        })
+        .discard[Boolean]
     )
   }
 }

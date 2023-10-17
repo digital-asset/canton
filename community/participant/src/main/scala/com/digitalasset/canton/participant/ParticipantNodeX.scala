@@ -344,6 +344,8 @@ class ParticipantNodeBootstrapX(
   override protected def mkNodeHealthService(storage: Storage): HealthService =
     HealthService(
       "participant",
+      logger,
+      timeouts,
       criticalDependencies = Seq(storage),
       // The sync service won't be reporting Ok until the node is initialized, but that shouldn't prevent traffic from
       // reaching the node

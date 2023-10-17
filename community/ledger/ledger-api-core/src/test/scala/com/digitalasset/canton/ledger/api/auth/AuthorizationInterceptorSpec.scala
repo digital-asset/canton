@@ -36,6 +36,9 @@ class AuthorizationInterceptorSpec
 
   behavior of s"$className.interceptCall"
 
+  private val AuthorizationInterceptorSuppressionRule: SuppressionRule =
+    SuppressionRule.forLogger[AuthorizationInterceptor] && SuppressionRule.Level(Level.ERROR)
+
   it should "close the ServerCall with a V2 status code on decoding failure" in {
     loggerFactory.assertLogs(AuthorizationInterceptorSuppressionRule)(
       within = testServerCloseError { case (actualStatus, actualMetadata) =>
@@ -94,15 +97,6 @@ class AuthorizationInterceptorSpec
       verify(serverCall).close(statusCaptor.capture, metadataCaptor.capture)
       assertRpcStatus(statusCaptor.value, metadataCaptor.value)
     }
-  }
-
-  object AuthorizationInterceptorSuppressionRule extends SuppressionRule {
-    private val logLevel = Level.ERROR
-    private val authorizationInterceptor = classOf[AuthorizationInterceptor].getName
-
-    override def isSuppressed(loggerName: String, eventLevel: Level): Boolean =
-      (loggerName contains authorizationInterceptor)
-        && eventLevel.toInt == logLevel.toInt
   }
 
 }

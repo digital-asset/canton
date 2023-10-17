@@ -15,9 +15,9 @@ import com.digitalasset.canton.config.*
 import com.digitalasset.canton.crypto.{CryptoPureApi, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.{
+  CloseableHealthComponent,
   ComponentHealthState,
   DelegatingMutableHealthComponent,
-  HealthComponent,
 }
 import com.digitalasset.canton.lifecycle.Lifecycle.toCloseableOption
 import com.digitalasset.canton.lifecycle.*
@@ -161,7 +161,7 @@ trait SequencerClient extends SequencerClientSend with FlagCloseable {
   @VisibleForTesting
   def flush(): Future[Unit]
 
-  def healthComponent: HealthComponent
+  def healthComponent: CloseableHealthComponent
 
   /** Acknowledge that we have successfully processed all events up to and including the given timestamp.
     * The client should then never subscribe for events from before this point.
@@ -242,22 +242,23 @@ class SequencerClientImpl(
   private def aggregateHealthResult(
       healthResult: Map[SequencerId, ComponentHealthState]
   ): ComponentHealthState =
-    if (healthResult.sizeIs == 1) {
-      healthResult.headOption.map(_._2).getOrElse(ComponentHealthState.Ok())
-    } else {
-      if (healthResult.values.count(_.isOk) >= sequencerTransports.sequencerToTransportMap.size) {
-        ComponentHealthState.Ok()
-      } else {
-        val unhealthySequencers = healthResult
-          .collect {
+    NonEmpty.from(healthResult) match {
+      case None => ComponentHealthState.NotInitializedState
+      case Some(healthResultNE) =>
+        if (healthResult.sizeIs == 1) healthResultNE.head1._2
+        else if (
+          sequencerTransports.sequencerToTransportMap.sizeIs <= healthResult.values.count(_.isOk)
+        ) ComponentHealthState.Ok()
+        else {
+          val unhealthySequencers = healthResult.collect {
             case (sequencerId, health) if !health.isOk => sequencerId
           }
-        ComponentHealthState.Degraded(
-          ComponentHealthState.UnhealthyState(
-            Some(s"Unhealthy sequencer subscriptions for [${unhealthySequencers.mkString(",")}]")
+          ComponentHealthState.Degraded(
+            ComponentHealthState.UnhealthyState(
+              Some(s"Unhealthy sequencer subscriptions for [${unhealthySequencers.mkString(",")}]")
+            )
           )
-        )
-      }
+        }
     }
 
   private lazy val deferredSubscriptionHealth =
@@ -265,11 +266,11 @@ class SequencerClientImpl(
       loggerFactory,
       SequencerClient.healthName,
       timeouts,
-      ComponentHealthState.ShutdownState,
       aggregateHealthResult,
+      ComponentHealthState.failed("Disconnected from domain"),
     )
 
-  val healthComponent: HealthComponent = deferredSubscriptionHealth
+  val healthComponent: CloseableHealthComponent = deferredSubscriptionHealth
 
   private val periodicAcknowledgementsRef =
     new AtomicReference[Option[PeriodicAcknowledgements]](None)

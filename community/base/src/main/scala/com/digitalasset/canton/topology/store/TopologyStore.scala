@@ -17,7 +17,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{PublicKey, SignatureCheckError}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
@@ -237,6 +237,18 @@ object TopologyTransactionRejection {
     override def toTopologyManagerError(implicit elc: ErrorLoggingContext) =
       TopologyManagerError.UnauthorizedTransaction.Failure()
   }
+
+  final case class ThresholdTooHigh(actual: Int, mustBeAtMost: Int)
+      extends TopologyTransactionRejection {
+    def asString: String = s"Threshold must not be higher than $mustBeAtMost, but was $actual."
+
+    override def pretty: Pretty[ThresholdTooHigh] = prettyOfString(_ => asString)
+
+    override def toTopologyManagerError(implicit elc: ErrorLoggingContext) = {
+      TopologyManagerError.InternalError.ImplementMe(asString)
+    }
+  }
+
   final case class SignatureCheckFailed(err: SignatureCheckError)
       extends TopologyTransactionRejection {
     def asString: String = err.toString
@@ -330,7 +342,7 @@ object TimeQuery {
 }
 
 trait TopologyStoreCommon[+StoreID <: TopologyStoreId, ValidTx, StoredTx, SignedTx]
-    extends AutoCloseable {
+    extends FlagCloseable {
 
   this: NamedLogging =>
 

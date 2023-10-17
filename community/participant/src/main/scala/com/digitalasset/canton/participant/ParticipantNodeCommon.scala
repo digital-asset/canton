@@ -21,7 +21,7 @@ import com.digitalasset.canton.config.{DbConfig, H2DbConfig}
 import com.digitalasset.canton.crypto.{Crypto, SyncCryptoApiProvider}
 import com.digitalasset.canton.domain.api.v0.DomainTimeServiceGrpc
 import com.digitalasset.canton.environment.{CantonNode, CantonNodeBootstrapCommon}
-import com.digitalasset.canton.health.{BaseMutableHealthComponent, MutableHealthComponent}
+import com.digitalasset.canton.health.MutableHealthComponent
 import com.digitalasset.canton.http.metrics.HttpApiMetrics
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -208,19 +208,19 @@ trait ParticipantNodeBootstrapCommon {
     None
   )
 
-  lazy val syncDomainHealth: MutableHealthComponent = BaseMutableHealthComponent(
+  lazy val syncDomainHealth: MutableHealthComponent = MutableHealthComponent(
     loggerFactory,
     SyncDomain.healthName,
     timeouts,
   )
   lazy val syncDomainEphemeralHealth: MutableHealthComponent =
-    BaseMutableHealthComponent(
+    MutableHealthComponent(
       loggerFactory,
       SyncDomainEphemeralState.healthName,
       timeouts,
     )
   lazy val syncDomainSequencerClientHealth: MutableHealthComponent =
-    BaseMutableHealthComponent(
+    MutableHealthComponent(
       loggerFactory,
       SequencerClient.healthName,
       timeouts,

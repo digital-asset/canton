@@ -68,6 +68,8 @@ final case class StoredTopologyTransactionX[+Op <: TopologyChangeOpX, +M <: Topo
   def selectOp[TargetOp <: TopologyChangeOpX: ClassTag] = transaction
     .selectOp[TargetOp]
     .map(_ => this.asInstanceOf[StoredTopologyTransactionX[TargetOp, M]])
+
+  def mapping: M = transaction.transaction.mapping
 }
 
 object StoredTopologyTransactionX {
@@ -264,7 +266,7 @@ object TopologyStoreX {
     val storeLoggerFactory = loggerFactory.append("store", storeId.toString)
     storage match {
       case _: MemoryStorage =>
-        new InMemoryTopologyStoreX(storeId, storeLoggerFactory)
+        new InMemoryTopologyStoreX(storeId, storeLoggerFactory, timeouts)
       case dbStorage: DbStorage =>
         new DbTopologyStoreX(dbStorage, storeId, maxDbConnections, timeouts, storeLoggerFactory)
     }

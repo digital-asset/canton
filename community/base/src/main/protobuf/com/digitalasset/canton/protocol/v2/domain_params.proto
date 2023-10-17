@@ -6,6 +6,7 @@ syntax = "proto3";
 package com.digitalasset.canton.protocol.v2;
 
 import "com/digitalasset/canton/crypto/v0/crypto.proto";
+import "com/digitalasset/canton/protocol/v0/traffic_control_parameters.proto";
 import "google/protobuf/duration.proto";
 import "scalapb/scalapb.proto";
 
@@ -54,4 +55,5 @@ message DynamicDomainParametersX {
   // TODO(#14050) implement party hosting limits
   uint32 default_max_hosting_participants_per_party = 14;
   google.protobuf.Duration sequencer_aggregate_submission_timeout = 15;
+  com.digitalasset.canton.protocol.v0.TrafficControlParameters traffic_control_parameters = 16;
 }

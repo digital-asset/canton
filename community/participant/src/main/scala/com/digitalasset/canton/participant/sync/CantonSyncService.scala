@@ -35,7 +35,7 @@ import com.digitalasset.canton.data.{
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.SyncServiceErrorGroup
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.InjectionErrorGroup
 import com.digitalasset.canton.error.*
-import com.digitalasset.canton.health.{BaseMutableHealthComponent, MutableHealthComponent}
+import com.digitalasset.canton.health.MutableHealthComponent
 import com.digitalasset.canton.ledger.api.health.HealthStatus
 import com.digitalasset.canton.ledger.configuration.*
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
@@ -169,11 +169,11 @@ class CantonSyncService(
   import ShowUtil.*
 
   val syncDomainHealth: MutableHealthComponent =
-    BaseMutableHealthComponent(loggerFactory, SyncDomain.healthName, timeouts)
+    MutableHealthComponent(loggerFactory, SyncDomain.healthName, timeouts)
   val ephemeralHealth: MutableHealthComponent =
-    BaseMutableHealthComponent(loggerFactory, SyncDomainEphemeralState.healthName, timeouts)
+    MutableHealthComponent(loggerFactory, SyncDomainEphemeralState.healthName, timeouts)
   val sequencerClientHealth: MutableHealthComponent =
-    BaseMutableHealthComponent(loggerFactory, SequencerClient.healthName, timeouts)
+    MutableHealthComponent(loggerFactory, SequencerClient.healthName, timeouts)
 
   val maxDeduplicationDuration: NonNegativeFiniteDuration =
     participantNodePersistentState.value.settingsStore.settings.maxDeduplicationDuration
@@ -1242,7 +1242,7 @@ class CantonSyncService(
         _ = syncDomainHealth.set(syncDomain)
         _ = ephemeralHealth.set(syncDomain.ephemeral)
         _ = sequencerClientHealth.set(syncDomain.sequencerClient.healthComponent)
-        _ = syncDomain.resolveUnhealthy
+        _ = syncDomain.resolveUnhealthy()
 
         // Start sequencer client subscription only after sync domain has been added to connectedDomainsMap, e.g. to
         // prevent sending PartyAddedToParticipantEvents before the domain is available for command submission. (#2279)

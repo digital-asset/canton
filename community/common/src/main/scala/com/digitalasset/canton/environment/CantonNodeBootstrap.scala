@@ -18,6 +18,7 @@ import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.health.HealthService
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.{
@@ -81,7 +82,7 @@ abstract class CantonNodeBootstrapBase[
   private val nodeId = new AtomicReference[Option[NodeId]](None)
 
   // TODO(i3168): Move to a error-safe node initialization approach
-  protected val storage =
+  protected val storage: Storage =
     arguments.storageFactory
       .tryCreate(
         connectionPoolForParticipant,
@@ -438,7 +439,8 @@ abstract class CantonNodeBootstrapBase[
   /** Health service component of the node
     */
   protected lazy val nodeHealthService: HealthService = mkNodeHealthService(storage)
-  protected val (healthReporter, grpcHealthServer) = mkHealthComponents(nodeHealthService)
+  protected val (healthReporter, grpcHealthServer, livenessHealthService) =
+    mkHealthComponents(nodeHealthService)
 
   override protected def onClosed(): Unit = {
     if (isRunningVar.getAndSet(false)) {
@@ -452,7 +454,13 @@ abstract class CantonNodeBootstrapBase[
         Lifecycle.toCloseableOption(initializationWatcherRef.get()),
         adminServerRegistry,
         adminServer,
-      ) ++ grpcHealthServer.toList ++ getNode.toList ++ stores ++ List(crypto.value, storage, clock)
+      ) ++ grpcHealthServer.toList ++ getNode.toList ++ stores ++ List(
+        crypto.value,
+        storage,
+        clock,
+        nodeHealthService,
+        livenessHealthService,
+      )
       Lifecycle.close(instances: _*)(logger)
       logger.debug(s"Successfully completed shutdown of $name")
     } else {

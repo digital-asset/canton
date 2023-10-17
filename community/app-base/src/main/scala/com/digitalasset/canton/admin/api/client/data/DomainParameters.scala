@@ -302,8 +302,10 @@ final case class DynamicDomainParametersV1(
 
   override def toProto(
       protocolVersion: ProtocolVersion
-  ): Either[String, DomainParametersChangeAuthorization.Parameters] =
-    if (protoVersion(protocolVersion) == 1)
+  ): Either[String, DomainParametersChangeAuthorization.Parameters] = {
+    val protoV = protoVersion(protocolVersion)
+    // TODO(#12373) Adapt when releasing BFT
+    if (protoV == 1 || protoV == 2)
       Right(
         protocolV1.DynamicDomainParameters(
           participantResponseTimeout = Some(participantResponseTimeout.toProtoPrimitive),
@@ -321,6 +323,7 @@ final case class DynamicDomainParametersV1(
       Left(
         s"Cannot convert DynamicDomainParametersV1 to Protobuf when domain protocol version is $protocolVersion"
       )
+  }
 }
 
 object DynamicDomainParameters {
@@ -339,7 +342,8 @@ object DynamicDomainParameters {
 
     if (protoVersion == 0)
       Right(domain.transformInto[DynamicDomainParametersV0])
-    else if (protoVersion == 1)
+    // TODO(#12373) Adapt when releasing BFT
+    else if (protoVersion == 1 || protoVersion == 2)
       Right(domain.transformInto[DynamicDomainParametersV1])
     else
       Left(ProtoDeserializationError.VersionError("DynamicDomainParameters", protoVersion))

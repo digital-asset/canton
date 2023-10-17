@@ -13,7 +13,11 @@ import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.crypto.Salt
-import com.digitalasset.canton.health.{ComponentHealthState, HealthComponent}
+import com.digitalasset.canton.health.{
+  AtomicHealthComponent,
+  CloseableHealthComponent,
+  ComponentHealthState,
+}
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
   FlagCloseable,
@@ -75,7 +79,8 @@ import scala.language.implicitConversions
   * Using storage objects after shutdown is unsafe; thus, they should only be closed when they're ready for
   * garbage collection.
   */
-sealed trait Storage extends FlagCloseable with HealthComponent { self: NamedLogging =>
+sealed trait Storage extends CloseableHealthComponent with AtomicHealthComponent {
+  self: NamedLogging =>
 
   /** Indicates if the storage instance is active and ready to perform updates/writes. */
   def isActive: Boolean
@@ -179,14 +184,14 @@ trait DbStore extends FlagCloseable with NamedLogging with HasCloseContext {
   protected val storage: DbStorage
 }
 
-trait DbStorage extends Storage with FlagCloseable { self: NamedLogging =>
+trait DbStorage extends Storage { self: NamedLogging =>
 
   val profile: DbStorage.Profile
   val dbConfig: DbConfig
 
   override val name: String = DbStorage.healthName
 
-  override lazy val initialHealthState: ComponentHealthState =
+  override def initialHealthState: ComponentHealthState =
     ComponentHealthState.NotInitializedState
 
   object DbStorageConverters {

@@ -472,7 +472,8 @@ class GrpcTopologyManagerReadService(
           val parameters =
             if (protoVersion == 0)
               Some(Result.Parameters.V0(domainParametersChange.domainParameters.toProtoV0))
-            else if (protoVersion == 1)
+            // TODO(#12373) Adapt when releasing BFT
+            else if (protoVersion == 1 || protoVersion == 2)
               Some(Result.Parameters.V1(domainParametersChange.domainParameters.toProtoV1))
             else {
               logger.warn(s"Unable to serialize domain parameters with version $protoVersion")

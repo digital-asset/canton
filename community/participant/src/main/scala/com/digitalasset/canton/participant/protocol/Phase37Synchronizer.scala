@@ -189,10 +189,16 @@ object Phase37Synchronizer {
   ) {
     def pendingRequestRelation
         : HMapRequestRelation[this.type, RequestRelation[A#PendingRequestData]] =
-      new HMapRequestRelation[this.type, RequestRelation[A#PendingRequestData]]
+      HMapRequestRelation[this.type, RequestRelation[A#PendingRequestData]]
   }
 
-  private class HMapRequestRelation[K, V]
+  private trait HMapRequestRelation[K, V]
+  private object HMapRequestRelation {
+    private object HMapRequestRelationImpl extends HMapRequestRelation[Any, Any]
+    @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+    def apply[K <: Singleton, V]: HMapRequestRelation[K, V] =
+      HMapRequestRelationImpl.asInstanceOf[HMapRequestRelation[K, V]]
+  }
 
   /** Contains a promise to fulfill with the request data and a future to use to chain evaluations.
     *

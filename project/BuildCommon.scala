@@ -770,6 +770,7 @@ object BuildCommon {
           scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
         ),
         Compile / PB.protoSources ++= (Test / PB.protoSources).value,
+        Compile / damlEnableJavaCodegen := true,
         Compile / damlCodeGeneration := Seq(
           (
             (Compile / sourceDirectory).value / "daml" / "CantonExamples",
@@ -1501,11 +1502,19 @@ object BuildCommon {
           auth0_jwks,
           scala_logging,
           shapeless,
+          checkerFramework,
         ),
+        // The default CompileOrder.Mixed encounters an issue
+        // when compiling the Java bindings (on parsing @NonNull annotated complex type values)
+        // In the mixed mode, scalac compiles first Java and Scala sources and then javac.
+        // Probably `scalac` compilation of Java encounters a bug, so as a workaround
+        // enforce always javac first.
+        compileOrder := CompileOrder.JavaThenScala,
         Compile / unmanagedSourceDirectories ++=
           Seq(
             // 0
             "language-support/scala/bindings/src/main/2.13",
+            "language-support/java/bindings/src/main/java",
             "ledger-api/rs-grpc-bridge/src/main/java",
             "libs-scala/build-info/src/main/scala",
             "libs-scala/concurrent/src/main/scala",

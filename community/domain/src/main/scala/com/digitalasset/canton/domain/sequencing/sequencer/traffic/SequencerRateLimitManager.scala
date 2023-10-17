@@ -6,6 +6,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer.traffic
 import cats.data.EitherT
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.sequencing.TrafficControlParameters
 import com.digitalasset.canton.sequencing.protocol.{Batch, ClosedEnvelope, TrafficState}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
@@ -27,7 +28,11 @@ trait SequencerRateLimitManager {
   /** Create a traffic state for a new member at the given timestamp.
     * Its base traffic remainder will be equal to the max burst window configured at that point in time.
     */
-  def createNewTrafficStateAt(member: Member, timestamp: CantonTimestamp)(implicit
+  def createNewTrafficStateAt(
+      member: Member,
+      timestamp: CantonTimestamp,
+      trafficControlConfig: TrafficControlParameters,
+  )(implicit
       ec: ExecutionContext,
       tc: TraceContext,
   ): Future[TrafficState]
@@ -36,11 +41,10 @@ trait SequencerRateLimitManager {
     *
     * @param member               member to top up
     * @param newExtraTrafficTotal new limit
-    * @param timestamp            timestamp at which the top up will be effective
     */
   def topUp(
       member: Member,
-      limit: TopUpEvent,
+      newExtraTrafficTotal: TopUpEvent,
   )(implicit
       ec: ExecutionContext,
       tc: TraceContext,
@@ -55,6 +59,7 @@ trait SequencerRateLimitManager {
       batch: Batch[ClosedEnvelope],
       sequencingTimestamp: CantonTimestamp,
       trafficState: TrafficState,
+      trafficControlConfig: TrafficControlParameters,
   )(implicit
       ec: ExecutionContext,
       tc: TraceContext,
@@ -71,6 +76,7 @@ trait SequencerRateLimitManager {
   def updateTrafficStates(
       partialTrafficStates: Map[Member, TrafficState],
       timestamp: CantonTimestamp,
+      trafficControlConfig: TrafficControlParameters,
   )(implicit
       ec: ExecutionContext,
       tc: TraceContext,

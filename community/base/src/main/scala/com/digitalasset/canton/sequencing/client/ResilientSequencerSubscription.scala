@@ -11,7 +11,7 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.error.CantonErrorGroups.SequencerSubscriptionErrorGroup
-import com.digitalasset.canton.health.{ComponentHealthState, HealthComponent}
+import com.digitalasset.canton.health.{CloseableAtomicHealthComponent, ComponentHealthState}
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.SerializedEventHandler
@@ -60,11 +60,11 @@ class ResilientSequencerSubscription[HandlerError](
 )(implicit executionContext: ExecutionContext)
     extends SequencerSubscription[HandlerError]
     with NamedLogging
-    with FlagCloseableAsync
-    with HealthComponent {
+    with CloseableAtomicHealthComponent
+    with FlagCloseableAsync {
   override val name: String = SequencerClient.healthName
   override val initialHealthState: ComponentHealthState = ComponentHealthState.Ok()
-  override val closingState: ComponentHealthState =
+  override def closingState: ComponentHealthState =
     ComponentHealthState.failed("Disconnected from domain")
   private val nextSubscriptionRef =
     new AtomicReference[Option[SequencerSubscription[HandlerError]]](None)
@@ -92,7 +92,7 @@ class ResilientSequencerSubscription[HandlerError](
         // register resolution
         FutureUtil.doNotAwait(
           hasReceivedEvent.awaitEvent.map { _ =>
-            resolveUnhealthy
+            resolveUnhealthy()
           },
           "has received event failed",
         )

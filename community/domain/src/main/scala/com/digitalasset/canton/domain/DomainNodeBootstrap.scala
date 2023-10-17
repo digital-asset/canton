@@ -49,10 +49,10 @@ import com.digitalasset.canton.health.admin.data.{
   TopologyQueueStatus,
 }
 import com.digitalasset.canton.health.{
-  BaseMutableHealthComponent,
   ComponentStatus,
   HealthService,
   MutableHealthComponent,
+  MutableHealthQuasiComponent,
 }
 import com.digitalasset.canton.lifecycle.Lifecycle.CloseableServer
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, Lifecycle}
@@ -136,7 +136,7 @@ class DomainNodeBootstrap(
     new DomainTopologyStore(storage, timeouts, loggerFactory, futureSupervisor)
 
   // Mutable health component for the sequencer health, created during initialization
-  private lazy val sequencerHealth = new BaseMutableHealthComponent[Sequencer](
+  private lazy val sequencerHealth = new MutableHealthQuasiComponent[Sequencer](
     loggerFactory,
     Sequencer.healthName,
     SequencerHealthStatus(isActive = false),
@@ -152,7 +152,7 @@ class DomainNodeBootstrap(
   )
 
   override protected def mkNodeHealthService(storage: Storage): HealthService =
-    HealthService("domain", Seq(storage))
+    HealthService("domain", logger, timeouts, Seq(storage))
 
   // Holds the gRPC server started when the node is started, even when non initialized
   // If non initialized the server will expose the gRPC health service only
@@ -179,6 +179,8 @@ class DomainNodeBootstrap(
 
   private val domainApiServiceHealth = HealthService(
     CantonGrpcUtil.sequencerHealthCheckServiceName,
+    logger,
+    timeouts,
     criticalDependencies = Seq(sequencerHealth, storage),
     softDependencies = Seq(domainTopologySenderHealth),
   )
@@ -244,6 +246,7 @@ class DomainNodeBootstrap(
         mediatorTopologyStore,
         sequencerHealth,
         domainTopologySenderHealth,
+        domainApiServiceHealth,
       )(logger)
     }
   }
