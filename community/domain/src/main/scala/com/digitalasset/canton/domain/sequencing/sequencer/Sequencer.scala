@@ -16,9 +16,9 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   SequencerWriteError,
 }
 import com.digitalasset.canton.domain.sequencing.sequencer.traffic.SequencerTrafficStatus
-import com.digitalasset.canton.health.BaseHealthComponent
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
-import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
+import com.digitalasset.canton.health.{AtomicHealthElement, CloseableHealthQuasiComponent}
+import com.digitalasset.canton.lifecycle.HasCloseContext
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLogging}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.PruningScheduler
@@ -60,15 +60,15 @@ object PruningError {
   */
 trait Sequencer
     extends SequencerPruning
-    with FlagCloseable
+    with CloseableHealthQuasiComponent
+    with AtomicHealthElement
     with HasCloseContext
-    with NamedLogging
-    with BaseHealthComponent {
+    with NamedLogging {
   override val name: String = Sequencer.healthName
   override type State = SequencerHealthStatus
-  override lazy val initialHealthState: SequencerHealthStatus =
+  override def initialHealthState: SequencerHealthStatus =
     SequencerHealthStatus(isActive = true)
-  override val closingState: SequencerHealthStatus = SequencerHealthStatus.shutdownStatus
+  override def closingState: SequencerHealthStatus = SequencerHealthStatus.shutdownStatus
 
   def isRegistered(member: Member)(implicit traceContext: TraceContext): Future[Boolean]
 
@@ -155,6 +155,12 @@ trait Sequencer
   def trafficStatus(members: Seq[Member])(implicit
       traceContext: TraceContext
   ): Future[SequencerTrafficStatus]
+
+  /** Return the full traffic state of all known members.
+    * This should not be exposed externally as is as it contains information not relevant to external consumers.
+    * Use [[trafficStatus]] instead.
+    */
+  def trafficStates: Future[Map[Member, TrafficState]] = Future.successful(Map.empty)
 }
 
 /** Sequencer pruning interface.

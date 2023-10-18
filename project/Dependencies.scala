@@ -123,6 +123,8 @@ object Dependencies {
   lazy val mockito_scala = "org.mockito" %% "mockito-scala" % "1.16.3"
   lazy val scalatestMockito = "org.scalatestplus" %% "mockito-3-4" % (scalatest_version + ".0")
 
+  lazy val checkerFramework = "org.checkerframework" % "checker-qual" % "3.28.0"
+
   // TODO(#10852) Gerolf says that there is little value behind the scala wrapper. so let's drop it
   //              and use caffeine directly
   lazy val scaffeine = "com.github.blemale" %% "scaffeine" % "5.2.1"

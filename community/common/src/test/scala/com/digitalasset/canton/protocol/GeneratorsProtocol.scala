@@ -99,6 +99,11 @@ object GeneratorsProtocol {
       DynamicDomainParameters.defaultMaxRequestSizeUntil,
     )
 
+    trafficControlConfig <- defaultValueArb(
+      representativePV,
+      DynamicDomainParameters.defaultTrafficControlParametersUntil,
+    )
+
     // Starting from pv=4, there is an additional constraint on the mediatorDeduplicationTimeout
     updatedMediatorDeduplicationTimeout =
       if (representativePV.representative > ProtocolVersion.v3)
@@ -121,6 +126,7 @@ object GeneratorsProtocol {
       maxRatePerParticipant,
       maxRequestSize,
       sequencerAggregateSubmissionTimeout,
+      trafficControlConfig,
     )(representativePV)
 
   } yield dynamicDomainParameters)

@@ -64,13 +64,7 @@ class MemoryCheckSpec extends AnyFlatSpec with BaseTest {
     ) shouldBe Some(expected)
   }
 
-  object MemoryCheckSpecSuppressionRule extends SuppressionRule {
-    private val logLevel = Level.ERROR
-    private val className = classOf[MemoryCheckSpec].getName
-
-    override def isSuppressed(loggerName: String, eventLevel: Level): Boolean =
-      (loggerName contains className)
-        && eventLevel.toInt == logLevel.toInt
-  }
+  val MemoryCheckSpecSuppressionRule: SuppressionRule =
+    SuppressionRule.forLogger[MemoryCheckSpec] && SuppressionRule.Level(Level.ERROR)
 
 }

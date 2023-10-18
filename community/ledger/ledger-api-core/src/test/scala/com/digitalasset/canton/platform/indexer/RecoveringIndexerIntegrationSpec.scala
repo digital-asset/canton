@@ -87,12 +87,8 @@ class RecoveringIndexerIntegrationSpec
     testId = UUID.randomUUID()
   }
 
-  object RecoveringIndexerSuppressionRule extends SuppressionRule {
-    override def isSuppressed(loggerName: String, _eventLevel: Level): Boolean =
-      loggerName.contains(
-        s"${classOf[RecoveringIndexer].getSimpleName}:"
-      )
-  }
+  val RecoveringIndexerSuppressionRule: SuppressionRule =
+    SuppressionRule.LoggerNameContains(s"${classOf[RecoveringIndexer].getSimpleName}:")
 
   private def assertLogsInOrder(expected: Seq[(Level, String)]): Assertion = {
     loggerFactory.fetchRecordedLogEntries
@@ -357,7 +353,6 @@ object RecoveringIndexerIntegrationSpec {
         })
         .map { case (queue, source) =>
           val readWriteService = new PartyOnlyQueueWriteService(
-            ledgerId,
             participantId,
             queue,
             source,
@@ -398,7 +393,6 @@ object RecoveringIndexerIntegrationSpec {
   }
 
   class PartyOnlyQueueWriteService(
-      ledgerId: String,
       participantId: Ref.ParticipantId,
       queue: BoundedSourceQueue[(Offset, Traced[Update])],
       source: Source[(Offset, Traced[Update]), NotUsed],

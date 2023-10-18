@@ -6,15 +6,19 @@ package com.digitalasset.canton.lifecycle
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.NoTracing
+import org.scalatest.concurrent.Eventually
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.*
 
-class TestResource extends FlagCloseable with NamedLogging {
+import java.util.concurrent.ConcurrentHashMap
+import scala.jdk.CollectionConverters.*
+
+class TestResource() extends FlagCloseable with NamedLogging {
   override protected val timeouts: ProcessingTimeout = ProcessingTimeout()
   override val loggerFactory = NamedLoggerFactory.root
 }
 
-class FlagCloseableTest extends AnyWordSpec with Matchers with NoTracing {
+class FlagCloseableTest extends AnyWordSpec with Matchers with NoTracing with Eventually {
   "FlagCloseable" should {
     "run shutdown tasks in order they were added" in {
 
@@ -40,6 +44,37 @@ class FlagCloseableTest extends AnyWordSpec with Matchers with NoTracing {
       closeable.close()
 
       shutdownTasks shouldBe Seq("first", "second")
+    }
+
+    "behave correctly if races occur during shutdown" in {
+      val shutdownTasks = new ConcurrentHashMap[Int, Unit]()
+      val closeable = new TestResource()
+      val total = 100
+
+      // Start by adding some shutdown tasks
+      (0 to total / 2).foreach { i =>
+        closeable.runOnShutdown_(new ConcurrentRunOnShutdownHelperClass(shutdownTasks, i))
+      }
+
+      // Then add another chunk each in it's own thread, and after a few close the closeable
+      val threads = (total / 2 + 1 to total).map { i =>
+        val t = new Thread(() => {
+          closeable.runOnShutdown_(new ConcurrentRunOnShutdownHelperClass(shutdownTasks, i))
+        })
+        t.start()
+
+        // Halfway through close the closeable
+        if (i == (total * 0.75).toInt) closeable.close()
+
+        t
+      }
+
+      eventually {
+        // We should run all the tasks once and only once
+        shutdownTasks.keySet().asScala should contain theSameElementsAs (0 to total)
+      }
+      // Make sure all threads complete
+      threads.foreach(_.join())
     }
 
     "allow to cancel shutdown tasks" in {
@@ -75,6 +110,17 @@ class FlagCloseableTest extends AnyWordSpec with Matchers with NoTracing {
       closeable.close()
 
       shutdownTasks shouldBe Seq("first", "third")
+    }
+  }
+
+  private class ConcurrentRunOnShutdownHelperClass(
+      shutdownTasks: ConcurrentHashMap[Int, Unit],
+      i: Int,
+  ) extends RunOnShutdown {
+    override val name = i.toString
+    override val done = shutdownTasks.contains(i)
+    override def run() = {
+      shutdownTasks.put(i, ())
     }
   }
 }

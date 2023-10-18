@@ -210,9 +210,9 @@ abstract class CantonNodeBootstrapCommon[
   protected def mkNodeHealthService(storage: Storage): HealthService
   protected def mkHealthComponents(
       nodeHealthService: HealthService
-  ): (GrpcHealthReporter, Option[GrpcHealthServer]) = {
+  ): (GrpcHealthReporter, Option[GrpcHealthServer], HealthService) = {
     // Service that will always return `SERVING`. Useful to be targeted by k8s liveness probes.
-    val livenessService = HealthService("liveness")
+    val livenessService = HealthService("liveness", logger, timeouts)
     val healthReporter: GrpcHealthReporter = new GrpcHealthReporter(loggerFactory)
     val grpcNodeHealthManager =
       ServiceHealthStatusManager(
@@ -237,7 +237,7 @@ abstract class CantonNodeBootstrapCommon[
         grpcNodeHealthManager.manager,
       )
     }
-    (healthReporter, grpcHealthServer)
+    (healthReporter, grpcHealthServer, livenessService)
   }
 
 }

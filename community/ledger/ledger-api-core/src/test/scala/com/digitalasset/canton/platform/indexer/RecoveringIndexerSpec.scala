@@ -52,12 +52,8 @@ final class RecoveringIndexerSpec
     super.afterEach()
   }
 
-  object RecoveringIndexerSuppressionRule extends SuppressionRule {
-    override def isSuppressed(loggerName: String, _eventLevel: Level): Boolean =
-      loggerName.contains(
-        s"${classOf[RecoveringIndexer].getSimpleName}:"
-      )
-  }
+  val RecoveringIndexerSuppressionRule: SuppressionRule =
+    SuppressionRule.forLogger[RecoveringIndexer] && !SuppressionRule.forLogger[TestIndexer]
 
   "RecoveringIndexer" should {
     "work when the stream completes" in {

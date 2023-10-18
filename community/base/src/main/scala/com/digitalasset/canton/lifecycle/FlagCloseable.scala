@@ -105,15 +105,14 @@ trait FlagCloseable extends AutoCloseable {
   def cancelShutdownTask(token: Long): Unit = onShutdownTasks.remove(token).discard
 
   private def runOnShutdownTasks()(implicit traceContext: TraceContext): Unit = {
-    onShutdownTasks.values.toList.foreach { task =>
-      if (!task.done) {
-        Try { task.run() }.fold(
-          t => logger.warn(s"Task ${task.name} failed on shutdown!", t),
-          Predef.identity,
-        )
-      }
+    onShutdownTasks.toList.foreach { case (token, task) =>
+      Try {
+        onShutdownTasks
+          .remove(token)
+          .filterNot(_.done)
+          .foreach(_.run())
+      }.failed.foreach(t => logger.warn(s"Task ${task.name} failed on shutdown!", t))
     }
-    onShutdownTasks.clear()
   }
 
   /** Check whether we're closing.

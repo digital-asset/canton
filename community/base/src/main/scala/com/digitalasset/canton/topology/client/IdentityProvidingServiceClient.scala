@@ -19,6 +19,7 @@ import com.digitalasset.canton.protocol.{
   DynamicDomainParameters,
   DynamicDomainParametersWithValidity,
 }
+import com.digitalasset.canton.sequencing.TrafficControlParameters
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.{
@@ -461,6 +462,13 @@ trait VettedPackagesSnapshotClient {
 
 trait DomainGovernanceSnapshotClient {
   this: BaseTopologySnapshotClient with NamedLogging =>
+
+  def trafficControlParameters[A](
+      protocolVersion: ProtocolVersion
+  )(implicit tc: TraceContext): Future[Option[TrafficControlParameters]] = {
+    findDynamicDomainParametersOrDefault(protocolVersion)
+      .map(_.trafficControlParameters)
+  }
 
   def findDynamicDomainParametersOrDefault(
       protocolVersion: ProtocolVersion,

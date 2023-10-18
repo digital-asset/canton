@@ -26,6 +26,12 @@ object GeneratorsTime {
     )
   )
 
+  implicit val positiveFiniteDurationArb: Arbitrary[PositiveFiniteDuration] = Arbitrary(
+    nonNegativeLongArb.arbitrary.map(i =>
+      PositiveFiniteDuration.create(Duration.ofNanos(i.unwrap)).value
+    )
+  )
+
   implicit val positiveSecondsArb: Arbitrary[PositiveSeconds] = Arbitrary(
     positiveLongArb.arbitrary.map(i => PositiveSeconds.tryOfSeconds(i.unwrap))
   )

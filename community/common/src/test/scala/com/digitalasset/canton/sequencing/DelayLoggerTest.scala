@@ -7,6 +7,7 @@ import com.daml.metrics.api.noop.NoOpGauge
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.logging.SuppressionRule.FullSuppression
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
@@ -19,10 +20,10 @@ class DelayLoggerTest extends AnyWordSpec with BaseTest {
     val delayLogger =
       new DelayLogger(clock, logger, NonNegativeFiniteDuration.tryOfSeconds(1), gauge)
 
-    def probe(delayMs: Long, assertion: Seq[LogEntry] => Assertion) = {
+    def probe(delayMs: Long, assertion: Seq[LogEntry] => Assertion): Unit = {
       val event = mock[PossiblyIgnoredProtocolEvent]
       when(event.timestamp).thenReturn(clock.now.minusMillis(delayMs))
-      loggerFactory.assertLogsSeq((_, _) => true)(
+      loggerFactory.assertLogsSeq(FullSuppression)(
         delayLogger.checkForDelay(event),
         assertion,
       )

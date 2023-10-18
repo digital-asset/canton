@@ -16,7 +16,11 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata}
-import com.digitalasset.canton.health.{ComponentHealthState, HealthComponent}
+import com.digitalasset.canton.health.{
+  AtomicHealthComponent,
+  CloseableHealthComponent,
+  ComponentHealthState,
+}
 import com.digitalasset.canton.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -134,7 +138,8 @@ class SyncDomain(
     extends NamedLogging
     with StartAndCloseable[Either[SyncDomainInitializationError, Unit]]
     with TransferSubmissionHandle
-    with HealthComponent
+    with CloseableHealthComponent
+    with AtomicHealthComponent
     with HasCloseContext {
 
   val topologyClient: DomainTopologyClientWithInit = domainHandle.topologyClient
@@ -142,8 +147,8 @@ class SyncDomain(
   override protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
 
   override val name: String = SyncDomain.healthName
-  override val initialHealthState: ComponentHealthState = ComponentHealthState.NotInitializedState
-  override val closingState: ComponentHealthState =
+  override def initialHealthState: ComponentHealthState = ComponentHealthState.NotInitializedState
+  override def closingState: ComponentHealthState =
     ComponentHealthState.failed("Disconnected from domain")
 
   private[canton] val sequencerClient = domainHandle.sequencerClient

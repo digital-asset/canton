@@ -17,6 +17,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   SequencerWriteError,
 }
 import com.digitalasset.canton.domain.sequencing.sequencer.traffic.SequencerTrafficStatus
+import com.digitalasset.canton.health.HealthListener
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.resource.Storage
@@ -219,9 +220,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
     "onHealthChange should register listener and immediately call it with current status" in {
       val sequencer = new StubSequencer(Set())
       var status = SequencerHealthStatus(false)
-      sequencer.registerOnHealthChange { (_listener, newHealth, _tc) =>
-        status = newHealth
-      }
+      sequencer.registerOnHealthChange(HealthListener("") { status = sequencer.getState })
 
       status shouldBe SequencerHealthStatus(true)
     }
@@ -229,9 +228,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
     "health status change should trigger registered health listener" in {
       val sequencer = new StubSequencer(Set())
       var status = SequencerHealthStatus(true)
-      sequencer.registerOnHealthChange { (_listener, newHealth, _tc) =>
-        status = newHealth
-      }
+      sequencer.registerOnHealthChange(HealthListener("") { status = sequencer.getState })
 
       val badHealth = SequencerHealthStatus(false, Some("something bad happened"))
       sequencer.reportHealthState(badHealth)

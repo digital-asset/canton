@@ -7,7 +7,6 @@ import akka.actor.ActorSystem
 import cats.data.EitherT
 import cats.syntax.parallel.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.admin.v0.{
@@ -36,6 +35,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
 import com.digitalasset.canton.domain.sequencing.service.*
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.domain.service.grpc.GrpcDomainService
+import com.digitalasset.canton.health.HealthListener
 import com.digitalasset.canton.health.admin.data.{SequencerHealthStatus, TopologyQueueStatus}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
@@ -48,6 +48,7 @@ import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.store.TopologyStateForInitializationService
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.{DiscardOps, config}
 import io.grpc.{ServerInterceptors, ServerServiceDefinition}
 
 import scala.annotation.nowarn
@@ -178,16 +179,23 @@ class SequencerRuntime(
     loggerFactory,
   )
 
-  sequencer.registerOnHealthChange { (_, status, traceContext) =>
-    if (!status.isActive && !isClosing) {
-      logger.warn(
-        s"Sequencer is unhealthy, so disconnecting all members. ${status.details.getOrElse("")}"
-      )(traceContext)
-      sequencerService.disconnectAllMembers()(traceContext)
-    } else {
-      logger.info(s"Sequencer is healthy")(traceContext)
-    }
-  }
+  sequencer
+    .registerOnHealthChange(new HealthListener {
+      override def name: String = "SequencerRuntime"
+
+      override def poke()(implicit traceContext: TraceContext): Unit = {
+        val status = sequencer.getState
+        if (!status.isActive && !isClosing) {
+          logger.warn(
+            s"Sequencer is unhealthy, so disconnecting all members. ${status.details.getOrElse("")}"
+          )
+          sequencerService.disconnectAllMembers()
+        } else {
+          logger.info(s"Sequencer is healthy")
+        }
+      }
+    })
+    .discard[Boolean]
 
   private val sequencerAdministrationService =
     new GrpcSequencerAdministrationService(sequencer, loggerFactory)

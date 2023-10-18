@@ -7,8 +7,12 @@ import cats.Eval
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.health.{ComponentHealthState, HealthComponent}
-import com.digitalasset.canton.lifecycle.{AsyncCloseable, CloseContext, FlagCloseable, Lifecycle}
+import com.digitalasset.canton.health.{
+  AtomicHealthComponent,
+  CloseableHealthComponent,
+  ComponentHealthState,
+}
+import com.digitalasset.canton.lifecycle.{AsyncCloseable, CloseContext, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
@@ -58,13 +62,13 @@ class SyncDomainEphemeralState(
     futureSupervisor: FutureSupervisor,
 )(implicit executionContext: ExecutionContext, closeContext: CloseContext)
     extends SyncDomainEphemeralStateLookup
-    with FlagCloseable
     with NamedLogging
-    with HealthComponent {
+    with CloseableHealthComponent
+    with AtomicHealthComponent {
 
   override val name: String = SyncDomainEphemeralState.healthName
-  override val initialHealthState: ComponentHealthState = ComponentHealthState.NotInitializedState
-  override val closingState: ComponentHealthState =
+  override def initialHealthState: ComponentHealthState = ComponentHealthState.NotInitializedState
+  override def closingState: ComponentHealthState =
     ComponentHealthState.failed("Disconnected from domain")
 
   // Key is the root hash of the transfer tree
@@ -158,10 +162,8 @@ class SyncDomainEphemeralState(
       loggerFactory,
     )
 
-  def markAsRecovered()(implicit tc: TraceContext): Unit = {
-    if (!resolveUnhealthy)
-      throw new IllegalStateException("SyncDomainState has already been marked as recovered.")
-  }
+  def markAsRecovered()(implicit tc: TraceContext): Unit =
+    resolveUnhealthy()
 
   override def onClosed(): Unit = {
     import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty.*
