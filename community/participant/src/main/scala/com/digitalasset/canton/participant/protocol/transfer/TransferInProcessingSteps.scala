@@ -16,7 +16,7 @@ import com.digitalasset.canton.data.*
 import com.digitalasset.canton.ledger.participant.state.v2.CompletionInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.RichRequestCounter
+import com.digitalasset.canton.participant.RequestOffset
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.PendingRequestData
 import com.digitalasset.canton.participant.protocol.conflictdetection.{
   ActivenessCheck,
@@ -44,6 +44,7 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.DefaultDeserializationError
+import com.digitalasset.canton.store.SessionKeyStore
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
@@ -195,9 +196,13 @@ private[transfer] class TransferInProcessingSteps(
           .ofSet(recipientsSet)
           .toRight(NoStakeholders.logAndCreate(transferData.contract.contractId, logger))
       )
-
       viewMessage <- EncryptedViewMessageFactory
-        .create(TransferInViewType)(fullTree, recentSnapshot, targetProtocolVersion.v)
+        .create(TransferInViewType)(
+          fullTree,
+          recentSnapshot,
+          ephemeralState.sessionKeyStoreLookup,
+          targetProtocolVersion.v,
+        )
         .leftMap[TransferProcessorError](EncryptionError(transferData.contract.contractId, _))
     } yield {
       val rootHashMessage =
@@ -249,16 +254,20 @@ private[transfer] class TransferInProcessingSteps(
   ): SubmissionResult =
     SubmissionResult(pendingSubmission.transferCompletion.future)
 
-  override protected def decryptTree(snapshot: DomainSnapshotSyncCryptoApi)(
+  override protected def decryptTree(
+      snapshot: DomainSnapshotSyncCryptoApi,
+      sessionKeyStore: SessionKeyStore,
+  )(
       envelope: OpenEnvelope[EncryptedViewMessage[TransferInViewType]]
   )(implicit
       tc: TraceContext
-  ): EitherT[Future, EncryptedViewMessageError[TransferInViewType], WithRecipients[
+  ): EitherT[Future, EncryptedViewMessageError, WithRecipients[
     FullTransferInTree
   ]] =
     EncryptedViewMessage
       .decryptFor(
         snapshot,
+        sessionKeyStore,
         envelope.protocolMessage,
         participantId,
         targetProtocolVersion.v,
@@ -539,7 +548,11 @@ private[transfer] class TransferInProcessingSteps(
             hostedStakeholders.toList,
           )
           timestampEvent = Some(
-            TimestampedEvent(event, requestCounter.asLocalOffset, Some(requestSequencerCounter))
+            TimestampedEvent(
+              event,
+              RequestOffset(requestId.unwrap, requestCounter),
+              Some(requestSequencerCounter),
+            )
           )
         } yield CommitAndStoreContractsAndPublishEvent(
           commitSetO,

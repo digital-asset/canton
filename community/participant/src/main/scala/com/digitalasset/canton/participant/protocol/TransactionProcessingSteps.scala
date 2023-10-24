@@ -26,7 +26,7 @@ import com.digitalasset.canton.ledger.participant.state.v2.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.*
-import com.digitalasset.canton.participant.RichRequestCounter
+import com.digitalasset.canton.participant.RequestOffset
 import com.digitalasset.canton.participant.metrics.TransactionProcessingMetrics
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
   MalformedPayload,
@@ -48,6 +48,7 @@ import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissio
   UnknownDomain,
 }
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
+  ContractLookupError,
   SerializableContractOfId,
   UnknownPackageError,
 }
@@ -73,6 +74,7 @@ import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.DefaultDeserializationError
+import com.digitalasset.canton.store.SessionKeyStore
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, MediatorRef, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -186,7 +188,6 @@ class TransactionProcessingSteps(
       mediator,
       recentSnapshot,
       ephemeralState.contractLookup,
-      ephemeralState.observedTimestampLookup,
       disclosedContracts,
     )
 
@@ -224,7 +225,6 @@ class TransactionProcessingSteps(
       mediator: MediatorRef,
       recentSnapshot: DomainSnapshotSyncCryptoApi,
       contractLookup: ContractLookup,
-      watermarkLookup: WatermarkLookup[CantonTimestamp],
       disclosedContracts: Map[LfContractId, SerializableContract],
   )(implicit traceContext: TraceContext)
       extends TrackedSubmission {
@@ -238,7 +238,7 @@ class TransactionProcessingSteps(
 
     override def commandDeduplicationFailure(
         failure: DeduplicationFailed
-    ): UnsequencedSubmission = {
+    ): TransactionSubmissionTrackingData = {
       // If the deduplication period is not supported, we report the empty deduplication period to be on the safe side
       // Ideally, we'd report the offset that is being assigned to the completion event,
       // but that is not supported in our current architecture as the MultiDomainEventLog assigns the global offset
@@ -280,13 +280,12 @@ class TransactionProcessingSteps(
             error
           ) -> emptyDeduplicationPeriod
       }
-      val tracking = TransactionSubmissionTrackingData(
+      TransactionSubmissionTrackingData(
         submitterInfo.toCompletionInfo().copy(optDeduplicationPeriod = dedupInfo.some),
         TransactionSubmissionTrackingData.CauseWithTemplate(error),
         Some(domainId),
         protocolVersion,
       )
-      UnsequencedSubmission(timestampForUpdate(), tracking)
     }
 
     override def submissionId: Option[LedgerSubmissionId] = submitterInfo.submissionId
@@ -302,7 +301,8 @@ class TransactionProcessingSteps(
     override def prepareBatch(
         actualDeduplicationOffset: DeduplicationPeriod.DeduplicationOffset,
         maxSequencingTime: CantonTimestamp,
-    ): EitherT[Future, UnsequencedSubmission, PreparedBatch] = {
+        sessionKeyStore: SessionKeyStore,
+    ): EitherT[Future, SubmissionTrackingData, PreparedBatch] = {
       logger.debug("Preparing batch for transaction submission")
       val submitterInfoWithDedupPeriod =
         submitterInfo.copy(deduplicationPeriod = actualDeduplicationOffset)
@@ -402,6 +402,7 @@ class TransactionProcessingSteps(
               keyResolver,
               mediator,
               recentSnapshot,
+              sessionKeyStore,
               lookupContractsWithDisclosed,
               None,
               maxSequencingTime,
@@ -411,6 +412,9 @@ class TransactionProcessingSteps(
               case TransactionTreeFactoryError(UnknownPackageError(unknownTo)) =>
                 TransactionSubmissionTrackingData
                   .CauseWithTemplate(SubmissionErrors.PackageNotVettedByRecipients.Error(unknownTo))
+              case TransactionTreeFactoryError(ContractLookupError(contractId, _)) =>
+                TransactionSubmissionTrackingData
+                  .CauseWithTemplate(SubmissionErrors.UnknownContractDomain.Error(contractId))
               case creationError =>
                 causeWithTemplate("Confirmation request creation failed", creationError)
             }
@@ -427,20 +431,19 @@ class TransactionProcessingSteps(
           batch,
           rootHash,
           submitterInfoWithDedupPeriod.toCompletionInfo(),
-          watermarkLookup,
         ): PreparedBatch
       }
 
       def mkError(
           rejectionCause: TransactionSubmissionTrackingData.RejectionCause
-      ): Success[Either[UnsequencedSubmission, PreparedBatch]] = {
+      ): Success[Either[SubmissionTrackingData, PreparedBatch]] = {
         val trackingData = TransactionSubmissionTrackingData(
           submitterInfoWithDedupPeriod.toCompletionInfo(),
           rejectionCause,
           Some(domainId),
           protocolVersion,
         )
-        Success(Left(UnsequencedSubmission(timestampForUpdate(), trackingData)))
+        Success(Left(trackingData))
       }
 
       // Make sure that we don't throw an error
@@ -495,17 +498,12 @@ class TransactionProcessingSteps(
       TransactionProcessor.SubmissionErrors.SubmissionDuringShutdown.Rejection()
 
     override def onFailure: TransactionSubmitted = TransactionSubmitted
-
-    private def timestampForUpdate(): CantonTimestamp =
-      // Assign the currently observed domain timestamp so that the error will be published soon
-      watermarkLookup.highWatermark
   }
 
   private class PreparedTransactionBatch(
       override val batch: Batch[DefaultOpenEnvelope],
       override val rootHash: RootHash,
       completionInfo: CompletionInfo,
-      watermarkLookup: WatermarkLookup[CantonTimestamp],
   ) extends PreparedBatch {
     override def pendingSubmissionId: Unit = ()
 
@@ -516,9 +514,7 @@ class TransactionProcessingSteps(
 
     override def submissionErrorTrackingData(
         error: SubmissionSendError
-    )(implicit traceContext: TraceContext): UnsequencedSubmission = {
-      // Assign the currently observed domain timestamp so that the error will be published soon
-      val timestamp = watermarkLookup.highWatermark
+    )(implicit traceContext: TraceContext): TransactionSubmissionTrackingData = {
       val errorCode: TransactionError = error.sendError match {
         case SendAsyncClientError.RequestRefused(SendAsyncError.Overloaded(_)) =>
           TransactionProcessor.SubmissionErrors.DomainBackpressure.Rejection(error.toString)
@@ -526,14 +522,12 @@ class TransactionProcessingSteps(
           TransactionProcessor.SubmissionErrors.SequencerRequest.Error(otherSendError)
       }
       val rejectionCause = TransactionSubmissionTrackingData.CauseWithTemplate(errorCode)
-      val trackingData =
-        TransactionSubmissionTrackingData(
-          completionInfo,
-          rejectionCause,
-          Some(domainId),
-          protocolVersion,
-        )
-      UnsequencedSubmission(timestamp, trackingData)
+      TransactionSubmissionTrackingData(
+        completionInfo,
+        rejectionCause,
+        Some(domainId),
+        protocolVersion,
+      )
     }
   }
 
@@ -554,6 +548,7 @@ class TransactionProcessingSteps(
   override def decryptViews(
       batch: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[TransactionViewType]]]],
       snapshot: DomainSnapshotSyncCryptoApi,
+      sessionKeyStore: SessionKeyStore,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionProcessorError, DecryptedViews] =
@@ -570,14 +565,13 @@ class TransactionProcessingSteps(
           .fromByteString(pureCrypto)(bytes)
           .leftMap(err => DefaultDeserializationError(err.message))
 
-      type DecryptionError = EncryptedViewMessageError[TransactionViewType]
-
       def decryptTree(
           vt: TransactionViewMessage,
           optRandomness: Option[SecureRandomness],
-      ): EitherT[Future, DecryptionError, LightTransactionViewTree] =
+      ): EitherT[Future, EncryptedViewMessageError, LightTransactionViewTree] =
         EncryptedViewMessage.decryptFor(
           snapshot,
+          sessionKeyStore,
           vt,
           participantId,
           protocolVersion,
@@ -609,6 +603,7 @@ class TransactionProcessingSteps(
           val randomnessF = EncryptedViewMessage
             .decryptRandomness(
               snapshot,
+              sessionKeyStore,
               message,
               participantId,
             )
@@ -651,7 +646,7 @@ class TransactionProcessingSteps(
           randomness: SecureRandomness,
       )(
           subviewHashAndIndex: (ViewHash, ViewPosition.MerklePathElement)
-      ): Either[DecryptionError, Unit] = {
+      ): Either[EncryptedViewMessageError, Unit] = {
         val (subviewHash, index) = subviewHashAndIndex
         val info = HkdfInfo.subview(index)
         for {
@@ -682,7 +677,7 @@ class TransactionProcessingSteps(
       def decryptViewWithRandomness(
           viewMessage: TransactionViewMessage,
           randomness: SecureRandomness,
-      ): EitherT[Future, DecryptionError, (DecryptedView, Option[Signature])] =
+      ): EitherT[Future, EncryptedViewMessageError, (DecryptedView, Option[Signature])] =
         for {
           ltvt <- decryptTree(viewMessage, Some(randomness))
           _ <- EitherT.fromEither[Future](
@@ -697,7 +692,7 @@ class TransactionProcessingSteps(
       def decryptView(
           transactionViewEnvelope: OpenEnvelope[TransactionViewMessage]
       ): Future[
-        Either[DecryptionError, (WithRecipients[DecryptedView], Option[Signature])]
+        Either[EncryptedViewMessageError, (WithRecipients[DecryptedView], Option[Signature])]
       ] = {
         for {
           _ <- extractRandomnessFromView(transactionViewEnvelope)
@@ -1180,7 +1175,7 @@ class TransactionProcessingSteps(
             requestType,
             Some(domainId),
           ),
-          rc.asLocalOffset,
+          RequestOffset(ts, rc),
           Some(sc),
         )
     } -> None // Transaction processing doesn't use pending submissions
@@ -1240,7 +1235,7 @@ class TransactionProcessingSteps(
       TimestampedEvent(
         LedgerSyncEvent
           .CommandRejected(requestTime.toLf, info, rejection, requestType, Some(domainId)),
-        requestCounter.asLocalOffset,
+        RequestOffset(requestTime, requestCounter),
         Some(requestSequencerCounter),
       )
     )
@@ -1421,7 +1416,7 @@ class TransactionProcessingSteps(
 
       timestampedEvent = TimestampedEvent(
         acceptedEvent,
-        requestCounter.asLocalOffset,
+        RequestOffset(requestTime, requestCounter),
         Some(requestSequencerCounter),
       )
     } yield CommitAndStoreContractsAndPublishEvent(

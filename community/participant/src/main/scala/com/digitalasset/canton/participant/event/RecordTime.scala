@@ -7,10 +7,15 @@ import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.util.TimeOfChange
+import com.digitalasset.canton.topology.processing.EffectiveTime
 
 /** Canton-internal record time
   * @param timestamp ACS change timestamp
   * @param tieBreaker ordering tie-breaker for changes that have the same timestamp (currently, happens only with repair requests)
+  *
+  * Value of the `tieBreaker`:
+  * - Requests (regular as well as repair requests) use the request counter as `tieBreaker`.
+  * - Empty ACS changes (ticks, received ACS commitments, time proofs) use `Long.MinValue`
   */
 final case class RecordTime(timestamp: CantonTimestamp, tieBreaker: Long) extends PrettyPrinting {
   override lazy val pretty: Pretty[RecordTime] = prettyOfClass(
@@ -30,4 +35,7 @@ object RecordTime {
     Ordering.by(rt => (rt.timestamp -> rt.tieBreaker))
 
   def fromTimeOfChange(toc: TimeOfChange): RecordTime = RecordTime(toc.timestamp, toc.rc.unwrap)
+
+  def apply(timestamp: EffectiveTime, tieBreaker: Long): RecordTime =
+    RecordTime(timestamp.value, tieBreaker)
 }

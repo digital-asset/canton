@@ -110,7 +110,7 @@ trait HasProtocolVersionedWrapper[ValueClass <: HasRepresentativeProtocolVersion
   /** Will check that default value rules defined in `companionObj.defaultValues` hold.
     */
   def validateInstance(): Either[String, Unit] =
-    companionObj.invariants.traverse_(_.validateInstance(this, representativeProtocolVersion))
+    companionObj.validateInstance(this, representativeProtocolVersion)
 
   /** Yields the proto representation of the class inside an `UntypedVersionedMessage` wrapper.
     *
@@ -230,7 +230,7 @@ trait HasSupportedProtoVersions[ValueClass] {
   // Serializer: (ValueClass => Proto)
   type Serializer = ValueClass => ByteString
 
-  private type ThisRepresentativeProtocolVersion = RepresentativeProtocolVersion[this.type]
+  protected type ThisRepresentativeProtocolVersion = RepresentativeProtocolVersion[this.type]
 
   trait Invariant {
     def validateInstance(
@@ -341,7 +341,7 @@ trait HasSupportedProtoVersions[ValueClass] {
       Either.cond(
         v.isEmpty == pv < untilExclusive.representative,
         (),
-        s"expecting None if and only if $pv < ${untilExclusive.representative}; found: $v",
+        s"expecting None if and only if pv < ${untilExclusive.representative}; for $pv, found: $v",
       )
   }
 
@@ -513,14 +513,13 @@ trait HasSupportedProtoVersions[ValueClass] {
   ) {
     val (higherProtoVersion, higherConverter) = converters.head1
 
-    def converterFor(protocolVersion: ProtocolVersion): ProtoCodec = {
+    def converterFor(protocolVersion: ProtocolVersion): ProtoCodec =
       converters
         .collectFirst {
           case (_, converter) if protocolVersion >= converter.fromInclusive.representative =>
             converter
         }
         .getOrElse(higherConverter)
-    }
 
     def deserializerFor(protoVersion: ProtoVersion): Deserializer =
       converters.get(protoVersion).map(_.deserializer).getOrElse(higherConverter.deserializer)
@@ -643,6 +642,14 @@ trait HasProtocolVersionedWrapperCompanion[
 
   type OriginalByteString = ByteString // What is passed to the fromByteString method
   type DataByteString = ByteString // What is inside the parsed UntypedVersionedMessage message
+
+  /** Will check that default value rules defined in `companionObj.defaultValues` hold.
+    */
+  def validateInstance(
+      instance: ValueClass,
+      representativeProtocolVersion: ThisRepresentativeProtocolVersion,
+  ): Either[String, Unit] =
+    invariants.traverse_(_.validateInstance(instance, representativeProtocolVersion))
 
   protected def deserializeForVersion(
       rpv: RepresentativeProtocolVersion[this.type],

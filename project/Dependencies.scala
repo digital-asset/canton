@@ -43,7 +43,7 @@ object Dependencies {
   lazy val gcp_kms_version = "2.4.0"
   lazy val netty_version = "4.1.72.Final"
 
-  lazy val reflections = "org.reflections" % "reflections" % "0.9.12"
+  lazy val reflections = "org.reflections" % "reflections" % "0.10.2"
   lazy val pureconfig_core =
     "com.github.pureconfig" %% "pureconfig-core" % pureconfig_version exclude ("com.chuusai", s"shapeless_$scala_version_short")
   lazy val pureconfig_cats = "com.github.pureconfig" %% "pureconfig-cats" % pureconfig_version
