@@ -23,7 +23,6 @@ import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissio
 import com.digitalasset.canton.participant.protocol.submission.{
   ChangeIdHash,
   SubmissionTrackingData,
-  UnsequencedSubmission,
 }
 import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps.PendingTransferIn
 import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessingSteps.PendingTransferOut
@@ -38,6 +37,7 @@ import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.store.SessionKeyStore
 import com.digitalasset.canton.topology.MediatorRef
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
@@ -222,7 +222,7 @@ trait ProcessingSteps[
     def embedInFlightSubmissionTrackerError(error: InFlightSubmissionTrackerError): SubmissionError
 
     /** The submission tracking data to be used in case command deduplication failed */
-    def commandDeduplicationFailure(failure: DeduplicationFailed): UnsequencedSubmission
+    def commandDeduplicationFailure(failure: DeduplicationFailed): SubmissionTrackingData
 
     /** Phase 1, step 1a
       *
@@ -240,7 +240,8 @@ trait ProcessingSteps[
     def prepareBatch(
         actualDeduplicationOffset: DeduplicationPeriod.DeduplicationOffset,
         maxSequencingTime: CantonTimestamp,
-    ): EitherT[Future, UnsequencedSubmission, PreparedBatch]
+        sessionKeyStore: SessionKeyStore,
+    ): EitherT[Future, SubmissionTrackingData, PreparedBatch]
 
     /** Produce a `SubmissionError` to be returned by the [[com.digitalasset.canton.participant.protocol.ProtocolProcessor.submit]] method
       * to indicate that a shutdown has happened during in-flight registration.
@@ -274,7 +275,7 @@ trait ProcessingSteps[
       */
     def submissionErrorTrackingData(error: SubmissionSendError)(implicit
         traceContext: TraceContext
-    ): UnsequencedSubmission
+    ): SubmissionTrackingData
   }
 
   /** Phase 1, step 2:
@@ -317,6 +318,7 @@ trait ProcessingSteps[
   def decryptViews(
       batch: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[RequestViewType]]]],
       snapshot: DomainSnapshotSyncCryptoApi,
+      sessionKeyStore: SessionKeyStore,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, RequestError, DecryptedViews]
@@ -329,14 +331,14 @@ trait ProcessingSteps[
     */
   case class DecryptedViews(
       views: Seq[(WithRecipients[DecryptedView], Option[Signature])],
-      decryptionErrors: Seq[EncryptedViewMessageError[RequestViewType]],
+      decryptionErrors: Seq[EncryptedViewMessageError],
   )
 
   object DecryptedViews {
     def apply(
-        all: Seq[Either[EncryptedViewMessageError[
-          RequestViewType
-        ], (WithRecipients[DecryptedView], Option[Signature])]]
+        all: Seq[
+          Either[EncryptedViewMessageError, (WithRecipients[DecryptedView], Option[Signature])]
+        ]
     ): DecryptedViews = {
       val (errors, views) = all.separate
       DecryptedViews(views, errors)

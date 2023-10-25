@@ -38,6 +38,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
   InFlightSubmission,
   InFlightSubmissionTracker,
   SequencedSubmission,
+  SubmissionTrackingData,
   UnsequencedSubmission,
 }
 import com.digitalasset.canton.participant.protocol.validation.{
@@ -290,33 +291,50 @@ abstract class ProtocolProcessor[
       }
 
     def observeSubmissionError(
-        newUnsequencedSubmission: UnsequencedSubmission
+        newTrackingData: SubmissionTrackingData
     ): Future[SubmissionResult] = {
-      // cap the new timeout by the max sequencing time
-      // so that the timeout field can move only backwards
-      val newUnsequencedSubmissionWithCappedTimeout =
-        if (newUnsequencedSubmission.timeout > maxSequencingTime)
-          newUnsequencedSubmission.copy(timeout = maxSequencingTime)
-        else newUnsequencedSubmission
+      // Assign the currently observed domain timestamp so that the error will be published soon.
+      // Cap it by the max sequencing time so that the timeout field can move only backwards.
+      val timestamp = ephemeral.observedTimestampLookup.highWatermark min maxSequencingTime
+      val newUnsequencedSubmission = UnsequencedSubmission(timestamp, newTrackingData)
       for {
         _unit <- inFlightSubmissionTracker.observeSubmissionError(
           tracked.changeIdHash,
           domainId,
           messageId,
-          newUnsequencedSubmissionWithCappedTimeout,
+          newUnsequencedSubmission,
         )
+        // The new timestamp is the sequencing timestamp of the most recently received sequencer message.
+        // If this message has already been fully processed and triggered the timely rejections
+        // before we updated the UnsequencedSubmission,
+        // then the rejection will be emitted only upon the next sequencer message that triggers such a timely rejection.
+        // However, it may be an arbitrary long time until this happens.
+        // Therefore, we notify the in-flight submission tracker again
+        // if it had already been notified for the chosen timestamp or a later one.
+        // This should happen only if the domain is idle and no messages are in flight between time observation
+        // and notification of the in-flight submission tracker (via the clean sequencer counter tracking).
+        // Because the domain is idle, another DB access does not hurt much.
+        //
+        // There is no point in notifying the in-flight submission tracker if we did not change the timestamp,
+        // because the regular timely rejection mechanism has already emitted the command timeout
+        // or ongoing processing of the message that triggers the timeout will anyway pick up the old or the updated
+        // tracking data.
+        _ = if (maxSequencingTime > timestamp)
+          ephemeral.timelyRejectNotifier.notifyIfInPastAsync(timestamp)
       } yield tracked.onFailure
     }
 
     // After in-flight registration, Make sure that all errors get a chance to update the tracking data and
     // instead return a `SubmissionResult` so that the submission will be acknowledged over the ledger API.
-    def unlessError[A](eitherT: EitherT[FutureUnlessShutdown, UnsequencedSubmission, A])(
+    def unlessError[A](eitherT: EitherT[FutureUnlessShutdown, SubmissionTrackingData, A])(
         continuation: A => FutureUnlessShutdown[SubmissionResult]
     ): FutureUnlessShutdown[SubmissionResult] = {
       eitherT.value.transformWith {
         case Success(UnlessShutdown.Outcome(Right(a))) => continuation(a)
-        case Success(UnlessShutdown.Outcome(Left(newUnsequencedSubmission))) =>
-          FutureUnlessShutdown.outcomeF(observeSubmissionError(newUnsequencedSubmission))
+        case Success(UnlessShutdown.Outcome(Left(newTrackingData))) =>
+          FutureUnlessShutdown.outcomeF(
+            observeSubmissionError(newTrackingData)
+          )
         case Success(UnlessShutdown.AbortedDueToShutdown) =>
           logger.debug(s"Failed to process submission due to shutdown")
           FutureUnlessShutdown.pure(tracked.onFailure)
@@ -365,16 +383,28 @@ abstract class ProtocolProcessor[
           }
         }
 
-        unlessError {
+        // There's no point to attempt to send the submission to the sequencer
+        // if we've already observed the max sequencing time or something later
+        // Rather, we notify the timely rejection mechanism so that the timeout completion
+        // is emitted. This should only happen if the max sequencing time was observed
+        // after the high watermark check in the InFlightSubmissionTracker.
+        val maxSequencingTimeHasElapsed =
+          ephemeral.timelyRejectNotifier.notifyIfInPastAsync(maxSequencingTime)
+        if (maxSequencingTimeHasElapsed) {
+          FutureUnlessShutdown.pure(tracked.onFailure)
+        } else {
           val batchF = for {
-            batch <- tracked.prepareBatch(actualDeduplicationOffset, maxSequencingTime)
-            _ <- EitherT.right[UnsequencedSubmission](
+            batch <- tracked.prepareBatch(
+              actualDeduplicationOffset,
+              maxSequencingTime,
+              ephemeral.sessionKeyStore,
+            )
+            _ <- EitherT.right[SubmissionTrackingData](
               inFlightSubmissionTracker.updateRegistration(inFlightSubmission, batch.rootHash)
             )
           } yield batch
-
-          batchF.mapK(FutureUnlessShutdown.outcomeK)
-        }(sendBatch)
+          unlessError(batchF.mapK(FutureUnlessShutdown.outcomeK))(sendBatch)
+        }
     }
 
     registeredF.mapK(FutureUnlessShutdown.outcomeK).map(afterRegistration)
@@ -664,9 +694,8 @@ abstract class ProtocolProcessor[
         decisionTime <- EitherT.fromEither[FutureUnlessShutdown](
           steps.decisionTimeFor(domainParameters, ts)
         )
-
         decryptedViews <- steps
-          .decryptViews(viewMessages, snapshot)
+          .decryptViews(viewMessages, snapshot, ephemeral.sessionKeyStore)
           .mapK(FutureUnlessShutdown.outcomeK)
       } yield (snapshot, decisionTime, decryptedViews)
 
@@ -1503,7 +1532,7 @@ abstract class ProtocolProcessor[
         for {
           _unit <- {
             logger.info(
-              show"Finalizing ${steps.requestKind.unquoted} request at $requestId with event ${eventO}."
+              show"Finalizing ${steps.requestKind.unquoted} request at $requestId with event $eventO."
             )
             // Schedule publication of the event with the associated causality update.
             // Note that both fields are optional.
@@ -1876,7 +1905,7 @@ object ProtocolProcessor {
   sealed trait MalformedPayload extends Product with Serializable with PrettyPrinting
 
   final case class ViewMessageError[VT <: ViewType](
-      error: EncryptedViewMessageError[VT]
+      error: EncryptedViewMessageError
   ) extends MalformedPayload {
     override def pretty: Pretty[ViewMessageError.this.type] = prettyOfParam(_.error)
   }

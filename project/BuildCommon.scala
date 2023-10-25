@@ -403,7 +403,10 @@ object BuildCommon {
     unitTestTask,
     oracleUnitTestTask,
     ignoreScalacOptionsWithPathsInIncrementalCompilation,
-    ideExcludeDirectories := Seq(target.value),
+    ideExcludeDirectories := Seq(
+      target.value,
+      (ThisBuild / baseDirectory).value / "daml" / "canton",
+    ),
   )
 
   lazy val cantonWarts = Seq(
@@ -722,6 +725,7 @@ object BuildCommon {
           akka_slf4j, // not used at compile time, but required by com.digitalasset.canton.util.AkkaUtil.createActorSystem
           logback_classic,
           logback_core,
+          reflections % Test,
           scala_logging,
           scala_collection_contrib,
           scalatest % Test,
@@ -868,6 +872,7 @@ object BuildCommon {
             |com\.digitalasset\.canton\.participant\.protocol\.v0\..*
       """
         ),
+        Compile / damlEnableJavaCodegen := true,
         Compile / damlCodeGeneration := Seq(
           (
             (Compile / sourceDirectory).value / "daml",

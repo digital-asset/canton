@@ -10,7 +10,13 @@ import com.digitalasset.canton.crypto.DecryptionError.FailedToDecrypt
 import com.digitalasset.canton.crypto.SyncCryptoError.SyncCryptoDecryptionError
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, Hash, HashOps, Signature}
 import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndex
-import com.digitalasset.canton.data.{CantonTimestamp, Informee, ViewPosition, ViewTree, ViewType}
+import com.digitalasset.canton.data.{
+  CantonTimestamp,
+  Informee,
+  ViewPosition,
+  ViewTree,
+  ViewTypeTest,
+}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
@@ -52,6 +58,7 @@ import com.digitalasset.canton.protocol.{
   v0,
 }
 import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.store.SessionKeyStore
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
   DomainId,
@@ -180,6 +187,7 @@ class TestProcessingSteps(
   override def decryptViews(
       batch: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[TestViewType]]]],
       snapshot: DomainSnapshotSyncCryptoApi,
+      sessionKeyStore: SessionKeyStore,
   )(implicit traceContext: TraceContext): EitherT[Future, TestProcessingError, DecryptedViews] = {
     def treeFor(viewHash: ViewHash, hash: Hash): TestViewTree = {
       val rootHash = RootHash(hash)
@@ -329,7 +337,7 @@ object TestProcessingSteps {
       throw new UnsupportedOperationException("TestViewTree cannot be serialized")
   }
 
-  case object TestViewType extends ViewType {
+  case object TestViewType extends ViewTypeTest {
     override type View = TestViewTree
     override type FullView = TestViewTree
 

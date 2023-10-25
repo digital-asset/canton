@@ -22,7 +22,7 @@ import com.digitalasset.canton.ledger.participant.state.v2.CompletionInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
-import com.digitalasset.canton.participant.RichRequestCounter
+import com.digitalasset.canton.participant.RequestOffset
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.WrapsProcessorError
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
   MalformedPayload,
@@ -50,6 +50,7 @@ import com.digitalasset.canton.protocol.messages.Verdict.{
 }
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, WithRecipients}
+import com.digitalasset.canton.store.SessionKeyStore
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantAttributes
 import com.digitalasset.canton.topology.{DomainId, MediatorRef, ParticipantId}
@@ -161,22 +162,28 @@ trait TransferProcessingSteps[
     )
   }
 
-  protected def decryptTree(snapshot: DomainSnapshotSyncCryptoApi)(
+  protected def decryptTree(
+      snapshot: DomainSnapshotSyncCryptoApi,
+      sessionKeyStore: SessionKeyStore,
+  )(
       envelope: OpenEnvelope[EncryptedViewMessage[RequestViewType]]
   )(implicit
       tc: TraceContext
-  ): EitherT[Future, EncryptedViewMessageError[RequestViewType], WithRecipients[
+  ): EitherT[Future, EncryptedViewMessageError, WithRecipients[
     DecryptedView
   ]]
 
   override def decryptViews(
       batch: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[RequestViewType]]]],
       snapshot: DomainSnapshotSyncCryptoApi,
+      sessionKeyStore: SessionKeyStore,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, DecryptedViews] = {
     val result = for {
-      decryptedEitherList <- batch.toNEF.parTraverse(decryptTree(snapshot)(_).value)
+      decryptedEitherList <- batch.toNEF.parTraverse(
+        decryptTree(snapshot, sessionKeyStore)(_).value
+      )
     } yield DecryptedViews(
       decryptedEitherList.map(_.map(decryptedView => (decryptedView, None)))
     )
@@ -249,7 +256,7 @@ trait TransferProcessingSteps[
       TimestampedEvent(
         LedgerSyncEvent
           .CommandRejected(ts.toLf, completionInfo, rejection, requestType, Some(domainId.unwrap)),
-        rc.asLocalOffset,
+        RequestOffset(ts, rc),
         Some(sc),
       )
     )
@@ -289,7 +296,7 @@ trait TransferProcessingSteps[
             requestType,
             Some(domainId.unwrap),
           ),
-        pendingTransfer.requestCounter.asLocalOffset,
+        RequestOffset(pendingTransfer.requestId.unwrap, pendingTransfer.requestCounter),
         Some(pendingTransfer.requestSequencerCounter),
       )
     )
@@ -493,7 +500,7 @@ object TransferProcessingSteps {
 
   final case class DecryptionError[VT <: ViewType](
       transferId: TransferId,
-      error: EncryptedViewMessageError[VT],
+      error: EncryptedViewMessageError,
   ) extends TransferProcessorError {
     override def message: String = s"Cannot transfer `$transferId`: decryption error"
   }

@@ -91,6 +91,7 @@ object DamlPlugin extends AutoPlugin {
               (if (enableJavaCodegen) Seq((Codegen.Java, javaOutputDirectory)) else Seq.empty)
 
           IO.delete(scalaOutputDirectory)
+          if (enableJavaCodegen) IO.delete(javaOutputDirectory) else ()
 
           settings.flatMap { case (damlProjectDirectory, darFile, packageName) =>
             codegens
