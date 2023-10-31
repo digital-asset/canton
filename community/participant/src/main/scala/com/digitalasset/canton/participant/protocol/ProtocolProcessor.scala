@@ -18,11 +18,7 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.data.{CantonTimestamp, ViewPosition, ViewTree, ViewType}
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
-import com.digitalasset.canton.lifecycle.{
-  FutureUnlessShutdown,
-  PromiseUnlessShutdown,
-  UnlessShutdown,
-}
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.protocol.Phase37Synchronizer.RequestOutcome
@@ -46,7 +42,7 @@ import com.digitalasset.canton.participant.protocol.validation.{
   RecipientsValidator,
 }
 import com.digitalasset.canton.participant.store
-import com.digitalasset.canton.participant.store.{StoredContract, SyncDomainEphemeralState}
+import com.digitalasset.canton.participant.store.SyncDomainEphemeralState
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.protocol.*
@@ -63,6 +59,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.{condUnitET, ifThenET}
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, LfPartyId, RequestCounter, SequencerCounter, checked}
@@ -450,7 +447,7 @@ abstract class ProtocolProcessor[
       )
 
       // use the send callback and a promise to capture the eventual sequenced event read by the submitter
-      sendResultP = new PromiseUnlessShutdown[SendResult](
+      sendResultP = mkPromise[SendResult](
         "sequenced-event-send-result",
         futureSupervisor,
       )
@@ -616,7 +613,14 @@ abstract class ProtocolProcessor[
               .registerRequest(steps.requestType)(RequestId(ts))
           )
           .map { handleRequestData =>
+            // If the result is not a success, we still need to complete the request data in some way
             performRequestProcessing(ts, rc, sc, handleRequestData, batch, freshOwnTimelyTxF)
+              .thereafter {
+                case Failure(exception) => handleRequestData.failed(exception)
+                case Success(UnlessShutdown.Outcome(Left(_))) => handleRequestData.complete(None)
+                case Success(UnlessShutdown.AbortedDueToShutdown) => handleRequestData.shutdown()
+                case _ =>
+              }
           }
       }
       toHandlerRequest(ts, processedET)
@@ -934,7 +938,6 @@ abstract class ProtocolProcessor[
 
     val steps.CheckActivenessAndWritePendingContracts(
       activenessSet,
-      pendingContracts,
       pendingDataAndResponseArgs,
     ) = contractsAndContinue
 
@@ -950,23 +953,9 @@ abstract class ProtocolProcessor[
         .authenticateInputContracts(pendingDataAndResponseArgs)
         .mapK(FutureUnlessShutdown.outcomeK)
 
-      conflictingContracts <- EitherT.right(
-        FutureUnlessShutdown.outcomeF(
-          ephemeral.storedContractManager.addPendingContracts(rc, pendingContracts)
-        )
-      )
-      // TODO(i12908): This check may evaluate differently during a replay. Should not cause a hard failure
-      //  E.g., if the contract has been written to the store in between with different contract data or metadata.
-      _ <- condUnitET[FutureUnlessShutdown](
-        conflictingContracts.isEmpty,
-        steps.embedRequestError(ConflictingContractData(conflictingContracts, pendingContracts)),
-      )
-
-      pendingContractIds = pendingContracts.map(_.unwrap.contractId).toSet
-
       pendingDataAndResponsesAndTimeoutEvent <-
         if (isCleanReplay(rc)) {
-          val pendingData = CleanReplayData(rc, sc, pendingContractIds, mediator)
+          val pendingData = CleanReplayData(rc, sc, mediator)
           val responses = Seq.empty[(MediatorResponse, Recipients)]
           val timeoutEvent = Either.right(Option.empty[TimestampedEvent])
           EitherT.pure[FutureUnlessShutdown, steps.RequestError](
@@ -981,7 +970,7 @@ abstract class ProtocolProcessor[
             pendingDataAndResponses <- steps.constructPendingDataAndResponse(
               pendingDataAndResponseArgs,
               ephemeral.transferCache,
-              ephemeral.storedContractManager,
+              ephemeral.contractStore,
               requestFuturesF.flatMap(_.activenessResult),
               pendingCursor,
               mediator,
@@ -996,13 +985,11 @@ abstract class ProtocolProcessor[
             PendingRequestData(
               pendingRequestCounter,
               pendingSequencerCounter,
-              pendingContractIds2,
               _,
             ) = pendingData
             _ = if (
               pendingRequestCounter != rc
               || pendingSequencerCounter != sc
-              || pendingContractIds2 != pendingContractIds
             )
               throw new RuntimeException("Pending result data inconsistent with request")
 
@@ -1040,12 +1027,11 @@ abstract class ProtocolProcessor[
             requestId,
             rc,
             sc,
-            pendingData.pendingContracts,
             decisionTime,
             timeoutEvent(),
           )
         )
-      _ = EitherTUtil.doNotAwait(timeoutET, "Handling timeout failed")
+      _ = EitherTUtil.doNotAwaitUS(timeoutET, "Handling timeout failed")
 
       signedResponsesTo <- EitherT.right(responsesTo.parTraverse { case (response, recipients) =>
         FutureUnlessShutdown.outcomeF(
@@ -1421,7 +1407,7 @@ abstract class ProtocolProcessor[
               ephemeral.requestTracker.tick(sc, resultTs)
               Left(steps.embedResultError(InvalidPendingRequest(requestId)))
           }
-      ).mapK(FutureUnlessShutdown.outcomeK).flatMap { pendingRequestDataOrReplayData =>
+      ).flatMap { pendingRequestDataOrReplayData =>
         performResultProcessing3(
           signedResultBatchE,
           unsignedResultE,
@@ -1454,7 +1440,7 @@ abstract class ProtocolProcessor[
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, steps.ResultError, Unit] = {
     val verdict = resultE.merge.verdict
 
-    val PendingRequestData(requestCounter, requestSequencerCounter, pendingContracts, _) =
+    val PendingRequestData(requestCounter, requestSequencerCounter, _) =
       pendingRequestDataOrReplayData
     val cleanReplay = isCleanReplay(requestCounter, pendingRequestDataOrReplayData)
     val pendingSubmissionDataO = pendingSubmissionDataForRequest(pendingRequestDataOrReplayData)
@@ -1486,8 +1472,6 @@ abstract class ProtocolProcessor[
 
             if (!isApproval && commitSetOF.isDefined)
               throw new RuntimeException("Negative verdicts entail an empty commit set")
-            if (!contractsToBeStored.subsetOf(pendingContracts))
-              throw new RuntimeException("All contracts to be stored should be pending")
 
             (commitSetOF, contractsToBeStored, eventO)
           }
@@ -1497,11 +1481,10 @@ abstract class ProtocolProcessor[
             case _ => None
           }
 
-          val contractsToBeStored = Set.empty[LfContractId]
           val eventO = None
 
           EitherT.pure[FutureUnlessShutdown, steps.ResultError](
-            (commitSetOF, contractsToBeStored, eventO)
+            (commitSetOF, Seq.empty, eventO)
           )
       }
       (commitSetOF, contractsToBeStored, eventO) = commitAndEvent
@@ -1518,13 +1501,12 @@ abstract class ProtocolProcessor[
       ).leftMap(err => steps.embedResultError(RequestTrackerError(err)))
         .mapK(FutureUnlessShutdown.outcomeK)
 
-      contractStoreUpdate = pendingContracts
-        .map(contractId => (contractId, contractsToBeStored.contains(contractId)))
-        .toMap
-
       _ <- EitherT.right(
         FutureUnlessShutdown.outcomeF(
-          ephemeral.storedContractManager.commitIfPending(requestCounter, contractStoreUpdate)
+          ephemeral.contractStore.storeCreatedContracts(
+            requestCounter,
+            contractsToBeStored,
+          )
         )
       )
 
@@ -1702,14 +1684,13 @@ abstract class ProtocolProcessor[
       requestId: RequestId,
       requestCounter: RequestCounter,
       sequencerCounter: SequencerCounter,
-      pendingContracts: Set[LfContractId],
       decisionTime: CantonTimestamp,
       timeoutEvent: => Either[steps.ResultError, Option[TimestampedEvent]],
   )(
       result: TimeoutResult
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, steps.ResultError, Unit] =
+  ): EitherT[FutureUnlessShutdown, steps.ResultError, Unit] =
     if (result.timedOut) {
       logger.info(
         show"${steps.requestKind.unquoted} request at $requestId timed out without a transaction result message."
@@ -1750,13 +1731,9 @@ abstract class ProtocolProcessor[
         // No need to clean up the pending submissions because this is handled (concurrently) by schedulePendingSubmissionRemoval
         cleanReplay = isCleanReplay(requestCounter, pendingRequestDataOrReplayData)
 
-        _ <- EitherT.right[steps.ResultError](
-          ephemeral.storedContractManager.deleteIfPending(requestCounter, pendingContracts)
-        )
-
-        _ <- ifThenET(!cleanReplay)(publishEvent())
+        _ <- ifThenET(!cleanReplay)(publishEvent()).mapK(FutureUnlessShutdown.outcomeK)
       } yield ()
-    } else EitherT.pure[Future, steps.ResultError](())
+    } else EitherT.pure[FutureUnlessShutdown, steps.ResultError](())
 
   private[this] def isCleanReplay(
       requestCounter: RequestCounter,
@@ -1791,7 +1768,6 @@ object ProtocolProcessor {
       extends PendingRequestDataOrReplayData[A] {
     override def requestCounter: RequestCounter = unwrap.requestCounter
     override def requestSequencerCounter: SequencerCounter = unwrap.requestSequencerCounter
-    override def pendingContracts: Set[LfContractId] = unwrap.pendingContracts
     override def isCleanReplay: Boolean = false
     override def mediator: MediatorRef = unwrap.mediator
   }
@@ -1799,7 +1775,6 @@ object ProtocolProcessor {
   final case class CleanReplayData(
       override val requestCounter: RequestCounter,
       override val requestSequencerCounter: SequencerCounter,
-      override val pendingContracts: Set[LfContractId],
       override val mediator: MediatorRef,
   ) extends PendingRequestDataOrReplayData[Nothing] {
     override def isCleanReplay: Boolean = true
@@ -1857,16 +1832,6 @@ object ProtocolProcessor {
       extends RequestProcessingError
       with ResultProcessingError {
     override def pretty: Pretty[RequestTrackerError] = prettyOfParam(_.error)
-  }
-
-  final case class ConflictingContractData(
-      existing: Set[StoredContract],
-      newContracts: Seq[WithTransactionId[SerializableContract]],
-  ) extends RequestProcessingError {
-    override def pretty: Pretty[ConflictingContractData] = prettyOfClass(
-      param("existing", _.existing),
-      param("new contracts", _.newContracts),
-    )
   }
 
   final case class ContractStoreError(error: NonEmptyChain[store.ContractStoreError])

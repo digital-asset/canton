@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.ledger.api.client
 
+import com.daml.ledger.api.v2.TransactionOuterClass.Transaction as JavaTransactionV2
 import com.daml.ledger.javaapi.data.codegen.{
   Contract,
   ContractCompanion,
@@ -11,9 +12,11 @@ import com.daml.ledger.javaapi.data.codegen.{
 }
 import com.daml.ledger.javaapi.data.{
   CreatedEvent as JavaCreatedEvent,
+  Event,
   ExercisedEvent,
   Transaction as JavaTransaction,
   TransactionTree,
+  TreeEvent,
 }
 
 import scala.jdk.CollectionConverters.*
@@ -35,20 +38,31 @@ object JavaDecodeUtil {
 
   def decodeAllCreated[TC](
       companion: ContractCompanion[TC, ?, ?]
-  )(transaction: JavaTransaction): Seq[TC] = {
+  )(transaction: JavaTransaction): Seq[TC] =
+    decodeAllCreatedFromEvents(companion)(transaction.getEvents.asScala.toSeq)
+
+  def decodeAllCreatedV2[TC](
+      companion: ContractCompanion[TC, ?, ?]
+  )(transaction: JavaTransactionV2): Seq[TC] =
+    decodeAllCreatedFromEvents(companion)(
+      transaction.getEventsList.asScala.toSeq.map(Event.fromProtoEvent)
+    )
+
+  def decodeAllCreatedFromEvents[TC](
+      companion: ContractCompanion[TC, ?, ?]
+  )(events: Seq[Event]): Seq[TC] =
     for {
-      event <- transaction.getEvents.asScala.toList
+      event <- events
       eventP = event.toProtoEvent
       created <- if (eventP.hasCreated) Seq(eventP.getCreated) else Seq()
       a <- decodeCreated(companion)(JavaCreatedEvent.fromProto(created)).toList
     } yield a
-  }
 
   def decodeArchivedExercise[TCid](
       companion: ContractCompanion[?, TCid, ?]
   )(event: ExercisedEvent): Option[TCid] =
     Option.when(event.getTemplateId == companion.TEMPLATE_ID && event.isConsuming)(
-      companion.toContractId(new ContractId((event.getContractId)))
+      companion.toContractId(new ContractId(event.getContractId))
     )
 
   def treeToCreated(transaction: TransactionTree): Seq[JavaCreatedEvent] =
@@ -67,4 +81,19 @@ object JavaDecodeUtil {
       created <- treeToCreated(transaction)
       a <- decodeCreated(companion)(created).toList
     } yield a
+
+  def decodeAllArchivedTree[TCid](
+      companion: ContractCompanion[?, TCid, ?]
+  )(transaction: TransactionTree): Seq[TCid] =
+    decodeAllArchivedTreeFromTreeEvents(companion)(transaction.getEventsById.asScala.toMap)
+
+  def decodeAllArchivedTreeFromTreeEvents[TCid](
+      companion: ContractCompanion[?, TCid, ?]
+  )(eventsById: Map[String, TreeEvent]): Seq[TCid] =
+    for {
+      event <- eventsById.values.toList
+      archive = event.toProtoTreeEvent.getExercised
+      if archive.getConsuming && archive.getTemplateId == companion.TEMPLATE_ID.toProto
+    } yield companion.toContractId(new ContractId(archive.getContractId))
+
 }

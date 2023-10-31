@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong}
 import scala.collection.concurrent.TrieMap
 import scala.util.Try
 
-trait OnShutdownRunner extends AutoCloseable {
+trait OnShutdownRunner { this: AutoCloseable =>
 
   private val closingFlag: AtomicBoolean = new AtomicBoolean(false)
 
@@ -60,6 +60,7 @@ trait OnShutdownRunner extends AutoCloseable {
   /** Removes a shutdown task from the list using a token returned by [[runOnShutdown]]
     */
   def cancelShutdownTask(token: Long): Unit = onShutdownTasks.remove(token).discard
+  def containsShutdownTask(token: Long): Boolean = onShutdownTasks.contains(token)
 
   private def runOnShutdownTasks()(implicit traceContext: TraceContext): Unit = {
     onShutdownTasks.toList.foreach { case (token, task) =>
@@ -80,8 +81,7 @@ trait OnShutdownRunner extends AutoCloseable {
 
   /** Blocks until all earlier tasks have completed and then prevents further tasks from being run.
     */
-  @SuppressWarnings(Array("org.wartremover.warts.While", "org.wartremover.warts.Var"))
-  final override def close(): Unit = {
+  protected[this] override def close(): Unit = {
     import TraceContext.Implicits.Empty.*
 
     val firstCallToClose = closingFlag.compareAndSet(false, true)
@@ -95,6 +95,17 @@ trait OnShutdownRunner extends AutoCloseable {
     } else {
       // TODO(i8594): Ensure we call close only once
     }
+  }
+}
+
+object OnShutdownRunner {
+
+  /** A closeable container for managing [[RunOnShutdown]] tasks and nothing else. */
+  class PureOnShutdownRunner(override protected val logger: TracedLogger)
+      extends AutoCloseable
+      with OnShutdownRunner {
+    override protected def onFirstClose(): Unit = ()
+    override def close(): Unit = super.close()
   }
 }
 

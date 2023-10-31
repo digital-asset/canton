@@ -16,6 +16,7 @@ import sbtassembly.AssemblyPlugin.autoImport.assembly
 import sbtassembly.{MergeStrategy, PathList}
 import sbtbuildinfo.BuildInfoPlugin
 import sbtbuildinfo.BuildInfoPlugin.autoImport.*
+import sbtide.Keys.ideExcludedDirectories
 import sbtprotoc.ProtocPlugin.autoImport.PB
 import scalafix.sbt.ScalafixPlugin
 import scoverage.ScoverageKeys.*
@@ -65,6 +66,7 @@ object BuildCommon {
         } ++ Seq(
           "Redhat GA for s390x natives" at "https://maven.repository.redhat.com/ga"
         ) ++ resolvers.value,
+        ideExcludedDirectories := Seq(baseDirectory.value / "daml" / "canton"),
         // scalacOptions += "-Ystatistics", // re-enable if you need to debug compile times
         // scalacOptions in Test += "-Ystatistics",
       )
@@ -91,8 +93,8 @@ object BuildCommon {
         ),
       Global / excludeLintKeys += Global / damlCodeGeneration,
       Global / excludeLintKeys ++= DamlProjects.allProjects.map(_ / wartremoverErrors),
-      Global / excludeLintKeys += Compile / ideExcludeDirectories,
-      Global / excludeLintKeys += Test / ideExcludeDirectories,
+      Global / excludeLintKeys += Compile / ideExcludedDirectories,
+      Global / excludeLintKeys += Test / ideExcludedDirectories,
     )
 
     // Inspired by https://www.viget.com/articles/two-ways-to-share-git-hooks-with-your-team/
@@ -391,22 +393,12 @@ object BuildCommon {
     case x => oldStrategy(x)
   }
 
-  // `ide-excluded-directories` is a key used by the intellij SBT integration.
-  // we can "re-declare" it here and the canton build and intellij will use the
-  // same setting
-  lazy val ideExcludeDirectories =
-    SettingKey[Seq[File]]("ide-excluded-directories", "Directories to exclude in intellij")
-
   // applies to all sub-projects
   lazy val sharedSettings = Seq(
     printTestTask,
     unitTestTask,
     oracleUnitTestTask,
     ignoreScalacOptionsWithPathsInIncrementalCompilation,
-    ideExcludeDirectories := Seq(
-      target.value,
-      (ThisBuild / baseDirectory).value / "daml" / "canton",
-    ),
   )
 
   lazy val cantonWarts = Seq(
@@ -1052,6 +1044,7 @@ object BuildCommon {
           mockito_scala % Test,
           scalatestMockito % Test,
         ) ++ javafx_all,
+        Compile / damlEnableJavaCodegen := true,
         Compile / damlCodeGeneration := Seq(
           (
             (Compile / sourceDirectory).value / "daml" / "doctor",
