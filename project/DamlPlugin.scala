@@ -110,6 +110,7 @@ object DamlPlugin extends AutoPlugin {
         }
         cache(settings.map(_._2).toSet).toSeq
       },
+      managedSourceDirectories += damlJavaCodegenOutput.value,
       damlBuild := {
         val dependencies = damlDependencies.value
         val outputDirectory = damlDarOutput.value

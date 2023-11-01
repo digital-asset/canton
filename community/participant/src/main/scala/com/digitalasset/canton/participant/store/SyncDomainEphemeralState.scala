@@ -96,8 +96,9 @@ class SyncDomainEphemeralState(
     startingPoints.cleanReplay.nextSequencerCounter,
     loggerFactory,
   )
-  val storedContractManager =
-    new StoredContractManager(persistentState.contractStore, loggerFactory)
+
+  val contractStore: ContractStore = persistentState.contractStore
+
   val transferCache =
     new TransferCache(persistentState.transferStore, loggerFactory)
 
@@ -147,6 +148,7 @@ class SyncDomainEphemeralState(
       startingPoints.cleanReplay.nextRequestCounter,
       loggerFactory,
       futureSupervisor,
+      timeouts,
     )
 
   val observedTimestampTracker = new WatermarkTracker[CantonTimestamp](
@@ -187,6 +189,7 @@ class SyncDomainEphemeralState(
       requestTracker,
       recordOrderPublisher,
       submissionTracker,
+      phase37Synchronizer,
       AsyncCloseable(
         "request-journal-flush",
         requestJournal.flush(),
@@ -206,7 +209,7 @@ trait SyncDomainEphemeralStateLookup {
 
   def sessionKeyStoreLookup: SessionKeyStore = sessionKeyStore
 
-  def contractLookup: ContractLookup = storedContractManager
+  def contractLookup: ContractLookup = contractStore
 
   def transferLookup: TransferLookup = transferCache
 

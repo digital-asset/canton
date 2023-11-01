@@ -10,6 +10,7 @@ import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.lf.data.Ref.{Identifier, Party}
 import com.digitalasset.canton.platform.TemplatePartiesFilter
 import com.digitalasset.canton.platform.participant.util.LfEngineToApi
+import com.digitalasset.canton.platform.store.dao.EventProjectionProperties.Projection
 import org.scalatest.*
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -43,8 +44,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             filter = TemplatePartiesFilter(Map.empty, Set(alice, bob, charlie)),
             eventProjectionProperties = EventProjectionProperties(
               verbose = true,
-              witnessTemplateIdFilter =
-                Map(alice -> Set.empty, bob -> Set.empty, charlie -> Set.empty),
+              wildcardWitnesses = Set(alice, bob, charlie),
             ),
             multiDomainEnabled = false,
           )
@@ -56,8 +56,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             filter = TemplatePartiesFilter(Map.empty, Set(alice, bob, charlie)),
             eventProjectionProperties = EventProjectionProperties(
               verbose = true,
-              witnessTemplateIdFilter =
-                Map(alice -> Set.empty, bob -> Set.empty, charlie -> Set.empty),
+              wildcardWitnesses = Set(alice, bob, charlie),
             ),
             multiDomainEnabled = false,
           )
@@ -84,8 +83,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             filter = TemplatePartiesFilter(Map.empty, Set(alice, bob, charlie)),
             eventProjectionProperties = EventProjectionProperties(
               verbose = true,
-              witnessTemplateIdFilter =
-                Map(alice -> Set.empty, bob -> Set.empty, charlie -> Set.empty),
+              wildcardWitnesses = Set(alice, bob, charlie),
             ),
             multiDomainEnabled = false,
           )
@@ -103,8 +101,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             filter = TemplatePartiesFilter(Map.empty, Set(alice, bob, charlie)),
             eventProjectionProperties = EventProjectionProperties(
               verbose = true,
-              witnessTemplateIdFilter =
-                Map(alice -> Set.empty, bob -> Set.empty, charlie -> Set.empty),
+              wildcardWitnesses = Set(alice, bob, charlie),
             ),
             multiDomainEnabled = false,
           )
@@ -136,7 +133,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             filter = TemplatePartiesFilter(Map(otherTemplateId -> Set(party1)), Set.empty),
             eventProjectionProperties = EventProjectionProperties(
               verbose = true,
-              witnessTemplateIdFilter = Map(party1 -> Set(otherTemplateId)),
+              wildcardWitnesses = Set.empty,
+              witnessTemplateProjections =
+                Map(party1 -> Map(otherTemplateId -> Projection(contractArguments = true))),
             ),
             multiDomainEnabled = false,
           )
@@ -175,9 +174,10 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             ),
             eventProjectionProperties = EventProjectionProperties(
               verbose = true,
-              witnessTemplateIdFilter = Map(
-                party1 -> Set(otherTemplateId),
-                party2 -> Set(otherTemplateId),
+              wildcardWitnesses = Set.empty,
+              witnessTemplateProjections = Map(
+                party1 -> Map(otherTemplateId -> Projection(contractArguments = true)),
+                party2 -> Map(otherTemplateId -> Projection(contractArguments = true)),
               ),
             ),
             multiDomainEnabled = false,
@@ -225,9 +225,10 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             ),
             eventProjectionProperties = EventProjectionProperties(
               verbose = true,
-              witnessTemplateIdFilter = Map(
-                party1 -> Set(someTemplateId),
-                party2 -> Set(otherTemplateId),
+              wildcardWitnesses = Set.empty,
+              witnessTemplateProjections = Map(
+                party1 -> Map(otherTemplateId -> Projection(contractArguments = true)),
+                party2 -> Map(otherTemplateId -> Projection(contractArguments = true)),
               ),
             ),
             multiDomainEnabled = false,
@@ -274,9 +275,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             ),
             eventProjectionProperties = EventProjectionProperties(
               verbose = true,
-              Map(
-                party1 -> Set(someTemplateId),
-                party2 -> Set.empty,
+              wildcardWitnesses = Set(party2),
+              witnessTemplateProjections = Map(
+                party1 -> Map(someTemplateId -> Projection(contractArguments = true))
               ),
             ),
             multiDomainEnabled = false,
@@ -329,9 +330,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             ),
             eventProjectionProperties = EventProjectionProperties(
               verbose = true,
-              witnessTemplateIdFilter = Map(
-                party1 -> Set(someTemplateId),
-                party2 -> Set.empty,
+              wildcardWitnesses = Set(party2),
+              witnessTemplateProjections = Map(
+                party1 -> Map(someTemplateId -> Projection(contractArguments = true))
               ),
             ),
             multiDomainEnabled = false,
@@ -349,10 +350,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             ),
             eventProjectionProperties = EventProjectionProperties(
               verbose = true,
-              witnessTemplateIdFilter = Map(
-                party1 -> Set(someTemplateId),
-                party2 -> Set.empty,
-                unknownParty -> Set.empty,
+              wildcardWitnesses = Set(party2, unknownParty),
+              witnessTemplateProjections = Map(
+                party1 -> Map(someTemplateId -> Projection(contractArguments = true))
               ),
             ),
             multiDomainEnabled = false,
@@ -371,9 +371,12 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             ),
             eventProjectionProperties = EventProjectionProperties(
               verbose = true,
-              witnessTemplateIdFilter = Map(
-                party1 -> Set(someTemplateId, unknownTemplate),
-                party2 -> Set.empty,
+              wildcardWitnesses = Set(party2),
+              witnessTemplateProjections = Map(
+                party1 -> Map(
+                  someTemplateId -> Projection(contractArguments = true),
+                  unknownTemplate -> Projection(contractArguments = true),
+                )
               ),
             ),
             multiDomainEnabled = false,
@@ -392,10 +395,12 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             ),
             eventProjectionProperties = EventProjectionProperties(
               verbose = true,
-              witnessTemplateIdFilter = Map(
-                party1 -> Set(someTemplateId, unknownTemplate),
-                party2 -> Set.empty,
-                unknownParty -> Set.empty,
+              wildcardWitnesses = Set(party2, unknownParty),
+              witnessTemplateProjections = Map(
+                party1 -> Map(
+                  someTemplateId -> Projection(contractArguments = true),
+                  unknownTemplate -> Projection(contractArguments = true),
+                )
               ),
             ),
             multiDomainEnabled = false,
@@ -413,8 +418,11 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             ),
             eventProjectionProperties = EventProjectionProperties(
               verbose = true,
-              witnessTemplateIdFilter = Map(
-                unknownParty -> Set(unknownTemplate)
+              wildcardWitnesses = Set.empty,
+              witnessTemplateProjections = Map(
+                unknownParty -> Map(
+                  unknownTemplate -> Projection(contractArguments = true)
+                )
               ),
             ),
             multiDomainEnabled = false,
@@ -439,8 +447,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
         .getActiveContracts(
           activeAt = end.lastOffset,
           filter = TemplatePartiesFilter(Map.empty, Set(alice)),
-          eventProjectionProperties =
-            EventProjectionProperties(verbose = true, Map(alice -> Set.empty)),
+          eventProjectionProperties = EventProjectionProperties(verbose = true, Set(alice)),
           multiDomainEnabled = false,
         )
         .runWith(Sink.seq)

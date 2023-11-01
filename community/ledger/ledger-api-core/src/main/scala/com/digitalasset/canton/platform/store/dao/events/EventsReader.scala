@@ -7,7 +7,7 @@ import com.daml.ledger.api.v1.event.CreatedEvent
 import com.daml.ledger.api.v1.event_query_service.GetEventsByContractKeyResponse
 import com.daml.ledger.api.v2.event_query_service.{Archived, Created, GetEventsByContractIdResponse}
 import com.daml.lf.data.Ref
-import com.daml.lf.data.Ref.{Identifier, Party}
+import com.daml.lf.data.Ref.Party
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.ContractId
 import com.digitalasset.canton.logging.LoggingContextWithTrace
@@ -45,9 +45,7 @@ private[dao] sealed class EventsReader(
       // Used by LfEngineToApi
       verbose = true,
       // Needed to get create arguments mapped
-      witnessTemplateIdFilter = requestingParties.map(_ -> Set.empty[Identifier]).toMap,
-      // We do not need interfaces mapped
-      witnessInterfaceViewFilter = Map.empty,
+      wildcardWitnesses = requestingParties.map(_.toString),
     )
 
     for {
@@ -100,9 +98,7 @@ private[dao] sealed class EventsReader(
       // Used by LfEngineToApi
       verbose = true,
       // Needed to get create arguments mapped
-      witnessTemplateIdFilter = requestingParties.map(_ -> Set.empty[Identifier]).toMap,
-      // We do not need interfaces mapped
-      witnessInterfaceViewFilter = Map.empty,
+      wildcardWitnesses = requestingParties.map(_.toString),
     )
 
     for {

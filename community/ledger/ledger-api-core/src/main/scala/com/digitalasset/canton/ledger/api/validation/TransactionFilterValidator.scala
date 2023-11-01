@@ -4,10 +4,14 @@
 package com.digitalasset.canton.ledger.api.validation
 
 import com.daml.error.ContextualizedErrorLogger
-import com.daml.ledger.api.v1.transaction_filter.{Filters, InterfaceFilter, TransactionFilter}
+import com.daml.ledger.api.v1.transaction_filter.{
+  Filters,
+  InterfaceFilter,
+  TemplateFilter,
+  TransactionFilter,
+}
 import com.daml.lf.data.Ref
 import com.digitalasset.canton.ledger.api.domain
-import com.digitalasset.canton.ledger.api.domain.InclusiveFilters
 import io.grpc.StatusRuntimeException
 import scalaz.std.either.*
 import scalaz.std.list.*
@@ -32,8 +36,9 @@ class TransactionFilterValidator(
     if (txFilter.filtersByParty.isEmpty) {
       Left(invalidArgument("filtersByParty cannot be empty"))
     } else {
-      val convertedFilters =
-        txFilter.filtersByParty.toList.traverse { case (k, v) =>
+      for {
+        _ <- validateAllFilterDefinitionsAreEitherDeprecatedOrCurrent(txFilter)
+        convertedFilters <- txFilter.filtersByParty.toList.traverse { case (k, v) =>
           for {
             key <- requireParty(k)
             value <- validateFilters(
@@ -43,7 +48,7 @@ class TransactionFilterValidator(
             )
           } yield key -> value
         }
-      convertedFilters.map(m => domain.TransactionFilter(m.toMap))
+      } yield domain.TransactionFilter(convertedFilters.toMap)
     }
   }
 
@@ -67,16 +72,75 @@ class TransactionFilterValidator(
                 .traverse(
                   validatedTemplateIdWithPackageIdResolutionFallback(
                     _,
+                    includeCreateEventPayload = false,
                     resolvePackageIds,
                   )(upgradingEnabled)
                 )
                 .map(_.flatten)
+            validatedTemplates <-
+              inclusive.templateFilters.toList
+                .traverse(validateTemplateFilter(_, resolvePackageIds, upgradingEnabled))
+                .map(_.flatten)
             validatedInterfaces <-
               inclusive.interfaceFilters.toList traverse validateInterfaceFilter
           } yield domain.Filters(
-            Some(InclusiveFilters(validatedIdents.toSet, validatedInterfaces.toSet))
+            Some(
+              domain.InclusiveFilters(
+                (validatedIdents ++ validatedTemplates).toSet,
+                validatedInterfaces.toSet,
+              )
+            )
           )
       }
+  }
+
+  // Allow using deprecated Protobuf fields for backwards compatibility
+  @annotation.nowarn("cat=deprecation&origin=com\\.daml\\.ledger\\.api\\.v1\\.transaction_filter.*")
+  private def validateAllFilterDefinitionsAreEitherDeprecatedOrCurrent(txFilter: TransactionFilter)(
+      implicit contextualizedErrorLogger: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, Unit] =
+    txFilter.filtersByParty.valuesIterator
+      .flatMap(_.inclusive.iterator)
+      .foldLeft(Right((false, false)): Either[StatusRuntimeException, (Boolean, Boolean)]) {
+        case (Right((deprecatedAcc, currentAcc)), inclusiveFilters) =>
+          val templateIdsPresent = inclusiveFilters.templateIds.nonEmpty
+          val templateFiltersPresent = inclusiveFilters.templateFilters.nonEmpty
+          val interfaceFiltersBlobFlag =
+            inclusiveFilters.interfaceFilters.exists(_.includeCreateArgumentsBlob)
+          val interfaceFiltersPayloadFlag =
+            inclusiveFilters.interfaceFilters.exists(_.includeCreateEventPayload)
+          val deprecated = templateIdsPresent || interfaceFiltersBlobFlag
+          val current = templateFiltersPresent || interfaceFiltersPayloadFlag
+          val deprecatedAggr = deprecated || deprecatedAcc
+          val currentAggr = current || currentAcc
+          if (deprecatedAggr && currentAggr)
+            Left(
+              invalidArgument(
+                "Transaction filter should be defined entirely either with deprecated fields, or with non-deprecated fields. Mixed definition is not allowed."
+              )
+            )
+          else Right((deprecatedAggr, currentAggr))
+        case (err, _) => err
+      }
+      .map(_ => ())
+
+  private def validateTemplateFilter(
+      filter: TemplateFilter,
+      resolvePackageIds: Ref.QualifiedName => Either[StatusRuntimeException, Iterable[
+        Ref.Identifier
+      ]],
+      upgradingEnabled: Boolean,
+  )(implicit
+      contextualizedErrorLogger: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, Iterable[domain.TemplateFilter]] = {
+    for {
+      templateId <- requirePresence(filter.templateId, "templateId")
+      validatedIds <- validatedTemplateIdWithPackageIdResolutionFallback(
+        templateId,
+        filter.includeCreateEventPayload,
+        resolvePackageIds,
+      )(upgradingEnabled)
+    } yield validatedIds
   }
 
   // Allow using deprecated Protobuf fields for backwards compatibility
@@ -91,6 +155,7 @@ class TransactionFilterValidator(
       interfaceId = validatedId,
       includeView = filter.includeInterfaceView,
       includeCreateArgumentsBlob = filter.includeCreateArgumentsBlob,
+      includeCreateEventPayload = filter.includeCreateEventPayload,
     )
   }
 }

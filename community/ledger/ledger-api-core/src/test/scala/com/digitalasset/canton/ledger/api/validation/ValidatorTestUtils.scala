@@ -7,7 +7,7 @@ import com.daml.grpc.GrpcStatus
 import com.daml.lf.data.Ref
 import com.daml.lf.value.Value.ContractId
 import com.digitalasset.canton.ledger.api.domain
-import com.digitalasset.canton.ledger.api.domain.InterfaceFilter
+import com.digitalasset.canton.ledger.api.domain.{InterfaceFilter, TemplateFilter}
 import com.digitalasset.canton.ledger.api.messages.transaction
 import com.google.rpc.error_details
 import io.grpc.Status.Code
@@ -28,6 +28,7 @@ trait ValidatorTestUtils extends Matchers with Inside with OptionValues {
   protected val packageId2 = Ref.PackageId.assertFromString("packageId2")
   protected val absoluteOffset = Ref.LedgerString.assertFromString("0042")
   protected val party = Ref.Party.assertFromString("party")
+  protected val party2 = Ref.Party.assertFromString("party2")
   protected val verbose = false
   protected val eventId = "eventId"
   protected val transactionId = "42"
@@ -59,7 +60,8 @@ trait ValidatorTestUtils extends Matchers with Inside with OptionValues {
       filters shouldEqual domain.Filters(
         Some(
           domain.InclusiveFilters(
-            templateIds = expectedTemplateIds,
+            templateFilters =
+              expectedTemplateIds.map(TemplateFilter(_, includeCreateEventPayload = false)),
             interfaceFilters = Set(
               InterfaceFilter(
                 interfaceId = Ref.Identifier(
@@ -71,6 +73,7 @@ trait ValidatorTestUtils extends Matchers with Inside with OptionValues {
                 ),
                 includeView = true,
                 includeCreateArgumentsBlob = true,
+                includeCreateEventPayload = false,
               )
             ),
           )
