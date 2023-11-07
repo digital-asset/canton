@@ -5,7 +5,11 @@ package com.digitalasset.canton.participant.sync
 
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.ledger.participant.state.v2.Update
-import com.digitalasset.canton.participant.admin.workflows.PackageID
+import com.digitalasset.canton.participant.admin.workflows.java.{
+  dardistribution,
+  pingpong,
+  pingpongvacuum,
+}
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.RequestType
 import com.digitalasset.canton.protocol.LedgerTransactionNodeStatistics
 
@@ -17,22 +21,21 @@ final class EventTranslationStrategy(
   def translate(e: LedgerSyncEvent): Option[Update] =
     e match {
       case e: LedgerSyncEvent.TransferredOut =>
-        Option.when(multiDomainLedgerAPIEnabled)(e.toDamlUpdate)
+        if (multiDomainLedgerAPIEnabled) e.toDamlUpdate else None
       case e: LedgerSyncEvent.TransferredIn =>
-        Option
-          .when(multiDomainLedgerAPIEnabled)(e.toDamlUpdate)
-          .orElse(e.asTransactionAccepted)
+        val transferInUpdate = if (multiDomainLedgerAPIEnabled) e.toDamlUpdate else None
+
+        transferInUpdate.orElse(e.asTransactionAccepted)
       case e: LedgerSyncEvent.CommandRejected =>
         e.kind match {
           case RequestType.TransferIn | RequestType.TransferOut =>
-            Option.when(multiDomainLedgerAPIEnabled)(e.toDamlUpdate)
+            if (multiDomainLedgerAPIEnabled) e.toDamlUpdate else None
           case RequestType.Transaction =>
-            Option(e.toDamlUpdate)
+            e.toDamlUpdate
         }
       case e: LedgerSyncEvent.TransactionAccepted =>
-        Option(augmentTransactionStatistics(e).toDamlUpdate)
-      case e =>
-        Option(e.toDamlUpdate)
+        augmentTransactionStatistics(e).toDamlUpdate
+      case e => e.toDamlUpdate
     }
 
   // Augment event with transaction statistics "as late as possible" as stats are redundant data and so that
@@ -52,9 +55,9 @@ final class EventTranslationStrategy(
   private val excludedPackageIds: Set[LfPackageId] =
     if (excludeInfrastructureTransactions) {
       Set(
-        LfPackageId.assertFromString(PackageID.PingPong),
-        LfPackageId.assertFromString(PackageID.DarDistribution),
-        LfPackageId.assertFromString(PackageID.PingPongVacuum),
+        LfPackageId.assertFromString(pingpong.Ping.TEMPLATE_ID.getPackageId),
+        LfPackageId.assertFromString(dardistribution.AcceptedDar.TEMPLATE_ID.getPackageId),
+        LfPackageId.assertFromString(pingpongvacuum.PingCleanup.TEMPLATE_ID.getPackageId),
       )
     } else {
       Set.empty[LfPackageId]

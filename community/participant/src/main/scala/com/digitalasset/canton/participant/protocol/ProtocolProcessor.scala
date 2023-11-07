@@ -26,7 +26,6 @@ import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
   PendingRequestData,
   WrapsProcessorError,
 }
-import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker.TimeoutResult
 import com.digitalasset.canton.participant.protocol.conflictdetection.{CommitSet, RequestTracker}
 import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicator.DeduplicationFailed
@@ -751,7 +750,6 @@ abstract class ProtocolProcessor[
               sc,
               ts,
               handleRequestData,
-              decisionTime,
               mediator,
               snapshot,
               malformedPayloads,
@@ -963,7 +961,7 @@ abstract class ProtocolProcessor[
           )
         } else {
           for {
-            pendingCursor <- EitherT.right(
+            _ <- EitherT.right(
               FutureUnlessShutdown.outcomeF(ephemeral.requestJournal.insert(rc, ts))
             )
 
@@ -972,7 +970,6 @@ abstract class ProtocolProcessor[
               ephemeral.transferCache,
               ephemeral.contractStore,
               requestFuturesF.flatMap(_.activenessResult),
-              pendingCursor,
               mediator,
               freshOwnTimelyTx,
             )
@@ -1011,14 +1008,6 @@ abstract class ProtocolProcessor[
       requestFutures <- EitherT.right[steps.RequestError](requestFuturesF)
       _activenessResult <- EitherT.right[steps.RequestError](requestFutures.activenessResult)
 
-      _ <- EitherT.right[steps.RequestError](
-        FutureUnlessShutdown.outcomeF(
-          unlessCleanReplay(rc)(
-            ephemeral.requestJournal.transit(rc, ts, RequestState.Pending, RequestState.Confirmed)
-          )
-        )
-      )
-
       _ = handleRequestData.complete(Some(pendingData))
       timeoutET = EitherT
         .right(requestFutures.timeoutResult)
@@ -1053,7 +1042,6 @@ abstract class ProtocolProcessor[
       handleRequestData: Phase37Synchronizer.PendingRequestDataHandle[
         steps.requestType.PendingRequestData
       ],
-      decisionTime: CantonTimestamp,
       mediatorRef: MediatorRef,
       snapshot: DomainSnapshotSyncCryptoApi,
       malformedPayloads: Seq[MalformedPayload],
@@ -1066,8 +1054,7 @@ abstract class ProtocolProcessor[
       EitherT.rightT(())
     } else {
       for {
-        pendingCursor <- EitherT.right(ephemeral.requestJournal.insert(rc, ts))
-        _ <- EitherT.right(pendingCursor)
+        _ <- EitherT.right(ephemeral.requestJournal.insert(rc, ts))
 
         _ = ephemeral.requestTracker.tick(sc, ts)
 
@@ -1076,10 +1063,6 @@ abstract class ProtocolProcessor[
         messages <- EitherT.right(responses.parTraverse { response =>
           signResponse(snapshot, response).map(_ -> recipients)
         })
-
-        _ <- EitherT.right[steps.RequestError](
-          ephemeral.requestJournal.transit(rc, ts, RequestState.Pending, RequestState.Confirmed)
-        )
 
         _ <- sendResponses(requestId, rc, messages)
           .leftMap(err => steps.embedRequestError(SequencerRequestError(err)))
@@ -1384,13 +1367,7 @@ abstract class ProtocolProcessor[
     //  that have also received a message with the request.
     //  A dishonest sequencer or mediator could break this assumption.
 
-    /* This part is still run as part of the synchronous processing, because we want
-     * only the first call to awaitConfirmed to get
-     * a non-empty value.
-     *
-     * Some more synchronization is done in the Phase37Synchronizer.
-     */
-
+    // Some more synchronization is done in the Phase37Synchronizer.
     val res = performUnlessClosingEitherUSF(
       s"$functionFullName(sc=$sc, traceId=${traceContext.traceId})"
     )(
@@ -1424,6 +1401,7 @@ abstract class ProtocolProcessor[
     EitherT.pure(res)
   }
 
+  // The processing in this method is done in the asynchronous part of the processing
   private[this] def performResultProcessing3(
       signedResultBatchE: Either[
         EventWithErrors[Deliver[DefaultOpenEnvelope]],
@@ -1516,6 +1494,7 @@ abstract class ProtocolProcessor[
             logger.info(
               show"Finalizing ${steps.requestKind.unquoted} request at $requestId with event $eventO."
             )
+
             // Schedule publication of the event with the associated causality update.
             // Note that both fields are optional.
             // Some events (such as rejection events) are not associated with causality updates.

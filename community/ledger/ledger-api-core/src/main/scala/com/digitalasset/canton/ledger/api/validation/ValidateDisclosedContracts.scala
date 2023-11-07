@@ -42,7 +42,7 @@ class ValidateDisclosedContracts(explicitDisclosureFeatureEnabled: Boolean) {
         RequestValidationErrors.InvalidField
           .Reject(
             "disclosed_contracts",
-            "feature in development: disclosed_contracts should not be set",
+            "feature disabled: disclosed_contracts should not be set",
           )
           .asGrpcError,
       )
@@ -116,9 +116,9 @@ class ValidateDisclosedContracts(explicitDisclosureFeatureEnabled: Boolean) {
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, DisclosedContract] =
     // TODO(#15058): For backwards compatibility with existing clients that rely on explicit disclosure,
-    //               we support the deprecated disclosedContract.arguments if the preferred createEventPayload is not provided.
+    //               we support the deprecated disclosedContract.arguments if the preferred createdEventBlob is not provided.
     //               However, using the deprecated format in command submission is not compatible with contract upgrading.
-    if (disclosedContract.createEventPayload.isEmpty)
+    if (disclosedContract.createdEventBlob.isEmpty)
       validateDeprecatedDisclosedContractFormat(disclosedContract)
     else
       validateUpgradableDisclosedContractFormat(disclosedContract)
@@ -132,31 +132,39 @@ class ValidateDisclosedContracts(explicitDisclosureFeatureEnabled: Boolean) {
     if (disclosedContract.arguments.isDefined || disclosedContract.metadata.isDefined)
       Left(
         invalidArgument(
-          "DisclosedContract.arguments or DisclosedContract.metadata cannot be set together with DisclosedContract.create_event_payload"
+          "DisclosedContract.arguments or DisclosedContract.metadata cannot be set together with DisclosedContract.created_event_blob"
         )
       )
     else
-      TransactionCoder
-        .decodeFatContractInstance(disclosedContract.createEventPayload)
-        .map { fatContractInstance =>
-          import fatContractInstance.*
-          UpgradableDisclosedContract(
-            contractId = contractId,
-            templateId = templateId,
-            argument = createArg,
-            createdAt = createdAt,
-            keyHash = contractKeyWithMaintainers.map(_.globalKey.hash),
-            driverMetadata = cantonData,
-            keyMaintainers = contractKeyWithMaintainers.map(_.maintainers),
-            signatories = signatories,
-            stakeholders = stakeholders,
-            keyValue = contractKeyWithMaintainers.map(_.value),
+      for {
+        fatContractInstance <- TransactionCoder
+          .decodeFatContractInstance(disclosedContract.createdEventBlob)
+          .left
+          .map(decodeError =>
+            invalidArgument(s"Unable to decode disclosed contract event payload: $decodeError")
           )
-        }
-        .left
-        .map(decodeError =>
-          invalidArgument(s"Unable to decode disclosed contract event payload: $decodeError")
+        _ <- Either.cond(
+          disclosedContract.contractId == fatContractInstance.contractId.coid,
+          (),
+          invalidArgument(
+            s"Mismatch between DisclosedContract.contract_id (${disclosedContract.contractId}) and contract_id from decoded DisclosedContract.created_event_blob (${fatContractInstance.contractId.coid})"
+          ),
         )
+      } yield {
+        import fatContractInstance.*
+        UpgradableDisclosedContract(
+          contractId = contractId,
+          templateId = templateId,
+          argument = createArg,
+          createdAt = createdAt,
+          keyHash = contractKeyWithMaintainers.map(_.globalKey.hash),
+          driverMetadata = cantonData,
+          keyMaintainers = contractKeyWithMaintainers.map(_.maintainers),
+          signatories = signatories,
+          stakeholders = stakeholders,
+          keyValue = contractKeyWithMaintainers.map(_.value),
+        )
+      }
 
   // Allow using deprecated Protobuf fields for backwards compatibility
   @annotation.nowarn(

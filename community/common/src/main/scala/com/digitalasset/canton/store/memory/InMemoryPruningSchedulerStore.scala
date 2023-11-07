@@ -4,7 +4,6 @@
 package com.digitalasset.canton.store.memory
 
 import cats.data.EitherT
-import com.digitalasset.canton.config.CantonRequireTypes.String3
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.scheduler.{Cron, PruningSchedule}
 import com.digitalasset.canton.store.PruningSchedulerStore
@@ -15,9 +14,8 @@ import monocle.macros.syntax.lens.*
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
 
-class InMemoryPruningSchedulerStore(
-    override val nodeCode: String3,
-    val loggerFactory: NamedLoggerFactory,
+final class InMemoryPruningSchedulerStore(
+    val loggerFactory: NamedLoggerFactory
 )(implicit
     val ec: ExecutionContext
 ) extends PruningSchedulerStore
