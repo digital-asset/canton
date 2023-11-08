@@ -277,7 +277,7 @@ object TransferInCommonData
         uuidP,
         targetMediatorP,
       )
-      protocolVersion = ProtocolVersion.fromProtoPrimitive(protocolVersionP)
+      protocolVersion <- ProtocolVersion.fromProtoPrimitive(protocolVersionP)
       _ <- checkMediatorGroupForProtocolVersion(commonData, protocolVersion)
     } yield TransferInCommonData(
       commonData.salt,
@@ -342,7 +342,7 @@ final case class TransferInView private (
     creatingTransactionId: TransactionId,
     transferOutResultEvent: DeliveredTransferOutResult,
     sourceProtocolVersion: SourceProtocolVersion,
-    // TODO(#9014) Remove the option
+    // TODO(#15179) Remove the option
     transferCounter: TransferCounterO,
 )(
     hashOps: HashOps,
@@ -628,13 +628,14 @@ object TransferInView
     ) =
       transferInViewP
     for {
+      protocolVersion <- ProtocolVersion.fromProtoPrimitive(sourceProtocolVersionP)
       commonData <- CommonData.fromProto(
         hashOps,
         saltP,
         submitterP,
         transferOutResultEventPO,
         creatingTransactionIdP,
-        ProtocolVersion.fromProtoPrimitive(sourceProtocolVersionP),
+        protocolVersion,
       )
       contract <- ProtoConverter
         .required("contract", contractP)
@@ -676,13 +677,14 @@ object TransferInView
     ) =
       transferInViewP
     for {
+      protocolVersion <- ProtocolVersion.fromProtoPrimitive(sourceProtocolVersionP)
       commonData <- CommonData.fromProto(
         hashOps,
         saltP,
         submitterP,
         transferOutResultEventPO,
         creatingTransactionIdP,
-        ProtocolVersion.fromProtoPrimitive(sourceProtocolVersionP),
+        protocolVersion,
       )
       contract <- ProtoConverter
         .required("contract", contractP)

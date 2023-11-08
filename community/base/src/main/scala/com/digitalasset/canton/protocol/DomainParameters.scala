@@ -58,7 +58,7 @@ object DomainParameters {
   }
 }
 
-@nowarn("msg=deprecated") // TODO(#9014) Remove deprecated parameters with next breaking version
+@nowarn("msg=deprecated") // TODO(#15221) Remove deprecated parameters with next breaking version
 final case class StaticDomainParameters private (
     @deprecated(
       "Starting from protocol version 4, `reconciliationInterval` is a dynamic domain parameter",
@@ -320,7 +320,7 @@ object StaticDomainParameters
         requiredCryptoKeyFormatsP,
         CryptoKeyFormat.fromProtoEnum,
       )
-      protocolVersion = ProtocolVersion.fromProtoPrimitive(protocolVersionP)
+      protocolVersion <- ProtocolVersion.fromProtoPrimitive(protocolVersionP)
     } yield StaticDomainParameters(
       StaticDomainParameters.defaultReconciliationInterval,
       StaticDomainParameters.defaultMaxRatePerParticipant,
@@ -1115,7 +1115,7 @@ final case class DynamicDomainParametersWithValidity(
   def map[T](f: DynamicDomainParameters => T): DomainParameters.WithValidity[T] =
     DomainParameters.WithValidity(validFrom, validUntil, f(parameters))
 
-  def isValidAt(ts: CantonTimestamp) =
+  def isValidAt(ts: CantonTimestamp): Boolean =
     validFrom < ts && validUntil.forall(ts <= _)
 
   private def checkValidity(ts: CantonTimestamp, goal: String): Either[String, Unit] = Either.cond(
@@ -1144,7 +1144,7 @@ final case class DynamicDomainParametersWithValidity(
   def decisionTimeForF(activenessTime: CantonTimestamp): Future[CantonTimestamp] =
     decisionTimeFor(activenessTime).fold(
       err => Future.failed(new IllegalStateException(err)),
-      Future.successful(_),
+      Future.successful,
     )
 
   def transferExclusivityLimitFor(baseline: CantonTimestamp): Either[String, CantonTimestamp] =

@@ -142,7 +142,7 @@ class CantonSyncService(
     identityPusher: ParticipantTopologyDispatcherCommon,
     partyNotifier: LedgerServerPartyNotifier,
     val syncCrypto: SyncCryptoApiProvider,
-    pruningProcessor: PruningProcessor,
+    val pruningProcessor: PruningProcessor,
     engine: Engine,
     syncDomainStateFactory: SyncDomainEphemeralStateFactory,
     clock: Clock,
@@ -656,7 +656,7 @@ class CantonSyncService(
           None,
         )
         unpublishedEvents = unpublished.mapFilter {
-          case RecordOrderPublisher.PendingTransferPublish(ts, eventLogId) =>
+          case RecordOrderPublisher.PendingTransferPublish(ts, _eventLogId) =>
             logger.error(
               s"Pending transfer event with timestamp $ts found in participant event log " +
                 s"$participantEventLogId. Participant event log should not contain transfers."
@@ -1187,6 +1187,7 @@ class CantonSyncService(
               domainHandle.topologyClient,
               domainCrypto,
               trafficStateController,
+              ephemeral.recordOrderPublisher,
               domainHandle.staticParameters.protocolVersion,
             ),
           missingKeysAlerter,
@@ -1252,7 +1253,7 @@ class CantonSyncService(
         this.resolveReconnectAttempts(domainAlias)
       }
 
-      def disconnectOn(cause: String): Unit = {
+      def disconnectOn(): Unit = {
         // only invoke domain disconnect if we actually got so far that the domain-id has been read from the remote node
         if (aliasManager.domainIdForAlias(domainAlias).nonEmpty)
           performDomainDisconnect(
@@ -1268,14 +1269,14 @@ class CantonSyncService(
             connectionListeners.get().foreach(_(domainAlias))
             x
           case UnlessShutdown.AbortedDueToShutdown =>
-            disconnectOn("shutdown")
+            disconnectOn()
             UnlessShutdown.AbortedDueToShutdown
           case x @ UnlessShutdown.Outcome(
                 Left(SyncServiceError.SyncServiceAlreadyAdded.Error(_))
               ) =>
             x
           case x @ UnlessShutdown.Outcome(Left(_)) =>
-            disconnectOn("failed connect")
+            disconnectOn()
             x
         }
 

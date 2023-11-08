@@ -177,7 +177,7 @@ final case class MonitoringConfig(
     metrics: MetricsConfig = MetricsConfig(),
     delayLoggingThreshold: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(20),
     tracing: TracingConfig = TracingConfig(),
-    // TODO(i9014) remove (breaking change)
+    // TODO(#15221) remove (breaking change)
     @Deprecated(since = "2.2.0") // use logging.api.messagePayloads instead
     logMessagePayloads: Option[Boolean] = None,
     logQueryCost: Option[QueryCostMonitoringConfig] = None,
@@ -312,7 +312,7 @@ final case class CantonFeatures(
     enablePreviewCommands: Boolean = false,
     enableTestingCommands: Boolean = false,
     enableRepairCommands: Boolean = false,
-    // TODO(#9014) remove for x-nodes
+    // TODO(#15221) remove for x-nodes
     skipTopologyManagerSignatureValidation: Boolean = false,
 ) {
   def featureFlags: Set[FeatureFlag] = {
@@ -532,6 +532,7 @@ private[config] object CantonNodeParameterConverter {
       parent.parameters.timeouts.processing,
       node.sequencerClient,
       node.caching,
+      node.parameters.batching,
       parent.parameters.nonStandardConfig,
       node.storage.parameters.migrateAndStart,
       parent.features.skipTopologyManagerSignatureValidation,
@@ -758,6 +759,8 @@ object CantonConfig {
       deriveReader[RemoteDomainConfig]
     lazy implicit val remoteParticipantConfigReader: ConfigReader[RemoteParticipantConfig] =
       deriveReader[RemoteParticipantConfig]
+    lazy implicit val batchingReader: ConfigReader[BatchingConfig] =
+      deriveReader[BatchingConfig]
     lazy implicit val dbParamsReader: ConfigReader[DbParametersConfig] =
       deriveReader[DbParametersConfig]
     lazy implicit val memoryReader: ConfigReader[CommunityStorageConfig.Memory] =
@@ -1127,6 +1130,8 @@ object CantonConfig {
       deriveWriter[RemoteParticipantConfig]
     lazy implicit val nodeMonitoringConfigWriter: ConfigWriter[NodeMonitoringConfig] =
       deriveWriter[NodeMonitoringConfig]
+    lazy implicit val batchingWriter: ConfigWriter[BatchingConfig] =
+      deriveWriter[BatchingConfig]
     lazy implicit val dbParametersWriter: ConfigWriter[DbParametersConfig] =
       deriveWriter[DbParametersConfig]
     lazy implicit val memoryWriter: ConfigWriter[CommunityStorageConfig.Memory] =

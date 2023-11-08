@@ -6,10 +6,17 @@ package com.digitalasset.canton.participant.topology
 import cats.data.EitherT
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout, TopologyXConfig}
+import com.digitalasset.canton.config.{
+  BatchingConfig,
+  CachingConfigs,
+  ProcessingTimeout,
+  TopologyXConfig,
+}
 import com.digitalasset.canton.crypto.{Crypto, DomainSyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.participant.event.RecordOrderPublisher
+import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminateProcessingX
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
 import com.digitalasset.canton.participant.traffic.{
   TrafficStateController,
@@ -68,9 +75,10 @@ trait TopologyComponentFactory {
       topologyClient: DomainTopologyClientWithInit,
       // this is the client above, wrapped with some crypto methods, but only the base client is accessible, so we
       // need to pass both.
-      // TODO(#9014) remove me with 3.0
+      // TODO(#15208) remove me with 3.0
       syncCrypto: DomainSyncCryptoClient,
       trafficStateController: TrafficStateController,
+      recordOrderPublisher: RecordOrderPublisher,
       protocolVersion: ProtocolVersion,
   ): TopologyTransactionProcessorCommon.Factory
 
@@ -84,6 +92,7 @@ class TopologyComponentFactoryOld(
     timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
     caching: CachingConfigs,
+    batching: BatchingConfig,
     topologyStore: TopologyStore[DomainStore],
     loggerFactory: NamedLoggerFactory,
 ) extends TopologyComponentFactory {
@@ -121,6 +130,7 @@ class TopologyComponentFactoryOld(
       Map(),
       packageDependencies,
       caching,
+      batching,
       timeouts,
       futureSupervisor,
       loggerFactory,
@@ -140,7 +150,7 @@ class TopologyComponentFactoryOld(
       loggerFactory,
     )
     if (preferCaching) {
-      new CachingTopologySnapshot(snapshot, caching, loggerFactory)
+      new CachingTopologySnapshot(snapshot, caching, batching, loggerFactory)
     } else
       snapshot
   }
@@ -151,12 +161,14 @@ class TopologyComponentFactoryOld(
       topologyClient: DomainTopologyClientWithInit,
       syncCrypto: DomainSyncCryptoClient,
       trafficStateController: TrafficStateController,
+      recordOrderPublisher: RecordOrderPublisher,
       protocolVersion: ProtocolVersion,
   ): TopologyTransactionProcessorCommon.Factory =
     new TopologyTransactionProcessorCommon.Factory {
       override def create(
           acsCommitmentScheduleEffectiveTime: Traced[EffectiveTime] => Unit
       )(implicit executionContext: ExecutionContext): TopologyTransactionProcessorCommon = {
+
         val processor = new TopologyTransactionProcessor(
           domainId,
           DomainTopologyTransactionMessageValidator
@@ -200,6 +212,7 @@ class TopologyComponentFactoryX(
     timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
     caching: CachingConfigs,
+    batching: BatchingConfig,
     topologyXConfig: TopologyXConfig,
     topologyStore: TopologyStoreX[DomainStore],
     loggerFactory: NamedLoggerFactory,
@@ -211,16 +224,25 @@ class TopologyComponentFactoryX(
       topologyClient: DomainTopologyClientWithInit,
       syncCrypto: DomainSyncCryptoClient,
       trafficStateController: TrafficStateController,
+      recordOrderPublisher: RecordOrderPublisher,
       protocolVersion: ProtocolVersion,
   ): TopologyTransactionProcessorCommon.Factory = new TopologyTransactionProcessorCommon.Factory {
     override def create(
         acsCommitmentScheduleEffectiveTime: Traced[EffectiveTime] => Unit
     )(implicit executionContext: ExecutionContext): TopologyTransactionProcessorCommon = {
+
+      val terminateTopologyProcessing = new ParticipantTopologyTerminateProcessingX(
+        recordOrderPublisher,
+        topologyStore,
+        loggerFactory,
+      )
+
       val processor = new TopologyTransactionProcessorX(
         domainId,
         crypto,
         topologyStore,
         acsCommitmentScheduleEffectiveTime,
+        terminateTopologyProcessing,
         topologyXConfig.enableTopologyTransactionValidation,
         futureSupervisor,
         timeouts,
@@ -270,6 +292,7 @@ class TopologyComponentFactoryX(
     topologyStore,
     packageDependencies,
     caching,
+    batching,
     timeouts,
     futureSupervisor,
     loggerFactory,
@@ -287,7 +310,7 @@ class TopologyComponentFactoryX(
       loggerFactory,
     )
     if (preferCaching) {
-      new CachingTopologySnapshot(snapshot, caching, loggerFactory)
+      new CachingTopologySnapshot(snapshot, caching, batching, loggerFactory)
     } else
       snapshot
   }

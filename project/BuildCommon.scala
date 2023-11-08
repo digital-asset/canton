@@ -66,7 +66,10 @@ object BuildCommon {
         } ++ Seq(
           "Redhat GA for s390x natives" at "https://maven.repository.redhat.com/ga"
         ) ++ resolvers.value,
-        ideExcludedDirectories := Seq(baseDirectory.value / "daml" / "canton"),
+        ideExcludedDirectories := Seq(
+          baseDirectory.value / "daml" / "canton",
+          baseDirectory.value / "target",
+        ),
         // scalacOptions += "-Ystatistics", // re-enable if you need to debug compile times
         // scalacOptions in Test += "-Ystatistics",
       )
@@ -399,6 +402,7 @@ object BuildCommon {
     unitTestTask,
     oracleUnitTestTask,
     ignoreScalacOptionsWithPathsInIncrementalCompilation,
+    ideExcludedDirectories += target.value,
   )
 
   lazy val cantonWarts = Seq(
