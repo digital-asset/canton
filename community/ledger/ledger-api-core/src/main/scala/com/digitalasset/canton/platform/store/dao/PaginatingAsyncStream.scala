@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.platform.store.dao
 
-import akka.NotUsed
-import akka.stream.OverflowStrategy
-import akka.stream.scaladsl.Source
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.dao.events.IdPageSizing
+import org.apache.pekko.NotUsed
+import org.apache.pekko.stream.OverflowStrategy
+import org.apache.pekko.stream.scaladsl.Source
 
 import scala.concurrent.Future
 

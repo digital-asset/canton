@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.sync
 
-import akka.stream.Materializer
 import cats.data.EitherT
 import cats.implicits.*
 import cats.{Eval, Id}
@@ -46,6 +45,7 @@ import com.digitalasset.canton.participant.{
   DefaultParticipantStateValues,
   ParticipantNodeParameters,
 }
+import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.*
@@ -58,6 +58,7 @@ import com.digitalasset.canton.{
   LedgerSubmissionId,
   LfPartyId,
 }
+import org.apache.pekko.stream.Materializer
 import org.mockito.ArgumentMatchers
 import org.scalatest.Outcome
 import org.scalatest.wordspec.FixtureAnyWordSpec
@@ -163,6 +164,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       LocalNodeParameters,
       SyncDomain.DefaultFactory,
       indexedStringStore,
+      new MemoryStorage(loggerFactory, timeouts),
       ParticipantTestMetrics,
       sequencerInfoLoader,
       () => true,

@@ -387,12 +387,13 @@ object BuildCommon {
         ) =>
       MergeStrategy.first
     // TODO(#10617) remove when no longer needed
-    case (PathList("akka", "stream", "scaladsl", broadcasthub, _*))
+    case (PathList("org", "apache", "pekko", "stream", "scaladsl", broadcasthub, _*))
         if broadcasthub.startsWith("BroadcastHub") =>
       MergeStrategy.first
     case "META-INF/versions/9/module-info.class" => MergeStrategy.discard
     case path if path.contains("module-info.class") => MergeStrategy.discard
     case PathList("org", "jline", _ @_*) => MergeStrategy.first
+    case "META-INF/FastDoubleParser-LICENSE" => MergeStrategy.first
     case x => oldStrategy(x)
   }
 
@@ -495,7 +496,7 @@ object BuildCommon {
       blake2b,
       `slick-fork`,
       `wartremover-extension`,
-      `akka-fork`,
+      `pekko-fork`,
       `demo`,
       `daml-errors`,
       `ledger-common`,
@@ -509,7 +510,7 @@ object BuildCommon {
     lazy val `util-external` = project
       .in(file("community/util-external"))
       .dependsOn(
-        `akka-fork`,
+        `pekko-fork`,
         `ledger-common`,
         `wartremover-extension` % "compile->compile;test->test",
       )
@@ -560,7 +561,7 @@ object BuildCommon {
     lazy val `community-app` = project
       .in(file("community/app"))
       .dependsOn(
-        `akka-fork`,
+        `pekko-fork`,
         `community-app-base`,
         `community-common` % "compile->compile;test->test",
         `community-integration-testing` % Test,
@@ -580,8 +581,8 @@ object BuildCommon {
           scopt,
           logback_classic,
           logback_core,
-          akka_stream_testkit % Test,
-          akka_http_testkit % Test,
+          pekko_stream_testkit % Test,
+          pekko_http_testkit % Test,
           cats,
           better_files,
           dropwizard_metrics_jvm, // not used at compile time, but required at runtime to report jvm metrics
@@ -599,6 +600,8 @@ object BuildCommon {
         additionalBundleSources := Seq.empty,
         assemblyMergeStrategy := {
           case "LICENSE-open-source-bundle.txt" => new RenameMergeStrategy("LICENSE-DA.txt")
+          // this file comes in multiple flavors, from io.get-coursier:interface and from org.scala-lang.modules:scala-collection-compat. Since the content differs it is resolve this explicitly with this MergeStrategy.
+          case path if path.endsWith("scala-collection-compat.properties") => MergeStrategy.first
           case x =>
             val oldStrategy = (ThisBuild / assemblyMergeStrategy).value
             oldStrategy(x)
@@ -627,7 +630,7 @@ object BuildCommon {
         sharedCantonSettings,
         JvmRulesPlugin.damlRepoHeaderSettings,
         libraryDependencies ++= Seq(
-          akka_http,
+          pekko_http,
           ammonite,
           jul_to_slf4j,
           pureconfig_cats,
@@ -708,7 +711,7 @@ object BuildCommon {
       .enablePlugins(DamlPlugin)
       .dependsOn(
         blake2b,
-        `akka-fork` % "compile->compile;test->test",
+        `pekko-fork` % "compile->compile;test->test",
         `community-base`,
         `wartremover-extension` % "compile->compile;test->test",
         `ledger-common` % "compile->compile;test->test",
@@ -718,7 +721,7 @@ object BuildCommon {
       .settings(
         sharedCantonSettings,
         libraryDependencies ++= Seq(
-          akka_slf4j, // not used at compile time, but required by com.digitalasset.canton.util.AkkaUtil.createActorSystem
+          pekko_slf4j, // not used at compile time, but required by com.digitalasset.canton.util.PekkoUtil.createActorSystem
           logback_classic,
           logback_core,
           reflections % Test,
@@ -740,7 +743,6 @@ object BuildCommon {
           grpc_netty,
           netty_boring_ssl,
           netty_native,
-          netty_native_s390,
           grpc_services,
           scalapb_runtime_grpc,
           scalapb_runtime,
@@ -786,7 +788,7 @@ object BuildCommon {
       .in(file("community/domain"))
       .dependsOn(
         `community-common` % "compile->compile;test->test",
-        `akka-fork`,
+        `pekko-fork`,
         `community-testing` % Test,
       )
       .settings(
@@ -845,8 +847,8 @@ object BuildCommon {
           scalacheck % Test,
           logback_classic % Runtime,
           logback_core % Runtime,
-          akka_stream,
-          akka_stream_testkit % Test,
+          pekko_stream,
+          pekko_stream_testkit % Test,
           cats,
           chimney,
           scalapb_runtime, // not sufficient to include only through the `common` dependency - race conditions ensue
@@ -1018,15 +1020,15 @@ object BuildCommon {
       )
 
     // TODO(#10617) remove when no longer needed
-    lazy val `akka-fork` = project
-      .in(file("community/lib/akka"))
+    lazy val `pekko-fork` = project
+      .in(file("community/lib/pekko"))
       .disablePlugins(BufPlugin, ScalafixPlugin, ScalafmtPlugin, WartRemover)
       .settings(
         sharedSettings,
         libraryDependencies ++= Seq(
-          akka_stream,
-          akka_stream_testkit % Test,
-          akka_slf4j,
+          pekko_stream,
+          pekko_stream_testkit % Test,
+          pekko_slf4j,
           scalatest % Test,
         ),
         // Exclude to apply our license header to any Scala files
@@ -1118,7 +1120,7 @@ object BuildCommon {
         libraryDependencies ++= Seq(
           dropwizard_metrics_core,
           opentelemetry_api,
-          akka_stream,
+          pekko_stream,
           slf4j_api,
           grpc_api,
           reflections,
@@ -1133,7 +1135,7 @@ object BuildCommon {
           scalatest % Test,
           mockito_scala % Test,
           scalatestMockito % Test,
-          akka_stream_testkit % Test,
+          pekko_stream_testkit % Test,
           scalacheck % Test,
           opentelemetry_sdk_testing % Test,
           scalatestScalacheck % Test,
@@ -1232,10 +1234,10 @@ object BuildCommon {
             .filterNot(_ == "-Xsource:3"),
           scalacOptions += "-Wconf:src=src_managed/.*:silent",
           libraryDependencies ++= Seq(
-            akka_http,
-            akka_http_core,
+            pekko_http,
+            pekko_http_core,
             spray_json_derived_codecs,
-            akka_stream_testkit % Test,
+            pekko_stream_testkit % Test,
             scalatest % Test,
             scalacheck % Test,
             scalaz_scalacheck % Test,
@@ -1243,7 +1245,7 @@ object BuildCommon {
           ),
           // TODO(#13303): Split in their daml-copy-common modules
           Compile / unmanagedSourceDirectories ++= Seq(
-            "observability/akka-http-metrics/src/main/scala",
+            "observability/pekko-http-metrics/src/main/scala",
             "utils/src/main/scala",
           ).map(f => DamlProjects.damlFolder.value / f),
           coverageEnabled := false,
@@ -1482,7 +1484,7 @@ object BuildCommon {
           opentelemetry_prometheus,
           opentelemetry_instrumentation_runtime_metrics,
           scalaz_core,
-          akka_stream,
+          pekko_stream,
           log4j_core,
           log4j_api,
           slf4j_api,
@@ -1563,7 +1565,7 @@ object BuildCommon {
         Compile / unmanagedSourceDirectories ++=
           Seq(
             // 1
-            "ledger-api/rs-grpc-akka/src/main/scala", // (ledger-api/rs-grpc-bridge)
+            "ledger-api/rs-grpc-pekko/src/main/scala", // (ledger-api/rs-grpc-bridge)
             "libs-scala/contextualized-logging/src/main/scala", // (libs-scala/grpc-utils, libs-scala/logging-entries)
             "libs-scala/crypto/src/main/scala", // (libs-scala/scala-utils)
             "libs-scala/nonempty/src/main/scala", // (libs-scala/scala-utils)
@@ -1619,7 +1621,7 @@ object BuildCommon {
             "daml-lf/language/src/main/scala", // (daml-lf/data, libs-scala/nameof)
             "language-support/scala/bindings/src/main/scala", // (ledger-api/grpc-definitions:ledger_api_proto_scala, daml-lf/data, language-support/scala/bindings/src/main/2.13)
             "libs-scala/resources-grpc/src/main/scala", // (libs-scala/resources)
-            "libs-scala/resources-akka/src/main/scala", // (libs-scala/resources)
+            "libs-scala/resources-pekko/src/main/scala", // (libs-scala/resources)
           ).map(f => damlFolder.value / f),
         coverageEnabled := false,
         // skip header check
@@ -1645,7 +1647,7 @@ object BuildCommon {
             "daml-lf/archive/src/main/scala", // (daml-lf/data, daml-lf/language, libs-scala/crypto, libs-scala/nameof, libs-scala/scala-utils)
             "daml-lf/transaction/src/main/scala", // (daml-lf/data, daml-lf/language, libs-scala/crypto, libs-scala/nameof, libs-scala/safe-proto, libs-scala/scala-utils)
             "daml-lf/validation/src/main/scala", // (daml-lf/data, daml-lf/language, libs-scala/scala-utils)
-            "libs-scala/ledger-resources/src/main/scala", // (libs-scala/resources, libs-scala/resources-akka, libs-scala/resources-grpc)
+            "libs-scala/ledger-resources/src/main/scala", // (libs-scala/resources, libs-scala/resources-pekko, libs-scala/resources-grpc)
           ).map(f => damlFolder.value / f),
         coverageEnabled := false,
         // skip header check
@@ -1735,6 +1737,8 @@ object BuildCommon {
           opentelemetry_sdk_testing,
           scalatestScalacheck,
           awaitility,
+          grpc_inprocess,
+          scala_parser_combinators,
         ),
         Compile / unmanagedSourceDirectories ++=
           Seq(
@@ -1819,7 +1823,7 @@ object BuildCommon {
         // referred unmanaged source directories, which is resolved by isolating these directories via symlinks.
         Compile / unmanagedSourceDirectories ++=
           Seq(
-            "community/lib/daml-copy-testing/rs-grpc-akka-test-symlink/scala", // Needed by participant-integration-api
+            "community/lib/daml-copy-testing/rs-grpc-pekko-test-symlink/scala", // Needed by participant-integration-api
             "community/lib/daml-copy-testing/sample-service-test-symlink/scala", // Needed by participant-integration-api
           ).map(file),
         coverageEnabled := false,

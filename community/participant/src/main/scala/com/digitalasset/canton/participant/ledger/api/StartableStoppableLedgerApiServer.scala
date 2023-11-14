@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.ledger.api
 
-import akka.actor.ActorSystem
 import com.daml.api.util.TimeProvider
 import com.daml.executors.executors.{NamedExecutor, QueueAwareExecutor}
 import com.daml.ledger.api.v1.experimental_features.{
@@ -60,6 +59,7 @@ import com.digitalasset.canton.util.{FutureUtil, SimpleExecutionQueue}
 import io.grpc.ServerInterceptor
 import io.opentelemetry.api.trace.Tracer
 import io.opentelemetry.instrumentation.grpc.v1_6.GrpcTracing
+import org.apache.pekko.actor.ActorSystem
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.Future
@@ -172,8 +172,13 @@ class StartableStoppableLedgerApiServer(
   private def buildLedgerApiServerOwner(
       overrideIndexerStartupMode: Option[IndexerStartupMode]
   )(implicit traceContext: TraceContext) = {
+
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory, telemetry)
+
+    val numIndexer = config.indexerConfig.ingestionParallelism.unwrap
+    val numLedgerApi = dbConfig.connectionPool.connectionPoolSize
+    logger.info(s"Creating storage, num-indexer: $numIndexer, num-ledger-api: $numLedgerApi")
 
     val indexServiceConfig = config.serverConfig.indexService
 
@@ -329,6 +334,7 @@ class StartableStoppableLedgerApiServer(
         multiDomainEnabled = multiDomainEnabled,
         upgradingEnabled = config.cantonParameterConfig.enableContractUpgrading,
         authenticateContract = authenticateContract,
+        dynParamGetter = config.syncService.dynamicDomainParameterGetter,
       )
       _ <- startHttpApiIfEnabled
       _ <- {

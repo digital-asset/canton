@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
-import akka.stream.scaladsl.{Keep, Sink, Source}
-import akka.stream.{BoundedSourceQueue, Materializer, QueueOfferResult}
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.lf.value.Value.ContractId
 import com.daml.metrics.InstrumentedGraph
@@ -27,6 +25,8 @@ import com.digitalasset.canton.platform.store.backend.ContractStorageBackend.{
 }
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import io.grpc.{Metadata, StatusRuntimeException}
+import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
+import org.apache.pekko.stream.{BoundedSourceQueue, Materializer, QueueOfferResult}
 
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
@@ -37,7 +37,7 @@ trait Loader[KEY, VALUE] {
 
 }
 
-class AkkaStreamParallelBatchedLoader[KEY, VALUE](
+class PekkoStreamParallelBatchedLoader[KEY, VALUE](
     batchLoad: Seq[(KEY, LoggingContextWithTrace)] => Future[Map[KEY, VALUE]],
     createQueue: () => Source[
       (KEY, LoggingContextWithTrace, Promise[Option[VALUE]]),
@@ -140,7 +140,7 @@ object ContractLoader {
   ): ResourceOwner[ContractLoader] = {
     ResourceOwner
       .forReleasable(() =>
-        new AkkaStreamParallelBatchedLoader[
+        new PekkoStreamParallelBatchedLoader[
           (ContractId, Offset),
           RawContractState,
         ](

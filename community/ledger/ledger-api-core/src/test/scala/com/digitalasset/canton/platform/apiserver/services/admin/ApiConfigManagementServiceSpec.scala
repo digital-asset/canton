@@ -3,15 +3,12 @@
 
 package com.digitalasset.canton.platform.apiserver.services.admin
 
-import akka.NotUsed
-import akka.stream.Materializer
-import akka.stream.scaladsl.Source
 import com.daml.api.util.TimeProvider
 import com.daml.error.ErrorsAssertions
 import com.daml.error.utils.ErrorDetails
 import com.daml.error.utils.ErrorDetails.RetryInfoDetail
 import com.daml.grpc.{GrpcException, GrpcStatus}
-import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
+import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.ledger.api.v1.admin.config_management_service.{
   GetTimeModelRequest,
   SetTimeModelRequest,
@@ -40,6 +37,9 @@ import io.grpc.Status.Code
 import io.grpc.StatusRuntimeException
 import io.opentelemetry.api.trace.Tracer
 import io.opentelemetry.sdk.OpenTelemetrySdk
+import org.apache.pekko.NotUsed
+import org.apache.pekko.stream.Materializer
+import org.apache.pekko.stream.scaladsl.Source
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
@@ -60,7 +60,7 @@ class ApiConfigManagementServiceSpec
     with Inside
     with MockitoSugar
     with ArgumentMatchersSugar
-    with AkkaBeforeAndAfterAll
+    with PekkoBeforeAndAfterAll
     with ErrorsAssertions
     with BaseTest
     with BeforeAndAfterEach {

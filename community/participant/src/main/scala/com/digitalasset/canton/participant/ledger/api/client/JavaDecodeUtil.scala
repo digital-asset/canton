@@ -14,7 +14,6 @@ import com.daml.ledger.javaapi.data.{
   ArchivedEvent,
   CreatedEvent as JavaCreatedEvent,
   Event,
-  ExercisedEvent,
   Transaction as JavaTransaction,
   TransactionTree,
   TreeEvent,
@@ -36,6 +35,9 @@ object JavaDecodeUtil {
     if (event.getInterfaceViews.containsKey(companion.TEMPLATE_ID)) {
       Some(companion.fromCreatedEvent(event))
     } else None
+
+  def flatToCreated(transaction: JavaTransaction): Seq[JavaCreatedEvent] =
+    transaction.getEvents.iterator.asScala.collect { case e: JavaCreatedEvent => e }.toSeq
 
   def decodeAllCreated[TC](
       companion: ContractCompanion[TC, ?, ?]
@@ -83,21 +85,8 @@ object JavaDecodeUtil {
       .map(_.getContractId)
       .map(new ContractId[T](_))
 
-  def decodeArchivedExercise[TCid](
-      companion: ContractCompanion[?, TCid, ?]
-  )(event: ExercisedEvent): Option[TCid] =
-    Option.when(event.getTemplateId == companion.TEMPLATE_ID && event.isConsuming)(
-      companion.toContractId(new ContractId(event.getContractId))
-    )
-
-  def treeToCreated(transaction: TransactionTree): Seq[JavaCreatedEvent] =
-    for {
-      event <- transaction.getEventsById.values.asScala.toSeq
-      created <- event match {
-        case created: JavaCreatedEvent => Seq(created)
-        case _ => Seq.empty
-      }
-    } yield created
+  private def treeToCreated(transaction: TransactionTree): Seq[JavaCreatedEvent] =
+    transaction.getEventsById.asScala.valuesIterator.collect { case e: JavaCreatedEvent => e }.toSeq
 
   def decodeAllCreatedTree[TC](
       companion: ContractCompanion[TC, ?, ?]

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant
 
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt, PositiveNumeric}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
 import com.digitalasset.canton.config.{
   ApiLoggingConfig,
   BatchAggregatorConfig,
@@ -36,10 +36,10 @@ final case class ParticipantNodeParameters(
     protocolConfig: ParticipantProtocolConfig,
     uniqueContractKeys: Boolean,
     ledgerApiServerParameters: LedgerApiServerParametersConfig,
-    maxDbConnections: PositiveInt,
     excludeInfrastructureTransactions: Boolean,
     enableEngineStackTrace: Boolean,
     enableContractUpgrading: Boolean,
+    iterationsBetweenInterruptions: Long,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters {
   override def dontWarnOnDeprecatedPV: Boolean = protocolConfig.dontWarnOnDeprecatedPV
@@ -86,9 +86,9 @@ object ParticipantNodeParameters {
     ),
     uniqueContractKeys = false,
     ledgerApiServerParameters = LedgerApiServerParametersConfig(),
-    maxDbConnections = PositiveInt.tryCreate(10),
     excludeInfrastructureTransactions = true,
     enableEngineStackTrace = false,
     enableContractUpgrading = false,
+    iterationsBetweenInterruptions = 10000, // 10000 is the default value in the engine configuration
   )
 }

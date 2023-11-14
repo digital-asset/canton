@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.platform.apiserver.services
 
-import akka.NotUsed
-import akka.stream.scaladsl.Flow
 import com.daml.metrics.api.MetricHandle.Counter
+import org.apache.pekko.NotUsed
+import org.apache.pekko.stream.scaladsl.Flow
 
 object StreamMetrics {
   def countElements[Out](counter: Counter): Flow[Out, Out, NotUsed] =

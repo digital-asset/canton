@@ -16,16 +16,16 @@ object Dependencies {
   lazy val incompatibleLogging: Array[ExclusionRule] =
     Array(ExclusionRule("org.slf4j"), ExclusionRule("ch.qos.logback"))
 
-  lazy val scala_version = "2.13.10"
+  lazy val scala_version = "2.13.11"
   lazy val scala_version_short = "2.13"
 
-  lazy val akka_http_version = "10.2.10"
-  // TODO(#10617) We have cloned akka's BroadcastHub implementation in community/lib/akka/src/main/scala/akka/stream/scaladsl/BroadcastHub.scala
-  //  When updating akka, make sure to update the clone as well, including the tests in community/lib/akka/src/main/scala/akka
-  lazy val akka_version = "2.6.21"
-  lazy val ammonite_version = "2.5.5"
+  lazy val pekko_version = "1.0.1"
+  // TODO(#10617) We have cloned pekko's BroadcastHub implementation in community/lib/pekko/src/main/scala/pekko/stream/scaladsl/BroadcastHub.scala
+  //  When updating pekko, make sure to update the clone as well, including the tests in community/lib/pekko/src/main/scala/pekko
+  lazy val pekko_http_version = "1.0.0"
+  lazy val ammonite_version = "2.5.9"
   lazy val awaitility_version = "4.2.0"
-  lazy val aws_version = "2.17.187"
+  lazy val aws_version = "2.21.17"
   lazy val better_files_version = "3.9.1"
   lazy val bouncy_castle_version = "1.70"
   lazy val cats_law_version = "2.9.0"
@@ -38,8 +38,7 @@ object Dependencies {
   lazy val dropwizard_version = "4.1.33"
   lazy val fabric_sdk_version = "2.2.13"
   lazy val flyway_version = "9.15.2"
-  lazy val gcp_kms_version = "2.4.0"
-  lazy val grpc_version = "1.44.0"
+  lazy val gcp_kms_version = "2.33.0"
   lazy val h2_version = "2.1.210"
   lazy val janino_version = "3.1.4"
   // TODO(i8460) Don't upgrade until https://github.com/sbt/sbt/issues/6564 is fixed
@@ -55,9 +54,9 @@ object Dependencies {
   lazy val monocle_version = "3.2.0"
   // pick the version of boring ssl and netty native from this table: https://github.com/grpc/grpc-java/blob/master/SECURITY.md#netty
   // required for ALPN (which is required for TLS+HTTP/2) when running on Java 8. JSSE will be used on Java 9+.
-  lazy val netty_boring_ssl_version = "2.0.46.Final"
-  lazy val netty_native_s390_version = "4.1.77.Final-redhat-00001"
-  lazy val netty_version = "4.1.72.Final"
+  lazy val grpc_version = "1.59.0"
+  lazy val netty_boring_ssl_version = "2.0.61.Final"
+  lazy val netty_version = "4.1.100.Final"
   lazy val opentelemetry_instrumentation_grpc_version = s"$opentelemetry_version-alpha"
   lazy val opentelemetry_instrumentation_runtime_metrics_version = s"$opentelemetry_version-alpha"
   lazy val opentelemetry_proto_version = "1.7.1-alpha"
@@ -71,12 +70,13 @@ object Dependencies {
   lazy val reflections_version = "0.10.2"
   lazy val scaffeine_version = "5.2.1"
   lazy val scala_collections_contrib_version = "0.2.2"
+  lazy val scala_parser_combinators_version = "1.1.2"
   lazy val scala_csv_version = "1.3.10"
   lazy val scala_logging_version = "3.9.5"
   lazy val scalacheck_version = "1.15.4"
   lazy val scalafx_version = "17.0.1-R26"
   lazy val scalafx_all_version = "17-ea+8"
-  lazy val scalatest_version = "3.2.9"
+  lazy val scalatest_version = "3.2.11"
   lazy val scopt_version = "4.1.0"
   lazy val shapeless_version = "2.3.6"
   lazy val slf4j_version = "2.0.6"
@@ -100,6 +100,8 @@ object Dependencies {
 
   lazy val scala_collection_contrib =
     "org.scala-lang.modules" %% "scala-collection-contrib" % scala_collections_contrib_version
+  lazy val scala_parser_combinators =
+    "org.scala-lang.modules" %% "scala-parser-combinators" % scala_parser_combinators_version
   lazy val scala_reflect = "org.scala-lang" % "scala-reflect" % scala_version
   lazy val scala_compiler = "org.scala-lang" % "scala-compiler" % scala_version
   lazy val shapeless = "com.chuusai" %% "shapeless" % shapeless_version
@@ -138,24 +140,23 @@ object Dependencies {
   lazy val netty_handler = "io.netty" % "netty-handler" % netty_version
   lazy val netty_native =
     "io.netty" % "netty-transport-native-epoll" % netty_version classifier "linux-x86_64" classifier "linux-aarch_64"
-  lazy val netty_native_s390 =
-    "io.netty" % "netty-transport-native-epoll-s390x" % netty_native_s390_version classifier "linux-s390_64"
   lazy val grpc_stub = "io.grpc" % "grpc-stub" % grpc_version
   lazy val grpc_services = "io.grpc" % "grpc-services" % grpc_version
   lazy val grpc_api = "io.grpc" % "grpc-api" % grpc_version
+  lazy val grpc_inprocess = "io.grpc" % "grpc-inprocess" % grpc_version
 
   lazy val scopt = "com.github.scopt" %% "scopt" % scopt_version
 
-  lazy val akka_actor_typed = "com.typesafe.akka" %% "akka-actor-typed" % akka_version
-  lazy val akka_actor_testkit_typed =
-    "com.typesafe.akka" %% "akka-actor-testkit-typed" % akka_version
-  lazy val akka_stream = "com.typesafe.akka" %% "akka-stream" % akka_version
-  lazy val akka_stream_testkit = "com.typesafe.akka" %% "akka-stream-testkit" % akka_version
-  lazy val akka_slf4j =
-    "com.typesafe.akka" %% "akka-slf4j" % akka_version excludeAll (incompatibleLogging: _*)
-  lazy val akka_http = "com.typesafe.akka" %% "akka-http" % akka_http_version
-  lazy val akka_http_core = "com.typesafe.akka" %% "akka-http-core" % akka_http_version
-  lazy val akka_http_testkit = "com.typesafe.akka" %% "akka-http-testkit" % akka_http_version
+  lazy val pekko_actor_typed = "org.apache.pekko" %% "pekko-actor-typed" % pekko_version
+  lazy val pekko_actor_testkit_typed =
+    "org.apache.pekko" %% "pekko-actor-testkit-typed" % pekko_version
+  lazy val pekko_stream = "org.apache.pekko" %% "pekko-stream" % pekko_version
+  lazy val pekko_stream_testkit = "org.apache.pekko" %% "pekko-stream-testkit" % pekko_version
+  lazy val pekko_slf4j =
+    "org.apache.pekko" %% "pekko-slf4j" % pekko_version excludeAll (incompatibleLogging: _*)
+  lazy val pekko_http = "org.apache.pekko" %% "pekko-http" % pekko_http_version
+  lazy val pekko_http_core = "org.apache.pekko" %% "pekko-http-core" % pekko_http_version
+  lazy val pekko_http_testkit = "org.apache.pekko" %% "pekko-http-testkit" % pekko_http_version
 
   lazy val spray_json_derived_codecs =
     "io.github.paoloboni" %% "spray-json-derived-codecs" % spray_json_derived_codecs_version exclude ("com.chuusai", s"shapeless_$scala_version_short")
@@ -167,7 +168,7 @@ object Dependencies {
   lazy val scalatestScalacheck =
     "org.scalatestplus" %% "scalacheck-1-15" % (scalatest_version + ".0")
   lazy val mockito_scala = "org.mockito" %% "mockito-scala" % mockito_scala_version
-  lazy val scalatestMockito = "org.scalatestplus" %% "mockito-3-4" % (scalatest_version + ".0")
+  lazy val scalatestMockito = "org.scalatestplus" %% "mockito-3-4" % ("3.2.10.0")
 
   lazy val checkerFramework = "org.checkerframework" % "checker-qual" % checkerFramework_version
 
@@ -355,7 +356,6 @@ object Dependencies {
   lazy val guava = damlDependency("com.google.guava", "guava")
   // TODO(#10852) one database library, not two
   lazy val anorm = damlDependency("org.playframework.anorm", "anorm")
-  lazy val anorm_akka = damlDependency("org.playframework.anorm", "anorm-akka")
   lazy val scalapb_json4s = damlDependency("com.thesamet.scalapb", "scalapb-json4s")
   lazy val opentelemetry_prometheus =
     damlDependency("io.opentelemetry", "opentelemetry-exporter-prometheus")

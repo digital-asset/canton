@@ -3,18 +3,18 @@
 
 package com.digitalasset.canton.ledger.client.services.transactions
 
-import akka.NotUsed
-import akka.stream.scaladsl.Source
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.grpc.adapter.client.akka.ClientAdapter
+import com.daml.grpc.adapter.client.pekko.ClientAdapter
 import com.daml.ledger.api.v1.transaction.{Transaction, TransactionTree}
 import com.daml.ledger.api.v1.transaction_service.{
   GetTransactionTreesResponse,
   GetTransactionsRequest,
   GetTransactionsResponse,
 }
-import com.digitalasset.canton.util.akkastreams.ImmutableIterable
+import com.digitalasset.canton.util.pekkostreams.ImmutableIterable
 import io.grpc.stub.StreamObserver
+import org.apache.pekko.NotUsed
+import org.apache.pekko.stream.scaladsl.Source
 
 object TransactionSource {
 

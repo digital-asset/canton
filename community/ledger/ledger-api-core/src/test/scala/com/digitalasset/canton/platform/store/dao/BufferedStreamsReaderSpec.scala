@@ -3,9 +3,7 @@
 
 package com.digitalasset.canton.platform.store.dao
 
-import akka.stream.scaladsl.{Sink, Source}
-import akka.{Done, NotUsed}
-import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
+import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.lf.data.Time.Timestamp
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.logging.LoggingContextWithTrace
@@ -16,6 +14,8 @@ import com.digitalasset.canton.platform.store.dao.BufferedStreamsReaderSpec.*
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.tracing.Traced
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, HasExecutorServiceGeneric}
+import org.apache.pekko.stream.scaladsl.{Sink, Source}
+import org.apache.pekko.{Done, NotUsed}
 import org.scalatest.Assertion
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.matchers.should.Matchers
@@ -30,7 +30,7 @@ import scala.util.chaining.*
 class BufferedStreamsReaderSpec
     extends AnyWordSpec
     with Matchers
-    with AkkaBeforeAndAfterAll
+    with PekkoBeforeAndAfterAll
     with TestFixtures
     with HasExecutionContext {
 
@@ -248,7 +248,7 @@ object BufferedStreamsReaderSpec {
       extends Matchers
       with ScalaFutures
       with BaseTest
-      with HasExecutorServiceGeneric { self: AkkaBeforeAndAfterAll =>
+      with HasExecutorServiceGeneric { self: PekkoBeforeAndAfterAll =>
 
     implicit val loggingContext: LoggingContextWithTrace = LoggingContextWithTrace.ForTesting
 
