@@ -8,6 +8,7 @@ import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.package_service.PackageServiceGrpc.PackageService
 import com.daml.ledger.api.v1.package_service.{HashFunction as APIHashFunction, *}
 import com.daml.lf.data.Ref
+import com.daml.logging.LoggingContext
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.domain.LedgerId
@@ -40,7 +41,8 @@ private[apiserver] final class ApiPackageService private (
     with GrpcApiService
     with NamedLogging {
 
-  private implicit val loggingContext = createLoggingContext(loggerFactory)(identity)
+  private implicit val loggingContext: LoggingContext =
+    createLoggingContext(loggerFactory)(identity)
 
   override def bindService(): ServerServiceDefinition =
     PackageServiceGrpc.bindService(this, executionContext)

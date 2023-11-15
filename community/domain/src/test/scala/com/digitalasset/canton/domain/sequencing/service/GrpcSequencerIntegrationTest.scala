@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.domain.sequencing.service
 
-import akka.NotUsed
 import cats.data.EitherT
+import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -63,7 +63,7 @@ import com.digitalasset.canton.time.{DomainTimeTracker, SimClock}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
-import com.digitalasset.canton.util.AkkaUtil
+import com.digitalasset.canton.util.PekkoUtil
 import com.digitalasset.canton.version.{
   ProtocolVersion,
   ProtocolVersionCompatibility,
@@ -72,6 +72,8 @@ import com.digitalasset.canton.version.{
 }
 import io.grpc.netty.NettyServerBuilder
 import io.opentelemetry.api.trace.Tracer
+import org.apache.pekko.NotUsed
+import org.apache.pekko.actor.ActorSystem
 import org.mockito.ArgumentMatchersSugar
 import org.scalatest.Outcome
 import org.scalatest.matchers.should.Matchers
@@ -89,9 +91,10 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
     with org.mockito.MockitoSugar
     with ArgumentMatchersSugar
     with Matchers {
-  implicit val actorSystem = AkkaUtil.createActorSystem("GrpcSequencerIntegrationTest")
-  implicit val executionSequencerFactory =
-    AkkaUtil.createExecutionSequencerFactory("GrpcSequencerIntegrationTest", noTracingLogger)
+  implicit val actorSystem: ActorSystem =
+    PekkoUtil.createActorSystem("GrpcSequencerIntegrationTest")
+  implicit val executionSequencerFactory: ExecutionSequencerFactory =
+    PekkoUtil.createExecutionSequencerFactory("GrpcSequencerIntegrationTest", noTracingLogger)
   val sequencer = mock[Sequencer]
   private val participant = ParticipantId("testing")
   private val domainId = DefaultTestIdentities.domainId

@@ -8,7 +8,6 @@ package com.digitalasset.canton.config
 // SOME OF THE IMPLICIT IMPORTS NECESSARY TO COMPILE
 ////////////////////////////////////////////////////////
 
-import akka.stream.ThrottleMode
 import cats.Order
 import cats.data.Validated
 import cats.syntax.either.*
@@ -80,6 +79,7 @@ import com.typesafe.config.{
 }
 import com.typesafe.scalalogging.LazyLogging
 import monocle.macros.syntax.lens.*
+import org.apache.pekko.stream.ThrottleMode
 import pureconfig.*
 import pureconfig.error.CannotConvert
 import pureconfig.generic.{FieldCoproductHint, ProductHint}
@@ -446,10 +446,10 @@ trait CantonConfig {
         ),
         uniqueContractKeys = participantConfig.init.parameters.uniqueContractKeys,
         ledgerApiServerParameters = participantParameters.ledgerApiServerParameters,
-        maxDbConnections = participantConfig.storage.maxConnectionsCanton(true, false, false),
         excludeInfrastructureTransactions = participantParameters.excludeInfrastructureTransactions,
         enableEngineStackTrace = participantParameters.enableEngineStackTraces,
         enableContractUpgrading = participantParameters.enableContractUpgrading,
+        iterationsBetweenInterruptions = participantParameters.iterationsBetweenInterruptions,
       )
     }
 
@@ -761,6 +761,8 @@ object CantonConfig {
       deriveReader[RemoteParticipantConfig]
     lazy implicit val batchingReader: ConfigReader[BatchingConfig] =
       deriveReader[BatchingConfig]
+    lazy implicit val connectionAllocationReader: ConfigReader[ConnectionAllocation] =
+      deriveReader[ConnectionAllocation]
     lazy implicit val dbParamsReader: ConfigReader[DbParametersConfig] =
       deriveReader[DbParametersConfig]
     lazy implicit val memoryReader: ConfigReader[CommunityStorageConfig.Memory] =
@@ -1132,6 +1134,8 @@ object CantonConfig {
       deriveWriter[NodeMonitoringConfig]
     lazy implicit val batchingWriter: ConfigWriter[BatchingConfig] =
       deriveWriter[BatchingConfig]
+    lazy implicit val connectionAllocationWriter: ConfigWriter[ConnectionAllocation] =
+      deriveWriter[ConnectionAllocation]
     lazy implicit val dbParametersWriter: ConfigWriter[DbParametersConfig] =
       deriveWriter[DbParametersConfig]
     lazy implicit val memoryWriter: ConfigWriter[CommunityStorageConfig.Memory] =

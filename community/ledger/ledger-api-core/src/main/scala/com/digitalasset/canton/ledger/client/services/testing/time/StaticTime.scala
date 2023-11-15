@@ -3,18 +3,18 @@
 
 package com.digitalasset.canton.ledger.client.services.testing.time
 
-import akka.stream.scaladsl.{Broadcast, Flow, GraphDSL, RunnableGraph, Sink}
-import akka.stream.{ClosedShape, KillSwitches, Materializer, UniqueKillSwitch}
 import com.daml.api.util.TimestampConversion.*
 import com.daml.api.util.{TimeProvider, TimestampConversion}
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.grpc.adapter.client.akka.ClientAdapter
+import com.daml.grpc.adapter.client.pekko.ClientAdapter
 import com.daml.ledger.api.v1.testing.time_service.TimeServiceGrpc.{TimeService, TimeServiceStub}
 import com.daml.ledger.api.v1.testing.time_service.{GetTimeRequest, SetTimeRequest}
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.ledger.client.LedgerClient
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import org.apache.pekko.stream.scaladsl.{Broadcast, Flow, GraphDSL, RunnableGraph, Sink}
+import org.apache.pekko.stream.{ClosedShape, KillSwitches, Materializer, UniqueKillSwitch}
 
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference

@@ -3,10 +3,7 @@
 
 package com.digitalasset.canton.platform.store.cache
 
-import akka.Done
-import akka.stream.Materializer
-import akka.stream.scaladsl.Source
-import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
+import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.{Ref, Time}
 import com.daml.lf.transaction.{GlobalKey, TransactionVersion, Versioned}
@@ -28,6 +25,9 @@ import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractSt
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader.*
+import org.apache.pekko.Done
+import org.apache.pekko.stream.Materializer
+import org.apache.pekko.stream.scaladsl.Source
 import org.scalatest.Assertions.fail
 import org.scalatest.flatspec.AsyncFlatSpec
 
@@ -39,7 +39,7 @@ import scala.util.Random
 
 class MutableCacheBackedContractStoreRaceTests
     extends AsyncFlatSpec
-    with AkkaBeforeAndAfterAll
+    with PekkoBeforeAndAfterAll
     with TestEssentials {
   behavior of "Mutable state cache updates"
 

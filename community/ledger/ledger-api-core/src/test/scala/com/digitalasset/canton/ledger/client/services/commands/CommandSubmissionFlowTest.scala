@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.ledger.client.services.commands
 
-import akka.stream.scaladsl.{Sink, Source}
-import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
+import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.ledger.api.v1.commands.Commands
 import com.daml.tracing.TelemetryContext
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.util.Ctx
 import com.google.protobuf.empty.Empty
+import org.apache.pekko.stream.scaladsl.{Sink, Source}
 import org.mockito.captor.ArgCaptor
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.matchers.should.Matchers
@@ -22,7 +22,7 @@ class CommandSubmissionFlowTest
     with MockitoSugar
     with ArgumentMatchersSugar
     with Matchers
-    with AkkaBeforeAndAfterAll
+    with PekkoBeforeAndAfterAll
     with BaseTest {
 
   "apply" should {

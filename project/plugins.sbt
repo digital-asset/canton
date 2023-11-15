@@ -2,7 +2,7 @@
 addSbtPlugin("org.wartremover" % "sbt-wartremover" % "3.1.4")
 addSbtPlugin("org.wartremover" % "sbt-wartremover-contrib" % "2.1.0")
 addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.4.6")
-addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.10.3")
+addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.11.1")
 
 // Code coverage
 addSbtPlugin("org.scoverage" % "sbt-scoverage" % "1.9.2")
@@ -17,7 +17,7 @@ addSbtPlugin("de.heikoseeberger" % "sbt-header" % "5.6.0")
 addSbtPlugin("io.spray" % "sbt-revolver" % "0.9.1")
 
 addSbtPlugin("com.thesamet" % "sbt-protoc" % "1.0.6")
-libraryDependencies += "com.thesamet.scalapb" %% "compilerplugin" % "0.11.8"
+libraryDependencies += "com.thesamet.scalapb" %% "compilerplugin" % "0.11.14"
 
 // helps scaladoc resolve links for common scala libraries
 addSbtPlugin("com.thoughtworks.sbt-api-mappings" % "sbt-api-mappings" % "3.0.0")

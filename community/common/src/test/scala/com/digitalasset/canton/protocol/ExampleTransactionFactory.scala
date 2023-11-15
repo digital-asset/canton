@@ -564,6 +564,7 @@ class ExampleTransactionFactory(
       consumed: Set[LfContractId],
       coreInputs: Seq[SerializableContract],
       created: Seq[SerializableContract],
+      resolvedKeys: Map[LfGlobalKey, SerializableKeyResolution],
       seed: Option[LfHash],
       isRoot: Boolean,
       subviews: TransactionView*
@@ -621,7 +622,7 @@ class ExampleTransactionFactory(
       coreInputContracts,
       createWithSerialization,
       createdInSubviewArchivedInCore,
-      Map.empty,
+      resolvedKeys,
       actionDescription,
       RollbackContext.empty,
       participantDataSalt(viewIndex),
@@ -721,8 +722,8 @@ class ExampleTransactionFactory(
       protocolVersion,
     )
 
-  def rootTransactionViewTree(rootViews: MerkleTree[TransactionView]*): TransactionViewTree =
-    TransactionViewTree.tryCreate(
+  def rootTransactionViewTree(rootViews: MerkleTree[TransactionView]*): FullTransactionViewTree =
+    FullTransactionViewTree.tryCreate(
       GenTransactionTree.tryCreate(cryptoOps)(
         submitterMetadata,
         commonMetadata,
@@ -747,8 +748,8 @@ class ExampleTransactionFactory(
         )
     }
 
-  def nonRootTransactionViewTree(rootViews: MerkleTree[TransactionView]*): TransactionViewTree =
-    TransactionViewTree.tryCreate(
+  def nonRootTransactionViewTree(rootViews: MerkleTree[TransactionView]*): FullTransactionViewTree =
+    FullTransactionViewTree.tryCreate(
       GenTransactionTree.tryCreate(cryptoOps)(
         blinded(submitterMetadata),
         commonMetadata,
@@ -783,11 +784,15 @@ class ExampleTransactionFactory(
       (Set.empty[LfPartyId], informeeTree())
 
     override def reinterpretedSubtransactions: Seq[
-      (TransactionViewTree, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver), Witnesses)
+      (
+          FullTransactionViewTree,
+          (LfVersionedTransaction, TransactionMetadata, LfKeyResolver),
+          Witnesses,
+      )
     ] =
       Seq.empty
 
-    override def rootTransactionViewTrees: Seq[TransactionViewTree] = Seq.empty
+    override def rootTransactionViewTrees: Seq[FullTransactionViewTree] = Seq.empty
 
     override def versionedSuffixedTransaction: LfVersionedTransaction =
       LfVersionedTransaction(
@@ -886,7 +891,7 @@ class ExampleTransactionFactory(
       )
 
     lazy val view0: TransactionView =
-      view(node, 0, consumed, used, created, nodeSeed, isRoot = true)
+      view(node, 0, consumed, used, created, Map.empty, nodeSeed, isRoot = true)
 
     override lazy val rootViews: Seq[TransactionView] = Seq(view0)
 
@@ -903,13 +908,17 @@ class ExampleTransactionFactory(
     override lazy val informeeTreeBlindedFor: (Set[LfPartyId], InformeeTree) =
       (Set.empty, informeeTree(blinded(view0)))
 
-    override lazy val rootTransactionViewTrees: Seq[TransactionViewTree] = transactionViewTrees
+    override lazy val rootTransactionViewTrees: Seq[FullTransactionViewTree] = transactionViewTrees
 
     override lazy val versionedSuffixedTransaction: LfVersionedTransaction =
       transaction(Seq(0), node)
 
     override lazy val reinterpretedSubtransactions: Seq[
-      (TransactionViewTree, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver), Witnesses)
+      (
+          FullTransactionViewTree,
+          (LfVersionedTransaction, TransactionMetadata, LfKeyResolver),
+          Witnesses,
+      )
     ] =
       Seq(
         (
@@ -1200,7 +1209,16 @@ class ExampleTransactionFactory(
 
     override lazy val rootViews: Seq[TransactionView] = examples.zipWithIndex.map {
       case (ex, index) =>
-        view(ex.node, index, ex.consumed, ex.used, ex.created, ex.nodeSeed, isRoot = true)
+        view(
+          ex.node,
+          index,
+          ex.consumed,
+          ex.used,
+          ex.created,
+          Map.empty,
+          ex.nodeSeed,
+          isRoot = true,
+        )
     }
 
     override def viewWithSubviews: Seq[(TransactionView, Seq[TransactionView])] =
@@ -1215,7 +1233,11 @@ class ExampleTransactionFactory(
       (Set.empty, informeeTree(rootViews.map(blinded): _*))
 
     override def reinterpretedSubtransactions: Seq[
-      (TransactionViewTree, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver), Witnesses)
+      (
+          FullTransactionViewTree,
+          (LfVersionedTransaction, TransactionMetadata, LfKeyResolver),
+          Witnesses,
+      )
     ] = {
       val blindedRootViews = rootViews.map(blinded)
       examples.zipWithIndex.map { case (example, i) =>
@@ -1228,7 +1250,7 @@ class ExampleTransactionFactory(
       }
     }
 
-    override def rootTransactionViewTrees: Seq[TransactionViewTree] = transactionViewTrees
+    override def rootTransactionViewTrees: Seq[FullTransactionViewTree] = transactionViewTrees
 
     override def versionedSuffixedTransaction: LfVersionedTransaction =
       transaction(0 until rootViewCount, examples.map(_.node): _*)
@@ -1554,6 +1576,7 @@ class ExampleTransactionFactory(
         Set.empty,
         Seq.empty,
         Seq(serializableFromCreate(create0, saltConditionally(salt0Id))),
+        Map.empty,
         Some(create0seed),
         isRoot = true,
       )
@@ -1564,6 +1587,7 @@ class ExampleTransactionFactory(
         Set.empty,
         Seq.empty,
         Seq(serializableFromCreate(create130, saltConditionally(salt130Id))),
+        Map.empty,
         Some(create130seed),
         isRoot = false,
       )
@@ -1574,6 +1598,7 @@ class ExampleTransactionFactory(
         Set.empty,
         Seq.empty,
         Seq(serializableFromCreate(create1310, saltConditionally(salt1310Id))),
+        Map.empty,
         Some(create1310seed),
         isRoot = false,
       )
@@ -1593,6 +1618,7 @@ class ExampleTransactionFactory(
           )
         ),
         Seq.empty,
+        Map.empty,
         Some(deriveNodeSeed(1, 3, 1)),
         isRoot = false,
         view110,
@@ -1616,6 +1642,7 @@ class ExampleTransactionFactory(
           serializableFromCreate(create10, saltConditionally(salt10Id)),
           serializableFromCreate(create12, saltConditionally(salt12Id)),
         ),
+        Map.empty,
         Some(deriveNodeSeed(1)),
         isRoot = true,
         view10,
@@ -1654,17 +1681,19 @@ class ExampleTransactionFactory(
         ),
       )
 
-    val transactionViewTree0: TransactionViewTree = rootTransactionViewTree(view0, blinded(view1))
+    val transactionViewTree0: FullTransactionViewTree =
+      rootTransactionViewTree(view0, blinded(view1))
 
-    val transactionViewTree1: TransactionViewTree = rootTransactionViewTree(blinded(view0), view1)
+    val transactionViewTree1: FullTransactionViewTree =
+      rootTransactionViewTree(blinded(view0), view1)
 
-    val transactionViewTree10: TransactionViewTree =
+    val transactionViewTree10: FullTransactionViewTree =
       nonRootTransactionViewTree(blinded(view0), leafsBlinded(view1, view10, blinded(view11)))
 
-    val transactionViewTree11: TransactionViewTree =
+    val transactionViewTree11: FullTransactionViewTree =
       nonRootTransactionViewTree(blinded(view0), leafsBlinded(view1, blinded(view10), view11))
 
-    val transactionViewTree110: TransactionViewTree =
+    val transactionViewTree110: FullTransactionViewTree =
       nonRootTransactionViewTree(
         blinded(view0),
         leafsBlinded(view1, blinded(view10), leafsBlinded(view11, view110)),
@@ -1674,7 +1703,11 @@ class ExampleTransactionFactory(
     val exercise13Abs: LfNodeExercises = genExercise13(create12.coid)
 
     override lazy val reinterpretedSubtransactions: Seq[
-      (TransactionViewTree, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver), Witnesses)
+      (
+          FullTransactionViewTree,
+          (LfVersionedTransaction, TransactionMetadata, LfKeyResolver),
+          Witnesses,
+      )
     ] =
       Seq(
         (
@@ -1746,7 +1779,7 @@ class ExampleTransactionFactory(
         ),
       )
 
-    override lazy val rootTransactionViewTrees: Seq[TransactionViewTree] =
+    override lazy val rootTransactionViewTrees: Seq[FullTransactionViewTree] =
       Seq(transactionViewTree0, transactionViewTree1)
 
     override lazy val versionedSuffixedTransaction: LfVersionedTransaction =
@@ -2136,6 +2169,7 @@ class ExampleTransactionFactory(
         Set.empty,
         Seq.empty,
         Seq(serializableFromCreate(create0, saltConditionally(salt0Id))),
+        Map.empty,
         Some(create0seed),
         isRoot = true,
       )
@@ -2147,6 +2181,7 @@ class ExampleTransactionFactory(
         Set.empty,
         Seq.empty,
         Seq(serializableFromCreate(create100, saltConditionally(salt100Id))),
+        Map.empty,
         Some(create100seed),
         isRoot = false,
       )
@@ -2165,6 +2200,7 @@ class ExampleTransactionFactory(
         )
       ),
       Seq.empty,
+      Map.empty,
       Some(deriveNodeSeed(1, 0)),
       isRoot = false,
       view100,
@@ -2177,6 +2213,7 @@ class ExampleTransactionFactory(
         Set.empty,
         Seq.empty,
         Seq(serializableFromCreate(create120, saltConditionally(salt120Id))),
+        Map.empty,
         Some(create120seed),
         isRoot = false,
       )
@@ -2196,6 +2233,7 @@ class ExampleTransactionFactory(
           )
         ),
         Seq.empty,
+        Map.empty,
         Some(deriveNodeSeed(1, 2)),
         isRoot = false,
         view110,
@@ -2220,6 +2258,7 @@ class ExampleTransactionFactory(
           serializableFromCreate(create11, saltConditionally(salt11Id)),
           serializableFromCreate(create13, saltConditionally(salt13Id)),
         ),
+        Map.empty,
         Some(deriveNodeSeed(1)),
         isRoot = true,
         view10,
@@ -2233,6 +2272,7 @@ class ExampleTransactionFactory(
         Set.empty,
         Seq.empty,
         Seq(serializableFromCreate(create2, saltConditionally(salt2Id))),
+        Map.empty,
         Some(create2seed),
         isRoot = true,
       )
@@ -2277,46 +2317,50 @@ class ExampleTransactionFactory(
         ),
       )
 
-    val transactionViewTree0: TransactionViewTree =
+    val transactionViewTree0: FullTransactionViewTree =
       rootTransactionViewTree(view0, blinded(view1), blinded(view2))
 
-    val transactionViewTree1: TransactionViewTree =
+    val transactionViewTree1: FullTransactionViewTree =
       rootTransactionViewTree(blinded(view0), view1, blinded(view2))
 
-    val transactionViewTree10: TransactionViewTree =
+    val transactionViewTree10: FullTransactionViewTree =
       nonRootTransactionViewTree(
         blinded(view0),
         leafsBlinded(view1, view10, blinded(view11)),
         blinded(view2),
       )
 
-    val transactionViewTree100: TransactionViewTree = nonRootTransactionViewTree(
+    val transactionViewTree100: FullTransactionViewTree = nonRootTransactionViewTree(
       blinded(view0),
       leafsBlinded(view1, leafsBlinded(view10, view100), blinded(view11)),
       blinded(view2),
     )
 
-    val transactionViewTree11: TransactionViewTree =
+    val transactionViewTree11: FullTransactionViewTree =
       nonRootTransactionViewTree(
         blinded(view0),
         leafsBlinded(view1, blinded(view10), view11),
         blinded(view2),
       )
 
-    val transactionViewTree110: TransactionViewTree = nonRootTransactionViewTree(
+    val transactionViewTree110: FullTransactionViewTree = nonRootTransactionViewTree(
       blinded(view0),
       leafsBlinded(view1, blinded(view10), leafsBlinded(view11, view110)),
       blinded(view2),
     )
 
-    val transactionViewTree2: TransactionViewTree =
+    val transactionViewTree2: FullTransactionViewTree =
       rootTransactionViewTree(blinded(view0), blinded(view1), view2)
 
     val create120reinterpret: LfNodeCreate =
       genCreate3X(lfCreate120Id, genCreate120Inst(create100Id), create120Agreement)
 
     override lazy val reinterpretedSubtransactions: Seq[
-      (TransactionViewTree, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver), Witnesses)
+      (
+          FullTransactionViewTree,
+          (LfVersionedTransaction, TransactionMetadata, LfKeyResolver),
+          Witnesses,
+      )
     ] =
       Seq(
         (
@@ -2406,7 +2450,7 @@ class ExampleTransactionFactory(
         ),
       )
 
-    override lazy val rootTransactionViewTrees: Seq[TransactionViewTree] =
+    override lazy val rootTransactionViewTrees: Seq[FullTransactionViewTree] =
       Seq(transactionViewTree0, transactionViewTree1, transactionViewTree2)
 
     override lazy val versionedSuffixedTransaction: LfVersionedTransaction =
@@ -2646,6 +2690,7 @@ class ExampleTransactionFactory(
         Set.empty,
         Seq.empty,
         Seq(serializableFromCreate(create0, saltConditionally(salt0Id))),
+        Map.empty,
         Some(create0seed),
         isRoot = true,
       )
@@ -2664,6 +2709,7 @@ class ExampleTransactionFactory(
         )
       ),
       Seq(serializableFromCreate(create110, saltConditionally(salt110Id))),
+      Map.empty,
       Some(deriveNodeSeed(1, 1)),
       isRoot = false,
     )
@@ -2682,6 +2728,7 @@ class ExampleTransactionFactory(
         )
       ),
       Seq(serializableFromCreate(create10, saltConditionally(salt10Id))),
+      Map.empty,
       Some(deriveNodeSeed(1)),
       isRoot = true,
       view10,
@@ -2707,13 +2754,19 @@ class ExampleTransactionFactory(
         informeeTree(blindedForInformeeTree(view0), blindedForInformeeTree(view1, blinded(view10))),
       )
 
-    val transactionViewTree0: TransactionViewTree = rootTransactionViewTree(view0, blinded(view1))
-    val transactionViewTree1: TransactionViewTree = rootTransactionViewTree(blinded(view0), view1)
-    val transactionViewTree10: TransactionViewTree =
+    val transactionViewTree0: FullTransactionViewTree =
+      rootTransactionViewTree(view0, blinded(view1))
+    val transactionViewTree1: FullTransactionViewTree =
+      rootTransactionViewTree(blinded(view0), view1)
+    val transactionViewTree10: FullTransactionViewTree =
       nonRootTransactionViewTree(blinded(view0), leafsBlinded(view1, view10))
 
     override def reinterpretedSubtransactions: Seq[
-      (TransactionViewTree, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver), Witnesses)
+      (
+          FullTransactionViewTree,
+          (LfVersionedTransaction, TransactionMetadata, LfKeyResolver),
+          Witnesses,
+      )
     ] =
       Seq(
         (
@@ -2756,7 +2809,7 @@ class ExampleTransactionFactory(
         ),
       )
 
-    override def rootTransactionViewTrees: Seq[TransactionViewTree] =
+    override def rootTransactionViewTrees: Seq[FullTransactionViewTree] =
       Seq(transactionViewTree0, transactionViewTree1)
 
     override def versionedSuffixedTransaction: LfVersionedTransaction =

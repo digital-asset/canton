@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer
 
-import akka.stream.*
-import akka.stream.scaladsl.{Keep, Sink}
 import cats.data.EitherT
 import cats.instances.option.*
 import cats.syntax.bifunctor.*
@@ -35,9 +33,11 @@ import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.util.retry.{Pause, Success}
-import com.digitalasset.canton.util.{AkkaUtil, EitherTUtil, FutureUtil, retry}
+import com.digitalasset.canton.util.{EitherTUtil, FutureUtil, PekkoUtil, retry}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
+import org.apache.pekko.stream.*
+import org.apache.pekko.stream.scaladsl.{Keep, Sink}
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.duration.*
@@ -72,7 +72,7 @@ private[sequencer] class RunningSequencerWriterFlow(
     * We intentionally hand out a transformed future that ensures our completed flag is set first.
     * This is to in most cases avoiding the race where we may call `queues.complete` on an already completed stream
     * which will cause a `IllegalStateException`.
-    * However as we can't actually synchronize the akka stream completing due to an error with close being called there
+    * However as we can't actually synchronize the pekko stream completing due to an error with close being called there
     * is likely still a short window when this situation could occur, however at this point it should only result in an
     * unclean shutdown.
     */
@@ -403,7 +403,7 @@ object SequencerWriter {
     def createWriterFlow(store: SequencerWriterStore)(implicit
         traceContext: TraceContext
     ): RunningSequencerWriterFlow =
-      AkkaUtil.runSupervised(
+      PekkoUtil.runSupervised(
         logger.error(s"Sequencer writer flow error", _)(TraceContext.empty),
         SequencerWriterSource(
           writerConfig,

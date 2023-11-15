@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.ledger.api
 
-import akka.actor.ActorSystem
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.ledger.resources.ResourceContext
@@ -35,6 +34,7 @@ import com.digitalasset.canton.platform.indexer.{
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.tracing.{NoTracing, TracerProvider}
 import com.digitalasset.canton.{LedgerParticipantId, checked}
+import org.apache.pekko.actor.ActorSystem
 
 import java.time.Duration as JDuration
 import scala.concurrent.{ExecutionContext, Future}
@@ -122,7 +122,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
       .fromEither[FutureUnlessShutdown](ledgerApiStorageE)
       .flatMap { ledgerApiStorage =>
         val connectionPoolConfig = DbSupport.ConnectionPoolConfig(
-          connectionPoolSize = config.storageConfig.maxConnectionsLedgerApiServer,
+          connectionPoolSize = config.storageConfig.numConnectionsLedgerApiServer.unwrap,
           connectionTimeout = config.serverConfig.databaseConnectionTimeout.underlying,
         )
 

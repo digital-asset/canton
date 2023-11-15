@@ -16,14 +16,7 @@ import com.daml.lf.data.Ref.{DottedName, Identifier, PackageId, Party}
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.engine.{Engine, ValueEnricher}
 import com.daml.lf.ledger.EventId
-import com.daml.lf.transaction.{
-  FatContractInstance,
-  GlobalKey,
-  GlobalKeyWithMaintainers,
-  Node,
-  TransactionCoder,
-  Versioned,
-}
+import com.daml.lf.transaction.*
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.VersionedValue
 import com.daml.lf.engine as LfEngine
@@ -55,7 +48,6 @@ import com.digitalasset.canton.platform.{
   Value as LfValue,
 }
 import com.digitalasset.canton.serialization.ProtoConverter.InstantConverter
-import com.google.protobuf
 import com.google.protobuf.ByteString
 import com.google.protobuf.timestamp.Timestamp as ApiTimestamp
 import com.google.rpc.Status
@@ -269,50 +261,43 @@ final class LfValueTranslation(
     @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
     lazy val templateId: LfIdentifier = apiIdentifierToDamlLfIdentifier(raw.partial.templateId.get)
 
-    @annotation.nowarn(
-      "cat=deprecation&origin=com\\.daml\\.ledger\\.api\\.v1\\.event\\.CreatedEvent.*"
-    )
     def getFatContractInstance(
         createArgument: VersionedValue,
         createKey: Option[VersionedValue],
-    ) = {
-      for {
-        contractId <- ContractId.fromString(raw.partial.contractId)
-        apiTemplateId <- raw.partial.templateId
-          .fold[Either[String, ApiIdentifier]](Left("missing templateId"))(Right(_))
-        packageId <- PackageId.fromString(apiTemplateId.packageId)
-        moduleName <- DottedName.fromString(apiTemplateId.moduleName)
-        entityName <- DottedName.fromString(apiTemplateId.entityName)
-        templateId = Identifier(packageId, LfQualifiedName(moduleName, entityName))
-        signatories <- raw.partial.signatories.traverse(Party.fromString).map(_.toSet)
-        observers <- raw.partial.observers.traverse(Party.fromString).map(_.toSet)
-        maintainers <- raw.createKeyMaintainers.toList.traverse(Party.fromString).map(_.toSet)
-        globalKey <- createKey.traverse(key =>
-          GlobalKey.build(templateId, key.unversioned).left.map(_.msg)
+    ): Option[Either[String, FatContractInstance]] =
+      raw.driverMetadata.filter(_.nonEmpty).map { driverMetadataBytes =>
+        for {
+          contractId <- ContractId.fromString(raw.partial.contractId)
+          apiTemplateId <- raw.partial.templateId
+            .fold[Either[String, ApiIdentifier]](Left("missing templateId"))(Right(_))
+          packageId <- PackageId.fromString(apiTemplateId.packageId)
+          moduleName <- DottedName.fromString(apiTemplateId.moduleName)
+          entityName <- DottedName.fromString(apiTemplateId.entityName)
+          templateId = Identifier(packageId, LfQualifiedName(moduleName, entityName))
+          signatories <- raw.partial.signatories.traverse(Party.fromString).map(_.toSet)
+          observers <- raw.partial.observers.traverse(Party.fromString).map(_.toSet)
+          maintainers <- raw.createKeyMaintainers.toList.traverse(Party.fromString).map(_.toSet)
+          globalKey <- createKey
+            .traverse(key => GlobalKey.build(templateId, key.unversioned).left.map(_.msg))
+          apiCreatedAt <- raw.partial.createdAt
+            .fold[Either[String, ApiTimestamp]](Left("missing createdAt"))(Right(_))
+          instant <- InstantConverter.fromProtoPrimitive(apiCreatedAt).left.map(_.message)
+          createdAt <- Timestamp.fromInstant(instant)
+        } yield FatContractInstance.fromCreateNode(
+          Node.Create(
+            coid = contractId,
+            templateId = templateId,
+            arg = createArgument.unversioned,
+            agreementText = raw.partial.agreementText.getOrElse(""),
+            signatories = signatories,
+            stakeholders = signatories ++ observers,
+            keyOpt = globalKey.map(GlobalKeyWithMaintainers(_, maintainers)),
+            version = createArgument.version,
+          ),
+          createTime = createdAt,
+          cantonData = Bytes.fromByteArray(driverMetadataBytes),
         )
-        apiCreatedAt <- raw.partial.metadata
-          .flatMap(_.createdAt)
-          .fold[Either[String, ApiTimestamp]](Left("missing createdAt"))(Right(_))
-        instant <- InstantConverter.fromProtoPrimitive(apiCreatedAt).left.map(_.message)
-        createdAt <- Timestamp.fromInstant(instant)
-        cantonData <- raw.partial.metadata
-          .map(_.driverMetadata)
-          .fold[Either[String, ByteString]](Left("missing cantonData"))(Right(_))
-      } yield FatContractInstance.fromCreateNode(
-        Node.Create(
-          coid = contractId,
-          templateId = templateId,
-          arg = createArgument.unversioned,
-          agreementText = raw.partial.agreementText.getOrElse(""),
-          signatories = signatories,
-          stakeholders = signatories ++ observers,
-          keyOpt = globalKey.map(GlobalKeyWithMaintainers(_, maintainers)),
-          version = createArgument.version,
-        ),
-        createTime = createdAt,
-        cantonData = Bytes.fromByteString(cantonData),
-      )
-    }
+      }
 
     for {
       createKey <- Future(
@@ -331,7 +316,6 @@ final class LfValueTranslation(
       )
     } yield raw.partial.copy(
       createArguments = apiContractData.createArguments,
-      createArgumentsBlob = apiContractData.createArgumentsBlob,
       contractKey = apiContractData.contractKey,
       interfaceViews = apiContractData.interfaceViews,
       createdEventBlob = apiContractData.createdEventBlob.getOrElse(ByteString.EMPTY),
@@ -403,32 +387,32 @@ final class LfValueTranslation(
     def getFatContractInstance(
         createArgument: VersionedValue,
         createKey: Option[VersionedValue],
-    ) = {
-      for {
-        contractId <- ContractId.fromString(createdEvent.contractId)
-        signatories <- createdEvent.signatories.toList.traverse(Party.fromString).map(_.toSet)
-        observers <- createdEvent.observers.toList.traverse(Party.fromString).map(_.toSet)
-        maintainers <- createdEvent.createKeyMaintainers.toList
-          .traverse(Party.fromString)
-          .map(_.toSet)
-        globalKey <- createKey.traverse(key =>
-          GlobalKey.build(templateId, key.unversioned).left.map(_.msg)
+    ): Option[Either[String, FatContractInstance]] =
+      Option(createdEvent.driverMetadata).filter(_.nonEmpty).map { driverMetadataBytes =>
+        for {
+          contractId <- ContractId.fromString(createdEvent.contractId)
+          signatories <- createdEvent.signatories.toList.traverse(Party.fromString).map(_.toSet)
+          observers <- createdEvent.observers.toList.traverse(Party.fromString).map(_.toSet)
+          maintainers <- createdEvent.createKeyMaintainers.toList
+            .traverse(Party.fromString)
+            .map(_.toSet)
+          globalKey <- createKey
+            .traverse(key => GlobalKey.build(templateId, key.unversioned).left.map(_.msg))
+        } yield FatContractInstance.fromCreateNode(
+          Node.Create(
+            coid = contractId,
+            templateId = createdEvent.templateId,
+            arg = createArgument.unversioned,
+            agreementText = createdEvent.agreementText.getOrElse(""),
+            signatories = signatories,
+            stakeholders = signatories ++ observers,
+            keyOpt = globalKey.map(GlobalKeyWithMaintainers(_, maintainers)),
+            version = createArgument.version,
+          ),
+          createTime = createdEvent.ledgerEffectiveTime,
+          cantonData = Bytes.fromByteArray(driverMetadataBytes),
         )
-      } yield FatContractInstance.fromCreateNode(
-        Node.Create(
-          coid = contractId,
-          templateId = createdEvent.templateId,
-          arg = createArgument.unversioned,
-          agreementText = createdEvent.agreementText.getOrElse(""),
-          signatories = signatories,
-          stakeholders = signatories ++ observers,
-          keyOpt = globalKey.map(GlobalKeyWithMaintainers(_, maintainers)),
-          version = createArgument.version,
-        ),
-        createTime = createdEvent.ledgerEffectiveTime,
-        cantonData = Bytes.fromByteArray(createdEvent.driverMetadata),
-      )
-    }
+      }
 
     for {
       createKey <- Future(
@@ -454,7 +438,7 @@ final class LfValueTranslation(
       templateId: LfIdentifier,
       witnesses: Set[String],
       eventProjectionProperties: EventProjectionProperties,
-      fatContractInstance: => Either[String, FatContractInstance],
+      fatContractInstance: => Option[Either[String, FatContractInstance]],
   )(implicit
       ec: ExecutionContext,
       loggingContext: LoggingContextWithTrace,
@@ -482,29 +466,30 @@ final class LfValueTranslation(
       ).flatMap(toInterfaceView(eventProjectionProperties.verbose, interfaceId))
     )
 
-    val asyncContractArgumentsBlob = condFuture(renderResult.contractArgumentsBlob)(
-      Future(ValueSerializer.serializeValueAny(value, "Cannot serialize contractArgumentsBlob"))
-    )
-
-    val asyncCreateEventPayload = condFuture(renderResult.createdEventBlob) {
-      (for {
-        fatInstance <- fatContractInstance
-        encoded <- TransactionCoder.encodeFatContractInstance(fatInstance).left.map(_.errorMessage)
-      } yield encoded).fold(
-        err => Future.failed(new RuntimeException(s"Cannot serialize createdEventBlob: $err")),
-        Future.successful,
-      )
+    val asyncCreatedEventBlob = condFuture(renderResult.createdEventBlob) {
+      fatContractInstance
+        .map { fatContractInstanceE =>
+          (for {
+            fatInstance <- fatContractInstanceE
+            encoded <- TransactionCoder
+              .encodeFatContractInstance(fatInstance)
+              .left
+              .map(_.errorMessage)
+          } yield encoded).fold(
+            err => Future.failed(new RuntimeException(s"Cannot serialize createdEventBlob: $err")),
+            Future.successful,
+          )
+        }
+        .getOrElse(Future.successful(ByteString.EMPTY))
     }
 
     for {
       contractArguments <- asyncContractArguments
-      contractArgumentsBlob <- asyncContractArgumentsBlob
-      createdEventBlob <- asyncCreateEventPayload
+      createdEventBlob <- asyncCreatedEventBlob
       contractKey <- asyncContractKey
       interfaceViews <- asyncInterfaceViews
     } yield ApiContractData(
       createArguments = contractArguments,
-      createArgumentsBlob = contractArgumentsBlob,
       createdEventBlob = createdEventBlob,
       contractKey = contractKey,
       interfaceViews = interfaceViews,
@@ -631,7 +616,6 @@ object LfValueTranslation {
 
   final case class ApiContractData(
       createArguments: Option[ApiRecord],
-      createArgumentsBlob: Option[protobuf.any.Any],
       createdEventBlob: Option[ByteString],
       contractKey: Option[ApiValue],
       interfaceViews: Seq[InterfaceView],

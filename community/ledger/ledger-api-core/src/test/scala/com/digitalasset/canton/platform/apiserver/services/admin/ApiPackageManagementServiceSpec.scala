@@ -3,13 +3,12 @@
 
 package com.digitalasset.canton.platform.apiserver.services.admin
 
-import akka.stream.scaladsl.Source
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.daml_lf_dev.DamlLf.Archive
 import com.daml.error.ErrorsAssertions
 import com.daml.error.utils.ErrorDetails
 import com.daml.error.utils.ErrorDetails.RetryInfoDetail
-import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
+import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.ledger.api.v1.admin.package_management_service.{
   PackageManagementServiceGrpc,
   UploadDarFileRequest,
@@ -40,6 +39,7 @@ import io.grpc.Status.Code
 import io.grpc.StatusRuntimeException
 import io.opentelemetry.api.trace.Tracer
 import io.opentelemetry.sdk.OpenTelemetrySdk
+import org.apache.pekko.stream.scaladsl.Source
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.concurrent.Eventually
@@ -58,7 +58,7 @@ class ApiPackageManagementServiceSpec
     with MockitoSugar
     with Matchers
     with ArgumentMatchersSugar
-    with AkkaBeforeAndAfterAll
+    with PekkoBeforeAndAfterAll
     with Eventually
     with ErrorsAssertions
     with BaseTest

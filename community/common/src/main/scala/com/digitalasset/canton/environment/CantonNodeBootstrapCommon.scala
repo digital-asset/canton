@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.environment
 
-import akka.actor.ActorSystem
 import better.files.File
 import cats.data.EitherT
 import com.daml.metrics.HealthMetrics
@@ -15,7 +14,6 @@ import com.digitalasset.canton.concurrent.{
   FutureSupervisor,
 }
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{LocalNodeConfig, ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService.GrpcVaultServiceFactory
@@ -45,6 +43,7 @@ import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TracerProvider}
 import com.digitalasset.canton.util.SimpleExecutionQueue
 import io.grpc.protobuf.services.ProtoReflectionService
 import io.opentelemetry.api.trace.Tracer
+import org.apache.pekko.actor.ActorSystem
 
 import java.util.concurrent.{Executors, ScheduledExecutorService}
 import scala.annotation.nowarn
@@ -149,12 +148,6 @@ abstract class CantonNodeBootstrapCommon[
 
   // This absolutely must be a "def", because it is used during class initialization.
   protected def connectionPoolForParticipant: Boolean = false
-
-  protected val maxDbConnections: PositiveInt = config.storage.maxConnectionsCanton(
-    forParticipant = connectionPoolForParticipant,
-    withWriteConnectionPool = true,
-    withMainConnection = true,
-  )
 
   protected val ips = new IdentityProvidingServiceClient()
 

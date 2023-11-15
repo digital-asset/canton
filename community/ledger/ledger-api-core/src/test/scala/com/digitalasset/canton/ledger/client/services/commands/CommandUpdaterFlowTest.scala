@@ -3,8 +3,7 @@
 
 package com.digitalasset.canton.ledger.client.services.commands
 
-import akka.stream.scaladsl.{Sink, Source}
-import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
+import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.ledger.api.v1.commands.Commands
 import com.daml.ledger.api.v1.commands.Commands.DeduplicationPeriod
 import com.daml.lf.data.Ref
@@ -13,6 +12,7 @@ import com.digitalasset.canton.ledger.api.{SubmissionIdGenerator, domain}
 import com.digitalasset.canton.ledger.client.configuration.CommandClientConfiguration
 import com.digitalasset.canton.util.Ctx
 import com.google.protobuf.duration.Duration
+import org.apache.pekko.stream.scaladsl.{Sink, Source}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -20,7 +20,7 @@ import scala.annotation.nowarn
 import scala.util.Failure
 
 @nowarn("msg=deprecated")
-class CommandUpdaterFlowTest extends AsyncWordSpec with Matchers with AkkaBeforeAndAfterAll {
+class CommandUpdaterFlowTest extends AsyncWordSpec with Matchers with PekkoBeforeAndAfterAll {
 
   import CommandUpdaterFlowTest.*
 

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.platform.store.dao
 
-import akka.stream.scaladsl.Sink
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.lf.archive.DarParser
 import com.daml.lf.crypto.Hash
@@ -23,6 +22,7 @@ import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.store.dao.JdbcLedgerDaoSuite.*
 import com.digitalasset.canton.platform.store.entries.LedgerEntry
 import com.digitalasset.canton.testing.utils.{TestModels, TestResourceUtils}
+import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.{AsyncTestSuite, OptionValues}
 
 import java.time.Duration
@@ -90,9 +90,6 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
     ),
   )
 
-  protected def recordFieldName(name: String): Option[Ref.Name] =
-    Some(Ref.Name.assertFromString(name))
-
   protected final val someTemplateId = testIdentifier("ParameterShowcase")
   protected final val someTemplateIdFilter =
     TemplateFilter(someTemplateId, includeCreatedEventBlob = false)
@@ -101,41 +98,41 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
   protected final val someValueNumeric =
     LfValue.ValueNumeric(com.daml.lf.data.Numeric.assertFromString("1.1"))
   protected final val someNestedOptionalInteger = LfValue.ValueRecord(
-    Some(testIdentifier("NestedOptionalInteger")),
+    None,
     ImmArray(
-      Some(Ref.Name.assertFromString("value")) -> LfValue.ValueVariant(
-        Some(testIdentifier("OptionalInteger")),
+      None -> LfValue.ValueVariant(
+        None,
         Ref.Name.assertFromString("SomeInteger"),
         someValueInt,
       )
     ),
   )
   protected final val someContractArgument = LfValue.ValueRecord(
-    Some(someTemplateId),
+    None,
     ImmArray(
-      recordFieldName("operator") -> LfValue.ValueParty(alice),
-      recordFieldName("integer") -> someValueInt,
-      recordFieldName("decimal") -> someValueNumeric,
-      recordFieldName("text") -> someValueText,
-      recordFieldName("bool") -> LfValue.ValueBool(true),
-      recordFieldName("time") -> LfValue.ValueTimestamp(Time.Timestamp.Epoch),
-      recordFieldName("nestedOptionalInteger") -> someNestedOptionalInteger,
-      recordFieldName("integerList") -> LfValue.ValueList(FrontStack(someValueInt)),
-      recordFieldName("optionalText") -> LfValue.ValueOptional(Some(someValueText)),
+      None -> LfValue.ValueParty(alice),
+      None -> someValueInt,
+      None -> someValueNumeric,
+      None -> someValueText,
+      None -> LfValue.ValueBool(true),
+      None -> LfValue.ValueTimestamp(Time.Timestamp.Epoch),
+      None -> someNestedOptionalInteger,
+      None -> LfValue.ValueList(FrontStack(someValueInt)),
+      None -> LfValue.ValueOptional(Some(someValueText)),
     ),
   )
   protected final val someChoiceName = Ref.Name.assertFromString("Choice1")
   protected final val someChoiceArgument = LfValue.ValueRecord(
     Some(testIdentifier(someChoiceName)),
     ImmArray(
-      recordFieldName("newInteger") -> someValueInt,
-      recordFieldName("newDecimal") -> someValueNumeric,
-      recordFieldName("newText") -> someValueText,
-      recordFieldName("newBool") -> LfValue.ValueBool(true),
-      recordFieldName("newTime") -> LfValue.ValueTimestamp(Time.Timestamp.Epoch),
-      recordFieldName("newNestedOptionalInteger") -> someNestedOptionalInteger,
-      recordFieldName("newIntegerList") -> LfValue.ValueList(FrontStack(someValueInt)),
-      recordFieldName("newOptionalText") -> LfValue.ValueOptional(Some(someValueText)),
+      None -> someValueInt,
+      None -> someValueNumeric,
+      None -> someValueText,
+      None -> LfValue.ValueBool(true),
+      None -> LfValue.ValueTimestamp(Time.Timestamp.Epoch),
+      None -> someNestedOptionalInteger,
+      None -> LfValue.ValueList(FrontStack(someValueInt)),
+      None -> LfValue.ValueOptional(Some(someValueText)),
     ),
   )
   protected final val someChoiceResult =
@@ -160,10 +157,8 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
   protected final val otherTemplateIdFilter =
     TemplateFilter(otherTemplateId, includeCreatedEventBlob = false)
   protected final val otherContractArgument = LfValue.ValueRecord(
-    Some(otherTemplateId),
-    ImmArray(
-      recordFieldName("operator") -> LfValue.ValueParty(alice)
-    ),
+    None,
+    ImmArray(None -> LfValue.ValueParty(alice)),
   )
 
   protected final val defaultConfig = Configuration(

@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.platform.apiserver
 
-import akka.actor.ActorSystem
-import com.daml.grpc.adapter.{AkkaExecutionSequencerPool, ExecutionSequencerFactory}
+import com.daml.grpc.adapter.{ExecutionSequencerFactory, PekkoExecutionSequencerPool}
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
+import org.apache.pekko.actor.ActorSystem
 
 import java.util.UUID
 import scala.concurrent.Future
@@ -22,5 +22,5 @@ final class ExecutionSequencerFactoryOwner(implicit actorSystem: ActorSystem)
   private val ActorCount = Runtime.getRuntime.availableProcessors() * 8
 
   override def acquire()(implicit context: ResourceContext): Resource[ExecutionSequencerFactory] =
-    Resource(Future(new AkkaExecutionSequencerPool(poolName, ActorCount)))(_.closeAsync())
+    Resource(Future(new PekkoExecutionSequencerPool(poolName, ActorCount)))(_.closeAsync())
 }

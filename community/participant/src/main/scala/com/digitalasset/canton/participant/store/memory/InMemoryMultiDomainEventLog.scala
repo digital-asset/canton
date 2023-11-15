@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.participant.store.memory
 
-import akka.NotUsed
-import akka.stream.scaladsl.Source
 import cats.data.OptionT
 import cats.syntax.foldable.*
 import cats.syntax.parallel.*
@@ -56,8 +54,8 @@ import com.digitalasset.canton.participant.{
   RequestOffset,
   TopologyOffset,
 }
-import com.digitalasset.canton.platform.akkastreams.dispatcher.Dispatcher
-import com.digitalasset.canton.platform.akkastreams.dispatcher.SubSource.RangeSource
+import com.digitalasset.canton.platform.pekkostreams.dispatcher.Dispatcher
+import com.digitalasset.canton.platform.pekkostreams.dispatcher.SubSource.RangeSource
 import com.digitalasset.canton.protocol.TargetDomainId
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.Clock
@@ -66,6 +64,8 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue}
+import org.apache.pekko.NotUsed
+import org.apache.pekko.stream.scaladsl.Source
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable.{SortedMap, TreeMap}

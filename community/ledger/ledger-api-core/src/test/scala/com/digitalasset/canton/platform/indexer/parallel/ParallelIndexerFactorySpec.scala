@@ -3,17 +3,17 @@
 
 package com.digitalasset.canton.platform.indexer.parallel
 
-import akka.stream.KillSwitch
-import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
+import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.platform.indexer.ha.Handle
+import org.apache.pekko.stream.KillSwitch
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.concurrent.{ExecutionContext, Future, Promise}
 
-class ParallelIndexerFactorySpec extends AsyncFlatSpec with Matchers with AkkaBeforeAndAfterAll {
+class ParallelIndexerFactorySpec extends AsyncFlatSpec with Matchers with PekkoBeforeAndAfterAll {
 
   // AsyncFlatSpec is with serial execution context
   private implicit val ec: ExecutionContext = system.dispatcher

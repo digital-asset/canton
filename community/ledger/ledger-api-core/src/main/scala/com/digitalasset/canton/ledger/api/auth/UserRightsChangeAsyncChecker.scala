@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.ledger.api.auth
 
-import akka.actor.Scheduler
 import com.daml.lf.data.Ref
 import com.digitalasset.canton.ledger.api.auth.interceptor.AuthorizationInterceptor
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore
+import org.apache.pekko.actor.Scheduler
 
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
@@ -22,7 +22,7 @@ private[auth] final class UserRightsChangeAsyncChecker(
     nowF: () => Instant,
     userManagementStore: UserManagementStore,
     userRightsCheckIntervalInSeconds: Int,
-    akkaScheduler: Scheduler,
+    pekkoScheduler: Scheduler,
 )(implicit ec: ExecutionContext) {
 
   /** Schedules an asynchronous and periodic task to check for user rights' state changes
@@ -46,7 +46,7 @@ private[auth] final class UserRightsChangeAsyncChecker(
     // Note: https://doc.akka.io/docs/akka/2.6.13/scheduler.html states that:
     // "All scheduled task will be executed when the ActorSystem is terminated, i.e. the task may execute before its timeout."
     val cancellable =
-      akkaScheduler.scheduleWithFixedDelay(initialDelay = delay, delay = delay)(() => {
+      pekkoScheduler.scheduleWithFixedDelay(initialDelay = delay, delay = delay)(() => {
         val userState
             : Future[Either[UserManagementStore.Error, (domain.User, Set[domain.UserRight])]] =
           for {
