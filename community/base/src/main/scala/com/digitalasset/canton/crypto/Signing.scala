@@ -15,7 +15,7 @@ import com.digitalasset.canton.crypto.store.{
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.KeyOwner
+import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
@@ -160,7 +160,7 @@ object Signature
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
-      ProtocolVersion.v3,
+      ProtocolVersion.v5,
       supportedProtoVersion(v0.Signature)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
@@ -339,7 +339,7 @@ object SigningPublicKey
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
-      ProtocolVersion.v3,
+      ProtocolVersion.v5,
       supportedProtoVersion(v0.SigningPublicKey)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
@@ -362,7 +362,7 @@ object SigningPublicKey
       scheme <- SigningKeyScheme.fromProtoEnum("scheme", publicKeyP.scheme)
     } yield new SigningPublicKey(id, format, publicKeyP.publicKey, scheme)
 
-  def collect(initialKeys: Map[KeyOwner, Seq[PublicKey]]): Map[KeyOwner, Seq[SigningPublicKey]] =
+  def collect(initialKeys: Map[Member, Seq[PublicKey]]): Map[Member, Seq[SigningPublicKey]] =
     initialKeys.map { case (k, v) =>
       (k, v.collect { case x: SigningPublicKey => x })
     }
@@ -412,7 +412,7 @@ final case class SigningPrivateKey private[crypto] (
 object SigningPrivateKey extends HasVersionedMessageCompanion[SigningPrivateKey] {
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
-      ProtocolVersion.v3,
+      ProtocolVersion.v5,
       supportedProtoVersion(v0.SigningPrivateKey)(fromProtoV0),
       _.toProtoV0.toByteString,
     )

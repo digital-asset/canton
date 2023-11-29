@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.admin.grpc
 import better.files.*
 import cats.data.EitherT
 import cats.syntax.all.*
-import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -21,6 +20,7 @@ import com.digitalasset.canton.participant.admin.grpc.GrpcParticipantRepairServi
 }
 import com.digitalasset.canton.participant.admin.inspection
 import com.digitalasset.canton.participant.admin.repair.RepairServiceError
+import com.digitalasset.canton.participant.admin.repair.RepairServiceError.ImportAcsError
 import com.digitalasset.canton.participant.admin.v0.*
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.participant.sync.CantonSyncService
@@ -547,8 +547,7 @@ final class GrpcParticipantRepairService(
           } yield ()
 
           resultE.value.flatMap {
-            case Left(error) =>
-              Future.failed(new RuntimeException(error)) // TODO(#14817): use Canton errors instead
+            case Left(error) => Future.failed(ImportAcsError.Error(error).asGrpcError)
             case Right(_) => Future.successful(UploadResponse())
           }
         }
@@ -637,8 +636,7 @@ final class GrpcParticipantRepairService(
       } yield ()
 
       resultE.value.flatMap {
-        case Left(error) =>
-          Future.failed(new RuntimeException(error)) // TODO(#14817): use Canton errors instead
+        case Left(error) => Future.failed(ImportAcsError.Error(error).asGrpcError)
         case Right(_) => Future.successful(UploadResponse())
       }
 
@@ -658,9 +656,9 @@ final class GrpcParticipantRepairService(
         ifNone = s"Domain ID's protocol version not found: $domainId",
       )
       _ <- EitherT.cond[Future](
-        protocolVersion < ProtocolVersion.CNTestNet,
+        protocolVersion < ProtocolVersion.v30,
         (),
-        s"Refusing to add contracts for a domain running on ${ProtocolVersion.CNTestNet} or higher. Please use export_acs and import_acs commands instead.",
+        s"Refusing to add contracts for a domain running on ${ProtocolVersion.v30} or higher. Please use export_acs and import_acs commands instead.",
       )
       alias <- EitherT.fromEither[Future](
         sync.aliasManager

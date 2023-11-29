@@ -10,7 +10,14 @@ import com.digitalasset.canton.domain.api.{v0, v1}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseRequiredNonEmpty}
-import com.digitalasset.canton.version.*
+import com.digitalasset.canton.version.{
+  HasVersionedMessageCompanion,
+  HasVersionedMessageCompanionCommon,
+  HasVersionedMessageCompanionDbHelpers,
+  HasVersionedWrapper,
+  ProtoVersion,
+  ProtocolVersion,
+}
 import com.digitalasset.canton.{ProtoDeserializationError, SequencerAlias}
 import com.google.protobuf.ByteString
 
@@ -195,12 +202,12 @@ object SequencerConnections
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
-      ProtocolVersion.v3,
+      ProtocolVersion.v5,
       supportedProtoVersion(v0.SequencerConnection)(fromProtoV0),
       _.default.toProtoV0.toByteString,
     ),
     ProtoVersion(1) -> ProtoCodec(
-      ProtocolVersion.CNTestNet,
+      ProtocolVersion.v30,
       supportedProtoVersion(v1.SequencerConnections)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),

@@ -7,7 +7,6 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.protocol.messages.Verdict.{
   Approve,
-  MediatorRejectV0,
   MediatorRejectV1,
   MediatorRejectV2,
   ParticipantReject,
@@ -78,17 +77,12 @@ object VerdictTest {
         MediatorError.MalformedMessage.Reject("").rpcStatusWithoutLoggingContext(),
         protocolVersion,
       )
-    else if (protocolVersion >= Verdict.MediatorRejectV1.firstApplicableProtocolVersion)
+    else
       MediatorRejectV1.tryCreate(
         "",
         MediatorError.MalformedMessage.id,
         MediatorError.MalformedMessage.category.asInt,
         protocolVersion,
-      )
-    else
-      MediatorRejectV0.tryCreate(
-        com.digitalasset.canton.protocol.v0.MediatorRejection.Code.Timeout,
-        "",
       )
 
   def malformedVerdict(protocolVersion: ProtocolVersion): Verdict.MediatorReject =
@@ -97,16 +91,11 @@ object VerdictTest {
         MediatorError.MalformedMessage.Reject("").rpcStatusWithoutLoggingContext(),
         protocolVersion,
       )
-    else if (protocolVersion >= Verdict.MediatorRejectV1.firstApplicableProtocolVersion)
+    else
       MediatorRejectV1.tryCreate(
         "",
         MediatorError.MalformedMessage.id,
         MediatorError.MalformedMessage.category.asInt,
         protocolVersion,
-      )
-    else
-      MediatorRejectV0.tryCreate(
-        com.digitalasset.canton.protocol.v0.MediatorRejection.Code.Timeout,
-        "",
       )
 }

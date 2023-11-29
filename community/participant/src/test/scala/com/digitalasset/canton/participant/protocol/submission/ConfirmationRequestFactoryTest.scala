@@ -220,9 +220,6 @@ class ConfirmationRequestFactoryTest
     val requestNoSignature = request
       .focus(_.viewEnvelopes)
       .modify(_.map(_.focus(_.protocolMessage).modify {
-        case v0: EncryptedViewMessageV0[_] =>
-          v0.focus(_.submitterParticipantSignature)
-            .modify(_.map(_ => SymbolicCrypto.emptySignature))
         case v1: EncryptedViewMessageV1[_] =>
           v1.focus(_.submitterParticipantSignature)
             .modify(_.map(_ => SymbolicCrypto.emptySignature))
@@ -307,7 +304,7 @@ class ConfirmationRequestFactoryTest
             TransactionViewType,
             testedProtocolVersion,
           )(
-            LightTransactionViewTree.fromTransactionViewTree(tree, testedProtocolVersion)
+            LightTransactionViewTree.fromTransactionViewTree(tree)
           )
           .valueOr(err => fail(s"Failed to encrypt view tree: $err"))
 
@@ -353,7 +350,7 @@ class ConfirmationRequestFactoryTest
               transactionFactory.domainId,
               SymmetricKeyScheme.Aes128Gcm,
             )(Some(RecipientsInfo(participants, Set.empty, Set.empty)))
-          } else if (testedProtocolVersion >= ProtocolVersion.v4)
+          } else
             EncryptedViewMessageV1(
               signature,
               tree.viewHash,
@@ -362,14 +359,7 @@ class ConfirmationRequestFactoryTest
               transactionFactory.domainId,
               SymmetricKeyScheme.Aes128Gcm,
             )(Some(RecipientsInfo(participants, Set.empty, Set.empty)))
-          else
-            EncryptedViewMessageV0(
-              signature,
-              tree.viewHash,
-              randomnessMap(keySeed, participants, cryptoPureApi).fmap(_.encrypted),
-              encryptedView,
-              transactionFactory.domainId,
-            )
+
         }
 
         OpenEnvelope(encryptedViewMessage, recipients)(testedProtocolVersion)

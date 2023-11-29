@@ -21,7 +21,7 @@ object DamlPlugin extends AutoPlugin {
 
   object autoImport {
     val damlCodeGeneration =
-      settingKey[Seq[(File, File, String)]](
+      taskKey[Seq[(File, File, String)]](
         "List of tuples (Daml project directory, Daml archive file, name of the generated Java package)"
       )
     val damlSourceDirectory = settingKey[File]("Directory containing daml projects")
@@ -61,6 +61,8 @@ object DamlPlugin extends AutoPlugin {
       taskKey[Unit]("Update the checked in DAR with a DAR built with the current Daml version")
     val damlEnableJavaCodegen =
       settingKey[Boolean]("Enable Java codegen")
+    val damlEnableScalaCodegen =
+      settingKey[Boolean]("Enable Scala codegen")
 
     lazy val baseDamlPluginSettings: Seq[Def.Setting[_]] = Seq(
       sourceGenerators += damlGenerateCode.taskValue,
@@ -73,7 +75,8 @@ object DamlPlugin extends AutoPlugin {
       damlJavaCodegenOutput := sourceManaged.value / "daml-codegen-java",
       damlBuildOrder := Seq(),
       damlCodeGeneration := Seq(),
-      damlEnableJavaCodegen := false,
+      damlEnableJavaCodegen := true,
+      damlEnableScalaCodegen := false,
       damlGenerateCode := {
         // for the time being we assume if we're using code generation then the DARs must first be built
         damlBuild.value
@@ -84,15 +87,13 @@ object DamlPlugin extends AutoPlugin {
         val cacheDirectory = streams.value.cacheDirectory
         val log = streams.value.log
         val enableJavaCodegen = damlEnableJavaCodegen.value
+        val enableScalaCodegen = damlEnableScalaCodegen.value
 
         val cache = FileFunction.cached(cacheDirectory, FileInfo.hash) { input =>
           val codegens =
-            (Seq((Codegen.Scala, scalaOutputDirectory))) ++
+            (if (enableScalaCodegen) Seq((Codegen.Scala, scalaOutputDirectory)) else Seq.empty) ++
               (if (enableJavaCodegen) Seq((Codegen.Java, javaOutputDirectory)) else Seq.empty)
-
-          IO.delete(scalaOutputDirectory)
-          if (enableJavaCodegen) IO.delete(javaOutputDirectory) else ()
-
+          codegens.foreach { case (_, outputDirectory) => IO.delete(outputDirectory) }
           settings.flatMap { case (damlProjectDirectory, darFile, packageName) =>
             codegens
               .flatMap { case (codegen, outputDirectory) =>

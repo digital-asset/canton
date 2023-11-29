@@ -64,7 +64,6 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
         optUsedPackages = None,
         optNodeSeeds = None,
         optByKeyNodes = None,
-        optDomainId = None,
       )
     val transactionId = LedgerTransactionId.assertFromString(idString)
 
@@ -86,6 +85,7 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
       blindingInfoO = None,
       hostedWitnesses = Nil,
       contractMetadata = Map(), // TODO(#9795) wire proper value
+      domainId = DomainId.tryFromString("da::default"),
     )
 
     TimestampedEvent(transactionAccepted, offset, None)

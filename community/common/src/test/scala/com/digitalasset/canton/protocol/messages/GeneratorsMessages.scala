@@ -6,7 +6,7 @@ package com.digitalasset.canton.protocol.messages
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.{GeneratorsCrypto, Signature}
-import com.digitalasset.canton.data.{CantonTimestampSecond, ViewPosition, ViewType}
+import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond, ViewPosition, ViewType}
 import com.digitalasset.canton.error.GeneratorsError
 import com.digitalasset.canton.protocol.messages.LocalReject.ConsistencyRejections.{
   DuplicateKey,
@@ -33,7 +33,7 @@ import com.digitalasset.canton.protocol.messages.LocalReject.TransferInRejects.{
   ContractIsLocked,
 }
 import com.digitalasset.canton.protocol.messages.LocalReject.TransferOutRejects.ActivenessCheckFailed
-import com.digitalasset.canton.protocol.{RequestId, RootHash, TransferDomainId, ViewHash}
+import com.digitalasset.canton.protocol.{RequestId, RootHash, TransferDomainId}
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.transaction.GeneratorsTransaction
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
@@ -90,20 +90,6 @@ object GeneratorsMessages {
       : Arbitrary[com.digitalasset.canton.protocol.v0.MediatorRejection.Code] = genArbitrary
 
   object GeneratorsVerdict {
-    private implicit val mediatorRejectV0Gen: Gen[Verdict.MediatorRejectV0] = {
-      import com.digitalasset.canton.protocol.v0.MediatorRejection.Code
-      for {
-        code <- protoMediatorRejectionCodeArb.arbitrary
-        if {
-          code match {
-            case Code.MissingCode | Code.Unrecognized(_) => false
-            case _ => true
-          }
-        }
-        reason <- Gen.alphaNumStr
-      } yield Verdict.MediatorRejectV0.tryCreate(code, reason)
-    }
-
     private def mediatorRejectV1Gen(
         pv: RepresentativeProtocolVersion[Verdict.type]
     ): Gen[Verdict.MediatorRejectV1] = for {
@@ -124,7 +110,6 @@ object GeneratorsMessages {
     // If this pattern match is not exhaustive anymore, update the generator below
     {
       ((_: Verdict.MediatorReject) match {
-        case _: Verdict.MediatorRejectV0 => ()
         case _: Verdict.MediatorRejectV1 => ()
         case _: Verdict.MediatorRejectV2 => ()
       }).discard
@@ -138,12 +123,7 @@ object GeneratorsMessages {
           Verdict.MediatorRejectV2.firstApplicableProtocolVersion
         )
       ) mediatorRejectV2Gen(pv)
-      else if (
-        pv >= Verdict.protocolVersionRepresentativeFor(
-          Verdict.MediatorRejectV1.firstApplicableProtocolVersion
-        )
-      ) mediatorRejectV1Gen(pv)
-      else mediatorRejectV0Gen
+      else mediatorRejectV1Gen(pv)
     }
 
     // TODO(#14515) Check that the generator is exhaustive
@@ -181,7 +161,7 @@ object GeneratorsMessages {
     }
 
     implicit val verdictArb: Arbitrary[Verdict] = Arbitrary(
-      Arbitrary.arbitrary[ProtocolVersion].flatMap(verdictGenFor(_))
+      Arbitrary.arbitrary[ProtocolVersion].flatMap(verdictGenFor)
     )
   }
 
@@ -301,7 +281,7 @@ object GeneratorsMessages {
     )
 
   implicit val transactionResultMessage: Arbitrary[TransactionResultMessage] = Arbitrary(for {
-    pv <- Gen.oneOf(ProtocolVersion.v6, ProtocolVersion.CNTestNet)
+    pv <- Gen.oneOf(ProtocolVersion.v6, ProtocolVersion.v30)
 
     verdict <- GeneratorsVerdict.verdictGenFor(pv)
     rootHash <- Arbitrary.arbitrary[RootHash]
@@ -335,13 +315,6 @@ object GeneratorsMessages {
 
       rpv = MediatorResponse.protocolVersionRepresentativeFor(pv)
 
-      viewHashO <- localVerdict match {
-        case _: LocalApprove | _: LocalReject
-            if rpv < MediatorResponse.protocolVersionRepresentativeFor(ProtocolVersion.v5) =>
-          Gen.some(Arbitrary.arbitrary[ViewHash])
-        case _ => Gen.option(Arbitrary.arbitrary[ViewHash])
-      }
-
       viewPositionO <- localVerdict match {
         case _: LocalApprove | _: LocalReject
             if rpv >= MediatorResponse.protocolVersionRepresentativeFor(ProtocolVersion.v5) =>
@@ -352,7 +325,6 @@ object GeneratorsMessages {
     } yield MediatorResponse.tryCreate(
       requestId,
       sender,
-      viewHashO,
       viewPositionO,
       localVerdict,
       rootHash,
@@ -408,10 +380,7 @@ object GeneratorsMessages {
     for {
       transactions <- Gen.listOf(GeneratorsTransaction.signedTopologyTransactionGenFor(pv))
       domainId <- Arbitrary.arbitrary[DomainId]
-      notSequencedAfter <- valueForEmptyOptionExactlyUntilExclusive(
-        pv,
-        DomainTopologyTransactionMessage.notSequencedAfterInvariant,
-      )
+      notSequencedAfter <- Arbitrary.arbitrary[CantonTimestamp]
     } yield Await.result(
       DomainTopologyTransactionMessage.tryCreate(
         transactions,
@@ -424,8 +393,6 @@ object GeneratorsMessages {
     )
 
   // TODO(#14241) Once we have more generators for merkle trees base classes, make these generators exhaustive
-  private def protocolMessageV1GenFor(pv: ProtocolVersion): Gen[ProtocolMessageV1] =
-    domainTopologyTransactionMessageGenFor(pv)
   private def protocolMessageV2GenFor(pv: ProtocolVersion): Gen[ProtocolMessageV2] =
     domainTopologyTransactionMessageGenFor(pv)
   private def protocolMessageV3GenFor(pv: ProtocolVersion): Gen[ProtocolMessageV3] =
@@ -440,7 +407,6 @@ object GeneratorsMessages {
   // We don't include `protocolMessageV0GenFor` because we don't want
   // to test EnvelopeContentV0 that uses a legacy converter
   def protocolMessageGen(pv: ProtocolVersion): Gen[ProtocolMessage] = Gen.oneOf(
-    protocolMessageV1GenFor(pv),
     protocolMessageV2GenFor(pv),
     protocolMessageV3GenFor(pv),
     unsignedProtocolMessageV4GenFor(pv),
@@ -449,18 +415,15 @@ object GeneratorsMessages {
 
   // TODO(#14515) Check that the generator is exhaustive
   implicit val envelopeContentArb: Arbitrary[EnvelopeContent] = Arbitrary(for {
-    rpv <- representativeProtocolVersionFilteredGen(EnvelopeContent)(
-      List(EnvelopeContent.representativeV0)
-    )
-    pv = rpv.representative
+    pv <- Arbitrary.arbitrary[ProtocolVersion]
+    rpv = EnvelopeContent.protocolVersionRepresentativeFor(pv)
     // We don't test EnvelopeContentV0 because it uses legacy converter which is incompatible with this test
     protocolMessageGen = Map(
-      EnvelopeContent.representativeV1 -> protocolMessageV1GenFor(pv),
       EnvelopeContent.representativeV2 -> protocolMessageV2GenFor(pv),
       EnvelopeContent.representativeV3 -> protocolMessageV3GenFor(pv),
       EnvelopeContent.representativeV4 -> unsignedProtocolMessageV4GenFor(pv),
     )(rpv)
     protocolMessage <- protocolMessageGen
-  } yield EnvelopeContent.tryCreate(protocolMessage, rpv.representative))
+  } yield EnvelopeContent.tryCreate(protocolMessage, pv))
 
 }

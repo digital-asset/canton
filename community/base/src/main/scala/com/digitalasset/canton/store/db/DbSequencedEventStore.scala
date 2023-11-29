@@ -90,7 +90,7 @@ class DbSequencedEventStore(
       val ignore = r.<<[Boolean]
 
       val getTrafficState = {
-        if (protocolVersion >= ProtocolVersion.CNTestNet) {
+        if (protocolVersion >= ProtocolVersion.v30) { // TODO(#15153) Kill this conditional
           SequencedEventTrafficState.sequencedEventTrafficStateGetResult(r)
         } else None
       }
@@ -153,7 +153,7 @@ class DbSequencedEventStore(
   private def bulkInsertQuery(
       events: Seq[PossiblyIgnoredSerializedEvent]
   )(implicit traceContext: TraceContext): DBIOAction[Unit, NoStream, Effect.All] = {
-    if (protocolVersion >= ProtocolVersion.CNTestNet) {
+    if (protocolVersion >= ProtocolVersion.v30) { // TODO(#15153) Kill this conditional
       // DEV protocol version supports sequencer traffic control
       val insertSql = storage.profile match {
         case _: DbStorage.Profile.Oracle =>
@@ -213,31 +213,32 @@ class DbSequencedEventStore(
       traceContext: TraceContext
   ): EitherT[Future, SequencedEventNotFoundError, PossiblyIgnoredSerializedEvent] =
     processingTime.eitherTEvent {
-      val query = if (protocolVersion >= ProtocolVersion.CNTestNet) {
-        criterion match {
-          case ByTimestamp(timestamp) =>
-            // The implementation assumes that we timestamps on sequenced events increases monotonically with the sequencer counter
-            // It therefore is fine to take the first event that we find.
-            sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore, extra_traffic_remainder, extra_traffic_consumed from sequenced_events
+      val query =
+        if (protocolVersion >= ProtocolVersion.v30) { // TODO(#15153) Kill this conditional
+          criterion match {
+            case ByTimestamp(timestamp) =>
+              // The implementation assumes that we timestamps on sequenced events increases monotonically with the sequencer counter
+              // It therefore is fine to take the first event that we find.
+              sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore, extra_traffic_remainder, extra_traffic_consumed from sequenced_events
                 where client = $partitionKey and ts = $timestamp"""
-          case LatestUpto(inclusive) =>
-            sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore, extra_traffic_remainder, extra_traffic_consumed from sequenced_events
+            case LatestUpto(inclusive) =>
+              sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore, extra_traffic_remainder, extra_traffic_consumed from sequenced_events
                 where client = $partitionKey and ts <= $inclusive
                 order by ts desc #${storage.limit(1)}"""
-        }
-      } else {
-        criterion match {
-          case ByTimestamp(timestamp) =>
-            // The implementation assumes that we timestamps on sequenced events increases monotonically with the sequencer counter
-            // It therefore is fine to take the first event that we find.
-            sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore from sequenced_events
+          }
+        } else {
+          criterion match {
+            case ByTimestamp(timestamp) =>
+              // The implementation assumes that we timestamps on sequenced events increases monotonically with the sequencer counter
+              // It therefore is fine to take the first event that we find.
+              sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore from sequenced_events
                 where client = $partitionKey and ts = $timestamp"""
-          case LatestUpto(inclusive) =>
-            sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore from sequenced_events
+            case LatestUpto(inclusive) =>
+              sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore from sequenced_events
                 where client = $partitionKey and ts <= $inclusive
                 order by ts desc #${storage.limit(1)}"""
+          }
         }
-      }
       storage
         .querySingle(query.as[PossiblyIgnoredSerializedEvent].headOption, functionFullName)
         .toRight(SequencedEventNotFoundError(criterion))
@@ -251,7 +252,7 @@ class DbSequencedEventStore(
         case ByTimestampRange(lowerInclusive, upperInclusive) =>
           for {
             events <-
-              if (protocolVersion >= ProtocolVersion.CNTestNet) {
+              if (protocolVersion >= ProtocolVersion.v30) { // TODO(#15153) Kill this conditional
                 storage.query(
                   sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore, extra_traffic_remainder, extra_traffic_consumed from sequenced_events
                     where client = $partitionKey and $lowerInclusive <= ts  and ts <= $upperInclusive
@@ -283,7 +284,7 @@ class DbSequencedEventStore(
   override def sequencedEvents(
       limit: Option[Int] = None
   )(implicit traceContext: TraceContext): Future[Seq[PossiblyIgnoredSerializedEvent]] = {
-    if (protocolVersion >= ProtocolVersion.CNTestNet) {
+    if (protocolVersion >= ProtocolVersion.v30) { // TODO(#15153) Kill this conditional
       processingTime.event {
         storage.query(
           sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore, extra_traffic_remainder, extra_traffic_consumed from sequenced_events

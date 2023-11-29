@@ -533,7 +533,7 @@ class InMemoryMultiDomainEventLog(
       AsyncCloseable(
         s"${this.getClass}: dispatcher",
         dispatcher.shutdown(),
-        timeouts.shutdownShort.duration,
+        timeouts.shutdownShort,
       ),
     )
   }

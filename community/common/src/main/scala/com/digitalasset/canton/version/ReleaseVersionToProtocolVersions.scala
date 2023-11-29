@@ -7,6 +7,8 @@ import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 
 object ReleaseVersionToProtocolVersions {
   private val v2 = ProtocolVersion(2)
+  private val v3 = ProtocolVersion(3)
+  private val v4 = ProtocolVersion(4)
 
   import ProtocolVersion.*
   // For each (major, minor) the list of supported protocol versions
@@ -21,6 +23,8 @@ object ReleaseVersionToProtocolVersions {
     ReleaseVersions.v2_6_0 -> List(v3, v4),
     ReleaseVersions.v2_7_0_snapshot -> List(v3, v4, v5),
     ReleaseVersions.v2_8_0_snapshot -> List(v3, v4, v5),
+    ReleaseVersions.v2_9_0_snapshot -> List(v3, v4, v5),
+    ReleaseVersions.v3_0_0_snapshot -> List(v5),
   ).map { case (release, pvs) => (release.majorMinor, NonEmptyUtil.fromUnsafe(pvs)) }
 
   def get(

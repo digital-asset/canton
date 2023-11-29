@@ -49,8 +49,7 @@ import com.digitalasset.canton.time.TimeProofTestUtil
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.util.{Checked, FutureUtil, MonadUtil}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.util.{Checked, MonadUtil}
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{
   BaseTest,
@@ -62,6 +61,7 @@ import com.digitalasset.canton.{
   SequencerCounter,
   TransferCounter,
   TransferCounterO,
+  config,
 }
 import org.scalatest.wordspec.AsyncWordSpec
 import org.scalatest.{Assertion, EitherValues}
@@ -72,7 +72,7 @@ import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.language.implicitConversions
 
 trait TransferStoreTest {
-  this: AsyncWordSpec with BaseTest =>
+  this: AsyncWordSpec & BaseTest =>
 
   import TransferStoreTest.*
   private implicit val _ec: ExecutionContext = ec
@@ -80,27 +80,26 @@ trait TransferStoreTest {
   private implicit def toGlobalOffset(i: Long): GlobalOffset = GlobalOffset.tryFromLong(i)
 
   protected def transferStore(mk: TargetDomainId => TransferStore): Unit = {
-    val transferData = FutureUtil.noisyAwaitResult(
-      mkTransferData(transfer10, mediator1),
-      "make transfer data",
-      10.seconds,
-    )
+    val transferData =
+      config
+        .NonNegativeFiniteDuration(10.seconds)
+        .await("make transfer data")(mkTransferData(transfer10, mediator1))
 
     def transferDataFor(
         transferId: TransferId,
         contract: SerializableContract,
         transferOutGlobalOffset: Option[GlobalOffset] = None,
-    ) =
-      FutureUtil.noisyAwaitResult(
-        mkTransferData(
-          transferId,
-          mediator1,
-          contract = contract,
-          transferOutGlobalOffset = transferOutGlobalOffset,
-        ),
-        "make transfer data",
-        10.seconds,
-      )
+    ): TransferData =
+      config
+        .NonNegativeFiniteDuration(10.seconds)
+        .await("make transfer data")(
+          mkTransferData(
+            transferId,
+            mediator1,
+            contract = contract,
+            transferOutGlobalOffset = transferOutGlobalOffset,
+          )
+        )
 
     val transferOutResult = mkTransferOutResult(transferData)
     val withTransferOutResult = transferData.copy(transferOutResult = Some(transferOutResult))
@@ -1201,15 +1200,6 @@ object TransferStoreTest extends EitherValues with NoTracing {
       transferOutGlobalOffset: Option[GlobalOffset] = None,
   ): Future[TransferData] = {
 
-    /*
-      Method TransferOutView.fromProtoV0 set protocol version to v3 (not present in Protobuf v0).
-     */
-    val targetProtocolVersion =
-      if (BaseTest.testedProtocolVersion <= ProtocolVersion.v3)
-        TargetProtocolVersion(ProtocolVersion.v3)
-      else
-        TargetProtocolVersion(BaseTest.testedProtocolVersion)
-
     val transferOutRequest = TransferOutRequest(
       submitterMetadata(submittingParty),
       Set(submittingParty),
@@ -1220,7 +1210,7 @@ object TransferStoreTest extends EitherValues with NoTracing {
       SourceProtocolVersion(BaseTest.testedProtocolVersion),
       sourceMediator,
       targetDomainId,
-      targetProtocolVersion,
+      TargetProtocolVersion(BaseTest.testedProtocolVersion),
       TimeProofTestUtil.mkTimeProof(
         timestamp = CantonTimestamp.Epoch,
         targetDomain = targetDomainId,

@@ -293,7 +293,8 @@ trait ActiveContractStoreTest extends PrunableByTimeTest {
       val toc = TimeOfChange(rc, ts)
 
       val faultyTransferCounter =
-        if (testedProtocolVersion < ProtocolVersion.CNTestNet) Some(TransferCounter.Genesis)
+        if (testedProtocolVersion < ProtocolVersion.v30)
+          Some(TransferCounter.Genesis) // TODO(#15153) Kill this conditional
         else None
 
       for {

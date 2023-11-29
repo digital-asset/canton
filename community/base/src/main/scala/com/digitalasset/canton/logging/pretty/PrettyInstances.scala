@@ -7,7 +7,8 @@ import cats.Show.Shown
 import com.daml.ledger.api.v1.completion.Completion
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset.LedgerBoundary
-import com.daml.ledger.client.binding.Primitive
+import com.daml.ledger.javaapi.data.Party
+import com.daml.ledger.javaapi.data.codegen.ContractId
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.{DottedName, PackageId, QualifiedName}
 import com.daml.lf.transaction.ContractStateMachine.ActiveLedgerState
@@ -31,16 +32,18 @@ import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.tracing.{TraceContext, W3CTraceContext}
 import com.digitalasset.canton.util.ShowUtil.HashLength
 import com.digitalasset.canton.util.{ErrorUtil, HexString}
-import com.digitalasset.canton.{LedgerApplicationId, LfPartyId, LfTimestamp}
+import com.digitalasset.canton.{LedgerApplicationId, LfPartyId, LfTimestamp, Uninhabited}
 import com.google.protobuf.ByteString
 import io.grpc.Status
 import io.grpc.health.v1.HealthCheckResponse.ServingStatus
 import pprint.Tree
 import slick.util.{DumpInfo, Dumpable}
 
+import java.lang.Long as JLong
 import java.net.URI
 import java.time.{Duration as JDuration, Instant}
 import java.util.UUID
+import scala.annotation.nowarn
 import scala.concurrent.duration.{Duration, FiniteDuration}
 
 /** Collects instances of [[Pretty]] for common types.
@@ -50,9 +53,12 @@ trait PrettyInstances {
   import Pretty.*
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-  implicit def prettyPrettyPrinting[T <: PrettyPrinting]: Pretty[T] =
-    // Cast is required to make IDEA happy.
-    inst => inst.pretty.treeOf(inst.asInstanceOf[inst.type])
+  implicit def prettyPrettyPrinting[T <: PrettyPrinting]: Pretty[T] = inst =>
+    if (inst == null) PrettyUtil.nullTree
+    else {
+      // Cast is required to make IDEA happy.
+      inst.pretty.treeOf(inst.asInstanceOf[inst.type])
+    }
 
   implicit def prettyTree[T <: Tree]: Pretty[T] = identity
 
@@ -64,11 +70,16 @@ trait PrettyInstances {
 
   implicit def prettyLong: Pretty[Long] = prettyOfString(_.toString)
 
+  implicit def prettyJLong: Pretty[JLong] = prettyOfString(_.toString)
+
   implicit def prettyBoolean: Pretty[Boolean] = prettyOfString(_.toString)
 
   implicit val prettyUnit: Pretty[Unit] = prettyOfString(_ => "()")
 
   implicit def prettySeq[T: Pretty]: Pretty[Seq[T]] = treeOfIterable("Seq", _)
+
+  @nowarn("msg=dead code following this construct")
+  implicit val prettyUninhabited: Pretty[Uninhabited] = (_: Uninhabited) => ???
 
   implicit def prettyNonempty[T: Pretty]: Pretty[NonEmpty[T]] =
     NonEmptyUtil.instances.prettyNonEmpty
@@ -185,8 +196,8 @@ trait PrettyInstances {
 
   implicit val prettyNodeId: Pretty[LfNodeId] = prettyOfParam(_.index)
 
-  implicit def prettyPrimitiveParty: Pretty[Primitive.Party] =
-    prettyOfString(partyId => prettyUidString(scalaz.Tag.unwrap(partyId)))
+  implicit def prettyPrimitiveParty: Pretty[Party] =
+    prettyOfString(party => prettyUidString(party.getValue))
 
   private def prettyUidString(partyStr: String): String =
     UniqueIdentifier.fromProtoPrimitive_(partyStr) match {
@@ -220,8 +231,7 @@ trait PrettyInstances {
   implicit def prettyLfContractId: Pretty[LfContractId] = prettyOfString {
     case LfContractId.V1(discriminator, suffix)
         // Shorten only Canton contract ids
-        if suffix.startsWith(NonAuthenticatedContractIdVersion.versionPrefixBytes) ||
-          suffix.startsWith(AuthenticatedContractIdVersion.versionPrefixBytes) =>
+        if suffix.startsWith(AuthenticatedContractIdVersionV2.versionPrefixBytes) =>
       val prefixBytesSize = CantonContractIdVersion.versionPrefixBytesSize
 
       val cantonVersionPrefix = suffix.slice(0, prefixBytesSize)
@@ -239,8 +249,8 @@ trait PrettyInstances {
     _.protoValue
   )
 
-  implicit def prettyPrimitiveContractId: Pretty[Primitive.ContractId[_]] = prettyOfString { coid =>
-    val coidStr = scalaz.Tag.unwrap(coid)
+  implicit def prettyContractId: Pretty[ContractId[_]] = prettyOfString { coid =>
+    val coidStr = coid.contractId
     val tokens = coidStr.split(':')
     if (tokens.lengthCompare(2) == 0) {
       tokens(0).readableHash.toString + ":" + tokens(1).readableHash.toString

@@ -151,7 +151,7 @@ private[store] object SerializableLedgerSyncEvent
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter
-      .storage(ReleaseProtocolVersion(ProtocolVersion.v3), v0.LedgerSyncEvent)(
+      .storage(ReleaseProtocolVersion(ProtocolVersion.v5), v0.LedgerSyncEvent)(
         supportedProtoVersion(_)(fromProtoV0),
         _.toProtoV0.toByteString,
       )
@@ -524,6 +524,7 @@ private[store] final case class SerializableTransactionAccepted(
       blindingInfo,
       hostedWitnesses,
       contractMetadata,
+      domainId,
     ) = transactionAccepted
     val contractMetadataP = contractMetadata.view.map { case (contractId, bytes) =>
       contractId.toProtoPrimitive -> bytes.toByteString
@@ -545,6 +546,7 @@ private[store] final case class SerializableTransactionAccepted(
       blindingInfo.map(SerializableBlindingInfo(_).toProtoV0),
       contractMetadata = contractMetadataP,
       hostedWitnesses = hostedWitnesses,
+      domainId = domainId.toProtoPrimitive,
     )
   }
 }
@@ -563,6 +565,7 @@ private[store] object SerializableTransactionAccepted {
       blindingInfoP,
       contractMetadataP,
       hostedWitnessesP,
+      domainIdP,
     ) = transactionAcceptedP
     for {
       optCompletionInfo <- completionInfoP.traverse(SerializableCompletionInfo.fromProtoV0)
@@ -593,6 +596,7 @@ private[store] object SerializableTransactionAccepted {
       }
       contractMetadata = contractMetadataSeq.toMap
       hostedWitnesses <- hostedWitnessesP.traverse(ProtoConverter.parseLfPartyId)
+      domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain_id")
     } yield LedgerSyncEvent.TransactionAccepted(
       optCompletionInfo,
       transactionMeta,
@@ -603,6 +607,7 @@ private[store] object SerializableTransactionAccepted {
       blindingInfo,
       hostedWitnesses.toList,
       contractMetadata = contractMetadata,
+      domainId = domainId,
     )
   }
 }
@@ -748,7 +753,7 @@ private[store] final case class SerializableCommandRejected(
       Some(SerializableLfTimestamp(recordTime).toProtoV0),
       Some(SerializableRejectionReasonTemplate(reason).toProtoV0),
       commandKindP,
-      domainId.map(_.toProtoPrimitive),
+      domainId.toProtoPrimitive,
     )
   }
 }
@@ -785,7 +790,7 @@ private[store] object SerializableCommandRejected {
         SerializableRejectionReasonTemplate.fromProtoV0
       )
       commandType <- commandTypeE
-      domainId <- domainIdP.map(DomainId.fromProtoPrimitive(_, "domain_id")).sequence
+      domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain_id")
     } yield LedgerSyncEvent.CommandRejected(
       recordTime,
       completionInfo,
@@ -948,7 +953,6 @@ private[store] final case class SerializableTransactionMeta(transactionMeta: Tra
       optUsedPackages,
       optNodeSeeds,
       optByKeyNodes,
-      optDomainId,
     ) = transactionMeta
     v0.TransactionMeta(
       ledgerTime = Some(InstantConverter.toProtoPrimitive(ledgerTime.toInstant)),
@@ -959,7 +963,6 @@ private[store] final case class SerializableTransactionMeta(transactionMeta: Tra
       nodeSeeds = optNodeSeeds.fold(Seq.empty[v0.NodeSeed])(_.map { case (nodeId, seedHash) =>
         SerializableNodeSeed(nodeId, seedHash).toProtoV0
       }.toSeq),
-      domainId = optDomainId.map(_.toProtoPrimitive),
       byKeyNodes = optByKeyNodes.map(byKeyNodes =>
         v0.TransactionMeta.ByKeyNodes(byKeyNodes.map(_.index).toSeq)
       ),
@@ -980,7 +983,6 @@ private[store] object SerializableTransactionMeta {
       usedPackagesP,
       nodeSeedsP,
       byKeyNodesP,
-      domainIdP,
     ) =
       transactionMetaP
     for {
@@ -1007,7 +1009,6 @@ private[store] object SerializableTransactionMeta {
       optByKeyNodes = byKeyNodesP.map(byKeyNodes =>
         byKeyNodes.byKeyNode.map(LfNodeId(_)).to(ImmArray)
       )
-      domainId <- domainIdP.map(DomainId.fromProtoPrimitive(_, "domain_id")).sequence
     } yield TransactionMeta(
       ledgerTime,
       workflowId,
@@ -1016,7 +1017,6 @@ private[store] object SerializableTransactionMeta {
       optUsedPackages,
       optNodeSeeds,
       optByKeyNodes,
-      domainId,
     )
   }
 }

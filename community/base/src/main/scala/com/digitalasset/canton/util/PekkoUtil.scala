@@ -15,6 +15,7 @@ import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.util.TryUtil.*
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.Logger
 import org.apache.pekko.actor.ActorSystem
@@ -455,7 +456,7 @@ object PekkoUtil extends HasLoggerName {
                   idempotentComplete()
               }
             }(materializer.executionContext)
-            .thereafter(_.failed.foreach { ex =>
+            .thereafter(_.forFailed { ex =>
               loggingContext.error(
                 s"The retry policy for RestartSource $name failed with an error. Stop retrying.",
                 ex,
@@ -537,6 +538,53 @@ object PekkoUtil extends HasLoggerName {
       graph: FlowOpsMat[A, Mat]
   )(combine: (Mat, M) => Mat2): graph.ReprMat[(A, M), Mat2] =
     graph.viaMat(new WithMaterializedValue[M, A](() => create))(combine)
+
+  private def logOnThrow[A](logger: Logger, name: => String)(action: => A): A =
+    try { action }
+    catch {
+      case NonFatal(e) =>
+        logger.error(s"$name failed", e)
+        throw e
+    }
+
+  /** Pekko by default swallows exceptions thrown in [[org.apache.pekko.stream.stage.OutHandler]]s.
+    * This wrapper makes sure that they are logged.
+    */
+  class LoggingOutHandler(delegate: OutHandler, logger: Logger, name: String) extends OutHandler {
+    override def onPull(): Unit =
+      logOnThrow(logger, s"$name onPull")(delegate.onPull())
+
+    override def onDownstreamFinish(cause: Throwable): Unit =
+      logOnThrow(logger, s"$name onDownstreamFinish")(delegate.onDownstreamFinish(cause))
+  }
+  object LoggingOutHandler {
+    def apply(logger: Logger, name: String)(delegate: OutHandler): OutHandler =
+      new LoggingOutHandler(delegate, logger, name)
+  }
+
+  /** Pekko by default swallows exceptions thrown in [[org.apache.pekko.stream.stage.InHandler]]s.
+    * This wrapper makes sure that they are logged.
+    */
+  class LoggingInHandler(delegate: InHandler, logger: Logger, name: String) extends InHandler {
+    override def onPush(): Unit =
+      logOnThrow(logger, s"$name onPush")(delegate.onPush())
+
+    override def onUpstreamFinish(): Unit =
+      logOnThrow(logger, s"$name onUpstreamFinish")(delegate.onUpstreamFinish())
+
+    override def onUpstreamFailure(ex: Throwable): Unit =
+      logOnThrow(logger, s"$name onUpstreamFailure")(delegate.onUpstreamFailure(ex))
+  }
+  object LoggingInHandler {
+    def apply(logger: Logger, name: String)(delegate: InHandler): InHandler =
+      new LoggingInHandler(delegate, logger, name)
+  }
+
+  /** Pekko by default swallows exceptions thrown in async callbacks.
+    * This wrapper makes sure that they are logged.
+    */
+  def loggingAsyncCallback[A](logger: Logger, name: String)(asyncCallback: A => Unit): A => Unit =
+    x => logOnThrow(logger, name)(asyncCallback(x))
 
   /** Creates a value upon materialization that is added to every element of the stream.
     *

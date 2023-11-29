@@ -30,7 +30,7 @@ final case class ApiLoggingConfig(
     warnBeyondLoad: Option[Int] = ApiLoggingConfig.defaultWarnBeyondLoad,
 ) {
 
-  def logMessagePayloads: Boolean = messagePayloads.getOrElse(false)
+  lazy val logMessagePayloads: Boolean = messagePayloads.getOrElse(false)
 
   /** Pretty printer for logging event details */
   lazy val printer = new CantonPrettyPrinter(maxStringLength, maxMessageLines)

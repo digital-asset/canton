@@ -256,7 +256,7 @@ object TransferInValidation {
       targetProtocolVersion: TargetProtocolVersion,
   ): Boolean =
     // TODO(#15179) Review the question above when releasing BFT
-    sourceProtocolVersion.v < ProtocolVersion.CNTestNet && targetProtocolVersion.v >= ProtocolVersion.CNTestNet
+    sourceProtocolVersion.v < ProtocolVersion.v30 && targetProtocolVersion.v >= ProtocolVersion.v30 // TODO(#15153) Kill this conditional
 
   final case class TransferInValidationResult(confirmingParties: Set[LfPartyId])
 

@@ -344,62 +344,55 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         participant: LocalParticipantReference,
         acs: Seq[SerializableContract],
         protocolVersion: ProtocolVersion,
-    ): (Seq[SerializableContract], Map[LfContractId, LfContractId]) =
-      CantonContractIdVersion.fromProtocolVersion(protocolVersion) match {
-        case NonAuthenticatedContractIdVersion =>
-          // No need to remap contract ids if the tested protocol version
-          // does not enforce the usage of authenticated contract ids
-          acs -> acs.view.map(contract => contract.contractId -> contract.contractId).toMap
-        case AuthenticatedContractIdVersion | AuthenticatedContractIdVersionV2 =>
-          val contractIdMappings = mutable.Map.empty[LfContractId, LfContractId]
-          // We assume ACS events are in order
-          val remappedCIds = acs.map { contract =>
-            // Update the referenced contract ids
-            val contractInstanceWithUpdatedContractIdReferences =
-              SerializableRawContractInstance
-                .create(
-                  contract.rawContractInstance.contractInstance.map(_.mapCid(contractIdMappings)),
-                  AgreementText.empty, // Empty is fine, because the agreement text is not used when generating the raw serializable contract hash
-                )
-                .valueOr(err =>
-                  throw new RuntimeException(
-                    s"Could not create serializable raw contract instance: $err"
-                  )
-                )
-
-            val LfContractId.V1(discriminator, _) = contract.contractId
-            val contractSalt = contract.contractSalt.getOrElse(
-              throw new IllegalArgumentException("Missing contract salt")
+    ): (Seq[SerializableContract], Map[LfContractId, LfContractId]) = {
+      val contractIdMappings = mutable.Map.empty[LfContractId, LfContractId]
+      // We assume ACS events are in order
+      val remappedCIds = acs.map { contract =>
+        // Update the referenced contract ids
+        val contractInstanceWithUpdatedContractIdReferences =
+          SerializableRawContractInstance
+            .create(
+              contract.rawContractInstance.contractInstance.map(_.mapCid(contractIdMappings)),
+              AgreementText.empty, // Empty is fine, because the agreement text is not used when generating the raw serializable contract hash
             )
-            val pureCrypto = participant.underlying
-              .map(_.cryptoPureApi)
-              .getOrElse(sys.error("where is my crypto?"))
-
-            // Compute the new contract id
-            val newContractId =
-              generate_contract_id(
-                cryptoPureApi = pureCrypto,
-                rawContract = contractInstanceWithUpdatedContractIdReferences,
-                createdAt = contract.ledgerCreateTime.ts,
-                discriminator = discriminator,
-                contractSalt = contractSalt,
-                metadata = contract.metadata,
-                protocolVersion = protocolVersion,
+            .valueOr(err =>
+              throw new RuntimeException(
+                s"Could not create serializable raw contract instance: $err"
               )
+            )
 
-            // Update the contract id mappings with the current contract's id
-            contractIdMappings += contract.contractId -> newContractId
+        val LfContractId.V1(discriminator, _) = contract.contractId
+        val contractSalt = contract.contractSalt.getOrElse(
+          throw new IllegalArgumentException("Missing contract salt")
+        )
+        val pureCrypto = participant.underlying
+          .map(_.cryptoPureApi)
+          .getOrElse(sys.error("where is my crypto?"))
 
-            // Update the contract with the new contract id and recomputed instance
-            contract
-              .copy(
-                contractId = newContractId,
-                rawContractInstance = contractInstanceWithUpdatedContractIdReferences,
-              )
-          }
+        // Compute the new contract id
+        val newContractId =
+          generate_contract_id(
+            cryptoPureApi = pureCrypto,
+            rawContract = contractInstanceWithUpdatedContractIdReferences,
+            createdAt = contract.ledgerCreateTime.ts,
+            discriminator = discriminator,
+            contractSalt = contractSalt,
+            metadata = contract.metadata,
+          )
 
-          remappedCIds -> Map.from(contractIdMappings)
+        // Update the contract id mappings with the current contract's id
+        contractIdMappings += contract.contractId -> newContractId
+
+        // Update the contract with the new contract id and recomputed instance
+        contract
+          .copy(
+            contractId = newContractId,
+            rawContractInstance = contractInstanceWithUpdatedContractIdReferences,
+          )
       }
+
+      remappedCIds -> Map.from(contractIdMappings)
+    }
 
     @Help.Summary("Generate authenticated contract id.")
     @Help.Description(
@@ -416,11 +409,9 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         discriminator: LfHash,
         contractSalt: Salt,
         metadata: ContractMetadata,
-        protocolVersion: ProtocolVersion,
     ): ContractId.V1 = {
       val unicumGenerator = new UnicumGenerator(cryptoPureApi)
-      val cantonContractIdVersion =
-        CantonContractIdVersion.fromProtocolVersion(protocolVersion)
+      val cantonContractIdVersion = AuthenticatedContractIdVersionV2
       val unicum = unicumGenerator
         .recomputeUnicum(
           contractSalt,

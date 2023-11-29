@@ -284,7 +284,9 @@ private final class MigrateContracts(
   ): CheckedT[Future, String, ActiveContractStore.AcsWarning, Unit] = {
 
     def whenTransferCounterIsSupported(r: RepairRequest)(tc: TransferCounter): TransferCounterO =
-      Option.when(r.domain.parameters.protocolVersion >= ProtocolVersion.CNTestNet)(tc)
+      Option.when(r.domain.parameters.protocolVersion >= ProtocolVersion.v30)(
+        tc
+      ) // TODO(#15153) Kill this conditional
 
     val outF = repairSource.domain.persistentState.activeContractStore
       .transferOutContracts(

@@ -368,7 +368,7 @@ private[platform] object InMemoryStateUpdater {
             optDeduplicationOffset = deduplicationOffset,
             optDeduplicationDurationSeconds = deduplicationDurationSeconds,
             optDeduplicationDurationNanos = deduplicationDurationNanos,
-            domainId = txAccepted.transactionMeta.optDomainId.map(_.toProtoPrimitive),
+            domainId = Some(txAccepted.domainId.toProtoPrimitive), // TODO(i15280)
             traceContext = traceContext,
           ),
           submitters = completionInfo.actAs.toSet,
@@ -383,7 +383,7 @@ private[platform] object InMemoryStateUpdater {
       offset = offset,
       events = events.toVector,
       completionDetails = completionDetails,
-      domainId = txAccepted.transactionMeta.optDomainId.map(_.toProtoPrimitive),
+      domainId = Some(txAccepted.domainId.toProtoPrimitive), // TODO(i15280)
     )
   }
 
@@ -408,7 +408,7 @@ private[platform] object InMemoryStateUpdater {
           optDeduplicationOffset = deduplicationOffset,
           optDeduplicationDurationSeconds = deduplicationDurationSeconds,
           optDeduplicationDurationNanos = deduplicationDurationNanos,
-          domainId = u.domainId.map(_.toProtoPrimitive),
+          domainId = Some(u.domainId.toProtoPrimitive), // TODO(i15280)
           traceContext = traceContext,
         ),
         submitters = u.completionInfo.actAs.toSet,

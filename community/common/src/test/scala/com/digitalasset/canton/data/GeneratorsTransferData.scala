@@ -226,14 +226,11 @@ object GeneratorsTransferData {
   implicit val transferInViewArb: Arbitrary[TransferInView] = Arbitrary(
     for {
       salt <- Arbitrary.arbitrary[Salt]
-      targetProtocolVersion <- Arbitrary.arbitrary[TargetProtocolVersion]
 
-      // Default sourceProtocolVersion for pv=3
-      sourceProtocolVersion <- defaultValueGen(
-        targetProtocolVersion.v,
-        TransferInView.sourceProtocolVersionDefaultValue,
-      )
-      contract <- serializableContractGen(targetProtocolVersion.v)
+      targetProtocolVersion <- Arbitrary.arbitrary[TargetProtocolVersion]
+      sourceProtocolVersion <- Arbitrary.arbitrary[SourceProtocolVersion]
+
+      contract <- serializableContractArb(canHaveEmptyKey = true).arbitrary
       creatingTransactionId <- Arbitrary.arbitrary[TransactionId]
       submitterMetadata <- transferInSubmitterMetadataGen(targetProtocolVersion)
       transferOutResultEvent <- deliveryTransferOutResultGen(contract, sourceProtocolVersion)
@@ -260,17 +257,12 @@ object GeneratorsTransferData {
       salt <- Arbitrary.arbitrary[Salt]
 
       sourceProtocolVersion <- Arbitrary.arbitrary[SourceProtocolVersion]
-
-      // Default targetProtocolVersion for pv=3
-      targetProtocolVersion <- defaultValueGen(
-        sourceProtocolVersion.v,
-        TransferOutView.targetProtocolVersionDefaultValue,
-      )
+      targetProtocolVersion <- Arbitrary.arbitrary[TargetProtocolVersion]
 
       submitterMetadata <- transferOutSubmitterMetadataGen(sourceProtocolVersion)
 
       creatingTransactionId <- Arbitrary.arbitrary[TransactionId]
-      contract <- GeneratorsProtocol.serializableContractGen(sourceProtocolVersion.v)
+      contract <- serializableContractArb(canHaveEmptyKey = true).arbitrary
 
       targetDomain <- Arbitrary.arbitrary[TargetDomainId]
       timeProof <- Arbitrary.arbitrary[TimeProof]

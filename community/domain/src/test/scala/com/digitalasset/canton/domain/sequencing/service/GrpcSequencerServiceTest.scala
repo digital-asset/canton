@@ -24,6 +24,7 @@ import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.DomainParametersLookup.SequencerDomainParameters
 import com.digitalasset.canton.protocol.{
   DomainParametersLookup,
+  DynamicDomainParametersLookup,
   TestDomainParameters,
   v0 as protocolV0,
 }
@@ -148,12 +149,9 @@ class GrpcSequencerServiceTest
         )
       )
 
-    private val domainParamLookup: DomainParametersLookup[SequencerDomainParameters] =
+    private val domainParamLookup: DynamicDomainParametersLookup[SequencerDomainParameters] =
       DomainParametersLookup.forSequencerDomainParameters(
-        BaseTest.defaultStaticDomainParametersWith(
-          maxRatePerParticipant = maxRatePerParticipant.unwrap,
-          maxRequestSize = maxRequestSize.unwrap,
-        ),
+        BaseTest.defaultStaticDomainParametersWith(),
         None,
         topologyClient,
         FutureSupervisor.Noop,
@@ -167,7 +165,7 @@ class GrpcSequencerServiceTest
     val maxItemsInTopologyBatch = 5
     private val numBatches = 3
     private val topologyInitService: Option[TopologyStateForInitializationService] =
-      if (testedProtocolVersion < ProtocolVersion.CNTestNet) None
+      if (testedProtocolVersion < ProtocolVersion.v30) None // TODO(#15153) Kill this conditional
       else
         Some(new TopologyStateForInitializationService {
           val factoryX =
@@ -260,581 +258,197 @@ class GrpcSequencerServiceTest
     )
   }
 
-  Seq(("send unsigned", false), ("send signed", true)).foreach { case (name, useSignedSend) =>
-    name should {
-      val versioned = SubmissionRequest.usingVersionedSubmissionRequest(testedProtocolVersion)
+  "send signed" should {
+    def signedSubmissionReq(
+        request: SubmissionRequest
+    ): SignedContent[BytestringWithCryptographicEvidence] =
+      signedContent(request.toByteString)
 
-      def signedSubmissionReq(
-          request: SubmissionRequest
-      ): SignedContent[BytestringWithCryptographicEvidence] =
-        signedContent(request.toByteString)
+    def sendProto(
+        requestV0: protocolV0.SubmissionRequest,
+        versionedRequest: ByteString,
+        versionedSignedRequest: ByteString,
+        authenticated: Boolean,
+    )(implicit env: Environment): Future[ParsingResult[SendAsyncResponse]] = {
+      import env.*
 
-      def sendProto(
-          requestV0: protocolV0.SubmissionRequest,
-          signedRequestV0: protocolV0.SignedContent,
-          versionedRequest: ByteString,
-          versionedSignedRequest: ByteString,
-          authenticated: Boolean,
-      )(implicit env: Environment): Future[ParsingResult[SendAsyncResponse]] = {
-        import env.*
-
-        if (!authenticated) {
-          val response =
-            if (versioned) {
-              val requestP = v0.SendAsyncUnauthenticatedVersionedRequest(versionedRequest)
-              service.sendAsyncUnauthenticatedVersioned(requestP)
-            } else
-              service.sendAsyncUnauthenticated(requestV0)
-          response.map(SendAsyncResponse.fromSendAsyncResponseProto)
-        } else if (useSignedSend) {
-          val response =
-            if (versioned) {
-              val requestP = v0.SendAsyncVersionedRequest(versionedSignedRequest)
-              service.sendAsyncVersioned(requestP)
-            } else service.sendAsyncSigned(signedRequestV0)
-          response.map(SendAsyncResponse.fromSendAsyncSignedResponseProto)
-        } else {
-          val response = service.sendAsync(requestV0)
-          response.map(SendAsyncResponse.fromSendAsyncResponseProto)
-        }
-      }
-
-      def send(request: SubmissionRequest, authenticated: Boolean)(implicit
-          env: Environment
-      ): Future[ParsingResult[SendAsyncResponse]] = {
-        val signedRequest = signedSubmissionReq(request)
-        sendProto(
-          request.toProtoV0,
-          signedRequest.toProtoV0,
-          request.toByteString,
-          signedRequest.toByteString,
-          authenticated,
-        )
-      }
-
-      def sendAndCheckSucceed(request: SubmissionRequest)(implicit
-          env: Environment
-      ): Future[Assertion] =
-        send(request, authenticated = true).map { responseP =>
-          responseP.value.error shouldBe None
-        }
-
-      def sendAndCheckError(
-          request: SubmissionRequest,
-          authenticated: Boolean = true,
-      )(assertion: PartialFunction[SendAsyncError, Assertion])(implicit
-          env: Environment
-      ): Future[Assertion] =
-        send(request, authenticated).map { responseP =>
-          assertion(responseP.value.error.value)
-        }
-
-      def sendProtoAndCheckError(
-          requestV0: protocolV0.SubmissionRequest,
-          signedRequestV0: protocolV0.SignedContent,
-          versionedRequest: ByteString,
-          versionedSignedRequest: ByteString,
-          assertion: PartialFunction[SendAsyncError, Assertion],
-          authenticated: Boolean = true,
-      )(implicit env: Environment): Future[Assertion] =
-        sendProto(
-          requestV0,
-          signedRequestV0,
-          versionedRequest,
-          versionedSignedRequest,
-          authenticated,
-        ).map { responseP =>
-          assertion(responseP.value.error.value)
-        }
-
-      if (SubmissionRequest.usingSignedSubmissionRequest(testedProtocolVersion) == useSignedSend) {
-        "reject empty request" in { implicit env =>
-          val requestV0 = protocolV0.SubmissionRequest("", "", false, None, None, None)
-          val signedRequestV0 = signedContent(
-            VersionedMessage[SubmissionRequest](requestV0.toByteString, 0).toByteString
-          )
-
-          loggerFactory.assertLogs(
-            sendProtoAndCheckError(
-              requestV0,
-              signedRequestV0.toProtoV0,
-              VersionedMessage(requestV0.toByteString, 0).toByteString,
-              signedRequestV0.toByteString,
-              { case SendAsyncError.RequestInvalid(message) =>
-                message should startWith("ValueConversionError(sender,Invalid keyOwner ``")
-              },
-            ),
-            _.warningMessage should startWith("ValueConversionError(sender,Invalid keyOwner ``"),
-          )
-        }
-
-        "reject envelopes with empty content" in { implicit env =>
-          val request = defaultRequest
-            .focus(_.batch.envelopes)
-            .modify(_.map(_.focus(_.bytes).replace(ByteString.EMPTY)))
-
-          loggerFactory.assertLogs(
-            sendAndCheckError(request) { case SendAsyncError.RequestInvalid(message) =>
-              message shouldBe "Batch contains envelope without content."
-            },
-            _.warningMessage should endWith(
-              "is invalid: Batch contains envelope without content."
-            ),
-          )
-        }
-
-        "reject envelopes with invalid sender" in { implicit env =>
-          val requestV0 = defaultRequest.toProtoV0.focus(_.sender).modify {
-            case "" => fail("sender should be set")
-            case _sender => "THISWILLFAIL"
-          }
-          val signedRequestV0 = signedContent(
-            VersionedMessage[SubmissionRequest](requestV0.toByteString, 0).toByteString
-          )
-          loggerFactory.assertLogs(
-            sendProtoAndCheckError(
-              requestV0,
-              signedRequestV0.toProtoV0,
-              VersionedMessage(requestV0.toByteString, 0).toByteString,
-              signedRequestV0.toByteString,
-              { case SendAsyncError.RequestInvalid(message) =>
-                message should startWith(
-                  "ValueConversionError(sender,Expected delimiter :: after three letter code of `THISWILLFAIL`)"
-                )
-              },
-            ),
-            _.warningMessage should startWith(
-              "ValueConversionError(sender,Expected delimiter :: after three letter code of `THISWILLFAIL`)"
-            ),
-          )
-        }
-
-        "reject large messages" in { implicit env =>
-          val bigEnvelope =
-            ClosedEnvelope.tryCreate(
-              ByteString.copyFromUtf8(scala.util.Random.nextString(5000)),
-              Recipients.cc(participant),
-              Seq.empty,
-              testedProtocolVersion,
-            )
-          val request = defaultRequest.focus(_.batch.envelopes).replace(List(bigEnvelope))
-
-          val alarmMsg = s"Max bytes to decompress is exceeded. The limit is 1000 bytes."
-          loggerFactory.assertLogs(
-            sendAndCheckError(request) { case SendAsyncError.RequestInvalid(message) =>
-              message should include(alarmMsg)
-            },
-            _.shouldBeCantonError(
-              SequencerError.MaxRequestSizeExceeded,
-              _ shouldBe alarmMsg,
-            ),
-          )
-        }
-
-        "reject unauthorized authenticated participant" in { implicit env =>
-          val request = defaultRequest
-            .focus(_.sender)
-            .replace(DefaultTestIdentities.participant2)
-
-          loggerFactory.assertLogs(
-            sendAndCheckError(request) { case SendAsyncError.RequestRefused(message) =>
-              message should (include("is not authorized to send:")
-                and include("just tried to use sequencer on behalf of"))
-            },
-            _.warningMessage should (include("is not authorized to send:")
-              and include("just tried to use sequencer on behalf of")),
-          )
-        }
-
-        "reject unauthenticated member that uses authenticated send" in { _ =>
-          val request = defaultRequest
-            .focus(_.sender)
-            .replace(unauthenticatedMember)
-
-          loggerFactory.assertLogs(
-            sendAndCheckError(request, authenticated = true) {
-              case SendAsyncError.RequestRefused(message) =>
-                message should include("needs to use unauthenticated send operation")
-            }(new Environment(unauthenticatedMember)),
-            _.warningMessage should include("needs to use unauthenticated send operation"),
-          )
-        }
-
-        "reject non domain manager authenticated member sending message to unauthenticated member" in {
-          implicit env =>
-            val request = defaultRequest
-              .focus(_.batch)
-              .replace(
-                Batch(
-                  List(
-                    ClosedEnvelope.tryCreate(
-                      content,
-                      Recipients.cc(unauthenticatedMember),
-                      Seq.empty,
-                      testedProtocolVersion,
-                    )
-                  ),
-                  testedProtocolVersion,
-                )
-              )
-            loggerFactory.assertLogs(
-              sendAndCheckError(request, authenticated = true) {
-                case SendAsyncError.RequestRefused(message) =>
-                  message should include("Member is trying to send message to unauthenticated")
-              },
-              _.warningMessage should include(
-                "Member is trying to send message to unauthenticated"
-              ),
-            )
-        }
-
-        "succeed authenticated domain manager sending message to unauthenticated member" in { _ =>
-          val request = defaultRequest
-            .focus(_.sender)
-            .replace(DefaultTestIdentities.domainManager)
-            .focus(_.batch)
-            .replace(
-              Batch(
-                List(
-                  ClosedEnvelope.tryCreate(
-                    content,
-                    Recipients.cc(unauthenticatedMember),
-                    Seq.empty,
-                    testedProtocolVersion,
-                  )
-                ),
-                testedProtocolVersion,
-              )
-            )
-          val domEnvironment = new Environment(DefaultTestIdentities.domainManager)
-          sendAndCheckSucceed(request)(domEnvironment)
-        }
-
-        "succeed unauthenticated member sending message to domain manager" in { _ =>
-          val request = defaultRequest
-            .focus(_.sender)
-            .replace(unauthenticatedMember)
-            .focus(_.batch)
-            .replace(
-              Batch(
-                List(
-                  ClosedEnvelope.tryCreate(
-                    content,
-                    Recipients.cc(DefaultTestIdentities.domainManager),
-                    Seq.empty,
-                    testedProtocolVersion,
-                  )
-                ),
-                testedProtocolVersion,
-              )
-            )
-          val newEnv = new Environment(unauthenticatedMember).service
-          val responseF =
-            if (versioned)
-              newEnv.sendAsyncUnauthenticatedVersioned(
-                v0.SendAsyncUnauthenticatedVersionedRequest(request.toByteString)
-              )
-            else
-              newEnv.sendAsyncUnauthenticated(request.toProtoV0)
-          responseF
-            .map { responseP =>
-              val response = SendAsyncResponse.fromSendAsyncResponseProto(responseP)
-              response.value.error shouldBe None
-            }
-        }
-
-        "reject on rate excess" in { implicit env =>
-          def expectSuccess(): Future[Assertion] = {
-            sendAndCheckSucceed(defaultRequest)
-          }
-
-          def expectOverloaded(): Future[Assertion] = {
-            sendAndCheckError(defaultRequest) { case SendAsyncError.Overloaded(message) =>
-              message should endWith("Submission rate exceeds rate limit of 5/s.")
-            }
-          }
-
-          for {
-            _ <- expectSuccess() // push us beyond the max rate
-            // Don't submit as we don't know when the current cycle ends
-            _ = Threading.sleep(1000) // recover
-            _ <- expectSuccess() // good again
-            _ <- expectOverloaded() // resource exhausted
-            _ = Threading.sleep(1000)
-            _ <- expectSuccess() // good again
-            _ <- expectOverloaded() // exhausted again
-          } yield succeed
-        }
-
-        def multipleMediatorTestCase(
-            mediator1: RecipientsTree,
-            mediator2: RecipientsTree,
-        ): (FixtureParam => Future[Assertion]) = { _ =>
-          val differentEnvelopes = Batch.fromClosed(
-            testedProtocolVersion,
-            ClosedEnvelope.tryCreate(
-              ByteString.copyFromUtf8("message to first mediator"),
-              Recipients(NonEmpty.mk(Seq, mediator1)),
-              Seq.empty,
-              testedProtocolVersion,
-            ),
-            ClosedEnvelope.tryCreate(
-              ByteString.copyFromUtf8("message to second mediator"),
-              Recipients(NonEmpty.mk(Seq, mediator2)),
-              Seq.empty,
-              testedProtocolVersion,
-            ),
-          )
-          val sameEnvelope = Batch.fromClosed(
-            testedProtocolVersion,
-            ClosedEnvelope.tryCreate(
-              ByteString.copyFromUtf8("message to two mediators and the participant"),
-              Recipients(
-                NonEmpty(
-                  Seq,
-                  RecipientsTree.ofMembers(
-                    NonEmpty.mk(Set, participant),
-                    Seq(
-                      mediator1,
-                      mediator2,
-                    ),
-                  ),
-                )
-              ),
-              Seq.empty,
-              testedProtocolVersion,
-            ),
-          )
-
-          val domainManager: Member = DefaultTestIdentities.domainManager
-
-          val batches = Seq(differentEnvelopes, sameEnvelope)
-          val badRequests = batches.map(batch => mkSubmissionRequest(batch, participant))
-          val goodRequests = batches.map(batch =>
-            mkSubmissionRequest(
-              batch,
-              DefaultTestIdentities.mediator,
-            ) -> DefaultTestIdentities.mediator
-          ) ++ batches.map(batch =>
-            mkSubmissionRequest(
-              batch,
-              domainManager,
-            ) -> domainManager
-          )
-          for {
-            _ <- MonadUtil.sequentialTraverse_(badRequests.zipWithIndex) {
-              case (badRequest, index) =>
-                withClue(s"bad request #$index") {
-                  // create a fresh environment for each request such that the rate limiter does not complain
-                  val participantEnv = new Environment(participant)
-                  loggerFactory.assertLogs(
-                    sendAndCheckError(badRequest) { case SendAsyncError.RequestRefused(message) =>
-                      message shouldBe "Batch from participant contains multiple mediators as recipients."
-                    }(participantEnv),
-                    _.warningMessage should include(
-                      "refused: Batch from participant contains multiple mediators as recipients."
-                    ),
-                  )
-                }
-            }
-            // We don't need log suppression for the good requests so we can run them in parallel
-            _ <- goodRequests.zipWithIndex.parTraverse_ { case ((goodRequest, sender), index) =>
-              withClue(s"good request #$index") {
-                val senderEnv = new Environment(sender)
-                sendAndCheckSucceed(goodRequest)(senderEnv)
-              }
-            }
-          } yield succeed
-        }
-
-        "reject sending to multiple mediators iff the sender is a participant" in multipleMediatorTestCase(
-          RecipientsTree.leaf(NonEmpty.mk(Set, DefaultTestIdentities.mediator)),
-          RecipientsTree.leaf(
-            NonEmpty.mk(Set, MediatorId(UniqueIdentifier.tryCreate("another", "mediator")))
-          ),
-        )
-
-        "reject sending to multiple mediator groups iff the sender is a participant" onlyRunWithOrGreaterThan (ProtocolVersion.CNTestNet) in multipleMediatorTestCase(
-          RecipientsTree(
-            NonEmpty.mk(
-              Set,
-              MediatorsOfDomain(NonNegativeInt.tryCreate(1)),
-            ),
-            Seq.empty,
-          ),
-          RecipientsTree(
-            NonEmpty.mk(
-              Set,
-              MediatorsOfDomain(NonNegativeInt.tryCreate(2)),
-            ),
-            Seq.empty,
-          ),
-        )
-
-        "reject requests to unauthenticated members with a signing key timestamps" in {
-          implicit env =>
-            val request = defaultRequest
-              .focus(_.timestampOfSigningKey)
-              .replace(Some(CantonTimestamp.ofEpochSecond(1)))
-              .focus(_.batch)
-              .replace(
-                Batch(
-                  List(
-                    ClosedEnvelope.tryCreate(
-                      content,
-                      Recipients.cc(unauthenticatedMember),
-                      Seq.empty,
-                      testedProtocolVersion,
-                    )
-                  ),
-                  testedProtocolVersion,
-                )
-              )
-
-            loggerFactory.assertLogs(
-              sendAndCheckError(request) { case SendAsyncError.RequestRefused(message) =>
-                message should include(
-                  "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key"
-                )
-              },
-              _.warningMessage should include(
-                "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key"
-              ),
-            )
-        }
-
-        "reject unauthenticated eligible members in aggregation rule" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
-          implicit env =>
-            val request = defaultRequest
-              .focus(_.timestampOfSigningKey)
-              .replace(Some(CantonTimestamp.ofEpochSecond(1)))
-              .focus(_.aggregationRule)
-              .replace(
-                Some(
-                  AggregationRule(
-                    eligibleMembers = NonEmpty(Seq, participant, unauthenticatedMember),
-                    threshold = PositiveInt.tryCreate(1),
-                    testedProtocolVersion,
-                  )
-                )
-              )
-            loggerFactory.assertLogs(
-              sendAndCheckError(request) { case SendAsyncError.RequestInvalid(message) =>
-                message should include(
-                  "Eligible senders in aggregation rule must be authenticated, but found unauthenticated members"
-                )
-              },
-              _.warningMessage should include(
-                "Eligible senders in aggregation rule must be authenticated, but found unauthenticated members"
-              ),
-            )
-        }
-
-        "reject unachievable threshold in aggregation rule" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
-          implicit env =>
-            val request = defaultRequest
-              .focus(_.timestampOfSigningKey)
-              .replace(Some(CantonTimestamp.ofEpochSecond(1)))
-              .focus(_.aggregationRule)
-              .replace(
-                Some(
-                  AggregationRule(
-                    eligibleMembers = NonEmpty(Seq, participant, participant),
-                    threshold = PositiveInt.tryCreate(2),
-                    testedProtocolVersion,
-                  )
-                )
-              )
-            loggerFactory.assertLogs(
-              sendAndCheckError(request) { case SendAsyncError.RequestInvalid(message) =>
-                message should include("Threshold 2 cannot be reached")
-              },
-              _.warningMessage should include("Threshold 2 cannot be reached"),
-            )
-        }
-
-        "reject uneligible sender in aggregation rule" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
-          implicit env =>
-            val request = defaultRequest
-              .focus(_.timestampOfSigningKey)
-              .replace(Some(CantonTimestamp.ofEpochSecond(1)))
-              .focus(_.aggregationRule)
-              .replace(
-                Some(
-                  AggregationRule(
-                    eligibleMembers = NonEmpty(Seq, DefaultTestIdentities.participant2),
-                    threshold = PositiveInt.tryCreate(1),
-                    testedProtocolVersion,
-                  )
-                )
-              )
-            loggerFactory.assertLogs(
-              sendAndCheckError(request) { case SendAsyncError.RequestInvalid(message) =>
-                message should include("Sender is not eligible according to the aggregation rule")
-              },
-              _.warningMessage should include(
-                "Sender is not eligible according to the aggregation rule"
-              ),
-            )
-        }
+      if (!authenticated) {
+        val requestP = v0.SendAsyncUnauthenticatedVersionedRequest(versionedRequest)
+        val response = service.sendAsyncUnauthenticatedVersioned(requestP)
+        response.map(SendAsyncResponse.fromSendAsyncResponseProto)
       } else {
-        "reject the request" in { implicit env =>
-          send(defaultRequest, authenticated = true).failed.map { error =>
-            error.getMessage should (include("UNIMPLEMENTED") and include(
-              s"send endpoints must be used with protocol version $testedProtocolVersion"
-            ))
-          }
+        val requestP = v0.SendAsyncVersionedRequest(versionedSignedRequest)
+        val response = service.sendAsyncVersioned(requestP)
 
-        }
+        response.map(SendAsyncResponse.fromSendAsyncSignedResponseProto)
+      }
+    }
+
+    def send(request: SubmissionRequest, authenticated: Boolean)(implicit
+        env: Environment
+    ): Future[ParsingResult[SendAsyncResponse]] = {
+      val signedRequest = signedSubmissionReq(request)
+      sendProto(
+        request.toProtoV0,
+        request.toByteString,
+        signedRequest.toByteString,
+        authenticated,
+      )
+    }
+
+    def sendAndCheckSucceed(request: SubmissionRequest)(implicit
+        env: Environment
+    ): Future[Assertion] =
+      send(request, authenticated = true).map { responseP =>
+        responseP.value.error shouldBe None
       }
 
-      "reject unauthenticated member sending message to non domain manager member" in { _ =>
-        val request = defaultRequest
-          .focus(_.sender)
-          .replace(unauthenticatedMember)
-
-        val errorMsg =
-          if (testedProtocolVersion >= ProtocolVersion.CNTestNet)
-            "Unauthenticated member is trying to send message to members other than the topology broadcast address All"
-          else
-            "Unauthenticated member is trying to send message to members other than the domain manager"
-
-        loggerFactory.assertLogs(
-          sendAndCheckError(request, authenticated = false) {
-            case SendAsyncError.RequestRefused(message) =>
-              message should include(errorMsg)
-          }(new Environment(unauthenticatedMember)),
-          _.warningMessage should include(errorMsg),
-        )
+    def sendAndCheckError(
+        request: SubmissionRequest,
+        authenticated: Boolean = true,
+    )(assertion: PartialFunction[SendAsyncError, Assertion])(implicit
+        env: Environment
+    ): Future[Assertion] =
+      send(request, authenticated).map { responseP =>
+        assertion(responseP.value.error.value)
       }
 
-      "reject authenticated member that uses unauthenticated send" in { implicit env =>
-        val request = defaultRequest
-          .focus(_.sender)
-          .replace(DefaultTestIdentities.participant1)
+    def sendProtoAndCheckError(
+        requestV0: protocolV0.SubmissionRequest,
+        versionedRequest: ByteString,
+        versionedSignedRequest: ByteString,
+        assertion: PartialFunction[SendAsyncError, Assertion],
+        authenticated: Boolean = true,
+    )(implicit env: Environment): Future[Assertion] =
+      sendProto(
+        requestV0,
+        versionedRequest,
+        versionedSignedRequest,
+        authenticated,
+      ).map { responseP =>
+        assertion(responseP.value.error.value)
+      }
 
-        loggerFactory.assertLogs(
-          sendAndCheckError(request, authenticated = false) {
-            case SendAsyncError.RequestRefused(message) =>
-              message should include("needs to use authenticated send operation")
+    "reject empty request" in { implicit env =>
+      val requestV0 = protocolV0.SubmissionRequest("", "", false, None, None, None)
+      val signedRequestV0 = signedContent(
+        VersionedMessage[SubmissionRequest](requestV0.toByteString, 0).toByteString
+      )
+
+      loggerFactory.assertLogs(
+        sendProtoAndCheckError(
+          requestV0,
+          VersionedMessage(requestV0.toByteString, 0).toByteString,
+          signedRequestV0.toByteString,
+          { case SendAsyncError.RequestInvalid(message) =>
+            message should startWith("ValueConversionError(sender,Invalid member ``")
           },
-          _.warningMessage should include("needs to use authenticated send operation"),
-        )
-      }
+        ),
+        _.warningMessage should startWith("ValueConversionError(sender,Invalid member ``"),
+      )
+    }
 
-      "reject requests from unauthenticated senders with a signing key timestamp" in { _ =>
+    "reject envelopes with empty content" in { implicit env =>
+      val request = defaultRequest
+        .focus(_.batch.envelopes)
+        .modify(_.map(_.focus(_.bytes).replace(ByteString.EMPTY)))
+
+      loggerFactory.assertLogs(
+        sendAndCheckError(request) { case SendAsyncError.RequestInvalid(message) =>
+          message shouldBe "Batch contains envelope without content."
+        },
+        _.warningMessage should endWith(
+          "is invalid: Batch contains envelope without content."
+        ),
+      )
+    }
+
+    "reject envelopes with invalid sender" in { implicit env =>
+      val requestV0 = defaultRequest.toProtoV0.focus(_.sender).modify {
+        case "" => fail("sender should be set")
+        case _sender => "THISWILLFAIL"
+      }
+      val signedRequestV0 = signedContent(
+        VersionedMessage[SubmissionRequest](requestV0.toByteString, 0).toByteString
+      )
+      loggerFactory.assertLogs(
+        sendProtoAndCheckError(
+          requestV0,
+          VersionedMessage(requestV0.toByteString, 0).toByteString,
+          signedRequestV0.toByteString,
+          { case SendAsyncError.RequestInvalid(message) =>
+            message should startWith(
+              "ValueConversionError(sender,Expected delimiter :: after three letter code of `THISWILLFAIL`)"
+            )
+          },
+        ),
+        _.warningMessage should startWith(
+          "ValueConversionError(sender,Expected delimiter :: after three letter code of `THISWILLFAIL`)"
+        ),
+      )
+    }
+
+    "reject large messages" in { implicit env =>
+      val bigEnvelope =
+        ClosedEnvelope.tryCreate(
+          ByteString.copyFromUtf8(scala.util.Random.nextString(5000)),
+          Recipients.cc(participant),
+          Seq.empty,
+          testedProtocolVersion,
+        )
+      val request = defaultRequest.focus(_.batch.envelopes).replace(List(bigEnvelope))
+
+      val alarmMsg = s"Max bytes to decompress is exceeded. The limit is 1000 bytes."
+      loggerFactory.assertLogs(
+        sendAndCheckError(request) { case SendAsyncError.RequestInvalid(message) =>
+          message should include(alarmMsg)
+        },
+        _.shouldBeCantonError(
+          SequencerError.MaxRequestSizeExceeded,
+          _ shouldBe alarmMsg,
+        ),
+      )
+    }
+
+    "reject unauthorized authenticated participant" in { implicit env =>
+      val request = defaultRequest
+        .focus(_.sender)
+        .replace(DefaultTestIdentities.participant2)
+
+      loggerFactory.assertLogs(
+        sendAndCheckError(request) { case SendAsyncError.RequestRefused(message) =>
+          message should (include("is not authorized to send:")
+            and include("just tried to use sequencer on behalf of"))
+        },
+        _.warningMessage should (include("is not authorized to send:")
+          and include("just tried to use sequencer on behalf of")),
+      )
+    }
+
+    "reject unauthenticated member that uses authenticated send" in { _ =>
+      val request = defaultRequest
+        .focus(_.sender)
+        .replace(unauthenticatedMember)
+
+      loggerFactory.assertLogs(
+        sendAndCheckError(request, authenticated = true) {
+          case SendAsyncError.RequestRefused(message) =>
+            message should include("needs to use unauthenticated send operation")
+        }(new Environment(unauthenticatedMember)),
+        _.warningMessage should include("needs to use unauthenticated send operation"),
+      )
+    }
+
+    "reject non domain manager authenticated member sending message to unauthenticated member" in {
+      implicit env =>
         val request = defaultRequest
-          .focus(_.sender)
-          .replace(unauthenticatedMember)
-          .focus(_.timestampOfSigningKey)
-          .replace(Some(CantonTimestamp.Epoch))
           .focus(_.batch)
           .replace(
             Batch(
               List(
                 ClosedEnvelope.tryCreate(
                   content,
-                  Recipients.cc(DefaultTestIdentities.domainManager),
+                  Recipients.cc(unauthenticatedMember),
                   Seq.empty,
                   testedProtocolVersion,
                 )
@@ -842,68 +456,376 @@ class GrpcSequencerServiceTest
               testedProtocolVersion,
             )
           )
-
         loggerFactory.assertLogs(
-          sendAndCheckError(request, authenticated = false) {
+          sendAndCheckError(request, authenticated = true) {
             case SendAsyncError.RequestRefused(message) =>
-              message should include(
-                "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key"
-              )
-          }(new Environment(unauthenticatedMember)),
+              message should include("Member is trying to send message to unauthenticated")
+          },
           _.warningMessage should include(
-            "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key"
+            "Member is trying to send message to unauthenticated"
           ),
         )
-      }
-
-      if (SubmissionRequest.usingVersionedSubmissionRequest(testedProtocolVersion)) {
-        "reject unversioned authenticated endpoint" in { implicit env =>
-          val responseF =
-            if (useSignedSend)
-              env.service.sendAsyncSigned(signedContent(defaultRequest.toByteString).toProtoV0)
-            else env.service.sendAsync(defaultRequest.toProtoV0)
-
-          responseF.failed
-            .map { error =>
-              error.getMessage should (include("UNIMPLEMENTED") and include(
-                s"send endpoints must be used with protocol version $testedProtocolVersion"
-              ))
-            }
-        }
-      } else {
-        "reject versioned authenticated endpoint" in { implicit env =>
-          env.service
-            .sendAsyncVersioned(
-              v0.SendAsyncVersionedRequest(signedContent(defaultRequest.toByteString).toByteString)
-            )
-            .failed
-            .map { error =>
-              error.getMessage should (include("UNIMPLEMENTED") and include(
-                s"send endpoints must be used with protocol version $testedProtocolVersion"
-              ))
-            }
-        }
-      }
     }
-  }
 
-  if (SubmissionRequest.usingVersionedSubmissionRequest(testedProtocolVersion)) {
-    "reject unversioned unauthenticated endpoint" in { implicit env =>
-      val responseF = env.service.sendAsyncUnauthenticated(defaultRequest.toProtoV0)
-      responseF.failed
-        .map { error =>
-          error.getMessage should (include("UNIMPLEMENTED") and include(
-            s"send endpoints must be used with protocol version $testedProtocolVersion"
-          ))
-        }
-    }
-  } else {
-    "reject versioned unauthenticated endpoint" in { implicit env =>
-      env.service
-        .sendAsyncUnauthenticatedVersioned(
-          v0.SendAsyncUnauthenticatedVersionedRequest(defaultRequest.toByteString)
+    "succeed authenticated domain manager sending message to unauthenticated member" in { _ =>
+      val request = defaultRequest
+        .focus(_.sender)
+        .replace(DefaultTestIdentities.domainManager)
+        .focus(_.batch)
+        .replace(
+          Batch(
+            List(
+              ClosedEnvelope.tryCreate(
+                content,
+                Recipients.cc(unauthenticatedMember),
+                Seq.empty,
+                testedProtocolVersion,
+              )
+            ),
+            testedProtocolVersion,
+          )
         )
-        .failed
+      val domEnvironment = new Environment(DefaultTestIdentities.domainManager)
+      sendAndCheckSucceed(request)(domEnvironment)
+    }
+
+    "succeed unauthenticated member sending message to domain manager" in { _ =>
+      val request = defaultRequest
+        .focus(_.sender)
+        .replace(unauthenticatedMember)
+        .focus(_.batch)
+        .replace(
+          Batch(
+            List(
+              ClosedEnvelope.tryCreate(
+                content,
+                Recipients.cc(DefaultTestIdentities.domainManager),
+                Seq.empty,
+                testedProtocolVersion,
+              )
+            ),
+            testedProtocolVersion,
+          )
+        )
+      val newEnv = new Environment(unauthenticatedMember).service
+      val responseF =
+        newEnv.sendAsyncUnauthenticatedVersioned(
+          v0.SendAsyncUnauthenticatedVersionedRequest(request.toByteString)
+        )
+
+      responseF
+        .map { responseP =>
+          val response = SendAsyncResponse.fromSendAsyncResponseProto(responseP)
+          response.value.error shouldBe None
+        }
+    }
+
+    "reject on rate excess" in { implicit env =>
+      def expectSuccess(): Future[Assertion] = {
+        sendAndCheckSucceed(defaultRequest)
+      }
+
+      def expectOverloaded(): Future[Assertion] = {
+        sendAndCheckError(defaultRequest) { case SendAsyncError.Overloaded(message) =>
+          message should endWith("Submission rate exceeds rate limit of 5/s.")
+        }
+      }
+
+      for {
+        _ <- expectSuccess() // push us beyond the max rate
+        // Don't submit as we don't know when the current cycle ends
+        _ = Threading.sleep(1000) // recover
+        _ <- expectSuccess() // good again
+        _ <- expectOverloaded() // resource exhausted
+        _ = Threading.sleep(1000)
+        _ <- expectSuccess() // good again
+        _ <- expectOverloaded() // exhausted again
+      } yield succeed
+    }
+
+    def multipleMediatorTestCase(
+        mediator1: RecipientsTree,
+        mediator2: RecipientsTree,
+    ): (FixtureParam => Future[Assertion]) = { _ =>
+      val differentEnvelopes = Batch.fromClosed(
+        testedProtocolVersion,
+        ClosedEnvelope.tryCreate(
+          ByteString.copyFromUtf8("message to first mediator"),
+          Recipients(NonEmpty.mk(Seq, mediator1)),
+          Seq.empty,
+          testedProtocolVersion,
+        ),
+        ClosedEnvelope.tryCreate(
+          ByteString.copyFromUtf8("message to second mediator"),
+          Recipients(NonEmpty.mk(Seq, mediator2)),
+          Seq.empty,
+          testedProtocolVersion,
+        ),
+      )
+      val sameEnvelope = Batch.fromClosed(
+        testedProtocolVersion,
+        ClosedEnvelope.tryCreate(
+          ByteString.copyFromUtf8("message to two mediators and the participant"),
+          Recipients(
+            NonEmpty(
+              Seq,
+              RecipientsTree.ofMembers(
+                NonEmpty.mk(Set, participant),
+                Seq(
+                  mediator1,
+                  mediator2,
+                ),
+              ),
+            )
+          ),
+          Seq.empty,
+          testedProtocolVersion,
+        ),
+      )
+
+      val domainManager: Member = DefaultTestIdentities.domainManager
+
+      val batches = Seq(differentEnvelopes, sameEnvelope)
+      val badRequests = batches.map(batch => mkSubmissionRequest(batch, participant))
+      val goodRequests = batches.map(batch =>
+        mkSubmissionRequest(
+          batch,
+          DefaultTestIdentities.mediator,
+        ) -> DefaultTestIdentities.mediator
+      ) ++ batches.map(batch =>
+        mkSubmissionRequest(
+          batch,
+          domainManager,
+        ) -> domainManager
+      )
+      for {
+        _ <- MonadUtil.sequentialTraverse_(badRequests.zipWithIndex) { case (badRequest, index) =>
+          withClue(s"bad request #$index") {
+            // create a fresh environment for each request such that the rate limiter does not complain
+            val participantEnv = new Environment(participant)
+            loggerFactory.assertLogs(
+              sendAndCheckError(badRequest) { case SendAsyncError.RequestRefused(message) =>
+                message shouldBe "Batch from participant contains multiple mediators as recipients."
+              }(participantEnv),
+              _.warningMessage should include(
+                "refused: Batch from participant contains multiple mediators as recipients."
+              ),
+            )
+          }
+        }
+        // We don't need log suppression for the good requests so we can run them in parallel
+        _ <- goodRequests.zipWithIndex.parTraverse_ { case ((goodRequest, sender), index) =>
+          withClue(s"good request #$index") {
+            val senderEnv = new Environment(sender)
+            sendAndCheckSucceed(goodRequest)(senderEnv)
+          }
+        }
+      } yield succeed
+    }
+
+    "reject sending to multiple mediators iff the sender is a participant" in multipleMediatorTestCase(
+      RecipientsTree.leaf(NonEmpty.mk(Set, DefaultTestIdentities.mediator)),
+      RecipientsTree.leaf(
+        NonEmpty.mk(Set, MediatorId(UniqueIdentifier.tryCreate("another", "mediator")))
+      ),
+    )
+
+    "reject sending to multiple mediator groups iff the sender is a participant" onlyRunWithOrGreaterThan (ProtocolVersion.v30) in multipleMediatorTestCase(
+      RecipientsTree(
+        NonEmpty.mk(
+          Set,
+          MediatorsOfDomain(NonNegativeInt.tryCreate(1)),
+        ),
+        Seq.empty,
+      ),
+      RecipientsTree(
+        NonEmpty.mk(
+          Set,
+          MediatorsOfDomain(NonNegativeInt.tryCreate(2)),
+        ),
+        Seq.empty,
+      ),
+    )
+
+    "reject requests to unauthenticated members with a signing key timestamps" in { implicit env =>
+      val request = defaultRequest
+        .focus(_.timestampOfSigningKey)
+        .replace(Some(CantonTimestamp.ofEpochSecond(1)))
+        .focus(_.batch)
+        .replace(
+          Batch(
+            List(
+              ClosedEnvelope.tryCreate(
+                content,
+                Recipients.cc(unauthenticatedMember),
+                Seq.empty,
+                testedProtocolVersion,
+              )
+            ),
+            testedProtocolVersion,
+          )
+        )
+
+      loggerFactory.assertLogs(
+        sendAndCheckError(request) { case SendAsyncError.RequestRefused(message) =>
+          message should include(
+            "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key"
+          )
+        },
+        _.warningMessage should include(
+          "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key"
+        ),
+      )
+    }
+
+    "reject unauthenticated eligible members in aggregation rule" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
+      implicit env =>
+        val request = defaultRequest
+          .focus(_.timestampOfSigningKey)
+          .replace(Some(CantonTimestamp.ofEpochSecond(1)))
+          .focus(_.aggregationRule)
+          .replace(
+            Some(
+              AggregationRule(
+                eligibleMembers = NonEmpty(Seq, participant, unauthenticatedMember),
+                threshold = PositiveInt.tryCreate(1),
+                testedProtocolVersion,
+              )
+            )
+          )
+        loggerFactory.assertLogs(
+          sendAndCheckError(request) { case SendAsyncError.RequestInvalid(message) =>
+            message should include(
+              "Eligible senders in aggregation rule must be authenticated, but found unauthenticated members"
+            )
+          },
+          _.warningMessage should include(
+            "Eligible senders in aggregation rule must be authenticated, but found unauthenticated members"
+          ),
+        )
+    }
+
+    "reject unachievable threshold in aggregation rule" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
+      implicit env =>
+        val request = defaultRequest
+          .focus(_.timestampOfSigningKey)
+          .replace(Some(CantonTimestamp.ofEpochSecond(1)))
+          .focus(_.aggregationRule)
+          .replace(
+            Some(
+              AggregationRule(
+                eligibleMembers = NonEmpty(Seq, participant, participant),
+                threshold = PositiveInt.tryCreate(2),
+                testedProtocolVersion,
+              )
+            )
+          )
+        loggerFactory.assertLogs(
+          sendAndCheckError(request) { case SendAsyncError.RequestInvalid(message) =>
+            message should include("Threshold 2 cannot be reached")
+          },
+          _.warningMessage should include("Threshold 2 cannot be reached"),
+        )
+    }
+
+    "reject uneligible sender in aggregation rule" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
+      implicit env =>
+        val request = defaultRequest
+          .focus(_.timestampOfSigningKey)
+          .replace(Some(CantonTimestamp.ofEpochSecond(1)))
+          .focus(_.aggregationRule)
+          .replace(
+            Some(
+              AggregationRule(
+                eligibleMembers = NonEmpty(Seq, DefaultTestIdentities.participant2),
+                threshold = PositiveInt.tryCreate(1),
+                testedProtocolVersion,
+              )
+            )
+          )
+        loggerFactory.assertLogs(
+          sendAndCheckError(request) { case SendAsyncError.RequestInvalid(message) =>
+            message should include("Sender is not eligible according to the aggregation rule")
+          },
+          _.warningMessage should include(
+            "Sender is not eligible according to the aggregation rule"
+          ),
+        )
+    }
+
+    "reject unauthenticated member sending message to non domain manager member" in { _ =>
+      val request = defaultRequest
+        .focus(_.sender)
+        .replace(unauthenticatedMember)
+
+      val errorMsg =
+        if (testedProtocolVersion >= ProtocolVersion.v30)
+          "Unauthenticated member is trying to send message to members other than the topology broadcast address All"
+        else
+          "Unauthenticated member is trying to send message to members other than the domain manager"
+
+      loggerFactory.assertLogs(
+        sendAndCheckError(request, authenticated = false) {
+          case SendAsyncError.RequestRefused(message) =>
+            message should include(errorMsg)
+        }(new Environment(unauthenticatedMember)),
+        _.warningMessage should include(errorMsg),
+      )
+    }
+
+    "reject authenticated member that uses unauthenticated send" in { implicit env =>
+      val request = defaultRequest
+        .focus(_.sender)
+        .replace(DefaultTestIdentities.participant1)
+
+      loggerFactory.assertLogs(
+        sendAndCheckError(request, authenticated = false) {
+          case SendAsyncError.RequestRefused(message) =>
+            message should include("needs to use authenticated send operation")
+        },
+        _.warningMessage should include("needs to use authenticated send operation"),
+      )
+    }
+
+    "reject requests from unauthenticated senders with a signing key timestamp" in { _ =>
+      val request = defaultRequest
+        .focus(_.sender)
+        .replace(unauthenticatedMember)
+        .focus(_.timestampOfSigningKey)
+        .replace(Some(CantonTimestamp.Epoch))
+        .focus(_.batch)
+        .replace(
+          Batch(
+            List(
+              ClosedEnvelope.tryCreate(
+                content,
+                Recipients.cc(DefaultTestIdentities.domainManager),
+                Seq.empty,
+                testedProtocolVersion,
+              )
+            ),
+            testedProtocolVersion,
+          )
+        )
+
+      loggerFactory.assertLogs(
+        sendAndCheckError(request, authenticated = false) {
+          case SendAsyncError.RequestRefused(message) =>
+            message should include(
+              "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key"
+            )
+        }(new Environment(unauthenticatedMember)),
+        _.warningMessage should include(
+          "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key"
+        ),
+      )
+    }
+
+    "reject unversioned authenticated endpoint" in { implicit env =>
+      val responseF =
+        env.service.sendAsyncSigned(signedContent(defaultRequest.toByteString).toProtoV0)
+
+      responseF.failed
         .map { error =>
           error.getMessage should (include("UNIMPLEMENTED") and include(
             s"send endpoints must be used with protocol version $testedProtocolVersion"
@@ -913,308 +835,138 @@ class GrpcSequencerServiceTest
   }
 
   "versionedSubscribe" should {
-    "return error if called with observer not capable of observing server calls" onlyRunWithOrGreaterThan ProtocolVersion.v5 in {
-      env =>
-        val observer = new MockStreamObserver[v0.VersionedSubscriptionResponse]()
-        loggerFactory.suppressWarningsAndErrors {
-          env.service.subscribeVersioned(
-            v0.SubscriptionRequest(member = "", counter = 0L),
-            observer,
-          )
-        }
+    "return error if called with observer not capable of observing server calls" in { env =>
+      val observer = new MockStreamObserver[v0.VersionedSubscriptionResponse]()
+      loggerFactory.suppressWarningsAndErrors {
+        env.service.subscribeVersioned(
+          v0.SubscriptionRequest(member = "", counter = 0L),
+          observer,
+        )
+      }
 
-        observer.items.toSeq should matchPattern {
-          case Seq(StreamError(err: StatusException)) if err.getStatus.getCode == INTERNAL =>
-        }
+      observer.items.toSeq should matchPattern {
+        case Seq(StreamError(err: StatusException)) if err.getStatus.getCode == INTERNAL =>
+      }
     }
 
-    "return error if request cannot be deserialized" onlyRunWithOrGreaterThan ProtocolVersion.v5 in {
-      env =>
-        val observer = new MockServerStreamObserver[v0.VersionedSubscriptionResponse]()
-        env.service.subscribeVersioned(v0.SubscriptionRequest(member = "", counter = 0L), observer)
+    "return error if request cannot be deserialized" in { env =>
+      val observer = new MockServerStreamObserver[v0.VersionedSubscriptionResponse]()
+      env.service.subscribeVersioned(v0.SubscriptionRequest(member = "", counter = 0L), observer)
 
-        observer.items.toSeq should matchPattern {
-          case Seq(StreamError(err: StatusException))
-              if err.getStatus.getCode == INVALID_ARGUMENT =>
-        }
+      observer.items.toSeq should matchPattern {
+        case Seq(StreamError(err: StatusException)) if err.getStatus.getCode == INVALID_ARGUMENT =>
+      }
     }
 
-    "return error if pool registration fails" onlyRunWithOrGreaterThan ProtocolVersion.v5 in {
-      env =>
-        val observer = new MockServerStreamObserver[v0.VersionedSubscriptionResponse]()
-        val requestP =
-          SubscriptionRequest(
-            participant,
-            SequencerCounter.Genesis,
-            testedProtocolVersion,
-          ).toProtoV0
+    "return error if pool registration fails" in { env =>
+      val observer = new MockServerStreamObserver[v0.VersionedSubscriptionResponse]()
+      val requestP =
+        SubscriptionRequest(
+          participant,
+          SequencerCounter.Genesis,
+          testedProtocolVersion,
+        ).toProtoV0
 
-        Mockito
-          .when(
-            env.subscriptionPool.create(
-              ArgumentMatchers.any[() => Subscription](),
-              ArgumentMatchers.any[Member](),
-            )(anyTraceContext)
-          )
-          .thenReturn(Left(PoolClosed))
+      Mockito
+        .when(
+          env.subscriptionPool.create(
+            ArgumentMatchers.any[() => Subscription](),
+            ArgumentMatchers.any[Member](),
+          )(anyTraceContext)
+        )
+        .thenReturn(Left(PoolClosed))
 
+      env.service.subscribeVersioned(requestP, observer)
+
+      inside(observer.items.loneElement) { case StreamError(ex: StatusException) =>
+        ex.getStatus.getCode shouldBe UNAVAILABLE
+        ex.getStatus.getDescription shouldBe "Subscription pool is closed."
+      }
+    }
+
+    "return error if sending request with member that is not authenticated" in { env =>
+      val observer = new MockServerStreamObserver[v0.VersionedSubscriptionResponse]()
+      val requestP =
+        SubscriptionRequest(
+          ParticipantId("Wrong participant"),
+          SequencerCounter.Genesis,
+          testedProtocolVersion,
+        ).toProtoV0
+
+      loggerFactory.suppressWarningsAndErrors {
         env.service.subscribeVersioned(requestP, observer)
-
-        inside(observer.items.loneElement) { case StreamError(ex: StatusException) =>
-          ex.getStatus.getCode shouldBe UNAVAILABLE
-          ex.getStatus.getDescription shouldBe "Subscription pool is closed."
-        }
-    }
-
-    "return error if sending request with member that is not authenticated" onlyRunWithOrGreaterThan ProtocolVersion.v5 in {
-      env =>
-        val observer = new MockServerStreamObserver[v0.VersionedSubscriptionResponse]()
-        val requestP =
-          SubscriptionRequest(
-            ParticipantId("Wrong participant"),
-            SequencerCounter.Genesis,
-            testedProtocolVersion,
-          ).toProtoV0
-
-        loggerFactory.suppressWarningsAndErrors {
-          env.service.subscribeVersioned(requestP, observer)
-        }
-
-        observer.items.toSeq should matchPattern {
-          case Seq(StreamError(err: StatusException))
-              if err.getStatus.getCode == PERMISSION_DENIED =>
-        }
-    }
-
-    "return error if authenticated member sending request unauthenticated endpoint" onlyRunWithOrGreaterThan ProtocolVersion.v5 in {
-      env =>
-        val observer = new MockServerStreamObserver[v0.VersionedSubscriptionResponse]()
-        val requestP =
-          SubscriptionRequest(
-            participant,
-            SequencerCounter.Genesis,
-            testedProtocolVersion,
-          ).toProtoV0
-
-        loggerFactory.suppressWarningsAndErrors {
-          env.service.subscribeUnauthenticatedVersioned(requestP, observer)
-        }
-
-        observer.items.toSeq should matchPattern {
-          case Seq(StreamError(err: StatusException))
-              if err.getStatus.getCode == PERMISSION_DENIED =>
-        }
-    }
-
-    "return error if unauthenticated member sending request authenticated endpoint" onlyRunWithOrGreaterThan ProtocolVersion.v5 in {
-      env =>
-        val observer = new MockServerStreamObserver[v0.VersionedSubscriptionResponse]()
-        val requestP =
-          SubscriptionRequest(
-            unauthenticatedMember,
-            SequencerCounter.Genesis,
-            testedProtocolVersion,
-          ).toProtoV0
-
-        loggerFactory.suppressWarningsAndErrors {
-          env.service.subscribeVersioned(requestP, observer)
-        }
-
-        observer.items.toSeq should matchPattern {
-          case Seq(StreamError(err: StatusException))
-              if err.getStatus.getCode == PERMISSION_DENIED =>
-        }
-    }
-
-    "return protocol version error if protocol version < v5 is used for subscribeVersioned" onlyRunWhen
-      (testedProtocolVersion < ProtocolVersion.v5) in { env =>
-        val observer = new MockServerStreamObserver[v0.VersionedSubscriptionResponse]()
-        val requestP =
-          SubscriptionRequest(
-            participant,
-            SequencerCounter.Genesis,
-            testedProtocolVersion,
-          ).toProtoV0
-
-        loggerFactory.suppressWarningsAndErrors {
-          env.service.subscribeVersioned(requestP, observer)
-        }
-
-        val expectedMessage =
-          "The unversioned subscribe endpoints must be used with protocol version"
-
-        observer.items.toSeq should matchPattern {
-          case Seq(StreamError(err: StatusException))
-              if err.getStatus.getCode == UNIMPLEMENTED && err.getMessage.contains(
-                expectedMessage
-              ) =>
-        }
       }
 
-    "return protocol version error if protocol version < v5 is used for subscribeUnauthenticatedVersioned" onlyRunWhen
-      (testedProtocolVersion < ProtocolVersion.v5) in { env =>
-        val observer = new MockServerStreamObserver[v0.VersionedSubscriptionResponse]()
-        val requestP =
-          SubscriptionRequest(
-            unauthenticatedMember,
-            SequencerCounter.Genesis,
-            testedProtocolVersion,
-          ).toProtoV0
-
-        loggerFactory.suppressWarningsAndErrors {
-          env.service.subscribeUnauthenticatedVersioned(requestP, observer)
-        }
-
-        val expectedMessage =
-          "The unversioned subscribe endpoints must be used with protocol version"
-
-        observer.items.toSeq should matchPattern {
-          case Seq(StreamError(err: StatusException))
-              if err.getStatus.getCode == UNIMPLEMENTED && err.getMessage.contains(
-                expectedMessage
-              ) =>
-        }
+      observer.items.toSeq should matchPattern {
+        case Seq(StreamError(err: StatusException)) if err.getStatus.getCode == PERMISSION_DENIED =>
       }
+    }
+
+    "return error if authenticated member sending request unauthenticated endpoint" in { env =>
+      val observer = new MockServerStreamObserver[v0.VersionedSubscriptionResponse]()
+      val requestP =
+        SubscriptionRequest(
+          participant,
+          SequencerCounter.Genesis,
+          testedProtocolVersion,
+        ).toProtoV0
+
+      loggerFactory.suppressWarningsAndErrors {
+        env.service.subscribeUnauthenticatedVersioned(requestP, observer)
+      }
+
+      observer.items.toSeq should matchPattern {
+        case Seq(StreamError(err: StatusException)) if err.getStatus.getCode == PERMISSION_DENIED =>
+      }
+    }
+
+    "return error if unauthenticated member sending request authenticated endpoint" in { env =>
+      val observer = new MockServerStreamObserver[v0.VersionedSubscriptionResponse]()
+      val requestP =
+        SubscriptionRequest(
+          unauthenticatedMember,
+          SequencerCounter.Genesis,
+          testedProtocolVersion,
+        ).toProtoV0
+
+      loggerFactory.suppressWarningsAndErrors {
+        env.service.subscribeVersioned(requestP, observer)
+      }
+
+      observer.items.toSeq should matchPattern {
+        case Seq(StreamError(err: StatusException)) if err.getStatus.getCode == PERMISSION_DENIED =>
+      }
+    }
   }
 
   "subscribe" should {
-    "return error if called with observer not capable of observing server calls" onlyRunWhen (testedProtocolVersion < ProtocolVersion.v5) in {
-      env =>
-        val observer = new MockStreamObserver[v0.SubscriptionResponse]()
-        loggerFactory.suppressWarningsAndErrors {
-          env.service.subscribe(v0.SubscriptionRequest(member = "", counter = 0L), observer)
-        }
 
-        observer.items.toSeq should matchPattern {
-          case Seq(StreamError(err: StatusException)) if err.getStatus.getCode == INTERNAL =>
-        }
-    }
+    "return protocol version error if protocol version >= v5 is used for subscribe" in { env =>
+      val observer = new MockServerStreamObserver[v0.SubscriptionResponse]()
+      val requestP =
+        SubscriptionRequest(
+          participant,
+          SequencerCounter.Genesis,
+          testedProtocolVersion,
+        ).toProtoV0
 
-    "return error if request cannot be deserialized" onlyRunWhen (testedProtocolVersion < ProtocolVersion.v5) in {
-      env =>
-        val observer = new MockServerStreamObserver[v0.SubscriptionResponse]()
-        env.service.subscribe(v0.SubscriptionRequest(member = "", counter = 0L), observer)
-
-        observer.items.toSeq should matchPattern {
-          case Seq(StreamError(err: StatusException))
-              if err.getStatus.getCode == INVALID_ARGUMENT =>
-        }
-    }
-
-    "return error if pool registration fails" onlyRunWhen (testedProtocolVersion < ProtocolVersion.v5) in {
-      env =>
-        val observer = new MockServerStreamObserver[v0.SubscriptionResponse]()
-        val requestP =
-          SubscriptionRequest(
-            participant,
-            SequencerCounter.Genesis,
-            testedProtocolVersion,
-          ).toProtoV0
-
-        Mockito
-          .when(
-            env.subscriptionPool.create(
-              ArgumentMatchers.any[() => Subscription](),
-              ArgumentMatchers.any[Member](),
-            )(anyTraceContext)
-          )
-          .thenReturn(Left(PoolClosed))
-
+      loggerFactory.suppressWarningsAndErrors {
         env.service.subscribe(requestP, observer)
-
-        inside(observer.items.loneElement) { case StreamError(ex: StatusException) =>
-          ex.getStatus.getCode shouldBe UNAVAILABLE
-          ex.getStatus.getDescription shouldBe "Subscription pool is closed."
-        }
-    }
-
-    "return error if sending request with member that is not authenticated" onlyRunWhen (testedProtocolVersion < ProtocolVersion.v5) in {
-      env =>
-        val observer = new MockServerStreamObserver[v0.SubscriptionResponse]()
-        val requestP =
-          SubscriptionRequest(
-            ParticipantId("Wrong participant"),
-            SequencerCounter.Genesis,
-            testedProtocolVersion,
-          ).toProtoV0
-
-        loggerFactory.suppressWarningsAndErrors {
-          env.service.subscribe(requestP, observer)
-        }
-
-        observer.items.toSeq should matchPattern {
-          case Seq(StreamError(err: StatusException))
-              if err.getStatus.getCode == PERMISSION_DENIED =>
-        }
-    }
-
-    "return error if authenticated member sending request unauthenticated endpoint" onlyRunWhen (testedProtocolVersion < ProtocolVersion.v5) in {
-      env =>
-        val observer = new MockServerStreamObserver[v0.SubscriptionResponse]()
-        val requestP =
-          SubscriptionRequest(
-            participant,
-            SequencerCounter.Genesis,
-            testedProtocolVersion,
-          ).toProtoV0
-
-        loggerFactory.suppressWarningsAndErrors {
-          env.service.subscribeUnauthenticated(requestP, observer)
-        }
-
-        observer.items.toSeq should matchPattern {
-          case Seq(StreamError(err: StatusException))
-              if err.getStatus.getCode == PERMISSION_DENIED =>
-        }
-    }
-
-    "return error if unauthenticated member sending request authenticated endpoint" onlyRunWhen (testedProtocolVersion < ProtocolVersion.v5) in {
-      env =>
-        val observer = new MockServerStreamObserver[v0.SubscriptionResponse]()
-        val requestP =
-          SubscriptionRequest(
-            unauthenticatedMember,
-            SequencerCounter.Genesis,
-            testedProtocolVersion,
-          ).toProtoV0
-
-        loggerFactory.suppressWarningsAndErrors {
-          env.service.subscribe(requestP, observer)
-        }
-
-        observer.items.toSeq should matchPattern {
-          case Seq(StreamError(err: StatusException))
-              if err.getStatus.getCode == PERMISSION_DENIED =>
-        }
-    }
-
-    "return protocol version error if protocol version >= v5 is used for subscribe" onlyRunWhen
-      (testedProtocolVersion >= ProtocolVersion.v5) in { env =>
-        val observer = new MockServerStreamObserver[v0.SubscriptionResponse]()
-        val requestP =
-          SubscriptionRequest(
-            participant,
-            SequencerCounter.Genesis,
-            testedProtocolVersion,
-          ).toProtoV0
-
-        loggerFactory.suppressWarningsAndErrors {
-          env.service.subscribe(requestP, observer)
-        }
-
-        val expectedMessage =
-          "The versioned subscribe endpoints must be used with protocol version"
-
-        observer.items.toSeq should matchPattern {
-          case Seq(StreamError(err: StatusException))
-              if err.getStatus.getCode == UNIMPLEMENTED && err.getMessage.contains(
-                expectedMessage
-              ) =>
-        }
       }
 
-    "return protocol version error if protocol version >= v5 is used for subscribeUnauthenticated" onlyRunWhen
-      (testedProtocolVersion >= ProtocolVersion.v5) in { env =>
+      val expectedMessage =
+        "The versioned subscribe endpoints must be used with protocol version"
+
+      observer.items.toSeq should matchPattern {
+        case Seq(StreamError(err: StatusException))
+            if err.getStatus.getCode == UNIMPLEMENTED && err.getMessage.contains(
+              expectedMessage
+            ) =>
+      }
+    }
+
+    "return protocol version error if protocol version >= v5 is used for subscribeUnauthenticated" in {
+      env =>
         val observer = new MockServerStreamObserver[v0.SubscriptionResponse]()
         val requestP =
           SubscriptionRequest(
@@ -1236,7 +988,7 @@ class GrpcSequencerServiceTest
                 expectedMessage
               ) =>
         }
-      }
+    }
   }
 
   Seq(("acknowledge", false), ("acknowledgeSigned", true)).foreach { case (name, useSignedAck) =>
@@ -1250,7 +1002,7 @@ class GrpcSequencerServiceTest
       signedContent(VersionedMessage(requestP.toByteString, 0).toByteString).toProtoV0
 
     name should {
-      if (SubmissionRequest.usingSignedSubmissionRequest(testedProtocolVersion) == useSignedAck) {
+      if (useSignedAck) {
         "reject unauthorized authenticated participant" in { implicit env =>
           val unauthorizedParticipant = DefaultTestIdentities.participant2
           val req =
@@ -1287,7 +1039,7 @@ class GrpcSequencerServiceTest
   }
 
   "downloadTopologyStateForInit" should {
-    "stream batches of topology transactions" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
+    "stream batches of topology transactions" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
       env =>
         val observer = new MockStreamObserver[v0.TopologyStateForInitResponse]()
         env.service.downloadTopologyStateForInit(

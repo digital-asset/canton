@@ -84,6 +84,7 @@ class DomainRouter(
 
   def submitTransaction(
       submitterInfo: SubmitterInfo,
+      optDomainId: Option[DomainId],
       transactionMeta: TransactionMeta,
       keyResolver: LfKeyResolver,
       transaction: LfSubmittedTransaction,
@@ -139,7 +140,7 @@ class DomainRouter(
         snapshotProvider,
         domainIdResolver,
         contractRoutingParties,
-        transactionMeta.optDomainId,
+        optDomainId,
       )
 
       domainSelector <- domainSelectorFactory.create(transactionData)
@@ -170,7 +171,7 @@ class DomainRouter(
         domainRankTarget,
         submitterInfo,
       )
-      _ = logger.info(s"submitting the transaction to the ${domainRankTarget.domainId}")
+      _ = logger.info(s"Submitting the transaction to the ${domainRankTarget.domainId}")
       transactionSubmittedF <- submit(domainRankTarget.domainId)(
         submitterInfo,
         transactionMeta,
@@ -202,9 +203,7 @@ class DomainRouter(
       domainSelector: DomainSelector
   )(implicit traceContext: TraceContext): EitherT[Future, TransactionRoutingError, DomainRank] =
     for {
-      _ <- checkValidityOfMultiDomain(
-        domainSelector.transactionData
-      )
+      _ <- checkValidityOfMultiDomain(domainSelector.transactionData)
       domainRankTarget <- domainSelector.forMultiDomain
     } yield domainRankTarget
 

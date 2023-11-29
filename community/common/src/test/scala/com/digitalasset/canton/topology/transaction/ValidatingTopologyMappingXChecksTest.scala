@@ -49,7 +49,7 @@ class ValidatingTopologyMappingXChecksTest
     (check, store)
   }
 
-  "TopologyMappingXChecks" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet when {
+  "TopologyMappingXChecks" onlyRunWithOrGreaterThan ProtocolVersion.v30 when {
     import DefaultTestIdentities.{participant1, participant2, participant3, party1, domainId}
     import factory.TestingTransactions.*
 

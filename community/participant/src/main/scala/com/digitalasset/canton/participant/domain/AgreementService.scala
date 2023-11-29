@@ -12,7 +12,6 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.domain.AgreementService.AgreementServiceError
-import com.digitalasset.canton.participant.domain.grpc.GrpcDomainServiceClient
 import com.digitalasset.canton.participant.store.ServiceAgreementStore
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.topology.DomainId
@@ -31,9 +30,6 @@ class AgreementService(
     with FlagCloseable {
 
   override protected val timeouts: ProcessingTimeout = nodeParameters.processingTimeouts
-
-  private lazy val domainServiceClient =
-    new GrpcDomainServiceClient(nodeParameters.tracing.propagation, loggerFactory)
 
   private[domain] def isRequiredAgreementAccepted(
       sequencerConnection: GrpcSequencerConnection,
@@ -70,25 +66,18 @@ class AgreementService(
       traceContext: TraceContext
   ): EitherT[Future, AgreementServiceError, Option[ServiceAgreement]] =
     for {
-      optAgreement <- {
-        if (protocolVersion >= ProtocolVersion.v3) {
-          ResourceUtil.withResource(
-            new GrpcSequencerConnectClient(
-              sequencerConnection,
-              timeouts,
-              nodeParameters.tracing.propagation,
-              loggerFactory,
-            )
-          )(client =>
-            client
-              .getAgreement(domainId)
-              .leftMap(err => AgreementServiceError(err.message))
-          )
-        } else
-          domainServiceClient
-            .getAgreement(domainId, sequencerConnection)
-            .leftMap(err => AgreementServiceError(err.message))
-      }
+      optAgreement <- ResourceUtil.withResource(
+        new GrpcSequencerConnectClient(
+          sequencerConnection,
+          timeouts,
+          nodeParameters.tracing.propagation,
+          loggerFactory,
+        )
+      )(client =>
+        client
+          .getAgreement(domainId)
+          .leftMap(err => AgreementServiceError(err.message))
+      )
 
       _ <- optAgreement.traverse_(ag =>
         acceptedAgreements

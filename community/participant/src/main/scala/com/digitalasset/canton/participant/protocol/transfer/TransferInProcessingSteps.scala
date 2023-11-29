@@ -456,7 +456,6 @@ private[transfer] class TransferInProcessingSteps(
                 .create(
                   requestId,
                   participantId,
-                  Some(txInRequest.viewHash),
                   Some(ViewPosition.root),
                   localVerdict,
                   txInRequest.toBeSigned,

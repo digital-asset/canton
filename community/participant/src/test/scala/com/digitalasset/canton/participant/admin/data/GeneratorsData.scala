@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.admin.data
 
 import com.digitalasset.canton.Generators.*
-import com.digitalasset.canton.protocol.GeneratorsProtocol.serializableContractGen
+import com.digitalasset.canton.protocol.GeneratorsProtocol.serializableContractArb
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.topology.GeneratorsTopology.*
 import com.digitalasset.canton.version.GeneratorsVersion.*
@@ -18,7 +18,7 @@ object GeneratorsData {
     Arbitrary(for {
       protocolVersion <- protocolVersionArb.arbitrary
       domainId <- Arbitrary.arbitrary[DomainId]
-      contract <- serializableContractGen(protocolVersion)
+      contract <- serializableContractArb(canHaveEmptyKey = true).arbitrary
       transferCounter <- transferCounterOGen(protocolVersion)
 
       ac = ActiveContract.create(domainId, contract, transferCounter)(protocolVersion)

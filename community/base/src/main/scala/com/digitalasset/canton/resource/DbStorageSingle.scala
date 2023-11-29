@@ -29,6 +29,7 @@ class DbStorageSingle private (
     override val dbConfig: DbConfig,
     db: Database,
     clock: Clock,
+    override protected val logOperations: Boolean,
     override val metrics: DbStorageMetrics,
     override protected val timeouts: ProcessingTimeout,
     override val threadsAvailableForWriting: PositiveInt,
@@ -58,14 +59,14 @@ class DbStorageSingle private (
       operationName: String,
       maxRetries: Int,
   )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[A] =
-    run(operationName, maxRetries)(db.run(action))
+    run("reading", operationName, maxRetries)(db.run(action))
 
   override protected[canton] def runWrite[A](
       action: DbAction.All[A],
       operationName: String,
       maxRetries: Int,
   )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[A] =
-    run(operationName, maxRetries)(db.run(action))
+    run("writing", operationName, maxRetries)(db.run(action))
 
   override def onClosed(): Unit = {
     periodicConnectionCheck.close()
@@ -168,6 +169,7 @@ object DbStorageSingle {
         config,
         db,
         clock,
+        logQueryCost.exists(_.logOperations),
         metrics,
         timeouts,
         numCombined,

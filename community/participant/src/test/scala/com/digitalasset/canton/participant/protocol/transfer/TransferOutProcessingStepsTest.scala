@@ -207,9 +207,6 @@ final class TransferOutProcessingStepsTest
 
   private val seedGenerator = new SeedGenerator(pureCrypto)
 
-  private val cantonContractIdVersion =
-    CantonContractIdVersion.fromProtocolVersion(testedProtocolVersion)
-
   private def createTransferCoordination(
       cryptoSnapshot: DomainSnapshotSyncCryptoApi = cryptoSnapshot
   ) =
@@ -626,7 +623,7 @@ final class TransferOutProcessingStepsTest
     }
 
     "forbid transfer if the target domain does not support transfer counters and the source domain supports them" in {
-      val targetProtocolVersion = TargetProtocolVersion(ProtocolVersion.v4)
+      val targetProtocolVersion = TargetProtocolVersion(ProtocolVersion.v5)
       val state = mkState
       val contract = ExampleTransactionFactory.asSerializable(
         contractId,
@@ -668,7 +665,7 @@ final class TransferOutProcessingStepsTest
             .value
             .failOnShutdown
       } yield {
-        if (outProcessingSteps.sourceDomainProtocolVersion.v >= ProtocolVersion.CNTestNet) {
+        if (outProcessingSteps.sourceDomainProtocolVersion.v >= ProtocolVersion.v30) { // TODO(#15153) Kill this conditional
           submissionResult shouldBe Left(
             IncompatibleProtocolVersions(
               contractId,
@@ -820,17 +817,9 @@ final class TransferOutProcessingStepsTest
         createOutProcessingSteps(c)
       }
 
-      if (testedProtocolVersion >= ProtocolVersion.v5) {
-        constructPendingDataAndResponseWith(outProcessingStepsWithoutPackages).leftOrFail(
-          "construction of pending data and response succeeded unexpectedly"
-        ) shouldBe a[PackageIdUnknownOrUnvetted]
-      } else {
-        constructPendingDataAndResponseWith(outProcessingStepsWithoutPackages).valueOrFail(
-          "construction of pending data and response failed"
-        )
-        succeed
-      }
-
+      constructPendingDataAndResponseWith(outProcessingStepsWithoutPackages).leftOrFail(
+        "construction of pending data and response succeeded unexpectedly"
+      ) shouldBe a[PackageIdUnknownOrUnvetted]
     }
   }
 

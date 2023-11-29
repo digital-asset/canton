@@ -134,9 +134,7 @@ trait SortedReconciliationIntervalsHelpers {
       )
     }
 
-    SortedReconciliationIntervalsProvider(
-      staticDomainParameters =
-        BaseTest.defaultStaticDomainParametersWith(reconciliationInterval = reconciliationInterval),
+    new SortedReconciliationIntervalsProvider(
       topologyClient = topologyClient,
       futureSupervisor = FutureSupervisor.Noop,
       loggerFactory = loggerFactory,

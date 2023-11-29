@@ -21,6 +21,7 @@ import com.digitalasset.canton.ledger.participant.state.v2.{
   WriteService,
 }
 import com.digitalasset.canton.metrics.Metrics
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.concurrent.CompletionStage
@@ -29,6 +30,7 @@ final class TimedWriteService(delegate: WriteService, metrics: Metrics) extends 
 
   override def submitTransaction(
       submitterInfo: SubmitterInfo,
+      optDomainId: Option[DomainId],
       transactionMeta: TransactionMeta,
       transaction: SubmittedTransaction,
       estimatedInterpretationCost: Long,
@@ -42,6 +44,7 @@ final class TimedWriteService(delegate: WriteService, metrics: Metrics) extends 
       metrics.daml.services.write.submitTransactionRunning,
       delegate.submitTransaction(
         submitterInfo,
+        optDomainId,
         transactionMeta,
         transaction,
         estimatedInterpretationCost,

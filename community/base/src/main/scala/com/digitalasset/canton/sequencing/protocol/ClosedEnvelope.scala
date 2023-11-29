@@ -134,13 +134,13 @@ object ClosedEnvelope extends HasProtocolVersionedCompanion[ClosedEnvelope] {
   override def name: String = "ClosedEnvelope"
 
   override def supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.Envelope)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v5)(v0.Envelope)(
       protoCompanion =>
         ProtoConverter.protoParser(protoCompanion.parseFrom)(_).flatMap(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
     ProtoVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.CNTestNet
+      ProtocolVersion.v30
     )(v1.Envelope)(
       protoCompanion =>
         ProtoConverter.protoParser(protoCompanion.parseFrom)(_).flatMap(fromProtoV1),
@@ -293,8 +293,6 @@ object ClosedEnvelope extends HasProtocolVersionedCompanion[ClosedEnvelope] {
     }
   }
 
-  // TODO(#15153) Remove comment
-  /** Use only in protocol version [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]] or later */
   def verifySignatures(
       snapshot: SyncCryptoApi,
       sender: Member,
@@ -305,8 +303,6 @@ object ClosedEnvelope extends HasProtocolVersionedCompanion[ClosedEnvelope] {
     snapshot.verifySignatures(hash, sender, signatures)
   }
 
-  // TODO(#15153) Remove comment
-  /** Use only in protocol version [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]] or later */
   def verifySignatures(
       snapshot: SyncCryptoApi,
       mediatorGroupIndex: MediatorGroupIndex,

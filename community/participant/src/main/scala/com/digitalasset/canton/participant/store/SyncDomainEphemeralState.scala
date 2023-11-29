@@ -126,7 +126,7 @@ class SyncDomainEphemeralState(
     )
   }
 
-  val recordOrderPublisher = {
+  val recordOrderPublisher: RecordOrderPublisher = {
     import TraceContext.Implicits.Empty.emptyTraceContext
     new RecordOrderPublisher(
       persistentState.domainId.item,
@@ -176,7 +176,7 @@ class SyncDomainEphemeralState(
   lazy val inFlightSubmissionTrackerDomainState: InFlightSubmissionTrackerDomainState =
     InFlightSubmissionTrackerDomainState.fromSyncDomainState(persistentState, this)
 
-  val timelyRejectNotifier = TimelyRejectNotifier(
+  val timelyRejectNotifier: TimelyRejectNotifier = TimelyRejectNotifier(
     inFlightSubmissionTracker,
     persistentState.domainId.item,
     startingPoints.rewoundSequencerCounterPrehead.map(_.timestamp),
@@ -193,7 +193,7 @@ class SyncDomainEphemeralState(
       AsyncCloseable(
         "request-journal-flush",
         requestJournal.flush(),
-        timeouts.shutdownProcessing.unwrap,
+        timeouts.shutdownProcessing,
       ),
     )(logger)
   }

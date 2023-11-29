@@ -449,9 +449,9 @@ class StoreBasedTopologySnapshotX(
   /** Returns a list of owner's keys (at most limit) */
   override def inspectKeys(
       filterOwner: String,
-      filterOwnerType: Option[KeyOwnerCode],
+      filterOwnerType: Option[MemberCode],
       limit: Int,
-  ): Future[Map[KeyOwner, KeyCollection]] = {
+  ): Future[Map[Member, KeyCollection]] = {
     store
       .inspect(
         proposals = false,
@@ -615,7 +615,7 @@ class StoreBasedTopologySnapshotX(
     )
 
   /** abstract loading function used to obtain the full key collection for a key owner */
-  override def allKeys(owner: KeyOwner): Future[KeyCollection] = findTransactions(
+  override def allKeys(owner: Member): Future[KeyCollection] = findTransactions(
     asOfInclusive = false,
     types = Seq(TopologyMappingX.Code.OwnerToKeyMappingX),
     filterUid = Some(Seq(owner.uid)),

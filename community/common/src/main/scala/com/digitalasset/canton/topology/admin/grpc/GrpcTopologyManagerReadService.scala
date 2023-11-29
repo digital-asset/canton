@@ -470,11 +470,8 @@ class GrpcTopologyManagerReadService(
           val protoVersion = domainParametersChange.domainParameters.protoVersion.v
 
           val parameters =
-            if (protoVersion == 0)
-              Some(Result.Parameters.V0(domainParametersChange.domainParameters.toProtoV0))
-            // TODO(#15152) Adapt when support for pv < 6 is dropped
             // TODO(#15153) Adapt when support for pv=6 is dropped
-            else if (protoVersion == 1 || protoVersion == 2)
+            if (protoVersion == 1 || protoVersion == 2)
               Some(Result.Parameters.V1(domainParametersChange.domainParameters.toProtoV1))
             else {
               logger.warn(s"Unable to serialize domain parameters with version $protoVersion")

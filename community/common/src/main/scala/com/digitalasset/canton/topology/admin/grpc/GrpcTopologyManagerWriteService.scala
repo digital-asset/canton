@@ -87,7 +87,7 @@ final class GrpcTopologyManagerWriteService[T <: CantonError](
   ): Future[AuthorizationSuccess] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val itemEitherT: EitherT[Future, CantonError, OwnerToKeyMapping] = for {
-      owner <- KeyOwner
+      owner <- Member
         .fromProtoPrimitive(request.keyOwner, "keyOwner")
         .leftMap(ProtoDeserializationFailure.Wrap(_))
         .toEitherT[Future]
@@ -234,8 +234,6 @@ final class GrpcTopologyManagerWriteService[T <: CantonError](
 
       domainParameters <- request.parameters match {
         case Parameters.Empty => Left(ProtoDeserializationError.FieldNotSet("domainParameters"))
-        case Parameters.ParametersV0(parametersV0) =>
-          DynamicDomainParameters.fromProtoV0(parametersV0)
         case Parameters.ParametersV1(parametersV1) =>
           DynamicDomainParameters.fromProtoV1(parametersV1)
       }

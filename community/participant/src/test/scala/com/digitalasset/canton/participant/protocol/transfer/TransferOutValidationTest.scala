@@ -147,14 +147,15 @@ class TransferOutValidationTest
       res <- validation.failOnShutdown
       // leftOrFailShutdown("couldn't get left from transfer out validation")
     } yield {
-      if (sourcePV.v < ProtocolVersion.CNTestNet) {
+      if (sourcePV.v < ProtocolVersion.v30) { // TODO(#15153) Kill this conditional
         res shouldBe Right(())
       } else res shouldBe Left(TemplateIdMismatch(templateId.leftSide, wrongTemplateId.leftSide))
     }
   }
 
-  "disallow transfers between domains with incompatible protocol versions" in {
-    val newSourcePV = SourceProtocolVersion(ProtocolVersion.CNTestNet)
+  // TODO(i15153): remove `onlyRunWithOrLessThan` clause once transfers from dev to v30 fail again (?)
+  "disallow transfers between domains with incompatible protocol versions" onlyRunWithOrLessThan ProtocolVersion.v30 in {
+    val newSourcePV = SourceProtocolVersion(ProtocolVersion.v30)
     val transferCounter = TransferCounter.forCreatedContract(newSourcePV.v)
     val validation = mkTransferOutValidation(
       stakeholders,

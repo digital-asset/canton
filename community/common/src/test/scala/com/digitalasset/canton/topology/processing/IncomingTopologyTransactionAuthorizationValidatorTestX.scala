@@ -32,9 +32,7 @@ class TopologyTransactionXTestFactory(loggerFactory: NamedLoggerFactory, initEc:
   import SigningKeys.*
 
   def createNsX(ns: Namespace, key: SigningPublicKey, isRootDelegation: Boolean) =
-    NamespaceDelegationX
-      .create(ns, key, isRootDelegation)
-      .fold(err => sys.error(s"Failed to create NamespaceDelegationX: $err"), identity)
+    NamespaceDelegationX.tryCreate(ns, key, isRootDelegation)
 
   val ns1 = Namespace(key1.fingerprint)
   val ns2 = Namespace(key2.fingerprint)
@@ -206,7 +204,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTestX
     with HasExecutionContext
     with ProtocolVersionChecksAsyncWordSpec {
 
-  "topology transaction authorization" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet when {
+  "topology transaction authorization" onlyRunWithOrGreaterThan ProtocolVersion.v30 when {
 
     object Factory extends TopologyTransactionXTestFactory(loggerFactory, parallelExecutionContext)
 

@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.foldable.*
+import cats.syntax.functor.*
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.catsinstances.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
@@ -15,8 +16,10 @@ import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.domain.sequencing.integrations.state.EphemeralState
 import com.digitalasset.canton.domain.sequencing.sequencer.{
   CommitMode,
+  InFlightAggregations,
   SequencerMemberStatus,
   SequencerPruningStatus,
 }
@@ -775,18 +778,6 @@ class DbSequencerStore(
         order by events.ts asc
         limit $limit"""
 
-    val querySafeWatermark = {
-      val query = profile match {
-        case _: H2 | _: Postgres =>
-          sql"select min(watermark_ts) from sequencer_watermarks where sequencer_online = true"
-        case _: Oracle =>
-          sql"select min(watermark_ts) from sequencer_watermarks where sequencer_online <> 0"
-      }
-
-      // `min` may return null that is wrapped into None
-      query.as[Option[CantonTimestamp]].headOption.map(_.flatten)
-    }
-
     def queryEvents(safeWatermarkO: Option[CantonTimestamp]) = {
       // If we don't have a safe watermark of all online sequencers (if all are offline) we'll fallback on allowing all
       // and letting the offline condition in the query include the event if suitable
@@ -826,7 +817,7 @@ class DbSequencerStore(
     }
 
     val query = for {
-      safeWatermark <- querySafeWatermark
+      safeWatermark <- safeWaterMarkDBIO
       events <- queryEvents(safeWatermark)
     } yield {
       (events, safeWatermark)
@@ -836,6 +827,98 @@ class DbSequencerStore(
       case (events, _) if events.nonEmpty => ReadEventPayloads(events)
       case (_, watermark) => SafeWatermark(watermark)
     }
+  }
+
+  private def safeWaterMarkDBIO: DBIOAction[Option[CantonTimestamp], NoStream, Effect.Read] = {
+    val query = profile match {
+      case _: H2 | _: Postgres =>
+        sql"select min(watermark_ts) from sequencer_watermarks where sequencer_online = true"
+      case _: Oracle =>
+        sql"select min(watermark_ts) from sequencer_watermarks where sequencer_online <> 0"
+    }
+    // `min` may return null that is wrapped into None
+    query.as[Option[CantonTimestamp]].headOption.map(_.flatten)
+  }
+
+  override def readStateAtTimestamp(
+      timestamp: CantonTimestamp
+  )(implicit traceContext: TraceContext): Future[EphemeralState] = {
+    def h2PostgresQueryMemberCheckpoints(
+        memberContainsBefore: String,
+        memberContainsAfter: String,
+        safeWatermark: CantonTimestamp,
+    ) = {
+      // this query returns checkpoints for all registered enabled members for the given timestamp.
+      // it does this by taking existing events and checkpoints before or at the given timestamp in order to compute
+      // the equivalent latest checkpoint for each member at or before this timestamp.
+      sql"""
+        -- the max counter for each member will be either the number of events -1 (because the index is 0 based)
+        -- or the checkpoint counter + number of events after that checkpoint
+        -- the timestamp for a member will be the maximum between the highest event timestamp and the checkpoint timestamp (if it exists)
+        select sequencer_members.member, coalesce(checkpoints.counter, - 1) + count(events.ts), coalesce(max(events.ts), checkpoints.ts), checkpoints.latest_topology_client_ts
+        from sequencer_members
+        left join (
+            -- if the member has checkpoints, let's find the one latest one that's still before or at the given timestamp.
+            -- using checkpoints is essential for cases where the db has been pruned
+            select member, max(counter) as counter, max(ts) as ts, max(latest_topology_client_ts) as latest_topology_client_ts
+            from sequencer_counter_checkpoints
+            where ts <= $timestamp
+            group by member
+        ) as checkpoints on checkpoints.member = sequencer_members.id
+        left join sequencer_events as events
+          on ((#$memberContainsBefore sequencer_members.id #$memberContainsAfter)
+                  -- if the checkpoint is defined, we only want events past it
+                  and ((checkpoints.ts is null) or (checkpoints.ts < events.ts)))
+        left join sequencer_watermarks watermarks
+          on (events.node_index is not null) and events.node_index = watermarks.node_index
+        where (
+            -- no need to consider disabled members since they can't be served events anymore
+            sequencer_members.enabled = true
+            -- consider the given timestamp
+            and sequencer_members.registered_ts <= $timestamp
+            and ((events.ts is null) or (
+                events.ts <= $timestamp
+                -- only consider events within the safe watermark
+                 and events.ts <= $safeWatermark
+                -- if the sequencer that produced the event is offline, only consider up until its offline watermark
+                 and watermarks.watermark_ts is not null
+                 and (watermarks.sequencer_online = true or events.ts <= watermarks.watermark_ts)
+                ))
+          )
+        group by (sequencer_members.member, checkpoints.counter, checkpoints.ts, checkpoints.latest_topology_client_ts)
+        """
+    }
+
+    def queryMemberCheckpoints(safeWatermarkO: Option[CantonTimestamp]) = {
+      val safeWatermark = safeWatermarkO.getOrElse(CantonTimestamp.MaxValue)
+
+      val query = profile match {
+        case _: Postgres =>
+          h2PostgresQueryMemberCheckpoints("", " = any(events.recipients)", safeWatermark)
+
+        case _: H2 =>
+          h2PostgresQueryMemberCheckpoints("array_contains(events.recipients, ", ")", safeWatermark)
+
+        case _: Oracle => sys.error("Oracle no longer supported")
+      }
+      query.as[(Member, CounterCheckpoint)]
+    }
+
+    val query = for {
+      safeWatermark <- safeWaterMarkDBIO
+      counters <- queryMemberCheckpoints(safeWatermark)
+    } yield counters
+
+    for {
+      statusAtTimestamp <- status(timestamp)
+      checkpointsAtTimestamp <- storage.query(query.transactionally, functionFullName)
+    } yield EphemeralState(
+      Map(): InFlightAggregations,
+      statusAtTimestamp.toInternal,
+      checkpointsAtTimestamp.toMap,
+      Set(),
+      Map(),
+    )
   }
 
   override def deleteEventsPastWatermark(
@@ -1095,7 +1178,7 @@ class DbSequencerStore(
       lowerBoundO <- fetchLowerBound()
       members <- storage.query(
         sql"""
-      select member, id, registered_ts, enabled from sequencer_members"""
+      select member, id, registered_ts, enabled from sequencer_members where registered_ts <= $now"""
           .as[(Member, SequencerMemberId, CantonTimestamp, Boolean)],
         functionFullName,
       )

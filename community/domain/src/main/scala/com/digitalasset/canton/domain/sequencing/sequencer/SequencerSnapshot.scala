@@ -83,11 +83,11 @@ final case class SequencerSnapshot(
 
 object SequencerSnapshot extends HasProtocolVersionedCompanion[SequencerSnapshot] {
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.SequencerSnapshot)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v5)(v0.SequencerSnapshot)(
       supportedProtoVersion(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.CNTestNet)(v1.SequencerSnapshot)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v30)(v1.SequencerSnapshot)(
       supportedProtoVersion(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),

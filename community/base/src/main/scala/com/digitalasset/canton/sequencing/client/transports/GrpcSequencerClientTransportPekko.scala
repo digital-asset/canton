@@ -54,7 +54,6 @@ class GrpcSequencerClientTransportPekko(
       metrics,
       timeouts,
       loggerFactory,
-      protocolVersion,
     )
     with SequencerClientTransportPekko {
 

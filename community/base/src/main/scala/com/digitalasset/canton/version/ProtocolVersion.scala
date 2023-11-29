@@ -241,7 +241,7 @@ object ProtocolVersion {
   final case class InvalidProtocolVersion(override val description: String) extends FailureReason
 
   // All stable protocol versions supported by this release
-  private val stableAndSupported: NonEmpty[List[ProtocolVersion]] =
+  val stableAndSupported: NonEmpty[List[ProtocolVersion]] =
     NonEmpty
       .from(
         BuildInfo.protocolVersions
@@ -254,36 +254,27 @@ object ProtocolVersion {
       )
 
   private val deprecated: Seq[ProtocolVersion] = Seq()
-  private val deleted: Seq[ProtocolVersion] = Seq(ProtocolVersion(2))
+  private val deleted: Seq[ProtocolVersion] =
+    Seq(ProtocolVersion(2), ProtocolVersion(3), ProtocolVersion(4))
 
   val unstable: NonEmpty[List[ProtocolVersionWithStatus[Unstable]]] =
-    NonEmpty.mk(List, ProtocolVersion.v6, ProtocolVersion.dev)
+    NonEmpty.mk(List, ProtocolVersion.v6, ProtocolVersion.v30, ProtocolVersion.dev)
 
   val supported: NonEmpty[List[ProtocolVersion]] =
     stableAndSupported ++ unstable
 
-  val latest: ProtocolVersion = stableAndSupported.max1
-
-  def lastStableVersions2: (ProtocolVersion, ProtocolVersion) = {
-    val List(beforeLastStableProtocolVersion, lastStableProtocolVersion) =
-      ProtocolVersion.stableAndSupported.forgetNE.sorted.takeRight(2): @unchecked
-
-    (beforeLastStableProtocolVersion, lastStableProtocolVersion)
-  }
+  // TODO(i15561): change back to `stableAndSupported.max1` once there is a stable Daml 3 protocol version
+  // TODO(i15153): use the smallest of the versions (so that when we have two, we use by default the smallest one, which should be the one which is stable)
+  val latest: ProtocolVersion = ProtocolVersion.v30
 
   lazy val dev: ProtocolVersionWithStatus[Unstable] = ProtocolVersion.unstable(Int.MaxValue)
 
-  lazy val v3: ProtocolVersionWithStatus[Stable] = ProtocolVersion.stable(3)
-  lazy val v4: ProtocolVersionWithStatus[Stable] = ProtocolVersion.stable(4)
   lazy val v5: ProtocolVersionWithStatus[Stable] = ProtocolVersion.stable(5)
   lazy val v6: ProtocolVersionWithStatus[Unstable] = ProtocolVersion.unstable(6)
+  lazy val v30: ProtocolVersionWithStatus[Unstable] = ProtocolVersion.unstable(30)
 
   // Minimum stable protocol version introduced
-  lazy val minimum: ProtocolVersion = v3
-
-  // Aliases for easier releasing of upcoming not yet defined protocol versions
-  // TODO(#15358) Adapt when releasing BFT
-  lazy val CNTestNet: ProtocolVersionWithStatus[Unstable] = dev
+  lazy val minimum: ProtocolVersion = v5
 }
 
 /*

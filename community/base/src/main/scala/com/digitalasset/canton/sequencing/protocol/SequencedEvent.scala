@@ -77,11 +77,11 @@ object SequencedEvent
 
   override val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     // TODO(#15153): Cleanup v0 after 3.x line is cut
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.SequencedEvent)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v5)(v0.SequencedEvent)(
       supportedProtoVersionMemoized(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.CNTestNet)(v1.SequencedEvent)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v30)(v1.SequencedEvent)(
       supportedProtoVersionMemoized(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),

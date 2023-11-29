@@ -375,9 +375,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
     "fail when protocol version are incompatible" in {
       // source domain does not support transfer counters
       val submissionParam2 =
-        submissionParam.copy(sourceProtocolVersion =
-          SourceProtocolVersion(ProtocolVersion.CNTestNet)
-        )
+        submissionParam.copy(sourceProtocolVersion = SourceProtocolVersion(ProtocolVersion.v30))
       for {
         transferData <- transferDataF
         deps <- statefulDependencies
@@ -397,7 +395,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
 
         // )("prepare submission did not return a left")
       } yield {
-        if (testedProtocolVersion < ProtocolVersion.CNTestNet)
+        if (testedProtocolVersion < ProtocolVersion.v30) // TODO(#15153) Kill this conditional
           preparedSubmission should matchPattern {
             case Left(IncompatibleProtocolVersions(_, _, _)) =>
           }

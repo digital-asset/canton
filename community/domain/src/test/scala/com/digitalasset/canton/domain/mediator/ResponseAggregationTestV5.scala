@@ -135,7 +135,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
         .value
 
       def mkResponse(
-          viewHash: ViewHash,
           viewPosition: ViewPosition,
           verdict: LocalVerdict,
           confirmingParties: Set[LfPartyId],
@@ -145,7 +144,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
         MediatorResponse.tryCreate(
           requestId,
           sender,
-          Some(viewHash),
           Some(viewPosition),
           verdict,
           rootHashO,
@@ -216,7 +214,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
           val responseWithWrongRootHash = MediatorResponse.tryCreate(
             requestId,
             solo,
-            Some(view1.viewHash),
             Some(view1Position),
             LocalApprove(testedProtocolVersion),
             someOtherRootHash,
@@ -246,7 +243,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
           describe("by Alice with veto rights due to her weight of 3") {
             it("rejects the transaction") {
               val response1 = mkResponse(
-                view1.viewHash,
                 view1Position,
                 testReject(),
                 Set(alice.party),
@@ -273,8 +269,7 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
           }
 
           describe("by a 'light-weight' party") {
-            val response1 =
-              mkResponse(view1.viewHash, view1Position, testReject(), Set(bob.party), rootHash)
+            val response1 = mkResponse(view1Position, testReject(), Set(bob.party), rootHash)
             lazy val rejected1 = loggerFactory.suppressWarningsAndErrors {
               valueOrFail(
                 sut.validateAndProgress(changeTs1, response1, topologySnapshot).futureValue
@@ -310,7 +305,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
             describe("a subsequent rejection that ensure no possibility of overall approval") {
               val changeTs2 = changeTs1.plusSeconds(1)
               val response2 = mkResponse(
-                view1.viewHash,
                 view1Position,
                 testReject(),
                 Set(alice.party),
@@ -336,7 +330,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
               describe("further rejection") {
                 val changeTs3 = changeTs2.plusSeconds(1)
                 val response3 = mkResponse(
-                  view1.viewHash,
                   view1Position,
                   testReject(),
                   Set(bob.party),
@@ -352,7 +345,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
               describe("further approval") {
                 val changeTs3 = changeTs2.plusSeconds(1)
                 val response3 = mkResponse(
-                  view1.viewHash,
                   view1Position,
                   LocalApprove(testedProtocolVersion),
                   Set(alice.party),
@@ -371,7 +363,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
         describe("approval") {
           lazy val changeTs = requestId.unwrap.plusSeconds(1)
           val response1 = mkResponse(
-            view1.viewHash,
             view1Position,
             LocalApprove(testedProtocolVersion),
             Set(bob.party),
@@ -406,7 +397,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
           }
           describe("if approvals meet the threshold") {
             val response2 = mkResponse(
-              view1.viewHash,
               view1Position,
               LocalApprove(testedProtocolVersion),
               Set(alice.party),
@@ -419,7 +409,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
                 "Alice's approval"
               )
             val response3 = mkResponse(
-              view2.viewHash,
               view2Position,
               LocalApprove(testedProtocolVersion),
               Set(bob.party),
@@ -443,7 +432,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
             describe("further rejection") {
               val response4 =
                 mkResponse(
-                  view1.viewHash,
                   view1Position,
                   LocalReject.MalformedRejects.Payloads
                     .Reject("test4")(localVerdictProtocolVersion),
@@ -463,7 +451,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
 
             describe("further redundant approval") {
               val response4 = mkResponse(
-                view1.viewHash,
                 view1Position,
                 LocalApprove(testedProtocolVersion),
                 Set(alice.party),
@@ -553,7 +540,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
         describe("for a single view") {
           it("should update the pending confirming parties set for all hosted parties") {
             val response = mkResponse(
-              view1.viewHash,
               view1Position,
               testReject("malformed view"),
               Set.empty,
@@ -605,7 +591,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
               MediatorResponse.tryCreate(
                 requestId,
                 solo,
-                None,
                 None,
                 testReject(rejectMsg),
                 None,
@@ -724,7 +709,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
         it("should reject non-VIP responses") {
           val response =
             mkResponse(
-              viewVip.viewHash,
               viewVipPosition,
               LocalApprove(testedProtocolVersion),
               Set(alice.party, bob.party),
@@ -752,7 +736,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
               requestId,
               nonVip,
               None,
-              None,
               reject,
               None,
               Set.empty,
@@ -779,7 +762,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
         it("should accept VIP responses") {
           val changeTs = requestId.unwrap.plusSeconds(1)
           val response = mkResponse(
-            viewVip.viewHash,
             viewVipPosition,
             LocalApprove(testedProtocolVersion),
             Set(alice.party),
@@ -937,7 +919,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
             val changeTs3 = requestId.unwrap.plusSeconds(3)
 
             val response1a = mkResponse(
-              view1.viewHash,
               view1Position,
               testReject(),
               Set(bob.party),
@@ -945,7 +926,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
               uno,
             )
             val response1b = mkResponse(
-              view1.viewHash,
               view1Position,
               testReject(),
               Set(bob.party),
@@ -953,7 +933,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
               uno,
             )
             val response1c = mkResponse(
-              view1.viewHash,
               view1Position,
               testReject(),
               Set(bob.party),
@@ -1005,7 +984,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
             lazy val changeTs2 = requestId.unwrap.plusSeconds(2)
             lazy val changeTs3 = requestId.unwrap.plusSeconds(3)
             val response1a = mkResponse(
-              view1.viewHash,
               view1Position,
               LocalApprove(testedProtocolVersion),
               Set(bob.party),
@@ -1013,7 +991,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
               uno,
             )
             val response1b = mkResponse(
-              view1.viewHash,
               view1Position,
               LocalApprove(testedProtocolVersion),
               Set(bob.party),
@@ -1021,7 +998,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
               uno,
             )
             val response1c = mkResponse(
-              view1.viewHash,
               view1Position,
               LocalApprove(testedProtocolVersion),
               Set(bob.party),
@@ -1076,7 +1052,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
             it("rejects the transaction") {
               val response1a =
                 mkResponse(
-                  view1.viewHash,
                   view1Position,
                   testReject(),
                   Set(alice.party),
@@ -1085,7 +1060,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
                 )
               val response1b =
                 mkResponse(
-                  view1.viewHash,
                   view1Position,
                   testReject(),
                   Set(alice.party),
@@ -1145,7 +1119,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
 
           describe("by Bob with 3 votes") {
             val response1a = mkResponse(
-              view1.viewHash,
               view1Position,
               testReject(),
               Set(bob.party),
@@ -1153,7 +1126,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
               uno,
             )
             val response1b = mkResponse(
-              view1.viewHash,
               view1Position,
               testReject(),
               Set(bob.party),
@@ -1161,7 +1133,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
               duo,
             )
             val response1c = mkResponse(
-              view1.viewHash,
               view1Position,
               testReject(),
               Set(bob.party),
@@ -1212,7 +1183,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
               val changeTs5 = changeTs1.plusSeconds(5)
               val response2a =
                 mkResponse(
-                  view1.viewHash,
                   view1Position,
                   testReject(),
                   Set(alice.party),
@@ -1221,7 +1191,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
                 )
               val response2b =
                 mkResponse(
-                  view1.viewHash,
                   view1Position,
                   testReject(),
                   Set(alice.party),
@@ -1255,7 +1224,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
               describe("further rejection") {
                 val changeTs6 = changeTs5.plusSeconds(1)
                 val response3 = mkResponse(
-                  view1.viewHash,
                   view1Position,
                   testReject(),
                   Set(bob.party),
@@ -1271,7 +1239,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
               describe("further approval") {
                 val changeTs6 = changeTs5.plusSeconds(1)
                 val response3 = mkResponse(
-                  view1.viewHash,
                   view1Position,
                   LocalApprove(testedProtocolVersion),
                   Set(alice.party),
@@ -1292,7 +1259,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
           lazy val changeTs2 = requestId.unwrap.plusSeconds(2)
           lazy val changeTs3 = requestId.unwrap.plusSeconds(3)
           val response1a = mkResponse(
-            view1.viewHash,
             view1Position,
             LocalApprove(testedProtocolVersion),
             Set(bob.party),
@@ -1300,7 +1266,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
             uno,
           )
           val response1b = mkResponse(
-            view1.viewHash,
             view1Position,
             LocalApprove(testedProtocolVersion),
             Set(bob.party),
@@ -1308,7 +1273,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
             duo,
           )
           val response1c = mkResponse(
-            view1.viewHash,
             view1Position,
             LocalApprove(testedProtocolVersion),
             Set(bob.party),
@@ -1353,7 +1317,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
           }
           describe("if approvals meet the threshold") {
             val response2a = mkResponse(
-              view1.viewHash,
               view1Position,
               LocalApprove(testedProtocolVersion),
               Set(alice.party),
@@ -1361,7 +1324,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
               uno,
             )
             val response2b = mkResponse(
-              view1.viewHash,
               view1Position,
               LocalApprove(testedProtocolVersion),
               Set(alice.party),
@@ -1380,7 +1342,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
                 "Alice's approval"
               )
             val response3a = mkResponse(
-              view2.viewHash,
               view2Position,
               LocalApprove(testedProtocolVersion),
               Set(bob.party),
@@ -1388,7 +1349,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
               uno,
             )
             val response3b = mkResponse(
-              view2.viewHash,
               view2Position,
               LocalApprove(testedProtocolVersion),
               Set(bob.party),
@@ -1396,7 +1356,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
               duo,
             )
             val response3c = mkResponse(
-              view2.viewHash,
               view2Position,
               LocalApprove(testedProtocolVersion),
               Set(bob.party),
@@ -1427,7 +1386,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
             describe("further rejection") {
               val response4 =
                 mkResponse(
-                  view1.viewHash,
                   view1Position,
                   LocalReject.MalformedRejects.Payloads
                     .Reject("test4")(localVerdictProtocolVersion),
@@ -1447,7 +1405,6 @@ class ResponseAggregationTestV5 extends PathAnyFunSpec with BaseTest {
 
             describe("further redundant approval") {
               val response4 = mkResponse(
-                view1.viewHash,
                 view1Position,
                 LocalApprove(testedProtocolVersion),
                 Set(alice.party),

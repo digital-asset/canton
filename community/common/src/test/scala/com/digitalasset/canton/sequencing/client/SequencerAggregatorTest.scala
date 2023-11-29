@@ -6,7 +6,9 @@ package com.digitalasset.canton.sequencing.client
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.SequencerAggregator.SequencerAggregatorError
+import com.digitalasset.canton.sequencing.protocol.SignedContent
 import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, SequencerAggregator}
+import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.util.ResourceUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
@@ -107,7 +109,7 @@ class SequencerAggregatorTest
       }
     }
 
-    "support reconfiguration to 2 out of 3" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
+    "support reconfiguration to 2 out of 3" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
       fixture =>
         import fixture.*
 
@@ -179,7 +181,7 @@ class SequencerAggregatorTest
   }
 
   "Sequencer aggregator with two expected sequencers" should {
-    "pass-through the combined event only if both sequencers emitted it" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
+    "pass-through the combined event only if both sequencers emitted it" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
       fixture =>
         import fixture.*
         val event1 = createEvent().futureValue
@@ -214,7 +216,25 @@ class SequencerAggregatorTest
     "fail if events share timestamp but timestampOfSigningKey is different" in { fixture =>
       import fixture.*
       val event1 = createEvent(timestampOfSigningKey = Some(CantonTimestamp.Epoch)).futureValue
-      val event2 = createEvent(timestampOfSigningKey = None).futureValue
+
+      /*
+      The goal is to do `createEvent(timestampOfSigningKey = None).futureValue`
+      But if we do, we have different salt (because of the randomness in the ExampleTransactionFactory
+      used by createEvent). So instead, we build the event.
+       */
+      val event2 = {
+        val signedContent = SignedContent.tryCreate(
+          content = event1.signedEvent.content,
+          signatures = event1.signedEvent.signatures,
+          timestampOfSigningKey = None,
+          representativeProtocolVersion = event1.signedEvent.representativeProtocolVersion,
+        )
+
+        OrdinarySequencedEvent(
+          signedEvent = signedContent,
+          trafficState = event1.trafficState,
+        )(event1.traceContext)
+      }
 
       val aggregator = mkAggregator(
         config(Set(sequencerAlice, sequencerBob), sequencerTrustThreshold = 2)
@@ -259,7 +279,7 @@ class SequencerAggregatorTest
         .futureValueUS shouldBe Left(SequencerAggregatorError.NotTheSameContentHash(hashes))
     }
 
-    "emit events in order when all sequencers confirmed" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
+    "emit events in order when all sequencers confirmed" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
       fixture =>
         import fixture.*
         val events = (1 to 2).map(s =>
@@ -289,7 +309,7 @@ class SequencerAggregatorTest
         futures(1).futureValueUS shouldBe Right(true)
     }
 
-    "support reconfiguration to another sequencer" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
+    "support reconfiguration to another sequencer" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
       fixture =>
         import fixture.*
 
@@ -322,7 +342,7 @@ class SequencerAggregatorTest
   }
 
   "Sequencer aggregator with two out of 3 expected sequencers" should {
-    "pass-through the combined event only if both sequencers emitted it" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
+    "pass-through the combined event only if both sequencers emitted it" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
       fixture =>
         import fixture.*
 
@@ -360,44 +380,43 @@ class SequencerAggregatorTest
         f3.futureValueUS shouldBe Right(false)
     }
 
-    "recover after skipping an event" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
-      fixture =>
-        import fixture.*
+    "recover after skipping an event" onlyRunWithOrGreaterThan ProtocolVersion.v30 in { fixture =>
+      import fixture.*
 
-        val aggregator = mkAggregator(
-          config(Set(sequencerAlice, sequencerBob, sequencerCarlos), sequencerTrustThreshold = 2)
-        )
+      val aggregator = mkAggregator(
+        config(Set(sequencerAlice, sequencerBob, sequencerCarlos), sequencerTrustThreshold = 2)
+      )
 
-        assertNoMessageDownstream(aggregator)
+      assertNoMessageDownstream(aggregator)
 
-        aggregator
-          .combineAndMergeEvent(sequencerAlice, aliceEvents(0))
-          .discard
-        aggregator
-          .combineAndMergeEvent(sequencerBob, bobEvents(0))
-          .discard
+      aggregator
+        .combineAndMergeEvent(sequencerAlice, aliceEvents(0))
+        .discard
+      aggregator
+        .combineAndMergeEvent(sequencerBob, bobEvents(0))
+        .discard
 
-        assertCombinedDownstreamMessage(aggregator, aliceEvents(0), bobEvents(0))
+      assertCombinedDownstreamMessage(aggregator, aliceEvents(0), bobEvents(0))
 
-        aggregator
-          .combineAndMergeEvent(sequencerCarlos, carlosEvents(0))
-          .discard // late event
+      aggregator
+        .combineAndMergeEvent(sequencerCarlos, carlosEvents(0))
+        .discard // late event
 
-        aggregator
-          .combineAndMergeEvent(sequencerAlice, aliceEvents(1))
-          .discard
-        aggregator
-          .combineAndMergeEvent(sequencerCarlos, carlosEvents(1))
-          .discard
+      aggregator
+        .combineAndMergeEvent(sequencerAlice, aliceEvents(1))
+        .discard
+      aggregator
+        .combineAndMergeEvent(sequencerCarlos, carlosEvents(1))
+        .discard
 
-        assertCombinedDownstreamMessage(
-          aggregator,
-          aliceEvents(1),
-          carlosEvents(1),
-        )
+      assertCombinedDownstreamMessage(
+        aggregator,
+        aliceEvents(1),
+        carlosEvents(1),
+      )
     }
 
-    "support reconfiguration to 1 out of 3" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
+    "support reconfiguration to 1 out of 3" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
       fixture =>
         import fixture.*
 
@@ -437,7 +456,7 @@ class SequencerAggregatorTest
         assertDownstreamMessage(aggregator, aliceEvents(1))
     }
 
-    "support reconfiguration to 1 out of 3 while incomplete consensus" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
+    "support reconfiguration to 1 out of 3 while incomplete consensus" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
       fixture =>
         import fixture.*
 
@@ -464,7 +483,7 @@ class SequencerAggregatorTest
   }
 
   "Sequencer aggregator with 3 out of 3 expected sequencers" should {
-    "support reconfiguration to 1 out of 3 while overfulfilled consensus" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
+    "support reconfiguration to 1 out of 3 while overfulfilled consensus" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
       fixture =>
         import fixture.*
 

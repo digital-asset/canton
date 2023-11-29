@@ -41,14 +41,9 @@ import com.google.common.annotations.VisibleForTesting
 import scala.concurrent.{ExecutionContext, Future}
 import scala.math.Ordered.orderingToOrdered
 
-/** In protocol versions prior to [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]],
-  * the `signatures` field contains a single signature over the `typeMessage`'s
-  * [[com.digitalasset.canton.protocol.messages.TypedSignedProtocolMessageContent.content]].
-  * From [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]] on, there can be any number of signatures
-  * and each signature covers the serialization of the `typedMessage` itself rather than just its
-  * [[com.digitalasset.canton.protocol.messages.TypedSignedProtocolMessageContent.content]].
+/** There can be any number of signatures.
+  * Every signature covers the serialization of the `typedMessage` and needs to be valid.
   */
-// TODO(#15358) Adapt comment. Most of it can be deleted.
 // sealed because this class is mocked in tests
 sealed case class SignedProtocolMessage[+M <: SignedProtocolMessageContent] private (
     typedMessage: TypedSignedProtocolMessageContent[M],
@@ -58,8 +53,6 @@ sealed case class SignedProtocolMessage[+M <: SignedProtocolMessageContent] priv
       SignedProtocolMessage.type
     ]
 ) extends ProtocolMessage
-    with ProtocolMessageV0
-    with ProtocolMessageV1
     with ProtocolMessageV2
     with ProtocolMessageV3
     with HasProtocolVersionedWrapper[SignedProtocolMessage[SignedProtocolMessageContent]] {
@@ -75,7 +68,7 @@ sealed case class SignedProtocolMessage[+M <: SignedProtocolMessageContent] priv
   ): EitherT[Future, SignatureCheckError, Unit] =
     if (
       representativeProtocolVersion >=
-        companionObj.protocolVersionRepresentativeFor(ProtocolVersion.CNTestNet)
+        companionObj.protocolVersionRepresentativeFor(ProtocolVersion.v30)
     ) {
       // TODO(#12390) Properly check the signatures, i.e. there shouldn't be multiple signatures from the same member on the same envelope
       ClosedEnvelope.verifySignatures(
@@ -96,7 +89,7 @@ sealed case class SignedProtocolMessage[+M <: SignedProtocolMessageContent] priv
   )(implicit traceContext: TraceContext): EitherT[Future, SignatureCheckError, Unit] = {
     if (
       representativeProtocolVersion >=
-        companionObj.protocolVersionRepresentativeFor(ProtocolVersion.CNTestNet)
+        companionObj.protocolVersionRepresentativeFor(ProtocolVersion.v30)
     ) {
 
       ClosedEnvelope.verifySignatures(
@@ -137,12 +130,6 @@ sealed case class SignedProtocolMessage[+M <: SignedProtocolMessageContent] priv
     )
   }
 
-  override def toProtoEnvelopeContentV0: v0.EnvelopeContent =
-    v0.EnvelopeContent(v0.EnvelopeContent.SomeEnvelopeContent.SignedMessage(toProtoV0))
-
-  override def toProtoEnvelopeContentV1: v1.EnvelopeContent =
-    v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.SignedMessage(toProtoV0))
-
   override def toProtoEnvelopeContentV2: v2.EnvelopeContent =
     v2.EnvelopeContent(v2.EnvelopeContent.SomeEnvelopeContent.SignedMessage(toProtoV0))
 
@@ -170,12 +157,12 @@ object SignedProtocolMessage
   override val name: String = "SignedProtocolMessage"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.SignedProtocolMessage)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v5)(v0.SignedProtocolMessage)(
       supportedProtoVersion(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
     ProtoVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.CNTestNet
+      ProtocolVersion.v30
     )(v1.SignedProtocolMessage)(
       supportedProtoVersion(_)(fromProtoV1),
       _.toProtoV1.toByteString,

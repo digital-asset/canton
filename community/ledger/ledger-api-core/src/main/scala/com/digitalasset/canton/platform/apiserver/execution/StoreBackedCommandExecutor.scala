@@ -5,7 +5,6 @@ package com.digitalasset.canton.platform.apiserver.execution
 
 import cats.data.*
 import cats.syntax.all.*
-import com.daml.api.util.TimeProvider
 import com.daml.lf.crypto
 import com.daml.lf.data.{ImmArray, Ref, Time}
 import com.daml.lf.engine.{
@@ -31,6 +30,7 @@ import com.digitalasset.canton.ledger.api.domain.{
   NonUpgradableDisclosedContract,
   UpgradableDisclosedContract,
 }
+import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
   ContractState,
@@ -154,6 +154,7 @@ private[apiserver] final class StoreBackedCommandExecutor(
         commands.submissionId.map(_.unwrap),
         ledgerConfiguration,
       ),
+      optDomainId = commands.domainId,
       transactionMeta = state.TransactionMeta(
         commands.commands.ledgerEffectiveTime,
         commands.workflowId.map(_.unwrap),
@@ -166,7 +167,6 @@ private[apiserver] final class StoreBackedCommandExecutor(
             .collect { case (nodeId, node: Node.Action) if node.byKey => nodeId }
             .to(ImmArray)
         ),
-        commands.domainId,
       ),
       transaction = updateTx,
       dependsOnLedgerTime = meta.dependsOnTime,

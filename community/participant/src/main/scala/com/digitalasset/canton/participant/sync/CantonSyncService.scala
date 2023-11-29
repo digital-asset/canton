@@ -363,6 +363,7 @@ class CantonSyncService(
   // Submit a transaction (write service implementation)
   override def submitTransaction(
       submitterInfo: SubmitterInfo,
+      optDomainId: Option[DomainId],
       transactionMeta: TransactionMeta,
       transaction: LfSubmittedTransaction,
       _estimatedInterpretationCost: Long,
@@ -377,6 +378,7 @@ class CantonSyncService(
       logger.debug(s"Received submit-transaction ${submitterInfo.commandId} from ledger-api server")
       submitTransactionF(
         submitterInfo,
+        optDomainId,
         transactionMeta,
         transaction,
         keyResolver,
@@ -430,9 +432,9 @@ class CantonSyncService(
         }
       _pruned <- pruningProcessor.pruneLedgerEvents(pruneUpToMultiDomainGlobalOffset)
     } yield ()).transform {
-      case Left(LedgerPruningNothingPruned(message)) =>
+      case Left(LedgerPruningNothingToPrune) =>
         logger.info(
-          s"Could not locate pruning point: ${message}. Considering success for idempotency"
+          s"Could not locate pruning point: ${LedgerPruningNothingToPrune.message}. Considering success for idempotency"
         )
         Right(())
       case Left(err @ LedgerPruningOnlySupportedInEnterpriseEdition) =>
@@ -472,6 +474,7 @@ class CantonSyncService(
 
   private def submitTransactionF(
       submitterInfo: SubmitterInfo,
+      optDomainId: Option[DomainId],
       transactionMeta: TransactionMeta,
       transaction: LfSubmittedTransaction,
       keyResolver: LfKeyResolver,
@@ -508,6 +511,7 @@ class CantonSyncService(
     } else {
       val submittedFF = domainRouter.submitTransaction(
         submitterInfo,
+        optDomainId,
         transactionMeta,
         keyResolver,
         transaction,
@@ -520,18 +524,18 @@ class CantonSyncService(
             // Reply with ACK as soon as the submission has been registered as in-flight,
             // and asynchronously send it to the sequencer.
             logger.debug(s"Command ${submitterInfo.commandId} is now in flight.")
-            val loggedF = sequencedF.transform {
-              case Success(UnlessShutdown.Outcome(_)) =>
-                logger.debug(s"Successfully submitted transaction ${submitterInfo.commandId}.")
-                Success(UnlessShutdown.Outcome(()))
-              case Success(UnlessShutdown.AbortedDueToShutdown) =>
-                logger.debug(
-                  s"Transaction submission aborted due to shutdown ${submitterInfo.commandId}."
-                )
-                Success(UnlessShutdown.Outcome(()))
-              case Failure(ex) =>
-                logger.error(s"Command submission for ${submitterInfo.commandId} failed", ex)
-                Success(UnlessShutdown.Outcome(()))
+            val loggedF = sequencedF.transformIntoSuccess { result =>
+              result match {
+                case Success(UnlessShutdown.Outcome(_)) =>
+                  logger.debug(s"Successfully submitted transaction ${submitterInfo.commandId}.")
+                case Success(UnlessShutdown.AbortedDueToShutdown) =>
+                  logger.debug(
+                    s"Transaction submission aborted due to shutdown ${submitterInfo.commandId}."
+                  )
+                case Failure(ex) =>
+                  logger.error(s"Command submission for ${submitterInfo.commandId} failed", ex)
+              }
+              UnlessShutdown.unit
             }
             Right(loggedF)
           case Success(Left(submissionError)) =>

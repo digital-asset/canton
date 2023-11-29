@@ -26,7 +26,7 @@ import com.digitalasset.canton.protocol.{LfContractId, LfTransactionVersion, LfV
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{DamlLfVersionToProtocolVersions, ProtocolVersion}
 import com.digitalasset.canton.{
   BaseTest,
   DomainAlias,
@@ -134,9 +134,11 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
     }
 
     "take minimum protocol version into account" in {
-      val oldPV = ProtocolVersion.v3
-      val newPV = ProtocolVersion.dev
+      val oldPV = ProtocolVersion.v5
       val transactionVersion = LfTransactionVersion.VDev
+      val newPV = DamlLfVersionToProtocolVersions.damlLfVersionToMinimumProtocolVersions
+        .get(transactionVersion)
+        .value
 
       val selectorOldPV = selectorForExerciseByInterface(
         transactionVersion = TransactionVersion.VDev, // requires protocol version dev

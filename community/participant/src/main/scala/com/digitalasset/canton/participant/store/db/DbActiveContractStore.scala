@@ -739,7 +739,7 @@ class DbActiveContractStore(
         )
         // retrieves the transfer counters for archived contracts that were activated between (`fromExclusive`, `toInclusive`]
         maxTransferCountersPerCidUpToRc =
-          if (protocolVersion >= ProtocolVersion.CNTestNet)
+          if (protocolVersion >= ProtocolVersion.v30) // TODO(#15153) Kill this conditional
             transferCounterForArchivals(retrievedChangesBetween)
           else Map.empty[(RequestCounter, LfContractId), TransferCounterO]
         /*
@@ -750,7 +750,7 @@ class DbActiveContractStore(
          */
         // retrieves the transfer counters for archived contracts that were activated at time <= `fromExclusive`
         maxTransferCountersPerRemainingCidUpToRc <- {
-          if (protocolVersion >= ProtocolVersion.CNTestNet) {
+          if (protocolVersion >= ProtocolVersion.v30) { // TODO(#15153) Kill this conditional
             val archivalsWithoutTransferCounters =
               maxTransferCountersPerCidUpToRc.filter(_._2.isEmpty)
             NonEmpty

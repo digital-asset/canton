@@ -62,11 +62,11 @@ trait TopologyStoreXTest extends AsyncWordSpec with TopologyStoreXTestBase {
             retrievedTx <- store.findStored(tx1_NSD_Proposal)
             txProtocolVersion <- store.findStoredForVersion(
               tx1_NSD_Proposal.transaction,
-              ProtocolVersion.CNTestNet,
+              ProtocolVersion.v30,
             )
             txBadProtocolVersion <- store.findStoredForVersion(
               tx1_NSD_Proposal.transaction,
-              ProtocolVersion.v4,
+              ProtocolVersion.v5,
             )
 
             proposalTransactions <- inspect(

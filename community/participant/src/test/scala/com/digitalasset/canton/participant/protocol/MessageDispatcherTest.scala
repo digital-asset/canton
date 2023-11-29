@@ -8,7 +8,7 @@ import cats.syntax.option.*
 import com.daml.metrics.api.MetricName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
-import com.digitalasset.canton.crypto.{Encrypted, HashPurpose, TestHash}
+import com.digitalasset.canton.crypto.{Encrypted, HashPurpose, SymmetricKeyScheme, TestHash}
 import com.digitalasset.canton.data.ViewType.{TransferInViewType, TransferOutViewType}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
@@ -25,6 +25,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.messages.EncryptedView.CompressedView
+import com.digitalasset.canton.protocol.messages.EncryptedViewMessageV1.RecipientsInfo
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{
   RequestAndRootHashMessage,
@@ -297,23 +298,25 @@ trait MessageDispatcherTest {
 
   private val encryptedTestView = EncryptedView(TestViewType)(emptyEncryptedViewTree)
   private val encryptedTestViewMessage =
-    EncryptedViewMessageV0(
+    EncryptedViewMessageV1(
       None,
       ViewHash(TestHash.digest(9000)),
-      Map.empty,
+      Seq.empty,
       encryptedTestView,
       domainId,
-    )
+      SymmetricKeyScheme.Aes128Gcm,
+    )(Some(RecipientsInfo(Set(participantId), Set.empty, Set.empty)))
 
   private val encryptedOtherTestView = EncryptedView(OtherTestViewType)(emptyEncryptedViewTree)
   private val encryptedOtherTestViewMessage =
-    EncryptedViewMessageV0(
+    EncryptedViewMessageV1(
       None,
       ViewHash(TestHash.digest(9001)),
-      Map.empty,
+      Seq.empty,
       encryptedOtherTestView,
       domainId,
-    )
+      SymmetricKeyScheme.Aes128Gcm,
+    )(Some(RecipientsInfo(Set(participantId), Set.empty, Set.empty)))
 
   private val requestId = RequestId(CantonTimestamp.Epoch)
   private val testMediatorResult =
@@ -380,7 +383,7 @@ trait MessageDispatcherTest {
           .currentSnapshotApproximation,
         domainId = domainId,
         protocolVersion = testedProtocolVersion,
-        notSequencedAfter = Some(CantonTimestamp.Epoch),
+        notSequencedAfter = CantonTimestamp.Epoch,
       )
       .futureValue
 
@@ -574,13 +577,14 @@ trait MessageDispatcherTest {
         "not be let through if UCK is enabled" in {
           val sut = mk(initRc = RequestCounter(-12), uck = Some(true))
           val encryptedTransferViewMessage =
-            EncryptedViewMessageV0(
+            EncryptedViewMessageV1(
               None,
               ViewHash(TestHash.digest(9002)),
-              Map.empty,
+              Seq.empty,
               transferView,
               domainId,
-            )
+              SymmetricKeyScheme.Aes128Gcm,
+            )(Some(RecipientsInfo(Set(participantId), Set.empty, Set.empty)))
           val rootHashMessage =
             RootHashMessage(
               rootHash(1),
@@ -726,13 +730,14 @@ trait MessageDispatcherTest {
       val sut = mk(initRc = RequestCounter(-12))
       val encryptedUnknownTestView = EncryptedView(UnknownTestViewType)(emptyEncryptedViewTree)
       val encryptedUnknownTestViewMessage =
-        EncryptedViewMessageV0(
+        EncryptedViewMessageV1(
           None,
           ViewHash(TestHash.digest(9002)),
-          Map.empty,
+          Seq.empty,
           encryptedUnknownTestView,
           domainId,
-        )
+          SymmetricKeyScheme.Aes128Gcm,
+        )(Some(RecipientsInfo(Set(participantId), Set.empty, Set.empty)))
       val rootHashMessage =
         RootHashMessage(
           rootHash(1),
@@ -1400,7 +1405,7 @@ private[protocol] object MessageDispatcherTest {
     val name: String = "TestRegularMediatorResult"
 
     val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-      ProtoVersion(0) -> UnsupportedProtoCodec(ProtocolVersion.v3)
+      ProtoVersion(0) -> UnsupportedProtoCodec(ProtocolVersion.v5)
     )
 
     override protected def deserializationErrorK(error: ProtoDeserializationError): Unit = ()

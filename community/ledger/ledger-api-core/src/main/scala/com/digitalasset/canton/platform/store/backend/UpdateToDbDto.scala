@@ -54,7 +54,7 @@ object UpdateToDbDto {
               IndexedUpdatesMetrics.Labels.status.rejected,
             )
           }
-          val domainId = u.domainId.map(_.toProtoPrimitive).filter(_ => multiDomainEnabled)
+          val domainId = Option.when(multiDomainEnabled)(u.domainId.toProtoPrimitive)
           Iterator(
             commandCompletion(
               offset = offset,
@@ -218,8 +218,7 @@ object UpdateToDbDto {
             event_sequential_id_first = 0, // this is filled later
             event_sequential_id_last = 0, // this is filled later
           )
-          val domainId =
-            u.transactionMeta.optDomainId.map(_.toProtoPrimitive).filter(_ => multiDomainEnabled)
+          val domainId = Option.when(multiDomainEnabled)(u.domainId.toProtoPrimitive)
           val events: Iterator[DbDto] = preorderTraversal.iterator
             .flatMap {
               case (nodeId, create: Create) =>

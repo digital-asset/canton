@@ -71,7 +71,7 @@ class UnionspaceAuthorizationGraphXTest
     }
 
     def mkNs(namespace: Namespace, key: SigningPublicKey, isRootDelegation: Boolean) =
-      NamespaceDelegationX.create(namespace, key, isRootDelegation).fold(sys.error, identity)
+      NamespaceDelegationX.tryCreate(namespace, key, isRootDelegation)
 
     val ns1k1k1 = mkAuth(mkNs(ns1, key1, isRootDelegation = true), key1)
     val ns1k4k1 = mkAuth(mkNs(ns1, key4, isRootDelegation = true), key1)
@@ -114,7 +114,7 @@ class UnionspaceAuthorizationGraphXTest
     ) shouldBe valid
   }
 
-  "authorization graph for a unionspace" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet when {
+  "authorization graph for a unionspace" onlyRunWithOrGreaterThan ProtocolVersion.v30 when {
 
     "only having namespace delegations for its constituents" should {
       import fixture.*

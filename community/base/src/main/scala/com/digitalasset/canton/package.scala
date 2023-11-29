@@ -115,7 +115,8 @@ package object canton {
 
   object TransferCounter extends CounterCompanion[TransferCounterDiscriminator] {
     def forCreatedContract(protocolVersion: ProtocolVersion): TransferCounterO =
-      if (protocolVersion >= ProtocolVersion.CNTestNet) Some(TransferCounter.Genesis)
+      if (protocolVersion >= ProtocolVersion.v30)
+        Some(TransferCounter.Genesis) // TODO(#15153) Kill this conditional
       else None
 
     def encodeDeterministically(transferCounter: TransferCounter): ByteString = encodeLong(
@@ -123,8 +124,7 @@ package object canton {
     )
   }
 
-  /** A transfer counter if available. Transfer counters are defined from protocol version
-    * [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]] on
+  /** A transfer counter.
     */
   type TransferCounterO = Option[TransferCounter]
 
@@ -141,4 +141,11 @@ package object canton {
 
   implicit val lfPartyOrdering: Ordering[LfPartyId] =
     IdString.`Party order instance`.toScalaOrdering
+
+  /** Use this type when scalac struggles to infer `Nothing`
+    * due to it being treated specially.
+    *
+    * see https://www.reddit.com/r/scala/comments/73791p/nothings_twin_brother_the_better_one/
+    */
+  type Uninhabited <: Nothing
 }

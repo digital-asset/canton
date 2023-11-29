@@ -6,14 +6,10 @@ package com.digitalasset.canton.protocol.messages
 import cats.syntax.either.*
 import com.digitalasset.canton
 import com.digitalasset.canton.crypto.HashPurpose
-import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
+import com.digitalasset.canton.data.ViewType
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
-import com.digitalasset.canton.protocol.messages.Verdict.{
-  MediatorRejectV0,
-  MediatorRejectV1,
-  MediatorRejectV2,
-}
+import com.digitalasset.canton.protocol.messages.Verdict.{MediatorRejectV1, MediatorRejectV2}
 import com.digitalasset.canton.protocol.{RequestId, v0, v1, v2}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -79,19 +75,6 @@ case class MalformedMediatorRequestResult private (
         "by the class invariant"
     )
 
-  protected def toProtoV0: v0.MalformedMediatorRequestResult = {
-    val rejection = verdict match {
-      case reject: Verdict.MediatorRejectV0 => reject.toProtoMediatorRejectionV0
-      case _ => mismatchingProtocolVersion
-    }
-    v0.MalformedMediatorRequestResult(
-      requestId = Some(requestId.unwrap.toProtoPrimitive),
-      domainId = domainId.toProtoPrimitive,
-      viewType = viewType.toProtoEnum,
-      rejection = Some(rejection),
-    )
-  }
-
   protected def toProtoV1: v1.MalformedMediatorRequestResult = {
     val rejection = verdict match {
       case reject: Verdict.MediatorRejectV1 => reject.toProtoMediatorRejectV1
@@ -134,13 +117,7 @@ object MalformedMediatorRequestResult
   override val name: String = "MalformedMediatorRequestResult"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(
-      v0.MalformedMediatorRequestResult
-    )(
-      supportedProtoVersionMemoized(_)(fromProtoV0),
-      _.toProtoV0.toByteString,
-    ),
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v4)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v5)(
       v1.MalformedMediatorRequestResult
     )(
       supportedProtoVersionMemoized(_)(fromProtoV1),
@@ -186,13 +163,6 @@ object MalformedMediatorRequestResult
         rpv: RepresentativeProtocolVersion[MalformedMediatorRequestResult.type],
     ): Either[String, Unit] = {
       v.verdict match {
-        case _: Verdict.MediatorRejectV0 =>
-          EitherUtil.condUnitE(
-            rpv == protocolVersionRepresentativeFor(
-              MediatorRejectV0.applicableProtocolVersion
-            ),
-            Verdict.MediatorRejectV0.wrongProtocolVersion(rpv),
-          )
         case _: Verdict.MediatorRejectV1 =>
           EitherUtil.condUnitE(
             rpv >= protocolVersionRepresentativeFor(
@@ -217,26 +187,6 @@ object MalformedMediatorRequestResult
   override def invariants: Seq[canton.protocol.messages.MalformedMediatorRequestResult.Invariant] =
     Seq(mediatorRejectVersionInvariant)
 
-  private def fromProtoV0(protoResultMsg: v0.MalformedMediatorRequestResult)(
-      bytes: ByteString
-  ): ParsingResult[MalformedMediatorRequestResult] = {
-
-    val v0.MalformedMediatorRequestResult(requestIdP, domainIdP, viewTypeP, rejectP) =
-      protoResultMsg
-    for {
-      requestId <- ProtoConverter
-        .required("request_id", requestIdP)
-        .flatMap(CantonTimestamp.fromProtoPrimitive)
-        .map(RequestId(_))
-      domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain_id")
-      viewType <- ViewType.fromProtoEnum(viewTypeP)
-      reject <- ProtoConverter.parseRequired(MediatorRejectV0.fromProtoV0, "rejection", rejectP)
-    } yield MalformedMediatorRequestResult(requestId, domainId, viewType, reject)(
-      protocolVersionRepresentativeFor(ProtoVersion(0)),
-      Some(bytes),
-    )
-  }
-
   private def fromProtoV1(malformedMediatorRequestResultP: v1.MalformedMediatorRequestResult)(
       bytes: ByteString
   ): ParsingResult[MalformedMediatorRequestResult] = {
@@ -250,7 +200,7 @@ object MalformedMediatorRequestResult
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain_id")
       viewType <- ViewType.fromProtoEnum(viewTypeP)
       reject <- ProtoConverter.parseRequired(
-        MediatorRejectV1.fromProtoV1(_, Verdict.protocolVersionRepresentativeFor(ProtoVersion(1))),
+        MediatorRejectV1.fromProtoV1(_, Verdict.protocolVersionRepresentativeFor(ProtoVersion(2))),
         "rejection",
         rejectionPO,
       )
@@ -278,7 +228,7 @@ object MalformedMediatorRequestResult
         rejectionPO,
       )
     } yield MalformedMediatorRequestResult(requestId, domainId, viewType, reject)(
-      protocolVersionRepresentativeFor(ProtoVersion(2)),
+      protocolVersionRepresentativeFor(ProtoVersion(3)),
       Some(bytes),
     )
   }

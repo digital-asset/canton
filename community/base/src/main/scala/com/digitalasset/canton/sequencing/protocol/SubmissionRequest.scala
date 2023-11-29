@@ -27,8 +27,6 @@ import com.digitalasset.canton.version.{
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
-import scala.math.Ordered.orderingToOrdered
-
 /** @param aggregationRule If [[scala.Some$]], this submission request is aggregatable.
   *                        Its envelopes will be delivered only when the rule's conditions are met.
   *                        The receipt of delivery for an aggregatable submission will be delivered immediately to the sender
@@ -49,6 +47,9 @@ final case class SubmissionRequest private (
     override val deserializedFrom: Option[ByteString] = None,
 ) extends HasProtocolVersionedWrapper[SubmissionRequest]
     with ProtocolVersionedMemoizedEvidence {
+  // Ensures the invariants related to default values hold
+  validateInstance().valueOr(err => throw new IllegalArgumentException(err))
+
   private lazy val batchProtoV0: v0.CompressedBatch = batch.toProtoV0
 
   @transient override protected lazy val companionObj: SubmissionRequest.type = SubmissionRequest
@@ -176,14 +177,14 @@ object SubmissionRequest
       MaxRequestSizeToDeserialize,
     ] {
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.SubmissionRequest)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v5)(v0.SubmissionRequest)(
       supportedProtoVersionMemoized(_) { (maxRequestSize, req) => bytes =>
         fromProtoV0(maxRequestSize)(req, Some(bytes))
       },
       _.toProtoV0.toByteString,
     ),
     ProtoVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.CNTestNet
+      ProtocolVersion.v30
     )(v1.SubmissionRequest)(
       supportedProtoVersionMemoized(_)(fromProtoV1),
       _.toProtoV1.toByteString,
@@ -192,7 +193,27 @@ object SubmissionRequest
 
   override def name: String = "submission request"
 
-  private val aggregationRuleSupportedSince = protocolVersionRepresentativeFor(ProtoVersion(1))
+  override lazy val invariants = Seq(aggregationRuleDefaultValue, timestampOfSigningKeyInvariant)
+
+  lazy val aggregationRuleDefaultValue
+      : SubmissionRequest.DefaultValueUntilExclusive[Option[AggregationRule]] =
+    DefaultValueUntilExclusive(
+      _.aggregationRule,
+      "aggregationRule",
+      protocolVersionRepresentativeFor(ProtoVersion(1)),
+      None,
+    )
+
+  lazy val timestampOfSigningKeyInvariant = new Invariant {
+    override def validateInstance(
+        v: SubmissionRequest,
+        rpv: SubmissionRequest.ThisRepresentativeProtocolVersion,
+    ): Either[String, Unit] =
+      EitherUtil.condUnitE(
+        v.aggregationRule.isEmpty || v.timestampOfSigningKey.isDefined,
+        s"Submission request has `aggregationRule` set, but `timestampOfSigningKey` is not defined. Please check that `timestampOfSigningKey` has been set for the submission.",
+      )
+  }
 
   def create(
       sender: Member,
@@ -204,30 +225,19 @@ object SubmissionRequest
       aggregationRule: Option[AggregationRule],
       representativeProtocolVersion: RepresentativeProtocolVersion[SubmissionRequest.type],
   ): Either[InvariantViolation, SubmissionRequest] =
-    for {
-      _ <- EitherUtil.condUnitE(
-        representativeProtocolVersion >= aggregationRuleSupportedSince || aggregationRule.isEmpty,
-        InvariantViolation(
-          s"Aggregation rules are not supported in protocol version equivalent to ${representativeProtocolVersion.representative}"
-        ),
+    Either
+      .catchOnly[IllegalArgumentException](
+        new SubmissionRequest(
+          sender,
+          messageId,
+          isRequest,
+          batch,
+          maxSequencingTime,
+          timestampOfSigningKey,
+          aggregationRule,
+        )(representativeProtocolVersion, deserializedFrom = None)
       )
-      _ <- EitherUtil.condUnitE(
-        aggregationRule.isEmpty || timestampOfSigningKey.isDefined,
-        InvariantViolation(
-          s"Submission request has `aggregationRule` set, but `timestampOfSigningKey` is not defined. Please check that `timestampOfSigningKey` has been set for the submission."
-        ),
-      )
-    } yield {
-      new SubmissionRequest(
-        sender,
-        messageId,
-        isRequest,
-        batch,
-        maxSequencingTime,
-        timestampOfSigningKey,
-        aggregationRule,
-      )(representativeProtocolVersion, deserializedFrom = None)
-    }
+      .leftMap(error => InvariantViolation(error.getMessage))
 
   def tryCreate(
       sender: Member,
@@ -329,10 +339,4 @@ object SubmissionRequest
       aggregationRule,
     )(protocolVersionRepresentativeFor(ProtoVersion(1)), Some(bytes))
   }
-
-  def usingSignedSubmissionRequest(protocolVersion: ProtocolVersion): Boolean =
-    protocolVersion >= ProtocolVersion.v4
-
-  def usingVersionedSubmissionRequest(protocolVersion: ProtocolVersion): Boolean =
-    protocolVersion >= ProtocolVersion.v5
 }

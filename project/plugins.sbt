@@ -56,3 +56,6 @@ libraryDependencies ++= Seq(
 addSbtPlugin("pl.project13.scala" % "sbt-jmh" % "0.4.3")
 
 addSbtPlugin("org.jetbrains.scala" % "sbt-ide-settings" % "1.1.2")
+
+// JUnit support
+addSbtPlugin("net.aichler" % "sbt-jupiter-interface" % "0.9.0")
