@@ -6,11 +6,12 @@ package com.digitalasset.canton.data
 import com.digitalasset.canton.topology.MediatorRef
 import com.digitalasset.canton.version.ProtocolVersion
 
+// TODO(#15153) Remove this object (assertions are always true)
 object TransferCommonData {
   val minimumPvForMediatorGroups: ProtocolVersion =
-    ProtocolVersion.CNTestNet
+    ProtocolVersion.v30
   val minimumPvForTransferCounter: ProtocolVersion =
-    ProtocolVersion.CNTestNet
+    ProtocolVersion.v30
 
   private[data] def isGroupMediatorSupported(
       protocolVersion: ProtocolVersion

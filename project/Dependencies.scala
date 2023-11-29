@@ -34,7 +34,6 @@ object Dependencies {
   lazy val checkerFramework_version = "3.28.0"
   lazy val chimney_version = "0.6.1"
   lazy val circe_version = "0.14.2"
-  lazy val concurrency_limits_version = "0.3.6"
   lazy val dropwizard_version = "4.1.33"
   lazy val fabric_sdk_version = "2.2.13"
   lazy val flyway_version = "9.15.2"
@@ -116,6 +115,7 @@ object Dependencies {
   lazy val h2 = "com.h2database" % "h2" % h2_version
   lazy val postgres = "org.postgresql" % "postgresql" % postgres_version
   lazy val flyway = "org.flywaydb" % "flyway-core" % flyway_version
+  lazy val flyway_commandline = "org.flywaydb" % "flyway-commandline" % flyway_version
   lazy val oracle = "com.oracle.database.jdbc" % "ojdbc8" % oracle_version
 
   // Picked up automatically by the scalapb compiler. Contains common dependencies such as protocol buffers like google/protobuf/timestamp.proto
@@ -169,6 +169,18 @@ object Dependencies {
     "org.scalatestplus" %% "scalacheck-1-15" % (scalatest_version + ".0")
   lazy val mockito_scala = "org.mockito" %% "mockito-scala" % mockito_scala_version
   lazy val scalatestMockito = "org.scalatestplus" %% "mockito-3-4" % ("3.2.10.0")
+
+  /*
+  "org.junit.jupiter:junit-jupiter-api:5.9.2",
+  "org.junit.jupiter:junit-jupiter-engine:5.9.2",
+  "org.junit.platform:junit-platform-engine:1.9.2",
+  "org.junit.platform:junit-platform-runner:1.9.2",
+   */
+
+  lazy val junit_jupiter_api = "org.junit.jupiter" % "junit-jupiter-api" % "5.9.2"
+  lazy val junit_jupiter_engine = "org.junit.jupiter" % "junit-jupiter-engine" % "5.9.2"
+  lazy val junit_platform_runner = "org.junit.platform" % "junit-platform-runner" % "1.9.2"
+  lazy val jupiter_interface = "net.aichler" % "jupiter-interface" % "0.9.0"
 
   lazy val checkerFramework = "org.checkerframework" % "checker-qual" % checkerFramework_version
 
@@ -277,9 +289,6 @@ object Dependencies {
   lazy val snakeyaml = "org.yaml" % "snakeyaml" % snakeyaml_version
 
   lazy val web3j = "org.web3j" % "core" % web3j_version
-
-  lazy val concurrency_limits =
-    "com.netflix.concurrency-limits" % "concurrency-limits-grpc" % concurrency_limits_version
 
   lazy val wartremover_dep =
     "org.wartremover" % "wartremover" % wartremover.Wart.PluginVersion cross CrossVersion.full

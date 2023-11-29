@@ -496,6 +496,10 @@ sealed trait ParticipantReferenceCommon
   @Help.Summary("Commands to repair the participant contract state", FeatureFlag.Repair)
   @Help.Group("Repair")
   def repair: ParticipantRepairAdministration
+
+  override def health
+      : HealthAdministrationCommon[ParticipantStatus] & ParticipantHealthAdministrationCommon
+
 }
 
 abstract class ParticipantReference(
@@ -715,7 +719,7 @@ abstract class ParticipantReferenceX(
   @Help.Summary("Topology management related commands")
   @Help.Group("Topology")
   @Help.Description("This group contains access to the full set of topology management commands.")
-  def topology: TopologyAdministrationGroupX = topology_
+  override def topology: TopologyAdministrationGroupX = topology_
   override protected def vettedPackagesOfParticipant(): Set[PackageId] = topology.vetted_packages
     .list(filterStore = "Authorized", filterParticipant = id.filterString)
     .flatMap(_.item.packageIds)

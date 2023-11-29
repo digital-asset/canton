@@ -100,7 +100,7 @@ object TopologyManagementInitialization {
           callback => {
             val maxSequencingTime = client.generateMaxSequencingTime
             logger.info(
-              s"Sending initial topology transactions to domain members $domainMembers as ${recentSnapshot.owner}"
+              s"Sending initial topology transactions to domain members $domainMembers as ${recentSnapshot.member}"
             )
             for {
               content <-
@@ -109,7 +109,7 @@ object TopologyManagementInitialization {
                     transactions.toList,
                     recentSnapshot,
                     id,
-                    Some(maxSequencingTime),
+                    maxSequencingTime,
                     protocolVersion,
                   )
                   .leftMap(SendAsyncClientError.RequestInvalid)
@@ -151,7 +151,7 @@ object TopologyManagementInitialization {
       topologyManagerSequencerCounterTrackerStore: SequencerCounterTrackerStore,
       topologyProcessor: TopologyTransactionProcessor,
       topologyClient: DomainTopologyClientWithInit,
-      initialKeys: Map[KeyOwner, Seq[PublicKey]],
+      initialKeys: Map[Member, Seq[PublicKey]],
       sequencerClientFactory: SequencerClientFactory,
       parameters: CantonNodeParameters,
       futureSupervisor: FutureSupervisor,

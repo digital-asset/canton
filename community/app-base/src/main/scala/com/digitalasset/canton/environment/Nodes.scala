@@ -286,7 +286,7 @@ class ManagedNodes[
     val runningInstances = nodes.toList
     import TraceContext.Implicits.Empty.*
     runningInstances.map { case (name, stage) =>
-      AsyncCloseable(s"node-$name", stopStage(name)(stage).value, timeouts.closing.duration)
+      AsyncCloseable(s"node-$name", stopStage(name)(stage).value, timeouts.closing)
     }
   }
 

@@ -64,10 +64,8 @@ class ParticipantDomainTopologyServiceTest
       participantId,
       requestId,
       List(
-        RegisterTopologyTransactionResponseResult.create(
-          signedIdentityTransaction.uniquePath.toProtoPrimitive,
-          RegisterTopologyTransactionResponseResult.State.Accepted,
-          testedProtocolVersion,
+        RegisterTopologyTransactionResponseResult(
+          RegisterTopologyTransactionResponseResult.State.Accepted
         )
       ),
       domainId,

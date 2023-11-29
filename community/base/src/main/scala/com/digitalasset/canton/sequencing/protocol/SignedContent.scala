@@ -37,10 +37,8 @@ import scala.math.Ordered.orderingToOrdered
 
 /** @param timestampOfSigningKey The timestamp of the topology snapshot that was used for signing the content.
   *                              [[scala.None$]] if the signing timestamp can be derived from the content.
-  * @param signatures            Signatures of the content provided by the different sequencers. For protocol versions
-  *                              before [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]] must not look at signatures except for the last one.
+  * @param signatures            Signatures of the content provided by the different sequencers.
   */
-// TODO(#15153) Remove comment: remove second sentence of comment about signatures
 final case class SignedContent[+A <: HasCryptographicEvidence] private (
     content: A,
     signatures: NonEmpty[Seq[Signature]],
@@ -114,18 +112,18 @@ object SignedContent
   override def name: String = "SignedContent"
 
   override def supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.SignedContent)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v5)(v0.SignedContent)(
       supportedProtoVersion(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.CNTestNet)(v1.SignedContent)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v30)(v1.SignedContent)(
       supportedProtoVersion(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
   )
 
   val multipleSignaturesSupportedSince: RepresentativeProtocolVersion[SignedContent.type] =
-    protocolVersionRepresentativeFor(ProtocolVersion.CNTestNet)
+    protocolVersionRepresentativeFor(ProtocolVersion.v30)
 
   // TODO(i12076): Start using multiple signatures
   def apply[A <: HasCryptographicEvidence](

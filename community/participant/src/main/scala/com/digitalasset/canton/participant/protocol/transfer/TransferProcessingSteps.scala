@@ -57,7 +57,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter}
 
@@ -252,7 +251,7 @@ trait TransferProcessingSteps[
     val tse = Option.when(isSubmittingParticipant)(
       TimestampedEvent(
         LedgerSyncEvent
-          .CommandRejected(ts.toLf, completionInfo, rejection, requestType, Some(domainId.unwrap)),
+          .CommandRejected(ts.toLf, completionInfo, rejection, requestType, domainId.unwrap),
         RequestOffset(ts, rc),
         Some(sc),
       )
@@ -291,7 +290,7 @@ trait TransferProcessingSteps[
             info,
             rejection,
             requestType,
-            Some(domainId.unwrap),
+            domainId.unwrap,
           ),
         RequestOffset(pendingTransfer.requestId.unwrap, pendingTransfer.requestCounter),
         Some(pendingTransfer.requestSequencerCounter),
@@ -548,20 +547,14 @@ object TransferProcessingSteps {
       sourcePV: SourceProtocolVersion,
       targetPV: TargetProtocolVersion,
       contractId: LfContractId,
-  )(implicit ec: ExecutionContext): EitherT[FutureUnlessShutdown, TransferProcessorError, Unit] = {
-    //  In PV=4, we introduced the sourceProtocolVersion in TransferInView, which is needed for
-    //  proper deserialization. Hence, we disallow some transfers
-    val missingSourceProtocolVersionInTransferIn = targetPV.v <= ProtocolVersion.v3
-    val isSourceProtocolVersionRequired = sourcePV.v >= ProtocolVersion.v4
-
+  )(implicit ec: ExecutionContext): EitherT[FutureUnlessShutdown, TransferProcessorError, Unit] =
     condUnitET[FutureUnlessShutdown](
-      !(missingSourceProtocolVersionInTransferIn && isSourceProtocolVersionRequired) && !incompatibleProtocolVersionsBetweenSourceAndDestinationDomains(
+      !incompatibleProtocolVersionsBetweenSourceAndDestinationDomains(
         sourcePV,
         targetPV,
       ),
       IncompatibleProtocolVersions(contractId, sourcePV, targetPV),
     )
-  }
 
   def checkIncompatiblePV(
       sourcePV: SourceProtocolVersion,

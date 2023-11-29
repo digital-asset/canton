@@ -9,7 +9,6 @@ import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.daml.error.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.ledger.api.refinements.ApiTypes as A
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.transaction.Transaction
 import com.daml.lf.data.Ref.PackageId
@@ -19,6 +18,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.AdminWorkflowServicesErrorGroup
 import com.digitalasset.canton.error.{CantonError, DecodedRpcStatus}
+import com.digitalasset.canton.ledger.api.refinements.ApiTypes as A
 import com.digitalasset.canton.ledger.client.configuration.CommandClientConfiguration
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
@@ -40,6 +40,7 @@ import com.digitalasset.canton.tracing.{NoTracing, Spanning, TraceContext, Trace
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ResourceUtil.withResource
 import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.util.TryUtil.ForFailedOps
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.util.{DamlPackageLoader, EitherTUtil, FutureUtil, retry}
 import com.google.protobuf.ByteString
@@ -372,7 +373,7 @@ private[admin] class ResilientTransactionsSubscription(
           logger.warn(s"$name finished with an error", error)
           ()
         },
-        timeouts.closing.duration,
+        timeouts.closing,
       )
     )
   }
@@ -395,7 +396,7 @@ private[admin] class ResilientTransactionsSubscription(
               // This closing races with the one from runOnShutdown so use getAndSet
               // to ensure calling close only once on a subscription
               ledgerSubscriptionRef.getAndSet(None).foreach(closeSubscription)
-              result.failed.foreach(handlePrunedDataAccessed)
+              result.forFailed(handlePrunedDataAccessed)
             }
         }
       },

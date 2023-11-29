@@ -66,9 +66,9 @@ object TypedSignedProtocolMessageContent
   override def name: String = "TypedSignedProtocolMessageContent"
 
   override def supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.v3),
+    ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.v5),
     ProtoVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.CNTestNet
+      ProtocolVersion.v30
     )(v0.TypedSignedProtocolMessageContent)(
       supportedProtoVersionMemoized(_)(fromProtoV0),
       _.toProtoV0.toByteString,

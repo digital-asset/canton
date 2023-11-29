@@ -31,6 +31,7 @@ import com.digitalasset.canton.topology.transaction.TopologyMappingX.{
 }
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.{LfPackageId, ProtoDeserializationError}
+import com.google.common.annotations.VisibleForTesting
 import slick.jdbc.SetParameter
 
 import scala.reflect.ClassTag
@@ -386,6 +387,14 @@ object NamespaceDelegationX {
       s"Root certificate for $namespace needs to be set as isRootDelegation = true",
     )
 
+  @VisibleForTesting
+  protected[canton] def tryCreate(
+      namespace: Namespace,
+      target: SigningPublicKey,
+      isRootDelegation: Boolean,
+  ): NamespaceDelegationX =
+    create(namespace, target, isRootDelegation).fold(err => sys.error(err), identity)
+
   def code: TopologyMappingX.Code = Code.NamespaceDelegationX
 
   /** Returns true if the given transaction is a self-signed root certificate */
@@ -666,6 +675,7 @@ object OwnerToKeyMappingX {
 final case class DomainTrustCertificateX(
     participantId: ParticipantId,
     domainId: DomainId,
+    // TODO(#15399): respect this restriction when reassigning contracts
     transferOnlyToGivenTargetDomains: Boolean,
     targetDomains: Seq[DomainId],
 ) extends TopologyMappingX {

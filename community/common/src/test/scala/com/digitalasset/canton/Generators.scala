@@ -32,10 +32,11 @@ object Generators {
     Gen.stringOfN(32, Gen.alphaNumChar).map(WorkflowId.assertFromString)
   )
 
-  def transferCounterOGen(pv: ProtocolVersion): Gen[TransferCounterO] = if (
-    pv < ProtocolVersion.CNTestNet
-  ) Gen.const(None)
-  else Gen.choose(0, Long.MaxValue).map(i => Some(TransferCounter(i)))
+  def transferCounterOGen(pv: ProtocolVersion): Gen[TransferCounterO] =
+    if ( // TODO(#15153) Kill this conditional
+      pv < ProtocolVersion.v30
+    ) Gen.const(None)
+    else Gen.choose(0, Long.MaxValue).map(i => Some(TransferCounter(i)))
 
   def lengthLimitedStringGen[A <: AbstractLengthLimitedString](
       companion: LengthLimitedStringCompanion[A]

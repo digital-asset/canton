@@ -84,11 +84,11 @@ object CommonMetadata
   override val name: String = "CommonMetadata"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.CommonMetadata)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v5)(v0.CommonMetadata)(
       supportedProtoVersionMemoized(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.CNTestNet)(v1.CommonMetadata)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v30)(v1.CommonMetadata)(
       supportedProtoVersionMemoized(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
@@ -100,7 +100,7 @@ object CommonMetadata
 
   private[data] def shouldHaveSingleMediator(
       rpv: RepresentativeProtocolVersion[CommonMetadata.type]
-  ): Boolean = rpv == protocolVersionRepresentativeFor(ProtocolVersion.v3)
+  ): Boolean = rpv == protocolVersionRepresentativeFor(ProtocolVersion.v5)
 
   def create(
       hashOps: HashOps,

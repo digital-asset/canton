@@ -19,16 +19,16 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
 
   /*
       proto               0         1    2
-      protocolVersion     3    4    5    6    7  ...
+      protocolVersion     5    6    7    8    9  ...
    */
   "HasVersionedWrapperV2" should {
     "use correct proto version depending on the protocol version for serialization" in {
       def message(i: Int): Message = Message("Hey", 1, 2.0)(protocolVersionRepresentative(i), None)
-      message(3).toProtoVersioned.version shouldBe 0
-      message(4).toProtoVersioned.version shouldBe 0
-      message(5).toProtoVersioned.version shouldBe 1
-      message(6).toProtoVersioned.version shouldBe 2
-      message(7).toProtoVersioned.version shouldBe 2
+      message(5).toProtoVersioned.version shouldBe 0
+      message(6).toProtoVersioned.version shouldBe 0
+      message(7).toProtoVersioned.version shouldBe 1
+      message(8).toProtoVersioned.version shouldBe 2
+      message(9).toProtoVersioned.version shouldBe 2
     }
 
     "set correct protocol version depending on the proto version" in {
@@ -39,7 +39,7 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
         .value
 
       val messageV0 = VersionedMessageV0("Hey").toByteString
-      val expectedV0Deserialization = Message("Hey", 0, 0)(protocolVersionRepresentative(3), None)
+      val expectedV0Deserialization = Message("Hey", 0, 0)(protocolVersionRepresentative(5), None)
       Message
         .fromByteString(ProtoVersion(0))(
           messageV0
@@ -55,7 +55,7 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
 
       val messageV1 = VersionedMessageV1("Hey", 42).toByteString
       val expectedV1Deserialization =
-        Message("Hey", 42, 1.0)(protocolVersionRepresentative(5), None)
+        Message("Hey", 42, 1.0)(protocolVersionRepresentative(7), None)
       fromByteString(messageV1, 1) shouldBe expectedV1Deserialization
 
       // Round trip serialization
@@ -67,7 +67,7 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
 
       val messageV2 = VersionedMessageV2("Hey", 42, 43.0).toByteString
       val expectedV2Deserialization =
-        Message("Hey", 42, 43.0)(protocolVersionRepresentative(6), None)
+        Message("Hey", 42, 43.0)(protocolVersionRepresentative(8), None)
       fromByteString(messageV2, 2) shouldBe expectedV2Deserialization
 
       // Round trip serialization
@@ -79,18 +79,19 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
     }
 
     "return the protocol representative" in {
-      protocolVersionRepresentative(3).representative shouldBe ProtocolVersion.v3
-      protocolVersionRepresentative(4).representative shouldBe ProtocolVersion.v3
-      protocolVersionRepresentative(5).representative shouldBe ProtocolVersion.v5
-      protocolVersionRepresentative(6).representative shouldBe ProtocolVersion(6)
-      protocolVersionRepresentative(7).representative shouldBe ProtocolVersion(6)
-      protocolVersionRepresentative(8).representative shouldBe ProtocolVersion(6)
+      protocolVersionRepresentative(5).representative shouldBe ProtocolVersion(5)
+      protocolVersionRepresentative(6).representative shouldBe ProtocolVersion(5)
+      protocolVersionRepresentative(7).representative shouldBe ProtocolVersion(7)
+      protocolVersionRepresentative(8).representative shouldBe ProtocolVersion(8)
+      protocolVersionRepresentative(9).representative shouldBe ProtocolVersion(8)
+      protocolVersionRepresentative(10).representative shouldBe ProtocolVersion(8)
     }
 
     "status consistency between protobuf messages and protocol versions" in {
       new HasMemoizedProtocolVersionedWrapperCompanion[Message] {
         import com.digitalasset.canton.version.HasProtocolVersionedWrapperTest.Message.*
 
+        // Used by the compiled string below
         val stablePV = ProtocolVersion.stable(10)
         val unstablePV = ProtocolVersion.unstable(11)
 
@@ -166,22 +167,22 @@ object HasProtocolVersionedWrapperTest {
     def name: String = "Message"
 
     /*
-      proto               0         1    2
-      protocolVersion     3    4    5    6    7  ...
+        proto               0         1    2
+        protocolVersion     5    6    7    8    9  ...
      */
     override val supportedProtoVersions = SupportedProtoVersions(
-      ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.unstable(5))(VersionedMessageV1)(
+      ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.unstable(7))(VersionedMessageV1)(
         supportedProtoVersionMemoized(_)(fromProtoV1),
         _.toProtoV1.toByteString,
       ),
       // Can use a stable Protobuf message in a stable protocol version
-      ProtoVersion(0) -> LegacyProtoConverter(ProtocolVersion.stable(3))(VersionedMessageV0)(
+      ProtoVersion(0) -> LegacyProtoConverter(ProtocolVersion.stable(5))(VersionedMessageV0)(
         supportedProtoVersionMemoized(_)(fromProtoV0),
         _.toProtoV0.toByteString,
       ),
       // Can use an unstable Protobuf message in an unstable protocol version
       ProtoVersion(2) -> VersionedProtoConverter(
-        ProtocolVersion.unstable(6)
+        ProtocolVersion.unstable(8)
       )(VersionedMessageV2)(
         supportedProtoVersionMemoized(_)(fromProtoV2),
         _.toProtoV2.toByteString,

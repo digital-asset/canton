@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.ledger.api
 
-import com.daml.api.util.TimeProvider
 import com.daml.executors.executors.{NamedExecutor, QueueAwareExecutor}
 import com.daml.ledger.api.v1.experimental_features.{
   CommandDeduplicationFeatures,
@@ -24,6 +23,7 @@ import com.digitalasset.canton.http.HttpApiServer
 import com.digitalasset.canton.ledger.api.auth.CachedJwtVerifierLoader
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.health.HealthChecks
+import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.participant.state.v2.metrics.{
   TimedReadService,
   TimedWriteService,
@@ -164,7 +164,7 @@ class StartableStoppableLedgerApiServer(
     TraceContext.withNewTraceContext { implicit traceContext =>
       logger.debug("Shutting down ledger API server")
       Seq(
-        AsyncCloseable("ledger API server", stop().unwrap, timeouts.shutdownNetwork.duration),
+        AsyncCloseable("ledger API server", stop().unwrap, timeouts.shutdownNetwork),
         SyncCloseable("ledger-api-server-queue", execQueue.close()),
       )
     }

@@ -7,7 +7,6 @@ package com.digitalasset.canton.protocol.v0;
 
 import "com/digitalasset/canton/crypto/v0/crypto.proto";
 import "com/digitalasset/canton/v0/trace_context.proto";
-import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
 import "scalapb/scalapb.proto";
@@ -87,31 +86,6 @@ message DeliverErrorReason {
 message ServiceAgreement {
   string id = 1; // A unique identifier of an agreement within a domain, which must change when the legal text changes
   string legal_text = 2;
-}
-
-message StaticDomainParameters {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
-
-  google.protobuf.Duration reconciliation_interval = 1;
-  uint32 max_rate_per_participant = 2;
-  uint32 max_inbound_message_size = 3;
-  bool unique_contract_keys = 4;
-  repeated com.digitalasset.canton.crypto.v0.SigningKeyScheme required_signing_key_schemes = 5;
-  repeated com.digitalasset.canton.crypto.v0.EncryptionKeyScheme required_encryption_key_schemes = 6;
-  repeated com.digitalasset.canton.crypto.v0.SymmetricKeyScheme required_symmetric_key_schemes = 7;
-  repeated com.digitalasset.canton.crypto.v0.HashAlgorithm required_hash_algorithms = 8;
-  repeated com.digitalasset.canton.crypto.v0.CryptoKeyFormat required_crypto_key_formats = 9;
-  string protocol_version = 10;
-}
-
-message DynamicDomainParameters {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
-
-  google.protobuf.Duration participant_response_timeout = 1;
-  google.protobuf.Duration mediator_reaction_timeout = 2;
-  google.protobuf.Duration transfer_exclusivity_timeout = 3;
-  google.protobuf.Duration topology_change_delay = 4;
-  google.protobuf.Duration ledger_time_record_time_tolerance = 5;
 }
 
 // Messages for performing a version handshake with a sequencer service

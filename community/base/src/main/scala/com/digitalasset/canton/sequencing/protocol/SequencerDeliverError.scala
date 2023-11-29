@@ -22,7 +22,7 @@ sealed trait SequencerDeliverError extends TransactionError {
     */
   def forProtocolVersion(protocolVersion: ProtocolVersion): SequencerDeliverError = {
     if (
-      protocolVersion < ProtocolVersion.CNTestNet && this.code != SequencerErrors.SubmissionRequestRefused
+      protocolVersion < ProtocolVersion.v30 && this.code != SequencerErrors.SubmissionRequestRefused // TODO(#15153) Kill this conditional
     ) {
       SequencerErrors.SubmissionRequestRefused(this.cause)
     } else {

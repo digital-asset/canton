@@ -1176,13 +1176,7 @@ abstract class ProtocolProcessor[
   ): EitherT[Future, steps.ResultError, EitherT[FutureUnlessShutdown, steps.ResultError, Unit]] = {
     ephemeral.recordOrderPublisher.tick(sc, resultTs)
 
-    val snapshotTs =
-      if (protocolVersion >= ProtocolVersion.v5) requestId.unwrap
-      else {
-        // Keeping legacy behavior to enforce a consistent behavior in old protocol versions.
-        // If different participants pick different values, this could result in a ledger fork.
-        resultTs
-      }
+    val snapshotTs = requestId.unwrap
 
     for {
       snapshot <- EitherT.right(

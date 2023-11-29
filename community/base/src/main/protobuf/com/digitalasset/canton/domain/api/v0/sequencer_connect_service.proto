@@ -34,7 +34,6 @@ message SequencerConnect {
 
     message Response {
       oneof parameters {
-        com.digitalasset.canton.protocol.v0.StaticDomainParameters parameters_v0 = 1;
         com.digitalasset.canton.protocol.v1.StaticDomainParameters parameters_v1 = 2;
       }
     }

@@ -170,32 +170,41 @@ final case class DeadlockDetectionConfig(
   * @param logMessagePayloads  Determines whether message payloads (as well as metadata) sent through GRPC are logged.
   * @param logQueryCost Determines whether to log the 15 most expensive db queries
   * @param logSlowFutures Whether we should active log slow futures (where instructed)
+  * @param dumpNumRollingLogFiles How many of the rolling log files shold be included in the remote dump. Default is 0.
   */
 final case class MonitoringConfig(
     deadlockDetection: DeadlockDetectionConfig = DeadlockDetectionConfig(),
     health: Option[HealthConfig] = None,
     metrics: MetricsConfig = MetricsConfig(),
-    delayLoggingThreshold: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(20),
+    // TODO(i9014) move into logging
+    delayLoggingThreshold: NonNegativeFiniteDuration =
+      MonitoringConfig.defaultDelayLoggingThreshold,
     tracing: TracingConfig = TracingConfig(),
-    // TODO(#15221) remove (breaking change)
-    @Deprecated(since = "2.2.0") // use logging.api.messagePayloads instead
-    logMessagePayloads: Option[Boolean] = None,
+    // TODO(i9014) rename to queries
     logQueryCost: Option[QueryCostMonitoringConfig] = None,
+    // TODO(i9014) move into logging
     logSlowFutures: Boolean = false,
     logging: LoggingConfig = LoggingConfig(),
+    dumpNumRollingLogFiles: NonNegativeInt = MonitoringConfig.defaultDumpNumRollingLogFiles,
 ) extends LazyLogging {
 
   // merge in backwards compatible config options
-  def getLoggingConfig: LoggingConfig = (logMessagePayloads, logging.api.messagePayloads) match {
-    case (Some(fst), _) =>
-      if (!logging.api.messagePayloads.forall(_ == fst))
-        logger.error(
-          "Broken config validation: logging.api.message-payloads differs from logMessagePayloads"
-        )
-      logging.focus(_.api.messagePayloads).replace(Some(fst))
-    case _ => logging
-  }
+  def getLoggingConfig: LoggingConfig =
+    (logging.api.messagePayloads, logging.api.messagePayloads) match {
+      case (Some(fst), _) =>
+        if (!logging.api.messagePayloads.forall(_ == fst))
+          logger.error(
+            "Broken config validation: logging.api.message-payloads differs from logMessagePayloads"
+          )
+        logging.focus(_.api.messagePayloads).replace(Some(fst))
+      case _ => logging
+    }
 
+}
+
+object MonitoringConfig {
+  private val defaultDelayLoggingThreshold = NonNegativeFiniteDuration.ofSeconds(20)
+  private val defaultDumpNumRollingLogFiles = NonNegativeInt.tryCreate(0)
 }
 
 /** Configuration for console command timeouts
@@ -290,8 +299,10 @@ final case class CantonParameters(
     enableAdditionalConsistencyChecks: Boolean = false,
     manualStart: Boolean = false,
     startupParallelism: Option[PositiveInt] = None,
-    nonStandardConfig: Boolean = false,
-    devVersionSupport: Boolean = false,
+    // TODO(i15561): Revert back to `false` once there is a stable Daml 3 protocol version
+    nonStandardConfig: Boolean = true,
+    // TODO(i15561): Revert back to `false` once there is a stable Daml 3 protocol version
+    devVersionSupport: Boolean = true,
     portsFile: Option[String] = None,
     timeouts: TimeoutSettings = TimeoutSettings(),
     retentionPeriodDefaults: RetentionPeriodDefaults = RetentionPeriodDefaults(),
@@ -458,7 +469,7 @@ trait CantonConfig {
   ): ParticipantNodeParameters =
     nodeParametersFor(participantNodeParameters_, "participant", participant)
 
-  /** Use `participantNodeParameters`` instead!
+  /** Use `participantNodeParameters` instead!
     */
   private[canton] def participantNodeParametersByString(name: String) = participantNodeParameters(
     InstanceName.tryCreate(name)
@@ -1352,10 +1363,12 @@ object CantonConfig {
       deriveWriter[RetentionPeriodDefaults]
     lazy implicit val inMemoryDbCacheSettingsWriter: ConfigWriter[DbCacheConfig] =
       deriveWriter[DbCacheConfig]
-    @nowarn("cat=unused") lazy implicit val batchAggregatorConfigWriter
-        : ConfigWriter[BatchAggregatorConfig] = {
-      implicit val batching = deriveWriter[BatchAggregatorConfig.Batching]
-      implicit val noBatching = deriveWriter[BatchAggregatorConfig.NoBatching.type]
+    lazy implicit val batchAggregatorConfigWriter: ConfigWriter[BatchAggregatorConfig] = {
+      @nowarn("cat=unused") implicit val batching: ConfigWriter[BatchAggregatorConfig.Batching] =
+        deriveWriter[BatchAggregatorConfig.Batching]
+      @nowarn("cat=unused") implicit val noBatching
+          : ConfigWriter[BatchAggregatorConfig.NoBatching.type] =
+        deriveWriter[BatchAggregatorConfig.NoBatching.type]
 
       deriveWriter[BatchAggregatorConfig]
     }
@@ -1376,7 +1389,7 @@ object CantonConfig {
     * @param files config files to read, parse and merge
     * @return [[scala.Right]] [[com.typesafe.config.Config]] if parsing was successful.
     */
-  def parseAndMergeConfigs(
+  private def parseAndMergeConfigs(
       files: NonEmpty[Seq[File]]
   )(implicit elc: ErrorLoggingContext): Either[CantonConfigError, Config] = {
     val baseConfig = ConfigFactory.load()
@@ -1407,7 +1420,8 @@ object CantonConfig {
   /** Renders a configuration file such that we can write it to the log-file on startup */
   def renderForLoggingOnStartup(config: Config): String = {
     import scala.jdk.CollectionConverters.*
-    val replace = Set("secret", "pw", "password", "ledger-api-jdbc-url")
+    val replace =
+      Set("secret", "pw", "password", "ledger-api-jdbc-url", "jdbc", "token", "admin-token")
     val blinded = ConfigValueFactory.fromAnyRef("****")
     def goVal(key: String, c: ConfigValue): ConfigValue = {
       c match {
@@ -1502,7 +1516,7 @@ object CantonConfig {
     * @return [[scala.Right]] of type `ConfClass` (e.g. [[CantonCommunityConfig]])) if parsing was successful.
     */
   def parseAndLoad[
-      ConfClass <: CantonConfig with ConfigDefaults[DefaultPorts, ConfClass]: ClassTag: ConfigReader
+      ConfClass <: CantonConfig & ConfigDefaults[DefaultPorts, ConfClass]: ClassTag: ConfigReader
   ](
       files: Seq[File]
   )(implicit elc: ErrorLoggingContext): Either[CantonConfigError, ConfClass] = {
@@ -1522,7 +1536,7 @@ object CantonConfig {
     * @return [[scala.Right]] of type `ClassTag` (e.g. [[CantonCommunityConfig]])) if parsing was successful.
     */
   def parseAndLoadOrExit[
-      ConfClass <: CantonConfig with ConfigDefaults[DefaultPorts, ConfClass]: ClassTag: ConfigReader
+      ConfClass <: CantonConfig & ConfigDefaults[DefaultPorts, ConfClass]: ClassTag: ConfigReader
   ](files: Seq[File])(implicit
       elc: ErrorLoggingContext
   ): ConfClass = {
@@ -1535,7 +1549,7 @@ object CantonConfig {
     *
     * @return [[scala.Right]] of type `CantonConfig` (e.g. [[CantonCommunityConfig]])) if parsing was successful.
     */
-  def loadAndValidate[ConfClass <: CantonConfig with ConfigDefaults[
+  def loadAndValidate[ConfClass <: CantonConfig & ConfigDefaults[
     DefaultPorts,
     ConfClass,
   ]: ClassTag: ConfigReader](
@@ -1564,7 +1578,7 @@ object CantonConfig {
     * @return [[scala.Right]] of type `ClassTag` (e.g. [[CantonCommunityConfig]])) if parsing was successful.
     */
   def loadOrExit[
-      ConfClass <: CantonConfig with ConfigDefaults[DefaultPorts, ConfClass]: ClassTag: ConfigReader
+      ConfClass <: CantonConfig & ConfigDefaults[DefaultPorts, ConfClass]: ClassTag: ConfigReader
   ](
       config: Config
   )(implicit elc: ErrorLoggingContext): ConfClass = {
@@ -1581,7 +1595,6 @@ object CantonConfig {
       .leftMap(failures => GenericConfigError.Error(ConfigErrors.getMessage[ConfClass](failures)))
   }
 
-  lazy val defaultConfigRenderer =
+  lazy val defaultConfigRenderer: ConfigRenderOptions =
     ConfigRenderOptions.defaults().setOriginComments(false).setComments(false).setJson(false)
-
 }

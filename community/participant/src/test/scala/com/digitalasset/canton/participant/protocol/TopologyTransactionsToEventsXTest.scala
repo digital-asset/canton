@@ -55,7 +55,7 @@ class TopologyTransactionsToEventsXTest
 
   "TopologyTransactionsToEvents" should {
 
-    "compute adds and removes" onlyRunWithOrGreaterThan ProtocolVersion.CNTestNet in {
+    "compute adds and removes" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
       val p1 = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("da::participant1"))
       val p2 = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("da::participant2"))
 

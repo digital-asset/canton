@@ -9,9 +9,9 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.protocol.submission.DomainSelectionFixture.Transactions.ExerciseByInterface
 import com.digitalasset.canton.participant.protocol.submission.DomainSelectionFixture.*
 import com.digitalasset.canton.participant.protocol.submission.DomainsFilterTest.*
-import com.digitalasset.canton.protocol.LfVersionedTransaction
+import com.digitalasset.canton.protocol.{LfTransactionVersion, LfVersionedTransaction}
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{DamlLfVersionToProtocolVersions, ProtocolVersion}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPackageId, LfPartyId}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -73,21 +73,24 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
     "reject domains when the minimum protocol version is not satisfied " in {
       import SimpleTopology.*
 
-      // LanguageVersion.v1_15 needs pv=4 so we use pv=3
-      val currentDomainPV = ProtocolVersion.v3
+      // LanguageVersion.VDev needs pv=dev so we use pv=6
+      val currentDomainPV = ProtocolVersion.v6
       val filter =
-        DomainsFilterForTx(Transactions.Create.tx(TransactionVersion.V15), currentDomainPV)
+        DomainsFilterForTx(Transactions.Create.tx(TransactionVersion.VDev), currentDomainPV)
 
       val (unusableDomains, usableDomains) =
         filter
           .split(loggerFactory, correctTopology, Transactions.Create.correctPackages)
           .futureValue
+      val requiredPV = DamlLfVersionToProtocolVersions.damlLfVersionToMinimumProtocolVersions
+        .get(LfTransactionVersion.VDev)
+        .value
       unusableDomains shouldBe List(
         UsableDomain.UnsupportedMinimumProtocolVersion(
           domainId = DefaultTestIdentities.domainId,
           currentPV = currentDomainPV,
-          requiredPV = ProtocolVersion.v4,
-          lfVersion = TransactionVersion.V15,
+          requiredPV = requiredPV,
+          lfVersion = TransactionVersion.VDev,
         )
       )
       usableDomains shouldBe empty

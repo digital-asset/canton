@@ -34,7 +34,6 @@ import magnolify.scalacheck.auto.*
 import org.scalacheck.{Arbitrary, Gen}
 
 import java.time.Duration
-import scala.math.Ordered.orderingToOrdered
 
 object GeneratorsData {
   import com.digitalasset.canton.Generators.*
@@ -179,17 +178,11 @@ object GeneratorsData {
     for {
       inputContractId <- Arbitrary.arbitrary[LfContractId]
 
-      templateId <-
-        if (pv >= ExerciseActionDescription.templateIdSupportedSince)
-          Gen.option(Arbitrary.arbitrary[LfTemplateId])
-        else Gen.const(None)
+      templateId <- Gen.option(Arbitrary.arbitrary[LfTemplateId])
 
       choice <- Arbitrary.arbitrary[LfChoiceName]
 
-      interfaceId <-
-        if (pv >= ExerciseActionDescription.interfaceSupportedSince)
-          Gen.option(Arbitrary.arbitrary[LfInterfaceId])
-        else Gen.const(None)
+      interfaceId <- Gen.option(Arbitrary.arbitrary[LfInterfaceId])
 
       // We consider only this specific value because the goal is not exhaustive testing of LF (de)serialization
       chosenValue <- Gen.long.map(ValueInt64)
@@ -272,7 +265,7 @@ object GeneratorsData {
       coreInputs <- Gen
         .listOf(
           Gen.zip(
-            GeneratorsProtocol.serializableContractArb(canHaveEmptyKey = false, Some(pv)).arbitrary,
+            GeneratorsProtocol.serializableContractArb(canHaveEmptyKey = false).arbitrary,
             Gen.oneOf(true, false),
           )
         )
@@ -281,7 +274,7 @@ object GeneratorsData {
       createdCore <- Gen
         .listOf(
           Gen.zip(
-            GeneratorsProtocol.serializableContractArb(canHaveEmptyKey = false, Some(pv)).arbitrary,
+            GeneratorsProtocol.serializableContractArb(canHaveEmptyKey = false).arbitrary,
             Gen.oneOf(true, false),
             Gen.oneOf(true, false),
           )

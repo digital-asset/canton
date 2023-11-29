@@ -85,11 +85,6 @@ sealed trait LedgerSyncEvent extends Product with Serializable with PrettyPrinti
 
 object LedgerSyncEvent {
 
-  // TODO(i13313) Where relevant, the domain ID should be mandatory
-  sealed trait WithDomainId extends LedgerSyncEvent {
-    def domainId: Option[DomainId]
-  }
-
   /** Produces a constant dummy transaction seed for transactions in which we cannot expose a seed. Essentially all of
     * them. TransactionMeta.submissionSeed can no longer be set to None starting with Daml 1.3
     */
@@ -276,7 +271,8 @@ object LedgerSyncEvent {
       blindingInfoO: Option[BlindingInfo],
       hostedWitnesses: List[LfPartyId],
       contractMetadata: Map[LfContractId, Bytes],
-  ) extends LedgerSyncEvent.WithDomainId {
+      domainId: DomainId,
+  ) extends LedgerSyncEvent {
     override def description: String = s"Accept transaction $transactionId"
 
     override def pretty: Pretty[TransactionAccepted] =
@@ -285,6 +281,7 @@ object LedgerSyncEvent {
         param("transactionId", _.transactionId),
         paramIfDefined("completion info", _.completionInfoO),
         param("transactionMeta", _.transactionMeta),
+        param("domainId", _.domainId),
         paramWithoutValue("transaction"),
         paramWithoutValue("divulgedContracts"),
         paramWithoutValue("blindingInfo"),
@@ -293,7 +290,6 @@ object LedgerSyncEvent {
       )
     override def toDamlUpdate: Option[Update] = Some(this.transformInto[Update.TransactionAccepted])
 
-    override def domainId: Option[DomainId] = transactionMeta.optDomainId
   }
 
   private def mkTx(nodes: Iterable[LfNode]): LfCommittedTransaction = {
@@ -330,7 +326,6 @@ object LedgerSyncEvent {
           optUsedPackages = None,
           optNodeSeeds = None,
           optByKeyNodes = None,
-          optDomainId = Option(domainId),
         ),
         transaction = mkTx(contracts),
         transactionId = transactionId,
@@ -339,6 +334,7 @@ object LedgerSyncEvent {
         blindingInfoO = None,
         hostedWitnesses = hostedWitnesses.toList,
         contractMetadata = contractMetadata,
+        domainId = domainId,
       )
     )
 
@@ -374,7 +370,6 @@ object LedgerSyncEvent {
           optUsedPackages = None,
           optNodeSeeds = None,
           optByKeyNodes = None,
-          optDomainId = Option(domainId),
         ),
         transaction = mkTx(contracts),
         transactionId = transactionId,
@@ -383,6 +378,7 @@ object LedgerSyncEvent {
         blindingInfoO = None,
         hostedWitnesses = hostedWitnesses.toList,
         contractMetadata = Map.empty,
+        domainId = domainId,
       )
     )
 
@@ -402,8 +398,8 @@ object LedgerSyncEvent {
       completionInfo: CompletionInfo,
       reasonTemplate: CommandRejected.FinalReason,
       kind: ProcessingSteps.RequestType.Values,
-      domainId: Option[DomainId],
-  ) extends LedgerSyncEvent.WithDomainId {
+      domainId: DomainId,
+  ) extends LedgerSyncEvent {
     override def description: String =
       s"Reject command ${completionInfo.commandId}${if (definiteAnswer)
           " (definite answer)"}: ${reasonTemplate.message}"
@@ -416,7 +412,7 @@ object LedgerSyncEvent {
         param("completionInfo", _.completionInfo),
         param("reason", _.reasonTemplate),
         param("kind", _.kind),
-        paramIfDefined("domainId", _.domainId),
+        param("domainId", _.domainId),
       )
 
     override def toDamlUpdate: Option[Update] = Some(this.transformInto[Update.CommandRejected])
@@ -438,7 +434,7 @@ object LedgerSyncEvent {
     }
   }
 
-  sealed trait TransferEvent extends LedgerSyncEvent.WithDomainId {
+  sealed trait TransferEvent extends LedgerSyncEvent {
     def transferId: TransferId
     def sourceDomain: SourceDomainId = transferId.sourceDomain
     def targetDomain: TargetDomainId
@@ -465,9 +461,7 @@ object LedgerSyncEvent {
     * @param workflowId            The workflowId specified by the submitter in the transfer command.
     * @param isTransferringParticipant True if the participant is transferring.
     *                                  Note: false if the data comes from an old serialized event
-    * @param transferCounter        The [[com.digitalasset.canton.TransferCounter]] of the contract.
-    *                               For protocol version earlier than [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]],
-    *                               its value is Long.MinValue
+    * @param transferCounter       The [[com.digitalasset.canton.TransferCounter]] of the contract.
     */
   final case class TransferredOut(
       updateId: LedgerTransactionId,
@@ -487,7 +481,7 @@ object LedgerSyncEvent {
 
     override def recordTime: LfTimestamp = transferId.transferOutTimestamp.underlying
 
-    override def domainId: Option[DomainId] = Option(sourceDomain.id)
+    def domainId: DomainId = sourceDomain.id
 
     def updateRecordTime(newRecordTime: LfTimestamp): TransferredOut =
       this.focus(_.transferId.transferOutTimestamp).replace(CantonTimestamp(newRecordTime))
@@ -551,9 +545,7 @@ object LedgerSyncEvent {
     * @param workflowId                The workflowId specified by the submitter in the transfer command.
     * @param isTransferringParticipant True if the participant is transferring.
     *                                  Note: false if the data comes from an old serialized event
-    * @param transferCounter The [[com.digitalasset.canton.TransferCounter]] of the contract.
-    *                        For protocol version earlier than [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]],
-    *                        its value is Long.MinValue
+    * @param transferCounter           The [[com.digitalasset.canton.TransferCounter]] of the contract.
     */
   final case class TransferredIn(
       updateId: LedgerTransactionId,
@@ -592,7 +584,7 @@ object LedgerSyncEvent {
 
     override def contractId: LfContractId = createNode.coid
 
-    override def domainId: Option[DomainId] = Option(targetDomain.id)
+    def domainId: DomainId = targetDomain.id
 
     /** Workaround to create an update for informing the ledger API server about a transferred-in contract.
       * Creates a TransactionAccepted event consisting of a single create action that creates the given contract.
@@ -612,7 +604,6 @@ object LedgerSyncEvent {
             optUsedPackages = None,
             optNodeSeeds = None,
             optByKeyNodes = None,
-            optDomainId = Some(targetDomain.unwrap),
           ),
           transaction = LfCommittedTransaction(
             LfVersionedTransaction(
@@ -627,6 +618,7 @@ object LedgerSyncEvent {
           blindingInfoO = None,
           hostedWitnesses = hostedStakeholders,
           contractMetadata = Map(createNode.coid -> contractMetadata),
+          domainId = targetDomain.unwrap,
         )
       )
 

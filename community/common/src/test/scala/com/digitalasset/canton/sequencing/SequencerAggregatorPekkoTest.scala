@@ -249,7 +249,7 @@ class SequencerAggregatorPekkoTest
     }
 
     "pass through the event only if sufficiently many sequencer IDs send it" onlyRunWithOrGreaterThan
-      ProtocolVersion.CNTestNet in { implicit fixture =>
+      ProtocolVersion.v30 in { implicit fixture =>
         import fixture.*
 
         val aggregator = mkAggregatorPekko()
@@ -305,7 +305,7 @@ class SequencerAggregatorPekkoTest
       }
 
     "support reconfiguring the threshold and sequencers" onlyRunWithOrGreaterThan
-      ProtocolVersion.CNTestNet in { implicit fixture =>
+      ProtocolVersion.v30 in { implicit fixture =>
         import fixture.*
 
         val validator = new SequencedEventValidatorImpl(
@@ -452,7 +452,7 @@ class SequencerAggregatorPekkoTest
     }
 
     "aggregate health signal for a multiple sequencers" onlyRunWithOrGreaterThan
-      ProtocolVersion.CNTestNet in { implicit fixture =>
+      ProtocolVersion.v30 in { implicit fixture =>
         import fixture.*
 
         val aggregator = mkAggregatorPekko()

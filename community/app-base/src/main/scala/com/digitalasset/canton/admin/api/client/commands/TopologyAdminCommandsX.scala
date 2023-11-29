@@ -180,7 +180,7 @@ object TopologyAdminCommandsX {
 
     final case class ListOwnerToKeyMapping(
         query: BaseQueryX,
-        filterKeyOwnerType: Option[KeyOwnerCode],
+        filterKeyOwnerType: Option[MemberCode],
         filterKeyOwnerUid: String,
     ) extends BaseCommand[v1.ListOwnerToKeyMappingRequest, v1.ListOwnerToKeyMappingResult, Seq[
           ListOwnerToKeyMappingResult
@@ -618,6 +618,7 @@ object TopologyAdminCommandsX {
         change: TopologyChangeOpX,
         serial: Option[PositiveInt],
         mustFullyAuthorize: Boolean,
+        forceChange: Boolean,
         store: String,
     ) extends BaseWriteCommand[
           AuthorizeRequest,
@@ -669,8 +670,9 @@ object TopologyAdminCommandsX {
           serial: Option[PositiveInt] = None,
           change: TopologyChangeOpX = TopologyChangeOpX.Replace,
           mustFullyAuthorize: Boolean = false,
+          forceChange: Boolean = false,
       ): Propose[M] =
-        Propose(Right(mapping), signedBy, change, serial, mustFullyAuthorize, store)
+        Propose(Right(mapping), signedBy, change, serial, mustFullyAuthorize, forceChange, store)
 
     }
 

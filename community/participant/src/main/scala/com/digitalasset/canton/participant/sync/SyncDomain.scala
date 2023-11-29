@@ -228,8 +228,7 @@ class SyncDomain(
     skipRecipientsCheck = skipRecipientsCheck,
   )
 
-  private val sortedReconciliationIntervalsProvider = SortedReconciliationIntervalsProvider(
-    staticDomainParameters,
+  private val sortedReconciliationIntervalsProvider = new SortedReconciliationIntervalsProvider(
     topologyClient,
     futureSupervisor,
     loggerFactory,

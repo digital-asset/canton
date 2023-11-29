@@ -65,14 +65,14 @@ private[canton] object ActiveContract extends HasProtocolVersionedCompanion[Acti
   override def supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     (
       ProtoVersion(0),
-      VersionedProtoConverter(ProtocolVersion.v3)(v0.ActiveContract)(
+      VersionedProtoConverter(ProtocolVersion.v5)(v0.ActiveContract)(
         supportedProtoVersion(_)(fromProtoV0),
         _.toProtoV0.toByteString,
       ),
     ),
     (
       ProtoVersion(1),
-      VersionedProtoConverter(ProtocolVersion.CNTestNet)(v1.ActiveContract)(
+      VersionedProtoConverter(ProtocolVersion.v30)(v1.ActiveContract)(
         supportedProtoVersion(_)(fromProtoV1),
         _.toProtoV1.toByteString,
       ),
@@ -84,7 +84,7 @@ private[canton] object ActiveContract extends HasProtocolVersionedCompanion[Acti
   lazy val transferCounterInvariant = EmptyOptionExactlyUntilExclusive(
     _.transferCounter,
     "transferCounter",
-    protocolVersionRepresentativeFor(ProtocolVersion.CNTestNet),
+    protocolVersionRepresentativeFor(ProtocolVersion.v30),
   )
 
   private def fromProtoV0(

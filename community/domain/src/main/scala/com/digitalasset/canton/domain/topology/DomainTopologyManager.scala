@@ -106,7 +106,7 @@ object DomainTopologyManager {
       packageDependencies = StoreBasedDomainTopologyClient.NoPackageDependencies,
       loggerFactory,
     )
-    def hasSigningKey(owner: KeyOwner): EitherT[Future, String, SigningPublicKey] = EitherT(
+    def hasSigningKey(owner: Member): EitherT[Future, String, SigningPublicKey] = EitherT(
       dbSnapshot
         .signingKey(owner)
         .map(_.toRight(s"$owner signing key is missing"))
@@ -210,7 +210,7 @@ class DomainTopologyManager(
   /** Return a set of initial keys we can use before the sequenced store has seen any topology transaction */
   def getKeysForBootstrapping()(implicit
       traceContext: TraceContext
-  ): Future[Map[KeyOwner, Seq[PublicKey]]] =
+  ): Future[Map[Member, Seq[PublicKey]]] =
     store.findInitialState(id)
 
   private def checkTransactionIsNotForAlienDomainEntities(

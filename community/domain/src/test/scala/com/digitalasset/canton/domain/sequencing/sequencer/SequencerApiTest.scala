@@ -238,7 +238,7 @@ abstract class SequencerApiTest
       }
 
       def testAggregation: Boolean =
-        testedProtocolVersion >= ProtocolVersion.CNTestNet && supportAggregation
+        testedProtocolVersion >= ProtocolVersion.v30 && supportAggregation // TODO(#15153) Kill this conditional
 
       "aggregate submission requests" onlyRunWhen testAggregation in { env =>
         import env.*

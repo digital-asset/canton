@@ -10,7 +10,6 @@ import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.error.MediatorError.{InvalidMessage, MalformedMessage, Timeout}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.{LocalReject, Verdict}
-import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.version.ProtocolVersion
 import pprint.Tree
 
@@ -54,23 +53,14 @@ object MediatorVerdict {
           case malformed: MalformedMessage.Reject => malformed
         }
         Verdict.MediatorRejectV2.tryCreate(error.rpcStatusWithoutLoggingContext(), protocolVersion)
-      } else if (protocolVersion >= Verdict.MediatorRejectV1.firstApplicableProtocolVersion) {
+      } else {
         def from(cause: String, code: ErrorCode): Verdict.MediatorRejectV1 =
           Verdict.MediatorRejectV1.tryCreate(cause, code.id, code.category.asInt, protocolVersion)
 
         reason match {
-          case timeout @ Timeout.Reject(cause, unresponsiveParties) => from(cause, timeout.code)
+          case timeout @ Timeout.Reject(cause, _unresponsiveParties) => from(cause, timeout.code)
           case invalid @ InvalidMessage.Reject(cause, _codeP) => from(cause, invalid.code)
           case malformed @ MalformedMessage.Reject(cause, _codeP) => from(cause, malformed.code)
-        }
-      } else {
-        reason match {
-          case Timeout.Reject(cause, unresponsiveParties) =>
-            Verdict.MediatorRejectV0.tryCreate(v0.MediatorRejection.Code.Timeout, cause)
-          case InvalidMessage.Reject(cause, codeP) =>
-            Verdict.MediatorRejectV0.tryCreate(codeP, cause)
-          case MalformedMessage.Reject(cause, codeP) =>
-            Verdict.MediatorRejectV0.tryCreate(codeP, cause)
         }
       }
     }

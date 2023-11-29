@@ -239,7 +239,7 @@ class TransferInValidationTest
             )
             .value
       } yield {
-        if (testedProtocolVersion < ProtocolVersion.CNTestNet) {
+        if (testedProtocolVersion < ProtocolVersion.v30) { // TODO(#15153) Kill this conditional and the other
           result shouldBe Right(Some(TransferInValidationResult(Set(party1))))
         } else {
           result shouldBe Left(
@@ -255,7 +255,7 @@ class TransferInValidationTest
 
     "disallow transfers from source domain supporting transfer counter to destination domain not supporting them" in {
       val transferDataSourceDomainPVCNTestNet =
-        transferData.copy(sourceProtocolVersion = SourceProtocolVersion(ProtocolVersion.CNTestNet))
+        transferData.copy(sourceProtocolVersion = SourceProtocolVersion(ProtocolVersion.v30))
       for {
         result <-
           transferInValidation
@@ -268,7 +268,7 @@ class TransferInValidationTest
             )
             .value
       } yield {
-        if (transferOutRequest.targetProtocolVersion.v >= ProtocolVersion.CNTestNet) {
+        if (transferOutRequest.targetProtocolVersion.v >= ProtocolVersion.v30) {
           result shouldBe Right(Some(TransferInValidationResult(Set(party1))))
         } else {
           result shouldBe Left(

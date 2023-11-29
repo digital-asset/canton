@@ -26,6 +26,7 @@ trait CommonTestAliases[+CE <: ConsoleEnvironment] {
   lazy val participant2x: LocalParticipantReferenceX = px("participant2")
   lazy val participant3x: LocalParticipantReferenceX = px("participant3")
   lazy val participant4x: LocalParticipantReferenceX = px("participant4")
+  lazy val participant5x: LocalParticipantReferenceX = px("participant5")
   lazy val da: CE#DomainLocalRef = d("da")
   lazy val acme: CE#DomainLocalRef = d("acme")
   lazy val repairDomain: CE#DomainLocalRef = d("repair")

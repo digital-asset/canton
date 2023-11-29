@@ -80,7 +80,6 @@ final case class ResponseAggregation[VKEY](
     val MediatorResponse(
       _requestId,
       sender,
-      _viewHashO,
       _viewPositionO,
       localVerdict,
       rootHashO,

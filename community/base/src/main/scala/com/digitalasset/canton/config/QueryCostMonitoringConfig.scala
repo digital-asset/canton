@@ -7,8 +7,10 @@ package com.digitalasset.canton.config
   *
   * @param every determines the duration between reports
   * @param resetOnOutput determines whether the statistics will be reset after creating a report
+  * @param logOperations if true (default false), log every query operation
   */
 final case class QueryCostMonitoringConfig(
     every: NonNegativeFiniteDuration,
     resetOnOutput: Boolean = true,
+    logOperations: Boolean = false,
 )

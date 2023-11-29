@@ -123,6 +123,11 @@ object FutureUnlessShutdownImpl {
     ): FutureUnlessShutdown[B] =
       FutureUnlessShutdown(unwrap.transform(f))
 
+    def transformIntoSuccess[B](f: Try[UnlessShutdown[A]] => UnlessShutdown[B])(implicit
+        ec: ExecutionContext
+    ): FutureUnlessShutdown[B] =
+      transform(x => Success(f(x)))
+
     /** Analog to [[scala.concurrent.Future]].`transform` */
     def transform[B](
         success: UnlessShutdown[A] => UnlessShutdown[B],

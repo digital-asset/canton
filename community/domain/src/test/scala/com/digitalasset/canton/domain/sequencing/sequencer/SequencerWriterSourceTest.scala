@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.functor.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.CantonRequireTypes.String256M
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store.*
@@ -16,14 +17,14 @@ import com.digitalasset.canton.lifecycle.{
   FlagCloseableAsync,
   SyncCloseable,
 }
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{BaseTest, HasExecutorService}
+import com.digitalasset.canton.{BaseTest, HasExecutorService, config}
 import com.google.protobuf.ByteString
 import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.ActorSystem
@@ -68,19 +69,19 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
         member: Member,
         memberId: SequencerMemberId,
     )(implicit traceContext: TraceContext): Source[ReadSignal, NotUsed] =
-      ???
+      fail("shouldn't be used")
 
     override def close(): Unit = ()
   }
 
   private class Env(keepAliveInterval: Option[NonNegativeFiniteDuration])
       extends FlagCloseableAsync {
-    override val timeouts = SequencerWriterSourceTest.this.timeouts
-    protected val logger = SequencerWriterSourceTest.this.logger
+    override val timeouts: ProcessingTimeout = SequencerWriterSourceTest.this.timeouts
+    protected val logger: TracedLogger = SequencerWriterSourceTest.this.logger
     implicit val actorSystem: ActorSystem = ActorSystem()
     val instanceIndex: Int = 0
-    val testWriterConfig =
-      SequencerWriterConfig.LowLatency(eventWriteBatchMaxSize = 1, payloadWriteBatchMaxSize = 1)
+    val testWriterConfig: SequencerWriterConfig.LowLatency =
+      SequencerWriterConfig.LowLatency()
 
     class InMemoryStoreWithTimeAdvancement(lFactory: NamedLoggerFactory)(implicit
         ec: ExecutionContext
@@ -101,7 +102,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
 
     val store =
       new InMemoryStoreWithTimeAdvancement(loggerFactory) // allows setting time advancements
-    val writerStore = SequencerWriterStore.singleInstance(store)
+    private val writerStore = SequencerWriterStore.singleInstance(store)
     val clock = new SimClock(loggerFactory = loggerFactory)
 
     val eventSignaller = new MockEventSignaller
@@ -135,8 +136,12 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
     override protected def closeAsync(): Seq[AsyncOrSyncCloseable] =
       Seq(
         SyncCloseable("sequencer", writer.complete()),
-        AsyncCloseable("done", doneF, 10.seconds),
-        AsyncCloseable("actorSystem", actorSystem.terminate(), 10.seconds),
+        AsyncCloseable("done", doneF, config.NonNegativeFiniteDuration(10.seconds)),
+        AsyncCloseable(
+          "actorSystem",
+          actorSystem.terminate(),
+          config.NonNegativeFiniteDuration(10.seconds),
+        ),
       )
   }
 
@@ -150,7 +155,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
   }
 
   private def getErrorMessage(message: String256M, errorO: Option[ByteString]): String = {
-    if (testedProtocolVersion >= ProtocolVersion.CNTestNet) {
+    if (testedProtocolVersion >= ProtocolVersion.v30) { // TODO(#15153) Kill this conditional
       DeliverErrorStoreEvent.deserializeError(message, errorO, testedProtocolVersion).toString
     } else {
       message.unwrap
@@ -200,7 +205,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
           _.warningMessage shouldBe "The payload to event time bound [PT1M] has been been exceeded by payload time [1970-01-01T00:00:00.000001Z] and sequenced event time [1970-01-01T00:01:11Z]",
         )
         events <- store.readEvents(aliceId)
-      } yield events.payloads should have size (0)
+      } yield events.payloads shouldBe empty
     }
   }
 
@@ -239,7 +244,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
         )
         events <- store.readEvents(aliceId)
       } yield {
-        events.payloads should have size (1)
+        events.payloads should have size 1
         events.payloads.headOption.map(_.event).value should matchPattern {
           case DeliverStoreEvent(_, `messageId2`, _, _, _, _) =>
         }
@@ -280,7 +285,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
         _ <- completeFlow()
         events <- store.readEvents(aliceId)
       } yield {
-        events.payloads should have size (2)
+        events.payloads should have size 2
         events.payloads.map(_.event)
       }
     }
@@ -307,7 +312,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
         )
         sortedEvents = sortByMessageId(events)
       } yield {
-        inside(sortedEvents(0)) { case event: DeliverStoreEvent[Payload] =>
+        inside(sortedEvents.head) { case event: DeliverStoreEvent[Payload] =>
           event.messageId shouldBe messageId1
         }
 

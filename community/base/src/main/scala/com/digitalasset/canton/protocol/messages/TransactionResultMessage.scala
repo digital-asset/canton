@@ -3,14 +3,12 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import cats.syntax.bifunctor.*
-import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.{HashOps, HashPurpose}
+import com.digitalasset.canton.data.InformeeTree
 import com.digitalasset.canton.data.ViewType.TransactionViewType
-import com.digitalasset.canton.data.{CantonTimestamp, InformeeTree}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
-import com.digitalasset.canton.protocol.{RequestId, RootHash, v0, v1, v2, v3}
+import com.digitalasset.canton.protocol.{RequestId, RootHash, v0, v2, v3}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
@@ -65,19 +63,6 @@ case class TransactionResultMessage private (
   @transient override protected lazy val companionObj: TransactionResultMessage.type =
     TransactionResultMessage
 
-  protected def toProtoV0: v0.TransactionResultMessage =
-    v0.TransactionResultMessage(
-      requestId = Some(requestId.unwrap.toProtoPrimitive),
-      verdict = Some(verdict.toProtoV0),
-      notificationTree = notificationTree.map(_.toProtoV0),
-    )
-
-  protected def toProtoV1: v1.TransactionResultMessage = v1.TransactionResultMessage(
-    requestId = Some(requestId.toProtoPrimitive),
-    verdict = Some(verdict.toProtoV1),
-    notificationTree = notificationTree.map(_.toProtoV1),
-  )
-
   protected def toProtoV2: v2.TransactionResultMessage =
     v2.TransactionResultMessage(
       requestId = Some(requestId.toProtoPrimitive),
@@ -123,14 +108,6 @@ object TransactionResultMessage
   override val name: String = "TransactionResultMessage"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.TransactionResultMessage)(
-      supportedProtoVersionMemoized(_)(fromProtoV0),
-      _.toProtoV0.toByteString,
-    ),
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v4)(v1.TransactionResultMessage)(
-      supportedProtoVersionMemoized(_)(fromProtoV1),
-      _.toProtoV1.toByteString,
-    ),
     ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v5)(v2.TransactionResultMessage)(
       supportedProtoVersionMemoized(_)(fromProtoV2),
       _.toProtoV2.toByteString,
@@ -170,58 +147,6 @@ object TransactionResultMessage
       protocolVersionRepresentativeFor(protocolVersion),
       None,
     )
-
-  private def fromProtoV0(hashOps: HashOps, protoResultMessage: v0.TransactionResultMessage)(
-      bytes: ByteString
-  ): ParsingResult[TransactionResultMessage] =
-    for {
-      requestId <- ProtoConverter
-        .required("request_id", protoResultMessage.requestId)
-        .flatMap(CantonTimestamp.fromProtoPrimitive)
-        .map(RequestId(_))
-      transactionResult <- ProtoConverter
-        .required("verdict", protoResultMessage.verdict)
-        .flatMap(Verdict.fromProtoV0)
-      protoNotificationTree <- ProtoConverter
-        .required("notification_tree", protoResultMessage.notificationTree)
-        .leftWiden[ProtoDeserializationError]
-      notificationTree <- InformeeTree.fromProtoV0(hashOps, protoNotificationTree)
-    } yield TransactionResultMessage(
-      requestId,
-      transactionResult,
-      notificationTree.tree.rootHash,
-      notificationTree.domainId,
-      Some(notificationTree),
-    )(
-      protocolVersionRepresentativeFor(ProtoVersion(0)),
-      Some(bytes),
-    )
-
-  private def fromProtoV1(hashOps: HashOps, protoResultMessage: v1.TransactionResultMessage)(
-      bytes: ByteString
-  ): ParsingResult[TransactionResultMessage] = {
-    val v1.TransactionResultMessage(requestIdPO, verdictPO, notificationTreePO) = protoResultMessage
-    for {
-      requestId <- ProtoConverter
-        .required("request_id", requestIdPO)
-        .flatMap(RequestId.fromProtoPrimitive)
-      transactionResult <- ProtoConverter
-        .required("verdict", verdictPO)
-        .flatMap(Verdict.fromProtoV1)
-      notificationTree <- ProtoConverter
-        .required("notification_tree", notificationTreePO)
-        .flatMap(InformeeTree.fromProtoV1(hashOps, _))
-    } yield TransactionResultMessage(
-      requestId,
-      transactionResult,
-      notificationTree.tree.rootHash,
-      notificationTree.domainId,
-      Some(notificationTree),
-    )(
-      protocolVersionRepresentativeFor(ProtoVersion(1)),
-      Some(bytes),
-    )
-  }
 
   private def fromProtoV2(_hashOps: HashOps, protoResultMessage: v2.TransactionResultMessage)(
       bytes: ByteString

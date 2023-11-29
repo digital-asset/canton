@@ -14,7 +14,13 @@ import com.digitalasset.canton.config.{
   DefaultProcessingTimeouts,
   ProcessingTimeout,
 }
-import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, Encrypted, SyncCryptoApi, TestHash}
+import com.digitalasset.canton.crypto.{
+  DomainSyncCryptoClient,
+  Encrypted,
+  SymmetricKeyScheme,
+  SyncCryptoApi,
+  TestHash,
+}
 import com.digitalasset.canton.data.PeanoQueue.{BeforeHead, NotInserted}
 import com.digitalasset.canton.data.{CantonTimestamp, ConfirmingParty, PeanoQueue}
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationDuration
@@ -43,6 +49,7 @@ import com.digitalasset.canton.participant.sync.{
   SyncDomainPersistentStateLookup,
 }
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.protocol.messages.EncryptedViewMessageV1.RecipientsInfo
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencing.AsyncResult
@@ -330,13 +337,14 @@ class ProtocolProcessorTest
   private lazy val viewHash = ViewHash(TestHash.digest(2))
   private lazy val encryptedView =
     EncryptedView(TestViewType)(Encrypted.fromByteString(rootHash.toProtoPrimitive).value)
-  private lazy val viewMessage: EncryptedViewMessage[TestViewType] = EncryptedViewMessageV0(
+  private lazy val viewMessage: EncryptedViewMessage[TestViewType] = EncryptedViewMessageV1(
     submitterParticipantSignature = None,
     viewHash = viewHash,
-    randomnessMap = Map.empty,
+    randomness = Nil,
     encryptedView = encryptedView,
     domainId = DefaultTestIdentities.domainId,
-  )
+    SymmetricKeyScheme.Aes128Gcm,
+  )(Some(RecipientsInfo(Set(participant), Set.empty, Set.empty)))
   private lazy val rootHashMessage = RootHashMessage(
     rootHash,
     DefaultTestIdentities.domainId,
@@ -374,7 +382,7 @@ class ProtocolProcessorTest
           None,
         ),
         TransactionSubmissionTrackingData.TimeoutCause,
-        Some(domain),
+        domain,
         testedProtocolVersion,
       ),
     ),
@@ -576,13 +584,14 @@ class ProtocolProcessorTest
       val viewHash1 = ViewHash(TestHash.digest(2))
       val encryptedViewWrongRH =
         EncryptedView(TestViewType)(Encrypted.fromByteString(wrongRootHash.toProtoPrimitive).value)
-      val viewMessageWrongRH = EncryptedViewMessageV0(
+      val viewMessageWrongRH = EncryptedViewMessageV1(
         submitterParticipantSignature = None,
         viewHash = viewHash1,
-        randomnessMap = Map.empty,
+        randomness = Nil,
         encryptedView = encryptedViewWrongRH,
         domainId = DefaultTestIdentities.domainId,
-      )
+        SymmetricKeyScheme.Aes128Gcm,
+      )(Some(RecipientsInfo(Set(participant), Set.empty, Set.empty)))
       val requestBatchWrongRH = RequestAndRootHashMessage(
         NonEmpty(
           Seq,
@@ -609,14 +618,16 @@ class ProtocolProcessorTest
     }
 
     "log decryption errors" in {
-      val viewMessageDecryptError: EncryptedViewMessage[TestViewType] = EncryptedViewMessageV0(
+      val viewMessageDecryptError: EncryptedViewMessage[TestViewType] = EncryptedViewMessageV1(
         submitterParticipantSignature = None,
         viewHash = viewHash,
-        randomnessMap = Map.empty,
+        randomness = Nil,
         encryptedView =
           EncryptedView(TestViewType)(Encrypted.fromByteString(ByteString.EMPTY).value),
         domainId = DefaultTestIdentities.domainId,
-      )
+        SymmetricKeyScheme.Aes128Gcm,
+      )(Some(RecipientsInfo(Set.empty, Set.empty, Set.empty)))
+
       val requestBatchDecryptError = RequestAndRootHashMessage(
         NonEmpty(
           Seq,
@@ -672,7 +683,7 @@ class ProtocolProcessorTest
           submissionDataForTrackerO = Some(
             SubmissionTracker.SubmissionData(
               submitterParticipant = participant,
-              maxSequencingTimeO = Some(requestId.unwrap.plusSeconds(10)),
+              maxSequencingTime = requestId.unwrap.plusSeconds(10),
             )
           ),
         )
@@ -696,7 +707,7 @@ class ProtocolProcessorTest
           submissionDataForTrackerO = Some(
             SubmissionTracker.SubmissionData(
               submitterParticipant = participant,
-              maxSequencingTimeO = Some(requestId.unwrap.plusSeconds(10)),
+              maxSequencingTime = requestId.unwrap.plusSeconds(10),
             )
           ),
         )
@@ -717,7 +728,7 @@ class ProtocolProcessorTest
           submissionDataForTrackerO = Some(
             SubmissionTracker.SubmissionData(
               submitterParticipant = otherParticipant,
-              maxSequencingTimeO = Some(requestId.unwrap.plusSeconds(10)),
+              maxSequencingTime = requestId.unwrap.plusSeconds(10),
             )
           ),
         )
@@ -755,7 +766,7 @@ class ProtocolProcessorTest
         submissionDataForTrackerO = Some(
           SubmissionTracker.SubmissionData(
             submitterParticipant = participant,
-            maxSequencingTimeO = Some(requestId.unwrap.plusSeconds(10)),
+            maxSequencingTime = requestId.unwrap.plusSeconds(10),
           )
         ),
         overrideInFlightSubmissionStoreO = Some(inFlightSubmissionStore),

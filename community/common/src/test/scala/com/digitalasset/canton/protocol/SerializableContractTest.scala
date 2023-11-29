@@ -8,7 +8,6 @@ import com.daml.lf.value.Value
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, TestHash, TestSalt}
 import com.digitalasset.canton.data.{CantonTimestamp, ProcessedDisclosedContract}
 import com.digitalasset.canton.protocol.SerializableContract.LedgerCreateTime
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, LfPartyId, LfTimestamp, LfValue}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -40,7 +39,7 @@ class SerializableContractTest extends AnyWordSpec with BaseTest {
         ExampleTransactionFactory.contractInstance(Seq(contractId)),
         metadata,
         CantonTimestamp.now(),
-        Option.when(testedProtocolVersion >= ProtocolVersion.v4)(someContractSalt),
+        someContractSalt,
       )
       SerializableContract.fromProtoVersioned(
         sci.toProtoVersioned(testedProtocolVersion)
@@ -63,10 +62,7 @@ class SerializableContractTest extends AnyWordSpec with BaseTest {
     val invalidFormatContractId = LfContractId.assertFromString("00" * 34)
 
     val authenticatedContractId =
-      AuthenticatedContractIdVersion.fromDiscriminator(contractIdDiscriminator, contractIdSuffix)
-
-    val nonAuthenticatedContractId =
-      NonAuthenticatedContractIdVersion.fromDiscriminator(contractIdDiscriminator, contractIdSuffix)
+      AuthenticatedContractIdVersionV2.fromDiscriminator(contractIdDiscriminator, contractIdSuffix)
 
     val agreementText = "agreement"
     val disclosedContract = ProcessedDisclosedContract(
@@ -112,20 +108,7 @@ class SerializableContractTest extends AnyWordSpec with BaseTest {
             )
           )
           .left
-          .value shouldBe s"Invalid disclosed contract id: malformed contract id '${invalidFormatContractId.toString}'. Suffix 00 does not start with one of the supported prefixes: Bytes(ca02), Bytes(ca01) or Bytes(ca00)"
-      }
-    }
-
-    "provided a disclosed contract with non-authenticated contract id" should {
-      "fail" in {
-        SerializableContract
-          .fromDisclosedContract(
-            disclosedContract.copy(create =
-              disclosedContract.create.copy(coid = nonAuthenticatedContractId)
-            )
-          )
-          .left
-          .value shouldBe s"Disclosed contract with non-authenticated contract id: ${nonAuthenticatedContractId.toString}"
+          .value shouldBe s"Invalid disclosed contract id: malformed contract id '${invalidFormatContractId.toString}'. Suffix 00 does not start with one of the supported prefixes: Bytes(ca02)"
       }
     }
 

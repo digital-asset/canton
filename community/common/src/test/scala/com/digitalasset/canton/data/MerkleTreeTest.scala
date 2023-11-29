@@ -209,12 +209,12 @@ object MerkleTreeTest {
     override def supportedProtoVersions: data.MerkleTreeTest.AbstractLeaf.SupportedProtoVersions =
       SupportedProtoVersions(
         ProtoVersion(0) -> LegacyProtoConverter.raw(
-          ProtocolVersion.v3,
+          ProtocolVersion.v5,
           fromProto(0),
           _.getCryptographicEvidence,
         ),
         ProtoVersion(1) -> VersionedProtoConverter.raw(
-          ProtocolVersion.v4,
+          ProtocolVersion.v6,
           fromProto(1),
           _.getCryptographicEvidence,
         ),

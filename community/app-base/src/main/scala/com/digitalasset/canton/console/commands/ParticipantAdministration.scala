@@ -1269,26 +1269,6 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     }
 
     @Help.Summary(
-      "Deprecated macro to connect a participant to a domain that supports connecting via many endpoints"
-    )
-    @Help.Description("""Use the command connect_ha with the updated arguments list""")
-    @Deprecated(since = "2.2.0")
-    def connect_ha(
-        domainAlias: DomainAlias,
-        firstConnection: SequencerConnection,
-        additionalConnections: SequencerConnection*
-    ): DomainConnectionConfig = {
-      val sequencerConnection = SequencerConnection
-        .merge(firstConnection +: additionalConnections)
-        .getOrElse(sys.error("Invalid sequencer connection"))
-      val sequencerConnections =
-        SequencerConnections.single(sequencerConnection)
-      val config = DomainConnectionConfig(domainAlias, sequencerConnections)
-      connect(config)
-      config
-    }
-
-    @Help.Summary(
       "Macro to connect a participant to a domain that supports connecting via many endpoints"
     )
     @Help.Description("""Domains can provide many endpoints to connect to for availability and performance benefits.

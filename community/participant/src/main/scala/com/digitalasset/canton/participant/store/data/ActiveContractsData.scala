@@ -17,15 +17,15 @@ final case class ActiveContractsData private (
     contracts: Iterable[ActiveContractData],
 ) {
 
-  if (protocolVersion < ProtocolVersion.CNTestNet) {
+  if (protocolVersion < ProtocolVersion.v30) { // TODO(#15153) Kill this conditional
     require(
       contracts.forall(tc => tc.transferCounter.isEmpty),
-      s"The reassignment counter must be empty for protocol version lower than '${ProtocolVersion.CNTestNet}'.",
+      s"The reassignment counter must be empty for protocol version lower than '${ProtocolVersion.v30}'.",
     )
   } else {
     require(
       contracts.forall(tc => tc.transferCounter.isDefined),
-      s"The reassignment counter must be defined for protocol version '${ProtocolVersion.CNTestNet}' or higher.",
+      s"The reassignment counter must be defined for protocol version '${ProtocolVersion.v30}' or higher.",
     )
   }
 

@@ -765,7 +765,7 @@ class DbMultiDomainEventLog private[db] (
           case NonFatal(e) =>
             logger.debug(s"Ignored exception in Pekko stream done future during shutdown", e)
         },
-        timeouts.shutdownShort.unwrap,
+        timeouts.shutdownShort,
       ),
     )
   }

@@ -264,6 +264,7 @@ object Update {
       blindingInfoO: Option[BlindingInfo],
       hostedWitnesses: List[Ref.Party],
       contractMetadata: Map[Value.ContractId, Bytes],
+      domainId: DomainId,
   ) extends Update {
     override def description: String = s"Accept transaction $transactionId"
   }
@@ -280,6 +281,7 @@ object Update {
             _,
             _,
             _,
+            domainId,
           ) =>
         LoggingValue.Nested.fromEntries(
           Logging.recordTime(recordTime),
@@ -288,6 +290,7 @@ object Update {
           Logging.ledgerTime(transactionMeta.ledgerEffectiveTime),
           Logging.workflowIdOpt(transactionMeta.workflowId),
           Logging.submissionTime(transactionMeta.submissionTime),
+          Logging.domainId(domainId),
         )
     }
   }
@@ -345,9 +348,7 @@ object Update {
       recordTime: Timestamp,
       completionInfo: CompletionInfo,
       reasonTemplate: CommandRejected.RejectionReasonTemplate,
-      domainId: Option[
-        DomainId
-      ], // TODO(#13173) None for backwards compatibility, expected to be set for X nodes
+      domainId: DomainId,
   ) extends Update {
     override def description: String =
       s"Reject command ${completionInfo.commandId}${if (definiteAnswer)
@@ -363,16 +364,15 @@ object Update {
   object CommandRejected {
 
     implicit val `CommandRejected to LoggingValue`: ToLoggingValue[CommandRejected] = {
-      case CommandRejected(recordTime, submitterInfo, reason, optDomainId) =>
+      case CommandRejected(recordTime, submitterInfo, reason, domainId) =>
         LoggingValue.Nested.fromEntries(
-          List(
-            Logging.recordTime(recordTime),
-            Logging.submitter(submitterInfo.actAs),
-            Logging.applicationId(submitterInfo.applicationId),
-            Logging.commandId(submitterInfo.commandId),
-            Logging.deduplicationPeriod(submitterInfo.optDeduplicationPeriod),
-            Logging.rejectionReason(reason),
-          ) ::: optDomainId.map(Logging.domainId).toList: _*
+          Logging.recordTime(recordTime),
+          Logging.submitter(submitterInfo.actAs),
+          Logging.applicationId(submitterInfo.applicationId),
+          Logging.commandId(submitterInfo.commandId),
+          Logging.deduplicationPeriod(submitterInfo.optDeduplicationPeriod),
+          Logging.rejectionReason(reason),
+          Logging.domainId(domainId),
         )
     }
 

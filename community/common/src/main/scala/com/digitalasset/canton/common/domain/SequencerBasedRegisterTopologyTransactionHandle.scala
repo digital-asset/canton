@@ -172,7 +172,7 @@ class DomainTopologyService(
 
   type RequestIndex = (TopologyRequestId, ParticipantId)
   type Request = RegisterTopologyTransactionRequest
-  type Response = RegisterTopologyTransactionResponse.Result
+  type Response = RegisterTopologyTransactionResponse
   type Result = Seq[RegisterTopologyTransactionResponseResult.State]
 
   val recipients = Recipients.cc(DomainTopologyManagerId(domainId))
@@ -181,17 +181,17 @@ class DomainTopologyService(
   ): (TopologyRequestId, ParticipantId) = (request.requestId, request.participant)
 
   protected def responseToIndex(
-      response: RegisterTopologyTransactionResponse.Result
+      response: RegisterTopologyTransactionResponse
   ): (TopologyRequestId, ParticipantId) = (response.requestId, response.participant)
 
   protected def responseToResult(
-      response: RegisterTopologyTransactionResponse.Result
+      response: RegisterTopologyTransactionResponse
   ): Seq[RegisterTopologyTransactionResponseResult.State] = response.results.map(_.state)
 
   protected def protocolMessageToResponse(
       m: ProtocolMessage
-  ): Option[RegisterTopologyTransactionResponse.Result] = m match {
-    case m: RegisterTopologyTransactionResponse.Result => Some(m)
+  ): Option[RegisterTopologyTransactionResponse] = m match {
+    case m: RegisterTopologyTransactionResponse => Some(m)
     case _ => None
   }
 

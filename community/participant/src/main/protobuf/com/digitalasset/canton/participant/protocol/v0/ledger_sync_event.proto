@@ -99,6 +99,7 @@ message TransactionAccepted {
   BlindingInfo blinding_info = 7; // optional
   map<string, bytes> contract_metadata = 8; //optional
   repeated string hosted_witnesses = 9; // not empty in case multi-domain deployment, empty otherwise
+  string domain_id = 10;
 }
 
 message CompletionInfo {
@@ -117,7 +118,6 @@ message TransactionMeta {
   repeated string used_packages = 5;
   repeated NodeSeed node_seeds = 6;
   ByKeyNodes by_key_nodes = 7; // optional
-  google.protobuf.StringValue domain_id = 8; // TODO(#13173) optional for backwards compatibility
 
   message ByKeyNodes {
     repeated int32 by_key_node = 1;
@@ -158,7 +158,7 @@ message CommandRejected {
     bytes status = 1;
   }
   CommandKind command_kind = 4;
-  google.protobuf.StringValue domain_id = 5; // TODO(#13173) optional for backwards compatibility
+  string domain_id = 5;
 }
 
 message TransferredOut {

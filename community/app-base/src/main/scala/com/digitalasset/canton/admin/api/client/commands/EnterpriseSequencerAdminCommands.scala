@@ -97,22 +97,6 @@ object EnterpriseSequencerAdminCommands {
   }
 
   object Initialize {
-    final case class V0(
-        domainId: DomainId,
-        topologySnapshot: StoredTopologyTransactions[TopologyChangeOp.Positive],
-        domainParameters: StaticDomainParameters,
-        snapshotO: Option[SequencerSnapshot],
-    ) extends Initialize[v0.InitRequest] {
-
-      override protected def serializer: InitializeSequencerRequest => v0.InitRequest = _.toProtoV0
-
-      override def submitRequest(
-          service: v0.SequencerInitializationServiceGrpc.SequencerInitializationServiceStub,
-          request: v0.InitRequest,
-      ): Future[v0.InitResponse] =
-        service.init(request)
-    }
-
     final case class V1(
         domainId: DomainId,
         topologySnapshot: StoredTopologyTransactions[TopologyChangeOp.Positive],
@@ -151,11 +135,10 @@ object EnterpriseSequencerAdminCommands {
         domainParameters: StaticDomainParameters,
         snapshotO: Option[SequencerSnapshot] = None,
     ): Initialize[_] = {
-      if (domainParameters.protocolVersion >= ProtocolVersion.CNTestNet)
+      if (domainParameters.protocolVersion >= ProtocolVersion.v30)
         V2(domainId, topologySnapshot, domainParameters, snapshotO)
-      else if (domainParameters.protocolVersion >= ProtocolVersion.v4)
+      else
         V1(domainId, topologySnapshot, domainParameters, snapshotO)
-      else V0(domainId, topologySnapshot, domainParameters, snapshotO)
     }
   }
 

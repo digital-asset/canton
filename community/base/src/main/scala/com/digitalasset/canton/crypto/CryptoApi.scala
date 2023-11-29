@@ -16,8 +16,8 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.serialization.DeserializationError
-import com.digitalasset.canton.topology.KeyOwner
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
+import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
@@ -89,7 +89,7 @@ object SyncCryptoError {
 
   /** error thrown if there is no key available as per identity providing service */
   final case class KeyNotAvailable(
-      owner: KeyOwner,
+      owner: Member,
       keyPurpose: KeyPurpose,
       timestamp: CantonTimestamp,
       candidates: Seq[Fingerprint],
@@ -121,7 +121,7 @@ object SyncCryptoError {
 }
 
 // TODO(i8808): consider changing `encryptFor` API to
-//  `def encryptFor(message: ByteString, owner: KeyOwner): EitherT[Future, SyncCryptoError, ByteString]`
+//  `def encryptFor(message: ByteString, member: Member): EitherT[Future, SyncCryptoError, ByteString]`
 // architecture-handbook-entry-begin: SyncCryptoApi
 /** impure part of the crypto api with access to private key store and knowledge about the current entity to key assoc */
 trait SyncCryptoApi {
@@ -151,13 +151,13 @@ trait SyncCryptoApi {
     */
   def verifySignature(
       hash: Hash,
-      signer: KeyOwner,
+      signer: Member,
       signature: Signature,
   ): EitherT[Future, SignatureCheckError, Unit]
 
   def verifySignatures(
       hash: Hash,
-      signer: KeyOwner,
+      signer: Member,
       signatures: NonEmpty[Seq[Signature]],
   ): EitherT[Future, SignatureCheckError, Unit]
 
@@ -173,14 +173,14 @@ trait SyncCryptoApi {
       signatures: NonEmpty[Seq[Signature]],
   )(implicit traceContext: TraceContext): EitherT[Future, SignatureCheckError, Unit]
 
-  /** Encrypts a message for the given key owner
+  /** Encrypts a message for the given member
     *
     * Utility method to lookup a key on an IPS snapshot and then encrypt the given message with the
     * most suitable key for the respective key owner.
     */
   def encryptFor[M <: HasVersionedToByteString](
       message: M,
-      owner: KeyOwner,
+      member: Member,
       version: ProtocolVersion,
   ): EitherT[Future, SyncCryptoError, AsymmetricEncrypted[M]]
 }

@@ -794,7 +794,7 @@ class AcsCommitmentProcessorTest
      in `commitmentMsg`, otherwise the test will fail.
      */
 
-    "work when commitment tick falls between two participants connection to the domain" onlyRunWithOrGreaterThan ProtocolVersion.v4 in {
+    "work when commitment tick falls between two participants connection to the domain" in {
       /*
         The goal here is to check that ACS commitment processing works even when
         a commitment tick falls between two participants' connection timepoints to the domain.
@@ -1371,7 +1371,7 @@ class AcsCommitmentProcessorTest
       val (activeCommitment1, deltaAddedCommitment1) =
         addCommonContractId(rc1, hash, initialTransferCounter)
       val (activeCommitment2, deltaAddedCommitment2) = addCommonContractId(rc2, hash, tc2)
-      if (testedProtocolVersion < ProtocolVersion.CNTestNet) {
+      if (testedProtocolVersion < ProtocolVersion.v30) { // TODO(#15153) Kill this conditional
         activeCommitment1 shouldBe activeCommitment2
         deltaAddedCommitment1 shouldBe deltaAddedCommitment2
       } else {

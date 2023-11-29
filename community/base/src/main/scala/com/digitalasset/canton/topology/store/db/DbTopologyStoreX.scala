@@ -308,13 +308,23 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
 
     queryForTransactions(
       asOfQuery(timestamp, asOfInclusive = false) ++
-        sql" AND (transaction_type = ${PartyToParticipantX.code}"
-        ++ conditionalAppend(filterParty, sqlPartyIdentifier, sqlPartyNS)
-        ++ sql") OR (transaction_type = ${DomainTrustCertificateX.code}"
-        // In DomainTrustCertificateX part of the filter, compare not only to participant, but also to party identifier
-        // to enable searching for the admin party
-        ++ conditionalAppend(filterParty, sqlPartyIdentifier, sqlPartyNS)
-        ++ conditionalAppend(filterParticipant, sqlParticipantIdentifier, sqlParticipantNS)
+        sql" AND NOT is_proposal AND operation = ${TopologyChangeOpX.Replace} AND ("
+        // PartyToParticipantX filtering
+        ++ Seq(
+          sql"(transaction_type = ${PartyToParticipantX.code}"
+            ++ conditionalAppend(filterParty, sqlPartyIdentifier, sqlPartyNS)
+            ++ sql")"
+        )
+        ++ sql" OR "
+        // DomainTrustCertificateX filtering
+        ++ Seq(
+          sql"(transaction_type = ${DomainTrustCertificateX.code}"
+          // In DomainTrustCertificateX part of the filter, compare not only to participant, but also to party identifier
+          // to enable searching for the admin party
+            ++ conditionalAppend(filterParty, sqlPartyIdentifier, sqlPartyNS)
+            ++ conditionalAppend(filterParticipant, sqlParticipantIdentifier, sqlParticipantNS)
+            ++ sql")"
+        )
         ++ sql")",
       storage.limit(limit),
     )

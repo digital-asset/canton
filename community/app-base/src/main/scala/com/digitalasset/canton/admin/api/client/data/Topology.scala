@@ -51,7 +51,7 @@ object ListPartiesResult {
 
 final case class ListKeyOwnersResult(
     store: DomainId,
-    owner: KeyOwner,
+    owner: Member,
     signingKeys: Seq[SigningPublicKey],
     encryptionKeys: Seq[EncryptionPublicKey],
 ) {
@@ -67,7 +67,7 @@ object ListKeyOwnersResult {
   ): ParsingResult[ListKeyOwnersResult] =
     for {
       domain <- DomainId.fromProtoPrimitive(value.domain, "domain")
-      owner <- KeyOwner.fromProtoPrimitive(value.keyOwner, "keyOwner")
+      owner <- Member.fromProtoPrimitive(value.keyOwner, "keyOwner")
       signingKeys <- value.signingKeys.traverse(SigningPublicKey.fromProtoV0)
       encryptionKeys <- value.encryptionKeys.traverse(EncryptionPublicKey.fromProtoV0)
     } yield ListKeyOwnersResult(domain, owner, signingKeys, encryptionKeys)
@@ -240,9 +240,8 @@ object ListDomainParametersChangeResult {
     context <- BaseResult.fromProtoV0(contextP)
     dynamicDomainParametersInternal <- value.parameters match {
       case Parameters.Empty => Left(ProtoDeserializationError.FieldNotSet("parameters"))
-      case Parameters.V0(v0) => DynamicDomainParametersInternal.fromProtoV0(v0)
       case Parameters.V1(v1) => DynamicDomainParametersInternal.fromProtoV1(v1)
     }
-    item <- DynamicDomainParameters(dynamicDomainParametersInternal)
+    item = DynamicDomainParameters(dynamicDomainParametersInternal)
   } yield ListDomainParametersChangeResult(context, item)
 }

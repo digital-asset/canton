@@ -4,7 +4,14 @@
 package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, SymbolicPureCrypto}
-import com.digitalasset.canton.crypto.{CryptoPureApi, Fingerprint, HashPurpose, LtHash16}
+import com.digitalasset.canton.crypto.{
+  CryptoPrivateApi,
+  CryptoPureApi,
+  Fingerprint,
+  HashPurpose,
+  LtHash16,
+  Signature,
+}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.pruning.{
@@ -20,13 +27,12 @@ import com.digitalasset.canton.protocol.messages.{
 import com.digitalasset.canton.store.PrunableByTimeTest
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifier}
-import com.digitalasset.canton.util.FutureUtil
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   LfPartyId,
   ProtocolVersionChecksAsyncWordSpec,
   TestMetrics,
+  config,
 }
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
@@ -36,10 +42,10 @@ import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.*
 
 trait CommitmentStoreBaseTest extends AsyncWordSpec with BaseTest {
-  val domainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::domain"))
+  val domainId: DomainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::domain"))
   val cryptoApi: CryptoPureApi = new SymbolicPureCrypto
 
-  val symbolicVault =
+  val symbolicVault: CryptoPrivateApi =
     SymbolicCrypto
       .tryCreate(
         Seq(Fingerprint.tryCreate("test")),
@@ -50,17 +56,21 @@ trait CommitmentStoreBaseTest extends AsyncWordSpec with BaseTest {
       )
       .privateCrypto
 
-  val localId = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("localParticipant::domain"))
-  val remoteId = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("remoteParticipant::domain"))
-  val remoteId2 = ParticipantId(
+  val localId: ParticipantId = ParticipantId(
+    UniqueIdentifier.tryFromProtoPrimitive("localParticipant::domain")
+  )
+  val remoteId: ParticipantId = ParticipantId(
+    UniqueIdentifier.tryFromProtoPrimitive("remoteParticipant::domain")
+  )
+  val remoteId2: ParticipantId = ParticipantId(
     UniqueIdentifier.tryFromProtoPrimitive("remoteParticipant2::domain")
   )
-  val interval = PositiveSeconds.tryOfSeconds(1)
+  val interval: PositiveSeconds = PositiveSeconds.tryOfSeconds(1)
 
   def ts(time: Int): CantonTimestamp = CantonTimestamp.ofEpochSecond(time.toLong)
   def meta(stakeholders: LfPartyId*): ContractMetadata =
     ContractMetadata.tryCreate(Set.empty, stakeholders.toSet, maybeKeyWithMaintainers = None)
-  def period(fromExclusive: Int, toInclusive: Int) =
+  def period(fromExclusive: Int, toInclusive: Int): CommitmentPeriod =
     CommitmentPeriod.create(ts(fromExclusive), ts(toInclusive), interval).value
 
   val dummyCommitment: AcsCommitment.CommitmentType = {
@@ -74,20 +84,19 @@ trait CommitmentStoreBaseTest extends AsyncWordSpec with BaseTest {
     h.getByteString()
   }
 
-  lazy val dummySignature = FutureUtil
-    .noisyAwaitResult(
+  lazy val dummySignature: Signature = config
+    .NonNegativeFiniteDuration(10.seconds)
+    .await("dummy signature")(
       symbolicVault
         .sign(
           cryptoApi.digest(HashPurpose.AcsCommitment, dummyCommitment),
           Fingerprint.tryCreate("test"),
         )
-        .value,
-      "dummy signature",
-      10.seconds,
+        .value
     )
     .valueOrFail("failed to create dummy signature")
 
-  val dummyCommitmentMsg =
+  val dummyCommitmentMsg: AcsCommitment =
     AcsCommitment.create(
       domainId,
       remoteId,
@@ -96,7 +105,7 @@ trait CommitmentStoreBaseTest extends AsyncWordSpec with BaseTest {
       dummyCommitment,
       testedProtocolVersion,
     )
-  val dummySigned =
+  val dummySigned: SignedProtocolMessage[AcsCommitment] =
     SignedProtocolMessage.tryFrom(dummyCommitmentMsg, testedProtocolVersion, dummySignature)
 
   val alice: LfPartyId = LfPartyId.assertFromString("Alice")
@@ -184,7 +193,7 @@ trait AcsCommitmentStoreTest
      This test is disabled for protocol versions for which the reconciliation interval is
      static because the described setting cannot occur.
      */
-    "correctly compute outstanding commitments when intersection contains no tick" onlyRunWithOrGreaterThan ProtocolVersion.v4 in {
+    "correctly compute outstanding commitments when intersection contains no tick" in {
       /*
         This copies the scenario of the test
         `work when commitment tick falls between two participants connection to the domain`

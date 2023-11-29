@@ -89,26 +89,12 @@ object TransferInViewTree
   override val name: String = "TransferInViewTree"
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> ProtoCodec(
-      ProtocolVersion.v3,
-      supportedProtoVersion(v0.TransferViewTree)(fromProtoV0),
-      _.toProtoV0.toByteString,
-    ),
     ProtoVersion(1) -> ProtoCodec(
-      ProtocolVersion.v4,
+      ProtocolVersion.v5,
       supportedProtoVersion(v1.TransferViewTree)(fromProtoV1),
       _.toProtoV1.toByteString,
-    ),
+    )
   )
-
-  def fromProtoV0(
-      hashOps: HashOps,
-      transferInViewTreeP: v0.TransferViewTree,
-  ): ParsingResult[TransferInViewTree] =
-    GenTransferViewTree.fromProtoV0(
-      TransferInCommonData.fromByteString(hashOps),
-      TransferInView.fromByteString(hashOps),
-    )((commonData, view) => new TransferInViewTree(commonData, view)(hashOps))(transferInViewTreeP)
 
   def fromProtoV1(
       hashOps: HashOps,
@@ -152,15 +138,6 @@ final case class TransferInCommonData private (
   @transient override protected lazy val companionObj: TransferInCommonData.type =
     TransferInCommonData
 
-  protected def toProtoV0: v0.TransferInCommonData =
-    v0.TransferInCommonData(
-      salt = Some(salt.toProtoV0),
-      targetDomain = targetDomain.toProtoPrimitive,
-      targetMediator = targetMediator.toProtoPrimitive,
-      stakeholders = stakeholders.toSeq,
-      uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
-    )
-
   protected def toProtoV1: v1.TransferInCommonData =
     v1.TransferInCommonData(
       salt = Some(salt.toProtoV0),
@@ -190,14 +167,10 @@ object TransferInCommonData
   override val name: String = "TransferInCommonData"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.TransferInCommonData)(
-      supportedProtoVersionMemoized(_)(fromProtoV0),
-      _.toProtoV0.toByteString,
-    ),
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v4)(v1.TransferInCommonData)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v5)(v1.TransferInCommonData)(
       supportedProtoVersionMemoized(_)(fromProtoV1),
       _.toProtoV1.toByteString,
-    ),
+    )
   )
 
   def create(hashOps: HashOps)(
@@ -226,35 +199,6 @@ object TransferInCommonData
     TransferCommonData
       .checkMediatorGroup(commonData.targetMediator, protocolVersion)
       .leftMap(ProtoDeserializationError.InvariantViolation.apply)
-
-  private[this] def fromProtoV0(hashOps: HashOps, transferInCommonDataP: v0.TransferInCommonData)(
-      bytes: ByteString
-  ): ParsingResult[TransferInCommonData] = {
-    val v0.TransferInCommonData(saltP, targetDomainP, stakeholdersP, uuidP, targetMediatorP) =
-      transferInCommonDataP
-    for {
-      commonData <- ParsedDataV0V1.fromProto(
-        saltP,
-        targetDomainP,
-        stakeholdersP,
-        uuidP,
-        targetMediatorP,
-      )
-      _ <- checkMediatorGroupForProtocolVersion(commonData, ProtocolVersion.v3)
-    } yield TransferInCommonData(
-      commonData.salt,
-      commonData.targetDomain,
-      commonData.targetMediator,
-      commonData.stakeholders,
-      commonData.uuid,
-    )(
-      hashOps,
-      TargetProtocolVersion(
-        protocolVersionRepresentativeFor(ProtoVersion(0)).representative
-      ),
-      Some(bytes),
-    )
-  }
 
   private[this] def fromProtoV1(hashOps: HashOps, transferInCommonDataP: v1.TransferInCommonData)(
       bytes: ByteString
@@ -332,8 +276,6 @@ object TransferInCommonData
   * @param contract The contract to be transferred including the instance
   * @param transferOutResultEvent The signed deliver event of the transfer-out result message
   * @param transferCounter The [[com.digitalasset.canton.TransferCounter]] of the contract.
-  *                        The value is defined iff the protocol versions is at least
-  *                        [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]].
   */
 final case class TransferInView private (
     override val salt: Salt,
@@ -365,15 +307,6 @@ final case class TransferInView private (
   val submissionId: Option[LedgerSubmissionId] = submitterMetadata.submissionId
   val commandId: LedgerCommandId = submitterMetadata.commandId
   val workflowId: Option[LfWorkflowId] = submitterMetadata.workflowId
-
-  protected def toProtoV0: v0.TransferInView =
-    v0.TransferInView(
-      salt = Some(salt.toProtoV0),
-      submitter = submitter,
-      contract = Some(contract.toProtoV0),
-      creatingTransactionId = creatingTransactionId.toProtoPrimitive,
-      transferOutResultEvent = Some(transferOutResultEvent.result.toProtoV0),
-    )
 
   protected def toProtoV1: v1.TransferInView =
     v1.TransferInView(
@@ -472,30 +405,22 @@ object TransferInView
   }
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.TransferInView)(
-      supportedProtoVersionMemoized(_)(fromProtoV0),
-      _.toProtoV0.toByteString,
-    ),
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v4)(v1.TransferInView)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v5)(v1.TransferInView)(
       supportedProtoVersionMemoized(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
-    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.CNTestNet)(v2.TransferInView)(
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v30)(v2.TransferInView)(
       supportedProtoVersionMemoized(_)(fromProtoV2),
       _.toProtoV2.toByteString,
     ),
   )
 
   override lazy val invariants = Seq(
-    transferCounterInvariant,
-    sourceProtocolVersionDefaultValue,
+    transferCounterInvariant
   )
 
-  private lazy val rpv4: RepresentativeProtocolVersion[TransferInView.type] =
-    protocolVersionRepresentativeFor(ProtocolVersion.v4)
-
   private lazy val rpvMultidomain: RepresentativeProtocolVersion[TransferInView.type] =
-    protocolVersionRepresentativeFor(ProtocolVersion.CNTestNet)
+    protocolVersionRepresentativeFor(ProtocolVersion.v30)
 
   lazy val transferCounterInvariant = EmptyOptionExactlyUntilExclusive(
     _.transferCounter,
@@ -543,14 +468,6 @@ object TransferInView
       None,
     )
 
-  lazy val sourceProtocolVersionDefaultValue: DefaultValueUntilExclusive[SourceProtocolVersion] =
-    DefaultValueUntilExclusive(
-      _.sourceProtocolVersion,
-      "sourceProtocolVersion",
-      rpv4,
-      SourceProtocolVersion(ProtocolVersion.v3),
-    )
-
   def create(hashOps: HashOps)(
       salt: Salt,
       submitterMetadata: TransferSubmitterMetadata,
@@ -573,47 +490,6 @@ object TransferInView
       )(hashOps, protocolVersionRepresentativeFor(targetProtocolVersion.v), None)
     )
     .leftMap(_.getMessage)
-
-  private[this] def fromProtoV0(hashOps: HashOps, transferInViewP: v0.TransferInView)(
-      bytes: ByteString
-  ): ParsingResult[TransferInView] = {
-    val v0.TransferInView(
-      saltP,
-      submitterP,
-      contractP,
-      transferOutResultEventPO,
-      creatingTransactionIdP,
-    ) =
-      transferInViewP
-    for {
-      commonData <- CommonData.fromProto(
-        hashOps,
-        saltP,
-        submitterP,
-        transferOutResultEventPO,
-        creatingTransactionIdP,
-        ProtocolVersion.v3,
-      )
-      contract <- ProtoConverter
-        .required("contract", contractP)
-        .flatMap(SerializableContract.fromProtoV0)
-    } yield TransferInView(
-      commonData.salt,
-      TransferSubmitterMetadata(
-        commonData.submitter,
-        applicationIdDefaultValue.defaultValue,
-        submittingParticipantDefaultValue.defaultValue,
-        commandIdDefaultValue.defaultValue,
-        submissionId = submissionIdDefaultValue.defaultValue,
-        workflowId = None,
-      ),
-      contract,
-      commonData.creatingTransactionId,
-      commonData.transferOutResultEvent,
-      commonData.sourceProtocolVersion,
-      None,
-    )(hashOps, protocolVersionRepresentativeFor(ProtoVersion(0)), Some(bytes))
-  }
 
   private[this] def fromProtoV1(hashOps: HashOps, transferInViewP: v1.TransferInView)(
       bytes: ByteString

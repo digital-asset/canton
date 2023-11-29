@@ -126,7 +126,6 @@ class TransferOutProcessingSteps(
       _ <- targetIsNotSource(contractId, targetDomain)
       storedContract <- getStoredContract(ephemeralState.contractLookup, contractId)
       stakeholders = storedContract.contract.metadata.stakeholders
-      templateId = storedContract.contract.rawContractInstance.contractInstance.unversioned.template
 
       _ <- PVSourceDestinationDomainsAreCompatible(
         sourceDomainProtocolVersion,
@@ -421,7 +420,7 @@ class TransferOutProcessingSteps(
             EitherT.rightT[FutureUnlessShutdown, TransferProcessorError](
               WithTransactionId(view.contract, view.creatingTransactionId)
             )
-          case _: TransferOutViewV0 | _: TransferOutViewV4 =>
+          case _: TransferOutViewV5 =>
             for {
               storedContract <- getStoredContract(contractLookup, fullTree.contractId)
 
@@ -525,7 +524,6 @@ class TransferOutProcessingSteps(
         contract.contractId,
         fullTree.transferCounter,
         confirmingStakeholders.toSet,
-        fullTree.viewHash,
         fullTree.tree.rootHash,
       )
     } yield StorePendingDataAndSendResponseAndCreateTimeout(
@@ -743,7 +741,6 @@ class TransferOutProcessingSteps(
       contractId: LfContractId,
       declaredTransferCounter: TransferCounterO,
       confirmingStakeholders: Set[LfPartyId],
-      viewHash: ViewHash,
       rootHash: RootHash,
   ): Option[MediatorResponse] = {
     val expectedPriorTransferCounter = Map[LfContractId, Option[ActiveContractStore.Status]](
@@ -769,7 +766,6 @@ class TransferOutProcessingSteps(
         MediatorResponse.tryCreate(
           requestId,
           participantId,
-          Some(viewHash),
           Some(ViewPosition.root),
           localVerdict,
           Some(rootHash),

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.platform.apiserver.services.command
 
-import com.daml.api.util.TimeProvider
 import com.daml.lf
 import com.daml.lf.command.ApiCommands as LfCommands
 import com.daml.lf.crypto.Hash
@@ -21,6 +20,7 @@ import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationDuration
 import com.digitalasset.canton.ledger.api.domain.{CommandId, Commands}
 import com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequest
+import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.participant.state.v2.{
   SubmissionResult,
@@ -271,12 +271,12 @@ class CommandSubmissionServiceImplSpec
       optUsedPackages = None,
       optNodeSeeds = None,
       optByKeyNodes = None,
-      optDomainId = None,
     )
     val estimatedInterpretationCost = 5L
     val processedDisclosedContracts = ImmArray(processedDisclosedContract)
     val commandExecutionResult = CommandExecutionResult(
       submitterInfo = submitterInfo,
+      optDomainId = None,
       transactionMeta = transactionMeta,
       transaction = transaction,
       dependsOnLedgerTime = false,
@@ -296,6 +296,7 @@ class CommandSubmissionServiceImplSpec
     when(
       writeService.submitTransaction(
         eqTo(submitterInfo),
+        eqTo(None),
         eqTo(transactionMeta),
         eqTo(transaction),
         eqTo(estimatedInterpretationCost),

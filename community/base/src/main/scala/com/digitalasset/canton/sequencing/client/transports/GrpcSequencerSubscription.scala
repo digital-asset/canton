@@ -139,7 +139,7 @@ class GrpcSequencerSubscription[E, R: HasProtoTraceContext] private[transports] 
       AsyncCloseable(
         "grpc-sequencer-subscription",
         completionF,
-        timeouts.shutdownShort.duration,
+        timeouts.shutdownShort,
         onTimeout = onTimeout,
       ),
     )

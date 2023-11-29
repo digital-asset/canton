@@ -46,7 +46,7 @@ object AcknowledgeRequest extends HasMemoizedProtocolVersionedWrapperCompanion[A
 
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
-      ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.AcknowledgeRequest)(
+      ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v5)(v0.AcknowledgeRequest)(
         supportedProtoVersionMemoized(_) { req => bytes =>
           fromProtoV0(req)(Some(bytes))
         },
