@@ -32,7 +32,7 @@ import java.util.UUID
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 
-/** Generate transaction trees as used from protocol version [[com.digitalasset.canton.version.ProtocolVersion.v5]] on
+/** Generate transaction trees as used from protocol version [[com.digitalasset.canton.version.ProtocolVersion.v30]] on
   */
 class TransactionTreeFactoryImplV3(
     submitterParticipant: ParticipantId,

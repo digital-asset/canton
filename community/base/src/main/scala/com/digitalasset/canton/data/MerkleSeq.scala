@@ -164,7 +164,7 @@ object MerkleSeq
 
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
-      ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v5)(v1.MerkleSeq)(
+      ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v30)(v1.MerkleSeq)(
         supportedProtoVersion(_)(fromProtoV1),
         _.toProtoV1.toByteString,
       )
@@ -414,7 +414,7 @@ object MerkleSeq
 
     override def supportedProtoVersions: SupportedProtoVersions =
       SupportedProtoVersions(
-        ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v5)(v1.MerkleSeqElement)(
+        ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v30)(v1.MerkleSeqElement)(
           supportedProtoVersion(_)(fromProtoV1),
           _.toProtoV1.toByteString,
         )

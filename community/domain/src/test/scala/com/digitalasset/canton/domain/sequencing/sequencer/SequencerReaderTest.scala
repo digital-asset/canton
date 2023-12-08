@@ -622,7 +622,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           )
           batch = Batch.fromClosed(
             testedProtocolVersion,
-            ClosedEnvelope.tryCreate(
+            ClosedEnvelope.create(
               ByteString.copyFromUtf8("test envelope"),
               Recipients.cc(alice, bob),
               Seq.empty,
@@ -795,7 +795,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           ) ++ (2L to 60L).map(i => (signingToleranceInSec + i, None, recipientsAlice))
           batch = Batch.fromClosed(
             testedProtocolVersion,
-            ClosedEnvelope.tryCreate(
+            ClosedEnvelope.create(
               ByteString.copyFromUtf8("test envelope"),
               Recipients.cc(alice, bob),
               Seq.empty,

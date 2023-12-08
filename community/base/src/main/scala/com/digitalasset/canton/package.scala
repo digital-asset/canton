@@ -10,7 +10,6 @@ import com.daml.lf.value.Value
 import com.digitalasset.canton.data.{Counter, CounterCompanion}
 import com.digitalasset.canton.ledger.configuration
 import com.digitalasset.canton.serialization.DeterministicEncoding.encodeLong
-import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
 package object canton {
@@ -114,11 +113,6 @@ package object canton {
   type TransferCounter = Counter[TransferCounterDiscriminator]
 
   object TransferCounter extends CounterCompanion[TransferCounterDiscriminator] {
-    def forCreatedContract(protocolVersion: ProtocolVersion): TransferCounterO =
-      if (protocolVersion >= ProtocolVersion.v30)
-        Some(TransferCounter.Genesis) // TODO(#15153) Kill this conditional
-      else None
-
     def encodeDeterministically(transferCounter: TransferCounter): ByteString = encodeLong(
       transferCounter.unwrap
     )

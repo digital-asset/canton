@@ -22,7 +22,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
-import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -283,18 +282,13 @@ private final class MigrateContracts(
       traceContext: TraceContext,
   ): CheckedT[Future, String, ActiveContractStore.AcsWarning, Unit] = {
 
-    def whenTransferCounterIsSupported(r: RepairRequest)(tc: TransferCounter): TransferCounterO =
-      Option.when(r.domain.parameters.protocolVersion >= ProtocolVersion.v30)(
-        tc
-      ) // TODO(#15153) Kill this conditional
-
     val outF = repairSource.domain.persistentState.activeContractStore
       .transferOutContracts(
         contracts.map { contract =>
           (
             contract.payload.contract.contractId,
             targetDomainId,
-            whenTransferCounterIsSupported(repairSource)(contract.payload.transferCounter),
+            Some(contract.payload.transferCounter),
             contract.sourceTimeOfChange,
           )
         }
@@ -307,7 +301,7 @@ private final class MigrateContracts(
           (
             contract.payload.contract.contractId,
             sourceDomainId,
-            whenTransferCounterIsSupported(repairTarget)(contract.payload.transferCounter),
+            Some(contract.payload.transferCounter),
             contract.targetTimeOfChange,
           )
         }

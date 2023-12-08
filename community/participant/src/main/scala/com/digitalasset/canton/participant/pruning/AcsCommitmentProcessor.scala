@@ -139,7 +139,7 @@ class AcsCommitmentProcessor(
     domainCrypto: SyncCryptoClient[SyncCryptoApi],
     sortedReconciliationIntervalsProvider: SortedReconciliationIntervalsProvider,
     store: AcsCommitmentStore,
-    commitmentPeriodObserver: (ExecutionContext, TraceContext) => FutureUnlessShutdown[Unit],
+    pruningObserver: TraceContext => Unit,
     metrics: PruningMetrics,
     protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
@@ -372,15 +372,10 @@ class AcsCommitmentProcessor(
         _ <- processBuffered(completedPeriod.toInclusive)
         _ <- indicateLocallyProcessed(completedPeriod)
       } yield {
-        // Run the observer asynchronously so that it does not block the further generation / processing of ACS commitments
-        // Since this runs after we mark the period as locally processed, there are no guarantees that the observer
-        // actually runs (e.g., if the participant crashes before be spawn this future).
-        FutureUtil.doNotAwait(
-          commitmentPeriodObserver(ec, traceContext).onShutdown {
-            logger.info("Skipping commitment period observer due to shutdown")
-          },
-          "commitment period observer failed",
-        )
+        // Inform the commitment period observer that we have completed the commitment period.
+        // The invocation is quick and will schedule the processing in the background
+        // It only kicks of journal pruning
+        pruningObserver(traceContext)
       }
     }
 
@@ -598,7 +593,7 @@ class AcsCommitmentProcessor(
       // and the outstanding commitments stored
       _ <- store.markComputedAndSent(period)
     } yield {
-      logger.info(
+      logger.debug(
         s"Deleted buffered commitments and set last computed and sent timestamp set to ${period.toInclusive}"
       )
     }
@@ -1057,7 +1052,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
           .map(_.tickBeforeOrAt(ts))
           .flatMap {
             case Some(tick) =>
-              loggingContext.info(s"Tick before or at $ts yields $tick on domain $domainId")
+              loggingContext.debug(s"Tick before or at $ts yields $tick on domain $domainId")
               Future.successful(tick)
             case None =>
               Future.failed(
@@ -1089,7 +1084,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
           } yield tickBeforeLastComputedAndSentO.map(_.min(latestTickBeforeOrAt))
       }
 
-      _ = loggingContext.info {
+      _ = loggingContext.debug {
         val timestamps = Map(
           "cleanReplayTs" -> cleanReplayTs.toString,
           "inFlightSubmissionTs" -> inFlightSubmissionTs.toString,

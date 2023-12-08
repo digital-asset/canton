@@ -18,11 +18,9 @@ import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.protocol.messages.{
   EnvelopeContent,
   ProtocolMessage,
-  ProtocolMessageV2,
-  ProtocolMessageV3,
-  UnsignedProtocolMessageV4,
+  UnsignedProtocolMessage,
 }
-import com.digitalasset.canton.protocol.{v0, v2, v3, v4}
+import com.digitalasset.canton.protocol.v4
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.sequencing.protocol.*
@@ -141,28 +139,13 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
     }
   }
 
-  class TestProtocolMessage(_text: String)
-      extends ProtocolMessage
-      with ProtocolMessageV2
-      with ProtocolMessageV3
-      with UnsignedProtocolMessageV4 {
-    private val payload =
-      v0.SignedProtocolMessage(
-        None,
-        v0.SignedProtocolMessage.SomeSignedProtocolMessage.Empty,
-      )
+  class TestProtocolMessage(_text: String) extends ProtocolMessage with UnsignedProtocolMessage {
     override def domainId: DomainId = fail("shouldn't be used")
 
     override def representativeProtocolVersion: RepresentativeProtocolVersion[companionObj.type] =
       fail("shouldn't be used")
 
     override protected val companionObj: AnyRef = TestProtocolMessage
-
-    override def toProtoEnvelopeContentV2: v2.EnvelopeContent =
-      v2.EnvelopeContent(v2.EnvelopeContent.SomeEnvelopeContent.SignedMessage(payload))
-
-    override def toProtoEnvelopeContentV3: v3.EnvelopeContent =
-      v3.EnvelopeContent(v3.EnvelopeContent.SomeEnvelopeContent.SignedMessage(payload))
 
     override def toProtoSomeEnvelopeContentV4: v4.EnvelopeContent.SomeEnvelopeContent =
       v4.EnvelopeContent.SomeEnvelopeContent.Empty

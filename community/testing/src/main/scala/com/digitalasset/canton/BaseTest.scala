@@ -122,12 +122,6 @@ trait BaseTest
 
   import scala.language.implicitConversions
 
-  protected val testTrafficState: Boolean =
-    testedProtocolVersion >= ProtocolVersion.v30 // TODO(#15153) Kill this conditional
-
-  protected def whenTestTrafficState[K, V](m: Map[K, V]): Map[K, V] =
-    if (testTrafficState) m else Map.empty
-
   /** Allows for invoking `myEitherT.futureValue` when `myEitherT: EitherT[Future, _, _]`.
     */
   implicit def futureConceptOfEitherTFuture[A, B](eitherTFuture: EitherT[Future, A, B])(implicit

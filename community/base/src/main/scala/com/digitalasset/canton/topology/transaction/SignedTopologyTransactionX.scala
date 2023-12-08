@@ -131,15 +131,12 @@ object SignedTopologyTransactionX
     SignedTopologyTransactionX[TopologyChangeOpX.Replace, TopologyMappingX]
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(-1) -> UnsupportedProtoCodec(
-      ProtocolVersion.minimum
-    ), // TODO(#15153) Kill this codec
     ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v30)(
       v2.SignedTopologyTransactionX
     )(
       supportedProtoVersion(_)(fromProtoV2),
       _.toProtoV2.toByteString,
-    ),
+    )
   )
 
   import com.digitalasset.canton.resource.DbStorage.Implicits.*

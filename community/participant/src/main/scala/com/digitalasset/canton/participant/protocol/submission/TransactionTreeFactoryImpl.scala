@@ -127,19 +127,16 @@ abstract class TransactionTreeFactoryImpl(
         Some(participantId.adminParty.toLf),
       )
 
-    for {
-      commonMetadata <- EitherT.fromEither[Future](
-        CommonMetadata
-          .create(cryptoOps, protocolVersion)(
-            confirmationPolicy,
-            domainId,
-            mediator,
-            commonMetadataSalt,
-            transactionUuid,
-          )
-          .leftMap(CommonMetadataError)
+    val commonMetadata = CommonMetadata
+      .create(cryptoOps, protocolVersion)(
+        confirmationPolicy,
+        domainId,
+        mediator,
+        commonMetadataSalt,
+        transactionUuid,
       )
 
+    for {
       submitterMetadata <- EitherT.fromEither[Future](
         SubmitterMetadata
           .fromSubmitterInfo(cryptoOps)(

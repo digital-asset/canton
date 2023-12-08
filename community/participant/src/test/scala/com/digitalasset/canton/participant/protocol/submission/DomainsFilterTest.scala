@@ -70,11 +70,12 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
       )
     }
 
-    "reject domains when the minimum protocol version is not satisfied " in {
+    // TODO(#15561) Re-enable this test when we have a stable protocol version
+    "reject domains when the minimum protocol version is not satisfied " ignore {
       import SimpleTopology.*
 
       // LanguageVersion.VDev needs pv=dev so we use pv=6
-      val currentDomainPV = ProtocolVersion.v6
+      val currentDomainPV = ProtocolVersion.v30
       val filter =
         DomainsFilterForTx(Transactions.Create.tx(TransactionVersion.VDev), currentDomainPV)
 

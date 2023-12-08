@@ -47,6 +47,6 @@ final case class TransactionMeta(
     param("ledgerEffectiveTime", _.ledgerEffectiveTime),
     paramIfDefined("workflowId", _.workflowId),
     param("submissionTime", _.submissionTime),
-    customParam(_ => "..."),
+    indicateOmittedFields,
   )
 }

@@ -5,24 +5,9 @@ syntax = "proto3";
 
 package com.digitalasset.canton.protocol.v0;
 
-import "com/digitalasset/canton/crypto/v0/crypto.proto";
 import "scalapb/scalapb.proto";
 
 // Messages depending on both participant_transaction.proto and participant_transfer.proto.
-
-message SignedProtocolMessage {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
-
-  com.digitalasset.canton.crypto.v0.Signature signature = 1;
-
-  oneof some_signed_protocol_message {
-    bytes mediator_response = 2;
-    bytes transaction_result = 3;
-    bytes malformed_mediator_request_result = 4;
-    bytes transfer_result = 5;
-    bytes acs_commitment = 6;
-  }
-}
 
 message TypedSignedProtocolMessageContent {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";

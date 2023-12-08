@@ -6,7 +6,6 @@ syntax = "proto3";
 package com.digitalasset.canton.protocol.v1;
 
 import "com/digitalasset/canton/crypto/v0/crypto.proto";
-import "com/digitalasset/canton/protocol/v0/common.proto";
 import "com/digitalasset/canton/protocol/v0/participant_transaction.proto";
 import "com/digitalasset/canton/protocol/v0/topology.proto";
 import "com/digitalasset/canton/protocol/v1/common.proto";
@@ -43,21 +42,6 @@ message Informee {
 }
 
 // EncryptedViewMessage
-
-message EncryptedViewMessage {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
-
-  bytes view_tree = 1;
-
-  // The symmetric encryption scheme used to encrypt the view tree
-  com.digitalasset.canton.crypto.v0.SymmetricKeyScheme encryption_scheme = 2;
-
-  com.digitalasset.canton.crypto.v0.Signature submitter_participant_signature = 3; // optional
-  bytes view_hash = 4;
-  repeated ParticipantRandomnessLookup randomness = 5;
-  string domain_id = 6;
-  v0.ViewType view_type = 7;
-}
 
 message ParticipantRandomnessLookup {
   // An encrypted random bytestring. After decryption, used in HKDF to derive the encryption keys for the view and

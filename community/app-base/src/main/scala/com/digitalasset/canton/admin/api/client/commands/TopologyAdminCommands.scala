@@ -364,26 +364,16 @@ object TopologyAdminCommands {
         force: Boolean,
     ) extends BaseCommand[v0.DomainParametersChangeAuthorization] {
       override def createRequest(): Either[String, v0.DomainParametersChangeAuthorization] = {
-        val protoVersion = newParameters.protoVersion.v
+        val parameters =
+          v0.DomainParametersChangeAuthorization.Parameters
+            .ParametersV1(newParameters.toProtoV2)
 
-        val parameters = protoVersion match {
-          case 1 =>
-            Right(
-              v0.DomainParametersChangeAuthorization.Parameters
-                .ParametersV1(newParameters.toProtoV1)
-            )
-          case _ =>
-            Left(s"Unsupported Proto version $protoVersion for dynamic domain parameters")
-        }
-
-        parameters.map { parameters =>
-          v0.DomainParametersChangeAuthorization(
-            authorization =
-              authData(TopologyChangeOp.Replace, signedBy, replaceExisting = false, force = force),
-            domain = domainId.toProtoPrimitive,
-            parameters = parameters,
-          )
-        }
+        v0.DomainParametersChangeAuthorization(
+          authorization =
+            authData(TopologyChangeOp.Replace, signedBy, replaceExisting = false, force = force),
+          domain = domainId.toProtoPrimitive,
+          parameters = parameters,
+        ).asRight
       }
 
       override def submitRequest(

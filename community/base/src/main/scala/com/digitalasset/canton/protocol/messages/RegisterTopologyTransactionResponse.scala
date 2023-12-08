@@ -10,7 +10,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.v1.RegisterTopologyTransactionResponse.Result.State as ProtoStateV1
-import com.digitalasset.canton.protocol.{v1, v2, v3, v4}
+import com.digitalasset.canton.protocol.{v1, v4}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, Member, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.version.{
@@ -30,20 +30,7 @@ final case class RegisterTopologyTransactionResponse(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
       RegisterTopologyTransactionResponse.type
     ]
-) extends UnsignedProtocolMessage
-    with ProtocolMessageV2
-    with ProtocolMessageV3
-    with UnsignedProtocolMessageV4 {
-
-  override def toProtoEnvelopeContentV2: v2.EnvelopeContent =
-    v2.EnvelopeContent(
-      v2.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionResponse(toProtoV1)
-    )
-
-  override def toProtoEnvelopeContentV3: v3.EnvelopeContent =
-    v3.EnvelopeContent(
-      v3.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionResponse(toProtoV1)
-    )
+) extends UnsignedProtocolMessage {
 
   override def toProtoSomeEnvelopeContentV4: v4.EnvelopeContent.SomeEnvelopeContent =
     v4.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionResponse(toProtoV1)
@@ -64,7 +51,7 @@ final case class RegisterTopologyTransactionResponse(
 object RegisterTopologyTransactionResponse
     extends HasProtocolVersionedCompanion[RegisterTopologyTransactionResponse] {
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v5)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v30)(
       v1.RegisterTopologyTransactionResponse
     )(
       supportedProtoVersion(_)(fromProtoV1),

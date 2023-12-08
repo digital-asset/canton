@@ -20,7 +20,6 @@ import com.digitalasset.canton.topology.store.{
   ValidatedTopologyTransactionX,
 }
 import com.digitalasset.canton.topology.transaction.*
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, ProtocolVersionChecksAsyncWordSpec}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -204,7 +203,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTestX
     with HasExecutionContext
     with ProtocolVersionChecksAsyncWordSpec {
 
-  "topology transaction authorization" onlyRunWithOrGreaterThan ProtocolVersion.v30 when {
+  "topology transaction authorization" when {
 
     object Factory extends TopologyTransactionXTestFactory(loggerFactory, parallelExecutionContext)
 

@@ -15,8 +15,11 @@ import com.digitalasset.canton.config.{
   ProcessingTimeout,
 }
 import com.digitalasset.canton.crypto.{
+  AsymmetricEncrypted,
   DomainSyncCryptoClient,
   Encrypted,
+  Fingerprint,
+  SecureRandomness,
   SymmetricKeyScheme,
   SyncCryptoApi,
   TestHash,
@@ -49,7 +52,7 @@ import com.digitalasset.canton.participant.sync.{
   SyncDomainPersistentStateLookup,
 }
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessageV1.RecipientsInfo
+import com.digitalasset.canton.protocol.messages.EncryptedViewMessage.RecipientsInfo
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencing.AsyncResult
@@ -174,6 +177,13 @@ class ProtocolProcessorTest
     CantonTimestamp.MinValue,
     None,
     domain,
+  )
+
+  private val encryptedRandomnessTest =
+    Encrypted.fromByteString[SecureRandomness](ByteString.EMPTY).value
+  private val sessionKeyMapTest = NonEmpty(
+    Seq,
+    new AsymmetricEncrypted[SecureRandomness](ByteString.EMPTY, Fingerprint.tryCreate("dummy")),
   )
 
   private type TestInstance =
@@ -337,13 +347,15 @@ class ProtocolProcessorTest
   private lazy val viewHash = ViewHash(TestHash.digest(2))
   private lazy val encryptedView =
     EncryptedView(TestViewType)(Encrypted.fromByteString(rootHash.toProtoPrimitive).value)
-  private lazy val viewMessage: EncryptedViewMessage[TestViewType] = EncryptedViewMessageV1(
+  private lazy val viewMessage: EncryptedViewMessage[TestViewType] = EncryptedViewMessage(
     submitterParticipantSignature = None,
     viewHash = viewHash,
-    randomness = Nil,
+    randomness = encryptedRandomnessTest,
+    sessionKey = sessionKeyMapTest,
     encryptedView = encryptedView,
     domainId = DefaultTestIdentities.domainId,
     SymmetricKeyScheme.Aes128Gcm,
+    testedProtocolVersion,
   )(Some(RecipientsInfo(Set(participant), Set.empty, Set.empty)))
   private lazy val rootHashMessage = RootHashMessage(
     rootHash,
@@ -584,13 +596,15 @@ class ProtocolProcessorTest
       val viewHash1 = ViewHash(TestHash.digest(2))
       val encryptedViewWrongRH =
         EncryptedView(TestViewType)(Encrypted.fromByteString(wrongRootHash.toProtoPrimitive).value)
-      val viewMessageWrongRH = EncryptedViewMessageV1(
+      val viewMessageWrongRH = EncryptedViewMessage(
         submitterParticipantSignature = None,
         viewHash = viewHash1,
-        randomness = Nil,
+        randomness = encryptedRandomnessTest,
+        sessionKey = sessionKeyMapTest,
         encryptedView = encryptedViewWrongRH,
         domainId = DefaultTestIdentities.domainId,
         SymmetricKeyScheme.Aes128Gcm,
+        testedProtocolVersion,
       )(Some(RecipientsInfo(Set(participant), Set.empty, Set.empty)))
       val requestBatchWrongRH = RequestAndRootHashMessage(
         NonEmpty(
@@ -618,14 +632,16 @@ class ProtocolProcessorTest
     }
 
     "log decryption errors" in {
-      val viewMessageDecryptError: EncryptedViewMessage[TestViewType] = EncryptedViewMessageV1(
+      val viewMessageDecryptError: EncryptedViewMessage[TestViewType] = EncryptedViewMessage(
         submitterParticipantSignature = None,
         viewHash = viewHash,
-        randomness = Nil,
+        randomness = encryptedRandomnessTest,
+        sessionKey = sessionKeyMapTest,
         encryptedView =
           EncryptedView(TestViewType)(Encrypted.fromByteString(ByteString.EMPTY).value),
         domainId = DefaultTestIdentities.domainId,
-        SymmetricKeyScheme.Aes128Gcm,
+        viewEncryptionScheme = SymmetricKeyScheme.Aes128Gcm,
+        protocolVersion = testedProtocolVersion,
       )(Some(RecipientsInfo(Set.empty, Set.empty, Set.empty)))
 
       val requestBatchDecryptError = RequestAndRootHashMessage(

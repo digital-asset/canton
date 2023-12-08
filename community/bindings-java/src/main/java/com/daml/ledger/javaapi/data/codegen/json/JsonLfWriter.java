@@ -69,7 +69,7 @@ public class JsonLfWriter {
   }
 
   public static Options opts() {
-    return new Options(true, true); // TODO: read these from sysprops?
+    return new Options(true, true);
   }
 
   public static final class Options {

@@ -480,13 +480,15 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
       protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
-  ): Future[Option[GenericStoredTopologyTransactionX]] =
+  ): Future[Option[GenericStoredTopologyTransactionX]] = {
+    val rpv = TopologyTransactionX.protocolVersionRepresentativeFor(protocolVersion)
+
     allTransactions().map(
       _.result.findLast(tx =>
-        tx.transaction.transaction == transaction && tx.transaction.representativeProtocolVersion == TopologyTransactionX
-          .protocolVersionRepresentativeFor(protocolVersion)
+        tx.transaction.transaction == transaction && tx.transaction.representativeProtocolVersion == rpv
       )
     )
+  }
 
   override def findParticipantOnboardingTransactions(
       participantId: ParticipantId,

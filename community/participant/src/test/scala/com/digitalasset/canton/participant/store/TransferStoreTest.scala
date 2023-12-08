@@ -8,12 +8,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.data.{
-  CantonTimestamp,
-  TransferInView,
-  TransferOutView,
-  TransferSubmitterMetadata,
-}
+import com.digitalasset.canton.data.{CantonTimestamp, TransferInView, TransferSubmitterMetadata}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.protocol.submission.SeedGenerator
@@ -36,7 +31,6 @@ import com.digitalasset.canton.protocol.{
   ContractMetadata,
   ExampleTransactionFactory,
   LfContractId,
-  LfTemplateId,
   RequestId,
   SerializableContract,
   SourceDomainId,
@@ -1151,8 +1145,7 @@ object TransferStoreTest extends EitherValues with NoTracing {
     )
   }
 
-  private val initialTransferCounter: TransferCounterO =
-    TransferCounter.forCreatedContract(BaseTest.testedProtocolVersion)
+  private val initialTransferCounter: TransferCounterO = Some(TransferCounter.Genesis)
 
   val seedGenerator = new SeedGenerator(pureCryptoApi)
 
@@ -1183,12 +1176,6 @@ object TransferStoreTest extends EitherValues with NoTracing {
       workflowId = None,
     )
   }
-
-  private[participant] val templateId: LfTemplateId =
-    TransferOutView.templateIdDefaultValue.orValue(
-      contract.contractInstance.unversioned.template,
-      BaseTest.testedProtocolVersion,
-    )
 
   def mkTransferDataForDomain(
       transferId: TransferId,
@@ -1226,7 +1213,6 @@ object TransferStoreTest extends EitherValues with NoTracing {
         seed,
         uuid,
       )
-      .value
     Future.successful(
       TransferData(
         sourceProtocolVersion = SourceProtocolVersion(BaseTest.testedProtocolVersion),
@@ -1271,7 +1257,7 @@ object TransferStoreTest extends EitherValues with NoTracing {
         mediatorMessage.allInformees,
       )
       val signedResult =
-        SignedProtocolMessage.tryFrom(
+        SignedProtocolMessage.from(
           result,
           BaseTest.testedProtocolVersion,
           sign("TransferOutResult-mediator"),

@@ -76,7 +76,7 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
   override lazy val name: String = "ActionDescription"
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v5)(v2.ActionDescription)(
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v30)(v2.ActionDescription)(
       supportedProtoVersion(_)(fromProtoV2),
       _.toProtoV2.toByteString,
     )

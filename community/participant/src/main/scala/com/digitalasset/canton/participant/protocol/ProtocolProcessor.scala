@@ -439,10 +439,9 @@ abstract class ProtocolProcessor[
         )
         .mapK(FutureUnlessShutdown.outcomeK)
 
-      _ = logger.debug(
-        withKind(
-          s"Sending batch with id $submissionId for request ${steps.submissionDescription(submissionParam)}"
-        )
+      _ = logger.info(
+        s"Phase 1 completed: Submitting ${batch.envelopes.length} envelopes for ${steps.requestKind} request, ${steps
+            .submissionDescription(submissionParam)}"
       )
 
       // use the send callback and a promise to capture the eventual sequenced event read by the submitter
@@ -597,7 +596,9 @@ abstract class ProtocolProcessor[
         )
       )
     } else {
-      logger.info(show"Processing ${steps.requestKind.unquoted} request at $requestId.")
+      logger.info(
+        show"Phase 3: Validating ${steps.requestKind.unquoted} request=${requestId.unwrap} with ${batch.requestEnvelopes.length} envelope(s)"
+      )
 
       val rootHash = batch.rootHashMessage.rootHash
       val freshOwnTimelyTxF = ephemeral.submissionTracker.register(rootHash, requestId)
@@ -968,7 +969,6 @@ abstract class ProtocolProcessor[
             pendingDataAndResponses <- steps.constructPendingDataAndResponse(
               pendingDataAndResponseArgs,
               ephemeral.transferCache,
-              ephemeral.contractStore,
               requestFuturesF.flatMap(_.activenessResult),
               mediator,
               freshOwnTimelyTx,
@@ -1027,10 +1027,30 @@ abstract class ProtocolProcessor[
           signResponse(snapshot, response).map(_ -> recipients)
         )
       })
+      _ <-
+        if (signedResponsesTo.nonEmpty) {
+          val messageId = sequencerClient.generateMessageId
+          logger.info(
+            s"Phase 4: Sending for request=${requestId.unwrap} with msgId=${messageId} ${val (approved, rejected) =
+                signedResponsesTo
+                  .foldLeft((0, 0)) { case ((app, rej), (response, _)) =>
+                    response.message.localVerdict match {
+                      case LocalApprove() => (app + 1, rej)
+                      case _: LocalReject => (app, rej + 1)
+                    }
+                  }
+              s"approved=${approved}, rejected=${rejected}" }"
+          )
+          sendResponses(requestId, rc, signedResponsesTo, Some(messageId))
+            .leftMap(err => steps.embedRequestError(SequencerRequestError(err)))
+            .mapK(FutureUnlessShutdown.outcomeK)
+        } else {
+          logger.info(
+            s"Phase 4: Finished validation for request=${requestId.unwrap} with nothing to approve."
+          )
+          EitherT.rightT[FutureUnlessShutdown, steps.RequestError](())
+        }
 
-      _ <- sendResponses(requestId, rc, signedResponsesTo)
-        .leftMap(err => steps.embedRequestError(SequencerRequestError(err)))
-        .mapK(FutureUnlessShutdown.outcomeK)
     } yield ()
 
   }
@@ -1314,7 +1334,6 @@ abstract class ProtocolProcessor[
           _verdict,
           resultRootHash,
           _domainId,
-          _,
         ) <- unsignedResultE.toOption
         case WrappedPendingRequestData(pendingRequestData) <- Some(pendingRequestDataOrReplayData)
         case PendingTransaction(txId, _, _, _, _, requestTime, _, _, _, _) <- Some(
@@ -1485,8 +1504,8 @@ abstract class ProtocolProcessor[
       _ <- ifThenET(!cleanReplay) {
         for {
           _unit <- {
-            logger.info(
-              show"Finalizing ${steps.requestKind.unquoted} request at $requestId with event $eventO."
+            logger.debug(
+              show"Finalizing ${steps.requestKind.unquoted} request=${requestId.unwrap} with event $eventO."
             )
 
             // Schedule publication of the event with the associated causality update.

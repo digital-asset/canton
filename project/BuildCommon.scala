@@ -2,6 +2,7 @@ import java.io.File
 import DamlPlugin.autoImport.*
 import Dependencies.*
 import better.files.{File as BetterFile, *}
+import com.lightbend.sbt.JavaFormatterPlugin
 import com.typesafe.sbt.SbtLicenseReport.autoImportImpl.*
 import de.heikoseeberger.sbtheader.HeaderPlugin.autoImport.{headerResources, headerSources}
 import org.scalafmt.sbt.ScalafmtPlugin
@@ -39,7 +40,7 @@ object BuildCommon {
         // TODO(#15469) Re-introduce damlCheckProjectVersions when we are aligned
         addCommandAlias(
           "lint",
-          "; bufFormatCheck ; scalafmtCheck ; Test / scalafmtCheck ; scalafmtSbtCheck; checkLicenseHeaders",
+          "; bufFormatCheck ; scalafmtCheck ; Test / scalafmtCheck ; scalafmtSbtCheck; checkLicenseHeaders; javafmtCheck",
         ) ++
         addCommandAlias(
           "scalafixCheck",
@@ -47,7 +48,7 @@ object BuildCommon {
         ) ++
         addCommandAlias(
           "format",
-          "; bufFormat ; scalafixAll ; scalafmtAll ; scalafmtSbt; createLicenseHeaders",
+          "; bufFormat ; scalafixAll ; scalafmtAll ; scalafmtSbt; createLicenseHeaders ; javafmtAll",
         ) ++
         // To be used by CI:
         // enable coverage and compile
@@ -315,6 +316,10 @@ object BuildCommon {
           Seq()
       }
       //  here, we copy the protobuf files of community manually
+      val ledgerApiProto: Seq[(File, String)] = packProtobufFiles(
+        "community" / "ledger-api",
+        "ledger-api",
+      )
       val communityBaseProto: Seq[(File, String)] = packProtobufFiles(
         "community" / "base",
         "community",
@@ -336,7 +341,7 @@ object BuildCommon {
         else Nil
 
       val protoFiles =
-        communityBaseProto ++ communityParticipantProto ++ communityDomainProto ++ researchAppProto
+        ledgerApiProto ++ communityBaseProto ++ communityParticipantProto ++ communityDomainProto ++ researchAppProto
 
       log.info("Invoking bundle generator")
       // add license to package
@@ -689,7 +694,7 @@ object BuildCommon {
           scalaVersion,
           sbtVersion,
           BuildInfoKey("damlLibrariesVersion" -> Dependencies.daml_libraries_version),
-          BuildInfoKey("protocolVersions" -> List("5")),
+          BuildInfoKey("protocolVersions" -> List()),
         ),
         buildInfoPackage := "com.digitalasset.canton.buildinfo",
         buildInfoObject := "BuildInfo",
@@ -981,7 +986,7 @@ object BuildCommon {
 
     lazy val blake2b = project
       .in(file("community/lib/Blake2b"))
-      .disablePlugins(BufPlugin, ScalafmtPlugin, WartRemover)
+      .disablePlugins(BufPlugin, ScalafmtPlugin, JavaFormatterPlugin, WartRemover)
       .settings(
         sharedSettings,
         libraryDependencies ++= Seq(
@@ -995,7 +1000,7 @@ object BuildCommon {
 
     lazy val `slick-fork` = project
       .in(file("community/lib/slick"))
-      .disablePlugins(BufPlugin, ScalafmtPlugin, WartRemover)
+      .disablePlugins(BufPlugin, ScalafmtPlugin, JavaFormatterPlugin, WartRemover)
       .settings(
         sharedSettings,
         libraryDependencies ++= Seq(
@@ -1025,7 +1030,7 @@ object BuildCommon {
     // TODO(#10617) remove when no longer needed
     lazy val `pekko-fork` = project
       .in(file("community/lib/pekko"))
-      .disablePlugins(BufPlugin, ScalafixPlugin, ScalafmtPlugin, WartRemover)
+      .disablePlugins(BufPlugin, ScalafixPlugin, ScalafmtPlugin, JavaFormatterPlugin, WartRemover)
       .settings(
         sharedSettings,
         libraryDependencies ++= Seq(
@@ -1319,6 +1324,7 @@ object BuildCommon {
         BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
+        JavaFormatterPlugin,
         WartRemover,
       ) // to accommodate different daml repo coding style
       .settings(
@@ -1346,6 +1352,7 @@ object BuildCommon {
         BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
+        JavaFormatterPlugin,
         WartRemover,
       )
       .settings(
@@ -1379,6 +1386,7 @@ object BuildCommon {
         BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
+        JavaFormatterPlugin,
         WartRemover,
       )
       .settings(
@@ -1463,6 +1471,7 @@ object BuildCommon {
         BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
+        JavaFormatterPlugin,
         WartRemover,
       ) // to accommodate different daml repo coding style
       .settings(
@@ -1550,6 +1559,7 @@ object BuildCommon {
         BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
+        JavaFormatterPlugin,
         WartRemover,
       ) // to accommodate different daml repo coding style
       .settings(
@@ -1577,6 +1587,7 @@ object BuildCommon {
         BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
+        JavaFormatterPlugin,
         WartRemover,
       ) // to accommodate different daml repo coding style
       .settings(
@@ -1603,6 +1614,7 @@ object BuildCommon {
         BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
+        JavaFormatterPlugin,
         WartRemover,
       ) // to accommodate different daml repo coding style
       .settings(
@@ -1628,6 +1640,7 @@ object BuildCommon {
         BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
+        JavaFormatterPlugin,
         WartRemover,
       ) // to accommodate different daml repo coding style
       .settings(
@@ -1654,6 +1667,7 @@ object BuildCommon {
         BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
+        JavaFormatterPlugin,
         WartRemover,
       ) // to accommodate different daml repo coding style
       .settings(
@@ -1679,6 +1693,7 @@ object BuildCommon {
         BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
+        JavaFormatterPlugin,
         WartRemover,
       ) // to accommodate different daml repo coding style
       .settings(
@@ -1735,6 +1750,7 @@ object BuildCommon {
         BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
+        JavaFormatterPlugin,
         WartRemover,
       ) // to accommodate different daml repo coding style
       .settings(
@@ -1809,6 +1825,7 @@ object BuildCommon {
         BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
+        JavaFormatterPlugin,
         WartRemover,
       ) // to accommodate different daml repo coding style
       .settings(
@@ -1832,6 +1849,7 @@ object BuildCommon {
         BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
+        JavaFormatterPlugin,
         WartRemover,
       ) // to accommodate different daml repo coding style
       .settings(

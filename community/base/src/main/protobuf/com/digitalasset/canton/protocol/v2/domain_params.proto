@@ -29,7 +29,7 @@ message ParticipantDomainLimits {
   uint32 max_num_packages = 3;
 }
 
-message DynamicDomainParametersX {
+message DynamicDomainParameters {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
 
   google.protobuf.Duration participant_response_timeout = 1;

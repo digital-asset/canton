@@ -7,7 +7,6 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.SigningPublicKey
 import com.digitalasset.canton.topology.transaction.{NamespaceDelegationX, TopologyMappingX}
 import com.digitalasset.canton.topology.{Namespace, TestingOwnerWithKeysX}
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTestWordSpec, ProtocolVersionChecksAnyWordSpec}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -70,7 +69,7 @@ class AuthorizationGraphXTest
     graph.areValidAuthorizationKeys(Set(key.fingerprint), requireRoot = requireRoot) shouldBe valid
   }
 
-  "authorization graph" onlyRunWithOrGreaterThan ProtocolVersion.v30 when {
+  "authorization graph" when {
     import fixture.*
     import fixture.factory.SigningKeys.*
 

@@ -71,7 +71,7 @@ object SubmissionTrackingData
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter
-      .storage(ReleaseProtocolVersion(ProtocolVersion.v5), v0.SubmissionTrackingData)(
+      .storage(ReleaseProtocolVersion(ProtocolVersion.v30), v0.SubmissionTrackingData)(
         supportedProtoVersion(_)(fromProtoV0),
         _.toProtoV0.toByteString,
       )

@@ -13,8 +13,18 @@ import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.domain.sequencing.sequencer.errors.SequencerError.{
+  ExceededMaxSequencingTime,
+  PayloadToEventTimeBoundExceeded,
+}
 import com.digitalasset.canton.domain.sequencing.sequencer.store.*
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
+import com.digitalasset.canton.error.BaseCantonError
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  NamedLoggerFactory,
+  NamedLogging,
+  TracedLogger,
+}
 import com.digitalasset.canton.sequencing.protocol.{
   SendAsyncError,
   SequencerErrors,
@@ -285,9 +295,8 @@ class SendEventGenerator(
     def validateAndGenerateEvent(senderId: SequencerMemberId): Future[StoreEvent[Payload]] = {
       def deliverError(unknownRecipients: NonEmpty[Seq[Member]]): DeliverErrorStoreEvent = {
         val error = SequencerErrors.UnknownRecipients(unknownRecipients)
-        val (message, serializedError) =
-          DeliverErrorStoreEvent.serializeError(error, protocolVersion)
-        DeliverErrorStoreEvent.create(
+
+        DeliverErrorStoreEvent(
           senderId,
           submission.messageId,
           error,
@@ -375,14 +384,14 @@ object SequenceWritesFlow {
     ): Option[Sequenced[PayloadId]] = {
       def checkMaxSequencingTime(
           event: Presequenced[StoreEvent[PayloadId]]
-      ): Either[String, Presequenced[StoreEvent[PayloadId]]] =
+      ): Either[BaseCantonError, Presequenced[StoreEvent[PayloadId]]] =
         event.maxSequencingTimeO
           .toLeft(event)
           .leftFlatMap { maxSequencingTime =>
             Either.cond(
               timestamp <= maxSequencingTime,
               event,
-              s"The sequencer time [$timestamp] has exceeded the max-sequencing-time of the send request [$maxSequencingTime]: ${event.event.description}",
+              ExceededMaxSequencingTime.Error(timestamp, maxSequencingTime, event.event.description),
             )
           }
 
@@ -406,8 +415,8 @@ object SequenceWritesFlow {
             else {
               val reason = SequencerErrors
                 .SigningTimestampAfterSequencingTimestamp(signingTimestamp, timestamp)
-                .forProtocolVersion(protocolVersion)
-              DeliverErrorStoreEvent.create(
+
+              DeliverErrorStoreEvent(
                 sender,
                 messageId,
                 reason,
@@ -420,19 +429,24 @@ object SequenceWritesFlow {
 
       def checkPayloadToEventMargin(
           presequencedEvent: Presequenced[StoreEvent[PayloadId]]
-      ): Either[String, Presequenced[StoreEvent[PayloadId]]] =
+      ): Either[BaseCantonError, Presequenced[StoreEvent[PayloadId]]] =
         presequencedEvent match {
           // we only need to check deliver events for payloads
+          // the only reason why
           case presequencedDeliver @ Presequenced(deliver: DeliverStoreEvent[PayloadId], _) =>
             val payloadTs = deliver.payload.unwrap
-            val bound = writerConfig.payloadToEventMargin.asJava
-            val maxAllowableEventTime = payloadTs.add(bound)
-
+            val bound = writerConfig.payloadToEventMargin
+            val maxAllowableEventTime = payloadTs.add(bound.asJava)
             Either
               .cond(
                 timestamp <= maxAllowableEventTime,
                 presequencedDeliver,
-                s"The payload to event time bound [$bound] has been been exceeded by payload time [$payloadTs] and sequenced event time [$timestamp]",
+                PayloadToEventTimeBoundExceeded.Error(
+                  bound.duration,
+                  payloadTs,
+                  sequencedTs = timestamp,
+                  messageId = deliver.messageId,
+                ),
               )
           case other =>
             Right(other)
@@ -445,7 +459,10 @@ object SequenceWritesFlow {
 
       resultE match {
         case Left(error) =>
-          logger.warn(error)(presequencedEvent.traceContext)
+          // log here as we don't have the trace context in the error itself
+          implicit val errorLoggingContext =
+            ErrorLoggingContext(logger, loggerFactory.properties, presequencedEvent.traceContext)
+          error.log()
           None
         case Right(event) =>
           val checkedEvent = checkSigningTimestamp(event)

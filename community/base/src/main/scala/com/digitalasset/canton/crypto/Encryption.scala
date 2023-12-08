@@ -293,7 +293,7 @@ object SymmetricKey extends HasVersionedMessageCompanion[SymmetricKey] {
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
-      ProtocolVersion.v5,
+      ProtocolVersion.v30,
       supportedProtoVersion(v0.SymmetricKey)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
@@ -388,7 +388,7 @@ object EncryptionPublicKey
     with HasVersionedMessageCompanionDbHelpers[EncryptionPublicKey] {
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
-      ProtocolVersion.v5,
+      ProtocolVersion.v30,
       supportedProtoVersion(v0.EncryptionPublicKey)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
@@ -458,7 +458,7 @@ final case class EncryptionPrivateKey private[crypto] (
 object EncryptionPrivateKey extends HasVersionedMessageCompanion[EncryptionPrivateKey] {
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
-      ProtocolVersion.v5,
+      ProtocolVersion.v30,
       supportedProtoVersion(v0.EncryptionPrivateKey)(fromProtoV0),
       _.toProtoV0.toByteString,
     )

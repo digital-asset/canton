@@ -27,7 +27,6 @@ import com.digitalasset.canton.topology.transaction.TopologyTransactionX.Generic
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   DomainAlias,
@@ -282,7 +281,7 @@ class QueueBasedDomainOutboxXTest
 
   "dispatcher" should {
 
-    "dispatch transaction on new connect" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
+    "dispatch transaction on new connect" in {
       val (target, manager, handle, client) =
         mk(transactions.length)
       for {
@@ -295,7 +294,7 @@ class QueueBasedDomainOutboxXTest
       }
     }
 
-    "dispatch transaction on existing connections" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
+    "dispatch transaction on existing connections" in {
       val (target, manager, handle, client) =
         mk(transactions.length)
       for {
@@ -308,7 +307,7 @@ class QueueBasedDomainOutboxXTest
       }
     }
 
-    "dispatch transactions continuously" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
+    "dispatch transactions continuously" in {
       val (target, manager, handle, client) = mk(slice1.length)
       for {
         _res <- push(manager, slice1)
@@ -323,7 +322,7 @@ class QueueBasedDomainOutboxXTest
       }
     }
 
-    "not dispatch old data when reconnected" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
+    "not dispatch old data when reconnected" in {
       val (target, manager, handle, client) = mk(slice1.length)
       for {
         _ <- outboxConnected(manager, handle, client, target)
@@ -340,7 +339,7 @@ class QueueBasedDomainOutboxXTest
       }
     }
 
-    "correctly find a remove in source store" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
+    "correctly find a remove in source store" in {
 
       val (target, manager, handle, client) =
         mk(transactions.length)
@@ -376,7 +375,7 @@ class QueueBasedDomainOutboxXTest
       }
     }
 
-    "handle rejected transactions" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
+    "handle rejected transactions" in {
       val (target, manager, handle, client) =
         mk(
           transactions.size,
@@ -392,7 +391,7 @@ class QueueBasedDomainOutboxXTest
       }
     }
 
-    "handle failed transactions" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
+    "handle failed transactions" in {
       logger.info("handle failed transactions")
       val (target, manager, handle, client) =
         mk(

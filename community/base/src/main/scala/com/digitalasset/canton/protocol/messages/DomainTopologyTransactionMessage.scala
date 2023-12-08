@@ -12,7 +12,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcastX.Broadcast
-import com.digitalasset.canton.protocol.{v1, v2, v3, v4}
+import com.digitalasset.canton.protocol.{v1, v2, v4}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.*
@@ -37,10 +37,7 @@ final case class DomainTopologyTransactionMessage private (
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
       DomainTopologyTransactionMessage.type
     ]
-) extends UnsignedProtocolMessage
-    with ProtocolMessageV2
-    with ProtocolMessageV3
-    with UnsignedProtocolMessageV4 {
+) extends UnsignedProtocolMessage {
 
   def hashToSign(hashOps: HashOps): Hash =
     DomainTopologyTransactionMessage.hash(
@@ -56,16 +53,6 @@ final case class DomainTopologyTransactionMessage private (
       transactions = transactions.map(_.getCryptographicEvidence),
       domainId = domainId.toProtoPrimitive,
       notSequencedAfter = Some(notSequencedAfter.toProtoPrimitive),
-    )
-
-  override def toProtoEnvelopeContentV2: v2.EnvelopeContent =
-    v2.EnvelopeContent(
-      v2.EnvelopeContent.SomeEnvelopeContent.DomainTopologyTransactionMessage(toProtoV1)
-    )
-
-  override def toProtoEnvelopeContentV3: v3.EnvelopeContent =
-    v3.EnvelopeContent(
-      v3.EnvelopeContent.SomeEnvelopeContent.DomainTopologyTransactionMessage(toProtoV1)
     )
 
   override def toProtoSomeEnvelopeContentV4: v4.EnvelopeContent.SomeEnvelopeContent =
@@ -94,7 +81,7 @@ object DomainTopologyTransactionMessage
     }
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v5)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v30)(
       v1.DomainTopologyTransactionMessage
     )(
       supportedProtoVersion(_)(fromProtoV1),
@@ -206,8 +193,7 @@ final case class TopologyTransactionsBroadcastX private (
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
       TopologyTransactionsBroadcastX.type
     ]
-) extends UnsignedProtocolMessage
-    with UnsignedProtocolMessageV4 {
+) extends UnsignedProtocolMessage {
 
   @transient override protected lazy val companionObj: TopologyTransactionsBroadcastX.type =
     TopologyTransactionsBroadcastX
@@ -249,13 +235,12 @@ object TopologyTransactionsBroadcastX
     }
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.minimum),
     ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v30)(
       v2.TopologyTransactionsBroadcastX
     )(
       supportedProtoVersion(_)(fromProtoV2),
       _.toProtoV2.toByteString,
-    ),
+    )
   )
 
   private[messages] def fromProtoV2(

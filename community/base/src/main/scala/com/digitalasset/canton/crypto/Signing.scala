@@ -160,7 +160,7 @@ object Signature
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
-      ProtocolVersion.v5,
+      ProtocolVersion.v30,
       supportedProtoVersion(v0.Signature)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
@@ -339,7 +339,7 @@ object SigningPublicKey
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
-      ProtocolVersion.v5,
+      ProtocolVersion.v30,
       supportedProtoVersion(v0.SigningPublicKey)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
@@ -412,7 +412,7 @@ final case class SigningPrivateKey private[crypto] (
 object SigningPrivateKey extends HasVersionedMessageCompanion[SigningPrivateKey] {
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
-      ProtocolVersion.v5,
+      ProtocolVersion.v30,
       supportedProtoVersion(v0.SigningPrivateKey)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
@@ -521,11 +521,6 @@ object SignatureCheckError {
         param("bytes", _.bytes),
         param("error", _.error.doubleQuoted),
       )
-  }
-  final case class InvalidCryptoScheme(message: String) extends SignatureCheckError {
-    override def pretty: Pretty[InvalidCryptoScheme] = prettyOfClass(
-      unnamedParam(_.message.unquoted)
-    )
   }
   final case class InvalidKeyError(message: String) extends SignatureCheckError {
     override def pretty: Pretty[InvalidKeyError] = prettyOfClass(unnamedParam(_.message.unquoted))

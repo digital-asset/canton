@@ -14,7 +14,6 @@ import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, NonNegativeDuration}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.event.{
   AcsChange,
   ContractMetadataAndTransferCounter,
@@ -52,7 +51,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.version.{HasTestCloseContext, ProtocolVersion}
+import com.digitalasset.canton.version.HasTestCloseContext
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
 import org.scalatest.wordspec.{AnyWordSpec, AsyncWordSpec}
@@ -97,7 +96,7 @@ sealed trait AcsCommitmentProcessorBaseTest
   )
 
   lazy val initialTransferCounter: TransferCounterO =
-    TransferCounter.forCreatedContract(testedProtocolVersion)
+    Some(TransferCounter.Genesis)
 
   protected def ts(i: Int): CantonTimestampSecond = CantonTimestampSecond.ofEpochSecond(i.longValue)
 
@@ -265,7 +264,7 @@ sealed trait AcsCommitmentProcessorBaseTest
       domainCrypto,
       sortedReconciliationIntervalsProvider,
       store,
-      (_, _) => FutureUnlessShutdown.unit,
+      _ => (),
       ParticipantTestMetrics.pruning,
       testedProtocolVersion,
       DefaultProcessingTimeouts.testing
@@ -1371,13 +1370,9 @@ class AcsCommitmentProcessorTest
       val (activeCommitment1, deltaAddedCommitment1) =
         addCommonContractId(rc1, hash, initialTransferCounter)
       val (activeCommitment2, deltaAddedCommitment2) = addCommonContractId(rc2, hash, tc2)
-      if (testedProtocolVersion < ProtocolVersion.v30) { // TODO(#15153) Kill this conditional
-        activeCommitment1 shouldBe activeCommitment2
-        deltaAddedCommitment1 shouldBe deltaAddedCommitment2
-      } else {
-        activeCommitment1 should not be activeCommitment2
-        deltaAddedCommitment1 should not be deltaAddedCommitment2
-      }
+
+      activeCommitment1 should not be activeCommitment2
+      deltaAddedCommitment1 should not be deltaAddedCommitment2
     }
 
     "transient contracts in a commit set obtain the correct transfer counter for archivals, hence do not appear in the ACS change" in {

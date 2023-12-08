@@ -53,7 +53,7 @@ class TransferInValidationTest
   )
 
   private val initialTransferCounter: TransferCounterO =
-    TransferCounter.forCreatedContract(testedProtocolVersion)
+    Some(TransferCounter.Genesis)
 
   private def submitterInfo(submitter: LfPartyId): TransferSubmitterMetadata = {
     TransferSubmitterMetadata(
@@ -150,7 +150,6 @@ class TransferInValidationTest
         seed,
         uuid,
       )
-      .value
     val transferData =
       TransferData(
         SourceProtocolVersion(testedProtocolVersion),
@@ -239,17 +238,13 @@ class TransferInValidationTest
             )
             .value
       } yield {
-        if (testedProtocolVersion < ProtocolVersion.v30) { // TODO(#15153) Kill this conditional and the other
-          result shouldBe Right(Some(TransferInValidationResult(Set(party1))))
-        } else {
-          result shouldBe Left(
-            InconsistentTransferCounter(
-              transferId,
-              inRequestWithWrongCounter.transferCounter,
-              transferData.transferCounter,
-            )
+        result shouldBe Left(
+          InconsistentTransferCounter(
+            transferId,
+            inRequestWithWrongCounter.transferCounter,
+            transferData.transferCounter,
           )
-        }
+        )
       }
     }
 
@@ -303,7 +298,6 @@ class TransferInValidationTest
         Some(awaitTimestampOverride),
         loggerFactory,
       ),
-      TargetProtocolVersion(testedProtocolVersion),
       loggerFactory = loggerFactory,
     )
   }

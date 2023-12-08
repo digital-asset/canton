@@ -378,7 +378,7 @@ final class RepairService(
                         _.contract.rawContractInstance.contractInstance.unversioned.template.packageId
                       )
                       .distinct
-                      .parTraverse_(packageVetted)
+                      .parTraverse_(packageKnown)
 
                     _uniqueKeysWithHostedMaintainerInContractsToAdd <- EitherTUtil.ifThenET(
                       repair.domain.parameters.uniqueContractKeys
@@ -1066,7 +1066,7 @@ final class RepairService(
         )
     }
 
-  private def packageVetted(
+  private def packageKnown(
       lfPackageId: LfPackageId
   )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] = {
     for {

@@ -31,9 +31,7 @@ import java.util.UUID
 final case class TransferOutMediatorMessage(
     tree: TransferOutViewTree
 ) extends MediatorRequest
-    with ProtocolMessageV2
-    with ProtocolMessageV3
-    with UnsignedProtocolMessageV4 {
+    with UnsignedProtocolMessage {
   require(tree.commonData.isFullyUnblinded, "The transfer-out common data must be unblinded")
   require(tree.view.isBlinded, "The transfer-out view must be blinded")
 
@@ -88,12 +86,6 @@ final case class TransferOutMediatorMessage(
   def toProtoV1: v1.TransferOutMediatorMessage =
     v1.TransferOutMediatorMessage(tree = Some(tree.toProtoV1))
 
-  override def toProtoEnvelopeContentV2: v2.EnvelopeContent =
-    v2.EnvelopeContent(v2.EnvelopeContent.SomeEnvelopeContent.TransferOutMediatorMessage(toProtoV1))
-
-  override def toProtoEnvelopeContentV3: v3.EnvelopeContent =
-    v3.EnvelopeContent(v3.EnvelopeContent.SomeEnvelopeContent.TransferOutMediatorMessage(toProtoV1))
-
   override def toProtoSomeEnvelopeContentV4: v4.EnvelopeContent.SomeEnvelopeContent =
     v4.EnvelopeContent.SomeEnvelopeContent.TransferOutMediatorMessage(toProtoV1)
 
@@ -111,7 +103,7 @@ object TransferOutMediatorMessage
     extends HasProtocolVersionedWithContextCompanion[TransferOutMediatorMessage, HashOps] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v5)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v30)(
       v1.TransferOutMediatorMessage
     )(
       supportedProtoVersion(_)((hashOps, proto) => fromProtoV1(hashOps)(proto)),

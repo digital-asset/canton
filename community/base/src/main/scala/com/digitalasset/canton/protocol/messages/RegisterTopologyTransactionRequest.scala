@@ -8,7 +8,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.Top
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
-import com.digitalasset.canton.protocol.{v0, v2, v3, v4}
+import com.digitalasset.canton.protocol.{v0, v4}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{DomainId, Member, ParticipantId, UniqueIdentifier}
@@ -33,20 +33,7 @@ final case class RegisterTopologyTransactionRequest private (
       RegisterTopologyTransactionRequest.type
     ]
 ) extends UnsignedProtocolMessage
-    with ProtocolMessageV2
-    with ProtocolMessageV3
-    with UnsignedProtocolMessageV4
     with PrettyPrinting {
-
-  override def toProtoEnvelopeContentV2: v2.EnvelopeContent =
-    v2.EnvelopeContent(
-      v2.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionRequest(toProtoV0)
-    )
-
-  override def toProtoEnvelopeContentV3: v3.EnvelopeContent =
-    v3.EnvelopeContent(
-      v3.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionRequest(toProtoV0)
-    )
 
   override def toProtoSomeEnvelopeContentV4: v4.EnvelopeContent.SomeEnvelopeContent =
     v4.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionRequest(toProtoV0)
@@ -76,7 +63,7 @@ object RegisterTopologyTransactionRequest
     extends HasProtocolVersionedCompanion[RegisterTopologyTransactionRequest] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v5)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v30)(
       v0.RegisterTopologyTransactionRequest
     )(
       supportedProtoVersion(_)(fromProtoV0),

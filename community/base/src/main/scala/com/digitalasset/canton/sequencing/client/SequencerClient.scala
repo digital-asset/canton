@@ -382,7 +382,7 @@ class SequencerClientImpl(
   ): Either[SendAsyncClientError, Unit] = {
     // We're ignoring the size of the SignedContent wrapper here.
     // TODO(#12320) Look into what we really want to do here
-    val serializedRequestSize = request.toProtoV0.serializedSize
+    val serializedRequestSize = request.toProtoV1.serializedSize
 
     Either.cond(
       serializedRequestSize <= maxRequestSize.unwrap,
@@ -531,7 +531,7 @@ class SequencerClientImpl(
   override def generateMaxSequencingTime: CantonTimestamp =
     clock.now.add(config.defaultMaxSequencingTimeOffset.asJava)
 
-  override protected def generateMessageId: MessageId = MessageId.randomMessageId()
+  override def generateMessageId: MessageId = MessageId.randomMessageId()
 
   /** Create a subscription for sequenced events for this member,
     * starting after the prehead in the `sequencerCounterTrackerStore`.

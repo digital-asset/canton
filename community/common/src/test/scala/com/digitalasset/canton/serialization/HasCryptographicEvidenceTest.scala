@@ -107,19 +107,14 @@ sealed case class MemoizedEvidenceSUT(b: Byte)(
   override protected val companionObj: MemoizedEvidenceSUT.type = MemoizedEvidenceSUT
 }
 
-object MemoizedEvidenceSUT
-    extends HasProtocolVersionedWrapperCompanion[MemoizedEvidenceSUT, Nothing] {
+object MemoizedEvidenceSUT extends HasProtocolVersionedWrapperCompanion[MemoizedEvidenceSUT, Unit] {
 
   override type Deserializer = Unit
 
   val name: String = "MemoizedEvidenceSUT"
 
-  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.raw(
-      ProtocolVersion.v5,
-      (),
-      _ => throw new NotImplementedError("Serialization is not implemented"),
-    )
+  val supportedProtoVersions: MemoizedEvidenceSUT.SupportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(0) -> UnsupportedProtoCodec(ProtocolVersion.v30)
   )
 
   private val defaultProtocolVersionRepresentative = protocolVersionRepresentativeFor(

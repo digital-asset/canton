@@ -52,7 +52,7 @@ public interface ValueDecoder<Data> {
     throw new IllegalArgumentException("Cannot create contract id for this data type");
   }
 
-  // TODO #15120 delete
+  // TODO(i15640) delete
   /**
    * @deprecated since Daml 2.5.0; it is only used in deprecated fromValue method of all generated
    *     data class

@@ -12,7 +12,6 @@ import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.catsinstances.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.SequencerCounter
-import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -198,8 +197,8 @@ class DbSequencerStore(
       recipientsO: Option[NonEmpty[SortedSet[SequencerMemberId]]] = None,
       payloadO: Option[P] = None,
       signingTimestampO: Option[CantonTimestamp] = None,
-      errorMessageO: Option[String256M] = None,
       traceContext: TraceContext,
+      // TODO(#15628) We should represent this differently, so that DeliverErrorStoreEvent.fromByteString parameter is always defined as well
       errorO: Option[ByteString],
   ) {
     lazy val asStoreEvent: Either[String, Sequenced[P]] =
@@ -229,11 +228,9 @@ class DbSequencerStore(
       for {
         messageId <- messageIdO.toRight("message-id not set for deliver error")
         sender <- senderO.toRight("sender not set for deliver error")
-        errorMessage <- errorMessageO.toRight("error-message not set for deliver error")
-        event <- DeliverErrorStoreEvent.create(
+        event = DeliverErrorStoreEvent(
           sender,
           messageId,
-          errorMessage,
           errorO,
           traceContext,
         )
@@ -267,16 +264,15 @@ class DbSequencerStore(
             traceContext = traceContext,
             errorO = None,
           )
-        case DeliverErrorStoreEvent(sender, messageId, message, errorO, traceContext) =>
+        case DeliverErrorStoreEvent(sender, messageId, errorO, traceContext) =>
           DeliverStoreEventRow(
-            storeEvent.timestamp,
-            instanceIndex,
-            EventTypeDiscriminator.Error,
+            timestamp = storeEvent.timestamp,
+            instanceIndex = instanceIndex,
+            eventType = EventTypeDiscriminator.Error,
             messageIdO = Some(messageId),
             senderO = Some(sender),
             recipientsO =
               Some(NonEmpty(SortedSet, sender)), // must be set for sender to receive value
-            errorMessageO = Some(message),
             traceContext = traceContext,
             errorO = errorO,
           )
@@ -305,7 +301,6 @@ class DbSequencerStore(
     val memberIdGetter = implicitly[GetResult[Option[SequencerMemberId]]]
     val memberIdNesGetter = implicitly[GetResult[Option[NonEmpty[SortedSet[SequencerMemberId]]]]]
     val payloadGetter = implicitly[GetResult[Option[Payload]]]
-    val errorMessageGetter = implicitly[GetResult[Option[String256M]]]
     val traceContextGetter = implicitly[GetResult[SerializableTraceContext]]
     val errorOGetter = implicitly[GetResult[Option[ByteString]]]
 
@@ -319,7 +314,6 @@ class DbSequencerStore(
         memberIdNesGetter(r),
         payloadGetter(r),
         timestampOGetter(r),
-        errorMessageGetter(r),
         traceContextGetter(r).unwrap,
         errorOGetter(r),
       )
@@ -551,9 +545,9 @@ class DbSequencerStore(
       case _: H2 | _: Postgres =>
         """insert into sequencer_events (
                                     |  ts, node_index, event_type, message_id, sender, recipients,
-                                    |  payload_id, signing_timestamp, error_message, trace_context, error
+                                    |  payload_id, signing_timestamp, trace_context, error
                                     |)
-                                    |  values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    |  values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                     |  on conflict do nothing""".stripMargin
       case _: Oracle =>
         """merge /*+ INDEX ( sequencer_events ( ts ) ) */
@@ -561,9 +555,9 @@ class DbSequencerStore(
           |using (select ? ts from dual) input
           |on (sequencer_events.ts = input.ts)
           |when not matched then
-          |  insert (ts, node_index, event_type, message_id, sender, recipients, payload_id, signing_timestamp,
-          |          error_message, trace_context, error)
-          |  values (input.ts, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""".stripMargin
+          |  insert (ts, node_index, event_type, message_id, sender, recipients, payload_id,
+          |  signing_timestamp, trace_context, error)
+          |  values (input.ts, ?, ?, ?, ?, ?, ?, ?, ?, ?)""".stripMargin
     }
 
     storage.queryAndUpdate(
@@ -577,7 +571,6 @@ class DbSequencerStore(
           recipients,
           payloadId,
           signingTimestampO,
-          errorMessage,
           traceContext,
           errorO,
         ) = DeliverStoreEventRow(instanceIndex, event)
@@ -590,7 +583,6 @@ class DbSequencerStore(
         pp >> recipients
         pp >> payloadId
         pp >> signingTimestampO
-        pp >> errorMessage
         pp >> SerializableTraceContext(traceContext)
         pp >> errorO
       },
@@ -760,7 +752,7 @@ class DbSequencerStore(
     ) = sql"""
         select events.ts, events.node_index, events.event_type, events.message_id, events.sender,
           events.recipients, payloads.id, payloads.content, events.signing_timestamp,
-          events.error_message, events.trace_context, events.error
+          events.trace_context, events.error
         from sequencer_events events
         left join sequencer_payloads payloads
           on events.payload_id = payloads.id
@@ -793,7 +785,7 @@ class DbSequencerStore(
           sql"""
           select events.ts, events.node_index, events.event_type, events.message_id, events.sender,
             events.recipients, payloads.id, payloads.content, events.signing_timestamp,
-            events.error_message, events.trace_context, events.error
+            events.trace_context, events.error
           from sequencer_events events
           left join sequencer_payloads payloads
             on events.payload_id = payloads.id
@@ -1128,7 +1120,7 @@ class DbSequencerStore(
         case (memberId, ts) if !disabledMembers.contains(memberId) => ts
       })
       // just take the lowest
-      .map(NonEmpty.from(_).map(_.min1))
+      .map(_.minimumOption)
   }
 
   override protected[store] def pruneEvents(

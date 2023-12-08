@@ -6,7 +6,6 @@ syntax = "proto3";
 package com.digitalasset.canton.domain.admin.v0;
 
 import "com/digitalasset/canton/crypto/v0/crypto.proto";
-import "com/digitalasset/canton/domain/admin/v1/sequencer_initialization_service.proto";
 import "com/digitalasset/canton/domain/admin/v2/sequencer_initialization_service.proto";
 import "com/digitalasset/canton/topology/admin/v0/topology_ext.proto";
 import "google/protobuf/empty.proto";
@@ -20,7 +19,6 @@ service SequencerInitializationService {
   // and will immediately attempt to use it.
   // If the request is received after the sequencer has been successfully initialized it should return successfully
   // if the domain_id matches the domain that the sequencer has been initialized for, otherwise it should fail.
-  rpc InitV1(com.digitalasset.canton.domain.admin.v1.InitRequest) returns (InitResponse);
   rpc InitV2(com.digitalasset.canton.domain.admin.v2.InitRequest) returns (InitResponse);
 }
 

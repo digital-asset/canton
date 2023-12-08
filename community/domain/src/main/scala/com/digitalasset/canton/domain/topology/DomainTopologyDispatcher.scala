@@ -659,16 +659,7 @@ private[domain] class DomainTopologyDispatcher(
     val receivingParticipantsF = performUnlessClosingF(functionFullName)(
       headSnapshot
         .participants()
-        .map(_.collect {
-          case (participantId, perm)
-              if perm.isActive ||
-                // with protocol version v5, we also dispatch topology transactions to disabled participants
-                // which avoids the "catchup" tx computation.
-                // but beware, there is a difference between "Disabled" and "None". with disabled, you are
-                // explicitly disabled, with None, we are back at the behaviour of < v5
-                protocolVersion >= ProtocolVersion.v5 =>
-            participantId
-        })
+        .map(_.map { case (participantId, _) => participantId })
     )
     val mediatorsF = performUnlessClosingF(functionFullName)(
       headSnapshot.mediatorGroups().map(_.flatMap(_.active))

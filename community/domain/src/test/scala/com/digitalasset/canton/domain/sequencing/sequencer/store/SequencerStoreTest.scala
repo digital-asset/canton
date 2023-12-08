@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
-import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.{CantonTimestamp, Counter}
 import com.digitalasset.canton.domain.sequencing.integrations.state.EphemeralState
@@ -30,7 +29,6 @@ import com.digitalasset.canton.topology.{
   UniqueIdentifier,
 }
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, ProtocolVersionChecksAsyncWordSpec, SequencerCounter}
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
@@ -180,13 +178,11 @@ trait SequencerStoreTest
       CounterCheckpoint(counter, ts, latestTopologyClientTs)
 
     "DeliverErrorStoreEvent" should {
-      "be able to serialize to and deserialize the error from protobuf" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
+      "be able to serialize to and deserialize the error from protobuf" in {
         val error = SequencerErrors.SigningTimestampTooEarly("too early!")
         val errorStatus = error.rpcStatusWithoutLoggingContext()
-        val (message, serialized) =
-          DeliverErrorStoreEvent.serializeError(error, testedProtocolVersion)
-        val deserialized =
-          DeliverErrorStoreEvent.deserializeError(message, serialized, testedProtocolVersion)
+        val serialized = DeliverErrorStoreEvent.serializeError(error, testedProtocolVersion)
+        val deserialized = DeliverErrorStoreEvent.fromByteString(Some(serialized))
         deserialized shouldBe Right(errorStatus)
       }
     }
@@ -323,15 +319,12 @@ trait SequencerStoreTest
         for {
           aliceId <- env.store.registerMember(alice, ts1)
           _bobId <- env.store.registerMember(bob, ts1)
-          error: DeliverErrorStoreEvent = DeliverErrorStoreEvent
-            .create(
-              aliceId,
-              messageId1,
-              String256M.tryCreate("Something went wrong".repeat(22000)),
-              None,
-              traceContext,
-            )
-            .value
+          error = DeliverErrorStoreEvent(
+            aliceId,
+            messageId1,
+            None,
+            traceContext,
+          )
           timestampedError: Sequenced[Nothing] = Sequenced(ts1, error)
           _ <- env.store.saveEvents(instanceIndex, NonEmpty(Seq, timestampedError))
           _ <- env.saveWatermark(timestampedError.timestamp).valueOrFail("saveWatermark")

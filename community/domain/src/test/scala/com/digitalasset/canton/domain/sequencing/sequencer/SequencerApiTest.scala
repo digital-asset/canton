@@ -9,10 +9,11 @@ import com.digitalasset.canton.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, HashPurpose, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.domain.sequencing.sequencer.errors.SequencerError.ExceededMaxSequencingTime
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer as CantonSequencer
 import com.digitalasset.canton.lifecycle.Lifecycle
-import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.logging.{NamedLogging, SuppressionRule}
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.sequencing.protocol.SendAsyncError.RequestInvalid
 import com.digitalasset.canton.sequencing.protocol.*
@@ -20,7 +21,6 @@ import com.digitalasset.canton.time.{Clock, SimClock}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.PekkoUtil
-import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import com.google.rpc.status.Status
 import org.apache.pekko.actor.ActorSystem
@@ -28,6 +28,7 @@ import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 import org.scalatest.{Assertion, FutureOutcome}
+import org.slf4j.event.Level
 
 import java.time.Duration
 import java.util.UUID
@@ -40,7 +41,7 @@ abstract class SequencerApiTest
 
   import RecipientsTest.*
 
-  trait Env extends AutoCloseable with NamedLogging {
+  protected trait Env extends AutoCloseable with NamedLogging {
 
     private[SequencerApiTest] implicit lazy val actorSystem: ActorSystem =
       PekkoUtil.createActorSystem(loggerFactory.threadName)(parallelExecutionContext)
@@ -138,7 +139,7 @@ abstract class SequencerApiTest
             "Register topology client"
           )
           _ <- valueOrFail(sequencer.registerMember(sender))("Register mediator")
-          messages <- loggerFactory.assertLogs(
+          messages <- loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.INFO))(
             valueOrFail(sequencer.sendAsync(request))("Sent async")
               .flatMap(_ =>
                 readForMembers(
@@ -147,9 +148,13 @@ abstract class SequencerApiTest
                   timeout = 5.seconds, // We don't need the full timeout here
                 )
               ),
-            entry => {
-              entry.warningMessage should include("has exceeded the max-sequencing-time")
-              entry.warningMessage should include(suppressedMessageContent)
+            forAll(_) { entry =>
+              entry.message should include(
+                suppressedMessageContent
+              ) // block update generator will log every send
+              entry.message should (include(ExceededMaxSequencingTime.id) or include(
+                "Observed Send"
+              ))
             },
           )
         } yield {
@@ -182,12 +187,16 @@ abstract class SequencerApiTest
           )
           _ <- valueOrFail(sequencer.registerMember(sender))("Register mediator")
           _ <- valueOrFail(sequencer.sendAsync(request1))("Sent async #1")
-          messages <- loggerFactory.assertLogs(
+          messages <- loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.INFO))(
             valueOrFail(sequencer.sendAsync(request2))("Sent async #2")
               .flatMap(_ => readForMembers(List(sender), sequencer)),
-            entry => {
-              entry.warningMessage should include("has exceeded the max-sequencing-time")
-              entry.warningMessage should include(suppressedMessageContent)
+            forAll(_) { entry =>
+              // block update generator will log every send
+              entry.message should ((include(ExceededMaxSequencingTime.id) or include(
+                "Observed Send"
+              ) and include(
+                suppressedMessageContent
+              )) or (include("Observed Send") and include(normalMessageContent)))
             },
           )
         } yield {
@@ -237,8 +246,7 @@ abstract class SequencerApiTest
         }
       }
 
-      def testAggregation: Boolean =
-        testedProtocolVersion >= ProtocolVersion.v30 && supportAggregation // TODO(#15153) Kill this conditional
+      def testAggregation: Boolean = supportAggregation
 
       "aggregate submission requests" onlyRunWhen testAggregation in { env =>
         import env.*
@@ -402,14 +410,14 @@ abstract class SequencerApiTest
         val content1 = "message1-to-sign"
         val content2 = "message2-to-sign"
         val recipients1 = Recipients.cc(p11, p13)
-        val envelope1 = ClosedEnvelope.tryCreate(
+        val envelope1 = ClosedEnvelope.create(
           ByteString.copyFromUtf8(content1),
           recipients1,
           Seq.empty,
           testedProtocolVersion,
         )
         val recipients2 = Recipients.cc(p12, p13)
-        val envelope2 = ClosedEnvelope.tryCreate(
+        val envelope2 = ClosedEnvelope.create(
           ByteString.copyFromUtf8(content2),
           recipients2,
           Seq.empty,
@@ -517,7 +525,7 @@ abstract class SequencerApiTest
         val aggregationRule =
           AggregationRule(NonEmpty(Seq, p14, p15), PositiveInt.tryCreate(2), testedProtocolVersion)
         val recipients = Recipients.cc(p14, p15)
-        val envelope = ClosedEnvelope.tryCreate(
+        val envelope = ClosedEnvelope.create(
           ByteString.copyFromUtf8(messageContent),
           recipients,
           Seq.empty,
@@ -884,7 +892,7 @@ trait SequencerApiTestUtils
 
     /** Closes the envelope by serializing the contents */
     def closeEnvelope: ClosedEnvelope =
-      ClosedEnvelope.tryCreate(
+      ClosedEnvelope.create(
         ByteString.copyFromUtf8(content),
         recipients,
         Seq.empty,

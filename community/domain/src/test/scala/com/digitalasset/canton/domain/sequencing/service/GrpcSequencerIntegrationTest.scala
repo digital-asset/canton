@@ -20,7 +20,6 @@ import com.digitalasset.canton.crypto.{HashPurpose, Nonce}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.api.v0.SequencerAuthenticationServiceGrpc.SequencerAuthenticationService
-import com.digitalasset.canton.domain.governance.ParticipantAuditor
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.domain.sequencing.SequencerParameters
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
@@ -30,20 +29,12 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.protocol.DomainParametersLookup.SequencerDomainParameters
-import com.digitalasset.canton.protocol.messages.{
-  ProtocolMessage,
-  ProtocolMessageV2,
-  ProtocolMessageV3,
-  UnsignedProtocolMessageV4,
-}
+import com.digitalasset.canton.protocol.messages.UnsignedProtocolMessage
 import com.digitalasset.canton.protocol.{
   DomainParametersLookup,
   DynamicDomainParameters,
   DynamicDomainParametersLookup,
   TestDomainParameters,
-  v0 as protocolV0,
-  v2 as protocolV2,
-  v3 as protocolV3,
   v4 as protocolV4,
 }
 import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
@@ -161,7 +152,6 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
       sequencer,
       DomainTestMetrics.sequencer,
       loggerFactory,
-      ParticipantAuditor.noop,
       authenticationCheck,
       new SubscriptionPool[GrpcManagedSubscription[_]](
         clock,
@@ -404,34 +394,13 @@ class GrpcSequencerIntegrationTest
     }
   }
 
-  private case object MockProtocolMessage
-      extends ProtocolMessage
-      with ProtocolMessageV2
-      with ProtocolMessageV3
-      with UnsignedProtocolMessageV4 {
-    // no significance to this payload, just need anything valid and this was the easiest to construct
-    private val payload =
-      protocolV0.SignedProtocolMessage(
-        None,
-        protocolV0.SignedProtocolMessage.SomeSignedProtocolMessage.Empty,
-      )
-
+  private case object MockProtocolMessage extends UnsignedProtocolMessage {
     override def representativeProtocolVersion: RepresentativeProtocolVersion[companionObj.type] =
       ???
 
     override protected lazy val companionObj = MockProtocolMessage
 
     override def domainId: DomainId = DefaultTestIdentities.domainId
-
-    override def toProtoEnvelopeContentV2: protocolV2.EnvelopeContent =
-      protocolV2.EnvelopeContent(
-        protocolV2.EnvelopeContent.SomeEnvelopeContent.SignedMessage(payload)
-      )
-
-    override def toProtoEnvelopeContentV3: protocolV3.EnvelopeContent =
-      protocolV3.EnvelopeContent(
-        protocolV3.EnvelopeContent.SomeEnvelopeContent.SignedMessage(payload)
-      )
 
     override def toProtoSomeEnvelopeContentV4: protocolV4.EnvelopeContent.SomeEnvelopeContent =
       protocolV4.EnvelopeContent.SomeEnvelopeContent.Empty
