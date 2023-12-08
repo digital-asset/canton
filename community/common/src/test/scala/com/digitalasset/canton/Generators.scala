@@ -8,7 +8,6 @@ import com.digitalasset.canton.config.CantonRequireTypes.{
   AbstractLengthLimitedString,
   LengthLimitedStringCompanion,
 }
-import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import org.scalacheck.{Arbitrary, Gen}
 
@@ -32,11 +31,8 @@ object Generators {
     Gen.stringOfN(32, Gen.alphaNumChar).map(WorkflowId.assertFromString)
   )
 
-  def transferCounterOGen(pv: ProtocolVersion): Gen[TransferCounterO] =
-    if ( // TODO(#15153) Kill this conditional
-      pv < ProtocolVersion.v30
-    ) Gen.const(None)
-    else Gen.choose(0, Long.MaxValue).map(i => Some(TransferCounter(i)))
+  def transferCounterOGen: Gen[TransferCounterO] =
+    Gen.choose(0, Long.MaxValue).map(i => Some(TransferCounter(i)))
 
   def lengthLimitedStringGen[A <: AbstractLengthLimitedString](
       companion: LengthLimitedStringCompanion[A]

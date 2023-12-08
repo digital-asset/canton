@@ -31,7 +31,6 @@ import com.digitalasset.canton.participant.protocol.submission.{
 import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessingSteps.PendingTransferOut
 import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessorError.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.{
-  IncompatibleProtocolVersions,
   NoTransferSubmissionPermission,
   TransferProcessorError,
 }
@@ -52,8 +51,8 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
 }
 import com.digitalasset.canton.topology.transaction.{ParticipantPermission, VettedPackages}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
-import com.digitalasset.canton.version.{HasTestCloseContext, ProtocolVersion}
 import com.digitalasset.canton.{
   BaseTest,
   HasExecutorService,
@@ -111,7 +110,7 @@ final class TransferOutProcessingStepsTest
     LfTemplateId.assertFromString("transferoutprocessingstepstestpackage:template:id")
 
   private val initialTransferCounter: TransferCounterO =
-    TransferCounter.forCreatedContract(testedProtocolVersion)
+    Some(TransferCounter.Genesis)
 
   private def submitterMetadata(submitter: LfPartyId): TransferSubmitterMetadata = {
     TransferSubmitterMetadata(
@@ -621,64 +620,6 @@ final class TransferOutProcessingStepsTest
         submissionResult shouldBe a[TargetDomainIsSourceDomain]
       }
     }
-
-    "forbid transfer if the target domain does not support transfer counters and the source domain supports them" in {
-      val targetProtocolVersion = TargetProtocolVersion(ProtocolVersion.v5)
-      val state = mkState
-      val contract = ExampleTransactionFactory.asSerializable(
-        contractId,
-        contractInstance = ExampleTransactionFactory.contractInstance(templateId = templateId),
-        metadata = ContractMetadata.tryCreate(
-          signatories = Set(party1),
-          stakeholders = Set(party1),
-          maybeKeyWithMaintainers = None,
-        ),
-      )
-      val transactionId = ExampleTransactionFactory.transactionId(1)
-      val submissionParam = TransferOutProcessingSteps.SubmissionParam(
-        submitterMetadata = submitterMetadata(party1),
-        contractId,
-        TargetDomainId(targetDomain.id),
-        targetProtocolVersion,
-      )
-
-      for {
-        _ <- state.contractStore.storeCreatedContract(
-          RequestCounter(1),
-          transactionId,
-          contract,
-        )
-        _ <- persistentState.activeContractStore
-          .markContractsActive(
-            Seq(contractId -> initialTransferCounter),
-            TimeOfChange(RequestCounter(1), timeEvent.timestamp),
-          )
-          .value
-        submissionResult <-
-          outProcessingSteps
-            .prepareSubmission(
-              submissionParam,
-              sourceMediator,
-              state,
-              cryptoSnapshot,
-            )
-            .value
-            .failOnShutdown
-      } yield {
-        if (outProcessingSteps.sourceDomainProtocolVersion.v >= ProtocolVersion.v30) { // TODO(#15153) Kill this conditional
-          submissionResult shouldBe Left(
-            IncompatibleProtocolVersions(
-              contractId,
-              outProcessingSteps.sourceDomainProtocolVersion,
-              targetProtocolVersion,
-            )
-          )
-        } else {
-          succeed
-        }
-
-      }
-    }
   }
 
   "receive request" should {
@@ -791,7 +732,6 @@ final class TransferOutProcessingStepsTest
         .constructPendingDataAndResponse(
           dataAndResponseArgs,
           state.transferCache,
-          state.contractStore,
           FutureUnlessShutdown.pure(mkActivenessResult()),
           sourceMediator,
           freshOwnTimelyTx = true,
@@ -879,7 +819,7 @@ final class TransferOutProcessingStepsTest
           SequencerCounter(1),
           rootHash,
           WithContractHash(contractId, contractHash),
-          initialTransferCounter,
+          TransferCounter.Genesis,
           templateId = templateId,
           transferringParticipant = false,
           submitterMetadata = submitterMetadata(submitter),
@@ -910,10 +850,7 @@ final class TransferOutProcessingStepsTest
       uuid: UUID = new UUID(6L, 7L),
   ): FullTransferOutTree = {
     val seed = seedGenerator.generateSaltSeed()
-    valueOrFail(request.toFullTransferOutTree(pureCrypto, pureCrypto, seed, uuid))(
-      "Failed to create fullTransferOutTree"
-    )
-    request.toFullTransferOutTree(pureCrypto, pureCrypto, seed, uuid).value
+    request.toFullTransferOutTree(pureCrypto, pureCrypto, seed, uuid)
   }
 
   def encryptTransferOutTree(

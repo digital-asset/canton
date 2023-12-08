@@ -11,6 +11,7 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.ViewPosition
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.SerializableContract.LedgerCreateTime
+import com.digitalasset.canton.sequencing.TrafficControlParameters
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveSeconds}
 import com.digitalasset.canton.topology.{DomainId, MediatorId, MediatorRef}
 import com.digitalasset.canton.version.{GeneratorsVersion, ProtocolVersion}
@@ -73,17 +74,12 @@ object GeneratorsProtocol {
       maxRatePerParticipant <- Arbitrary.arbitrary[NonNegativeInt]
       maxRequestSize <- Arbitrary.arbitrary[MaxRequestSize]
 
-      trafficControlConfig <- defaultValueArb(
-        representativePV,
-        DynamicDomainParameters.defaultTrafficControlParametersUntil,
-      )
+      trafficControlConfig <- Gen.option(Arbitrary.arbitrary[TrafficControlParameters])
 
       updatedMediatorDeduplicationTimeout = ledgerTimeRecordTimeTolerance * NonNegativeInt
         .tryCreate(2) + mediatorDeduplicationMargin
 
-      // TODO(#14691) Use generator properly when dynamic domain parameters are properly versioned
-      sequencerAggregateSubmissionTimeout =
-        DynamicDomainParameters.defaultSequencerAggregateSubmissionTimeoutUntilExclusive.defaultValue
+      sequencerAggregateSubmissionTimeout <- Arbitrary.arbitrary[NonNegativeFiniteDuration]
 
       dynamicDomainParameters = DynamicDomainParameters.tryCreate(
         participantResponseTimeout,

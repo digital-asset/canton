@@ -44,7 +44,6 @@ object GeneratorsData {
   import com.digitalasset.canton.crypto.GeneratorsCrypto.*
   import com.digitalasset.canton.version.GeneratorsVersion.*
   import com.digitalasset.canton.ledger.api.GeneratorsApi.*
-  import org.scalatest.EitherValues.*
   import org.scalatest.OptionValues.*
 
   private val tenYears: Duration = Duration.ofDays(365 * 10)
@@ -80,26 +79,20 @@ object GeneratorsData {
       domainId <- Arbitrary.arbitrary[DomainId]
 
       mediatorRef <- Arbitrary.arbitrary[MediatorRef]
-      singleMediatorRef <- Arbitrary.arbitrary[MediatorRef.Single]
 
       salt <- Arbitrary.arbitrary[Salt]
       uuid <- Gen.uuid
       protocolVersion <- representativeProtocolVersionGen(CommonMetadata)
-
-      updatedMediatorRef =
-        if (CommonMetadata.shouldHaveSingleMediator(protocolVersion)) singleMediatorRef
-        else mediatorRef
 
       hashOps = TestHash // Not used for serialization
     } yield CommonMetadata
       .create(hashOps, protocolVersion)(
         confirmationPolicy,
         domainId,
-        updatedMediatorRef,
+        mediatorRef,
         salt,
         uuid,
       )
-      .value
   )
 
   implicit val participantMetadataArb: Arbitrary[ParticipantMetadata] = Arbitrary(

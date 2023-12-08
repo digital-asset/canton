@@ -99,7 +99,7 @@ object FullInformeeTree
   override val name: String = "FullInformeeTree"
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v5)(v1.FullInformeeTree)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v30)(v1.FullInformeeTree)(
       supportedProtoVersion(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     )

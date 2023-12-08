@@ -466,11 +466,14 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
       protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
-  ): Future[Option[GenericStoredTopologyTransactionX]] =
+  ): Future[Option[GenericStoredTopologyTransactionX]] = {
+    val rpv = TopologyTransactionX.protocolVersionRepresentativeFor(protocolVersion)
+
     findStoredSql(
       transaction,
-      subQuery = sql" AND representative_protocol_version = ${protocolVersion}",
+      subQuery = sql" AND representative_protocol_version = ${rpv.representative}",
     ).map(_.result.lastOption)
+  }
 
   override def findParticipantOnboardingTransactions(
       participantId: ParticipantId,

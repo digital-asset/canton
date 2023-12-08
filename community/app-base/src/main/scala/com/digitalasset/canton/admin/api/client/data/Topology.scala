@@ -240,7 +240,7 @@ object ListDomainParametersChangeResult {
     context <- BaseResult.fromProtoV0(contextP)
     dynamicDomainParametersInternal <- value.parameters match {
       case Parameters.Empty => Left(ProtoDeserializationError.FieldNotSet("parameters"))
-      case Parameters.V1(v1) => DynamicDomainParametersInternal.fromProtoV1(v1)
+      case Parameters.V1(ddpX) => DynamicDomainParametersInternal.fromProtoV2(ddpX)
     }
     item = DynamicDomainParameters(dynamicDomainParametersInternal)
   } yield ListDomainParametersChangeResult(context, item)

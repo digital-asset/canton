@@ -241,7 +241,7 @@ object TopologyTransaction
   override val name: String = "TopologyTransaction"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v5)(v1.TopologyTransaction)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v30)(v1.TopologyTransaction)(
       supportedProtoVersionMemoized(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     )

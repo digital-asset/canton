@@ -151,7 +151,7 @@ private[store] object SerializableLedgerSyncEvent
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter
-      .storage(ReleaseProtocolVersion(ProtocolVersion.v5), v0.LedgerSyncEvent)(
+      .storage(ReleaseProtocolVersion(ProtocolVersion.v30), v0.LedgerSyncEvent)(
         supportedProtoVersion(_)(fromProtoV0),
         _.toProtoV0.toByteString,
       )

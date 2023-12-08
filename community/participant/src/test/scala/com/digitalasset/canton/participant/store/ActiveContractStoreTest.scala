@@ -9,6 +9,7 @@ import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.QualifiedName
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.ActiveContractStore.*
 import com.digitalasset.canton.participant.util.TimeOfChange
@@ -29,7 +30,6 @@ import com.digitalasset.canton.store.PrunableByTimeTest
 import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{Checked, CheckedT}
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   LfPackageId,
@@ -49,11 +49,13 @@ import scala.concurrent.{ExecutionContext, Future}
 trait ActiveContractStoreTest extends PrunableByTimeTest {
   this: AsyncWordSpecLike & BaseTest & TestMetrics =>
 
+  protected implicit def closeContext: CloseContext
+
   lazy val acsDomainStr: String300 = String300.tryCreate("active-contract-store::default")
   lazy val acsDomainId: DomainId = DomainId.tryFromString(acsDomainStr.unwrap)
 
   lazy val initialTransferCounter: TransferCounterO =
-    TransferCounter.forCreatedContract(testedProtocolVersion)
+    Some(TransferCounter.Genesis)
 
   lazy val tc1: TransferCounterO = initialTransferCounter.map(_ + 1)
   lazy val tc2: TransferCounterO = initialTransferCounter.map(_ + 2)
@@ -292,10 +294,7 @@ trait ActiveContractStoreTest extends PrunableByTimeTest {
       val acs = mk()
       val toc = TimeOfChange(rc, ts)
 
-      val faultyTransferCounter =
-        if (testedProtocolVersion < ProtocolVersion.v30)
-          Some(TransferCounter.Genesis) // TODO(#15153) Kill this conditional
-        else None
+      val faultyTransferCounter = None
 
       for {
         marked <- acs.markContractActive(coid00 -> faultyTransferCounter, toc).value

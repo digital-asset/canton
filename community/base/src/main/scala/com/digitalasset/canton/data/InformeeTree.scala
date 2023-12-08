@@ -49,7 +49,7 @@ object InformeeTree extends HasProtocolVersionedWithContextCompanion[InformeeTre
   override val name: String = "InformeeTree"
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v5)(v1.InformeeTree)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v30)(v1.InformeeTree)(
       supportedProtoVersion(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     )

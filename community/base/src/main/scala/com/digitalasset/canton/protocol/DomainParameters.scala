@@ -30,7 +30,6 @@ import com.digitalasset.canton.topology.transaction.ParticipantDomainLimits
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{ProtoDeserializationError, checked}
-import com.google.protobuf.duration.Duration
 
 import scala.concurrent.Future
 import scala.math.Ordered.orderingToOrdered
@@ -95,7 +94,7 @@ object StaticDomainParameters
     extends HasProtocolVersionedCompanion[StaticDomainParameters]
     with ProtocolVersionedCompanionDbHelpers[StaticDomainParameters] {
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v5)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v30)(
       protoV1.StaticDomainParameters
     )(
       supportedProtoVersion(_)(fromProtoV1),
@@ -254,9 +253,6 @@ final case class DynamicDomainParameters private (
 ) extends HasProtocolVersionedWrapper[DynamicDomainParameters]
     with PrettyPrinting {
 
-  // Ensures the invariants related to default values hold
-  validateInstance().valueOr(err => throw new IllegalArgumentException(err))
-
   @transient override protected lazy val companionObj: DynamicDomainParameters.type =
     DynamicDomainParameters
 
@@ -282,11 +278,16 @@ final case class DynamicDomainParameters private (
     transferExclusivityTimeout > NonNegativeFiniteDuration.Zero
 
   def update(
-      transferExclusivityTimeout: NonNegativeFiniteDuration = transferExclusivityTimeout
+      transferExclusivityTimeout: NonNegativeFiniteDuration = transferExclusivityTimeout,
+      reconciliationInterval: PositiveSeconds = reconciliationInterval,
+      maxRatePerParticipant: NonNegativeInt = maxRatePerParticipant,
+      maxRequestSize: MaxRequestSize = maxRequestSize,
   ): DynamicDomainParameters =
     this.copy(
       transferExclusivityTimeout = transferExclusivityTimeout,
       reconciliationInterval = reconciliationInterval,
+      maxRatePerParticipant = maxRatePerParticipant,
+      maxRequestSize = maxRequestSize,
     )(representativeProtocolVersion)
 
   def tryUpdate(
@@ -298,6 +299,7 @@ final case class DynamicDomainParameters private (
       mediatorDeduplicationTimeout: NonNegativeFiniteDuration = mediatorDeduplicationTimeout,
       reconciliationInterval: PositiveSeconds = reconciliationInterval,
       maxRatePerParticipant: NonNegativeInt = maxRatePerParticipant,
+      maxRequestSize: MaxRequestSize = maxRequestSize,
       sequencerAggregateSubmissionTimeout: NonNegativeFiniteDuration =
         sequencerAggregateSubmissionTimeout,
       trafficControlParameters: Option[TrafficControlParameters] = trafficControlParameters,
@@ -315,20 +317,7 @@ final case class DynamicDomainParameters private (
     trafficControlParameters = trafficControlParameters,
   )(representativeProtocolVersion)
 
-  def toProtoV1: protoV1.DynamicDomainParameters =
-    protoV1.DynamicDomainParameters(
-      participantResponseTimeout = Some(participantResponseTimeout.toProtoPrimitive),
-      mediatorReactionTimeout = Some(mediatorReactionTimeout.toProtoPrimitive),
-      transferExclusivityTimeout = Some(transferExclusivityTimeout.toProtoPrimitive),
-      topologyChangeDelay = Some(topologyChangeDelay.toProtoPrimitive),
-      ledgerTimeRecordTimeTolerance = Some(ledgerTimeRecordTimeTolerance.toProtoPrimitive),
-      mediatorDeduplicationTimeout = Some(mediatorDeduplicationTimeout.toProtoPrimitive),
-      reconciliationInterval = Some(reconciliationInterval.toProtoPrimitive),
-      maxRatePerParticipant = maxRatePerParticipant.unwrap,
-      maxRequestSize = maxRequestSize.unwrap,
-    )
-
-  def toProtoV2: protoV2.DynamicDomainParametersX = protoV2.DynamicDomainParametersX(
+  def toProtoV2: protoV2.DynamicDomainParameters = protoV2.DynamicDomainParameters(
     participantResponseTimeout = Some(participantResponseTimeout.toProtoPrimitive),
     mediatorReactionTimeout = Some(mediatorReactionTimeout.toProtoPrimitive),
     transferExclusivityTimeout = Some(transferExclusivityTimeout.toProtoPrimitive),
@@ -396,41 +385,15 @@ final case class DynamicDomainParameters private (
 object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDomainParameters] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v5)(
-      protoV1.DynamicDomainParameters
-    )(
-      supportedProtoVersion(_)(fromProtoV1),
-      _.toProtoV1.toByteString,
-    ),
     ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v30)(
-      protoV2.DynamicDomainParametersX
+      protoV2.DynamicDomainParameters
     )(
       supportedProtoVersion(_)(fromProtoV2),
       _.toProtoV2.toByteString,
-    ),
+    )
   )
 
   override def name: String = "dynamic domain parameters"
-
-  private lazy val rpvCNTestNet = protocolVersionRepresentativeFor(ProtocolVersion.v30)
-
-  override lazy val invariants = Seq(
-    defaultTrafficControlParametersUntil
-  )
-
-  lazy val defaultTrafficControlParametersUntil = DefaultValueUntilExclusive(
-    _.trafficControlParameters,
-    "trafficControlParameters",
-    rpvCNTestNet,
-    None,
-  )
-
-  lazy val defaultSequencerAggregateSubmissionTimeoutUntilExclusive = DefaultValueUntilExclusive(
-    _.sequencerAggregateSubmissionTimeout,
-    "sequencerAggregateSubmissionTimeout",
-    rpvCNTestNet,
-    defaultSequencerAggregateSubmissionTimeout,
-  )
 
   lazy val defaultReconciliationInterval: PositiveSeconds = PositiveSeconds.tryOfSeconds(60)
   lazy val defaultMaxRatePerParticipant: NonNegativeInt = NonNegativeInt.tryCreate(1000000)
@@ -529,10 +492,7 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
       maxRatePerParticipant,
       maxRequestSize,
       sequencerAggregateSubmissionTimeout,
-      defaultTrafficControlParametersUntil.orValue(
-        trafficControlParameters,
-        representativeProtocolVersion,
-      ),
+      trafficControlParameters,
     )(representativeProtocolVersion)
   }
 
@@ -551,6 +511,7 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
       mediatorReactionTimeout = mediatorReactionTimeout,
     )
 
+  // TODO(#15161) Rework this when old nodes are killed
   def initialValues(
       topologyChangeDelay: NonNegativeFiniteDuration,
       protocolVersion: ProtocolVersion,
@@ -608,164 +569,13 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
     initialValues(topologyChangeDelay, protocolVersion)
   }
 
-  def initialXValues(clock: Clock, protocolVersion: ProtocolVersion): DynamicDomainParameters = {
-    val topologyChangeDelay = clock match {
-      case _: RemoteClock | _: SimClock => defaultTopologyChangeDelayNonStandardClock
-      case _ => defaultTopologyChangeDelay
-    }
-    initialValues(
-      topologyChangeDelay,
-      protocolVersion,
-    )
-  }
-
   // if there is no topology change delay defined (or not yet propagated), we'll use this one
   val topologyChangeDelayIfAbsent: NonNegativeFiniteDuration = NonNegativeFiniteDuration.Zero
 
-  private def fromProtoSharedV0(
-      participantResponseTimeoutP: Option[Duration],
-      mediatorReactionTimeoutP: Option[Duration],
-      transferExclusivityTimeoutP: Option[Duration],
-      topologyChangeDelayP: Option[Duration],
-      ledgerTimeRecordTimeToleranceP: Option[Duration],
-  ): ParsingResult[
-    (
-        NonNegativeFiniteDuration,
-        NonNegativeFiniteDuration,
-        NonNegativeFiniteDuration,
-        NonNegativeFiniteDuration,
-        NonNegativeFiniteDuration,
-    )
-  ] = for {
-    participantResponseTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
-      "participantResponseTimeout"
-    )(
-      participantResponseTimeoutP
-    )
-    mediatorReactionTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
-      "mediatorReactionTimeout"
-    )(
-      mediatorReactionTimeoutP
-    )
-    transferExclusivityTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
-      "transferExclusivityTimeout"
-    )(
-      transferExclusivityTimeoutP
-    )
-    topologyChangeDelay <- NonNegativeFiniteDuration.fromProtoPrimitiveO("topologyChangeDelay")(
-      topologyChangeDelayP
-    )
-    ledgerTimeRecordTimeTolerance <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
-      "ledgerTimeRecordTimeTolerance"
-    )(
-      ledgerTimeRecordTimeToleranceP
-    )
-  } yield (
-    participantResponseTimeout,
-    mediatorReactionTimeout,
-    transferExclusivityTimeout,
-    topologyChangeDelay,
-    ledgerTimeRecordTimeTolerance,
-  )
-
-  private def fromProtoSharedV1(
-      reconciliationIntervalP: Option[Duration],
-      mediatorDeduplicationTimeoutP: Option[Duration],
-      maxRatePerParticipantP: Int,
-      maxRequestSizeP: Int,
-  ): ParsingResult[
-    (PositiveSeconds, NonNegativeFiniteDuration, NonNegativeInt, MaxRequestSize)
-  ] = for {
-    reconciliationInterval <- PositiveSeconds.fromProtoPrimitiveO(
-      "reconciliationInterval"
-    )(
-      reconciliationIntervalP
-    )
-    mediatorDeduplicationTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
-      "mediatorDeduplicationTimeout"
-    )(
-      mediatorDeduplicationTimeoutP
-    )
-    maxRatePerParticipant <- NonNegativeInt
-      .create(maxRatePerParticipantP)
-      .leftMap(InvariantViolation.toProtoDeserializationError)
-
-    maxRequestSize <- NonNegativeInt
-      .create(maxRequestSizeP)
-      .map(MaxRequestSize)
-      .leftMap(InvariantViolation.toProtoDeserializationError)
-
-  } yield (
-    reconciliationInterval,
-    mediatorDeduplicationTimeout,
-    maxRatePerParticipant,
-    maxRequestSize,
-  )
-
-  def fromProtoV1(
-      domainParametersP: protoV1.DynamicDomainParameters
-  ): ParsingResult[DynamicDomainParameters] = {
-    val protoV1.DynamicDomainParameters(
-      participantResponseTimeoutP,
-      mediatorReactionTimeoutP,
-      transferExclusivityTimeoutP,
-      topologyChangeDelayP,
-      ledgerTimeRecordTimeToleranceP,
-      reconciliationIntervalP,
-      mediatorDeduplicationTimeoutP,
-      maxRatePerParticipantP,
-      maxRequestSizeP,
-    ) = domainParametersP
-    for {
-      decodedV0 <- fromProtoSharedV0(
-        participantResponseTimeoutP,
-        mediatorReactionTimeoutP,
-        transferExclusivityTimeoutP,
-        topologyChangeDelayP,
-        ledgerTimeRecordTimeToleranceP,
-      )
-      (
-        participantResponseTimeout,
-        mediatorReactionTimeout,
-        transferExclusivityTimeout,
-        topologyChangeDelay,
-        ledgerTimeRecordTimeTolerance,
-      ) = decodedV0
-      decodedV1 <- fromProtoSharedV1(
-        reconciliationIntervalP,
-        mediatorDeduplicationTimeoutP,
-        maxRatePerParticipantP,
-        maxRequestSizeP,
-      )
-      (
-        reconciliationInterval,
-        mediatorDeduplicationTimeout,
-        maxRatePerParticipant,
-        maxRequestSize,
-      ) = decodedV1
-
-      domainParameters <-
-        create(
-          participantResponseTimeout = participantResponseTimeout,
-          mediatorReactionTimeout = mediatorReactionTimeout,
-          transferExclusivityTimeout = transferExclusivityTimeout,
-          topologyChangeDelay = topologyChangeDelay,
-          ledgerTimeRecordTimeTolerance = ledgerTimeRecordTimeTolerance,
-          mediatorDeduplicationTimeout = mediatorDeduplicationTimeout,
-          reconciliationInterval = reconciliationInterval,
-          maxRatePerParticipant = maxRatePerParticipant,
-          maxRequestSize = maxRequestSize,
-          sequencerAggregateSubmissionTimeout = defaultSequencerAggregateSubmissionTimeout,
-          trafficControlConfig = None,
-        )(protocolVersionRepresentativeFor(ProtoVersion(1)))
-          .leftMap(_.toProtoDeserializationError)
-    } yield domainParameters
-  }
-
   def fromProtoV2(
-      domainParametersP: protoV2.DynamicDomainParametersX
+      domainParametersP: protoV2.DynamicDomainParameters
   ): ParsingResult[DynamicDomainParameters] = {
-    val protoV2.DynamicDomainParametersX(
+    val protoV2.DynamicDomainParameters(
       participantResponseTimeoutP,
       mediatorReactionTimeoutP,
       transferExclusivityTimeoutP,
@@ -783,37 +593,57 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
       trafficControlConfigP,
     ) = domainParametersP
     for {
-      decodedV0 <- fromProtoSharedV0(
-        participantResponseTimeoutP,
-        mediatorReactionTimeoutP,
-        transferExclusivityTimeoutP,
-        topologyChangeDelayP,
-        ledgerTimeRecordTimeToleranceP,
+
+      participantResponseTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
+        "participantResponseTimeout"
+      )(
+        participantResponseTimeoutP
       )
-      (
-        participantResponseTimeout,
-        mediatorReactionTimeout,
-        transferExclusivityTimeout,
-        topologyChangeDelay,
-        ledgerTimeRecordTimeTolerance,
-      ) = decodedV0
-      maxRate <- ProtoConverter.parseRequired[Int, v2.ParticipantDomainLimits](
+      mediatorReactionTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
+        "mediatorReactionTimeout"
+      )(
+        mediatorReactionTimeoutP
+      )
+      transferExclusivityTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
+        "transferExclusivityTimeout"
+      )(
+        transferExclusivityTimeoutP
+      )
+      topologyChangeDelay <- NonNegativeFiniteDuration.fromProtoPrimitiveO("topologyChangeDelay")(
+        topologyChangeDelayP
+      )
+      ledgerTimeRecordTimeTolerance <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
+        "ledgerTimeRecordTimeTolerance"
+      )(
+        ledgerTimeRecordTimeToleranceP
+      )
+
+      reconciliationInterval <- PositiveSeconds.fromProtoPrimitiveO(
+        "reconciliationInterval"
+      )(
+        reconciliationIntervalP
+      )
+      mediatorDeduplicationTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
+        "mediatorDeduplicationTimeout"
+      )(
+        mediatorDeduplicationTimeoutP
+      )
+
+      maxRatePerParticipantP <- ProtoConverter.parseRequired[Int, v2.ParticipantDomainLimits](
         item => Right(item.maxRate),
         "default_limits",
         defaultLimitsP,
       )
-      decodedV1 <- fromProtoSharedV1(
-        reconciliationIntervalP,
-        mediatorDeduplicationTimeoutP,
-        maxRate,
-        maxRequestSizeP,
-      )
-      (
-        reconciliationInterval,
-        mediatorDeduplicationTimeout,
-        maxRatePerParticipant,
-        maxRequestSize,
-      ) = decodedV1
+
+      maxRatePerParticipant <- NonNegativeInt
+        .create(maxRatePerParticipantP)
+        .leftMap(InvariantViolation.toProtoDeserializationError)
+
+      maxRequestSize <- NonNegativeInt
+        .create(maxRequestSizeP)
+        .map(MaxRequestSize)
+        .leftMap(InvariantViolation.toProtoDeserializationError)
+
       sequencerAggregateSubmissionTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
         "sequencerAggregateSubmissionTimeout"
       )(

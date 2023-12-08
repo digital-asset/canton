@@ -26,9 +26,6 @@ object VersionedStatus extends HasProtocolVersionedCompanion2[VersionedStatus, V
     * See the helper `supportedProtoVersion` below to define a `Parser`.
     */
   override def supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(-1) -> UnsupportedProtoCodec(
-      ProtocolVersion.minimum
-    ), // TODO(#15153) Kill this codec (and maybe UnsupportedProtoCodec?)
     ProtoVersion(0) -> VersionedProtoConverter
       .storage(
         ReleaseProtocolVersion(ProtocolVersion.v30),
@@ -36,7 +33,7 @@ object VersionedStatus extends HasProtocolVersionedCompanion2[VersionedStatus, V
       )(
         supportedProtoVersion(_)(fromProtoV0),
         _.toProtoV0.toByteString,
-      ),
+      )
   )
 
   def fromProtoV0(versionedStatusP: v0.VersionedStatus): ParsingResult[VersionedStatus] = {

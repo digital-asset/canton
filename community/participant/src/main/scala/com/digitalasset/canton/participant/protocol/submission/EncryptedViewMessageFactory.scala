@@ -11,12 +11,10 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.ViewType
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessageV1.RecipientsInfo
+import com.digitalasset.canton.protocol.messages.EncryptedViewMessage.RecipientsInfo
 import com.digitalasset.canton.protocol.messages.{
   EncryptedView,
   EncryptedViewMessage,
-  EncryptedViewMessageV1,
-  EncryptedViewMessageV2,
   RootHashMessageRecipients,
 }
 import com.digitalasset.canton.serialization.DeserializationError
@@ -35,7 +33,7 @@ object EncryptedViewMessageFactory {
   private final case class EncryptedViewMessageCommon[VT <: ViewType](
       symmetricViewKeyRandomness: SecureRandomness,
       symmetricViewKey: SymmetricKey,
-      recipientsInfo: EncryptedViewMessageV1.RecipientsInfo,
+      recipientsInfo: RecipientsInfo,
       usingGroupAddressing: Boolean,
       signature: Option[Signature],
       encryptedView: EncryptedView[VT],
@@ -201,9 +199,9 @@ object EncryptedViewMessageFactory {
           }
       } yield sessionKeyAndMap
 
-    def createEncryptedViewMessageV2(
+    def createEncryptedViewMessage(
         evmCommon: EncryptedViewMessageCommon[VT]
-    ): EitherT[Future, EncryptedViewMessageCreationError, EncryptedViewMessageV2[VT]] =
+    ): EitherT[Future, EncryptedViewMessageCreationError, EncryptedViewMessage[VT]] =
       (if (!evmCommon.usingGroupAddressing) {
          for {
            sessionKeyAndRandomnessMap <- getSessionKey(evmCommon.recipientsInfo)
@@ -240,7 +238,7 @@ object EncryptedViewMessageFactory {
              )
          )
        }).map { case (randomnessV2, sessionKeyMap) =>
-        EncryptedViewMessageV2[VT](
+        EncryptedViewMessage[VT](
           evmCommon.signature,
           viewTree.viewHash,
           randomnessV2,
@@ -248,31 +246,11 @@ object EncryptedViewMessageFactory {
           evmCommon.encryptedView,
           viewTree.domainId,
           viewEncryptionScheme,
+          protocolVersion,
         )(
           Some(evmCommon.recipientsInfo)
         )
       }
-
-    def createEncryptedViewMessageV1(
-        evmCommon: EncryptedViewMessageCommon[VT]
-    ): EitherT[Future, EncryptedViewMessageCreationError, EncryptedViewMessageV1[VT]] =
-      createDataMap(
-        evmCommon.recipientsInfo.informeeParticipants.to(LazyList),
-        randomness,
-        cryptoSnapshot,
-        protocolVersion,
-      ).map(randomnessV1 =>
-        EncryptedViewMessageV1[VT](
-          evmCommon.signature,
-          viewTree.viewHash,
-          randomnessV1.values.toSeq,
-          evmCommon.encryptedView,
-          viewTree.domainId,
-          viewEncryptionScheme,
-        )(
-          Some(evmCommon.recipientsInfo)
-        )
-      )
 
     def encryptRandomnessWithSessionKey(
         sessionKey: SymmetricKey
@@ -285,9 +263,7 @@ object EncryptedViewMessageFactory {
 
     for {
       evmCommon <- createEVMCommon()
-      message <-
-        if (protocolVersion >= ProtocolVersion.v6) createEncryptedViewMessageV2(evmCommon)
-        else createEncryptedViewMessageV1(evmCommon)
+      message <- createEncryptedViewMessage(evmCommon)
 
     } yield message
   }

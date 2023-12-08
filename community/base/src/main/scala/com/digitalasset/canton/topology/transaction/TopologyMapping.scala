@@ -278,7 +278,7 @@ object LegalIdentityClaim extends HasMemoizedProtocolVersionedWrapperCompanion[L
   override val name: String = "LegalIdentityClaim"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v5)(v0.LegalIdentityClaim)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v30)(v0.LegalIdentityClaim)(
       supportedProtoVersionMemoized(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
@@ -621,7 +621,7 @@ final case class DomainParametersChange(
 ) extends DomainGovernanceMapping {
   private[transaction] def toProtoV1: v1.DomainParametersChange = v1.DomainParametersChange(
     domain = domainId.toProtoPrimitive,
-    Option(domainParameters.toProtoV1),
+    Option(domainParameters.toProtoV2),
   )
 
   override def dbType: DomainTopologyTransactionType = DomainParametersChange.dbType
@@ -637,8 +637,8 @@ object DomainParametersChange {
   ): ParsingResult[DomainParametersChange] = {
     for {
       uid <- UniqueIdentifier.fromProtoPrimitive(value.domain, "domain")
-      domainParametersP <- value.domainParameters.toRight(FieldNotSet("domainParameters"))
-      domainParameters <- DynamicDomainParameters.fromProtoV1(domainParametersP)
+      domainParametersXP <- value.domainParameters.toRight(FieldNotSet("domainParameters"))
+      domainParameters <- DynamicDomainParameters.fromProtoV2(domainParametersXP)
     } yield DomainParametersChange(DomainId(uid), domainParameters)
   }
 }

@@ -64,8 +64,8 @@ final class TimedWriteService(delegate: WriteService, metrics: Metrics) extends 
       traceContext: TraceContext
   ): CompletionStage[SubmissionResult] =
     Timed.timedAndTrackedCompletionStage(
-      metrics.daml.services.write.submitTransaction,
-      metrics.daml.services.write.submitTransactionRunning,
+      metrics.daml.services.write.submitReassignment,
+      metrics.daml.services.write.submitReassignmentRunning,
       delegate.submitReassignment(
         submitter,
         applicationId,

@@ -13,7 +13,6 @@ import com.digitalasset.canton.topology.transaction.{
   UnionspaceDefinitionX,
 }
 import com.digitalasset.canton.topology.{Namespace, TestingOwnerWithKeysX}
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTestWordSpec, ProtocolVersionChecksAnyWordSpec}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -114,7 +113,7 @@ class UnionspaceAuthorizationGraphXTest
     ) shouldBe valid
   }
 
-  "authorization graph for a unionspace" onlyRunWithOrGreaterThan ProtocolVersion.v30 when {
+  "authorization graph for a unionspace" when {
 
     "only having namespace delegations for its constituents" should {
       import fixture.*

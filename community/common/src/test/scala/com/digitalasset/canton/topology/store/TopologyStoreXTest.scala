@@ -64,10 +64,6 @@ trait TopologyStoreXTest extends AsyncWordSpec with TopologyStoreXTestBase {
               tx1_NSD_Proposal.transaction,
               ProtocolVersion.v30,
             )
-            txBadProtocolVersion <- store.findStoredForVersion(
-              tx1_NSD_Proposal.transaction,
-              ProtocolVersion.v5,
-            )
 
             proposalTransactions <- inspect(
               store,
@@ -111,7 +107,6 @@ trait TopologyStoreXTest extends AsyncWordSpec with TopologyStoreXTestBase {
             assert(maxTs.contains((SequencedTime(ts6), EffectiveTime(ts6))))
             retrievedTx.map(_.transaction) shouldBe Some(tx1_NSD_Proposal)
             txProtocolVersion.map(_.transaction) shouldBe Some(tx1_NSD_Proposal)
-            txBadProtocolVersion shouldBe None
 
             expectTransactions(
               proposalTransactions,

@@ -38,7 +38,7 @@ object LocalVerdict extends HasProtocolVersionedCompanion[LocalVerdict] {
 
   override def supportedProtoVersions: messages.LocalVerdict.SupportedProtoVersions =
     SupportedProtoVersions(
-      ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v5)(v1.LocalVerdict)(
+      ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v30)(v1.LocalVerdict)(
         supportedProtoVersion(_)(fromProtoV1),
         _.toProtoV1.toByteString,
       )

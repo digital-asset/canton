@@ -378,7 +378,7 @@ object SequencedEventValidator extends HasLoggerName {
       if (signingTimestamp <= approximateSnapshotTime) {
         EitherT(snapshotF.flatMap(validateWithSnapshot))
       } else {
-        loggingContext.info(
+        loggingContext.debug(
           s"Validating event at $sequencingTimestamp optimistically with snapshot taken at $approximateSnapshotTime"
         )
         EitherT(validateWithSnapshot(approximateSnapshot))
@@ -625,7 +625,7 @@ class SequencedEventValidatorImpl(
               event.timestamp,
               lastTopologyClientTimestamp(priorEventO),
               protocolVersion,
-              warnIfApproximate = true,
+              warnIfApproximate = priorEventO.nonEmpty,
               optimistic,
             )
             .leftMap(InvalidTimestampOfSigningKey(event.timestamp, signingTs, _))

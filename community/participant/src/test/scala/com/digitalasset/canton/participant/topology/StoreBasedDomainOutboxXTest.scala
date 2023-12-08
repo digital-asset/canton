@@ -28,7 +28,6 @@ import com.digitalasset.canton.topology.transaction.TopologyTransactionX.Generic
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   DomainAlias,
@@ -286,7 +285,7 @@ class StoreBasedDomainOutboxXTest
     .map(x => StoredTopologyTransactionsX(x.result.filter(_.validUntil.isEmpty)))
 
   "dispatcher" should {
-    "dispatch transaction on new connect" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
+    "dispatch transaction on new connect" in {
       val (source, target, manager, handle, client) =
         mk(transactions.length)
       for {
@@ -299,7 +298,7 @@ class StoreBasedDomainOutboxXTest
       }
     }
 
-    "dispatch transaction on existing connections" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
+    "dispatch transaction on existing connections" in {
       val (source, target, manager, handle, client) =
         mk(transactions.length)
       for {
@@ -312,7 +311,7 @@ class StoreBasedDomainOutboxXTest
       }
     }
 
-    "dispatch transactions continuously" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
+    "dispatch transactions continuously" in {
       val (source, target, manager, handle, client) = mk(slice1.length)
       for {
         _res <- push(manager, slice1)
@@ -327,7 +326,7 @@ class StoreBasedDomainOutboxXTest
       }
     }
 
-    "not dispatch old data when reconnected" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
+    "not dispatch old data when reconnected" in {
       val (source, target, manager, handle, client) = mk(slice1.length)
       for {
         _ <- outboxConnected(manager, handle, client, source, target)
@@ -344,7 +343,7 @@ class StoreBasedDomainOutboxXTest
       }
     }
 
-    "correctly find a remove in source store" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
+    "correctly find a remove in source store" in {
 
       val (source, target, manager, handle, client) =
         mk(transactions.length)
@@ -384,7 +383,7 @@ class StoreBasedDomainOutboxXTest
       }
     }
 
-    "also push deprecated transactions" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
+    "also push deprecated transactions" in {
       val (source, target, manager, handle, client) =
         mk(transactions.length - 1)
       val midRevertSerialBumped = transactions(2).reverse
@@ -411,7 +410,7 @@ class StoreBasedDomainOutboxXTest
       }
     }
 
-    "handle rejected transactions" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
+    "handle rejected transactions" in {
       val (source, target, manager, handle, client) =
         mk(
           transactions.size,
@@ -427,7 +426,7 @@ class StoreBasedDomainOutboxXTest
       }
     }
 
-    "handle failed transactions" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
+    "handle failed transactions" in {
       val (source, target, manager, handle, client) =
         mk(
           2,

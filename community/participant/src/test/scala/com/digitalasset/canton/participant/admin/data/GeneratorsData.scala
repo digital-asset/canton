@@ -19,7 +19,7 @@ object GeneratorsData {
       protocolVersion <- protocolVersionArb.arbitrary
       domainId <- Arbitrary.arbitrary[DomainId]
       contract <- serializableContractArb(canHaveEmptyKey = true).arbitrary
-      transferCounter <- transferCounterOGen(protocolVersion)
+      transferCounter <- transferCounterOGen
 
       ac = ActiveContract.create(domainId, contract, transferCounter)(protocolVersion)
 

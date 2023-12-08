@@ -667,7 +667,6 @@ class ExampleTransactionFactory(
         Salt.tryDeriveSalt(transactionSeed, 1, cryptoOps),
         transactionUuid,
       )
-      .value
 
   val participantMetadata: ParticipantMetadata =
     ParticipantMetadata(cryptoOps)(

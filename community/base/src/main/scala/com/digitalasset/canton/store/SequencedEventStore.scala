@@ -49,6 +49,7 @@ trait SequencedEventStore extends PrunableByTime with NamedLogging with AutoClos
   import SequencedEventStore.SearchCriterion
 
   implicit val ec: ExecutionContext
+  protected def kind: String = "sequenced events"
 
   /** Stores the given [[com.digitalasset.canton.sequencing.protocol.SequencedEvent]]s.
     * If an event with the same timestamp already exist, the event may remain unchanged or overwritten.
@@ -181,7 +182,7 @@ object SequencedEventStore {
         timestamp = Some(timestamp.toProtoPrimitive),
         traceContext = Some(SerializableTraceContext(traceContext).toProtoV0),
         isIgnored = isIgnored,
-        underlying = underlying.map(_.toProtoV0),
+        underlying = underlying.map(_.toProtoV1),
       )
   }
 
@@ -325,7 +326,7 @@ object SequencedEventStore {
       for {
         underlyingO <- underlyingPO.traverse(
           SignedContent
-            .fromProtoV0(_)
+            .fromProtoV1(_)
             .flatMap(
               _.deserializeContent(SequencedEvent.fromByteStringOpen(hashOps, protocolVersion))
             )

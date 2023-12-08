@@ -231,7 +231,7 @@ message ListDomainParametersStateRequest {
 message ListDomainParametersStateResult {
     message Result {
         BaseResult context = 1;
-        com.digitalasset.canton.protocol.v2.DynamicDomainParametersX item = 2;
+        com.digitalasset.canton.protocol.v2.DynamicDomainParameters item = 2;
     }
     repeated Result results = 1;
 }

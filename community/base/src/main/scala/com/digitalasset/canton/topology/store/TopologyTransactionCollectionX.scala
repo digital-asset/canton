@@ -121,22 +121,11 @@ object StoredTopologyTransactionsX
     StoredTopologyTransactionsX[TopologyChangeOpX.Replace, TopologyMappingX]
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(-1) -> ProtoCodec(
-      ProtocolVersion.minimum, // TODO(#15153) Kill this codec
-      _ =>
-        throw new UnsupportedOperationException(
-          s"Cannot deserialize: StoredTopologyTransactionsX are only supported from protocol version ${ProtocolVersion.v30}"
-        ),
-      _ =>
-        throw new UnsupportedOperationException(
-          s"Cannot serialize: StoredTopologyTransactionsX are only supported from protocol version ${ProtocolVersion.v30}"
-        ),
-    ),
     ProtoVersion(0) -> ProtoCodec(
       ProtocolVersion.v30,
       supportedProtoVersion(v0.TopologyTransactions)(fromProtoV0),
       _.toProtoV0.toByteString,
-    ),
+    )
   )
 
   def fromProtoV0(

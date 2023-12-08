@@ -44,13 +44,13 @@ class SubmissionRequestTest extends BaseTestWordSpec {
     "authenticate the relevant fields" in {
       if (testedProtocolVersion >= ProtocolVersion.v30) {
 
-        val envelope1 = ClosedEnvelope.tryCreate(
+        val envelope1 = ClosedEnvelope.create(
           ByteString.copyFromUtf8("Content1"),
           Recipients.cc(DefaultTestIdentities.participant1),
           Seq.empty,
           testedProtocolVersion,
         )
-        val envelope2 = ClosedEnvelope.tryCreate(
+        val envelope2 = ClosedEnvelope.create(
           ByteString.copyFromUtf8("Content2"),
           Recipients.cc(DefaultTestIdentities.participant1),
           Seq.empty,
@@ -103,7 +103,7 @@ class SubmissionRequestTest extends BaseTestWordSpec {
 
     "ignore sender-specific fields" in {
       if (testedProtocolVersion >= ProtocolVersion.v30) {
-        val envelope1 = ClosedEnvelope.tryCreate(
+        val envelope1 = ClosedEnvelope.create(
           ByteString.copyFromUtf8("some-content"),
           Recipients.cc(DefaultTestIdentities.participant1, DefaultTestIdentities.participant3),
           Seq.empty,
@@ -131,7 +131,7 @@ class SubmissionRequestTest extends BaseTestWordSpec {
 
         assertEquivalentRequests(requestsWithoutSignatures)
 
-        val envelope2 = ClosedEnvelope.tryCreate(
+        val envelope2 = ClosedEnvelope.create(
           ByteString.copyFromUtf8("some-content"),
           Recipients.cc(DefaultTestIdentities.participant1, DefaultTestIdentities.participant2),
           Seq(Signature.noSignature),

@@ -6,10 +6,10 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 import cats.data.EitherT
 import cats.syntax.functor.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
-import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.domain.sequencing.sequencer.errors.SequencerError.PayloadToEventTimeBoundExceeded
 import com.digitalasset.canton.domain.sequencing.sequencer.store.*
 import com.digitalasset.canton.lifecycle.{
   AsyncCloseable,
@@ -23,7 +23,6 @@ import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutorService, config}
 import com.google.protobuf.ByteString
 import org.apache.pekko.NotUsed
@@ -154,13 +153,8 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
     result
   }
 
-  private def getErrorMessage(message: String256M, errorO: Option[ByteString]): String = {
-    if (testedProtocolVersion >= ProtocolVersion.v30) { // TODO(#15153) Kill this conditional
-      DeliverErrorStoreEvent.deserializeError(message, errorO, testedProtocolVersion).toString
-    } else {
-      message.unwrap
-    }
-  }
+  private def getErrorMessage(errorO: Option[ByteString]): String =
+    DeliverErrorStoreEvent.fromByteString(errorO).toString
 
   private val alice = ParticipantId("alice")
   private val bob = ParticipantId("bob")
@@ -202,7 +196,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
             offerDeliverOrFail(Presequenced.alwaysValid(deliver1))
             completeFlow()
           },
-          _.warningMessage shouldBe "The payload to event time bound [PT1M] has been been exceeded by payload time [1970-01-01T00:00:00.000001Z] and sequenced event time [1970-01-01T00:01:11Z]",
+          _.shouldBeCantonErrorCode(PayloadToEventTimeBoundExceeded),
         )
         events <- store.readEvents(aliceId)
       } yield events.payloads shouldBe empty
@@ -234,14 +228,12 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
           payload2,
           None,
         )
-        _ <- loggerFactory.assertLogs(
-          {
-            offerDeliverOrFail(Presequenced.withMaxSequencingTime(deliver1, beforeNow))
-            offerDeliverOrFail(Presequenced.withMaxSequencingTime(deliver2, longAfterNow))
-            completeFlow()
-          },
-          _.warningMessage should include regex "The sequencer time \\[.*\\] has exceeded the max-sequencing-time of the send request \\[1970-01-01T00:00:05Z\\]: deliver\\[message-id:1\\]",
-        )
+        _ <- {
+          offerDeliverOrFail(Presequenced.withMaxSequencingTime(deliver1, beforeNow))
+          offerDeliverOrFail(Presequenced.withMaxSequencingTime(deliver2, longAfterNow))
+          completeFlow()
+        }
+
         events <- store.readEvents(aliceId)
       } yield {
         events.payloads should have size 1
@@ -316,10 +308,9 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
           event.messageId shouldBe messageId1
         }
 
-        inside(sortedEvents(1)) {
-          case DeliverErrorStoreEvent(_, `messageId2`, message, errorO, _) =>
-            getErrorMessage(message, errorO) should (include("Invalid signing timestamp")
-              and include("The signing timestamp must be before or at "))
+        inside(sortedEvents(1)) { case DeliverErrorStoreEvent(_, _, errorO, _) =>
+          getErrorMessage(errorO) should (include("Invalid signing timestamp")
+            and include("The signing timestamp must be before or at "))
         }
       }
     }
@@ -328,7 +319,6 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
   "deliver with unknown recipients" should {
     "instead write an error" in withEnv() { implicit env =>
       import env.*
-      val messageId = MessageId.tryCreate("test-unknown-recipients")
 
       for {
         aliceId <- store.registerMember(alice, CantonTimestamp.Epoch)
@@ -340,7 +330,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
               isRequest = true,
               batch = Batch.fromClosed(
                 testedProtocolVersion,
-                ClosedEnvelope.tryCreate(
+                ClosedEnvelope.create(
                   ByteString.EMPTY,
                   Recipients.cc(bob),
                   Seq.empty,
@@ -360,13 +350,11 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
             error = events.payloads.collectFirst {
               case Sequenced(
                     _,
-                    deliverError @ DeliverErrorStoreEvent(`aliceId`, `messageId`, _, _, _),
+                    deliverError @ DeliverErrorStoreEvent(`aliceId`, _, _, _),
                   ) =>
                 deliverError
             }.value
-          } yield getErrorMessage(error.message, error.error) should include(
-            s"Unknown recipients: $bob"
-          )
+          } yield getErrorMessage(error.error) should include(s"Unknown recipients: $bob")
         }
       } yield succeed
     }

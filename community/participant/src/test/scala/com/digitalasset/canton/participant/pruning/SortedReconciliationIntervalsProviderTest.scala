@@ -22,7 +22,7 @@ class SortedReconciliationIntervalsProviderTest
 
   "SortedReconciliationIntervalsProvider" must {
     "allow to query reconciliation intervals (PV >= 4)" in {
-      val protocolVersion = ProtocolVersion.v5
+      val protocolVersion = ProtocolVersion.latest
 
       val clock = new SimClock(fromEpoch(0), loggerFactory)
 

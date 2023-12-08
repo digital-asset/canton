@@ -283,8 +283,7 @@ class DomainTopologyManager(
       transaction.transaction.element.mapping match {
         // in v5, the domain topology message validator expects to get the From before the To
         // and no Both. so we need to ensure that at no point, a Both is added to the domain manager
-        case ParticipantState(RequestSide.Both, _, participant, _, _)
-            if protocolVersion >= ProtocolVersion.v5 =>
+        case ParticipantState(RequestSide.Both, _, participant, _, _) =>
           EitherT.leftT(
             DomainTopologyManagerError.InvalidOrFaultyOnboardingRequest
               .Failure(

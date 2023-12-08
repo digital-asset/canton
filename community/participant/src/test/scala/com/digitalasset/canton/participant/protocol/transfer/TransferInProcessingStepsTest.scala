@@ -28,7 +28,6 @@ import com.digitalasset.canton.participant.protocol.submission.{
 import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferInValidation.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.{
-  IncompatibleProtocolVersions,
   NoTransferSubmissionPermission,
   ReceivedMultipleRequests,
   StakeholdersMismatch,
@@ -87,7 +86,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
   )
 
   private val initialTransferCounter: TransferCounterO =
-    TransferCounter.forCreatedContract(testedProtocolVersion)
+    Some(TransferCounter.Genesis)
 
   private def submitterInfo(submitter: LfPartyId): TransferSubmitterMetadata = {
     TransferSubmitterMetadata(
@@ -231,7 +230,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
             seed,
             uuid,
           )
-          .value
         TransferData(
           SourceProtocolVersion(testedProtocolVersion),
           transferId.transferOutTimestamp,
@@ -391,15 +389,8 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
             )
             .value
             .failOnShutdown
-        // if (testedProtocolVersion < TransferCommonData.minimumPvForTransferCounter) preparedS
-
-        // )("prepare submission did not return a left")
       } yield {
-        if (testedProtocolVersion < ProtocolVersion.v30) // TODO(#15153) Kill this conditional
-          preparedSubmission should matchPattern {
-            case Left(IncompatibleProtocolVersions(_, _, _)) =>
-          }
-        else preparedSubmission should matchPattern { case Right(_) => }
+        preparedSubmission should matchPattern { case Right(_) => }
       }
 
     }
@@ -572,14 +563,12 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
         )
 
         transferLookup = ephemeralState.transferCache
-        contractLookup = ephemeralState.contractLookup
 
         result <- leftOrFail(
           transferInProcessingSteps
             .constructPendingDataAndResponse(
               pendingDataAndResponseArgs2,
               transferLookup,
-              contractLookup,
               FutureUnlessShutdown.pure(mkActivenessResult()),
               targetMediator,
               freshOwnTimelyTx = true,
@@ -619,12 +608,11 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
           transferringParticipant = true,
         )
 
-        result <- valueOrFail(
+        _result <- valueOrFail(
           transferInProcessingSteps
             .constructPendingDataAndResponse(
               pendingDataAndResponseArgs,
               transferLookup,
-              contractLookup,
               FutureUnlessShutdown.pure(mkActivenessResult()),
               targetMediator,
               freshOwnTimelyTx = true,

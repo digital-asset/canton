@@ -5,9 +5,7 @@ syntax = "proto3";
 
 package com.digitalasset.canton.protocol.v1;
 
-import "com/digitalasset/canton/protocol/v0/common.proto";
 import "com/digitalasset/canton/protocol/v1/merkle.proto";
-import "google/protobuf/timestamp.proto";
 import "scalapb/scalapb.proto";
 
 // Messages related to the transaction or transfer protocol sent by a mediator
@@ -17,21 +15,4 @@ message InformeeTree {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
   GenTransactionTree tree = 1;
-}
-
-// Renamed MediatorRejection -> MediatorReject
-message MediatorReject {
-  reserved 1; // removed "code" field
-  string cause = 2; // renamed reason -> cause
-  string error_code = 3;
-  uint32 error_category = 4;
-}
-
-message MalformedMediatorRequestResult {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
-
-  google.protobuf.Timestamp request_id = 1;
-  string domain_id = 2;
-  com.digitalasset.canton.protocol.v0.ViewType view_type = 3;
-  MediatorReject rejection = 4; // MediatorRejection -> MediatorReject
 }

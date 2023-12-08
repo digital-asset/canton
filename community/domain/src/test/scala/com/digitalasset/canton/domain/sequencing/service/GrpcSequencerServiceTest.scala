@@ -14,7 +14,6 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
-import com.digitalasset.canton.domain.governance.ParticipantAuditor
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.domain.sequencing.SequencerParameters
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
@@ -26,7 +25,7 @@ import com.digitalasset.canton.protocol.{
   DomainParametersLookup,
   DynamicDomainParametersLookup,
   TestDomainParameters,
-  v0 as protocolV0,
+  v1 as protocolV1,
 }
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.BytestringWithCryptographicEvidence
@@ -75,38 +74,7 @@ class GrpcSequencerServiceTest
     with HasExecutionContext {
   type Subscription = GrpcManagedSubscription[_]
 
-  sealed trait StreamItem
-  case class StreamNext[A](value: A) extends StreamItem
-  case class StreamError(t: Throwable) extends StreamItem
-  object StreamComplete extends StreamItem
-
-  class MockStreamObserver[T] extends StreamObserver[T] with RecordStreamObserverItems[T]
-  class MockServerStreamObserver[T]
-      extends ServerCallStreamObserver[T]
-      with RecordStreamObserverItems[T] {
-    override def isCancelled: Boolean = ???
-    override def setOnCancelHandler(onCancelHandler: Runnable): Unit = ???
-    override def setCompression(compression: String): Unit = ???
-    override def isReady: Boolean = ???
-    override def setOnReadyHandler(onReadyHandler: Runnable): Unit = ???
-    override def disableAutoInboundFlowControl(): Unit = ???
-    override def request(count: Int): Unit = ???
-    override def setMessageCompression(enable: Boolean): Unit = ???
-  }
-
-  trait RecordStreamObserverItems[T] {
-    this: StreamObserver[T] =>
-
-    val items: mutable.Buffer[StreamItem] = mutable.Buffer[StreamItem]()
-
-    override def onNext(value: T): Unit = items += StreamNext(value)
-    override def onError(t: Throwable): Unit = items += StreamError(t)
-    override def onCompleted(): Unit = items += StreamComplete
-  }
-
-  class MockSubscription extends CloseNotification with AutoCloseable {
-    override def close(): Unit = {}
-  }
+  import GrpcSequencerServiceTest.*
 
   private lazy val participant = DefaultTestIdentities.participant1
   private lazy val crypto = new SymbolicPureCrypto
@@ -164,38 +132,35 @@ class GrpcSequencerServiceTest
 
     val maxItemsInTopologyBatch = 5
     private val numBatches = 3
-    private val topologyInitService: Option[TopologyStateForInitializationService] =
-      if (testedProtocolVersion < ProtocolVersion.v30) None // TODO(#15153) Kill this conditional
-      else
-        Some(new TopologyStateForInitializationService {
-          val factoryX =
-            new TopologyTransactionXTestFactory(loggerFactory, initEc = parallelExecutionContext)
+    private val topologyInitService: TopologyStateForInitializationService =
+      new TopologyStateForInitializationService {
+        val factoryX =
+          new TopologyTransactionXTestFactory(loggerFactory, initEc = parallelExecutionContext)
 
-          override def initialSnapshot(member: Member)(implicit
-              executionContext: ExecutionContext,
-              traceContext: TraceContext,
-          ): Future[GenericStoredTopologyTransactionsX] = Future.successful(
-            StoredTopologyTransactionsX(
-              // As we don't expect the actual transactions in this test, we can repeat the same transaction a bunch of times
-              List
-                .fill(maxItemsInTopologyBatch * numBatches)(factoryX.ns1k1_k1)
-                .map(
-                  StoredTopologyTransactionX(
-                    SequencedTime.MinValue,
-                    EffectiveTime.MinValue,
-                    None,
-                    _,
-                  )
+        override def initialSnapshot(member: Member)(implicit
+            executionContext: ExecutionContext,
+            traceContext: TraceContext,
+        ): Future[GenericStoredTopologyTransactionsX] = Future.successful(
+          StoredTopologyTransactionsX(
+            // As we don't expect the actual transactions in this test, we can repeat the same transaction a bunch of times
+            List
+              .fill(maxItemsInTopologyBatch * numBatches)(factoryX.ns1k1_k1)
+              .map(
+                StoredTopologyTransactionX(
+                  SequencedTime.MinValue,
+                  EffectiveTime.MinValue,
+                  None,
+                  _,
                 )
-            )
+              )
           )
-        })
+        )
+      }
     val service =
       new GrpcSequencerService(
         sequencer,
         DomainTestMetrics.sequencer,
         loggerFactory,
-        ParticipantAuditor.noop,
         new AuthenticationCheck.MatchesAuthenticatedMember {
           override def lookupCurrentMember(): Option[Member] = member.some
         },
@@ -203,7 +168,7 @@ class GrpcSequencerServiceTest
         sequencerSubscriptionFactory,
         domainParamLookup,
         params,
-        topologyInitService,
+        Some(topologyInitService),
         BaseTest.testedProtocolVersion,
         enableBroadcastOfUnauthenticatedMessages = false,
         maxItemsInTopologyResponse = PositiveInt.tryCreate(maxItemsInTopologyBatch),
@@ -249,8 +214,7 @@ class GrpcSequencerServiceTest
     mkSubmissionRequest(
       Batch(
         List(
-          ClosedEnvelope
-            .tryCreate(content, Recipients.cc(recipient), Seq.empty, testedProtocolVersion)
+          ClosedEnvelope.create(content, Recipients.cc(recipient), Seq.empty, testedProtocolVersion)
         ),
         testedProtocolVersion,
       ),
@@ -265,7 +229,6 @@ class GrpcSequencerServiceTest
       signedContent(request.toByteString)
 
     def sendProto(
-        requestV0: protocolV0.SubmissionRequest,
         versionedRequest: ByteString,
         versionedSignedRequest: ByteString,
         authenticated: Boolean,
@@ -289,7 +252,6 @@ class GrpcSequencerServiceTest
     ): Future[ParsingResult[SendAsyncResponse]] = {
       val signedRequest = signedSubmissionReq(request)
       sendProto(
-        request.toProtoV0,
         request.toByteString,
         signedRequest.toByteString,
         authenticated,
@@ -314,14 +276,12 @@ class GrpcSequencerServiceTest
       }
 
     def sendProtoAndCheckError(
-        requestV0: protocolV0.SubmissionRequest,
         versionedRequest: ByteString,
         versionedSignedRequest: ByteString,
         assertion: PartialFunction[SendAsyncError, Assertion],
         authenticated: Boolean = true,
     )(implicit env: Environment): Future[Assertion] =
       sendProto(
-        requestV0,
         versionedRequest,
         versionedSignedRequest,
         authenticated,
@@ -330,15 +290,14 @@ class GrpcSequencerServiceTest
       }
 
     "reject empty request" in { implicit env =>
-      val requestV0 = protocolV0.SubmissionRequest("", "", false, None, None, None)
+      val requestV1 = protocolV1.SubmissionRequest("", "", false, None, None, None, None)
       val signedRequestV0 = signedContent(
-        VersionedMessage[SubmissionRequest](requestV0.toByteString, 0).toByteString
+        VersionedMessage[SubmissionRequest](requestV1.toByteString, 0).toByteString
       )
 
       loggerFactory.assertLogs(
         sendProtoAndCheckError(
-          requestV0,
-          VersionedMessage(requestV0.toByteString, 0).toByteString,
+          VersionedMessage(requestV1.toByteString, 0).toByteString,
           signedRequestV0.toByteString,
           { case SendAsyncError.RequestInvalid(message) =>
             message should startWith("ValueConversionError(sender,Invalid member ``")
@@ -364,17 +323,16 @@ class GrpcSequencerServiceTest
     }
 
     "reject envelopes with invalid sender" in { implicit env =>
-      val requestV0 = defaultRequest.toProtoV0.focus(_.sender).modify {
+      val requestV1 = defaultRequest.toProtoV1.focus(_.sender).modify {
         case "" => fail("sender should be set")
         case _sender => "THISWILLFAIL"
       }
       val signedRequestV0 = signedContent(
-        VersionedMessage[SubmissionRequest](requestV0.toByteString, 0).toByteString
+        VersionedMessage[SubmissionRequest](requestV1.toByteString, 0).toByteString
       )
       loggerFactory.assertLogs(
         sendProtoAndCheckError(
-          requestV0,
-          VersionedMessage(requestV0.toByteString, 0).toByteString,
+          VersionedMessage(requestV1.toByteString, 0).toByteString,
           signedRequestV0.toByteString,
           { case SendAsyncError.RequestInvalid(message) =>
             message should startWith(
@@ -390,7 +348,7 @@ class GrpcSequencerServiceTest
 
     "reject large messages" in { implicit env =>
       val bigEnvelope =
-        ClosedEnvelope.tryCreate(
+        ClosedEnvelope.create(
           ByteString.copyFromUtf8(scala.util.Random.nextString(5000)),
           Recipients.cc(participant),
           Seq.empty,
@@ -446,7 +404,7 @@ class GrpcSequencerServiceTest
           .replace(
             Batch(
               List(
-                ClosedEnvelope.tryCreate(
+                ClosedEnvelope.create(
                   content,
                   Recipients.cc(unauthenticatedMember),
                   Seq.empty,
@@ -475,7 +433,7 @@ class GrpcSequencerServiceTest
         .replace(
           Batch(
             List(
-              ClosedEnvelope.tryCreate(
+              ClosedEnvelope.create(
                 content,
                 Recipients.cc(unauthenticatedMember),
                 Seq.empty,
@@ -497,7 +455,7 @@ class GrpcSequencerServiceTest
         .replace(
           Batch(
             List(
-              ClosedEnvelope.tryCreate(
+              ClosedEnvelope.create(
                 content,
                 Recipients.cc(DefaultTestIdentities.domainManager),
                 Seq.empty,
@@ -549,13 +507,13 @@ class GrpcSequencerServiceTest
     ): (FixtureParam => Future[Assertion]) = { _ =>
       val differentEnvelopes = Batch.fromClosed(
         testedProtocolVersion,
-        ClosedEnvelope.tryCreate(
+        ClosedEnvelope.create(
           ByteString.copyFromUtf8("message to first mediator"),
           Recipients(NonEmpty.mk(Seq, mediator1)),
           Seq.empty,
           testedProtocolVersion,
         ),
-        ClosedEnvelope.tryCreate(
+        ClosedEnvelope.create(
           ByteString.copyFromUtf8("message to second mediator"),
           Recipients(NonEmpty.mk(Seq, mediator2)),
           Seq.empty,
@@ -564,7 +522,7 @@ class GrpcSequencerServiceTest
       )
       val sameEnvelope = Batch.fromClosed(
         testedProtocolVersion,
-        ClosedEnvelope.tryCreate(
+        ClosedEnvelope.create(
           ByteString.copyFromUtf8("message to two mediators and the participant"),
           Recipients(
             NonEmpty(
@@ -630,7 +588,7 @@ class GrpcSequencerServiceTest
       ),
     )
 
-    "reject sending to multiple mediator groups iff the sender is a participant" onlyRunWithOrGreaterThan (ProtocolVersion.v30) in multipleMediatorTestCase(
+    "reject sending to multiple mediator groups iff the sender is a participant" in multipleMediatorTestCase(
       RecipientsTree(
         NonEmpty.mk(
           Set,
@@ -655,7 +613,7 @@ class GrpcSequencerServiceTest
         .replace(
           Batch(
             List(
-              ClosedEnvelope.tryCreate(
+              ClosedEnvelope.create(
                 content,
                 Recipients.cc(unauthenticatedMember),
                 Seq.empty,
@@ -678,79 +636,76 @@ class GrpcSequencerServiceTest
       )
     }
 
-    "reject unauthenticated eligible members in aggregation rule" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
-      implicit env =>
-        val request = defaultRequest
-          .focus(_.timestampOfSigningKey)
-          .replace(Some(CantonTimestamp.ofEpochSecond(1)))
-          .focus(_.aggregationRule)
-          .replace(
-            Some(
-              AggregationRule(
-                eligibleMembers = NonEmpty(Seq, participant, unauthenticatedMember),
-                threshold = PositiveInt.tryCreate(1),
-                testedProtocolVersion,
-              )
+    "reject unauthenticated eligible members in aggregation rule" in { implicit env =>
+      val request = defaultRequest
+        .focus(_.timestampOfSigningKey)
+        .replace(Some(CantonTimestamp.ofEpochSecond(1)))
+        .focus(_.aggregationRule)
+        .replace(
+          Some(
+            AggregationRule(
+              eligibleMembers = NonEmpty(Seq, participant, unauthenticatedMember),
+              threshold = PositiveInt.tryCreate(1),
+              testedProtocolVersion,
             )
           )
-        loggerFactory.assertLogs(
-          sendAndCheckError(request) { case SendAsyncError.RequestInvalid(message) =>
-            message should include(
-              "Eligible senders in aggregation rule must be authenticated, but found unauthenticated members"
-            )
-          },
-          _.warningMessage should include(
+        )
+      loggerFactory.assertLogs(
+        sendAndCheckError(request) { case SendAsyncError.RequestInvalid(message) =>
+          message should include(
             "Eligible senders in aggregation rule must be authenticated, but found unauthenticated members"
-          ),
-        )
+          )
+        },
+        _.warningMessage should include(
+          "Eligible senders in aggregation rule must be authenticated, but found unauthenticated members"
+        ),
+      )
     }
 
-    "reject unachievable threshold in aggregation rule" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
-      implicit env =>
-        val request = defaultRequest
-          .focus(_.timestampOfSigningKey)
-          .replace(Some(CantonTimestamp.ofEpochSecond(1)))
-          .focus(_.aggregationRule)
-          .replace(
-            Some(
-              AggregationRule(
-                eligibleMembers = NonEmpty(Seq, participant, participant),
-                threshold = PositiveInt.tryCreate(2),
-                testedProtocolVersion,
-              )
+    "reject unachievable threshold in aggregation rule" in { implicit env =>
+      val request = defaultRequest
+        .focus(_.timestampOfSigningKey)
+        .replace(Some(CantonTimestamp.ofEpochSecond(1)))
+        .focus(_.aggregationRule)
+        .replace(
+          Some(
+            AggregationRule(
+              eligibleMembers = NonEmpty(Seq, participant, participant),
+              threshold = PositiveInt.tryCreate(2),
+              testedProtocolVersion,
             )
           )
-        loggerFactory.assertLogs(
-          sendAndCheckError(request) { case SendAsyncError.RequestInvalid(message) =>
-            message should include("Threshold 2 cannot be reached")
-          },
-          _.warningMessage should include("Threshold 2 cannot be reached"),
         )
+      loggerFactory.assertLogs(
+        sendAndCheckError(request) { case SendAsyncError.RequestInvalid(message) =>
+          message should include("Threshold 2 cannot be reached")
+        },
+        _.warningMessage should include("Threshold 2 cannot be reached"),
+      )
     }
 
-    "reject uneligible sender in aggregation rule" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
-      implicit env =>
-        val request = defaultRequest
-          .focus(_.timestampOfSigningKey)
-          .replace(Some(CantonTimestamp.ofEpochSecond(1)))
-          .focus(_.aggregationRule)
-          .replace(
-            Some(
-              AggregationRule(
-                eligibleMembers = NonEmpty(Seq, DefaultTestIdentities.participant2),
-                threshold = PositiveInt.tryCreate(1),
-                testedProtocolVersion,
-              )
+    "reject uneligible sender in aggregation rule" in { implicit env =>
+      val request = defaultRequest
+        .focus(_.timestampOfSigningKey)
+        .replace(Some(CantonTimestamp.ofEpochSecond(1)))
+        .focus(_.aggregationRule)
+        .replace(
+          Some(
+            AggregationRule(
+              eligibleMembers = NonEmpty(Seq, DefaultTestIdentities.participant2),
+              threshold = PositiveInt.tryCreate(1),
+              testedProtocolVersion,
             )
           )
-        loggerFactory.assertLogs(
-          sendAndCheckError(request) { case SendAsyncError.RequestInvalid(message) =>
-            message should include("Sender is not eligible according to the aggregation rule")
-          },
-          _.warningMessage should include(
-            "Sender is not eligible according to the aggregation rule"
-          ),
         )
+      loggerFactory.assertLogs(
+        sendAndCheckError(request) { case SendAsyncError.RequestInvalid(message) =>
+          message should include("Sender is not eligible according to the aggregation rule")
+        },
+        _.warningMessage should include(
+          "Sender is not eligible according to the aggregation rule"
+        ),
+      )
     }
 
     "reject unauthenticated member sending message to non domain manager member" in { _ =>
@@ -797,7 +752,7 @@ class GrpcSequencerServiceTest
         .replace(
           Batch(
             List(
-              ClosedEnvelope.tryCreate(
+              ClosedEnvelope.create(
                 content,
                 Recipients.cc(DefaultTestIdentities.domainManager),
                 Seq.empty,
@@ -819,18 +774,6 @@ class GrpcSequencerServiceTest
           "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key"
         ),
       )
-    }
-
-    "reject unversioned authenticated endpoint" in { implicit env =>
-      val responseF =
-        env.service.sendAsyncSigned(signedContent(defaultRequest.toByteString).toProtoV0)
-
-      responseF.failed
-        .map { error =>
-          error.getMessage should (include("UNIMPLEMENTED") and include(
-            s"send endpoints must be used with protocol version $testedProtocolVersion"
-          ))
-        }
     }
   }
 
@@ -998,8 +941,8 @@ class GrpcSequencerServiceTest
       } else
         env.service.acknowledge(request.toProtoV0)
 
-    def signedAcknowledgeReq(requestP: v0.AcknowledgeRequest): protocolV0.SignedContent =
-      signedContent(VersionedMessage(requestP.toByteString, 0).toByteString).toProtoV0
+    def signedAcknowledgeReq(requestP: v0.AcknowledgeRequest): protocolV1.SignedContent =
+      signedContent(VersionedMessage(requestP.toByteString, 0).toByteString).toProtoV1
 
     name should {
       if (useSignedAck) {
@@ -1039,38 +982,85 @@ class GrpcSequencerServiceTest
   }
 
   "downloadTopologyStateForInit" should {
-    "stream batches of topology transactions" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
-      env =>
-        val observer = new MockStreamObserver[v0.TopologyStateForInitResponse]()
-        env.service.downloadTopologyStateForInit(
-          TopologyStateForInitRequest(participant, testedProtocolVersion).toProtoV0,
-          observer,
-        )
+    "stream batches of topology transactions" in { env =>
+      val observer = new MockStreamObserver[v0.TopologyStateForInitResponse]()
+      env.service.downloadTopologyStateForInit(
+        TopologyStateForInitRequest(participant, testedProtocolVersion).toProtoV0,
+        observer,
+      )
 
-        eventually() {
-          // wait for the steam to be complete
-          observer.items.lastOption shouldBe Some(StreamComplete)
-        }
-        val parsed = observer.items.toSeq.map {
-          case StreamNext(response: v0.TopologyStateForInitResponse) =>
-            StreamNext(
-              TopologyStateForInitResponse
-                .fromProtoV0(response)
-                .getOrElse(sys.error("error converting response from protobuf"))
+      eventually() {
+        // wait for the steam to be complete
+        observer.items.lastOption shouldBe Some(StreamComplete)
+      }
+      val parsed = observer.items.toSeq.map {
+        case StreamNext(response: v0.TopologyStateForInitResponse) =>
+          StreamNext(
+            TopologyStateForInitResponse
+              .fromProtoV0(response)
+              .getOrElse(sys.error("error converting response from protobuf"))
+          )
+        case otherwise => otherwise
+      }
+      parsed should matchPattern {
+        case Seq(
+              StreamNext(batch1: TopologyStateForInitResponse),
+              StreamNext(batch2: TopologyStateForInitResponse),
+              StreamNext(batch3: TopologyStateForInitResponse),
+              StreamComplete,
             )
-          case otherwise => otherwise
-        }
-        parsed should matchPattern {
-          case Seq(
-                StreamNext(batch1: TopologyStateForInitResponse),
-                StreamNext(batch2: TopologyStateForInitResponse),
-                StreamNext(batch3: TopologyStateForInitResponse),
-                StreamComplete,
-              )
-              if Seq(batch1, batch2, batch3).forall(
-                _.topologyTransactions.value.result.size == env.maxItemsInTopologyBatch
-              ) =>
-        }
+            if Seq(batch1, batch2, batch3).forall(
+              _.topologyTransactions.value.result.size == env.maxItemsInTopologyBatch
+            ) =>
+      }
     }
+  }
+}
+
+private object GrpcSequencerServiceTest {
+  sealed trait StreamItem
+
+  final case class StreamNext[A](value: A) extends StreamItem
+
+  final case class StreamError(t: Throwable) extends StreamItem
+
+  object StreamComplete extends StreamItem
+
+  class MockStreamObserver[T] extends StreamObserver[T] with RecordStreamObserverItems[T]
+
+  class MockServerStreamObserver[T]
+      extends ServerCallStreamObserver[T]
+      with RecordStreamObserverItems[T] {
+    override def isCancelled: Boolean = ???
+
+    override def setOnCancelHandler(onCancelHandler: Runnable): Unit = ???
+
+    override def setCompression(compression: String): Unit = ???
+
+    override def isReady: Boolean = ???
+
+    override def setOnReadyHandler(onReadyHandler: Runnable): Unit = ???
+
+    override def disableAutoInboundFlowControl(): Unit = ???
+
+    override def request(count: Int): Unit = ???
+
+    override def setMessageCompression(enable: Boolean): Unit = ???
+  }
+
+  trait RecordStreamObserverItems[T] {
+    this: StreamObserver[T] =>
+
+    val items: mutable.Buffer[StreamItem] = mutable.Buffer[StreamItem]()
+
+    override def onNext(value: T): Unit = items += StreamNext(value)
+
+    override def onError(t: Throwable): Unit = items += StreamError(t)
+
+    override def onCompleted(): Unit = items += StreamComplete
+  }
+
+  class MockSubscription extends CloseNotification with AutoCloseable {
+    override def close(): Unit = {}
   }
 }

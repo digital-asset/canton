@@ -10,7 +10,6 @@ import cats.syntax.either.*
 import cats.syntax.parallel.*
 import cats.{Functor, Show}
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -31,7 +30,6 @@ import com.digitalasset.canton.sequencing.protocol.{
   MessageId,
   SequencedEvent,
   SequencerDeliverError,
-  SequencerErrors,
 }
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
@@ -184,18 +182,12 @@ object DeliverStoreEvent {
   }
 }
 
-final case class DeliverErrorStoreEvent private (
+final case class DeliverErrorStoreEvent(
     sender: SequencerMemberId,
     messageId: MessageId,
-    message: String256M,
     error: Option[ByteString],
     override val traceContext: TraceContext,
 ) extends StoreEvent[Nothing] {
-  require(
-    error.isEmpty ^ message.str.isEmpty,
-    "`message` and `error` fields must not be set together or both be empty",
-  )
-
   override val notifies: WriteNotification = WriteNotification.Members(SortedSet(sender))
   override val description: String = show"deliver-error[message-id:$messageId]"
   override def members: NonEmpty[Set[SequencerMemberId]] = NonEmpty(Set, sender)
@@ -207,74 +199,39 @@ object DeliverErrorStoreEvent {
   def serializeError(
       error: SequencerDeliverError,
       protocolVersion: ProtocolVersion,
-  ): (String256M, Option[ByteString]) = {
-    if (protocolVersion >= ProtocolVersion.v30) { // TODO(#15153) Kill this conditional
-      (
-        String256M.empty,
-        Some(
-          VersionedStatus
-            .create(error.rpcStatusWithoutLoggingContext(), protocolVersion)
-            .toByteString
-        ),
-      )
-    } else {
-      (String256M(error.cause)(), None)
-    }
-  }
+  ): ByteString =
+    VersionedStatus
+      .create(error.rpcStatusWithoutLoggingContext(), protocolVersion)
+      .toByteString
 
-  def create(
-      sender: SequencerMemberId,
-      messageId: MessageId,
-      message: String256M,
-      error: Option[ByteString],
-      traceContext: TraceContext,
-  ): Either[String, DeliverErrorStoreEvent] = Either
-    .catchOnly[IllegalArgumentException](
-      DeliverErrorStoreEvent(sender, messageId, message, error, traceContext)
-    )
-    .leftMap(_.getMessage)
-
-  def create(
+  def apply(
       sender: SequencerMemberId,
       messageId: MessageId,
       error: SequencerDeliverError,
       protocolVersion: ProtocolVersion,
       traceContext: TraceContext,
   ): DeliverErrorStoreEvent = {
-    val (message, serializedError) =
+    val serializedError =
       DeliverErrorStoreEvent.serializeError(error, protocolVersion)
 
     DeliverErrorStoreEvent(
       sender,
       messageId,
-      message,
-      serializedError,
+      Some(serializedError),
       traceContext,
     )
   }
 
-  def deserializeError(
-      errorMessage: String256M,
-      serializedErrorO: Option[ByteString],
-      protocolVersion: ProtocolVersion,
-  ): ParsingResult[Status] = {
-    if (protocolVersion >= ProtocolVersion.v30) { // TODO(#15153) Kill this conditional
-      serializedErrorO.fold[ParsingResult[Status]](
-        Left(ProtoDeserializationError.FieldNotSet("error"))
-      )(serializedError =>
-        VersionedStatus
-          .fromByteString(serializedError)
-          .map(_.status)
-      )
-
-    } else {
-      Right(
-        SequencerErrors
-          .SubmissionRequestRefused(errorMessage.unwrap)
-          .rpcStatusWithoutLoggingContext()
-      )
-    }
-  }
+  def fromByteString(
+      serializedErrorO: Option[ByteString]
+  ): ParsingResult[Status] =
+    serializedErrorO.fold[ParsingResult[Status]](
+      Left(ProtoDeserializationError.FieldNotSet("error"))
+    )(serializedError =>
+      VersionedStatus
+        .fromByteString(serializedError)
+        .map(_.status)
+    )
 }
 
 final case class Presequenced[+E <: StoreEvent[_]](
@@ -715,8 +672,18 @@ trait SequencerStore extends NamedLogging with AutoCloseable {
         UnsafePruningPoint(requestedTimestamp, safeTimestamp),
       )
       adjustedTimestamp <- EitherT.right(adjustTimestamp())
+      additionalCheckpointInfo =
+        if (adjustedTimestamp < requestedTimestamp && logger.underlying.isInfoEnabled()) {
+          status.members
+            .filter(_.enabled)
+            .minByOption(_.safePruningTimestamp)
+            .map(_.member)
+            .fold("No enabled member")(memberMostBehind =>
+              s"The sequencer client member most behind is ${memberMostBehind}"
+            )
+        } else ""
       _ = logger.info(
-        s"From safe timestamp [$safeTimestamp] and requested timestamp [$requestedTimestamp] we have picked pruning events at [$adjustedTimestamp] to support recorded counter checkpoints"
+        s"From safe timestamp [$safeTimestamp] and requested timestamp [$requestedTimestamp] we have picked pruning events at [$adjustedTimestamp] to support recorded counter checkpoints. ${additionalCheckpointInfo}"
       )
       _ <- EitherT.right(updateLowerBound(adjustedTimestamp))
       description <- EitherT.right(performPruning(adjustedTimestamp))

@@ -20,10 +20,10 @@ class ProtocolVersionTest extends AnyWordSpec with BaseTest {
 
     "parse version string if valid" in {
       // Old semver format
-      ProtocolVersion.create("5.0.0").value shouldBe ProtocolVersion.v5
+      ProtocolVersion.create("30.0.0").value shouldBe ProtocolVersion.v30
 
       // New format
-      ProtocolVersion.create("5").value shouldBe ProtocolVersion.v5
+      ProtocolVersion.create("30").value shouldBe ProtocolVersion.v30
 
       ProtocolVersion
         .create(Int.MaxValue.toString)
@@ -37,19 +37,19 @@ class ProtocolVersionTest extends AnyWordSpec with BaseTest {
     }
 
     "be comparable" in {
-      ProtocolVersion.v6 < ProtocolVersion.dev shouldBe true
-      ProtocolVersion.v6 <= ProtocolVersion.dev shouldBe true
+      ProtocolVersion.v30 < ProtocolVersion.dev shouldBe true
+      ProtocolVersion.v30 <= ProtocolVersion.dev shouldBe true
       ProtocolVersion.dev <= ProtocolVersion.dev shouldBe true
 
-      ProtocolVersion.dev < ProtocolVersion.v6 shouldBe false
-      ProtocolVersion.dev <= ProtocolVersion.v6 shouldBe false
+      ProtocolVersion.dev < ProtocolVersion.v30 shouldBe false
+      ProtocolVersion.dev <= ProtocolVersion.v30 shouldBe false
 
       ProtocolVersion.dev <= ProtocolVersion.dev shouldBe true
-      ProtocolVersion.v6 < ProtocolVersion.dev shouldBe true
-      ProtocolVersion.dev <= ProtocolVersion.v6 shouldBe false
+      ProtocolVersion.v30 < ProtocolVersion.dev shouldBe true
+      ProtocolVersion.dev <= ProtocolVersion.v30 shouldBe false
 
       ProtocolVersion.dev == ProtocolVersion.dev shouldBe true
-      ProtocolVersion.dev == ProtocolVersion.v6 shouldBe false
+      ProtocolVersion.dev == ProtocolVersion.v30 shouldBe false
     }
 
     val invalidProtocolVersionNumber = Int.MinValue

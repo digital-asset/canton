@@ -132,10 +132,6 @@ case class MediatorResponse private (
       domainId = domainId.toProtoPrimitive,
     )
 
-  override def toProtoSomeSignedProtocolMessage
-      : v0.SignedProtocolMessage.SomeSignedProtocolMessage.MediatorResponse =
-    v0.SignedProtocolMessage.SomeSignedProtocolMessage.MediatorResponse(getCryptographicEvidence)
-
   override protected[messages] def toProtoTypedSomeSignedProtocolMessage
       : v0.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage =
     v0.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage.MediatorResponse(
@@ -161,7 +157,7 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
   override val name: String = "MediatorResponse"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v5)(v2.MediatorResponse)(
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v30)(v2.MediatorResponse)(
       supportedProtoVersionMemoized(_)(fromProtoV2),
       _.toProtoV2.toByteString,
     )

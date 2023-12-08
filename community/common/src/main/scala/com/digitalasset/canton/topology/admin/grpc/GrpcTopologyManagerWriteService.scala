@@ -234,8 +234,8 @@ final class GrpcTopologyManagerWriteService[T <: CantonError](
 
       domainParameters <- request.parameters match {
         case Parameters.Empty => Left(ProtoDeserializationError.FieldNotSet("domainParameters"))
-        case Parameters.ParametersV1(parametersV1) =>
-          DynamicDomainParameters.fromProtoV1(parametersV1)
+        case Parameters.ParametersV1(ddpX) =>
+          DynamicDomainParameters.fromProtoV2(ddpX)
       }
 
     } yield DomainParametersChange(DomainId(uid), domainParameters)

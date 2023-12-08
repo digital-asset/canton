@@ -8,6 +8,7 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
+import com.digitalasset.canton.protocol.v4.EnvelopeContent
 import com.digitalasset.canton.protocol.{SourceDomainId, TargetDomainId, TransferId, v0}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -43,6 +44,11 @@ final case class CausalityMessage private (
     clock = Some(clock.toProtoV0),
   )
 
+  override protected[messages] def toProtoSomeEnvelopeContentV4
+      : EnvelopeContent.SomeEnvelopeContent = throw new RuntimeException(
+    "This should not be called"
+  )
+
   override def pretty: Pretty[CausalityMessage.this.type] =
     prettyOfClass(
       param("Message domain ", _.domainId),
@@ -56,7 +62,7 @@ final case class CausalityMessage private (
 object CausalityMessage extends HasProtocolVersionedCompanion[CausalityMessage] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v5)(v0.CausalityMessage)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v30)(v0.CausalityMessage)(
       supportedProtoVersion(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     )

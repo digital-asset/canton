@@ -14,7 +14,6 @@ import com.digitalasset.canton.topology.{
   TestingOwnerWithKeysX,
   UniqueIdentifier,
 }
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, ProtocolVersionChecksAsyncWordSpec}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -55,7 +54,7 @@ class TopologyTransactionsToEventsXTest
 
   "TopologyTransactionsToEvents" should {
 
-    "compute adds and removes" onlyRunWithOrGreaterThan ProtocolVersion.v30 in {
+    "compute adds and removes" in {
       val p1 = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("da::participant1"))
       val p2 = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("da::participant2"))
 

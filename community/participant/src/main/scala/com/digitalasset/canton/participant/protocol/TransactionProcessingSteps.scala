@@ -153,8 +153,9 @@ class TransactionProcessingSteps(
 
   override def requestKind: String = "Transaction"
 
-  override def submissionDescription(param: SubmissionParam): String =
-    s"Submitters ${param.submitterInfo.actAs.mkString(", ")}, command ${param.submitterInfo.commandId}"
+  override def submissionDescription(param: SubmissionParam): String = {
+    show"submitters ${param.submitterInfo.actAs}, command-id ${param.submitterInfo.commandId}"
+  }
 
   override def submissionIdOfPendingRequest(pendingData: PendingTransaction): Unit = ()
 
@@ -573,7 +574,6 @@ class TransactionProcessingSteps(
           sessionKeyStore,
           vt,
           participantId,
-          protocolVersion,
           optRandomness,
         )(
           lightTransactionViewTreeDeserializer
@@ -835,7 +835,6 @@ class TransactionProcessingSteps(
   override def constructPendingDataAndResponse(
       pendingDataAndResponseArgs: PendingDataAndResponseArgs,
       transferLookup: TransferLookup,
-      contractLookup: ContractLookup,
       activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       mediator: MediatorRef,
       freshOwnTimelyTx: Boolean,

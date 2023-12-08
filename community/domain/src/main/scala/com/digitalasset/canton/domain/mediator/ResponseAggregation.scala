@@ -16,6 +16,7 @@ import com.digitalasset.canton.domain.mediator.ResponseAggregation.ViewState
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.logging.NamedLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.{
   LocalApprove,
   LocalReject,
@@ -23,7 +24,6 @@ import com.digitalasset.canton.protocol.messages.{
   MediatorRequest,
   MediatorResponse,
 }
-import com.digitalasset.canton.protocol.{RequestId, ViewHash}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
@@ -78,7 +78,7 @@ final case class ResponseAggregation[VKEY](
       ec: ExecutionContext,
   ): Future[Option[ResponseAggregation[VKEY]]] = {
     val MediatorResponse(
-      _requestId,
+      requestId,
       sender,
       _viewPositionO,
       localVerdict,
@@ -103,7 +103,7 @@ final case class ResponseAggregation[VKEY](
       // - more exhaustive security alerts
       // - avoid race conditions in security tests
       statesOfViews <- OptionT.fromOption[Future](state.leftMap { s => // move down
-        loggingContext.debug(
+        loggingContext.info(
           s"Request ${requestId.unwrap} has already been finalized with verdict $s before response $responseTimestamp from $sender with $localVerdict for view $viewKeyO arrives"
         )
       }.toOption)
@@ -242,9 +242,6 @@ final case class ResponseAggregation[VKEY](
   def withVersion(version: CantonTimestamp): ResponseAggregation[VKEY] =
     copy(version = version)
 
-  def withRequestId(requestId: RequestId): ResponseAggregation[VKEY] =
-    copy(requestId = requestId)
-
   def timeout(
       version: CantonTimestamp
   )(implicit loggingContext: NamedLoggingContext): ResponseAggregation[VKEY] = state match {
@@ -303,11 +300,9 @@ object ResponseAggregation {
 
     override def pretty: Pretty[ConsortiumVotingState] = {
       prettyOfClass(
-        paramIfTrue("consortium party", _.threshold.value > 1),
-        paramIfTrue("non-consortium party", _.threshold.value == 1),
-        param("threshold", _.threshold, _.threshold.value > 1),
-        param("approved by participants", _.approvals),
-        param("rejected by participants", _.rejections),
+        param("consortium-threshold", _.threshold, _.threshold.value > 1),
+        paramIfNonEmpty("approved by participants", _.approvals),
+        paramIfNonEmpty("rejected by participants", _.rejections),
       )
     }
   }
@@ -339,37 +334,23 @@ object ResponseAggregation {
   def fromRequest(
       requestId: RequestId,
       request: MediatorRequest,
-      protocolVersion: ProtocolVersion,
       topologySnapshot: TopologySnapshot,
   )(implicit
       requestTraceContext: TraceContext,
       ec: ExecutionContext,
   ): Future[ResponseAggregation[?]] =
-    if (protocolVersion >= ProtocolVersion.v5) {
-      for {
-        initialState <- mkInitialState(
-          request.informeesAndThresholdByViewPosition,
-          topologySnapshot,
-        )
-      } yield {
-        ResponseAggregation[ViewPosition](
-          requestId,
-          request,
-          requestId.unwrap,
-          Right(initialState),
-        )(requestTraceContext = requestTraceContext)
-      }
-    } else {
-      for {
-        initialState <- mkInitialState(request.informeesAndThresholdByViewHash, topologySnapshot)
-      } yield {
-        ResponseAggregation[ViewHash](
-          requestId,
-          request,
-          requestId.unwrap,
-          Right(initialState),
-        )(requestTraceContext = requestTraceContext)
-      }
+    for {
+      initialState <- mkInitialState(
+        request.informeesAndThresholdByViewPosition,
+        topologySnapshot,
+      )
+    } yield {
+      ResponseAggregation[ViewPosition](
+        requestId,
+        request,
+        requestId.unwrap,
+        Right(initialState),
+      )(requestTraceContext = requestTraceContext)
     }
 
   private def mkInitialState[K](

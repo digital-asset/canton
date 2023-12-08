@@ -57,12 +57,7 @@ object GeneratorsProtocol {
 
   def recipientsArb(protocolVersion: ProtocolVersion): Arbitrary[Recipients] = {
 
-    // For pv < ClosedEnvelope.groupAddressesSupportedSince, the recipients should contain only members
-    val protocolVersionDependentRecipientGen =
-      if (protocolVersion < ClosedEnvelope.groupAddressesSupportedSince.representative) {
-        Arbitrary.arbitrary[MemberRecipient]
-      } else
-        Arbitrary.arbitrary[Recipient]
+    val protocolVersionDependentRecipientGen = Arbitrary.arbitrary[Recipient]
 
     Arbitrary(for {
       depths <- nonEmptyListGen(Arbitrary(Gen.choose(0, 3)))
@@ -75,11 +70,10 @@ object GeneratorsProtocol {
   private def closedEnvelopeGenFor(protocolVersion: ProtocolVersion): Gen[ClosedEnvelope] =
     for {
       bytes <- Arbitrary.arbitrary[ByteString]
-      signatures <- defaultValueGen(protocolVersion, ClosedEnvelope.defaultSignaturesUntil)(
-        Arbitrary(Gen.listOfN(5, signatureArb.arbitrary))
-      )
+      signatures <- Gen.listOfN(5, signatureArb.arbitrary)
+
       recipients <- recipientsArb(protocolVersion).arbitrary
-    } yield ClosedEnvelope.tryCreate(bytes, recipients, signatures, protocolVersion)
+    } yield ClosedEnvelope.create(bytes, recipients, signatures, protocolVersion)
 
   implicit val closedEnvelopeArb: Arbitrary[ClosedEnvelope] = Arbitrary(for {
     protocolVersion <- Arbitrary.arbitrary[ProtocolVersion]

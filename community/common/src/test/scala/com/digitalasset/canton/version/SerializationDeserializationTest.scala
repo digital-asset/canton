@@ -7,7 +7,6 @@ import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.sequencing.protocol.MaxRequestSizeToDeserialize
 import com.digitalasset.canton.topology.transaction.{LegalIdentityClaim, SignedTopologyTransaction}
 import com.digitalasset.canton.{BaseTest, SerializationDeserializationTestHelpers}
@@ -37,14 +36,14 @@ class SerializationDeserializationTest
       testProtocolVersioned(AcsCommitment)
       testProtocolVersioned(Verdict)
       testProtocolVersioned(MediatorResponse)
-      testMemoizedProtocolVersionedWithCtx(TypedSignedProtocolMessageContent, TestHash)
-      testProtocolVersionedWithCtx(SignedProtocolMessage, TestHash)
+      testMemoizedProtocolVersioned(TypedSignedProtocolMessageContent)
+      testProtocolVersioned(SignedProtocolMessage)
 
       testProtocolVersioned(LocalVerdict)
       testProtocolVersioned(TransferResult)
       testProtocolVersioned(MalformedMediatorRequestResult)
       testProtocolVersionedWithCtx(EnvelopeContent, TestHash)
-      testMemoizedProtocolVersionedWithCtx(TransactionResultMessage, TestHash)
+      testMemoizedProtocolVersioned(TransactionResultMessage)
 
       testProtocolVersioned(com.digitalasset.canton.sequencing.protocol.AcknowledgeRequest)
       testProtocolVersioned(com.digitalasset.canton.sequencing.protocol.AggregationRule)
@@ -87,18 +86,7 @@ class SerializationDeserializationTest
         com.digitalasset.canton.sequencing.protocol.SubmissionRequest,
         MaxRequestSizeToDeserialize.NoLimit,
       )
-      testVersioned(
-        com.digitalasset.canton.sequencing.SequencerConnections,
-        List(
-          SerializationDeserializationTestHelpers.DefaultValueUntilExclusive[SequencerConnections](
-            transformer = (sc: SequencerConnections) =>
-              SequencerConnections.single(
-                sc.default
-              ),
-            untilExclusive = ProtocolVersion.v30,
-          )
-        ),
-      )
+      testVersioned(com.digitalasset.canton.sequencing.SequencerConnections)
     }
 
     "be exhaustive" in {

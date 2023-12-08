@@ -467,16 +467,8 @@ class GrpcTopologyManagerReadService(
     } yield {
       val results = res
         .collect { case (context, domainParametersChange: DomainParametersChange) =>
-          val protoVersion = domainParametersChange.domainParameters.protoVersion.v
-
           val parameters =
-            // TODO(#15153) Adapt when support for pv=6 is dropped
-            if (protoVersion == 1 || protoVersion == 2)
-              Some(Result.Parameters.V1(domainParametersChange.domainParameters.toProtoV1))
-            else {
-              logger.warn(s"Unable to serialize domain parameters with version $protoVersion")
-              None
-            }
+            Some(Result.Parameters.V1(domainParametersChange.domainParameters.toProtoV2))
 
           parameters.map { parameters =>
             adminProto.ListDomainParametersChangesResult.Result(

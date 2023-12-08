@@ -29,11 +29,7 @@ import java.util.UUID
   * @param tree The transfer-in view tree blinded for the mediator
   * @throws java.lang.IllegalArgumentException if the common data is blinded or the view is not blinded
   */
-final case class TransferInMediatorMessage(tree: TransferInViewTree)
-    extends MediatorRequest
-    with ProtocolMessageV2
-    with ProtocolMessageV3
-    with UnsignedProtocolMessageV4 {
+final case class TransferInMediatorMessage(tree: TransferInViewTree) extends MediatorRequest {
 
   require(tree.commonData.isFullyUnblinded, "The transfer-in common data must be unblinded")
   require(tree.view.isBlinded, "The transfer-out view must be blinded")
@@ -87,18 +83,6 @@ final case class TransferInMediatorMessage(tree: TransferInViewTree)
     )
   }
 
-  override def toProtoEnvelopeContentV2: v2.EnvelopeContent =
-    v2.EnvelopeContent(
-      someEnvelopeContent =
-        v2.EnvelopeContent.SomeEnvelopeContent.TransferInMediatorMessage(toProtoV1)
-    )
-
-  override def toProtoEnvelopeContentV3: v3.EnvelopeContent =
-    v3.EnvelopeContent(
-      someEnvelopeContent =
-        v3.EnvelopeContent.SomeEnvelopeContent.TransferInMediatorMessage(toProtoV1)
-    )
-
   override def toProtoSomeEnvelopeContentV4: v4.EnvelopeContent.SomeEnvelopeContent =
     v4.EnvelopeContent.SomeEnvelopeContent.TransferInMediatorMessage(toProtoV1)
 
@@ -119,7 +103,7 @@ object TransferInMediatorMessage
     extends HasProtocolVersionedWithContextCompanion[TransferInMediatorMessage, HashOps] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v5)(v1.TransferInMediatorMessage)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v30)(v1.TransferInMediatorMessage)(
       supportedProtoVersion(_)((hashOps, proto) => fromProtoV1(hashOps)(proto)),
       _.toProtoV1.toByteString,
     )

@@ -7,8 +7,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.protocol.messages.Verdict.{
   Approve,
-  MediatorRejectV1,
-  MediatorRejectV2,
+  MediatorReject,
   ParticipantReject,
 }
 import com.digitalasset.canton.protocol.messages.{LocalReject, LocalVerdict, Verdict}
@@ -72,30 +71,14 @@ class VerdictTest extends AnyWordSpec with BaseTest {
 
 object VerdictTest {
   def timeoutVerdict(protocolVersion: ProtocolVersion): Verdict.MediatorReject =
-    if (protocolVersion >= Verdict.MediatorRejectV2.firstApplicableProtocolVersion)
-      MediatorRejectV2.tryCreate(
-        MediatorError.MalformedMessage.Reject("").rpcStatusWithoutLoggingContext(),
-        protocolVersion,
-      )
-    else
-      MediatorRejectV1.tryCreate(
-        "",
-        MediatorError.MalformedMessage.id,
-        MediatorError.MalformedMessage.category.asInt,
-        protocolVersion,
-      )
+    MediatorReject.tryCreate(
+      MediatorError.MalformedMessage.Reject("").rpcStatusWithoutLoggingContext(),
+      protocolVersion,
+    )
 
   def malformedVerdict(protocolVersion: ProtocolVersion): Verdict.MediatorReject =
-    if (protocolVersion >= Verdict.MediatorRejectV2.firstApplicableProtocolVersion)
-      MediatorRejectV2.tryCreate(
-        MediatorError.MalformedMessage.Reject("").rpcStatusWithoutLoggingContext(),
-        protocolVersion,
-      )
-    else
-      MediatorRejectV1.tryCreate(
-        "",
-        MediatorError.MalformedMessage.id,
-        MediatorError.MalformedMessage.category.asInt,
-        protocolVersion,
-      )
+    MediatorReject.tryCreate(
+      MediatorError.MalformedMessage.Reject("").rpcStatusWithoutLoggingContext(),
+      protocolVersion,
+    )
 }

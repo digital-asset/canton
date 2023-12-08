@@ -9,7 +9,7 @@ import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.{FullInformeeTree, Informee, ViewPosition, ViewType}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
-import com.digitalasset.canton.protocol.{RequestId, RootHash, ViewHash, v1, v2, v3, v4}
+import com.digitalasset.canton.protocol.{RequestId, RootHash, ViewHash, v1, v4}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, MediatorRef}
@@ -34,9 +34,7 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(
     // By default, we use ProtoBuf for serialization.
     // Serializable classes that have a corresponding Protobuf message should inherit from this trait to inherit common code and naming conventions.
     // If the corresponding Protobuf message of a class has multiple versions (e.g. `v0.InformeeMessage` and `v1.InformeeMessage`),
-    with ProtocolMessageV2
-    with ProtocolMessageV3
-    with UnsignedProtocolMessageV4 {
+    with UnsignedProtocolMessage {
 
   override val representativeProtocolVersion: RepresentativeProtocolVersion[InformeeMessage.type] =
     InformeeMessage.protocolVersionRepresentativeFor(protocolVersion)
@@ -79,12 +77,6 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(
       protocolVersion = protocolVersion.toProtoPrimitive,
     )
 
-  override def toProtoEnvelopeContentV2: v2.EnvelopeContent =
-    v2.EnvelopeContent(v2.EnvelopeContent.SomeEnvelopeContent.InformeeMessage(toProtoV1))
-
-  override def toProtoEnvelopeContentV3: v3.EnvelopeContent =
-    v3.EnvelopeContent(v3.EnvelopeContent.SomeEnvelopeContent.InformeeMessage(toProtoV1))
-
   override def toProtoSomeEnvelopeContentV4: v4.EnvelopeContent.SomeEnvelopeContent =
     v4.EnvelopeContent.SomeEnvelopeContent.InformeeMessage(toProtoV1)
 
@@ -103,7 +95,7 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(
 object InformeeMessage extends HasProtocolVersionedWithContextCompanion[InformeeMessage, HashOps] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v5)(v1.InformeeMessage)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v30)(v1.InformeeMessage)(
       supportedProtoVersion(_)((hashOps, proto) => fromProtoV1(hashOps)(proto)),
       _.toProtoV1.toByteString,
     )
