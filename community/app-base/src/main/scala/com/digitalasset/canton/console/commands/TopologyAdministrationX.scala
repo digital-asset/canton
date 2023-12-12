@@ -38,13 +38,14 @@ import com.digitalasset.canton.health.admin.data.TopologyQueueStatus
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.admin.grpc.BaseQueryX
+import com.digitalasset.canton.topology.admin.grpc.{BaseQueryX, TopologyStore}
 import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
 import com.digitalasset.canton.topology.store.{StoredTopologyTransactionsX, TimeQueryX}
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.TopologyTransactionX.TxHash
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
@@ -93,6 +94,29 @@ class TopologyAdministrationGroupX(
 
   override protected def getIdCommand(): ConsoleCommandResult[UniqueIdentifier] =
     runner.adminCommand(TopologyAdminCommandsX.Init.GetId())
+
+  /** If `filterStore` is not `Authorized` and if `filterDomain` is non-empty, they should correspond to the same domain.
+    */
+  private def areFilterStoreFilterDomainCompatible(
+      filterStore: String,
+      filterDomain: String,
+  ): Either[String, Unit] = {
+    val storeO: Option[TopologyStore] =
+      OptionUtil.emptyStringAsNone(filterStore).map(TopologyStore.tryFromString)
+    val domainO: Option[DomainId] =
+      OptionUtil.emptyStringAsNone(filterDomain).map(DomainId.tryFromString)
+
+    (storeO, domainO) match {
+      case (Some(TopologyStore.Domain(domainStore)), Some(domain)) =>
+        Either.cond(
+          domainStore == domain,
+          (),
+          s"Expecting filterDomain and filterStore to relate to the same domain but found `$domain` and `$domainStore`",
+        )
+
+      case _ => Right(())
+    }
+  }
 
   @Help.Summary("Inspect all topology transactions at once")
   @Help.Group("All Transactions")
@@ -270,9 +294,9 @@ class TopologyAdministrationGroupX(
     }
   }
 
-  @Help.Summary("Manage unionspaces")
-  @Help.Group("Unionspaces")
-  object unionspaces extends Helpful {
+  @Help.Summary("Manage decentralized namespaces")
+  @Help.Group("Decentralized namespaces")
+  object decentralized_namespaces extends Helpful {
     def list(
         filterStore: String = "",
         proposals: Boolean = false,
@@ -281,9 +305,9 @@ class TopologyAdministrationGroupX(
         filterNamespace: String = "",
         filterSigningKey: String = "",
         protocolVersion: Option[String] = None,
-    ): Seq[ListUnionspaceDefinitionResult] = consoleEnvironment.run {
+    ): Seq[ListDecentralizedNamespaceDefinitionResult] = consoleEnvironment.run {
       adminCommand(
-        TopologyAdminCommandsX.Read.ListUnionspaceDefinition(
+        TopologyAdminCommandsX.Read.ListDecentralizedNamespaceDefinition(
           BaseQueryX(
             filterStore,
             proposals,
@@ -297,11 +321,11 @@ class TopologyAdministrationGroupX(
       )
     }
 
-    @Help.Summary("Propose the creation of a new unionspace")
+    @Help.Summary("Propose the creation of a new decentralized namespace")
     @Help.Description("""
-        owners: the namespaces of the founding members of the unionspace, which are used to compute the name of the unionspace.
-        threshold: this threshold specifies the minimum number of signatures of unionspace members that are required to
-                   satisfy authorization requirements on topology transactions for the namespace of the unionspace.
+        owners: the namespaces of the founding members of the decentralized namespace, which are used to compute the name of the decentralized namespace.
+        threshold: this threshold specifies the minimum number of signatures of decentralized namespace members that are required to
+                   satisfy authorization requirements on topology transactions for the namespace of the decentralized namespace.
 
         store: - "Authorized": the topology transaction will be stored in the node's authorized store and automatically
                                propagated to connected domains, if applicable.
@@ -326,35 +350,36 @@ class TopologyAdministrationGroupX(
         //  let the grpc service figure out the right key to use, once that's implemented
         signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
         serial: Option[PositiveInt] = None,
-    ): SignedTopologyTransactionX[TopologyChangeOpX, UnionspaceDefinitionX] = {
+    ): SignedTopologyTransactionX[TopologyChangeOpX, DecentralizedNamespaceDefinitionX] = {
       val ownersNE = NonEmpty
         .from(owners)
         .getOrElse(
           consoleEnvironment.run(
-            CommandErrors.GenericCommandError("Proposed unionspace needs at least one owner")
+            CommandErrors
+              .GenericCommandError("Proposed decentralized namespace needs at least one owner")
           )
         )
-      val unionspace = UnionspaceDefinitionX
+      val decentralizedNamespace = DecentralizedNamespaceDefinitionX
         .create(
-          UnionspaceDefinitionX.computeNamespace(owners),
+          DecentralizedNamespaceDefinitionX.computeNamespace(owners),
           threshold,
           ownersNE,
         )
         .valueOr(error => consoleEnvironment.run(GenericCommandError(error)))
-      authorize(unionspace, store, mustFullyAuthorize, signedBy.toList, serial)
+      authorize(decentralizedNamespace, store, mustFullyAuthorize, signedBy.toList, serial)
     }
 
     def authorize(
-        unionspace: UnionspaceDefinitionX,
+        decentralizedNamespace: DecentralizedNamespaceDefinitionX,
         store: String,
         mustFullyAuthorize: Boolean = false,
         signedBy: Seq[Fingerprint],
         serial: Option[PositiveInt] = None,
-    ): SignedTopologyTransactionX[TopologyChangeOpX, UnionspaceDefinitionX] =
+    ): SignedTopologyTransactionX[TopologyChangeOpX, DecentralizedNamespaceDefinitionX] =
       consoleEnvironment.run(
         adminCommand {
           TopologyAdminCommandsX.Write.Propose(
-            unionspace,
+            decentralizedNamespace,
             signedBy = signedBy.toList,
             serial = serial,
             change = TopologyChangeOpX.Replace,
@@ -366,14 +391,14 @@ class TopologyAdministrationGroupX(
       )
 
     def join(
-        unionspace: Fingerprint,
+        decentralizedNamespace: Fingerprint,
         owner: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
     ): GenericSignedTopologyTransactionX = {
       ???
     }
 
     def leave(
-        unionspace: Fingerprint,
+        decentralizedNamespace: Fingerprint,
         owner: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
     ): ByteString = {
       ByteString.EMPTY
@@ -663,7 +688,8 @@ class TopologyAdministrationGroupX(
         synchronize: Option[config.NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
-        mustFullyAuthorize: Boolean = true, // configurable in case of a key under a unionspace
+        // configurable in case of a key under a decentralized namespace
+        mustFullyAuthorize: Boolean = true,
     ): Unit = propose(
       key,
       purpose,
@@ -703,7 +729,8 @@ class TopologyAdministrationGroupX(
         synchronize: Option[config.NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
-        mustFullyAuthorize: Boolean = true, // configurable in case of a key under a unionspace
+        // configurable in case of a key under a decentralized namespace
+        mustFullyAuthorize: Boolean = true,
         force: Boolean = false,
     ): Unit = propose(
       key,
@@ -1657,20 +1684,31 @@ class TopologyAdministrationGroupX(
         filterDomain: String = "",
         filterSigningKey: String = "",
         protocolVersion: Option[String] = None,
-    ): Seq[ListMediatorDomainStateResult] = consoleEnvironment.run {
-      adminCommand(
-        TopologyAdminCommandsX.Read.MediatorDomainState(
-          BaseQueryX(
-            filterStore,
-            proposals,
-            timeQuery,
-            operation,
-            filterSigningKey,
-            protocolVersion.map(ProtocolVersion.tryCreate),
-          ),
-          filterDomain,
-        )
+        group: Option[NonNegativeInt] = None,
+    ): Seq[ListMediatorDomainStateResult] = {
+      def predicate(res: ListMediatorDomainStateResult): Boolean = group.forall(_ == res.item.group)
+
+      areFilterStoreFilterDomainCompatible(filterStore, filterDomain).valueOr(err =>
+        throw new IllegalArgumentException(err)
       )
+
+      consoleEnvironment
+        .run {
+          adminCommand(
+            TopologyAdminCommandsX.Read.MediatorDomainState(
+              BaseQueryX(
+                filterStore,
+                proposals,
+                timeQuery,
+                operation,
+                filterSigningKey,
+                protocolVersion.map(ProtocolVersion.tryCreate),
+              ),
+              filterDomain,
+            )
+          )
+        }
+        .filter(predicate)
     }
 
     @Help.Summary("Propose changes to the mediator topology")
@@ -1700,29 +1738,72 @@ class TopologyAdministrationGroupX(
         domainId: DomainId,
         threshold: PositiveInt,
         active: Seq[MediatorId],
-        passive: Seq[MediatorId] = Seq.empty,
+        observers: Seq[MediatorId] = Seq.empty,
         group: NonNegativeInt,
         store: Option[String] = None,
+        synchronize: Option[config.NonNegativeDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
         mustFullyAuthorize: Boolean = false,
         // TODO(#14056) don't use the instance's root namespace key by default.
         //  let the grpc service figure out the right key to use, once that's implemented
         signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
         serial: Option[PositiveInt] = None,
-    ): SignedTopologyTransactionX[TopologyChangeOpX, MediatorDomainStateX] =
-      consoleEnvironment.run {
-        adminCommand(
-          TopologyAdminCommandsX.Write.Propose(
-            mapping = MediatorDomainStateX
-              .create(domainId, group, threshold, active, passive),
-            signedBy = signedBy.toList,
-            serial = serial,
-            change = TopologyChangeOpX.Replace,
-            mustFullyAuthorize = mustFullyAuthorize,
-            forceChange = false,
-            store = store.getOrElse(domainId.filterString),
-          )
-        )
-      }
+    ): SignedTopologyTransactionX[TopologyChangeOpX, MediatorDomainStateX] = {
+      val command = TopologyAdminCommandsX.Write.Propose(
+        mapping = MediatorDomainStateX
+          .create(domainId, group, threshold, active, observers),
+        signedBy = signedBy.toList,
+        serial = serial,
+        change = TopologyChangeOpX.Replace,
+        mustFullyAuthorize = mustFullyAuthorize,
+        forceChange = false,
+        store = store.getOrElse(domainId.filterString),
+      )
+
+      synchronisation.runAdminCommand(synchronize)(command)
+    }
+
+    @Help.Summary("Propose to remove a mediator group")
+    @Help.Description("""
+         domainId: the target domain
+         group: the mediator group identifier
+
+         store: - "Authorized": the topology transaction will be stored in the node's authorized store and automatically
+                                propagated to connected domains, if applicable.
+                - "<domain-id>": the topology transaction will be directly submitted to the specified domain without
+                                 storing it locally first. This also means it will _not_ be synchronized to other domains
+                                 automatically.
+         mustFullyAuthorize: when set to true, the proposal's previously received signatures and the signature of this node must be
+                             sufficient to fully authorize the topology transaction. if this is not the case, the request fails.
+                             when set to false, the proposal retains the proposal status until enough signatures are accumulated to
+                             satisfy the mapping's authorization requirements.""")
+    def remove_group(
+        domainId: DomainId,
+        group: NonNegativeInt,
+        store: Option[String] = None,
+        synchronize: Option[config.NonNegativeDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+        mustFullyAuthorize: Boolean = false,
+    ): SignedTopologyTransactionX[TopologyChangeOpX, MediatorDomainStateX] = {
+
+      val mediatorStateResult = list(filterStore = domainId.filterString, group = Some(group))
+        .maxByOption(_.context.serial)
+        .getOrElse(throw new IllegalArgumentException(s"Unknown mediator group $group"))
+
+      val command = TopologyAdminCommandsX.Write.Propose(
+        mapping = mediatorStateResult.item,
+        signedBy = mediatorStateResult.context.signedBy,
+        serial = Some(mediatorStateResult.context.serial.increment),
+        change = TopologyChangeOpX.Remove,
+        mustFullyAuthorize = mustFullyAuthorize,
+        forceChange = false,
+        store = store.getOrElse(domainId.filterString),
+      )
+
+      synchronisation.runAdminCommand(synchronize)(command)
+    }
   }
 
   @Help.Summary("Inspect sequencer domain state")

@@ -332,16 +332,9 @@ object BuildCommon {
         "community" / "domain",
         "domain",
       )
-      val researchAppProto: Seq[(File, String)] =
-        if (moduleName.value == "research-app")
-          packProtobufFiles(
-            "research" / "app",
-            "research",
-          )
-        else Nil
 
       val protoFiles =
-        ledgerApiProto ++ communityBaseProto ++ communityParticipantProto ++ communityDomainProto ++ researchAppProto
+        ledgerApiProto ++ communityBaseProto ++ communityParticipantProto ++ communityDomainProto
 
       log.info("Invoking bundle generator")
       // add license to package
@@ -372,6 +365,7 @@ object BuildCommon {
   def mergeStrategy(oldStrategy: String => MergeStrategy): String => MergeStrategy = {
     case PathList("LICENSE") => MergeStrategy.last
     case PathList("buf.yaml") => MergeStrategy.discard
+    case PathList("scala", "tools", "nsc", "doc", "html", _*) => MergeStrategy.discard
     case PathList("META-INF", "io.netty.versions.properties") => MergeStrategy.first
     case "reflect.properties" => MergeStrategy.first
     case PathList("org", "checkerframework", _ @_*) => MergeStrategy.first
