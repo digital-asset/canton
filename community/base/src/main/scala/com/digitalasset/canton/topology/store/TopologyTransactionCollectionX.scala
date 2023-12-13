@@ -73,7 +73,7 @@ final case class StoredTopologyTransactionsX[+Op <: TopologyChangeOpX, +M <: Top
   def splitCertsAndRest: StoredTopologyTransactionsX.CertsAndRest = {
     val certTypes = Set(
       TopologyMappingX.Code.NamespaceDelegationX,
-      TopologyMappingX.Code.UnionspaceDefinitionX,
+      TopologyMappingX.Code.DecentralizedNamespaceDefinitionX,
       TopologyMappingX.Code.IdentifierDelegationX,
     )
     val empty = Seq.empty[GenericStoredTopologyTransactionX]
@@ -146,7 +146,9 @@ object StoredTopologyTransactionsX
           item.validFrom,
         )
         validUntil <- item.validUntil.traverse(EffectiveTime.fromProtoPrimitive)
-        transaction <- SignedTopologyTransactionX.fromByteString(item.transaction)
+        transaction <- SignedTopologyTransactionX.fromByteStringUnsafe(
+          item.transaction
+        ) // TODO(#12626) – try with context – use an optional protocol version for cases when the protocol version is known
       } yield StoredTopologyTransactionX(
         sequenced,
         validFrom,
