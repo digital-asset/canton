@@ -1,6 +1,6 @@
 # Canton
 
-[Canton is a next-generation DAML ledger interoperability protocol](https://docs.daml.com/canton/about.html) that implements DAML's built-in models of authorization and
+[Canton is a next-generation Daml ledger interoperability protocol](https://docs.daml.com/canton/about.html) that implements Daml's built-in models of authorization and
 privacy faithfully.
 
 * By partitioning the global state it solves both the privacy problems and the scaling bottlenecks of platforms such as
