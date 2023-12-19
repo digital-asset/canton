@@ -51,6 +51,7 @@ object Dependencies {
   lazy val magnolifyShared_version = "0.6.2"
   lazy val mockito_scala_version = "1.16.3"
   lazy val monocle_version = "3.2.0"
+  lazy val munit_version = "0.7.26"
   // pick the version of boring ssl and netty native from this table: https://github.com/grpc/grpc-java/blob/master/SECURITY.md#netty
   // required for ALPN (which is required for TLS+HTTP/2) when running on Java 8. JSSE will be used on Java 9+.
   lazy val grpc_version = "1.59.0"
@@ -303,6 +304,8 @@ object Dependencies {
   lazy val gcp_kms = "com.google.cloud" % "google-cloud-kms" % gcp_kms_version
 
   lazy val awaitility = "org.awaitility" % "awaitility" % awaitility_version
+
+  lazy val munit = "org.scalameta" % "munit_2.13" % munit_version
 
   lazy val damlDependencyMap = {
     import io.circe._, io.circe.parser._, io.circe.generic.auto._, io.circe.syntax._

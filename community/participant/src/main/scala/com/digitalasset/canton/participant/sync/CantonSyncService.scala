@@ -34,7 +34,6 @@ import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.Tra
 import com.digitalasset.canton.error.*
 import com.digitalasset.canton.health.MutableHealthComponent
 import com.digitalasset.canton.ledger.api.health.HealthStatus
-import com.digitalasset.canton.ledger.configuration.*
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.error.{CommonErrors, PackageServiceErrors}
 import com.digitalasset.canton.ledger.participant.state
@@ -109,8 +108,8 @@ import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Source
 import org.slf4j.event.Level
 
+import java.util.concurrent.CompletionStage
 import java.util.concurrent.atomic.AtomicReference
-import java.util.concurrent.{CompletableFuture, CompletionStage}
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future}
@@ -156,7 +155,6 @@ class CantonSyncService(
     val isActive: () => Boolean,
     futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
-    skipRecipientsCheck: Boolean,
     multiDomainLedgerAPIEnabled: Boolean,
 )(implicit ec: ExecutionContext, mat: Materializer, val tracer: Tracer)
     extends state.v2.WriteService
@@ -556,17 +554,6 @@ class CantonSyncService(
     }
   }
 
-  override def submitConfiguration(
-      _maxRecordTimeToBeRemovedUpstream: participant.LedgerSyncRecordTime,
-      submissionId: LedgerSubmissionId,
-      config: Configuration,
-  )(implicit
-      traceContext: TraceContext
-  ): CompletionStage[SubmissionResult] = {
-    logger.info("Canton does not support dynamic reconfiguration of time model")
-    CompletableFuture.completedFuture(TransactionError.NotSupported)
-  }
-
   /** Build source for subscription (for ledger api server indexer).
     *
     * @param beginAfterOffset offset after which to emit events
@@ -588,7 +575,9 @@ class CantonSyncService(
                 event
                   .traverse(eventTranslationStrategy.translate)
                   .map { e =>
-                    logger.debug(show"Emitting event at offset $offset. Event: ${event.value}")
+                    logger.debug(show"Emitting event at offset $offset. Event: ${event.value}")(
+                      e.traceContext
+                    )
                     (UpstreamOffsetConvert.fromGlobalOffset(offset), e)
                   }
               },
@@ -1213,7 +1202,6 @@ class CantonSyncService(
           trafficStateController,
           futureSupervisor,
           domainLoggerFactory,
-          skipRecipientsCheck = skipRecipientsCheck,
         )
 
         // update list of connected domains
@@ -1648,7 +1636,6 @@ object CantonSyncService {
         sequencerInfoLoader: SequencerInfoLoader,
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
-        skipRecipientsCheck: Boolean,
         multiDomainLedgerAPIEnabled: Boolean,
     )(implicit ec: ExecutionContext, mat: Materializer, tracer: Tracer): T
   }
@@ -1679,7 +1666,6 @@ object CantonSyncService {
         sequencerInfoLoader: SequencerInfoLoader,
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
-        skipRecipientsCheck: Boolean,
         multiDomainLedgerAPIEnabled: Boolean,
     )(implicit
         ec: ExecutionContext,
@@ -1713,7 +1699,6 @@ object CantonSyncService {
         () => storage.isActive,
         futureSupervisor,
         loggerFactory,
-        skipRecipientsCheck = skipRecipientsCheck,
         multiDomainLedgerAPIEnabled: Boolean,
       )
   }

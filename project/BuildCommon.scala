@@ -70,6 +70,7 @@ object BuildCommon {
         ) ++ resolvers.value,
         ideExcludedDirectories := Seq(
           baseDirectory.value / "daml" / "canton",
+          baseDirectory.value / "daml" / "canton-3x",
           baseDirectory.value / "target",
         ),
         // scalacOptions += "-Ystatistics", // re-enable if you need to debug compile times
@@ -1103,6 +1104,7 @@ object BuildCommon {
       .in(file("community/ledger/ledger-common"))
       .dependsOn(
         DamlProjects.`daml-copy-macro`,
+        DamlProjects.`bindings-java`,
         DamlProjects.`ledger-api`,
         DamlProjects.`daml-copy-protobuf-java`,
         DamlProjects.`daml-copy-common`,
@@ -1111,6 +1113,10 @@ object BuildCommon {
         `util-logging`,
         `wartremover-extension` % "compile->compile;test->test",
       )
+      // TODO(#15270) support the generation of dars for different lf-versions
+      // omitting the target in the build options of the .daml files
+      // maybe by passing the map of (package, lf-version) that we need to create dars for
+      .enablePlugins(DamlPlugin)
       .settings(
         sharedSettings, // Upgrade to sharedCantonSettings when com.digitalasset.canton.concurrent.Threading moved out of community-base
         scalacOptions += "-Wconf:src=src_managed/.*:silent",
@@ -1145,6 +1151,23 @@ object BuildCommon {
         Test / parallelExecution := true,
         coverageEnabled := false,
         JvmRulesPlugin.damlRepoHeaderSettings,
+        Compile / damlEnableJavaCodegen := true,
+        Compile / damlCodeGeneration := (for (
+          name <- Seq(
+            "benchtool",
+            "model",
+            "semantic",
+            "package_management",
+            "carbonv1",
+            "carbonv2",
+            "carbonv3",
+          )
+        )
+          yield (
+            (Compile / sourceDirectory).value / "daml" / s"$name",
+            (Compile / damlDarOutput).value / s"${name.replace("_", "-")}-tests.dar",
+            s"com.daml.ledger.test.java.$name",
+          )),
       )
 
     // The TlsCertificateRevocationCheckingSpec relies on the "com.sun.net.ssl.checkRevocation" system variable to
@@ -1711,14 +1734,7 @@ object BuildCommon {
         `daml-copy-protobuf-java`,
         `daml-copy-common`,
       )
-      .disablePlugins(
-        BufPlugin,
-        ScalafixPlugin,
-        ScalafmtPlugin,
-        WartRemover,
-      ) // to accommodate different daml repo coding style
       .settings(
-        scalacOptions --= removeCompileFlagsForDaml,
         sharedSettings,
         compileOrder := CompileOrder.JavaThenScala,
         libraryDependencies ++= Seq(
