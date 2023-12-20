@@ -491,7 +491,7 @@ object DamlPlugin extends AutoPlugin {
         (
           s"https://repo.maven.apache.org/maven2/com/daml/codegen-jvm-main/${damlVersion}/",
           s"codegen-jvm-main-${damlVersion}.jar",
-          basePackageName + ".java",
+          basePackageName + (if (!basePackageName.contains("java")) ".java" else ""),
           "java",
           Seq("java"),
         )
