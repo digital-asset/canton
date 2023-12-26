@@ -32,6 +32,8 @@ object DamlPlugin extends AutoPlugin {
         "List of directory names used to sort the Daml building by order in this list"
       )
     val damlDarOutput = settingKey[File]("Directory to put generated DAR files in")
+    val damlDarLfVersion =
+      settingKey[String]("Lf version for which to generate DAR files")
     val damlScalaCodegenOutput =
       settingKey[File]("Directory to put Scala sources generated from DARs")
     val damlJavaCodegenOutput =
@@ -70,6 +72,7 @@ object DamlPlugin extends AutoPlugin {
       damlSourceDirectory := sourceDirectory.value / "daml",
       damlCompileDirectory := target.value / "daml",
       damlDarOutput := resourceManaged.value,
+      damlDarLfVersion := "",
       damlDependencies := Seq(),
       damlScalaCodegenOutput := sourceManaged.value / "daml-codegen-scala",
       damlJavaCodegenOutput := sourceManaged.value / "daml-codegen-java",
@@ -115,6 +118,7 @@ object DamlPlugin extends AutoPlugin {
       damlBuild := {
         val dependencies = damlDependencies.value
         val outputDirectory = damlDarOutput.value
+        val outputLfVersion = damlDarLfVersion.value
         val buildDirectory = damlCompileDirectory.value
         val sourceDirectory = damlSourceDirectory.value
         // we don't really know dependencies between daml files, so just assume if any change then we need to rebuild all packages
@@ -154,6 +158,7 @@ object DamlPlugin extends AutoPlugin {
                 sourceDirectory,
                 buildDirectory,
                 outputDirectory,
+                outputLfVersion,
                 sourceDirectory.toPath.relativize(projectFile.toPath).toFile,
                 damlCompilerVersion.value,
                 damlLanguageVersions.value,
@@ -314,6 +319,7 @@ object DamlPlugin extends AutoPlugin {
       sourceDirectory: File,
       buildDirectory: File,
       outputDirectory: File,
+      outputLfVersion: String,
       relativeDamlProjectFile: File,
       damlVersion: String,
       damlLanguageVersions: Seq[String],
@@ -336,19 +342,14 @@ object DamlPlugin extends AutoPlugin {
       tarballPath = Seq("damlc", "damlc"),
     )
 
-    // so far canton system dars depend on daml-script, but maybe daml-triggers or others some day?
-    val damlLibsDependencyTypes = Seq("daml-script")
-    val damlLibsDependencyVersions = damlLanguageVersions.foldLeft(Seq(""))(_ :+ "-" + _)
     val damlScriptDars = for {
-      depType <- damlLibsDependencyTypes
-      depVersion <- damlLibsDependencyVersions
+      depVersion <- damlLanguageVersions
     } yield {
-      (depType, s"$depType$depVersion")
+      ("daml-script", s"daml3-script-$depVersion")
     }
-    val daml3ScriptDars = ("daml-script", "daml3-script-2.dev")
 
     val damlLibsEnv = (for {
-      (depType, artifactName) <- damlScriptDars :+ daml3ScriptDars
+      (depType, artifactName) <- damlScriptDars
     } yield {
       ensureArtifactAvailable(
         url = url + s"$depType/",
@@ -374,18 +375,24 @@ object DamlPlugin extends AutoPlugin {
     val outputDar = outputDirectory / s"$damlProjectName.dar"
     val processLogger = new BufferedLogger
 
+    val damlcCommand = damlc.getAbsolutePath :: "build" ::
+      "--project-root" :: projectBuildDirectory.toString ::
+      "--output" :: outputDar.getAbsolutePath :: Nil
+    val command =
+      // if the damlDarLfVersion is not set the daml.yaml is expected to contain the target lf-version in the build-options
+      if (outputLfVersion.isEmpty) damlcCommand
+      else damlcCommand ::: ("--target" :: outputLfVersion :: Nil)
+
     val result = Process(
-      command = damlc.getAbsolutePath :: "build" ::
-        "--project-root" :: projectBuildDirectory.toString ::
-        "--output" :: outputDar.getAbsolutePath :: Nil,
+      command = command,
       cwd = projectBuildDirectory,
       extraEnv = damlLibsEnv: _*, // env variable set so that damlc finds daml-script dar
     ) ! processLogger
 
     if (result != 0) {
       throw new MessageOnlyException(s"""
-          |damlc build failed [$originalDamlProjectFile]:
-          |${processLogger.output("  ")}
+           |damlc build failed [$originalDamlProjectFile]:
+           |${processLogger.output("  ")}
         """.stripMargin.trim)
     }
 
