@@ -69,8 +69,7 @@ object BuildCommon {
           "Redhat GA for s390x natives" at "https://maven.repository.redhat.com/ga"
         ) ++ resolvers.value,
         ideExcludedDirectories := Seq(
-          baseDirectory.value / "daml" / "canton",
-          baseDirectory.value / "daml" / "canton-3x",
+          baseDirectory.value / "daml",
           baseDirectory.value / "target",
         ),
         // scalacOptions += "-Ystatistics", // re-enable if you need to debug compile times
@@ -93,6 +92,7 @@ object BuildCommon {
       //  Global / concurrentRestrictions += Tags.limitAll(1), // re-enable if you want to serialize compilation (to not mess up the Ystatistics output)
       Global / excludeLintKeys += Compile / damlBuildOrder,
       Global / excludeLintKeys += `community-app` / Compile / damlCompileDirectory,
+      Global / excludeLintKeys += `community-app` / Compile / damlDarLfVersion,
       Global / excludeLintKeys ++= (CommunityProjects.allProjects ++ DamlProjects.allProjects)
         .map(
           _ / autoAPIMappings
@@ -329,13 +329,17 @@ object BuildCommon {
         "community" / "participant",
         "participant",
       )
+      val communityAdminProto: Seq[(File, String)] = packProtobufFiles(
+        "community" / "admin-api",
+        "admin-api",
+      )
       val communityDomainProto: Seq[(File, String)] = packProtobufFiles(
         "community" / "domain",
         "domain",
       )
 
       val protoFiles =
-        ledgerApiProto ++ communityBaseProto ++ communityParticipantProto ++ communityDomainProto
+        ledgerApiProto ++ communityBaseProto ++ communityParticipantProto ++ communityAdminProto ++ communityDomainProto
 
       log.info("Invoking bundle generator")
       // add license to package
@@ -502,6 +506,8 @@ object BuildCommon {
       `demo`,
       `daml-errors`,
       `ledger-common`,
+      `ledger-common-dars-lf-v2-1`,
+      `ledger-common-dars-lf-v2-dev`,
       `ledger-api-core`,
       `ledger-json-api`,
       `ledger-api-tools`,
@@ -610,8 +616,6 @@ object BuildCommon {
         },
         assembly / mainClass := Some("com.digitalasset.canton.CantonCommunityApp"),
         assembly / assemblyJarName := s"canton-open-source-${version.value}.jar",
-        // specifying the damlSourceDirectory to non-default location enables checking/updating of daml version
-        Compile / damlSourceDirectory := sourceDirectory.value / "pack" / "examples" / "06-messaging",
         // clearing the damlBuild tasks to prevent compiling which does not work due to relative file "data-dependencies";
         // "data-dependencies" daml.yaml setting relies on hardcoded "0.0.1" project version
         Compile / damlBuild := Seq(), // message-0.0.1.dar is hardcoded and contact-0.0.1.dar is built by MessagingExampleIntegrationTest
@@ -652,6 +656,7 @@ object BuildCommon {
       .dependsOn(
         `slick-fork`,
         `util-external`,
+        `community-admin-api`,
         DamlProjects.`daml-copy-common`,
         DamlProjects.`bindings-java`,
         // No strictly internal dependencies on purpose so that this can be a foundational module and avoid circular dependencies
@@ -791,6 +796,7 @@ object BuildCommon {
       .in(file("community/domain"))
       .dependsOn(
         `community-common` % "compile->compile;test->test",
+        `community-admin-api` % "compile->compile;test->test",
         `pekko-fork`,
         `community-testing` % Test,
       )
@@ -834,6 +840,7 @@ object BuildCommon {
       .in(file("community/participant"))
       .dependsOn(
         `community-common` % "compile->compile;test->test",
+        `community-admin-api`,
         `community-testing` % Test,
         `ledger-common`,
         `ledger-api-core`,
@@ -877,19 +884,46 @@ object BuildCommon {
         Compile / damlCodeGeneration := Seq(
           (
             (Compile / sourceDirectory).value / "daml",
-            (Compile / resourceDirectory).value / "dar" / "AdminWorkflows.dar",
+            (Compile / damlDarOutput).value / "AdminWorkflows.dar",
             "com.digitalasset.canton.participant.admin.workflows",
           ),
           (
             (Compile / sourceDirectory).value / "daml" / "ping-pong-vacuum",
-            (Compile / resourceManaged).value / "AdminWorkflowsWithVacuuming.dar",
+            (Compile / damlDarOutput).value / "AdminWorkflowsWithVacuuming.dar",
             "com.digitalasset.canton.participant.admin.workflows",
           ),
         ),
-        damlFixedDars := Seq("AdminWorkflows.dar"),
+        Compile / damlBuildOrder := Seq(
+          "daml/daml.yaml",
+          "daml/ping-pong-vacuum/daml.yaml",
+        ),
+        // TODO(#16168) Before creating the first stable release with backwards compatibility guarantees,
+        //  make "AdminWorkflows.dar" stable again
+        damlFixedDars := Seq(),
         addProtobufFilesToHeaderCheck(Compile),
         addFilesToHeaderCheck("*.daml", "daml", Compile),
         JvmRulesPlugin.damlRepoHeaderSettings,
+      )
+
+    lazy val `community-admin-api` = project
+      .in(file("community/admin-api"))
+      .dependsOn(`util-external`, `daml-errors` % "compile->compile;test->test")
+      .settings(
+        sharedCantonSettings,
+        libraryDependencies ++= Seq(
+          scalapb_runtime // not sufficient to include only through the `common` dependency - race conditions ensue
+        ),
+        Compile / PB.targets := Seq(
+          scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
+        ),
+        // Ensure the package scoped options will be picked up by sbt-protoc if used downstream
+        // See https://scalapb.github.io/docs/customizations/#publishing-package-scoped-options
+        Compile / packageBin / packageOptions += (
+          Package.ManifestAttributes(
+            "ScalaPB-Options-Proto" -> "com/digitalasset/canton/admin/scalapb/package.proto"
+          )
+        ),
+        addProtobufFilesToHeaderCheck(Compile),
       )
 
     lazy val `community-testing` = project
@@ -1042,7 +1076,10 @@ object BuildCommon {
     lazy val `demo` = project
       .in(file("community/demo"))
       .enablePlugins(DamlPlugin)
-      .dependsOn(`community-app` % "compile->compile;test->test")
+      .dependsOn(
+        `community-app` % "compile->compile;test->test",
+        `community-admin-api` % "compile->compile;test->test",
+      )
       .settings(
         sharedCantonSettings,
         libraryDependencies ++= Seq(
@@ -1104,7 +1141,6 @@ object BuildCommon {
       .in(file("community/ledger/ledger-common"))
       .dependsOn(
         DamlProjects.`daml-copy-macro`,
-        DamlProjects.`bindings-java`,
         DamlProjects.`ledger-api`,
         DamlProjects.`daml-copy-protobuf-java`,
         DamlProjects.`daml-copy-common`,
@@ -1113,10 +1149,6 @@ object BuildCommon {
         `util-logging`,
         `wartremover-extension` % "compile->compile;test->test",
       )
-      // TODO(#15270) support the generation of dars for different lf-versions
-      // omitting the target in the build options of the .daml files
-      // maybe by passing the map of (package, lf-version) that we need to create dars for
-      .enablePlugins(DamlPlugin)
       .settings(
         sharedSettings, // Upgrade to sharedCantonSettings when com.digitalasset.canton.concurrent.Threading moved out of community-base
         scalacOptions += "-Wconf:src=src_managed/.*:silent",
@@ -1151,24 +1183,46 @@ object BuildCommon {
         Test / parallelExecution := true,
         coverageEnabled := false,
         JvmRulesPlugin.damlRepoHeaderSettings,
-        Compile / damlEnableJavaCodegen := true,
-        Compile / damlCodeGeneration := (for (
-          name <- Seq(
-            "benchtool",
-            "model",
-            "semantic",
-            "package_management",
-            "carbonv1",
-            "carbonv2",
-            "carbonv3",
-          )
-        )
-          yield (
-            (Compile / sourceDirectory).value / "daml" / s"$name",
-            (Compile / damlDarOutput).value / s"${name.replace("_", "-")}-tests.dar",
-            s"com.daml.ledger.test.java.$name",
-          )),
       )
+
+    def createLedgerCommonDarsProject(lfVersion: String) =
+      Project(
+        s"ledger-common-dars-lf-v$lfVersion".replace('.', '-'),
+        file(s"community/ledger/ledger-common-dars/lf-v$lfVersion"),
+      )
+        .dependsOn(
+          DamlProjects.`bindings-java`
+        )
+        .enablePlugins(DamlPlugin)
+        .settings(
+          sharedSettings,
+          Compile / damlDarLfVersion := lfVersion,
+          `ledger-common-dars-shared-settings`,
+        )
+
+    lazy val `ledger-common-dars-shared-settings` = Seq(
+      Compile / damlEnableJavaCodegen := true,
+      Compile / damlSourceDirectory := baseDirectory.value / ".." / "src",
+      Compile / damlCodeGeneration := (for (
+        name <- Seq(
+          "benchtool",
+          "model",
+          "semantic",
+          "package_management",
+          "carbonv1",
+          "carbonv2",
+          "carbonv3",
+        )
+      )
+        yield (
+          (Compile / damlSourceDirectory).value / "main" / "daml" / s"$name",
+          (Compile / damlDarOutput).value / s"${name.replace("_", "-")}-tests.dar",
+          s"com.daml.ledger.test.java.$name",
+        )),
+    )
+
+    lazy val `ledger-common-dars-lf-v2-1` = createLedgerCommonDarsProject(lfVersion = "2.1")
+    lazy val `ledger-common-dars-lf-v2-dev` = createLedgerCommonDarsProject(lfVersion = "2.dev")
 
     // The TlsCertificateRevocationCheckingSpec relies on the "com.sun.net.ssl.checkRevocation" system variable to
     // function properly. However, if another test (e.g. TlsSpec) modifies this variable, the change will not be
