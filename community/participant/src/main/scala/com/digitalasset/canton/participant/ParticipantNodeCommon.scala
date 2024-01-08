@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant
@@ -251,6 +251,7 @@ trait ParticipantNodeBootstrapCommon {
       topologyManager: ParticipantTopologyManagerOps,
       packageDependencyResolver: PackageDependencyResolver,
       componentFactory: ParticipantComponentBootstrapFactory,
+      skipRecipientsCheck: Boolean,
       overrideKeyUniqueness: Option[Boolean] = None, // TODO(i13235) remove when UCK is gone
   )(implicit executionSequencerFactory: ExecutionSequencerFactory): EitherT[
     FutureUnlessShutdown,
@@ -453,6 +454,7 @@ trait ParticipantNodeBootstrapCommon {
         sequencerInfoLoader,
         arguments.futureSupervisor,
         loggerFactory,
+        skipRecipientsCheck,
         multiDomainLedgerAPIEnabled = ledgerApiServerFactory.multiDomainEnabled,
       )
 

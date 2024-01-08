@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.topology
@@ -239,8 +239,12 @@ class QueueBasedDomainOutboxX(
 
     logger.debug(s"Invoked flush with queue size ${queueState.get().queuedApprox}")
 
+    if (isClosing) {
+      logger.debug("Flush invoked in spite of closing")
+      EitherT.rightT(())
+    }
     // only flush if we are not running yet
-    if (cur.running) {
+    else if (cur.running) {
       logger.debug("Another flush cycle is currently ongoing")
       EitherT.rightT(())
     } else {

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.ledger.client.services.commands
@@ -25,16 +25,6 @@ class CommandUpdaterFlowTest extends AsyncWordSpec with Matchers with PekkoBefor
   import CommandUpdaterFlowTest.*
 
   "apply" should {
-    "fail fast on an invalid ledger ID" in {
-      val aCommandSubmission =
-        CommandSubmission(defaultCommands.copy(ledgerId = "anotherLedgerId"))
-
-      runCommandUpdaterFlow(aCommandSubmission)
-        .transformWith {
-          case Failure(exception) => exception shouldBe an[IllegalArgumentException]
-          case _ => fail
-        }
-    }
 
     "fail fast on an invalid application ID" in {
       val aCommandSubmission =
@@ -77,7 +67,6 @@ class CommandUpdaterFlowTest extends AsyncWordSpec with Matchers with PekkoBefor
           CommandClientConfiguration.default,
           aSubmissionIdGenerator,
           anApplicationId,
-          aLedgerId,
         )
       )
       .runWith(Sink.head)

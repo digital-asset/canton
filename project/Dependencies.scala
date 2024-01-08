@@ -1,6 +1,8 @@
-import cats.syntax.either._
-import cats.syntax.functorFilter._
-import sbt.{io => _, _}
+import cats.syntax.either.*
+import cats.syntax.functorFilter.*
+import sbt.{io as _, *}
+
+import scala.util.chaining.scalaUtilChainingOps
 
 object Dependencies {
   val daml_libraries_version = metabuild.BuildInfo.daml_libraries_version
@@ -44,7 +46,7 @@ object Dependencies {
   lazy val javafx_all_version = "17-ea+8"
   lazy val javax_annotations_version = "1.3.2"
   lazy val log4j_version = "2.17.0"
-  lazy val logback_version = "1.4.5"
+  lazy val logback_version = "1.4.14"
   lazy val logstash_version = "6.6"
   lazy val magnolia_version = "1.1.3"
   lazy val magnolifyScalacheck_version = "0.6.2"
@@ -54,7 +56,7 @@ object Dependencies {
   lazy val munit_version = "0.7.26"
   // pick the version of boring ssl and netty native from this table: https://github.com/grpc/grpc-java/blob/master/SECURITY.md#netty
   // required for ALPN (which is required for TLS+HTTP/2) when running on Java 8. JSSE will be used on Java 9+.
-  lazy val grpc_version = "1.59.0"
+  lazy val grpc_version = "1.60.0"
   lazy val netty_boring_ssl_version = "2.0.61.Final"
   lazy val netty_version = "4.1.100.Final"
   lazy val opentelemetry_instrumentation_grpc_version = s"$opentelemetry_version-alpha"
@@ -307,47 +309,95 @@ object Dependencies {
 
   lazy val munit = "org.scalameta" % "munit_2.13" % munit_version
 
-  lazy val damlDependencyMap = {
-    import io.circe._, io.circe.parser._, io.circe.generic.auto._, io.circe.syntax._
-    import better.files._
+  object resolveDependency {
+    import io.circe.*, io.circe.parser.*, io.circe.generic.auto.*, io.circe.syntax.*
+    import better.files.*
 
-    case class Dependencies(dependency_tree: DependencyTree)
-    case class DependencyTree(dependencies: List[Dependency])
-    case class Dependency(coord: String)
+    lazy val ThisProject = "Canton"
+    lazy val OtherProjects: Set[String] = Set("DamlSDK")
 
-    val deps = decode[Dependencies](
-      file"daml/maven_install_2.13.json".contentAsString
-    ).valueOr { err =>
-      throw new RuntimeException(s"Failed to parse daml repo maven json file: $err")
-    }
+    case class Dependencies(dependencies: List[Dependency])
+    case class Dependency(org: String, artifact: String, version: String, users: Set[String])
 
-    deps.dependency_tree.dependencies.mapFilter { dep =>
-      dep.coord.split(":") match {
-        case Array(org, artifact, version) =>
-          Some((org, artifact) -> (org % artifact % version))
-        case _ => None
-      }
-    }.toMap
+    private val dependenciesForThisProject =
+      decode[Dependencies](file"dependencies.json".contentAsString)
+        .valueOr { err =>
+          throw new RuntimeException(s"Failed to parse dependencies file: $err")
+        }
+        .dependencies
+        .mapFilter {
+          case Dependency(org, artifact, version, users) if users contains ThisProject =>
+            Some((org, artifact) -> (org % artifact % version))
+          case dep if dep.users.subsetOf(OtherProjects) => None
+          case invalid =>
+            throw new RuntimeException(s"Invalid dependency definition: $invalid")
+        }
+        .toMap
+
+    def apply(organization: String, artifact: String): ModuleID =
+      dependenciesForThisProject
+        .get(organization -> artifact)
+        .orElse(dependenciesForThisProject.get(organization -> s"${artifact}_2.13"))
+        .getOrElse(
+          throw new RuntimeException(s"Unknown dependency: $organization, $artifact")
+        )
   }
 
-  def damlDependency(org: String, artifact: String): ModuleID = {
-    damlDependencyMap
-      .get((org, artifact))
-      .orElse(damlDependencyMap.get((org, s"${artifact}_2.13")))
-      .getOrElse(throw new RuntimeException(s"Unknown daml dependency: $org, $artifact"))
-  }
-
-  // TODO(i10677): Pull in dependencies from daml submodule
   lazy val daml_script_runner = "com.daml" %% "daml-script-runner" % daml_libraries_version
+  lazy val daml_lf_data = "com.daml" %% "daml-lf-data" % daml_libraries_version
+  lazy val daml_libs_scala_contextualized_logging =
+    "com.daml" %% "contextualized-logging" % daml_libraries_version
+  lazy val daml_test_evidence_tag =
+    "com.daml" %% "test-evidence-tag" % daml_libraries_version
+  lazy val daml_test_evidence_generator_scalatest =
+    "com.daml" %% "test-evidence-generator" % daml_libraries_version
+  lazy val daml_lf_archive_reader = "com.daml" %% "daml-lf-archive-reader" % daml_libraries_version
+  lazy val daml_lf_engine = "com.daml" %% "daml-lf-engine" % daml_libraries_version
+  lazy val daml_lf_transaction = "com.daml" %% "daml-lf-transaction" % daml_libraries_version
+  lazy val daml_non_empty = "com.daml" %% "nonempty" % daml_libraries_version
+  lazy val daml_nonempty_cats = "com.daml" %% "nonempty-cats" % daml_libraries_version
+  lazy val daml_metrics = "com.daml" %% "metrics" % daml_libraries_version
+  lazy val daml_tracing = "com.daml" %% "tracing" % daml_libraries_version
+  lazy val daml_telemetry = "com.daml" %% "telemetry" % daml_libraries_version
+
+  lazy val daml_observability_pekko_http_metrics =
+    "com.daml" %% "pekko-http-metrics" % daml_libraries_version
+  lazy val daml_executors = "com.daml" %% "executors" % daml_libraries_version
+  lazy val daml_timer_utils = "com.daml" %% "timer-utils" % daml_libraries_version
+  lazy val daml_libs_scala_jwt = "com.daml" %% "jwt" % daml_libraries_version
+  lazy val daml_libs_struct_spray_json = "com.daml" %% "struct-spray-json" % daml_libraries_version
+  lazy val daml_libs_scala_scalatest_utils =
+    "com.daml" %% "scalatest-utils" % daml_libraries_version
+  lazy val daml_rs_grpc_pekko = "com.daml" %% "rs-grpc-pekko" % daml_libraries_version
+  lazy val daml_lf_encoder = "com.daml" %% "daml-lf-encoder" % daml_libraries_version
+  lazy val daml_lf_api_type_signature =
+    "com.daml" %% "daml-lf-api-type-signature" % daml_libraries_version
+  lazy val daml_rs_grpc_bridge = "com.daml" % "rs-grpc-bridge" % daml_libraries_version
+  // Daml testing libs
+  lazy val daml_libs_scala_ports = "com.daml" %% "ports" % daml_libraries_version
+  lazy val daml_http_test_utils = "com.daml" %% "http-test-utils" % daml_libraries_version
+  lazy val daml_testing_utils = "com.daml" %% "testing-utils" % daml_libraries_version
+  lazy val daml_metrics_test_lib = "com.daml" %% "metrics-test-lib" % daml_libraries_version
+  lazy val daml_lf_transaction_test_lib =
+    "com.daml" %% "daml-lf-transaction-test-lib" % daml_libraries_version
+  lazy val daml_rs_grpc_testing_utils =
+    "com.daml" %% "rs-grpc-testing-utils" % daml_libraries_version
+  lazy val daml_observability_tracing_test_lib =
+    "com.daml" %% "tracing-test-lib" % daml_libraries_version
+
+  // TODO(#16172): Consider publishing and using artifact from Daml repo
+  //  lazy val daml_libs_scala_ledger_resources_test_lib = "com.daml" %% "ledger-resources-test-lib" % daml_libraries_version
+  lazy val daml_libs_scala_grpc_test_utils =
+    "com.daml" %% "grpc-test-utils" % daml_libraries_version
 
   // daml repo dependencies
   // TODO(#10852) scalaz or cats. let's pick one.
-  lazy val scalaz_core = damlDependency("org.scalaz", "scalaz-core")
-  lazy val scalaz_scalacheck = damlDependency("org.scalaz", "scalaz-scalacheck-binding")
-  lazy val fasterjackson_core = damlDependency("com.fasterxml.jackson.core", "jackson-core")
+  lazy val scalaz_core = resolveDependency("org.scalaz", "scalaz-core")
+  lazy val scalaz_scalacheck = resolveDependency("org.scalaz", "scalaz-scalacheck-binding")
+  lazy val fasterjackson_core = resolveDependency("com.fasterxml.jackson.core", "jackson-core")
   // TODO(#10852) yet another json library
-  lazy val spray = damlDependency("io.spray", "spray-json")
-  lazy val google_protobuf_java = damlDependency("com.google.protobuf", "protobuf-java")
+  lazy val spray = resolveDependency("io.spray", "spray-json")
+  lazy val google_protobuf_java = resolveDependency("com.google.protobuf", "protobuf-java")
   lazy val protobuf_version = google_protobuf_java.revision
   // To override 3.19.2 from the daml repo's maven_install_2.13.json
   lazy val google_protobuf_java_util =
@@ -355,23 +405,23 @@ object Dependencies {
 
   // version depends actually on scalapb
   lazy val google_common_protos =
-    damlDependency("com.google.api.grpc", "proto-google-common-protos")
+    resolveDependency("com.google.api.grpc", "proto-google-common-protos")
 
-  lazy val apache_commons_text = damlDependency("org.apache.commons", "commons-text")
-  lazy val typelevel_paiges = damlDependency("org.typelevel", "paiges-core")
-  lazy val commons_io = damlDependency("commons-io", "commons-io")
-  lazy val commons_codec = damlDependency("commons-codec", "commons-codec")
-  lazy val lihaoyi_sourcecode = damlDependency("com.lihaoyi", "sourcecode")
-  lazy val totososhi = damlDependency("com.github.tototoshi", "scala-csv")
-  lazy val auth0_java = damlDependency("com.auth0", "java-jwt")
-  lazy val auth0_jwks = damlDependency("com.auth0", "jwks-rsa")
-  lazy val guava = damlDependency("com.google.guava", "guava")
+  lazy val apache_commons_text = resolveDependency("org.apache.commons", "commons-text")
+  lazy val typelevel_paiges = resolveDependency("org.typelevel", "paiges-core")
+  lazy val commons_io = resolveDependency("commons-io", "commons-io")
+  lazy val commons_codec = resolveDependency("commons-codec", "commons-codec")
+  lazy val lihaoyi_sourcecode = resolveDependency("com.lihaoyi", "sourcecode")
+  lazy val totososhi = resolveDependency("com.github.tototoshi", "scala-csv")
+  lazy val auth0_java = resolveDependency("com.auth0", "java-jwt")
+  lazy val auth0_jwks = resolveDependency("com.auth0", "jwks-rsa")
+  lazy val guava = resolveDependency("com.google.guava", "guava")
   // TODO(#10852) one database library, not two
-  lazy val anorm = damlDependency("org.playframework.anorm", "anorm")
-  lazy val scalapb_json4s = damlDependency("com.thesamet.scalapb", "scalapb-json4s")
+  lazy val anorm = resolveDependency("org.playframework.anorm", "anorm")
+  lazy val scalapb_json4s = resolveDependency("com.thesamet.scalapb", "scalapb-json4s")
   lazy val opentelemetry_prometheus =
-    damlDependency("io.opentelemetry", "opentelemetry-exporter-prometheus")
+    resolveDependency("io.opentelemetry", "opentelemetry-exporter-prometheus")
   // it should be kept up-to-date with the scaffeine version to avoid incompatibilities
-  lazy val caffeine = damlDependency("com.github.ben-manes.caffeine", "caffeine")
-  lazy val hikaricp = damlDependency("com.zaxxer", "HikariCP")
+  lazy val caffeine = resolveDependency("com.github.ben-manes.caffeine", "caffeine")
+  lazy val hikaricp = resolveDependency("com.zaxxer", "HikariCP")
 }
