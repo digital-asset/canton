@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.admin
@@ -34,7 +34,10 @@ import com.digitalasset.canton.participant.sync.SyncServiceInjectionError.Passiv
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.PartyId
-import com.digitalasset.canton.topology.TopologyManagerError.NoAppropriateSigningKeyInStore
+import com.digitalasset.canton.topology.TopologyManagerError.{
+  NoAppropriateSigningKeyInStore,
+  SecretKeyNotInStore,
+}
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, Spanning, TraceContext, TracerProvider}
 import com.digitalasset.canton.util.FutureInstances.*
@@ -135,7 +138,7 @@ class AdminWorkflowServices(
       .leftSubflatMap(res) {
         case CantonPackageServiceError.IdentityManagerParentError(
               ParticipantTopologyManagerError.IdentityManagerParentError(
-                NoAppropriateSigningKeyInStore.Failure(_)
+                NoAppropriateSigningKeyInStore.Failure(_) | SecretKeyNotInStore.Failure(_)
               )
             ) =>
           // Log error by creating error object, but continue processing.

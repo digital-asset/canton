@@ -29,7 +29,7 @@ object JvmRulesPlugin extends AutoPlugin {
     headerLicense := Some(
       HeaderLicense
         .Custom( // When updating the year here, also update .circleci/enterpriseAppHeaderCheck.sh and damlRepoHeaderSettings below
-          """|Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates.
+          """|Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates.
              |Proprietary code. All rights reserved.
              |""".stripMargin
         )
@@ -51,7 +51,7 @@ object JvmRulesPlugin extends AutoPlugin {
     headerLicense := Some(
       HeaderLicense
         .Custom( // When updating the year here, also update .circleci/enterpriseAppHeaderCheck.sh and cantonRepoHeaderSettings above
-          """|Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+          """|Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
              |SPDX-License-Identifier: Apache-2.0
              |""".stripMargin
         )

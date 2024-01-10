@@ -1,0 +1,134 @@
+{
+  "dependencies": [
+    {
+      "org": "commons-codec",
+      "artifact": "commons-codec",
+      "version": "1.11",
+      "description": "The Apache Commons Codec package contains simple encoder and decoders for various formats such as Base64 and Hexadecimal. In addition to these widely used encoders and decoders, the codec package also maintains a collection of phonetic encoding utilities.",
+      "users": [
+        "Canton",
+        "DamlSDK"
+      ]
+    },
+    {
+      "org": "commons-io",
+      "artifact": "commons-io",
+      "version": "2.11.0",
+      "description": "The Apache Commons IO library contains utility classes, stream implementations, file filters,file comparators, endian transformation classes, and much more.",
+      "users": [
+        "Canton",
+        "DamlSDK"
+      ]
+    },
+    {
+      "org": "com.google.api.grpc",
+      "artifact": "proto-google-common-protos",
+      "version": "2.22.0",
+      "description": "PROTO library for proto-google-common-protos",
+      "users": [
+        "Canton",
+        "DamlSDK"
+      ]
+    },
+    {
+      "org": "com.google.protobuf",
+      "artifact": "protobuf-java",
+      "version": "3.24.0",
+      "description": "Core Protocol Buffers library. Protocol Buffers are a way of encoding structured data in an efficient yet extensible format.",
+      "users": [
+        "Canton",
+        "DamlSDK"
+      ]
+    },
+    {
+      "org": "com.fasterxml.jackson.core",
+      "artifact": "jackson-core",
+      "version": "2.14.3",
+      "description": "Core Jackson processing abstractions (aka Streaming API), implementation for JSON",
+      "users": [
+        "Canton",
+        "DamlSDK"
+      ]
+    },
+    {
+      "org": "com.auth0",
+      "artifact": "java-jwt",
+      "version": "4.2.1",
+      "description": "Java implementation of JSON Web Token (JWT)",
+      "users": [
+        "Canton",
+        "DamlSDK"
+      ]
+    },
+    {
+      "org": "com.auth0",
+      "artifact": "jwks-rsa",
+      "version": "0.21.2",
+      "description": "JSON Web Key Set parser library",
+      "users": [
+        "Canton",
+        "DamlSDK"
+      ]
+    },
+    {
+      "org": "com.zaxxer",
+      "artifact": "HikariCP",
+      "version": "3.2.0",
+      "description": "Ultimate JDBC Connection Pool",
+      "users": [
+        "Canton",
+        "DamlSDK"
+      ]
+    },
+    {
+      "org": "com.google.guava",
+      "artifact": "guava",
+      "version": "31.1-jre",
+      "description": "Guava is a suite of core and expanded libraries that include utility classes, Google's collections, I/O classes, and much more.",
+      "users": [
+        "Canton",
+        "DamlSDK"
+      ]
+    },
+    {
+      "org": "org.scalaz",
+      "artifact": "scalaz-scalacheck-binding_2.13",
+      "version": "7.2.33-scalacheck-1.15",
+      "description": "scalaz-scalacheck-binding",
+      "users": [
+        "Canton",
+        "DamlSDK"
+      ]
+    },
+    {
+      "org": "com.github.ben-manes.caffeine",
+      "artifact": "caffeine",
+      "version": "3.1.2",
+      "description": "A high performance caching library",
+      "users": [
+        "Canton",
+        "DamlSDK"
+      ]
+    },
+    {
+      "org": "org.playframework.anorm",
+      "artifact": "anorm_2.13",
+      "version": "2.7.0",
+      "description": "Anorm, simple SQL data access",
+      "users": [
+        "Canton",
+        "DamlSDK"
+      ]
+    },
+    {
+      "org": "com.thesamet.scalapb",
+      "artifact": "scalapb-json4s_2.13",
+      "version": "0.11.1",
+      "description": "scalapb-json4s",
+      "users": [
+        "Canton",
+        "DamlSDK"
+      ]
+    }
+  ]
+}
