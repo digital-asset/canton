@@ -66,10 +66,7 @@ import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.metrics.{MetricsConfig, MetricsPrefix, MetricsReporterConfig}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
-import com.digitalasset.canton.participant.config.ParticipantInitConfig.{
-  ParticipantLedgerApiInitConfig,
-  ParticipantParametersInitConfig,
-}
+import com.digitalasset.canton.participant.config.ParticipantInitConfig.ParticipantLedgerApiInitConfig
 import com.digitalasset.canton.participant.config.*
 import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
@@ -93,7 +90,6 @@ import com.typesafe.config.{
   ConfigValueFactory,
 }
 import com.typesafe.scalalogging.LazyLogging
-import monocle.macros.syntax.lens.*
 import org.apache.pekko.stream.ThrottleMode
 import pureconfig.*
 import pureconfig.error.CannotConvert
@@ -150,15 +146,6 @@ object CheckConfig {
   final case class IsActive(node: Option[String] = None) extends CheckConfig
 }
 
-/** Configuration of health server backend. */
-final case class HealthServerConfig(address: String = "0.0.0.0", port: Port)
-
-/** Configuration to expose a health endpoint on the given `server` running the configured check
-  * @param server Server details for hosting the health endpoint
-  * @param check Check for determining whether this canton process is healthy
-  */
-final case class HealthConfig(server: HealthServerConfig, check: CheckConfig)
-
 /** Deadlock detection configuration
   *
   * A simple deadlock detection method. Using a background scheduler, we schedule a trivial future on the EC.
@@ -177,7 +164,6 @@ final case class DeadlockDetectionConfig(
 /** Configuration for metrics and tracing
   *
   * @param deadlockDetection Should we regularly check our environment EC for deadlocks?
-  * @param health Optional Health check to expose an http server to monitor is the canton process is healthy
   * @param metrics Optional Metrics Reporter used to expose internally captured metrics
   * @param delayLoggingThreshold         Logs a warning message once the sequencer client falls behind in processing messages from the sequencer (based on the sequencing timestamp).
   *
@@ -189,7 +175,6 @@ final case class DeadlockDetectionConfig(
   */
 final case class MonitoringConfig(
     deadlockDetection: DeadlockDetectionConfig = DeadlockDetectionConfig(),
-    health: Option[HealthConfig] = None,
     metrics: MetricsConfig = MetricsConfig(),
     // TODO(i9014) move into logging
     delayLoggingThreshold: NonNegativeFiniteDuration =
@@ -201,21 +186,7 @@ final case class MonitoringConfig(
     logSlowFutures: Boolean = false,
     logging: LoggingConfig = LoggingConfig(),
     dumpNumRollingLogFiles: NonNegativeInt = MonitoringConfig.defaultDumpNumRollingLogFiles,
-) extends LazyLogging {
-
-  // merge in backwards compatible config options
-  def getLoggingConfig: LoggingConfig =
-    (logging.api.messagePayloads, logging.api.messagePayloads) match {
-      case (Some(fst), _) =>
-        if (!logging.api.messagePayloads.forall(_ == fst))
-          logger.error(
-            "Broken config validation: logging.api.message-payloads differs from logMessagePayloads"
-          )
-        logging.focus(_.api.messagePayloads).replace(Some(fst))
-      case _ => logging
-    }
-
-}
+) extends LazyLogging
 
 object MonitoringConfig {
   private val defaultDelayLoggingThreshold = NonNegativeFiniteDuration.ofSeconds(20)
@@ -332,14 +303,11 @@ final case class CantonParameters(
   * @param enablePreviewCommands         Feature flag to enable the set of commands that use functionality which we don't deem stable.
   * @param enableTestingCommands         Feature flag to enable the set of commands used by Canton developers for testing purposes.
   * @param enableRepairCommands          Feature flag to enable the set of commands used by Canton operators for manual repair purposes.
-  * @param skipTopologyManagerSignatureValidation If true, the signature validation of the domain topology transaction messages (2.x) will be skipped
   */
 final case class CantonFeatures(
     enablePreviewCommands: Boolean = false,
     enableTestingCommands: Boolean = false,
     enableRepairCommands: Boolean = false,
-    // TODO(#15221) remove for x-nodes
-    skipTopologyManagerSignatureValidation: Boolean = false,
 ) {
   def featureFlags: Set[FeatureFlag] = {
     (Seq(FeatureFlag.Stable)
@@ -506,8 +474,7 @@ trait CantonConfig {
           dontWarnOnDeprecatedPV = participantParameters.dontWarnOnDeprecatedPV,
           initialProtocolVersion = participantParameters.initialProtocolVersion.unwrap,
         ),
-        uniqueContractKeys = participantConfig.init.parameters.uniqueContractKeys,
-        ledgerApiServerParameters = participantParameters.ledgerApiServerParameters,
+        ledgerApiServerParameters = participantParameters.ledgerApiServer,
         excludeInfrastructureTransactions = participantParameters.excludeInfrastructureTransactions,
         enableEngineStackTrace = participantParameters.enableEngineStackTraces,
         enableContractUpgrading = participantParameters.enableContractUpgrading,
@@ -580,7 +547,19 @@ trait CantonConfig {
     def domain(config: DomainConfig): Seq[String] =
       portDescriptionFromConfig(config)(Seq(("admin-api", _.adminApi), ("public-api", _.publicApi)))
 
-    Seq(domains.fmap(domain), participants.fmap(participant))
+    def sequencer(config: SequencerNodeConfigCommon): Seq[String] =
+      portDescriptionFromConfig(config)(Seq(("admin-api", _.adminApi), ("public-api", _.publicApi)))
+
+    def mediator(config: MediatorNodeConfigCommon): Seq[String] =
+      portDescriptionFromConfig(config)(Seq(("admin-api", _.adminApi)))
+
+    Seq(
+      domains.fmap(domain),
+      participants.fmap(participant),
+      participantsX.fmap(participant),
+      sequencersX.fmap(sequencer),
+      mediatorsX.fmap(mediator),
+    )
       .flatMap(_.map { case (name, ports) =>
         nodePortsDescription(name, ports)
       })
@@ -617,16 +596,15 @@ private[config] object CantonNodeParameterConverter {
       parent.monitoring.tracing,
       parent.monitoring.delayLoggingThreshold.toInternal,
       parent.monitoring.logQueryCost,
-      parent.monitoring.getLoggingConfig,
+      parent.monitoring.logging,
       parent.parameters.enableAdditionalConsistencyChecks,
       parent.features.enablePreviewCommands,
       parent.parameters.timeouts.processing,
       node.sequencerClient,
-      node.caching,
+      node.parameters.caching,
       node.parameters.batching,
       parent.parameters.nonStandardConfig,
       node.storage.parameters.migrateAndStart,
-      parent.features.skipTopologyManagerSignatureValidation,
     )
   }
 
@@ -804,9 +782,6 @@ object CantonConfig {
       deriveReader[InitConfigBase.Identity]
     lazy implicit val initConfigReader: ConfigReader[InitConfig] = deriveReader[InitConfig]
       .enableNestedOpt("auto-init", _.copy(identity = None))
-    lazy implicit val parametersParticipantInitConfigReader
-        : ConfigReader[ParticipantParametersInitConfig] =
-      deriveReader[ParticipantParametersInitConfig]
     lazy implicit val ledgerApiParticipantInitConfigReader
         : ConfigReader[ParticipantLedgerApiInitConfig] =
       deriveReader[ParticipantLedgerApiInitConfig]
@@ -824,6 +799,8 @@ object CantonConfig {
     lazy implicit val domainInitConfigReader: ConfigReader[DomainInitConfig] =
       deriveReader[DomainInitConfig]
         .enableNestedOpt("auto-init", _.copy(identity = None))
+    lazy implicit val httpHealthServerConfigReader: ConfigReader[HttpHealthServerConfig] =
+      deriveReader[HttpHealthServerConfig]
     implicit val grpcHealthServerConfigReader: ConfigReader[GrpcHealthServerConfig] =
       deriveReader[GrpcHealthServerConfig]
     lazy implicit val communityCryptoProviderReader: ConfigReader[CommunityCryptoProvider] =
@@ -982,7 +959,12 @@ object CantonConfig {
       ConfigReader.fromCursor[CommunitySequencerConfig] { cur =>
         for {
           objCur <- cur.asObjectCursor
-          sequencerType <- objCur.atKey("type").flatMap(_.asString)
+          sequencerType <- objCur.atKey("type").flatMap(_.asString) match {
+            case Right("reference") =>
+              // Allow using "reference" as the sequencer type in both community and enterprise
+              Right("community-reference")
+            case other => other
+          }
           config <- (sequencerType match {
             case "database" =>
               communitySequencerConfigDatabaseReader.from(objCur.withoutKey("type"))
@@ -1020,9 +1002,7 @@ object CantonConfig {
     lazy implicit val checkConfigIsActiveReader: ConfigReader[CheckConfig.IsActive] =
       deriveReader[CheckConfig.IsActive].applyDeprecations
     lazy implicit val checkConfigReader: ConfigReader[CheckConfig] = deriveReader[CheckConfig]
-    lazy implicit val healthServerConfigReader: ConfigReader[HealthServerConfig] =
-      deriveReader[HealthServerConfig]
-    lazy implicit val healthConfigReader: ConfigReader[HealthConfig] = deriveReader[HealthConfig]
+
     lazy implicit val metricsFilterConfigReader: ConfigReader[MetricsConfig.MetricsFilterConfig] =
       deriveReader[MetricsConfig.MetricsFilterConfig]
     lazy implicit val metricsConfigGraphitePrefixStatic: ConfigReader[MetricsPrefix.Static] =
@@ -1210,11 +1190,10 @@ object CantonConfig {
     lazy implicit val initBaseIdentityConfigWriter: ConfigWriter[InitConfigBase.Identity] =
       deriveWriter[InitConfigBase.Identity]
     lazy implicit val initConfigWriter: ConfigWriter[InitConfig] = deriveWriter[InitConfig]
+    lazy implicit val httpHealthServerConfigWriter: ConfigWriter[HttpHealthServerConfig] =
+      deriveWriter[HttpHealthServerConfig]
     lazy implicit val grpcHealthServerConfigWriter: ConfigWriter[GrpcHealthServerConfig] =
       deriveWriter[GrpcHealthServerConfig]
-    lazy implicit val parametersParticipantInitConfigWriter
-        : ConfigWriter[ParticipantParametersInitConfig] =
-      deriveWriter[ParticipantParametersInitConfig]
     lazy implicit val ledgerApiParticipantInitConfigWriter
         : ConfigWriter[ParticipantLedgerApiInitConfig] =
       deriveWriter[ParticipantLedgerApiInitConfig]
@@ -1434,9 +1413,7 @@ object CantonConfig {
     lazy implicit val checkConfigIsActiveWriter: ConfigWriter[CheckConfig.IsActive] =
       deriveWriter[CheckConfig.IsActive]
     lazy implicit val checkConfigWriter: ConfigWriter[CheckConfig] = deriveWriter[CheckConfig]
-    lazy implicit val healthServerConfigWriter: ConfigWriter[HealthServerConfig] =
-      deriveWriter[HealthServerConfig]
-    lazy implicit val healthConfigWriter: ConfigWriter[HealthConfig] = deriveWriter[HealthConfig]
+
     lazy implicit val metricsFilterConfigWriter: ConfigWriter[MetricsConfig.MetricsFilterConfig] =
       deriveWriter[MetricsConfig.MetricsFilterConfig]
     lazy implicit val metricsConfigGraphiteNoPrefix: ConfigWriter[MetricsPrefix.NoPrefix.type] =
