@@ -36,11 +36,7 @@ import com.digitalasset.canton.participant.admin.{
 }
 import com.digitalasset.canton.participant.config.*
 import com.digitalasset.canton.participant.domain.grpc.GrpcDomainRegistry
-import com.digitalasset.canton.participant.domain.{
-  AgreementService,
-  DomainAliasManager,
-  DomainAliasResolution,
-}
+import com.digitalasset.canton.participant.domain.{DomainAliasManager, DomainAliasResolution}
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.{
   IndexerLockIds,
   LedgerApiServerState,
@@ -82,7 +78,6 @@ class CantonLedgerApiServerFactory(
     allocateIndexerLockIds: DbConfig => Either[String, Option[IndexerLockIds]],
     meteringReportKey: MeteringReportKey,
     val multiDomainEnabled: Boolean,
-    community: Boolean,
     futureSupervisor: FutureSupervisor,
     val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {
@@ -163,7 +158,6 @@ class CantonLedgerApiServerFactory(
           startLedgerApiServer = sync.isActive(),
           futureSupervisor = futureSupervisor,
           multiDomainEnabled = multiDomainEnabled,
-          community = community,
         )(executionContext, actorSystem)
         .leftMap { err =>
           // The MigrateOnEmptySchema exception is private, thus match on the expected message
@@ -254,7 +248,6 @@ trait ParticipantNodeBootstrapCommon {
       packageDependencyResolver: PackageDependencyResolver,
       componentFactory: ParticipantComponentBootstrapFactory,
       skipRecipientsCheck: Boolean,
-      overrideKeyUniqueness: Option[Boolean] = None, // TODO(i13235) remove when UCK is gone
   )(implicit executionSequencerFactory: ExecutionSequencerFactory): EitherT[
     FutureUnlessShutdown,
     String,
@@ -272,20 +265,13 @@ trait ParticipantNodeBootstrapCommon {
       participantId,
       ips,
       crypto,
-      config.caching,
+      config.parameters.caching,
       timeouts,
       futureSupervisor,
       loggerFactory,
     )
     // closed in DomainAliasManager
     val registeredDomainsStore = RegisteredDomainsStore(storage, timeouts, loggerFactory)
-
-    // closed in grpc domain registry
-    val agreementService = {
-      // store is cleaned up as part of the agreement service
-      val acceptedAgreements = ServiceAgreementStore(storage, timeouts, loggerFactory)
-      new AgreementService(acceptedAgreements, parameterConfig, loggerFactory)
-    }
 
     for {
       domainConnectionConfigStore <- EitherT
@@ -317,9 +303,7 @@ trait ParticipantNodeBootstrapCommon {
           storage,
           clock,
           config.init.ledgerApi.maxDeduplicationDuration.toInternal.some,
-          overrideKeyUniqueness.orElse(config.init.parameters.uniqueContractKeys.some),
           parameterConfig.batchingConfig,
-          parameterConfig.stores,
           ReleaseProtocolVersion.latest,
           arguments.metrics,
           indexedStringStore,
@@ -372,7 +356,6 @@ trait ParticipantNodeBootstrapCommon {
         participantId,
         syncDomainPersistentStateManager,
         persistentState.map(_.settingsStore),
-        agreementService,
         topologyDispatcher,
         syncCrypto,
         config.crypto,
@@ -425,6 +408,7 @@ trait ParticipantNodeBootstrapCommon {
                 storage,
                 adminToken,
                 parameterConfig.stores,
+                parameterConfig.batchingConfig,
               )
             )
           )
@@ -508,7 +492,6 @@ trait ParticipantNodeBootstrapCommon {
       val stateService = new DomainConnectivityService(
         sync,
         domainAliasManager,
-        agreementService,
         parameterConfig.processingTimeouts,
         sequencerInfoLoader,
         loggerFactory,

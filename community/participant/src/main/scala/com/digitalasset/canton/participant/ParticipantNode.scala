@@ -435,7 +435,6 @@ object ParticipantNodeBootstrap {
 
     override protected def createEngine(arguments: Arguments): Engine =
       DAMLe.newEngine(
-        uniqueContractKeys = arguments.parameterConfig.uniqueContractKeys,
         enableLfDev = arguments.parameterConfig.devVersionSupport,
         enableStackTraces = arguments.parameterConfig.enableEngineStackTrace,
         enableContractUpgrading = arguments.parameterConfig.enableContractUpgrading,
@@ -476,7 +475,6 @@ object ParticipantNodeBootstrap {
         futureSupervisor = arguments.futureSupervisor,
         loggerFactory = arguments.loggerFactory,
         multiDomainEnabled = multiDomainEnabledForLedgerApiServer,
-        community = true,
       )
 
     protected def multiDomainEnabledForLedgerApiServer: Boolean

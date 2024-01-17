@@ -661,7 +661,6 @@ object BuildCommon {
         libraryDependencies ++= Seq(
           daml_libs_scala_jwt,
           dropwizard_metrics_jmx,
-          pekko_http,
           ammonite,
           jul_to_slf4j,
           pureconfig_cats,
@@ -758,6 +757,7 @@ object BuildCommon {
         sharedCantonSettings,
         libraryDependencies ++= Seq(
           pekko_slf4j, // not used at compile time, but required by com.digitalasset.canton.util.PekkoUtil.createActorSystem
+          pekko_http, // used for http health service
           logback_classic,
           logback_core,
           daml_lf_transaction_test_lib % Test,
@@ -881,6 +881,8 @@ object BuildCommon {
       .settings(
         sharedCantonSettings,
         libraryDependencies ++= Seq(
+          daml_test_evidence_tag % Test,
+          daml_test_evidence_generator_scalatest % Test,
           daml_libs_scala_jwt,
           scala_logging,
           scalatest % Test,

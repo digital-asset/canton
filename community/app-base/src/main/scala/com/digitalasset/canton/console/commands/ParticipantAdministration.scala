@@ -6,6 +6,7 @@ package com.digitalasset.canton.console.commands
 import cats.syntax.option.*
 import cats.syntax.traverse.*
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
+import com.daml.ledger.api.v2.participant_offset.ParticipantOffset
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommands.Pruning.{
   GetParticipantScheduleCommand,
@@ -56,6 +57,7 @@ import com.digitalasset.canton.participant.admin.grpc.TransferSearchResult
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.participant.sync.TimestampedEvent
+import com.digitalasset.canton.platform.apiserver.services.ApiConversions
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
   CommitmentPeriod,
@@ -556,16 +558,18 @@ class ParticipantPruningAdministrationGroup(
     "Return the highest participant ledger offset whose record time is before or at the given one (if any) at which pruning is safely possible",
     FeatureFlag.Preview,
   )
-  def find_safe_offset(beforeOrAt: Instant = Instant.now()): Option[LedgerOffset] = {
+  def find_safe_offset(beforeOrAt: Instant = Instant.now()): Option[ParticipantOffset] = {
     check(FeatureFlag.Preview) {
       val ledgerEnd = consoleEnvironment.run(
         ledgerApiCommand(LedgerApiCommands.TransactionService.GetLedgerEnd())
       )
-      consoleEnvironment.run(
-        adminCommand(
-          ParticipantAdminCommands.Pruning.GetSafePruningOffsetCommand(beforeOrAt, ledgerEnd)
+      consoleEnvironment
+        .run(
+          adminCommand(
+            ParticipantAdminCommands.Pruning.GetSafePruningOffsetCommand(beforeOrAt, ledgerEnd)
+          )
         )
-      )
+        .map(ledgerOffset => ApiConversions.toV2(ledgerOffset))
     }
   }
 
@@ -1060,29 +1064,6 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     def is_connected(domainId: DomainId): Boolean =
       list_connected().exists(_.domainId == domainId)
 
-    private def confirm_agreement(domainAlias: DomainAlias): Unit = {
-
-      val response = get_agreement(domainAlias)
-
-      val autoApprove =
-        sys.env.getOrElse("CANTON_AUTO_APPROVE_AGREEMENTS", "no").toLowerCase == "yes"
-      response.foreach {
-        case (agreement, accepted) if !accepted =>
-          if (autoApprove) {
-            accept_agreement(domainAlias.unwrap, agreement.id)
-          } else {
-            println(s"Service Agreement for `$domainAlias`:")
-            println(agreement.text)
-            println("Do you accept the license? yes/no")
-            print("> ")
-            val answer = Option(scala.io.StdIn.readLine())
-            if (answer.exists(_.toLowerCase == "yes"))
-              accept_agreement(domainAlias.unwrap, agreement.id)
-          }
-        case _ => () // Don't do anything if the license has already been accepted
-      }
-    }
-
     @Help.Summary(
       "Macro to connect a participant to a locally configured domain given by reference"
     )
@@ -1181,12 +1162,10 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       if (current.isEmpty) {
         // architecture-handbook-entry-begin: OnboardParticipantConnect
         // register the domain configuration
-        register(config.copy(manualConnect = true))
+        consoleEnvironment.run {
+          ParticipantCommands.domains.register(runner, config)
+        }
         if (!config.manualConnect) {
-          // fetch and confirm domain agreement
-          if (config.sequencerConnections.nonBftSetup) { // agreement is removed with the introduction of BFT domain.
-            confirm_agreement(config.domain.unwrap)
-          }
           reconnect(config.domain.unwrap, retry = false).discard
           // now update the domain settings to auto-connect
           modify(config.domain.unwrap, _.copy(manualConnect = false))
@@ -1206,9 +1185,6 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         |First, `register` will be invoked with the given arguments, but first registered
         |with manualConnect = true. If you already set manualConnect = true, then nothing else
         |will happen and you will have to do the remaining steps yourselves.
-        |Otherwise, if the domain requires an agreement, it is fetched and presented to the user for evaluation.
-        |If the user is fine with it, the agreement is confirmed. If you want to auto-confirm,
-        |then set the environment variable CANTON_AUTO_APPROVE_AGREEMENTS=yes.
         |Finally, the command will invoke `reconnect` to startup the connection.
         |If the reconnect succeeded, the registered configuration will be updated
         |with manualStart = true. If anything fails, the domain will remain registered with `manualConnect = true` and
@@ -1406,17 +1382,6 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     def config(domain: DomainAlias): Option[DomainConnectionConfig] =
       list_registered().map(_._1).find(_.domain == domain)
 
-    @Help.Summary("Register new domain connection")
-    @Help.Description("""When connecting to a domain, we need to register the domain connection and eventually
-        |accept the terms of service of the domain before we can connect. The registration process is therefore
-        |a subset of the operation. Therefore, register is equivalent to connect if the domain does not require
-        |a service agreement. However, you would usually call register only in advanced scripts.""")
-    def register(config: DomainConnectionConfig): Unit = {
-      consoleEnvironment.run {
-        ParticipantCommands.domains.register(runner, config)
-      }
-    }
-
     @Help.Summary("Modify existing domain connection")
     def modify(
         domain: DomainAlias,
@@ -1441,21 +1406,6 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         } yield ()
       }
     }
-
-    @Help.Summary(
-      "Get the service agreement of the given domain alias and if it has been accepted already."
-    )
-    def get_agreement(domainAlias: DomainAlias): Option[(v0.Agreement, Boolean)] =
-      consoleEnvironment.run {
-        adminCommand(ParticipantAdminCommands.DomainConnectivity.GetAgreement(domainAlias))
-      }
-    @Help.Summary("Accept the service agreement of the given domain alias")
-    def accept_agreement(domainAlias: DomainAlias, agreementId: String): Unit =
-      consoleEnvironment.run {
-        adminCommand(
-          ParticipantAdminCommands.DomainConnectivity.AcceptAgreement(domainAlias, agreementId)
-        )
-      }
 
   }
 

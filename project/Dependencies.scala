@@ -39,7 +39,7 @@ object Dependencies {
   lazy val dropwizard_version = "4.1.33"
   lazy val fabric_sdk_version = "2.2.13"
   lazy val flyway_version = "9.15.2"
-  lazy val gcp_kms_version = "2.33.0"
+  lazy val gcp_kms_version = "2.36.0"
   lazy val h2_version = "2.1.210"
   lazy val janino_version = "3.1.4"
   // TODO(i8460) Don't upgrade until https://github.com/sbt/sbt/issues/6564 is fixed
@@ -384,9 +384,6 @@ object Dependencies {
     "com.daml" %% "rs-grpc-testing-utils" % daml_libraries_version
   lazy val daml_observability_tracing_test_lib =
     "com.daml" %% "tracing-test-lib" % daml_libraries_version
-
-  // TODO(#16172): Consider publishing and using artifact from Daml repo
-  //  lazy val daml_libs_scala_ledger_resources_test_lib = "com.daml" %% "ledger-resources-test-lib" % daml_libraries_version
   lazy val daml_libs_scala_grpc_test_utils =
     "com.daml" %% "grpc-test-utils" % daml_libraries_version
 
