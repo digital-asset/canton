@@ -328,7 +328,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         |part of repair or export/import procedure, the corresponding contract id must be recomputed."""
     )
     def recompute_contract_ids(
-        participant: LocalParticipantReference,
+        participant: LocalParticipantReferenceX,
         acs: Seq[SerializableContract],
         protocolVersion: ProtocolVersion,
     ): (Seq[SerializableContract], Map[LfContractId, LfContractId]) = {
@@ -338,10 +338,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         // Update the referenced contract ids
         val contractInstanceWithUpdatedContractIdReferences =
           SerializableRawContractInstance
-            .create(
-              contract.rawContractInstance.contractInstance.map(_.mapCid(contractIdMappings)),
-              AgreementText.empty, // Empty is fine, because the agreement text is not used when generating the raw serializable contract hash
-            )
+            .create(contract.rawContractInstance.contractInstance.map(_.mapCid(contractIdMappings)))
             .valueOr(err =>
               throw new RuntimeException(
                 s"Could not create serializable raw contract instance: $err"
@@ -574,7 +571,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
     // intentionally not publicly documented
     object jwt {
       def generate_unsafe_token_for_participant(
-          participant: LocalParticipantReference,
+          participant: LocalParticipantReferenceX,
           admin: Boolean,
           applicationId: String,
       ): Map[PartyId, String] = {
@@ -1062,7 +1059,7 @@ object DebuggingHelpers extends LazyLogging {
       }
       .toMap
     val lapiAcs =
-      ref.ledger_api.acs.of_all().map(ev => (ev.event.contractId, ev.templateId)).toMap
+      ref.ledger_api_v2.state.acs.of_all().map(ev => (ev.event.contractId, ev.templateId)).toMap
     (syncAcs, lapiAcs)
   }
 

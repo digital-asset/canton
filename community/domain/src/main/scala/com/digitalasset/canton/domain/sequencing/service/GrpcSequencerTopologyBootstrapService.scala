@@ -50,7 +50,7 @@ class GrpcSequencerTopologyBootstrapService(
             topologySnapshotO <- EitherT
               .fromEither[Future](
                 request.initialTopologySnapshot
-                  .traverse(StoredTopologyTransactions.fromProtoV0)
+                  .traverse(StoredTopologyTransactions.fromProtoV30)
               )
               .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.toString).asException())
             topologySnapshot = topologySnapshotO
@@ -63,6 +63,7 @@ class GrpcSequencerTopologyBootstrapService(
                 loggerFactory,
                 timeouts,
                 futureSupervisor,
+                protocolVersion,
               )
               .leftMap(Status.INVALID_ARGUMENT.withDescription(_).asException())
             _ <- EitherT

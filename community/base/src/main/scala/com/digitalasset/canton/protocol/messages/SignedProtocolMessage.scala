@@ -16,7 +16,7 @@ import com.digitalasset.canton.crypto.{
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
-import com.digitalasset.canton.protocol.v1
+import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.sequencing.protocol.ClosedEnvelope
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -24,7 +24,7 @@ import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{
-  HasProtocolVersionedCompanion,
+  HasProtocolVersionedWithValidationCompanion,
   HasProtocolVersionedWrapper,
   ProtoVersion,
   ProtocolVersion,
@@ -105,9 +105,9 @@ case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
 
   override def domainId: DomainId = message.domainId
 
-  protected def toProtoV1: v1.SignedProtocolMessage = {
-    v1.SignedProtocolMessage(
-      signature = signatures.map(_.toProtoV0),
+  protected def toProtoV30: v30.SignedProtocolMessage = {
+    v30.SignedProtocolMessage(
+      signature = signatures.map(_.toProtoV30),
       typedSignedProtocolMessageContent = typedMessage.toByteString,
     )
   }
@@ -127,7 +127,7 @@ case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
 }
 
 object SignedProtocolMessage
-    extends HasProtocolVersionedCompanion[SignedProtocolMessage[
+    extends HasProtocolVersionedWithValidationCompanion[SignedProtocolMessage[
       SignedProtocolMessageContent
     ]] {
   override val name: String = "SignedProtocolMessage"
@@ -135,9 +135,9 @@ object SignedProtocolMessage
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(1) -> VersionedProtoConverter(
       ProtocolVersion.v30
-    )(v1.SignedProtocolMessage)(
-      supportedProtoVersion(_)(fromProtoV1),
-      _.toProtoV1.toByteString,
+    )(v30.SignedProtocolMessage)(
+      supportedProtoVersion(_)(fromProtoV30),
+      _.toProtoV30.toByteString,
     )
   )
 
@@ -202,14 +202,17 @@ object SignedProtocolMessage
         throw new IllegalStateException(s"Failed to create signed protocol message: $err")
       )
 
-  private def fromProtoV1( // TODO(#12626) – try with context
-      signedMessageP: v1.SignedProtocolMessage
+  private def fromProtoV30(
+      expectedProtocolVersion: ProtocolVersion,
+      signedMessageP: v30.SignedProtocolMessage,
   ): ParsingResult[SignedProtocolMessage[SignedProtocolMessageContent]] = {
-    val v1.SignedProtocolMessage(signaturesP, typedMessageBytes) = signedMessageP
+    val v30.SignedProtocolMessage(signaturesP, typedMessageBytes) = signedMessageP
     for {
-      typedMessage <- TypedSignedProtocolMessageContent.fromByteStringUnsafe(typedMessageBytes)
+      typedMessage <- TypedSignedProtocolMessageContent.fromByteString(expectedProtocolVersion)(
+        typedMessageBytes
+      )
       signatures <- ProtoConverter.parseRequiredNonEmpty(
-        Signature.fromProtoV0,
+        Signature.fromProtoV30,
         "signatures",
         signaturesP,
       )

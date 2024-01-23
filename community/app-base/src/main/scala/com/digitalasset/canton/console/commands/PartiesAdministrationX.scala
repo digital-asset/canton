@@ -274,7 +274,7 @@ class ParticipantPartiesAdministrationGroupX(
             // sync with ledger-api server if this node is connected to at least one domain
             if (syncLedgerApi && primaryConnected.exists(_.nonEmpty))
               retryE(
-                runner.ledger_api.parties.list().map(_.party).contains(partyId),
+                runner.ledger_api_v2.parties.list().map(_.party).contains(partyId),
                 show"The party $partyId never appeared on the ledger API server",
               )
             else Right(())
@@ -353,7 +353,7 @@ class ParticipantPartiesAdministrationGroupX(
       party: PartyId,
       modifier: PartyDetails => PartyDetails,
   ): PartyDetails = {
-    runner.ledger_api.parties.update(
+    runner.ledger_api_v2.parties.update(
       party = party,
       modifier = modifier,
     )
@@ -404,7 +404,7 @@ class LocalParticipantPartiesAdministrationGroupX(
 object TopologySynchronisationX {
 
   def awaitTopologyObserved[T <: ParticipantReferenceX](
-      reference: ParticipantReferenceX,
+      participant: ParticipantReferenceX,
       partyAssignment: Set[(PartyId, T)],
       timeout: NonNegativeDuration,
   )(implicit env: ConsoleEnvironment): Unit =
@@ -413,12 +413,12 @@ object TopologySynchronisationX {
         val partiesWithId = partyAssignment.map { case (party, participantRef) =>
           (party, participantRef.id)
         }
-        env.domains.all.forall { domain =>
-          val domainId = domain.id
-          !reference.domains.active(domain) || {
-            val timestamp = reference.testing.fetch_domain_time(domainId)
+        env.sequencersX.all.forall { sequencer =>
+          val domainId = sequencer.domain_id
+          !participant.domains.is_connected(domainId) || {
+            val timestamp = participant.testing.fetch_domain_time(domainId)
             partiesWithId.subsetOf(
-              reference.parties
+              participant.parties
                 .list(asOf = Some(timestamp.toInstant))
                 .flatMap(res => res.participants.map(par => (res.party, par.participant)))
                 .toSet

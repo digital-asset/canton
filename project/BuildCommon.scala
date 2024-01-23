@@ -919,16 +919,10 @@ object BuildCommon {
             (Compile / sourceDirectory).value / "daml",
             (Compile / damlDarOutput).value / "AdminWorkflows.dar",
             "com.digitalasset.canton.participant.admin.workflows",
-          ),
-          (
-            (Compile / sourceDirectory).value / "daml" / "ping-pong-vacuum",
-            (Compile / damlDarOutput).value / "AdminWorkflowsWithVacuuming.dar",
-            "com.digitalasset.canton.participant.admin.workflows",
-          ),
+          )
         ),
         Compile / damlBuildOrder := Seq(
-          "daml/daml.yaml",
-          "daml/ping-pong-vacuum/daml.yaml",
+          "daml/daml.yaml"
         ),
         // TODO(#16168) Before creating the first stable release with backwards compatibility guarantees,
         //  make "AdminWorkflows.dar" stable again
@@ -1056,7 +1050,15 @@ object BuildCommon {
     // TODO(i12761): package individual libraries instead of fat JARs for external consumption
     lazy val `sequencer-driver-lib`: Project =
       project
-        .settings(sharedCantonSettings)
+        .settings(
+          sharedCantonSettings,
+          libraryDependencies ++= Seq(
+            circe_core,
+            circe_generic,
+            circe_parser,
+            better_files,
+          ),
+        )
         .settings(UberLibrary.of(`sequencer-driver-api`))
 
     lazy val `community-reference-driver` = project

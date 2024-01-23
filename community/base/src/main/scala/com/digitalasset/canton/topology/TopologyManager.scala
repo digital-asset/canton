@@ -51,6 +51,8 @@ abstract class TopologyManager[E <: CantonError](
     with NamedLogging
     with FlagCloseableAsync {
 
+  def isAuthorizedStore: Boolean = store.storeId.isAuthorizedStore
+
   protected val validator =
     new IncomingTopologyTransactionAuthorizationValidator(
       crypto.pureCrypto,
@@ -149,7 +151,7 @@ abstract class TopologyManager[E <: CantonError](
   ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] = {
 
     lazy val unauthorizedTransaction: TopologyManagerError =
-      TopologyManagerError.UnauthorizedTransaction.Failure()
+      TopologyManagerError.UnauthorizedTransaction.Failure("Unauthorized")
 
     lazy val removingKeyWithDanglingTransactionsMustBeForcedError: TopologyManagerError =
       TopologyManagerError.RemovingKeyWithDanglingTransactionsMustBeForced

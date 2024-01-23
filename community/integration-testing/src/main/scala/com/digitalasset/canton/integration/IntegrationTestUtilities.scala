@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.integration
 
+import com.daml.ledger.api.v1.transaction.TreeEvent
 import com.daml.ledger.api.v1.transaction.TreeEvent.Kind.{Created, Exercised}
-import com.daml.ledger.api.v1.transaction.{TransactionTree, TreeEvent}
 import com.daml.ledger.api.v1.value.Value
 import com.daml.ledger.api.v2.transaction.TransactionTree as TransactionTreeV2
 import com.digitalasset.canton.concurrent.Threading
@@ -71,8 +71,6 @@ object IntegrationTestUtilities {
     GrabbedCounts(pcsCount, acceptedTransactionCount)
   }
 
-  /** @param domainRef can either be a domain reference or a sequencer reference (in a distributed domain)
-    */
   def grabCounts(
       domainAlias: DomainAlias,
       participant: LocalParticipantReferenceX,
@@ -84,22 +82,11 @@ object IntegrationTestUtilities {
     mkGrabCounts(pcsCount, acceptedTransactionCount, limit)
   }
 
-  def grabCountsX[ParticipantNodeT <: ParticipantNodeCommon](
-      domainAlias: DomainAlias,
-      participant: LocalParticipantReferenceCommon[ParticipantNodeT],
-      limit: Int = 100,
-  ): GrabbedCounts = {
-    val pcsCount = participant.testing.pcs_search(domainAlias, limit = limit).length
-    val acceptedTransactionCount =
-      participant.testing.transaction_search(Some(domainAlias), limit = limit).length
-    mkGrabCounts(pcsCount, acceptedTransactionCount, limit)
-  }
-
-  def expectedGrabbedCountsForBong(levels: Long, validators: Int = 0): GrabbedCounts = {
-    // 2^(n+2) - 3 contracts plus input ping (last collapse changes to pong) plus PingProposals for validator
-    val contracts = (math.pow(2, levels + 2d) - 3 + 1).toInt + validators
-    // 2^(n+1) + 1 + validator events expected
-    val events = (math.pow(2, levels + 1d) + 1).toInt + validators
+  def expectedGrabbedCountsForBong(levels: Int, validators: Int = 0): GrabbedCounts = {
+    // 2^(n+2) - 3 contracts plus input BongProposal (last collapse changes to bong) for validator
+    val contracts = (math.pow(2, levels + 2d) - 3).toInt + Math.max(1, validators)
+    // 2^(n+1) + validator events expected
+    val events = (math.pow(2, levels + 1d)).toInt + Math.max(1, validators)
     GrabbedCounts(contracts, events)
   }
 
@@ -127,24 +114,7 @@ object IntegrationTestUtilities {
     assertIsSorted(eventsWithRecordTime)
   }
 
-  def extractSubmissionResult(tree: TransactionTree): Value.Sum = {
-    require(
-      tree.rootEventIds.size == 1,
-      s"Received transaction with not exactly one root node: $tree",
-    )
-    tree.eventsById(tree.rootEventIds.head).kind match {
-      case Created(created) => Value.Sum.ContractId(created.contractId)
-      case Exercised(exercised) =>
-        val Value(result) = exercised.exerciseResult.getOrElse(
-          throw new RuntimeException("Unable to exercise choice.")
-        )
-        result
-      case TreeEvent.Kind.Empty =>
-        throw new IllegalArgumentException(s"Received transaction with empty event kind: $tree")
-    }
-  }
-
-  def extractSubmissionResultV2(tree: TransactionTreeV2): Value.Sum = {
+  def extractSubmissionResult(tree: TransactionTreeV2): Value.Sum = {
     require(
       tree.rootEventIds.size == 1,
       s"Received transaction with not exactly one root node: $tree",

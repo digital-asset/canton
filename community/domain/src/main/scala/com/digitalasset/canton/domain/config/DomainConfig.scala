@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.domain.config
 
-import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
-import com.digitalasset.canton.config.LocalNodeConfig.LocalNodeConfigDeprecationImplicits
 import com.digitalasset.canton.config.RequireTypes.{
   ExistingFile,
   NonNegativeInt,
@@ -72,33 +70,7 @@ final case class CommunityPublicServerConfig(
 ) extends PublicServerConfig
     with CommunityServerConfig
 
-object DomainBaseConfig {
-
-  // TODO(i10108): remove when backwards compatibility can be discarded
-  /** Adds deprecations specific to DomainBaseConfig
-    * We need to manually combine it with the upstream deprecations from LocalNodeConfig
-    * in order to not lose them.
-    */
-  trait DomainBaseConfigDeprecationImplicits extends LocalNodeConfigDeprecationImplicits {
-    implicit def deprecatedDomainBaseConfig[X <: DomainBaseConfig]: DeprecatedFieldsFor[X] =
-      new DeprecatedFieldsFor[DomainBaseConfig] {
-        override def movedFields: List[DeprecatedConfigUtils.MovedConfigPath] = List(
-          DeprecatedConfigUtils.MovedConfigPath(
-            "domain-parameters",
-            "init.domain-parameters",
-          )
-        ) ++ deprecatedLocalNodeConfig.movedFields
-
-        override def deprecatePath: List[DeprecatedConfigUtils.DeprecatedConfigPath[_]] = List(
-          DeprecatedConfigUtils
-            .DeprecatedConfigPath[Boolean]("domain-parameters.unique-contract-keys", "2.7.0"),
-          DeprecatedConfigUtils
-            .DeprecatedConfigPath[Boolean]("init.domain-parameters.unique-contract-keys", "2.7.0"),
-        )
-      }
-  }
-}
-
+// TODO(#15160): Deep remove domain nodes
 trait DomainBaseConfig extends LocalNodeConfig {
 
   /** determines how this node is initialized */
@@ -128,6 +100,7 @@ trait DomainBaseConfig extends LocalNodeConfig {
 }
 
 /** Configuration parameters for a single domain. */
+// TODO(#15160): Deep remove domain nodes
 trait DomainConfig extends DomainBaseConfig {
 
   override val nodeTypeName: String = "domain"
@@ -158,6 +131,7 @@ final case class DomainNodeParametersConfig(
     caching: CachingConfigs = CachingConfigs(),
 ) extends LocalNodeParametersConfig
 
+// TODO(#15160): Deep remove domain nodes
 final case class CommunityDomainConfig(
     override val init: DomainInitConfig = DomainInitConfig(),
     override val auditLogging: Boolean = false,

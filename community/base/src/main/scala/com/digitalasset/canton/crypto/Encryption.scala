@@ -6,6 +6,7 @@ package com.digitalasset.canton.crypto
 import cats.Order
 import cats.data.EitherT
 import cats.instances.future.*
+import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.CantonRequireTypes.String68
@@ -14,6 +15,7 @@ import com.digitalasset.canton.crypto.store.{
   CryptoPrivateStoreExtended,
   CryptoPublicStoreError,
 }
+import com.digitalasset.canton.error.{BaseCantonError, CantonErrorGroups}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{DeserializationError, ProtoConverter}
@@ -190,7 +192,7 @@ sealed trait EncryptionKeyScheme extends Product with Serializable with PrettyPr
   def name: String
   // TODO(#12757): once we decouple the key scheme from the actual encryption algorithm this will move to the algorithm
   def supportDeterministicEncryption: Boolean
-  def toProtoEnum: v0.EncryptionKeyScheme
+  def toProtoEnum: v30.EncryptionKeyScheme
   override val pretty: Pretty[this.type] = prettyOfString(_.name)
 }
 
@@ -202,8 +204,8 @@ object EncryptionKeyScheme {
   case object EciesP256HkdfHmacSha256Aes128Gcm extends EncryptionKeyScheme {
     override val name: String = "ECIES-P256_HMAC256_AES128-GCM"
     override val supportDeterministicEncryption: Boolean = false
-    override def toProtoEnum: v0.EncryptionKeyScheme =
-      v0.EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm
+    override def toProtoEnum: v30.EncryptionKeyScheme =
+      v30.EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm
   }
 
   /* This hybrid scheme from JCE/Bouncy Castle is intended to be used to encrypt the key for the view payload data
@@ -214,15 +216,15 @@ object EncryptionKeyScheme {
   case object EciesP256HmacSha256Aes128Cbc extends EncryptionKeyScheme {
     override val name: String = "ECIES-P256_HMAC256_AES128-CBC"
     override val supportDeterministicEncryption: Boolean = true
-    override def toProtoEnum: v0.EncryptionKeyScheme =
-      v0.EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc
+    override def toProtoEnum: v30.EncryptionKeyScheme =
+      v30.EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc
   }
 
   case object Rsa2048OaepSha256 extends EncryptionKeyScheme {
     override val name: String = "RSA2048-OAEP-SHA256"
     override val supportDeterministicEncryption: Boolean = true
-    override def toProtoEnum: v0.EncryptionKeyScheme =
-      v0.EncryptionKeyScheme.Rsa2048OaepSha256
+    override def toProtoEnum: v30.EncryptionKeyScheme =
+      v30.EncryptionKeyScheme.Rsa2048OaepSha256
   }
 
   val allSchemes: NonEmpty[Set[EncryptionKeyScheme]] = NonEmpty.mk(
@@ -234,18 +236,18 @@ object EncryptionKeyScheme {
 
   def fromProtoEnum(
       field: String,
-      schemeP: v0.EncryptionKeyScheme,
+      schemeP: v30.EncryptionKeyScheme,
   ): ParsingResult[EncryptionKeyScheme] =
     schemeP match {
-      case v0.EncryptionKeyScheme.MissingEncryptionKeyScheme =>
+      case v30.EncryptionKeyScheme.MissingEncryptionKeyScheme =>
         Left(ProtoDeserializationError.FieldNotSet(field))
-      case v0.EncryptionKeyScheme.Unrecognized(value) =>
+      case v30.EncryptionKeyScheme.Unrecognized(value) =>
         Left(ProtoDeserializationError.UnrecognizedEnum(field, value))
-      case v0.EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm =>
+      case v30.EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm =>
         Right(EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm)
-      case v0.EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc =>
+      case v30.EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc =>
         Right(EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc)
-      case v0.EncryptionKeyScheme.Rsa2048OaepSha256 =>
+      case v30.EncryptionKeyScheme.Rsa2048OaepSha256 =>
         Right(EncryptionKeyScheme.Rsa2048OaepSha256)
     }
 }
@@ -253,7 +255,7 @@ object EncryptionKeyScheme {
 /** Key schemes for symmetric encryption. */
 sealed trait SymmetricKeyScheme extends Product with Serializable with PrettyPrinting {
   def name: String
-  def toProtoEnum: v0.SymmetricKeyScheme
+  def toProtoEnum: v30.SymmetricKeyScheme
   def keySizeInBytes: Int
   override def pretty: Pretty[this.type] = prettyOfString(_.name)
 }
@@ -266,20 +268,20 @@ object SymmetricKeyScheme {
   /** AES with 128bit key in GCM */
   case object Aes128Gcm extends SymmetricKeyScheme {
     override def name: String = "AES128-GCM"
-    override def toProtoEnum: v0.SymmetricKeyScheme = v0.SymmetricKeyScheme.Aes128Gcm
+    override def toProtoEnum: v30.SymmetricKeyScheme = v30.SymmetricKeyScheme.Aes128Gcm
     override def keySizeInBytes: Int = 16
   }
 
   def fromProtoEnum(
       field: String,
-      schemeP: v0.SymmetricKeyScheme,
+      schemeP: v30.SymmetricKeyScheme,
   ): ParsingResult[SymmetricKeyScheme] =
     schemeP match {
-      case v0.SymmetricKeyScheme.MissingSymmetricKeyScheme =>
+      case v30.SymmetricKeyScheme.MissingSymmetricKeyScheme =>
         Left(ProtoDeserializationError.FieldNotSet(field))
-      case v0.SymmetricKeyScheme.Unrecognized(value) =>
+      case v30.SymmetricKeyScheme.Unrecognized(value) =>
         Left(ProtoDeserializationError.UnrecognizedEnum(field, value))
-      case v0.SymmetricKeyScheme.Aes128Gcm => Right(SymmetricKeyScheme.Aes128Gcm)
+      case v30.SymmetricKeyScheme.Aes128Gcm => Right(SymmetricKeyScheme.Aes128Gcm)
     }
 }
 
@@ -292,8 +294,8 @@ final case class SymmetricKey(
     with NoCopy {
   override protected def companionObj = SymmetricKey
 
-  protected def toProtoV0: v0.SymmetricKey =
-    v0.SymmetricKey(format = format.toProtoEnum, key = key, scheme = scheme.toProtoEnum)
+  protected def toProtoV30: v30.SymmetricKey =
+    v30.SymmetricKey(format = format.toProtoEnum, key = key, scheme = scheme.toProtoEnum)
 }
 
 object SymmetricKey extends HasVersionedMessageCompanion[SymmetricKey] {
@@ -302,12 +304,12 @@ object SymmetricKey extends HasVersionedMessageCompanion[SymmetricKey] {
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
       ProtocolVersion.v30,
-      supportedProtoVersion(v0.SymmetricKey)(fromProtoV0),
-      _.toProtoV0.toByteString,
+      supportedProtoVersion(v30.SymmetricKey)(fromProtoV30),
+      _.toProtoV30.toByteString,
     )
   )
 
-  private def fromProtoV0(keyP: v0.SymmetricKey): ParsingResult[SymmetricKey] =
+  private def fromProtoV30(keyP: v30.SymmetricKey): ParsingResult[SymmetricKey] =
     for {
       format <- CryptoKeyFormat.fromProtoEnum("format", keyP.format)
       scheme <- SymmetricKeyScheme.fromProtoEnum("scheme", keyP.scheme)
@@ -318,11 +320,11 @@ final case class EncryptionKeyPair(publicKey: EncryptionPublicKey, privateKey: E
     extends CryptoKeyPair[EncryptionPublicKey, EncryptionPrivateKey]
     with NoCopy {
 
-  def toProtoV0: v0.EncryptionKeyPair =
-    v0.EncryptionKeyPair(Some(publicKey.toProtoV0), Some(privateKey.toProtoV0))
+  def toProtoV30: v30.EncryptionKeyPair =
+    v30.EncryptionKeyPair(Some(publicKey.toProtoV30), Some(privateKey.toProtoV30))
 
-  protected def toProtoCryptoKeyPairPairV0: v0.CryptoKeyPair.Pair =
-    v0.CryptoKeyPair.Pair.EncryptionKeyPair(toProtoV0)
+  protected def toProtoCryptoKeyPairPairV30: v30.CryptoKeyPair.Pair =
+    v30.CryptoKeyPair.Pair.EncryptionKeyPair(toProtoV30)
 }
 
 object EncryptionKeyPair {
@@ -345,17 +347,17 @@ object EncryptionKeyPair {
     new EncryptionKeyPair(publicKey, privateKey)
   }
 
-  def fromProtoV0(
-      encryptionKeyPairP: v0.EncryptionKeyPair
+  def fromProtoV30(
+      encryptionKeyPairP: v30.EncryptionKeyPair
   ): ParsingResult[EncryptionKeyPair] =
     for {
       publicKey <- ProtoConverter.parseRequired(
-        EncryptionPublicKey.fromProtoV0,
+        EncryptionPublicKey.fromProtoV30,
         "public_key",
         encryptionKeyPairP.publicKey,
       )
       privateKey <- ProtoConverter.parseRequired(
-        EncryptionPrivateKey.fromProtoV0,
+        EncryptionPrivateKey.fromProtoV30,
         "private_key",
         encryptionKeyPairP.privateKey,
       )
@@ -376,16 +378,16 @@ final case class EncryptionPublicKey private[crypto] (
 
   val purpose: KeyPurpose = KeyPurpose.Encryption
 
-  def toProtoV0: v0.EncryptionPublicKey =
-    v0.EncryptionPublicKey(
+  def toProtoV30: v30.EncryptionPublicKey =
+    v30.EncryptionPublicKey(
       id = id.toProtoPrimitive,
       format = format.toProtoEnum,
       publicKey = key,
       scheme = scheme.toProtoEnum,
     )
 
-  override protected def toProtoPublicKeyKeyV0: v0.PublicKey.Key =
-    v0.PublicKey.Key.EncryptionPublicKey(toProtoV0)
+  override protected def toProtoPublicKeyKeyV30: v30.PublicKey.Key =
+    v30.PublicKey.Key.EncryptionPublicKey(toProtoV30)
 
   override val pretty: Pretty[EncryptionPublicKey] =
     prettyOfClass(param("id", _.id), param("format", _.format), param("scheme", _.scheme))
@@ -397,8 +399,8 @@ object EncryptionPublicKey
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
       ProtocolVersion.v30,
-      supportedProtoVersion(v0.EncryptionPublicKey)(fromProtoV0),
-      _.toProtoV0.toByteString,
+      supportedProtoVersion(v30.EncryptionPublicKey)(fromProtoV30),
+      _.toProtoV30.toByteString,
     )
   )
 
@@ -412,8 +414,8 @@ object EncryptionPublicKey
   ): EncryptionPrivateKey =
     throw new UnsupportedOperationException("Use generate or deserialization methods")
 
-  def fromProtoV0(
-      publicKeyP: v0.EncryptionPublicKey
+  def fromProtoV30(
+      publicKeyP: v30.EncryptionPublicKey
   ): ParsingResult[EncryptionPublicKey] =
     for {
       id <- Fingerprint.fromProtoPrimitive(publicKeyP.id)
@@ -451,24 +453,24 @@ final case class EncryptionPrivateKey private[crypto] (
 
   override def purpose: KeyPurpose = KeyPurpose.Encryption
 
-  def toProtoV0: v0.EncryptionPrivateKey =
-    v0.EncryptionPrivateKey(
+  def toProtoV30: v30.EncryptionPrivateKey =
+    v30.EncryptionPrivateKey(
       id = id.toProtoPrimitive,
       format = format.toProtoEnum,
       privateKey = key,
       scheme = scheme.toProtoEnum,
     )
 
-  override protected def toProtoPrivateKeyKeyV0: v0.PrivateKey.Key =
-    v0.PrivateKey.Key.EncryptionPrivateKey(toProtoV0)
+  override protected def toProtoPrivateKeyKeyV30: v30.PrivateKey.Key =
+    v30.PrivateKey.Key.EncryptionPrivateKey(toProtoV30)
 }
 
 object EncryptionPrivateKey extends HasVersionedMessageCompanion[EncryptionPrivateKey] {
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
       ProtocolVersion.v30,
-      supportedProtoVersion(v0.EncryptionPrivateKey)(fromProtoV0),
-      _.toProtoV0.toByteString,
+      supportedProtoVersion(v30.EncryptionPrivateKey)(fromProtoV30),
+      _.toProtoV30.toByteString,
     )
   )
 
@@ -482,8 +484,8 @@ object EncryptionPrivateKey extends HasVersionedMessageCompanion[EncryptionPriva
   ): EncryptionPrivateKey =
     throw new UnsupportedOperationException("Use generate or deserialization methods")
 
-  def fromProtoV0(
-      privateKeyP: v0.EncryptionPrivateKey
+  def fromProtoV30(
+      privateKeyP: v30.EncryptionPrivateKey
   ): ParsingResult[EncryptionPrivateKey] =
     for {
       id <- Fingerprint.fromProtoPrimitive(privateKeyP.id)
@@ -544,7 +546,18 @@ object DecryptionError {
 }
 
 sealed trait EncryptionKeyGenerationError extends Product with Serializable with PrettyPrinting
-object EncryptionKeyGenerationError {
+object EncryptionKeyGenerationError extends CantonErrorGroups.CommandErrorGroup {
+
+  @Explanation("This error indicates that an encryption key could not be created.")
+  @Resolution("Inspect the error details")
+  object ErrorCode
+      extends ErrorCode(
+        id = "ENCRYPTION_KEY_GENERATION_ERROR",
+        ErrorCategory.InvalidIndependentOfSystemState,
+      ) {
+    final case class Wrap(reason: EncryptionKeyGenerationError)
+        extends BaseCantonError.Impl(cause = "Unable to create encryption key")
+  }
 
   final case class GeneralError(error: Exception) extends EncryptionKeyGenerationError {
     override def pretty: Pretty[GeneralError] = prettyOfClass(unnamedParam(_.error))
@@ -594,5 +607,4 @@ object EncryptionKeyCreationError {
       unnamedParam(_.error.unquoted)
     )
   }
-
 }

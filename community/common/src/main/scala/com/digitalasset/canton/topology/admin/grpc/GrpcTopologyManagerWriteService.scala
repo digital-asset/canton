@@ -17,11 +17,11 @@ import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.admin.v0.DomainParametersChangeAuthorization.Parameters
-import com.digitalasset.canton.topology.admin.v0.*
+import com.digitalasset.canton.topology.admin.v30old.DomainParametersChangeAuthorization.Parameters
+import com.digitalasset.canton.topology.admin.v30old.*
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.canton.{LfPackageId, ProtoDeserializationError}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -44,7 +44,7 @@ final class GrpcTopologyManagerWriteService[T <: CantonError](
     val authDataE = for {
       authDataP <- ProtoConverter.required("authorization", authDataPO)
       AuthorizationData(changeP, signedByP, replaceExistingP, forceChangeP) = authDataP
-      change <- TopologyChangeOp.fromProtoV0(changeP)
+      change <- TopologyChangeOp.fromProtoV30(changeP)
       fingerprint <- (if (signedByP.isEmpty) None
                       else Some(Fingerprint.fromProtoPrimitive(signedByP))).sequence
     } yield (change, fingerprint, replaceExistingP, forceChangeP)
@@ -163,13 +163,12 @@ final class GrpcTopologyManagerWriteService[T <: CantonError](
       request: SignedTopologyTransactionAddition
   ): Future[AdditionSuccess] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val pvv = ProtocolVersionValidation.unless(manager.isAuthorizedStore)(protocolVersion)
     for {
       parsed <- mapErrNew(
         EitherT
           .fromEither[Future](
-            SignedTopologyTransaction.fromByteString(protocolVersion)(
-              request.serialized
-            )
+            SignedTopologyTransaction.fromByteString(pvv)(request.serialized)
           )
           .leftMap(ProtoDeserializationFailure.Wrap(_))
       )
@@ -239,7 +238,7 @@ final class GrpcTopologyManagerWriteService[T <: CantonError](
       domainParameters <- request.parameters match {
         case Parameters.Empty => Left(ProtoDeserializationError.FieldNotSet("domainParameters"))
         case Parameters.ParametersV1(ddpX) =>
-          DynamicDomainParameters.fromProtoV2(ddpX)
+          DynamicDomainParameters.fromProtoV30(ddpX)
       }
 
     } yield DomainParametersChange(DomainId(uid), domainParameters)

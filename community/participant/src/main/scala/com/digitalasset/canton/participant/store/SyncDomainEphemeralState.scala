@@ -105,7 +105,6 @@ class SyncDomainEphemeralState(
   val requestTracker: RequestTracker = {
     val conflictDetector = new ConflictDetector(
       persistentState.activeContractStore,
-      persistentState.contractKeyJournal,
       transferCache,
       loggerFactory,
       persistentState.enableAdditionalConsistencyChecks,
@@ -145,7 +144,6 @@ class SyncDomainEphemeralState(
 
   val phase37Synchronizer =
     new Phase37Synchronizer(
-      startingPoints.cleanReplay.nextRequestCounter,
       loggerFactory,
       futureSupervisor,
       timeouts,

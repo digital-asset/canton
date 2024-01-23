@@ -9,11 +9,11 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultUnboundedTimeout,
   TimeoutType,
 }
-import com.digitalasset.canton.admin.pruning.v0.LocatePruningTimestamp
+import com.digitalasset.canton.admin.pruning.v30.LocatePruningTimestamp
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Fingerprint, PublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.admin.v0.EnterpriseMediatorAdministrationServiceGrpc
+import com.digitalasset.canton.domain.admin.v0.MediatorAdministrationServiceGrpc
 import com.digitalasset.canton.domain.admin.{v0, v2}
 import com.digitalasset.canton.domain.mediator.admin.gprc.{
   InitializeMediatorRequest,
@@ -32,6 +32,7 @@ import io.grpc.ManagedChannel
 import scala.concurrent.Future
 
 object EnterpriseMediatorAdministrationCommands {
+  // TODO(#15161): Remove old mediator commands and administration endpoints
   abstract class BaseMediatorInitializationCommand[Req, Rep, Res]
       extends GrpcAdminCommand[Req, Rep, Res] {
     override type Svc = v0.MediatorInitializationServiceGrpc.MediatorInitializationServiceStub
@@ -51,11 +52,11 @@ object EnterpriseMediatorAdministrationCommands {
   abstract class BaseMediatorAdministrationCommand[Req, Rep, Res]
       extends GrpcAdminCommand[Req, Rep, Res] {
     override type Svc =
-      v0.EnterpriseMediatorAdministrationServiceGrpc.EnterpriseMediatorAdministrationServiceStub
+      v0.MediatorAdministrationServiceGrpc.MediatorAdministrationServiceStub
     override def createService(
         channel: ManagedChannel
-    ): v0.EnterpriseMediatorAdministrationServiceGrpc.EnterpriseMediatorAdministrationServiceStub =
-      v0.EnterpriseMediatorAdministrationServiceGrpc.stub(channel)
+    ): v0.MediatorAdministrationServiceGrpc.MediatorAdministrationServiceStub =
+      v0.MediatorAdministrationServiceGrpc.stub(channel)
   }
 
   final case class Initialize(
@@ -132,15 +133,15 @@ object EnterpriseMediatorAdministrationCommands {
   final case class Prune(timestamp: CantonTimestamp)
       extends GrpcAdminCommand[v0.MediatorPruningRequest, Empty, Unit] {
     override type Svc =
-      v0.EnterpriseMediatorAdministrationServiceGrpc.EnterpriseMediatorAdministrationServiceStub
+      v0.MediatorAdministrationServiceGrpc.MediatorAdministrationServiceStub
     override def createService(
         channel: ManagedChannel
-    ): v0.EnterpriseMediatorAdministrationServiceGrpc.EnterpriseMediatorAdministrationServiceStub =
-      v0.EnterpriseMediatorAdministrationServiceGrpc.stub(channel)
+    ): v0.MediatorAdministrationServiceGrpc.MediatorAdministrationServiceStub =
+      v0.MediatorAdministrationServiceGrpc.stub(channel)
     override def createRequest(): Either[String, v0.MediatorPruningRequest] =
       Right(v0.MediatorPruningRequest(timestamp.toProtoPrimitive.some))
     override def submitRequest(
-        service: v0.EnterpriseMediatorAdministrationServiceGrpc.EnterpriseMediatorAdministrationServiceStub,
+        service: v0.MediatorAdministrationServiceGrpc.MediatorAdministrationServiceStub,
         request: v0.MediatorPruningRequest,
     ): Future[Empty] = service.prune(request)
     override def handleResponse(response: Empty): Either[String, Unit] = Right(())
@@ -160,7 +161,7 @@ object EnterpriseMediatorAdministrationCommands {
     )
 
     override def submitRequest(
-        service: EnterpriseMediatorAdministrationServiceGrpc.EnterpriseMediatorAdministrationServiceStub,
+        service: MediatorAdministrationServiceGrpc.MediatorAdministrationServiceStub,
         request: LocatePruningTimestamp.Request,
     ): Future[LocatePruningTimestamp.Response] =
       service.locatePruningTimestamp(request)

@@ -12,16 +12,17 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcastX.Broadcast
-import com.digitalasset.canton.protocol.{v1, v2, v4}
+import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{
-  HasProtocolVersionedCompanion,
+  HasProtocolVersionedWithContextCompanion,
   ProtoVersion,
   ProtocolVersion,
+  ProtocolVersionValidation,
   RepresentativeProtocolVersion,
 }
 import com.google.common.annotations.VisibleForTesting
@@ -47,16 +48,16 @@ final case class DomainTopologyTransactionMessage private (
       hashOps,
     )
 
-  private[messages] def toProtoV1: v1.DomainTopologyTransactionMessage =
-    v1.DomainTopologyTransactionMessage(
-      signature = Some(domainTopologyManagerSignature.toProtoV0),
+  private[messages] def toProtoV30: v30.DomainTopologyTransactionMessage =
+    v30.DomainTopologyTransactionMessage(
+      signature = Some(domainTopologyManagerSignature.toProtoV30),
       transactions = transactions.map(_.getCryptographicEvidence),
       domainId = domainId.toProtoPrimitive,
       notSequencedAfter = Some(notSequencedAfter.toProtoPrimitive),
     )
 
-  override def toProtoSomeEnvelopeContentV4: v4.EnvelopeContent.SomeEnvelopeContent =
-    v4.EnvelopeContent.SomeEnvelopeContent.DomainTopologyTransactionMessage(toProtoV1)
+  override def toProtoSomeEnvelopeContentV30: v30.EnvelopeContent.SomeEnvelopeContent =
+    v30.EnvelopeContent.SomeEnvelopeContent.DomainTopologyTransactionMessage(toProtoV30)
 
   @transient override protected lazy val companionObj: DomainTopologyTransactionMessage.type =
     DomainTopologyTransactionMessage
@@ -69,7 +70,10 @@ final case class DomainTopologyTransactionMessage private (
 }
 
 object DomainTopologyTransactionMessage
-    extends HasProtocolVersionedCompanion[DomainTopologyTransactionMessage] {
+    extends HasProtocolVersionedWithContextCompanion[
+      DomainTopologyTransactionMessage,
+      ProtocolVersion,
+    ] {
 
   implicit val domainIdentityTransactionMessageCast
       : ProtocolMessageContentCast[DomainTopologyTransactionMessage] =
@@ -82,10 +86,10 @@ object DomainTopologyTransactionMessage
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v30)(
-      v1.DomainTopologyTransactionMessage
+      v30.DomainTopologyTransactionMessage
     )(
-      supportedProtoVersion(_)(fromProtoV1),
-      _.toProtoV1.toByteString,
+      supportedProtoVersion(_)(fromProtoV30),
+      _.toProtoV30.toByteString,
     )
   )
 
@@ -160,15 +164,18 @@ object DomainTopologyTransactionMessage
     )
   }
 
-  private[messages] def fromProtoV1(
-      message: v1.DomainTopologyTransactionMessage
+  private[messages] def fromProtoV30(
+      expectedProtocolVersion: ProtocolVersion,
+      message: v30.DomainTopologyTransactionMessage,
   ): ParsingResult[DomainTopologyTransactionMessage] = {
-    val v1.DomainTopologyTransactionMessage(signature, domainId, timestamp, transactions) = message
+    val v30.DomainTopologyTransactionMessage(signature, domainId, timestamp, transactions) = message
     for {
       succeededContent <- transactions.toList.traverse(
-        SignedTopologyTransaction.fromByteStringUnsafe
-      ) // TODO(#12626) - try with context
-      signature <- ProtoConverter.parseRequired(Signature.fromProtoV0, "signature", signature)
+        SignedTopologyTransaction.fromByteString(
+          ProtocolVersionValidation(expectedProtocolVersion)
+        )
+      )
+      signature <- ProtoConverter.parseRequired(Signature.fromProtoV30, "signature", signature)
       domainUid <- UniqueIdentifier.fromProtoPrimitive(domainId, "domainId")
       notSequencedAfter <- ProtoConverter.parseRequired(
         CantonTimestamp.fromProtoPrimitive,
@@ -198,20 +205,21 @@ final case class TopologyTransactionsBroadcastX private (
   @transient override protected lazy val companionObj: TopologyTransactionsBroadcastX.type =
     TopologyTransactionsBroadcastX
 
-  override protected[messages] def toProtoSomeEnvelopeContentV4
-      : v4.EnvelopeContent.SomeEnvelopeContent =
-    v4.EnvelopeContent.SomeEnvelopeContent.TopologyTransactionsBroadcast(toProtoV2)
+  override protected[messages] def toProtoSomeEnvelopeContentV30
+      : v30.EnvelopeContent.SomeEnvelopeContent =
+    v30.EnvelopeContent.SomeEnvelopeContent.TopologyTransactionsBroadcast(toProtoV30)
 
-  def toProtoV2: v2.TopologyTransactionsBroadcastX = v2.TopologyTransactionsBroadcastX(
+  def toProtoV30: v30.TopologyTransactionsBroadcastX = v30.TopologyTransactionsBroadcastX(
     domainId.toProtoPrimitive,
-    broadcasts = broadcasts.map(_.toProtoV2),
+    broadcasts = broadcasts.map(_.toProtoV30),
   )
 
 }
 
 object TopologyTransactionsBroadcastX
-    extends HasProtocolVersionedCompanion[
-      TopologyTransactionsBroadcastX
+    extends HasProtocolVersionedWithContextCompanion[
+      TopologyTransactionsBroadcastX,
+      ProtocolVersion,
     ] {
 
   def create(
@@ -236,32 +244,38 @@ object TopologyTransactionsBroadcastX
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v30)(
-      v2.TopologyTransactionsBroadcastX
+      v30.TopologyTransactionsBroadcastX
     )(
-      supportedProtoVersion(_)(fromProtoV2),
-      _.toProtoV2.toByteString,
+      supportedProtoVersion(_)(fromProtoV30),
+      _.toProtoV30.toByteString,
     )
   )
 
-  private[messages] def fromProtoV2(
-      message: v2.TopologyTransactionsBroadcastX
+  private[messages] def fromProtoV30(
+      expectedProtocolVersion: ProtocolVersion,
+      message: v30.TopologyTransactionsBroadcastX,
   ): ParsingResult[TopologyTransactionsBroadcastX] = {
-    val v2.TopologyTransactionsBroadcastX(domain, broadcasts) = message
+    val v30.TopologyTransactionsBroadcastX(domain, broadcasts) = message
     for {
       domainId <- DomainId.fromProtoPrimitive(domain, "domain")
-      broadcasts <- broadcasts.traverse(broadcastFromProtoV2)
+      broadcasts <- broadcasts.traverse(broadcastFromProtoV30(expectedProtocolVersion))
     } yield TopologyTransactionsBroadcastX(domainId, broadcasts.toList)(
       protocolVersionRepresentativeFor(ProtoVersion(2))
     )
   }
 
-  private def broadcastFromProtoV2(
-      message: v2.TopologyTransactionsBroadcastX.Broadcast
+  private def broadcastFromProtoV30(expectedProtocolVersion: ProtocolVersion)(
+      message: v30.TopologyTransactionsBroadcastX.Broadcast
   ): ParsingResult[Broadcast] = {
-    val v2.TopologyTransactionsBroadcastX.Broadcast(broadcastId, transactions) = message
+    val v30.TopologyTransactionsBroadcastX.Broadcast(broadcastId, transactions) = message
     for {
       broadcastId <- String255.fromProtoPrimitive(broadcastId, "broadcast_id")
-      transactions <- transactions.traverse(SignedTopologyTransactionX.fromProtoV2)
+      transactions <- transactions.traverse(tx =>
+        SignedTopologyTransactionX.fromProtoV30(
+          ProtocolVersionValidation(expectedProtocolVersion),
+          tx,
+        )
+      )
     } yield Broadcast(broadcastId, transactions.toList)
   }
 
@@ -269,10 +283,10 @@ object TopologyTransactionsBroadcastX
       broadcastId: TopologyRequestId,
       transactions: List[SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]],
   ) {
-    def toProtoV2: v2.TopologyTransactionsBroadcastX.Broadcast =
-      v2.TopologyTransactionsBroadcastX.Broadcast(
+    def toProtoV30: v30.TopologyTransactionsBroadcastX.Broadcast =
+      v30.TopologyTransactionsBroadcastX.Broadcast(
         broadcastId = broadcastId.toProtoPrimitive,
-        transactions = transactions.map(_.toProtoV2),
+        transactions = transactions.map(_.toProtoV30),
       )
   }
 
