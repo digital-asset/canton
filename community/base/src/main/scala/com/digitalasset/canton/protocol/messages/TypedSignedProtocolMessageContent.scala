@@ -5,7 +5,7 @@ package com.digitalasset.canton.protocol.messages
 
 import cats.Functor
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
-import com.digitalasset.canton.protocol.v0
+import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.version.*
@@ -31,8 +31,8 @@ case class TypedSignedProtocolMessageContent[+M <: SignedProtocolMessageContent]
   override protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
 
-  private def toProtoV0: v0.TypedSignedProtocolMessageContent =
-    v0.TypedSignedProtocolMessageContent(
+  private def toProtoV30: v30.TypedSignedProtocolMessageContent =
+    v30.TypedSignedProtocolMessageContent(
       someSignedProtocolMessage = content.toProtoTypedSomeSignedProtocolMessage
     )
 
@@ -58,7 +58,7 @@ case class TypedSignedProtocolMessageContent[+M <: SignedProtocolMessageContent]
 }
 
 object TypedSignedProtocolMessageContent
-    extends HasMemoizedProtocolVersionedWrapperCompanion[
+    extends HasMemoizedProtocolVersionedWithValidationCompanion[
       TypedSignedProtocolMessageContent[SignedProtocolMessageContent]
     ] {
   override def name: String = "TypedSignedProtocolMessageContent"
@@ -66,9 +66,9 @@ object TypedSignedProtocolMessageContent
   override def supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v30
-    )(v0.TypedSignedProtocolMessageContent)(
-      supportedProtoVersionMemoized(_)(fromProtoV0),
-      _.toProtoV0.toByteString,
+    )(v30.TypedSignedProtocolMessageContent)(
+      supportedProtoVersionMemoized(_)(fromProtoV30),
+      _.toProtoV30.toByteString,
     )
   )
 
@@ -87,24 +87,28 @@ object TypedSignedProtocolMessageContent
   ): TypedSignedProtocolMessageContent[M] =
     TypedSignedProtocolMessageContent(content)(protocolVersionRepresentativeFor(protoVersion), None)
 
-  // TODO(#12626) – try with context
-  private def fromProtoV0(proto: v0.TypedSignedProtocolMessageContent)(
+  private def fromProtoV30(
+      expectedProtocolVersion: ProtocolVersion,
+      proto: v30.TypedSignedProtocolMessageContent,
+  )(
       bytes: ByteString
   ): ParsingResult[TypedSignedProtocolMessageContent[SignedProtocolMessageContent]] = {
-    import v0.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage as Sm
-    val v0.TypedSignedProtocolMessageContent(messageBytes) = proto
+    import v30.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage as Sm
+    val v30.TypedSignedProtocolMessageContent(messageBytes) = proto
     for {
       message <- (messageBytes match {
         case Sm.MediatorResponse(mediatorResponseBytes) =>
-          MediatorResponse.fromByteStringUnsafe(mediatorResponseBytes)
+          MediatorResponse.fromByteString(expectedProtocolVersion)(mediatorResponseBytes)
         case Sm.TransactionResult(transactionResultMessageBytes) =>
-          TransactionResultMessage.fromByteStringUnsafe(transactionResultMessageBytes)
+          TransactionResultMessage.fromByteString(expectedProtocolVersion)(
+            transactionResultMessageBytes
+          )
         case Sm.TransferResult(transferResultBytes) =>
-          TransferResult.fromByteStringUnsafe(transferResultBytes)
+          TransferResult.fromByteString(expectedProtocolVersion)(transferResultBytes)
         case Sm.AcsCommitment(acsCommitmentBytes) =>
-          AcsCommitment.fromByteStringUnsafe(acsCommitmentBytes)
+          AcsCommitment.fromByteString(expectedProtocolVersion)(acsCommitmentBytes)
         case Sm.MalformedMediatorRequestResult(malformedMediatorRequestResultBytes) =>
-          MalformedMediatorRequestResult.fromByteStringUnsafe(
+          MalformedMediatorRequestResult.fromByteString(expectedProtocolVersion)(
             malformedMediatorRequestResultBytes
           )
         case Sm.Empty =>

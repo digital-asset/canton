@@ -10,7 +10,7 @@ import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.domain.admin.v0
-import com.digitalasset.canton.domain.admin.v0.EnterpriseSequencerConnectionServiceGrpc.EnterpriseSequencerConnectionService
+import com.digitalasset.canton.domain.admin.v0.SequencerConnectionServiceGrpc.SequencerConnectionService
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
   FlagCloseable,
@@ -30,6 +30,7 @@ import com.digitalasset.canton.sequencing.{
   SequencerConnection,
   SequencerConnections,
 }
+import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
@@ -52,16 +53,16 @@ class GrpcSequencerConnectionService(
       Unit,
     ],
 )(implicit ec: ExecutionContext)
-    extends v0.EnterpriseSequencerConnectionServiceGrpc.EnterpriseSequencerConnectionService {
+    extends v0.SequencerConnectionServiceGrpc.SequencerConnectionService {
   override def getConnection(request: v0.GetConnectionRequest): Future[v0.GetConnectionResponse] =
     EitherTUtil.toFuture(
       fetchConnection()
         .leftMap(error => Status.FAILED_PRECONDITION.withDescription(error).asException())
-        .map { optSequencerConnections =>
-          v0.GetConnectionResponse(
-            optSequencerConnections.toList.flatMap(_.toProtoV0),
-            optSequencerConnections.map(_.sequencerTrustThreshold.unwrap).getOrElse(0),
-          )
+        .map {
+          case Some(sequencerConnections) =>
+            v0.GetConnectionResponse(Some(sequencerConnections.toProtoV30))
+
+          case None => v0.GetConnectionResponse(None)
         }
     )
 
@@ -92,14 +93,15 @@ class GrpcSequencerConnectionService(
 
   private def parseConnection(
       request: v0.SetConnectionRequest
-  ): EitherT[Future, StatusException, SequencerConnections] =
-    SequencerConnections
-      .fromProtoV0(
-        request.sequencerConnections,
-        request.sequencerTrustThreshold,
-      )
+  ): EitherT[Future, StatusException, SequencerConnections] = {
+    val v0.SetConnectionRequest(sequencerConnectionsPO) = request
+
+    ProtoConverter
+      .required("sequencerConnections", sequencerConnectionsPO)
+      .flatMap(SequencerConnections.fromProtoV30)
       .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.message).asException())
       .toEitherT[Future]
+  }
 
   private def validateReplacement(
       existing: SequencerConnections,
@@ -145,7 +147,7 @@ object GrpcSequencerConnectionService {
   ): UpdateSequencerClient = {
     val clientO = new AtomicReference[Option[RichSequencerClient]](None)
     registry.addServiceU(
-      EnterpriseSequencerConnectionService.bindService(
+      SequencerConnectionService.bindService(
         new GrpcSequencerConnectionService(
           fetchConnection = () => fetchConfig().map(_.map(sequencerConnectionLens.get)),
           setConnection = newSequencerConnection =>

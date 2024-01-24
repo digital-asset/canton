@@ -5,7 +5,6 @@ package com.digitalasset.canton.admin.api.client.commands
 
 import cats.implicits.toTraverseOps
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.domain.admin.v0
 import com.digitalasset.canton.sequencing.SequencerConnections
 import com.google.protobuf.empty.Empty
@@ -17,12 +16,12 @@ object EnterpriseSequencerConnectionAdminCommands {
   abstract class BaseSequencerConnectionAdminCommand[Req, Rep, Res]
       extends GrpcAdminCommand[Req, Rep, Res] {
     override type Svc =
-      v0.EnterpriseSequencerConnectionServiceGrpc.EnterpriseSequencerConnectionServiceStub
+      v0.SequencerConnectionServiceGrpc.SequencerConnectionServiceStub
 
     override def createService(
         channel: ManagedChannel
-    ): v0.EnterpriseSequencerConnectionServiceGrpc.EnterpriseSequencerConnectionServiceStub =
-      v0.EnterpriseSequencerConnectionServiceGrpc.stub(channel)
+    ): v0.SequencerConnectionServiceGrpc.SequencerConnectionServiceStub =
+      v0.SequencerConnectionServiceGrpc.stub(channel)
   }
 
   final case class GetConnection()
@@ -32,7 +31,7 @@ object EnterpriseSequencerConnectionAdminCommands {
         Option[SequencerConnections],
       ] {
     override def submitRequest(
-        service: v0.EnterpriseSequencerConnectionServiceGrpc.EnterpriseSequencerConnectionServiceStub,
+        service: v0.SequencerConnectionServiceGrpc.SequencerConnectionServiceStub,
         request: v0.GetConnectionRequest,
     ): Future[v0.GetConnectionResponse] = service.getConnection(request)
 
@@ -42,15 +41,10 @@ object EnterpriseSequencerConnectionAdminCommands {
 
     override def handleResponse(
         response: v0.GetConnectionResponse
-    ): Either[String, Option[SequencerConnections]] =
-      NonEmpty.from(response.sequencerConnections).traverse { connections =>
-        SequencerConnections
-          .fromProtoV0(
-            connections,
-            response.sequencerTrustThreshold,
-          )
-          .leftMap(_.message)
-      }
+    ): Either[String, Option[SequencerConnections]] = {
+      val v0.GetConnectionResponse(sequencerConnectionsPO) = response
+      sequencerConnectionsPO.traverse(SequencerConnections.fromProtoV30).leftMap(_.message)
+    }
   }
 
   final case class SetConnection(connections: SequencerConnections)
@@ -60,15 +54,12 @@ object EnterpriseSequencerConnectionAdminCommands {
         Unit,
       ] {
     override def submitRequest(
-        service: v0.EnterpriseSequencerConnectionServiceGrpc.EnterpriseSequencerConnectionServiceStub,
+        service: v0.SequencerConnectionServiceGrpc.SequencerConnectionServiceStub,
         request: v0.SetConnectionRequest,
     ): Future[Empty] = service.setConnection(request)
 
     override def createRequest(): Either[String, v0.SetConnectionRequest] = Right(
-      v0.SetConnectionRequest(
-        connections.connections.map(_.toProtoV0),
-        connections.sequencerTrustThreshold.unwrap,
-      )
+      v0.SetConnectionRequest(Some(connections.toProtoV30))
     )
 
     override def handleResponse(response: Empty): Either[String, Unit] = Right(())
