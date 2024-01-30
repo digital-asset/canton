@@ -5,7 +5,7 @@ package com.digitalasset.canton.protocol.messages
 
 import cats.syntax.traverse.*
 import com.daml.error.ContextualizedErrorLogger
-import com.daml.error.utils.DeserializedCantonError
+import com.daml.error.utils.DecodedCantonError
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.{InvariantViolation, OtherError}
@@ -50,7 +50,7 @@ object Verdict
     with ProtocolVersionedCompanionDbHelpers[Verdict] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(3) -> VersionedProtoConverter(ProtocolVersion.v30)(v30.Verdict)(
+    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v30)(v30.Verdict)(
       supportedProtoVersion(_)(fromProtoV30),
       _.toProtoV30.toByteString,
     )
@@ -91,7 +91,7 @@ object Verdict
     override def logWithContext(extra: Map[String, String])(implicit
         contextualizedErrorLogger: ContextualizedErrorLogger
     ): Unit =
-      DeserializedCantonError.fromGrpcStatus(status) match {
+      DecodedCantonError.fromGrpcStatus(status) match {
         case Right(error) => error.logWithContext(extra)
         case Left(err) =>
           contextualizedErrorLogger.warn(s"Failed to parse mediator rejection: $err")
@@ -100,7 +100,7 @@ object Verdict
     override def rpcStatusWithoutLoggingContext(): Status = status
 
     override def isTimeoutDeterminedByMediator: Boolean =
-      DeserializedCantonError.fromGrpcStatus(status).exists(_.code.id == MediatorError.Timeout.id)
+      DecodedCantonError.fromGrpcStatus(status).exists(_.code.id == MediatorError.Timeout.id)
   }
 
   object MediatorReject {
@@ -114,14 +114,11 @@ object Verdict
     private[messages] def fromProtoV30(
         mediatorRejectP: v30.MediatorReject
     ): ParsingResult[MediatorReject] = {
-      // Proto version 3 because mediator rejections are versioned according to verdicts
-      // and verdicts use mediator reject V2 in proto version 3.
-      val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtoVersion(3))
-
       val v30.MediatorReject(statusO) = mediatorRejectP
       for {
         status <- ProtoConverter.required("rejection_reason", statusO)
-      } yield MediatorReject(status)(representativeProtocolVersion)
+        rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
+      } yield MediatorReject(status)(rpv)
     }
   }
 
@@ -196,14 +193,15 @@ object Verdict
     val v30.Verdict(someVerdictP) = verdictP
     import v30.Verdict.{SomeVerdict as V}
 
-    val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtoVersion(3))
-    someVerdictP match {
-      case V.Approve(empty.Empty(_)) => Right(Approve()(representativeProtocolVersion))
-      case V.MediatorReject(mediatorRejectP) =>
-        MediatorReject.fromProtoV30(mediatorRejectP)
-      case V.ParticipantReject(participantRejectP) =>
-        ParticipantReject.fromProtoV30(participantRejectP, representativeProtocolVersion)
-      case V.Empty => Left(OtherError("empty verdict type"))
+    protocolVersionRepresentativeFor(ProtoVersion(30)).flatMap { rpv =>
+      someVerdictP match {
+        case V.Approve(empty.Empty(_)) => Right(Approve()(rpv))
+        case V.MediatorReject(mediatorRejectP) =>
+          MediatorReject.fromProtoV30(mediatorRejectP)
+        case V.ParticipantReject(participantRejectP) =>
+          ParticipantReject.fromProtoV30(participantRejectP, rpv)
+        case V.Empty => Left(OtherError("empty verdict type"))
+      }
     }
   }
 

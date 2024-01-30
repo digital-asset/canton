@@ -5,13 +5,13 @@ package com.digitalasset.canton.ledger.api.auth
 
 import com.daml.jwt.JwtTimestampLeeway
 import com.digitalasset.canton.ledger.error.groups.AuthorizationChecksErrors
+import com.digitalasset.canton.ledger.localstore.api.UserManagementStore
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
   LoggingContextWithTrace,
   NamedLoggerFactory,
   NamedLogging,
 }
-import com.digitalasset.canton.platform.localstore.api.UserManagementStore
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.StatusRuntimeException
 import io.grpc.stub.ServerCallStreamObserver
@@ -157,7 +157,7 @@ private[auth] final class OngoingAuthorizationObserver[A](
       .notExpired(now, jwtTimestampLeeway, tokenExpiryGracePeriodForStreams)
       .left
       .map(authorizationError =>
-        AuthorizationChecksErrors.PermissionDenied
+        AuthorizationChecksErrors.AccessTokenExpired
           .Reject(authorizationError.reason)(errorLogger)
           .asGrpcError
       )

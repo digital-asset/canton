@@ -15,11 +15,9 @@ import com.digitalasset.canton.config.{
 }
 import com.digitalasset.canton.domain.config.DomainParametersConfig
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
-import com.digitalasset.canton.protocol.DynamicDomainParameters.{
-  InvalidDynamicDomainParameters,
-  protocolVersionRepresentativeFor,
-}
+import com.digitalasset.canton.protocol.DynamicDomainParameters.InvalidDynamicDomainParameters
 import com.digitalasset.canton.protocol.{
+  CatchUpConfig,
   DynamicDomainParameters as DynamicDomainParametersInternal,
   OnboardingRestriction,
   StaticDomainParameters as StaticDomainParametersInternal,
@@ -46,6 +44,7 @@ final case class StaticDomainParameters(
     requiredHashAlgorithms: Set[HashAlgorithm],
     requiredCryptoKeyFormats: Set[CryptoKeyFormat],
     protocolVersion: ProtocolVersion,
+    catchUpParameters: Option[CatchUpConfig],
 ) {
   def writeToFile(outputFile: String): Unit =
     BinaryFileUtil.writeByteStringToFile(outputFile, toInternal.toByteString)
@@ -68,6 +67,7 @@ final case class StaticDomainParameters(
         requiredCryptoKeyFormats.map(_.transformInto[DomainCrypto.CryptoKeyFormat])
       ),
       protocolVersion = protocolVersion,
+      catchUpParameters = catchUpParameters,
     )
 }
 
@@ -118,6 +118,7 @@ object StaticDomainParameters {
       requiredCryptoKeyFormats =
         domain.requiredCryptoKeyFormats.forgetNE.map(_.transformInto[CryptoKeyFormat]),
       protocolVersion = domain.protocolVersion,
+      catchUpParameters = domain.catchUpParameters,
     )
 
   def tryReadFromFile(inputFile: String): StaticDomainParameters = {
@@ -223,27 +224,32 @@ final case class DynamicDomainParameters(
       )
     )
 
-  private[canton] def toInternal: DynamicDomainParametersInternal =
-    DynamicDomainParametersInternal.tryCreate(
-      participantResponseTimeout =
-        InternalNonNegativeFiniteDuration.fromConfig(participantResponseTimeout),
-      mediatorReactionTimeout =
-        InternalNonNegativeFiniteDuration.fromConfig(mediatorReactionTimeout),
-      transferExclusivityTimeout =
-        InternalNonNegativeFiniteDuration.fromConfig(transferExclusivityTimeout),
-      topologyChangeDelay = InternalNonNegativeFiniteDuration.fromConfig(topologyChangeDelay),
-      ledgerTimeRecordTimeTolerance =
-        InternalNonNegativeFiniteDuration.fromConfig(ledgerTimeRecordTimeTolerance),
-      mediatorDeduplicationTimeout =
-        InternalNonNegativeFiniteDuration.fromConfig(mediatorDeduplicationTimeout),
-      reconciliationInterval = PositiveSeconds.fromConfig(reconciliationInterval),
-      maxRatePerParticipant = maxRatePerParticipant,
-      maxRequestSize = MaxRequestSize(maxRequestSize),
-      sequencerAggregateSubmissionTimeout =
-        InternalNonNegativeFiniteDuration.fromConfig(sequencerAggregateSubmissionTimeout),
-      trafficControlParameters = trafficControlParameters.map(_.toInternal),
-      onboardingRestriction = onboardingRestriction,
-    )(protocolVersionRepresentativeFor(ProtoVersion(0)))
+  private[canton] def toInternal: Either[String, DynamicDomainParametersInternal] =
+    DynamicDomainParametersInternal
+      .protocolVersionRepresentativeFor(ProtoVersion(30))
+      .leftMap(_.message)
+      .map { rpv =>
+        DynamicDomainParametersInternal.tryCreate(
+          participantResponseTimeout =
+            InternalNonNegativeFiniteDuration.fromConfig(participantResponseTimeout),
+          mediatorReactionTimeout =
+            InternalNonNegativeFiniteDuration.fromConfig(mediatorReactionTimeout),
+          transferExclusivityTimeout =
+            InternalNonNegativeFiniteDuration.fromConfig(transferExclusivityTimeout),
+          topologyChangeDelay = InternalNonNegativeFiniteDuration.fromConfig(topologyChangeDelay),
+          ledgerTimeRecordTimeTolerance =
+            InternalNonNegativeFiniteDuration.fromConfig(ledgerTimeRecordTimeTolerance),
+          mediatorDeduplicationTimeout =
+            InternalNonNegativeFiniteDuration.fromConfig(mediatorDeduplicationTimeout),
+          reconciliationInterval = PositiveSeconds.fromConfig(reconciliationInterval),
+          maxRatePerParticipant = maxRatePerParticipant,
+          maxRequestSize = MaxRequestSize(maxRequestSize),
+          sequencerAggregateSubmissionTimeout =
+            InternalNonNegativeFiniteDuration.fromConfig(sequencerAggregateSubmissionTimeout),
+          trafficControlParameters = trafficControlParameters.map(_.toInternal),
+          onboardingRestriction = onboardingRestriction,
+        )(rpv)
+      }
 }
 
 object DynamicDomainParameters {

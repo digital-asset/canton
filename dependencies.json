@@ -2,7 +2,7 @@
   "dependencies": [
     {
       "org": "commons-codec",
-      "artifact": "commons-codec",
+      "artifacts": ["commons-codec"],
       "version": "1.11",
       "description": "The Apache Commons Codec package contains simple encoder and decoders for various formats such as Base64 and Hexadecimal. In addition to these widely used encoders and decoders, the codec package also maintains a collection of phonetic encoding utilities.",
       "users": [
@@ -12,7 +12,7 @@
     },
     {
       "org": "commons-io",
-      "artifact": "commons-io",
+      "artifacts": ["commons-io"],
       "version": "2.11.0",
       "description": "The Apache Commons IO library contains utility classes, stream implementations, file filters,file comparators, endian transformation classes, and much more.",
       "users": [
@@ -22,7 +22,7 @@
     },
     {
       "org": "com.google.api.grpc",
-      "artifact": "proto-google-common-protos",
+      "artifacts": ["proto-google-common-protos"],
       "version": "2.22.0",
       "description": "PROTO library for proto-google-common-protos",
       "users": [
@@ -32,7 +32,7 @@
     },
     {
       "org": "com.google.protobuf",
-      "artifact": "protobuf-java",
+      "artifacts": ["protobuf-java"],
       "version": "3.24.0",
       "description": "Core Protocol Buffers library. Protocol Buffers are a way of encoding structured data in an efficient yet extensible format.",
       "users": [
@@ -42,7 +42,7 @@
     },
     {
       "org": "com.fasterxml.jackson.core",
-      "artifact": "jackson-core",
+      "artifacts": ["jackson-core"],
       "version": "2.14.3",
       "description": "Core Jackson processing abstractions (aka Streaming API), implementation for JSON",
       "users": [
@@ -52,7 +52,7 @@
     },
     {
       "org": "com.auth0",
-      "artifact": "java-jwt",
+      "artifacts": ["java-jwt"],
       "version": "4.2.1",
       "description": "Java implementation of JSON Web Token (JWT)",
       "users": [
@@ -62,7 +62,7 @@
     },
     {
       "org": "com.auth0",
-      "artifact": "jwks-rsa",
+      "artifacts": ["jwks-rsa"],
       "version": "0.21.2",
       "description": "JSON Web Key Set parser library",
       "users": [
@@ -72,7 +72,7 @@
     },
     {
       "org": "com.zaxxer",
-      "artifact": "HikariCP",
+      "artifacts": ["HikariCP"],
       "version": "3.2.0",
       "description": "Ultimate JDBC Connection Pool",
       "users": [
@@ -82,7 +82,7 @@
     },
     {
       "org": "com.google.guava",
-      "artifact": "guava",
+      "artifacts": ["guava"],
       "version": "31.1-jre",
       "description": "Guava is a suite of core and expanded libraries that include utility classes, Google's collections, I/O classes, and much more.",
       "users": [
@@ -92,7 +92,7 @@
     },
     {
       "org": "org.scalaz",
-      "artifact": "scalaz-scalacheck-binding_2.13",
+      "artifacts": ["scalaz-scalacheck-binding_2.13"],
       "version": "7.2.33-scalacheck-1.15",
       "description": "scalaz-scalacheck-binding",
       "users": [
@@ -102,7 +102,7 @@
     },
     {
       "org": "com.github.ben-manes.caffeine",
-      "artifact": "caffeine",
+      "artifacts": ["caffeine"],
       "version": "3.1.2",
       "description": "A high performance caching library",
       "users": [
@@ -112,7 +112,7 @@
     },
     {
       "org": "org.playframework.anorm",
-      "artifact": "anorm_2.13",
+      "artifacts": ["anorm_2.13"],
       "version": "2.7.0",
       "description": "Anorm, simple SQL data access",
       "users": [
@@ -122,9 +122,64 @@
     },
     {
       "org": "com.thesamet.scalapb",
-      "artifact": "scalapb-json4s_2.13",
+      "artifacts": ["scalapb-json4s_2.13"],
       "version": "0.11.1",
       "description": "scalapb-json4s",
+      "users": [
+        "Canton",
+        "DamlSDK"
+      ]
+    },
+    {
+      "org": "io.opentelemetry",
+      "artifacts": [
+        "opentelemetry-api",
+        "opentelemetry-sdk",
+        "opentelemetry-sdk-testing",
+        "opentelemetry-exporter-zipkin",
+        "opentelemetry-exporter-jaeger",
+        "opentelemetry-exporter-otlp-trace"
+      ],
+      "version": "1.12.0",
+      "description": "Opentelemetry libraries",
+      "users": [
+        "Canton",
+        "DamlSDK"
+      ]
+    },
+    {
+      "org": "io.opentelemetry",
+      "artifacts": [
+        "opentelemetry-sdk-extension-autoconfigure",
+        "opentelemetry-exporter-prometheus"
+      ],
+      "version": "1.12.0-alpha",
+      "description": "Opentelemetry libraries, alpha version",
+      "users": [
+        "Canton",
+        "DamlSDK"
+      ]
+    },
+    {
+      "org": "io.opentelemetry.instrumentation",
+      "artifacts": [
+        "opentelemetry-grpc-1.6",
+        "opentelemetry-runtime-metrics"
+      ],
+      "version": "1.12.0-alpha",
+      "description": "Opentelemetry instrumentation libraries, alpha version",
+      "users": [
+        "Canton",
+        "DamlSDK"
+      ]
+    },
+    {
+      "org": "io.opentelemetry",
+      "artifacts": [
+        "opentelemetry-proto"
+      ],
+      "version": "1.7.1-alpha",
+      "description": "Opentelemetry protobuf libraries, alpha version",
       "users": [
         "Canton",
         "DamlSDK"
@@ -132,3 +187,4 @@
     }
   ]
 }
+

@@ -163,7 +163,7 @@ object AcsCommitment extends HasMemoizedProtocolVersionedWrapperCompanion[AcsCom
   override val name: String = "AcsCommitment"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v30)(v30.AcsCommitment)(
+    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v30)(v30.AcsCommitment)(
       supportedProtoVersionMemoized(_)(fromProtoV30),
       _.toProtoV30.toByteString,
     )
@@ -222,8 +222,9 @@ object AcsCommitment extends HasMemoizedProtocolVersionedWrapperCompanion[AcsCom
       period = CommitmentPeriod(fromExclusive, periodLength)
       cmt = protoMsg.commitment
       commitment = commitmentTypeFromByteString(cmt)
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield new AcsCommitment(domainId, sender, counterParticipant, period, commitment)(
-      protocolVersionRepresentativeFor(ProtoVersion(0)),
+      rpv,
       Some(bytes),
     ) {}
   }

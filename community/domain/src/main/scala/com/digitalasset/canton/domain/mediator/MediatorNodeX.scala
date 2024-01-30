@@ -8,7 +8,7 @@ import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.crypto.{Crypto, Fingerprint}
-import com.digitalasset.canton.domain.admin.v2.MediatorInitializationServiceGrpc
+import com.digitalasset.canton.domain.admin.v30.MediatorInitializationServiceGrpc
 import com.digitalasset.canton.domain.mediator.admin.gprc.{
   InitializeMediatorRequestX,
   InitializeMediatorResponseX,
@@ -18,7 +18,7 @@ import com.digitalasset.canton.domain.mediator.store.{
   MediatorDomainConfiguration,
   MediatorDomainConfigurationStore,
 }
-import com.digitalasset.canton.domain.metrics.MediatorNodeMetrics
+import com.digitalasset.canton.domain.metrics.MediatorMetrics
 import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.health.{ComponentStatus, GrpcHealthReporter, HealthService}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasCloseContext}
@@ -85,7 +85,7 @@ class MediatorNodeBootstrapX(
     arguments: CantonNodeBootstrapCommonArguments[
       MediatorNodeConfigCommon,
       MediatorNodeParameters,
-      MediatorNodeMetrics,
+      MediatorMetrics,
     ],
     protected val replicaManager: MediatorReplicaManager,
     override protected val mediatorRuntimeFactory: MediatorRuntimeFactory,
@@ -98,7 +98,7 @@ class MediatorNodeBootstrapX(
       MediatorNodeX,
       MediatorNodeConfigCommon,
       MediatorNodeParameters,
-      MediatorNodeMetrics,
+      MediatorMetrics,
     ](arguments)
     with MediatorNodeBootstrapCommon[MediatorNodeX, MediatorNodeConfigCommon] {
 

@@ -92,6 +92,7 @@ object BuildCommon {
       Global / excludeLintKeys += Compile / damlBuildOrder,
       Global / excludeLintKeys += `community-app` / Compile / damlCompileDirectory,
       Global / excludeLintKeys += `community-app` / Compile / damlDarLfVersion,
+      Global / excludeLintKeys += `community-app` / Compile / useVersionedDarName,
       Global / excludeLintKeys ++= (CommunityProjects.allProjects ++ DamlProjects.allProjects)
         .map(
           _ / autoAPIMappings
@@ -581,9 +582,10 @@ object BuildCommon {
           opentelemetry_sdk,
           opentelemetry_sdk_autoconfigure,
           opentelemetry_instrumentation_grpc,
-          opentelemetry_zipkin,
-          opentelemetry_jaeger,
-          opentelemetry_otlp,
+          opentelemetry_exporter_zipkin,
+          opentelemetry_exporter_jaeger,
+          opentelemetry_exporter_otlp,
+          opentelemetry_exporter_prometheus,
         ),
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
         coverageEnabled := false,
@@ -617,8 +619,7 @@ object BuildCommon {
           pekko_http_testkit % Test,
           cats,
           better_files,
-          dropwizard_metrics_jvm, // not used at compile time, but required at runtime to report jvm metrics
-          dropwizard_metrics_graphite,
+          opentelemetry_instrumentation_runtime_metrics,
           monocle_macro,
           scala_logging,
         ),
@@ -660,7 +661,6 @@ object BuildCommon {
         JvmRulesPlugin.damlRepoHeaderSettings,
         libraryDependencies ++= Seq(
           daml_libs_scala_jwt,
-          dropwizard_metrics_jmx,
           ammonite,
           jul_to_slf4j,
           pureconfig_cats,
@@ -792,17 +792,13 @@ object BuildCommon {
           sttp_circe,
           monocle_macro, // Include it here, even if unused, so that it can be used everywhere
           pureconfig_core,
-          dropwizard_metrics_core,
-          prometheus_dropwizard, // Include it here to overwrite transitive dependencies by DAML libraries
-          prometheus_httpserver, // Include it here to overwrite transitive dependencies by DAML libraries
-          prometheus_hotspot, // Include it here to overwrite transitive dependencies by DAML libraries
           opentelemetry_api,
           opentelemetry_sdk,
           opentelemetry_sdk_autoconfigure,
           opentelemetry_instrumentation_grpc,
-          opentelemetry_zipkin,
-          opentelemetry_jaeger,
-          opentelemetry_otlp,
+          opentelemetry_exporter_zipkin,
+          opentelemetry_exporter_jaeger,
+          opentelemetry_exporter_otlp,
         ),
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
         Compile / PB.targets := Seq(
@@ -1226,14 +1222,16 @@ object BuildCommon {
         ),
         addProtobufFilesToHeaderCheck(Compile),
         libraryDependencies ++= Seq(
+          caffeine,
           commons_codec,
           commons_io,
           daml_metrics,
           daml_lf_archive_reader,
           daml_lf_transaction,
           daml_lf_engine,
+          daml_rs_grpc_bridge,
+          daml_rs_grpc_pekko,
           daml_timer_utils,
-          dropwizard_metrics_core,
           opentelemetry_api,
           pekko_stream,
           slf4j_api,
@@ -1242,7 +1240,6 @@ object BuildCommon {
           grpc_netty,
           netty_boring_ssl, // This should be a Runtime dep, but needs to be declared at Compile scope due to https://github.com/sbt/sbt/issues/5568
           netty_handler,
-          caffeine,
           scalapb_runtime,
           scalapb_runtime_grpc,
           daml_http_test_utils % Test,
@@ -1255,7 +1252,6 @@ object BuildCommon {
           scalatestMockito % Test,
           pekko_stream_testkit % Test,
           scalacheck % Test,
-          opentelemetry_sdk_testing % Test,
           scalatestScalacheck % Test,
         ),
         Test / parallelExecution := true,
@@ -1287,6 +1283,7 @@ object BuildCommon {
           "model",
           "semantic",
           "package_management",
+          "experimental",
           "carbonv1",
           "carbonv2",
           "carbonv3",
@@ -1348,7 +1345,6 @@ object BuildCommon {
           netty_handler,
           hikaricp,
           guava,
-          dropwizard_metrics_core,
           bouncycastle_bcprov_jdk15on % Test,
           bouncycastle_bcpkix_jdk15on % Test,
           scalaz_scalacheck % Test,

@@ -67,7 +67,7 @@ object RegisterTopologyTransactionRequest
     ] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v30)(
+    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v30)(
       v30.RegisterTopologyTransactionRequest
     )(
       supportedProtoVersion(_)(fromProtoV30),
@@ -106,13 +106,14 @@ object RegisterTopologyTransactionRequest
       )
       domainUid <- UniqueIdentifier.fromProtoPrimitive(message.domainId, "domainId")
       requestId <- String255.fromProtoPrimitive(message.requestId, "requestId")
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield RegisterTopologyTransactionRequest(
       requestedBy,
       ParticipantId(participantUid),
       requestId,
       transactions,
       DomainId(domainUid),
-    )(protocolVersionRepresentativeFor(ProtoVersion(0)))
+    )(rpv)
   }
 
   override def name: String = "RegisterTopologyTransactionRequest"

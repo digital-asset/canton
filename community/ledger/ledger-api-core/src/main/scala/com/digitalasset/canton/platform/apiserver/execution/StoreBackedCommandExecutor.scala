@@ -106,7 +106,7 @@ private[apiserver] final class StoreBackedCommandExecutor(
         }
         .value
         .map(_.toOption)
-      _ <- Future.sequence(coids.map(contractStore.lookupContractStateWithoutDivulgence))
+      _ <- Future.sequence(coids.map(contractStore.lookupContractState))
       submissionResult <- submitToEngine(commands, submissionSeed, interpretationTimeNanos)
       submission <- consume(
         commands.actAs,
@@ -190,7 +190,7 @@ private[apiserver] final class StoreBackedCommandExecutor(
       loggingContext: LoggingContextWithTrace
   ): Future[Result[(SubmittedTransaction, Transaction.Metadata)]] =
     Tracked.future(
-      metrics.daml.execution.engineRunning,
+      metrics.execution.engineRunning,
       Future(trackSyncExecution(interpretationTimeNanos) {
         // The actAs and readAs parties are used for two kinds of checks by the ledger API server:
         // When looking up contracts during command interpretation, the engine should only see contracts
@@ -200,6 +200,8 @@ private[apiserver] final class StoreBackedCommandExecutor(
         // authorize the resulting transaction.
         val commitAuthorizers = commands.actAs
         engine.submit(
+          packageMap = commands.packageMap,
+          packagePreference = commands.packagePreferenceSet,
           submitters = commitAuthorizers,
           readAs = commands.readAs,
           cmds = commands.commands,
@@ -239,7 +241,7 @@ private[apiserver] final class StoreBackedCommandExecutor(
           val start = System.nanoTime
           Timed
             .future(
-              metrics.daml.execution.lookupActiveContract,
+              metrics.execution.lookupActiveContract,
               contractStore.lookupActiveContract(readers, acoid),
             )
             .flatMap { instance =>
@@ -247,7 +249,7 @@ private[apiserver] final class StoreBackedCommandExecutor(
               lookupActiveContractCount.incrementAndGet()
               resolveStep(
                 Tracked.value(
-                  metrics.daml.execution.engineRunning,
+                  metrics.execution.engineRunning,
                   trackSyncExecution(interpretationTimeNanos)(resume(instance)),
                 )
               )
@@ -257,7 +259,7 @@ private[apiserver] final class StoreBackedCommandExecutor(
           val start = System.nanoTime
           Timed
             .future(
-              metrics.daml.execution.lookupContractKey,
+              metrics.execution.lookupContractKey,
               contractStore.lookupContractKey(readers, key.globalKey),
             )
             .flatMap { contractId =>
@@ -265,7 +267,7 @@ private[apiserver] final class StoreBackedCommandExecutor(
               lookupContractKeyCount.incrementAndGet()
               resolveStep(
                 Tracked.value(
-                  metrics.daml.execution.engineRunning,
+                  metrics.execution.engineRunning,
                   trackSyncExecution(interpretationTimeNanos)(resume(contractId)),
                 )
               )
@@ -276,12 +278,12 @@ private[apiserver] final class StoreBackedCommandExecutor(
             .loadPackage(
               packageId = packageId,
               delegate = packageId => packagesService.getLfArchive(packageId)(loggingContext),
-              metric = metrics.daml.execution.getLfPackage,
+              metric = metrics.execution.getLfPackage,
             )
             .flatMap { maybePackage =>
               resolveStep(
                 Tracked.value(
-                  metrics.daml.execution.engineRunning,
+                  metrics.execution.engineRunning,
                   trackSyncExecution(interpretationTimeNanos)(resume(maybePackage)),
                 )
               )
@@ -302,7 +304,7 @@ private[apiserver] final class StoreBackedCommandExecutor(
           def resume(): Future[Either[ErrorCause, A]] =
             resolveStep(
               Tracked.value(
-                metrics.daml.execution.engineRunning,
+                metrics.execution.engineRunning,
                 trackSyncExecution(interpretationTimeNanos)(continue()),
               )
             )
@@ -346,7 +348,7 @@ private[apiserver] final class StoreBackedCommandExecutor(
               }
               resolveStep(
                 Tracked.value(
-                  metrics.daml.execution.engineRunning,
+                  metrics.execution.engineRunning,
                   trackSyncExecution(interpretationTimeNanos)(resume(resumed)),
                 )
               )
@@ -357,7 +359,7 @@ private[apiserver] final class StoreBackedCommandExecutor(
             result => {
               resolveStep(
                 Tracked.value(
-                  metrics.daml.execution.engineRunning,
+                  metrics.execution.engineRunning,
                   trackSyncExecution(interpretationTimeNanos)(resume(result)),
                 )
               )
@@ -366,15 +368,15 @@ private[apiserver] final class StoreBackedCommandExecutor(
       }
 
     resolveStep(result).andThen { case _ =>
-      metrics.daml.execution.lookupActiveContractPerExecution
+      metrics.execution.lookupActiveContractPerExecution
         .update(lookupActiveContractTime.get(), TimeUnit.NANOSECONDS)
-      metrics.daml.execution.lookupActiveContractCountPerExecution
+      metrics.execution.lookupActiveContractCountPerExecution
         .update(lookupActiveContractCount.get)
-      metrics.daml.execution.lookupContractKeyPerExecution
+      metrics.execution.lookupContractKeyPerExecution
         .update(lookupContractKeyTime.get(), TimeUnit.NANOSECONDS)
-      metrics.daml.execution.lookupContractKeyCountPerExecution
+      metrics.execution.lookupContractKeyCountPerExecution
         .update(lookupContractKeyCount.get())
-      metrics.daml.execution.engine
+      metrics.execution.engine
         .update(interpretationTimeNanos.get(), TimeUnit.NANOSECONDS)
     }
   }
@@ -481,7 +483,7 @@ private[apiserver] final class StoreBackedCommandExecutor(
     def lookupActiveContractVerificationData(): Result =
       EitherT(
         contractStore
-          .lookupContractStateWithoutDivulgence(coid)
+          .lookupContractState(coid)
           .map {
             case active: ContractState.Active =>
               UpgradeVerificationContractData
@@ -511,7 +513,7 @@ private[apiserver] final class StoreBackedCommandExecutor(
         // During submission the ResultNeedUpgradeVerification should only be called
         // for contracts that are being upgraded. We do not support the upgrading of
         // divulged contracts.
-        Some(s"Contract with $coid was not found or it refers to a divulged contract.")
+        Some(s"Contract with $coid was not found.")
       case MissingDriverMetadata =>
         Some(
           s"Contract with $coid is missing the driver metadata and cannot be upgraded. This can happen for contracts created with older Canton versions"

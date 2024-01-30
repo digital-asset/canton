@@ -62,7 +62,7 @@ object ParticipantMetadata
   override val name: String = "ParticipantMetadata"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v30)(v30.ParticipantMetadata)(
+    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v30)(v30.ParticipantMetadata)(
       supportedProtoVersionMemoized(_)(fromProtoV30),
       _.toProtoV30.toByteString,
     )
@@ -101,9 +101,10 @@ object ParticipantMetadata
       salt <- ProtoConverter
         .parseRequired(Salt.fromProtoV30, "salt", saltP)
         .leftMap(_.inField("salt"))
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield ParticipantMetadata(let, submissionTime, workflowId, salt)(
       hashOps,
-      protocolVersionRepresentativeFor(ProtoVersion(0)),
+      rpv,
       Some(bytes),
     )
 }

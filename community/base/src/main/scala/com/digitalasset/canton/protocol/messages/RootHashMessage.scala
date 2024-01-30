@@ -90,7 +90,7 @@ object RootHashMessage
     ], ByteString => ParsingResult[RootHashMessagePayload]] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v30)(v30.RootHashMessage)(
+    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v30)(v30.RootHashMessage)(
       supportedProtoVersion(_)((deserializer, proto) => fromProtoV30(deserializer)(proto)),
       _.toProtoV30.toByteString,
     )
@@ -120,12 +120,13 @@ object RootHashMessage
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain_id")
       viewType <- ViewType.fromProtoEnum(viewTypeP)
       payloadO <- payloadDeserializer(payloadP)
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield RootHashMessage(
       rootHash,
       domainId,
       viewType,
       payloadO,
-    )(protocolVersionRepresentativeFor(ProtoVersion(0)))
+    )(rpv)
   }
 
   implicit def rootHashMessageProtocolMessageContentCast[Payload <: RootHashMessagePayload](implicit

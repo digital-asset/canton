@@ -30,7 +30,7 @@ object TopologyStateForInitRequest
   override val name: String = "TopologyStateForInitRequest"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v30)(
+    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v30)(
       v30.TopologyStateForInitRequest
     )(
       supportedProtoVersion(_)(fromProtoV30),
@@ -50,9 +50,8 @@ object TopologyStateForInitRequest
     val v30.TopologyStateForInitRequest(memberP) = topologyStateForInitRequestP
     for {
       member <- Member.fromProtoPrimitive(memberP, "member")
-    } yield TopologyStateForInitRequest(member)(
-      protocolVersionRepresentativeFor(ProtoVersion(0))
-    )
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
+    } yield TopologyStateForInitRequest(member)(rpv)
   }
 
 }
