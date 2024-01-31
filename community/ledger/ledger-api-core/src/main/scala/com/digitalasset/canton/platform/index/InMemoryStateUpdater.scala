@@ -8,7 +8,6 @@ import com.daml.daml_lf_dev.DamlLf
 import com.daml.executors.InstrumentedExecutors
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.lf.data.Ref.HexString
-import com.daml.lf.data.Time
 import com.daml.lf.engine.Blinding
 import com.daml.lf.ledger.EventId
 import com.daml.lf.transaction.Node.{Create, Exercise}
@@ -75,7 +74,7 @@ private[platform] object InMemoryStateUpdaterFlow {
       .mapAsync(1) { result =>
         Future {
           update(result)
-          metrics.daml.index.ledgerEndSequentialId.updateValue(result.lastEventSequentialId)
+          metrics.index.ledgerEndSequentialId.updateValue(result.lastEventSequentialId)
         }(updateCachesExecutionContext)
       }
 }
@@ -99,14 +98,14 @@ private[platform] object InMemoryStateUpdater {
   )(implicit traceContext: TraceContext): ResourceOwner[UpdaterFlow] = for {
     prepareUpdatesExecutor <- ResourceOwner.forExecutorService(() =>
       InstrumentedExecutors.newWorkStealingExecutor(
-        metrics.daml.lapi.threadpool.indexBypass.prepareUpdates,
+        metrics.lapi.threadpool.indexBypass.prepareUpdates,
         prepareUpdatesParallelism,
         metrics.executorServiceMetrics,
       )
     )
     updateCachesExecutor <- ResourceOwner.forExecutorService(() =>
       InstrumentedExecutors.newFixedThreadPool(
-        metrics.daml.lapi.threadpool.indexBypass.updateInMemoryState,
+        metrics.lapi.threadpool.indexBypass.updateInMemoryState,
         1,
         metrics.executorServiceMetrics,
       )
@@ -121,10 +120,10 @@ private[platform] object InMemoryStateUpdater {
     logger = logger,
   )(
     prepare = prepare(
-      archiveToMetadata = (archive, timestamp) =>
+      archiveToMetadata = archive =>
         Timed.value(
-          metrics.daml.index.packageMetadata.decodeArchive,
-          PackageMetadata.from(archive, timestamp),
+          metrics.index.packageMetadata.decodeArchive,
+          PackageMetadata.from(archive),
         ),
       multiDomainEnabled = multiDomainEnabled,
     ),
@@ -132,7 +131,7 @@ private[platform] object InMemoryStateUpdater {
   )
 
   private[index] def extractMetadataFromUploadedPackages(
-      archiveToMetadata: (DamlLf.Archive, Time.Timestamp) => PackageMetadata
+      archiveToMetadata: DamlLf.Archive => PackageMetadata
   )(
       batch: Vector[(Offset, Traced[Update])]
   ): PackageMetadata =
@@ -140,12 +139,12 @@ private[platform] object InMemoryStateUpdater {
       .collect { case (_, Traced(packageUpload: Update.PublicPackageUpload)) => packageUpload }
       .foldLeft(PackageMetadata()) { case (pkgMeta, packageUpload) =>
         packageUpload.archives.view
-          .map(archiveToMetadata(_, packageUpload.recordTime))
+          .map(archiveToMetadata)
           .foldLeft(pkgMeta)(_ |+| _)
       }
 
   private[index] def prepare(
-      archiveToMetadata: (DamlLf.Archive, Time.Timestamp) => PackageMetadata,
+      archiveToMetadata: DamlLf.Archive => PackageMetadata,
       multiDomainEnabled: Boolean,
   )(
       batch: Vector[(Offset, Traced[Update])],

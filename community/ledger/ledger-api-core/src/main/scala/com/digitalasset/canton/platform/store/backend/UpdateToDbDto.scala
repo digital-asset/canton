@@ -49,7 +49,7 @@ object UpdateToDbDto {
             IndexedUpdatesMetrics.Labels.applicationId -> u.completionInfo.applicationId,
           ) { implicit mc: MetricsContext =>
             incrementCounterForEvent(
-              metrics.daml.indexerEvents,
+              metrics.indexerEvents,
               IndexedUpdatesMetrics.Labels.eventType.transaction,
               IndexedUpdatesMetrics.Labels.status.rejected,
             )
@@ -73,7 +73,7 @@ object UpdateToDbDto {
 
         case u: ConfigurationChanged =>
           incrementCounterForEvent(
-            metrics.daml.indexerEvents,
+            metrics.indexerEvents,
             IndexedUpdatesMetrics.Labels.eventType.configurationChange,
             IndexedUpdatesMetrics.Labels.status.accepted,
           )
@@ -90,7 +90,7 @@ object UpdateToDbDto {
 
         case u: PartyAddedToParticipant =>
           incrementCounterForEvent(
-            metrics.daml.indexerEvents,
+            metrics.indexerEvents,
             IndexedUpdatesMetrics.Labels.eventType.partyAllocation,
             IndexedUpdatesMetrics.Labels.status.accepted,
           )
@@ -109,7 +109,7 @@ object UpdateToDbDto {
 
         case u: PartyAllocationRejected =>
           incrementCounterForEvent(
-            metrics.daml.indexerEvents,
+            metrics.indexerEvents,
             IndexedUpdatesMetrics.Labels.eventType.partyAllocation,
             IndexedUpdatesMetrics.Labels.status.rejected,
           )
@@ -128,7 +128,7 @@ object UpdateToDbDto {
 
         case u: PublicPackageUpload =>
           incrementCounterForEvent(
-            metrics.daml.indexerEvents,
+            metrics.indexerEvents,
             IndexedUpdatesMetrics.Labels.eventType.packageUpload,
             IndexedUpdatesMetrics.Labels.status.accepted,
           )
@@ -157,7 +157,7 @@ object UpdateToDbDto {
 
         case u: PublicPackageUploadRejected =>
           incrementCounterForEvent(
-            metrics.daml.indexerEvents,
+            metrics.indexerEvents,
             IndexedUpdatesMetrics.Labels.eventType.packageUpload,
             IndexedUpdatesMetrics.Labels.status.rejected,
           )
@@ -176,7 +176,7 @@ object UpdateToDbDto {
             IndexedUpdatesMetrics.Labels.applicationId -> u.completionInfoO.map(_.applicationId)
           ) { implicit mc: MetricsContext =>
             incrementCounterForEvent(
-              metrics.daml.indexerEvents,
+              metrics.indexerEvents,
               IndexedUpdatesMetrics.Labels.eventType.transaction,
               IndexedUpdatesMetrics.Labels.status.accepted,
             )
@@ -335,32 +335,6 @@ object UpdateToDbDto {
                 Iterator.empty // It is okay to collect: blinding info is already there, we are free at hand to filter out the fetch and lookup nodes here already
             }
 
-          val divulgedContractIndex = u.divulgedContracts
-            .map(divulgedContract => divulgedContract.contractId -> divulgedContract)
-            .toMap
-          val divulgences = blinding.divulgence.iterator.collect {
-            // only store divulgence events, which are divulging to parties
-            case (contractId, visibleToParties) if visibleToParties.nonEmpty =>
-              val contractInst = divulgedContractIndex.get(contractId).map(_.contractInst)
-              DbDto.EventDivulgence(
-                event_offset = Some(offset.toHexString),
-                command_id = u.completionInfoO.map(_.commandId),
-                workflow_id = u.transactionMeta.workflowId,
-                application_id = u.completionInfoO.map(_.applicationId),
-                submitters = u.completionInfoO.map(_.actAs.toSet),
-                contract_id = contractId.coid,
-                template_id = contractInst.map(_.unversioned.template.toString),
-                tree_event_witnesses = visibleToParties.map(_.toString),
-                create_argument = contractInst
-                  .map(_.map(_.arg))
-                  .map(translation.serialize(contractId, _))
-                  .map(compressionStrategy.createArgumentCompression.compress),
-                create_argument_compression = compressionStrategy.createArgumentCompression.id,
-                event_sequential_id = 0, // this is filled later
-                domain_id = domainId,
-              )
-          }
-
           val completions =
             u.completionInfoO.iterator.map(
               commandCompletion(
@@ -377,7 +351,7 @@ object UpdateToDbDto {
           // because in a later stage the preceding events
           // will be assigned consecutive event sequential ids
           // and transaction meta is assigned sequential ids of its first and last event
-          events ++ divulgences ++ completions ++ Seq(transactionMeta)
+          events ++ completions ++ Seq(transactionMeta)
 
         case u: ReassignmentAccepted if multiDomainEnabled =>
           val events = u.reassignment match {

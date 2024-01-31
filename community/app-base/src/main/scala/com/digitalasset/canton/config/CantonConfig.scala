@@ -61,7 +61,7 @@ import com.digitalasset.canton.ledger.runner.common.PureConfigReaderWriter.Secur
   userManagementServiceConfigConvert,
 }
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.metrics.{MetricsConfig, MetricsPrefix, MetricsReporterConfig}
+import com.digitalasset.canton.metrics.{MetricsConfig, MetricsReporterConfig}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
 import com.digitalasset.canton.participant.config.ParticipantInitConfig.ParticipantLedgerApiInitConfig
@@ -70,11 +70,13 @@ import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfig
 import com.digitalasset.canton.platform.indexer.PackageMetadataViewConfig
+import com.digitalasset.canton.protocol.CatchUpConfig
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.pureconfigutils.HttpServerConfig
 import com.digitalasset.canton.pureconfigutils.SharedConfigReaders.catchConvertError
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
+import com.digitalasset.canton.time.EnrichedDurations.RichNonNegativeFiniteDurationConfig
 import com.digitalasset.canton.tracing.TracingConfig
 import com.typesafe.config.ConfigException.UnresolvedSubstitution
 import com.typesafe.config.{
@@ -374,6 +376,8 @@ trait CantonConfig {
         enableEngineStackTrace = participantParameters.enableEngineStackTraces,
         enableContractUpgrading = participantParameters.enableContractUpgrading,
         iterationsBetweenInterruptions = participantParameters.iterationsBetweenInterruptions,
+        journalGarbageCollectionDelay =
+          participantParameters.journalGarbageCollectionDelay.toInternal,
       )
     }
 
@@ -680,9 +684,6 @@ object CantonConfig {
     lazy implicit val participantInitConfigReader: ConfigReader[ParticipantInitConfig] =
       deriveReader[ParticipantInitConfig]
         .enableNestedOpt("auto-init", _.copy(identity = None))
-    lazy implicit val domainInitConfigReader: ConfigReader[DomainInitConfig] =
-      deriveReader[DomainInitConfig]
-        .enableNestedOpt("auto-init", _.copy(identity = None))
     lazy implicit val httpHealthServerConfigReader: ConfigReader[HttpHealthServerConfig] =
       deriveReader[HttpHealthServerConfig]
     implicit val grpcHealthServerConfigReader: ConfigReader[GrpcHealthServerConfig] =
@@ -704,8 +705,6 @@ object CantonConfig {
     lazy implicit val communityCryptoReader: ConfigReader[CommunityCryptoConfig] =
       deriveReader[CommunityCryptoConfig]
     lazy implicit val clientConfigReader: ConfigReader[ClientConfig] = deriveReader[ClientConfig]
-    lazy implicit val remoteDomainConfigReader: ConfigReader[RemoteDomainConfig] =
-      deriveReader[RemoteDomainConfig]
     lazy implicit val remoteParticipantConfigReader: ConfigReader[RemoteParticipantConfig] =
       deriveReader[RemoteParticipantConfig]
     lazy implicit val batchingReader: ConfigReader[BatchingConfig] =
@@ -798,8 +797,6 @@ object CantonConfig {
       deriveReader[ActiveContractsServiceStreamsConfig]
     lazy implicit val packageMetadataViewConfigReader: ConfigReader[PackageMetadataViewConfig] =
       deriveReader[PackageMetadataViewConfig]
-    lazy implicit val identityConfigReader: ConfigReader[TopologyConfig] =
-      deriveReader[TopologyConfig]
     lazy implicit val topologyXConfigReader: ConfigReader[TopologyXConfig] =
       deriveReader[TopologyXConfig]
     lazy implicit val sequencerConnectionConfigCertificateFileReader
@@ -875,31 +872,18 @@ object CantonConfig {
       deriveReader[RemoteMediatorConfig]
     lazy implicit val domainParametersConfigReader: ConfigReader[DomainParametersConfig] =
       deriveReader[DomainParametersConfig]
-    lazy implicit val domainNodeParametersConfigReader: ConfigReader[DomainNodeParametersConfig] =
-      deriveReader[DomainNodeParametersConfig]
+    lazy implicit val catchUpParametersConfigReader: ConfigReader[CatchUpConfig] =
+      deriveReader[CatchUpConfig]
     lazy implicit val deadlockDetectionConfigReader: ConfigReader[DeadlockDetectionConfig] =
       deriveReader[DeadlockDetectionConfig]
 
     lazy implicit val metricsFilterConfigReader: ConfigReader[MetricsConfig.MetricsFilterConfig] =
       deriveReader[MetricsConfig.MetricsFilterConfig]
-    lazy implicit val metricsConfigGraphitePrefixStatic: ConfigReader[MetricsPrefix.Static] =
-      deriveReader[MetricsPrefix.Static]
-    lazy implicit val metricsConfigGraphitePrefixNoPrefix
-        : ConfigReader[MetricsPrefix.NoPrefix.type] =
-      deriveReader[MetricsPrefix.NoPrefix.type]
-    lazy implicit val metricsConfigGraphitePrefixHostname
-        : ConfigReader[MetricsPrefix.Hostname.type] =
-      deriveReader[MetricsPrefix.Hostname.type]
-    lazy implicit val metricsConfigGraphitePrefix: ConfigReader[MetricsPrefix] =
-      deriveReader[MetricsPrefix]
-    lazy implicit val metricsConfigGraphiteReader: ConfigReader[MetricsConfig.Graphite] =
-      deriveReader[MetricsConfig.Graphite]
-    lazy implicit val metricsConfigPrometheusReader: ConfigReader[MetricsConfig.Prometheus] =
-      deriveReader[MetricsConfig.Prometheus]
-    lazy implicit val metricsConfigCsvReader: ConfigReader[MetricsConfig.Csv] =
-      deriveReader[MetricsConfig.Csv]
-    lazy implicit val metricsConfigJMXReader: ConfigReader[MetricsConfig.JMX] =
-      deriveReader[MetricsConfig.JMX]
+    lazy implicit val metricsConfigPrometheusReader
+        : ConfigReader[MetricsReporterConfig.Prometheus] =
+      deriveReader[MetricsReporterConfig.Prometheus]
+    lazy implicit val metricsConfigCsvReader: ConfigReader[MetricsReporterConfig.Csv] =
+      deriveReader[MetricsReporterConfig.Csv]
     lazy implicit val metricsReporterConfigReader: ConfigReader[MetricsReporterConfig] =
       deriveReader[MetricsReporterConfig]
     lazy implicit val histogramDefinitionConfigReader: ConfigReader[HistogramDefinition] =
@@ -1084,8 +1068,6 @@ object CantonConfig {
       deriveWriter[NodeIdentifierConfig]
     lazy implicit val participantInitConfigWriter: ConfigWriter[ParticipantInitConfig] =
       deriveWriter[ParticipantInitConfig]
-    lazy implicit val domainInitConfigWriter: ConfigWriter[DomainInitConfig] =
-      deriveWriter[DomainInitConfig]
     lazy implicit val communityCryptoProviderWriter: ConfigWriter[CommunityCryptoProvider] =
       deriveEnumerationWriter[CommunityCryptoProvider]
     lazy implicit val cryptoSigningKeySchemeWriter: ConfigWriter[SigningKeyScheme] =
@@ -1103,8 +1085,6 @@ object CantonConfig {
     lazy implicit val communityCryptoWriter: ConfigWriter[CommunityCryptoConfig] =
       deriveWriter[CommunityCryptoConfig]
     lazy implicit val clientConfigWriter: ConfigWriter[ClientConfig] = deriveWriter[ClientConfig]
-    lazy implicit val remoteDomainConfigWriter: ConfigWriter[RemoteDomainConfig] =
-      deriveWriter[RemoteDomainConfig]
     lazy implicit val remoteParticipantConfigWriter: ConfigWriter[RemoteParticipantConfig] =
       deriveWriter[RemoteParticipantConfig]
     lazy implicit val nodeMonitoringConfigWriter: ConfigWriter[NodeMonitoringConfig] =
@@ -1198,8 +1178,6 @@ object CantonConfig {
       deriveWriter[ActiveContractsServiceStreamsConfig]
     lazy implicit val packageMetadataViewConfigWriter: ConfigWriter[PackageMetadataViewConfig] =
       deriveWriter[PackageMetadataViewConfig]
-    lazy implicit val identityConfigWriter: ConfigWriter[TopologyConfig] =
-      deriveWriter[TopologyConfig]
     lazy implicit val topologyXConfigWriter: ConfigWriter[TopologyXConfig] =
       deriveWriter[TopologyXConfig]
     lazy implicit val sequencerConnectionConfigCertificateFileWriter
@@ -1279,29 +1257,19 @@ object CantonConfig {
       deriveWriter[RemoteMediatorConfig]
     lazy implicit val domainParametersConfigWriter: ConfigWriter[DomainParametersConfig] =
       deriveWriter[DomainParametersConfig]
-    lazy implicit val domainNodeParametersConfigWriter: ConfigWriter[DomainNodeParametersConfig] =
-      deriveWriter[DomainNodeParametersConfig]
+    lazy implicit val catchUpParametersConfigWriter: ConfigWriter[CatchUpConfig] =
+      deriveWriter[CatchUpConfig]
     lazy implicit val deadlockDetectionConfigWriter: ConfigWriter[DeadlockDetectionConfig] =
       deriveWriter[DeadlockDetectionConfig]
 
     lazy implicit val metricsFilterConfigWriter: ConfigWriter[MetricsConfig.MetricsFilterConfig] =
       deriveWriter[MetricsConfig.MetricsFilterConfig]
-    lazy implicit val metricsConfigGraphiteNoPrefix: ConfigWriter[MetricsPrefix.NoPrefix.type] =
-      deriveWriter[MetricsPrefix.NoPrefix.type]
-    lazy implicit val metricsConfigGraphiteStatic: ConfigWriter[MetricsPrefix.Static] =
-      deriveWriter[MetricsPrefix.Static]
-    lazy implicit val metricsConfigGraphiteHostname: ConfigWriter[MetricsPrefix.Hostname.type] =
-      deriveWriter[MetricsPrefix.Hostname.type]
-    lazy implicit val metricsConfigGraphitePrefix: ConfigWriter[MetricsPrefix] =
-      deriveWriter[MetricsPrefix]
-    lazy implicit val metricsConfigGraphiteWriter: ConfigWriter[MetricsConfig.Graphite] =
-      deriveWriter[MetricsConfig.Graphite]
-    lazy implicit val metricsConfigPrometheusWriter: ConfigWriter[MetricsConfig.Prometheus] =
-      deriveWriter[MetricsConfig.Prometheus]
-    lazy implicit val metricsConfigCsvWriter: ConfigWriter[MetricsConfig.Csv] =
-      deriveWriter[MetricsConfig.Csv]
-    lazy implicit val metricsConfigJMXWriter: ConfigWriter[MetricsConfig.JMX] =
-      deriveWriter[MetricsConfig.JMX]
+    lazy implicit val metricsConfigPrometheusWriter
+        : ConfigWriter[MetricsReporterConfig.Prometheus] =
+      deriveWriter[MetricsReporterConfig.Prometheus]
+    lazy implicit val metricsConfigCsvWriter: ConfigWriter[MetricsReporterConfig.Csv] =
+      deriveWriter[MetricsReporterConfig.Csv]
+
     lazy implicit val metricsReporterConfigWriter: ConfigWriter[MetricsReporterConfig] =
       deriveWriter[MetricsReporterConfig]
     lazy implicit val histogramDefinitionConfigWriter: ConfigWriter[HistogramDefinition] =

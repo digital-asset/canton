@@ -45,8 +45,8 @@ private[dao] sealed class ContractsReader(
       loggingContext: LoggingContextWithTrace
   ): Future[KeyState] =
     Timed.future(
-      metrics.daml.index.db.lookupKey,
-      dispatcher.executeSql(metrics.daml.index.db.lookupContractByKeyDbMetrics)(
+      metrics.index.db.lookupKey,
+      dispatcher.executeSql(metrics.index.db.lookupContractByKeyDbMetrics)(
         storageBackend.keyState(key, validAt)
       ),
     )
@@ -55,15 +55,15 @@ private[dao] sealed class ContractsReader(
       loggingContext: LoggingContextWithTrace
   ): Future[Option[ContractState]] =
     Timed.future(
-      metrics.daml.index.db.lookupActiveContract,
+      metrics.index.db.lookupActiveContract,
       contractLoader
         .load(contractId -> before)
         .map(_.map {
           case raw: RawCreatedContract =>
             val decompressionTimer =
-              metrics.daml.index.db.lookupCreatedContractsDbMetrics.compressionTimer
+              metrics.index.db.lookupCreatedContractsDbMetrics.compressionTimer
             val deserializationTimer =
-              metrics.daml.index.db.lookupCreatedContractsDbMetrics.translationTimer
+              metrics.index.db.lookupCreatedContractsDbMetrics.translationTimer
 
             val contract = toContract(
               contractId = contractId,
@@ -103,58 +103,6 @@ private[dao] sealed class ContractsReader(
           case raw: RawArchivedContract => ArchivedContract(raw.flatEventWitnesses)
         }),
     )
-
-  /** Lookup of a contract in the case the contract value is not already known */
-  override def lookupActiveContractAndLoadArgument(
-      readers: Set[Party],
-      contractId: ContractId,
-  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[Contract]] = {
-
-    Timed.future(
-      metrics.daml.index.db.lookupActiveContract,
-      dispatcher
-        .executeSql(metrics.daml.index.db.lookupDivulgedActiveContractDbMetrics)(
-          storageBackend.activeContractWithArgument(readers, contractId)
-        )
-        .map(_.map { raw =>
-          toContract(
-            contractId = contractId,
-            templateId = raw.templateId,
-            createArgument = raw.createArgument,
-            createArgumentCompression =
-              Compression.Algorithm.assertLookup(raw.createArgumentCompression),
-            decompressionTimer =
-              metrics.daml.index.db.lookupDivulgedActiveContractDbMetrics.compressionTimer,
-            deserializationTimer =
-              metrics.daml.index.db.lookupDivulgedActiveContractDbMetrics.translationTimer,
-          )
-        }),
-    )
-  }
-
-  /** Lookup of a contract in the case the contract value is already known (loaded from a cache) */
-  override def lookupActiveContractWithCachedArgument(
-      readers: Set[Party],
-      contractId: ContractId,
-      createArgument: Value,
-  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[Contract]] = {
-
-    Timed.future(
-      metrics.daml.index.db.lookupActiveContract,
-      dispatcher
-        .executeSql(metrics.daml.index.db.lookupDivulgedActiveContractDbMetrics)(
-          storageBackend.activeContractWithoutArgument(readers, contractId)
-        )
-        .map(
-          _.map(templateId =>
-            toContract(
-              templateId = templateId,
-              createArgument = createArgument,
-            )
-          )
-        ),
-    )
-  }
 }
 
 private[dao] object ContractsReader {

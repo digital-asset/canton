@@ -21,6 +21,7 @@ import com.daml.lf.value.Value
 import com.daml.lf.value.Value.VersionedValue
 import com.daml.lf.engine as LfEngine
 import com.daml.metrics.Timed
+import com.digitalasset.canton.ledger.api.util.LfEngineToApi
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
   LoggingContextWithTrace,
@@ -30,7 +31,6 @@ import com.digitalasset.canton.logging.{
 import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.apiserver.services.{ErrorCause, RejectionGenerators}
 import com.digitalasset.canton.platform.packages.DeduplicatingPackageLoader
-import com.digitalasset.canton.platform.participant.util.LfEngineToApi
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.RawCreatedEvent
 import com.digitalasset.canton.platform.store.dao.EventProjectionProperties
 import com.digitalasset.canton.platform.store.dao.events.LfValueTranslation.ApiContractData
@@ -192,7 +192,7 @@ final class LfValueTranslation(
           .loadPackage(
             packageId = packageId,
             delegate = packageId => loadPackage(packageId, loggingContext),
-            metric = metrics.daml.index.db.translation.getLfPackage,
+            metric = metrics.index.db.translation.getLfPackage,
           )
           .flatMap(pkgO => consumeEnricherResult(resume(pkgO)))
       case result =>
@@ -568,7 +568,7 @@ final class LfValueTranslation(
       loggingContext: LoggingContextWithTrace,
       executionContext: ExecutionContext,
   ): Future[Either[Status, Versioned[Value]]] = Timed.future(
-    metrics.daml.index.lfValue.computeInterfaceView, {
+    metrics.index.lfValue.computeInterfaceView, {
       implicit val errorLogger: ContextualizedErrorLogger =
         ErrorLoggingContext(logger, loggingContext)
 
@@ -600,7 +600,7 @@ final class LfValueTranslation(
               .loadPackage(
                 packageId = packageId,
                 delegate = packageId => loadPackage(packageId, loggingContext),
-                metric = metrics.daml.index.db.translation.getLfPackage,
+                metric = metrics.index.db.translation.getLfPackage,
               )
               .map(resume)
               .flatMap(goAsync)

@@ -69,17 +69,10 @@ object AggregationRule
   ): AggregationRule =
     AggregationRule(eligibleMembers, threshold)(protocolVersionRepresentativeFor(protocolVersion))
 
-  def apply(
-      eligibleMembers: NonEmpty[Seq[Member]],
-      threshold: PositiveInt,
-      protoVersion: ProtoVersion,
-  ): AggregationRule =
-    AggregationRule(eligibleMembers, threshold)(protocolVersionRepresentativeFor(protoVersion))
-
   override def name: String = "AggregationRule"
 
   override def supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v30)(v30.AggregationRule)(
+    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v30)(v30.AggregationRule)(
       supportedProtoVersion(_)(fromProtoV30),
       _.toProtoV30.toByteString,
     )
@@ -94,6 +87,7 @@ object AggregationRule
         eligibleMembersP,
       )
       threshold <- ProtoConverter.parsePositiveInt(thresholdP)
-    } yield AggregationRule(eligibleMembers, threshold, ProtoVersion(0))
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
+    } yield AggregationRule(eligibleMembers, threshold)(rpv)
   }
 }

@@ -39,14 +39,14 @@ import com.digitalasset.canton.participant.admin.grpc.{
 }
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig as CDomainConnectionConfig
 import com.digitalasset.canton.participant.sync.UpstreamOffsetConvert
-import com.digitalasset.canton.protocol.{LfContractId, TransferId}
+import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.serialization.ProtoConverter.InstantConverter
 import com.digitalasset.canton.topology.{DomainId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.traffic.MemberTrafficStatus
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainAlias, LedgerApplicationId, LedgerTransactionId, config}
+import com.digitalasset.canton.{DomainAlias, LedgerTransactionId, config}
 import com.google.protobuf.ByteString
 import com.google.protobuf.empty.Empty
 import com.google.protobuf.timestamp.Timestamp
@@ -703,7 +703,7 @@ object ParticipantAdminCommands {
         ): Either[String, (CDomainConnectionConfig, Boolean)] =
           for {
             configP <- result.config.toRight("Server has sent empty config")
-            config <- CDomainConnectionConfig.fromProtoV0(configP).leftMap(_.toString)
+            config <- CDomainConnectionConfig.fromProtoV30(configP).leftMap(_.toString)
           } yield (config, result.connected)
 
         response.results.traverse(mapRes)
@@ -757,79 +757,6 @@ object ParticipantAdminCommands {
         TransferServiceGrpc.stub(channel)
     }
 
-    final case class TransferOut(
-        submittingParty: PartyId,
-        contractId: LfContractId,
-        sourceDomain: DomainAlias,
-        targetDomain: DomainAlias,
-        applicationId: LedgerApplicationId,
-        submissionId: String,
-        workflowId: String,
-        commandId: String,
-    ) extends Base[AdminTransferOutRequest, AdminTransferOutResponse, TransferId] {
-      override def createRequest(): Either[String, AdminTransferOutRequest] =
-        Right(
-          AdminTransferOutRequest(
-            submittingParty = submittingParty.toLf,
-            originDomain = sourceDomain.toProtoPrimitive,
-            targetDomain = targetDomain.toProtoPrimitive,
-            contractId = contractId.coid,
-            applicationId = applicationId,
-            submissionId = submissionId,
-            workflowId = workflowId,
-            commandId = commandId,
-          )
-        )
-
-      override def submitRequest(
-          service: TransferServiceStub,
-          request: AdminTransferOutRequest,
-      ): Future[AdminTransferOutResponse] =
-        service.transferOut(request)
-
-      override def handleResponse(response: AdminTransferOutResponse): Either[String, TransferId] =
-        response match {
-          case AdminTransferOutResponse(Some(transferIdP)) =>
-            TransferId.fromAdminProto30(transferIdP).leftMap(_.toString)
-          case AdminTransferOutResponse(None) => Left("Empty TransferOutResponse")
-        }
-    }
-
-    final case class TransferIn(
-        submittingParty: PartyId,
-        transferId: v30.TransferId,
-        targetDomain: DomainAlias,
-        applicationId: LedgerApplicationId,
-        submissionId: String,
-        workflowId: String,
-        commandId: String,
-    ) extends Base[AdminTransferInRequest, AdminTransferInResponse, Unit] {
-
-      override def createRequest(): Either[String, AdminTransferInRequest] =
-        Right(
-          AdminTransferInRequest(
-            submittingPartyId = submittingParty.toLf,
-            transferId = Some(transferId),
-            targetDomain = targetDomain.toProtoPrimitive,
-            applicationId = applicationId,
-            submissionId = submissionId,
-            workflowId = workflowId,
-            commandId = commandId,
-          )
-        )
-
-      override def submitRequest(
-          service: TransferServiceStub,
-          request: AdminTransferInRequest,
-      ): Future[AdminTransferInResponse] =
-        service.transferIn(request)
-
-      override def handleResponse(response: AdminTransferInResponse): Either[String, Unit] = Right(
-        ()
-      )
-
-    }
-
     final case class TransferSearch(
         targetDomain: DomainAlias,
         sourceDomainFilter: Option[DomainAlias],
@@ -865,7 +792,7 @@ object ParticipantAdminCommands {
       ): Either[String, Seq[TransferSearchResult]] =
         response match {
           case AdminTransferSearchResponse(results) =>
-            results.traverse(TransferSearchResult.fromProtoV0).leftMap(_.toString)
+            results.traverse(TransferSearchResult.fromProtoV30).leftMap(_.toString)
         }
 
       override def timeoutType: TimeoutType = DefaultUnboundedTimeout
@@ -1183,7 +1110,7 @@ object ParticipantAdminCommands {
         response.trafficState
           .map { trafficStatus =>
             MemberTrafficStatus
-              .fromProtoV0(trafficStatus)
+              .fromProtoV30(trafficStatus)
               .leftMap(_.message)
           }
           .getOrElse(Left("No traffic state available"))

@@ -27,7 +27,7 @@ object Dependencies {
   lazy val pekko_http_version = "1.0.0"
   lazy val ammonite_version = "2.5.9"
   lazy val awaitility_version = "4.2.0"
-  lazy val aws_version = "2.21.17"
+  lazy val aws_version = "2.22.3"
   lazy val better_files_version = "3.9.1"
   lazy val bouncy_castle_version = "1.70"
   lazy val cats_law_version = "2.9.0"
@@ -37,7 +37,6 @@ object Dependencies {
   lazy val chimney_version = "0.6.1"
   lazy val circe_version = "0.14.2"
   lazy val dropwizard_version = "4.1.33"
-  lazy val fabric_sdk_version = "2.2.13"
   lazy val flyway_version = "9.15.2"
   lazy val gcp_kms_version = "2.36.0"
   lazy val h2_version = "2.1.210"
@@ -59,11 +58,7 @@ object Dependencies {
   lazy val grpc_version = "1.60.0"
   lazy val netty_boring_ssl_version = "2.0.61.Final"
   lazy val netty_version = "4.1.100.Final"
-  lazy val opentelemetry_instrumentation_grpc_version = s"$opentelemetry_version-alpha"
-  lazy val opentelemetry_instrumentation_runtime_metrics_version = s"$opentelemetry_version-alpha"
-  lazy val opentelemetry_proto_version = "1.7.1-alpha"
-  lazy val opentelemetry_sdk_autoconfigure_version = s"$opentelemetry_version-alpha"
-  lazy val opentelemetry_version = "1.12.0"
+
   lazy val oracle_version = "19.18.0.0"
   lazy val postgres_version = "42.6.0"
   lazy val pprint_version = "0.8.1"
@@ -90,7 +85,6 @@ object Dependencies {
   lazy val testcontainers_version = "1.15.1"
   lazy val tink_version = "1.3.0"
   lazy val toxiproxy_java_version = "2.1.7"
-  lazy val web3j_version = "4.9.7"
 
   lazy val reflections = "org.reflections" % "reflections" % reflections_version
   lazy val pureconfig_core =
@@ -137,6 +131,7 @@ object Dependencies {
 
   lazy val grpc_protobuf = "io.grpc" % "grpc-protobuf" % grpc_version
   lazy val grpc_netty = "io.grpc" % "grpc-netty" % grpc_version
+  lazy val grpc_netty_shaded = "io.grpc" % "grpc-netty-shaded" % grpc_version
 
   lazy val netty_boring_ssl =
     "io.netty" % "netty-tcnative-boringssl-static" % netty_boring_ssl_version
@@ -236,35 +231,27 @@ object Dependencies {
     ),
   )
 
-  lazy val dropwizard_metrics_core = "io.dropwizard.metrics" % "metrics-core" % dropwizard_version
-  lazy val dropwizard_metrics_jmx = "io.dropwizard.metrics" % "metrics-jmx" % dropwizard_version
-  lazy val dropwizard_metrics_jvm = "io.dropwizard.metrics" % "metrics-jvm" % dropwizard_version
-  lazy val dropwizard_metrics_graphite =
-    "io.dropwizard.metrics" % "metrics-graphite" % dropwizard_version
-
-  lazy val prometheus_dropwizard = "io.prometheus" % "simpleclient_dropwizard" % prometheus_version
-  lazy val prometheus_httpserver = "io.prometheus" % "simpleclient_httpserver" % prometheus_version
-  lazy val prometheus_hotspot = "io.prometheus" % "simpleclient_hotspot" % prometheus_version
-
-  lazy val opentelemetry_api = "io.opentelemetry" % "opentelemetry-api" % opentelemetry_version
-  lazy val opentelemetry_sdk = "io.opentelemetry" % "opentelemetry-sdk" % opentelemetry_version
+  lazy val opentelemetry_api = resolveDependency("io.opentelemetry", "opentelemetry-api")
+  lazy val opentelemetry_sdk = resolveDependency("io.opentelemetry", "opentelemetry-sdk")
   lazy val opentelemetry_sdk_testing =
-    "io.opentelemetry" % "opentelemetry-sdk-testing" % opentelemetry_version
+    resolveDependency("io.opentelemetry", "opentelemetry-sdk-testing")
   lazy val opentelemetry_sdk_autoconfigure =
-    "io.opentelemetry" % "opentelemetry-sdk-extension-autoconfigure" % opentelemetry_sdk_autoconfigure_version
-  lazy val opentelemetry_zipkin =
-    "io.opentelemetry" % "opentelemetry-exporter-zipkin" % opentelemetry_version
-  lazy val opentelemetry_jaeger =
-    "io.opentelemetry" % "opentelemetry-exporter-jaeger" % opentelemetry_version
-  lazy val opentelemetry_otlp =
-    "io.opentelemetry" % "opentelemetry-exporter-otlp-trace" % opentelemetry_version
+    resolveDependency("io.opentelemetry", "opentelemetry-sdk-extension-autoconfigure")
+  lazy val opentelemetry_exporter_zipkin =
+    resolveDependency("io.opentelemetry", "opentelemetry-exporter-zipkin")
+  lazy val opentelemetry_exporter_jaeger =
+    resolveDependency("io.opentelemetry", "opentelemetry-exporter-jaeger")
+  lazy val opentelemetry_exporter_otlp =
+    resolveDependency("io.opentelemetry", "opentelemetry-exporter-otlp-trace")
+  lazy val opentelemetry_exporter_prometheus =
+    resolveDependency("io.opentelemetry", "opentelemetry-exporter-prometheus")
   lazy val opentelemetry_proto =
-    "io.opentelemetry" % "opentelemetry-proto" % opentelemetry_proto_version
+    resolveDependency("io.opentelemetry", "opentelemetry-proto")
 
   lazy val opentelemetry_instrumentation_grpc =
-    "io.opentelemetry.instrumentation" % "opentelemetry-grpc-1.6" % opentelemetry_instrumentation_grpc_version
+    resolveDependency("io.opentelemetry.instrumentation", "opentelemetry-grpc-1.6")
   lazy val opentelemetry_instrumentation_runtime_metrics =
-    "io.opentelemetry.instrumentation" % "opentelemetry-runtime-metrics" % opentelemetry_instrumentation_runtime_metrics_version
+    resolveDependency("io.opentelemetry.instrumentation", "opentelemetry-runtime-metrics")
 
   lazy val better_files = "com.github.pathikrit" %% "better-files" % better_files_version
 
@@ -287,11 +274,6 @@ object Dependencies {
   }
 
   lazy val toxiproxy_java = "eu.rekawek.toxiproxy" % "toxiproxy-java" % toxiproxy_java_version
-
-  lazy val fabric_sdk = "org.hyperledger.fabric-sdk-java" % "fabric-sdk-java" % fabric_sdk_version
-  lazy val snakeyaml = "org.yaml" % "snakeyaml" % snakeyaml_version
-
-  lazy val web3j = "org.web3j" % "core" % web3j_version
 
   lazy val wartremover_dep =
     "org.wartremover" % "wartremover" % wartremover.Wart.PluginVersion cross CrossVersion.full
@@ -317,7 +299,7 @@ object Dependencies {
     lazy val OtherProjects: Set[String] = Set("DamlSDK")
 
     case class Dependencies(dependencies: List[Dependency])
-    case class Dependency(org: String, artifact: String, version: String, users: Set[String])
+    case class Dependency(org: String, artifacts: Seq[String], version: String, users: Set[String])
 
     private val dependenciesForThisProject =
       decode[Dependencies](file"dependencies.json".contentAsString)
@@ -325,10 +307,10 @@ object Dependencies {
           throw new RuntimeException(s"Failed to parse dependencies file: $err")
         }
         .dependencies
-        .mapFilter {
-          case Dependency(org, artifact, version, users) if users contains ThisProject =>
-            Some((org, artifact) -> (org % artifact % version))
-          case dep if dep.users.subsetOf(OtherProjects) => None
+        .flatMap {
+          case Dependency(org, artifacts, version, users) if users contains ThisProject =>
+            artifacts.map(artifact => (org, artifact) -> (org % artifact % version))
+          case dep if dep.users.subsetOf(OtherProjects) => Seq.empty
           case invalid =>
             throw new RuntimeException(s"Invalid dependency definition: $invalid")
         }
@@ -416,8 +398,7 @@ object Dependencies {
   // TODO(#10852) one database library, not two
   lazy val anorm = resolveDependency("org.playframework.anorm", "anorm")
   lazy val scalapb_json4s = resolveDependency("com.thesamet.scalapb", "scalapb-json4s")
-  lazy val opentelemetry_prometheus =
-    resolveDependency("io.opentelemetry", "opentelemetry-exporter-prometheus")
+
   // it should be kept up-to-date with the scaffeine version to avoid incompatibilities
   lazy val caffeine = resolveDependency("com.github.ben-manes.caffeine", "caffeine")
   lazy val hikaricp = resolveDependency("com.zaxxer", "HikariCP")

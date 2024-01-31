@@ -37,7 +37,7 @@ object SubscriptionRequest extends HasProtocolVersionedCompanion[SubscriptionReq
   override val name: String = "SubscriptionRequest"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v30)(v30.SubscriptionRequest)(
+    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v30)(v30.SubscriptionRequest)(
       supportedProtoVersion(_)(fromProtoV30),
       _.toProtoV30.toByteString,
     )
@@ -56,8 +56,7 @@ object SubscriptionRequest extends HasProtocolVersionedCompanion[SubscriptionReq
     val v30.SubscriptionRequest(memberP, counter) = subscriptionRequestP
     for {
       member <- Member.fromProtoPrimitive(memberP, "member")
-    } yield SubscriptionRequest(member, SequencerCounter(counter))(
-      protocolVersionRepresentativeFor(ProtoVersion(0))
-    )
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
+    } yield SubscriptionRequest(member, SequencerCounter(counter))(rpv)
   }
 }

@@ -5,8 +5,8 @@ package com.digitalasset.canton.admin.api.client.commands
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.domain.admin.v0.SequencerAdministrationServiceGrpc.SequencerAdministrationServiceStub
-import com.digitalasset.canton.domain.admin.v0 as adminproto
+import com.digitalasset.canton.domain.admin.v30.SequencerAdministrationServiceGrpc.SequencerAdministrationServiceStub
+import com.digitalasset.canton.domain.admin.v30 as adminproto
 import com.digitalasset.canton.domain.sequencing.sequencer.SequencerPruningStatus
 import com.digitalasset.canton.domain.sequencing.sequencer.traffic.SequencerTrafficStatus
 import com.digitalasset.canton.topology.Member
@@ -40,7 +40,7 @@ object SequencerAdminCommands {
     override def handleResponse(
         response: adminproto.SequencerPruningStatus
     ): Either[String, SequencerPruningStatus] =
-      SequencerPruningStatus.fromProtoV0(response).leftMap(_.toString)
+      SequencerPruningStatus.fromProtoV30(response).leftMap(_.toString)
   }
 
   final case class GetTrafficControlState(members: Seq[Member])
@@ -61,7 +61,7 @@ object SequencerAdminCommands {
         response: adminproto.TrafficControlStateResponse
     ): Either[String, SequencerTrafficStatus] =
       response.trafficStates
-        .traverse(com.digitalasset.canton.traffic.MemberTrafficStatus.fromProtoV0)
+        .traverse(com.digitalasset.canton.traffic.MemberTrafficStatus.fromProtoV30)
         .leftMap(_.toString)
         .map(SequencerTrafficStatus)
   }

@@ -94,7 +94,6 @@ object ApiConversions {
       )
     }
   }
-
   def toV1(
       getTransactionByEventIdRequest: GetTransactionByEventIdRequest
   ): GetTransactionByEventIdRequestV1 =
@@ -211,6 +210,7 @@ object ApiConversions {
       readAs = commands.readAs,
       submissionId = commands.submissionId,
       disclosedContracts = commands.disclosedContracts,
+      packageIdSelectionPreference = commands.packageIdSelectionPreference,
     )
 
   def toV1(getActiveContractsResponse: GetActiveContractsResponseV2): GetActiveContractsResponseV1 =

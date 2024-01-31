@@ -28,7 +28,11 @@ import com.daml.ledger.api.v2.completion.Completion as CompletionV2
 import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdResponse as GetEventsByContractIdResponseV2
 import com.daml.ledger.api.v2.participant_offset.ParticipantOffset
 import com.daml.ledger.api.v2.reassignment.Reassignment
-import com.daml.ledger.api.v2.state_service.GetConnectedDomainsResponse
+import com.daml.ledger.api.v2.state_service.{
+  ActiveContract,
+  GetActiveContractsResponse,
+  GetConnectedDomainsResponse,
+}
 import com.daml.ledger.api.v2.transaction.{
   Transaction as TransactionV2,
   TransactionTree as TransactionTreeV2,
@@ -38,22 +42,16 @@ import com.daml.ledger.javaapi.data.ReassignmentV2
 import com.daml.ledger.{api, javaapi as javab}
 import com.daml.lf.data.Ref
 import com.daml.metrics.api.MetricHandle.{Histogram, Meter}
-import com.daml.metrics.api.{MetricHandle, MetricName, MetricsContext}
+import com.daml.metrics.api.{MetricName, MetricsContext}
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.{
   WrappedContractEntry,
   WrappedCreatedEvent,
+  WrappedIncompleteAssigned,
+  WrappedIncompleteUnassigned,
 }
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiV2Commands.CompletionWrapper
-import com.digitalasset.canton.admin.api.client.commands.LedgerApiV2Commands.UpdateService.{
-  AssignedWrapper,
-  ReassignmentWrapper,
-  TransactionTreeWrapper,
-  TransactionWrapper,
-  UnassignedWrapper,
-  UpdateTreeWrapper,
-  UpdateWrapper,
-}
+import com.digitalasset.canton.admin.api.client.commands.LedgerApiV2Commands.UpdateService.*
 import com.digitalasset.canton.admin.api.client.commands.{
   LedgerApiCommands,
   LedgerApiV2Commands,
@@ -97,7 +95,7 @@ import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ResourceUtil
-import com.digitalasset.canton.{LedgerTransactionId, LfPartyId, config}
+import com.digitalasset.canton.{LedgerTransactionId, LfPackageId, LfPartyId, config}
 import com.google.protobuf.field_mask.FieldMask
 import io.grpc.StatusRuntimeException
 import io.grpc.stub.StreamObserver
@@ -106,7 +104,6 @@ import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicReference
-import scala.annotation.nowarn
 import scala.concurrent.{Await, ExecutionContext}
 import scala.util.chaining.scalaUtilChainingOps
 import scala.util.{Failure, Success, Try}
@@ -168,9 +165,40 @@ trait BaseLedgerApiAdministration extends NoTracing {
           verbose: Boolean = true,
           timeout: config.NonNegativeDuration = timeouts.ledgerCommand,
           resultFilter: UpdateTreeWrapper => Boolean = _ => true,
+      ): Seq[UpdateTreeWrapper] =
+        trees_with_tx_filter(
+          filter = TransactionFilterV2(partyIds.map(_.toLf -> Filters()).toMap),
+          completeAfter = completeAfter,
+          beginOffset = beginOffset,
+          endOffset = endOffset,
+          verbose = verbose,
+          timeout = timeout,
+          resultFilter = resultFilter,
+        )
+
+      @Help.Summary("Get update trees", FeatureFlag.Testing)
+      @Help.Description(
+        """This function connects to the update tree stream for the transaction filter and collects update trees
+          |until either `completeAfter` update trees have been received or `timeout` has elapsed.
+          |The returned update trees can be filtered to be between the given offsets (default: no filtering).
+          |If the participant has been pruned via `pruning.prune` and if `beginOffset` is lower than the pruning offset,
+          |this command fails with a `NOT_FOUND` error.
+          |NOTE: As opposed to the flat transaction streams, the transaction filter provided for transaction trees DO NOT
+          | filter the events in the tree, but decide instead the event payloads projection rules.
+          | (e.g. whether to include in the CreatedEvent the created event blob)."""
+      )
+      def trees_with_tx_filter(
+          filter: TransactionFilterV2,
+          completeAfter: Int,
+          beginOffset: ParticipantOffset = new ParticipantOffset().withBoundary(
+            ParticipantOffset.ParticipantBoundary.PARTICIPANT_BEGIN
+          ),
+          endOffset: Option[ParticipantOffset] = None,
+          verbose: Boolean = true,
+          timeout: config.NonNegativeDuration = timeouts.ledgerCommand,
+          resultFilter: UpdateTreeWrapper => Boolean = _ => true,
       ): Seq[UpdateTreeWrapper] = check(FeatureFlag.Testing)({
         val observer = new RecordingStreamObserver[UpdateTreeWrapper](completeAfter, resultFilter)
-        val filter = TransactionFilterV2(partyIds.map(_.toLf -> Filters()).toMap)
         mkResult(
           subscribe_trees(observer, filter, beginOffset, endOffset, verbose),
           "getUpdateTrees",
@@ -178,24 +206,6 @@ trait BaseLedgerApiAdministration extends NoTracing {
           timeout,
         )
       })
-
-      private def mkResult[Res](
-          call: => AutoCloseable,
-          requestDescription: String,
-          observer: RecordingStreamObserver[Res],
-          timeout: config.NonNegativeDuration,
-      ): Seq[Res] = consoleEnvironment.run {
-        try {
-          ResourceUtil.withResource(call) { _ =>
-            // Not doing noisyAwaitResult here, because we don't want to log warnings in case of a timeout.
-            CommandSuccessful(Await.result(observer.result, timeout.duration))
-          }
-        } catch {
-          case sre: StatusRuntimeException =>
-            GenericCommandError(GrpcError(requestDescription, name, sre).toString)
-          case _: TimeoutException => CommandSuccessful(observer.responses)
-        }
-      }
 
       @Help.Summary("Subscribe to the update tree stream", FeatureFlag.Testing)
       @Help.Description(
@@ -335,22 +345,24 @@ trait BaseLedgerApiAdministration extends NoTracing {
       )
       def start_measuring(
           parties: Set[PartyId],
-          metricSuffix: String,
+          metricName: String,
           onUpdate: UpdateTreeWrapper => Unit = _ => (),
       )(implicit consoleEnvironment: ConsoleEnvironment): AutoCloseable =
         check(FeatureFlag.Testing) {
 
-          val metricName = MetricName(name, metricSuffix)
+          val wrappedMetricName = MetricName(metricName)
 
           val observer: StreamObserver[UpdateTreeWrapper] = new StreamObserver[UpdateTreeWrapper] {
 
-            @nowarn("cat=deprecation")
-            val metricsFactory: MetricHandle.MetricsFactory =
-              consoleEnvironment.environment.metricsFactory.metricsFactory
+            val metricsFactory = consoleEnvironment.environment.metricsRegistry
+              .forParticipant(name)
+              .openTelemetryMetricsFactory
 
-            val metric: Meter = metricsFactory.meter(metricName)
-            val nodeCount: Histogram = metricsFactory.histogram(metricName :+ "tx-node-count")
-            val transactionSize: Histogram = metricsFactory.histogram(metricName :+ "tx-size")
+            val metric: Meter = metricsFactory.meter(wrappedMetricName)
+            val nodeCount: Histogram =
+              metricsFactory.histogram(wrappedMetricName :+ "tx-node-count")
+            val transactionSize: Histogram =
+              metricsFactory.histogram(wrappedMetricName :+ "tx-size")
 
             override def onNext(tree: UpdateTreeWrapper): Unit = {
               val (s, serializedSize) = tree match {
@@ -447,6 +459,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           readAs: Seq[PartyId] = Seq.empty,
           disclosedContracts: Seq[DisclosedContract] = Seq.empty,
           applicationId: String = applicationId,
+          userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
       ): TransactionTreeV2 = {
         val tx = consoleEnvironment.run {
           ledgerApiCommand(
@@ -462,6 +475,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
               disclosedContracts,
               domainId,
               applicationId,
+              userPackageSelectionPreference,
             )
           )
         }
@@ -496,6 +510,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           readAs: Seq[PartyId] = Seq.empty,
           disclosedContracts: Seq[DisclosedContract] = Seq.empty,
           applicationId: String = applicationId,
+          userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
       ): TransactionV2 = {
         val tx = consoleEnvironment.run {
           ledgerApiCommand(
@@ -511,6 +526,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
               disclosedContracts,
               domainId,
               applicationId,
+              userPackageSelectionPreference,
             )
           )
         }
@@ -534,6 +550,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           readAs: Seq[PartyId] = Seq.empty,
           disclosedContracts: Seq[DisclosedContract] = Seq.empty,
           applicationId: String = applicationId,
+          userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
       ): Unit = check(FeatureFlag.Testing) {
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -549,6 +566,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
               disclosedContracts,
               domainId,
               applicationId,
+              userPackageSelectionPreference,
             )
           )
         }
@@ -789,7 +807,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
         })
 
       @Help.Summary("Read the current connected domains for a party", FeatureFlag.Testing)
-      def connectedDomains(partyId: PartyId): GetConnectedDomainsResponse =
+      def connected_domains(partyId: PartyId): GetConnectedDomainsResponse =
         check(FeatureFlag.Testing)(consoleEnvironment.run {
           ledgerApiCommand(
             LedgerApiV2Commands.StateService.GetConnectedDomains(partyId.toLf)
@@ -799,7 +817,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
       @Help.Summary("Read active contracts", FeatureFlag.Testing)
       @Help.Group("Active Contracts")
       object acs extends Helpful {
-        @Help.Summary("List the set of active contracts of a given party")
+        @Help.Summary("List the set of active contract entries of a given party")
         @Help.Description(
           """This command will return the current set of active contracts and incomplete reassignments for the given party.
             |
@@ -810,7 +828,8 @@ trait BaseLedgerApiAdministration extends NoTracing {
             |- filterTemplate: list of templates ids to filter for, empty sequence acts as a wildcard
             |- timeout: the maximum wait time for the complete acs to arrive
             |- includeCreatedEventBlob: whether the result should contain the createdEventBlobs, it works only
-            |  if the filterTemplate is non-empty"""
+            |  if the filterTemplate is non-empty
+            |- resultFilter: custom filter of the results, applies before limit"""
         )
         def of_party(
             party: PartyId,
@@ -820,24 +839,134 @@ trait BaseLedgerApiAdministration extends NoTracing {
             activeAtOffset: String = "",
             timeout: config.NonNegativeDuration = timeouts.unbounded,
             includeCreatedEventBlob: Boolean = false,
-        ): Seq[WrappedContractEntry] =
-          consoleEnvironment
-            .run {
+            resultFilter: GetActiveContractsResponse => Boolean = _.contractEntry.isDefined,
+        ): Seq[WrappedContractEntry] = {
+          val observer =
+            new RecordingStreamObserver[GetActiveContractsResponse](limit.value, resultFilter)
+          mkResult(
+            consoleEnvironment.run {
               ledgerApiCommand(
-                LedgerApiV2Commands.StateService
-                  .GetActiveContracts(
-                    Set(party.toLf),
-                    limit,
-                    filterTemplates,
-                    activeAtOffset,
-                    verbose,
-                    timeout.asFiniteApproximation,
-                    includeCreatedEventBlob,
-                  )(consoleEnvironment.environment.scheduler)
+                LedgerApiV2Commands.StateService.GetActiveContracts(
+                  observer,
+                  Set(party.toLf),
+                  limit,
+                  filterTemplates,
+                  activeAtOffset,
+                  verbose,
+                  timeout.asFiniteApproximation,
+                  includeCreatedEventBlob,
+                )
               )
-            }
-            .filter(_.contractEntry.isDefined)
-            .map(activeContract => WrappedContractEntry(activeContract.contractEntry))
+            },
+            "getActiveContracts",
+            observer,
+            timeout,
+          ).map(activeContract => WrappedContractEntry(activeContract.contractEntry))
+        }
+
+        @Help.Summary("List the set of active contracts of a given party")
+        @Help.Description(
+          """This command will return the current set of active contracts for the given party.
+            |
+            |Supported arguments:
+            |- party: for which party you want to load the acs
+            |- limit: limit (default set via canton.parameter.console)
+            |- verbose: whether the resulting events should contain detailed type information
+            |- filterTemplate: list of templates ids to filter for, empty sequence acts as a wildcard
+            |- timeout: the maximum wait time for the complete acs to arrive
+            |- includeCreatedEventBlob: whether the result should contain the createdEventBlobs, it works only
+            |  if the filterTemplate is non-empty"""
+        )
+        def active_contracts_of_party(
+            party: PartyId,
+            limit: PositiveInt = defaultLimit,
+            verbose: Boolean = true,
+            filterTemplates: Seq[TemplateId] = Seq.empty,
+            activeAtOffset: String = "",
+            timeout: config.NonNegativeDuration = timeouts.unbounded,
+            includeCreatedEventBlob: Boolean = false,
+        ): Seq[ActiveContract] =
+          of_party(
+            party,
+            limit,
+            verbose,
+            filterTemplates,
+            activeAtOffset,
+            timeout,
+            includeCreatedEventBlob,
+            _.contractEntry.isActiveContract,
+          )
+            .flatMap(_.entry.activeContract)
+
+        @Help.Summary("List the set of incomplete unassigned events of a given party")
+        @Help.Description(
+          """This command will return the current set of incomplete unassigned events for the given party.
+            |
+            |Supported arguments:
+            |- party: for which party you want to load the acs
+            |- limit: limit (default set via canton.parameter.console)
+            |- verbose: whether the resulting events should contain detailed type information
+            |- filterTemplate: list of templates ids to filter for, empty sequence acts as a wildcard
+            |- timeout: the maximum wait time for the complete acs to arrive
+            |- includeCreatedEventBlob: whether the result should contain the createdEventBlobs, it works only
+            |  if the filterTemplate is non-empty"""
+        )
+        def incomplete_unassigned_of_party(
+            party: PartyId,
+            limit: PositiveInt = defaultLimit,
+            verbose: Boolean = true,
+            filterTemplates: Seq[TemplateId] = Seq.empty,
+            activeAtOffset: String = "",
+            timeout: config.NonNegativeDuration = timeouts.unbounded,
+            includeCreatedEventBlob: Boolean = false,
+        ): Seq[WrappedIncompleteUnassigned] =
+          of_party(
+            party,
+            limit,
+            verbose,
+            filterTemplates,
+            activeAtOffset,
+            timeout,
+            includeCreatedEventBlob,
+            _.contractEntry.isIncompleteUnassigned,
+          )
+            .flatMap(_.entry.incompleteUnassigned)
+            .map(WrappedIncompleteUnassigned(_))
+
+        @Help.Summary("List the set of incomplete assigned events of a given party")
+        @Help.Description(
+          """This command will return the current set of incomplete assigned events for the given party.
+            |
+            |Supported arguments:
+            |- party: for which party you want to load the acs
+            |- limit: limit (default set via canton.parameter.console)
+            |- verbose: whether the resulting events should contain detailed type information
+            |- filterTemplate: list of templates ids to filter for, empty sequence acts as a wildcard
+            |- timeout: the maximum wait time for the complete acs to arrive
+            |- includeCreatedEventBlob: whether the result should contain the createdEventBlobs, it works only
+            |  if the filterTemplate is non-empty"""
+        )
+        def incomplete_assigned_of_party(
+            party: PartyId,
+            limit: PositiveInt = defaultLimit,
+            verbose: Boolean = true,
+            filterTemplates: Seq[TemplateId] = Seq.empty,
+            activeAtOffset: String = "",
+            timeout: config.NonNegativeDuration = timeouts.unbounded,
+            includeCreatedEventBlob: Boolean = false,
+        ): Seq[WrappedIncompleteAssigned] =
+          of_party(
+            party,
+            limit,
+            verbose,
+            filterTemplates,
+            activeAtOffset,
+            timeout,
+            includeCreatedEventBlob,
+            _.contractEntry.isIncompleteAssigned,
+          )
+            .flatMap(_.entry.incompleteAssigned)
+            .map(WrappedIncompleteAssigned(_))
 
         @Help.Summary(
           "List the set of active contracts for all parties hosted on this participant"
@@ -853,6 +982,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
              - identityProviderId: limit the response to parties governed by the given identity provider
              - includeCreatedEventBlob: whether the result should contain the createdEventBlobs, it works only
                if the filterTemplate is non-empty
+             - resultFilter: custom filter of the results, applies before limit
           """
         )
         def of_all(
@@ -863,6 +993,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
             timeout: config.NonNegativeDuration = timeouts.unbounded,
             identityProviderId: String = "",
             includeCreatedEventBlob: Boolean = false,
+            resultFilter: GetActiveContractsResponse => Boolean = _.contractEntry.isDefined,
         ): Seq[WrappedContractEntry] =
           consoleEnvironment.runE {
             for {
@@ -875,20 +1006,31 @@ trait BaseLedgerApiAdministration extends NoTracing {
               res <- {
                 if (localParties.isEmpty) Right(Seq.empty)
                 else {
-                  ledgerApiCommand(
-                    LedgerApiV2Commands.StateService.GetActiveContracts(
-                      localParties.toSet,
-                      limit,
-                      filterTemplates,
-                      activeAtOffset,
-                      verbose,
-                      timeout.asFiniteApproximation,
-                      includeCreatedEventBlob,
-                    )(consoleEnvironment.environment.scheduler)
-                  ).toEither.map(
-                    _.filter(_.contractEntry.isDefined)
-                      .map(activeContract => WrappedContractEntry(activeContract.contractEntry))
+                  val observer = new RecordingStreamObserver[GetActiveContractsResponse](
+                    limit.value,
+                    resultFilter,
                   )
+                  Try(
+                    mkResult(
+                      consoleEnvironment.run {
+                        ledgerApiCommand(
+                          LedgerApiV2Commands.StateService.GetActiveContracts(
+                            observer,
+                            localParties.toSet,
+                            limit,
+                            filterTemplates,
+                            activeAtOffset,
+                            verbose,
+                            timeout.asFiniteApproximation,
+                            includeCreatedEventBlob,
+                          )
+                        )
+                      },
+                      "getActiveContracts",
+                      observer,
+                      timeout,
+                    ).map(activeContract => WrappedContractEntry(activeContract.contractEntry))
+                  ).toEither.left.map(_.getMessage)
                 }
               }
             } yield res
@@ -1635,6 +1777,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
             readAs: Seq[PartyId] = Seq.empty,
             disclosedContracts: Seq[javab.data.DisclosedContract] = Seq.empty,
             applicationId: String = applicationId,
+            userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
         ): javab.data.TransactionTreeV2 = check(FeatureFlag.Testing) {
           val tx = consoleEnvironment.run {
             ledgerApiCommand(
@@ -1650,6 +1793,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
                 disclosedContracts.map(c => DisclosedContract.fromJavaProto(c.toProto)),
                 domainId,
                 applicationId,
+                userPackageSelectionPreference,
               )
             )
           }
@@ -1687,6 +1831,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
             readAs: Seq[PartyId] = Seq.empty,
             disclosedContracts: Seq[javab.data.DisclosedContract] = Seq.empty,
             applicationId: String = applicationId,
+            userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
         ): javab.data.TransactionV2 = check(FeatureFlag.Testing) {
           val tx = consoleEnvironment.run {
             ledgerApiCommand(
@@ -1702,6 +1847,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
                 disclosedContracts.map(c => DisclosedContract.fromJavaProto(c.toProto)),
                 domainId,
                 applicationId,
+                userPackageSelectionPreference,
               )
             )
           }
@@ -2263,22 +2409,24 @@ trait BaseLedgerApiAdministration extends NoTracing {
       )
       def start_measuring(
           parties: Set[PartyId],
-          metricSuffix: String,
+          metricName: String,
           onTransaction: TransactionTree => Unit = _ => (),
       )(implicit consoleEnvironment: ConsoleEnvironment): AutoCloseable =
         check(FeatureFlag.Testing) {
 
-          val metricName = MetricName(name, metricSuffix)
+          val wrappedMetricName = MetricName(metricName)
 
           val observer: StreamObserver[TransactionTree] = new StreamObserver[TransactionTree] {
 
-            @nowarn("cat=deprecation")
-            val metricsFactory: MetricHandle.MetricsFactory =
-              consoleEnvironment.environment.metricsFactory.metricsFactory
+            val metricsFactory = consoleEnvironment.environment.metricsRegistry
+              .forParticipant(name)
+              .openTelemetryMetricsFactory
 
-            val metric: Meter = metricsFactory.meter(metricName)
-            val nodeCount: Histogram = metricsFactory.histogram(metricName :+ "tx-node-count")
-            val transactionSize: Histogram = metricsFactory.histogram(metricName :+ "tx-size")
+            val metric: Meter = metricsFactory.meter(wrappedMetricName)
+            val nodeCount: Histogram =
+              metricsFactory.histogram(wrappedMetricName :+ "tx-node-count")
+            val transactionSize: Histogram =
+              metricsFactory.histogram(wrappedMetricName :+ "tx-size")
 
             override def onNext(tree: TransactionTree): Unit = {
               val s = tree.rootEventIds.size.toLong
@@ -3674,6 +3822,23 @@ trait BaseLedgerApiAdministration extends NoTracing {
     modified.concat(deletions)
   }
 
+  private def mkResult[Res](
+      call: => AutoCloseable,
+      requestDescription: String,
+      observer: RecordingStreamObserver[Res],
+      timeout: config.NonNegativeDuration,
+  ): Seq[Res] = consoleEnvironment.run {
+    try {
+      ResourceUtil.withResource(call) { _ =>
+        // Not doing noisyAwaitResult here, because we don't want to log warnings in case of a timeout.
+        CommandSuccessful(Await.result(observer.result, timeout.duration))
+      }
+    } catch {
+      case sre: StatusRuntimeException =>
+        GenericCommandError(GrpcError(requestDescription, name, sre).toString)
+      case _: TimeoutException => CommandSuccessful(observer.responses)
+    }
+  }
 }
 
 trait LedgerApiAdministration extends BaseLedgerApiAdministration {
