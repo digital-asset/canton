@@ -15,17 +15,17 @@ import com.digitalasset.canton.data.PeanoQueue.NotInserted
 import com.digitalasset.canton.data.{CantonTimestamp, Counter, PeanoTreeQueue}
 import com.digitalasset.canton.domain.block.data.SequencerBlockStore
 import com.digitalasset.canton.domain.block.{
-  BlockSequencerStateManager,
+  BlockSequencerStateManagerBase,
   BlockUpdateGenerator,
   RawLedgerBlock,
 }
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.PruningError.UnsafePruningPoint
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer.EventSource
+import com.digitalasset.canton.domain.sequencing.sequencer.*
 import com.digitalasset.canton.domain.sequencing.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   CreateSubscriptionError,
-  OperationError,
   RegisterMemberError,
   SequencerWriteError,
 }
@@ -33,17 +33,6 @@ import com.digitalasset.canton.domain.sequencing.sequencer.traffic.{
   SequencerRateLimitManager,
   SequencerTrafficStatus,
 }
-import com.digitalasset.canton.domain.sequencing.sequencer.{
-  BaseSequencer,
-  PruningError,
-  PruningSupportError,
-  SequencerHealthConfig,
-  SequencerSnapshot,
-  SequencerValidations,
-  SignatureVerifier,
-  *,
-}
-import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.lifecycle.{
   AsyncCloseable,
@@ -52,6 +41,7 @@ import com.digitalasset.canton.lifecycle.{
   FlagCloseableAsync,
   SyncCloseable,
 }
+import com.digitalasset.canton.logging.pretty.CantonPrettyPrinter
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.PruningScheduler
@@ -70,7 +60,7 @@ import org.apache.pekko.stream.scaladsl.{Keep, Merge, Sink, Source}
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.control.NonFatal
+import scala.util.chaining.*
 import scala.util.{Failure, Success}
 
 class BlockSequencer(
@@ -80,7 +70,7 @@ class BlockSequencer(
     initialBlockHeight: Option[Long],
     cryptoApi: DomainSyncCryptoClient,
     topologyClientMember: Member,
-    stateManager: BlockSequencerStateManager,
+    stateManager: BlockSequencerStateManagerBase,
     store: SequencerBlockStore,
     storage: Storage,
     futureSupervisor: FutureSupervisor,
@@ -88,12 +78,13 @@ class BlockSequencer(
     clock: Clock,
     protocolVersion: ProtocolVersion,
     rateLimitManager: Option[SequencerRateLimitManager],
-    implicitMemberRegistration: Boolean,
     orderingTimeFixMode: OrderingTimeFixMode,
-    parameters: CantonNodeParameters,
+    processingTimeouts: ProcessingTimeout,
+    logEventDetails: Boolean,
+    prettyPrinter: CantonPrettyPrinter,
     metrics: SequencerMetrics,
     loggerFactory: NamedLoggerFactory,
-)(implicit executionContext: ExecutionContext, materializer: Materializer, trace: Tracer)
+)(implicit executionContext: ExecutionContext, materializer: Materializer, tracer: Tracer)
     extends BaseSequencer(
       DomainTopologyManagerId(domainId),
       loggerFactory,
@@ -104,7 +95,7 @@ class BlockSequencer(
     with NamedLogging
     with FlagCloseableAsync {
 
-  override def timeouts: ProcessingTimeout = parameters.processingTimeouts
+  override def timeouts: ProcessingTimeout = processingTimeouts
 
   override private[sequencing] def firstSequencerCounterServeableForSequencer: SequencerCounter =
     stateManager.firstSequencerCounterServableForSequencer
@@ -120,49 +111,51 @@ class BlockSequencer(
       topologyClientMember,
       stateManager.maybeLowerSigningTimestampBound,
       rateLimitManager,
-      implicitMemberRegistration,
       orderingTimeFixMode,
       loggerFactory,
     )(CloseContext(cryptoApi))
     val ((killSwitch, localEventsQueue), done) = PekkoUtil.runSupervised(
-      ex => logger.error("Fatally failed to handle state changes", ex)(TraceContext.empty),
-      Source
-        .combineMat(
-          blockSequencerOps
-            .subscribe()(TraceContext.empty)
-            .statefulMapConcat(BlockSequencer.ensureBlocksAreOrdered(initialBlockHeight))
-            .map(block => Right(block): Either[BlockSequencer.LocalEvent, RawLedgerBlock]),
-          Source
-            .queue[BlockSequencer.LocalEvent](bufferSize = 1000, OverflowStrategy.backpressure)
-            .map(event => Left(event): Either[BlockSequencer.LocalEvent, RawLedgerBlock]),
-        )(Merge(_))(Keep.both)
-        .mapAsync(
-          // `stateManager.handleBlock` in `handleBlockContents` must execute sequentially.
-          parallelism = 1
-        ) {
-          case Right(blockEvents) =>
-            implicit val tc: TraceContext =
-              blockEvents.events.headOption.map(_.traceContext).getOrElse(TraceContext.empty)
-            logger.debug(
-              s"Handle block with height=${blockEvents.blockHeight} with num-events=${blockEvents.events.length}"
-            )
-            stateManager
-              .handleBlock(
-                updateGenerator.asBlockUpdate(blockEvents)
+      ex => logger.error("Fatally failed to handle state changes", ex)(TraceContext.empty), {
+        val driverSource = blockSequencerOps
+          .subscribe()(TraceContext.empty)
+          .statefulMapConcat(BlockSequencer.ensureBlocksAreOrdered(initialBlockHeight))
+          .map(block => Right(block): Either[BlockSequencer.LocalEvent, RawLedgerBlock])
+        val localSource = Source
+          .queue[BlockSequencer.LocalEvent](bufferSize = 1000, OverflowStrategy.backpressure)
+          .map(event => Left(event): Either[BlockSequencer.LocalEvent, RawLedgerBlock])
+        val combinedSource = Source
+          .combineMat(
+            driverSource,
+            localSource,
+          )(Merge(_))(Keep.both)
+        val combinedSourceWithBlockHandling = combinedSource
+          .mapAsync(
+            // `stateManager.handleBlock` in `handleBlockContents` must execute sequentially.
+            parallelism = 1
+          ) {
+            case Right(blockEvents) =>
+              implicit val tc: TraceContext =
+                blockEvents.events.headOption.map(_.traceContext).getOrElse(TraceContext.empty)
+              logger.debug(
+                s"Handle block with height=${blockEvents.blockHeight} with num-events=${blockEvents.events.length}"
               )
-              .map { state =>
-                metrics.sequencerClient.handler.delay
-                  .updateValue((clock.now - state.latestBlock.lastTs).toMillis)
-                ()
-              }
-              .onShutdown(
-                logger.debug(
-                  s"Block with height=${blockEvents.blockHeight} wasn't handled because sequencer is shutting down"
+              stateManager
+                .handleBlock(
+                  updateGenerator.asBlockUpdate(blockEvents)
                 )
-              )
-          case Left(localEvent) => stateManager.handleLocalEvent(localEvent)(TraceContext.empty)
-        }
-        .toMat(Sink.ignore)(Keep.both),
+                .map { state =>
+                  metrics.sequencerClient.handler.delay
+                    .updateValue((clock.now - state.latestBlock.lastTs).toMillis)
+                }
+                .onShutdown(
+                  logger.debug(
+                    s"Block with height=${blockEvents.blockHeight} wasn't handled because sequencer is shutting down"
+                  )
+                )
+            case Left(localEvent) => stateManager.handleLocalEvent(localEvent)(TraceContext.empty)
+          }
+        combinedSourceWithBlockHandling.toMat(Sink.ignore)(Keep.both)
+      },
     )
     (killSwitch, localEventsQueue, done)
   }
@@ -263,30 +256,22 @@ class BlockSequencer(
     for {
       timestampOfSigningKeyCheck <- ensureTimestampOfSigningKeyPresentForAggregationRule(submission)
       _ <- validateMaxSequencingTime(timestampOfSigningKeyCheck, submission)
-      memberCheck <-
-        if (implicitMemberRegistration) {
-          EitherT
-            .right[SendAsyncError](
-              cryptoApi.currentSnapshotApproximation.ipsSnapshot
-                .allMembers()
-                .map(allMembers =>
-                  (member: Member) => allMembers.contains(member) || !member.isAuthenticated
-                )
-            )
-        } else {
-          EitherT.rightT[Future, SendAsyncError]((member: Member) =>
-            stateManager.isMemberRegistered(member)
+      memberCheck <- EitherT.right[SendAsyncError](
+        cryptoApi.currentSnapshotApproximation.ipsSnapshot
+          .allMembers()
+          .map(allMembers =>
+            (member: Member) => allMembers.contains(member) || !member.isAuthenticated
           )
-        }
+      )
       _ <- SequencerValidations
         .checkSenderAndRecipientsAreRegistered(
           submission,
           memberCheck,
         )
         .toEitherT[Future]
-      _ = if (parameters.loggingConfig.eventDetails)
+      _ = if (logEventDetails)
         logger.debug(
-          s"Invoking send operation on the ledger with the following protobuf message serialized to bytes ${parameters.loggingConfig.api.printer
+          s"Invoking send operation on the ledger with the following protobuf message serialized to bytes ${prettyPrinter
               .printAdHoc(submission.toProtoVersioned)}"
         )
       _ <-
@@ -305,75 +290,36 @@ class BlockSequencer(
       traceContext: TraceContext
   ): EitherT[Future, CreateSubscriptionError, EventSource] = {
     logger.debug(s"Answering readInternal(member = $member, offset = $offset)")
-    if (implicitMemberRegistration) {
-      if (!member.isAuthenticated) {
-        // allowing unauthenticated members to read events is the same as automatically registering an unauthenticated member
-        // and then proceeding with the subscription.
-        // optimization: if the member is unauthenticated, we don't need to fetch all members from the snapshot
-        EitherT.fromEither[Future](stateManager.readEventsForMember(member, offset))
-      } else {
-        EitherT
-          .right(cryptoApi.currentSnapshotApproximation.ipsSnapshot.isMemberKnown(member))
-          .flatMap { isKnown =>
-            if (isKnown) {
-              EitherT.fromEither[Future](stateManager.readEventsForMember(member, offset))
-            } else {
-              EitherT.leftT(CreateSubscriptionError.UnknownMember(member))
-            }
-          }
-      }
-    } else {
+    if (!member.isAuthenticated) {
+      // allowing unauthenticated members to read events is the same as automatically registering an unauthenticated member
+      // and then proceeding with the subscription.
+      // optimization: if the member is unauthenticated, we don't need to fetch all members from the snapshot
       EitherT.fromEither[Future](stateManager.readEventsForMember(member, offset))
+    } else {
+      EitherT
+        .right(cryptoApi.currentSnapshotApproximation.ipsSnapshot.isMemberKnown(member))
+        .flatMap { isKnown =>
+          if (isKnown) {
+            EitherT.fromEither[Future](stateManager.readEventsForMember(member, offset))
+          } else {
+            EitherT.leftT(CreateSubscriptionError.UnknownMember(member))
+          }
+        }
     }
   }
 
   override def isRegistered(
       member: Member
   )(implicit traceContext: TraceContext): Future[Boolean] = {
-    if (implicitMemberRegistration) {
-      if (!member.isAuthenticated) Future.successful(true)
-      else cryptoApi.headSnapshot.ipsSnapshot.isMemberKnown(member)
-    } else {
-      logger.debug(s"Answering isRegistered(member = $member)")
-      Future.successful(stateManager.isMemberRegistered(member))
-    }
+    if (!member.isAuthenticated) Future.successful(true)
+    else cryptoApi.headSnapshot.ipsSnapshot.isMemberKnown(member)
   }
 
   override def registerMember(member: Member)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SequencerWriteError[RegisterMemberError], Unit] = {
-    if (implicitMemberRegistration) {
-      // there is nothing extra to be done for member registration in Canton 3.x
-      EitherT.rightT[Future, SequencerWriteError[RegisterMemberError]](())
-    } else {
-      logger.debug(s"Registering $member at the $name sequencer")
-      if (stateManager.isMemberRegistered(member)) {
-        val error = OperationError(RegisterMemberError.AlreadyRegisteredError(member))
-        EitherT.leftT[Future, Unit](error)
-      } else {
-        val actuallyRegisteredF =
-          futureSupervisor.supervised(s"Waiting for member $member to be exist")(
-            stateManager.waitForMemberToExist(member)
-          )
-        for {
-          _ <- blockSequencerOps.register(member)
-          // wait for the blockchain to reflect that the member is registered
-          _ <- EitherT[Future, SequencerWriteError[
-            RegisterMemberError
-          ], CantonTimestamp](
-            actuallyRegisteredF.map(Right(_)).recover { case NonFatal(throwable) =>
-              logger.error("Failed waiting for the member registration event", throwable)
-              Left(
-                OperationError(
-                  RegisterMemberError
-                    .UnexpectedError(member, "Failed waiting for the member registration event")
-                )
-              )
-            }
-          )
-        } yield ()
-      }
-    }
+    // there is nothing extra to be done for member registration in Canton 3.x
+    EitherT.rightT[Future, SequencerWriteError[RegisterMemberError]](())
   }
 
   /** Important: currently both the disable member and the prune functionality on the block sequencer are
@@ -425,8 +371,19 @@ class BlockSequencer(
     // TODO(#12676) Make sure that we don't request a snapshot for a state that was already pruned
     store
       .readStateForBlockContainingTimestamp(timestamp)
-      .map(_.toSequencerSnapshot(protocolVersion))
-      .leftMap(_ => s"Provided timestamp $timestamp is not linked to a block")
+      .bimap(
+        _ => s"Provided timestamp $timestamp is not linked to a block",
+        blockEphemeralState =>
+          blockEphemeralState
+            .toSequencerSnapshot(protocolVersion)
+            .tap(snapshot =>
+              if (logger.underlying.isDebugEnabled()) {
+                logger.debug(
+                  s"Snapshot for timestamp $timestamp: $snapshot with ephemeral state: $blockEphemeralState"
+                )
+              }
+            ),
+      )
 
   override def pruningStatus(implicit traceContext: TraceContext): Future[SequencerPruningStatus] =
     store.pruningStatus().map(_.toSequencerPruningStatus(clock.now))

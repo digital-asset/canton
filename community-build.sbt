@@ -15,6 +15,7 @@ lazy val demo = CommunityProjects.demo
 lazy val blake2b = CommunityProjects.blake2b
 lazy val `slick-fork` = CommunityProjects.`slick-fork`
 lazy val `pekko-fork` = CommunityProjects.`pekko-fork`
+lazy val `magnolify-addon` = CommunityProjects.`magnolify-addon`
 lazy val `util-external` = CommunityProjects.`util-external`
 lazy val `util-logging` = CommunityProjects.`util-logging`
 lazy val `sequencer-driver-api` = CommunityProjects.`sequencer-driver-api`

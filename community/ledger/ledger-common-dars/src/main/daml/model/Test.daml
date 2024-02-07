@@ -377,3 +377,28 @@ template CreateAndFetch
       do cid <- create CreateAndFetch with p
          _ <- fetch cid
          return ()
+
+template MultiPartyContract
+  with
+    parties: [Party]
+    value: Text
+  where
+    signatory parties
+
+    choice MPAddSignatories : ContractId MultiPartyContract
+      with
+        newParties: [Party]
+      controller parties ++ newParties
+      do
+        create this with
+          parties = parties ++ newParties
+
+    nonconsuming choice MPFetchOther : ()
+      with
+        cid: ContractId MultiPartyContract
+        actors: [Party]
+      controller actors
+      do
+        actualContract <- fetch cid
+        return ()
+

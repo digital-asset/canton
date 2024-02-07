@@ -17,6 +17,7 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt,
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.protocol.v30.EnumsX
 import com.digitalasset.canton.protocol.v30.TopologyMappingX.Mapping
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, v30}
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -118,7 +119,7 @@ object TopologyMappingX {
     object PurgeTopologyTransactionX extends Code(15, "ptt")
     object TrafficControlStateX extends Code(16, "tcs")
 
-    lazy val all = Seq(
+    lazy val all: Seq[Code] = Seq(
       NamespaceDelegationX,
       IdentifierDelegationX,
       DecentralizedNamespaceDefinitionX,
@@ -146,8 +147,14 @@ object TopologyMappingX {
       namespacesWithRoot: Set[Namespace] = Set.empty,
       namespaces: Set[Namespace] = Set.empty,
       uids: Set[UniqueIdentifier] = Set.empty,
-  ) {
+  ) extends PrettyPrinting {
     def isEmpty: Boolean = namespacesWithRoot.isEmpty && namespaces.isEmpty && uids.isEmpty
+
+    override def pretty: Pretty[RequiredAuthXAuthorizations.this.type] = prettyOfClass(
+      paramIfNonEmpty("namespacesWithRoot", _.namespacesWithRoot),
+      paramIfNonEmpty("namespaces", _.namespaces),
+      paramIfNonEmpty("uids", _.uids),
+    )
   }
 
   object RequiredAuthXAuthorizations {
@@ -170,7 +177,7 @@ object TopologyMappingX {
       }
   }
 
-  sealed trait RequiredAuthX {
+  sealed trait RequiredAuthX extends PrettyPrinting {
     def requireRootDelegation: Boolean = false
     def satisfiedByActualAuthorizers(
         namespacesWithRoot: Set[Namespace],
@@ -213,6 +220,8 @@ object TopologyMappingX {
       ): Either[RequiredAuthXAuthorizations, Unit] = Either.unit
 
       override def authorizations: RequiredAuthXAuthorizations = RequiredAuthXAuthorizations()
+
+      override def pretty: Pretty[EmptyAuthorization.this.type] = adHocPrettyInstance
     }
 
     final case class RequiredNamespaces(
@@ -240,6 +249,11 @@ object TopologyMappingX {
         namespacesWithRoot = if (requireRootDelegation) namespaces else Set.empty,
         namespaces = if (requireRootDelegation) Set.empty else namespaces,
       )
+
+      override def pretty: Pretty[RequiredNamespaces.this.type] = prettyOfClass(
+        unnamedParam(_.namespaces),
+        paramIfTrue("requireRootDelegation", _.requireRootDelegation),
+      )
     }
 
     final case class RequiredUids(uids: Set[UniqueIdentifier]) extends RequiredAuthX {
@@ -255,6 +269,10 @@ object TopologyMappingX {
       override def authorizations: RequiredAuthXAuthorizations = RequiredAuthXAuthorizations(
         namespaces = uids.map(_.namespace),
         uids = uids,
+      )
+
+      override def pretty: Pretty[RequiredUids.this.type] = prettyOfClass(
+        unnamedParam(_.uids)
       )
     }
 
@@ -276,6 +294,9 @@ object TopologyMappingX {
 
       override def authorizations: RequiredAuthXAuthorizations =
         RequiredAuthXAuthorizations.monoid.combine(first.authorizations, second.authorizations)
+
+      override def pretty: Pretty[And.this.type] =
+        prettyOfClass(unnamedParam(_.first), unnamedParam(_.second))
     }
 
     private[transaction] final case class Or(
@@ -296,6 +317,9 @@ object TopologyMappingX {
 
       override def authorizations: RequiredAuthXAuthorizations =
         RequiredAuthXAuthorizations.monoid.combine(first.authorizations, second.authorizations)
+
+      override def pretty: Pretty[Or.this.type] =
+        prettyOfClass(unnamedParam(_.first), unnamedParam(_.second))
     }
   }
 
@@ -479,7 +503,7 @@ final case class DecentralizedNamespaceDefinitionX private (
             TopologyTransactionX(
               _op,
               _serial,
-              DecentralizedNamespaceDefinitionX(`namespace`, previousThreshold, previousOwners),
+              DecentralizedNamespaceDefinitionX(`namespace`, _previousThreshold, previousOwners),
             )
           ) =>
         val added = owners.diff(previousOwners)
@@ -491,7 +515,7 @@ final case class DecentralizedNamespaceDefinitionX private (
               Set(namespace)
             )
           )
-      case Some(topoTx) =>
+      case Some(_topoTx) =>
         // TODO(#14048): proper error or ignore
         sys.error(s"unexpected transaction data: $previous")
     }
@@ -750,20 +774,23 @@ object DomainTrustCertificateX {
 sealed abstract class ParticipantPermissionX(val canConfirm: Boolean)
     extends Product
     with Serializable {
-  def toProtoV2: v30.EnumsX.ParticipantPermissionX
+  def toProtoV30: v30.EnumsX.ParticipantPermissionX
   def toNonX: ParticipantPermission
 }
 object ParticipantPermissionX {
   case object Submission extends ParticipantPermissionX(canConfirm = true) {
-    lazy val toProtoV2 = v30.EnumsX.ParticipantPermissionX.Submission
+    lazy val toProtoV30: EnumsX.ParticipantPermissionX =
+      v30.EnumsX.ParticipantPermissionX.PARTICIPANT_PERMISSION_X_SUBMISSION
     override def toNonX: ParticipantPermission = ParticipantPermission.Submission
   }
   case object Confirmation extends ParticipantPermissionX(canConfirm = true) {
-    lazy val toProtoV2 = v30.EnumsX.ParticipantPermissionX.Confirmation
+    lazy val toProtoV30: EnumsX.ParticipantPermissionX =
+      v30.EnumsX.ParticipantPermissionX.PARTICIPANT_PERMISSION_X_CONFIRMATION
     override def toNonX: ParticipantPermission = ParticipantPermission.Confirmation
   }
   case object Observation extends ParticipantPermissionX(canConfirm = false) {
-    lazy val toProtoV2 = v30.EnumsX.ParticipantPermissionX.Observation
+    lazy val toProtoV30: EnumsX.ParticipantPermissionX =
+      v30.EnumsX.ParticipantPermissionX.PARTICIPANT_PERMISSION_X_OBSERVATION
     override def toNonX: ParticipantPermission = ParticipantPermission.Observation
   }
 
@@ -771,11 +798,14 @@ object ParticipantPermissionX {
       value: v30.EnumsX.ParticipantPermissionX
   ): ParsingResult[ParticipantPermissionX] =
     value match {
-      case v30.EnumsX.ParticipantPermissionX.MissingParticipantPermission =>
+      case v30.EnumsX.ParticipantPermissionX.PARTICIPANT_PERMISSION_X_UNSPECIFIED =>
         Left(FieldNotSet(value.name))
-      case v30.EnumsX.ParticipantPermissionX.Submission => Right(Submission)
-      case v30.EnumsX.ParticipantPermissionX.Confirmation => Right(Confirmation)
-      case v30.EnumsX.ParticipantPermissionX.Observation => Right(Observation)
+      case v30.EnumsX.ParticipantPermissionX.PARTICIPANT_PERMISSION_X_SUBMISSION =>
+        Right(Submission)
+      case v30.EnumsX.ParticipantPermissionX.PARTICIPANT_PERMISSION_X_CONFIRMATION =>
+        Right(Confirmation)
+      case v30.EnumsX.ParticipantPermissionX.PARTICIPANT_PERMISSION_X_OBSERVATION =>
+        Right(Observation)
       case v30.EnumsX.ParticipantPermissionX.Unrecognized(x) =>
         Left(UnrecognizedEnum(value.name, x))
     }
@@ -787,34 +817,6 @@ object ParticipantPermissionX {
       Submission,
     ).zipWithIndex.toMap
     Ordering.by[ParticipantPermissionX, Int](participantPermissionXOrderMap(_))
-  }
-}
-
-sealed trait TrustLevelX {
-  def toProtoV30: v30.EnumsX.TrustLevelX
-  def toNonX: TrustLevel
-}
-object TrustLevelX {
-  case object Ordinary extends TrustLevelX {
-    lazy val toProtoV30 = v30.EnumsX.TrustLevelX.Ordinary
-    def toNonX: TrustLevel = TrustLevel.Ordinary
-  }
-  case object Vip extends TrustLevelX {
-    lazy val toProtoV30 = v30.EnumsX.TrustLevelX.Vip
-    def toNonX: TrustLevel = TrustLevel.Vip
-  }
-
-  def fromProtoV30(value: v30.EnumsX.TrustLevelX): ParsingResult[TrustLevelX] = value match {
-    case v30.EnumsX.TrustLevelX.Ordinary => Right(Ordinary)
-    case v30.EnumsX.TrustLevelX.Vip => Right(Vip)
-    case v30.EnumsX.TrustLevelX.MissingTrustLevel => Left(FieldNotSet(value.name))
-    case v30.EnumsX.TrustLevelX.Unrecognized(x) => Left(UnrecognizedEnum(value.name, x))
-  }
-
-  implicit val orderingTrustLevelX: Ordering[TrustLevelX] = {
-    val participantTrustLevelXOrderMap =
-      Seq[TrustLevelX](Ordinary, Vip).zipWithIndex.toMap
-    Ordering.by[TrustLevelX, Int](participantTrustLevelXOrderMap(_))
   }
 }
 
@@ -831,20 +833,18 @@ final case class ParticipantDomainPermissionX(
     domainId: DomainId,
     participantId: ParticipantId,
     permission: ParticipantPermissionX,
-    trustLevel: TrustLevelX,
     limits: Option[ParticipantDomainLimits],
     loginAfter: Option[CantonTimestamp],
 ) extends TopologyMappingX {
 
   def toParticipantAttributes: ParticipantAttributes =
-    ParticipantAttributes(permission.toNonX, trustLevel.toNonX, loginAfter)
+    ParticipantAttributes(permission.toNonX, loginAfter)
 
   def toProto: v30.ParticipantDomainPermissionX =
     v30.ParticipantDomainPermissionX(
       domain = domainId.toProtoPrimitive,
       participant = participantId.toProtoPrimitive,
-      permission = permission.toProtoV2,
-      trustLevel = trustLevel.toProtoV30,
+      permission = permission.toProtoV30,
       limits = limits.map(_.toProto),
       loginAfter = loginAfter.map(_.toProtoPrimitive),
     )
@@ -881,7 +881,6 @@ final case class ParticipantDomainPermissionX(
         domainId,
         participantId,
         permission,
-        trustLevel,
         Some(defaultLimits),
         loginAfter,
       )
@@ -904,7 +903,6 @@ object ParticipantDomainPermissionX {
       domainId,
       participantId,
       ParticipantPermissionX.Submission,
-      TrustLevelX.Ordinary,
       None,
       None,
     )
@@ -916,7 +914,6 @@ object ParticipantDomainPermissionX {
       domainId <- DomainId.fromProtoPrimitive(value.domain, "domain")
       participantId <- ParticipantId.fromProtoPrimitive(value.participant, "participant")
       permission <- ParticipantPermissionX.fromProtoV30(value.permission)
-      trustLevel <- TrustLevelX.fromProtoV30(value.trustLevel)
       limits = value.limits.map(ParticipantDomainLimits.fromProtoV30)
       loginAfter <- value.loginAfter.fold[ParsingResult[Option[CantonTimestamp]]](Right(None))(
         CantonTimestamp.fromProtoPrimitive(_).map(_.some)
@@ -925,7 +922,6 @@ object ParticipantDomainPermissionX {
       domainId,
       participantId,
       permission,
-      trustLevel,
       limits,
       loginAfter,
     )
@@ -1054,7 +1050,7 @@ final case class HostingParticipant(
   def toProto: v30.PartyToParticipantX.HostingParticipant =
     v30.PartyToParticipantX.HostingParticipant(
       participant = participantId.toProtoPrimitive,
-      permission = permission.toProtoV2,
+      permission = permission.toProtoV30,
     )
 }
 
@@ -1283,7 +1279,7 @@ final case class MediatorDomainStateX private (
     observers: Seq[MediatorId],
 ) extends TopologyMappingX {
 
-  lazy val allMediatorsInGroup = active ++ observers
+  lazy val allMediatorsInGroup: NonEmpty[Seq[MediatorId]] = active ++ observers
 
   def toProto: v30.MediatorDomainStateX =
     v30.MediatorDomainStateX(
@@ -1332,7 +1328,7 @@ object MediatorDomainStateX {
     _ <- Either.cond(
       threshold.unwrap <= active.length,
       (),
-      s"threshold (${threshold}) of mediator domain state higher than number of mediators ${active.length}",
+      s"threshold ($threshold) of mediator domain state higher than number of mediators ${active.length}",
     )
     activeNE <- NonEmpty
       .from(active)
@@ -1378,7 +1374,7 @@ final case class SequencerDomainStateX private (
     observers: Seq[SequencerId],
 ) extends TopologyMappingX {
 
-  lazy val allSequencers = active ++ observers
+  lazy val allSequencers: NonEmpty[Seq[SequencerId]] = active ++ observers
 
   def toProto: v30.SequencerDomainStateX =
     v30.SequencerDomainStateX(
@@ -1425,7 +1421,7 @@ object SequencerDomainStateX {
     _ <- Either.cond(
       threshold.unwrap <= active.length,
       (),
-      s"threshold (${threshold}) of sequencer domain state higher than number of active sequencers ${active.length}",
+      s"threshold ($threshold) of sequencer domain state higher than number of active sequencers ${active.length}",
     )
     activeNE <- NonEmpty
       .from(active)

@@ -151,7 +151,7 @@ object JvmRulesPlugin extends AutoPlugin {
       Compile / compile / wartremoverErrors ++= wartremoverErrorsForCompileScope,
       Test / compile / wartremoverErrors := wartremoverErrorsForTestScope,
       // Disable wart checks on generated code
-      wartremoverExcluded += (Compile / sourceManaged).value,
+      wartremoverExcluded ++= Seq((Compile / sourceManaged).value, (Test / sourceManaged).value),
       // licenses += ("Apache-2.0", new URL("https://www.apache.org/licenses/LICENSE-2.0.txt")),
       //
       // allow sbt to pull scaladoc from managed dependencies if referenced in our ScalaDoc links

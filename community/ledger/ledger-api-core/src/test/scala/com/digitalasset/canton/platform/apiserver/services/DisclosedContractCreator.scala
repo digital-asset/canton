@@ -12,7 +12,6 @@ import com.daml.lf.transaction.{
   Node,
   TransactionCoder,
   TransactionVersion,
-  Util,
 }
 import com.daml.lf.value.Value.{ContractId, ValueRecord, ValueTrue}
 import com.digitalasset.canton.LfValue
@@ -63,7 +62,6 @@ object DisclosedContractCreator {
         ),
       ),
       api.keyMaintainers,
-      shared = Util.sharedKey(testTxVersion),
     )
 
     val fatContractInstance: FatContractInstance = FatContractInstance.fromCreateNode(

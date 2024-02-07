@@ -73,7 +73,6 @@ class StartableStoppableLedgerApiServer(
     dbConfig: DbSupport.DbConfig,
     telemetry: Telemetry,
     futureSupervisor: FutureSupervisor,
-    multiDomainEnabled: Boolean,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     actorSystem: ActorSystem,
@@ -198,7 +197,6 @@ class StartableStoppableLedgerApiServer(
           executionContext,
           tracer,
           loggerFactory,
-          multiDomainEnabled = multiDomainEnabled,
         )
       timedReadService = new TimedReadService(config.syncService, config.metrics)
       indexerHealth <- new IndexerServiceOwner(
@@ -213,7 +211,6 @@ class StartableStoppableLedgerApiServer(
         executionContext,
         tracer,
         loggerFactory,
-        multiDomainEnabled = multiDomainEnabled,
         startupMode = overrideIndexerStartupMode.getOrElse(DefaultIndexerStartupMode),
         dataSourceProperties = DbSupport.DataSourceProperties(
           connectionPool = IndexerConfig
@@ -244,7 +241,6 @@ class StartableStoppableLedgerApiServer(
           maxQueueSize = maxQueueSize.value,
           maxBatchSize = maxBatchSize.value,
           parallelism = parallelism.value,
-          multiDomainEnabled = multiDomainEnabled,
           loggerFactory = loggerFactory,
         )
       }
@@ -329,7 +325,6 @@ class StartableStoppableLedgerApiServer(
         tokenExpiryGracePeriodForStreams =
           config.cantonParameterConfig.ledgerApiServerParameters.tokenExpiryGracePeriodForStreams,
         meteringReportKey = config.meteringReportKey,
-        multiDomainEnabled = multiDomainEnabled,
         telemetry = telemetry,
         loggerFactory = loggerFactory,
         upgradingEnabled = config.cantonParameterConfig.enableContractUpgrading,

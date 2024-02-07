@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.*
 import cats.syntax.either.*
-import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps, Signature}
@@ -26,6 +25,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
   EncryptedViewMessageFactory,
   SeedGenerator,
 }
+import com.digitalasset.canton.participant.protocol.transfer.TransferInValidation.TransferSigningError
 import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessorError.{
   TargetDomainIsSourceDomain,
@@ -177,8 +177,12 @@ class TransferOutProcessingSteps(
         transferOutUuid,
       )
 
-      mediatorMessage = fullTree.mediatorMessage
       rootHash = fullTree.rootHash
+      submittingParticipantSignature <- sourceRecentSnapshot
+        .sign(rootHash.unwrap)
+        .leftMap(TransferSigningError)
+        .mapK(FutureUnlessShutdown.outcomeK)
+      mediatorMessage = fullTree.mediatorMessage(submittingParticipantSignature)
       viewMessage <- EncryptedViewMessageFactory
         .create(TransferOutViewType)(
           fullTree,
@@ -480,11 +484,10 @@ class TransferOutProcessingSteps(
         transferCoordination.addTransferOutRequest(transferData).mapK(FutureUnlessShutdown.outcomeK)
       }
       confirmingStakeholders <- EitherT.right(
-        contract.metadata.stakeholders.toList.parTraverseFilter(stakeholder =>
-          FutureUnlessShutdown.outcomeF(
-            sourceSnapshot.ipsSnapshot
-              .canConfirm(participantId, stakeholder)
-              .map(Option.when(_)(stakeholder))
+        FutureUnlessShutdown.outcomeF(
+          sourceSnapshot.ipsSnapshot.canConfirm(
+            participantId,
+            contract.metadata.stakeholders,
           )
         )
       )
@@ -494,7 +497,7 @@ class TransferOutProcessingSteps(
         activenessResult,
         contract.contractId,
         fullTree.transferCounter,
-        confirmingStakeholders.toSet,
+        confirmingStakeholders,
         fullTree.tree.rootHash,
       )
     } yield StorePendingDataAndSendResponseAndCreateTimeout(
@@ -650,7 +653,7 @@ class TransferOutProcessingSteps(
         .leftMap[TransferProcessorError](FieldConversionError(transferId, "Transaction Id", _))
 
       completionInfo =
-        Option.when(participantId.toLf == submitterMetadata.submittingParticipant)(
+        Option.when(participantId == submitterMetadata.submittingParticipant)(
           CompletionInfo(
             actAs = List(submitterMetadata.submitter),
             applicationId = submitterMetadata.applicationId,

@@ -228,7 +228,7 @@ object TopologyStoreId {
 
 }
 
-sealed trait TopologyTransactionRejection extends PrettyPrinting {
+sealed trait TopologyTransactionRejection extends PrettyPrinting with Product with Serializable {
   def asString: String
   def asString1GB: String256M =
     String256M.tryCreate(asString, Some("topology transaction rejection"))
@@ -237,15 +237,16 @@ sealed trait TopologyTransactionRejection extends PrettyPrinting {
 }
 object TopologyTransactionRejection {
 
-  final case class NoDelegationFoundForKey(key: Fingerprint) extends TopologyTransactionRejection {
-    override def asString: String = s"No delegation found for key ${key.singleQuoted}"
-    override def pretty: Pretty[NoDelegationFoundForKey] = prettyOfString(_ => asString)
+  final case class NoDelegationFoundForKeys(keys: Set[Fingerprint])
+      extends TopologyTransactionRejection {
+    override def asString: String = s"No delegation found for keys ${keys.mkString(", ")}"
+    override def pretty: Pretty[NoDelegationFoundForKeys] = prettyOfString(_ => asString)
 
     override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
       TopologyManagerError.UnauthorizedTransaction.Failure(asString)
 
   }
-  object NotAuthorized extends TopologyTransactionRejection {
+  case object NotAuthorized extends TopologyTransactionRejection {
     override def asString: String = "Not authorized"
     override def pretty: Pretty[NotAuthorized.type] = prettyOfString(_ => asString)
 
@@ -926,7 +927,7 @@ object TopologyStore {
         false
       case OwnerToKeyMapping(pid, _) => pid == participantId
       case SignedLegalIdentityClaim(uid, _, _) => uid == participantId.uid
-      case ParticipantState(_, _, pid, _, _) => pid == participantId
+      case ParticipantState(_, _, pid, _) => pid == participantId
       case PartyToParticipant(_, _, _, _) => false
       case VettedPackages(_, _) => false
       case MediatorDomainState(_, _, _) => false

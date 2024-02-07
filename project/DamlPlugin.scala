@@ -382,6 +382,7 @@ object DamlPlugin extends AutoPlugin {
     // copy project directory into target tree
     // the reason for this is that `daml build` caches files in a `.daml` directory of the source tree
     // making sbt to believe that the source code changed
+    IO.delete(projectBuildDirectory) // to not let deleted files stick around in build directory
     IO.copyDirectory(originalDamlProjectFile.getAbsoluteFile.getParentFile, projectBuildDirectory)
 
     val damlYamlMap = readDamlYaml(originalDamlProjectFile)

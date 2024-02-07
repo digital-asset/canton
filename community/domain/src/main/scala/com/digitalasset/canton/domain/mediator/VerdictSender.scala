@@ -225,6 +225,8 @@ private[mediator] class DefaultVerdictSender(
   private def informeesByParticipantAndWithGroupAddressing(
       informees: List[LfPartyId],
       topologySnapshot: TopologySnapshot,
+  )(implicit
+      traceContext: TraceContext
   ): Future[(Map[ParticipantId, Set[LfPartyId]], Set[LfPartyId])] =
     for {
       partiesWithGroupAddressing <- topologySnapshot.partiesWithGroupAddressing(informees)
@@ -328,7 +330,7 @@ private[mediator] class DefaultVerdictSender(
             val rejection = (viewType match {
               case ViewType.TransactionViewType =>
                 requestO match {
-                  case Some(request @ InformeeMessage(_)) =>
+                  case Some(request @ InformeeMessage(_, _)) =>
                     request.createMediatorResult(
                       requestId,
                       rejectionReason,

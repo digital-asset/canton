@@ -1,4 +1,5 @@
 import java.io.File
+import BufPlugin.autoImport.bufLintCheck
 import DamlPlugin.autoImport.*
 import Dependencies.*
 import better.files.{File as BetterFile, *}
@@ -24,6 +25,7 @@ import scoverage.ScoverageKeys.*
 import wartremover.WartRemover
 import wartremover.WartRemover.autoImport.*
 
+import scala.collection.compat.toOptionCompanionExtension
 import scala.language.postfixOps
 
 object BuildCommon {
@@ -40,15 +42,15 @@ object BuildCommon {
         // TODO(#15469) Re-introduce damlCheckProjectVersions when we are aligned
         addCommandAlias(
           "lint",
-          "; bufFormatCheck ; scalafmtCheck ; Test / scalafmtCheck ; scalafmtSbtCheck; checkLicenseHeaders; javafmtCheck",
+          "; bufFormatCheck ; bufLintCheck ; scalafmtCheck ; Test / scalafmtCheck ; scalafmtSbtCheck; checkLicenseHeaders; javafmtCheck",
         ) ++
         addCommandAlias(
           "scalafixCheck",
           s"${alsoTest("scalafix --check")}",
         ) ++
-        addCommandAlias(
+        addCommandAlias( // `bufLintCheck` violations cannot be fixed automatically -- they're here to make sure violations are caught before pushing to CI
           "format",
-          "; bufFormat ; scalafixAll ; scalafmtAll ; scalafmtSbt; createLicenseHeaders ; javafmtAll",
+          "; bufFormat ; bufLintCheck ; scalafixAll ; scalafmtAll ; scalafmtSbt; createLicenseHeaders ; javafmtAll",
         ) ++
         // To be used by CI:
         // enable coverage and compile
@@ -63,11 +65,9 @@ object BuildCommon {
       Seq(
         organization := "com.digitalasset.canton",
         scalaVersion := scala_version,
-        resolvers := Seq(Dependencies.use_custom_daml_version).collect { case true =>
+        resolvers := resolvers.value ++ Option.when(Dependencies.use_custom_daml_version)(
           sbt.librarymanagement.Resolver.mavenLocal // conditionally enable local maven repo for custom Daml jars
-        } ++ Seq(
-          "Redhat GA for s390x natives" at "https://maven.repository.redhat.com/ga"
-        ) ++ resolvers.value,
+        ),
         ideExcludedDirectories := Seq(
           baseDirectory.value / "target"
         ),
@@ -506,6 +506,7 @@ object BuildCommon {
       `slick-fork`,
       `wartremover-extension`,
       `pekko-fork`,
+      `magnolify-addon`,
       `demo`,
       `daml-errors`,
       `daml-adjustable-clock`,
@@ -681,6 +682,7 @@ object BuildCommon {
         `slick-fork`,
         `util-external`,
         `community-admin-api`,
+        `magnolify-addon` % "compile->test",
         DamlProjects.`bindings-java`,
         // No strictly internal dependencies on purpose so that this can be a foundational module and avoid circular dependencies
       )
@@ -711,11 +713,10 @@ object BuildCommon {
         ),
         // Ensure the package scoped options will be picked up by sbt-protoc if used downstream
         // See https://scalapb.github.io/docs/customizations/#publishing-package-scoped-options
-        Compile / packageBin / packageOptions += (
+        Compile / packageBin / packageOptions +=
           Package.ManifestAttributes(
             "ScalaPB-Options-Proto" -> "com/digitalasset/canton/scalapb/package.proto"
-          )
-        ),
+          ),
         buildInfoKeys := Seq[BuildInfoKey](
           version,
           scalaVersion,
@@ -804,7 +805,10 @@ object BuildCommon {
         Compile / PB.targets := Seq(
           scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
         ),
-        Compile / PB.protoSources ++= (Test / PB.protoSources).value,
+        Test / PB.targets := Seq(
+          scalapb.gen(flatPackage = true) -> (Test / sourceManaged).value / "protobuf"
+        ),
+        Test / bufLintCheck := {}, // disable linting for protobuf files in tests
         Compile / damlEnableJavaCodegen := true,
         Compile / damlCodeGeneration := Seq(
           (
@@ -941,11 +945,10 @@ object BuildCommon {
         ),
         // Ensure the package scoped options will be picked up by sbt-protoc if used downstream
         // See https://scalapb.github.io/docs/customizations/#publishing-package-scoped-options
-        Compile / packageBin / packageOptions += (
+        Compile / packageBin / packageOptions +=
           Package.ManifestAttributes(
             "ScalaPB-Options-Proto" -> "com/digitalasset/canton/admin/scalapb/package.proto"
-          )
-        ),
+          ),
         addProtobufFilesToHeaderCheck(Compile),
       )
 
@@ -1133,6 +1136,20 @@ object BuildCommon {
         coverageEnabled := false,
       )
 
+    lazy val `magnolify-addon` = project
+      .in(file("community/lib/magnolify"))
+      .settings(
+        sharedSettings,
+        libraryDependencies ++= Seq(
+          magnolia,
+          magnolifyScalacheck,
+          magnolifyShared % Test,
+          scala_reflect,
+          scalacheck,
+          scalatest % Test,
+        ),
+      )
+
     lazy val `demo` = project
       .in(file("community/demo"))
       .enablePlugins(DamlPlugin)
@@ -1212,6 +1229,7 @@ object BuildCommon {
         `daml-errors` % "compile->compile;test->test",
         `util-logging`,
         `wartremover-extension` % "compile->compile;test->test",
+        `ledger-common-dars-lf-v2-1` % "test",
       )
       .settings(
         sharedSettings, // Upgrade to sharedCantonSettings when com.digitalasset.canton.concurrent.Threading moved out of community-base
@@ -1220,6 +1238,7 @@ object BuildCommon {
           PB.gens.java -> (Compile / sourceManaged).value / "protobuf",
           scalapb.gen(flatPackage = false) -> (Compile / sourceManaged).value / "protobuf",
         ),
+        Test / unmanagedResourceDirectories += (`ledger-common-dars-lf-v2-1` / Compile / resourceManaged).value,
         addProtobufFilesToHeaderCheck(Compile),
         libraryDependencies ++= Seq(
           caffeine,
@@ -1286,7 +1305,6 @@ object BuildCommon {
           "experimental",
           "carbonv1",
           "carbonv2",
-          "carbonv3",
         )
       )
         yield (
@@ -1325,7 +1343,7 @@ object BuildCommon {
       .dependsOn(
         `ledger-common` % "compile->compile;test->test",
         `community-base`,
-        `community-common`,
+        `community-common` % "compile->compile;test->test",
         `community-testing` % "test->test",
         `daml-adjustable-clock` % "test",
       )

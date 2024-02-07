@@ -159,7 +159,6 @@ class CantonSyncService(
     futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
     skipRecipientsCheck: Boolean,
-    multiDomainLedgerAPIEnabled: Boolean,
 )(implicit ec: ExecutionContext, mat: Materializer, val tracer: Tracer)
     extends state.v2.WriteService
     with WriteParticipantPruningService
@@ -183,8 +182,7 @@ class CantonSyncService(
       .getOrElse(throw new RuntimeException("Max deduplication duration is not available"))
 
   val eventTranslationStrategy = new EventTranslationStrategy(
-    multiDomainLedgerAPIEnabled = multiDomainLedgerAPIEnabled,
-    excludeInfrastructureTransactions = parameters.excludeInfrastructureTransactions,
+    excludeInfrastructureTransactions = parameters.excludeInfrastructureTransactions
   )
 
   type ConnectionListener = Traced[DomainId] => Unit
@@ -1530,7 +1528,7 @@ class CantonSyncService(
               submitterMetadata = TransferSubmitterMetadata(
                 submitter = submitter,
                 applicationId = applicationId,
-                submittingParticipant = participantId.toLf,
+                submittingParticipant = participantId,
                 commandId = commandId,
                 submissionId = submissionId,
                 workflowId = workflowId,
@@ -1550,7 +1548,7 @@ class CantonSyncService(
               submitterMetadata = TransferSubmitterMetadata(
                 submitter = submitter,
                 applicationId = applicationId,
-                submittingParticipant = participantId.toLf,
+                submittingParticipant = participantId,
                 commandId = commandId,
                 submissionId = submissionId,
                 workflowId = workflowId,
@@ -1581,14 +1579,19 @@ class CantonSyncService(
       .collect { case (domainAlias, (domainId, true)) =>
         for {
           topology <- getSnapshot(domainAlias, domainId)
-          attributesO <- topology.hostedOn(request.party, participantId = participantId)
-        } yield attributesO.map(attributes =>
-          ConnectedDomainResponse.ConnectedDomain(
-            domainAlias,
-            domainId,
-            attributes.permission,
+          partyWithAttributes <- topology.hostedOn(
+            Set(request.party),
+            participantId = participantId,
           )
-        )
+        } yield partyWithAttributes
+          .get(request.party)
+          .map(attributes =>
+            ConnectedDomainResponse.ConnectedDomain(
+              domainAlias,
+              domainId,
+              attributes.permission,
+            )
+          )
       }.toSeq
 
     Future.sequence(result).map(_.flatten).map(ConnectedDomainResponse.apply)
@@ -1654,7 +1657,6 @@ object CantonSyncService {
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
         skipRecipientsCheck: Boolean,
-        multiDomainLedgerAPIEnabled: Boolean,
     )(implicit ec: ExecutionContext, mat: Materializer, tracer: Tracer): T
   }
 
@@ -1685,7 +1687,6 @@ object CantonSyncService {
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
         skipRecipientsCheck: Boolean,
-        multiDomainLedgerAPIEnabled: Boolean,
     )(implicit
         ec: ExecutionContext,
         mat: Materializer,
@@ -1719,7 +1720,6 @@ object CantonSyncService {
         futureSupervisor,
         loggerFactory,
         skipRecipientsCheck = skipRecipientsCheck,
-        multiDomainLedgerAPIEnabled: Boolean,
       )
   }
 }
