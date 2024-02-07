@@ -1,6 +1,7 @@
 // Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import sbt.MessageOnlyException
 import sbt.{Def, *}
 import sbt.Keys.*
 
@@ -11,6 +12,7 @@ object BufPlugin extends AutoPlugin {
   object autoImport {
     val bufFormat = taskKey[Unit]("Re-formats the Protobuf files in place")
     val bufFormatCheck = taskKey[Unit]("Checks whether the Protobuf files are already formatted")
+    val bufLintCheck = taskKey[Unit]("Checks whether the Protobuf files pass linting")
   }
   import autoImport.*
 
@@ -23,32 +25,39 @@ object BufPlugin extends AutoPlugin {
 
   private final case class Command(override val toString: String) extends AnyVal
   private object Command {
-    val Overwrite: Command = Command("buf format --diff --write")
-    val Check: Command = Command("buf format --diff --exit-code")
+    val FormatOverwrite: Command = Command("buf format --diff --write")
+    val FormatCheck: Command = Command("buf format --diff --exit-code")
+    val LintCheck: Command = Command("buf lint")
   }
 
   private def run(command: Command): Def.Initialize[Task[Unit]] =
     Def.taskDyn {
       val logger = streams.value.log
-      val compileProtoSources = (Compile / PB.protoSources).value
-      val testProtoSources = (Test / PB.protoSources).value
+      val protoSources = (ThisScope / PB.protoSources).value
       Def.task {
-        for (source <- compileProtoSources ++ testProtoSources if source.exists) {
+        for (source <- protoSources if source.exists) {
           val fullCommand = s"$command $source"
           val status = fullCommand ! logger
           if (status != 0) {
-            throw new RuntimeException(s"'$fullCommand' returned non-zero status code $status")
+            throw new MessageOnlyException(s"'$fullCommand' returned non-zero status code $status")
           }
         }
       }
     }
 
-  override def projectSettings: Seq[Def.Setting[_]] = Seq(
+  private val unscopedProjectSettings = Seq(
     bufFormat := {
-      run(Command.Overwrite).value
+      run(Command.FormatOverwrite).value
     },
     bufFormatCheck := {
-      run(Command.Check).value
+      run(Command.FormatCheck).value
+    },
+    bufLintCheck := {
+      run(Command.LintCheck).value
     },
   )
+
+  override def projectSettings: Seq[Def.Setting[_]] =
+    inConfig(Compile)(unscopedProjectSettings) ++ inConfig(Test)(unscopedProjectSettings)
+
 }

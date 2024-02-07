@@ -14,7 +14,7 @@ import com.digitalasset.canton.domain.block.{
   TransactionSignature,
 }
 import com.digitalasset.canton.domain.sequencing.sequencer.reference.store.ReferenceBlockOrderingStore
-import com.digitalasset.canton.domain.sequencing.sequencer.reference.store.v0.{
+import com.digitalasset.canton.domain.sequencing.sequencer.reference.store.v1.{
   TracedBatchedBlockOrderingRequests,
   TracedBlockOrderingRequest,
 }
@@ -229,8 +229,9 @@ object ReferenceBlockOrderer {
 
     sendQueue
       .execute(
-        store.insertRequest(
-          BlockOrderer.OrderedRequest(timestamp.underlying.micros, tag, body)
+        store.insertRequestWithHeight(
+          blockHeight,
+          BlockOrderer.OrderedRequest(timestamp.underlying.micros, tag, body),
         ),
         s"send request at $timestamp",
       )

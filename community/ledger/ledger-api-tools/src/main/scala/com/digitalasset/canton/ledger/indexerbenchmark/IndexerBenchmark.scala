@@ -77,7 +77,6 @@ class IndexerBenchmark extends NamedLogging {
               indexerExecutionContext,
               tracer,
               loggerFactory,
-              multiDomainEnabled = false,
             )
             .acquire()
         indexerFactory = new JdbcIndexer.Factory(
@@ -91,7 +90,6 @@ class IndexerBenchmark extends NamedLogging {
           servicesExecutionContext,
           tracer,
           loggerFactory,
-          multiDomainEnabled = false,
           dataSourceProperties,
           highAvailability,
         )

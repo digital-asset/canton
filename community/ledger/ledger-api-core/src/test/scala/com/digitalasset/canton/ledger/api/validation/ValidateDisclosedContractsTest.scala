@@ -273,7 +273,6 @@ object ValidateDisclosedContractsTest {
         ),
       ),
       api.keyMaintainers,
-      shared = Util.sharedKey(testTxVersion),
     )
 
     private val keyHash: Hash = keyWithMaintainers.globalKey.hash

@@ -12,7 +12,7 @@ import com.daml.lf.engine.Blinding
 import com.daml.lf.ledger.EventId
 import com.daml.lf.transaction.Node.{Create, Exercise}
 import com.daml.lf.transaction.Transaction.ChildrenRecursion
-import com.daml.lf.transaction.{Node, NodeId, Util}
+import com.daml.lf.transaction.{Node, NodeId}
 import com.daml.metrics.Timed
 import com.daml.timer.FutureCheck.*
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod.{
@@ -92,7 +92,6 @@ private[platform] object InMemoryStateUpdater {
       inMemoryState: InMemoryState,
       prepareUpdatesParallelism: Int,
       preparePackageMetadataTimeOutWarning: FiniteDuration,
-      multiDomainEnabled: Boolean,
       metrics: Metrics,
       loggerFactory: NamedLoggerFactory,
   )(implicit traceContext: TraceContext): ResourceOwner[UpdaterFlow] = for {
@@ -100,14 +99,12 @@ private[platform] object InMemoryStateUpdater {
       InstrumentedExecutors.newWorkStealingExecutor(
         metrics.lapi.threadpool.indexBypass.prepareUpdates,
         prepareUpdatesParallelism,
-        metrics.executorServiceMetrics,
       )
     )
     updateCachesExecutor <- ResourceOwner.forExecutorService(() =>
       InstrumentedExecutors.newFixedThreadPool(
         metrics.lapi.threadpool.indexBypass.updateInMemoryState,
         1,
-        metrics.executorServiceMetrics,
       )
     )
     logger = loggerFactory.getTracedLogger(getClass)
@@ -124,8 +121,7 @@ private[platform] object InMemoryStateUpdater {
         Timed.value(
           metrics.index.packageMetadata.decodeArchive,
           PackageMetadata.from(archive),
-        ),
-      multiDomainEnabled = multiDomainEnabled,
+        )
     ),
     update = update(inMemoryState, logger),
   )
@@ -144,8 +140,7 @@ private[platform] object InMemoryStateUpdater {
       }
 
   private[index] def prepare(
-      archiveToMetadata: DamlLf.Archive => PackageMetadata,
-      multiDomainEnabled: Boolean,
+      archiveToMetadata: DamlLf.Archive => PackageMetadata
   )(
       batch: Vector[(Offset, Traced[Update])],
       lastEventSequentialId: Long,
@@ -159,7 +154,7 @@ private[platform] object InMemoryStateUpdater {
           t.map(_ => convertTransactionAccepted(offset, u, t.traceContext))
         case (offset, r @ Traced(u: Update.CommandRejected)) =>
           r.map(_ => convertTransactionRejected(offset, u, r.traceContext))
-        case (offset, r @ Traced(u: Update.ReassignmentAccepted)) if multiDomainEnabled =>
+        case (offset, r @ Traced(u: Update.ReassignmentAccepted)) =>
           r.map(_ => convertReassignmentAccepted(offset, u, r.traceContext))
       },
       lastOffset = offset,
@@ -246,7 +241,7 @@ private[platform] object InMemoryStateUpdater {
                 arg = createdEvent.createArgument,
               ),
               globalKey = createdEvent.contractKey.map(k =>
-                Key.assertBuild(createdEvent.templateId, k.unversioned, Util.sharedKey(k.version))
+                Key.assertBuild(createdEvent.templateId, k.unversioned)
               ),
               ledgerEffectiveTime = createdEvent.ledgerEffectiveTime,
               stakeholders = createdEvent.flatEventWitnesses.map(Party.assertFromString),
@@ -261,7 +256,7 @@ private[platform] object InMemoryStateUpdater {
             ContractStateEvent.Archived(
               contractId = exercisedEvent.contractId,
               globalKey = exercisedEvent.contractKey.map(k =>
-                Key.assertBuild(exercisedEvent.templateId, k.unversioned, Util.sharedKey(k.version))
+                Key.assertBuild(exercisedEvent.templateId, k.unversioned)
               ),
               stakeholders = exercisedEvent.flatEventWitnesses.map(Party.assertFromString),
               eventOffset = exercisedEvent.eventOffset,
@@ -367,7 +362,7 @@ private[platform] object InMemoryStateUpdater {
             optDeduplicationOffset = deduplicationOffset,
             optDeduplicationDurationSeconds = deduplicationDurationSeconds,
             optDeduplicationDurationNanos = deduplicationDurationNanos,
-            domainId = Some(txAccepted.domainId.toProtoPrimitive), // TODO(i15280)
+            domainId = txAccepted.domainId.toProtoPrimitive,
             traceContext = traceContext,
           ),
           submitters = completionInfo.actAs.toSet,
@@ -407,7 +402,7 @@ private[platform] object InMemoryStateUpdater {
           optDeduplicationOffset = deduplicationOffset,
           optDeduplicationDurationSeconds = deduplicationDurationSeconds,
           optDeduplicationDurationNanos = deduplicationDurationNanos,
-          domainId = Some(u.domainId.toProtoPrimitive), // TODO(i15280)
+          domainId = u.domainId.toProtoPrimitive,
           traceContext = traceContext,
         ),
         submitters = u.completionInfo.actAs.toSet,
@@ -436,11 +431,11 @@ private[platform] object InMemoryStateUpdater {
             optDeduplicationOffset = deduplicationOffset,
             optDeduplicationDurationSeconds = deduplicationDurationSeconds,
             optDeduplicationDurationNanos = deduplicationDurationNanos,
-            domainId = Some(u.reassignment match {
+            domainId = u.reassignment match {
               case _: Reassignment.Assign => u.reassignmentInfo.targetDomain.unwrap.toProtoPrimitive
               case _: Reassignment.Unassign =>
                 u.reassignmentInfo.sourceDomain.unwrap.toProtoPrimitive
-            }),
+            },
             traceContext = traceContext,
           ),
           submitters = completionInfo.actAs.toSet,
