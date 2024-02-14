@@ -28,19 +28,19 @@ import com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationDurat
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 import com.digitalasset.canton.protocol.SerializableContract.LedgerCreateTime
 import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.transaction.ParticipantAttributes
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Confirmation,
   Observation,
   Submission,
 }
-import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, VettedPackages}
 import com.digitalasset.canton.topology.{
   DomainId,
   MediatorId,
   MediatorRef,
   ParticipantId,
-  TestingIdentityFactory,
-  TestingTopology,
+  TestingIdentityFactoryX,
+  TestingTopologyX,
   UniqueIdentifier,
 }
 import com.digitalasset.canton.tracing.TraceContext
@@ -148,7 +148,6 @@ object ExampleTransactionFactory {
       coid = cid,
       templateId = unversionedContractInst.template,
       arg = unversionedContractInst.arg,
-      agreementText = "", // not used anymore
       signatories = signatories,
       stakeholders = signatories ++ observers,
       keyOpt = key,
@@ -325,8 +324,8 @@ object ExampleTransactionFactory {
   val commandId: CommandId = DefaultDamlValues.commandId()
   val workflowId: WorkflowId = WorkflowId.assertFromString("testWorkflowId")
 
-  val defaultTestingTopology: TestingTopology =
-    TestingTopology(
+  val defaultTestingTopology: TestingTopologyX =
+    TestingTopologyX(
       topology = Map(
         submitter -> Map(submittingParticipant -> Submission),
         signatory -> Map(
@@ -337,12 +336,14 @@ object ExampleTransactionFactory {
         ),
       ),
       participants = Map(submittingParticipant -> ParticipantAttributes(Submission)),
-      packages = Seq(submittingParticipant, signatoryParticipant).map(
-        VettedPackages(_, Seq(ExampleTransactionFactory.packageId))
-      ),
+      packages = Seq(submittingParticipant, signatoryParticipant)
+        .map(
+          _ -> Seq(ExampleTransactionFactory.packageId)
+        )
+        .toMap,
     )
 
-  def defaultTestingIdentityFactory: TestingIdentityFactory =
+  def defaultTestingIdentityFactory: TestingIdentityFactoryX =
     defaultTestingTopology.build()
 
   // Topology
@@ -454,7 +455,7 @@ class ExampleTransactionFactory(
         capturedContractIds = Seq(suffixedId(-1, 0), suffixedId(-1, 1)),
         unsuffixedCapturedContractIds = Seq(suffixedId(-1, 0), suffixedId(-1, 1)),
       ),
-      SingleFetch(version = LfTransactionVersion.V14),
+      SingleFetch(version = LfTransactionVersion.V31),
       SingleExercise(seed = deriveNodeSeed(0)),
       SingleExerciseWithNonstakeholderActor(seed = deriveNodeSeed(0)),
       MultipleRoots,
@@ -1068,7 +1069,6 @@ class ExampleTransactionFactory(
       lfContractId: LfContractId = suffixedId(-1, 0),
       contractId: LfContractId = suffixedId(-1, 0),
       inputContractInstance: LfContractInst = contractInstance(),
-      inputContractAgreementText: String = "single exercise",
       salt: Salt = TestSalt.generateSalt(random.nextInt()),
   ) extends SingleNode(Some(seed)) {
     override def toString: String = "single exercise"
@@ -1176,7 +1176,7 @@ class ExampleTransactionFactory(
         contractId = create0.contractId,
         fetchedContractInstance = create0.contractInstance,
         version =
-          LfTransactionVersion.V14, // ensure we test merging transactions with different versions
+          LfTransactionVersion.V31, // ensure we test merging transactions with different versions
         salt = create0.salt,
       )
     private val exercise4: SingleExercise =
