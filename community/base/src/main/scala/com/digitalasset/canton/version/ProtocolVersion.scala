@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.version
@@ -171,7 +171,10 @@ object ProtocolVersion {
     }
   }
 
-  private[version] def unsupportedErrorMessage(pv: ProtocolVersion, includeDeleted: Boolean) = {
+  private[version] def unsupportedErrorMessage(
+      pv: ProtocolVersion,
+      includeDeleted: Boolean = false,
+  ) = {
     val supportedStablePVs = stableAndSupported.map(_.toString)
 
     val supportedPVs: NonEmpty[List[String]] = if (includeDeleted) {
@@ -229,7 +232,7 @@ object ProtocolVersion {
     */
   def fromProtoPrimitive(rawVersion: Int): ParsingResult[ProtocolVersion] = {
     val pv = ProtocolVersion(rawVersion)
-    Either.cond(pv.isSupported, pv, OtherError(unsupportedErrorMessage(pv, includeDeleted = false)))
+    Either.cond(pv.isSupported, pv, OtherError(unsupportedErrorMessage(pv)))
   }
 
   /** Like [[create]] ensures a supported protocol version; tailored to (de-)serialization purposes.
@@ -253,7 +256,7 @@ object ProtocolVersion {
         sys.error("Release needs to support at least one protocol version")
       )
 
-  private val deprecated: Seq[ProtocolVersion] = Seq()
+  private val deprecated: Seq[ProtocolVersion] = Seq(v3, v4)
   private val deleted: Seq[ProtocolVersion] = Seq(ProtocolVersion(2))
 
   val unstable: NonEmpty[List[ProtocolVersionWithStatus[Unstable]]] =
@@ -280,10 +283,6 @@ object ProtocolVersion {
 
   // Minimum stable protocol version introduced
   lazy val minimum: ProtocolVersion = v3
-
-  // Aliases for easier releasing of upcoming not yet defined protocol versions
-  // TODO(#15358) Adapt when releasing BFT
-  lazy val CNTestNet: ProtocolVersionWithStatus[Unstable] = dev
 }
 
 /*

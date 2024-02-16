@@ -1,9 +1,8 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.apiserver.execution
 
-import com.daml.api.util.TimeProvider
 import com.daml.lf.command.{ApiCommands as LfCommands, DisclosedContract as LfDisclosedContract}
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.Ref.{Identifier, ParticipantId, Party}
@@ -26,10 +25,12 @@ import com.daml.lf.transaction.{
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.{ContractInstance, ValueTrue}
 import com.daml.logging.LoggingContext
+import com.digitalasset.canton.BaseTest.{pvPackageName, pvTransactionVersion}
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{CryptoPureApi, Salt, SaltSeed}
 import com.digitalasset.canton.ledger.api.domain.{CommandId, Commands, LedgerId}
+import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.api.{DeduplicationPeriod, domain}
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
@@ -93,6 +94,8 @@ class StoreBackedCommandExecutorSpec
         participantId = any[ParticipantId],
         submissionSeed = any[Hash],
         disclosures = any[ImmArray[LfDisclosedContract]],
+        packageMap = any[Map[Ref.PackageId, (Ref.PackageName, Ref.PackageVersion)]],
+        packagePreference = any[Set[Ref.PackageId]],
       )(any[LoggingContext])
     )
       .thenReturn(result)
@@ -216,8 +219,14 @@ class StoreBackedCommandExecutorSpec
 
     val stakeholderContractId: LfContractId = LfContractId.assertFromString("00" + "00" * 32 + "03")
     val stakeholderContract = ContractState.Active(
-      contractInstance =
-        Versioned(LfTransactionVersion.maxVersion, ContractInstance(identifier, Value.ValueTrue)),
+      contractInstance = Versioned(
+        LfTransactionVersion.maxVersion,
+        ContractInstance(
+          template = identifier,
+          packageName = pvPackageName,
+          arg = Value.ValueTrue,
+        ),
+      ),
       ledgerEffectiveTime = Timestamp.now(),
       stakeholders = Set(Ref.Party.assertFromString("unexpectedSig")),
       signatories = Set(Ref.Party.assertFromString("unexpectedSig")),
@@ -235,7 +244,9 @@ class StoreBackedCommandExecutorSpec
     val disclosedContractId: LfContractId = LfContractId.assertFromString("00" + "00" * 32 + "02")
 
     val disclosedContract: domain.DisclosedContract = domain.UpgradableDisclosedContract(
+      version = pvTransactionVersion,
       templateId = identifier,
+      packageName = pvPackageName,
       contractId = disclosedContractId,
       argument = ValueTrue,
       createdAt = mock[Timestamp],
@@ -275,6 +286,7 @@ class StoreBackedCommandExecutorSpec
                   identifier,
                   someContractKey(signatory, "some key"),
                   Set(signatory),
+                  shared = true,
                 )
             ),
             resume = verdict => {
@@ -292,6 +304,8 @@ class StoreBackedCommandExecutorSpec
           participantId = any[ParticipantId],
           submissionSeed = any[Hash],
           disclosures = any[ImmArray[LfDisclosedContract]],
+          packageMap = any[Map[Ref.PackageId, (Ref.PackageName, Ref.PackageVersion)]],
+          packagePreference = any[Set[Ref.PackageId]],
         )(any[LoggingContext])
       ).thenReturn(engineResult)
 
@@ -403,7 +417,14 @@ class StoreBackedCommandExecutorSpec
     }
 
     "disallow archived contracts" in {
-      doTest(Some(archivedContractId), Some(Some("Contract archived")))
+      doTest(
+        Some(archivedContractId),
+        Some(
+          Some(
+            s"Contract with $archivedContractId was not found or it refers to a divulged contract."
+          )
+        ),
+      )
     }
 
     "disallow unauthorized disclosed contracts" in {

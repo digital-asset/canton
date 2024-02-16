@@ -1,9 +1,9 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.admin.grpc
 
-import com.daml.ledger.api.refinements.ApiTypes.WorkflowId
+import com.digitalasset.canton.ledger.api.refinements.ApiTypes.WorkflowId
 import com.digitalasset.canton.participant.admin.PingService
 import com.digitalasset.canton.participant.admin.v0.*
 import com.digitalasset.canton.tracing.Spanning

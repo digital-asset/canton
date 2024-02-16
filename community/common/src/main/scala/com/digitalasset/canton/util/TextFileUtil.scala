@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.util
@@ -11,7 +11,9 @@ object TextFileUtil {
   /** writes the given string to the file.
     */
   def writeStringToFile(outputFile: File, s: String): Unit =
-    ResourceUtil.withResource(new BufferedWriter(new FileWriter(outputFile)))(_.write(s))
+    ResourceUtil.withResource(new FileWriter(outputFile)) { writer =>
+      ResourceUtil.withResource(new BufferedWriter(writer))(_.write(s))
+    }
 
   /** Gets full string content of a file
     */

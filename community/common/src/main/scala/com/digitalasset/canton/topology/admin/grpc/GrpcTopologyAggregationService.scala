@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.topology.admin.grpc
@@ -13,17 +13,13 @@ import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
 import com.digitalasset.canton.topology.admin.v0
 import com.digitalasset.canton.topology.client.*
-import com.digitalasset.canton.topology.store.{
-  TopologyStore,
-  TopologyStoreCommon,
-  TopologyStoreId,
-  TopologyStoreX,
-}
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreCommon, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{DomainId, KeyOwnerCode, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{MonadUtil, OptionUtil}
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -201,27 +197,6 @@ class GrpcTopologyAggregationService(
     useStateTxs = true,
     StoreBasedDomainTopologyClient.NoPackageDependencies,
     loggerFactory,
+    ProtocolVersionValidation.NoValidation,
   )
-}
-
-class GrpcTopologyAggregationServiceX(
-    stores: => Seq[TopologyStoreX[TopologyStoreId.DomainStore]],
-    ips: IdentityProvidingServiceClient,
-    loggerFactory: NamedLoggerFactory,
-)(implicit ec: ExecutionContext)
-    extends GrpcTopologyAggregationServiceCommon[TopologyStoreX[TopologyStoreId.DomainStore]](
-      stores,
-      ips,
-      loggerFactory,
-    ) {
-  override protected def getTopologySnapshot(
-      asOf: CantonTimestamp,
-      store: TopologyStoreX[TopologyStoreId.DomainStore],
-  ): TopologySnapshotLoader =
-    new StoreBasedTopologySnapshotX(
-      asOf,
-      store,
-      StoreBasedDomainTopologyClient.NoPackageDependencies,
-      loggerFactory,
-    )
 }

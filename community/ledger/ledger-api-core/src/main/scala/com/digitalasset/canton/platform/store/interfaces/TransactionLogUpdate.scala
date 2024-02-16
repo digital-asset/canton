@@ -1,13 +1,13 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.store.interfaces
 
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.lf.crypto.Hash
-import com.daml.lf.data.Bytes
 import com.daml.lf.data.Ref.Party
 import com.daml.lf.data.Time.Timestamp
+import com.daml.lf.data.{Bytes, Ref}
 import com.daml.lf.ledger.EventId
 import com.daml.lf.transaction.GlobalKey
 import com.daml.lf.value.Value as LfValue
@@ -109,6 +109,7 @@ object TransactionLogUpdate {
       contractId: ContractId,
       ledgerEffectiveTime: Timestamp,
       templateId: Identifier,
+      packageName: Option[Ref.PackageName],
       commandId: String,
       workflowId: String,
       contractKey: Option[LfValue.VersionedValue],

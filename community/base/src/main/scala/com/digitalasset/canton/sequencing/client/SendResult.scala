@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.sequencing.client
@@ -20,9 +20,6 @@ sealed trait SendResult extends Product with Serializable
 object SendResult {
 
   /** Send caused a deliver event to be successfully sequenced.
-    * For aggregatable submission requests, success means that the aggregatable submission was assigned a timestamp.
-    * It does not mean that the [[com.digitalasset.canton.sequencing.protocol.AggregationRule.threshold]]
-    * was reached and the envelopes are delivered.
     * Accordingly, the [[com.digitalasset.canton.sequencing.protocol.Deliver]] event may contain an empty batch.
     */
   final case class Success(deliver: Deliver[Envelope[_]]) extends SendResult

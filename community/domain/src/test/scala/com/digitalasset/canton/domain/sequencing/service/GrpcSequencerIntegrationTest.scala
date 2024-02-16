@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.sequencing.service
@@ -20,7 +20,6 @@ import com.digitalasset.canton.crypto.{HashPurpose, Nonce}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.api.v0.SequencerAuthenticationServiceGrpc.SequencerAuthenticationService
-import com.digitalasset.canton.domain.governance.ParticipantAuditor
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.domain.sequencing.SequencerParameters
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
@@ -36,7 +35,6 @@ import com.digitalasset.canton.protocol.messages.{
   ProtocolMessageV1,
   ProtocolMessageV2,
   ProtocolMessageV3,
-  UnsignedProtocolMessageV4,
 }
 import com.digitalasset.canton.protocol.{
   DomainParametersLookup,
@@ -45,7 +43,6 @@ import com.digitalasset.canton.protocol.{
   v1 as protocolV1,
   v2 as protocolV2,
   v3 as protocolV3,
-  v4 as protocolV4,
 }
 import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
 import com.digitalasset.canton.sequencing.client.*
@@ -164,7 +161,6 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
       sequencer,
       DomainTestMetrics.sequencer,
       loggerFactory,
-      ParticipantAuditor.noop,
       authenticationCheck,
       new SubscriptionPool[GrpcManagedSubscription[_]](
         clock,
@@ -175,9 +171,7 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
       sequencerSubscriptionFactory,
       domainParamsLookup,
       params,
-      None,
       BaseTest.testedProtocolVersion,
-      enableBroadcastOfUnauthenticatedMessages = false,
     )
   private val connectService = new GrpcSequencerConnectService(
     domainId = domainId,
@@ -413,8 +407,7 @@ class GrpcSequencerIntegrationTest
       with ProtocolMessageV0
       with ProtocolMessageV1
       with ProtocolMessageV2
-      with ProtocolMessageV3
-      with UnsignedProtocolMessageV4 {
+      with ProtocolMessageV3 {
     // no significance to this payload, just need anything valid and this was the easiest to construct
     private val payload =
       protocolV0.SignedProtocolMessage(
@@ -447,8 +440,5 @@ class GrpcSequencerIntegrationTest
       protocolV3.EnvelopeContent(
         protocolV3.EnvelopeContent.SomeEnvelopeContent.SignedMessage(payload)
       )
-
-    override def toProtoSomeEnvelopeContentV4: protocolV4.EnvelopeContent.SomeEnvelopeContent =
-      protocolV4.EnvelopeContent.SomeEnvelopeContent.Empty
   }
 }

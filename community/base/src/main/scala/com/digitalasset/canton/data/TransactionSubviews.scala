@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.data
@@ -207,26 +207,26 @@ final case class TransactionSubviewsV1 private[data] (
 
 object TransactionSubviews {
   private[data] def fromProtoV0(
-      context: (HashOps, ConfirmationPolicy),
+      context: (HashOps, ConfirmationPolicy, ProtocolVersion),
       subviewsP: Seq[v0.BlindableNode],
   ): ParsingResult[TransactionSubviewsV0] =
     for {
       subviews <- subviewsP.traverse(subviewP =>
         MerkleTree.fromProtoOptionV0(
           Some(subviewP),
-          TransactionView.fromByteString(ProtoVersion(0))(context),
+          TransactionView.fromByteStringLegacy(ProtoVersion(0))(context),
         )
       )
     } yield TransactionSubviewsV0(subviews)
 
   private[data] def fromProtoV1(
-      context: (HashOps, ConfirmationPolicy),
+      context: (HashOps, ConfirmationPolicy, ProtocolVersion),
       subviewsPO: Option[v1.MerkleSeq],
   ): ParsingResult[TransactionSubviewsV1] = {
-    val (hashOps, _) = context
+    val (hashOps, _, _) = context
     for {
       subviewsP <- ProtoConverter.required("ViewNode.subviews", subviewsPO)
-      tvParser = TransactionView.fromByteString(ProtoVersion(1))(context)
+      tvParser = TransactionView.fromByteStringLegacy(ProtoVersion(1))(context)
       subviews <- MerkleSeq.fromProtoV1((hashOps, tvParser), subviewsP)
     } yield TransactionSubviewsV1(subviews)
   }

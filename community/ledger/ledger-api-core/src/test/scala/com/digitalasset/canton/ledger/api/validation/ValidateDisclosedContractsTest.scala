@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.ledger.api.validation
@@ -14,6 +14,7 @@ import com.daml.lf.data.{Bytes, ImmArray, Ref, Time}
 import com.daml.lf.transaction.*
 import com.daml.lf.value.Value.{ContractId, ValueRecord}
 import com.daml.lf.value.Value as Lf
+import com.digitalasset.canton.BaseTest.{pvPackageName, pvTransactionVersion}
 import com.digitalasset.canton.LfValue
 import com.digitalasset.canton.ledger.api.domain.UpgradableDisclosedContract
 import com.digitalasset.canton.ledger.api.validation.ValidateDisclosedContractsTest.{
@@ -291,6 +292,7 @@ object ValidateDisclosedContractsTest {
         ),
       ),
       api.keyMaintainers,
+      shared = Util.sharedKey(pvTransactionVersion),
     )
 
     private val keyHash: Hash = keyWithMaintainers.globalKey.hash
@@ -299,12 +301,13 @@ object ValidateDisclosedContractsTest {
       create = Node.Create(
         coid = lf.lfContractId,
         templateId = lf.templateId,
+        packageName = pvPackageName,
         arg = lf.createArg,
         agreementText = "",
         signatories = api.signatories,
         stakeholders = api.stakeholders,
         keyOpt = Some(lf.keyWithMaintainers),
-        version = TransactionVersion.maxVersion,
+        version = pvTransactionVersion,
       ),
       createTime = Time.Timestamp.assertFromLong(api.createdAtSeconds * 1000000L),
       cantonData = lf.driverMetadataBytes,
@@ -312,7 +315,9 @@ object ValidateDisclosedContractsTest {
 
     val expectedDisclosedContracts: ImmArray[UpgradableDisclosedContract] = ImmArray(
       UpgradableDisclosedContract(
+        pvTransactionVersion,
         templateId,
+        pvPackageName,
         lfContractId,
         argument = createArgWithoutLabels,
         createdAt = Time.Timestamp.assertFromLong(api.createdAtSeconds * 1000000L),

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.data
@@ -220,11 +220,14 @@ object MerkleTreeTest {
         ),
       )
 
-    def fromProto(protoVersion: Int)(bytes: ByteString): ParsingResult[Leaf1] = {
-      leafFromByteString(i =>
-        Leaf1(i)(protocolVersionRepresentativeFor(ProtoVersion(protoVersion)))
-      )(bytes).leftMap(e => ProtoDeserializationError.OtherError(e.message))
-    }
+    def fromProto(protoVersion: Int)(bytes: ByteString): ParsingResult[Leaf1] =
+      for {
+        rpv <- protocolVersionRepresentativeFor(ProtoVersion(protoVersion))
+        leaf <- leafFromByteString(i => Leaf1(i)(rpv))(bytes).leftMap(e =>
+          ProtoDeserializationError.OtherError(e.message)
+        )
+      } yield leaf
+
   }
 
   abstract class AbstractLeaf[A <: MerkleTree[

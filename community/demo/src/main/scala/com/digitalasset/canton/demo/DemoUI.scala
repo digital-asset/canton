@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.demo
@@ -693,7 +693,6 @@ class DemoUI(script: BaseScript, val loggerFactory: NamedLoggerFactory)
     Threading.newExecutionContext(
       "demo-ui",
       noTracingLogger,
-      maybeMetrics = None,
     )
   private implicit val actorSystem: ActorSystem = PekkoUtil.createActorSystem("demo-ui")
   private implicit val sequencerPool: ExecutionSequencerFactory =

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.store.backend
@@ -250,6 +250,7 @@ object ContractStorageBackend {
 
   final case class RawCreatedContract(
       templateId: String,
+      packageName: Option[String],
       flatEventWitnesses: Set[Party],
       createArgument: Array[Byte],
       createArgumentCompression: Option[Int],
@@ -268,6 +269,7 @@ object ContractStorageBackend {
 
   class RawContract(
       val templateId: String,
+      val packageName: Option[String],
       val createArgument: Array[Byte],
       val createArgumentCompression: Option[Int],
   )
@@ -374,6 +376,7 @@ object EventStorageBackend {
       updateId: String,
       contractId: String,
       templateId: Identifier,
+      packageName: Option[String],
       witnessParties: Set[String],
       signatories: Set[String],
       observers: Set[String],

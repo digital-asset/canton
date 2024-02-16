@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.mediator
@@ -118,15 +118,13 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
 
       val requestId = RequestId(CantonTimestamp.Epoch)
 
-      val commonMetadataSignatory = CommonMetadata
-        .create(hashOps, testedProtocolVersion)(
-          ConfirmationPolicy.Signatory,
-          domainId,
-          mediator,
-          salt(5417),
-          new UUID(0L, 0L),
-        )
-        .value
+      val commonMetadataSignatory = CommonMetadata(hashOps, testedProtocolVersion)(
+        ConfirmationPolicy.Signatory,
+        domainId,
+        mediator,
+        salt(5417),
+        new UUID(0L, 0L),
+      )
 
       def mkResponse(
           viewHash: ViewHash,
@@ -609,15 +607,14 @@ class ResponseAggregationTestV0 extends PathAnyFunSpec with BaseTest {
       }
 
       describe("under the VIP policy") {
-        val commonMetadata = CommonMetadata
-          .create(hashOps, testedProtocolVersion)(
-            ConfirmationPolicy.Vip,
-            domainId,
-            mediator,
-            salt(5417),
-            new UUID(0L, 0L),
-          )
-          .value
+        val commonMetadata = CommonMetadata(hashOps, testedProtocolVersion)(
+          ConfirmationPolicy.Vip,
+          domainId,
+          mediator,
+          salt(5417),
+          new UUID(0L, 0L),
+        )
+
         val fullInformeeTree = FullInformeeTree.tryCreate(
           GenTransactionTree.tryCreate(hashOps)(
             b(0),

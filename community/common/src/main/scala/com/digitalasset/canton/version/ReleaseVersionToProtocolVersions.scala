@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.version
@@ -19,8 +19,9 @@ object ReleaseVersionToProtocolVersions {
     ReleaseVersions.v2_4_0 -> List(v2, v3),
     ReleaseVersions.v2_5_0 -> List(v2, v3, v4),
     ReleaseVersions.v2_6_0 -> List(v3, v4),
-    ReleaseVersions.v2_7_0_snapshot -> List(v3, v4, v5),
-    ReleaseVersions.v2_8_0_snapshot -> List(v3, v4, v5),
+    ReleaseVersions.v2_7_0 -> List(v3, v4, v5),
+    ReleaseVersions.v2_8_0 -> List(v3, v4, v5),
+    ReleaseVersions.v2_9_0 -> List(v3, v4, v5),
   ).map { case (release, pvs) => (release.majorMinor, NonEmptyUtil.fromUnsafe(pvs)) }
 
   def get(

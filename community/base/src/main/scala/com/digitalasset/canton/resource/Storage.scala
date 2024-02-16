@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.resource
@@ -43,9 +43,9 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.retry.RetryEither
 import com.digitalasset.canton.util.retry.RetryUtil.DbExceptionRetryable
+import com.digitalasset.canton.util.{Thereafter, *}
 import com.digitalasset.canton.{LfPackageId, LfPartyId}
 import com.google.protobuf.ByteString
 import com.typesafe.config.{Config, ConfigValueFactory}
@@ -62,7 +62,7 @@ import slick.lifted.Aliases
 import slick.util.{AsyncExecutor, AsyncExecutorWithMetrics, ClassLoaderUtil}
 
 import java.io.ByteArrayInputStream
-import java.sql.{Blob, SQLException, Statement}
+import java.sql.{Blob, SQLException, SQLTransientException, Statement}
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.{ScheduledExecutorService, TimeUnit}
@@ -188,6 +188,7 @@ trait DbStorage extends Storage { self: NamedLogging =>
 
   val profile: DbStorage.Profile
   val dbConfig: DbConfig
+  protected val logOperations: Boolean
 
   override val name: String = DbStorage.healthName
 
@@ -302,11 +303,14 @@ trait DbStorage extends Storage { self: NamedLogging =>
 
   private val defaultMaxRetries = retry.Forever
 
-  protected def run[A](operationName: String, maxRetries: Int)(
+  protected def run[A](action: String, operationName: String, maxRetries: Int)(
       body: => Future[A]
   )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[A] = {
+    if (logOperations) {
+      logger.debug(s"started $action: $operationName")
+    }
+    import Thereafter.syntax.*
     implicit val success: retry.Success[A] = retry.Success.always
-
     retry
       .Backoff(
         logger,
@@ -321,6 +325,12 @@ trait DbStorage extends Storage { self: NamedLogging =>
         ),
       )
       .apply(body, DbExceptionRetryable)
+      .thereafter { _ =>
+        if (logOperations) {
+          logger.debug(s"completed $action: $operationName")
+        }
+      }
+
   }
 
   protected[canton] def runRead[A](
@@ -412,6 +422,9 @@ object DbStorage {
 
   final case class PassiveInstanceException(reason: String)
       extends RuntimeException(s"DbStorage instance is not active: $reason")
+
+  final case class NoConnectionAvailable()
+      extends SQLTransientException("No free connection available")
 
   sealed trait Profile extends Product with Serializable with PrettyPrinting {
     def jdbc: JdbcProfile

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.admin.api.client.data
@@ -32,7 +32,7 @@ object LedgerApiUser {
     val ProtoLedgerApiUser(id, primaryParty, isDeactivated, metadataO, identityProviderId) = value
     Option
       .when(primaryParty.nonEmpty)(primaryParty)
-      .traverse(LfPartyId.fromString(_).flatMap(PartyId.fromLfParty(_)))
+      .traverse(LfPartyId.fromString(_).flatMap(PartyId.fromLfParty))
       .leftMap { err =>
         ProtoDeserializationError.ValueConversionError("primaryParty", err)
       }

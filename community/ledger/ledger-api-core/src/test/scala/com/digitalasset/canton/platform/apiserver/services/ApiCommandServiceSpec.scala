@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.apiserver.services
@@ -17,14 +17,18 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.MockMessages.*
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.services.CommandService
-import com.digitalasset.canton.ledger.api.validation.{CommandsValidator, ValidateDisclosedContracts}
+import com.digitalasset.canton.ledger.api.validation.{
+  CommandsValidator,
+  ValidateDisclosedContracts,
+  ValidateUpgradingPackageResolutions,
+}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.google.protobuf.empty.Empty
 import org.mockito.captor.ArgCaptor
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
+import org.scalatest.Assertion
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
-import org.scalatest.{Assertion, Assertions}
 
 import java.time.{Duration, Instant}
 import java.util.concurrent.atomic.AtomicInteger
@@ -192,7 +196,7 @@ object ApiCommandServiceSpec {
 
   private val commandsValidator = new CommandsValidator(
     ledgerId = LedgerId(ledgerId),
-    resolveToTemplateId = _ => Assertions.fail("should not be called"),
+    validateUpgradingPackageResolutions = ValidateUpgradingPackageResolutions.UpgradingDisabled,
     upgradingEnabled = false,
     validateDisclosedContracts = new ValidateDisclosedContracts(false),
   )

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.mediator
@@ -63,15 +63,14 @@ class MediatorStateTest
         TransactionSubviews.empty(testedProtocolVersion, hashOps),
         testedProtocolVersion,
       )
-      val commonMetadata = CommonMetadata
-        .create(hashOps, testedProtocolVersion)(
-          ConfirmationPolicy.Signatory,
-          domainId,
-          MediatorRef(mediatorId),
-          s(5417),
-          new UUID(0, 0),
-        )
-        .value
+      val commonMetadata = CommonMetadata(hashOps, testedProtocolVersion)(
+        ConfirmationPolicy.Signatory,
+        domainId,
+        MediatorRef(mediatorId),
+        s(5417),
+        new UUID(0, 0),
+      )
+
       FullInformeeTree.tryCreate(
         GenTransactionTree.tryCreate(hashOps)(
           BlindedNode(rh(11)),

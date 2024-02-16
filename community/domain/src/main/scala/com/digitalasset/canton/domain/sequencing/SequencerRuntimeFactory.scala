@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.sequencing
@@ -14,7 +14,6 @@ import com.digitalasset.canton.domain.admin.v0.EnterpriseSequencerAdministration
 import com.digitalasset.canton.domain.config.DomainConfig
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.authentication.MemberAuthenticationServiceFactory
-import com.digitalasset.canton.domain.sequencing.sequencer.traffic.SequencerRateLimitManager
 import com.digitalasset.canton.domain.sequencing.sequencer.{
   CommunityDatabaseSequencerFactory,
   CommunitySequencerConfig,
@@ -30,7 +29,6 @@ import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
-import com.digitalasset.canton.topology.store.TopologyStateForInitializationService
 import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.actor.ActorSystem
@@ -59,15 +57,12 @@ trait SequencerRuntimeFactory {
       staticDomainParameters: StaticDomainParameters,
       testingConfig: TestingConfigInternal,
       processingTimeout: ProcessingTimeout,
-      auditLogger: TracedLogger,
       agreementManager: Option[ServiceAgreementManager],
       memberAuthenticationServiceFactory: MemberAuthenticationServiceFactory,
       localParameters: CantonNodeWithSequencerParameters,
       metrics: SequencerMetrics,
       indexedStringStore: IndexedStringStore,
       futureSupervisor: FutureSupervisor,
-      topologyStateForInitializationService: Option[TopologyStateForInitializationService],
-      rateLimitManager: Option[SequencerRateLimitManager],
       topologyManagerStatusO: Option[TopologyManagerStatus],
       loggerFactory: NamedLoggerFactory,
       logger: TracedLogger,
@@ -96,15 +91,12 @@ object SequencerRuntimeFactory {
         staticDomainParameters: StaticDomainParameters,
         testingConfig: TestingConfigInternal,
         processingTimeout: ProcessingTimeout,
-        auditLogger: TracedLogger,
         agreementManager: Option[ServiceAgreementManager],
         memberAuthenticationServiceFactory: MemberAuthenticationServiceFactory,
         localParameters: CantonNodeWithSequencerParameters,
         metrics: SequencerMetrics,
         indexedStringStore: IndexedStringStore,
         futureSupervisor: FutureSupervisor,
-        topologyStateForInitializationService: Option[TopologyStateForInitializationService],
-        rateLimitManager: Option[SequencerRateLimitManager],
         topologyManagerStatusO: Option[TopologyManagerStatus],
         loggerFactory: NamedLoggerFactory,
         logger: TracedLogger,
@@ -148,8 +140,6 @@ object SequencerRuntimeFactory {
               clock,
               syncCrypto,
               futureSupervisor,
-              rateLimitManager,
-              implicitMemberRegistration = false,
             )
         )
 
@@ -166,7 +156,6 @@ object SequencerRuntimeFactory {
           topologyManagerStatusO,
           storage,
           clock,
-          auditLogger,
           SequencerAuthenticationConfig(
             agreementManager,
             domainConfig.publicApi.nonceExpirationTime,
@@ -182,7 +171,6 @@ object SequencerRuntimeFactory {
           futureSupervisor,
           agreementManager,
           memberAuthenticationServiceFactory,
-          topologyStateForInitializationService,
           loggerFactory,
         )
 

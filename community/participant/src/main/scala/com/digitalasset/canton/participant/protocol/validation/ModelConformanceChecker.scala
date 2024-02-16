@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol.validation
@@ -8,7 +8,7 @@ import cats.syntax.alternative.*
 import cats.syntax.bifunctor.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
-import com.daml.lf.data.Ref.{Identifier, PackageId}
+import com.daml.lf.data.Ref.{Identifier, PackageId, PackageName}
 import com.daml.lf.engine
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.ViewParticipantData.RootAction
@@ -73,6 +73,7 @@ class ModelConformanceChecker(
         Boolean,
         ViewHash,
         TraceContext,
+        Map[PackageName, PackageId],
     ) => EitherT[
       Future,
       DAMLeError,
@@ -244,6 +245,7 @@ class ModelConformanceChecker(
       viewParticipantData.rootAction(enableContractUpgrading)
     val rbContext = viewParticipantData.rollbackContext
     val seed = viewParticipantData.actionDescription.seedOption
+
     for {
       viewInputContracts <- validateInputContracts(view, requestCounter)
       _ <- validatePackageVettings(view, topologySnapshot)
@@ -255,6 +257,18 @@ class ModelConformanceChecker(
           resolverFromView,
           serializableContractAuthenticator,
         )
+      packageResolution: Map[PackageName, PackageId] =
+        if (enableContractUpgrading) {
+          // TODO Until https://github.com/DACH-NY/canton/issues/16681
+          viewInputContracts.values
+            .flatMap(s => {
+              val u = s.contract.contractInstance.unversioned
+              u.packageName.map(p => p -> u.template.packageId)
+            })
+            .toMap
+        } else {
+          Map.empty
+        }
       lfTxAndMetadata <- reinterpret(
         contractLookupAndVerification,
         authorizers,
@@ -265,6 +279,7 @@ class ModelConformanceChecker(
         failed,
         view.viewHash,
         traceContext,
+        packageResolution,
       )
         .leftWiden[Error]
       (lfTx, metadata, resolverFromReinterpretation) = lfTxAndMetadata
@@ -363,6 +378,7 @@ object ModelConformanceChecker {
         expectFailure: Boolean,
         viewHash: ViewHash,
         traceContext: TraceContext,
+        packageResolution: Map[PackageName, PackageId],
     ): EitherT[Future, DAMLeError, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver)] =
       damle
         .reinterpret(
@@ -373,6 +389,7 @@ object ModelConformanceChecker {
           submissionTime,
           rootSeed,
           expectFailure,
+          packageResolution,
         )(traceContext)
         .leftMap(DAMLeError(_, viewHash))
 
@@ -423,7 +440,11 @@ object ModelConformanceChecker {
         )
         .leftMap(DAMLeFailure.apply)
       expected: LfNodeCreate = LfNodeCreate(
+        // Do not validate the contract id. The validation would fail due to mismatching seed.
+        // The contract id is already validated by SerializableContractAuthenticator,
+        // as contract is an input contract of the underlying transaction.
         coid = actual.coid,
+        packageName = unversioned.packageName,
         templateId = unversioned.template,
         arg = unversioned.arg,
         agreementText = instance.unvalidatedAgreementText.v,

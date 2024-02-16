@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.admin.api.client.commands
@@ -42,7 +42,6 @@ import com.digitalasset.canton.pruning.admin
 import com.digitalasset.canton.serialization.ProtoConverter.InstantConverter
 import com.digitalasset.canton.topology.{DomainId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.traffic.MemberTrafficStatus
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DomainAlias, LedgerApplicationId, LedgerTransactionId, config}
@@ -513,8 +512,11 @@ object ParticipantAdminCommands {
 
     }
 
-    final case class ImportAcs(acsChunk: ByteString, workflowIdPrefix: String)
-        extends GrpcAdminCommand[ImportAcsRequest, ImportAcsResponse, Unit]
+    final case class ImportAcs(
+        acsChunk: ByteString,
+        workflowIdPrefix: String,
+        onboardedParties: Set[PartyId],
+    ) extends GrpcAdminCommand[ImportAcsRequest, ImportAcsResponse, Unit]
         with StreamingMachinery[ImportAcsRequest, ImportAcsResponse] {
 
       override type Svc = ParticipantRepairServiceStub
@@ -523,7 +525,13 @@ object ParticipantAdminCommands {
         ParticipantRepairServiceGrpc.stub(channel)
 
       override def createRequest(): Either[String, ImportAcsRequest] = {
-        Right(ImportAcsRequest(acsChunk, workflowIdPrefix))
+        Right(
+          ImportAcsRequest(
+            acsChunk,
+            workflowIdPrefix,
+            onboardedParties = onboardedParties.map(_.toLf).toSeq,
+          )
+        )
       }
 
       override def submitRequest(
@@ -532,7 +540,12 @@ object ParticipantAdminCommands {
       ): Future[ImportAcsResponse] = {
         stream(
           service.importAcs,
-          (bytes: Array[Byte]) => ImportAcsRequest(ByteString.copyFrom(bytes), workflowIdPrefix),
+          (bytes: Array[Byte]) =>
+            ImportAcsRequest(
+              ByteString.copyFrom(bytes),
+              workflowIdPrefix,
+              onboardedParties.map(_.toLf).toSeq,
+            ),
           request.acsSnapshot,
         )
       }
@@ -546,6 +559,7 @@ object ParticipantAdminCommands {
         domain: DomainAlias,
         contracts: Seq[LfContractId],
         ignoreAlreadyPurged: Boolean,
+        offboardedParties: Set[PartyId],
     ) extends GrpcAdminCommand[PurgeContractsRequest, PurgeContractsResponse, Unit] {
 
       override type Svc = ParticipantRepairServiceStub
@@ -559,6 +573,7 @@ object ParticipantAdminCommands {
             domain = domain.toProtoPrimitive,
             contractIds = contracts.map(_.coid),
             ignoreAlreadyPurged = ignoreAlreadyPurged,
+            offboardedParties = offboardedParties.toSeq.map(_.toLf),
           )
         )
       }
@@ -1265,43 +1280,4 @@ object ParticipantAdminCommands {
         }
     }
   }
-
-  object TrafficControl {
-    final case class GetTrafficControlState(domainId: DomainId)
-        extends GrpcAdminCommand[
-          TrafficControlStateRequest,
-          TrafficControlStateResponse,
-          MemberTrafficStatus,
-        ] {
-      override type Svc = TrafficControlServiceGrpc.TrafficControlServiceStub
-
-      override def createService(
-          channel: ManagedChannel
-      ): TrafficControlServiceGrpc.TrafficControlServiceStub =
-        TrafficControlServiceGrpc.stub(channel)
-
-      override def submitRequest(
-          service: TrafficControlServiceGrpc.TrafficControlServiceStub,
-          request: TrafficControlStateRequest,
-      ): Future[TrafficControlStateResponse] =
-        service.trafficControlState(request)
-
-      override def createRequest(): Either[String, TrafficControlStateRequest] = Right(
-        TrafficControlStateRequest(domainId.toProtoPrimitive)
-      )
-
-      override def handleResponse(
-          response: TrafficControlStateResponse
-      ): Either[String, MemberTrafficStatus] = {
-        response.trafficState
-          .map { trafficStatus =>
-            MemberTrafficStatus
-              .fromProtoV0(trafficStatus)
-              .leftMap(_.message)
-          }
-          .getOrElse(Left("No traffic state available"))
-      }
-    }
-  }
-
 }

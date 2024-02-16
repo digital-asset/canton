@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.admin.data
@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.admin.data
 import better.files.File
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.TransferCounterO
 import com.digitalasset.canton.protocol.messages.HasDomainId
 import com.digitalasset.canton.protocol.{HasSerializableContract, SerializableContract}
 import com.digitalasset.canton.topology.DomainId
@@ -27,8 +26,6 @@ private[canton] final case class SerializableContractWithDomainId(
     with HasSerializableContract {
 
   import SerializableContractWithDomainId.{Delimiter, encoder}
-
-  override def transferCounter: TransferCounterO = None
 
   def encode(protocolVersion: ProtocolVersion): String = {
     val byteStr = contract.toByteString(protocolVersion)

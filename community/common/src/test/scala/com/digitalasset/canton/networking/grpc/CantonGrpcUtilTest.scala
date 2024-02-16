@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.networking.grpc
@@ -338,7 +338,7 @@ class CantonGrpcUtilTest extends FixtureAnyWordSpec with BaseTest with HasExecut
           sendRequest().value,
           _.errorMessage shouldBe
             """Request failed for serverName.
-              |  GrpcServerError: UNKNOWN/null
+              |  GrpcServerError: UNKNOWN/Application error processing RPC
               |  Request: command""".stripMargin,
         )
 
@@ -349,7 +349,7 @@ class CantonGrpcUtilTest extends FixtureAnyWordSpec with BaseTest with HasExecut
         // We usually have the ApiRequestLogger to ensure that this case is mapped to INTERNAL.
 
         err.status.getCode shouldBe UNKNOWN
-        err.status.getDescription shouldBe null
+        err.status.getDescription shouldBe "Application error processing RPC"
         err.status.getCause shouldBe null
       }
     }

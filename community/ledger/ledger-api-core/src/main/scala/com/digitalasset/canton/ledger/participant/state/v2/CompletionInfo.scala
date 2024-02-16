@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.ledger.participant.state.v2
@@ -56,6 +56,7 @@ final case class CompletionInfo(
     param("applicationId", _.applicationId),
     paramIfDefined("deduplication period", _.optDeduplicationPeriod),
     param("submissionId", _.submissionId),
+    indicateOmittedFields,
   )
 }
 

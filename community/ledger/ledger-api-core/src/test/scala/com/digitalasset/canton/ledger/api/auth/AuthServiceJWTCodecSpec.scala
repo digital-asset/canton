@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.ledger.api.auth
@@ -12,6 +12,7 @@ import spray.json.*
 import java.time.Instant
 import scala.util.{Success, Try}
 
+@SuppressWarnings(Array("com.digitalasset.canton.TryFailed"))
 class AuthServiceJWTCodecSpec
     extends AnyWordSpec
     with Matchers

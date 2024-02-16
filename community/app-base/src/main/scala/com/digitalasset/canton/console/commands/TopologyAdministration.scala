@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.console.commands
@@ -96,7 +96,7 @@ abstract class TopologyAdministrationGroupCommon(
     /** run a topology change command synchronized and wait until the node becomes idle again */
     private[console] def run[T](timeout: Option[NonNegativeDuration])(func: => T): T = {
       val ret = func
-      ConsoleMacros.utils.synchronize_topology(timeout)(consoleEnvironment)
+      timeout.foreach(tm => ConsoleMacros.utils.synchronize_topology(Some(tm))(consoleEnvironment))
       ret
     }
   }
@@ -188,7 +188,7 @@ class TopologyAdministrationGroup(
         | in order to create the authoritative topology state on a domain (which is stored in the store named using the domain-id),
         | such that every domain member will have the same view on the topology state on a particular domain.
         |
-        |"<domain-id> - The domain store is the authorized topology state on a domain. A participant has one store for each
+        |"<domain-id>" - The domain store is the authorized topology state on a domain. A participant has one store for each
         | domain it is connected to. The domain has exactly one store with its domain-id.
         |
         |"Requested" - A domain can be configured such that when participant tries to register a topology transaction with

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.store.backend
@@ -12,6 +12,7 @@ object DbDtoToStringsForInterning {
       templateIds = dbDtos.iterator.flatMap(templateIdsOf),
       parties = dbDtos.iterator.flatMap(partiesOf),
       domainIds = dbDtos.iterator.flatMap(domainIdsOf),
+      packageNames = dbDtos.iterator.flatMap(packageNamesOf),
     )
 
   private def templateIdsOf(dbDto: DbDto): Iterator[String] =
@@ -31,6 +32,15 @@ object DbDtoToStringsForInterning {
       case dbDto: DbDto.EventAssign =>
         Iterator(dbDto.template_id)
 
+      case _ => Iterator.empty
+    }
+
+  private def packageNamesOf(dbDto: DbDto): Iterator[String] =
+    dbDto match {
+      case dbDto: DbDto.EventCreate =>
+        dbDto.package_name.iterator
+      case dbDto: DbDto.EventDivulgence =>
+        dbDto.package_name.iterator
       case _ => Iterator.empty
     }
 

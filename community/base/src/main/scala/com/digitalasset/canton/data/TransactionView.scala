@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.data
@@ -409,7 +409,7 @@ final case class TransactionView private (
 object TransactionView
     extends HasProtocolVersionedWithContextCompanion[
       TransactionView,
-      (HashOps, ConfirmationPolicy),
+      (HashOps, ConfirmationPolicy, ProtocolVersion),
     ] {
   override def name: String = "TransactionView"
   override def supportedProtoVersions: SupportedProtoVersions =
@@ -525,25 +525,26 @@ object TransactionView
     GenLens[TransactionView](_.subviews)
 
   private def fromProtoV0(
-      context: (HashOps, ConfirmationPolicy),
+      context: (HashOps, ConfirmationPolicy, ProtocolVersion),
       protoView: v0.ViewNode,
   ): ParsingResult[TransactionView] = {
-    val (hashOps, _) = context
+    val (hashOps, confirmationPolicy, expectedProtocolVersion) = context
     for {
       commonData <- MerkleTree.fromProtoOptionV0(
         protoView.viewCommonData,
-        ViewCommonData.fromByteString(context),
+        ViewCommonData.fromByteString(expectedProtocolVersion)((hashOps, confirmationPolicy)),
       )
       participantData <- MerkleTree.fromProtoOptionV0(
         protoView.viewParticipantData,
-        ViewParticipantData.fromByteString(hashOps),
+        ViewParticipantData.fromByteString(expectedProtocolVersion)(hashOps),
       )
       subViews <- TransactionSubviews.fromProtoV0(context, protoView.subviews)
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(0))
       view <- createFromRepresentativePV(hashOps)(
         commonData,
         participantData,
         subViews,
-        protocolVersionRepresentativeFor(ProtoVersion(0)),
+        rpv,
       ).leftMap(e =>
         ProtoDeserializationError.OtherError(s"Unable to create transaction views: $e")
       )
@@ -551,25 +552,26 @@ object TransactionView
   }
 
   private def fromProtoV1(
-      context: (HashOps, ConfirmationPolicy),
+      context: (HashOps, ConfirmationPolicy, ProtocolVersion),
       protoView: v1.ViewNode,
   ): ParsingResult[TransactionView] = {
-    val (hashOps, _) = context
+    val (hashOps, confirmationPolicy, expectedProtocolVersion) = context
     for {
       commonData <- MerkleTree.fromProtoOptionV1(
         protoView.viewCommonData,
-        ViewCommonData.fromByteString(context),
+        ViewCommonData.fromByteString(expectedProtocolVersion)((hashOps, confirmationPolicy)),
       )
       participantData <- MerkleTree.fromProtoOptionV1(
         protoView.viewParticipantData,
-        ViewParticipantData.fromByteString(hashOps),
+        ViewParticipantData.fromByteString(expectedProtocolVersion)(hashOps),
       )
       subViews <- TransactionSubviews.fromProtoV1(context, protoView.subviews)
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(1))
       view <- createFromRepresentativePV(hashOps)(
         commonData,
         participantData,
         subViews,
-        protocolVersionRepresentativeFor(ProtoVersion(1)),
+        rpv,
       ).leftMap(e =>
         ProtoDeserializationError.OtherError(s"Unable to create transaction views: $e")
       )

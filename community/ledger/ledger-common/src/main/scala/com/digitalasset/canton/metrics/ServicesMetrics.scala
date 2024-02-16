@@ -1,8 +1,9 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.metrics
 
+import com.daml.metrics.CacheMetrics
 import com.daml.metrics.api.MetricDoc.MetricQualification.{Debug, Saturation, Traffic}
 import com.daml.metrics.api.MetricHandle.{
   Counter,
@@ -255,4 +256,6 @@ class ServicesMetrics(
 
   object pruning extends PruningMetrics(prefix :+ "pruning", labeledMetricsFactory)
 
+  val eventsByContractKeyCache: CacheMetrics =
+    new CacheMetrics(prefix :+ "events_by_contract_key_cache", labeledMetricsFactory)
 }

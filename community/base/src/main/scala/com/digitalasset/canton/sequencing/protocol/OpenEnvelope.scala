@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.sequencing.protocol
@@ -35,10 +35,9 @@ final case class OpenEnvelope[+M <: ProtocolMessage](
     prettyOfClass(unnamedParam(_.protocolMessage), param("recipients", _.recipients))
 
   override def forRecipient(
-      member: Member,
-      groupAddresses: Set[GroupRecipient],
+      member: Member
   ): Option[OpenEnvelope[M]] = {
-    val subtrees = recipients.forMember(member, groupAddresses)
+    val subtrees = recipients.forMember(member)
     subtrees.map(s => this.copy(recipients = s))
   }
 

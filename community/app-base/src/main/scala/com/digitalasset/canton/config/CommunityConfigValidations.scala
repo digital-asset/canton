@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.config
@@ -155,10 +155,8 @@ object CommunityConfigValidations
     val CantonCommunityConfig(
       domains,
       participants,
-      participantsX,
       remoteDomains,
       remoteParticipants,
-      remoteParticipantsX,
       _,
       _,
       _,
@@ -170,8 +168,6 @@ object CommunityConfigValidations
         participants,
         remoteDomains,
         remoteParticipants,
-        participantsX,
-        remoteParticipantsX,
       )
         .exists(_.nonEmpty),
       (),
@@ -256,8 +252,6 @@ object CommunityConfigValidations
       val pv = config.init.domainParameters.protocolVersion.unwrap
       if (pv.isDeprecated && !config.init.domainParameters.dontWarnOnDeprecatedPV)
         DeprecatedProtocolVersion.WarnDomain(name, pv).discard
-
-      logger.info(s"Domain $name is using protocol version $pv")
     }
     Validated.valid(())
   }

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.apiserver.services
@@ -198,6 +198,7 @@ object ApiConversions {
       readAs = commands.readAs,
       submissionId = commands.submissionId,
       disclosedContracts = commands.disclosedContracts,
+      packageIdSelectionPreference = commands.packageIdSelectionPreference,
     )
 
   def toV1(getActiveContractsResponse: GetActiveContractsResponseV2): GetActiveContractsResponseV1 =

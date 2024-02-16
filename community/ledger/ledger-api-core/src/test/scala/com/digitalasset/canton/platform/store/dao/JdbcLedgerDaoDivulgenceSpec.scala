@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.store.dao
@@ -6,8 +6,8 @@ package com.digitalasset.canton.platform.store.dao
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.transaction.test.{TransactionBuilder, TreeTransactionBuilder}
-import com.daml.lf.transaction.{GlobalKeyWithMaintainers, Node, TransactionVersion}
-import com.daml.lf.value.Value.{ValueParty, VersionedContractInstance}
+import com.daml.lf.transaction.{GlobalKeyWithMaintainers, Node, TransactionVersion, Util, Versioned}
+import com.daml.lf.value.Value.{ContractInstance, ValueParty}
 import com.digitalasset.canton.platform.store.entries.LedgerEntry
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -29,6 +29,7 @@ private[dao] trait JdbcLedgerDaoDivulgenceSpec extends LoneElement with Inside {
         Node.Create(
           coid = contractId,
           templateId = someTemplateId,
+          packageName = Some(somePackageName),
           arg = someContractArgument,
           agreementText = someAgreement,
           signatories = Set(alice),
@@ -43,14 +44,20 @@ private[dao] trait JdbcLedgerDaoDivulgenceSpec extends LoneElement with Inside {
       val create =
         Node.Create(
           coid = contractId,
-          someTemplateId,
-          someContractArgument,
-          someAgreement,
+          templateId = someTemplateId,
+          packageName = Some(somePackageName),
+          arg = someContractArgument,
+          agreementText = someAgreement,
           signatories = Set(bob),
           stakeholders = Set(bob),
           keyOpt = Some(
             GlobalKeyWithMaintainers
-              .assertBuild(someTemplateId, someContractKey(bob, "some key"), Set(bob))
+              .assertBuild(
+                someTemplateId,
+                someContractKey(bob, "some key"),
+                Set(bob),
+                Util.sharedKey(testLanguageVersion),
+              )
           ),
           version = TransactionVersion.minVersion,
         )
@@ -60,6 +67,7 @@ private[dao] trait JdbcLedgerDaoDivulgenceSpec extends LoneElement with Inside {
       val exercise3a = Node.Exercise(
         targetCoid = create1,
         templateId = someTemplateId,
+        packageName = Some(somePackageName),
         interfaceId = None,
         choiceId = someChoiceName,
         consuming = true,
@@ -79,11 +87,17 @@ private[dao] trait JdbcLedgerDaoDivulgenceSpec extends LoneElement with Inside {
       val fetch3b = Node.Fetch(
         coid = create2Cid,
         templateId = someTemplateId,
+        packageName = Some(somePackageName),
         actingParties = Set(bob),
         signatories = Set(bob),
         stakeholders = Set(bob),
         keyOpt = Some(
-          GlobalKeyWithMaintainers.assertBuild(someTemplateId, ValueParty(bob), Set(bob))
+          GlobalKeyWithMaintainers.assertBuild(
+            someTemplateId,
+            ValueParty(bob),
+            Set(bob),
+            Util.sharedKey(testLanguageVersion),
+          )
         ),
         byKey = false,
         version = TransactionVersion.minVersion,
@@ -92,6 +106,7 @@ private[dao] trait JdbcLedgerDaoDivulgenceSpec extends LoneElement with Inside {
       val exercise3c = Node.Exercise(
         targetCoid = create2Cid,
         templateId = someTemplateId,
+        packageName = Some(somePackageName),
         interfaceId = None,
         choiceId = someChoiceName,
         consuming = true,
@@ -105,7 +120,12 @@ private[dao] trait JdbcLedgerDaoDivulgenceSpec extends LoneElement with Inside {
         exerciseResult = Some(someChoiceResult),
         keyOpt = Some(
           GlobalKeyWithMaintainers
-            .assertBuild(someTemplateId, someContractKey(bob, "some key"), Set(bob))
+            .assertBuild(
+              someTemplateId,
+              someContractKey(bob, "some key"),
+              Set(bob),
+              Util.sharedKey(testLanguageVersion),
+            )
         ),
         byKey = false,
         version = TransactionVersion.minVersion,
@@ -113,14 +133,20 @@ private[dao] trait JdbcLedgerDaoDivulgenceSpec extends LoneElement with Inside {
 
       val create3d = Node.Create(
         coid = TransactionBuilder.newCid,
-        someTemplateId,
-        someContractArgument,
-        someAgreement,
+        templateId = someTemplateId,
+        packageName = Some(somePackageName),
+        arg = someContractArgument,
+        agreementText = someAgreement,
         signatories = Set(bob),
         stakeholders = Set(alice, bob),
         keyOpt = Some(
           GlobalKeyWithMaintainers
-            .assertBuild(someTemplateId, someContractKey(bob, "some key"), Set(bob))
+            .assertBuild(
+              someTemplateId,
+              someContractKey(bob, "some key"),
+              Set(bob),
+              Util.sharedKey(testLanguageVersion),
+            )
         ),
         version = TransactionVersion.minVersion,
       )
@@ -135,12 +161,16 @@ private[dao] trait JdbcLedgerDaoDivulgenceSpec extends LoneElement with Inside {
       )
     }
 
-    val someVersionedContractInstance =
-      VersionedContractInstance(
-        version = TransactionVersion.V14,
-        template = someContractInstance.template,
-        arg = someContractInstance.arg,
+    val someVersionedContractInstance = {
+      Versioned(
+        TransactionVersion.V14,
+        ContractInstance(
+          template = someContractInstance.template,
+          packageName = None,
+          arg = someContractInstance.arg,
+        ),
       )
+    }
 
     val t1 = Timestamp.now()
     val t2 = t1.addMicros(1000)

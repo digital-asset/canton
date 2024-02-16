@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton
@@ -104,6 +104,9 @@ package object protocol {
 
   type LfTemplateId = Ref.TypeConName
   val LfTemplateId: Ref.TypeConName.type = Ref.TypeConName
+
+  type LfPackageName = Ref.PackageName
+  val LfPackageName: Ref.PackageName.type = Ref.PackageName
 
   type LfChoiceName = Ref.ChoiceName
   val LfChoiceName: Ref.ChoiceName.type = Ref.ChoiceName

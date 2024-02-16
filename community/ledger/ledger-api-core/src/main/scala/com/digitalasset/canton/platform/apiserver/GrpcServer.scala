@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.apiserver
@@ -23,7 +23,7 @@ import scala.concurrent.duration.DurationInt
 import scala.util.Failure
 import scala.util.control.NoStackTrace
 
-private[apiserver] object GrpcServer {
+object GrpcServer {
 
   // Unfortunately, we can't get the maximum inbound message size from the client, so we don't know
   // how big this should be. This seems long enough to contain useful data, but short enough that it

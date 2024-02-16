@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol.transfer
@@ -12,17 +12,12 @@ import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, Signature}
 import com.digitalasset.canton.data.ViewType.TransferViewType
-import com.digitalasset.canton.data.{
-  CantonTimestamp,
-  TransferCommonData,
-  TransferSubmitterMetadata,
-  ViewType,
-}
+import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata, ViewType}
 import com.digitalasset.canton.ledger.participant.state.v2.CompletionInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
-import com.digitalasset.canton.participant.RequestOffset
+import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.WrapsProcessorError
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
   MalformedPayload,
@@ -253,7 +248,7 @@ trait TransferProcessingSteps[
       TimestampedEvent(
         LedgerSyncEvent
           .CommandRejected(ts.toLf, completionInfo, rejection, requestType, Some(domainId.unwrap)),
-        RequestOffset(ts, rc),
+        LocalOffset(rc),
         Some(sc),
       )
     )
@@ -293,7 +288,7 @@ trait TransferProcessingSteps[
             requestType,
             Some(domainId.unwrap),
           ),
-        RequestOffset(pendingTransfer.requestId.unwrap, pendingTransfer.requestCounter),
+        LocalOffset(pendingTransfer.requestCounter),
         Some(pendingTransfer.requestSequencerCounter),
       )
     )
@@ -536,14 +531,6 @@ object TransferProcessingSteps {
     )
   }
 
-  // Disallow reassignments from a source domains that support transfer counters to a
-  // destination domain that does not support them
-  def incompatibleProtocolVersionsBetweenSourceAndDestinationDomains(
-      sourcePV: SourceProtocolVersion,
-      targetPV: TargetProtocolVersion,
-  ): Boolean =
-    (sourcePV.v >= TransferCommonData.minimumPvForTransferCounter) && (targetPV.v < TransferCommonData.minimumPvForTransferCounter)
-
   def PVSourceDestinationDomainsAreCompatible(
       sourcePV: SourceProtocolVersion,
       targetPV: TargetProtocolVersion,
@@ -555,26 +542,8 @@ object TransferProcessingSteps {
     val isSourceProtocolVersionRequired = sourcePV.v >= ProtocolVersion.v4
 
     condUnitET[FutureUnlessShutdown](
-      !(missingSourceProtocolVersionInTransferIn && isSourceProtocolVersionRequired) && !incompatibleProtocolVersionsBetweenSourceAndDestinationDomains(
-        sourcePV,
-        targetPV,
-      ),
+      !(missingSourceProtocolVersionInTransferIn && isSourceProtocolVersionRequired),
       IncompatibleProtocolVersions(contractId, sourcePV, targetPV),
     )
   }
-
-  def checkIncompatiblePV(
-      sourcePV: SourceProtocolVersion,
-      targetPV: TargetProtocolVersion,
-      contractId: LfContractId,
-  ): Either[IncompatibleProtocolVersions, Unit] =
-    Either.cond(
-      !incompatibleProtocolVersionsBetweenSourceAndDestinationDomains(sourcePV, targetPV),
-      (),
-      IncompatibleProtocolVersions(
-        contractId,
-        sourcePV,
-        targetPV,
-      ),
-    )
 }

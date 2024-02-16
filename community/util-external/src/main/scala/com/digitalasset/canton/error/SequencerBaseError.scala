@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.error
@@ -21,7 +21,7 @@ object SequencerBaseError {
   def asGrpcError(error: BaseError)(implicit
       logger: ContextualizedErrorLogger
   ): StatusRuntimeException =
-    error.code.asGrpcError(error)
+    ErrorCode.asGrpcError(error)
 
   def stringFromContext(
       error: BaseError

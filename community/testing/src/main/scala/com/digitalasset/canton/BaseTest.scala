@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton
@@ -6,6 +6,8 @@ package com.digitalasset.canton
 import cats.Functor
 import cats.data.{EitherT, OptionT}
 import cats.syntax.parallel.*
+import com.daml.lf.data.Ref.PackageName
+import com.daml.lf.transaction.TransactionVersion
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor, Threading}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
@@ -13,7 +15,7 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCryptoProvider
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLogging, SuppressingLogger}
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
-import com.digitalasset.canton.protocol.StaticDomainParameters
+import com.digitalasset.canton.protocol.{CatchUpConfig, StaticDomainParameters}
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, W3CTraceContext}
@@ -21,6 +23,7 @@ import com.digitalasset.canton.util.CheckedT
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.{
   ProtocolVersion,
+  ProtocolVersionValidation,
   ReleaseProtocolVersion,
   RepresentativeProtocolVersion,
 }
@@ -125,11 +128,6 @@ trait BaseTest
     with AppendedClues { self =>
 
   import scala.language.implicitConversions
-
-  protected val testTrafficState: Boolean = testedProtocolVersion >= ProtocolVersion.CNTestNet
-
-  protected def whenTestTrafficState[K, V](m: Map[K, V]): Map[K, V] =
-    if (testTrafficState) m else Map.empty
 
   /** Allows for invoking `myEitherT.futureValue` when `myEitherT: EitherT[Future, _, _]`.
     */
@@ -374,6 +372,7 @@ object BaseTest {
       uniqueContractKeys: Boolean = false,
       maxRequestSize: Int = StaticDomainParameters.defaultMaxRequestSize.unwrap,
       protocolVersion: ProtocolVersion = testedProtocolVersion,
+      catchUpParameters: Option[CatchUpConfig] = None,
   ): StaticDomainParameters = StaticDomainParameters.create(
     reconciliationInterval = reconciliationInterval,
     maxRatePerParticipant = NonNegativeInt.tryCreate(maxRatePerParticipant),
@@ -390,9 +389,23 @@ object BaseTest {
   lazy val testedProtocolVersion: ProtocolVersion =
     tryGetProtocolVersionFromEnv.getOrElse(ProtocolVersion.latest)
 
+  lazy val testedProtocolVersionValidation: ProtocolVersionValidation =
+    ProtocolVersionValidation(testedProtocolVersion)
+
   lazy val testedReleaseProtocolVersion: ReleaseProtocolVersion = ReleaseProtocolVersion(
     testedProtocolVersion
   )
+
+  lazy val pvPackageName: Option[PackageName] = {
+    Option.when(testedProtocolVersion >= ProtocolVersion.dev)(
+      PackageName.assertFromString("package_name")
+    )
+  }
+
+  lazy val pvTransactionVersion: TransactionVersion = {
+    if (testedProtocolVersion >= ProtocolVersion.dev) TransactionVersion.maxVersion
+    else TransactionVersion.StableVersions.max
+  }
 
   lazy val CantonExamplesPath: String = getResourcePath("CantonExamples.dar")
   lazy val CantonTestsPath: String = getResourcePath("CantonTests.dar")
@@ -402,10 +415,8 @@ object BaseTest {
   lazy val DamlScript3TestFilesPath: String = getResourcePath("DamlScript3TestFiles.dar")
   lazy val DamlTestFilesPath: String = getResourcePath("DamlTestFiles.dar")
   lazy val DamlTestLfV15FilesPath: String = getResourcePath("DamlTestLfV15Files.dar")
-  lazy val UpgradeV1: String = getResourcePath("upgrade-v1.dar")
-  lazy val UpgradeV2: String = getResourcePath("upgrade-v2.dar")
 
-  private def getResourcePath(name: String): String =
+  def getResourcePath(name: String): String =
     Option(getClass.getClassLoader.getResource(name))
       .map(_.getPath)
       .getOrElse(throw new IllegalArgumentException(s"Cannot find resource $name"))

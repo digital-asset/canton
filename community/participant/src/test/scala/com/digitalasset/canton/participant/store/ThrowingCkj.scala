@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.store
@@ -39,7 +39,7 @@ class ThrowingCkj[T <: Throwable](mk: String => T)(override implicit val ec: Exe
 
   override def doPrune(beforeAndIncluding: CantonTimestamp, lastPruning: Option[CantonTimestamp])(
       implicit traceContext: TraceContext
-  ): Future[Unit] =
+  ): Future[Int] =
     Future.failed(mk(show"doPrune($beforeAndIncluding)"))
 
   override def deleteSince(inclusive: TimeOfChange)(implicit

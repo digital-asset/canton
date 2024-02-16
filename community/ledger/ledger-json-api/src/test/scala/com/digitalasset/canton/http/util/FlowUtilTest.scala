@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.http.util
@@ -29,7 +29,7 @@ class FlowUtilTest
 
   "allowOnlyFirstInput" should "pass 1st message through and replace all others with errors" in forAll(
     nonEmptyVectorOfInts
-  ) { xs: Vector[Int] =>
+  ) { (xs: Vector[Int]) =>
     val error = "Error"
     val errorNum = Math.max(xs.size - 1, 0)
     val expected: Vector[String \/ Int] =

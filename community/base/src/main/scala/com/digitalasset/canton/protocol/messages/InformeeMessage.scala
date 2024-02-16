@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol.messages
@@ -9,7 +9,7 @@ import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.{FullInformeeTree, Informee, ViewPosition, ViewType}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
-import com.digitalasset.canton.protocol.{RequestId, RootHash, ViewHash, v0, v1, v2, v3, v4}
+import com.digitalasset.canton.protocol.{RequestId, RootHash, ViewHash, v0, v1, v2, v3}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, MediatorRef}
@@ -37,8 +37,7 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(
     with ProtocolMessageV0
     with ProtocolMessageV1
     with ProtocolMessageV2
-    with ProtocolMessageV3
-    with UnsignedProtocolMessageV4 {
+    with ProtocolMessageV3 {
 
   override val representativeProtocolVersion: RepresentativeProtocolVersion[InformeeMessage.type] =
     InformeeMessage.protocolVersionRepresentativeFor(protocolVersion)
@@ -64,7 +63,7 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(
       verdict: Verdict,
       recipientParties: Set[LfPartyId],
   ): TransactionResultMessage = {
-    if (protocolVersion >= ProtocolVersion.v5) {
+    if (protocolVersion > ProtocolVersion.v4) {
       TransactionResultMessage(
         requestId,
         verdict,
@@ -119,9 +118,6 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(
   override def toProtoEnvelopeContentV3: v3.EnvelopeContent =
     v3.EnvelopeContent(v3.EnvelopeContent.SomeEnvelopeContent.InformeeMessage(toProtoV1))
 
-  override def toProtoSomeEnvelopeContentV4: v4.EnvelopeContent.SomeEnvelopeContent =
-    v4.EnvelopeContent.SomeEnvelopeContent.InformeeMessage(toProtoV1)
-
   override def minimumThreshold(informees: Set[Informee]): NonNegativeInt =
     fullInformeeTree.confirmationPolicy.minimumThreshold(informees)
 
@@ -134,7 +130,8 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(
   @transient override protected lazy val companionObj: InformeeMessage.type = InformeeMessage
 }
 
-object InformeeMessage extends HasProtocolVersionedWithContextCompanion[InformeeMessage, HashOps] {
+object InformeeMessage
+    extends HasProtocolVersionedWithContextCompanion[InformeeMessage, (HashOps, ProtocolVersion)] {
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.InformeeMessage)(
@@ -158,7 +155,7 @@ object InformeeMessage extends HasProtocolVersionedWithContextCompanion[Informee
   // but other classes use something else (e.g. "String").
   // In the end, it is most important that the errors are informative and this can be achieved in different ways.
   private[messages] def fromProtoV0(
-      hashOps: HashOps
+      context: (HashOps, ProtocolVersion)
   )(informeeMessageP: v0.InformeeMessage): ParsingResult[InformeeMessage] = {
     // Use pattern matching to access the fields of v0.InformeeMessage,
     // because this will break if a field is forgotten.
@@ -169,14 +166,13 @@ object InformeeMessage extends HasProtocolVersionedWithContextCompanion[Informee
         "InformeeMessage.informeeTree",
         maybeFullInformeeTreeP,
       )
-      fullInformeeTree <- FullInformeeTree.fromProtoV0(hashOps, fullInformeeTreeP)
-    } yield new InformeeMessage(fullInformeeTree)(
-      protocolVersionRepresentativeFor(ProtoVersion(0)).representative
-    )
+      fullInformeeTree <- FullInformeeTree.fromProtoV0(context, fullInformeeTreeP)
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(0))
+    } yield new InformeeMessage(fullInformeeTree)(rpv.representative)
   }
 
   private[messages] def fromProtoV1(
-      hashOps: HashOps
+      context: (HashOps, ProtocolVersion)
   )(informeeMessageP: v1.InformeeMessage): ParsingResult[InformeeMessage] = {
     // Use pattern matching to access the fields of v0.InformeeMessage,
     // because this will break if a field is forgotten.
@@ -187,7 +183,7 @@ object InformeeMessage extends HasProtocolVersionedWithContextCompanion[Informee
         "InformeeMessage.informeeTree",
         maybeFullInformeeTreeP,
       )
-      fullInformeeTree <- FullInformeeTree.fromProtoV1(hashOps, fullInformeeTreeP)
+      fullInformeeTree <- FullInformeeTree.fromProtoV1(context, fullInformeeTreeP)
       protocolVersion <- ProtocolVersion.fromProtoPrimitive(protocolVersionP)
     } yield new InformeeMessage(fullInformeeTree)(protocolVersion)
   }

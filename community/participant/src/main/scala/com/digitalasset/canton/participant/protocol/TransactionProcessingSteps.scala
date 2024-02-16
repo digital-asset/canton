@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol
@@ -26,7 +26,7 @@ import com.digitalasset.canton.ledger.participant.state.v2.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.*
-import com.digitalasset.canton.participant.RequestOffset
+import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.metrics.TransactionProcessingMetrics
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
   MalformedPayload,
@@ -154,8 +154,9 @@ class TransactionProcessingSteps(
 
   override def requestKind: String = "Transaction"
 
-  override def submissionDescription(param: SubmissionParam): String =
-    s"Submitters ${param.submitterInfo.actAs.mkString(", ")}, command ${param.submitterInfo.commandId}"
+  override def submissionDescription(param: SubmissionParam): String = {
+    show"submitters ${param.submitterInfo.actAs}, command-id ${param.submitterInfo.commandId}"
+  }
 
   override def submissionIdOfPendingRequest(pendingData: PendingTransaction): Unit = ()
 
@@ -562,7 +563,7 @@ class TransactionProcessingSteps(
           bytes: ByteString
       ): Either[DefaultDeserializationError, LightTransactionViewTree] =
         LightTransactionViewTree
-          .fromByteString(pureCrypto)(bytes)
+          .fromByteString((pureCrypto, protocolVersion))(bytes)
           .leftMap(err => DefaultDeserializationError(err.message))
 
       def decryptTree(
@@ -620,24 +621,10 @@ class TransactionProcessingSteps(
             .discard[Promise[SecureRandomness]]
         }
 
-        if (
-          transactionViewEnvelope.recipients.leafRecipients.contains(MemberRecipient(participantId))
-        ) Future.successful(completeRandomnessPromise())
+        if (transactionViewEnvelope.recipients.leafRecipients.contains(Recipient(participantId)))
+          Future.successful(completeRandomnessPromise())
         else {
-          // check also if participant is addressed as part of a group address
-          val parties = transactionViewEnvelope.recipients.leafRecipients.collect {
-            case ParticipantsOfParty(party) => party
-          }
-          if (parties.nonEmpty) {
-            crypto.ips.currentSnapshotApproximation
-              .activeParticipantsOfParties(
-                parties.toSeq.map(_.toLf)
-              )
-              .map { partiesToParticipants =>
-                val participants = partiesToParticipants.values.flatten.toSet
-                if (participants.contains(participantId)) completeRandomnessPromise() else ()
-              }
-          } else Future.unit
+          Future.unit
         }
       }
 
@@ -1165,7 +1152,7 @@ class TransactionProcessingSteps(
             requestType,
             Some(domainId),
           ),
-          RequestOffset(ts, rc),
+          LocalOffset(rc),
           Some(sc),
         )
     } -> None // Transaction processing doesn't use pending submissions
@@ -1225,7 +1212,7 @@ class TransactionProcessingSteps(
       TimestampedEvent(
         LedgerSyncEvent
           .CommandRejected(requestTime.toLf, info, rejection, requestType, Some(domainId)),
-        RequestOffset(requestTime, requestCounter),
+        LocalOffset(requestCounter),
         Some(requestSequencerCounter),
       )
     )
@@ -1405,7 +1392,7 @@ class TransactionProcessingSteps(
 
       timestampedEvent = TimestampedEvent(
         acceptedEvent,
-        RequestOffset(requestTime, requestCounter),
+        LocalOffset(requestCounter),
         Some(requestSequencerCounter),
       )
     } yield CommitAndStoreContractsAndPublishEvent(

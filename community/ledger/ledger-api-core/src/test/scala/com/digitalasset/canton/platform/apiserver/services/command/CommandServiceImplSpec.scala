@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.apiserver.services.command
@@ -16,7 +16,11 @@ import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
 import com.daml.lf.data.Ref
 import com.daml.tracing.DefaultOpenTelemetry
 import com.digitalasset.canton.ledger.api.domain.LedgerId
-import com.digitalasset.canton.ledger.api.validation.{CommandsValidator, ValidateDisclosedContracts}
+import com.digitalasset.canton.ledger.api.validation.{
+  CommandsValidator,
+  ValidateDisclosedContracts,
+  ValidateUpgradingPackageResolutions,
+}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, LoggingContextWithTrace}
 import com.digitalasset.canton.platform.apiserver.services.command.CommandServiceImplSpec.*
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker.SubmissionKey
@@ -45,6 +49,7 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.Future
 import scala.concurrent.duration.DurationInt
 
+@SuppressWarnings(Array("com.digitalasset.canton.TryFailed"))
 class CommandServiceImplSpec
     extends AsyncWordSpec
     with Matchers
@@ -248,7 +253,7 @@ class CommandServiceImplSpec
   ): ResourceOwner[CommandServiceGrpc.CommandServiceStub] = {
     val commandsValidator = new CommandsValidator(
       ledgerId = ledgerId,
-      resolveToTemplateId = _ => fail("should not be called"),
+      validateUpgradingPackageResolutions = ValidateUpgradingPackageResolutions.UpgradingDisabled,
       upgradingEnabled = false,
       validateDisclosedContracts = new ValidateDisclosedContracts(false),
     )

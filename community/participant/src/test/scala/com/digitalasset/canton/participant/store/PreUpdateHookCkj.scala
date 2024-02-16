@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.store
@@ -43,7 +43,7 @@ class PreUpdateHookCkj(private val ckj: ContractKeyJournal)(
 
   override def doPrune(beforeAndIncluding: CantonTimestamp, lastPruning: Option[CantonTimestamp])(
       implicit traceContext: TraceContext
-  ): Future[Unit] =
+  ): Future[Int] =
     ckj.doPrune(beforeAndIncluding, lastPruning)
 
   override def deleteSince(inclusive: TimeOfChange)(implicit

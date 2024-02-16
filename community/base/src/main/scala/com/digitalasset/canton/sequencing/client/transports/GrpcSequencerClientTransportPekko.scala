@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.sequencing.client.transports
@@ -28,7 +28,6 @@ import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.Context.CancellableContext
 import io.grpc.stub.StreamObserver
 import io.grpc.{CallOptions, Context, ManagedChannel, Status, StatusRuntimeException}
-import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.{Keep, Source}
 
 import scala.concurrent.ExecutionContext
@@ -44,7 +43,6 @@ class GrpcSequencerClientTransportPekko(
 )(implicit
     executionContext: ExecutionContext,
     executionSequencerFactory: ExecutionSequencerFactory,
-    materializer: Materializer,
 )
 // TODO(#13789) Extend GrpcSequencerClientTransportCommon and drop support for non-Pekko subscriptions
     extends GrpcSequencerClientTransport(
@@ -138,12 +136,12 @@ class GrpcSequencerClientTransportPekko(
         if (requiresAuthentication) sequencerServiceClient.subscribeVersioned _
         else sequencerServiceClient.subscribeUnauthenticatedVersioned _
 
-      mkSubscription(subscriber)(SubscriptionResponse.fromVersionedProtoV0(_)(_))
+      mkSubscription(subscriber)(SubscriptionResponse.fromVersionedProtoV0(protocolVersion)(_)(_))
     } else {
       val subscriber =
         if (requiresAuthentication) sequencerServiceClient.subscribe _
         else sequencerServiceClient.subscribeUnauthenticated _
-      mkSubscription(subscriber)(SubscriptionResponse.fromProtoV0(_)(_))
+      mkSubscription(subscriber)(SubscriptionResponse.fromProtoV0(protocolVersion)(_)(_))
     }
 
   }

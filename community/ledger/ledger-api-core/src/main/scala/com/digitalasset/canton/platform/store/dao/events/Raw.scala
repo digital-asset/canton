@@ -1,9 +1,8 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.store.dao.events
 
-import com.daml.api.util.TimestampConversion
 import com.daml.ledger.api.v1.event.{
   ArchivedEvent as PbArchivedEvent,
   CreatedEvent as PbCreatedEvent,
@@ -13,6 +12,7 @@ import com.daml.ledger.api.v1.event.{
 import com.daml.ledger.api.v1.transaction.{TreeEvent as PbTreeEvent}
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.Time.Timestamp
+import com.digitalasset.canton.ledger.api.util.TimestampConversion
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.Identifier
 import com.digitalasset.canton.platform.participant.util.LfEngineToApi
@@ -91,6 +91,7 @@ object Raw {
         eventId: String,
         contractId: String,
         templateId: Identifier,
+        packageName: Option[String],
         createSignatories: ArraySeq[String],
         createObservers: ArraySeq[String],
         createAgreementText: Option[String],
@@ -102,6 +103,7 @@ object Raw {
         eventId = eventId,
         contractId = contractId,
         templateId = Some(LfEngineToApi.toApiIdentifier(templateId)),
+        packageName = packageName,
         contractKey = null,
         createArguments = null,
         witnessParties = eventWitnesses,
@@ -147,6 +149,7 @@ object Raw {
           eventId: String,
           contractId: String,
           templateId: Identifier,
+          packageName: Option[String],
           createArgument: Array[Byte],
           createArgumentCompression: Option[Int],
           createSignatories: ArraySeq[String],
@@ -165,6 +168,7 @@ object Raw {
             eventId = eventId,
             contractId = contractId,
             templateId = templateId,
+            packageName = packageName,
             createSignatories = createSignatories,
             createObservers = createObservers,
             createAgreementText = createAgreementText,
@@ -253,6 +257,7 @@ object Raw {
           eventId: String,
           contractId: String,
           templateId: Identifier,
+          packageName: Option[String],
           createArgument: Array[Byte],
           createArgumentCompression: Option[Int],
           createSignatories: ArraySeq[String],
@@ -271,6 +276,7 @@ object Raw {
             eventId = eventId,
             contractId = contractId,
             templateId = templateId,
+            packageName = packageName,
             createSignatories = createSignatories,
             createObservers = createObservers,
             createAgreementText = createAgreementText,

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.sequencing.sequencer
@@ -21,8 +21,6 @@ import com.digitalasset.canton.sequencing.protocol.{
   SignedContent,
   SubmissionRequest,
   SubscriptionRequest,
-  TopologyStateForInitRequest,
-  TopologyStateForInitResponse,
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
@@ -173,12 +171,5 @@ class DirectSequencerClientTransport(
     // never called - throwing an exception so tests fail if this ever changes
     throw new UnsupportedOperationException(
       "handshake is not implemented for DirectSequencerClientTransport"
-    )
-
-  override def downloadTopologyStateForInit(request: TopologyStateForInitRequest)(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, String, TopologyStateForInitResponse] =
-    throw new UnsupportedOperationException(
-      "downloadTopologyStateForInit is not implemented for DirectSequencerClientTransport"
     )
 }

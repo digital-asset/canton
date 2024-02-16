@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.sequencing.service
@@ -9,9 +9,8 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeNumeric, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeNumeric}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
@@ -21,25 +20,16 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.SequencerError
 import com.digitalasset.canton.domain.sequencing.sequencer.{Sequencer, SequencerValidations}
 import com.digitalasset.canton.domain.sequencing.service.GrpcSequencerService.*
 import com.digitalasset.canton.lifecycle.FlagCloseable
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.DomainParametersLookup.SequencerDomainParameters
 import com.digitalasset.canton.protocol.{DomainParametersLookup, v0 as protocolV0}
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.time.{Clock, TimeProof}
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.store.{
-  StoredTopologyTransactionsX,
-  TopologyStateForInitializationService,
-}
-import com.digitalasset.canton.tracing.{
-  SerializableTraceContext,
-  TraceContext,
-  TraceContextGrpc,
-  Traced,
-}
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{EitherTUtil, RateLimiter}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{ProtoDeserializationError, SequencerCounter}
@@ -51,7 +41,6 @@ import org.apache.pekko.stream.Materializer
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.{Failure, Success}
 
 /** Authenticate the current user can perform an operation on behalf of the given member */
 private[sequencing] trait AuthenticationCheck {
@@ -104,21 +93,17 @@ object GrpcSequencerService {
   def apply(
       sequencer: Sequencer,
       metrics: SequencerMetrics,
-      auditLogger: TracedLogger,
       authenticationCheck: AuthenticationCheck,
       clock: Clock,
       domainParamsLookup: DomainParametersLookup[SequencerDomainParameters],
       parameters: SequencerParameters,
       protocolVersion: ProtocolVersion,
-      topologyStateForInitializationService: Option[TopologyStateForInitializationService],
-      enableBroadcastOfUnauthenticatedMessages: Boolean,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext, materializer: Materializer): GrpcSequencerService =
     new GrpcSequencerService(
       sequencer,
       metrics,
       loggerFactory,
-      auditLogger,
       authenticationCheck,
       new SubscriptionPool[GrpcManagedSubscription[_]](
         clock,
@@ -133,9 +118,7 @@ object GrpcSequencerService {
       ),
       domainParamsLookup,
       parameters,
-      topologyStateForInitializationService,
       protocolVersion,
-      enableBroadcastOfUnauthenticatedMessages,
     )
 
   /** Abstracts the steps that are different in processing the submission requests coming from the various sendAsync endpoints
@@ -147,7 +130,11 @@ object GrpcSequencerService {
     type ValueClass
 
     /** Tries to parse the proto class to the value class, erroring if the request exceeds the given limit. */
-    def parse(requestP: ProtoClass, maxRequestSize: MaxRequestSize): ParsingResult[ValueClass]
+    def parse(
+        requestP: ProtoClass,
+        maxRequestSize: MaxRequestSize,
+        protocolVersion: ProtocolVersion,
+    ): ParsingResult[ValueClass]
 
     /** Extract the [[SubmissionRequest]] from the value class */
     def unwrap(request: ValueClass): SubmissionRequest
@@ -165,6 +152,7 @@ object GrpcSequencerService {
     override def parse(
         requestP: protocolV0.SubmissionRequest,
         maxRequestSize: MaxRequestSize,
+        protocolVersion: ProtocolVersion, // unused; because this parse implementation uses proto version 0 always
     ): ParsingResult[SubmissionRequest] =
       SubmissionRequest.fromProtoV0(
         requestP,
@@ -186,13 +174,16 @@ object GrpcSequencerService {
     override def parse(
         requestP: protocolV0.SignedContent,
         maxRequestSize: MaxRequestSize,
+        protocolVersion: ProtocolVersion,
     ): ParsingResult[SignedContent[SubmissionRequest]] =
       SignedContent
         .fromProtoV0(requestP)
         .flatMap(
           _.deserializeContent(
             SubmissionRequest
-              .fromByteString(MaxRequestSizeToDeserialize.Limit(maxRequestSize.value))
+              .fromByteString(protocolVersion)(
+                MaxRequestSizeToDeserialize.Limit(maxRequestSize.value)
+              )
           )
         )
 
@@ -211,12 +202,17 @@ object GrpcSequencerService {
     override def parse(
         requestP: v0.SendAsyncVersionedRequest,
         maxRequestSize: MaxRequestSize,
+        protocolVersion: ProtocolVersion,
     ): ParsingResult[SignedContent[SubmissionRequest]] = {
       for {
-        signedContent <- SignedContent.fromByteString(requestP.signedSubmissionRequest)
+        signedContent <- SignedContent.fromByteString(protocolVersion)(
+          requestP.signedSubmissionRequest
+        )
         signedSubmissionRequest <- signedContent.deserializeContent(
           SubmissionRequest
-            .fromByteString(MaxRequestSizeToDeserialize.Limit(maxRequestSize.value))
+            .fromByteString(protocolVersion)(
+              MaxRequestSizeToDeserialize.Limit(maxRequestSize.value)
+            )
         )
       } yield signedSubmissionRequest
     }
@@ -236,8 +232,11 @@ object GrpcSequencerService {
     override def parse(
         requestP: v0.SendAsyncUnauthenticatedVersionedRequest,
         maxRequestSize: MaxRequestSize,
+        protocolVersion: ProtocolVersion,
     ): ParsingResult[SubmissionRequest] =
-      SubmissionRequest.fromByteString(MaxRequestSizeToDeserialize.Limit(maxRequestSize.value))(
+      SubmissionRequest.fromByteString(protocolVersion)(
+        MaxRequestSizeToDeserialize.Limit(maxRequestSize.value)
+      )(
         requestP.submissionRequest
       )
 
@@ -271,16 +270,12 @@ class GrpcSequencerService(
     sequencer: Sequencer,
     metrics: SequencerMetrics,
     protected val loggerFactory: NamedLoggerFactory,
-    auditLogger: TracedLogger,
     authenticationCheck: AuthenticationCheck,
     subscriptionPool: SubscriptionPool[GrpcManagedSubscription[_]],
     directSequencerSubscriptionFactory: DirectSequencerSubscriptionFactory,
     domainParamsLookup: DomainParametersLookup[SequencerDomainParameters],
     parameters: SequencerParameters,
-    topologyStateForInitializationService: Option[TopologyStateForInitializationService],
     protocolVersion: ProtocolVersion,
-    enableBroadcastOfUnauthenticatedMessages: Boolean,
-    maxItemsInTopologyResponse: PositiveInt = PositiveInt.tryCreate(100),
 )(implicit ec: ExecutionContext)
     extends v0.SequencerServiceGrpc.SequencerService
     with NamedLogging
@@ -400,7 +395,7 @@ class GrpcSequencerService(
         maxRequestSize: MaxRequestSize
     ): Either[SendAsyncError, processing.ValueClass] = for {
       request <- processing
-        .parse(proto, maxRequestSize)
+        .parse(proto, maxRequestSize, protocolVersion)
         .leftMap(requestDeserializationError(_, maxRequestSize))
       _ <- validateSubmissionRequest(
         proto.serializedSize,
@@ -419,8 +414,14 @@ class GrpcSequencerService(
       _ <- processing.send(request, sequencer)
     } yield ()
 
-    performUnlessClosingF(functionFullName)(sendET.value.map(toSendAsyncResponse))
+    performUnlessClosingF(functionFullName)(sendET.value.map { res =>
+      res.left.foreach { err =>
+        logger.info(s"Rejecting submission request by $senderFromMetadata with ${err}")
+      }
+      toSendAsyncResponse(res)
+    })
       .onShutdown(SendAsyncResponse(error = Some(SendAsyncError.ShuttingDown())))
+
   }
 
   private def toSendAsyncResponse(result: Either[SendAsyncError, Unit]): SendAsyncResponse =
@@ -495,7 +496,7 @@ class GrpcSequencerService(
 
       _ = {
         val envelopesCount = request.batch.envelopesCount
-        auditLogger.info(
+        logger.info(
           s"'$sender' sends request with id '$messageId' of size $requestSize bytes with $envelopesCount envelopes."
         )
       }
@@ -521,7 +522,6 @@ class GrpcSequencerService(
         ),
         "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key",
       )
-      _ <- request.aggregationRule.traverse_(validateAggregationRule(sender, messageId, _))
     } yield {
       metrics.bytesProcessed.mark(requestSize.toLong)(MetricsContext.Empty)
       metrics.messagesProcessed.mark()
@@ -541,21 +541,8 @@ class GrpcSequencerService(
       envelopes: Seq[ClosedEnvelope],
   ): Boolean =
     timestampOfSigningKey.isEmpty || (sender.isAuthenticated && envelopes.forall(
-      _.recipients.allRecipients.forall {
-        case MemberRecipient(m) => m.isAuthenticated
-        case _ => true
-      }
+      _.recipients.allRecipients.forall(_.member.isAuthenticated)
     ))
-
-  private def validateAggregationRule(
-      sender: Member,
-      messageId: MessageId,
-      aggregationRule: AggregationRule,
-  )(implicit traceContext: TraceContext): Either[SendAsyncError, Unit] = {
-    SequencerValidations
-      .wellformedAggregationRule(sender, aggregationRule)
-      .leftMap(message => invalid(messageId.toProtoPrimitive, sender)(message))
-  }
 
   private def invalid(messageIdP: String, senderPO: String)(
       message: String
@@ -595,7 +582,7 @@ class GrpcSequencerService(
       val unauthRecipients = request.batch.envelopes
         .toSet[ClosedEnvelope]
         .flatMap(_.recipients.allRecipients)
-        .collect { case MemberRecipient(unauthMember: UnauthenticatedMemberId) =>
+        .collect { case Recipient(unauthMember: UnauthenticatedMemberId) =>
           unauthMember
         }
       Either.cond(
@@ -615,20 +602,15 @@ class GrpcSequencerService(
     val nonIdmRecipients = request.batch.envelopes
       .flatMap(_.recipients.allRecipients)
       .filter {
-        case MemberRecipient(_: DomainTopologyManagerId) => false
-        case TopologyBroadcastAddress.recipient if enableBroadcastOfUnauthenticatedMessages =>
-          false
+        case Recipient(_: DomainTopologyManagerId) => false
         case _ => true
       }
     Either.cond(
       nonIdmRecipients.isEmpty,
       (),
       refuse(request.messageId.toProtoPrimitive, unauthenticatedMember)(
-        if (protocolVersion >= ProtocolVersion.CNTestNet)
-          s"Unauthenticated member is trying to send message to members other than the topology broadcast address ${TopologyBroadcastAddress.recipient}"
-        else
-          s"Unauthenticated member is trying to send message to members other than the domain manager: ${nonIdmRecipients.toSet
-              .mkString(" ,")}."
+        s"Unauthenticated member is trying to send message to members other than the domain manager: ${nonIdmRecipients.toSet
+            .mkString(" ,")}."
       ),
     )
   }
@@ -875,7 +857,9 @@ class GrpcSequencerService(
     } else {
       val acknowledgeRequestE = SignedContent
         .fromProtoV0(request)
-        .flatMap(_.deserializeContent(AcknowledgeRequest.fromByteString))
+        .flatMap(
+          _.deserializeContent(AcknowledgeRequest.fromByteString(protocolVersion))
+        )
       performAcknowledge(acknowledgeRequestE.map(SignedAcknowledgeRequest))
     }
   }
@@ -920,11 +904,8 @@ class GrpcSequencerService(
       observer: ServerCallStreamObserver[T],
       toSubscriptionResponse: OrdinarySerializedEvent => T,
   )(implicit traceContext: TraceContext): GrpcManagedSubscription[T] = {
-    member match {
-      case ParticipantId(uid) =>
-        auditLogger.info(s"$uid creates subscription from $counter")
-      case _ => ()
-    }
+
+    logger.info(s"$member subscribes from counter=$counter")
     new GrpcManagedSubscription(
       handler => directSequencerSubscriptionFactory.create(counter, "direct", member, handler),
       observer,
@@ -965,44 +946,6 @@ class GrpcSequencerService(
         logger.warn(s"Authentication check failed: $message")
         permissionDenied(message)
       }
-
-  override def downloadTopologyStateForInit(
-      requestP: v0.TopologyStateForInitRequest,
-      responseObserver: StreamObserver[v0.TopologyStateForInitResponse],
-  ): Unit = {
-    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    topologyStateForInitializationService match {
-      case Some(topologyStateForInitializationService) =>
-        TopologyStateForInitRequest
-          .fromProtoV0(requestP)
-          .traverse(request =>
-            topologyStateForInitializationService
-              .initialSnapshot(request.member)
-          )
-          .onComplete {
-            case Success(Left(parsingError)) =>
-              responseObserver.onError(ProtoDeserializationFailure.Wrap(parsingError).asGrpcError)
-
-            case Success(Right(initialSnapshot)) =>
-              initialSnapshot.result.grouped(maxItemsInTopologyResponse.value).foreach { batch =>
-                val response =
-                  TopologyStateForInitResponse(Traced(StoredTopologyTransactionsX(batch)))
-                responseObserver.onNext(response.toProtoV0)
-              }
-              responseObserver.onCompleted()
-
-            case Failure(exception) =>
-              responseObserver.onError(exception)
-          }
-
-      case None =>
-        responseObserver.onError(
-          new UnsupportedOperationException(
-            "service not implemented for non-x nodes. this is a coding bug"
-          )
-        )
-    }
-  }
 
   private def invalidRequest(message: String): Status =
     Status.INVALID_ARGUMENT.withDescription(message)

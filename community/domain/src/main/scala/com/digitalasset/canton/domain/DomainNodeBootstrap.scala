@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain
@@ -24,7 +24,6 @@ import com.digitalasset.canton.domain.config.store.{
   DomainNodeSettingsStore,
   StoredDomainNodeSettings,
 }
-import com.digitalasset.canton.domain.governance.ParticipantAuditor
 import com.digitalasset.canton.domain.initialization.*
 import com.digitalasset.canton.domain.mediator.{
   CommunityMediatorRuntimeFactory,
@@ -34,7 +33,6 @@ import com.digitalasset.canton.domain.mediator.{
 import com.digitalasset.canton.domain.metrics.DomainMetrics
 import com.digitalasset.canton.domain.sequencing.authentication.MemberAuthenticationServiceFactory
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
-import com.digitalasset.canton.domain.sequencing.sequencer.traffic.SequencerRateLimitManager
 import com.digitalasset.canton.domain.sequencing.service.GrpcSequencerVersionService
 import com.digitalasset.canton.domain.sequencing.{SequencerRuntime, SequencerRuntimeFactory}
 import com.digitalasset.canton.domain.server.DynamicDomainGrpcServer
@@ -74,12 +72,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.*
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
-import com.digitalasset.canton.topology.store.{
-  DomainTopologyStore,
-  TopologyStateForInitializationService,
-  TopologyStore,
-  TopologyStoreId,
-}
+import com.digitalasset.canton.topology.store.{DomainTopologyStore, TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
@@ -471,19 +464,6 @@ class DomainNodeBootstrap(
             loggerFactory,
           )
 
-        auditLogger = ParticipantAuditor.factory(loggerFactory, config.auditLogging)
-        // add audit logging to the domain manager
-        _ = if (config.auditLogging) {
-          manager.addObserver(new DomainIdentityStateObserver {
-            override def willChangeTheParticipantState(
-                participant: ParticipantId,
-                attributes: ParticipantAttributes,
-            ): Unit = {
-              auditLogger.info(s"Updating participant $participant to $attributes")
-            }
-          })
-        }
-
         syncCrypto: DomainSyncCryptoClient = {
           ips.add(topologyClient).discard
           new SyncCryptoApiProvider(
@@ -536,15 +516,12 @@ class DomainNodeBootstrap(
             staticDomainParameters,
             arguments.testingConfig,
             parameters.processingTimeouts,
-            auditLogger,
             agreementManager,
             memberAuthFactory,
             parameters,
             arguments.metrics.sequencer,
             indexedStringStore,
             futureSupervisor,
-            Option.empty[TopologyStateForInitializationService],
-            Option.empty[SequencerRateLimitManager],
             Option.empty[TopologyManagerStatus],
             loggerFactory,
             logger,

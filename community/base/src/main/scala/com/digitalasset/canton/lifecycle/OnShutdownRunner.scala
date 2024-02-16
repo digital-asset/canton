@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.lifecycle
@@ -6,6 +6,7 @@ package com.digitalasset.canton.lifecycle
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.TryUtil.*
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong}
@@ -22,7 +23,7 @@ trait OnShutdownRunner { this: AutoCloseable =>
   protected def logger: TracedLogger
 
   /** Check whether we're closing.
-    * Susceptible to race conditions; unless you're using using this as a flag to the retry lib or you really know
+    * Susceptible to race conditions; unless you're using this as a flag to the retry lib or you really know
     * what you're doing, prefer `performUnlessClosing` and friends.
     */
   def isClosing: Boolean = closingFlag.get()
@@ -70,7 +71,7 @@ trait OnShutdownRunner { this: AutoCloseable =>
           .filterNot(_.done)
           // TODO(#8594) Time limit the shutdown tasks similar to how we time limit the readers in FlagCloseable
           .foreach(_.run())
-      }.failed.foreach(t => logger.warn(s"Task ${task.name} failed on shutdown!", t))
+      }.forFailed(t => logger.warn(s"Task ${task.name} failed on shutdown!", t))
     }
   }
 

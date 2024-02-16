@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.mediator
@@ -31,6 +31,8 @@ import scala.concurrent.{ExecutionContext, Future}
   *
   * All mediator request related events that can be processed concurrently grouped by requestId.
   */
+// TODO(#15627) we can simplify this quite a bit as we just need to push the events into the
+//    ConfirmationResponseProcessor pipelines instead of doing the complicated book keeping here.
 private[mediator] final case class MediatorEventStage(
     requests: NonEmpty[Map[RequestId, NonEmpty[Seq[Traced[MediatorEvent]]]]]
 ) {
@@ -107,7 +109,6 @@ private[mediator] class MediatorEventsProcessor(
     val identityF = identityClientEventHandler(Traced(events))
 
     val envelopesByEvent = envelopesGroupedByEvent(events)
-
     for {
       deduplicatorResult <- FutureUnlessShutdown.outcomeF(
         deduplicator.rejectDuplicates(envelopesByEvent)
@@ -221,6 +222,7 @@ private[mediator] class MediatorEventsProcessor(
               logger.error(s"Received messages with wrong domain ids: $wrongDomainIds")
             },
           )
+
           (event, domainEnvelopes)
 
         case DeliverError(_, _, _, _, SequencerErrors.TrafficCredit(_)) =>
@@ -273,8 +275,6 @@ private[mediator] class MediatorEventsProcessor(
     val responses =
       envelopes.mapFilter(ProtocolMessage.select[SignedProtocolMessage[MediatorResponse]])
 
-    val containsTopologyTransactionsX = DefaultOpenEnvelopesFilter.containsTopologyX(envelopes)
-
     val events: Seq[MediatorEvent] = if (requests.nonEmpty && responses.nonEmpty) {
       logger.error("Received both mediator requests and mediator responses.")
       Seq.empty
@@ -291,7 +291,6 @@ private[mediator] class MediatorEventsProcessor(
               timestamp,
               request.protocolMessage,
               rootHashMessages.toList,
-              batchAlsoContainsTopologyXTransaction = containsTopologyTransactionsX,
             )
           )
 

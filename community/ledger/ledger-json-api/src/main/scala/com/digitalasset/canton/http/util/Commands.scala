@@ -1,9 +1,9 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.http.util
 
-import com.daml.ledger.api.refinements.ApiTypes as lar
+import com.digitalasset.canton.ledger.api.refinements.ApiTypes as lar
 import com.daml.ledger.api.v1 as lav1
 import com.digitalasset.canton.http.{domain}
 import lav1.commands.Commands.DeduplicationPeriod

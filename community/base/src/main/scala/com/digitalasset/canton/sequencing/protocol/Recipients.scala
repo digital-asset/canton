@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.sequencing.protocol
@@ -25,10 +25,9 @@ final case class Recipients(trees: NonEmpty[Seq[RecipientsTree]]) extends Pretty
   def allPaths: NonEmpty[Seq[NonEmpty[Seq[NonEmpty[Set[Recipient]]]]]] = trees.flatMap(_.allPaths)
 
   def forMember(
-      member: Member,
-      groupRecipients: Set[GroupRecipient],
+      member: Member
   ): Option[Recipients] = {
-    val ts = trees.forgetNE.flatMap(t => t.forMember(member, groupRecipients))
+    val ts = trees.forgetNE.flatMap(t => t.forMember(member))
     val optTs = NonEmpty.from(ts)
     optTs.map(Recipients(_))
   }
@@ -59,13 +58,10 @@ final case class Recipients(trees: NonEmpty[Seq[RecipientsTree]]) extends Pretty
 object Recipients {
 
   def fromProtoV0(
-      proto: v0.Recipients,
-      supportGroupAddressing: Boolean,
+      proto: v0.Recipients
   ): ParsingResult[Recipients] = {
     for {
-      trees <- proto.recipientsTree.traverse(t =>
-        RecipientsTree.fromProtoV0(t, supportGroupAddressing)
-      )
+      trees <- proto.recipientsTree.traverse(t => RecipientsTree.fromProtoV0(t))
       recipients <- NonEmpty
         .from(trees)
         .toRight(

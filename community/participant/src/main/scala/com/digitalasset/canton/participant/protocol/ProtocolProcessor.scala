@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol
@@ -51,7 +51,6 @@ import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{AsyncResult, HandlerResult}
-import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, MediatorRef, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -170,9 +169,8 @@ abstract class ProtocolProcessor[
   )(implicit traceContext: TraceContext): EitherT[Future, NoMediatorError, MediatorRef] = {
     val fut = for {
       allMediatorGroups <- recentSnapshot.mediatorGroups()
-      allActiveMediatorGroups = allMediatorGroups.filter(_.isActive)
     } yield {
-      val mediatorCount = allActiveMediatorGroups.size
+      val mediatorCount = allMediatorGroups.size
       if (mediatorCount == 0) {
         Left(NoMediatorError(recentSnapshot.timestamp))
       } else {
@@ -190,7 +188,7 @@ abstract class ProtocolProcessor[
           // and then the modulo is negative. We must ensure that it's positive!
           if (mod < 0) mod + mediatorCount else mod
         }
-        val mediator = checked(allActiveMediatorGroups(chosenIndex))
+        val mediator = checked(allMediatorGroups(chosenIndex))
         val chosen = MediatorRef(mediator)
         logger.debug(s"Chose the mediator $chosen")
         Right(chosen)
@@ -439,10 +437,9 @@ abstract class ProtocolProcessor[
         )
         .mapK(FutureUnlessShutdown.outcomeK)
 
-      _ = logger.debug(
-        withKind(
-          s"Sending batch with id $submissionId for request ${steps.submissionDescription(submissionParam)}"
-        )
+      _ = logger.info(
+        s"Phase 1 completed: Submitting ${batch.envelopes.length} envelopes for ${steps.requestKind} request, ${steps
+            .submissionDescription(submissionParam)}"
       )
 
       // use the send callback and a promise to capture the eventual sequenced event read by the submitter
@@ -597,7 +594,9 @@ abstract class ProtocolProcessor[
         )
       )
     } else {
-      logger.info(show"Processing ${steps.requestKind.unquoted} request at $requestId.")
+      logger.info(
+        show"Phase 3: Validating ${steps.requestKind.unquoted} request=${requestId.unwrap} with ${batch.requestEnvelopes.length} envelope(s)"
+      )
 
       val rootHash = batch.rootHashMessage.rootHash
       val freshOwnTimelyTxF = ephemeral.submissionTracker.register(rootHash, requestId)
@@ -803,9 +802,11 @@ abstract class ProtocolProcessor[
               logger.error(
                 s"Mediator $declaredMediator declared in views is not the recipient $mediator of the root hash message"
               )
-              EitherT.right[steps.RequestError](
-                prepareForMediatorResultOfBadRequest(rc, sc, ts)
-              )
+              EitherT
+                .right[steps.RequestError](
+                  prepareForMediatorResultOfBadRequest(rc, sc, ts)
+                )
+                .thereafter(_ => handleRequestData.complete(None))
             }
 
             for {
@@ -1027,10 +1028,30 @@ abstract class ProtocolProcessor[
           signResponse(snapshot, response).map(_ -> recipients)
         )
       })
+      _ <-
+        if (signedResponsesTo.nonEmpty) {
+          val messageId = sequencerClient.generateMessageId
+          logger.info(
+            s"Phase 4: Sending for request=${requestId.unwrap} with msgId=${messageId} ${val (approved, rejected) =
+                signedResponsesTo
+                  .foldLeft((0, 0)) { case ((app, rej), (response, _)) =>
+                    response.message.localVerdict match {
+                      case LocalApprove() => (app + 1, rej)
+                      case _: LocalReject => (app, rej + 1)
+                    }
+                  }
+              s"approved=${approved}, rejected=${rejected}" }"
+          )
+          sendResponses(requestId, rc, signedResponsesTo, Some(messageId))
+            .leftMap(err => steps.embedRequestError(SequencerRequestError(err)))
+            .mapK(FutureUnlessShutdown.outcomeK)
+        } else {
+          logger.info(
+            s"Phase 4: Finished validation for request=${requestId.unwrap} with nothing to approve."
+          )
+          EitherT.rightT[FutureUnlessShutdown, steps.RequestError](())
+        }
 
-      _ <- sendResponses(requestId, rc, signedResponsesTo)
-        .leftMap(err => steps.embedRequestError(SequencerRequestError(err)))
-        .mapK(FutureUnlessShutdown.outcomeK)
     } yield ()
 
   }
@@ -1281,17 +1302,13 @@ abstract class ProtocolProcessor[
         snapshot <- crypto.awaitSnapshot(requestId.unwrap)
         res <- {
           pendingRequestData.mediator match {
-            case MediatorRef.Single(mediatorId) =>
+            case MediatorRef(mediatorId) =>
               resultE.merge
                 .verifySignature(
                   snapshot,
                   mediatorId,
                 )
                 .value
-            case MediatorRef.Group(MediatorsOfDomain(mediatorGroupIndex: MediatorGroupIndex)) =>
-              (for {
-                signatureCheck <- resultE.merge.verifySignature(snapshot, mediatorGroupIndex)
-              } yield signatureCheck).value
           }
         }
       } yield {
@@ -1491,8 +1508,8 @@ abstract class ProtocolProcessor[
       _ <- ifThenET(!cleanReplay) {
         for {
           _unit <- {
-            logger.info(
-              show"Finalizing ${steps.requestKind.unquoted} request at $requestId with event $eventO."
+            logger.debug(
+              show"Finalizing ${steps.requestKind.unquoted} request=${requestId.unwrap} with event $eventO."
             )
 
             // Schedule publication of the event with the associated causality update.

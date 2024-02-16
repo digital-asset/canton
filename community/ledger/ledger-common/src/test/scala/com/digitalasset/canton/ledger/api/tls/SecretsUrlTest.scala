@@ -1,9 +1,9 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.ledger.api.tls
 
-import com.daml.testing.SimpleHttpServer
+import com.daml.http.test.SimpleHttpServer
 import com.digitalasset.canton.ledger.api.tls.SecretsUrlTest.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec

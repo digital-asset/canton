@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.admin.api.client.data
@@ -11,10 +11,12 @@ import com.digitalasset.canton.config.{NonNegativeFiniteDuration, PositiveDurati
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.DynamicDomainParameters.InvalidDynamicDomainParameters
 import com.digitalasset.canton.protocol.{
+  CatchUpConfig,
   DynamicDomainParameters as DynamicDomainParametersInternal,
   StaticDomainParameters as StaticDomainParametersInternal,
   v0 as protocolV0,
   v1 as protocolV1,
+  v2 as protocolV2,
 }
 import com.digitalasset.canton.topology.admin.v0
 import com.digitalasset.canton.topology.admin.v0.DomainParametersChangeAuthorization
@@ -86,7 +88,11 @@ sealed abstract case class StaticDomainParametersV0(
     protocolVersion: ProtocolVersion,
 ) extends StaticDomainParameters {
   override private[canton] def toInternal: StaticDomainParametersInternal =
-    toInternal(maxRatePerParticipant, reconciliationInterval, MaxRequestSize(maxInboundMessageSize))
+    toInternal(
+      maxRatePerParticipant,
+      reconciliationInterval,
+      MaxRequestSize(maxInboundMessageSize),
+    )
 }
 
 sealed abstract case class StaticDomainParametersV1(
@@ -156,7 +162,7 @@ object StaticDomainParameters {
 
   def tryReadFromFile(inputFile: String): StaticDomainParameters = {
     val staticDomainParametersInternal = StaticDomainParametersInternal
-      .readFromFile(inputFile)
+      .readFromFileUnsafe(inputFile)
       .valueOr(err =>
         throw new IllegalArgumentException(
           s"Reading static domain parameters from file $inputFile failed: $err"
@@ -183,6 +189,9 @@ sealed trait DynamicDomainParameters {
   /** max request size is only available in V1 */
   def maxRequestSizeV1: Option[NonNegativeInt] = None
 
+  /** max rate per participant is only available in V1 */
+  def maxRatePerParticipantV1: Option[NonNegativeInt] = None
+
   /** Checks if it is safe to change the `ledgerTimeRecordTimeTolerance` to the given new value.
     */
   private[canton] def compatibleWithNewLedgerTimeRecordTimeTolerance(
@@ -208,6 +217,9 @@ sealed trait DynamicDomainParameters {
       topologyChangeDelay: NonNegativeFiniteDuration = topologyChangeDelay,
       ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration = ledgerTimeRecordTimeTolerance,
   ): DynamicDomainParameters
+
+  def updateMaxRate(maxRatePerParticipant: NonNegativeInt): DynamicDomainParameters
+
 }
 
 final case class DynamicDomainParametersV0(
@@ -235,6 +247,8 @@ final case class DynamicDomainParametersV0(
     topologyChangeDelay = topologyChangeDelay,
     ledgerTimeRecordTimeTolerance = ledgerTimeRecordTimeTolerance,
   )
+
+  override def updateMaxRate(nonNegativeInt: NonNegativeInt): DynamicDomainParameters = this
 
   override def toProto(
       protocolVersion: ProtocolVersion
@@ -268,6 +282,10 @@ final case class DynamicDomainParametersV1(
 ) extends DynamicDomainParameters {
 
   override def maxRequestSizeV1: Option[NonNegativeInt] = Some(maxRequestSize)
+  override def maxRatePerParticipantV1: Option[NonNegativeInt] = Some(maxRatePerParticipant)
+
+  override def updateMaxRate(maxRatePerParticipant: NonNegativeInt): DynamicDomainParameters =
+    copy(maxRatePerParticipant = maxRatePerParticipant)
 
   if (ledgerTimeRecordTimeTolerance * 2 > mediatorDeduplicationTimeout)
     throw new InvalidDynamicDomainParameters(
@@ -306,7 +324,7 @@ final case class DynamicDomainParametersV1(
     val protoV = protoVersion(protocolVersion)
     // TODO(#15152) Adapt when support for pv < 6 is dropped
     // TODO(#15153) Adapt when support for pv=6 is dropped
-    if (protoV == 1 || protoV == 2)
+    if (protoV == 1)
       Right(
         protocolV1.DynamicDomainParameters(
           participantResponseTimeout = Some(participantResponseTimeout.toProtoPrimitive),
@@ -322,7 +340,85 @@ final case class DynamicDomainParametersV1(
       ).map(DomainParametersChangeAuthorization.Parameters.ParametersV1)
     else
       Left(
-        s"Cannot convert DynamicDomainParametersV1 to Protobuf when domain protocol version is $protocolVersion"
+        s"Cannot convert DynamicDomainParameters to Protobuf when domain protocol version is $protocolVersion"
+      )
+  }
+}
+
+final case class DynamicDomainParametersV2(
+    participantResponseTimeout: NonNegativeFiniteDuration,
+    mediatorReactionTimeout: NonNegativeFiniteDuration,
+    transferExclusivityTimeout: NonNegativeFiniteDuration,
+    topologyChangeDelay: NonNegativeFiniteDuration,
+    ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration,
+    mediatorDeduplicationTimeout: NonNegativeFiniteDuration,
+    reconciliationInterval: PositiveDurationSeconds,
+    maxRatePerParticipant: NonNegativeInt,
+    maxRequestSize: NonNegativeInt,
+    catchUpConfig: Option[CatchUpConfig],
+) extends DynamicDomainParameters {
+
+  override def maxRequestSizeV1: Option[NonNegativeInt] = Some(maxRequestSize)
+  override def maxRatePerParticipantV1: Option[NonNegativeInt] = Some(maxRatePerParticipant)
+
+  override def updateMaxRate(maxRatePerParticipant: NonNegativeInt): DynamicDomainParameters =
+    copy(maxRatePerParticipant = maxRatePerParticipant)
+
+  if (ledgerTimeRecordTimeTolerance * 2 > mediatorDeduplicationTimeout)
+    throw new InvalidDynamicDomainParameters(
+      s"The ledgerTimeRecordTimeTolerance ($ledgerTimeRecordTimeTolerance) must be at most half of the " +
+        s"mediatorDeduplicationTimeout ($mediatorDeduplicationTimeout)."
+    )
+
+  // https://docs.google.com/document/d/1tpPbzv2s6bjbekVGBn6X5VZuw0oOTHek5c30CBo4UkI/edit#bookmark=id.1dzc6dxxlpca
+  override private[canton] def compatibleWithNewLedgerTimeRecordTimeTolerance(
+      newLedgerTimeRecordTimeTolerance: NonNegativeFiniteDuration
+  ): Boolean = {
+    // If false, a new request may receive the same ledger time as a previous request and the previous
+    // request may be evicted too early from the mediator's deduplication store.
+    // Thus, an attacker may assign the same UUID to both requests.
+    // See i9028 for a detailed design. (This is the second clause of item 2 of Lemma 2).
+    ledgerTimeRecordTimeTolerance + newLedgerTimeRecordTimeTolerance <= mediatorDeduplicationTimeout
+  }
+
+  override def update(
+      participantResponseTimeout: NonNegativeFiniteDuration = participantResponseTimeout,
+      mediatorReactionTimeout: NonNegativeFiniteDuration = mediatorReactionTimeout,
+      transferExclusivityTimeout: NonNegativeFiniteDuration = transferExclusivityTimeout,
+      topologyChangeDelay: NonNegativeFiniteDuration = topologyChangeDelay,
+      ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration = ledgerTimeRecordTimeTolerance,
+  ): DynamicDomainParameters = this.copy(
+    participantResponseTimeout = participantResponseTimeout,
+    mediatorReactionTimeout = mediatorReactionTimeout,
+    transferExclusivityTimeout = transferExclusivityTimeout,
+    topologyChangeDelay = topologyChangeDelay,
+    ledgerTimeRecordTimeTolerance = ledgerTimeRecordTimeTolerance,
+  )
+
+  override def toProto(
+      protocolVersion: ProtocolVersion
+  ): Either[String, DomainParametersChangeAuthorization.Parameters] = {
+    val protoV = protoVersion(protocolVersion)
+    // TODO(#15152) Adapt when support for pv < 6 is dropped
+    // TODO(#15153) Adapt when support for pv=6 is dropped
+    if (protoV == 2)
+      Right(
+        protocolV2.DynamicDomainParameters(
+          participantResponseTimeout = Some(participantResponseTimeout.toProtoPrimitive),
+          mediatorReactionTimeout = Some(mediatorReactionTimeout.toProtoPrimitive),
+          transferExclusivityTimeout = Some(transferExclusivityTimeout.toProtoPrimitive),
+          topologyChangeDelay = Some(topologyChangeDelay.toProtoPrimitive),
+          ledgerTimeRecordTimeTolerance = Some(ledgerTimeRecordTimeTolerance.toProtoPrimitive),
+          mediatorDeduplicationTimeout = Some(mediatorDeduplicationTimeout.toProtoPrimitive),
+          reconciliationInterval = Some(reconciliationInterval.toProtoPrimitive),
+          maxRatePerParticipant = maxRatePerParticipant.unwrap,
+          maxRequestSize = maxRequestSize.unwrap,
+          catchUpParameters = catchUpConfig.map(_.toProtoV2),
+        )
+      ).map(DomainParametersChangeAuthorization.Parameters.ParametersV2)
+    else
+      Left(
+        s"Cannot convert DynamicDomainParameters to Protobuf when domain protocol version is $protocolVersion"
       )
   }
 }
@@ -345,8 +441,10 @@ object DynamicDomainParameters {
       Right(domain.transformInto[DynamicDomainParametersV0])
     // TODO(#15152) Adapt when support for pv < 6 is dropped
     // TODO(#15153) Adapt when support for pv=6 is dropped
-    else if (protoVersion == 1 || protoVersion == 2)
+    else if (protoVersion == 1)
       Right(domain.transformInto[DynamicDomainParametersV1])
+    else if (protoVersion == 2)
+      Right(domain.transformInto[DynamicDomainParametersV2])
     else
       Left(ProtoDeserializationError.VersionError("DynamicDomainParameters", protoVersion))
   }

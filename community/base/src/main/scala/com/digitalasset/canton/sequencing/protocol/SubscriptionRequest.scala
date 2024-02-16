@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.sequencing.protocol
@@ -55,8 +55,9 @@ object SubscriptionRequest extends HasProtocolVersionedCompanion[SubscriptionReq
     val v0.SubscriptionRequest(memberP, counter) = subscriptionRequestP
     for {
       member <- Member.fromProtoPrimitive(memberP, "member")
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(0))
     } yield SubscriptionRequest(member, SequencerCounter(counter))(
-      protocolVersionRepresentativeFor(ProtoVersion(0))
+      rpv
     )
   }
 

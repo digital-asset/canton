@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.crypto
@@ -293,6 +293,8 @@ object CryptoKeyFormat {
     override val name: String = "Symbolic"
     override def toProtoEnum: v0.CryptoKeyFormat = v0.CryptoKeyFormat.Symbolic
   }
+
+  val allFormats: Set[CryptoKeyFormat] = Set(Tink, Der, Raw, Symbolic)
 
   def fromProtoEnum(
       field: String,

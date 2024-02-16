@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.http.json
@@ -6,7 +6,7 @@ package com.digitalasset.canton.http.json
 import org.apache.pekko.http.scaladsl.model.StatusCode
 import com.digitalasset.canton.http.domain
 import com.digitalasset.canton.http.domain.{Base64, ContractTypeId, DisclosedContract}
-import com.daml.ledger.api.refinements.ApiTypes as lar
+import com.digitalasset.canton.ledger.api.refinements.ApiTypes as lar
 import com.daml.lf.data.Ref.HexString
 import com.daml.lf.value.Value.ContractId
 import com.daml.nonempty.NonEmpty

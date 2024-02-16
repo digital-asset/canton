@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol
@@ -18,7 +18,7 @@ import com.digitalasset.canton.topology.{DomainId, MediatorRef, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
+import com.digitalasset.canton.{RequestCounter, SequencerCounter, checked}
 
 import scala.concurrent.ExecutionContext
 
@@ -105,19 +105,5 @@ class BadRootHashMessagesRequestProcessor(
               logger.warn(show"Failed to send best-effort rejection of malformed request: $error")
           )
       } yield ()
-    }
-
-  def participantIsAddressByPartyGroupAddress(
-      timestamp: CantonTimestamp,
-      parties: Seq[LfPartyId],
-      participantId: ParticipantId,
-  )(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Boolean] =
-    performUnlessClosingUSF(functionFullName) {
-      for {
-        snapshot <- crypto.awaitIpsSnapshotUS(timestamp)
-        p <- FutureUnlessShutdown.outcomeF(snapshot.activeParticipantsOfParties(parties))
-      } yield p.values.exists(_.contains(participantId))
     }
 }

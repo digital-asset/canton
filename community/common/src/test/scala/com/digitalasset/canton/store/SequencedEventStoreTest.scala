@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.store
@@ -16,14 +16,14 @@ import com.digitalasset.canton.store.SequencedEventStore.*
 import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.{BaseTest, CloseableTest, SequencerCounter, TestMetrics}
+import com.digitalasset.canton.{BaseTest, CloseableTest, SequencerCounter}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.ExecutionContext
 
 trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest {
-  this: AsyncWordSpec with BaseTest with TestMetrics =>
+  this: AsyncWordSpec with BaseTest =>
 
   val sequencerKey: Fingerprint = Fingerprint.tryCreate("sequencer")
   val crypto: Crypto =
@@ -49,10 +49,9 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest {
     SignedContent(event, sign(s"deliver signature ${event.counter}"), None, testedProtocolVersion)
 
   lazy val closedEnvelope =
-    ClosedEnvelope.tryCreate(
+    ClosedEnvelope(
       ByteString.copyFromUtf8("message"),
       RecipientsTest.testInstance,
-      Seq.empty,
       testedProtocolVersion,
     )
 

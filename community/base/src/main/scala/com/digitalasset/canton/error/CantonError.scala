@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.error
@@ -39,6 +39,9 @@ object ErrorCodeUtils {
 
 /** The main Canton error for everything that should be logged and notified
   *
+  * PREFER [[CantonError]] OVER [[BaseCantonError]] IN ORDER TO LOG THE ERROR IMMEDIATELY UPON CREATION
+  * TO ENSURE WE DON'T LOSE THE ERROR MESSAGE.
+  *
   * In many cases, we return errors that are communicated to clients as a Left. For such cases,
   * we should use CantonError to report them.
   *
@@ -77,10 +80,10 @@ trait BaseCantonError extends BaseError {
   def log()(implicit loggingContext: ErrorLoggingContext): Unit = logWithContext()(loggingContext)
 
   def asGrpcError(implicit loggingContext: ErrorLoggingContext): StatusRuntimeException =
-    code.asGrpcError(this)(loggingContext)
+    ErrorCode.asGrpcError(this)(loggingContext)
 
   def asGoogleGrpcStatus(implicit loggingContext: ErrorLoggingContext): com.google.rpc.Status =
-    code.asGrpcStatus(this)(loggingContext)
+    ErrorCode.asGrpcStatus(this)(loggingContext)
 
 }
 
@@ -137,7 +140,7 @@ trait CantonError extends BaseCantonError {
   def log(): Unit = logWithContext()(loggingContext)
 
   def asGrpcError: StatusRuntimeException =
-    code.asGrpcError(this)(loggingContext)
+    ErrorCode.asGrpcError(this)(loggingContext)
 
   // automatically log the error on generation
   if (logOnCreation) {

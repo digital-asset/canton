@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.data
@@ -98,7 +98,7 @@ final case class FullInformeeTree private (tree: GenTransactionTree)(
 }
 
 object FullInformeeTree
-    extends HasProtocolVersionedWithContextCompanion[FullInformeeTree, HashOps] {
+    extends HasProtocolVersionedWithContextAndValidationCompanion[FullInformeeTree, HashOps] {
   override val name: String = "FullInformeeTree"
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
@@ -143,28 +143,30 @@ object FullInformeeTree
     )
 
   def fromProtoV0(
-      hashOps: HashOps,
+      context: (HashOps, ProtocolVersion),
       protoInformeeTree: v0.FullInformeeTree,
   ): ParsingResult[FullInformeeTree] =
     for {
       protoTree <- ProtoConverter.required("tree", protoInformeeTree.tree)
-      tree <- GenTransactionTree.fromProtoV0(hashOps, protoTree)
+      tree <- GenTransactionTree.fromProtoV0(context, protoTree)
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(0))
       fullInformeeTree <- FullInformeeTree
-        .create(tree, protocolVersionRepresentativeFor(ProtoVersion(0)))
+        .create(tree, rpv)
         .leftMap(e =>
           ProtoDeserializationError.OtherError(s"Unable to create full informee tree: $e")
         )
     } yield fullInformeeTree
 
   def fromProtoV1(
-      hashOps: HashOps,
+      context: (HashOps, ProtocolVersion),
       protoInformeeTree: v1.FullInformeeTree,
   ): ParsingResult[FullInformeeTree] =
     for {
       protoTree <- ProtoConverter.required("tree", protoInformeeTree.tree)
-      tree <- GenTransactionTree.fromProtoV1(hashOps, protoTree)
+      tree <- GenTransactionTree.fromProtoV1(context, protoTree)
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(1))
       fullInformeeTree <- FullInformeeTree
-        .create(tree, protocolVersionRepresentativeFor(ProtoVersion(1)))
+        .create(tree, rpv)
         .leftMap(e =>
           ProtoDeserializationError.OtherError(s"Unable to create full informee tree: $e")
         )

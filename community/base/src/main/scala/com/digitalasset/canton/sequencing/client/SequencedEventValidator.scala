@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.sequencing.client
@@ -378,7 +378,7 @@ object SequencedEventValidator extends HasLoggerName {
       if (signingTimestamp <= approximateSnapshotTime) {
         EitherT(snapshotF.flatMap(validateWithSnapshot))
       } else {
-        loggingContext.info(
+        loggingContext.debug(
           s"Validating event at $sequencingTimestamp optimistically with snapshot taken at $approximateSnapshotTime"
         )
         EitherT(validateWithSnapshot(approximateSnapshot))

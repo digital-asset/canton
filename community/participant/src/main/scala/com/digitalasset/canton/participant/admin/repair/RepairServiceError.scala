@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.admin.repair
@@ -147,6 +147,23 @@ object RepairServiceError extends RepairServiceErrorGroup {
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
     final case class Error(domain: DomainAlias, reason: String)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(cause = reason)
+        with RepairServiceError
+  }
+
+  @Explanation(
+    "Import Acs has failed."
+  )
+  @Resolution(
+    "Retry after operator intervention."
+  )
+  object ImportAcsError
+      extends ErrorCode(
+        id = "IMPORT_ACS_ERROR",
+        ErrorCategory.InvalidIndependentOfSystemState,
+      ) {
+    final case class Error(reason: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(cause = reason)
         with RepairServiceError

@@ -1,13 +1,10 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol.messages
 
 import cats.Functor
-import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.crypto.HashOps
-import com.digitalasset.canton.protocol.v0
-import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.version.*
 import com.google.common.annotations.VisibleForTesting
@@ -32,11 +29,6 @@ case class TypedSignedProtocolMessageContent[+M <: SignedProtocolMessageContent]
   override protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
 
-  private def toProtoV0: v0.TypedSignedProtocolMessageContent =
-    v0.TypedSignedProtocolMessageContent(
-      someSignedProtocolMessage = content.toProtoTypedSomeSignedProtocolMessage
-    )
-
   @VisibleForTesting
   def copy[MM <: SignedProtocolMessageContent](
       content: MM = this.content
@@ -59,20 +51,14 @@ case class TypedSignedProtocolMessageContent[+M <: SignedProtocolMessageContent]
 }
 
 object TypedSignedProtocolMessageContent
-    extends HasMemoizedProtocolVersionedWithContextCompanion[
+    extends HasMemoizedProtocolVersionedWithContextAndValidationCompanion[
       TypedSignedProtocolMessageContent[SignedProtocolMessageContent],
       HashOps,
     ] {
   override def name: String = "TypedSignedProtocolMessageContent"
 
   override def supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.v3),
-    ProtoVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.CNTestNet
-    )(v0.TypedSignedProtocolMessageContent)(
-      supportedProtoVersionMemoized(_)(fromProtoV0),
-      _.toProtoV0.toByteString,
-    ),
+    ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.v3)
   )
 
   def apply[M <: SignedProtocolMessageContent](
@@ -83,36 +69,4 @@ object TypedSignedProtocolMessageContent
       protocolVersionRepresentativeFor(protocolVersion),
       None,
     )
-
-  def apply[M <: SignedProtocolMessageContent](
-      content: M,
-      protoVersion: ProtoVersion,
-  ): TypedSignedProtocolMessageContent[M] =
-    TypedSignedProtocolMessageContent(content)(protocolVersionRepresentativeFor(protoVersion), None)
-
-  private def fromProtoV0(hashOps: HashOps, proto: v0.TypedSignedProtocolMessageContent)(
-      bytes: ByteString
-  ): ParsingResult[TypedSignedProtocolMessageContent[SignedProtocolMessageContent]] = {
-    import v0.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage as Sm
-    val v0.TypedSignedProtocolMessageContent(messageBytes) = proto
-    for {
-      message <- (messageBytes match {
-        case Sm.MediatorResponse(mediatorResponseBytes) =>
-          MediatorResponse.fromByteString(mediatorResponseBytes)
-        case Sm.TransactionResult(transactionResultMessageBytes) =>
-          TransactionResultMessage.fromByteString(hashOps)(transactionResultMessageBytes)
-        case Sm.TransferResult(transferResultBytes) =>
-          TransferResult.fromByteString(transferResultBytes)
-        case Sm.AcsCommitment(acsCommitmentBytes) =>
-          AcsCommitment.fromByteString(acsCommitmentBytes)
-        case Sm.MalformedMediatorRequestResult(malformedMediatorRequestResultBytes) =>
-          MalformedMediatorRequestResult.fromByteString(malformedMediatorRequestResultBytes)
-        case Sm.Empty =>
-          Left(OtherError("Deserialization of a SignedMessage failed due to a missing message"))
-      }): ParsingResult[SignedProtocolMessageContent]
-    } yield TypedSignedProtocolMessageContent(message)(
-      protocolVersionRepresentativeFor(ProtoVersion(0)),
-      Some(bytes),
-    )
-  }
 }

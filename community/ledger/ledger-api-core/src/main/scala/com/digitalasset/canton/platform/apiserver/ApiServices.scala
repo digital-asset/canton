@@ -1,10 +1,8 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.apiserver
 
-import com.daml.api.util.TimeProvider
-import com.daml.error.ContextualizedErrorLogger
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.lf.data.Ref
@@ -16,13 +14,8 @@ import com.digitalasset.canton.ledger.api.auth.services.*
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.grpc.GrpcHealthService
 import com.digitalasset.canton.ledger.api.health.HealthChecks
-import com.digitalasset.canton.ledger.api.validation.{
-  CommandsValidator,
-  PartyNameChecker,
-  PartyValidator,
-  TransactionFilterValidator,
-  TransactionServiceRequestValidator,
-}
+import com.digitalasset.canton.ledger.api.util.TimeProvider
+import com.digitalasset.canton.ledger.api.validation.*
 import com.digitalasset.canton.ledger.participant.state.index.v2.*
 import com.digitalasset.canton.ledger.participant.state.v2.ReadService
 import com.digitalasset.canton.ledger.participant.state.v2 as state
@@ -48,16 +41,16 @@ import com.digitalasset.canton.platform.apiserver.services.transaction.{
   TransactionServiceImpl,
 }
 import com.digitalasset.canton.platform.config.{CommandServiceConfig, UserManagementServiceConfig}
+import com.digitalasset.canton.platform.localstore.PackageMetadataStore
 import com.digitalasset.canton.platform.localstore.api.{
   IdentityProviderConfigStore,
   PartyRecordStore,
   UserManagementStore,
 }
 import com.digitalasset.canton.platform.services.time.TimeProviderType
-import com.digitalasset.canton.platform.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.tracing.TraceContext
+import io.grpc.BindableService
 import io.grpc.protobuf.services.ProtoReflectionService
-import io.grpc.{BindableService, StatusRuntimeException}
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 
@@ -88,6 +81,7 @@ object ApiServices {
       readService: ReadService,
       indexService: IndexService,
       userManagementStore: UserManagementStore,
+      packageMetadataStore: PackageMetadataStore,
       identityProviderConfigStore: IdentityProviderConfigStore,
       partyRecordStore: PartyRecordStore,
       authorizer: Authorizer,
@@ -173,11 +167,7 @@ object ApiServices {
         executionContext: ExecutionContext
     ): List[BindableService] = {
 
-      val transactionFilterValidator =
-        new TransactionFilterValidator(
-          resolveTemplateIds = resolveTemplateNameTo[Set[Ref.Identifier]](_.all)(indexService),
-          upgradingEnabled = upgradingEnabled,
-        )
+      val transactionFilterValidator = new TransactionFilterValidator(upgradingEnabled)
       val transactionServiceRequestValidator =
         new TransactionServiceRequestValidator(
           ledgerId = ledgerId,
@@ -407,9 +397,11 @@ object ApiServices {
           metrics,
         )
 
+        val validateUpgradingPackageResolutions =
+          ValidateUpgradingPackageResolutions(packageMetadataStore)
         val commandsValidator = CommandsValidator(
           ledgerId = ledgerId,
-          resolveToTemplateId = resolveTemplateNameTo(_.primary)(indexService),
+          validateUpgradingPackageResolutions = validateUpgradingPackageResolutions,
           upgradingEnabled = upgradingEnabled,
           enableExplicitDisclosure = enableExplicitDisclosure,
         )
@@ -539,13 +531,4 @@ object ApiServices {
       }
     }
   }
-
-  private def resolveTemplateNameTo[O](to: PackageMetadata.TemplatesForQualifiedName => O)(
-      indexService: IndexService
-  ): Ref.QualifiedName => ContextualizedErrorLogger => Either[StatusRuntimeException, O] =
-    (templateQualifiedName: Ref.QualifiedName) =>
-      (contextualizedErrorLogger: ContextualizedErrorLogger) =>
-        indexService
-          .resolveToTemplateIds(templateQualifiedName)(contextualizedErrorLogger)
-          .map(to)
 }

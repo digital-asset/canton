@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.topology.client
@@ -77,9 +77,6 @@ class PartyTopologySnapshotClientTest extends AsyncWordSpec with BaseTest {
           parties: Set[LfPartyId]
       ): Future[PartyTopologySnapshotClient.AuthorityOfResponse] =
         Future.successful(PartyTopologySnapshotClient.AuthorityOfResponse(Map.empty))
-
-      override def partiesWithGroupAddressing(parties: Seq[LfPartyId]): Future[Set[LfPartyId]] =
-        ???
 
       override def consortiumThresholds(
           parties: Set[LfPartyId]

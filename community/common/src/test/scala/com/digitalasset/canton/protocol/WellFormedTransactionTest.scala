@@ -1,9 +1,10 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol
 
 import com.daml.lf.data.ImmArray
+import com.daml.lf.transaction.Util
 import com.daml.lf.value.Value
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.{State, WithSuffixes, WithoutSuffixes}
@@ -230,6 +231,7 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
           LfNodeExercises(
             targetCoid = suffixedId(2, -1),
             templateId = templateId,
+            packageName = None,
             interfaceId = None,
             choiceId = LfChoiceName.assertFromString("choice"),
             consuming = false,
@@ -272,7 +274,12 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
             signatories = Set(signatory),
             key = Some(
               LfGlobalKeyWithMaintainers
-                .assertBuild(templateId, contractInst.unversioned.arg, Set.empty)
+                .assertBuild(
+                  templateId,
+                  contractInst.unversioned.arg,
+                  Set.empty,
+                  Util.sharedKey(ExampleTransactionFactory.languageVersion),
+                )
             ),
           ),
           ExampleTransactionFactory.exerciseNode(
@@ -284,6 +291,7 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
                 templateId,
                 contractInst.unversioned.arg,
                 Set.empty,
+                Util.sharedKey(ExampleTransactionFactory.languageVersion),
               )
             ),
           ),

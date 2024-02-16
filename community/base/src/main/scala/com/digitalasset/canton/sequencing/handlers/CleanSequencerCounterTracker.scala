@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.sequencing.handlers
@@ -17,6 +17,7 @@ import com.digitalasset.canton.sequencing.{HandlerResult, PossiblyIgnoredApplica
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
 import com.digitalasset.canton.store.{CursorPrehead, SequencerCounterTrackerStore}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.TryUtil.*
 
 import java.util.concurrent.atomic.AtomicLong
 import scala.concurrent.{ExecutionContext, Future}
@@ -104,7 +105,7 @@ class CleanSequencerCounterTracker(
         tracedPrehead.withTraceContext { implicit traceContext => prehead =>
           store.advancePreheadSequencerCounterTo(prehead).map { _ =>
             // Signal the new prehead and make sure that the update handler cannot interfere by throwing exceptions
-            Try(onUpdate(tracedPrehead)).failed.foreach { ex =>
+            Try(onUpdate(tracedPrehead)).forFailed { ex =>
               logger.error("onUpdate handler failed", ex)
             }
           }

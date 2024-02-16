@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.sequencing.sequencer
@@ -157,7 +157,6 @@ class SequencerWriterTest extends FixtureAsyncWordSpec with BaseTest {
         Batch.empty(testedProtocolVersion),
         maxSequencingTime = CantonTimestamp.MaxValue,
         timestampOfSigningKey = None,
-        aggregationRule = None,
         testedProtocolVersion,
       )
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.sequencing.authentication
@@ -16,7 +16,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.*
 import com.digitalasset.canton.sequencing.authentication.grpc.AuthenticationTokenWithExpiry
@@ -25,7 +25,6 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.processing.*
-import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
@@ -61,7 +60,6 @@ class MemberAuthenticationService(
     isTopologyInitialized: Future[Unit],
     override val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
-    auditLogger: TracedLogger,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
     with FlagCloseable {
@@ -149,8 +147,8 @@ class MemberAuthenticationService(
       storedToken = StoredAuthenticationToken(member, tokenExpiry, token)
       _ <- handlePassiveInstanceException(tokenCache.saveToken(storedToken))
     } yield {
-      auditLogger.info(
-        s"$member authenticated new token based on agreement $agreementId on $domain"
+      logger.info(
+        s"$member authenticated new token with expiry $tokenExpiry"
       )
       AuthenticationTokenWithExpiry(token, tokenExpiry)
     }
@@ -258,7 +256,6 @@ class MemberAuthenticationServiceOld(
     isTopologyInitialized: Future[Unit],
     timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
-    auditLogger: TracedLogger,
 )(implicit ec: ExecutionContext)
     extends MemberAuthenticationService(
       domain,
@@ -272,7 +269,6 @@ class MemberAuthenticationServiceOld(
       isTopologyInitialized,
       timeouts,
       loggerFactory,
-      auditLogger,
     )
     with TopologyTransactionProcessingSubscriber {
 
@@ -309,74 +305,6 @@ class MemberAuthenticationServiceOld(
   override def onClosed(): Unit = Lifecycle.close(store)(logger)
 }
 
-class MemberAuthenticationServiceX(
-    domain: DomainId,
-    cryptoApi: DomainSyncCryptoClient,
-    store: MemberAuthenticationStore,
-    agreementManager: Option[ServiceAgreementManager],
-    clock: Clock,
-    nonceExpirationTime: Duration,
-    tokenExpirationTime: Duration,
-    invalidateMemberCallback: Traced[Member] => Unit,
-    isTopologyInitialized: Future[Unit],
-    timeouts: ProcessingTimeout,
-    loggerFactory: NamedLoggerFactory,
-    auditLogger: TracedLogger,
-)(implicit ec: ExecutionContext)
-    extends MemberAuthenticationService(
-      domain,
-      cryptoApi,
-      store,
-      agreementManager,
-      clock,
-      nonceExpirationTime = nonceExpirationTime,
-      tokenExpirationTime = tokenExpirationTime,
-      invalidateMemberCallback,
-      isTopologyInitialized,
-      timeouts,
-      loggerFactory,
-      auditLogger,
-    )
-    with TopologyTransactionProcessingSubscriberX {
-
-  /** domain topology client subscriber used to remove member tokens if they get disabled */
-  override def observed(
-      sequencerTimestamp: SequencedTime,
-      effectiveTimestamp: EffectiveTime,
-      sc: SequencerCounter,
-      transactions: Seq[GenericSignedTopologyTransactionX],
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    FutureUnlessShutdown.lift(performUnlessClosing(functionFullName) {
-      transactions.flatMap(_.transaction.selectMapping[DomainTrustCertificateX]).foreach {
-        case TopologyTransactionX(
-              TopologyChangeOpX.Remove,
-              _serial,
-              cert: DomainTrustCertificateX,
-            ) =>
-          val participant = cert.participantId
-          def invalidateAndExpire: Future[Unit] = {
-            isParticipantActive(participant).flatMap { isActive =>
-              if (!isActive) {
-                logger.debug(s"Expiring all auth-tokens of ${participant}")
-                tokenCache
-                  // first, remove all auth tokens
-                  .invalidateAllTokensForMember(participant)
-                  // second, ensure the sequencer client gets disconnected
-                  .map(_ => invalidateMemberCallback(Traced(participant)))
-              } else Future.unit
-            }
-          }
-          FutureUtil.doNotAwait(
-            invalidateAndExpire,
-            s"Invalidating participant authentication for $participant",
-          )
-        case _ =>
-      }
-    })
-
-  override def onClosed(): Unit = Lifecycle.close(store)(logger)
-}
-
 trait MemberAuthenticationServiceFactory {
   def createAndSubscribe(
       syncCrypto: DomainSyncCryptoClient,
@@ -384,7 +312,6 @@ trait MemberAuthenticationServiceFactory {
       agreementManager: Option[ServiceAgreementManager],
       invalidateMemberCallback: Traced[Member] => Unit,
       isTopologyInitialized: Future[Unit],
-      auditLogger: TracedLogger,
   )(implicit ec: ExecutionContext): MemberAuthenticationService
 }
 
@@ -405,7 +332,6 @@ object MemberAuthenticationServiceFactory {
           agreementManager: Option[ServiceAgreementManager],
           invalidateMemberCallback: Traced[Member] => Unit,
           isTopologyInitialized: Future[Unit],
-          auditLogger: TracedLogger,
       )(implicit ec: ExecutionContext): MemberAuthenticationService = {
         val service = new MemberAuthenticationServiceOld(
           domain,
@@ -419,48 +345,9 @@ object MemberAuthenticationServiceFactory {
           isTopologyInitialized,
           timeouts,
           loggerFactory,
-          auditLogger,
         )
         topologyTransactionProcessor.subscribe(service)
         service
       }
     }
-
-  def forX(
-      domain: DomainId,
-      clock: Clock,
-      nonceExpirationTime: Duration,
-      tokenExpirationTime: Duration,
-      timeouts: ProcessingTimeout,
-      loggerFactory: NamedLoggerFactory,
-      topologyTransactionProcessorX: TopologyTransactionProcessorX,
-  ): MemberAuthenticationServiceFactory =
-    new MemberAuthenticationServiceFactory {
-      override def createAndSubscribe(
-          syncCrypto: DomainSyncCryptoClient,
-          store: MemberAuthenticationStore,
-          agreementManager: Option[ServiceAgreementManager],
-          invalidateMemberCallback: Traced[Member] => Unit,
-          isTopologyInitialized: Future[Unit],
-          auditLogger: TracedLogger,
-      )(implicit ec: ExecutionContext): MemberAuthenticationService = {
-        val service = new MemberAuthenticationServiceX(
-          domain,
-          syncCrypto,
-          store,
-          agreementManager,
-          clock,
-          nonceExpirationTime = nonceExpirationTime,
-          tokenExpirationTime = tokenExpirationTime,
-          invalidateMemberCallback,
-          isTopologyInitialized,
-          timeouts,
-          loggerFactory,
-          auditLogger,
-        )
-        topologyTransactionProcessorX.subscribe(service)
-        service
-      }
-    }
-
 }

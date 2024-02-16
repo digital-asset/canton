@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol
@@ -24,7 +24,7 @@ import com.digitalasset.canton.sequencing.client.{
   SendCallback,
   SequencerClient,
 }
-import com.digitalasset.canton.sequencing.protocol.{Batch, Recipients}
+import com.digitalasset.canton.sequencing.protocol.{Batch, MessageId, Recipients}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
@@ -86,6 +86,8 @@ abstract class AbstractMessageProcessor(
       requestId: RequestId,
       rc: RequestCounter,
       messages: Seq[(ProtocolMessage, Recipients)],
+      messageId: Option[MessageId] =
+        None, // use client.messageId. passed in here such that we can log it before sending
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] = {
     if (messages.isEmpty) EitherT.pure[Future, SendAsyncClientError](())
     else {
@@ -101,6 +103,7 @@ abstract class AbstractMessageProcessor(
         _ <- sequencerClient.sendAsync(
           Batch.of(protocolVersion, messages: _*),
           maxSequencingTime = maxSequencingTime,
+          messageId = messageId.getOrElse(MessageId.randomMessageId()),
           callback = SendCallback.log(s"Response message for request [$rc]", logger),
         )
       } yield ()

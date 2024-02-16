@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.config
@@ -54,7 +54,6 @@ trait LocalNodeConfig extends NodeConfig {
   def crypto: CryptoConfig
   def sequencerClient: SequencerClientConfig
   def monitoring: NodeMonitoringConfig
-  def topologyX: TopologyXConfig
 
   /** Various cache sizes */
   // TODO(#15221) move into parameters

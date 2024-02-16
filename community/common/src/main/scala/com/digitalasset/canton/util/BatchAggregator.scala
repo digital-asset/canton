@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.util
@@ -13,6 +13,7 @@ import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.util.TryUtil.ForFailedOps
 
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
@@ -175,8 +176,7 @@ class BatchAggregatorImpl[A, B](
     Future.fromTry(Try(processor.executeSingle(item))).flatten.thereafter { result =>
       inFlight.decrementAndGet().discard[Int]
       maybeRunQueuedQueries()
-
-      result.failed.foreach {
+      result.forFailed {
         implicit val prettyItem: Pretty[A] = processor.prettyItem
         processor.logger.error(show"Failed to process ${processor.kind.unquoted} $item", _)
       }

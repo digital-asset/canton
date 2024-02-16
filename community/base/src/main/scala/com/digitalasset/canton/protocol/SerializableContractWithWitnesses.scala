@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol
@@ -12,5 +12,5 @@ import com.digitalasset.canton.topology.PartyId
  */
 object SerializableContractWithWitnesses {
   def apply(contract: SerializableContract, witnesses: Set[PartyId]): RepairContract =
-    RepairContract(contract, witnesses, None)
+    RepairContract(contract, witnesses)
 }

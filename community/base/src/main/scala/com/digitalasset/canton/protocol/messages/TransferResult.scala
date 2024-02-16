@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol.messages
@@ -58,12 +58,6 @@ case class TransferResult[+Domain <: TransferDomainId] private (
   override protected[messages] def toProtoSomeSignedProtocolMessage
       : v0.SignedProtocolMessage.SomeSignedProtocolMessage.TransferResult =
     v0.SignedProtocolMessage.SomeSignedProtocolMessage.TransferResult(getCryptographicEvidence)
-
-  override protected[messages] def toProtoTypedSomeSignedProtocolMessage
-      : v0.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage =
-    v0.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage.TransferResult(
-      getCryptographicEvidence
-    )
 
   @transient override protected lazy val companionObj: TransferResult.type = TransferResult
 
@@ -220,8 +214,9 @@ object TransferResult
           verdict <- ProtoConverter
             .required("TransferResult.verdict", maybeVerdictP)
             .flatMap(Verdict.fromProtoV0)
+          rpv <- protocolVersionRepresentativeFor(ProtoVersion(0))
         } yield TransferResult(requestId, informees.toSet, domain, verdict)(
-          protocolVersionRepresentativeFor(ProtoVersion(0)),
+          rpv,
           Some(bytes),
         )
     }
@@ -250,8 +245,9 @@ object TransferResult
       verdict <- ProtoConverter
         .required("TransferResult.verdict", verdictPO)
         .flatMap(Verdict.fromProtoV1)
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(1))
     } yield TransferResult(requestId, informees.toSet, domain, verdict)(
-      protocolVersionRepresentativeFor(ProtoVersion(1)),
+      rpv,
       Some(bytes),
     )
   }
@@ -280,8 +276,9 @@ object TransferResult
       verdict <- ProtoConverter
         .required("TransferResult.verdict", verdictPO)
         .flatMap(Verdict.fromProtoV2)
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(2))
     } yield TransferResult(requestId, informees.toSet, domain, verdict)(
-      protocolVersionRepresentativeFor(ProtoVersion(2)),
+      rpv,
       Some(bytes),
     )
   }
@@ -310,8 +307,9 @@ object TransferResult
       verdict <- ProtoConverter
         .required("TransferResult.verdict", verdictPO)
         .flatMap(Verdict.fromProtoV3)
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(3))
     } yield TransferResult(requestId, informees.toSet, domain, verdict)(
-      protocolVersionRepresentativeFor(ProtoVersion(3)),
+      rpv,
       Some(bytes),
     )
   }

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.logging.pretty
@@ -7,7 +7,8 @@ import cats.Show.Shown
 import com.daml.ledger.api.v1.completion.Completion
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset.LedgerBoundary
-import com.daml.ledger.client.binding.Primitive
+import com.daml.ledger.javaapi.data.Party
+import com.daml.ledger.javaapi.data.codegen.ContractId
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.{DottedName, PackageId, QualifiedName}
 import com.daml.lf.transaction.ContractStateMachine.ActiveLedgerState
@@ -38,6 +39,7 @@ import io.grpc.health.v1.HealthCheckResponse.ServingStatus
 import pprint.Tree
 import slick.util.{DumpInfo, Dumpable}
 
+import java.lang.Long as JLong
 import java.net.URI
 import java.time.{Duration as JDuration, Instant}
 import java.util.UUID
@@ -63,6 +65,8 @@ trait PrettyInstances {
   implicit def prettyInt: Pretty[Int] = prettyOfString(_.toString)
 
   implicit def prettyLong: Pretty[Long] = prettyOfString(_.toString)
+
+  implicit def prettyJLong: Pretty[JLong] = prettyOfString(_.toString)
 
   implicit def prettyBoolean: Pretty[Boolean] = prettyOfString(_.toString)
 
@@ -128,7 +132,7 @@ trait PrettyInstances {
 
   implicit val prettyUuid: Pretty[UUID] = prettyOfString(_.toString.readableHash.toString)
   // There is deliberately no instance for `String` to force clients
-  // use ShowUtil.ShowStringSyntax instead.
+  // use ShowUtil.ShowStringSyntax instead (e.g. "string".singleQuoted).
   def prettyString: Pretty[String] = prettyOfString(identity)
 
   implicit val prettyByteString: Pretty[ByteString] =
@@ -185,8 +189,8 @@ trait PrettyInstances {
 
   implicit val prettyNodeId: Pretty[LfNodeId] = prettyOfParam(_.index)
 
-  implicit def prettyPrimitiveParty: Pretty[Primitive.Party] =
-    prettyOfString(partyId => prettyUidString(scalaz.Tag.unwrap(partyId)))
+  implicit def prettyPrimitiveParty: Pretty[Party] =
+    prettyOfString(party => prettyUidString(party.getValue))
 
   private def prettyUidString(partyStr: String): String =
     UniqueIdentifier.fromProtoPrimitive_(partyStr) match {
@@ -239,8 +243,8 @@ trait PrettyInstances {
     _.protoValue
   )
 
-  implicit def prettyPrimitiveContractId: Pretty[Primitive.ContractId[_]] = prettyOfString { coid =>
-    val coidStr = scalaz.Tag.unwrap(coid)
+  implicit def prettyContractId: Pretty[ContractId[_]] = prettyOfString { coid =>
+    val coidStr = coid.contractId
     val tokens = coidStr.split(':')
     if (tokens.lengthCompare(2) == 0) {
       tokens(0).readableHash.toString + ":" + tokens(1).readableHash.toString
@@ -270,9 +274,9 @@ trait PrettyInstances {
   implicit def prettyV2DeduplicationPeriod: Pretty[DeduplicationPeriod] =
     prettyOfString {
       case deduplicationDuration: DeduplicationPeriod.DeduplicationDuration =>
-        s"DeduplicationDuration(duration=${deduplicationDuration.duration}"
+        s"(duration=${deduplicationDuration.duration})"
       case dedupOffset: DeduplicationPeriod.DeduplicationOffset =>
-        s"DeduplicationOffset(offset=${dedupOffset.offset}"
+        s"(offset=${dedupOffset.offset})"
     }
 
   implicit def prettyCompletion: Pretty[Completion] =

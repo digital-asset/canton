@@ -1,11 +1,11 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.store
 
 import cats.Eval
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.{CacheConfigWithTimeout, ProcessingTimeout}
+import com.digitalasset.canton.config.{ProcessingTimeout, SessionKeyCacheConfig}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.{
   AtomicHealthComponent,
@@ -59,7 +59,7 @@ class SyncDomainEphemeralState(
     val startingPoints: ProcessingStartingPoints,
     createTimeTracker: NamedLoggerFactory => DomainTimeTracker,
     metrics: SyncDomainMetrics,
-    sessionKeyCacheConfig: CacheConfigWithTimeout,
+    sessionKeyCacheConfig: SessionKeyCacheConfig,
     override val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
@@ -80,8 +80,7 @@ class SyncDomainEphemeralState(
   val pendingTransferInSubmissions: TrieMap[RootHash, PendingTransferSubmission] =
     TrieMap.empty[RootHash, PendingTransferSubmission]
 
-  val sessionKeyStore: SessionKeyStore =
-    SessionKeyStore(sessionKeyCacheConfig)
+  val sessionKeyStore: SessionKeyStore = SessionKeyStore(sessionKeyCacheConfig)
 
   val requestJournal =
     new RequestJournal(
@@ -145,7 +144,6 @@ class SyncDomainEphemeralState(
 
   val phase37Synchronizer =
     new Phase37Synchronizer(
-      startingPoints.cleanReplay.nextRequestCounter,
       loggerFactory,
       futureSupervisor,
       timeouts,

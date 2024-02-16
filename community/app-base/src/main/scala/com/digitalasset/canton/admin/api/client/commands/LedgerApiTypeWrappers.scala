@@ -1,15 +1,15 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.admin.api.client.commands
 
-import com.daml.api.util.TimestampConversion
 import com.daml.ledger.api.v1.event.CreatedEvent
 import com.daml.ledger.api.v1.value.{Record, RecordField, Value}
 import com.daml.lf.data.Time
 import com.daml.lf.transaction.TransactionCoder
 import com.digitalasset.canton.admin.api.client.data.TemplateId
 import com.digitalasset.canton.crypto.Salt
+import com.digitalasset.canton.ledger.api.util.TimestampConversion
 import com.digitalasset.canton.protocol.{DriverContractMetadata, LfContractId}
 
 /** Wrapper class to make scalapb LedgerApi classes more convenient to access
@@ -87,6 +87,7 @@ object LedgerApiTypeWrappers {
 
       ContractData(
         templateId = templateId,
+        packageName = event.packageName,
         createArguments = createArguments,
         signatories = event.signatories.toSet,
         observers = event.observers.toSet,
@@ -100,6 +101,7 @@ object LedgerApiTypeWrappers {
   /** Holder of "core" contract defining fields (particularly those relevant for importing contracts) */
   final case class ContractData(
       templateId: TemplateId,
+      packageName: Option[String],
       createArguments: Record,
       // track signatories and observers for use as auth validation by daml engine
       signatories: Set[String],

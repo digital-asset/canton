@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.data
@@ -101,9 +101,10 @@ object ParticipantMetadata
       salt <- ProtoConverter
         .parseRequired(Salt.fromProtoV0, "salt", saltP)
         .leftMap(_.inField("salt"))
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(0))
     } yield ParticipantMetadata(let, submissionTime, workflowId, salt)(
       hashOps,
-      protocolVersionRepresentativeFor(ProtoVersion(0)),
+      rpv,
       Some(bytes),
     )
 }

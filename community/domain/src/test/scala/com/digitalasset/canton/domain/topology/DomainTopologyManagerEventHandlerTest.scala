@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.topology
@@ -61,8 +61,7 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
       domainId,
       testedProtocolVersion,
     )
-    .headOption
-    .value
+
   private val domainIdentityServiceResult =
     RegisterTopologyTransactionResponseResult.create(
       signedIdentityTransaction.uniquePath.toProtoPrimitive,
@@ -111,7 +110,6 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
             any[Option[CantonTimestamp]],
             any[CantonTimestamp],
             any[MessageId],
-            any[Option[AggregationRule]],
             any[SendCallback],
           )(any[TraceContext])
         ).thenAnswer {
@@ -121,7 +119,6 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
               _: Option[CantonTimestamp],
               _: CantonTimestamp,
               _: MessageId,
-              _: Option[AggregationRule],
               callback: SendCallback,
           ) =>
             callback.apply(UnlessShutdown.Outcome(SendResult.Success(null)))

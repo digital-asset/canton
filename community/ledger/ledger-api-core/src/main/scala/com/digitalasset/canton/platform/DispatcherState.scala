@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform
@@ -68,18 +68,19 @@ class DispatcherState(
   })
 
   def stopDispatcher(): Future[Unit] = blocking(synchronized {
-    logger.info(s"Stopping active $ServiceName.")
+
     dispatcherStateRef match {
       case DispatcherNotRunning | DispatcherStateShutdown =>
-        logger.info(s"$ServiceName already stopped or shutdown.")
+        logger.debug(s"$ServiceName already stopped, shutdown or never started.")
         Future.unit
       case DispatcherRunning(dispatcher) =>
+        logger.info(s"Stopping active $ServiceName.")
         dispatcherStateRef = DispatcherNotRunning
         dispatcher
           .cancel(() => dispatcherNotRunning)
           .transform {
             case Success(_) =>
-              logger.info(s"Active $ServiceName stopped.")
+              logger.debug(s"Active $ServiceName stopped.")
               Success(())
             case f @ Failure(failure) =>
               logger.warn(s"Failed stopping active $ServiceName", failure)

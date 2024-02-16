@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.store.db
@@ -12,7 +12,7 @@ import com.digitalasset.canton.participant.store.db.DbContractStoreTest.createDb
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
-import com.digitalasset.canton.store.{IndexedDomain, IndexedStringType}
+import com.digitalasset.canton.store.{IndexedDomain, IndexedStringType, PrunableByTimeParameters}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future
@@ -52,6 +52,7 @@ trait DbActiveContractStoreTest extends AsyncWordSpec with BaseTest with ActiveC
           domainId,
           enableAdditionalConsistencyChecks = true,
           maxContractIdSqlInListSize = PositiveNumeric.tryCreate(10),
+          PrunableByTimeParameters.testingParams,
           indexStore,
           testedProtocolVersion,
           timeouts,

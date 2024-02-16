@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.store.db
@@ -15,18 +15,13 @@ import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.*
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
-import com.digitalasset.canton.sequencing.protocol.{
-  SequencedEvent,
-  SequencedEventTrafficState,
-  SignedContent,
-}
+import com.digitalasset.canton.sequencing.protocol.{SequencedEvent, SignedContent}
 import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, PossiblyIgnoredSerializedEvent}
-import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.store.*
 import com.digitalasset.canton.store.db.DbSequencedEventStore.*
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.util.{EitherTUtil, Thereafter}
-import com.digitalasset.canton.version.{ProtocolVersion, UntypedVersionedMessage, VersionedMessage}
+import com.digitalasset.canton.version.ProtocolVersion
 import slick.jdbc.{GetResult, SetParameter}
 
 import java.util.concurrent.Semaphore
@@ -89,11 +84,7 @@ class DbSequencedEventStore(
       val traceContext: TraceContext = r.<<[SerializableTraceContext].unwrap
       val ignore = r.<<[Boolean]
 
-      val getTrafficState = {
-        if (protocolVersion >= ProtocolVersion.CNTestNet) {
-          SequencedEventTrafficState.sequencedEventTrafficStateGetResult(r)
-        } else None
-      }
+      val getTrafficState = None
 
       typ match {
         case SequencedEventDbType.IgnoredEvent =>
@@ -101,11 +92,11 @@ class DbSequencedEventStore(
             traceContext
           )
         case _ =>
-          val signedEvent = ProtoConverter
-            .protoParserArray(UntypedVersionedMessage.parseFrom)(eventBytes)
-            .map(VersionedMessage.apply)
-            .flatMap(SignedContent.fromProtoVersioned(_))
-            .flatMap(_.deserializeContent(SequencedEvent.fromByteString))
+          val signedEvent = SignedContent
+            .fromByteArrayUnsafe(eventBytes)
+            .flatMap(
+              _.deserializeContent(SequencedEvent.fromByteString(protocolVersion))
+            )
             .valueOr(err =>
               throw new DbDeserializationException(s"Failed to deserialize sequenced event: $err")
             )
@@ -153,38 +144,9 @@ class DbSequencedEventStore(
   private def bulkInsertQuery(
       events: Seq[PossiblyIgnoredSerializedEvent]
   )(implicit traceContext: TraceContext): DBIOAction[Unit, NoStream, Effect.All] = {
-    if (protocolVersion >= ProtocolVersion.CNTestNet) {
-      // DEV protocol version supports sequencer traffic control
-      val insertSql = storage.profile match {
-        case _: DbStorage.Profile.Oracle =>
-          """merge /*+ INDEX ( sequenced_events ( ts, client ) ) */
-            |into sequenced_events
-            |using (select ? client, ? ts from dual) input
-            |on (sequenced_events.ts = input.ts and sequenced_events.client = input.client)
-            |when not matched then
-            |  insert (client, ts, sequenced_event, type, sequencer_counter, trace_context, ignore, extra_traffic_remainder, extra_traffic_consumed)
-            |  values (input.client, input.ts, ?, ?, ?, ?, ?, ?, ?)""".stripMargin
-
-        case _ =>
-          "insert into sequenced_events (client, ts, sequenced_event, type, sequencer_counter, trace_context, ignore, extra_traffic_remainder, extra_traffic_consumed) " +
-            "values (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
-            "on conflict do nothing"
-      }
-      DbStorage.bulkOperation_(insertSql, events, storage.profile) { pp => event =>
-        pp >> partitionKey
-        pp >> event.timestamp
-        pp >> event.underlyingEventBytes
-        pp >> event.dbType
-        pp >> event.counter
-        pp >> SerializableTraceContext(event.traceContext)
-        pp >> event.isIgnored
-        pp >> event.trafficState.map(_.extraTrafficRemainder)
-        pp >> event.trafficState.map(_.extraTrafficConsumed)
-      }
-    } else {
-      val insertSql = storage.profile match {
-        case _: DbStorage.Profile.Oracle =>
-          """merge /*+ INDEX ( sequenced_events ( ts, client ) ) */
+    val insertSql = storage.profile match {
+      case _: DbStorage.Profile.Oracle =>
+        """merge /*+ INDEX ( sequenced_events ( ts, client ) ) */
             |into sequenced_events
             |using (select ? client, ? ts from dual) input
             |on (sequenced_events.ts = input.ts and sequenced_events.client = input.client)
@@ -192,20 +154,19 @@ class DbSequencedEventStore(
             |  insert (client, ts, sequenced_event, type, sequencer_counter, trace_context, ignore)
             |  values (input.client, input.ts, ?, ?, ?, ?, ?)""".stripMargin
 
-        case _ =>
-          "insert into sequenced_events (client, ts, sequenced_event, type, sequencer_counter, trace_context, ignore) " +
-            "values (?, ?, ?, ?, ?, ?, ?) " +
-            "on conflict do nothing"
-      }
-      DbStorage.bulkOperation_(insertSql, events, storage.profile) { pp => event =>
-        pp >> partitionKey
-        pp >> event.timestamp
-        pp >> event.underlyingEventBytes
-        pp >> event.dbType
-        pp >> event.counter
-        pp >> SerializableTraceContext(event.traceContext)
-        pp >> event.isIgnored
-      }
+      case _ =>
+        "insert into sequenced_events (client, ts, sequenced_event, type, sequencer_counter, trace_context, ignore) " +
+          "values (?, ?, ?, ?, ?, ?, ?) " +
+          "on conflict do nothing"
+    }
+    DbStorage.bulkOperation_(insertSql, events, storage.profile) { pp => event =>
+      pp >> partitionKey
+      pp >> event.timestamp
+      pp >> event.underlyingEventBytes
+      pp >> event.dbType
+      pp >> event.counter
+      pp >> SerializableTraceContext(event.traceContext)
+      pp >> event.isIgnored
     }
   }
 
@@ -213,31 +174,18 @@ class DbSequencedEventStore(
       traceContext: TraceContext
   ): EitherT[Future, SequencedEventNotFoundError, PossiblyIgnoredSerializedEvent] =
     processingTime.eitherTEvent {
-      val query = if (protocolVersion >= ProtocolVersion.CNTestNet) {
-        criterion match {
-          case ByTimestamp(timestamp) =>
-            // The implementation assumes that we timestamps on sequenced events increases monotonically with the sequencer counter
-            // It therefore is fine to take the first event that we find.
-            sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore, extra_traffic_remainder, extra_traffic_consumed from sequenced_events
+      val query = criterion match {
+        case ByTimestamp(timestamp) =>
+          // The implementation assumes that we timestamps on sequenced events increases monotonically with the sequencer counter
+          // It therefore is fine to take the first event that we find.
+          sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore from sequenced_events
                 where client = $partitionKey and ts = $timestamp"""
-          case LatestUpto(inclusive) =>
-            sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore, extra_traffic_remainder, extra_traffic_consumed from sequenced_events
+        case LatestUpto(inclusive) =>
+          sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore from sequenced_events
                 where client = $partitionKey and ts <= $inclusive
                 order by ts desc #${storage.limit(1)}"""
-        }
-      } else {
-        criterion match {
-          case ByTimestamp(timestamp) =>
-            // The implementation assumes that we timestamps on sequenced events increases monotonically with the sequencer counter
-            // It therefore is fine to take the first event that we find.
-            sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore from sequenced_events
-                where client = $partitionKey and ts = $timestamp"""
-          case LatestUpto(inclusive) =>
-            sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore from sequenced_events
-                where client = $partitionKey and ts <= $inclusive
-                order by ts desc #${storage.limit(1)}"""
-        }
       }
+
       storage
         .querySingle(query.as[PossiblyIgnoredSerializedEvent].headOption, functionFullName)
         .toRight(SequencedEventNotFoundError(criterion))
@@ -250,24 +198,14 @@ class DbSequencedEventStore(
       criterion match {
         case ByTimestampRange(lowerInclusive, upperInclusive) =>
           for {
-            events <-
-              if (protocolVersion >= ProtocolVersion.CNTestNet) {
-                storage.query(
-                  sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore, extra_traffic_remainder, extra_traffic_consumed from sequenced_events
+            events <- storage.query(
+              sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore from sequenced_events
                     where client = $partitionKey and $lowerInclusive <= ts  and ts <= $upperInclusive
                     order by ts #${limit.fold("")(storage.limit(_))}"""
-                    .as[PossiblyIgnoredSerializedEvent],
-                  functionFullName,
-                )
-              } else {
-                storage.query(
-                  sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore from sequenced_events
-                    where client = $partitionKey and $lowerInclusive <= ts  and ts <= $upperInclusive
-                    order by ts #${limit.fold("")(storage.limit(_))}"""
-                    .as[PossiblyIgnoredSerializedEvent],
-                  functionFullName,
-                )
-              }
+                .as[PossiblyIgnoredSerializedEvent],
+              functionFullName,
+            )
+
             // check for pruning after we've read the events so that we certainly catch the case
             // if pruning is started while we're reading (as we're not using snapshot isolation here)
             pruningO <- pruningStatus
@@ -282,43 +220,31 @@ class DbSequencedEventStore(
 
   override def sequencedEvents(
       limit: Option[Int] = None
-  )(implicit traceContext: TraceContext): Future[Seq[PossiblyIgnoredSerializedEvent]] = {
-    if (protocolVersion >= ProtocolVersion.CNTestNet) {
-      processingTime.event {
-        storage.query(
-          sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore, extra_traffic_remainder, extra_traffic_consumed from sequenced_events
+  )(implicit traceContext: TraceContext): Future[Seq[PossiblyIgnoredSerializedEvent]] =
+    processingTime.event {
+      storage.query(
+        sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore from sequenced_events
               where client = $partitionKey
               order by ts #${limit.fold("")(storage.limit(_))}"""
-            .as[PossiblyIgnoredSerializedEvent],
-          functionFullName,
-        )
-      }
-    } else {
-      processingTime.event {
-        storage.query(
-          sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore from sequenced_events
-              where client = $partitionKey
-              order by ts #${limit.fold("")(storage.limit(_))}"""
-            .as[PossiblyIgnoredSerializedEvent],
-          functionFullName,
-        )
-      }
+          .as[PossiblyIgnoredSerializedEvent],
+        functionFullName,
+      )
     }
-  }
 
   override protected[canton] def doPrune(
       untilInclusive: CantonTimestamp,
       lastPruning: Option[CantonTimestamp],
-  )(implicit traceContext: TraceContext): Future[Unit] =
+  )(implicit traceContext: TraceContext): Future[Int] =
     processingTime.event {
       val query =
         sqlu"delete from sequenced_events where client = $partitionKey and ts <= $untilInclusive"
       storage
-        .update(query, functionFullName)
+        .queryAndUpdate(query, functionFullName)
         .map { nrPruned =>
           logger.info(
             s"Pruned at least $nrPruned entries from the sequenced event store of client $partitionKey older or equal to $untilInclusive"
           )
+          nrPruned
         }
     }
 

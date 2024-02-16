@@ -1,9 +1,8 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.apiserver.services.command
 
-import com.daml.api.util.TimeProvider
 import com.daml.lf
 import com.daml.lf.command.ApiCommands as LfCommands
 import com.daml.lf.crypto.Hash
@@ -21,6 +20,7 @@ import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationDuration
 import com.digitalasset.canton.ledger.api.domain.{CommandId, Commands}
 import com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequest
+import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.participant.state.v2.{
   SubmissionResult,
@@ -107,6 +107,7 @@ class CommandSubmissionServiceImplSpec
     loggerFactory.assertLogs(
       within = {
         val tmplId = toIdentifier("M:T")
+        val sharedKeys = true
 
         val errorsToExpectedStatuses: Seq[(ErrorCause, Status)] = List(
           ErrorCause.DamlLf(
@@ -121,7 +122,7 @@ class CommandSubmissionServiceImplSpec
             LfError.Interpretation(
               LfError.Interpretation.DamlException(
                 LfInterpretationError.DuplicateContractKey(
-                  GlobalKey.assertBuild(tmplId, Value.ValueUnit)
+                  GlobalKey.assertBuild(tmplId, Value.ValueUnit, sharedKeys)
                 )
               ),
               None,
@@ -222,6 +223,7 @@ class CommandSubmissionServiceImplSpec
       )
     val processedDisclosedContract = com.digitalasset.canton.data.ProcessedDisclosedContract(
       templateId = Identifier.assertFromString("some:pkg:identifier"),
+      packageName = None,
       contractId = TransactionBuilder.newCid,
       argument = Value.ValueNil,
       createdAt = Timestamp.Epoch,

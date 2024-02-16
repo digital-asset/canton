@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol.messages
@@ -26,7 +26,7 @@ import com.digitalasset.canton.protocol.{v0, *}
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseRequiredNonEmpty}
 import com.digitalasset.canton.store.SessionKeyStore
-import com.digitalasset.canton.topology.{DomainId, ParticipantId, PartyId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.*
@@ -80,6 +80,10 @@ sealed trait EncryptedView[+VT <: ViewType] extends Product with Serializable {
     // Unfortunately, there doesn't seem to be a way to convince Scala's type checker that the two types must be equal.
     if (desiredViewType == viewType) Some(this.asInstanceOf[EncryptedView[desiredViewType.type]])
     else None
+
+  /** Indicative size for pretty printing */
+  def sizeHint: Int
+
 }
 object EncryptedView {
   def apply[VT <: ViewType](
@@ -88,6 +92,7 @@ object EncryptedView {
     new EncryptedView[VT] {
       override val viewType: aViewType.type = aViewType
       override val viewTree = aViewTree
+      override lazy val sizeHint: Int = aViewTree.ciphertext.size
     }
 
   def compressed[VT <: ViewType](
@@ -183,6 +188,7 @@ sealed trait EncryptedViewMessage[+VT <: ViewType] extends UnsignedProtocolMessa
   override def pretty: Pretty[EncryptedViewMessage.this.type] = prettyOfClass(
     param("view hash", _.viewHash),
     param("view type", _.viewType),
+    param("size", _.encryptedView.sizeHint),
   )
 
   def toByteString: ByteString
@@ -201,12 +207,12 @@ final case class EncryptedViewMessageV0[+VT <: ViewType](
     with ProtocolMessageV0 {
 
   protected[messages] override def recipientsInfo: Option[RecipientsInfo] = Some(
-    RecipientsInfo(randomnessMap.keySet, Set.empty, Set.empty)
+    RecipientsInfo(randomnessMap.keySet)
   )
 
   override val representativeProtocolVersion
       : RepresentativeProtocolVersion[EncryptedViewMessage.type] =
-    EncryptedViewMessage.protocolVersionRepresentativeFor(ProtoVersion(0))
+    EncryptedViewMessage.tryProtocolVersionRepresentativeFor(ProtoVersion(0))
 
   def toProtoV0: v0.EncryptedViewMessage =
     v0.EncryptedViewMessage(
@@ -261,7 +267,7 @@ final case class EncryptedViewMessageV1[+VT <: ViewType](
 
   override val representativeProtocolVersion
       : RepresentativeProtocolVersion[EncryptedViewMessage.type] =
-    EncryptedViewMessage.protocolVersionRepresentativeFor(ProtoVersion(1))
+    EncryptedViewMessage.tryProtocolVersionRepresentativeFor(ProtoVersion(1))
 
   def toProtoV1: v1.EncryptedViewMessage = v1.EncryptedViewMessage(
     viewTree = encryptedView.viewTree.ciphertext,
@@ -307,8 +313,7 @@ final case class EncryptedViewMessageV2[+VT <: ViewType](
 )(
     val recipientsInfo: Option[RecipientsInfo]
 ) extends EncryptedViewMessage[VT]
-    with ProtocolMessageV3
-    with UnsignedProtocolMessageV4 {
+    with ProtocolMessageV3 {
 
   def copy[A <: ViewType](
       submitterParticipantSignature: Option[Signature] = this.submitterParticipantSignature,
@@ -330,7 +335,7 @@ final case class EncryptedViewMessageV2[+VT <: ViewType](
 
   override val representativeProtocolVersion
       : RepresentativeProtocolVersion[EncryptedViewMessage.type] =
-    EncryptedViewMessage.protocolVersionRepresentativeFor(ProtoVersion(2))
+    EncryptedViewMessage.tryProtocolVersionRepresentativeFor(ProtoVersion(2))
 
   private def toProtoV2: v2.EncryptedViewMessage = v2.EncryptedViewMessage(
     viewTree = encryptedView.viewTree.ciphertext,
@@ -345,9 +350,6 @@ final case class EncryptedViewMessageV2[+VT <: ViewType](
 
   override def toProtoEnvelopeContentV3: v3.EnvelopeContent =
     v3.EnvelopeContent(v3.EnvelopeContent.SomeEnvelopeContent.EncryptedViewMessage(toProtoV2))
-
-  override def toProtoSomeEnvelopeContentV4: v4.EnvelopeContent.SomeEnvelopeContent =
-    v4.EnvelopeContent.SomeEnvelopeContent.EncryptedViewMessage(toProtoV2)
 
   override protected def updateView[VT2 <: ViewType](
       newView: EncryptedView[VT2]
@@ -441,9 +443,7 @@ object EncryptedViewMessageV0 {
 object EncryptedViewMessageV1 {
 
   final case class RecipientsInfo(
-      informeeParticipants: Set[ParticipantId],
-      partiesWithGroupAddressing: Set[PartyId],
-      participantsAddressedByGroupAddress: Set[ParticipantId],
+      informeeParticipants: Set[ParticipantId]
   )
 
   private def serializeRandomnessEntry(

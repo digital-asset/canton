@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.sequencing.protocol
@@ -21,9 +21,7 @@ sealed trait SequencerDeliverError extends TransactionError {
     * by turning specific error codes into a BatchRefused (generic one), which existed before.
     */
   def forProtocolVersion(protocolVersion: ProtocolVersion): SequencerDeliverError = {
-    if (
-      protocolVersion < ProtocolVersion.CNTestNet && this.code != SequencerErrors.SubmissionRequestRefused
-    ) {
+    if (this.code != SequencerErrors.SubmissionRequestRefused) {
       SequencerErrors.SubmissionRequestRefused(this.cause)
     } else {
       this

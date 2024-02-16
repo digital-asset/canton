@@ -1,9 +1,8 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.ledger.api
 
-import com.daml.api.util.TimeProvider
 import com.daml.executors.executors.{NamedExecutor, QueueAwareExecutor}
 import com.daml.ledger.api.v1.experimental_features.{
   CommandDeduplicationFeatures,
@@ -24,6 +23,7 @@ import com.digitalasset.canton.http.HttpApiServer
 import com.digitalasset.canton.ledger.api.auth.CachedJwtVerifierLoader
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.health.HealthChecks
+import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.participant.state.v2.metrics.{
   TimedReadService,
   TimedWriteService,
@@ -204,6 +204,9 @@ class StartableStoppableLedgerApiServer(
           tracer,
           loggerFactory,
           multiDomainEnabled = multiDomainEnabled,
+          maxEventsByContractKeyCacheSize = Option.when(
+            config.serverConfig.unsafeEnableEventsByContractKeyCache.enabled
+          )(config.serverConfig.unsafeEnableEventsByContractKeyCache.cacheSize.unwrap),
         )
       timedReadService = new TimedReadService(config.syncService, config.metrics)
       indexerHealth <- new IndexerServiceOwner(
@@ -276,6 +279,9 @@ class StartableStoppableLedgerApiServer(
         loggerFactory = loggerFactory,
       )
 
+      packageMetadataStore = new InMemoryPackageMetadataStore(
+        inMemoryState.packageMetadataView
+      )
       serializableContractAuthenticator = new SerializableContractAuthenticatorImpl(
         new UnicumGenerator(config.syncService.pureCryptoApi)
       )
@@ -288,6 +294,7 @@ class StartableStoppableLedgerApiServer(
         submissionTracker = inMemoryState.submissionTracker,
         indexService = indexService,
         userManagementStore = userManagementStore,
+        packageMetadataStore = packageMetadataStore,
         identityProviderConfigStore = getIdentityProviderConfigStore(
           dbSupport,
           config.serverConfig.identityProviderManagement,
@@ -327,6 +334,8 @@ class StartableStoppableLedgerApiServer(
         jwtVerifierLoader = jwtVerifierLoader,
         jwtTimestampLeeway =
           config.cantonParameterConfig.ledgerApiServerParameters.jwtTimestampLeeway,
+        tokenExpiryGracePeriodForStreams =
+          config.cantonParameterConfig.ledgerApiServerParameters.tokenExpiryGracePeriodForStreams,
         meteringReportKey = config.meteringReportKey,
         enableExplicitDisclosure = config.serverConfig.enableExplicitDisclosure,
         telemetry = telemetry,

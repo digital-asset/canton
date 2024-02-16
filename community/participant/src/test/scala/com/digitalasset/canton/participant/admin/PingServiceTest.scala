@@ -1,11 +1,11 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.admin
 
-import com.daml.ledger.api.refinements.ApiTypes.WorkflowId
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
+import com.digitalasset.canton.ledger.api.refinements.ApiTypes.WorkflowId
 import com.digitalasset.canton.participant.admin.workflows.java.pingpong as M
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.ParticipantId

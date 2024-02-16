@@ -25,7 +25,7 @@ object Dependencies {
   lazy val pekko_http_version = "1.0.0"
   lazy val ammonite_version = "2.5.9"
   lazy val awaitility_version = "4.2.0"
-  lazy val aws_version = "2.21.17"
+  lazy val aws_version = "2.22.3"
   lazy val better_files_version = "3.9.1"
   lazy val bouncy_castle_version = "1.70"
   lazy val cats_law_version = "2.9.0"
@@ -35,7 +35,7 @@ object Dependencies {
   lazy val chimney_version = "0.6.1"
   lazy val circe_version = "0.14.2"
   lazy val concurrency_limits_version = "0.3.6"
-  lazy val dropwizard_version = "4.1.33"
+  lazy val dropwizard_version = "4.2.25"
   lazy val fabric_sdk_version = "2.2.13"
   lazy val flyway_version = "9.15.2"
   lazy val gcp_kms_version = "2.33.0"
@@ -54,7 +54,7 @@ object Dependencies {
   lazy val monocle_version = "3.2.0"
   // pick the version of boring ssl and netty native from this table: https://github.com/grpc/grpc-java/blob/master/SECURITY.md#netty
   // required for ALPN (which is required for TLS+HTTP/2) when running on Java 8. JSSE will be used on Java 9+.
-  lazy val grpc_version = "1.59.0"
+  lazy val grpc_version = "1.60.0"
   lazy val netty_boring_ssl_version = "2.0.61.Final"
   lazy val netty_version = "4.1.100.Final"
   lazy val opentelemetry_instrumentation_grpc_version = s"$opentelemetry_version-alpha"
@@ -134,6 +134,7 @@ object Dependencies {
 
   lazy val grpc_protobuf = "io.grpc" % "grpc-protobuf" % grpc_version
   lazy val grpc_netty = "io.grpc" % "grpc-netty" % grpc_version
+  lazy val grpc_netty_shaded = "io.grpc" % "grpc-netty-shaded" % grpc_version
 
   lazy val netty_boring_ssl =
     "io.netty" % "netty-tcnative-boringssl-static" % netty_boring_ssl_version
@@ -169,6 +170,18 @@ object Dependencies {
     "org.scalatestplus" %% "scalacheck-1-15" % (scalatest_version + ".0")
   lazy val mockito_scala = "org.mockito" %% "mockito-scala" % mockito_scala_version
   lazy val scalatestMockito = "org.scalatestplus" %% "mockito-3-4" % ("3.2.10.0")
+
+  /*
+  "org.junit.jupiter:junit-jupiter-api:5.9.2",
+  "org.junit.jupiter:junit-jupiter-engine:5.9.2",
+  "org.junit.platform:junit-platform-engine:1.9.2",
+  "org.junit.platform:junit-platform-runner:1.9.2",
+   */
+
+  lazy val junit_jupiter_api = "org.junit.jupiter" % "junit-jupiter-api" % "5.9.2"
+  lazy val junit_jupiter_engine = "org.junit.jupiter" % "junit-jupiter-engine" % "5.9.2"
+  lazy val junit_platform_runner = "org.junit.platform" % "junit-platform-runner" % "1.9.2"
+  lazy val jupiter_interface = "net.aichler" % "jupiter-interface" % "0.9.0"
 
   lazy val checkerFramework = "org.checkerframework" % "checker-qual" % checkerFramework_version
 

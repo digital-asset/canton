@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.topology.admin.grpc
@@ -474,8 +474,10 @@ class GrpcTopologyManagerReadService(
               Some(Result.Parameters.V0(domainParametersChange.domainParameters.toProtoV0))
             // TODO(#15152) Adapt when support for pv < 6 is dropped
             // TODO(#15153) Adapt when support for pv=6 is dropped
-            else if (protoVersion == 1 || protoVersion == 2)
+            else if (protoVersion == 1)
               Some(Result.Parameters.V1(domainParametersChange.domainParameters.toProtoV1))
+            else if (protoVersion == 2)
+              Some(Result.Parameters.V2(domainParametersChange.domainParameters.toProtoV2))
             else {
               logger.warn(s"Unable to serialize domain parameters with version $protoVersion")
               None

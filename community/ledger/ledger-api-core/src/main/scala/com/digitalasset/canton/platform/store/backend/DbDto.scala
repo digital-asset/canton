@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.store.backend
@@ -20,6 +20,7 @@ object DbDto {
       submitters: Option[Set[String]],
       contract_id: String,
       template_id: Option[String],
+      package_name: Option[String],
       tree_event_witnesses: Set[String],
       create_argument: Option[Array[Byte]],
       create_argument_compression: Option[Int],
@@ -39,6 +40,7 @@ object DbDto {
       event_id: Option[String],
       contract_id: String,
       template_id: Option[String],
+      package_name: Option[String],
       flat_event_witnesses: Set[String],
       tree_event_witnesses: Set[String],
       create_argument: Option[Array[Byte]],

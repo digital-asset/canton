@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.sequencing.client
@@ -6,7 +6,7 @@ package com.digitalasset.canton.sequencing.client
 import cats.data.EitherT
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
-import com.digitalasset.canton.sequencing.protocol.{AggregationRule, Batch, MessageId}
+import com.digitalasset.canton.sequencing.protocol.{Batch, MessageId}
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.Future
@@ -46,7 +46,6 @@ trait SequencerClientSend {
       timestampOfSigningKey: Option[CantonTimestamp] = None,
       maxSequencingTime: CantonTimestamp = generateMaxSequencingTime,
       messageId: MessageId = generateMessageId,
-      aggregationRule: Option[AggregationRule] = None,
       callback: SendCallback = SendCallback.empty,
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit]
 
@@ -58,5 +57,5 @@ trait SequencerClientSend {
   /** Generates a message id.
     * The message id is only for correlation within this client and does not need to be globally unique.
     */
-  protected def generateMessageId: MessageId = MessageId.randomMessageId()
+  def generateMessageId: MessageId = MessageId.randomMessageId()
 }

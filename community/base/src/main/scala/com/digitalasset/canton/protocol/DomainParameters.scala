@@ -1,21 +1,19 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol
 
-import cats.instances.option.*
+import cats.implicits.toTraverseOps
 import cats.syntax.either.*
-import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.DynamicDomainParameters.InvalidDynamicDomainParameters
 import com.digitalasset.canton.protocol.{v0 as protoV0, v1 as protoV1, v2 as protoV2}
-import com.digitalasset.canton.sequencing.TrafficControlParameters
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.{
@@ -26,7 +24,6 @@ import com.digitalasset.canton.time.{
   SimClock,
 }
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.topology.transaction.ParticipantDomainLimits
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{ProtoDeserializationError, checked}
@@ -381,11 +378,19 @@ object StaticDomainParameters
   *                               compatibility.
   *                               Should be significantly longer than the period of time it takes to compute the commitment and have it sequenced of the domain.
   *                               Otherwise, ACS commitments will keep being exchanged continuously on an idle domain.
-  * @param maxRatePerParticipant maximum number of messages sent per participant per second
+  * @param maxRatePerParticipant maximum number of confirmation requests sent per participant per second
   * @param maxRequestSize maximum size of messages (in bytes) that the domain can receive through the public API
   * @param sequencerAggregateSubmissionTimeout the maximum time for how long an incomplete aggregate submission request is
   *                                            allowed to stay pending in the sequencer's state before it's removed.
   *                                            Must be at least `participantResponseTimeout` + `mediatorReactionTimeout` in a practical system.
+  * @param catchUpParameters   Optional parameters of type [[com.digitalasset.canton.protocol.CatchUpConfig]].
+  *                            Defined starting with protobuf version v2 and protocol version v6.
+  *                            If None, the catch-up mode is disabled: the participant does not trigger the
+  *                            catch-up mode when lagging behind.
+  *                            If not None, it specifies the number of reconciliation intervals that the
+  *                            participant skips in catch-up mode, and the number of catch-up intervals
+  *                           intervals a participant should lag behind in order to enter catch-up mode.
+  *
   * @throws DynamicDomainParameters$.InvalidDynamicDomainParameters
   *   if `mediatorDeduplicationTimeout` is less than twice of `ledgerTimeRecordTimeTolerance`.
   */
@@ -400,7 +405,7 @@ final case class DynamicDomainParameters private (
     maxRatePerParticipant: NonNegativeInt,
     maxRequestSize: MaxRequestSize,
     sequencerAggregateSubmissionTimeout: NonNegativeFiniteDuration,
-    trafficControlParameters: Option[TrafficControlParameters],
+    catchUpConfig: Option[CatchUpConfig],
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
       DynamicDomainParameters.type
@@ -454,7 +459,7 @@ final case class DynamicDomainParameters private (
       maxRatePerParticipant: NonNegativeInt = maxRatePerParticipant,
       sequencerAggregateSubmissionTimeout: NonNegativeFiniteDuration =
         sequencerAggregateSubmissionTimeout,
-      trafficControlParameters: Option[TrafficControlParameters] = trafficControlParameters,
+      catchUpConfig: Option[CatchUpConfig] = catchUpConfig,
   ): DynamicDomainParameters = DynamicDomainParameters.tryCreate(
     participantResponseTimeout = participantResponseTimeout,
     mediatorReactionTimeout = mediatorReactionTimeout,
@@ -466,7 +471,7 @@ final case class DynamicDomainParameters private (
     maxRatePerParticipant = maxRatePerParticipant,
     maxRequestSize = maxRequestSize,
     sequencerAggregateSubmissionTimeout = sequencerAggregateSubmissionTimeout,
-    trafficControlParameters = trafficControlParameters,
+    catchUpConfig = catchUpConfig,
   )(representativeProtocolVersion)
 
   def toProtoV0: protoV0.DynamicDomainParameters =
@@ -490,81 +495,44 @@ final case class DynamicDomainParameters private (
       maxRatePerParticipant = maxRatePerParticipant.unwrap,
       maxRequestSize = maxRequestSize.unwrap,
     )
+  def toProtoV2: protoV2.DynamicDomainParameters =
+    protoV2.DynamicDomainParameters(
+      participantResponseTimeout = Some(participantResponseTimeout.toProtoPrimitive),
+      mediatorReactionTimeout = Some(mediatorReactionTimeout.toProtoPrimitive),
+      transferExclusivityTimeout = Some(transferExclusivityTimeout.toProtoPrimitive),
+      topologyChangeDelay = Some(topologyChangeDelay.toProtoPrimitive),
+      ledgerTimeRecordTimeTolerance = Some(ledgerTimeRecordTimeTolerance.toProtoPrimitive),
+      mediatorDeduplicationTimeout = Some(mediatorDeduplicationTimeout.toProtoPrimitive),
+      reconciliationInterval = Some(reconciliationInterval.toProtoPrimitive),
+      maxRatePerParticipant = maxRatePerParticipant.unwrap,
+      maxRequestSize = maxRequestSize.unwrap,
+      catchUpParameters = catchUpConfig.map(_.toProtoV2),
+    )
 
-  def toProtoV2: protoV2.DynamicDomainParametersX = protoV2.DynamicDomainParametersX(
-    participantResponseTimeout = Some(participantResponseTimeout.toProtoPrimitive),
-    mediatorReactionTimeout = Some(mediatorReactionTimeout.toProtoPrimitive),
-    transferExclusivityTimeout = Some(transferExclusivityTimeout.toProtoPrimitive),
-    topologyChangeDelay = Some(topologyChangeDelay.toProtoPrimitive),
-    ledgerTimeRecordTimeTolerance = Some(ledgerTimeRecordTimeTolerance.toProtoPrimitive),
-    mediatorDeduplicationTimeout = Some(mediatorDeduplicationTimeout.toProtoPrimitive),
-    reconciliationInterval = Some(reconciliationInterval.toProtoPrimitive),
-    maxRequestSize = maxRequestSize.unwrap,
-    // TODO(#14053) add permissioned domain mode
-    permissionedDomain = false,
-    // TODO(#14054) add restricted packages mode
-    requiredPackages = Seq.empty,
-    // TODO(#14054) add only restricted packages supported
-    onlyRequiredPackagesPermitted = false,
-    defaultParticipantLimits = Some(v2DefaultParticipantLimits.toProto),
-    // TODO(#14050) limit number of participants that can be allocated to a given party
-    defaultMaxHostingParticipantsPerParty = 0,
-    sequencerAggregateSubmissionTimeout =
-      Some(sequencerAggregateSubmissionTimeout.toProtoPrimitive),
-    trafficControlParameters = trafficControlParameters.map(_.toProtoV0),
-  )
+  override def pretty: Pretty[DynamicDomainParameters] = if (
+    representativeProtocolVersion >= companionObj.rpv4
+  ) {
+    prettyOfClass(
+      param("participant response timeout", _.participantResponseTimeout),
+      param("mediator reaction timeout", _.mediatorReactionTimeout),
+      param("transfer exclusivity timeout", _.transferExclusivityTimeout),
+      param("topology change delay", _.topologyChangeDelay),
+      param("ledger time record time tolerance", _.ledgerTimeRecordTimeTolerance),
+      param("mediator deduplication timeout", _.mediatorDeduplicationTimeout),
+      param("reconciliation interval", _.reconciliationInterval),
+      param("max rate per participant", _.maxRatePerParticipant),
+      param("max request size", _.maxRequestSize.value),
+      paramIfDefined("catchup config", _.catchUpConfig),
+    )
+  } else {
+    prettyOfClass(
+      param("participant response timeout", _.participantResponseTimeout),
+      param("mediator reaction timeout", _.mediatorReactionTimeout),
+      param("transfer exclusivity timeout", _.transferExclusivityTimeout),
+      param("topology change delay", _.topologyChangeDelay),
+      param("ledger time record time tolerance", _.ledgerTimeRecordTimeTolerance),
+    )
 
-  // TODO(#14052) add topology limits
-  def v2DefaultParticipantLimits: ParticipantDomainLimits = ParticipantDomainLimits(
-    maxRate = maxRatePerParticipant.unwrap,
-    maxNumParties = Int.MaxValue,
-    maxNumPackages = Int.MaxValue,
-  )
-
-  override def pretty: Pretty[DynamicDomainParameters] = {
-    if (
-      representativeProtocolVersion >= companionObj.protocolVersionRepresentativeFor(
-        ProtocolVersion.CNTestNet
-      )
-    ) {
-      prettyOfClass(
-        param("participant response timeout", _.participantResponseTimeout),
-        param("mediator reaction timeout", _.mediatorReactionTimeout),
-        param("transfer exclusivity timeout", _.transferExclusivityTimeout),
-        param("topology change delay", _.topologyChangeDelay),
-        param("ledger time record time tolerance", _.ledgerTimeRecordTimeTolerance),
-        param("mediator deduplication timeout", _.mediatorDeduplicationTimeout),
-        param("reconciliation interval", _.reconciliationInterval),
-        param("max rate per participant", _.maxRatePerParticipant),
-        param("max request size", _.maxRequestSize.value),
-        param("sequencer aggregate submission timeout", _.sequencerAggregateSubmissionTimeout),
-        paramIfDefined("traffic control config", _.trafficControlParameters),
-      )
-    } else if (
-      representativeProtocolVersion >= companionObj.protocolVersionRepresentativeFor(
-        ProtocolVersion.v4
-      )
-    ) {
-      prettyOfClass(
-        param("participant response timeout", _.participantResponseTimeout),
-        param("mediator reaction timeout", _.mediatorReactionTimeout),
-        param("transfer exclusivity timeout", _.transferExclusivityTimeout),
-        param("topology change delay", _.topologyChangeDelay),
-        param("ledger time record time tolerance", _.ledgerTimeRecordTimeTolerance),
-        param("mediator deduplication timeout", _.mediatorDeduplicationTimeout),
-        param("reconciliation interval", _.reconciliationInterval),
-        param("max rate per participant", _.maxRatePerParticipant),
-        param("max request size", _.maxRequestSize.value),
-      )
-    } else {
-      prettyOfClass(
-        param("participant response timeout", _.participantResponseTimeout),
-        param("mediator reaction timeout", _.mediatorReactionTimeout),
-        param("transfer exclusivity timeout", _.transferExclusivityTimeout),
-        param("topology change delay", _.topologyChangeDelay),
-        param("ledger time record time tolerance", _.ledgerTimeRecordTimeTolerance),
-      )
-    }
   }
 }
 
@@ -583,8 +551,8 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
       supportedProtoVersion(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
-    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.CNTestNet)(
-      protoV2.DynamicDomainParametersX
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v6)(
+      protoV2.DynamicDomainParameters
     )(
       supportedProtoVersion(_)(fromProtoV2),
       _.toProtoV2.toByteString,
@@ -595,20 +563,13 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
 
   private lazy val rpv4 = protocolVersionRepresentativeFor(ProtocolVersion.v4)
 
-  private lazy val rpvCNTestNet = protocolVersionRepresentativeFor(ProtocolVersion.CNTestNet)
+  private lazy val rpv6 = protocolVersionRepresentativeFor(ProtocolVersion.v6)
 
   override lazy val invariants = Seq(
     defaultReconciliationIntervalUntil,
     defaultMaxRatePerParticipantUntil,
     defaultMaxRequestSizeUntil,
-    defaultTrafficControlParametersUntil,
-  )
-
-  lazy val defaultTrafficControlParametersUntil = DefaultValueUntilExclusive(
-    _.trafficControlParameters,
-    "trafficControlParameters",
-    rpvCNTestNet,
-    None,
+    defaultCatchUpConfigUntil,
   )
 
   lazy val defaultReconciliationIntervalUntil = DefaultValueUntilExclusive(
@@ -632,12 +593,15 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
     StaticDomainParameters.defaultMaxRequestSize,
   )
 
-  lazy val defaultSequencerAggregateSubmissionTimeoutUntilExclusive = DefaultValueUntilExclusive(
-    _.sequencerAggregateSubmissionTimeout,
-    "sequencerAggregateSubmissionTimeout",
-    rpvCNTestNet,
-    defaultSequencerAggregateSubmissionTimeout,
+  lazy val defaultCatchUpConfigUntil = DefaultValueUntilExclusive(
+    _.catchUpConfig,
+    "catchUpConfig",
+    rpv6,
+    defaultCatchUpConfig,
   )
+
+  private val defaultCatchUpConfig: Option[CatchUpConfig] =
+    Option.empty[CatchUpConfig]
 
   private val defaultParticipantResponseTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.tryOfSeconds(30)
@@ -646,9 +610,6 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
 
   private val defaultTransferExclusivityTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.tryOfSeconds(60)
-
-  private val defaultTrafficControlParameters: Option[TrafficControlParameters] =
-    Option.empty[TrafficControlParameters]
 
   private val defaultTopologyChangeDelay: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.tryOfMillis(250)
@@ -662,7 +623,7 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
     defaultLedgerTimeRecordTimeTolerance * NonNegativeInt.tryCreate(2)
 
   // Based on SequencerClientConfig.defaultMaxSequencingTimeOffset
-  private val defaultSequencerAggregateSubmissionTimeout: NonNegativeFiniteDuration =
+  val defaultSequencerAggregateSubmissionTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.tryOfMinutes(5)
 
   /** Safely creates DynamicDomainParameters.
@@ -680,7 +641,7 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
       maxRatePerParticipant: NonNegativeInt,
       maxRequestSize: MaxRequestSize,
       sequencerAggregateSubmissionTimeout: NonNegativeFiniteDuration,
-      trafficControlConfig: Option[TrafficControlParameters],
+      catchUpConfig: Option[CatchUpConfig],
   )(
       representativeProtocolVersion: RepresentativeProtocolVersion[DynamicDomainParameters.type]
   ): Either[InvalidDynamicDomainParameters, DynamicDomainParameters] =
@@ -696,7 +657,7 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
         maxRatePerParticipant,
         maxRequestSize,
         sequencerAggregateSubmissionTimeout,
-        trafficControlConfig,
+        catchUpConfig,
       )(representativeProtocolVersion)
     )
 
@@ -715,7 +676,7 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
       maxRatePerParticipant: NonNegativeInt,
       maxRequestSize: MaxRequestSize,
       sequencerAggregateSubmissionTimeout: NonNegativeFiniteDuration,
-      trafficControlParameters: Option[TrafficControlParameters],
+      catchUpConfig: Option[CatchUpConfig],
   )(
       representativeProtocolVersion: RepresentativeProtocolVersion[DynamicDomainParameters.type]
   ): DynamicDomainParameters = {
@@ -741,8 +702,8 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
         representativeProtocolVersion,
       ),
       sequencerAggregateSubmissionTimeout,
-      defaultTrafficControlParametersUntil.orValue(
-        trafficControlParameters,
+      defaultCatchUpConfigUntil.orValue(
+        catchUpConfig,
         representativeProtocolVersion,
       ),
     )(representativeProtocolVersion)
@@ -751,17 +712,6 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
   /** Default dynamic domain parameters for non-static clocks */
   def defaultValues(protocolVersion: ProtocolVersion): DynamicDomainParameters =
     initialValues(defaultTopologyChangeDelay, protocolVersion)
-
-  /** Default mediator-X dynamic parameters allowing to specify more generous mediator-x timeouts for BFT-distribution */
-  def defaultXValues(
-      protocolVersion: ProtocolVersion,
-      mediatorReactionTimeout: NonNegativeFiniteDuration = defaultMediatorReactionTimeout,
-  ): DynamicDomainParameters =
-    initialValues(
-      defaultTopologyChangeDelay,
-      protocolVersion,
-      mediatorReactionTimeout = mediatorReactionTimeout,
-    )
 
   def initialValues(
       topologyChangeDelay: NonNegativeFiniteDuration,
@@ -779,7 +729,7 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
       maxRatePerParticipant = StaticDomainParameters.defaultMaxRatePerParticipant,
       maxRequestSize = StaticDomainParameters.defaultMaxRequestSize,
       sequencerAggregateSubmissionTimeout = defaultSequencerAggregateSubmissionTimeout,
-      trafficControlParameters = defaultTrafficControlParameters,
+      catchUpConfig = defaultCatchUpConfig,
     )(
       protocolVersionRepresentativeFor(protocolVersion)
     )
@@ -807,7 +757,7 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
       maxRatePerParticipant = maxRatePerParticipant,
       maxRequestSize = maxRequestSize,
       sequencerAggregateSubmissionTimeout = sequencerAggregateSubmissionTimeout,
-      trafficControlParameters = defaultTrafficControlParameters,
+      catchUpConfig = defaultCatchUpConfig,
     )(
       protocolVersionRepresentativeFor(protocolVersion)
     )
@@ -905,6 +855,7 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
         topologyChangeDelay,
         ledgerTimeRecordTimeTolerance,
       ) = decoded
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(0))
     } yield checked( // safe because value for mediatorDeduplicationTimeout is safe
       DynamicDomainParameters.tryCreate(
         participantResponseTimeout = participantResponseTimeout,
@@ -917,8 +868,8 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
         maxRatePerParticipant = StaticDomainParameters.defaultMaxRatePerParticipant,
         maxRequestSize = StaticDomainParameters.defaultMaxRequestSize,
         sequencerAggregateSubmissionTimeout = defaultSequencerAggregateSubmissionTimeout,
-        trafficControlParameters = defaultTrafficControlParameters,
-      )(protocolVersionRepresentativeFor(ProtoVersion(0)))
+        catchUpConfig = defaultCatchUpConfig,
+      )(rpv)
     )
   }
 
@@ -948,7 +899,6 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
       .create(maxRequestSizeP)
       .map(MaxRequestSize)
       .leftMap(InvariantViolation.toProtoDeserializationError)
-
   } yield (
     reconciliationInterval,
     mediatorDeduplicationTimeout,
@@ -998,6 +948,8 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
         maxRequestSize,
       ) = decodedV1
 
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(1))
+
       domainParameters <-
         create(
           participantResponseTimeout = participantResponseTimeout,
@@ -1009,17 +961,16 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
           reconciliationInterval = reconciliationInterval,
           maxRatePerParticipant = maxRatePerParticipant,
           maxRequestSize = maxRequestSize,
+          catchUpConfig = None,
           sequencerAggregateSubmissionTimeout = defaultSequencerAggregateSubmissionTimeout,
-          trafficControlConfig = None,
-        )(protocolVersionRepresentativeFor(ProtoVersion(1)))
-          .leftMap(_.toProtoDeserializationError)
+        )(rpv).leftMap(_.toProtoDeserializationError)
     } yield domainParameters
   }
 
   def fromProtoV2(
-      domainParametersP: protoV2.DynamicDomainParametersX
+      domainParametersP: protoV2.DynamicDomainParameters
   ): ParsingResult[DynamicDomainParameters] = {
-    val protoV2.DynamicDomainParametersX(
+    val protoV2.DynamicDomainParameters(
       participantResponseTimeoutP,
       mediatorReactionTimeoutP,
       transferExclusivityTimeoutP,
@@ -1027,14 +978,9 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
       ledgerTimeRecordTimeToleranceP,
       reconciliationIntervalP,
       mediatorDeduplicationTimeoutP,
+      maxRatePerParticipantP,
       maxRequestSizeP,
-      _permissionedDomain,
-      _requiredPackages,
-      _onlyRequiredPackagesPermitted,
-      defaultLimitsP,
-      _partyHostingLimits,
-      sequencerAggregateSubmissionTimeoutP,
-      trafficControlConfigP,
+      catchupConfigP,
     ) = domainParametersP
     for {
       decodedV0 <- fromProtoSharedV0(
@@ -1051,15 +997,10 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
         topologyChangeDelay,
         ledgerTimeRecordTimeTolerance,
       ) = decodedV0
-      maxRate <- ProtoConverter.parseRequired[Int, v2.ParticipantDomainLimits](
-        item => Right(item.maxRate),
-        "default_limits",
-        defaultLimitsP,
-      )
       decodedV1 <- fromProtoSharedV1(
         reconciliationIntervalP,
         mediatorDeduplicationTimeoutP,
-        maxRate,
+        maxRatePerParticipantP,
         maxRequestSizeP,
       )
       (
@@ -1068,13 +1009,10 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
         maxRatePerParticipant,
         maxRequestSize,
       ) = decodedV1
-      sequencerAggregateSubmissionTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
-        "sequencerAggregateSubmissionTimeout"
-      )(
-        sequencerAggregateSubmissionTimeoutP
-      )
 
-      trafficControlConfig <- trafficControlConfigP.traverse(TrafficControlParameters.fromProtoV0)
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(2))
+
+      catchUpConfig <- catchupConfigP.traverse(CatchUpConfig.fromProtoV2)
 
       domainParameters <-
         create(
@@ -1087,10 +1025,9 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
           reconciliationInterval = reconciliationInterval,
           maxRatePerParticipant = maxRatePerParticipant,
           maxRequestSize = maxRequestSize,
-          sequencerAggregateSubmissionTimeout = sequencerAggregateSubmissionTimeout,
-          trafficControlConfig = trafficControlConfig,
-        )(protocolVersionRepresentativeFor(ProtoVersion(2)))
-          .leftMap(_.toProtoDeserializationError)
+          catchUpConfig = catchUpConfig,
+          sequencerAggregateSubmissionTimeout = defaultSequencerAggregateSubmissionTimeout,
+        )(rpv).leftMap(_.toProtoDeserializationError)
     } yield domainParameters
   }
 
@@ -1167,4 +1104,51 @@ final case class DynamicDomainParametersWithValidity(
   def topologyChangeDelay: NonNegativeFiniteDuration = parameters.topologyChangeDelay
   def transferExclusivityTimeout: NonNegativeFiniteDuration = parameters.transferExclusivityTimeout
   def sequencerSigningTolerance: NonNegativeFiniteDuration = parameters.sequencerSigningTolerance
+}
+
+/** The class specifies the catch-up parameters governing the catch-up mode of a participant lagging behind with its
+  * ACS commitments computation.
+  *
+  * @param catchUpIntervalSkip         The number of reconciliation intervals that the participant skips in
+  *                                    catch-up mode.
+  *                                    A catch-up interval thus has a length of
+  *                                    `reconciliationInterval` * `catchUpIntervalSkip`.
+  *                                    All participants must catch up to the same timestamp. To ensure this, the
+  *                                    interval count starts at EPOCH and gets incremented in catch-up intervals.
+  *                                    For example, a `reconciliationInterval` of 5 seconds,
+  *                                    and a catchUpIntervalSkip of 2 (intervals), when a participant receiving a valid commitment at
+  *                                    15 seconds with timestamp 20 seconds, will perform catch-up from 10 seconds to 20 seconds (skipping 15 seconds commitment).
+  * @param nrIntervalsToTriggerCatchUp The number of intervals a participant should lag behind in
+  *                                    order to trigger catch-up mode. If a participant's current timestamp is behind
+  *                                    the timestamp of valid received commitments by `reconciliationInterval` *
+  *                                    `catchUpIntervalSkip` * `nrIntervalsToTriggerCatchUp`,
+  *                                     then the participant triggers catch-up mode.
+  */
+final case class CatchUpConfig(
+    catchUpIntervalSkip: PositiveInt,
+    nrIntervalsToTriggerCatchUp: PositiveInt,
+) extends PrettyPrinting {
+  override def pretty: Pretty[CatchUpConfig] = prettyOfClass(
+    param("catchUpIntervalSkip", _.catchUpIntervalSkip),
+    param("nrIntervalsToTriggerCatchUp", _.nrIntervalsToTriggerCatchUp),
+  )
+
+  def toProtoV2: protoV2.CatchUpConfig = protoV2.CatchUpConfig(
+    catchUpIntervalSkip.value,
+    nrIntervalsToTriggerCatchUp.value,
+  )
+}
+
+object CatchUpConfig {
+  def fromProtoV2(
+      value: v2.CatchUpConfig
+  ): ParsingResult[CatchUpConfig] = {
+    val v2.CatchUpConfig(catchUpIntervalSkipP, nrIntervalsToTriggerCatchUpP) = value
+    for {
+      catchUpIntervalSkip <- ProtoConverter.parsePositiveInt(catchUpIntervalSkipP)
+      nrIntervalsToTriggerCatchUp <- ProtoConverter.parsePositiveInt(
+        nrIntervalsToTriggerCatchUpP
+      )
+    } yield CatchUpConfig(catchUpIntervalSkip, nrIntervalsToTriggerCatchUp)
+  }
 }

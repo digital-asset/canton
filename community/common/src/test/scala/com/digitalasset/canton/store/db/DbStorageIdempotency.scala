@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.store.db
@@ -26,6 +26,7 @@ class DbStorageIdempotency(
   override val profile: DbStorage.Profile = underlying.profile
   override def metrics: DbStorageMetrics = underlying.metrics
   override val dbConfig: DbConfig = underlying.dbConfig
+  override protected val logOperations: Boolean = false
 
   override protected[canton] def runRead[A](
       action: ReadTransactional[A],

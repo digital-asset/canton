@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package slick.util
@@ -132,7 +132,7 @@ class AsyncExecutorWithMetrics(
       private val lastReport = new AtomicReference(CantonTimestamp.now())
       def track(trace: String, runningTime: Long): Unit = {
         if (logger.underlying.isInfoEnabled) {
-          logQueryCost.foreach { case QueryCostMonitoringConfig(frequency, resetOnOutput) =>
+          logQueryCost.foreach { case QueryCostMonitoringConfig(frequency, resetOnOutput, _) =>
             val updated = cost.updateAndGet { tmp =>
               val (count, total): (Long, Long) = tmp.getOrElse(trace, (0, 0))
               tmp + (trace -> ((count + 1, total + runningTime)))
@@ -153,8 +153,9 @@ class AsyncExecutorWithMetrics(
                   f"count=$count%7d mean=${nanos / (Math.max(count, 1) * 1e6)}%7.2f ms total=${nanos / 1e9}%5.1f s $name%s"
                 }
                 .mkString("\n  ")
+              val total = f"${updated.values.map(_._2).sum / 1e9}%5.1f"
               logger.info(
-                s"Here is our list of the 15 most expensive database queries for ${metrics.prefix}:\n  " + items
+                s"Here is our list of the 15 most expensive database queries for ${metrics.prefix} with total of $total s:\n  " + items
               )
             }
           }
@@ -336,7 +337,9 @@ class AsyncExecutorWithMetrics(
               ignore.forall(pack => !e.getClassName.startsWith(pack))
             }
             .map(_.toString)
-            .getOrElse("<unknown>")
+            .getOrElse(
+              "<unknown>"
+            ) // if we can't find the call-site, then it's usually some transactionally
         } else "query-tracking-disabled"
         // initialize statistics gathering
         stats.put(command, QueryInfo(tr)).discard
@@ -450,4 +453,24 @@ class AsyncExecutorWithMetrics(
     }
   }
 
+}
+
+object AsyncExecutorWithMetrics {
+  def createSingleThreaded(
+      name: String,
+      metrics: DbQueueMetrics,
+      logger: Logger,
+  ): AsyncExecutorWithMetrics & AsyncExecutorWithShutdown =
+    new AsyncExecutorWithMetrics(
+      name = s"${name}DatabaseExecutor",
+      minThreads = 1,
+      maxThreads = 1,
+      queueSize = 1000,
+      maxConnections = 1,
+      logQueryCost = None,
+      metrics = metrics,
+      scheduler = None,
+      logger = logger,
+      warnOnSlowQueryO = None,
+    )
 }

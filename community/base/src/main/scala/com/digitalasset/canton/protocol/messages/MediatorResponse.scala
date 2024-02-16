@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol.messages
@@ -171,12 +171,6 @@ case class MediatorResponse private (
       : v0.SignedProtocolMessage.SomeSignedProtocolMessage.MediatorResponse =
     v0.SignedProtocolMessage.SomeSignedProtocolMessage.MediatorResponse(getCryptographicEvidence)
 
-  override protected[messages] def toProtoTypedSomeSignedProtocolMessage
-      : v0.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage =
-    v0.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage.MediatorResponse(
-      getCryptographicEvidence
-    )
-
   override def hashPurpose: HashPurpose = HashPurpose.MediatorResponseSignature
 
   override def pretty: Pretty[this.type] =
@@ -340,6 +334,7 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
       rootHashO <- RootHash.fromProtoPrimitiveOption(rootHashP)
       confirmingParties <- confirmingPartiesP.traverse(ProtoConverter.parseLfPartyId)
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain_id")
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(0))
       response <- Either
         .catchOnly[InvalidMediatorResponse](
           MediatorResponse(
@@ -352,7 +347,7 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
             confirmingParties.toSet,
             domainId,
           )(
-            supportedProtoVersions.protocolVersionRepresentativeFor(ProtoVersion(0)),
+            rpv,
             Some(bytes),
           )
         )
@@ -385,6 +380,7 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
       rootHashO <- RootHash.fromProtoPrimitiveOption(rootHashP)
       confirmingParties <- confirmingPartiesP.traverse(ProtoConverter.parseLfPartyId)
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain_id")
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(1))
       response <- Either
         .catchOnly[InvalidMediatorResponse](
           MediatorResponse(
@@ -397,7 +393,7 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
             confirmingParties.toSet,
             domainId,
           )(
-            supportedProtoVersions.protocolVersionRepresentativeFor(ProtoVersion(1)),
+            rpv,
             Some(bytes),
           )
         )
@@ -430,6 +426,7 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
       confirmingParties <- confirmingPartiesP.traverse(ProtoConverter.parseLfPartyId)
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain_id")
       viewPositionO = viewPositionPO.map(ViewPosition.fromProtoV2)
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(2))
       response <- Either
         .catchOnly[InvalidMediatorResponse](
           MediatorResponse(
@@ -442,7 +439,7 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
             confirmingParties.toSet,
             domainId,
           )(
-            supportedProtoVersions.protocolVersionRepresentativeFor(ProtoVersion(2)),
+            rpv,
             Some(bytes),
           )
         )

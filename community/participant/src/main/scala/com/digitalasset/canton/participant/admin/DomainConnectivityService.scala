@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.admin
@@ -128,9 +128,10 @@ class DomainConnectivityService(
   def registerDomain(
       request: v0.DomainConnectionConfig
   )(implicit traceContext: TraceContext): Future[v0.RegisterDomainResponse] = {
-    logger.info(show"Registering ${request.domainAlias}")
+
     val resp = for {
       conf <- mapErr(DomainConnectionConfig.fromProtoV0(request))
+      _ = logger.info(show"Registering ${request.domainAlias} with ${conf}")
       _ <- mapErrNewET(sync.addDomain(conf))
       _ <-
         if (!conf.manualConnect) for {

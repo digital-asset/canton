@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.sequencing.client
@@ -312,9 +312,7 @@ object SequencerClientFactory {
       }
 
       private def grpcTransport(connection: GrpcSequencerConnection, member: Member)(implicit
-          executionContext: ExecutionContextExecutor,
-          executionSequencerFactory: ExecutionSequencerFactory,
-          materializer: Materializer,
+          executionContext: ExecutionContextExecutor
       ): SequencerClientTransport = {
         val channel = createChannel(connection)
         val auth = grpcSequencerClientAuth(connection, member)
@@ -333,7 +331,6 @@ object SequencerClientFactory {
       private def grpcTransportPekko(connection: GrpcSequencerConnection, member: Member)(implicit
           executionContext: ExecutionContextExecutor,
           executionSequencerFactory: ExecutionSequencerFactory,
-          materializer: Materializer,
       ): GrpcSequencerClientTransportPekko = {
         val channel = createChannel(connection)
         val auth = grpcSequencerClientAuth(connection, member)

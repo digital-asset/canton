@@ -1,11 +1,10 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.pruning
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
-import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervals.ReconciliationInterval
 import com.digitalasset.canton.protocol.DomainParameters
 import com.digitalasset.canton.protocol.messages.CommitmentPeriod
@@ -492,7 +491,7 @@ private[pruning] object SortedReconciliationIntervalsTestHelpers extends EitherV
   def timeProofPeriodFlow(
       dynamicDomainParameters: DomainParameters.WithValidity[PositiveSeconds],
       times: Seq[CantonTimestamp],
-  )(implicit errorLoggingContext: ErrorLoggingContext): Seq[CommitmentPeriod] = {
+  ): Seq[CommitmentPeriod] = {
     val reconciliationIntervals = SortedReconciliationIntervals
       .create(Seq(dynamicDomainParameters), CantonTimestamp.MaxValue)
       .value

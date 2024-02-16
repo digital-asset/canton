@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.util
@@ -14,6 +14,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.SimpleExecutionQueue.TaskCell
 import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.util.TryUtil.*
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
@@ -74,15 +75,6 @@ class SimpleExecutionQueue(
       loggingContext: ErrorLoggingContext
   ): FutureUnlessShutdown[A] =
     genExecute(runIfFailed = false, execution, description, runWhenUnderFailures)
-
-  def executeUnderFailures[A](execution: => Future[A], description: String)(implicit
-      loggingContext: ErrorLoggingContext
-  ): FutureUnlessShutdown[A] =
-    genExecute(
-      runIfFailed = true,
-      FutureUnlessShutdown.outcomeF(execution)(directExecutionContext),
-      description,
-    )
 
   def executeUnderFailuresUS[A](execution: => FutureUnlessShutdown[A], description: String)(implicit
       loggingContext: ErrorLoggingContext
@@ -286,13 +278,12 @@ object SimpleExecutionQueue {
                 s"Not running task ${description.singleQuoted} due to exception after waiting for $waitingDelay"
               )(loggingContext.traceContext)
             }
-            Try(runWhenUnderFailures).failed
-              .foreach(e =>
-                loggingContext.logger.debug(
-                  s"Failed to run 'runWhenUnderFailures' function for ${description.singleQuoted}",
-                  e,
-                )(loggingContext.traceContext)
-              )
+            Try(runWhenUnderFailures).forFailed(e =>
+              loggingContext.logger.debug(
+                s"Failed to run 'runWhenUnderFailures' function for ${description.singleQuoted}",
+                e,
+              )(loggingContext.traceContext)
+            )
             FutureUnlessShutdown.failed(ex)
           }
       }(directExecutionContext)

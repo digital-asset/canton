@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.sequencing.client
@@ -965,10 +965,6 @@ class SequencerClientTest
         request: SubscriptionRequest,
         handler: SerializedEventHandler[E],
     )(implicit traceContext: TraceContext): SequencerSubscription[E] = ???
-
-    override def downloadTopologyStateForInit(request: TopologyStateForInitRequest)(implicit
-        traceContext: TraceContext
-    ): EitherT[Future, String, TopologyStateForInitResponse] = ???
   }
 
   private implicit class RichSequencerClient(client: SequencerClientImpl) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol.messages
@@ -41,7 +41,9 @@ class MediatorResponseTest extends AnyWordSpec with BaseTest with HasCryptograph
   )
 
   def fromByteString(bytes: ByteString): MediatorResponse = {
-    MediatorResponse.fromByteString(bytes).valueOr(err => fail(err.toString))
+    MediatorResponse
+      .fromByteString(testedProtocolVersion)(bytes)
+      .valueOr(err => fail(err.toString))
   }
 
   "ConfirmationResponse" should {

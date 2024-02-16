@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.config
@@ -126,7 +126,6 @@ trait DomainBaseConfig extends LocalNodeConfig {
 
   override def clientAdminApi: ClientConfig = adminApi.clientConfig
 
-  override val topologyX: TopologyXConfig = TopologyXConfig.NotUsed
 }
 
 /** Configuration parameters for a single domain. */
@@ -194,7 +193,7 @@ final case class CommunityDomainConfig(
   *
   * @param adminApi the client settings used to connect to the admin api of the remote process.
   * @param publicApi these details are provided to other nodes to use for how they should
-  *                            connect to the sequencer if the domain node has an embedded sequencer
+  *                  connect to the sequencer if the domain node has an embedded sequencer
   */
 final case class RemoteDomainConfig(
     adminApi: ClientConfig,

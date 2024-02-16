@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.sequencing.client
@@ -7,7 +7,7 @@ import cats.data.EitherT
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.client.TestSequencerClientSend.Request
-import com.digitalasset.canton.sequencing.protocol.{AggregationRule, Batch, MessageId}
+import com.digitalasset.canton.sequencing.protocol.{Batch, MessageId}
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.Future
@@ -28,11 +28,10 @@ class TestSequencerClientSend extends SequencerClientSend {
       timestampOfSigningKey: Option[CantonTimestamp],
       maxSequencingTime: CantonTimestamp,
       messageId: MessageId,
-      aggregationRule: Option[AggregationRule],
       callback: SendCallback,
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] = {
     requestsQueue.add(
-      Request(batch, sendType, timestampOfSigningKey, maxSequencingTime, messageId, aggregationRule)
+      Request(batch, sendType, timestampOfSigningKey, maxSequencingTime, messageId)
     )
     EitherT[Future, SendAsyncClientError, Unit](Future.successful(Right(())))
   }
@@ -48,6 +47,5 @@ object TestSequencerClientSend {
       timestampOfSigningKey: Option[CantonTimestamp],
       maxSequencingTime: CantonTimestamp,
       messageId: MessageId,
-      aggregationRule: Option[AggregationRule],
   )(implicit val traceContext: TraceContext)
 }

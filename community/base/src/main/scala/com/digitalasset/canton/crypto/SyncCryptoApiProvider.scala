@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.crypto
@@ -523,12 +523,9 @@ class DomainSnapshotSyncCryptoApi(
         }
       )
       validKeysWithMember <- EitherT.right(
-        mediatorGroup.active
-          .parFlatTraverse { mediatorId =>
-            ipsSnapshot
-              .signingKeys(mediatorId)
-              .map(keys => keys.map(key => (key.id, (mediatorId, key))))
-          }
+        ipsSnapshot
+          .signingKeys(mediatorGroup.active)
+          .map(keys => keys.map(key => (key.id, (mediatorGroup.active, key))))
           .map(_.toMap)
       )
       validKeys = validKeysWithMember.view.mapValues(_._2).toMap

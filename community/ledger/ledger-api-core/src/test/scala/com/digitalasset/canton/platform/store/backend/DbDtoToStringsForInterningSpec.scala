@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.store.backend
@@ -17,6 +17,10 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       "50",
       "87",
       "94",
+    ).sorted
+    iterators.packageNames.toList.sorted shouldBe List(
+      "PN1",
+      "PN2",
     ).sorted
     iterators.parties.toList.sorted shouldBe List(
       "2",
@@ -105,6 +109,7 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       submitters = Some(Set("10", "11", "12")),
       contract_id = "13",
       template_id = Some("14"),
+      package_name = Some("PN2"),
       tree_event_witnesses = Set("15", "16", "17"),
       create_argument = None,
       create_argument_compression = Some(1),
@@ -123,6 +128,7 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       event_id = Some("23"),
       contract_id = "24",
       template_id = Some("25"),
+      package_name = Some("PN1"),
       flat_event_witnesses = Set("26", "27", "28"),
       tree_event_witnesses = Set("29", "30", "31"),
       create_argument = None,

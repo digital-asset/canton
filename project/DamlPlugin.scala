@@ -21,7 +21,7 @@ object DamlPlugin extends AutoPlugin {
 
   object autoImport {
     val damlCodeGeneration =
-      settingKey[Seq[(File, File, String)]](
+      taskKey[Seq[(File, File, String)]](
         "List of tuples (Daml project directory, Daml archive file, name of the generated Java package)"
       )
     val damlSourceDirectory = settingKey[File]("Directory containing daml projects")
@@ -32,6 +32,9 @@ object DamlPlugin extends AutoPlugin {
         "List of directory names used to sort the Daml building by order in this list"
       )
     val damlDarOutput = settingKey[File]("Directory to put generated DAR files in")
+    val useVersionedDarName = settingKey[Boolean](
+      "If enabled, the output DAR file name is <project-name>-<project-version>.dar otherwise it is <project-name>.dar"
+    )
     val damlScalaCodegenOutput =
       settingKey[File]("Directory to put Scala sources generated from DARs")
     val damlJavaCodegenOutput =
@@ -45,6 +48,8 @@ object DamlPlugin extends AutoPlugin {
     )
     val damlProjectVersionOverride =
       settingKey[Option[String]]("Allows hardcoding daml project version")
+    val damlEnableProjectVersionOverride =
+      settingKey[Boolean]("Enables overriding the Daml project-version key")
 
     val damlGenerateCode = taskKey[Seq[File]]("Generate scala code from Daml")
     // From https://github.com/DACH-NY/the-real-canton-coin/pull/357:
@@ -61,6 +66,8 @@ object DamlPlugin extends AutoPlugin {
       taskKey[Unit]("Update the checked in DAR with a DAR built with the current Daml version")
     val damlEnableJavaCodegen =
       settingKey[Boolean]("Enable Java codegen")
+    val damlEnableScalaCodegen =
+      settingKey[Boolean]("Enable Scala codegen")
 
     lazy val baseDamlPluginSettings: Seq[Def.Setting[_]] = Seq(
       sourceGenerators += damlGenerateCode.taskValue,
@@ -73,7 +80,9 @@ object DamlPlugin extends AutoPlugin {
       damlJavaCodegenOutput := sourceManaged.value / "daml-codegen-java",
       damlBuildOrder := Seq(),
       damlCodeGeneration := Seq(),
-      damlEnableJavaCodegen := false,
+      damlEnableJavaCodegen := true,
+      damlEnableScalaCodegen := false,
+      useVersionedDarName := false,
       damlGenerateCode := {
         // for the time being we assume if we're using code generation then the DARs must first be built
         damlBuild.value
@@ -84,15 +93,13 @@ object DamlPlugin extends AutoPlugin {
         val cacheDirectory = streams.value.cacheDirectory
         val log = streams.value.log
         val enableJavaCodegen = damlEnableJavaCodegen.value
+        val enableScalaCodegen = damlEnableScalaCodegen.value
 
         val cache = FileFunction.cached(cacheDirectory, FileInfo.hash) { input =>
           val codegens =
-            (Seq((Codegen.Scala, scalaOutputDirectory))) ++
+            (if (enableScalaCodegen) Seq((Codegen.Scala, scalaOutputDirectory)) else Seq.empty) ++
               (if (enableJavaCodegen) Seq((Codegen.Java, javaOutputDirectory)) else Seq.empty)
-
-          IO.delete(scalaOutputDirectory)
-          if (enableJavaCodegen) IO.delete(javaOutputDirectory) else ()
-
+          codegens.foreach { case (_, outputDirectory) => IO.delete(outputDirectory) }
           settings.flatMap { case (damlProjectDirectory, darFile, packageName) =>
             codegens
               .flatMap { case (codegen, outputDirectory) =>
@@ -120,6 +127,7 @@ object DamlPlugin extends AutoPlugin {
         val cacheDir = streams.value.cacheDirectory
         val allDamlFiles = damlSourceDirectory.value ** "*.daml"
         val damlProjectFiles = damlSourceDirectory.value ** "daml.yaml"
+        val useVersionedDarFileName = useVersionedDarName.value
 
         val buildDependencies = damlBuildOrder.value
 
@@ -153,6 +161,7 @@ object DamlPlugin extends AutoPlugin {
                 sourceDirectory,
                 buildDirectory,
                 outputDirectory,
+                useVersionedDarFileName,
                 sourceDirectory.toPath.relativize(projectFile.toPath).toFile,
                 damlCompilerVersion.value,
                 damlLanguageVersions.value,
@@ -165,13 +174,15 @@ object DamlPlugin extends AutoPlugin {
       // Declare dependency so that Daml packages in test scope may depend on packages in compile scope.
       (Test / damlBuild) := (Test / damlBuild).dependsOn(Compile / damlBuild).value,
       damlCheckProjectVersions := {
-        val projectVersion = version.value
-        val overrideVersion = damlProjectVersionOverride.value
+        val projectVersionOverride = ProjectVersionOverride(
+          damlEnableProjectVersionOverride.value,
+          damlProjectVersionOverride.value.getOrElse(version.value),
+        )
         val damlProjectFiles = (damlSourceDirectory.value ** "daml.yaml").get
 
         damlProjectFiles.foreach(
           checkProjectVersions(
-            overrideVersion.getOrElse(projectVersion),
+            projectVersionOverride,
             damlCompilerVersion.value,
             _,
           )
@@ -191,9 +202,13 @@ object DamlPlugin extends AutoPlugin {
         val overrideVersion = damlProjectVersionOverride.value
         val damlProjectFiles = (damlSourceDirectory.value ** "daml.yaml").get
 
+        val projectVersionOverride = ProjectVersionOverride(
+          damlEnableProjectVersionOverride.value,
+          overrideVersion.getOrElse(projectVersion),
+        )
         damlProjectFiles.foreach(
           updateProjectVersions(
-            overrideVersion.getOrElse(projectVersion),
+            projectVersionOverride,
             damlCompilerVersion.value,
             _,
           )
@@ -230,6 +245,7 @@ object DamlPlugin extends AutoPlugin {
     damlCodeGeneration := Seq(),
     damlFixedDars := Seq(),
     damlProjectVersionOverride := None,
+    damlEnableProjectVersionOverride := true,
   )
 
   override lazy val projectSettings: Seq[Def.Setting[_]] =
@@ -240,7 +256,7 @@ object DamlPlugin extends AutoPlugin {
     * If a mismatch is found a [[sbt.internal.MessageOnlyException]] will be thrown.
     */
   private def checkProjectVersions(
-      projectVersion: String,
+      projectVersionOverride: ProjectVersionOverride,
       damlVersion: String,
       damlProjectFile: File,
   ): Unit = {
@@ -250,7 +266,7 @@ object DamlPlugin extends AutoPlugin {
     )
 
     val values = readDamlYaml(damlProjectFile)
-    ensureMatchingVersion(projectVersion, "version")
+    projectVersionOverride.foreach(ensureMatchingVersion(_, "version"))
     ensureMatchingVersion(damlVersion, "sdk-version")
 
     def ensureMatchingVersion(sbtVersion: String, fieldName: String): Unit = {
@@ -269,7 +285,7 @@ object DamlPlugin extends AutoPlugin {
   /** Write the project and daml versions of our sbt project to the given daml.yaml project file.
     */
   private def updateProjectVersions(
-      projectVersion: String,
+      projectVersionOverride: ProjectVersionOverride,
       damlVersion: String,
       damlProjectFile: File,
   ): Unit = {
@@ -279,7 +295,8 @@ object DamlPlugin extends AutoPlugin {
     )
 
     val values = readDamlYaml(damlProjectFile)
-    values.put("version", projectVersion)
+    projectVersionOverride.foreach(values.put("version", _))
+
     values.put("sdk-version", damlVersion)
 
     val writer = new YamlWriter(new FileWriter(damlProjectFile))
@@ -313,6 +330,7 @@ object DamlPlugin extends AutoPlugin {
       sourceDirectory: File,
       buildDirectory: File,
       outputDirectory: File,
+      useVersionedDarName: Boolean,
       relativeDamlProjectFile: File,
       damlVersion: String,
       damlLanguageVersions: Seq[String],
@@ -369,8 +387,14 @@ object DamlPlugin extends AutoPlugin {
     // making sbt to believe that the source code changed
     IO.copyDirectory(originalDamlProjectFile.getAbsoluteFile.getParentFile, projectBuildDirectory)
 
-    val damlProjectName = readDamlYaml(originalDamlProjectFile).get("name").toString
-    val outputDar = outputDirectory / s"$damlProjectName.dar"
+    val damlYamlMap = readDamlYaml(originalDamlProjectFile)
+    val damlProjectName = damlYamlMap.get("name").toString
+    val outputDar =
+      if (!useVersionedDarName) outputDirectory / s"$damlProjectName.dar"
+      else {
+        val projectVersion = damlYamlMap.get("version").toString
+        outputDirectory / s"$damlProjectName-$projectVersion.dar"
+      }
     val processLogger = new BufferedLogger
 
     val result = Process(
@@ -534,4 +558,20 @@ object DamlPlugin extends AutoPlugin {
     (managedSourceDir ** s"*.${suffix}").get
   }
 
+  sealed trait ProjectVersionOverride extends Product with Serializable {
+    def foreach(f: String => Unit): Unit
+  }
+
+  object ProjectVersionOverride {
+    def apply(enableOverride: Boolean, overrideValue: => String): ProjectVersionOverride =
+      if (enableOverride) Override(overrideValue) else DoNotOverride
+
+    final case object DoNotOverride extends ProjectVersionOverride {
+      override def foreach(f: String => Unit): Unit = ()
+    }
+
+    final case class Override(overrideVersion: String) extends ProjectVersionOverride {
+      override def foreach(f: String => Unit): Unit = f(overrideVersion)
+    }
+  }
 }

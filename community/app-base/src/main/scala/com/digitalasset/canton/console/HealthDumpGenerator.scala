@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.console
@@ -108,9 +108,13 @@ trait HealthDumpGenerator[Status <: CantonStatus] {
     // This is a guess based on the default logback config as to what the rolling log files look like
     // If we want to be more robust we'd have to access logback directly, extract the pattern from there, and use it to
     // glob files.
-    val rollingLogs = logFile.siblings.filter { f =>
-      f.name.contains(logFile.name) && f.extension.contains(".gz")
-    }
+    val rollingLogs = logFile.siblings
+      .filter { f =>
+        f.name.contains(logFile.name) && f.extension.contains(".gz")
+      }
+      .toSeq
+      .sortBy(_.name)
+      .take(environment.config.monitoring.dumpNumRollingLogFiles.unwrap)
 
     File.usingTemporaryFile("canton-dump-", ".json") { tmpFile =>
       tmpFile.append(dump.asJson.spaces2)

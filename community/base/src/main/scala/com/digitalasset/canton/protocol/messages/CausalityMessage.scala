@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol.messages
@@ -82,11 +82,12 @@ object CausalityMessage extends HasProtocolVersionedCompanion[CausalityMessage] 
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "target_domain_id").map(TargetDomainId(_))
       clocks <- ProtoConverter.parseRequired(VectorClock.fromProtoV0, "clock", clockPO)
       tid <- ProtoConverter.parseRequired(TransferId.fromProtoV0, "transfer_id", transferIdP)
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(0))
     } yield CausalityMessage(
       domainId,
       tid,
       clocks,
-    )(protocolVersionRepresentativeFor(ProtoVersion(0)))
+    )(rpv)
   }
 
   override def name: String = "CausalityMessage"

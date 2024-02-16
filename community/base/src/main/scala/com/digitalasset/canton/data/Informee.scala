@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.data
@@ -21,6 +21,11 @@ import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 sealed trait Informee extends Product with Serializable with PrettyPrinting {
   def party: LfPartyId
 
+  /** Determines how much "impact" the informee has on approving / rejecting the underlying view.
+    *
+    * Positive value: confirming party
+    * Zero: plain informee, who sees the underlying view, but has no impact on approving / rejecting it
+    */
   def weight: NonNegativeInt
 
   def requiredTrustLevel: TrustLevel

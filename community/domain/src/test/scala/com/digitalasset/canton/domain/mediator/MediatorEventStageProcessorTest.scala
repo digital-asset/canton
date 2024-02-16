@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.mediator
@@ -152,7 +152,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
     )
 
     val signedConfirmationResponse =
-      SignedProtocolMessage.tryFrom(mediatorResponse, testedProtocolVersion, Signature.noSignature)
+      SignedProtocolMessage.from(mediatorResponse, testedProtocolVersion, Signature.noSignature)
     when(signedConfirmationResponse.message.domainId).thenReturn(domainId)
     val informeeMessageWithWrongDomainId = mock[InformeeMessage]
     when(informeeMessageWithWrongDomainId.domainId)
@@ -309,7 +309,6 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
                   _,
                   `firstRequestTs`,
                   InformeeMessage(_),
-                  _,
                   _,
                 ),
                 MediatorEvent.Timeout(_, `timesOutAt`, `requestId`),

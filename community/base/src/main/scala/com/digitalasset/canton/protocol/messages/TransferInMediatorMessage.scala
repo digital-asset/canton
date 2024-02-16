@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol.messages
@@ -34,8 +34,7 @@ final case class TransferInMediatorMessage(tree: TransferInViewTree)
     with ProtocolMessageV0
     with ProtocolMessageV1
     with ProtocolMessageV2
-    with ProtocolMessageV3
-    with UnsignedProtocolMessageV4 {
+    with ProtocolMessageV3 {
 
   require(tree.commonData.isFullyUnblinded, "The transfer-in common data must be unblinded")
   require(tree.view.isBlinded, "The transfer-out view must be blinded")
@@ -113,9 +112,6 @@ final case class TransferInMediatorMessage(tree: TransferInViewTree)
         v3.EnvelopeContent.SomeEnvelopeContent.TransferInMediatorMessage(toProtoV1)
     )
 
-  override def toProtoSomeEnvelopeContentV4: v4.EnvelopeContent.SomeEnvelopeContent =
-    v4.EnvelopeContent.SomeEnvelopeContent.TransferInMediatorMessage(toProtoV1)
-
   def toProtoV0: v0.TransferInMediatorMessage =
     v0.TransferInMediatorMessage(tree = Some(tree.toProtoV0))
 
@@ -133,26 +129,29 @@ final case class TransferInMediatorMessage(tree: TransferInViewTree)
 }
 
 object TransferInMediatorMessage
-    extends HasProtocolVersionedWithContextCompanion[TransferInMediatorMessage, HashOps] {
+    extends HasProtocolVersionedWithContextCompanion[
+      TransferInMediatorMessage,
+      (HashOps, ProtocolVersion),
+    ] {
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.TransferInMediatorMessage)(
-      supportedProtoVersion(_)((hashOps, proto) => fromProtoV0(hashOps)(proto)),
+      supportedProtoVersion(_)((context, proto) => fromProtoV0(context)(proto)),
       _.toProtoV0.toByteString,
     ),
     ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v4)(v1.TransferInMediatorMessage)(
-      supportedProtoVersion(_)((hashOps, proto) => fromProtoV1(hashOps)(proto)),
+      supportedProtoVersion(_)((context, proto) => fromProtoV1(context)(proto)),
       _.toProtoV1.toByteString,
     ),
   )
 
-  def fromProtoV0(hashOps: HashOps)(
+  def fromProtoV0(context: (HashOps, ProtocolVersion))(
       transferInMediatorMessageP: v0.TransferInMediatorMessage
   ): ParsingResult[TransferInMediatorMessage] =
     for {
       tree <- ProtoConverter
         .required("TransferInMediatorMessage.tree", transferInMediatorMessageP.tree)
-        .flatMap(TransferInViewTree.fromProtoV0(hashOps, _))
+        .flatMap(TransferInViewTree.fromProtoV0(context, _))
       _ <- EitherUtil.condUnitE(
         tree.commonData.isFullyUnblinded,
         OtherError(s"Transfer-in common data is blinded in request ${tree.rootHash}"),
@@ -163,13 +162,13 @@ object TransferInMediatorMessage
       )
     } yield TransferInMediatorMessage(tree)
 
-  def fromProtoV1(hashOps: HashOps)(
+  def fromProtoV1(context: (HashOps, ProtocolVersion))(
       transferInMediatorMessageP: v1.TransferInMediatorMessage
   ): ParsingResult[TransferInMediatorMessage] =
     for {
       tree <- ProtoConverter
         .required("TransferInMediatorMessage.tree", transferInMediatorMessageP.tree)
-        .flatMap(TransferInViewTree.fromProtoV1(hashOps, _))
+        .flatMap(TransferInViewTree.fromProtoV1(context, _))
       _ <- EitherUtil.condUnitE(
         tree.commonData.isFullyUnblinded,
         OtherError(s"Transfer-in common data is blinded in request ${tree.rootHash}"),

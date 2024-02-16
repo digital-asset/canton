@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol.transfer
@@ -55,9 +55,6 @@ object TransferOutProcessorError {
       s"Cannot transfer-out contract `$contractId` because it's not active. Current status $status"
   }
 
-  final case object TransferCounterOverflow extends TransferProcessorError {
-    override def message: String = "Transfer counter overflow"
-  }
   final case class InvalidResult(
       transferId: TransferId,
       result: DeliveredTransferOutResult.InvalidTransferOutResult,

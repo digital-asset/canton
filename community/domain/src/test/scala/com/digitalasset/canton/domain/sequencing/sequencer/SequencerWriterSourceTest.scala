@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.sequencing.sequencer
@@ -9,6 +9,7 @@ import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.domain.sequencing.sequencer.errors.SequencerError.PayloadToEventTimeBoundExceeded
 import com.digitalasset.canton.domain.sequencing.sequencer.store.*
 import com.digitalasset.canton.lifecycle.{
   AsyncCloseable,
@@ -22,7 +23,6 @@ import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutorService}
 import com.google.protobuf.ByteString
 import org.apache.pekko.NotUsed
@@ -149,13 +149,8 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
     result
   }
 
-  private def getErrorMessage(message: String256M, errorO: Option[ByteString]): String = {
-    if (testedProtocolVersion >= ProtocolVersion.CNTestNet) {
-      DeliverErrorStoreEvent.deserializeError(message, errorO, testedProtocolVersion).toString
-    } else {
-      message.unwrap
-    }
-  }
+  private def getErrorMessage(message: String256M, errorO: Option[ByteString]): String =
+    message.unwrap
 
   private val alice = ParticipantId("alice")
   private val bob = ParticipantId("bob")
@@ -197,7 +192,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
             offerDeliverOrFail(Presequenced.alwaysValid(deliver1))
             completeFlow()
           },
-          _.warningMessage shouldBe "The payload to event time bound [PT1M] has been been exceeded by payload time [1970-01-01T00:00:00.000001Z] and sequenced event time [1970-01-01T00:01:11Z]",
+          _.shouldBeCantonErrorCode(PayloadToEventTimeBoundExceeded),
         )
         events <- store.readEvents(aliceId)
       } yield events.payloads should have size (0)
@@ -229,14 +224,12 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
           payload2,
           None,
         )
-        _ <- loggerFactory.assertLogs(
-          {
-            offerDeliverOrFail(Presequenced.withMaxSequencingTime(deliver1, beforeNow))
-            offerDeliverOrFail(Presequenced.withMaxSequencingTime(deliver2, longAfterNow))
-            completeFlow()
-          },
-          _.warningMessage should include regex "The sequencer time \\[.*\\] has exceeded the max-sequencing-time of the send request \\[1970-01-01T00:00:05Z\\]: deliver\\[message-id:1\\]",
-        )
+        _ <- {
+          offerDeliverOrFail(Presequenced.withMaxSequencingTime(deliver1, beforeNow))
+          offerDeliverOrFail(Presequenced.withMaxSequencingTime(deliver2, longAfterNow))
+          completeFlow()
+        }
+
         events <- store.readEvents(aliceId)
       } yield {
         events.payloads should have size (1)
@@ -335,16 +328,14 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
               isRequest = true,
               batch = Batch.fromClosed(
                 testedProtocolVersion,
-                ClosedEnvelope.tryCreate(
+                ClosedEnvelope(
                   ByteString.EMPTY,
                   Recipients.cc(bob),
-                  Seq.empty,
                   testedProtocolVersion,
                 ),
               ),
               maxSequencingTime = CantonTimestamp.MaxValue,
               timestampOfSigningKey = None,
-              aggregationRule = None,
               protocolVersion = testedProtocolVersion,
             )
           )

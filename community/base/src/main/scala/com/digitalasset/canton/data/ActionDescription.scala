@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.data
@@ -128,6 +128,7 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
     actionNode match {
       case LfNodeCreate(
             contractId,
+            _packageName,
             _templateId,
             _arg,
             _agreementText,
@@ -144,6 +145,7 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
 
       case LfNodeExercises(
             inputContract,
+            _packageName,
             templateId,
             interfaceId,
             choice,
@@ -179,6 +181,7 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
 
       case LfNodeFetch(
             inputContract,
+            _packageName,
             _templateId,
             actingParties,
             _signatories,
@@ -202,7 +205,7 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
           protocolVersionRepresentativeFor(protocolVersion)
         )
 
-      case LfNodeLookupByKey(_, keyWithMaintainers, _result, version) =>
+      case LfNodeLookupByKey(_, _, keyWithMaintainers, _result, version) =>
         for {
           _ <- Either.cond(
             seedO.isEmpty,
@@ -399,14 +402,14 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
     import v0.ActionDescription.Description.*
     val v0.ActionDescription(description) = actionDescriptionP
 
-    val pv = protocolVersionRepresentativeFor(ProtoVersion(0))
-
-    description match {
-      case Create(create) => fromCreateProtoV0(create, pv)
-      case Exercise(exercise) => fromExerciseProtoV0(exercise, pv)
-      case Fetch(fetch) => fromFetchProtoV0(fetch, pv)
-      case LookupByKey(lookup) => fromLookupByKeyProtoV0(lookup, pv)
-      case Empty => Left(FieldNotSet("description"))
+    protocolVersionRepresentativeFor(ProtoVersion(0)).flatMap { pv =>
+      description match {
+        case Create(create) => fromCreateProtoV0(create, pv)
+        case Exercise(exercise) => fromExerciseProtoV0(exercise, pv)
+        case Fetch(fetch) => fromFetchProtoV0(fetch, pv)
+        case LookupByKey(lookup) => fromLookupByKeyProtoV0(lookup, pv)
+        case Empty => Left(FieldNotSet("description"))
+      }
     }
   }
 
@@ -416,14 +419,14 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
     import v1.ActionDescription.Description.*
     val v1.ActionDescription(description) = actionDescriptionP
 
-    val pv = protocolVersionRepresentativeFor(ProtoVersion(1))
-
-    description match {
-      case Create(create) => fromCreateProtoV0(create, pv)
-      case Exercise(exercise) => fromExerciseProtoV1(exercise, pv)
-      case Fetch(fetch) => fromFetchProtoV0(fetch, pv)
-      case LookupByKey(lookup) => fromLookupByKeyProtoV0(lookup, pv)
-      case Empty => Left(FieldNotSet("description"))
+    protocolVersionRepresentativeFor(ProtoVersion(1)).flatMap { pv =>
+      description match {
+        case Create(create) => fromCreateProtoV0(create, pv)
+        case Exercise(exercise) => fromExerciseProtoV1(exercise, pv)
+        case Fetch(fetch) => fromFetchProtoV0(fetch, pv)
+        case LookupByKey(lookup) => fromLookupByKeyProtoV0(lookup, pv)
+        case Empty => Left(FieldNotSet("description"))
+      }
     }
   }
 
@@ -433,15 +436,16 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
     import v2.ActionDescription.Description.*
     val v2.ActionDescription(description) = actionDescriptionP
 
-    val pv = protocolVersionRepresentativeFor(ProtoVersion(2))
-
-    description match {
-      case Create(create) => fromCreateProtoV0(create, pv)
-      case Exercise(exercise) => fromExerciseProtoV2(exercise, pv)
-      case Fetch(fetch) => fromFetchProtoV0(fetch, pv)
-      case LookupByKey(lookup) => fromLookupByKeyProtoV0(lookup, pv)
-      case Empty => Left(FieldNotSet("description"))
+    protocolVersionRepresentativeFor(ProtoVersion(2)).flatMap { pv =>
+      description match {
+        case Create(create) => fromCreateProtoV0(create, pv)
+        case Exercise(exercise) => fromExerciseProtoV2(exercise, pv)
+        case Fetch(fetch) => fromFetchProtoV0(fetch, pv)
+        case LookupByKey(lookup) => fromLookupByKeyProtoV0(lookup, pv)
+        case Empty => Left(FieldNotSet("description"))
+      }
     }
+
   }
 
   private def lfVersionFromProtoVersioned(

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset
@@ -9,9 +9,6 @@ import com.daml.lf.transaction.{ContractStateMachine, Versioned}
 import com.daml.lf.value.Value
 import com.digitalasset.canton.data.{Counter, CounterCompanion}
 import com.digitalasset.canton.ledger.configuration
-import com.digitalasset.canton.serialization.DeterministicEncoding.encodeLong
-import com.digitalasset.canton.version.ProtocolVersion
-import com.google.protobuf.ByteString
 
 package object canton {
 
@@ -108,25 +105,6 @@ package object canton {
   /** The counter assigned by the transaction processor to confirmation and transfer requests. */
   type RequestCounterDiscriminator
   type RequestCounter = Counter[RequestCounterDiscriminator]
-
-  /** The counter assigned to a contract to count the number of its transfers */
-  type TransferCounterDiscriminator
-  type TransferCounter = Counter[TransferCounterDiscriminator]
-
-  object TransferCounter extends CounterCompanion[TransferCounterDiscriminator] {
-    def forCreatedContract(protocolVersion: ProtocolVersion): TransferCounterO =
-      if (protocolVersion >= ProtocolVersion.CNTestNet) Some(TransferCounter.Genesis)
-      else None
-
-    def encodeDeterministically(transferCounter: TransferCounter): ByteString = encodeLong(
-      transferCounter.unwrap
-    )
-  }
-
-  /** A transfer counter if available. Transfer counters are defined from protocol version
-    * [[com.digitalasset.canton.version.ProtocolVersion.CNTestNet]] on
-    */
-  type TransferCounterO = Option[TransferCounter]
 
   object RequestCounter extends CounterCompanion[RequestCounterDiscriminator]
 

@@ -1,11 +1,9 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.store.dao.events
 
 import cats.syntax.traverse.*
-import com.daml.api.util.TimestampConversion
-import com.daml.api.util.TimestampConversion.fromInstant
 import com.daml.ledger.api.v1.transaction.TreeEvent
 import com.daml.ledger.api.v1.event as apiEvent
 import com.daml.ledger.api.v2.reassignment.{
@@ -24,6 +22,8 @@ import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.{Identifier, Party}
 import com.daml.lf.transaction.{FatContractInstance, GlobalKeyWithMaintainers, Node}
 import com.daml.lf.value.Value.ContractId
+import com.digitalasset.canton.ledger.api.util.TimestampConversion
+import com.digitalasset.canton.ledger.api.util.TimestampConversion.fromInstant
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.api.v1.event.EventOps.TreeEventOps
 import com.digitalasset.canton.platform.participant.util.LfEngineToApi
@@ -41,7 +41,7 @@ import com.google.protobuf.timestamp.Timestamp
 
 import scala.concurrent.{ExecutionContext, Future}
 
-private[events] object TransactionLogUpdatesConversions {
+private[platform] object TransactionLogUpdatesConversions {
   object ToFlatTransaction {
     def filter(
         wildcardParties: Set[Party],
@@ -506,6 +506,7 @@ private[events] object TransactionLogUpdatesConversions {
               Node.Create(
                 coid = createdEvent.contractId,
                 templateId = createdEvent.templateId,
+                packageName = createdEvent.packageName,
                 arg = createdEvent.createArgument.unversioned,
                 agreementText = createdEvent.createAgreementText.getOrElse(""),
                 signatories = createdEvent.createSignatories,
@@ -535,6 +536,7 @@ private[events] object TransactionLogUpdatesConversions {
           eventId = createdEvent.eventId.toLedgerString,
           contractId = createdEvent.contractId.coid,
           templateId = Some(LfEngineToApi.toApiIdentifier(createdEvent.templateId)),
+          packageName = createdEvent.packageName,
           contractKey = apiContractData.contractKey,
           createArguments = apiContractData.createArguments,
           createdEventBlob = apiContractData.createdEventBlob.getOrElse(ByteString.EMPTY),

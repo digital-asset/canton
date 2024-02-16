@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.store.backend
@@ -57,6 +57,7 @@ private[backend] trait StorageBackendTestsContracts
     createdContracts.get(contractId).isDefined shouldBe true
     createdContracts.get(contractId).foreach { c =>
       c.templateId shouldBe someTemplateId.toString
+      c.packageName shouldBe Some(somePackageName)
       c.createArgumentCompression shouldBe None
       c.flatEventWitnesses shouldBe Set(signatory, observer)
     }

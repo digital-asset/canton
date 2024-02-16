@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol.submission
@@ -128,19 +128,15 @@ abstract class TransactionTreeFactoryImpl(
         Some(participantId.adminParty.toLf),
       )
 
-    for {
-      commonMetadata <- EitherT.fromEither[Future](
-        CommonMetadata
-          .create(cryptoOps, protocolVersion)(
-            confirmationPolicy,
-            domainId,
-            mediator,
-            commonMetadataSalt,
-            transactionUuid,
-          )
-          .leftMap(CommonMetadataError)
-      )
+    val commonMetadata = CommonMetadata(cryptoOps, protocolVersion)(
+      confirmationPolicy,
+      domainId,
+      mediator,
+      commonMetadataSalt,
+      transactionUuid,
+    )
 
+    for {
       submitterMetadata <- EitherT.fromEither[Future](
         SubmitterMetadata
           .fromSubmitterInfo(cryptoOps)(

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.store
@@ -12,6 +12,8 @@ import com.digitalasset.canton.tracing.TraceContext
 import scala.concurrent.Future
 
 trait SubmissionTrackerStore extends PrunableByTime with AutoCloseable {
+
+  override protected def kind: String = "tracked submissions"
 
   /** Register a fresh request in the store.
     * @return a `Future` that resolves to `true` if the request is indeed fresh and was added to the store,

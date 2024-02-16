@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.environment
@@ -28,7 +28,7 @@ import com.digitalasset.canton.console.{
 }
 import com.digitalasset.canton.domain.DomainNodeBootstrap
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.participant.{ParticipantNodeBootstrap, ParticipantNodeBootstrapX}
+import com.digitalasset.canton.participant.ParticipantNodeBootstrap
 import com.digitalasset.canton.resource.{CommunityDbMigrationsFactory, DbMigrationsFactory}
 
 class CommunityEnvironment(
@@ -42,9 +42,6 @@ class CommunityEnvironment(
   override protected val participantNodeFactory
       : ParticipantNodeBootstrap.Factory[Config#ParticipantConfigType, ParticipantNodeBootstrap] =
     ParticipantNodeBootstrap.CommunityParticipantFactory
-  override protected val participantNodeFactoryX
-      : ParticipantNodeBootstrap.Factory[Config#ParticipantConfigType, ParticipantNodeBootstrapX] =
-    ParticipantNodeBootstrapX.CommunityParticipantFactory
 
   override protected val domainFactory: DomainNodeBootstrap.Factory[Config#DomainConfigType] =
     DomainNodeBootstrap.CommunityDomainFactory

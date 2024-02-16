@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol.messages
@@ -6,22 +6,20 @@ package com.digitalasset.canton.protocol.messages
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.TopologyRequestId
-import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
-import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcastX.Broadcast
-import com.digitalasset.canton.protocol.{v0, v1, v2, v3, v4}
+import com.digitalasset.canton.protocol.{v0, v1, v2, v3}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{
-  HasProtocolVersionedCompanion,
+  HasProtocolVersionedWithContextCompanion,
   ProtoVersion,
   ProtocolVersion,
+  ProtocolVersionValidation,
   RepresentativeProtocolVersion,
 }
 import com.google.common.annotations.VisibleForTesting
@@ -41,8 +39,7 @@ final case class DomainTopologyTransactionMessage private (
     with ProtocolMessageV0
     with ProtocolMessageV1
     with ProtocolMessageV2
-    with ProtocolMessageV3
-    with UnsignedProtocolMessageV4 {
+    with ProtocolMessageV3 {
 
   // Ensures the invariants related to default values hold
   DomainTopologyTransactionMessage
@@ -55,6 +52,7 @@ final case class DomainTopologyTransactionMessage private (
       domainId,
       notSequencedAfter,
       hashOps,
+      representativeProtocolVersion,
     )
 
   private[messages] def toProtoV0: v0.DomainTopologyTransactionMessage =
@@ -92,9 +90,6 @@ final case class DomainTopologyTransactionMessage private (
       v3.EnvelopeContent.SomeEnvelopeContent.DomainTopologyTransactionMessage(toProtoV1)
     )
 
-  override def toProtoSomeEnvelopeContentV4: v4.EnvelopeContent.SomeEnvelopeContent =
-    v4.EnvelopeContent.SomeEnvelopeContent.DomainTopologyTransactionMessage(toProtoV1)
-
   @transient override protected lazy val companionObj: DomainTopologyTransactionMessage.type =
     DomainTopologyTransactionMessage
 
@@ -106,7 +101,10 @@ final case class DomainTopologyTransactionMessage private (
 }
 
 object DomainTopologyTransactionMessage
-    extends HasProtocolVersionedCompanion[DomainTopologyTransactionMessage] {
+    extends HasProtocolVersionedWithContextCompanion[
+      DomainTopologyTransactionMessage,
+      ProtocolVersion,
+    ] {
 
   implicit val domainIdentityTransactionMessageCast
       : ProtocolMessageContentCast[DomainTopologyTransactionMessage] =
@@ -127,7 +125,15 @@ object DomainTopologyTransactionMessage
     ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v5)(
       v1.DomainTopologyTransactionMessage
     )(
-      supportedProtoVersion(_)(fromProtoV1),
+      supportedProtoVersion(_)(fromProtoV1(ProtoVersion(1))),
+      _.toProtoV1.toByteString,
+    ),
+    // use separate ProtoVersion starting with v6 to allow different hashing
+    // scheme for protocol version 5 and 6
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v6)(
+      v1.DomainTopologyTransactionMessage
+    )(
+      supportedProtoVersion(_)(fromProtoV1(ProtoVersion(2))),
       _.toProtoV1.toByteString,
     ),
   )
@@ -144,17 +150,38 @@ object DomainTopologyTransactionMessage
       domainId: DomainId,
       notSequencedAfter: Option[CantonTimestamp],
       hashOps: HashOps,
+      representativeProtocolVersion: RepresentativeProtocolVersion[
+        DomainTopologyTransactionMessage.type
+      ],
   ): Hash = {
     val builder = hashOps
       .build(HashPurpose.DomainTopologyTransactionMessageSignature)
       .add(domainId.toProtoPrimitive)
-
-    notSequencedAfter.foreach { ts =>
-      builder.add(ts.toEpochMilli)
+    val version = representativeProtocolVersion.representative
+    notSequencedAfter match {
+      case Some(ts) if version == ProtocolVersion.v5 =>
+        builder.add(ts.toEpochMilli).discard
+      case Some(ts) if version >= ProtocolVersion.v6 =>
+        builder
+          .add(version.toProtoPrimitive)
+          .add(ts.toMicros)
+          .add(transactions.length)
+          .discard
+      case Some(_) =>
+        throw new IllegalStateException(
+          "notSequencedAfter not expected for pv < 5"
+        )
+      case None if version >= ProtocolVersion.v5 =>
+        // Won't happen because of the invariant
+        throw new IllegalStateException(
+          "notSequencedAfter must be present for protocol version >= 5"
+        )
+      case None =>
     }
 
     transactions.foreach(elem => builder.add(elem.getCryptographicEvidence))
     builder.finish()
+
   }
 
   def create(
@@ -170,14 +197,16 @@ object DomainTopologyTransactionMessage
     val notSequencedAfterUpdated =
       notSequencedAfterInvariant.orValue(notSequencedAfter, protocolVersion)
 
+    val representativeProtocolVersion = protocolVersionRepresentativeFor(protocolVersion)
     val hashToSign = hash(
       transactions,
       domainId,
       notSequencedAfterUpdated,
       syncCrypto.crypto.pureCrypto,
+      representativeProtocolVersion,
     )
-
     for {
+
       signature <- syncCrypto.sign(hashToSign).leftMap(_.toString)
       domainTopologyTransactionMessageE = Either
         .catchOnly[IllegalArgumentException](
@@ -186,7 +215,7 @@ object DomainTopologyTransactionMessage
             transactions,
             notSequencedAfter = notSequencedAfterUpdated,
             domainId,
-          )(protocolVersionRepresentativeFor(protocolVersion))
+          )(representativeProtocolVersion)
         )
         .leftMap(_.getMessage)
       domainTopologyTransactionMessage <- EitherT.fromEither[Future](
@@ -218,28 +247,38 @@ object DomainTopologyTransactionMessage
   }
 
   private[messages] def fromProtoV0(
-      message: v0.DomainTopologyTransactionMessage
+      expectedProtocolVersion: ProtocolVersion,
+      message: v0.DomainTopologyTransactionMessage,
   ): ParsingResult[DomainTopologyTransactionMessage] = {
     val v0.DomainTopologyTransactionMessage(signature, _domainId, transactions) = message
+
     for {
-      succeededContent <- transactions.toList.traverse(SignedTopologyTransaction.fromByteString)
+      succeededContent <- transactions.toList.traverse(
+        SignedTopologyTransaction.fromByteString(
+          ProtocolVersionValidation(expectedProtocolVersion)
+        )
+      )
       signature <- ProtoConverter.parseRequired(Signature.fromProtoV0, "signature", signature)
       domainUid <- UniqueIdentifier.fromProtoPrimitive(message.domainId, "domainId")
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(0))
     } yield DomainTopologyTransactionMessage(
       signature,
       succeededContent,
       notSequencedAfter = None,
       DomainId(domainUid),
-    )(protocolVersionRepresentativeFor(ProtoVersion(0)))
+    )(rpv)
   }
 
-  private[messages] def fromProtoV1(
-      message: v1.DomainTopologyTransactionMessage
+  private[messages] def fromProtoV1(protoVersion: ProtoVersion)(
+      expectedProtocolVersion: ProtocolVersion,
+      message: v1.DomainTopologyTransactionMessage,
   ): ParsingResult[DomainTopologyTransactionMessage] = {
     val v1.DomainTopologyTransactionMessage(signature, domainId, timestamp, transactions) = message
     for {
       succeededContent <- transactions.toList.traverse(
-        SignedTopologyTransaction.fromByteString
+        SignedTopologyTransaction.fromByteString(
+          ProtocolVersionValidation(expectedProtocolVersion)
+        )
       )
       signature <- ProtoConverter.parseRequired(Signature.fromProtoV0, "signature", signature)
       domainUid <- UniqueIdentifier.fromProtoPrimitive(domainId, "domainId")
@@ -248,118 +287,14 @@ object DomainTopologyTransactionMessage
         "not_sequenced_after",
         timestamp,
       )
+      rpv <- protocolVersionRepresentativeFor(protoVersion)
     } yield DomainTopologyTransactionMessage(
       signature,
       succeededContent,
       notSequencedAfter = Some(notSequencedAfter),
       DomainId(domainUid),
-    )(protocolVersionRepresentativeFor(ProtoVersion(1)))
+    )(rpv)
   }
 
   override def name: String = "DomainTopologyTransactionMessage"
-}
-
-final case class TopologyTransactionsBroadcastX private (
-    override val domainId: DomainId,
-    broadcasts: Seq[Broadcast],
-)(
-    override val representativeProtocolVersion: RepresentativeProtocolVersion[
-      TopologyTransactionsBroadcastX.type
-    ]
-) extends UnsignedProtocolMessage
-    with UnsignedProtocolMessageV4 {
-
-  @transient override protected lazy val companionObj: TopologyTransactionsBroadcastX.type =
-    TopologyTransactionsBroadcastX
-
-  override protected[messages] def toProtoSomeEnvelopeContentV4
-      : v4.EnvelopeContent.SomeEnvelopeContent =
-    v4.EnvelopeContent.SomeEnvelopeContent.TopologyTransactionsBroadcast(toProtoV2)
-
-  def toProtoV2: v2.TopologyTransactionsBroadcastX = v2.TopologyTransactionsBroadcastX(
-    domainId.toProtoPrimitive,
-    broadcasts = broadcasts.map(_.toProtoV2),
-  )
-
-}
-
-object TopologyTransactionsBroadcastX
-    extends HasProtocolVersionedCompanion[
-      TopologyTransactionsBroadcastX
-    ] {
-
-  def create(
-      domainId: DomainId,
-      broadcasts: Seq[Broadcast],
-      protocolVersion: ProtocolVersion,
-  ): TopologyTransactionsBroadcastX =
-    TopologyTransactionsBroadcastX(domainId = domainId, broadcasts = broadcasts)(
-      supportedProtoVersions.protocolVersionRepresentativeFor(protocolVersion)
-    )
-
-  override def name: String = "TopologyTransactionsBroadcastX"
-
-  implicit val acceptedTopologyTransactionXMessageCast
-      : ProtocolMessageContentCast[TopologyTransactionsBroadcastX] =
-    ProtocolMessageContentCast.create[TopologyTransactionsBroadcastX](
-      name
-    ) {
-      case att: TopologyTransactionsBroadcastX => Some(att)
-      case _ => None
-    }
-
-  val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.minimum),
-    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.CNTestNet)(
-      v2.TopologyTransactionsBroadcastX
-    )(
-      supportedProtoVersion(_)(fromProtoV2),
-      _.toProtoV2.toByteString,
-    ),
-  )
-
-  private[messages] def fromProtoV2(
-      message: v2.TopologyTransactionsBroadcastX
-  ): ParsingResult[TopologyTransactionsBroadcastX] = {
-    val v2.TopologyTransactionsBroadcastX(domain, broadcasts) = message
-    for {
-      domainId <- DomainId.fromProtoPrimitive(domain, "domain")
-      broadcasts <- broadcasts.traverse(broadcastFromProtoV2)
-    } yield TopologyTransactionsBroadcastX(domainId, broadcasts.toList)(
-      protocolVersionRepresentativeFor(ProtoVersion(2))
-    )
-  }
-
-  private def broadcastFromProtoV2(
-      message: v2.TopologyTransactionsBroadcastX.Broadcast
-  ): ParsingResult[Broadcast] = {
-    val v2.TopologyTransactionsBroadcastX.Broadcast(broadcastId, transactions) = message
-    for {
-      broadcastId <- String255.fromProtoPrimitive(broadcastId, "broadcast_id")
-      transactions <- transactions.traverse(SignedTopologyTransactionX.fromProtoV2)
-    } yield Broadcast(broadcastId, transactions.toList)
-  }
-
-  final case class Broadcast(
-      broadcastId: TopologyRequestId,
-      transactions: List[SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]],
-  ) {
-    def toProtoV2: v2.TopologyTransactionsBroadcastX.Broadcast =
-      v2.TopologyTransactionsBroadcastX.Broadcast(
-        broadcastId = broadcastId.toProtoPrimitive,
-        transactions = transactions.map(_.toProtoV2),
-      )
-  }
-
-  /** The state of the submission of a topology transaction broadcast. In combination with the sequencer client
-    * send tracker capability, State reflects that either the sequencer Accepted the submission or that the submission
-    * was Rejected due to an error or a timeout. See DomainTopologyServiceX.
-    */
-  sealed trait State extends Product with Serializable
-
-  object State {
-    case object Failed extends State
-
-    case object Accepted extends State
-  }
 }

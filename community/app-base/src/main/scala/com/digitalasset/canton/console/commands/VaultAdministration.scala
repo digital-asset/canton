@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.console.commands
@@ -257,14 +257,6 @@ class SecretKeyAdministration(
             filterKeyOwnerType = Some(owner.code),
           )
           .map(_.item.key)
-      case tx: TopologyAdministrationGroupX =>
-        tx.owner_to_key_mappings
-          .list(
-            filterStore = AuthorizedStore.filterName,
-            filterKeyOwnerUid = owner.filterString,
-            filterKeyOwnerType = Some(owner.code),
-          )
-          .flatMap(_.item.keys)
       case _ =>
         throw new IllegalStateException(
           "Impossible to encounter topology admin group besides X and non-X"

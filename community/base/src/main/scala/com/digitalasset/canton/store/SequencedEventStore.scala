@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.store
@@ -49,6 +49,7 @@ trait SequencedEventStore extends PrunableByTime with NamedLogging with AutoClos
   import SequencedEventStore.SearchCriterion
 
   implicit val ec: ExecutionContext
+  protected def kind: String = "sequenced events"
 
   /** Stores the given [[com.digitalasset.canton.sequencing.protocol.SequencedEvent]]s.
     * If an event with the same timestamp already exist, the event may remain unchanged or overwritten.

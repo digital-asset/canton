@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol.messages
@@ -59,7 +59,7 @@ class AcsCommitmentTest extends AnyWordSpec with BaseTest with HasCryptographicE
     )
 
   def fromByteString(bytes: ByteString): AcsCommitment = {
-    AcsCommitment.fromByteString(bytes) match {
+    AcsCommitment.fromByteString(testedProtocolVersion)(bytes) match {
       case Left(x) => fail(x.toString)
       case Right(x) => x
     }

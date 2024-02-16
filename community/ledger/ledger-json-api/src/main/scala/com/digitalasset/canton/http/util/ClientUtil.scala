@@ -1,11 +1,11 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.http.util
 
 import java.util.UUID
 
-import com.daml.ledger.api.refinements.ApiTypes.{CommandId, Party}
+import com.digitalasset.canton.ledger.api.refinements.ApiTypes.{CommandId, Party}
 import com.daml.ledger.api.v1.transaction_filter.{Filters, TransactionFilter}
 import com.daml.ledger.api.{v1 => lav1}
 

@@ -1,8 +1,9 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.store.interfaces
 
+import com.daml.lf.data.Ref
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.transaction.GlobalKey
 import com.digitalasset.canton.ledger.offset.Offset
@@ -37,6 +38,7 @@ private[platform] trait LedgerDaoContractsReader {
   def lookupActiveContractWithCachedArgument(
       readers: Set[Party],
       contractId: ContractId,
+      packageName: Option[Ref.PackageName],
       createArgument: Value,
   )(implicit loggingContext: LoggingContextWithTrace): Future[Option[Contract]]
 

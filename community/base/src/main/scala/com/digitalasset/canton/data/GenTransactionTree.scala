@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.data
@@ -302,19 +302,20 @@ object GenTransactionTree {
     GenLens[GenTransactionTree](_.rootViews)
 
   def fromProtoV0(
-      hashOps: HashOps,
+      context: (HashOps, ProtocolVersion),
       protoTransactionTree: v0.GenTransactionTree,
-  ): ParsingResult[GenTransactionTree] =
+  ): ParsingResult[GenTransactionTree] = {
+    val (hashOps, expectedProtocolVersion) = context
     for {
       submitterMetadata <- MerkleTree
         .fromProtoOptionV0(
           protoTransactionTree.submitterMetadata,
-          SubmitterMetadata.fromByteString(hashOps),
+          SubmitterMetadata.fromByteString(expectedProtocolVersion)(hashOps),
         )
       commonMetadata <- MerkleTree
         .fromProtoOptionV0(
           protoTransactionTree.commonMetadata,
-          CommonMetadata.fromByteString(hashOps),
+          CommonMetadata.fromByteString(expectedProtocolVersion)(hashOps),
         )
       commonMetadataUnblinded <- commonMetadata.unwrap.leftMap(_ =>
         InvariantViolation("GenTransactionTree.commonMetadata is blinded")
@@ -322,15 +323,15 @@ object GenTransactionTree {
       participantMetadata <- MerkleTree
         .fromProtoOptionV0(
           protoTransactionTree.participantMetadata,
-          ParticipantMetadata.fromByteString(hashOps),
+          ParticipantMetadata.fromByteString(expectedProtocolVersion)(hashOps),
         )
       rootViewsP <- ProtoConverter
         .required("GenTransactionTree.rootViews", protoTransactionTree.rootViews)
       rootViews <- MerkleSeq.fromProtoV0(
         (
           hashOps,
-          TransactionView.fromByteString(ProtoVersion(0))(
-            (hashOps, commonMetadataUnblinded.confirmationPolicy)
+          TransactionView.fromByteStringLegacy(ProtoVersion(0))(
+            (hashOps, commonMetadataUnblinded.confirmationPolicy, expectedProtocolVersion)
           ),
         ),
         rootViewsP,
@@ -343,21 +344,23 @@ object GenTransactionTree {
         rootViews,
       )
     } yield genTransactionTree
+  }
 
   def fromProtoV1(
-      hashOps: HashOps,
+      context: (HashOps, ProtocolVersion),
       protoTransactionTree: v1.GenTransactionTree,
-  ): ParsingResult[GenTransactionTree] =
+  ): ParsingResult[GenTransactionTree] = {
+    val (hashOps, expectedProtocolVersion) = context
     for {
       submitterMetadata <- MerkleTree
         .fromProtoOptionV1(
           protoTransactionTree.submitterMetadata,
-          SubmitterMetadata.fromByteString(hashOps),
+          SubmitterMetadata.fromByteString(expectedProtocolVersion)(hashOps),
         )
       commonMetadata <- MerkleTree
         .fromProtoOptionV1(
           protoTransactionTree.commonMetadata,
-          CommonMetadata.fromByteString(hashOps),
+          CommonMetadata.fromByteString(expectedProtocolVersion)(hashOps),
         )
       commonMetadataUnblinded <- commonMetadata.unwrap.leftMap(_ =>
         InvariantViolation("GenTransactionTree.commonMetadata is blinded")
@@ -365,15 +368,15 @@ object GenTransactionTree {
       participantMetadata <- MerkleTree
         .fromProtoOptionV1(
           protoTransactionTree.participantMetadata,
-          ParticipantMetadata.fromByteString(hashOps),
+          ParticipantMetadata.fromByteString(expectedProtocolVersion)(hashOps),
         )
       rootViewsP <- ProtoConverter
         .required("GenTransactionTree.rootViews", protoTransactionTree.rootViews)
       rootViews <- MerkleSeq.fromProtoV1(
         (
           hashOps,
-          TransactionView.fromByteString(ProtoVersion(1))(
-            (hashOps, commonMetadataUnblinded.confirmationPolicy)
+          TransactionView.fromByteStringLegacy(ProtoVersion(1))(
+            (hashOps, commonMetadataUnblinded.confirmationPolicy, expectedProtocolVersion)
           ),
         ),
         rootViewsP,
@@ -386,6 +389,7 @@ object GenTransactionTree {
         rootViews,
       )
     } yield genTransactionTree
+  }
 
   def createGenTransactionTreeV0V1(
       hashOps: HashOps,

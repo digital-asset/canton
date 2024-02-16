@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.admin.api.client.data
@@ -7,13 +7,14 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.admin.api.client.data.ListPartiesResult.ParticipantDomains
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.protocol.{DynamicDomainParameters as DynamicDomainParametersInternal}
+import com.digitalasset.canton.protocol.DynamicDomainParameters as DynamicDomainParametersInternal
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.v0
 import com.digitalasset.canton.topology.admin.v0.ListDomainParametersChangesResult.Result.Parameters
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.google.protobuf.ByteString
 
 import java.time.Instant
@@ -175,8 +176,13 @@ object ListSignedLegalIdentityClaimResult {
       contextProto <- ProtoConverter.required("context", value.context)
       context <- BaseResult.fromProtoV0(contextProto)
       itemProto <- ProtoConverter.required("item", value.item)
-      item <- SignedLegalIdentityClaim.fromProtoV0(itemProto)
-      claim <- LegalIdentityClaim.fromByteString(item.claim)
+      item <- SignedLegalIdentityClaim.fromProtoV0(
+        ProtocolVersionValidation.NoValidation,
+        itemProto,
+      )
+      claim <- LegalIdentityClaim.fromByteStringUnsafe(
+        item.claim
+      )
     } yield ListSignedLegalIdentityClaimResult(context, claim)
   }
 }
@@ -242,6 +248,7 @@ object ListDomainParametersChangeResult {
       case Parameters.Empty => Left(ProtoDeserializationError.FieldNotSet("parameters"))
       case Parameters.V0(v0) => DynamicDomainParametersInternal.fromProtoV0(v0)
       case Parameters.V1(v1) => DynamicDomainParametersInternal.fromProtoV1(v1)
+      case Parameters.V2(v2) => DynamicDomainParametersInternal.fromProtoV2(v2)
     }
     item <- DynamicDomainParameters(dynamicDomainParametersInternal)
   } yield ListDomainParametersChangeResult(context, item)

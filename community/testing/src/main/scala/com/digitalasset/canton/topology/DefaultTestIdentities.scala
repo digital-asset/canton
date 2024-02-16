@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.topology
@@ -24,9 +24,6 @@ object DefaultTestIdentities {
   val domainManager = DomainTopologyManagerId(uid)
   val sequencerId = SequencerId(uid)
   val mediator = MediatorId(uid)
-
-  val sequencerIdX = SequencerId(UniqueIdentifier(Identifier.tryCreate("sequencer"), namespace))
-  val mediatorIdX = MediatorId(UniqueIdentifier(Identifier.tryCreate("mediator"), namespace))
 
   val (participant1, party1) = createParticipantAndParty(1)
   val (participant2, party2) = createParticipantAndParty(2)

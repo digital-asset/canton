@@ -1,15 +1,15 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol
 
 import cats.syntax.either.*
-import com.daml.ledger.api.refinements.ApiTypes
 import com.daml.ledger.javaapi.data.codegen.ContractId
 import com.daml.lf.data.Bytes
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.ledger.api.refinements.ApiTypes
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 

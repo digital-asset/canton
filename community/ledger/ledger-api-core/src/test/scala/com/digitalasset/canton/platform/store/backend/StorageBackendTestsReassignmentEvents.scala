@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.store.backend
@@ -222,6 +222,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
             updateId = offset(1).toHexString,
             contractId = hashCid("#1").coid,
             templateId = someTemplateId,
+            packageName = None,
             witnessParties = Set("signatory"),
             signatories = Set("signatory"),
             observers = Set("observer"),
@@ -250,6 +251,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
             updateId = offset(2).toHexString,
             contractId = hashCid("#2").coid,
             templateId = someTemplateId,
+            packageName = None,
             witnessParties = Set("signatory"),
             signatories = Set("signatory"),
             observers = Set("observer"),
@@ -479,6 +481,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
           updateId = offset(1).toHexString,
           contractId = hashCid("#1").coid,
           templateId = someTemplateId,
+          packageName = None,
           witnessParties = Set("observer"),
           signatories = Set("signatory"),
           observers = Set("observer"),
@@ -502,6 +505,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
           updateId = offset(2).toHexString,
           contractId = hashCid("#2").coid,
           templateId = someTemplateId,
+          packageName = None,
           witnessParties = Set("observer"),
           signatories = Set("signatory"),
           observers = Set("observer"),
@@ -624,6 +628,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
           updateId = offset(2).toHexString,
           contractId = hashCid("#1").coid,
           templateId = someTemplateId,
+          packageName = None,
           witnessParties = Set("observer"),
           signatories = Set("signatory"),
           observers = Set("observer"),
@@ -647,6 +652,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
           updateId = offset(3).toHexString,
           contractId = hashCid("#2").coid,
           templateId = someTemplateId,
+          packageName = None,
           witnessParties = Set("observer"),
           signatories = Set("signatory"),
           observers = Set("observer"),

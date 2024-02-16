@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.topology.client
@@ -32,11 +32,10 @@ import com.digitalasset.canton.topology.store.{
   TopologyStore,
   TopologyStoreId,
 }
-import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.canton.{DiscardOps, LfPartyId, SequencerCounter}
 
 import java.time.Duration as JDuration
@@ -130,18 +129,6 @@ abstract class BaseDomainTopologyClientOld
       effectiveTimestamp: EffectiveTime,
       sequencerCounter: SequencerCounter,
       transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    observedInternal(sequencedTimestamp, effectiveTimestamp)
-}
-
-abstract class BaseDomainTopologyClientX
-    extends BaseDomainTopologyClient
-    with DomainTopologyClientWithInitX {
-  override def observed(
-      sequencedTimestamp: SequencedTime,
-      effectiveTimestamp: EffectiveTime,
-      sequencerCounter: SequencerCounter,
-      transactions: Seq[GenericSignedTopologyTransactionX],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     observedInternal(sequencedTimestamp, effectiveTimestamp)
 }
@@ -341,6 +328,7 @@ class StoreBasedDomainTopologyClient(
       useStateTxs = useStateTxs,
       packageDependencies,
       loggerFactory,
+      ProtocolVersionValidation(protocolVersion),
     )
   }
 
@@ -368,6 +356,7 @@ class StoreBasedTopologySnapshot(
     useStateTxs: Boolean,
     packageDependencies: PackageId => EitherT[Future, PackageId, Set[PackageId]],
     val loggerFactory: NamedLoggerFactory,
+    protocolVersionValidation: ProtocolVersionValidation,
 )(implicit val executionContext: ExecutionContext)
     extends TopologySnapshotLoader
     with NamedLogging
@@ -649,7 +638,7 @@ class StoreBasedTopologySnapshot(
       case TopologyStateUpdateElement(_id, SignedLegalIdentityClaim(_, claimBytes, _signature)) =>
         val result = for {
           claim <- LegalIdentityClaim
-            .fromByteString(claimBytes)
+            .fromByteString(protocolVersionValidation)(claimBytes)
             .leftMap(err => s"Failed to parse legal identity claim proto: $err")
 
           certOpt = claim.evidence match {
@@ -781,8 +770,7 @@ class StoreBasedTopologySnapshot(
       .map { case (id, index) =>
         MediatorGroup(
           index = NonNegativeInt.tryCreate(index),
-          Seq(id),
-          Seq.empty,
+          id,
           threshold = PositiveInt.one,
         )
       }
@@ -914,6 +902,7 @@ object StoreBasedTopologySnapshot {
       useStateTxs = false,
       packageDependencies = StoreBasedDomainTopologyClient.NoPackageDependencies,
       loggerFactory,
+      ProtocolVersionValidation.NoValidation,
     )
   }
 }

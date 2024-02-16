@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol
@@ -26,7 +26,6 @@ import com.digitalasset.canton.store.SequencedEventStore.{
   IgnoredSequencedEvent,
   OrdinarySequencedEvent,
 }
-import com.digitalasset.canton.time.TimeProof
 import com.digitalasset.canton.topology.processing.SequencedTime
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
@@ -154,12 +153,19 @@ class DefaultMessageDispatcher(
       ): FutureUnlessShutdown[Unit] =
         signedEventE.fold(_.content, _.content) match {
           case deliver @ Deliver(sc, ts, _, _, _) if TimeProof.isTimeProofDeliver(deliver) =>
+            logTimeProof(sc, ts)
             tickTrackers(sc, ts, triggerAcsChangePublication = true)
 
-          case Deliver(sc, ts, _, _, _) =>
+          case Deliver(sc, ts, _, msgIdO, _) =>
             val deliverE = signedEventE.fold(
-              err => Left(err.asInstanceOf[EventWithErrors[Deliver[DefaultOpenEnvelope]]]),
-              evt => Right(evt.asInstanceOf[SignedContent[Deliver[DefaultOpenEnvelope]]]),
+              err => {
+                logFaultyEvent(sc, ts, msgIdO, err)
+                Left(err.asInstanceOf[EventWithErrors[Deliver[DefaultOpenEnvelope]]])
+              },
+              evt => {
+                logEvent(sc, ts, msgIdO, evt)
+                Right(evt.asInstanceOf[SignedContent[Deliver[DefaultOpenEnvelope]]])
+              },
             )
             processBatch(deliverE)
               .thereafter {
@@ -171,7 +177,8 @@ class DefaultMessageDispatcher(
                   logger.error("event processing failed.", ex)
               }
 
-          case error @ DeliverError(sc, ts, _, _, _) =>
+          case error @ DeliverError(sc, ts, _, msgId, status) =>
+            logDeliveryError(sc, ts, msgId, status)
             logger.debug(s"Received a deliver error at ${sc} / ${ts}")
             for {
               _unit <- observeDeliverError(error)

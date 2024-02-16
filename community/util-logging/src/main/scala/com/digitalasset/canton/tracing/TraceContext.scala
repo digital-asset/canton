@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.tracing
@@ -126,7 +126,7 @@ object TraceContext {
           withNewTraceContext { implicit traceContext =>
             // log that we're creating a single traceContext from many trace ids
             val traceIds = validTracesNE.map(_.traceId).collect { case Some(traceId) => traceId }
-            logger.info(s"Created batch from traceIds: [${traceIds.mkString(",")}]")
+            logger.debug(s"Created batch from traceIds: [${traceIds.mkString(",")}]")
             traceContext
           }
     }

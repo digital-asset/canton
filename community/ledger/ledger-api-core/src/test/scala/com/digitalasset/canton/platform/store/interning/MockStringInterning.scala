@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.store.interning
@@ -52,6 +52,21 @@ class MockStringInterning extends StringInterning {
 
       override def tryExternalize(id: Int): Option[Ref.Identifier] =
         rawStringInterning.tryExternalize(id).map(Ref.Identifier.assertFromString)
+    }
+
+  override val packageName: StringInterningDomain[Ref.PackageName] =
+    new StringInterningDomain[Ref.PackageName] {
+      override val unsafe: StringInterningAccessor[String] = rawStringInterning
+
+      override def internalize(t: Ref.PackageName): Int = tryInternalize(t).get
+
+      override def tryInternalize(t: Ref.PackageName): Option[Int] =
+        rawStringInterning.tryInternalize(t.toString)
+
+      override def externalize(id: Int): Ref.PackageName = tryExternalize(id).get
+
+      override def tryExternalize(id: Int): Option[Ref.PackageName] =
+        rawStringInterning.tryExternalize(id).map(Ref.PackageName.assertFromString)
     }
 
   override def party: StringInterningDomain[Party] =

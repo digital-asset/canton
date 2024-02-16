@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.data
@@ -27,6 +27,7 @@ object ProcessedDisclosedContract {
   // Helper builder for test
   def apply(
       templateId: Ref.Identifier,
+      packageName: Option[Ref.PackageName],
       contractId: Value.ContractId,
       argument: Value,
       createdAt: Time.Timestamp,
@@ -40,6 +41,7 @@ object ProcessedDisclosedContract {
     ProcessedDisclosedContract(
       create = Node.Create(
         templateId = templateId,
+        packageName = packageName,
         coid = contractId,
         arg = argument,
         signatories = signatories,

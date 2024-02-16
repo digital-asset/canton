@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.admin.inspection
@@ -24,7 +24,6 @@ import com.digitalasset.canton.protocol.{
   AgreementText,
   ContractMetadata,
   LfContractId,
-  LfContractInst,
   LfTransactionVersion,
   SerializableContract,
   SerializableRawContractInstance,
@@ -36,9 +35,9 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{
   LfPartyId,
   LfValue,
+  LfVersioned,
   RequestCounter,
   RequestCounterDiscriminator,
-  TransferCounter,
 }
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.EitherValues
@@ -130,10 +129,13 @@ object AcsInspectionTest extends MockitoSugar with ArgumentMatchersSugar {
   private val MockedSerializableRawContractInstance =
     SerializableRawContractInstance
       .create(
-        LfContractInst(
+        LfVersioned(
           LfTransactionVersion.VDev,
-          Ref.Identifier.assertFromString("pkg:Mod:Template"),
-          LfValue.ValueNil,
+          LfValue.ContractInstance(
+            template = Ref.Identifier.assertFromString("pkg:Mod:Template"),
+            packageName = None,
+            arg = LfValue.ValueNil,
+          ),
         ),
         AgreementText.empty,
       )
@@ -165,7 +167,7 @@ object AcsInspectionTest extends MockitoSugar with ArgumentMatchersSugar {
 
     val allContractIds = contracts.keys ++ missingContracts
 
-    val snapshot = allContractIds.map(_ -> (CantonTimestamp.Epoch, Option.empty[TransferCounter]))
+    val snapshot = allContractIds.map(_ -> CantonTimestamp.Epoch)
 
     val acs = mock[ActiveContractStore]
     when(acs.snapshot(any[CantonTimestamp]))
@@ -204,10 +206,9 @@ object AcsInspectionTest extends MockitoSugar with ArgumentMatchersSugar {
     TraceContext.withNewTraceContext { implicit tc =>
       val builder = Vector.newBuilder[SerializableContract]
       AcsInspection
-        .forEachVisibleActiveContract(FakeDomainId, state, parties, timestamp = None) {
-          case (contract, _) =>
-            builder += contract
-            Right(())
+        .forEachVisibleActiveContract(FakeDomainId, state, parties, timestamp = None) { contract =>
+          builder += contract
+          Right(())
         }
         .map(_ => builder.result())
         .value

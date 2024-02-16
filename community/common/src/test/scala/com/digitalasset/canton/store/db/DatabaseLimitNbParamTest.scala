@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.store.db
@@ -60,8 +60,7 @@ trait DatabaseLimitNbParamTest
         rawStorage
           .update(query.asUpdate, "parameter limit query", maxRetries = 1)
           .transformWith { outcome =>
-            val errorKind = DbExceptionRetryable.retryOK(outcome, logger)
-
+            val errorKind = DbExceptionRetryable.retryOK(outcome, logger, None)
             errorKind match {
               case FatalErrorKind =>
               case _ => fail("Database error kind should be fatal")

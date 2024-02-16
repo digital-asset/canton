@@ -1,16 +1,15 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.topology
 
 import cats.kernel.Order
 import cats.syntax.either.*
-import com.daml.ledger.client.binding.Primitive.Party as ClientParty
 import com.daml.ledger.javaapi.data.Party
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
 import com.digitalasset.canton.config.CantonRequireTypes.{String255, String3, String300}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.crypto.RandomOps
+import com.digitalasset.canton.crypto.{Fingerprint, RandomOps}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
@@ -325,8 +324,6 @@ final case class PartyId(uid: UniqueIdentifier) extends Identity {
 
   def toLf: LfPartyId = LfPartyId.assertFromString(uid.toProtoPrimitive)
 
-  def toPrim: ClientParty = ClientParty(toLf)
-
   def toParty: Party = new Party(toLf)
 }
 
@@ -340,6 +337,9 @@ object PartyId {
 
   def apply(identifier: Identifier, namespace: Namespace): PartyId =
     PartyId(UniqueIdentifier(identifier, namespace))
+
+  def apply(identifier: Identifier, namespace: Fingerprint): PartyId =
+    PartyId(UniqueIdentifier(identifier, Namespace(namespace)))
 
   def fromLfParty(lfParty: LfPartyId): Either[String, PartyId] =
     UniqueIdentifier.fromProtoPrimitive_(lfParty).map(PartyId(_))
@@ -378,16 +378,16 @@ object DomainMember {
 
 }
 
+/** @param index uniquely identifies the group, just like [[MediatorId]] for single mediators.
+  * @param active the active mediators belonging to the group
+  * @param passive the passive mediators belonging to the group
+  * @param threshold the minimum size of a quorum
+  */
 final case class MediatorGroup(
     index: MediatorGroupIndex,
-    active: Seq[MediatorId],
-    passive: Seq[MediatorId],
+    active: MediatorId,
     threshold: PositiveInt,
-) {
-  def isActive: Boolean = active.size >= threshold.value
-
-  def all: Seq[MediatorId] = active ++ passive
-}
+)
 
 object MediatorGroup {
   type MediatorGroupIndex = NonNegativeInt

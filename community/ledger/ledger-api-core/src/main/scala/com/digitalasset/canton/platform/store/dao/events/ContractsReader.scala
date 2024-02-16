@@ -1,9 +1,10 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.store.dao.events
 
-import com.daml.lf.transaction.GlobalKey
+import com.daml.lf.data.Ref
+import com.daml.lf.transaction.{GlobalKey, Util}
 import com.daml.lf.value.Value.VersionedValue
 import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricHandle.Timer
@@ -68,6 +69,7 @@ private[dao] sealed class ContractsReader(
             val contract = toContract(
               contractId = contractId,
               templateId = raw.templateId,
+              packageName = raw.packageName,
               createArgument = raw.createArgument,
               createArgumentCompression =
                 Compression.Algorithm.assertLookup(raw.createArgumentCompression),
@@ -83,7 +85,11 @@ private[dao] sealed class ContractsReader(
                 deserializationTimer,
                 s"Failed to deserialize create key for contract ${contractId.coid}",
               )
-              GlobalKey.assertBuild(contract.unversioned.template, value.unversioned)
+              GlobalKey.assertBuild(
+                contract.unversioned.template,
+                value.unversioned,
+                Util.sharedKey(value.version),
+              )
             }
 
             ActiveContract(
@@ -116,6 +122,7 @@ private[dao] sealed class ContractsReader(
           toContract(
             contractId = contractId,
             templateId = raw.templateId,
+            packageName = raw.packageName,
             createArgument = raw.createArgument,
             createArgumentCompression =
               Compression.Algorithm.assertLookup(raw.createArgumentCompression),
@@ -132,6 +139,7 @@ private[dao] sealed class ContractsReader(
   override def lookupActiveContractWithCachedArgument(
       readers: Set[Party],
       contractId: ContractId,
+      packageName: Option[Ref.PackageName],
       createArgument: Value,
   )(implicit loggingContext: LoggingContextWithTrace): Future[Option[Contract]] = {
 
@@ -145,6 +153,7 @@ private[dao] sealed class ContractsReader(
           _.map(templateId =>
             toContract(
               templateId = templateId,
+              packageName = packageName,
               createArgument = createArgument,
             )
           )
@@ -199,6 +208,7 @@ private[dao] object ContractsReader {
   private def toContract(
       contractId: ContractId,
       templateId: String,
+      packageName: Option[String],
       createArgument: Array[Byte],
       createArgumentCompression: Compression.Algorithm,
       decompressionTimer: Timer,
@@ -212,16 +222,19 @@ private[dao] object ContractsReader {
     )
     Contract(
       template = Identifier.assertFromString(templateId),
+      packageName = packageName.map(Ref.PackageName.assertFromString),
       arg = deserialized,
     )
   }
 
   private def toContract(
       templateId: String,
+      packageName: Option[Ref.PackageName],
       createArgument: Value,
   ): Contract =
     Contract(
       template = Identifier.assertFromString(templateId),
+      packageName = packageName,
       arg = createArgument,
     )
 }

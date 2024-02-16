@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol
@@ -7,7 +7,7 @@ import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.data.{Bytes, ImmArray}
-import com.daml.lf.transaction.Versioned
+import com.daml.lf.transaction.{Util, Versioned}
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.{
   ValueContractId,
@@ -69,11 +69,12 @@ import scala.util.Random
 object ExampleTransactionFactory {
   val hkdfOps: HkdfOps = new SymbolicPureCrypto()
   // Helper methods for Daml-LF types
+  val languageVersion = LfTransactionBuilder.defaultLanguageVersion
   val packageId = LfTransactionBuilder.defaultPackageId
   val templateId = LfTransactionBuilder.defaultTemplateId
   val someOptUsedPackages = Some(Set(packageId))
   val defaultGlobalKey = LfTransactionBuilder.defaultGlobalKey
-  val transactionVersion = protocol.DummyTransactionVersion
+  val transactionVersion = LfTransactionBuilder.defaultTransactionVersion
 
   private def valueCapturing(coid: List[LfContractId]): Value = {
     val captives = coid.map(c => (None, ValueContractId(c)))
@@ -87,7 +88,11 @@ object ExampleTransactionFactory {
       capturedIds: Seq[LfContractId] = Seq.empty,
       templateId: LfTemplateId = templateId,
   ): LfContractInst =
-    LfContractInst(templateId, versionedValueCapturing(capturedIds.toList))
+    LfContractInst(
+      template = templateId,
+      packageName = None,
+      arg = versionedValueCapturing(capturedIds.toList),
+    )
 
   val veryDeepValue: Value = {
     def deepValue(depth: Int): Value =
@@ -99,7 +104,16 @@ object ExampleTransactionFactory {
     LfVersioned(transactionVersion, veryDeepValue)
 
   val veryDeepContractInstance: LfContractInst =
-    LfContractInst(templateId, veryDeepVersionedValue)
+    LfContractInst(template = templateId, packageName = None, arg = veryDeepVersionedValue)
+
+  def globalKey(
+      templateId: LfTemplateId,
+      value: LfValue,
+  ): Versioned[LfGlobalKey] =
+    LfVersioned(
+      transactionVersion,
+      LfGlobalKey.assertBuild(templateId, value, Util.sharedKey(transactionVersion)),
+    )
 
   def globalKeyWithMaintainers(
       key: LfGlobalKey = defaultGlobalKey,
@@ -119,6 +133,7 @@ object ExampleTransactionFactory {
     LfNodeFetch(
       coid = cid,
       templateId = templateId,
+      packageName = None,
       actingParties = actingParties,
       signatories = signatories,
       stakeholders = signatories ++ observers,
@@ -137,13 +152,14 @@ object ExampleTransactionFactory {
   ): LfNodeCreate = {
     val unversionedContractInst = contractInstance.unversioned
     LfNodeCreate(
-      cid,
-      unversionedContractInst.template,
-      unversionedContractInst.arg,
-      agreementText,
+      coid = cid,
+      templateId = unversionedContractInst.template,
+      packageName = None,
+      arg = unversionedContractInst.arg,
+      agreementText = agreementText,
       signatories = signatories,
       stakeholders = signatories ++ observers,
-      key,
+      keyOpt = key,
       version = transactionVersion,
     )
   }
@@ -165,6 +181,7 @@ object ExampleTransactionFactory {
     LfNodeExercises(
       targetCoid = targetCoid,
       templateId = templateId,
+      packageName = None,
       interfaceId = None,
       choiceId = LfChoiceName.assertFromString("choice"),
       consuming = consuming,
@@ -207,10 +224,11 @@ object ExampleTransactionFactory {
       resolution: Option[LfContractId] = None,
   ): LfNodeLookupByKey =
     LfNodeLookupByKey(
-      key.templateId,
-      LfGlobalKeyWithMaintainers(key, maintainers),
-      resolution,
-      transactionVersion,
+      templateId = key.templateId,
+      packageName = None,
+      key = LfGlobalKeyWithMaintainers(key, maintainers),
+      result = resolution,
+      version = transactionVersion,
     )
 
   def nodeId(index: Int): LfNodeId = LfNodeId(index)
@@ -665,15 +683,13 @@ class ExampleTransactionFactory(
     )
 
   val commonMetadata: CommonMetadata =
-    CommonMetadata
-      .create(cryptoOps, protocolVersion)(
-        confirmationPolicy,
-        domainId,
-        mediatorRef,
-        Salt.tryDeriveSalt(transactionSeed, 1, cryptoOps),
-        transactionUuid,
-      )
-      .value
+    CommonMetadata(cryptoOps, protocolVersion)(
+      confirmationPolicy,
+      domainId,
+      mediatorRef,
+      Salt.tryDeriveSalt(transactionSeed, 1, cryptoOps),
+      transactionUuid,
+    )
 
   val participantMetadata: ParticipantMetadata =
     ParticipantMetadata(cryptoOps)(
@@ -1075,6 +1091,43 @@ class ExampleTransactionFactory(
         targetCoid = id,
         actingParties = Set(submitter),
         signatories = Set(submitter),
+        observers = Set(observer),
+      )
+
+    override def node: LfNodeExercises = genNode(contractId)
+    override def lfNode: LfNodeExercises = genNode(lfContractId)
+    override def reinterpretedNode: LfNodeExercises = node
+
+    override def consuming: Boolean = true
+  }
+
+  /** Single consuming exercise without children without any acting party or signatory, and
+    * [[observer]] as observer.
+    *
+    * @param lfContractId id of the exercised contract
+    * @param contractId id of the exercised contract
+    * @param inputContractInstance instance of the used contract.
+    */
+  @SuppressWarnings(Array("org.wartremover.warts.IsInstanceOf"))
+  case class SingleExerciseWithoutConfirmingParties(
+      seed: LfHash,
+      override val nodeId: LfNodeId = LfNodeId(0),
+      lfContractId: LfContractId = suffixedId(-1, 0),
+      contractId: LfContractId = suffixedId(-1, 0),
+      inputContractInstance: LfContractInst = contractInstance(),
+      inputContractAgreementText: String = "single exercise",
+      saltO: Option[Salt] = saltConditionally(TestSalt.generateSalt(random.nextInt())),
+  ) extends SingleNode(Some(seed)) {
+    override def toString: String = "single exercise"
+
+    override val contractInstance: LfContractInst = inputContractInstance
+    override val agreementText: String = inputContractAgreementText
+
+    private def genNode(id: LfContractId): LfNodeExercises =
+      exerciseNodeWithoutChildren(
+        targetCoid = id,
+        actingParties = Set.empty,
+        signatories = Set.empty,
         observers = Set(observer),
       )
 

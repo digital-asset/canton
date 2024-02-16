@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol
@@ -8,25 +8,27 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
-import com.digitalasset.canton.data.ViewPosition
+import com.digitalasset.canton.data.{GeneratorsDataTime, ViewPosition}
 import com.digitalasset.canton.protocol.SerializableContract.LedgerCreateTime
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{DomainId, MediatorId, MediatorRef}
-import com.digitalasset.canton.version.{GeneratorsVersion, ProtocolVersion}
+import com.digitalasset.canton.version.ProtocolVersion
 import magnolify.scalacheck.auto.*
 import org.scalacheck.{Arbitrary, Gen}
 
-object GeneratorsProtocol {
-
+final class GeneratorsProtocol(
+    protocolVersion: ProtocolVersion,
+    generatorsDataTime: GeneratorsDataTime,
+) {
   import com.digitalasset.canton.Generators.*
   import com.digitalasset.canton.GeneratorsLf.*
   import com.digitalasset.canton.config.GeneratorsConfig.{nonNegativeFiniteDurationArb as _, *}
   import com.digitalasset.canton.crypto.GeneratorsCrypto.*
-  import com.digitalasset.canton.data.GeneratorsData.*
   import com.digitalasset.canton.time.GeneratorsTime.*
   import com.digitalasset.canton.topology.GeneratorsTopology.*
   import com.digitalasset.canton.version.GeneratorsVersion.*
   import org.scalatest.EitherValues.*
+  import generatorsDataTime.*
 
   implicit val staticDomainParametersArb: Arbitrary[StaticDomainParameters] = {
     Arbitrary(for {
@@ -37,8 +39,6 @@ object GeneratorsProtocol {
       requiredSymmetricKeySchemes <- nonEmptySetGen[SymmetricKeyScheme]
       requiredHashAlgorithms <- nonEmptySetGen[HashAlgorithm]
       requiredCryptoKeyFormats <- nonEmptySetGen[CryptoKeyFormat]
-
-      protocolVersion <- protocolVersionArb.arbitrary
 
       reconciliationInterval <- defaultValueGen(
         protocolVersion,
@@ -71,7 +71,7 @@ object GeneratorsProtocol {
     } yield parameters)
   }
 
-  def dynamicDomainParametersGenFor(pv: ProtocolVersion): Gen[DynamicDomainParameters] =
+  implicit val dynamicDomainParametersArb: Arbitrary[DynamicDomainParameters] = Arbitrary(
     for {
       participantResponseTimeout <- Arbitrary.arbitrary[NonNegativeFiniteDuration]
       mediatorReactionTimeout <- Arbitrary.arbitrary[NonNegativeFiniteDuration]
@@ -84,7 +84,7 @@ object GeneratorsProtocol {
         .choose(0L, 10000L)
         .map(NonNegativeFiniteDuration.tryOfMicros)
 
-      representativePV = DynamicDomainParameters.protocolVersionRepresentativeFor(pv)
+      representativePV = DynamicDomainParameters.protocolVersionRepresentativeFor(protocolVersion)
 
       reconciliationInterval <- defaultValueArb(
         representativePV,
@@ -101,21 +101,21 @@ object GeneratorsProtocol {
         DynamicDomainParameters.defaultMaxRequestSizeUntil,
       )
 
-      trafficControlConfig <- defaultValueArb(
+      catchUpConfig <- defaultValueArb(
         representativePV,
-        DynamicDomainParameters.defaultTrafficControlParametersUntil,
+        DynamicDomainParameters.defaultCatchUpConfigUntil,
       )
 
       // Starting from pv=4, there is an additional constraint on the mediatorDeduplicationTimeout
       updatedMediatorDeduplicationTimeout =
-        if (pv > ProtocolVersion.v3)
+        if (protocolVersion > ProtocolVersion.v3)
           ledgerTimeRecordTimeTolerance * NonNegativeInt.tryCreate(2) + mediatorDeduplicationMargin
         else
           ledgerTimeRecordTimeTolerance * NonNegativeInt.tryCreate(2)
 
       // TODO(#14691) Use generator properly when dynamic domain parameters are properly versioned
       sequencerAggregateSubmissionTimeout =
-        DynamicDomainParameters.defaultSequencerAggregateSubmissionTimeoutUntilExclusive.defaultValue
+        DynamicDomainParameters.defaultSequencerAggregateSubmissionTimeout
 
       dynamicDomainParameters = DynamicDomainParameters.tryCreate(
         participantResponseTimeout,
@@ -128,15 +128,11 @@ object GeneratorsProtocol {
         maxRatePerParticipant,
         maxRequestSize,
         sequencerAggregateSubmissionTimeout,
-        trafficControlConfig,
+        catchUpConfig,
       )(representativePV)
 
     } yield dynamicDomainParameters
-
-  implicit val dynamicDomainParametersArb: Arbitrary[DynamicDomainParameters] = Arbitrary(for {
-    representativePV <- GeneratorsVersion.representativeProtocolVersionGen(DynamicDomainParameters)
-    dynamicDomainParameters <- dynamicDomainParametersGenFor(representativePV.representative)
-  } yield dynamicDomainParameters)
+  )
 
   implicit val rootHashArb: Arbitrary[RootHash] = Arbitrary(
     Arbitrary.arbitrary[Hash].map(RootHash(_))
@@ -231,11 +227,12 @@ object GeneratorsProtocol {
   }
 
   // Salt not supported for pv < 4
-  def serializableContractGen(pv: ProtocolVersion): Gen[SerializableContract] =
-    if (pv < ProtocolVersion.v4)
+  implicit val serializableContractArb: Arbitrary[SerializableContract] = Arbitrary(
+    if (protocolVersion < ProtocolVersion.v4)
       serializableContractArb(canHaveEmptyKey = true).arbitrary.map(_.copy(contractSalt = None))
     else
       serializableContractArb(canHaveEmptyKey = true).arbitrary
+  )
 
   implicit val globalKeyWithMaintainersArb: Arbitrary[Versioned[LfGlobalKeyWithMaintainers]] =
     Arbitrary(

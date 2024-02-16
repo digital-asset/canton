@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.console.commands
@@ -1721,18 +1721,6 @@ class ParticipantHealthAdministration(
     val consoleEnvironment: ConsoleEnvironment,
     override val loggerFactory: NamedLoggerFactory,
 ) extends HealthAdministration(
-      runner,
-      consoleEnvironment,
-      ParticipantStatus.fromProtoV0,
-    )
-    with FeatureFlagFilter
-    with ParticipantHealthAdministrationCommon
-
-class ParticipantHealthAdministrationX(
-    val runner: AdminCommandRunner,
-    val consoleEnvironment: ConsoleEnvironment,
-    override val loggerFactory: NamedLoggerFactory,
-) extends HealthAdministrationX(
       runner,
       consoleEnvironment,
       ParticipantStatus.fromProtoV0,

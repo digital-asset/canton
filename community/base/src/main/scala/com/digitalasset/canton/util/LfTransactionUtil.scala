@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.util
@@ -174,9 +174,11 @@ object LfTransactionUtil {
   val actingParties: LfActionNode => Set[LfPartyId] = {
     case _: LfNodeCreate => Set.empty
 
-    case node @ LfNodeFetch(_, _, noActors, _, _, _, _, _) if noActors.isEmpty =>
-      throw new IllegalArgumentException(s"Fetch node $node without acting parties.")
-    case LfNodeFetch(_, _, actors, _, _, _, _, _) => actors
+    case node: LfNodeFetch =>
+      if (node.actingParties.isEmpty)
+        throw new IllegalArgumentException(s"Fetch node $node without acting parties.")
+      else
+        node.actingParties
 
     case n: LfNodeExercises => n.actingParties
 

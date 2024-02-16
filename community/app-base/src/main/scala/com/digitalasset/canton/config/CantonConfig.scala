@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.config
@@ -60,6 +60,7 @@ import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfig
 import com.digitalasset.canton.platform.indexer.PackageMetadataViewConfig
+import com.digitalasset.canton.protocol.CatchUpConfig
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.pureconfigutils.HttpServerConfig
 import com.digitalasset.canton.pureconfigutils.SharedConfigReaders.catchConvertError
@@ -170,19 +171,25 @@ final case class DeadlockDetectionConfig(
   * @param logMessagePayloads  Determines whether message payloads (as well as metadata) sent through GRPC are logged.
   * @param logQueryCost Determines whether to log the 15 most expensive db queries
   * @param logSlowFutures Whether we should active log slow futures (where instructed)
+  * @param dumpNumRollingLogFiles How many of the rolling log files shold be included in the remote dump. Default is 0.
   */
 final case class MonitoringConfig(
     deadlockDetection: DeadlockDetectionConfig = DeadlockDetectionConfig(),
     health: Option[HealthConfig] = None,
     metrics: MetricsConfig = MetricsConfig(),
-    delayLoggingThreshold: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(20),
+    // TODO(i9014) move into logging
+    delayLoggingThreshold: NonNegativeFiniteDuration =
+      MonitoringConfig.defaultDelayLoggingThreshold,
     tracing: TracingConfig = TracingConfig(),
     // TODO(#15221) remove (breaking change)
     @Deprecated(since = "2.2.0") // use logging.api.messagePayloads instead
     logMessagePayloads: Option[Boolean] = None,
+    // TODO(i9014) rename to queries
     logQueryCost: Option[QueryCostMonitoringConfig] = None,
+    // TODO(i9014) move into logging
     logSlowFutures: Boolean = false,
     logging: LoggingConfig = LoggingConfig(),
+    dumpNumRollingLogFiles: NonNegativeInt = MonitoringConfig.defaultDumpNumRollingLogFiles,
 ) extends LazyLogging {
 
   // merge in backwards compatible config options
@@ -196,6 +203,11 @@ final case class MonitoringConfig(
     case _ => logging
   }
 
+}
+
+object MonitoringConfig {
+  private val defaultDelayLoggingThreshold = NonNegativeFiniteDuration.ofSeconds(20)
+  private val defaultDumpNumRollingLogFiles = NonNegativeInt.tryCreate(0)
 }
 
 /** Configuration for console command timeouts
@@ -354,18 +366,6 @@ trait CantonConfig {
     n.unwrap -> c
   }
 
-  /** all participants that this Canton process can operate or connect to
-    *
-    * participants are grouped by their local name
-    */
-  def participantsX: Map[InstanceName, ParticipantConfigType]
-
-  /** Use `participantsX` instead!
-    */
-  def participantsByStringX: Map[String, ParticipantConfigType] = participantsX.map { case (n, c) =>
-    n.unwrap -> c
-  }
-
   /** all remotely running domains to which the console can connect and operate on */
   def remoteDomains: Map[InstanceName, RemoteDomainConfig]
 
@@ -378,19 +378,9 @@ trait CantonConfig {
   /** all remotely running participants to which the console can connect and operate on */
   def remoteParticipants: Map[InstanceName, RemoteParticipantConfig]
 
-  /** all remotely running participants to which the console can connect and operate on */
-  def remoteParticipantsX: Map[InstanceName, RemoteParticipantConfig]
-
   /** Use `remoteParticipants` instead!
     */
   def remoteParticipantsByString: Map[String, RemoteParticipantConfig] = remoteParticipants.map {
-    case (n, c) =>
-      n.unwrap -> c
-  }
-
-  /** Use `remoteParticipantsX` instead!
-    */
-  def remoteParticipantsByStringX: Map[String, RemoteParticipantConfig] = remoteParticipantsX.map {
     case (n, c) =>
       n.unwrap -> c
   }
@@ -428,7 +418,7 @@ trait CantonConfig {
     domainNodeParameters(InstanceName.tryCreate(name))
 
   private lazy val participantNodeParameters_ : Map[InstanceName, ParticipantNodeParameters] =
-    (participants ++ participantsX).fmap { participantConfig =>
+    participants.fmap { participantConfig =>
       val participantParameters = participantConfig.parameters
       ParticipantNodeParameters(
         general = CantonNodeParameterConverter.general(this, participantConfig),
@@ -820,6 +810,9 @@ object CantonConfig {
       deriveReader[AuthServiceConfig]
     lazy implicit val rateLimitConfigReader: ConfigReader[RateLimitingConfig] =
       deriveReader[RateLimitingConfig]
+    lazy implicit val enableEventsByContractKeyCacheReader
+        : ConfigReader[EnableEventsByContractKeyCache] =
+      deriveReader[EnableEventsByContractKeyCache]
     lazy implicit val ledgerApiServerConfigReader: ConfigReader[LedgerApiServerConfig] =
       deriveReader[LedgerApiServerConfig].applyDeprecations
 
@@ -851,8 +844,6 @@ object CantonConfig {
       deriveReader[PackageMetadataViewConfig]
     lazy implicit val identityConfigReader: ConfigReader[TopologyConfig] =
       deriveReader[TopologyConfig]
-    lazy implicit val topologyXConfigReader: ConfigReader[TopologyXConfig] =
-      deriveReader[TopologyXConfig]
     lazy implicit val sequencerConnectionConfigCertificateFileReader
         : ConfigReader[SequencerConnectionConfig.CertificateFile] =
       deriveReader[SequencerConnectionConfig.CertificateFile]
@@ -890,6 +881,8 @@ object CantonConfig {
       deriveReader[CommunitySequencerConfig]
     lazy implicit val domainParametersConfigReader: ConfigReader[DomainParametersConfig] =
       deriveReader[DomainParametersConfig]
+    lazy implicit val catchUpParametersConfigReader: ConfigReader[CatchUpConfig] =
+      deriveReader[CatchUpConfig]
     lazy implicit val domainNodeParametersConfigReader: ConfigReader[DomainNodeParametersConfig] =
       deriveReader[DomainNodeParametersConfig]
     lazy implicit val deadlockDetectionConfigReader: ConfigReader[DeadlockDetectionConfig] =
@@ -955,10 +948,14 @@ object CantonConfig {
       deriveReader[CacheConfig]
     lazy implicit val cacheConfigWithTimeoutReader: ConfigReader[CacheConfigWithTimeout] =
       deriveReader[CacheConfigWithTimeout]
+    lazy implicit val sessionKeyCacheConfigReader: ConfigReader[SessionKeyCacheConfig] =
+      deriveReader[SessionKeyCacheConfig]
     lazy implicit val cachingConfigsReader: ConfigReader[CachingConfigs] =
       deriveReader[CachingConfigs]
     lazy implicit val adminWorkflowConfigReader: ConfigReader[AdminWorkflowConfig] =
       deriveReader[AdminWorkflowConfig]
+    lazy implicit val journalPruningConfigReader: ConfigReader[JournalPruningConfig] =
+      deriveReader[JournalPruningConfig]
     lazy implicit val participantStoreConfigReader: ConfigReader[ParticipantStoreConfig] =
       deriveReader[ParticipantStoreConfig]
     lazy implicit val ledgerApiContractLoaderConfigReader: ConfigReader[ContractLoaderConfig] =
@@ -1199,6 +1196,9 @@ object CantonConfig {
       deriveWriter[AuthServiceConfig]
     lazy implicit val rateLimitConfigWriter: ConfigWriter[RateLimitingConfig] =
       deriveWriter[RateLimitingConfig]
+    lazy implicit val enableEventsByContractKeyCacheWriter
+        : ConfigWriter[EnableEventsByContractKeyCache] =
+      deriveWriter[EnableEventsByContractKeyCache]
     lazy implicit val ledgerApiServerConfigWriter: ConfigWriter[LedgerApiServerConfig] =
       deriveWriter[LedgerApiServerConfig]
 
@@ -1226,8 +1226,6 @@ object CantonConfig {
       deriveWriter[PackageMetadataViewConfig]
     lazy implicit val identityConfigWriter: ConfigWriter[TopologyConfig] =
       deriveWriter[TopologyConfig]
-    lazy implicit val topologyXConfigWriter: ConfigWriter[TopologyXConfig] =
-      deriveWriter[TopologyXConfig]
     lazy implicit val sequencerConnectionConfigCertificateFileWriter
         : ConfigWriter[SequencerConnectionConfig.CertificateFile] =
       deriveWriter[SequencerConnectionConfig.CertificateFile]
@@ -1263,6 +1261,8 @@ object CantonConfig {
       deriveWriter[CommunitySequencerConfig]
     lazy implicit val domainParametersConfigWriter: ConfigWriter[DomainParametersConfig] =
       deriveWriter[DomainParametersConfig]
+    lazy implicit val catchUpParametersConfigWriter: ConfigWriter[CatchUpConfig] =
+      deriveWriter[CatchUpConfig]
     lazy implicit val domainNodeParametersConfigWriter: ConfigWriter[DomainNodeParametersConfig] =
       deriveWriter[DomainNodeParametersConfig]
     lazy implicit val deadlockDetectionConfigWriter: ConfigWriter[DeadlockDetectionConfig] =
@@ -1326,10 +1326,14 @@ object CantonConfig {
       deriveWriter[CacheConfig]
     lazy implicit val cacheConfigWithTimeoutWriter: ConfigWriter[CacheConfigWithTimeout] =
       deriveWriter[CacheConfigWithTimeout]
+    lazy implicit val sessionKeyCacheConfigWriter: ConfigWriter[SessionKeyCacheConfig] =
+      deriveWriter[SessionKeyCacheConfig]
     lazy implicit val cachingConfigsWriter: ConfigWriter[CachingConfigs] =
       deriveWriter[CachingConfigs]
     lazy implicit val adminWorkflowConfigWriter: ConfigWriter[AdminWorkflowConfig] =
       deriveWriter[AdminWorkflowConfig]
+    lazy implicit val journalPruningConfigWriter: ConfigWriter[JournalPruningConfig] =
+      deriveWriter[JournalPruningConfig]
     lazy implicit val participantStoreConfigWriter: ConfigWriter[ParticipantStoreConfig] =
       deriveWriter[ParticipantStoreConfig]
     lazy implicit val ledgerApiContractLoaderConfigWriter: ConfigWriter[ContractLoaderConfig] =
@@ -1407,7 +1411,8 @@ object CantonConfig {
   /** Renders a configuration file such that we can write it to the log-file on startup */
   def renderForLoggingOnStartup(config: Config): String = {
     import scala.jdk.CollectionConverters.*
-    val replace = Set("secret", "pw", "password", "ledger-api-jdbc-url")
+    val replace =
+      Set("secret", "pw", "password", "ledger-api-jdbc-url", "jdbc", "token", "admin-token")
     val blinded = ConfigValueFactory.fromAnyRef("****")
     def goVal(key: String, c: ConfigValue): ConfigValue = {
       c match {

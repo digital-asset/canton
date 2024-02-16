@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.mediator
@@ -16,6 +16,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, ConfirmingParty, ViewType}
 import com.digitalasset.canton.domain.mediator.store.MediatorState
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{v0, *}
@@ -38,6 +39,34 @@ import org.slf4j.event.Level
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 
+/** small helper class to extract appropriate data for logging
+  *
+  * please once we rewrite the mediator event stage stuff, we should
+  * clean this up again.
+  */
+// TODO(#15627) remove me
+private[mediator] final case class MediatorResultLog(
+    sender: ParticipantId,
+    ts: CantonTimestamp,
+    approved: Int = 0,
+    rejected: Seq[LocalReject] = Seq.empty,
+)(val traceContext: TraceContext)
+    extends PrettyPrinting {
+  override def pretty: Pretty[MediatorResultLog] = prettyNode(
+    "ParticipantResponse",
+    param("sender", _.sender),
+    param("ts", _.ts),
+    param("approved", _.approved, _.approved > 0),
+    paramIfNonEmpty("rejected", _.rejected),
+  )
+
+  def extend(result: LocalVerdict): MediatorResultLog = result match {
+    case _: LocalApprove => copy(approved = approved + 1)(traceContext)
+    case reject: LocalReject => copy(rejected = rejected :+ reject)(traceContext)
+  }
+
+}
+
 /** Scalable service to check the received Stakeholder Trees and Confirmation Responses, derive a verdict and post
   * result messages to stakeholders.
   */
@@ -57,6 +86,22 @@ private[mediator] class ConfirmationResponseProcessor(
     with FlagCloseable
     with HasCloseContext {
 
+  private def extractEventsForLogging(
+      events: Seq[Traced[MediatorEvent]]
+  ): Seq[MediatorResultLog] =
+    events
+      .collect { case tr @ Traced(MediatorEvent.Response(_, timestamp, response, _)) =>
+        (response.message.sender, timestamp, tr.traceContext, response.message.localVerdict)
+      }
+      .groupBy { case (sender, ts, traceContext, _) => (sender, ts, traceContext) }
+      .map { case ((sender, ts, traceContext), results) =>
+        results.foldLeft(MediatorResultLog(sender, ts)(traceContext)) {
+          case (acc, (_, _, _, result)) =>
+            acc.extend(result)
+        }
+      }
+      .toSeq
+
   /** Handle events for a single request-id.
     * Callers should ensure all events are for the same request and ordered by sequencer time.
     */
@@ -67,6 +112,14 @@ private[mediator] class ConfirmationResponseProcessor(
   ): HandlerResult = {
 
     val requestTs = requestId.unwrap
+    // // TODO(#15627) clean me up after removing the MediatorStageEvent stuff
+    if (logger.underlying.isInfoEnabled()) {
+      extractEventsForLogging(events).foreach { result =>
+        logger.info(
+          show"Phase 5: Received responses for request=${requestId}: $result"
+        )(result.traceContext)
+      }
+    }
 
     val future = for {
       // FIXME(i12903): do not block if requestId is far in the future
@@ -87,7 +140,6 @@ private[mediator] class ConfirmationResponseProcessor(
                   _,
                   request,
                   rootHashMessages,
-                  batchAlsoContainsTopologyXTransaction,
                 ) =>
               processRequest(
                 requestId,
@@ -96,7 +148,6 @@ private[mediator] class ConfirmationResponseProcessor(
                 decisionTime,
                 request,
                 rootHashMessages,
-                batchAlsoContainsTopologyXTransaction,
               )
             case MediatorEvent.Response(counter, timestamp, response, recipients) =>
               processResponse(
@@ -135,7 +186,9 @@ private[mediator] class ConfirmationResponseProcessor(
       implicit val traceContext: TraceContext = responseAggregation.requestTraceContext
 
       logger
-        .debug(s"Request ${requestId}: Timeout in state ${responseAggregation.state} at $timestamp")
+        .info(
+          s"Phase 6: Request ${requestId.unwrap}: Timeout in state ${responseAggregation.state} at $timestamp"
+        )
 
       val timeout = responseAggregation.timeout(version = timestamp)
       mediatorState
@@ -159,7 +212,6 @@ private[mediator] class ConfirmationResponseProcessor(
       decisionTime: CantonTimestamp,
       request: MediatorRequest,
       rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
-      batchAlsoContainsTopologyXTransaction: Boolean,
   )(implicit traceContext: TraceContext): Future[Unit] = {
     withSpan("ConfirmationResponseProcessor.processRequest") { implicit traceContext => span =>
       span.setAttribute("request_id", requestId.toString)
@@ -173,7 +225,6 @@ private[mediator] class ConfirmationResponseProcessor(
           request,
           rootHashMessages,
           topologySnapshot,
-          batchAlsoContainsTopologyXTransaction,
         )
 
         // Take appropriate actions based on unitOrVerdictO
@@ -192,9 +243,8 @@ private[mediator] class ConfirmationResponseProcessor(
               _ <- mediatorState.add(aggregation)
             } yield {
               timeTracker.requestTick(participantResponseDeadline)
-
-              logger.debug(
-                show"$requestId: registered mediator request. Initial state: ${aggregation.showMergedState}"
+              logger.info(
+                show"Phase 2: Registered request=${requestId.unwrap} with ${request.informeesAndThresholdByViewHash.size} view(s). Initial state: ${aggregation.showMergedState}"
               )
             }
 
@@ -234,7 +284,6 @@ private[mediator] class ConfirmationResponseProcessor(
       request: MediatorRequest,
       rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
       topologySnapshot: TopologySnapshot,
-      batchAlsoContainsTopologyXTransaction: Boolean,
   )(implicit
       traceContext: TraceContext
   ): Future[Either[Option[MediatorVerdict.MediatorReject], Unit]] = (for {
@@ -285,21 +334,6 @@ private[mediator] class ConfirmationResponseProcessor(
     _ <-
       validateAuthorizedConfirmingParties(requestId, request, topologySnapshot)
         .leftMap(Option.apply)
-
-    // Reject, if the batch also contains a topology transaction
-    _ <- EitherTUtil
-      .condUnitET(
-        !batchAlsoContainsTopologyXTransaction, {
-          val rejection = MediatorError.MalformedMessage
-            .Reject(
-              s"Received a mediator request with id $requestId also containing a topology transaction.",
-              v0.MediatorRejection.Code.MissingCode,
-            )
-            .reported()
-          MediatorVerdict.MediatorReject(rejection)
-        },
-      )
-      .leftMap(Option.apply)
   } yield ()).value
 
   private def checkDeclaredMediator(
@@ -324,30 +358,11 @@ private[mediator] class ConfirmationResponseProcessor(
     }
 
     (request.mediator match {
-      case MediatorRef.Single(declaredMediatorId) =>
+      case MediatorRef(declaredMediatorId) =>
         EitherTUtil.condUnitET[Future](
           declaredMediatorId == mediatorId,
           rejectWrongMediator(show"incorrect mediator id"),
         )
-      case MediatorRef.Group(declaredMediatorGroup) =>
-        for {
-          mediatorGroupO <- EitherT.right(
-            topologySnapshot.mediatorGroup(declaredMediatorGroup.group)
-          )
-          mediatorGroup <- EitherT.fromOption[Future](
-            mediatorGroupO,
-            rejectWrongMediator(show"unknown mediator group"),
-          )
-          _ <- EitherTUtil.condUnitET[Future](
-            mediatorGroup.isActive,
-            rejectWrongMediator(show"inactive mediator group"),
-          )
-          _ <- EitherTUtil.condUnitET[Future](
-            mediatorGroup.active.contains(mediatorId) || mediatorGroup.passive.contains(mediatorId),
-            rejectWrongMediator(show"this mediator not being part of the mediator group"),
-          )
-
-        } yield ()
     }).map(_ => request.mediator)
   }
 
@@ -370,9 +385,8 @@ private[mediator] class ConfirmationResponseProcessor(
     val rootHashMessagesRecipients = correctRecipients
       .flatMap(recipients =>
         recipients
-          .collect {
-            case m @ MemberRecipient(_: ParticipantId) => m
-            case pop: ParticipantsOfParty => pop
+          .collect { case m @ Recipient(_: ParticipantId) =>
+            m
           }
       )
     def repeatedMembers(recipients: Seq[Recipient]): Seq[Recipient] = {
@@ -441,10 +455,6 @@ private[mediator] class ConfirmationResponseProcessor(
             _ <- EitherTUtil.condUnitET[Future](
               wrongMems.superfluousMembers.isEmpty,
               show"Superfluous root hash message for members: ${wrongMems.superfluousMembers}",
-            )
-            _ <- EitherTUtil.condUnitET[Future](
-              wrongMems.superfluousInformees.isEmpty,
-              show"Superfluous root hash message for group addressed parties: ${wrongMems.superfluousInformees}",
             )
           } yield ()
       }
@@ -621,7 +631,6 @@ private[mediator] class ConfirmationResponseProcessor(
             OptionT.none[Future, Unit]
           }
         }
-
         nextResponseAggregation <- OptionT(
           responseAggregation.validateAndProgress(ts, response, snapshot.ipsSnapshot)
         )
@@ -658,6 +667,9 @@ private[mediator] class ConfirmationResponseProcessor(
   )(implicit traceContext: TraceContext): Future[Unit] =
     responseAggregation.asFinalized(protocolVersion) match {
       case Some(finalizedResponse) =>
+        logger.info(
+          s"Phase 6: Finalized request=${finalizedResponse.requestId} with verdict ${finalizedResponse.verdict}"
+        )
         verdictSender.sendResult(
           finalizedResponse.requestId,
           finalizedResponse.request,

@@ -1,10 +1,11 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.store
 
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
+import com.daml.lf.transaction.Util
 import com.daml.lf.value.Value.ValueInt64
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.store.ContractKeyJournal.{
@@ -17,9 +18,11 @@ import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.LfGlobalKey
 import com.digitalasset.canton.store.PrunableByTimeTest
 import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.util.LfTransactionBuilder.defaultLanguageVersion
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{LfTransactionBuilder, MonadUtil}
-import com.digitalasset.canton.{BaseTest, RequestCounter, TestMetrics}
+import com.digitalasset.canton.version.HasTestCloseContext
+import com.digitalasset.canton.{BaseTest, RequestCounter}
 import org.scalatest.wordspec.AsyncWordSpecLike
 
 import java.time.Instant
@@ -29,7 +32,7 @@ import scala.util.Random
 
 @nowarn("msg=match may not be exhaustive")
 trait ContractKeyJournalTest extends PrunableByTimeTest {
-  this: AsyncWordSpecLike & BaseTest & TestMetrics =>
+  this: AsyncWordSpecLike & BaseTest =>
   import ContractKeyJournalTest.*
 
   def contractKeyJournal(mkCkj: ExecutionContext => ContractKeyJournal): Unit = {
@@ -173,6 +176,8 @@ trait ContractKeyJournalTest extends PrunableByTimeTest {
     "prune" should {
       "remove the obsolete updates" in {
         val ckj = mk()
+        implicit val closeContext = HasTestCloseContext.makeTestCloseContext(logger)
+
         for {
           _ <- ckj.prune(CantonTimestamp.Epoch)
           _ <- valueOrFail(
@@ -259,5 +264,9 @@ trait ContractKeyJournalTest extends PrunableByTimeTest {
 
 object ContractKeyJournalTest {
   def globalKey(keyIndex: Long): LfGlobalKey =
-    LfGlobalKey.assertBuild(LfTransactionBuilder.defaultTemplateId, ValueInt64(keyIndex))
+    LfGlobalKey.assertBuild(
+      LfTransactionBuilder.defaultTemplateId,
+      ValueInt64(keyIndex),
+      Util.sharedKey(defaultLanguageVersion),
+    )
 }

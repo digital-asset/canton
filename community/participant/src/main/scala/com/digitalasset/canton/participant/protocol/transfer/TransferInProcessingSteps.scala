@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol.transfer
@@ -15,8 +15,8 @@ import com.digitalasset.canton.data.ViewType.TransferInViewType
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.ledger.participant.state.v2.CompletionInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.RequestOffset
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.PendingRequestData
 import com.digitalasset.canton.participant.protocol.conflictdetection.{
   ActivenessCheck,
@@ -48,18 +48,10 @@ import com.digitalasset.canton.store.SessionKeyStore
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
-import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
-import com.digitalasset.canton.{
-  LfPartyId,
-  RequestCounter,
-  SequencerCounter,
-  TransferCounter,
-  TransferCounterO,
-  checked,
-}
+import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
 
 import java.util.UUID
 import scala.concurrent.{ExecutionContext, Future}
@@ -173,7 +165,6 @@ private[transfer] class TransferInProcessingSteps(
           submitterMetadata,
           stakeholders,
           transferData.contract,
-          transferData.transferCounter,
           transferData.creatingTransactionId,
           targetDomain,
           mediator,
@@ -219,7 +210,7 @@ private[transfer] class TransferInProcessingSteps(
           checked(
             NonEmptyUtil.fromUnsafe(
               recipientsSet.toSeq.map(participant =>
-                NonEmpty(Set, mediator.toRecipient, MemberRecipient(participant))
+                NonEmpty(Set, mediator.toRecipient, Recipient(participant))
               )
             )
           )
@@ -273,7 +264,7 @@ private[transfer] class TransferInProcessingSteps(
         targetProtocolVersion.v,
       ) { bytes =>
         FullTransferInTree
-          .fromByteString(snapshot.pureCrypto)(bytes)
+          .fromByteString(snapshot.pureCrypto, targetProtocolVersion.v)(bytes)
           .leftMap(e => DefaultDeserializationError(e.toString))
       }
       .map(WithRecipients(_, envelope.recipients))
@@ -407,7 +398,6 @@ private[transfer] class TransferInProcessingSteps(
         sc,
         txInRequest.tree.rootHash,
         txInRequest.contract,
-        txInRequest.transferCounter,
         txInRequest.submitterMetadata,
         txInRequest.creatingTransactionId,
         transferringParticipant,
@@ -501,7 +491,6 @@ private[transfer] class TransferInProcessingSteps(
       requestSequencerCounter,
       rootHash,
       contract,
-      transferCounter,
       submitterMetadata,
       creatingTransactionId,
       transferringParticipant,
@@ -524,7 +513,6 @@ private[transfer] class TransferInProcessingSteps(
                 CommitSet.TransferInCommit(
                   transferId,
                   contract.metadata,
-                  transferCounter,
                 ),
               )
           ),
@@ -542,13 +530,12 @@ private[transfer] class TransferInProcessingSteps(
             transferId,
             rootHash,
             isTransferringParticipant = transferringParticipant,
-            transferCounter,
             hostedStakeholders.toList,
           )
           timestampEvent = Some(
             TimestampedEvent(
               event,
-              RequestOffset(requestId.unwrap, requestCounter),
+              LocalOffset(requestCounter),
               Some(requestSequencerCounter),
             )
           )
@@ -578,21 +565,21 @@ private[transfer] class TransferInProcessingSteps(
       transferId: TransferId,
       rootHash: RootHash,
       isTransferringParticipant: Boolean,
-      transferCounter: TransferCounterO,
       hostedStakeholders: List[LfPartyId],
   ): EitherT[Future, TransferProcessorError, LedgerSyncEvent.TransferredIn] = {
     val targetDomain = domainId
     val contractInst = contract.contractInstance.unversioned
     val createNode: LfNodeCreate =
       LfNodeCreate(
-        contract.contractId,
-        contractInst.template,
-        contractInst.arg,
-        "", // TODO(i12451): get the right agreement text from `contractInst`
-        contract.metadata.signatories,
-        contract.metadata.stakeholders,
+        coid = contract.contractId,
+        templateId = contractInst.template,
+        packageName = contractInst.packageName,
+        arg = contractInst.arg,
+        agreementText = "", // TODO(i12451): get the right agreement text from `contractInst`
+        signatories = contract.metadata.signatories,
+        stakeholders = contract.metadata.stakeholders,
         keyOpt = contract.metadata.maybeKeyWithMaintainers,
-        contract.contractInstance.version,
+        version = contract.contractInstance.version,
       )
     val driverContractMetadata = contract.contractSalt
       .map { salt =>
@@ -639,11 +626,6 @@ private[transfer] class TransferInProcessingSteps(
       workflowId = submitterMetadata.workflowId,
       isTransferringParticipant = isTransferringParticipant,
       hostedStakeholders = hostedStakeholders,
-      transferCounter = transferCounter.getOrElse(
-        // Default value for protocol version earlier than dev
-        // TODO(#15179) Adapt when releasing BFT
-        TransferCounter.MinValue
-      ),
     )
   }
 }
@@ -666,7 +648,6 @@ object TransferInProcessingSteps {
       override val requestSequencerCounter: SequencerCounter,
       rootHash: RootHash,
       contract: SerializableContract,
-      transferCounter: TransferCounterO,
       submitterMetadata: TransferSubmitterMetadata,
       creatingTransactionId: TransactionId,
       isTransferringParticipant: Boolean,
@@ -682,7 +663,6 @@ object TransferInProcessingSteps {
       submitterMetadata: TransferSubmitterMetadata,
       stakeholders: Set[LfPartyId],
       contract: SerializableContract,
-      transferCounter: TransferCounterO,
       creatingTransactionId: TransactionId,
       targetDomain: TargetDomainId,
       targetMediator: MediatorRef,
@@ -690,48 +670,21 @@ object TransferInProcessingSteps {
       transferInUuid: UUID,
       sourceProtocolVersion: SourceProtocolVersion,
       targetProtocolVersion: TargetProtocolVersion,
-  )(implicit
-      loggingContext: ErrorLoggingContext
   ): Either[TransferProcessorError, FullTransferInTree] = {
     val commonDataSalt = Salt.tryDeriveSalt(seed, 0, pureCrypto)
     val viewSalt = Salt.tryDeriveSalt(seed, 1, pureCrypto)
 
+    val commonData = TransferInCommonData
+      .create(pureCrypto)(
+        commonDataSalt,
+        targetDomain,
+        targetMediator,
+        stakeholders,
+        transferInUuid,
+        targetProtocolVersion,
+      )
+
     for {
-      _ <- checkIncompatiblePV(sourceProtocolVersion, targetProtocolVersion, contract.contractId)
-
-      // If transfer is initiated from a domain where the transfers counters are not yet defined, we set it to 0
-      // And if we transfer to a domain that does not support transfer counters and the source domain also does not
-      // support them, we omit it
-      // Otherwise, due to the PV compatibility check above, both domains must support transfer counters and we
-      // keep the transfer counter unchanged
-      revisedTransferCounter = {
-        if (
-          sourceProtocolVersion.v < TransferCommonData.minimumPvForTransferCounter &&
-          targetProtocolVersion.v >= TransferCommonData.minimumPvForTransferCounter
-        )
-          Some(TransferCounter.Genesis)
-        else if (
-          targetProtocolVersion.v < TransferCommonData.minimumPvForTransferCounter && sourceProtocolVersion.v < TransferCommonData.minimumPvForTransferCounter
-        ) None
-        else if (
-          targetProtocolVersion.v >= TransferCommonData.minimumPvForTransferCounter && sourceProtocolVersion.v >= TransferCommonData.minimumPvForTransferCounter
-        ) transferCounter
-        else
-          ErrorUtil.invalidState(
-            s"The source domain PV ${sourceProtocolVersion.v} and target domains PV ${targetProtocolVersion.v} are incompatible"
-          )
-      }
-
-      commonData <- TransferInCommonData
-        .create(pureCrypto)(
-          commonDataSalt,
-          targetDomain,
-          targetMediator,
-          stakeholders,
-          transferInUuid,
-          targetProtocolVersion,
-        )
-        .leftMap(reason => InvalidTransferCommonData(reason))
       view <- TransferInView
         .create(pureCrypto)(
           viewSalt,
@@ -741,7 +694,6 @@ object TransferInProcessingSteps {
           transferOutResult,
           sourceProtocolVersion,
           targetProtocolVersion,
-          revisedTransferCounter,
         )
         .leftMap(reason => InvalidTransferView(reason))
       tree = TransferInViewTree(commonData, view)(pureCrypto)

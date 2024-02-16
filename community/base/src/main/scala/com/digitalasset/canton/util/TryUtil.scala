@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.util
@@ -18,4 +18,10 @@ object TryUtil {
       case e: InterruptedException => Failure(e)
       case NonFatal(e) => Failure(e)
     }
+
+  implicit final class ForFailedOps[A](private val a: Try[A]) extends AnyVal {
+    @inline
+    def forFailed(f: Throwable => Unit): Unit = a.fold(f, _ => ())
+  }
+
 }

@@ -1,13 +1,13 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.concurrent
 
 import cats.syntax.parallel.*
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{LazyValWithContext, ResourceUtil}
-import com.digitalasset.canton.{BaseTest, TestMetrics}
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
@@ -15,7 +15,7 @@ import java.util.concurrent.{Semaphore, TimeUnit}
 import scala.concurrent.{ExecutionContext, Future, blocking}
 
 @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
-class ThreadingTest extends AnyWordSpec with BaseTest with TestMetrics {
+class ThreadingTest extends AnyWordSpec with BaseTest {
 
   lazy val configuredNumerOfThreads: Int = Threading.detectNumberOfThreads(noTracingLogger)
   lazy val expectedNumberOfParallelTasks: Int =
@@ -236,7 +236,6 @@ class ThreadingTest extends AnyWordSpec with BaseTest with TestMetrics {
         Threading.newExecutionContext(
           "threading-test-execution-context",
           noTracingLogger,
-          executorServiceMetrics,
         )
 
       def rec(n: Int): Future[Int] = {
@@ -345,7 +344,6 @@ class ThreadingTest extends AnyWordSpec with BaseTest with TestMetrics {
         Threading.newExecutionContext(
           "threading-test-execution-context",
           noTracingLogger,
-          executorServiceMetrics,
         )
       )(logger, DefaultProcessingTimeouts.testing)
     ) { case ExecutorServiceExtensions(ec) =>

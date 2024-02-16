@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.topology
@@ -256,6 +256,7 @@ class TestingIdentityFactory(
       useStateTxs = true,
       packageDependencies,
       loggerFactory,
+      BaseTest.testedProtocolVersionValidation,
     )
   }
 
@@ -370,9 +371,8 @@ class TestingIdentityFactory(
       )
     }
 
-  def newSigningPublicKey(owner: KeyOwner): SigningPublicKey = {
+  def newSigningPublicKey(owner: KeyOwner): SigningPublicKey =
     SymbolicCrypto.signingPublicKey(TestingIdentityFactory.keyFingerprintForOwner(owner))
-  }
 
 }
 

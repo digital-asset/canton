@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol
@@ -7,10 +7,12 @@ import cats.syntax.flatMap.*
 import cats.syntax.option.*
 import com.daml.metrics.api.MetricName
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.ApiType.Grpc.prettyOfString
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{Encrypted, HashPurpose, TestHash}
 import com.digitalasset.canton.data.ViewType.{TransferInViewType, TransferOutViewType}
 import com.digitalasset.canton.data.*
+import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory}
 import com.digitalasset.canton.metrics.MetricHandle.NoOpMetricsFactory
@@ -25,13 +27,17 @@ import com.digitalasset.canton.participant.protocol.submission.{
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.messages.EncryptedView.CompressedView
+import com.digitalasset.canton.protocol.messages.Verdict.{
+  MediatorRejectV0,
+  MediatorRejectV1,
+  MediatorRejectV2,
+}
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{
   RequestAndRootHashMessage,
   RequestId,
   RequestProcessor,
   RootHash,
-  VerdictTest,
   ViewHash,
   v0 as protocolv0,
 }
@@ -43,7 +49,6 @@ import com.digitalasset.canton.sequencing.{
   SequencerTestUtils,
 }
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
-import com.digitalasset.canton.time.TimeProof
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.SequencedTime
 import com.digitalasset.canton.tracing.Traced
@@ -317,7 +322,7 @@ trait MessageDispatcherTest {
 
   private val requestId = RequestId(CantonTimestamp.Epoch)
   private val testMediatorResult =
-    SignedProtocolMessage.tryFrom(
+    SignedProtocolMessage.from(
       TestRegularMediatorResult(
         TestViewType,
         domainId,
@@ -328,7 +333,7 @@ trait MessageDispatcherTest {
       dummySignature,
     )
   private val otherTestMediatorResult =
-    SignedProtocolMessage.tryFrom(
+    SignedProtocolMessage.from(
       TestRegularMediatorResult(
         OtherTestViewType,
         domainId,
@@ -389,13 +394,33 @@ trait MessageDispatcherTest {
     when(rawCommitment.representativeProtocolVersion).thenReturn(
       AcsCommitment.protocolVersionRepresentativeFor(testedProtocolVersion)
     )
+    when(rawCommitment.pretty).thenReturn(prettyOfString(_ => "test"))
 
     val commitment =
-      SignedProtocolMessage.tryFrom(rawCommitment, testedProtocolVersion, dummySignature)
+      SignedProtocolMessage.from(rawCommitment, testedProtocolVersion, dummySignature)
 
-    val reject = VerdictTest.malformedVerdict(testedProtocolVersion)
+    def malformedVerdict(protocolVersion: ProtocolVersion): Verdict.MediatorReject =
+      if (protocolVersion >= Verdict.MediatorRejectV2.firstApplicableProtocolVersion)
+        MediatorRejectV2.tryCreate(
+          MediatorError.MalformedMessage.Reject("").rpcStatusWithoutLoggingContext(),
+          protocolVersion,
+        )
+      else if (protocolVersion >= Verdict.MediatorRejectV1.firstApplicableProtocolVersion)
+        MediatorRejectV1.tryCreate(
+          "",
+          MediatorError.MalformedMessage.id,
+          MediatorError.MalformedMessage.category.asInt,
+          protocolVersion,
+        )
+      else
+        MediatorRejectV0.tryCreate(
+          com.digitalasset.canton.protocol.v0.MediatorRejection.Code.Timeout,
+          "",
+        )
+
+    val reject = malformedVerdict(testedProtocolVersion)
     val malformedMediatorRequestResult =
-      SignedProtocolMessage.tryFrom(
+      SignedProtocolMessage.from(
         MalformedMediatorRequestResult.tryCreate(
           RequestId(CantonTimestamp.MinValue),
           domainId,
@@ -768,7 +793,7 @@ trait MessageDispatcherTest {
     "complain about unknown view types in a result" in {
       val sut = mk(initRc = RequestCounter(-11))
       val unknownTestMediatorResult =
-        SignedProtocolMessage.tryFrom(
+        SignedProtocolMessage.from(
           TestRegularMediatorResult(
             UnknownTestViewType,
             domainId,
@@ -1183,7 +1208,7 @@ trait MessageDispatcherTest {
       "malformed mediator requests be sent to the right processor" in {
         def malformed(viewType: ViewType, processor: ProcessorOfFixture): Future[Assertion] = {
           val result =
-            SignedProtocolMessage.tryFrom(
+            SignedProtocolMessage.from(
               MalformedMediatorRequestResult.tryCreate(
                 RequestId(CantonTimestamp.MinValue),
                 domainId,
@@ -1378,11 +1403,6 @@ private[protocol] object MessageDispatcherTest {
 
     override def toProtoSomeSignedProtocolMessage
         : protocolv0.SignedProtocolMessage.SomeSignedProtocolMessage =
-      throw new UnsupportedOperationException(
-        s"${this.getClass.getSimpleName} cannot be serialized"
-      )
-    override def toProtoTypedSomeSignedProtocolMessage
-        : protocolv0.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage =
       throw new UnsupportedOperationException(
         s"${this.getClass.getSimpleName} cannot be serialized"
       )

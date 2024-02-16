@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.sequencing.sequencer
@@ -618,10 +618,9 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           )
           batch = Batch.fromClosed(
             testedProtocolVersion,
-            ClosedEnvelope.tryCreate(
+            ClosedEnvelope(
               ByteString.copyFromUtf8("test envelope"),
               Recipients.cc(alice, bob),
-              Seq.empty,
               testedProtocolVersion,
             ),
           )
@@ -791,10 +790,9 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           ) ++ (2L to 60L).map(i => (signingToleranceInSec + i, None, recipientsAlice))
           batch = Batch.fromClosed(
             testedProtocolVersion,
-            ClosedEnvelope.tryCreate(
+            ClosedEnvelope(
               ByteString.copyFromUtf8("test envelope"),
               Recipients.cc(alice, bob),
-              Seq.empty,
               testedProtocolVersion,
             ),
           )

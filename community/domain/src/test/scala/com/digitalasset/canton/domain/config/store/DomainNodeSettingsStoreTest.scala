@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.config.store
@@ -108,11 +108,12 @@ trait DbDomainNodeSettingsStoreTest
 
     for {
       _ <- store.saveSettings(nonDefaultConfig).valueOrFail("save")
-      store2 = loggerFactory.assertLogs(
-        mkStore(true),
-        _.warningMessage should include("Resetting static domain parameters to the ones "),
-      )
-      current <- store2.fetchSettings.valueOrFail("fetch")
+      store2 = mkStore(true)
+      current <-
+        loggerFactory.assertLogs(
+          store2.fetchSettings.valueOrFail("fetch"),
+          _.warningMessage should include("Resetting static domain parameters to the ones "),
+        )
     } yield {
       current should contain(makeConfig()) // should be default config
     }

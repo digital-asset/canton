@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.index
@@ -22,9 +22,10 @@ import com.digitalasset.canton.platform.apiserver.TimedIndexService
 import com.digitalasset.canton.platform.common.{MismatchException, ParticipantIdNotFoundException}
 import com.digitalasset.canton.platform.config.IndexServiceConfig
 import com.digitalasset.canton.platform.store.DbSupport
-import com.digitalasset.canton.platform.store.cache.*
+import com.digitalasset.canton.platform.store.cache.{PackageLanguageVersionCache, *}
 import com.digitalasset.canton.platform.store.dao.events.{
   BufferedTransactionsReader,
+  CachedEventsReader,
   ContractLoader,
   LfValueTranslation,
 }
@@ -60,11 +61,15 @@ final class IndexServiceOwner(
   private val initializationMaxAttempts = 3000 // give up after 5min
 
   def acquire()(implicit context: ResourceContext): Resource[IndexService] = {
+
     val ledgerDao = createLedgerReadDao(
       ledgerEndCache = inMemoryState.ledgerEndCache,
       stringInterning = inMemoryState.stringInterningView,
       contractLoader = contractLoader,
     )
+
+    val packageLanguageVersionCache =
+      new PackageLanguageVersionCache(ledgerDao, metrics, loggerFactory)(servicesExecutionContext)
 
     for {
       _ <- Resource.fromFuture(verifyParticipantId(ledgerDao))
@@ -108,16 +113,32 @@ final class IndexServiceOwner(
         loggerFactory = loggerFactory,
       )(inMemoryFanOutExecutionContext)
 
+      eventsReader = inMemoryState.eventsByContractKeyCache
+        .map(eventsByContractKeyCache =>
+          new CachedEventsReader(
+            delegate = ledgerDao.eventsReader,
+            eventsByContractKeyCache = eventsByContractKeyCache,
+            lfValueTranslation = lfValueTranslation,
+            loggerFactory = loggerFactory,
+          )
+        )
+        .getOrElse(ledgerDao.eventsReader)
+
       indexService = new IndexServiceImpl(
         ledgerId = ledgerId,
         participantId = participantId,
         ledgerDao = ledgerDao,
         transactionsReader = bufferedTransactionsReader,
         commandCompletionsReader = bufferedCommandCompletionsReader,
+        eventsReader = eventsReader,
         contractStore = contractStore,
-        pruneBuffers = inMemoryState.inMemoryFanoutBuffer.prune,
+        pruneBuffers = offset => {
+          inMemoryState.inMemoryFanoutBuffer.prune(offset)
+          inMemoryState.eventsByContractKeyCache.foreach(_.flush())
+        },
         dispatcher = () => inMemoryState.dispatcherState.getDispatcher,
         packageMetadataView = inMemoryState.packageMetadataView,
+        packageLanguageVersionCache = packageLanguageVersionCache,
         metrics = metrics,
         loggerFactory = loggerFactory,
       )
@@ -218,7 +239,7 @@ final class IndexServiceOwner(
         InstrumentedExecutors.newWorkStealingExecutor(
           metrics.daml.lapi.threadpool.inMemoryFanOut.toString,
           threadPoolSize,
-          metrics.executorServiceMetrics,
+          metrics.noOpExecutorServiceMetrics,
         )
       )
 

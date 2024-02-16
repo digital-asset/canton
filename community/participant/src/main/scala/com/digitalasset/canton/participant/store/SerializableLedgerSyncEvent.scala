@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.store
@@ -62,7 +62,6 @@ import com.digitalasset.canton.{
   LedgerSubmissionId,
   LfPackageId,
   ProtoDeserializationError,
-  TransferCounter,
 }
 import com.google.protobuf.ByteString
 import com.google.rpc.status.Status as RpcStatus
@@ -131,14 +130,6 @@ private[store] final case class SerializableLedgerSyncEvent(event: LedgerSyncEve
 
         case transferIn: LedgerSyncEvent.TransferredIn =>
           SyncEventP.TransferredIn(SerializableTransferredIn(transferIn).toProtoV0)
-
-        case partiesAdded: LedgerSyncEvent.PartiesAddedToParticipant =>
-          SyncEventP.PartiesAdded(SerializablePartiesAddedToParticipant(partiesAdded).toProtoV0)
-
-        case partiesRemoved: LedgerSyncEvent.PartiesRemovedFromParticipant =>
-          SyncEventP.PartiesRemoved(
-            SerializablePartiesRemovedFromParticipant(partiesRemoved).toProtoV0
-          )
       }
     )
   }
@@ -195,7 +186,7 @@ private[store] object SerializableLedgerSyncEvent
       ledgerSyncEventP: v0.LedgerSyncEvent
   ): ParsingResult[SerializableLedgerSyncEvent] = {
     val SyncEventP = v0.LedgerSyncEvent.Value
-    val ledgerSyncEvent = ledgerSyncEventP.value match {
+    val ledgerSyncEventE = ledgerSyncEventP.value match {
       case SyncEventP.Empty =>
         Left(ProtoDeserializationError.FieldNotSet("LedgerSyncEvent.value"))
       case SyncEventP.ConfigurationChanged(configurationChanged) =>
@@ -222,17 +213,12 @@ private[store] object SerializableLedgerSyncEvent
         SerializableContractsAdded.fromProtoV0(contractsAdded)
       case SyncEventP.ContractsPurged(contractsPurged) =>
         SerializableContractsPurged.fromProtoV0(contractsPurged)
-      case SyncEventP.PartiesAdded(partiesAddedToParticipant) =>
-        SerializablePartiesAddedToParticipant.fromProtoV0(partiesAddedToParticipant)
-      case SyncEventP.PartiesRemoved(partiesRemovedFromParticipant) =>
-        SerializablePartiesRemovedFromParticipant.fromProtoV0(partiesRemovedFromParticipant)
     }
 
-    ledgerSyncEvent.map(
-      SerializableLedgerSyncEvent(_)(
-        protocolVersionRepresentativeFor(ProtoVersion(0))
-      )
-    )
+    for {
+      ledgerSyncEvent <- ledgerSyncEventE
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(0))
+    } yield SerializableLedgerSyncEvent(ledgerSyncEvent)(rpv)
   }
 }
 
@@ -1094,7 +1080,6 @@ private[store] final case class SerializableTransferredOut(
       workflowId,
       isTransferringParticipant,
       hostedStakeholders,
-      transferCounter,
     ) = transferOut
     v0.TransferredOut(
       updateId = updateId,
@@ -1111,7 +1096,7 @@ private[store] final case class SerializableTransferredOut(
       workflowId = workflowId.getOrElse(""),
       isTransferringParticipant = isTransferringParticipant,
       hostedStakeholders = hostedStakeholders,
-      transferCounter = transferCounter.toProtoPrimitive,
+      transferCounter = Long.MinValue,
     )
   }
 }
@@ -1134,7 +1119,7 @@ private[store] object SerializableTransferredOut {
       templateIdP,
       isTransferringParticipant,
       hostedStakeholdersP,
-      transferCounterP,
+      _transferCounterP,
     ) = transferOutP
 
     for {
@@ -1168,7 +1153,6 @@ private[store] object SerializableTransferredOut {
       workflowId = workflowId,
       isTransferringParticipant = isTransferringParticipant,
       hostedStakeholders = hostedStakeholders.toList,
-      transferCounter = TransferCounter(transferCounterP),
     )
   }
 }
@@ -1190,7 +1174,6 @@ final case class SerializableTransferredIn(transferIn: LedgerSyncEvent.Transferr
       workflowId,
       isTransferringParticipant,
       hostedStakeholders,
-      transferCounter,
     ) = transferIn
     val contractMetadataP = contractMetadata.toByteString
     val createNodeByteString = SerializableLedgerSyncEvent.trySerializeNode(createNode)
@@ -1209,7 +1192,7 @@ final case class SerializableTransferredIn(transferIn: LedgerSyncEvent.Transferr
       workflowId = workflowId.getOrElse(""),
       isTransferringParticipant = isTransferringParticipant,
       hostedStakeholders = hostedStakeholders,
-      transferCounter = transferCounter.toProtoPrimitive,
+      transferCounter = Long.MinValue,
     )
 
   }
@@ -1232,7 +1215,7 @@ private[store] object SerializableTransferredIn {
       workflowIdP,
       isTransferringParticipant,
       hostedStakeholdersP,
-      transferCounterP,
+      _transferCounterP,
     ) = transferInP
 
     for {
@@ -1271,103 +1254,6 @@ private[store] object SerializableTransferredIn {
       workflowId = workflowId,
       isTransferringParticipant = isTransferringParticipant,
       hostedStakeholders = hostedStakeholders.toList,
-      transferCounter = TransferCounter(transferCounterP),
-    )
-  }
-}
-
-private[store] final case class SerializablePartiesAddedToParticipant(
-    partiesAddedToParticipant: LedgerSyncEvent.PartiesAddedToParticipant
-) {
-  def toProtoV0: v0.PartiesAddedToParticipant = {
-    val LedgerSyncEvent.PartiesAddedToParticipant(
-      parties,
-      participantId,
-      recordTime,
-      effectiveTime,
-    ) =
-      partiesAddedToParticipant
-    v0.PartiesAddedToParticipant(
-      parties.forgetNE.toSeq,
-      participantId,
-      Some(SerializableLfTimestamp(recordTime).toProtoV0),
-      Some(SerializableLfTimestamp(effectiveTime).toProtoV0),
-    )
-  }
-}
-
-private[store] object SerializablePartiesAddedToParticipant {
-  def fromProtoV0(
-      partyAddedToParticipant: v0.PartiesAddedToParticipant
-  ): ParsingResult[LedgerSyncEvent.PartiesAddedToParticipant] = {
-    val v0.PartiesAddedToParticipant(partiesP, participantIdP, recordTimeP, effectiveTimeP) =
-      partyAddedToParticipant
-    for {
-      partiesNE <- ProtoConverter.parseRequiredNonEmpty(
-        ProtoConverter.parseLfPartyId,
-        "parties",
-        partiesP,
-      )
-      participantId <- ProtoConverter.parseLfParticipantId(participantIdP)
-      recordTime <- required("recordTime", recordTimeP).flatMap(
-        SerializableLfTimestamp.fromProtoPrimitive
-      )
-      effectiveTime <- required("effectiveTime", effectiveTimeP).flatMap(
-        SerializableLfTimestamp.fromProtoPrimitive
-      )
-    } yield LedgerSyncEvent.PartiesAddedToParticipant(
-      partiesNE.toSet,
-      participantId,
-      recordTime,
-      effectiveTime,
-    )
-  }
-}
-
-private[store] final case class SerializablePartiesRemovedFromParticipant(
-    partiesRemovedFromParticipant: LedgerSyncEvent.PartiesRemovedFromParticipant
-) {
-  def toProtoV0: v0.PartiesRemovedFromParticipant = {
-    val LedgerSyncEvent.PartiesRemovedFromParticipant(
-      parties,
-      participantId,
-      recordTime,
-      effectiveTime,
-    ) =
-      partiesRemovedFromParticipant
-    v0.PartiesRemovedFromParticipant(
-      parties.forgetNE.toSeq,
-      participantId,
-      Some(SerializableLfTimestamp(recordTime).toProtoV0),
-      Some(SerializableLfTimestamp(effectiveTime).toProtoV0),
-    )
-  }
-}
-
-private[store] object SerializablePartiesRemovedFromParticipant {
-  def fromProtoV0(
-      partyRemovedFromParticipant: v0.PartiesRemovedFromParticipant
-  ): ParsingResult[LedgerSyncEvent.PartiesRemovedFromParticipant] = {
-    val v0.PartiesRemovedFromParticipant(partiesP, participantIdP, recordTimeP, effectiveTimeP) =
-      partyRemovedFromParticipant
-    for {
-      partiesNE <- ProtoConverter.parseRequiredNonEmpty(
-        ProtoConverter.parseLfPartyId,
-        "parties",
-        partiesP,
-      )
-      participantId <- ProtoConverter.parseLfParticipantId(participantIdP)
-      recordTime <- required("recordTime", recordTimeP).flatMap(
-        SerializableLfTimestamp.fromProtoPrimitive
-      )
-      effectiveTime <- required("effectiveTime", effectiveTimeP).flatMap(
-        SerializableLfTimestamp.fromProtoPrimitive
-      )
-    } yield LedgerSyncEvent.PartiesRemovedFromParticipant(
-      partiesNE.toSet,
-      participantId,
-      recordTime,
-      effectiveTime,
     )
   }
 }

@@ -1,16 +1,16 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.ledger.client.services.testing.time
 
-import com.daml.api.util.TimestampConversion.*
-import com.daml.api.util.{TimeProvider, TimestampConversion}
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.grpc.adapter.client.pekko.ClientAdapter
 import com.daml.ledger.api.v1.testing.time_service.TimeServiceGrpc.{TimeService, TimeServiceStub}
 import com.daml.ledger.api.v1.testing.time_service.{GetTimeRequest, SetTimeRequest}
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.ledger.api.util.TimestampConversion.*
+import com.digitalasset.canton.ledger.api.util.{TimeProvider, TimestampConversion}
 import com.digitalasset.canton.ledger.client.LedgerClient
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import org.apache.pekko.stream.scaladsl.{Broadcast, Flow, GraphDSL, RunnableGraph, Sink}

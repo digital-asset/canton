@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol.messages
@@ -144,12 +144,6 @@ abstract sealed case class AcsCommitment private (
       : v0.SignedProtocolMessage.SomeSignedProtocolMessage =
     v0.SignedProtocolMessage.SomeSignedProtocolMessage.AcsCommitment(getCryptographicEvidence)
 
-  override protected[messages] def toProtoTypedSomeSignedProtocolMessage
-      : v0.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage =
-    v0.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage.AcsCommitment(
-      getCryptographicEvidence
-    )
-
   override def hashPurpose: HashPurpose = HashPurpose.AcsCommitment
 
   override lazy val pretty: Pretty[AcsCommitment] = {
@@ -226,8 +220,9 @@ object AcsCommitment extends HasMemoizedProtocolVersionedWrapperCompanion[AcsCom
       period = CommitmentPeriod(fromExclusive, periodLength)
       cmt = protoMsg.commitment
       commitment = commitmentTypeFromByteString(cmt)
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(0))
     } yield new AcsCommitment(domainId, sender, counterParticipant, period, commitment)(
-      protocolVersionRepresentativeFor(ProtoVersion(0)),
+      rpv,
       Some(bytes),
     ) {}
   }

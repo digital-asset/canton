@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.sequencing.protocol
@@ -15,10 +15,7 @@ trait Envelope[+M] extends PrettyPrinting {
 
   def recipients: Recipients
 
-  def forRecipient(
-      member: Member,
-      groupAddresses: Set[GroupRecipient],
-  ): Option[Envelope[M]]
+  def forRecipient(member: Member): Option[Envelope[M]]
 
   /** Closes the envelope by serializing the contents if necessary */
   def closeEnvelope: ClosedEnvelope

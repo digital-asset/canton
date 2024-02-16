@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.platform.store.cache
@@ -7,6 +7,7 @@ import com.daml.lf.crypto.Hash
 import com.daml.lf.data.{ImmArray, Ref, Time}
 import com.daml.lf.transaction.{GlobalKey, TransactionVersion, Versioned}
 import com.daml.lf.value.Value.{ContractInstance, ValueInt64, ValueRecord}
+import com.digitalasset.canton.BaseTest.pvPackageName
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
@@ -170,7 +171,11 @@ class ContractStateCachesSpec
     ContractId.V1(Hash.hashPrivateKey(id.toString))
 
   private def globalKey(id: Int): Key =
-    GlobalKey.assertBuild(Identifier.assertFromString(s"some:template:name"), ValueInt64(id.toLong))
+    GlobalKey.assertBuild(
+      Identifier.assertFromString(s"some:template:name"),
+      ValueInt64(id.toLong),
+      shared = true,
+    )
 
   private def contract(id: Int): Contract = {
     val templateId = Identifier.assertFromString(s"some:template:name")
@@ -178,7 +183,11 @@ class ContractStateCachesSpec
       Some(templateId),
       ImmArray(None -> ValueInt64(id.toLong)),
     )
-    val contractInstance = ContractInstance(templateId, contractArgument)
+    val contractInstance = ContractInstance(
+      template = templateId,
+      packageName = pvPackageName,
+      arg = contractArgument,
+    )
     Versioned(TransactionVersion.StableVersions.max, contractInstance)
   }
 

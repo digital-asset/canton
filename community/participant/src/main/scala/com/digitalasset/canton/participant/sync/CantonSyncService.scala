@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.sync
@@ -54,7 +54,10 @@ import com.digitalasset.canton.participant.Pruning.*
 import com.digitalasset.canton.participant.*
 import com.digitalasset.canton.participant.admin.*
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
-import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
+import com.digitalasset.canton.participant.admin.inspection.{
+  JournalGarbageCollectorControl,
+  SyncStateInspection,
+}
 import com.digitalasset.canton.participant.admin.repair.RepairService
 import com.digitalasset.canton.participant.domain.*
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
@@ -83,7 +86,6 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.{
 }
 import com.digitalasset.canton.participant.topology.*
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
-import com.digitalasset.canton.participant.traffic.TrafficStateController
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
 import com.digitalasset.canton.protocol.*
@@ -394,8 +396,19 @@ class CantonSyncService(
   lazy val stateInspection = new SyncStateInspection(
     syncDomainPersistentStateManager,
     participantNodePersistentState,
-    pruningProcessor,
     parameters.processingTimeouts,
+    new JournalGarbageCollectorControl {
+      override def disable(domainId: DomainId)(implicit traceContext: TraceContext): Future[Unit] =
+        connectedDomainsMap
+          .get(domainId)
+          .map(_.addJournalGarageCollectionLock())
+          .getOrElse(Future.unit)
+      override def enable(domainId: DomainId)(implicit traceContext: TraceContext): Unit = {
+        connectedDomainsMap
+          .get(domainId)
+          .foreach(_.removeJournalGarageCollectionLock())
+      }
+    },
     loggerFactory,
   )
 
@@ -406,10 +419,9 @@ class CantonSyncService(
   ): CompletionStage[PruningResult] =
     (withNewTrace("CantonSyncService.prune") { implicit traceContext => span =>
       span.setAttribute("submission_id", submissionId)
-
       pruneInternally(pruneUpToInclusive)
         .fold(
-          err => PruningResult.NotPruned(err.code.asGrpcStatus(err)),
+          err => PruningResult.NotPruned(ErrorCode.asGrpcStatus(err)),
           _ => PruningResult.ParticipantPruned,
         )
         .onShutdown(
@@ -430,9 +442,9 @@ class CantonSyncService(
         }
       _pruned <- pruningProcessor.pruneLedgerEvents(pruneUpToMultiDomainGlobalOffset)
     } yield ()).transform {
-      case Left(LedgerPruningNothingPruned(message)) =>
+      case Left(LedgerPruningNothingToPrune) =>
         logger.info(
-          s"Could not locate pruning point: ${message}. Considering success for idempotency"
+          s"Could not locate pruning point: ${LedgerPruningNothingToPrune.message}. Considering success for idempotency"
         )
         Right(())
       case Left(err @ LedgerPruningOnlySupportedInEnterpriseEdition) =>
@@ -1154,7 +1166,7 @@ class CantonSyncService(
                     loggerFactory,
                   ),
                 domainMetrics,
-                parameters.cachingConfigs.sessionKeyCache,
+                parameters.cachingConfigs.sessionKeyCacheConfig,
                 participantId,
               )
           )
@@ -1167,14 +1179,6 @@ class CantonSyncService(
           domainHandle.topologyClient,
           domainCrypto.crypto.cryptoPrivateStore,
           loggerFactory,
-        )
-
-        trafficStateController = new TrafficStateController(
-          participantId,
-          loggerFactory,
-          domainHandle.topologyClient,
-          metrics.domainMetrics(domainAlias),
-          clock,
         )
 
         syncDomain = syncDomainFactory.create(
@@ -1196,7 +1200,6 @@ class CantonSyncService(
               missingKeysAlerter,
               domainHandle.topologyClient,
               domainCrypto,
-              trafficStateController,
               ephemeral.recordOrderPublisher,
               domainHandle.staticParameters.protocolVersion,
             ),
@@ -1206,7 +1209,6 @@ class CantonSyncService(
           clock,
           metrics.pruning,
           domainMetrics,
-          trafficStateController,
           futureSupervisor,
           domainLoggerFactory,
           skipRecipientsCheck = skipRecipientsCheck,

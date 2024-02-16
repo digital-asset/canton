@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.console
@@ -33,10 +33,6 @@ trait ConsoleEnvironmentTestHelpers[+CE <: ConsoleEnvironment] { this: CE =>
   def p(name: String): ParticipantReference = participants.all
     .find(_.name == name)
     .getOrElse(sys.error(s"neither local nor remote participant [$name] is configured"))
-
-  def px(name: String): LocalParticipantReferenceX = participantsX.local
-    .find(_.name == name)
-    .getOrElse(sys.error(s"neither local nor remote participant x [$name] is configured"))
 
   def d(name: String): CE#DomainLocalRef =
     domains.local

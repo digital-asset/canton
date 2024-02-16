@@ -1,11 +1,11 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.mediator.admin.gprc
 
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.SigningPublicKey
-import com.digitalasset.canton.domain.admin.{v0, v2}
+import com.digitalasset.canton.domain.admin.v0
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 
@@ -66,19 +66,5 @@ object InitializeMediatorResponse {
       case v0.InitializeMediatorResponse.Value.Success(value) => success(value)
       case v0.InitializeMediatorResponse.Value.Failure(value) => failure(value)
     }
-  }
-}
-
-final case class InitializeMediatorResponseX() {
-  def toProtoV2: v2.InitializeMediatorResponse = v2.InitializeMediatorResponse()
-}
-
-object InitializeMediatorResponseX {
-
-  def fromProtoV2(
-      responseP: v2.InitializeMediatorResponse
-  ): ParsingResult[InitializeMediatorResponseX] = {
-    val v2.InitializeMediatorResponse() = responseP
-    Right(InitializeMediatorResponseX())
   }
 }

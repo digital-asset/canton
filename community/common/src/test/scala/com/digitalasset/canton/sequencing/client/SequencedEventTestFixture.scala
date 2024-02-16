@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.sequencing.client
@@ -160,12 +160,11 @@ class SequencedEventTestFixture(
       MessageId.tryCreate("test").some,
       Batch(
         List(
-          ClosedEnvelope.tryCreate(
+          ClosedEnvelope(
             serializedOverride.getOrElse(
               EnvelopeContent.tryCreate(message, testedProtocolVersion).toByteString
             ),
             Recipients.cc(subscriberId),
-            Seq.empty,
             testedProtocolVersion,
           )
         ),

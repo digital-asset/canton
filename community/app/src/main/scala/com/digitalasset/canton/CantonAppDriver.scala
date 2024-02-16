@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton
@@ -117,7 +117,7 @@ abstract class CantonAppDriver[E <: Environment] extends App with NamedLogging w
       }
     }
   }))
-  logger.info("Registered shutdown-hook.")
+  logger.debug("Registered shutdown-hook.")
 
   val cantonConfig: E#Config = {
     val mergedUserConfigsE = NonEmpty.from(cliOptions.configFiles) match {

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.version
@@ -11,6 +11,7 @@ object ReleaseVersions {
   lazy val v2_4_0: ReleaseVersion = ReleaseVersion(2, 4, 0)
   lazy val v2_5_0: ReleaseVersion = ReleaseVersion(2, 5, 0)
   lazy val v2_6_0: ReleaseVersion = ReleaseVersion(2, 6, 0)
-  lazy val v2_7_0_snapshot: ReleaseVersion = ReleaseVersion(2, 7, 0, Some("SNAPSHOT"))
-  lazy val v2_8_0_snapshot: ReleaseVersion = ReleaseVersion(2, 8, 0, Some("SNAPSHOT"))
+  lazy val v2_7_0: ReleaseVersion = ReleaseVersion(2, 7, 0)
+  lazy val v2_8_0: ReleaseVersion = ReleaseVersion(2, 8, 0)
+  lazy val v2_9_0: ReleaseVersion = ReleaseVersion(2, 9, 0)
 }

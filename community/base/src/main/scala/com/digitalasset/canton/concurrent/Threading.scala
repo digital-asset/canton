@@ -1,10 +1,9 @@
-// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.concurrent
 
 import cats.syntax.either.*
-import com.daml.metrics.ExecutorServiceMetrics
 import com.digitalasset.canton.lifecycle.ClosingException
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil.*
@@ -12,6 +11,7 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder
 import com.typesafe.scalalogging.Logger
 
 import java.util.concurrent.*
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.function.Predicate
 import scala.concurrent.{ExecutionContext, blocking}
 
@@ -119,19 +119,10 @@ object Threading {
   def newExecutionContext(
       name: String,
       logger: Logger,
-      metrics: ExecutorServiceMetrics,
-  ): ExecutionContextIdlenessExecutorService =
-    newExecutionContext(name, logger, Some(metrics))
-
-  def newExecutionContext(
-      name: String,
-      logger: Logger,
-      maybeMetrics: Option[ExecutorServiceMetrics],
   ): ExecutionContextIdlenessExecutorService =
     newExecutionContext(
       name,
       logger,
-      maybeMetrics,
       detectNumberOfThreads(logger),
     )
 
@@ -145,7 +136,6 @@ object Threading {
   def newExecutionContext(
       name: String,
       logger: Logger,
-      maybeMetrics: Option[ExecutorServiceMetrics],
       parallelism: Int,
       maxExtraThreads: Int = 256,
       exitOnFatal: Boolean = true,
@@ -167,12 +157,8 @@ object Threading {
       .asInstanceOf[ForkJoinPool.ForkJoinWorkerThreadFactory]
 
     val forkJoinPool = createForkJoinPool(parallelism, threadFactory, handler, logger)
-    val executorService =
-      maybeMetrics.fold(forkJoinPool: ExecutorService)(
-        _.monitorExecutorService(name, forkJoinPool)
-      )
 
-    new ForkJoinIdlenessExecutorService(forkJoinPool, executorService, reporter, name)
+    new ForkJoinIdlenessExecutorService(forkJoinPool, forkJoinPool, reporter, name)
   }
 
   /** Minimum parallelism of ForkJoinPool.
@@ -243,11 +229,17 @@ object Threading {
     logger
   )
 
+  private val detectedNumberOfThreads = new AtomicInteger(-1)
+
   /** Detects the number of threads the same way as `scala.concurrent.impl.ExecutionContextImpl`,
     * except that system property values like 'x2' are not supported.
+    *
+    * This will run once and cache the results
     */
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
-  def detectNumberOfThreads(logger: Logger): Int = {
+  def detectNumberOfThreads(logger: Logger): Int = if (detectedNumberOfThreads.get() > 0)
+    detectedNumberOfThreads.get()
+  else {
     def getIntProperty(name: String): Option[Int] =
       for {
         strProperty <- Option(System.getProperty(name))
@@ -299,7 +291,7 @@ object Threading {
         numThreads = maxThreads
       }
     }
-
+    detectedNumberOfThreads.set(numThreads)
     numThreads
   }
 
