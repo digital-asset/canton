@@ -6,11 +6,11 @@ package com.digitalasset.canton.participant.util
 import cats.data.EitherT
 import com.daml.lf.VersionRange
 import com.daml.lf.data.Ref.PackageId
-import com.daml.lf.data.{ImmArray, Time}
+import com.daml.lf.data.{ImmArray, Ref, Time}
 import com.daml.lf.engine.*
 import com.daml.lf.interpretation.Error as LfInterpretationError
 import com.daml.lf.language.Ast.Package
-import com.daml.lf.language.{LanguageMajorVersion, LanguageVersion}
+import com.daml.lf.language.LanguageVersion
 import com.daml.lf.transaction.{ContractKeyUniquenessMode, TransactionVersion, Versioned}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{LoggingContextUtil, NamedLoggerFactory, NamedLogging}
@@ -32,6 +32,7 @@ import scala.util.{Failure, Success}
 
 object DAMLe {
   def newEngine(
+      uniqueContractKeys: Boolean,
       enableLfDev: Boolean,
       enableStackTraces: Boolean,
       profileDir: Option[Path] = None,
@@ -41,21 +42,23 @@ object DAMLe {
   ): Engine =
     new Engine(
       EngineConfig(
-        allowedLanguageVersions =
-          if (enableLfDev)
-            LanguageVersion.AllVersions(LanguageMajorVersion.V2)
-          else
-            VersionRange(
-              LanguageVersion.v2_1,
-              // TODO(#14706): use LanguageVersion.StableVersions.max or similar once LF v2 is stable
-              LanguageVersion.v2_1,
-            ),
+        allowedLanguageVersions = VersionRange(
+          LanguageVersion.v1_14,
+          // TODO(#14706): use LanguageVersion.AllVersions(majorVersion) instead of v2_dev once Canton has a way of
+          //   deciding which major version of LF to use depending on the context. It is currently safe to use v2_dev
+          //   here because the engine temporarily accepts version ranges spanning two major LF versions.
+          //   Similary, use LanguageVersions.StableVersions(majorVersion).max once such a parameterized StableVersions
+          //   is introduced.
+          if (enableLfDev) LanguageVersion.v2_dev else LanguageVersion.StableVersions.max,
+        ),
         // The package store contains only validated packages, so we can skip validation upon loading
         packageValidation = false,
         stackTraceMode = enableStackTraces,
         profileDir = profileDir,
         requireSuffixedGlobalContractId = true,
-        contractKeyUniqueness = ContractKeyUniquenessMode.Off,
+        contractKeyUniqueness =
+          if (uniqueContractKeys) ContractKeyUniquenessMode.Strict
+          else ContractKeyUniquenessMode.Off,
         enableContractUpgrading = enableContractUpgrading,
         iterationsBetweenInterruptions = iterationsBetweenInterruptions,
       )
@@ -73,6 +76,7 @@ object DAMLe {
       stakeholders: Set[LfPartyId],
       templateId: LfTemplateId,
       keyWithMaintainers: Option[LfGlobalKeyWithMaintainers],
+      agreementText: AgreementText,
   ) {
     def metadataWithGlobalKey: ContractMetadata =
       ContractMetadata.tryCreate(
@@ -119,6 +123,7 @@ class DAMLe(
       submissionTime: CantonTimestamp,
       rootSeed: Option[LfHash],
       expectFailure: Boolean,
+      packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
   )(implicit
       traceContext: TraceContext
   ): EitherT[
@@ -177,6 +182,7 @@ class DAMLe(
         nodeSeed = rootSeed,
         submissionTime = submissionTime.toLf,
         ledgerEffectiveTime = ledgerTime.toLf,
+        packageResolution = packageResolution,
       )
     }
 
@@ -203,6 +209,7 @@ class DAMLe(
         nodeSeed = Some(DAMLe.zeroSeed),
         submissionTime = Time.Timestamp.Epoch, // Only used to compute contract ids
         ledgerEffectiveTime = ledgerEffectiveTime.ts.underlying,
+        packageResolution = Map.empty,
       )
       for {
         txWithMetadata <- EitherT(
@@ -238,19 +245,30 @@ class DAMLe(
         Some(DAMLe.zeroSeed),
         expectFailure = false,
       )
-      (transaction, _, _) = transactionWithMetadata
+      (transaction, _metadata, _resolver) = transactionWithMetadata
       md = transaction.nodes(transaction.roots(0)) match {
-        case nc: LfNodeCreate =>
+        case nc @ LfNodeCreate(
+              _cid,
+              packageName,
+              templateId,
+              arg,
+              agreementText,
+              signatories,
+              stakeholders,
+              key,
+              version,
+            ) =>
           ContractWithMetadata(
             LfContractInst(
-              template = nc.templateId,
-              arg = Versioned(nc.version, nc.arg),
-              packageName = nc.packageName,
+              template = templateId,
+              packageName = packageName,
+              arg = Versioned(version, arg),
             ),
-            nc.signatories,
-            nc.stakeholders,
+            signatories,
+            stakeholders,
             nc.templateId,
-            nc.keyOpt,
+            key,
+            AgreementText(agreementText),
           )
         case node => throw new RuntimeException(s"DAMLe reinterpreted a create node as $node")
       }

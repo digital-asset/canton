@@ -4,9 +4,8 @@
 package com.digitalasset.canton.domain.mediator
 
 import cats.data.EitherT
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, Signature}
+import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.error.MediatorError.MalformedMessage
 import com.digitalasset.canton.protocol.messages.{
@@ -24,14 +23,12 @@ import com.digitalasset.canton.sequencing.client.{
   SequencerClientSend,
 }
 import com.digitalasset.canton.sequencing.protocol.{
-  AggregationRule,
   Batch,
-  MemberRecipient,
   MessageId,
   OpenEnvelope,
+  Recipient,
   Recipients,
 }
-import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{
   DomainId,
@@ -39,12 +36,11 @@ import com.digitalasset.canton.topology.{
   MediatorId,
   MediatorRef,
   ParticipantId,
-  TestingIdentityFactoryX,
-  TestingTopologyX,
+  TestingIdentityFactory,
+  TestingTopology,
   UniqueIdentifier,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, ProtocolVersionChecksAsyncWordSpec}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -57,138 +53,30 @@ class DefaultVerdictSenderTest
 
   val activeMediator1 = MediatorId(UniqueIdentifier.tryCreate("mediator", "one"))
   val activeMediator2 = MediatorId(UniqueIdentifier.tryCreate("mediator", "two"))
-  val passiveMediator3 = MediatorId(UniqueIdentifier.tryCreate("mediator", "three"))
 
   val mediatorGroup: MediatorGroup = MediatorGroup(
     index = NonNegativeInt.zero,
-    active = Seq(
-      activeMediator1,
-      activeMediator2,
-    ),
-    passive = Seq(
-      passiveMediator3
-    ),
+    active = activeMediator2,
     threshold = PositiveInt.tryCreate(2),
-  )
-  val expectedMediatorGroupAggregationRule = Some(
-    AggregationRule(
-      NonEmpty.mk(Seq, mediatorGroup.active(0), mediatorGroup.active.tail *),
-      PositiveInt.tryCreate(2),
-      testedProtocolVersion,
-    )
   )
 
   "DefaultVerdictSender" should {
-    "work for pv <= dev" should {
-      "send approvals" in {
-        val tester = TestHelper(
-          mediatorId = activeMediator1,
-          transactionMediatorRef = MediatorRef(activeMediator1),
-        )
-        tester.sendApproval() map { _ =>
-          tester.interceptedMessages should have size 1
-        }
-      }
-      "send rejects" in {
-        val tester = TestHelper(
-          mediatorId = activeMediator1,
-          transactionMediatorRef = MediatorRef(activeMediator1),
-        )
-        tester.sendReject() map { _ =>
-          tester.interceptedMessages should have size 1
-        }
+    "send approvals" in {
+      val tester = TestHelper(
+        mediatorId = activeMediator1,
+        transactionMediatorRef = MediatorRef(activeMediator1),
+      )
+      tester.sendApproval() map { _ =>
+        tester.interceptedMessages should have size 1
       }
     }
-
-    "for active mediators" should {
-      "send approvals" in {
-        val tester = TestHelper(
-          mediatorId = activeMediator1,
-          transactionMediatorRef = MediatorRef(mediatorGroup),
-        )
-        tester.sendApproval() map { _ =>
-          tester.interceptedMessages should have size 1
-        }
-      }
-      "send rejects" in {
-        val tester = TestHelper(
-          mediatorId = activeMediator1,
-          transactionMediatorRef = MediatorRef(mediatorGroup),
-        )
-        tester.sendReject() map { _ =>
-          tester.interceptedMessages should have size 1
-        }
-      }
-    }
-
-    "for passive mediators" should {
-      "not send approvals" in {
-        val tester = TestHelper(
-          mediatorId = passiveMediator3,
-          transactionMediatorRef = MediatorRef(mediatorGroup),
-        )
-        tester.sendApproval() map { _ =>
-          tester.interceptedMessages should have size 0
-        }
-      }
-      "not send rejects" in {
-        val tester = TestHelper(
-          mediatorId = passiveMediator3,
-          transactionMediatorRef = MediatorRef(mediatorGroup),
-        )
-        tester.sendReject() map { _ =>
-          tester.interceptedMessages should have size 0
-        }
-      }
-    }
-
-    "for requests to a singular mediator should set no aggregation rule" should {
-      "for approvals" in {
-        val tester = TestHelper(
-          mediatorId = activeMediator1,
-          transactionMediatorRef = MediatorRef(activeMediator1),
-        )
-        tester.sendApproval() map { _ =>
-          tester.interceptedMessages should have size 1
-          val (_, aggregationRule) = tester.interceptedMessages.loneElement
-          aggregationRule shouldBe None
-        }
-      }
-      "for rejects" in {
-        val tester = TestHelper(
-          mediatorId = activeMediator1,
-          transactionMediatorRef = MediatorRef(activeMediator1),
-        )
-        tester.sendReject() map { _ =>
-          tester.interceptedMessages should have size 1
-          val (_, aggregationRule) = tester.interceptedMessages.loneElement
-          aggregationRule shouldBe None
-        }
-      }
-    }
-
-    "for requests to a mediator group should set aggregation rule" should {
-      "for approvals" in {
-        val tester = TestHelper(
-          mediatorId = activeMediator1,
-          transactionMediatorRef = MediatorRef(mediatorGroup),
-        )
-        tester.sendApproval() map { _ =>
-          tester.interceptedMessages should have size 1
-          val (_, aggregationRule) = tester.interceptedMessages.loneElement
-          aggregationRule shouldBe expectedMediatorGroupAggregationRule
-        }
-      }
-      "for rejects" in {
-        val tester = TestHelper(
-          mediatorId = activeMediator1,
-          transactionMediatorRef = MediatorRef(mediatorGroup),
-        )
-        tester.sendReject() map { _ =>
-          tester.interceptedMessages should have size 1
-          val (_, aggregationRule) = tester.interceptedMessages.loneElement
-          aggregationRule shouldBe expectedMediatorGroupAggregationRule
-        }
+    "send rejects" in {
+      val tester = TestHelper(
+        mediatorId = activeMediator1,
+        transactionMediatorRef = MediatorRef(activeMediator1),
+      )
+      tester.sendReject() map { _ =>
+        tester.interceptedMessages should have size 1
       }
     }
   }
@@ -206,8 +94,7 @@ class DefaultVerdictSenderTest
       new ExampleTransactionFactory()(domainId = domainId, mediatorRef = transactionMediatorRef)
     val mediatorRef: MediatorRef = factory.mediatorRef
     val fullInformeeTree = factory.MultipleRootsAndViewNestings.fullInformeeTree
-    val informeeMessage =
-      InformeeMessage(fullInformeeTree, Signature.noSignature)(testedProtocolVersion)
+    val informeeMessage = InformeeMessage(fullInformeeTree)(testedProtocolVersion)
     val rootHashMessage = RootHashMessage(
       fullInformeeTree.transactionId.toRootHash,
       domainId,
@@ -215,10 +102,10 @@ class DefaultVerdictSenderTest
       ViewType.TransactionViewType,
       SerializedRootHashMessagePayload.empty,
     )
-    val participant: ParticipantId = ExampleTransactionFactory.submittingParticipant
+    val participant: ParticipantId = ExampleTransactionFactory.submitterParticipant
     val rhmEnvelope = OpenEnvelope(
       rootHashMessage,
-      Recipients.cc(transactionMediatorRef.toRecipient, MemberRecipient(participant)),
+      Recipients.cc(transactionMediatorRef.toRecipient, Recipient(participant)),
     )(testedProtocolVersion)
 
     val submitter = ExampleTransactionFactory.submitter
@@ -231,51 +118,30 @@ class DefaultVerdictSenderTest
 
     val initialDomainParameters = TestDomainParameters.defaultDynamic
 
-    val domainSyncCryptoApi: DomainSyncCryptoClient =
-      if (testedProtocolVersion >= ProtocolVersion.v30) {
-        val topology = TestingTopologyX(
-          Set(domainId),
-          Map(
-            submitter -> Map(participant -> ParticipantPermission.Confirmation),
-            signatory ->
-              Map(participant -> ParticipantPermission.Confirmation),
-            observer ->
-              Map(participant -> ParticipantPermission.Observation),
-          ),
-          Set(mediatorGroup),
-        )
+    val domainSyncCryptoApi: DomainSyncCryptoClient = {
+      val topology = TestingTopology(
+        Set(domainId),
+        Map(
+          submitter -> Map(participant -> ParticipantPermission.Confirmation),
+          signatory ->
+            Map(participant -> ParticipantPermission.Confirmation),
+          observer ->
+            Map(participant -> ParticipantPermission.Observation),
+        ),
+        Set(mediatorId),
+      )
 
-        val identityFactory = TestingIdentityFactoryX(
-          topology,
-          loggerFactory,
-          dynamicDomainParameters = initialDomainParameters,
-        )
+      val identityFactory = TestingIdentityFactory(
+        topology,
+        loggerFactory,
+        dynamicDomainParameters = initialDomainParameters,
+      )
 
-        identityFactory.forOwnerAndDomain(mediatorId, domainId)
-      } else {
-        val topology = TestingTopologyX(
-          Set(domainId),
-          Map(
-            submitter -> Map(participant -> ParticipantPermission.Confirmation),
-            signatory ->
-              Map(participant -> ParticipantPermission.Confirmation),
-            observer ->
-              Map(participant -> ParticipantPermission.Observation),
-          ),
-          Set(MediatorGroup(MediatorGroupIndex.zero, Seq(mediatorId), Seq.empty, PositiveInt.one)),
-        )
-
-        val identityFactory = TestingIdentityFactoryX(
-          topology,
-          loggerFactory,
-          dynamicDomainParameters = initialDomainParameters,
-        )
-
-        identityFactory.forOwnerAndDomain(mediatorId, domainId)
-      }
+      identityFactory.forOwnerAndDomain(mediatorId, domainId)
+    }
 
     val interceptedMessages: java.util.concurrent.BlockingQueue[
-      (Batch[DefaultOpenEnvelope], Option[AggregationRule])
+      Batch[DefaultOpenEnvelope]
     ] =
       new java.util.concurrent.LinkedBlockingQueue()
 
@@ -284,13 +150,12 @@ class DefaultVerdictSenderTest
         override def sendAsync(
             batch: Batch[DefaultOpenEnvelope],
             sendType: SendType,
-            topologyTimestamp: Option[CantonTimestamp],
+            timestampOfSigningKey: Option[CantonTimestamp],
             maxSequencingTime: CantonTimestamp,
             messageId: MessageId,
-            aggregationRule: Option[AggregationRule],
             callback: SendCallback,
         )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] = {
-          interceptedMessages.add((batch, aggregationRule))
+          interceptedMessages.add(batch)
           EitherT.pure(())
         }
 

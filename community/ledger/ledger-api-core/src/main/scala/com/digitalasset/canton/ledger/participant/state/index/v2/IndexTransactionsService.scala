@@ -26,6 +26,7 @@ trait IndexTransactionsService extends LedgerEndService {
       endAt: Option[LedgerOffset],
       filter: TransactionFilter,
       verbose: Boolean,
+      multiDomainEnabled: Boolean,
   )(implicit loggingContext: LoggingContextWithTrace): Source[GetUpdatesResponse, NotUsed]
 
   def transactionTrees(
@@ -33,6 +34,7 @@ trait IndexTransactionsService extends LedgerEndService {
       endAt: Option[LedgerOffset],
       filter: TransactionFilter,
       verbose: Boolean,
+      multiDomainEnabled: Boolean,
   )(implicit loggingContext: LoggingContextWithTrace): Source[GetUpdateTreesResponse, NotUsed]
 
   def getTransactionById(

@@ -51,20 +51,19 @@ object ParallelIndexerFactory {
       readService: ReadService,
       initializeInMemoryState: DbDispatcher => LedgerEnd => Future[Unit],
       loggerFactory: NamedLoggerFactory,
-      indexerDbDispatcherOverride: Option[DbDispatcher],
   )(implicit traceContext: TraceContext): ResourceOwner[Indexer] = {
     val logger = TracedLogger(loggerFactory.getLogger(getClass))
     for {
       inputMapperExecutor <- asyncPool(
         inputMappingParallelism,
         "input-mapping-pool",
-        metrics.parallelIndexer.inputMapping.executor,
+        metrics.daml.parallelIndexer.inputMapping.executor,
         loggerFactory,
       ).afterReleased(logger.debug("Input Mapping Threadpool released"))
       batcherExecutor <- asyncPool(
         batchingParallelism,
         "batching-pool",
-        metrics.parallelIndexer.batching.executor,
+        metrics.daml.parallelIndexer.batching.executor,
         loggerFactory,
       ).afterReleased(logger.debug("Batching Threadpool released"))
       haCoordinator <-
@@ -77,6 +76,7 @@ object ParallelIndexerFactory {
                     "ha-coordinator",
                     1,
                     new ThreadFactoryBuilder().setNameFormat("ha-coordinator-%d").build,
+                    metrics.noOpExecutorServiceMetrics,
                     throwable =>
                       logger
                         .error(
@@ -129,26 +129,22 @@ object ParallelIndexerFactory {
       haCoordinator.protectedExecution { connectionInitializer =>
         val indexingHandleF = initializeHandle(
           for {
-            dbDispatcher <- indexerDbDispatcherOverride
-              .map(ResourceOwner.successful)
-              .getOrElse(
-                DbDispatcher
-                  .owner(
-                    // this is the DataSource which will be wrapped by HikariCP, and which will drive the ingestion
-                    // therefore this needs to be configured with the connection-init-hook, what we get from HaCoordinator
-                    dataSource = dataSourceStorageBackend.createDataSource(
-                      dataSourceConfig = dbConfig.dataSourceConfig,
-                      connectionInitHook = Some(connectionInitializer.initialize),
-                      loggerFactory = loggerFactory,
-                    ),
-                    serverRole = ServerRole.Indexer,
-                    connectionPoolSize = dbConfig.connectionPool.connectionPoolSize,
-                    connectionTimeout = dbConfig.connectionPool.connectionTimeout,
-                    metrics = metrics,
-                    loggerFactory = loggerFactory,
-                  )
-                  .afterReleased(logger.debug("Indexing DbDispatcher released"))
+            dbDispatcher <- DbDispatcher
+              .owner(
+                // this is the DataSource which will be wrapped by HikariCP, and which will drive the ingestion
+                // therefore this needs to be configured with the connection-init-hook, what we get from HaCoordinator
+                dataSource = dataSourceStorageBackend.createDataSource(
+                  dataSourceConfig = dbConfig.dataSourceConfig,
+                  connectionInitHook = Some(connectionInitializer.initialize),
+                  loggerFactory = loggerFactory,
+                ),
+                serverRole = ServerRole.Indexer,
+                connectionPoolSize = dbConfig.connectionPool.connectionPoolSize,
+                connectionTimeout = dbConfig.connectionPool.connectionTimeout,
+                metrics = metrics,
+                loggerFactory = loggerFactory,
               )
+              .afterReleased(logger.debug("Indexing DbDispatcher released"))
             _ <- meteringAggregator(dbDispatcher)
               .afterReleased(logger.debug("Metering Aggregator released"))
           } yield dbDispatcher

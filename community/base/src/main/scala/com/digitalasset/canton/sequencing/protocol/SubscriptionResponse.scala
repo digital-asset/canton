@@ -4,8 +4,8 @@
 package com.digitalasset.canton.sequencing.protocol
 
 import cats.syntax.traverse.*
-import com.digitalasset.canton.domain.api.v30
-import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.domain.api.v0
+import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, required}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -16,12 +16,36 @@ final case class SubscriptionResponse(
 )
 
 object SubscriptionResponse {
-  def fromVersionedProtoV30(
-      protocolVersion: ProtocolVersion
-  )(responseP: v30.VersionedSubscriptionResponse)(implicit
+
+  /** Deserializes the SubscriptionResponse however will ignore the
+    * [[com.digitalasset.canton.domain.api.v0.SubscriptionResponse.traceContext]] field and instead use the supplied value.
+    * This is because we deserialize the traceContext separately from this request immediately on receiving the structure.
+    */
+  def fromProtoV0(protocolVersion: ProtocolVersion)(responseP: v0.SubscriptionResponse)(implicit
       traceContext: TraceContext
   ): ParsingResult[SubscriptionResponse] = {
-    val v30.VersionedSubscriptionResponse(
+    val v0.SubscriptionResponse(
+      maybeSignedSequencedEventP,
+      _ignoredTraceContext,
+    ) = responseP
+    for {
+      signedSequencedEventP <- required(
+        "SubscriptionResponse.signedSequencedEvent",
+        maybeSignedSequencedEventP,
+      )
+      signedContent <- SignedContent.fromProtoV0(signedSequencedEventP)
+      signedSequencedEvent <- signedContent.deserializeContent(
+        SequencedEvent.fromByteString(protocolVersion)
+      )
+    } yield SubscriptionResponse(signedSequencedEvent, traceContext, None)
+  }
+
+  def fromVersionedProtoV0(protocolVersion: ProtocolVersion)(
+      responseP: v0.VersionedSubscriptionResponse
+  )(implicit
+      traceContext: TraceContext
+  ): ParsingResult[SubscriptionResponse] = {
+    val v0.VersionedSubscriptionResponse(
       signedSequencedEvent,
       _ignoredTraceContext,
       trafficStateP,
@@ -33,7 +57,7 @@ object SubscriptionResponse {
       signedSequencedEvent <- signedContent.deserializeContent(
         SequencedEvent.fromByteString(protocolVersion)
       )
-      trafficState <- trafficStateP.traverse(SequencedEventTrafficState.fromProtoV30)
+      trafficState <- trafficStateP.traverse(SequencedEventTrafficState.fromProtoV0)
     } yield SubscriptionResponse(signedSequencedEvent, traceContext, trafficState)
 
   }

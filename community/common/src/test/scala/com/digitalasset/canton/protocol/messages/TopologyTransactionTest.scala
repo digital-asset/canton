@@ -3,10 +3,8 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.BaseTest.testedProtocolVersionValidation
 import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.serialization.HasCryptographicEvidenceTest
 import com.digitalasset.canton.topology.*
@@ -19,32 +17,25 @@ class TopologyTransactionTest extends AnyWordSpec with BaseTest with HasCryptogr
 
   private val uid = DefaultTestIdentities.uid
   private val uid2 = UniqueIdentifier.tryFromProtoPrimitive("da1::default1")
-  private val sequencerId = DefaultTestIdentities.sequencerId
+  private val managerId = DefaultTestIdentities.domainManager
   private val domainId = DefaultTestIdentities.domainId
   private val crypto =
-    TestingTopologyX(sequencerGroup =
-      SequencerGroup(
-        active = Seq(SequencerId(domainId)),
-        passive = Seq.empty,
-        threshold = PositiveInt.one,
-      )
-    ).build(loggerFactory).forOwnerAndDomain(sequencerId, domainId)
+    TestingTopology().build(loggerFactory).forOwnerAndDomain(managerId, domainId)
   private val publicKey =
     crypto.currentSnapshotApproximation.ipsSnapshot
-      .signingKey(sequencerId)
+      .signingKey(managerId)
       .futureValue
       .getOrElse(sys.error("no key"))
   private val defaultDynamicDomainParameters = TestDomainParameters.defaultDynamic
 
-  private def mk[T <: TopologyMappingX](
+  private def mk[T <: TopologyStateUpdateMapping](
       mapping: T
-  ): TopologyTransactionX[TopologyChangeOpX.Replace, T] = {
-    TopologyTransactionX(TopologyChangeOpX.Replace, PositiveInt.one, mapping, testedProtocolVersion)
-  }
+  ): TopologyStateUpdate[TopologyChangeOp.Add] =
+    TopologyStateUpdate.createAdd(mapping, testedProtocolVersion)
 
-  private val deserialize: ByteString => TopologyTransactionX[TopologyChangeOpX, TopologyMappingX] =
+  private val deserialize: ByteString => TopologyTransaction[TopologyChangeOp] =
     bytes =>
-      TopologyTransactionX.fromByteString(
+      TopologyTransaction.fromByteString(
         testedProtocolVersionValidation
       )(
         bytes
@@ -54,8 +45,8 @@ class TopologyTransactionTest extends AnyWordSpec with BaseTest with HasCryptogr
       }
 
   private def runTest(
-      t1: TopologyTransactionX[TopologyChangeOpX, TopologyMappingX],
-      t2: TopologyTransactionX[TopologyChangeOpX, TopologyMappingX],
+      t1: TopologyTransaction[TopologyChangeOp],
+      t2: TopologyTransaction[TopologyChangeOp],
   ): Unit = {
     behave like hasCryptographicEvidenceSerialization(t1, t2)
     behave like hasCryptographicEvidenceDeserialization(t1, t1.getCryptographicEvidence)(
@@ -67,73 +58,64 @@ class TopologyTransactionTest extends AnyWordSpec with BaseTest with HasCryptogr
 
     "namespace mappings" should {
 
-      val nsd =
-        mk(NamespaceDelegationX.tryCreate(uid.namespace, publicKey, isRootDelegation = true))
-      val nsd2 =
-        mk(NamespaceDelegationX.tryCreate(uid2.namespace, publicKey, isRootDelegation = false))
+      val nsd = mk(NamespaceDelegation(uid.namespace, publicKey, true))
+      val nsd2 = mk(NamespaceDelegation(uid2.namespace, publicKey, false))
 
       runTest(nsd, nsd2)
 
     }
 
     "identifier delegations" should {
-      val id1 = mk(IdentifierDelegationX(uid, publicKey))
-      val id2 = mk(IdentifierDelegationX(uid2, publicKey))
+      val id1 = mk(IdentifierDelegation(uid, publicKey))
+      val id2 = mk(IdentifierDelegation(uid2, publicKey))
       runTest(id1, id2)
     }
 
     "key to owner mappings" should {
-      val k1 = mk(OwnerToKeyMappingX(sequencerId, None, NonEmpty(Seq, publicKey)))
-      val k2 = mk(OwnerToKeyMappingX(sequencerId, None, NonEmpty(Seq, publicKey)))
+      val k1 = mk(OwnerToKeyMapping(managerId, publicKey))
+      val k2 = mk(OwnerToKeyMapping(managerId, publicKey))
       runTest(k1, k2)
     }
 
     "party to participant" should {
       val p1 =
         mk(
-          PartyToParticipantX(
+          PartyToParticipant(
+            RequestSide.From,
             PartyId(uid),
-            None,
-            PositiveInt.one,
-            Seq(HostingParticipant(ParticipantId(uid2), ParticipantPermissionX.Observation)),
-            groupAddressing = false,
+            ParticipantId(uid2),
+            ParticipantPermission.Observation,
           )
         )
-
       val p2 =
         mk(
-          PartyToParticipantX(
-            PartyId(uid),
-            Some(domainId),
-            PositiveInt.two,
-            Seq(
-              HostingParticipant(ParticipantId(uid2), ParticipantPermissionX.Observation),
-              HostingParticipant(ParticipantId(uid), ParticipantPermissionX.Submission),
-            ),
-            groupAddressing = true,
+          PartyToParticipant(
+            RequestSide.To,
+            PartyId(uid2),
+            ParticipantId(uid),
+            ParticipantPermission.Observation,
           )
         )
-
       runTest(p1, p2)
     }
 
     "participant state" should {
       val ps1 = mk(
-        ParticipantDomainPermissionX(
+        ParticipantState(
+          RequestSide.From,
           domainId,
           ParticipantId(uid),
-          ParticipantPermissionX.Submission,
-          limits = None,
-          loginAfter = None,
+          ParticipantPermission.Submission,
+          TrustLevel.Vip,
         )
       )
       val ps2 = mk(
-        ParticipantDomainPermissionX(
+        ParticipantState(
+          RequestSide.To,
           domainId,
-          ParticipantId(uid),
-          ParticipantPermissionX.Observation,
-          limits = Some(ParticipantDomainLimits(13, 37, 42)),
-          loginAfter = Some(CantonTimestamp.MinValue.plusSeconds(17)),
+          ParticipantId(uid2),
+          ParticipantPermission.Confirmation,
+          TrustLevel.Ordinary,
         )
       )
 
@@ -142,8 +124,14 @@ class TopologyTransactionTest extends AnyWordSpec with BaseTest with HasCryptogr
     }
 
     "domain parameters change" should {
-      val dmp1 = mk(DomainParametersStateX(DomainId(uid), defaultDynamicDomainParameters))
-      val dmp2 = mk(DomainParametersStateX(DomainId(uid), defaultDynamicDomainParameters))
+      val dmp1 = DomainGovernanceTransaction(
+        DomainParametersChange(DomainId(uid), defaultDynamicDomainParameters),
+        testedProtocolVersion,
+      )
+      val dmp2 = DomainGovernanceTransaction(
+        DomainParametersChange(DomainId(uid), defaultDynamicDomainParameters),
+        testedProtocolVersion,
+      )
       runTest(dmp1, dmp2)
     }
 

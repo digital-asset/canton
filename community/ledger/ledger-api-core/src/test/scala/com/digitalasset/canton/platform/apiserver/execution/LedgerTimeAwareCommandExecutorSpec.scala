@@ -71,6 +71,7 @@ class LedgerTimeAwareCommandExecutorSpec
   private val processedDisclosedContracts = ImmArray(
     ProcessedDisclosedContract(
       templateId = Identifier.assertFromString("some:pkg:identifier"),
+      packageName = None,
       contractId = cid,
       argument = Value.ValueNil,
       createdAt = Time.Timestamp.Epoch,
@@ -78,6 +79,7 @@ class LedgerTimeAwareCommandExecutorSpec
       signatories = Set.empty,
       stakeholders = Set.empty,
       keyOpt = None,
+      agreementText = "",
       version = TransactionVersion.StableVersions.max,
     )
   )
@@ -98,16 +100,7 @@ class LedgerTimeAwareCommandExecutorSpec
         None,
         configuration,
       ),
-      None,
-      TransactionMeta(
-        let,
-        None,
-        Time.Timestamp.Epoch,
-        submissionSeed,
-        None,
-        None,
-        None,
-      ),
+      TransactionMeta(let, None, Time.Timestamp.Epoch, submissionSeed, None, None, None, None),
       transaction,
       dependsOnLedgerTime,
       5L,
@@ -178,16 +171,7 @@ class LedgerTimeAwareCommandExecutorSpec
             None,
             configuration,
           ),
-          None,
-          TransactionMeta(
-            let,
-            None,
-            Time.Timestamp.Epoch,
-            submissionSeed,
-            None,
-            None,
-            None,
-          ),
+          TransactionMeta(let, None, Time.Timestamp.Epoch, submissionSeed, None, None, None, None),
           transaction,
           dependsOnLedgerTime,
           5L,

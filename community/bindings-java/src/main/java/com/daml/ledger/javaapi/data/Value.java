@@ -77,6 +77,11 @@ public abstract class Value {
     return (this instanceof Int64) ? Optional.of((Int64) this) : Optional.empty();
   }
 
+  @Deprecated
+  public final Optional<Decimal> asDecimal() {
+    return (this instanceof Decimal) ? Optional.of((Decimal) this) : Optional.empty();
+  }
+
   public final Optional<Numeric> asNumeric() {
     return (this instanceof Numeric) ? Optional.of((Numeric) this) : Optional.empty();
   }
@@ -107,6 +112,12 @@ public abstract class Value {
 
   public final Optional<DamlTextMap> asTextMap() {
     return (this instanceof DamlTextMap) ? Optional.of((DamlTextMap) this) : Optional.empty();
+  }
+
+  /** Use {@link Value#asTextMap()} */
+  @Deprecated
+  public final Optional<DamlTextMap> asMap() {
+    return asTextMap();
   }
 
   public final Optional<DamlGenMap> asGenMap() {

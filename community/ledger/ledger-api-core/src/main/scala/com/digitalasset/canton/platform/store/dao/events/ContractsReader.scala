@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
-import com.daml.lf.transaction.GlobalKey
+import com.daml.lf.data.Ref
+import com.daml.lf.transaction.{GlobalKey, Util}
 import com.daml.lf.value.Value.VersionedValue
 import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricHandle.Timer
@@ -45,8 +46,8 @@ private[dao] sealed class ContractsReader(
       loggingContext: LoggingContextWithTrace
   ): Future[KeyState] =
     Timed.future(
-      metrics.index.db.lookupKey,
-      dispatcher.executeSql(metrics.index.db.lookupContractByKeyDbMetrics)(
+      metrics.daml.index.db.lookupKey,
+      dispatcher.executeSql(metrics.daml.index.db.lookupContractByKeyDbMetrics)(
         storageBackend.keyState(key, validAt)
       ),
     )
@@ -55,19 +56,20 @@ private[dao] sealed class ContractsReader(
       loggingContext: LoggingContextWithTrace
   ): Future[Option[ContractState]] =
     Timed.future(
-      metrics.index.db.lookupActiveContract,
+      metrics.daml.index.db.lookupActiveContract,
       contractLoader
         .load(contractId -> before)
         .map(_.map {
           case raw: RawCreatedContract =>
             val decompressionTimer =
-              metrics.index.db.lookupCreatedContractsDbMetrics.compressionTimer
+              metrics.daml.index.db.lookupCreatedContractsDbMetrics.compressionTimer
             val deserializationTimer =
-              metrics.index.db.lookupCreatedContractsDbMetrics.translationTimer
+              metrics.daml.index.db.lookupCreatedContractsDbMetrics.translationTimer
 
             val contract = toContract(
               contractId = contractId,
               templateId = raw.templateId,
+              packageName = raw.packageName,
               createArgument = raw.createArgument,
               createArgumentCompression =
                 Compression.Algorithm.assertLookup(raw.createArgumentCompression),
@@ -86,6 +88,7 @@ private[dao] sealed class ContractsReader(
               GlobalKey.assertBuild(
                 contract.unversioned.template,
                 value.unversioned,
+                Util.sharedKey(value.version),
               )
             }
 
@@ -102,6 +105,61 @@ private[dao] sealed class ContractsReader(
           case raw: RawArchivedContract => ArchivedContract(raw.flatEventWitnesses)
         }),
     )
+
+  /** Lookup of a contract in the case the contract value is not already known */
+  override def lookupActiveContractAndLoadArgument(
+      readers: Set[Party],
+      contractId: ContractId,
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[Contract]] = {
+
+    Timed.future(
+      metrics.daml.index.db.lookupActiveContract,
+      dispatcher
+        .executeSql(metrics.daml.index.db.lookupDivulgedActiveContractDbMetrics)(
+          storageBackend.activeContractWithArgument(readers, contractId)
+        )
+        .map(_.map { raw =>
+          toContract(
+            contractId = contractId,
+            templateId = raw.templateId,
+            packageName = raw.packageName,
+            createArgument = raw.createArgument,
+            createArgumentCompression =
+              Compression.Algorithm.assertLookup(raw.createArgumentCompression),
+            decompressionTimer =
+              metrics.daml.index.db.lookupDivulgedActiveContractDbMetrics.compressionTimer,
+            deserializationTimer =
+              metrics.daml.index.db.lookupDivulgedActiveContractDbMetrics.translationTimer,
+          )
+        }),
+    )
+  }
+
+  /** Lookup of a contract in the case the contract value is already known (loaded from a cache) */
+  override def lookupActiveContractWithCachedArgument(
+      readers: Set[Party],
+      contractId: ContractId,
+      packageName: Option[Ref.PackageName],
+      createArgument: Value,
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[Contract]] = {
+
+    Timed.future(
+      metrics.daml.index.db.lookupActiveContract,
+      dispatcher
+        .executeSql(metrics.daml.index.db.lookupDivulgedActiveContractDbMetrics)(
+          storageBackend.activeContractWithoutArgument(readers, contractId)
+        )
+        .map(
+          _.map(templateId =>
+            toContract(
+              templateId = templateId,
+              packageName = packageName,
+              createArgument = createArgument,
+            )
+          )
+        ),
+    )
+  }
 }
 
 private[dao] object ContractsReader {
@@ -150,6 +208,7 @@ private[dao] object ContractsReader {
   private def toContract(
       contractId: ContractId,
       templateId: String,
+      packageName: Option[String],
       createArgument: Array[Byte],
       createArgumentCompression: Compression.Algorithm,
       decompressionTimer: Timer,
@@ -163,16 +222,19 @@ private[dao] object ContractsReader {
     )
     Contract(
       template = Identifier.assertFromString(templateId),
+      packageName = packageName.map(Ref.PackageName.assertFromString),
       arg = deserialized,
     )
   }
 
   private def toContract(
       templateId: String,
+      packageName: Option[Ref.PackageName],
       createArgument: Value,
   ): Contract =
     Contract(
       template = Identifier.assertFromString(templateId),
+      packageName = packageName,
       arg = createArgument,
     )
 }

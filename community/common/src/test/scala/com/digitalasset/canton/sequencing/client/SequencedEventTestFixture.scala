@@ -45,18 +45,13 @@ class SequencedEventTestFixture(
     extends AutoCloseable {
   import ScalaFutures.*
   def fixtureTraceContext: TraceContext = traceContext
-
-  private lazy val factory: ExampleTransactionFactory = new ExampleTransactionFactory()()(
-    executionContext
-  )
-
   lazy val defaultDomainId: DomainId = DefaultTestIdentities.domainId
   lazy val subscriberId: ParticipantId = ParticipantId("participant1-id")
-  lazy val sequencerAlice: SequencerId = DefaultTestIdentities.sequencerIdX
+  lazy val sequencerAlice: SequencerId = DefaultTestIdentities.sequencerId
   lazy val subscriberCryptoApi: DomainSyncCryptoClient =
-    TestingIdentityFactoryX(loggerFactory).forOwnerAndDomain(subscriberId, defaultDomainId)
+    TestingIdentityFactory(loggerFactory).forOwnerAndDomain(subscriberId, defaultDomainId)
   private lazy val sequencerCryptoApi: DomainSyncCryptoClient =
-    TestingIdentityFactoryX(loggerFactory).forOwnerAndDomain(sequencerAlice, defaultDomainId)
+    TestingIdentityFactory(loggerFactory).forOwnerAndDomain(sequencerAlice, defaultDomainId)
   lazy val updatedCounter: Long = 42L
   val sequencerBob: SequencerId = SequencerId(
     UniqueIdentifier(Identifier.tryCreate("da2"), namespace)
@@ -69,18 +64,18 @@ class SequencedEventTestFixture(
   )
   implicit val materializer: Materializer = Materializer(actorSystem)
 
-  private val alice = ParticipantId(UniqueIdentifier.tryCreate("participant", "alice"))
-  private val bob = ParticipantId(UniqueIdentifier.tryCreate("participant", "bob"))
-  private val carlos = ParticipantId(UniqueIdentifier.tryCreate("participant", "carlos"))
-  private val signatureAlice = SymbolicCrypto.signature(
+  val alice = ParticipantId(UniqueIdentifier.tryCreate("participant", "alice"))
+  val bob = ParticipantId(UniqueIdentifier.tryCreate("participant", "bob"))
+  val carlos = ParticipantId(UniqueIdentifier.tryCreate("participant", "carlos"))
+  val signatureAlice = SymbolicCrypto.signature(
     ByteString.copyFromUtf8("signatureAlice1"),
     alice.uid.namespace.fingerprint,
   )
-  private val signatureBob = SymbolicCrypto.signature(
+  val signatureBob = SymbolicCrypto.signature(
     ByteString.copyFromUtf8("signatureBob1"),
     bob.uid.namespace.fingerprint,
   )
-  private val signatureCarlos = SymbolicCrypto.signature(
+  val signatureCarlos = SymbolicCrypto.signature(
     ByteString.copyFromUtf8("signatureCarlos1"),
     carlos.uid.namespace.fingerprint,
   )
@@ -151,11 +146,12 @@ class SequencedEventTestFixture(
       counter: Long = updatedCounter,
       timestamp: CantonTimestamp = CantonTimestamp.Epoch,
       timestampOfSigningKey: Option[CantonTimestamp] = None,
-  ): Future[OrdinarySerializedEvent] = {
+  )(implicit executionContext: ExecutionContext): Future[OrdinarySerializedEvent] = {
     import cats.syntax.option.*
     val message = {
+      val factory: ExampleTransactionFactory = new ExampleTransactionFactory()()(executionContext)
       val fullInformeeTree = factory.MultipleRootsAndViewNestings.fullInformeeTree
-      InformeeMessage(fullInformeeTree, Signature.noSignature)(testedProtocolVersion)
+      InformeeMessage(fullInformeeTree)(testedProtocolVersion)
     }
     val deliver: Deliver[ClosedEnvelope] = Deliver.create[ClosedEnvelope](
       SequencerCounter(counter),
@@ -164,12 +160,11 @@ class SequencedEventTestFixture(
       MessageId.tryCreate("test").some,
       Batch(
         List(
-          ClosedEnvelope.create(
+          ClosedEnvelope(
             serializedOverride.getOrElse(
               EnvelopeContent.tryCreate(message, testedProtocolVersion).toByteString
             ),
             Recipients.cc(subscriberId),
-            Seq.empty,
             testedProtocolVersion,
           )
         ),

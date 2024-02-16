@@ -48,6 +48,7 @@ private[store] object StorageBackendTestValues {
   val someTemplateId: Ref.Identifier = Ref.Identifier.assertFromString("pkg:Mod:Template")
   val someTemplateId2: Ref.Identifier = Ref.Identifier.assertFromString("pkg:Mod:Template2")
   val someTemplateId3: Ref.Identifier = Ref.Identifier.assertFromString("pkg:Mod:Template3")
+  val somePackageName: Ref.PackageName = Ref.PackageName.assertFromString("package_name")
   val someIdentityParams: ParameterStorageBackend.IdentityParams =
     ParameterStorageBackend.IdentityParams(someParticipantId)
   val someParty: Ref.Party = Ref.Party.assertFromString("party")
@@ -137,10 +138,11 @@ private[store] object StorageBackendTestValues {
       ledgerEffectiveTime: Option[Timestamp] = Some(someTime),
       driverMetadata: Option[Array[Byte]] = None,
       keyHash: Option[String] = None,
-      domainId: String = "x::sourcedomain",
+      domainId: Option[String] = None,
       createKey: Option[Array[Byte]] = None,
       createKeyMaintainer: Option[String] = None,
       traceContext: Array[Byte] = serializableTraceContext,
+      packageName: Option[Ref.PackageName] = Some(somePackageName),
   ): DbDto.EventCreate = {
     val transactionId = transactionIdFromOffset(offset)
     val stakeholders = Set(signatory, observer)
@@ -157,6 +159,7 @@ private[store] object StorageBackendTestValues {
       event_id = Some(EventId(transactionId, NodeId(0)).toLedgerString),
       contract_id = contractId.coid,
       template_id = Some(someTemplateId.toString),
+      package_name = packageName,
       flat_event_witnesses = stakeholders,
       tree_event_witnesses = informees,
       create_argument = Some(someSerializedDamlLfValue),
@@ -189,7 +192,7 @@ private[store] object StorageBackendTestValues {
       signatory: String = "signatory",
       actor: String = "actor",
       commandId: String = UUID.randomUUID().toString,
-      domainId: String = "x::sourcedomain",
+      domainId: Option[String] = None,
       traceContext: Array[Byte] = serializableTraceContext,
   ): DbDto.EventExercise = {
     val transactionId = transactionIdFromOffset(offset)
@@ -220,6 +223,34 @@ private[store] object StorageBackendTestValues {
       event_sequential_id = eventSequentialId,
       domain_id = domainId,
       trace_context = traceContext,
+    )
+  }
+
+  /** A single divulgence event
+    */
+  def dtoDivulgence(
+      offset: Option[Offset],
+      eventSequentialId: Long,
+      contractId: ContractId,
+      submitter: String = "signatory",
+      divulgee: String = "divulgee",
+      commandId: String = UUID.randomUUID().toString,
+      domainId: Option[String] = None,
+  ): DbDto.EventDivulgence = {
+    DbDto.EventDivulgence(
+      event_offset = offset.map(_.toHexString),
+      command_id = Some(commandId),
+      workflow_id = Some("workflow_id"),
+      application_id = Some(someApplicationId),
+      submitters = Some(Set(submitter)),
+      contract_id = contractId.coid,
+      template_id = Some(someTemplateId.toString),
+      package_name = Some(somePackageName),
+      tree_event_witnesses = Set(divulgee),
+      create_argument = Some(someSerializedDamlLfValue),
+      create_argument_compression = None,
+      event_sequential_id = eventSequentialId,
+      domain_id = domainId,
     )
   }
 
@@ -306,7 +337,7 @@ private[store] object StorageBackendTestValues {
       deduplicationDurationSeconds: Option[Long] = None,
       deduplicationDurationNanos: Option[Int] = None,
       deduplicationStart: Option[Timestamp] = None,
-      domainId: String = "x::sourcedomain",
+      domainId: Option[String] = None,
       traceContext: Array[Byte] = serializableTraceContext,
   ): DbDto.CommandCompletion =
     DbDto.CommandCompletion(
@@ -370,31 +401,7 @@ private[store] object StorageBackendTestValues {
     dto match {
       case e: DbDto.EventCreate => Ref.TransactionId.assertFromString(e.transaction_id.get)
       case e: DbDto.EventExercise => Ref.TransactionId.assertFromString(e.transaction_id.get)
-      case e: DbDto.EventAssign => Ref.TransactionId.assertFromString(e.update_id)
-      case e: DbDto.EventUnassign => Ref.TransactionId.assertFromString(e.update_id)
       case _ => sys.error(s"$dto does not have a transaction id")
-    }
-  }
-
-  def dtoEventSeqId(dto: DbDto): Long = {
-    dto match {
-      case e: DbDto.EventCreate => e.event_sequential_id
-      case e: DbDto.EventExercise => e.event_sequential_id
-      case e: DbDto.EventAssign => e.event_sequential_id
-      case e: DbDto.EventUnassign => e.event_sequential_id
-      case _ => sys.error(s"$dto does not have a event sequential id")
-    }
-  }
-
-  def dtoOffset(dto: DbDto): String = {
-    dto match {
-      case e: DbDto.EventCreate =>
-        e.event_offset.getOrElse(sys.error(s"$dto does not have an offset set"))
-      case e: DbDto.EventExercise =>
-        e.event_offset.getOrElse(sys.error(s"$dto does not have an offset set"))
-      case e: DbDto.EventAssign => e.event_offset
-      case e: DbDto.EventUnassign => e.event_offset
-      case _ => sys.error(s"$dto does not have a offset id")
     }
   }
 
@@ -402,15 +409,9 @@ private[store] object StorageBackendTestValues {
     dto match {
       case e: DbDto.EventCreate => Ref.ApplicationId.assertFromString(e.application_id.get)
       case e: DbDto.EventExercise => Ref.ApplicationId.assertFromString(e.application_id.get)
+      case e: DbDto.EventDivulgence => Ref.ApplicationId.assertFromString(e.application_id.get)
       case e: DbDto.CommandCompletion => Ref.ApplicationId.assertFromString(e.application_id)
       case _ => sys.error(s"$dto does not have an application id")
     }
   }
-
-  def metaFromSingle(dbDto: DbDto): DbDto.TransactionMeta = DbDto.TransactionMeta(
-    transaction_id = dtoTransactionId(dbDto),
-    event_offset = dtoOffset(dbDto),
-    event_sequential_id_first = dtoEventSeqId(dbDto),
-    event_sequential_id_last = dtoEventSeqId(dbDto),
-  )
 }

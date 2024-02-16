@@ -6,12 +6,18 @@ package com.digitalasset.canton
 import cats.Functor
 import cats.data.{EitherT, OptionT}
 import cats.syntax.parallel.*
+import com.daml.lf.data.Ref.PackageName
+import com.daml.lf.transaction.TransactionVersion
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor, Threading}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCryptoProvider
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLogging, SuppressingLogger}
+import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.{CatchUpConfig, StaticDomainParameters}
+import com.digitalasset.canton.time.PositiveSeconds
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, W3CTraceContext}
 import com.digitalasset.canton.util.CheckedT
 import com.digitalasset.canton.util.FutureInstances.*
@@ -19,6 +25,7 @@ import com.digitalasset.canton.version.{
   ProtocolVersion,
   ProtocolVersionValidation,
   ReleaseProtocolVersion,
+  RepresentativeProtocolVersion,
 }
 import io.opentelemetry.api.trace.Tracer
 import org.mockito.{ArgumentMatchers, ArgumentMatchersSugar}
@@ -36,6 +43,7 @@ import org.scalatestplus.scalacheck.CheckerAsserting
 import org.slf4j.bridge.SLF4JBridgeHandler
 import org.typelevel.discipline.Laws
 
+import scala.annotation.nowarn
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
@@ -61,12 +69,14 @@ trait TestEssentials
   protected def timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
 
   protected lazy val testedProtocolVersion: ProtocolVersion = BaseTest.testedProtocolVersion
-  protected lazy val testedProtocolVersionValidation: ProtocolVersionValidation =
-    BaseTest.testedProtocolVersionValidation
   protected lazy val testedReleaseProtocolVersion: ReleaseProtocolVersion =
     BaseTest.testedReleaseProtocolVersion
   protected lazy val defaultStaticDomainParameters: StaticDomainParameters =
     BaseTest.defaultStaticDomainParameters
+
+  protected def signedTransactionProtocolVersionRepresentative
+      : RepresentativeProtocolVersion[SignedTopologyTransaction.type] =
+    SignedTopologyTransaction.protocolVersionRepresentativeFor(testedProtocolVersion)
 
   // default to providing an empty trace context to all tests
   protected implicit def traceContext: TraceContext = TraceContext.empty
@@ -137,21 +147,6 @@ trait BaseTest
         throw ex
     }
   }
-  def clueF[T](message: String)(expr: => Future[T])(implicit ec: ExecutionContext): Future[T] = {
-    logger.debug(s"Running clue: $message")
-    Try(expr) match {
-      case Success(value) =>
-        value.onComplete {
-          case Success(_) =>
-            logger.debug(s"Finished clue: $message")
-          case Failure(ex) =>
-            logger.error(s"Failed clue: $message", ex)
-        }
-        value
-      case Failure(ex) =>
-        throw ex
-    }
-  }
 
   /** Allows for returning an `EitherT[Future, _, Assertion]` instead of `Future[Assertion]` in asynchronous
     * test suites.
@@ -171,12 +166,7 @@ trait BaseTest
   def eventually[T](
       timeUntilSuccess: FiniteDuration = 20.seconds,
       maxPollInterval: FiniteDuration = 5.seconds,
-  )(testCode: => T): T = BaseTest.eventually(timeUntilSuccess, maxPollInterval, true)(testCode)
-
-  def eventuallyNoException[T](
-      timeUntilSuccess: FiniteDuration = 20.seconds,
-      maxPollInterval: FiniteDuration = 5.seconds,
-  )(testCode: => T): T = BaseTest.eventually(timeUntilSuccess, maxPollInterval, false)(testCode)
+  )(testCode: => T): T = BaseTest.eventually(timeUntilSuccess, maxPollInterval)(testCode)
 
   /** Keeps evaluating `testCode` until it fails or a timeout occurs.
     * @return the result the last evaluation of `testCode`
@@ -324,7 +314,7 @@ trait BaseTest
   lazy val CantonTestsPath: String = BaseTest.CantonTestsPath
   lazy val PerformanceTestPath: String = BaseTest.PerformanceTestPath
   lazy val DamlTestFilesPath: String = BaseTest.DamlTestFilesPath
-  lazy val DamlTestLfV21FilesPath: String = BaseTest.DamlTestLfV21FilesPath
+  lazy val DamlTestLfV15FilesPath: String = BaseTest.DamlTestLfV15FilesPath
 }
 
 object BaseTest {
@@ -344,7 +334,6 @@ object BaseTest {
   def eventually[T](
       timeUntilSuccess: FiniteDuration = 20.seconds,
       maxPollInterval: FiniteDuration = 5.seconds,
-      retryOnTestFailuresOnly: Boolean = true,
   )(testCode: => T): T = {
     require(
       timeUntilSuccess >= Duration.Zero,
@@ -352,19 +341,14 @@ object BaseTest {
     )
     val deadline = timeUntilSuccess.fromNow
     var sleepMs = 1L
-    def sleep(): Unit = {
-      val timeLeft = deadline.timeLeft.toMillis max 0
-      Threading.sleep(sleepMs min timeLeft)
-      sleepMs = (sleepMs * 2) min maxPollInterval.toMillis
-    }
     while (deadline.hasTimeLeft()) {
       try {
         return testCode
       } catch {
         case _: TestFailedException =>
-          sleep()
-        case _: Throwable if !retryOnTestFailuresOnly =>
-          sleep()
+          val timeLeft = deadline.timeLeft.toMillis max 0
+          Threading.sleep(sleepMs min timeLeft)
+          sleepMs = (sleepMs * 2) min maxPollInterval.toMillis
       }
     }
     testCode // try one last time and throw exception, if assertion keeps failing
@@ -374,17 +358,32 @@ object BaseTest {
   lazy val defaultStaticDomainParameters: StaticDomainParameters =
     defaultStaticDomainParametersWith()
 
+  lazy val defaultMaxRatePerParticipant: NonNegativeInt =
+    defaultStaticDomainParameters.maxRatePerParticipant: @nowarn("msg=deprecated")
+  lazy val defaultMaxRequestSize: MaxRequestSize =
+    defaultStaticDomainParameters.maxRequestSize: @nowarn(
+      "msg=deprecated"
+    )
+
   def defaultStaticDomainParametersWith(
+      maxRatePerParticipant: Int = StaticDomainParameters.defaultMaxRatePerParticipant.unwrap,
+      reconciliationInterval: PositiveSeconds =
+        StaticDomainParameters.defaultReconciliationInterval,
+      uniqueContractKeys: Boolean = false,
+      maxRequestSize: Int = StaticDomainParameters.defaultMaxRequestSize.unwrap,
       protocolVersion: ProtocolVersion = testedProtocolVersion,
       catchUpParameters: Option[CatchUpConfig] = None,
   ): StaticDomainParameters = StaticDomainParameters.create(
+    reconciliationInterval = reconciliationInterval,
+    maxRatePerParticipant = NonNegativeInt.tryCreate(maxRatePerParticipant),
+    maxRequestSize = MaxRequestSize(NonNegativeInt.tryCreate(maxRequestSize)),
+    uniqueContractKeys = uniqueContractKeys,
     requiredSigningKeySchemes = SymbolicCryptoProvider.supportedSigningKeySchemes,
     requiredEncryptionKeySchemes = SymbolicCryptoProvider.supportedEncryptionKeySchemes,
     requiredSymmetricKeySchemes = SymbolicCryptoProvider.supportedSymmetricKeySchemes,
     requiredHashAlgorithms = SymbolicCryptoProvider.supportedHashAlgorithms,
     requiredCryptoKeyFormats = SymbolicCryptoProvider.supportedCryptoKeyFormats,
     protocolVersion = protocolVersion,
-    catchUpParameters = catchUpParameters,
   )
 
   lazy val testedProtocolVersion: ProtocolVersion =
@@ -397,14 +396,25 @@ object BaseTest {
     testedProtocolVersion
   )
 
+  lazy val pvPackageName: Option[PackageName] = {
+    Option.when(testedProtocolVersion >= ProtocolVersion.dev)(
+      PackageName.assertFromString("package_name")
+    )
+  }
+
+  lazy val pvTransactionVersion: TransactionVersion = {
+    if (testedProtocolVersion >= ProtocolVersion.dev) TransactionVersion.maxVersion
+    else TransactionVersion.StableVersions.max
+  }
+
   lazy val CantonExamplesPath: String = getResourcePath("CantonExamples.dar")
   lazy val CantonTestsPath: String = getResourcePath("CantonTests.dar")
   lazy val CantonLfDev: String = getResourcePath("CantonLfDev.dar")
-  lazy val CantonLfV21: String = getResourcePath("CantonLfV21.dar")
+  lazy val CantonLfV15: String = getResourcePath("CantonLfV15.dar")
   lazy val PerformanceTestPath: String = getResourcePath("PerformanceTest.dar")
   lazy val DamlScript3TestFilesPath: String = getResourcePath("DamlScript3TestFiles.dar")
   lazy val DamlTestFilesPath: String = getResourcePath("DamlTestFiles.dar")
-  lazy val DamlTestLfV21FilesPath: String = getResourcePath("DamlTestLfV21Files.dar")
+  lazy val DamlTestLfV15FilesPath: String = getResourcePath("DamlTestLfV15Files.dar")
 
   def getResourcePath(name: String): String =
     Option(getClass.getClassLoader.getResource(name))

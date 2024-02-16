@@ -25,7 +25,6 @@ trait StorageBackendSuite
     with StorageBackendTestsMeteringParameters
     with StorageBackendTestsWriteMetering
     with StorageBackendTestsReadMetering
-    with StorageBackendTestsReassignmentEvents
-    with StorageBackendTestsQueryValidRange {
+    with StorageBackendTestsReassignmentEvents {
   this: AnyFlatSpec =>
 }

@@ -5,7 +5,6 @@ package com.digitalasset.canton.topology.client
 
 import com.digitalasset.canton.config.RequireTypes.PositiveLong
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.Future
 
@@ -21,5 +20,5 @@ trait DomainTrafficControlStateClient {
     */
   def trafficControlStatus(
       members: Seq[Member]
-  )(implicit traceContext: TraceContext): Future[Map[Member, Option[MemberTrafficControlState]]]
+  ): Future[Map[Member, Option[MemberTrafficControlState]]]
 }

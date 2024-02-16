@@ -8,7 +8,6 @@ import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.DomainSequencingTestUtils.*
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
@@ -35,9 +34,8 @@ import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
   Member,
   ParticipantId,
-  SequencerGroup,
   SequencerId,
-  TestingTopologyX,
+  TestingTopology,
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
@@ -65,13 +63,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
   private val ts0 = CantonTimestamp.Epoch
   private val domainId = DefaultTestIdentities.domainId
   private val topologyClientMember = SequencerId(domainId)
-  private val crypto = TestingTopologyX(sequencerGroup =
-    SequencerGroup(
-      active = Seq(SequencerId(domainId)),
-      passive = Seq.empty,
-      threshold = PositiveInt.one,
-    )
-  ).build(loggerFactory).forOwner(SequencerId(domainId))
+  private val crypto = TestingTopology().build(loggerFactory).forOwner(SequencerId(domainId))
   private val cryptoD =
     valueOrFail(crypto.forDomain(domainId).toRight("no crypto api"))("domain crypto")
   private val instanceDiscriminator = new UUID(1L, 2L)
@@ -106,17 +98,17 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
   }
 
   class Env extends FlagCloseableAsync {
-    protected val timeouts: ProcessingTimeout = SequencerReaderTest.this.timeouts
-    protected val logger: TracedLogger = SequencerReaderTest.this.logger
+    protected val timeouts = SequencerReaderTest.this.timeouts
+    protected val logger = SequencerReaderTest.this.logger
     val autoPushLatestTimestamps =
       new AtomicBoolean(true) // should the latest timestamp be added to the signaller when stored
-    val actorSystem: ActorSystem = ActorSystem(classOf[SequencerReaderTest].getSimpleName)
+    val actorSystem = ActorSystem(classOf[SequencerReaderTest].getSimpleName)
     implicit val materializer: Materializer = Materializer(actorSystem)
     val store = new InMemorySequencerStore(loggerFactory)
     val instanceIndex: Int = 0
     // create a spy so we can add verifications on how many times methods were called
-    val storeSpy: InMemorySequencerStore = spy[InMemorySequencerStore](store)
-    val testConfig: CommunitySequencerReaderConfig =
+    val storeSpy = spy[InMemorySequencerStore](store)
+    val testConfig =
       CommunitySequencerReaderConfig(
         readBatchSize = 10,
         checkpointInterval = config.NonNegativeFiniteDuration.ofMillis(800),
@@ -133,7 +125,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
       timeouts,
       loggerFactory,
     )
-    val defaultTimeout: FiniteDuration = 20.seconds
+    val defaultTimeout = 20.seconds
     implicit val closeContext: CloseContext = CloseContext(reader)
 
     def ts(epochSeconds: Int): CantonTimestamp = CantonTimestamp.ofEpochSecond(epochSeconds.toLong)
@@ -180,7 +172,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
     // We don't update the topology client, so we expect to get a couple of warnings about unknown topology snapshots
     private def ignoreWarningsFromLackOfTopologyUpdates(entries: Seq[LogEntry]): Assertion =
       forEvery(entries) {
-        _.warningMessage should fullyMatch regex ".*Using approximate topology snapshot .* for desired timestamp.*"
+        _.warningMessage should fullyMatch regex (".*Using approximate topology snapshot .* for desired timestamp.*")
       }
 
     def pullFromQueue(
@@ -214,7 +206,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
       for {
         _ <- payloads
           .traverse_(store.savePayloads(_, instanceDiscriminator))
-          .valueOrFail("Save payloads")
+          .valueOrFail(s"Save payloads")
         _ <- store.saveEvents(instanceIndex, eventsNE)
         _ <- store
           .saveWatermark(instanceIndex, eventsNE.last1.timestamp)
@@ -226,11 +218,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
     }
 
     override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = Seq(
-      AsyncCloseable(
-        "actorSystem",
-        actorSystem.terminate(),
-        config.NonNegativeFiniteDuration(10.seconds),
-      ),
+      AsyncCloseable("actorSystem", actorSystem.terminate(), 10.seconds),
       SyncCloseable("materializer", materializer.shutdown()),
     )
   }
@@ -419,7 +407,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           events <- readAsSeq(alice, SequencerCounter(10), 15)
         } yield {
           // this assertion is a bit redundant as we're actually just looking for the prior fetch to complete rather than get stuck
-          events should have size 15
+          events should have size (15)
         }
       }
     }
@@ -430,7 +418,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
 
         import scala.jdk.CollectionConverters.*
 
-        def saveCounterCheckpointCallCount: Int =
+        def saveCounterCheckpointCallCount =
           Mockito
             .mockingDetails(storeSpy)
             .getInvocations
@@ -613,8 +601,8 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
         for {
           domainParamsO <- cryptoD.headSnapshot.ipsSnapshot.findDynamicDomainParameters()
           domainParams = domainParamsO.valueOrFail("No domain parameters found")
-          topologyTimestampTolerance = domainParams.sequencerTopologyTimestampTolerance
-          topologyTimestampToleranceInSec = topologyTimestampTolerance.duration.toSeconds
+          signingTolerance = domainParams.sequencerSigningTolerance
+          signingToleranceInSec = signingTolerance.duration.toSeconds
 
           _ <- store.registerMember(topologyClientMember, ts0)
           aliceId <- store.registerMember(alice, ts0)
@@ -624,16 +612,15 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           testData = Seq(
             // Sequencing ts, signing ts relative to ts0
             (1L, 0L),
-            (topologyTimestampToleranceInSec, 0L),
-            (topologyTimestampToleranceInSec + 1L, 0L),
-            (topologyTimestampToleranceInSec + 2L, 2L),
+            (signingToleranceInSec, 0L),
+            (signingToleranceInSec + 1L, 0L),
+            (signingToleranceInSec + 2L, 2L),
           )
           batch = Batch.fromClosed(
             testedProtocolVersion,
-            ClosedEnvelope.create(
+            ClosedEnvelope(
               ByteString.copyFromUtf8("test envelope"),
               Recipients.cc(alice, bob),
-              Seq.empty,
               testedProtocolVersion,
             ),
           )
@@ -652,18 +639,18 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
             Sequenced(ts0.plusSeconds(sequenceTs), storeEvent)
           }
           _ <- storePayloadsAndWatermark(delivers)
-        } yield (topologyTimestampTolerance, batch, delivers)
+        } yield (signingTolerance, batch, delivers)
       }
 
       final case class DeliveredEventToCheck[A](
           delivered: A,
           sequencingTimestamp: CantonTimestamp,
           messageId: MessageId,
-          topologyTimestamp: CantonTimestamp,
+          signingTimestamp: CantonTimestamp,
           sequencerCounter: Long,
       )
 
-      def filterForTopologyTimestamps[A]
+      def filterForSigningTimestamps[A]
           : PartialFunction[((A, Sequenced[Payload]), Int), DeliveredEventToCheck[A]] = {
         case (
               (
@@ -675,19 +662,19 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
                     messageId,
                     _members,
                     _payload,
-                    Some(topologyTimestamp),
+                    Some(signingTimestamp),
                     _traceContext,
                   ),
                 ),
               ),
               idx,
             ) =>
-          DeliveredEventToCheck(delivered, timestamp, messageId, topologyTimestamp, idx.toLong)
+          DeliveredEventToCheck(delivered, timestamp, messageId, signingTimestamp, idx.toLong)
       }
 
       "read by the sender into deliver errors" in { env =>
         import env.*
-        setup(env).flatMap { case (topologyTimestampTolerance, batch, delivers) =>
+        setup(env).flatMap { case (signingTolerance, batch, delivers) =>
           for {
             aliceEvents <- readAsSeq(alice, SequencerCounter(0), delivers.length)
           } yield {
@@ -697,18 +684,18 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
             ))
             val deliverWithSigningTimestamps =
               aliceEvents.zip(delivers).zipWithIndex.collect {
-                filterForTopologyTimestamps
+                filterForSigningTimestamps
               }
             forEvery(deliverWithSigningTimestamps) {
               case DeliveredEventToCheck(
                     delivered,
                     sequencingTimestamp,
                     messageId,
-                    topologyTimestamp,
+                    signingTimestamp,
                     sc,
                   ) =>
                 val expectedSequencedEvent =
-                  if (topologyTimestamp + topologyTimestampTolerance >= sequencingTimestamp)
+                  if (signingTimestamp + signingTolerance >= sequencingTimestamp)
                     Deliver.create(
                       SequencerCounter(sc),
                       sequencingTimestamp,
@@ -723,10 +710,11 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
                       sequencingTimestamp,
                       domainId,
                       messageId,
-                      SequencerErrors.TopoologyTimestampTooEarly(
-                        topologyTimestamp,
-                        sequencingTimestamp,
-                      ),
+                      SequencerErrors
+                        .SigningTimestampTooEarly(
+                          signingTimestamp,
+                          sequencingTimestamp,
+                        ),
                       testedProtocolVersion,
                     )
                 delivered.signedEvent.content shouldBe expectedSequencedEvent
@@ -737,7 +725,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
 
       "read by another recipient into empty batches" in { env =>
         import env.*
-        setup(env).flatMap { case (topologyTimestampTolerance, batch, delivers) =>
+        setup(env).flatMap { case (signingTolerance, batch, delivers) =>
           for {
             bobEvents <- readAsSeq(bob, SequencerCounter(0), delivers.length)
           } yield {
@@ -746,18 +734,18 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
               .map(SequencerCounter(_))
             val deliverWithSigningTimestamps =
               bobEvents.zip(delivers).zipWithIndex.collect {
-                filterForTopologyTimestamps
+                filterForSigningTimestamps
               }
             forEvery(deliverWithSigningTimestamps) {
               case DeliveredEventToCheck(
                     delivered,
                     sequencingTimestamp,
                     _messageId,
-                    topologyTimestamp,
+                    signingTimestamp,
                     sc,
                   ) =>
                 val expectedSequencedEvent =
-                  if (topologyTimestamp + topologyTimestampTolerance >= sequencingTimestamp)
+                  if (signingTimestamp + signingTolerance >= sequencingTimestamp)
                     Deliver.create(
                       SequencerCounter(sc),
                       sequencingTimestamp,
@@ -787,7 +775,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
         for {
           domainParamsO <- cryptoD.headSnapshot.ipsSnapshot.findDynamicDomainParameters()
           domainParams = domainParamsO.valueOrFail("No domain parameters found")
-          signingTolerance = domainParams.sequencerTopologyTimestampTolerance
+          signingTolerance = domainParams.sequencerSigningTolerance
           signingToleranceInSec = signingTolerance.duration.toSeconds
 
           topologyClientMemberId <- store.registerMember(topologyClientMember, ts0)
@@ -802,10 +790,9 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           ) ++ (2L to 60L).map(i => (signingToleranceInSec + i, None, recipientsAlice))
           batch = Batch.fromClosed(
             testedProtocolVersion,
-            ClosedEnvelope.create(
+            ClosedEnvelope(
               ByteString.copyFromUtf8("test envelope"),
               Recipients.cc(alice, bob),
-              Seq.empty,
               testedProtocolVersion,
             ),
           )

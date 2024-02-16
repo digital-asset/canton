@@ -16,6 +16,7 @@ import com.digitalasset.canton.http.domain.{
 import com.digitalasset.canton.http.json.*
 import com.digitalasset.canton.http.util.FutureUtil.{either, eitherT}
 import com.digitalasset.canton.http.util.Logging.{InstanceUUID, RequestID}
+import com.digitalasset.canton.http.util.toLedgerId
 import com.digitalasset.canton.http.util.JwtParties.*
 import com.daml.jwt.domain.Jwt
 import com.daml.ledger.api.v1 as lav1
@@ -51,7 +52,7 @@ private[http] final class CreateAndExercise(
       for {
         cmd <-
           decoder
-            .decodeCreateCommand(reqBody, jwt)
+            .decodeCreateCommand(reqBody, jwt, toLedgerId(jwtPayload.ledgerId))
             .liftErr(InvalidUserInput): ET[
             CreateCommand[ApiRecord, Template.RequiredPkg]
           ]
@@ -75,7 +76,7 @@ private[http] final class CreateAndExercise(
       for {
         cmd <-
           decoder
-            .decodeExerciseCommand(reqBody, jwt)
+            .decodeExerciseCommand(reqBody, jwt, toLedgerId(jwtPayload.ledgerId))
             .liftErr(InvalidUserInput): ET[
             domain.ExerciseCommand.RequiredPkg[LfValue, domain.ContractLocator[LfValue]]
           ]
@@ -106,7 +107,7 @@ private[http] final class CreateAndExercise(
       for {
         cmd <-
           decoder
-            .decodeCreateAndExerciseCommand(reqBody, jwt)
+            .decodeCreateAndExerciseCommand(reqBody, jwt, toLedgerId(jwtPayload.ledgerId))
             .liftErr(InvalidUserInput): ET[
             domain.CreateAndExerciseCommand.LAVResolved
           ]
@@ -137,6 +138,7 @@ private[http] final class CreateAndExercise(
         jwt,
         resolveRefParties(meta, jwtPayload),
         reference,
+        toLedgerId(jwtPayload.ledgerId),
       )
       .flatMap {
         case -\/((tpId, key)) => EitherT.either(lfValueToApiValue(key).map(k => -\/(tpId -> k)))

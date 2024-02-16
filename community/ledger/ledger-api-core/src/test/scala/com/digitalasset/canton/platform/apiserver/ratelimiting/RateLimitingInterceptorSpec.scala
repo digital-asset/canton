@@ -3,25 +3,26 @@
 
 package com.digitalasset.canton.platform.apiserver.ratelimiting
 
+import com.codahale.metrics.MetricRegistry
 import com.daml.executors.executors.{NamedExecutor, QueueAwareExecutor}
+import com.daml.grpc.adapter.utils.implementations.HelloServicePekkoImplementation
+import com.daml.grpc.sampleservice.implementations.HelloServiceReferenceImplementation
 import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
-import com.daml.ledger.resources.ResourceOwner
-import com.daml.metrics.api.MetricsContext
+import com.daml.ledger.resources.{ResourceOwner, TestResourceContext}
+import com.daml.platform.hello.{HelloRequest, HelloResponse, HelloServiceGrpc}
 import com.daml.ports.Port
 import com.daml.scalautil.Statement.discard
 import com.daml.tracing.NoOpTelemetry
-import com.digitalasset.canton.domain.api.v0
-import com.digitalasset.canton.grpc.sampleservice.HelloServiceReferenceImplementation
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.grpc.{GrpcClientResource, GrpcHealthService}
 import com.digitalasset.canton.ledger.api.health.HealthChecks.ComponentName
 import com.digitalasset.canton.ledger.api.health.{HealthChecks, ReportsHealth}
-import com.digitalasset.canton.ledger.resources.TestResourceContext
 import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.apiserver.ActiveStreamMetricsInterceptor
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.apiserver.ratelimiting.LimitResult.LimitResultCheck
-import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.google.protobuf.ByteString
 import io.grpc.Status.Code
 import io.grpc.*
 import io.grpc.health.v1.health.{HealthCheckRequest, HealthCheckResponse, HealthGrpc}
@@ -43,7 +44,7 @@ import java.lang.management.*
 import java.net.{InetAddress, InetSocketAddress}
 import java.util.concurrent.{LinkedBlockingQueue, TimeUnit}
 import scala.concurrent.duration.FiniteDuration
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.{Future, Promise}
 
 final class RateLimitingInterceptorSpec
     extends AsyncFlatSpec
@@ -51,7 +52,6 @@ final class RateLimitingInterceptorSpec
     with Eventually
     with TestResourceContext
     with MockitoSugar
-    with HasExecutionContext
     with BaseTest {
 
   import RateLimitingInterceptorSpec.*
@@ -73,7 +73,7 @@ final class RateLimitingInterceptorSpec
     val threadPoolHumanReadableName = "For testing"
     withChannel(
       metrics,
-      new HelloServiceReferenceImplementation,
+      new HelloServicePekkoImplementation,
       config,
       additionalChecks = List(
         ThreadpoolCheck(
@@ -84,11 +84,11 @@ final class RateLimitingInterceptorSpec
         )
       ),
     ).use { channel =>
-      val helloService = v0.HelloServiceGrpc.stub(channel)
+      val helloService = HelloServiceGrpc.stub(channel)
       for {
-        _ <- helloService.hello(v0.Hello.Request("one"))
-        exception <- helloService.hello(v0.Hello.Request("two")).failed
-        _ <- helloService.hello(v0.Hello.Request("three"))
+        _ <- helloService.single(HelloRequest(1))
+        exception <- helloService.single(HelloRequest(2)).failed
+        _ <- helloService.single(HelloRequest(3))
       } yield {
         exception.toString should include(threadPoolHumanReadableName)
       }
@@ -98,9 +98,9 @@ final class RateLimitingInterceptorSpec
   /** Allowing metadata requests allows grpcurl to be used to debug problems */
 
   it should "allow metadata requests even when over limit" in {
-    metrics.openTelemetryMetricsFactory
-      .meter(metrics.lapi.threadpool.apiServices :+ "submitted")
-      .mark(config.maxApiServicesQueueSize.toLong + 1)(MetricsContext.Empty) // Over limit
+    metrics.registry
+      .meter(MetricRegistry.name(metrics.daml.lapi.threadpool.apiServices, "submitted"))
+      .mark(config.maxApiServicesQueueSize.toLong + 1) // Over limit
 
     val protoService = ProtoReflectionService.newInstance()
 
@@ -130,9 +130,9 @@ final class RateLimitingInterceptorSpec
   }
 
   it should "allow health checks event when over limit" in {
-    metrics.openTelemetryMetricsFactory
-      .meter(metrics.lapi.threadpool.apiServices :+ "submitted")
-      .mark(config.maxApiServicesQueueSize.toLong + 1)(MetricsContext.Empty) // Over limit
+    metrics.registry
+      .meter(MetricRegistry.name(metrics.daml.lapi.threadpool.apiServices, "submitted"))
+      .mark(config.maxApiServicesQueueSize.toLong + 1) // Over limit
 
     val healthService =
       new GrpcHealthService(healthChecks, telemetry = NoOpTelemetry, loggerFactory = loggerFactory)(
@@ -192,13 +192,13 @@ final class RateLimitingInterceptorSpec
 
     val pool = List(nonCollectableBean, nonHeapBean, memoryPoolBean)
 
-    withChannel(metrics, new HelloServiceReferenceImplementation, config, pool, memoryBean).use {
+    withChannel(metrics, new HelloServicePekkoImplementation, config, pool, memoryBean).use {
       channel =>
-        val helloService = v0.HelloServiceGrpc.stub(channel)
+        val helloService = HelloServiceGrpc.stub(channel)
         for {
-          _ <- helloService.hello(v0.Hello.Request("one"))
-          exception <- helloService.hello(v0.Hello.Request("two")).failed
-          _ <- helloService.hello(v0.Hello.Request("three"))
+          _ <- helloService.single(HelloRequest(1))
+          exception <- helloService.single(HelloRequest(2)).failed
+          _ <- helloService.single(HelloRequest(3))
         } yield {
           verify(memoryPoolBean).setCollectionUsageThreshold(
             config.calculateCollectionUsageThreshold(maxMemory)
@@ -219,9 +219,7 @@ final class RateLimitingInterceptorSpec
         for {
           fStatus1 <- streamHello(channel) // Ok
           fStatus2 <- streamHello(channel) // Ok
-          // Metrics are used by the limiting interceptor, so the following assert causes the test to fail
-          //  rather than being stuck if metrics don't work.
-          _ = metrics.lapi.streams.active.getValue shouldBe limitStreamConfig.maxStreams
+          activeStreams = metrics.daml.lapi.streams.active.getValue
           fStatus3 <- streamHello(channel) // Limited
           status3 <- fStatus3 // Closed as part of limiting
           _ = waitService.completeStream()
@@ -232,12 +230,13 @@ final class RateLimitingInterceptorSpec
           _ = waitService.completeStream()
           status4 <- fStatus4
         } yield {
+          activeStreams shouldBe limitStreamConfig.maxStreams
           status1.getCode shouldBe Code.OK
           status2.getCode shouldBe Code.OK
           status3.getCode shouldBe Code.ABORTED
-          status3.getDescription should include(metrics.lapi.streams.activeName)
+          status3.getDescription should include(metrics.daml.lapi.streams.activeName)
           status4.getCode shouldBe Code.OK
-          eventually { metrics.lapi.streams.active.getValue shouldBe 0 }
+          eventually { metrics.daml.lapi.streams.active.getValue shouldBe 0 }
         }
       }
     }
@@ -257,7 +256,7 @@ final class RateLimitingInterceptorSpec
           fStatus2 <- streamHello(channel)
           fHelloStatus2 = singleHello(channel)
 
-          activeStreams = metrics.lapi.streams.active.getValue
+          activeStreams = metrics.daml.lapi.streams.active.getValue
 
           _ = waitService.completeStream()
           _ = waitService.completeSingle()
@@ -275,7 +274,7 @@ final class RateLimitingInterceptorSpec
           helloStatus1.getCode shouldBe Code.OK
           status2.getCode shouldBe Code.OK
           helloStatus2.getCode shouldBe Code.OK
-          eventually { metrics.lapi.streams.active.getValue shouldBe 0 }
+          eventually { metrics.daml.lapi.streams.active.getValue shouldBe 0 }
         }
       }
     }
@@ -321,7 +320,7 @@ final class RateLimitingInterceptorSpec
       } yield {
         status1.getCode shouldBe Code.CANCELLED
 
-        eventually { metrics.lapi.streams.active.getValue shouldBe 0 }
+        eventually { metrics.daml.lapi.streams.active.getValue shouldBe 0 }
       }
     }
   }
@@ -345,11 +344,11 @@ final class RateLimitingInterceptorSpec
 
     val pool = List(memoryPoolBean)
 
-    withChannel(metrics, new HelloServiceReferenceImplementation, config, pool, memoryBean).use {
+    withChannel(metrics, new HelloServicePekkoImplementation, config, pool, memoryBean).use {
       channel =>
-        val helloService = v0.HelloServiceGrpc.stub(channel)
+        val helloService = HelloServiceGrpc.stub(channel)
         for {
-          _ <- helloService.hello(v0.Hello.Request("foo"))
+          _ <- helloService.single(HelloRequest(1))
         } yield {
           verify(memoryPoolBean).setCollectionUsageThreshold(
             config.calculateCollectionUsageThreshold(initMemory)
@@ -425,14 +424,14 @@ object RateLimitingInterceptorSpec extends MockitoSugar {
     * the server side on every request.  For stream based rate limiting we want to explicitly hold open
     * the stream such that we know for sure how many streams are open.
     */
-  class WaitService(implicit ec: ExecutionContext) extends HelloServiceReferenceImplementation {
+  class WaitService extends HelloServiceReferenceImplementation {
 
-    private val observers = new LinkedBlockingQueue[StreamObserver[v0.Hello.Response]]()
-    private val requests = new LinkedBlockingQueue[Promise[v0.Hello.Response]]()
+    private val observers = new LinkedBlockingQueue[StreamObserver[HelloResponse]]()
+    private val requests = new LinkedBlockingQueue[Promise[HelloResponse]]()
 
     def completeStream(): Unit = {
       val responseObserver = observers.remove()
-      responseObserver.onNext(v0.Hello.Response("last"))
+      responseObserver.onNext(HelloResponse(0, ByteString.copyFromUtf8("last")))
       responseObserver.onCompleted()
     }
 
@@ -440,20 +439,20 @@ object RateLimitingInterceptorSpec extends MockitoSugar {
       discard(
         requests
           .poll(10, TimeUnit.SECONDS)
-          .success(v0.Hello.Response("only"))
+          .success(HelloResponse(0, ByteString.copyFromUtf8("only")))
       )
     }
 
-    override def helloStreamed(
-        request: v0.Hello.Request,
-        responseObserver: StreamObserver[v0.Hello.Response],
+    override def serverStreaming(
+        request: HelloRequest,
+        responseObserver: StreamObserver[HelloResponse],
     ): Unit = {
-      responseObserver.onNext(v0.Hello.Response("first"))
+      responseObserver.onNext(HelloResponse(0, ByteString.copyFromUtf8("first")))
       observers.put(responseObserver)
     }
 
-    override def hello(request: v0.Hello.Request): Future[v0.Hello.Response] = {
-      val promise = Promise[v0.Hello.Response]()
+    override def single(request: HelloRequest): Future[HelloResponse] = {
+      val promise = Promise[HelloResponse]()
       requests.put(promise)
       promise.future
     }
@@ -463,22 +462,22 @@ object RateLimitingInterceptorSpec extends MockitoSugar {
   def singleHello(channel: Channel): Future[Status] = {
 
     val status = Promise[Status]()
-    val clientCall = channel.newCall(v0.HelloServiceGrpc.METHOD_HELLO, CallOptions.DEFAULT)
+    val clientCall = channel.newCall(HelloServiceGrpc.METHOD_SINGLE, CallOptions.DEFAULT)
 
     clientCall.start(
-      new ClientCall.Listener[v0.Hello.Response] {
+      new ClientCall.Listener[HelloResponse] {
         override def onClose(grpcStatus: Status, trailers: Metadata): Unit = {
           logger.debug(s"Single closed with $grpcStatus")
           status.success(grpcStatus)
         }
-        override def onMessage(message: v0.Hello.Response): Unit = {
+        override def onMessage(message: HelloResponse): Unit = {
           logger.debug(s"Got single message: $message")
         }
       },
       new Metadata(),
     )
 
-    clientCall.sendMessage(v0.Hello.Request("foo"))
+    clientCall.sendMessage(HelloRequest(1))
     clientCall.halfClose()
     clientCall.request(1)
 
@@ -490,15 +489,15 @@ object RateLimitingInterceptorSpec extends MockitoSugar {
     val init = Promise[Future[Status]]()
     val status = Promise[Status]()
     val clientCall =
-      channel.newCall(v0.HelloServiceGrpc.METHOD_HELLO_STREAMED, CallOptions.DEFAULT)
+      channel.newCall(HelloServiceGrpc.METHOD_SERVER_STREAMING, CallOptions.DEFAULT)
 
     clientCall.start(
-      new ClientCall.Listener[v0.Hello.Response] {
+      new ClientCall.Listener[HelloResponse] {
         override def onClose(grpcStatus: Status, trailers: Metadata): Unit = {
           if (!init.isCompleted) init.success(status.future)
           status.success(grpcStatus)
         }
-        override def onMessage(message: v0.Hello.Response): Unit = {
+        override def onMessage(message: HelloResponse): Unit = {
           if (!init.isCompleted) init.success(status.future)
         }
       },
@@ -506,7 +505,7 @@ object RateLimitingInterceptorSpec extends MockitoSugar {
     )
 
     // When the handshake is single message -> streamHello then onReady is not applicable
-    clientCall.sendMessage(v0.Hello.Request("foo"))
+    clientCall.sendMessage(HelloRequest(2))
     clientCall.halfClose()
     clientCall.request(2) // Request both messages
 

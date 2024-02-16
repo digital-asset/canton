@@ -55,6 +55,8 @@ final case class NodeReferences[A, R <: A, L <: A](local: Seq[L], remote: Seq[R]
 @SuppressWarnings(Array("org.wartremover.warts.Any")) // required for `Binding[_]` usage
 trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing {
   type Env <: Environment
+  type DomainLocalRef <: LocalDomainReference
+  type DomainRemoteRef <: RemoteDomainReference
   type Status <: CantonStatus
 
   def consoleLogger: Logger = super.noTracingLogger
@@ -85,11 +87,11 @@ trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing 
     * Implementations should just return a int for the instance (typically just a static value based on type),
     * and then the console will start these instances for lower to higher values.
     */
-  protected def startupOrderPrecedence(instance: LocalInstanceReference): Int
+  protected def startupOrderPrecedence(instance: LocalInstanceReferenceCommon): Int
 
   /** The order that local nodes would ideally be started in. */
-  final val startupOrdering: Ordering[LocalInstanceReference] =
-    (x: LocalInstanceReference, y: LocalInstanceReference) =>
+  final val startupOrdering: Ordering[LocalInstanceReferenceCommon] =
+    (x: LocalInstanceReferenceCommon, y: LocalInstanceReferenceCommon) =>
       startupOrderPrecedence(x) compare startupOrderPrecedence(y)
 
   /** allows for injecting a custom admin command runner during tests */
@@ -103,27 +105,49 @@ trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing 
   private val featureSetReference: AtomicReference[HelperItems] =
     new AtomicReference[HelperItems](HelperItems(environment.config.features.featureFlags))
 
+  /** Generate implementation specific help items for local domains */
+  protected def localDomainHelpItems(
+      scope: Set[FeatureFlag],
+      localDomain: DomainLocalRef,
+  ): Seq[Help.Item]
+
+  /** Generate implementation specific help items for remote domains */
+  protected def remoteDomainHelpItems(
+      scope: Set[FeatureFlag],
+      remoteDomain: DomainRemoteRef,
+  ): Seq[Help.Item]
+
   private case class HelperItems(scope: Set[FeatureFlag]) {
     lazy val participantHelperItems = {
       // due to the use of reflection to grab the help-items, i need to write the following, repetitive stuff explicitly
       val subItems =
-        if (participantsX.local.nonEmpty)
-          participantsX.local.headOption.toList.flatMap(p =>
+        if (participants.local.nonEmpty)
+          participants.local.headOption.toList.flatMap(p =>
             Help.getItems(p, baseTopic = Seq("$participant"), scope = scope)
           )
-        else if (participantsX.remote.nonEmpty)
-          participantsX.remote.headOption.toList.flatMap(p =>
+        else if (participants.remote.nonEmpty)
+          participants.remote.headOption.toList.flatMap(p =>
             Help.getItems(p, baseTopic = Seq("$participant"), scope = scope)
           )
         else Seq()
       Help.Item("$participant", None, Summary(""), Description(""), Topic(Seq()), subItems)
     }
 
+    lazy val domainHelperItems = {
+      val subItems =
+        if (domains.local.nonEmpty)
+          domains.local.headOption.toList.flatMap(localDomainHelpItems(scope, _))
+        else if (domains.remote.nonEmpty)
+          domains.remote.headOption.toList.flatMap(remoteDomainHelpItems(scope, _))
+        else Seq()
+      Help.Item("$domain", None, Summary(""), Description(""), Topic(Seq()), subItems)
+    }
+
     lazy val filteredHelpItems = {
       helpItems.filter(x => scope.contains(x.summary.flag))
     }
 
-    lazy val all = filteredHelpItems :+ participantHelperItems
+    lazy val all = filteredHelpItems :+ participantHelperItems :+ domainHelperItems
 
   }
 
@@ -292,7 +316,7 @@ trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing 
         Help.Topic(Help.defaultTopLevelTopic),
       ))
 
-  lazy val participantsX: NodeReferences[
+  lazy val participants: NodeReferences[
     ParticipantReference,
     RemoteParticipantReference,
     LocalParticipantReference,
@@ -304,51 +328,28 @@ trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing 
         .toSeq,
     )
 
-  lazy val sequencersX: NodeReferences[
-    SequencerNodeReference,
-    RemoteSequencerNodeReference,
-    LocalSequencerNodeReference,
-  ] =
+  lazy val domains: NodeReferences[DomainReference, DomainRemoteRef, DomainLocalRef] =
     NodeReferences(
-      environment.config.sequencersByString.keys.map(createSequencerReference).toSeq,
-      environment.config.remoteSequencersByString.keys.map(createRemoteSequencerReference).toSeq,
-    )
-
-  lazy val mediatorsX
-      : NodeReferences[MediatorReference, RemoteMediatorReference, LocalMediatorReference] =
-    NodeReferences(
-      environment.config.mediatorsByString.keys.map(createMediatorReference).toSeq,
-      environment.config.remoteMediatorsByString.keys.map(createRemoteMediatorReference).toSeq,
+      environment.config.domainsByString.keys.map(createDomainReference).toSeq,
+      environment.config.remoteDomainsByString.keys.map(createRemoteDomainReference).toSeq,
     )
 
   // the scala compiler / wartremover gets confused here if I use ++ directly
   def mergeLocalInstances(
-      locals: Seq[LocalInstanceReference]*
-  ): Seq[LocalInstanceReference] =
+      locals: Seq[LocalInstanceReferenceCommon]*
+  ): Seq[LocalInstanceReferenceCommon] =
     locals.flatten
-  def mergeLocalInstancesX(
-      locals: Seq[LocalInstanceReference]*
-  ): Seq[LocalInstanceReference] =
-    locals.flatten
-  def mergeRemoteInstances(remotes: Seq[InstanceReference]*): Seq[InstanceReference] =
+  def mergeRemoteInstances(remotes: Seq[InstanceReferenceCommon]*): Seq[InstanceReferenceCommon] =
     remotes.flatten
 
   lazy val nodes: NodeReferences[
-    InstanceReference,
-    InstanceReference,
-    LocalInstanceReference,
+    InstanceReferenceCommon,
+    InstanceReferenceCommon,
+    LocalInstanceReferenceCommon,
   ] = {
     NodeReferences(
-      mergeLocalInstances(
-        participantsX.local,
-        sequencersX.local,
-        mediatorsX.local,
-      ),
-      mergeRemoteInstances(
-        participantsX.remote,
-        sequencersX.remote,
-        mediatorsX.remote,
-      ),
+      mergeLocalInstances(participants.local, domains.local),
+      mergeRemoteInstances(participants.remote, domains.remote),
     )
   }
 
@@ -359,58 +360,66 @@ trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing 
   protected val topicGenericNodeReferences = "Generic Node References"
   protected val genericNodeReferencesDoc = " (.all, .local, .remote)"
 
+  protected def domainsTopLevelValue(
+      h: TopLevelValue.Partial,
+      domains: NodeReferences[DomainReference, DomainRemoteRef, DomainLocalRef],
+  ): TopLevelValue[NodeReferences[DomainReference, DomainRemoteRef, DomainLocalRef]]
+
+  /** Supply the local domain value used by the implementation */
+  protected def localDomainTopLevelValue(
+      h: TopLevelValue.Partial,
+      d: DomainLocalRef,
+  ): TopLevelValue[DomainLocalRef]
+
+  /** Supply the remote domain value used by the implementation */
+  protected def remoteDomainTopLevelValue(
+      h: TopLevelValue.Partial,
+      d: DomainRemoteRef,
+  ): TopLevelValue[DomainRemoteRef]
+
   /** Assemble top level values with their identifier name, value binding, and help description.
     */
   protected def topLevelValues: Seq[TopLevelValue[_]] = {
     val nodeTopic = Seq(topicNodeReferences)
-    val localParticipantXBinds: Seq[TopLevelValue[_]] =
-      participantsX.local.map(p =>
-        TopLevelValue(p.name, helpText("participant x", p.name), p, nodeTopic)
+    val localParticipantBinds: Seq[TopLevelValue[_]] =
+      participants.local.map(p =>
+        TopLevelValue(p.name, helpText("participant", p.name), p, nodeTopic)
       )
-    val remoteParticipantXBinds: Seq[TopLevelValue[_]] =
-      participantsX.remote.map(p =>
-        TopLevelValue(p.name, helpText("remote participant x", p.name), p, nodeTopic)
+    val remoteParticipantBinds: Seq[TopLevelValue[_]] =
+      participants.remote.map(p =>
+        TopLevelValue(p.name, helpText("remote participant", p.name), p, nodeTopic)
       )
-    val localMediatorXBinds: Seq[TopLevelValue[_]] =
-      mediatorsX.local.map(d =>
-        TopLevelValue(d.name, helpText("local mediator-x", d.name), d, nodeTopic)
+    val localDomainBinds: Seq[TopLevelValue[_]] =
+      domains.local.map(d =>
+        localDomainTopLevelValue(
+          TopLevelValue.Partial(d.name, helpText("local domain", d.name), nodeTopic),
+          d,
+        )
       )
-    val remoteMediatorXBinds: Seq[TopLevelValue[_]] =
-      mediatorsX.remote.map(d =>
-        TopLevelValue(d.name, helpText("remote mediator-x", d.name), d, nodeTopic)
-      )
-    val localSequencerXBinds: Seq[TopLevelValue[_]] =
-      sequencersX.local.map(d =>
-        TopLevelValue(d.name, helpText("local sequencer-x", d.name), d, nodeTopic)
-      )
-    val remoteSequencerXBinds: Seq[TopLevelValue[_]] =
-      sequencersX.remote.map(d =>
-        TopLevelValue(d.name, helpText("remote sequencer-x", d.name), d, nodeTopic)
+    val remoteDomainBinds: Seq[TopLevelValue[_]] =
+      domains.remote.map(d =>
+        remoteDomainTopLevelValue(
+          TopLevelValue.Partial(d.name, helpText("remote domain", d.name), nodeTopic),
+          d,
+        )
       )
     val clockBinds: Option[TopLevelValue[_]] =
       environment.simClock.map(cl =>
         TopLevelValue("clock", "Simulated time", new SimClockCommand(cl))
       )
     val referencesTopic = Seq(topicGenericNodeReferences)
-    localParticipantXBinds ++ remoteParticipantXBinds ++
-      localSequencerXBinds ++ remoteSequencerXBinds ++ localMediatorXBinds ++ remoteMediatorXBinds ++ clockBinds.toList :+
+    localParticipantBinds ++ remoteParticipantBinds ++
+      localDomainBinds ++ remoteDomainBinds ++ clockBinds.toList :+
       TopLevelValue(
-        "participantsX",
-        "All participant x nodes" + genericNodeReferencesDoc,
-        participantsX,
+        "participants",
+        "All participant nodes" + genericNodeReferencesDoc,
+        participants,
         referencesTopic,
       ) :+
-      TopLevelValue(
-        "mediatorsX",
-        "All mediator-x nodes" + genericNodeReferencesDoc,
-        mediatorsX,
-        referencesTopic,
-      ) :+
-      TopLevelValue(
-        "sequencersX",
-        "All sequencer-x nodes" + genericNodeReferencesDoc,
-        sequencersX,
-        referencesTopic,
+      domainsTopLevelValue(
+        TopLevelValue
+          .Partial("domains", "All domain nodes" + genericNodeReferencesDoc, referencesTopic),
+        domains,
       ) :+
       TopLevelValue("nodes", "All nodes" + genericNodeReferencesDoc, nodes, referencesTopic)
   }
@@ -446,18 +455,8 @@ trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing 
     new LocalParticipantReference(this, name)
   private def createRemoteParticipantReference(name: String): RemoteParticipantReference =
     new RemoteParticipantReference(this, name)
-
-  private def createSequencerReference(name: String): LocalSequencerNodeReference =
-    new LocalSequencerNodeReference(this, name)
-
-  private def createRemoteSequencerReference(name: String): RemoteSequencerNodeReference =
-    new RemoteSequencerNodeReference(this, name)
-
-  private def createMediatorReference(name: String): LocalMediatorReference =
-    new LocalMediatorReference(this, name)
-
-  private def createRemoteMediatorReference(name: String): RemoteMediatorReference =
-    new RemoteMediatorReference(this, name)
+  protected def createDomainReference(name: String): DomainLocalRef
+  protected def createRemoteDomainReference(name: String): DomainRemoteRef
 
   /** So we can we make this available
     */
@@ -486,12 +485,19 @@ object ConsoleEnvironment {
     import scala.language.implicitConversions
 
     implicit def toInstanceReferenceExtensions(
-        instances: Seq[LocalInstanceReference]
-    ): LocalInstancesExtensions[LocalInstanceReference] =
+        instances: Seq[LocalInstanceReferenceCommon]
+    ): LocalInstancesExtensions =
       new LocalInstancesExtensions.Impl(instances)
 
     /** Implicit maps an LfPartyId to a PartyId */
     implicit def toPartId(lfPartyId: LfPartyId): PartyId = PartyId.tryFromLfParty(lfPartyId)
+
+    /** Extensions for many instance references
+      */
+    implicit def toLocalDomainExtensions(
+        instances: Seq[LocalDomainReference]
+    ): LocalInstancesExtensions =
+      new LocalDomainReferencesExtensions(instances)
 
     /** Extensions for many participant references
       */
@@ -502,9 +508,7 @@ object ConsoleEnvironment {
 
     implicit def toLocalParticipantReferencesExtensions(
         participants: Seq[LocalParticipantReference]
-    )(implicit
-        consoleEnvironment: ConsoleEnvironment
-    ): LocalParticipantReferencesExtensions =
+    )(implicit consoleEnvironment: ConsoleEnvironment): LocalParticipantReferencesExtensions =
       new LocalParticipantReferencesExtensions(participants)
 
     /** Implicitly map strings to DomainAlias, Fingerprint and Identifier
@@ -522,12 +526,12 @@ object ConsoleEnvironment {
       SequencerConnections.single(GrpcSequencerConnection.tryCreate(connection))
 
     implicit def toGSequencerConnection(
-        ref: SequencerNodeReference
+        ref: InstanceReferenceWithSequencerConnection
     ): SequencerConnection =
       ref.sequencerConnection
 
     implicit def toGSequencerConnections(
-        ref: SequencerNodeReference
+        ref: InstanceReferenceWithSequencerConnection
     ): SequencerConnections =
       SequencerConnections.single(ref.sequencerConnection)
 
@@ -536,7 +540,7 @@ object ConsoleEnvironment {
 
     /** Implicitly map ParticipantReferences to the ParticipantId
       */
-    implicit def toParticipantIdX(reference: ParticipantReference): ParticipantId = reference.id
+    implicit def toParticipantId(reference: ParticipantReference): ParticipantId = reference.id
 
     /** Implicitly map an `Int` to a `NonNegativeInt`.
       * @throws java.lang.IllegalArgumentException if `n` is negative

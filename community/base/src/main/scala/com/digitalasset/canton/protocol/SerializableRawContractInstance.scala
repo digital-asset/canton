@@ -5,6 +5,7 @@ package com.digitalasset.canton.protocol
 
 import cats.syntax.either.*
 import com.daml.lf.transaction.{TransactionCoder, TransactionOuterClass}
+import com.daml.lf.value.Value.ContractInstanceWithAgreement
 import com.daml.lf.value.ValueCoder
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -20,8 +21,6 @@ import monocle.Lens
 import monocle.macros.GenLens
 import slick.jdbc.{GetResult, SetParameter}
 
-import scala.annotation.unused
-
 /** Represents a serializable contract instance and memoizes the serialization.
   *
   * @param contractInstance The contract instance whose serialization is to be memoized.
@@ -30,7 +29,10 @@ import scala.annotation.unused
   *                         the serialization is produced by [[TransactionCoder.encodeContractInstance]].
   */
 final case class SerializableRawContractInstance private (
-    contractInstance: LfContractInst
+    contractInstance: LfContractInst,
+    // Keeping this in the serializable instance for historical reasons
+    // The agreement text may come from an untrusted node.
+    unvalidatedAgreementText: AgreementText,
 )(
     override val deserializedFrom: Option[ByteString]
 ) extends MemoizedEvidenceWithFailure[ValueCoder.EncodeError] {
@@ -40,7 +42,10 @@ final case class SerializableRawContractInstance private (
   @throws[SerializationCheckFailed[ValueCoder.EncodeError]]
   protected[this] override def toByteStringChecked: Either[ValueCoder.EncodeError, ByteString] =
     TransactionCoder
-      .encodeContractInstance(ValueCoder.CidEncoder, contractInstance)
+      .encodeContractInstance(
+        ValueCoder.CidEncoder,
+        contractInstance.map(ContractInstanceWithAgreement(_, unvalidatedAgreementText.v)),
+      )
       .map(_.toByteString)
 
   lazy val contractHash: LfHash =
@@ -49,11 +54,11 @@ final case class SerializableRawContractInstance private (
       contractInstance.unversioned.arg,
     )
 
-  @unused // needed for lenses
   private def copy(
-      contractInstance: LfContractInst = this.contractInstance
+      contractInstance: LfContractInst = this.contractInstance,
+      unvalidatedAgreementText: AgreementText = this.unvalidatedAgreementText,
   ): SerializableRawContractInstance =
-    SerializableRawContractInstance(contractInstance)(None)
+    SerializableRawContractInstance(contractInstance, unvalidatedAgreementText)(None)
 }
 
 object SerializableRawContractInstance {
@@ -76,10 +81,11 @@ object SerializableRawContractInstance {
     pp >> c.getCryptographicEvidence.toByteArray
 
   def create(
-      contractInstance: LfContractInst
+      contractInstance: LfContractInst,
+      agreementText: AgreementText,
   ): Either[ValueCoder.EncodeError, SerializableRawContractInstance] =
     try {
-      Right(new SerializableRawContractInstance(contractInstance)(None))
+      Right(new SerializableRawContractInstance(contractInstance, agreementText)(None))
     } catch {
       case SerializationCheckFailed(err: ValueCoder.EncodeError) => Left(err)
     }
@@ -95,14 +101,18 @@ object SerializableRawContractInstance {
       contractInstanceP <- ProtoConverter.protoParser(
         TransactionOuterClass.ContractInstance.parseFrom
       )(bytes)
-      contractInstance <- TransactionCoder
-        .decodeContractInstance(ValueCoder.CidDecoder, contractInstanceP)
+      contractInstanceAndAgreementText <- TransactionCoder
+        .decodeVersionedContractInstance(ValueCoder.CidDecoder, contractInstanceP)
         .leftMap(error => ValueConversionError("", error.toString))
-    } yield createWithSerialization(contractInstance)(bytes)
+      ContractInstanceWithAgreement(_, agreementText) = contractInstanceAndAgreementText.unversioned
+    } yield createWithSerialization(
+      contractInstanceAndAgreementText.map(_.contractInstance),
+      AgreementText(agreementText),
+    )(bytes)
 
   @VisibleForTesting
-  def createWithSerialization(contractInst: LfContractInst)(
+  def createWithSerialization(contractInst: LfContractInst, agreementText: AgreementText)(
       deserializedFrom: ByteString
   ): SerializableRawContractInstance =
-    new SerializableRawContractInstance(contractInst)(Some(deserializedFrom))
+    new SerializableRawContractInstance(contractInst, agreementText)(Some(deserializedFrom))
 }

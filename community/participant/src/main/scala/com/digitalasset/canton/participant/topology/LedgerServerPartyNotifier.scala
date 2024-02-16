@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.topology
 
 import cats.syntax.either.*
+import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.DisplayName
@@ -17,7 +18,6 @@ import com.digitalasset.canton.time.{Clock, PositiveFiniteDuration}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.*
 import com.digitalasset.canton.topology.store.{PartyMetadata, PartyMetadataStore}
-import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
@@ -45,16 +45,14 @@ class LedgerServerPartyNotifier(
     extends NamedLogging
     with FlagCloseable {
 
-  private val pendingAllocationData =
-    TrieMap[(PartyId, ParticipantId), (String255, Option[DisplayName])]()
+  private val pendingAllocationSubmissionIds = TrieMap[(PartyId, ParticipantId), String255]()
   def expectPartyAllocationForXNodes(
       party: PartyId,
       onParticipant: ParticipantId,
       submissionId: String255,
-      displayName: Option[DisplayName],
   ): Either[String, Unit] = if (mustTrackSubmissionIds) {
-    pendingAllocationData
-      .putIfAbsent((party, onParticipant), (submissionId, displayName))
+    pendingAllocationSubmissionIds
+      .putIfAbsent((party, onParticipant), submissionId)
       .toLeft(())
       .leftMap(_ => s"Allocation for party ${party} is already inflight")
   } else
@@ -66,9 +64,9 @@ class LedgerServerPartyNotifier(
       submissionId: String255,
   ): Unit = {
     val key = (party, onParticipant)
-    pendingAllocationData.get(key).foreach { case (storedId, _) =>
+    pendingAllocationSubmissionIds.get(key).foreach { storedId =>
       if (storedId == submissionId) {
-        pendingAllocationData.remove(key).discard
+        pendingAllocationSubmissionIds.remove(key).discard
       }
     }
   }
@@ -85,80 +83,56 @@ class LedgerServerPartyNotifier(
     }
   }
 
-  def attachToTopologyProcessorX(): TopologyTransactionProcessingSubscriberX =
-    new TopologyTransactionProcessingSubscriberX {
+  def attachToTopologyProcessorOld(): TopologyTransactionProcessingSubscriber =
+    new TopologyTransactionProcessingSubscriber {
 
       override def observed(
           sequencerTimestamp: SequencedTime,
           effectiveTimestamp: EffectiveTime,
           sequencerCounter: SequencerCounter,
-          transactions: Seq[GenericSignedTopologyTransactionX],
+          transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
       )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-        observeTopologyTransactions(sequencerTimestamp, effectiveTimestamp, transactions)
+        transactions.parTraverse_ { transaction =>
+          Option(transaction)
+            .mapFilter(extractTopologyProcessorData)
+            .map(observedF(sequencerTimestamp, effectiveTimestamp, _))
+            .getOrElse(FutureUnlessShutdown.unit)
+        }
+
       }
     }
 
-  def attachToIdentityManagerX(): TopologyManagerObserver =
-    new TopologyManagerObserver {
+  def attachToIdentityManagerOld(): ParticipantTopologyManagerObserver =
+    new ParticipantTopologyManagerObserver {
       override def addedNewTransactions(
           timestamp: CantonTimestamp,
-          transactions: Seq[GenericSignedTopologyTransactionX],
+          transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
       )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-        observeTopologyTransactions(
-          SequencedTime(timestamp),
-          EffectiveTime(timestamp),
-          transactions,
+        transactions.parTraverse_(
+          Option(_)
+            .mapFilter(extractTopologyProcessorData)
+            .map(observedF(SequencedTime(clock.now), EffectiveTime(clock.now), _))
+            .getOrElse(FutureUnlessShutdown.unit)
         )
     }
 
-  def observeTopologyTransactions(
-      sequencedTime: SequencedTime,
-      effectiveTime: EffectiveTime,
-      transactions: Seq[GenericSignedTopologyTransactionX],
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    transactions.parTraverse_(
-      extractTopologyProcessorXData(_)
-        .parTraverse_(observedF(sequencedTime, effectiveTime, _))
-    )
-  }
-
-  private def extractTopologyProcessorXData(
-      transaction: GenericSignedTopologyTransactionX
-  ): Seq[(PartyId, ParticipantId, String255, Option[DisplayName])] = {
-    if (transaction.operation != TopologyChangeOpX.Replace || transaction.isProposal) {
-      Seq.empty
-    } else {
-      transaction.transaction.mapping match {
-        case PartyToParticipantX(partyId, _, _, participants, _) =>
-          participants
-            .map { hostingParticipant =>
-              // Note/CN-5291: Only remove pending submission-id once update persisted.
-              val (submissionId, displayName) = pendingAllocationData
-                .getOrElse(
-                  (partyId, hostingParticipant.participantId),
-                  (LengthLimitedString.getUuid.asString255, None),
-                )
-              (
-                partyId,
-                hostingParticipant.participantId,
-                submissionId,
-                displayName,
-              )
-            }
-        // propagate admin parties
-        case DomainTrustCertificateX(participantId, _, _, _) =>
-          Seq(
-            (
-              participantId.adminParty,
-              participantId,
-              LengthLimitedString.getUuid.asString255,
-              None,
-            )
+  private def extractTopologyProcessorData(
+      transaction: SignedTopologyTransaction[TopologyChangeOp]
+  ): Option[(PartyId, ParticipantId, String255)] =
+    Option(transaction.transaction.element.mapping)
+      .filter(_ => transaction.operation == TopologyChangeOp.Add)
+      .collect {
+        case PartyToParticipant(_, party, participant, permission) if permission.isActive =>
+          (
+            party,
+            participant,
+            transaction.transaction.element.id.toLengthLimitedString,
           )
-        case _ => Seq.empty
+        // propagate admin parties
+        case ParticipantState(_, _, participant, permission, _) if permission.isActive =>
+          (participant.adminParty, participant, LengthLimitedString.getUuid.asString255)
+
       }
-    }
-  }
 
   private val sequentialQueue = new SimpleExecutionQueue(
     "LedgerServerPartyNotifier",
@@ -174,9 +148,6 @@ class LedgerServerPartyNotifier(
       .execute(
         {
           val currentTime = clock.now
-          logger.debug(
-            s"Setting display name ${displayName.singleQuoted} for party $partyId as of $currentTime"
-          )
           updateAndNotify(
             partyId,
             Some(displayName),
@@ -254,7 +225,7 @@ class LedgerServerPartyNotifier(
       // Further races are prevented by this function being called (indirectly) within the
       // sequential queue.
       metadata.participantId.foreach(participant =>
-        pendingAllocationData.remove((metadata.partyId, participant)).discard
+        pendingAllocationSubmissionIds.remove((metadata.partyId, participant)).discard
       )
 
       scheduleNotification(metadata, sequencerTimestamp)
@@ -274,11 +245,9 @@ class LedgerServerPartyNotifier(
       .toOption match {
       case Some(timeBeforeScheduling) =>
         lazy val latestMetadata = checkForConcurrentUpdate(metadata)
-        clock
-          .scheduleAfter(notifyLedgerServer(metadata.partyId, latestMetadata), timeBeforeScheduling)
-          .discard
+        clock.scheduleAfter(notifyLedgerServer(latestMetadata), timeBeforeScheduling).discard
       case None =>
-        notifyLedgerServer(metadata.partyId, Future.successful(metadata))(clock.now)
+        notifyLedgerServer(Future.successful(metadata))(clock.now)
     }
   }
 
@@ -319,8 +288,7 @@ class LedgerServerPartyNotifier(
     }
 
   private def notifyLedgerServer(
-      partyId: PartyId,
-      fetchMetadata: => Future[PartyMetadata],
+      fetchMetadata: => Future[PartyMetadata]
   )(timestamp: CantonTimestamp)(implicit traceContext: TraceContext): Unit =
     FutureUtil.doNotAwait(
       sequentialQueue
@@ -330,21 +298,21 @@ class LedgerServerPartyNotifier(
             _ <- sendNotification(metadata)
             _ <- FutureUnlessShutdown.outcomeF(store.markNotified(metadata))
           } yield {
-            logger.debug(s"Notification for $partyId scheduled at $timestamp sent and marked")
+            logger.debug(s"Notification scheduled at $timestamp sent and marked")
           },
-          s"Notifying the ledger server about the metadata update of $partyId",
+          "Notifying the ledger server about the metadata update",
         )
         .unwrap,
-      s"Error while sending the metadata update notification for $partyId to the ledger server",
+      "Error while sending the metadata update notification to the ledger server",
     )
 
   private def observedF(
       sequencerTimestamp: SequencedTime,
       effectiveTimestamp: EffectiveTime,
-      data: (PartyId, ParticipantId, String255, Option[DisplayName]),
+      data: (PartyId, ParticipantId, String255),
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
 
-    val (party, participant, submissionId, displayName) = data
+    val (party, participant, submissionId) = data
     // start the notification in the background
     // note, that if this fails, we have an issue as ledger server will not have
     // received the event. this is generally an issue with everything we send to the
@@ -353,7 +321,7 @@ class LedgerServerPartyNotifier(
       sequentialQueue.execute(
         updateAndNotify(
           party,
-          displayName = displayName,
+          displayName = None,
           targetParticipantId = Some(participant),
           sequencerTimestamp,
           effectiveTimestamp,

@@ -64,5 +64,6 @@ object DefaultParticipantStateValues {
       optUsedPackages = None,
       optNodeSeeds = None,
       optByKeyNodes = None,
+      optDomainId = None,
     )
 }

@@ -3,12 +3,15 @@
 
 package com.digitalasset.canton.integration
 
-import com.daml.ledger.api.v1.transaction.TreeEvent
 import com.daml.ledger.api.v1.transaction.TreeEvent.Kind.{Created, Exercised}
+import com.daml.ledger.api.v1.transaction.{TransactionTree, TreeEvent}
 import com.daml.ledger.api.v1.value.Value
-import com.daml.ledger.api.v2.transaction.TransactionTree as TransactionTreeV2
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.console.{InstanceReference, LocalParticipantReference}
+import com.digitalasset.canton.console.{
+  InstanceReference,
+  InstanceReferenceWithSequencerConnection,
+  LocalParticipantReference,
+}
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
 import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, TimestampedEvent}
 import com.digitalasset.canton.tracing.TraceContext
@@ -39,11 +42,12 @@ object IntegrationTestUtilities {
   }
 
   def grabCountsRemote(
-      domain: DomainAlias,
+      domainRef: InstanceReferenceWithSequencerConnection,
       pr: SyncStateInspection,
       limit: Int = 100,
   ): GrabbedCounts = {
     implicit val traceContext: TraceContext = TraceContext.empty
+    val domain = domainRef.name
     val pcsCount = pr.findContracts(domain, None, None, None, limit = limit).length
     val acceptedTransactionCount = pr.findAcceptedTransactions(Some(domain)).length
     mkGrabCounts(pcsCount, acceptedTransactionCount, limit)
@@ -66,29 +70,28 @@ object IntegrationTestUtilities {
     GrabbedCounts(pcsCount, acceptedTransactionCount)
   }
 
+  /** @param domainRef can either be a domain reference or a sequencer reference (in a distributed domain)
+    */
   def grabCounts(
-      domainAlias: DomainAlias,
-      participant: LocalParticipantReference,
+      domainRef: InstanceReference,
+      pr: LocalParticipantReference,
       limit: Int = 100,
   ): GrabbedCounts = {
-    val pcsCount = participant.testing.pcs_search(domainAlias, limit = limit).length
-    val acceptedTransactionCount =
-      participant.testing.transaction_search(Some(domainAlias), limit = limit).length
+    val domain = domainRef.name
+    val pcsCount = pr.testing.pcs_search(domain, limit = limit).length
+    val acceptedTransactionCount = pr.testing.transaction_search(Some(domain), limit = limit).length
     mkGrabCounts(pcsCount, acceptedTransactionCount, limit)
   }
 
-  def expectedGrabbedCountsForBong(levels: Int, validators: Int = 0): GrabbedCounts = {
-    // 2^(n+2) - 3 contracts plus input BongProposal (last collapse changes to bong) for validator
-    val contracts = (math.pow(2, levels + 2d) - 3).toInt + Math.max(1, validators)
-    // 2^(n+1) + validator events expected
-    val events = (math.pow(2, levels + 1d)).toInt + Math.max(1, validators)
+  def expectedGrabbedCountsForBong(levels: Long, validators: Int = 0): GrabbedCounts = {
+    // 2^(n+2) - 3 contracts plus input ping (last collapse changes to pong) plus PingProposals for validator
+    val contracts = (math.pow(2, levels + 2d) - 3 + 1).toInt + validators
+    // 2^(n+1) + 1 + validator events expected
+    val events = (math.pow(2, levels + 1d) + 1).toInt + validators
     GrabbedCounts(contracts, events)
   }
 
-  def assertIncreasingRecordTime(
-      domain: DomainAlias,
-      pr: LocalParticipantReference,
-  ): Unit =
+  def assertIncreasingRecordTime(domain: DomainAlias, pr: LocalParticipantReference): Unit =
     assertIncreasingRecordTime(domain, alias => pr.testing.event_search(alias))
 
   def assertIncreasingRecordTime(
@@ -109,12 +112,12 @@ object IntegrationTestUtilities {
     assertIsSorted(eventsWithRecordTime)
   }
 
-  def extractSubmissionResult(tree: TransactionTreeV2): Value.Sum = {
+  def extractSubmissionResult(tree: TransactionTree): Value.Sum = {
     require(
       tree.rootEventIds.size == 1,
       s"Received transaction with not exactly one root node: $tree",
     )
-    tree.eventsById(tree.rootEventIds.head).kind match {
+    tree.eventsById(tree.rootEventIds(0)).kind match {
       case Created(created) => Value.Sum.ContractId(created.contractId)
       case Exercised(exercised) =>
         val Value(result) = exercised.exerciseResult.getOrElse(
@@ -146,16 +149,4 @@ object IntegrationTestUtilities {
     }
     pollTestCode()
   }
-
-  def runOnAllInitializedDomainsForAllOwners(
-      initializedDomains: Map[DomainAlias, InitializedDomain],
-      run: (InstanceReference, InitializedDomain) => Unit,
-      topologyAwaitIdle: Boolean,
-  ): Unit =
-    initializedDomains.foreach { case (_, initializedDomain) =>
-      if (topologyAwaitIdle) {
-        initializedDomain.domainOwners.foreach(_.topology.synchronisation.await_idle())
-      }
-      initializedDomain.domainOwners.foreach(run(_, initializedDomain))
-    }
 }

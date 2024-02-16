@@ -25,6 +25,7 @@ import com.daml.lf.transaction.{
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.{ContractInstance, ValueTrue}
 import com.daml.logging.LoggingContext
+import com.digitalasset.canton.BaseTest.{pvPackageName, pvTransactionVersion}
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{CryptoPureApi, Salt, SaltSeed}
@@ -220,7 +221,11 @@ class StoreBackedCommandExecutorSpec
     val stakeholderContract = ContractState.Active(
       contractInstance = Versioned(
         LfTransactionVersion.maxVersion,
-        ContractInstance(template = identifier, arg = Value.ValueTrue),
+        ContractInstance(
+          template = identifier,
+          packageName = pvPackageName,
+          arg = Value.ValueTrue,
+        ),
       ),
       ledgerEffectiveTime = Timestamp.now(),
       stakeholders = Set(Ref.Party.assertFromString("unexpectedSig")),
@@ -239,7 +244,9 @@ class StoreBackedCommandExecutorSpec
     val disclosedContractId: LfContractId = LfContractId.assertFromString("00" + "00" * 32 + "02")
 
     val disclosedContract: domain.DisclosedContract = domain.UpgradableDisclosedContract(
+      version = pvTransactionVersion,
       templateId = identifier,
+      packageName = pvPackageName,
       contractId = disclosedContractId,
       argument = ValueTrue,
       createdAt = mock[Timestamp],
@@ -275,7 +282,12 @@ class StoreBackedCommandExecutorSpec
             observers = Set(Ref.Party.assertFromString("observer")),
             keyOpt = Some(
               GlobalKeyWithMaintainers
-                .assertBuild(identifier, someContractKey(signatory, "some key"), Set(signatory))
+                .assertBuild(
+                  identifier,
+                  someContractKey(signatory, "some key"),
+                  Set(signatory),
+                  shared = true,
+                )
             ),
             resume = verdict => {
               ref.set(Some(verdict))
@@ -327,10 +339,10 @@ class StoreBackedCommandExecutorSpec
 
       val store = mock[ContractStore]
       when(
-        store.lookupContractState(any[LfContractId])(any[LoggingContextWithTrace])
+        store.lookupContractStateWithoutDivulgence(any[LfContractId])(any[LoggingContextWithTrace])
       ).thenReturn(Future.successful(ContractState.NotFound))
       when(
-        store.lookupContractState(same(stakeholderContractId))(
+        store.lookupContractStateWithoutDivulgence(same(stakeholderContractId))(
           any[LoggingContextWithTrace]
         )
       ).thenReturn(
@@ -339,7 +351,7 @@ class StoreBackedCommandExecutorSpec
         )
       )
       when(
-        store.lookupContractState(same(archivedContractId))(
+        store.lookupContractStateWithoutDivulgence(same(archivedContractId))(
           any[LoggingContextWithTrace]
         )
       ).thenReturn(Future.successful(ContractState.Archived))
@@ -398,14 +410,21 @@ class StoreBackedCommandExecutorSpec
         Some(divulgedContractId),
         Some(
           Some(
-            s"Contract with $divulgedContractId was not found."
+            s"Contract with $divulgedContractId was not found or it refers to a divulged contract."
           )
         ),
       )
     }
 
     "disallow archived contracts" in {
-      doTest(Some(archivedContractId), Some(Some("Contract archived")))
+      doTest(
+        Some(archivedContractId),
+        Some(
+          Some(
+            s"Contract with $archivedContractId was not found or it refers to a divulged contract."
+          )
+        ),
+      )
     }
 
     "disallow unauthorized disclosed contracts" in {

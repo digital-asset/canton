@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.ledger.configuration
 
+import com.digitalasset.canton.ledger.configuration.protobuf
+
 import java.time.Duration
 import scala.util.Try
 
@@ -22,18 +24,18 @@ final case class Configuration(
 object Configuration {
 
   /** The first configuration generation, by convention. */
-  private val StartingGeneration = 1L
+  val StartingGeneration = 1L
 
   /** Version history:
     * V1: initial version
     * V2: added maxDeduplicationTime
     */
-  private val protobufVersion = 2L
+  val protobufVersion = 2L
 
   /** A duration of 1 day is likely to be longer than any application will keep retrying, barring
     * very strange events, and should work for most ledger and participant configurations.
     */
-  private val reasonableMaxDeduplicationDuration: Duration = Duration.ofDays(1)
+  val reasonableMaxDeduplicationDuration: Duration = Duration.ofDays(1)
 
   val reasonableInitialConfiguration: Configuration = Configuration(
     generation = StartingGeneration,
@@ -41,13 +43,13 @@ object Configuration {
     maxDeduplicationDuration = reasonableMaxDeduplicationDuration,
   )
 
-  def encode(config: Configuration): v2.LedgerConfiguration = {
+  def encode(config: Configuration): protobuf.LedgerConfiguration = {
     val tm = config.timeModel
-    v2.LedgerConfiguration.newBuilder
+    protobuf.LedgerConfiguration.newBuilder
       .setVersion(protobufVersion)
       .setGeneration(config.generation)
       .setTimeModel(
-        v2.LedgerTimeModel.newBuilder
+        protobuf.LedgerTimeModel.newBuilder
           .setAvgTransactionLatency(buildDuration(tm.avgTransactionLatency))
           .setMinSkew(buildDuration(tm.minSkew))
           .setMaxSkew(buildDuration(tm.maxSkew))
@@ -57,18 +59,18 @@ object Configuration {
   }
 
   def decode(bytes: Array[Byte]): Either[String, Configuration] =
-    Try(v2.LedgerConfiguration.parseFrom(bytes)).toEither.left
+    Try(protobuf.LedgerConfiguration.parseFrom(bytes)).toEither.left
       .map(_.getMessage)
       .flatMap(decode)
 
-  def decode(config: v2.LedgerConfiguration): Either[String, Configuration] =
+  def decode(config: protobuf.LedgerConfiguration): Either[String, Configuration] =
     config.getVersion match {
       case 1 => decodeV1(config)
       case 2 => decodeV2(config)
       case v => Left(s"Unknown version: $v")
     }
 
-  private def decodeV1(config: v2.LedgerConfiguration): Either[String, Configuration] =
+  private def decodeV1(config: protobuf.LedgerConfiguration): Either[String, Configuration] =
     for {
       tm <-
         if (config.hasTimeModel) {
@@ -84,7 +86,7 @@ object Configuration {
       )
     }
 
-  private def decodeV2(config: v2.LedgerConfiguration): Either[String, Configuration] =
+  private def decodeV2(config: protobuf.LedgerConfiguration): Either[String, Configuration] =
     for {
       tm <-
         if (config.hasTimeModel) {
@@ -111,7 +113,7 @@ object Configuration {
       )
     }
 
-  private def decodeTimeModel(tm: v2.LedgerTimeModel): Either[String, LedgerTimeModel] =
+  private def decodeTimeModel(tm: protobuf.LedgerTimeModel): Either[String, LedgerTimeModel] =
     LedgerTimeModel(
       avgTransactionLatency = parseDuration(tm.getAvgTransactionLatency),
       minSkew = parseDuration(tm.getMinSkew),

@@ -11,18 +11,32 @@ import com.daml.ledger.api.v1.commands.{
 import com.daml.lf.data.ImmArray
 import com.daml.lf.transaction.TransactionCoder
 import com.digitalasset.canton.ledger.api.domain.{DisclosedContract, UpgradableDisclosedContract}
-import com.digitalasset.canton.ledger.api.validation.FieldValidator.requireContractId
+import com.digitalasset.canton.ledger.api.validation.FieldValidator.{
+  requireContractId,
+  requirePresence,
+  validateIdentifier,
+}
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.invalidArgument
-import com.digitalasset.canton.ledger.api.validation.ValueValidator.*
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import io.grpc.StatusRuntimeException
 
 import scala.collection.mutable
 
-class ValidateDisclosedContracts {
+class ValidateDisclosedContracts(explicitDisclosureFeatureEnabled: Boolean) {
   def apply(commands: ProtoCommands)(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, ImmArray[DisclosedContract]] =
     for {
+      _ <- Either.cond(
+        explicitDisclosureFeatureEnabled || commands.disclosedContracts.isEmpty,
+        (),
+        RequestValidationErrors.InvalidField
+          .Reject(
+            "disclosed_contracts",
+            "feature disabled: disclosed_contracts should not be set",
+          )
+          .asGrpcError,
+      )
       validatedDisclosedContracts <- validateDisclosedContracts(commands.disclosedContracts)
     } yield validatedDisclosedContracts
 
@@ -88,7 +102,9 @@ class ValidateDisclosedContracts {
       } yield {
         import fatContractInstance.*
         UpgradableDisclosedContract(
+          version = version,
           contractId = validatedContractId,
+          packageName = packageName,
           templateId = templateId,
           argument = createArg,
           createdAt = createdAt,

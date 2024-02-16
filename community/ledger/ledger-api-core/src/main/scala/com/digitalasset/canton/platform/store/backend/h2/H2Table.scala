@@ -14,9 +14,8 @@ private[h2] object H2Table {
   private def idempotentBatchedInsertBase[FROM](
       insertStatement: String,
       keyFieldIndex: Int,
-      ordering: Ordering[FROM],
   )(fields: Seq[(String, Field[FROM, _, _])]): Table[FROM] =
-    new BaseTable[FROM](fields, Some(ordering)) {
+    new BaseTable[FROM](fields) {
       override def executeUpdate: Array[Array[_]] => Connection => Unit =
         data =>
           connection =>
@@ -72,16 +71,11 @@ private[h2] object H2Table {
        |""".stripMargin
   }
 
-  def idempotentBatchedInsert[FROM](
-      tableName: String,
-      keyFieldIndex: Int,
-      ordering: Ordering[FROM],
-  )(
+  def idempotentBatchedInsert[FROM](tableName: String, keyFieldIndex: Int)(
       fields: (String, Field[FROM, _, _])*
   ): Table[FROM] =
     idempotentBatchedInsertBase(
       idempotentBatchedInsertStatement(tableName, fields, keyFieldIndex),
       keyFieldIndex,
-      ordering,
     )(fields)
 }

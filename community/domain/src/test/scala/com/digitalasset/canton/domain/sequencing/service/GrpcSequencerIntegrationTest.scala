@@ -18,9 +18,9 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{HashPurpose, Nonce}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.api.v30
-import com.digitalasset.canton.domain.api.v30.SequencerAuthenticationServiceGrpc.SequencerAuthenticationService
-import com.digitalasset.canton.domain.metrics.SequencerTestMetrics
+import com.digitalasset.canton.domain.api.v0
+import com.digitalasset.canton.domain.api.v0.SequencerAuthenticationServiceGrpc.SequencerAuthenticationService
+import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.domain.sequencing.SequencerParameters
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
@@ -29,13 +29,20 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.protocol.DomainParametersLookup.SequencerDomainParameters
-import com.digitalasset.canton.protocol.messages.UnsignedProtocolMessage
+import com.digitalasset.canton.protocol.messages.{
+  ProtocolMessage,
+  ProtocolMessageV0,
+  ProtocolMessageV1,
+  ProtocolMessageV2,
+  ProtocolMessageV3,
+}
 import com.digitalasset.canton.protocol.{
   DomainParametersLookup,
-  DynamicDomainParameters,
-  DynamicDomainParametersLookup,
   TestDomainParameters,
-  v30 as protocolV30,
+  v0 as protocolV0,
+  v1 as protocolV1,
+  v2 as protocolV2,
+  v3 as protocolV3,
 }
 import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
 import com.digitalasset.canton.sequencing.client.*
@@ -90,7 +97,7 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
   private val domainId = DefaultTestIdentities.domainId
   private val sequencerId = DefaultTestIdentities.sequencerId
   private val cryptoApi =
-    TestingTopologyX()
+    TestingTopology()
       .withSimpleParticipants(participant)
       .build()
       .forOwnerAndDomain(participant, domainId)
@@ -100,8 +107,8 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
   private val futureSupervisor = FutureSupervisor.Noop
   private val topologyClient = mock[DomainTopologyClient]
   private val mockTopologySnapshot = mock[TopologySnapshot]
-  private val maxRatePerParticipant = DynamicDomainParameters.defaultMaxRatePerParticipant
-  private val maxRequestSize = DynamicDomainParameters.defaultMaxRequestSize
+  private val maxRatePerParticipant = BaseTest.defaultMaxRatePerParticipant
+  private val maxRequestSize = BaseTest.defaultMaxRequestSize
 
   when(topologyClient.currentSnapshotApproximation(any[TraceContext]))
     .thenReturn(mockTopologySnapshot)
@@ -120,16 +127,18 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
       )
     )
 
-  private val domainParamsLookup: DynamicDomainParametersLookup[SequencerDomainParameters] =
+  private val domainParamsLookup: DomainParametersLookup[SequencerDomainParameters] =
     DomainParametersLookup.forSequencerDomainParameters(
-      BaseTest.defaultStaticDomainParameters,
+      BaseTest.defaultStaticDomainParametersWith(maxRatePerParticipant =
+        maxRatePerParticipant.unwrap
+      ),
       None,
       topologyClient,
       futureSupervisor,
       loggerFactory,
     )
 
-  private val authenticationCheck = new AuthenticationCheck {
+  val authenticationCheck = new AuthenticationCheck {
 
     override def authenticate(
         member: Member,
@@ -150,42 +159,39 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
   private val service =
     new GrpcSequencerService(
       sequencer,
-      SequencerTestMetrics,
+      DomainTestMetrics.sequencer,
       loggerFactory,
       authenticationCheck,
       new SubscriptionPool[GrpcManagedSubscription[_]](
         clock,
-        SequencerTestMetrics,
+        DomainTestMetrics.sequencer,
         timeouts,
         loggerFactory,
       ),
       sequencerSubscriptionFactory,
       domainParamsLookup,
       params,
-      None,
       BaseTest.testedProtocolVersion,
-      enableBroadcastOfUnauthenticatedMessages = false,
     )
   private val connectService = new GrpcSequencerConnectService(
     domainId = domainId,
     sequencerId = sequencerId,
     staticDomainParameters = BaseTest.defaultStaticDomainParameters,
     cryptoApi = cryptoApi,
+    agreementManager = None,
     loggerFactory = loggerFactory,
   )
 
   private val authService = new SequencerAuthenticationService {
-    override def challenge(
-        request: v30.SequencerAuthentication.ChallengeRequest
-    ): Future[v30.SequencerAuthentication.ChallengeResponse] =
+    override def challenge(request: v0.Challenge.Request): Future[v0.Challenge.Response] =
       for {
         fingerprints <- cryptoApi.ips.currentSnapshotApproximation
           .signingKeys(participant)
           .map(_.map(_.fingerprint).toList)
-      } yield v30.SequencerAuthentication.ChallengeResponse(
-        v30.SequencerAuthentication.ChallengeResponse.Value
+      } yield v0.Challenge.Response(
+        v0.Challenge.Response.Value
           .Success(
-            v30.SequencerAuthentication.ChallengeResponse.Success(
+            v0.Challenge.Success(
               ReleaseVersion.current.toProtoPrimitive,
               Nonce.generate(cryptoApi.pureCrypto).toProtoPrimitive,
               fingerprints.map(_.unwrap),
@@ -193,13 +199,13 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
           )
       )
     override def authenticate(
-        request: v30.SequencerAuthentication.AuthenticateRequest
-    ): Future[v30.SequencerAuthentication.AuthenticateResponse] =
+        request: v0.Authentication.Request
+    ): Future[v0.Authentication.Response] =
       Future.successful(
-        v30.SequencerAuthentication.AuthenticateResponse(
-          v30.SequencerAuthentication.AuthenticateResponse.Value
+        v0.Authentication.Response(
+          v0.Authentication.Response.Value
             .Success(
-              v30.SequencerAuthentication.AuthenticateResponse.Success(
+              v0.Authentication.Success(
                 AuthenticationToken.generate(cryptoApi.pureCrypto).toProtoPrimitive,
                 Some(clock.now.plusSeconds(100000).toProtoPrimitive),
               )
@@ -208,12 +214,12 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
       )
   }
   private val serverPort = UniquePortGenerator.next
-  logger.debug(s"Using port $serverPort for integration test")
+  logger.debug(s"Using port ${serverPort} for integration test")
   private val server = NettyServerBuilder
     .forPort(serverPort.unwrap)
-    .addService(v30.SequencerConnectServiceGrpc.bindService(connectService, ec))
-    .addService(v30.SequencerServiceGrpc.bindService(service, ec))
-    .addService(v30.SequencerAuthenticationServiceGrpc.bindService(authService, ec))
+    .addService(v0.SequencerConnectServiceGrpc.bindService(connectService, ec))
+    .addService(v0.SequencerServiceGrpc.bindService(service, ec))
+    .addService(v0.SequencerAuthenticationServiceGrpc.bindService(authService, ec))
     .build()
     .start()
 
@@ -222,7 +228,7 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
   private val connection =
     GrpcSequencerConnection(
       NonEmpty(Seq, Endpoint("localhost", serverPort)),
-      transportSecurity = false,
+      false,
       None,
       SequencerAlias.Default,
     )
@@ -235,6 +241,7 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
         domainId,
         cryptoApi,
         cryptoApi.crypto,
+        agreedAgreementId = None,
         SequencerClientConfig(),
         TracingConfig.Propagation.Disabled,
         TestingConfigInternal(),
@@ -298,6 +305,7 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
       sequencerSubscriptionFactory
         .create(
           any[SequencerCounter],
+          any[String],
           any[Member],
           any[SerializedEventOrErrorHandler[NotUsed]],
         )(any[TraceContext])
@@ -394,15 +402,43 @@ class GrpcSequencerIntegrationTest
     }
   }
 
-  private case object MockProtocolMessage extends UnsignedProtocolMessage {
+  private case object MockProtocolMessage
+      extends ProtocolMessage
+      with ProtocolMessageV0
+      with ProtocolMessageV1
+      with ProtocolMessageV2
+      with ProtocolMessageV3 {
+    // no significance to this payload, just need anything valid and this was the easiest to construct
+    private val payload =
+      protocolV0.SignedProtocolMessage(
+        None,
+        protocolV0.SignedProtocolMessage.SomeSignedProtocolMessage.Empty,
+      )
+
     override def representativeProtocolVersion: RepresentativeProtocolVersion[companionObj.type] =
       ???
 
     override protected lazy val companionObj = MockProtocolMessage
 
     override def domainId: DomainId = DefaultTestIdentities.domainId
+    override def toProtoEnvelopeContentV0: protocolV0.EnvelopeContent =
+      protocolV0.EnvelopeContent(
+        protocolV0.EnvelopeContent.SomeEnvelopeContent.SignedMessage(payload)
+      )
 
-    override def toProtoSomeEnvelopeContentV30: protocolV30.EnvelopeContent.SomeEnvelopeContent =
-      protocolV30.EnvelopeContent.SomeEnvelopeContent.Empty
+    override def toProtoEnvelopeContentV1: protocolV1.EnvelopeContent =
+      protocolV1.EnvelopeContent(
+        protocolV1.EnvelopeContent.SomeEnvelopeContent.SignedMessage(payload)
+      )
+
+    override def toProtoEnvelopeContentV2: protocolV2.EnvelopeContent =
+      protocolV2.EnvelopeContent(
+        protocolV2.EnvelopeContent.SomeEnvelopeContent.SignedMessage(payload)
+      )
+
+    override def toProtoEnvelopeContentV3: protocolV3.EnvelopeContent =
+      protocolV3.EnvelopeContent(
+        protocolV3.EnvelopeContent.SomeEnvelopeContent.SignedMessage(payload)
+      )
   }
 }

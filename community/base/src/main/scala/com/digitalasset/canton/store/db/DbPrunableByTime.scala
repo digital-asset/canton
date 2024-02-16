@@ -5,6 +5,7 @@ package com.digitalasset.canton.store.db
 
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedString, PrunableByTime}
@@ -42,19 +43,22 @@ trait DbPrunableByTime[PartitionKey] extends PrunableByTime {
 
   import storage.api.*
 
+  protected val processingTime: TimedLoadGauge
+
   override def pruningStatus(implicit
       traceContext: TraceContext
-  ): Future[Option[PruningStatus]] = {
-    val query = sql"""
+  ): Future[Option[PruningStatus]] =
+    processingTime.event {
+      val query = sql"""
         select phase, ts, succeeded from #$pruning_status_table
         where #$partitionColumn = $partitionKey
         """.as[PruningStatus].headOption
-    storage.query(query, functionFullName)
-  }
+      storage.query(query, functionFullName)
+    }
 
   protected[canton] def advancePruningTimestamp(phase: PruningPhase, timestamp: CantonTimestamp)(
       implicit traceContext: TraceContext
-  ): Future[Unit] = {
+  ): Future[Unit] = processingTime.event {
 
     val query = (storage.profile, phase) match {
       case (_: DbStorage.Profile.Postgres, PruningPhase.Completed) =>

@@ -5,8 +5,7 @@ package com.digitalasset.canton.sequencing.protocol
 
 import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.config.CantonRequireTypes.String73
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, GeneratorsDataTime}
 import com.digitalasset.canton.protocol.TargetDomainId
 import com.digitalasset.canton.protocol.messages.{GeneratorsMessages, ProtocolMessage}
 import com.digitalasset.canton.time.TimeProofTestUtil
@@ -19,33 +18,20 @@ import org.scalacheck.{Arbitrary, Gen}
 
 final class GeneratorsProtocol(
     protocolVersion: ProtocolVersion,
+    generatorsDataTime: GeneratorsDataTime,
     generatorsMessages: GeneratorsMessages,
 ) {
   import com.digitalasset.canton.Generators.*
   import com.digitalasset.canton.config.GeneratorsConfig.*
-  import com.digitalasset.canton.crypto.GeneratorsCrypto.*
-  import com.digitalasset.canton.data.GeneratorsDataTime.*
   import com.digitalasset.canton.topology.GeneratorsTopology.*
-  import generatorsMessages.*
+  import generatorsDataTime.*
 
   implicit val acknowledgeRequestArb: Arbitrary[AcknowledgeRequest] = Arbitrary(for {
     ts <- Arbitrary.arbitrary[CantonTimestamp]
     member <- Arbitrary.arbitrary[Member]
   } yield AcknowledgeRequest(member, ts, protocolVersion))
 
-  implicit val aggregationRuleArb: Arbitrary[AggregationRule] =
-    Arbitrary(
-      for {
-        threshold <- Arbitrary.arbitrary[PositiveInt]
-        eligibleMembers <- Generators.nonEmptyListGen[Member]
-      } yield AggregationRule(eligibleMembers, threshold)(
-        AggregationRule.protocolVersionRepresentativeFor(protocolVersion)
-      )
-    )
-
-  implicit val groupRecipientArb: Arbitrary[GroupRecipient] = genArbitrary
   implicit val recipientArb: Arbitrary[Recipient] = genArbitrary
-  implicit val memberRecipientArb: Arbitrary[MemberRecipient] = genArbitrary
 
   private def recipientsTreeGen(
       recipientArb: Arbitrary[Recipient]
@@ -64,26 +50,19 @@ final class GeneratorsProtocol(
   }
 
   implicit val recipientsArb: Arbitrary[Recipients] = {
-
-    val protocolVersionDependentRecipientGen = Arbitrary.arbitrary[Recipient]
-
     Arbitrary(for {
       depths <- nonEmptyListGen(Arbitrary(Gen.choose(0, 3)))
       trees <- Gen.sequence[List[RecipientsTree], RecipientsTree](
-        depths.forgetNE.map(recipientsTreeGen(Arbitrary(protocolVersionDependentRecipientGen)))
+        depths.forgetNE.map(recipientsTreeGen(implicitly[Arbitrary[Recipient]])(_))
       )
     } yield Recipients(NonEmptyUtil.fromUnsafe(trees)))
   }
 
-  implicit val closedEnvelopeArb: Arbitrary[ClosedEnvelope] = Arbitrary(for {
-    bytes <- Arbitrary.arbitrary[ByteString]
-    signatures <- Gen.listOfN(5, signatureArb.arbitrary)
-
-    recipients <- recipientsArb.arbitrary
-  } yield ClosedEnvelope.create(bytes, recipients, signatures, protocolVersion))
-
-  implicit val mediatorsOfDomainArb: Arbitrary[MediatorsOfDomain] = Arbitrary(
-    Arbitrary.arbitrary[NonNegativeInt].map(MediatorsOfDomain(_))
+  implicit val closedEnvelopeArb: Arbitrary[ClosedEnvelope] = Arbitrary(
+    for {
+      bytes <- Arbitrary.arbitrary[ByteString]
+      recipients <- recipientsArb.arbitrary
+    } yield ClosedEnvelope(bytes, recipients, protocolVersion)
   )
 
   implicit val messageIdArb: Arbitrary[MessageId] = Arbitrary(
@@ -92,7 +71,7 @@ final class GeneratorsProtocol(
 
   implicit val openEnvelopArb: Arbitrary[OpenEnvelope[ProtocolMessage]] = Arbitrary(
     for {
-      protocolMessage <- protocolMessageArb.arbitrary
+      protocolMessage <- generatorsMessages.protocolMessageGen
       recipients <- recipientsArb.arbitrary
     } yield OpenEnvelope(protocolMessage, recipients)(protocolVersion)
   )
@@ -130,19 +109,14 @@ final class GeneratorsProtocol(
         envelopes <- Generators.nonEmptyListGen[ClosedEnvelope](closedEnvelopeArb)
         batch = Batch(envelopes.map(_.closeEnvelope), protocolVersion)
         maxSequencingTime <- Arbitrary.arbitrary[CantonTimestamp]
-        aggregationRule <- Gen.option(Arbitrary.arbitrary[AggregationRule])
-        topologyTimestamp <-
-          if (aggregationRule.nonEmpty)
-            Arbitrary.arbitrary[CantonTimestamp].map(Some(_))
-          else Gen.const(None)
+        timestampOfSigningKey = None
       } yield SubmissionRequest.tryCreate(
         sender,
         messageId,
         isRequest,
         batch,
         maxSequencingTime,
-        topologyTimestamp,
-        aggregationRule,
+        timestampOfSigningKey,
         SubmissionRequest.protocolVersionRepresentativeFor(protocolVersion).representative,
       )
     )

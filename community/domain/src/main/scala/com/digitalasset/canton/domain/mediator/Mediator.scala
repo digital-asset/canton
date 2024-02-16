@@ -28,7 +28,7 @@ import com.digitalasset.canton.protocol.messages.{
 }
 import com.digitalasset.canton.protocol.{DynamicDomainParametersWithValidity, RequestId}
 import com.digitalasset.canton.sequencing.*
-import com.digitalasset.canton.sequencing.client.RichSequencerClient
+import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.handlers.DiscardIgnoredEvents
 import com.digitalasset.canton.sequencing.protocol.{
   ClosedEnvelope,
@@ -42,12 +42,7 @@ import com.digitalasset.canton.store.{SequencedEventStore, SequencerCounterTrack
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessorCommon
-import com.digitalasset.canton.topology.{
-  DomainId,
-  DomainOutboxStatus,
-  MediatorId,
-  TopologyManagerStatus,
-}
+import com.digitalasset.canton.topology.{DomainId, MediatorId, TopologyManagerStatus}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.FutureInstances.parallelFuture
@@ -64,12 +59,11 @@ private[mediator] class Mediator(
     val domain: DomainId,
     val mediatorId: MediatorId,
     @VisibleForTesting
-    val sequencerClient: RichSequencerClient,
+    val sequencerClient: SequencerClient,
     val topologyClient: DomainTopologyClientWithInit,
     private[canton] val syncCrypto: DomainSyncCryptoClient,
     topologyTransactionProcessor: TopologyTransactionProcessorCommon,
     val topologyManagerStatusO: Option[TopologyManagerStatus],
-    val domainOutboxStatusO: Option[DomainOutboxStatus],
     timeTrackerConfig: DomainTimeTrackerConfig,
     state: MediatorState,
     private[canton] val sequencerCounterTrackerStore: SequencerCounterTrackerStore,
@@ -91,7 +85,7 @@ private[mediator] class Mediator(
       clock,
       logger,
       parameters.delayLoggingThreshold,
-      metrics.sequencerClient.handler.delay,
+      metrics.sequencerClient.delay,
     )
 
   val timeTracker = DomainTimeTracker(

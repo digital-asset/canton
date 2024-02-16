@@ -156,7 +156,7 @@ class SequencerInfoLoader(
       _ <- performHandshake(client, domainAlias, sequencerAlias)
 
       domainParameters <- client
-        .getDomainParameters(domainAlias.unwrap)
+        .getDomainParameters(domainAlias)
         .leftMap(SequencerInfoLoader.fromSequencerConnectClientError(domainAlias))
     } yield (bootstrapInfo, domainParameters)
   }

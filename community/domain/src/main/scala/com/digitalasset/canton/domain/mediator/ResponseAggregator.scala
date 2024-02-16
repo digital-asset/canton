@@ -12,8 +12,15 @@ import com.digitalasset.canton.data.{CantonTimestamp, ConfirmingParty, Informee,
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
-import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.protocol.{RequestId, RootHash}
+import com.digitalasset.canton.protocol.messages.{
+  LocalApprove,
+  LocalReject,
+  LocalVerdict,
+  Malformed,
+  MediatorRequest,
+  MediatorResponse,
+}
+import com.digitalasset.canton.protocol.{RequestId, RootHash, ViewHash}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.util.ErrorUtil
@@ -64,7 +71,6 @@ trait ResponseAggregator extends HasLoggerName with Product with Serializable {
       ec: ExecutionContext,
       loggingContext: NamedLoggingContext,
   ): OptionT[Future, List[(VKEY, Set[LfPartyId])]] = {
-    implicit val tc = loggingContext.traceContext
     def authorizedPartiesOfSender(
         viewKey: VKEY,
         declaredConfirmingParties: Set[ConfirmingParty],
@@ -75,15 +81,14 @@ trait ResponseAggregator extends HasLoggerName with Product with Serializable {
             Map("requestId" -> requestId.toString, "reportedBy" -> show"$sender")
           )
           val hostedConfirmingPartiesF =
-            topologySnapshot.canConfirm(
-              sender,
-              declaredConfirmingParties.map(_.party),
-            )
+            declaredConfirmingParties.toList
+              .parFilterA(p => topologySnapshot.canConfirm(sender, p.party, p.requiredTrustLevel))
+              .map(_.toSet)
           val res = hostedConfirmingPartiesF.map { hostedConfirmingParties =>
             loggingContext.debug(
               show"Malformed response $responseTimestamp for $viewKey considered as a rejection on behalf of $hostedConfirmingParties"
             )
-            Some(hostedConfirmingParties): Option[Set[LfPartyId]]
+            Some(hostedConfirmingParties.map(_.party)): Option[Set[LfPartyId]]
           }
           OptionT(res)
 
@@ -105,14 +110,12 @@ trait ResponseAggregator extends HasLoggerName with Product with Serializable {
             expectedConfirmingParties =
               declaredConfirmingParties.filter(p => confirmingParties.contains(p.party))
             unauthorizedConfirmingParties <- OptionT.liftF(
-              topologySnapshot
-                .canConfirm(
-                  sender,
-                  expectedConfirmingParties.map(_.party),
-                )
-                .map { confirmingParties =>
-                  (expectedConfirmingParties.map(_.party) -- confirmingParties)
+              expectedConfirmingParties.toList
+                .parFilterA { p =>
+                  topologySnapshot.canConfirm(sender, p.party, p.requiredTrustLevel).map(x => !x)
                 }
+                .map(_.map(_.party))
+                .map(_.toSet)
             )
             _ <-
               if (unauthorizedConfirmingParties.isEmpty) OptionT.some[Future](())
@@ -129,10 +132,10 @@ trait ResponseAggregator extends HasLoggerName with Product with Serializable {
 
     for {
       _ <- OptionT.fromOption[Future](rootHashO.traverse_ { rootHash =>
-        if (request.rootHash == rootHash) Some(())
+        if (request.rootHash.forall(_ == rootHash)) Some(())
         else {
           val cause =
-            show"Received a mediator response at $responseTimestamp by $sender for request $requestId with an invalid root hash $rootHash instead of ${request.rootHash}. Discarding response..."
+            show"Received a mediator response at $responseTimestamp by $sender for request $requestId with an invalid root hash $rootHash instead of ${request.rootHash.showValueOrNone}. Discarding response..."
           val alarm = MediatorError.MalformedMessage.Reject(cause)
           alarm.report()
 
@@ -157,13 +160,17 @@ trait ResponseAggregator extends HasLoggerName with Product with Serializable {
             val informeesByView = ViewKey[VKEY].informeesAndThresholdByKey(request)
             val ret = informeesByView.toList
               .parTraverseFilter { case (viewKey, (informees, _threshold)) =>
-                val confirmingParties = informees.collect { case cp: ConfirmingParty => cp.party }
-                topologySnapshot.canConfirm(sender, confirmingParties).map { partiesCanConfirm =>
-                  val hostedConfirmingParties = confirmingParties.toSeq
-                    .filter(partiesCanConfirm.contains(_))
-                  Option.when(hostedConfirmingParties.nonEmpty)(
-                    viewKey -> hostedConfirmingParties.toSet
-                  )
+                val hostedConfirmingPartiesF = informees.toList.parTraverseFilter {
+                  case ConfirmingParty(party, _, requiredTrustLevel) =>
+                    topologySnapshot
+                      .canConfirm(sender, party, requiredTrustLevel)
+                      .map(x => if (x) Some(party) else None)
+                  case _ => Future.successful(None)
+                }
+                hostedConfirmingPartiesF.map { hostedConfirmingParties =>
+                  if (hostedConfirmingParties.nonEmpty)
+                    Some(viewKey -> hostedConfirmingParties.toSet)
+                  else None
                 }
               }
               .map { viewsWithConfirmingPartiesForSender =>
@@ -223,5 +230,17 @@ object ViewKey {
       request.informeesAndThresholdByViewPosition
 
     override def treeOf(t: ViewPosition): Tree = t.pretty.treeOf(t)
+  }
+  implicit case object ViewHashKey extends ViewKey[ViewHash] {
+    override def name: String = "view hash"
+
+    override def keyOfResponse(response: MediatorResponse): Option[ViewHash] = response.viewHashO
+
+    override def informeesAndThresholdByKey(
+        request: MediatorRequest
+    ): Map[ViewHash, (Set[Informee], NonNegativeInt)] =
+      request.informeesAndThresholdByViewHash
+
+    override def treeOf(t: ViewHash): Tree = t.pretty.treeOf(t)
   }
 }

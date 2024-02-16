@@ -3,14 +3,13 @@
 
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
-import cats.data.{Chain, NonEmptyChain}
+import cats.data.{Chain, EitherT, NonEmptyChain}
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.data.CantonTimestamp.{Epoch, ofEpochMilli}
-import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.pretty.PrettyPrinting
 import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetector.*
 import com.digitalasset.canton.participant.protocol.conflictdetection.LockableState.{
@@ -34,6 +33,12 @@ import com.digitalasset.canton.participant.store.ActiveContractStore.{
   Status,
   TransferredAway,
 }
+import com.digitalasset.canton.participant.store.ContractKeyJournal.{
+  Assigned,
+  ContractKeyJournalError,
+  ContractKeyState,
+  Unassigned,
+}
 import com.digitalasset.canton.participant.store.TransferStore.{
   TransferAlreadyCompleted,
   TransferCompleted,
@@ -46,18 +51,19 @@ import com.digitalasset.canton.participant.store.memory.{
   TransferCacheTest,
 }
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange}
-import com.digitalasset.canton.protocol.{ExampleTransactionFactory, LfContractId, TransferId}
+import com.digitalasset.canton.protocol.{
+  ExampleTransactionFactory,
+  LfContractId,
+  LfGlobalKey,
+  TransferId,
+}
 import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{Checked, CheckedT}
 import com.digitalasset.canton.version.HasTestCloseContext
-import com.digitalasset.canton.{
-  BaseTest,
-  HasExecutorService,
-  RequestCounter,
-  TransferCounter,
-  TransferCounterO,
-}
+import com.digitalasset.canton.{BaseTest, HasExecutorService, RequestCounter}
 import org.scalactic.source
+import org.scalactic.source.Position
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -86,22 +92,24 @@ class ConflictDetectorTest
   private val transfer1 = TransferId(sourceDomain1, Epoch)
   private val transfer2 = TransferId(sourceDomain2, Epoch)
 
-  private val initialTransferCounter: TransferCounterO =
-    Some(TransferCounter.Genesis)
-  private val transferCounter1 = initialTransferCounter.map(_ + 1)
-  private val transferCounter2 = initialTransferCounter.map(_ + 2)
+  private val key1: LfGlobalKey = ContractKeyJournalTest.globalKey(1)
+  private val key2: LfGlobalKey = ContractKeyJournalTest.globalKey(2)
+  private val key3: LfGlobalKey = ContractKeyJournalTest.globalKey(3)
+  private val key4: LfGlobalKey = ContractKeyJournalTest.globalKey(4)
+  private val key5: LfGlobalKey = ContractKeyJournalTest.globalKey(5)
 
-  private val active = Active(initialTransferCounter)
-
+  private val active = Active
   private def defaultTransferCache: TransferCache =
     new TransferCache(new InMemoryTransferStore(targetDomain, loggerFactory), loggerFactory)
 
   private def mkCd(
       acs: ActiveContractStore = mkEmptyAcs(),
+      ckj: ContractKeyJournal = mkEmptyCkj(),
       transferCache: TransferCache = defaultTransferCache,
   ): ConflictDetector =
     new ConflictDetector(
       acs,
+      ckj,
       transferCache,
       loggerFactory,
       true,
@@ -138,24 +146,35 @@ class ConflictDetectorTest
           (coid00, tocN5, active),
           (coid01, tocN5, active),
         )
-        cd = mkCd(acs)
+        ckj <- mkCkj(
+          (key1, tocN5, Assigned)
+        )
+        cd = mkCd(acs, ckj)
 
         actSet = mkActivenessSet(
           deact = Set(coid00),
           useOnly = Set(coid01),
           create = Set(coid10),
+          freeKeys = Set(key3),
+          assignKeys = Set(key2),
+          unassignKeys = Set(key1),
           prior = Set(coid00, coid10),
         )
         actRes = mkActivenessResult(prior = Map(coid00 -> Some(active), coid10 -> None))
         commitSet = mkCommitSet(
           arch = Set(coid00),
           create = Set(coid10),
+          keys = Map(key1 -> Unassigned, key2 -> Assigned),
         )
         _ <- singleCRwithTR(cd, rc, actSet, actRes, commitSet, ts)
 
         _ <- checkContractState(acs, coid00, Archived -> toc)("consumed contract is archived")
         _ <- checkContractState(acs, coid01, active -> tocN5)("fetched contract remains active")
         _ <- checkContractState(acs, coid10, active -> toc)("created contract is active")
+
+        _ <- checkKeyState(ckj, key1, Unassigned -> toc)("Unassigned key is unassigned")
+        _ <- checkKeyState(ckj, key2, Assigned -> toc)("Assigned key is assigned")
+        _ <- checkKeyState(ckj, key3, None)("Unknown key remains unknown")
       } yield succeed
     }
 
@@ -211,6 +230,17 @@ class ConflictDetectorTest
       } yield assert(failure.isInstanceOf[ConflictDetectionStoreAccessError])
     }
 
+    "complain about failing contract key journal reads" in {
+      val cd = mkCd(ckj = new ThrowingCkj[RuntimeException](msg => new RuntimeException(msg)))
+      for {
+        failure <- cd
+          .registerActivenessSet(RequestCounter(0), mkActivenessSet(freeKeys = Set(key1)))
+          .failed
+      } yield {
+        assert(failure.isInstanceOf[ConflictDetectionStoreAccessError])
+      }
+    }
+
     "complain about requests in flight" in {
       val cd = mkCd()
       for {
@@ -261,7 +291,8 @@ class ConflictDetectorTest
       for {
         rawAcs <- mkAcs()
         acs = new HookedAcs(rawAcs)
-        cd = mkCd(acs)
+        ckj <- mkCkj()
+        cd = mkCd(acs, ckj)
 
         cr <- prefetchAndCheck(cd, rc, mkActivenessSet(create = Set(coid00)))
         _ = acs.setCreateHook { (_, _) =>
@@ -296,12 +327,20 @@ class ConflictDetectorTest
           (coid10, toc2, Archived),
         )
         acs = new HookedAcs(rawAcs)(parallelExecutionContext)
-        cd = mkCd(acs)
+        rawCkj <- mkCkj(
+          (key1, toc1, Assigned),
+          (key2, toc2, Unassigned),
+        )
+        ckj = new PreUpdateHookCkj(rawCkj)(parallelExecutionContext)
+        cd = mkCd(acs, ckj)
 
         actSet = mkActivenessSet(
           deact = Set(coid00, coid01, coid10),
           useOnly = Set(coid11, coid20),
           create = Set(coid21, coid22),
+          freeKeys = Set(key3),
+          assignKeys = Set(key2, key4),
+          unassignKeys = Set(key1),
         )
         cr <- prefetchAndCheck(cd, rc, actSet)
 
@@ -318,10 +357,15 @@ class ConflictDetectorTest
         _ = checkContractState(cd, coid21, 0, 1, 0)(s"lock contract $coid21 for creation")
         _ = checkContractState(cd, coid22, 0, 1, 0)(s"lock contract $coid22 for creation")
 
+        _ = checkKeyState(cd, key1, Assigned, toc1, 0, 1, 0)(show"lock key $key1")
+        _ = checkKeyState(cd, key2, Unassigned, toc2, 0, 1, 0)(show"lock key $key2")
+        _ = checkKeyState(cd, key4, 0, 1, 0)(show"lock key $key4")
+        _ = checkKeyStateAbsent(cd, key3)(show"do not keep key $key3 in memory")
+
         toc = TimeOfChange(rc, ofEpochMilli(2))
         _ = acs.setCreateHook { (coids, ToC) =>
           Future.successful {
-            assert(coids.toSet == Set(coid21 -> initialTransferCounter) && ToC == toc)
+            assert(coids.toSet == Set(coid21) && ToC == toc)
             checkContractState(cd, coid21, active, toc, 0, 0, 1)(s"Contract $coid01 is active")
             checkContractStateAbsent(cd, coid22)(
               s"Rolled-back creation for contract $coid22 is evicted"
@@ -337,11 +381,27 @@ class ConflictDetectorTest
             checkContractStateAbsent(cd, coid01)(s"Non-archived contract $coid01 is evicted.")
           }
         }
+        keyUpdates = Map(
+          key1 -> (Unassigned, toc),
+          key2 -> (Assigned, toc),
+          key4 -> (Assigned, toc),
+        )
+        _ = ckj.setUpdateHook { keys =>
+          EitherT.pure {
+            assert(keys == keyUpdates)
+            forEvery(keyUpdates) { case (key, (newStatus, toc)) =>
+              checkKeyState(cd, key, newStatus, toc, 0, 0, 1)(
+                show"Key $key is $newStatus with pending write"
+              )
+            }
+          }
+        }
         fin <- cd
           .finalizeRequest(
             mkCommitSet(
               arch = Set(coid00),
               create = Set(coid21),
+              keys = keyUpdates.view.mapValues(_._1).toMap,
             ),
             toc,
           )
@@ -352,6 +412,9 @@ class ConflictDetectorTest
         _ = checkContractStateAbsent(cd, coid00)(s"evict archived contract $coid00")
         _ = checkContractStateAbsent(cd, coid01)(s"evict unlocked non-archived contract $coid01")
         _ = checkContractStateAbsent(cd, coid21)(s"evict created contract $coid21")
+        _ = checkKeyStateAbsent(cd, key1)(s"evict unassigned key $key1")
+        _ = checkKeyStateAbsent(cd, key2)(s"evict reassigned key $key2")
+        _ = checkKeyStateAbsent(cd, key4)(s"evict freshly assigned key $key3")
       } yield succeed
     }
 
@@ -361,19 +424,20 @@ class ConflictDetectorTest
       val toc = TimeOfChange(rc, ts)
       val cd = mkCd()
       val actSet0 =
-        mkActivenessSet(create = Set(coid00, coid01))
+        mkActivenessSet(create = Set(coid00, coid01), assignKeys = Set(key1, key2))
       val commitSet0 =
-        mkCommitSet(create = Set(coid00, coid01))
+        mkCommitSet(create = Set(coid00, coid01), keys = Map(key1 -> Assigned, key2 -> Assigned))
       val actSet1 =
-        mkActivenessSet(deact = Set(coid00))
+        mkActivenessSet(deact = Set(coid00), unassignKeys = Set(key1), prior = Set(coid00))
       for {
         cr0 <- prefetchAndCheck(cd, rc, actSet0)
         _ = cr0 shouldBe mkActivenessResult()
         cr1 <- prefetchAndCheck(cd, rc + 1L, actSet1)
-        _ = cr1 shouldBe mkActivenessResult(locked = Set(coid00))
+        _ = cr1 shouldBe mkActivenessResult(locked = Set(coid00), lockedKeys = Set(key1))
         _ = checkContractState(cd, coid00, 0, 1 + 1, 0)(
           s"Nonexistent contract $coid00 is locked for activation and deactivation"
         )
+        _ = checkKeyState(cd, key1, 0, 1 + 1, 0)(show"Unknown key $key1 is locked twice")
 
         fin1 <- cd
           .finalizeRequest(CommitSet.empty, TimeOfChange(rc + 1, ts.plusMillis(1)))
@@ -383,11 +447,15 @@ class ConflictDetectorTest
         _ = checkContractState(cd, coid00, 0, 1, 0)(
           s"Rollback of request ${rc + 1} releases the deactivation lock."
         )
+        _ = checkKeyState(cd, key1, 0, 1, 0)(show"Rollback of request ${rc + 1} releases key lock.")
 
         fin0 <- cd.finalizeRequest(commitSet0, toc).flatten.failOnShutdown
         _ = fin0 shouldBe Right(())
         _ = forEvery(Seq(coid00, coid01)) { coid =>
           checkContractStateAbsent(cd, coid)(s"created contract $coid is evicted")
+        }
+        _ = forEvery(Seq(key1, key2)) { key =>
+          checkKeyStateAbsent(cd, key)(show"Assigned key $key is evicted")
         }
       } yield succeed
     }
@@ -408,13 +476,21 @@ class ConflictDetectorTest
           (coid11, toc2, active),
         )
         acs = new HookedAcs(rawAcs)(parallelExecutionContext)
-        cd = mkCd(acs)
+        rawCkj <- mkCkj(
+          (key1, toc0, Assigned),
+          (key2, toc0, Assigned),
+          (key2, toc1, Unassigned),
+        )
+        ckj = new PreUpdateHookCkj(rawCkj)(parallelExecutionContext)
+        cd = mkCd(acs, ckj)
 
         // Activeness check for the first request
         actSet1 = mkActivenessSet(
           deact = Set(coid00, coid11),
           useOnly = Set(coid10),
           create = Set(coid20, coid21),
+          assignKeys = Set(key2, key3, key4),
+          unassignKeys = Set(key1),
         )
         cr1 <- prefetchAndCheck(cd, rc, actSet1)
         _ = cr1 shouldBe mkActivenessResult()
@@ -425,16 +501,23 @@ class ConflictDetectorTest
           s"locked consumed contract $coid01"
         )
         _ = checkContractStateAbsent(cd, coid10)(s"evict used-only contract $coid10")
+        _ = checkKeyState(cd, key1, Assigned, toc0, 0, 1, 0)(show"Lock assigned key $key1")
+        _ = checkKeyState(cd, key2, Unassigned, toc1, 0, 1, 0)(show"Lock free key $key2")
+        _ = checkKeyState(cd, key3, 0, 1, 0)(show"Lock unknown key $key3")
+        _ = checkKeyState(cd, key4, 0, 1, 0)(show"Lock unknown key $key4")
 
         // Prefetch a third request
         actSet3 = mkActivenessSet(
           deact = Set(coid00, coid11),
           useOnly = Set(coid01, coid10, coid21),
+          freeKeys = Set(key1),
+          assignKeys = Set(key2, key4),
           prior = Set(coid01, coid21),
         )
         actRes3 = mkActivenessResult(
           locked = Set(coid00, coid10, coid21),
           notActive = Map(coid01 -> Archived, coid11 -> Archived),
+          lockedKeys = Set(key1),
           prior = Map(coid01 -> Some(Archived)),
         )
         _ <- cd.registerActivenessSet(rc + 2, actSet3).failOnShutdown
@@ -444,11 +527,15 @@ class ConflictDetectorTest
         actSet2 = mkActivenessSet(
           deact = Set(coid00, coid10, coid20, coid21),
           useOnly = Set(coid11, coid01),
+          freeKeys = Set(key2),
+          unassignKeys = Set(key3),
+          assignKeys = Set(key1),
           prior = Set(coid00, coid10, coid20),
         )
         actRes2 = mkActivenessResult(
           locked = Set(coid00, coid11, coid20, coid21),
           notActive = Map(coid01 -> Archived),
+          lockedKeys = Set(key1, key2, key3),
           prior = Map(coid10 -> Some(active)),
         )
         cr2 <- prefetchAndCheck(cd, rc2, actSet2)
@@ -465,6 +552,12 @@ class ConflictDetectorTest
         )
         _ = checkContractState(cd, coid20, 0, 1 + 1, 0)(s"Contract $coid20 in creation is locked")
         _ = checkContractState(cd, coid21, 1, 1 + 1, 0)(s"Contract $coid21 in creation is locked")
+        _ = checkKeyState(cd, key1, Assigned, toc0, 1, 1 + 1, 0)(
+          show"Assigned key $key1 is locked twice"
+        )
+        _ = checkKeyState(cd, key2, Unassigned, toc1, 1, 1, 0)(show"Key $key2 is locked only once")
+        _ = checkKeyState(cd, key3, 0, 1 + 1, 0)(show"Unknown key $key3 is locked twice")
+        _ = checkKeyState(cd, key4, 1, 1 + 0, 0)(show"Fresh key $key4 is locked once")
 
         // Check that the in-memory states of contracts are as expected after finalizing the first request, but before the updates are persisted
         _ = acs.setCreateHook { (_, _) =>
@@ -481,9 +574,23 @@ class ConflictDetectorTest
             checkContractState(cd, coid11, Archived, toc, 1, 0, 1)(s"$coid11 is being archived")
           }
         }
+        _ = ckj.setUpdateHook { _ =>
+          EitherT.pure {
+            checkKeyState(cd, key1, Unassigned, toc, 1, 1, 1)(
+              show"Key $key1 gets unassigned, but remains locked"
+            )
+            checkKeyState(cd, key2, Unassigned, toc1, 1, 0, 0)(
+              show"Key $key2 with pending activeness check remains in memory"
+            )
+            checkKeyState(cd, key3, Assigned, toc, 0, 1, 1)(
+              show"Key $key3 gets assigned and remains locked"
+            )
+          }
+        }
         commitSet1 = mkCommitSet(
           arch = Set(coid11),
           create = Set(coid20),
+          keys = Map(key3 -> Assigned, key1 -> Unassigned),
         )
         fin1 <- cd.finalizeRequest(commitSet1, toc).flatten.failOnShutdown
         _ = assert(fin1 == Right(()))
@@ -495,6 +602,9 @@ class ConflictDetectorTest
           s"Created contract $coid20 remains locked"
         )
         _ = checkContractState(cd, coid21, 1, 1, 0)(s"Rolled back $coid21 remains locked")
+        _ = checkKeyState(cd, key1, Unassigned, toc, 1, 1, 0)(show"Key $key1 remains locked once")
+        _ = checkKeyState(cd, key3, Assigned, toc, 0, 1, 0)(show"Key $key3 remains locked once")
+        _ = checkKeyState(cd, key4, 1, 0, 0)(show"Key $key4 is unlocked, but remains")
 
         // Activeness check for the third request
         cr3 <- cd.checkActivenessAndLock(rc + 2).failOnShutdown
@@ -509,6 +619,11 @@ class ConflictDetectorTest
         _ = checkContractState(cd, coid10, active, toc2, 0, 1, 0)(
           s"Used-only contract $coid10 remains locked once"
         )
+        _ = checkKeyState(cd, key1, Unassigned, toc, 0, 1, 0)(
+          show"Key $key1 remains being locked once"
+        )
+        _ = checkKeyState(cd, key2, Unassigned, toc1, 0, 1, 0)(show"Key $key2 is locked again")
+        _ = checkKeyState(cd, key4, 0, 1, 0)(show"Key $key4 is locked once")
       } yield succeed
     }
 
@@ -518,15 +633,18 @@ class ConflictDetectorTest
       for {
         rawAcs <- mkAcs((coid00, toc0, active))
         acs = new HookedAcs(rawAcs)(parallelExecutionContext)
-        cd = mkCd(acs)
+        rawCkj <- mkCkj((key1, toc0, Assigned))
+        ckj = new PreUpdateHookCkj(rawCkj)(parallelExecutionContext)
+        cd = mkCd(acs, ckj)
 
         // Activeness check for the first request
         actSet0 = mkActivenessSet(
-          create = Set(coid00, coid01, coid11)
+          create = Set(coid00, coid01, coid11),
+          assignKeys = Set(key1, key2, key3),
         )
         cr0 <- prefetchAndCheck(cd, RequestCounter(1), actSet0)
         _ = assert(
-          cr0 == mkActivenessResult(notFresh = Set(coid00))
+          cr0 == mkActivenessResult(notFresh = Set(coid00), notFreeKeys = Map(key1 -> Assigned))
         )
         _ = checkContractState(cd, coid00, active, toc0, 0, 1, 0)(
           s"lock for activation the existing contract $coid00"
@@ -534,13 +652,17 @@ class ConflictDetectorTest
         _ = checkContractState(cd, coid01, 0, 1, 0)(
           s"lock non-existing contract $coid01 for creation"
         )
+        _ = checkKeyState(cd, key1, Assigned, toc0, 0, 1, 0)(show"lock the assigned key $key1")
+        _ = checkKeyState(cd, key2, 0, 1, 0)(show"lock the unknown key $key2")
 
         // Activeness check for the second request
         actSet1 = mkActivenessSet(
           deact = Set(coid11),
           create = Set(coid01, coid10),
+          assignKeys = Set(key2),
+          freeKeys = Set(key3),
         )
-        actRes1 = mkActivenessResult(locked = Set(coid11, coid01))
+        actRes1 = mkActivenessResult(locked = Set(coid11, coid01), lockedKeys = Set(key2, key3))
         cr1 <- prefetchAndCheck(cd, RequestCounter(2), actSet1)
         _ = assert(cr1 == actRes1)
         _ = checkContractState(cd, coid01, 0, 2, 0)(
@@ -550,6 +672,11 @@ class ConflictDetectorTest
         _ = checkContractState(cd, coid11, 0, 1 + 1, 0)(
           s"locked-for-creation contract $coid11 is locked for deactivation"
         )
+        _ = checkKeyState(cd, key1, Assigned, toc0, 0, 1, 0)(
+          show"The assigned key $key1 remains locked"
+        )
+        _ = checkKeyState(cd, key2, 0, 2, 0)(show"lock the unknown key $key2 once more")
+        _ = checkKeyState(cd, key3, 0, 1, 0)(show"The unknown key $key3 remains locked once")
 
         // Finalize first request and make sure that the in-memory states are up to date while the ACS updates are being written
         _ = acs.setCreateHook { (_, _) =>
@@ -560,8 +687,17 @@ class ConflictDetectorTest
             checkContractState(cd, coid11, 0, 1, 0)(s"Rolled-back contract $coid11 remains locked")
           }
         }
+        _ = ckj.setUpdateHook { _ =>
+          EitherT.pure {
+            checkKeyStateAbsent(cd, key1)(show"Assigned key $key1 is evicted")
+            checkKeyState(cd, key2, Assigned, toc1, 0, 1, 1)(
+              show"Key $key1 is assigned and remains locked"
+            )
+            checkKeyStateAbsent(cd, key3)(show"Key $key3 is evicted")
+          }
+        }
         fin1 <- cd
-          .finalizeRequest(mkCommitSet(create = Set(coid01)), toc1)
+          .finalizeRequest(mkCommitSet(create = Set(coid01), keys = Map(key2 -> Assigned)), toc1)
           .flatten
           .failOnShutdown
         _ = assert(fin1 == Right(()))
@@ -574,15 +710,18 @@ class ConflictDetectorTest
       val toc = TimeOfChange(rc, ts)
       for {
         acs <- mkAcs()
-        cd = mkCd(acs)
+        ckj <- mkCkj()
+        cd = mkCd(acs, ckj)
         actSet = mkActivenessSet(
           create = Set(coid00, coid01, coid10, coid11),
+          assignKeys = Set(key1, key2),
           prior = Set(coid00),
         )
         actRes = mkActivenessResult(prior = Map(coid00 -> None))
         commitSet = mkCommitSet(
           arch = Set(coid00, coid10),
           create = Set(coid01, coid00),
+          keys = Map(key1 -> Assigned, key2 -> Unassigned),
         )
         _ <- singleCRwithTR(cd, rc, actSet, actRes, commitSet, ts)
 
@@ -594,6 +733,10 @@ class ConflictDetectorTest
           s"contract $coid10 is archived, but not created"
         )
         _ <- checkContractState(acs, coid11, None)(s"contract $coid11 does not exist")
+        _ <- checkKeyState(ckj, key1, Assigned -> toc)(show"Key $key1 is assigned")
+        _ <- checkKeyState(ckj, key2, Unassigned -> toc)(
+          show"Key $key2 of transient contract is unassigned"
+        )
       } yield succeed
     }
 
@@ -801,11 +944,12 @@ class ConflictDetectorTest
       val toc0 = TimeOfChange(RequestCounter(0), Epoch)
       for {
         acs <- mkAcs((coid00, toc0, active))
+        ckj <- mkCkj()
         transferCache <- mkTransferCache(loggerFactory)(
           transfer1 -> mediator1,
           transfer2 -> mediator2,
         )
-        cd = mkCd(acs, transferCache)
+        cd = mkCd(acs, ckj, transferCache)
 
         _ <- checkInvalidCommitSet(cd, RequestCounter(1), ofEpochMilli(2))(
           mkActivenessSet(deact = Set(coid00)),
@@ -826,8 +970,13 @@ class ConflictDetectorTest
 
         _ <- checkInvalidCommitSet(cd, RequestCounter(4), ofEpochMilli(4))(
           mkActivenessSet(useOnly = Set(coid00)),
-          mkCommitSet(tfOut = Map(coid00 -> (sourceDomain1.unwrap -> transferCounter1))),
+          mkCommitSet(tfOut = Map(coid00 -> sourceDomain1.unwrap)),
         )("Transfer-out contract only used, not locked.")
+
+        _ <- checkInvalidCommitSet(cd, RequestCounter(5), ofEpochMilli(5))(
+          mkActivenessSet(freeKeys = Set(key1)),
+          mkCommitSet(keys = Map(key1 -> Assigned)),
+        )("Update a key without locking it")
       } yield succeed
     }
 
@@ -1071,7 +1220,8 @@ class ConflictDetectorTest
           (coid21, tocN1, active),
         )
         acs = new HookedAcs(rawAcs)(parallelExecutionContext)
-        cd = mkCd(acs)
+        ckj <- mkCkj()
+        cd = mkCd(acs, ckj)
 
         // Activeness check for first request
         cr0 <- prefetchAndCheck(cd, RequestCounter(0), actSet0)
@@ -1139,14 +1289,157 @@ class ConflictDetectorTest
       } yield succeed
     }
 
+    "interleave contract key journal updates with further requests" in {
+      val tocN1 = TimeOfChange(RequestCounter(-1), Epoch)
+      val toc1 = TimeOfChange(RequestCounter(1), ofEpochMilli(1))
+      val toc2 = TimeOfChange(RequestCounter(2), ofEpochMilli(2))
+      val toc3 = TimeOfChange(RequestCounter(3), ofEpochMilli(4))
+
+      val actSet1 = mkActivenessSet(
+        freeKeys = Set(key3),
+        assignKeys = Set(key2, key4),
+        unassignKeys = Set(key1, key5),
+      )
+      val commitSet1 =
+        mkCommitSet(keys =
+          Map(key1 -> Unassigned, key2 -> Assigned, key4 -> Assigned, key5 -> Unassigned)
+        )
+      val actSet2 = mkActivenessSet(
+        freeKeys = Set(key1),
+        unassignKeys = Set(key1, key4),
+        assignKeys = Set(key3),
+      )
+      val actRes2 = mkActivenessResult(lockedKeys = Set(key1, key4))
+      val commitSet2 =
+        mkCommitSet(keys = Map(key1 -> Unassigned, key3 -> Assigned, key4 -> Unassigned))
+
+      val actSet3 = mkActivenessSet(assignKeys = Set(key2, key3, key5))
+      val actRes3 = mkActivenessResult(lockedKeys = Set(key3), notFreeKeys = Map(key2 -> Assigned))
+
+      val finF1Complete = Promise[Unit]()
+      val finF2Complete = Promise[Unit]()
+
+      def finalizeRequest3(cd: ConflictDetector) = {
+        val key3Updates = Map(key2 -> Assigned, key3 -> Assigned, key5 -> Assigned)
+        EitherT.right[ContractKeyJournalError](for {
+          _ <- finF2Complete.future
+          fin3 <- cd.finalizeRequest(mkCommitSet(keys = key3Updates), toc3).flatten.failOnShutdown
+        } yield {
+          assert(fin3 == Right(()))
+          checkKeyState(cd, key2, Assigned, toc3, 0, 0, 1)(show"Key $key2 has its version updated")
+          checkKeyState(cd, key3, Assigned, toc3, 0, 0, 1)(show"Key $key3 is assigned")
+          checkKeyState(cd, key5, Assigned, toc3, 0, 0, 1)(show"Key $key5 is assigned")
+          ()
+        })
+      }
+
+      def storeHookRequest1(ckj: PreUpdateHookCkj, cd: ConflictDetector) = {
+        // This runs while request 1's CKJ updates are written
+        checkKeyState(cd, key1, Unassigned, toc1, 0, 1, 1)(
+          show"Key $key1 is unassigned and remains locked"
+        )
+        checkKeyState(cd, key2, Assigned, toc1, 1, 0, 1)(
+          show"Key $key2 has a pending assignment write."
+        )
+        checkKeyState(cd, key3, 1, 1, 0)(s"Key $key3 remains locked")
+        checkKeyState(cd, key4, Assigned, toc1, 0, 1, 1)(
+          show"Key $key4 remains locked with a pending write"
+        )
+        checkKeyState(cd, key5, Unassigned, toc1, 1, 0, 1)(
+          show"Transient key $key4 has a pending write"
+        )
+
+        // Activeness check for the third request
+        EitherT.right[ContractKeyJournalError](for {
+          _ <- finF1Complete.future
+          cr3 <- cd.checkActivenessAndLock(RequestCounter(3)).failOnShutdown
+          _ = assert(cr3 == actRes3)
+          _ = checkKeyState(cd, key2, Assigned, toc1, 0, 1, 1)(
+            show"Key $key2 still has a pending assignment write."
+          )
+          _ = checkKeyState(cd, key3, 0, 2, 0)(s"Key $key3 remains locked")
+          _ = checkKeyState(cd, key4, Assigned, toc1, 0, 1, 1)(show"Key $key4 remains locked")
+          _ = checkKeyState(cd, key5, Unassigned, toc1, 0, 1, 1)(
+            show"Transient key $key4 is locked again"
+          )
+
+          // Finalize second request and then finalize third request while the updates of the second request are written.
+          _ = ckj.setUpdateHook(_ =>
+            finalizeRequest3(cd)
+          ) // This runs while request 2's CKJ updates are written
+
+          finF2 <- cd.finalizeRequest(commitSet2, toc2).failOnShutdown
+          _ = finF2Complete.success(())
+          fin2 <- finF2.failOnShutdown
+          _ = assert(fin2 == Right(()))
+          _ = checkKeyState(cd, key1, Unassigned, toc2, 0, 0, 1)(
+            show"Key $key1 still has a pending write"
+          )
+          _ = checkKeyStateAbsent(cd, key3)(show"Key $key3 is evicted")
+          _ = checkKeyState(cd, key4, Unassigned, toc2, 0, 0, 1)(
+            show"Key $key4 is unassigned again"
+          )
+        } yield ())
+      }
+
+      for {
+        rawCkj <- mkCkj(
+          (key1, tocN1, Assigned),
+          (key2, tocN1, Unassigned),
+          (key5, tocN1, Unassigned),
+        )
+        ckj = new PreUpdateHookCkj(rawCkj)(parallelExecutionContext)
+        cd = mkCd(ckj = ckj)
+
+        // Prefetch third request
+        _ <- cd.registerActivenessSet(RequestCounter(3), actSet3).failOnShutdown
+
+        // Activeness check for the first request
+        cr1 <- prefetchAndCheck(cd, toc1.rc, actSet1)
+        _ = cr1 shouldBe mkActivenessResult()
+
+        // Activeness check for the second request
+        cr2 <- prefetchAndCheck(cd, toc2.rc, actSet2)
+        _ = assert(cr2 == actRes2)
+
+        _ = forEvery(
+          Seq(
+            (key1, Some(Assigned -> tocN1), 0, 2),
+            (key2, Some(Unassigned -> tocN1), 1, 1),
+            (key3, None, 1, 1),
+            (key4, None, 0, 2),
+            (key5, Some(Unassigned -> tocN1), 1, 1),
+          )
+        ) {
+          case (key, Some((status, version)), pending, locks) =>
+            checkKeyState(cd, key, status, version, pending, locks, 0)(
+              show"State of known key $key"
+            )
+          case (key, None, pending, locks) =>
+            checkKeyState(cd, key, pending, locks, 0)(show"State of unknown key $key")
+        }
+
+        // Finalize the first request and do a lot of stuff while the updates are written
+        _ = ckj.setUpdateHook(_ => storeHookRequest1(ckj, cd))
+        finF1 <- cd.finalizeRequest(commitSet1, toc1).failOnShutdown
+        _ = finF1Complete.success(())
+        fin1 <- finF1.failOnShutdown
+        _ = assert(fin1 == Right(()))
+        _ = forEvery(Seq(key1, key2, key3, key4, key5)) { key =>
+          checkKeyStateAbsent(cd, key)(show"Key $key has been evicted")
+        }
+      } yield succeed
+    }
+
     "transfer-in unknown contracts" in {
       for {
         acs <- mkAcs()
+        ckj <- mkCkj()
         transferCache <- mkTransferCache(loggerFactory)(
           transfer1 -> mediator1,
           transfer2 -> mediator2,
         )
-        cd = mkCd(acs, transferCache)
+        cd = mkCd(acs, ckj, transferCache)
         ts = ofEpochMilli(1)
         actSet = mkActivenessSet(
           tfIn = Set(coid00, coid01, coid10),
@@ -1189,12 +1482,13 @@ class ConflictDetectorTest
       for {
         acs <- mkAcs(
           (coid00, toc0, Archived),
-          (coid01, toc0, TransferredAway(targetDomain1, initialTransferCounter)),
+          (coid01, toc0, TransferredAway(targetDomain1)),
         )
+        ckj <- mkCkj()
         transferCache <- mkTransferCache(loggerFactory)(
           transfer1 -> mediator1
         ) // Omit transfer2 to mimic a non-transferring participant
-        cd = mkCd(acs, transferCache)
+        cd = mkCd(acs, ckj, transferCache)
         ts = ofEpochMilli(1)
         toc1 = TimeOfChange(RequestCounter(1), ts)
         actSet = mkActivenessSet(
@@ -1215,7 +1509,7 @@ class ConflictDetectorTest
             notFree = Map(coid00 -> Archived),
             prior = Map(
               coid00 -> Some(Archived),
-              coid01 -> Some(TransferredAway(targetDomain1, initialTransferCounter)),
+              coid01 -> Some(TransferredAway(targetDomain1)),
             ),
           ),
           s"Report that $coid00 was already archived.",
@@ -1241,12 +1535,11 @@ class ConflictDetectorTest
       val toc0 = TimeOfChange(RequestCounter(0), Epoch)
       for {
         acs <- mkAcs((coid00, toc0, active), (coid01, toc0, active))
-        cd = mkCd(acs)
+        ckj <- mkCkj()
+        cd = mkCd(acs, ckj)
         activenessSet = mkActivenessSet(deact = Set(coid00, coid01), prior = Set(coid00, coid01))
         actRes = mkActivenessResult(prior = Map(coid00 -> Some(active), coid01 -> Some(active)))
-        commitSet = mkCommitSet(tfOut =
-          Map(coid00 -> (domain1 -> transferCounter1), coid01 -> (domain2 -> transferCounter2))
-        )
+        commitSet = mkCommitSet(tfOut = Map(coid00 -> domain1, coid01 -> domain2))
         ts = ofEpochMilli(1)
         _ <- singleCRwithTR(cd, RequestCounter(1), activenessSet, actRes, commitSet, ts)
         fetch00 <- acs.fetchState(coid00)
@@ -1255,7 +1548,7 @@ class ConflictDetectorTest
         assert(
           fetch00.contains(
             AcsContractState(
-              TransferredAway(targetDomain1, transferCounter1),
+              TransferredAway(targetDomain1),
               RequestCounter(1),
               ts,
             )
@@ -1265,7 +1558,7 @@ class ConflictDetectorTest
         assert(
           fetch01.contains(
             AcsContractState(
-              TransferredAway(targetDomain2, transferCounter2),
+              TransferredAway(targetDomain2),
               RequestCounter(1),
               ts,
             )
@@ -1282,9 +1575,10 @@ class ConflictDetectorTest
           (coid00, toc0, active),
           (coid11, toc0, active),
         )
-        _ <- acs.transferInContract(coid01, toc0, sourceDomain1, transferCounter1).value
+        _ <- acs.transferInContract(coid01, toc0, sourceDomain1).value
+        ckj <- mkCkj()
         transferCache <- mkTransferCache(loggerFactory)(transfer2 -> mediator2)
-        cd = mkCd(acs, transferCache)
+        cd = mkCd(acs, ckj, transferCache)
         activenessSet = mkActivenessSet(
           deact = Set(coid00, coid01),
           create = Set(coid10),
@@ -1296,13 +1590,13 @@ class ConflictDetectorTest
         actRes = mkActivenessResult(prior =
           Map(
             coid00 -> Some(active),
-            coid01 -> Some(Active(transferCounter1)),
+            coid01 -> Some(Active),
             coid11 -> Some(active),
           )
         )
         commitSet = mkCommitSet(
           arch = Set(coid00),
-          tfOut = Map(coid01 -> (domain1 -> transferCounter2)),
+          tfOut = Map(coid01 -> domain1),
           tfIn = Map(coid20 -> transfer2),
           create = Set(coid10),
         )
@@ -1322,7 +1616,7 @@ class ConflictDetectorTest
         assert(
           fetch01.contains(
             AcsContractState(
-              TransferredAway(targetDomain1, transferCounter2),
+              TransferredAway(targetDomain1),
               RequestCounter(1),
               ts,
             )
@@ -1351,8 +1645,9 @@ class ConflictDetectorTest
     "allow repurposing the activation locks" in {
       for {
         acs <- mkAcs()
+        ckj <- mkCkj()
         transferCache <- mkTransferCache(loggerFactory)(transfer1 -> mediator1)
-        cd = mkCd(acs, transferCache)
+        cd = mkCd(acs, ckj, transferCache)
         activenessSet = mkActivenessSet(
           create = Set(coid00),
           tfIn = Set(coid01),
@@ -1388,7 +1683,8 @@ class ConflictDetectorTest
           transfer1 -> mediator1,
           transfer2 -> mediator2,
         )
-        cd = mkCd(acs, transferCache)
+        ckj <- mkCkj()
+        cd = mkCd(acs, ckj, transferCache)
         activenessSet = mkActivenessSet(
           tfIn = Set(coid10, coid11),
           transferIds = Set(transfer1, transfer2),
@@ -1397,8 +1693,7 @@ class ConflictDetectorTest
         commitSet = mkCommitSet(
           create = Set(coid20),
           tfIn = Map(coid10 -> transfer2, coid11 -> transfer1),
-          tfOut =
-            Map(coid20 -> (domain1 -> transferCounter1), coid11 -> (domain2 -> transferCounter2)),
+          tfOut = Map(coid20 -> domain1, coid11 -> domain2),
           arch = Set(coid10),
         )
         _ <- singleCRwithTR(
@@ -1420,7 +1715,7 @@ class ConflictDetectorTest
         assert(
           fetch11.contains(
             AcsContractState(
-              TransferredAway(targetDomain2, transferCounter2),
+              TransferredAway(targetDomain2),
               RequestCounter(0),
               Epoch,
             )
@@ -1430,7 +1725,7 @@ class ConflictDetectorTest
         assert(
           fetch20.contains(
             AcsContractState(
-              TransferredAway(targetDomain1, transferCounter1),
+              TransferredAway(targetDomain1),
               RequestCounter(0),
               Epoch,
             )
@@ -1443,8 +1738,9 @@ class ConflictDetectorTest
     "double spend a transferred-away contract" in {
       val toc0 = TimeOfChange(RequestCounter(0), Epoch)
       for {
-        acs <- mkAcs((coid00, toc0, TransferredAway(targetDomain1, transferCounter1)))
-        cd = mkCd(acs)
+        acs <- mkAcs((coid00, toc0, TransferredAway(targetDomain1)))
+        ckj <- mkCkj()
+        cd = mkCd(acs, ckj)
         actRes1 <- prefetchAndCheck(
           cd,
           RequestCounter(1),
@@ -1452,7 +1748,7 @@ class ConflictDetectorTest
         )
         fin1 <- cd
           .finalizeRequest(
-            mkCommitSet(tfOut = Map(coid00 -> (domain2 -> transferCounter2))),
+            mkCommitSet(tfOut = Map(coid00 -> domain2)),
             TimeOfChange(RequestCounter(1), ofEpochMilli(1)),
           )
           .flatten
@@ -1461,15 +1757,15 @@ class ConflictDetectorTest
       } yield {
         assert(
           actRes1 == mkActivenessResult(
-            notActive = Map(coid00 -> TransferredAway(targetDomain1, transferCounter1)),
-            prior = Map(coid00 -> Some(TransferredAway(targetDomain1, transferCounter1))),
+            notActive = Map(coid00 -> TransferredAway(targetDomain1)),
+            prior = Map(coid00 -> Some(TransferredAway(targetDomain1))),
           )
         )
         assert(fin1 == Right(()))
         assert(
           fetch00.contains(
             AcsContractState(
-              TransferredAway(targetDomain2, transferCounter2),
+              TransferredAway(targetDomain2),
               RequestCounter(1),
               ofEpochMilli(1),
             )
@@ -1481,11 +1777,12 @@ class ConflictDetectorTest
     "double transfer-in a contract" in {
       for {
         acs <- mkAcs()
+        ckj <- mkCkj()
         transferCache <- mkTransferCache(loggerFactory)(
           transfer1 -> mediator1,
           transfer2 -> mediator2,
         )
-        cd = mkCd(acs, transferCache)
+        cd = mkCd(acs, ckj, transferCache)
         actSet1 = mkActivenessSet(tfIn = Set(coid00), transferIds = Set(transfer1))
         actSet2 = mkActivenessSet(tfIn = Set(coid00), transferIds = Set(transfer2))
         commitSet1 = mkCommitSet(tfIn = Map(coid00 -> transfer1))
@@ -1518,13 +1815,14 @@ class ConflictDetectorTest
       val toc0 = TimeOfChange(RequestCounter(0), Epoch)
       for {
         acs <- mkAcs((coid00, toc0, active), (coid01, toc0, active))
+        ckj <- mkCkj()
         transferCache <- mkTransferCache(loggerFactory)(transfer2 -> mediator2)
-        cd = mkCd(acs, transferCache)
+        cd = mkCd(acs, ckj, transferCache)
         actSet1 = mkActivenessSet(create = Set(coid10), deact = Set(coid00, coid01))
         commitSet1 = mkCommitSet(
           create = Set(coid10),
           arch = Set(coid00),
-          tfOut = Map(coid01 -> (domain1 -> transferCounter1)),
+          tfOut = Map(coid01 -> domain1),
         )
         actSet2 = mkActivenessSet(
           tfIn = Set(coid10),
@@ -1533,8 +1831,7 @@ class ConflictDetectorTest
         )
         commitSet2 = mkCommitSet(
           tfIn = Map(coid10 -> transfer2),
-          tfOut =
-            Map(coid00 -> (domain2 -> transferCounter1), coid01 -> (domain2 -> transferCounter2)),
+          tfOut = Map(coid00 -> domain2, coid01 -> domain2),
         )
         ts = ofEpochMilli(1000)
         toc2 = TimeOfChange(RequestCounter(2), ts)
@@ -1618,7 +1915,7 @@ class ConflictDetectorTest
         _ = hookedStore.preComplete { (_transferId, _toc) =>
           // This runs after committing the request, but before the transfer store is updated
           val actSetOut = mkActivenessSet(deact = Set(coid00))
-          val commitSetOut = mkCommitSet(tfOut = Map(coid00 -> (domain1 -> transferCounter1)))
+          val commitSetOut = mkCommitSet(tfOut = Map(coid00 -> domain1))
           CheckedT(for {
             _ <- singleCRwithTR(
               cd,
@@ -1653,30 +1950,32 @@ class ConflictDetectorTest
       val toc1 = TimeOfChange(RequestCounter(1), ofEpochMilli(1))
       val toc2 = TimeOfChange(RequestCounter(2), ofEpochMilli(2))
       val toc3 = TimeOfChange(RequestCounter(3), ofEpochMilli(3))
-      implicit val closeContext: CloseContext = HasTestCloseContext.makeTestCloseContext(logger)
+      implicit val closeContext = HasTestCloseContext.makeTestCloseContext(logger)
       for {
         acs <- mkAcs((coid00, toc0, active), (coid01, toc0, active))
-        cd = mkCd(acs)
+        ckj <- mkCkj((key1, toc0, Assigned), (key2, toc0, Assigned))
+        cd = mkCd(acs, ckj)
 
-        actSet1 = mkActivenessSet(deact = Set(coid00, coid01))
+        actSet1 = mkActivenessSet(deact = Set(coid00, coid01), unassignKeys = Set(key1, key2))
         cr1 <- prefetchAndCheck(cd, RequestCounter(1), actSet1)
         _ = assert(cr1 == mkActivenessResult())
 
-        actSet2 = mkActivenessSet(deact = Set(coid00, coid01))
+        actSet2 = mkActivenessSet(deact = Set(coid00, coid01), unassignKeys = Set(key1, key2))
         cr2 <- prefetchAndCheck(cd, RequestCounter(2), actSet2)
         _ = assert(
-          cr2 == mkActivenessResult(locked = Set(coid00, coid01))
+          cr2 == mkActivenessResult(locked = Set(coid00, coid01), lockedKeys = Set(key1, key2))
         )
 
         actSet3 = actSet2
         cr2 <- prefetchAndCheck(cd, RequestCounter(3), actSet3)
         _ = assert(
-          cr2 == mkActivenessResult(locked = Set(coid00, coid01))
+          cr2 == mkActivenessResult(locked = Set(coid00, coid01), lockedKeys = Set(key1, key2))
         )
 
         commitSet1 = mkCommitSet(
           arch = Set(coid00),
-          tfOut = Map(coid01 -> (domain1 -> transferCounter1)),
+          tfOut = Map(coid01 -> domain1),
+          keys = Map(key1 -> Unassigned, key2 -> Assigned),
         )
         fin1 <- cd.finalizeRequest(commitSet1, toc1).flatten.failOnShutdown
         _ = assert(fin1 == Right(()))
@@ -1688,6 +1987,12 @@ class ConflictDetectorTest
 
         // Triggers invariant checking if invariant checking is enabled
         fin2 <- cd.finalizeRequest(CommitSet.empty, toc2).flatten.failOnShutdown
+
+        // Now prune the contract key journal (pruning does not run atomically on all stores)
+        _ <- ckj.prune(toc1.timestamp)
+
+        _ <- checkKeyState(ckj, key1, None)(show"$key1 has been pruned")
+        _ <- checkKeyState(ckj, key2, Assigned -> toc1)(show"$key2 has not been pruned")
 
         // Triggers invariant checking if invariant checking is enabled
         fin3 <- cd.finalizeRequest(CommitSet.empty, toc3).flatten.failOnShutdown
@@ -1716,7 +2021,8 @@ class ConflictDetectorTest
           (coid21, tocN1, active),
         )
         acs = new HookedAcs(rawAcs)(parallelExecutionContext)
-        cd = mkCd(acs)
+        ckj <- mkCkj()
+        cd = mkCd(acs, ckj)
 
         _ = setFetchHook(acs, cd)
         _ <- cd.registerActivenessSet(RequestCounter(0), actSet0).failOnShutdown
@@ -1758,7 +2064,8 @@ class ConflictDetectorTest
       for {
         rawAcs <- mkAcs()
         acs = new HookedAcs(rawAcs)(parallelExecutionContext)
-        cd = mkCd(acs)
+        ckj <- mkCkj()
+        cd = mkCd(acs, ckj)
 
         _ = setFetchHook(acs, cd)
         _ <- loggerFactory.assertThrowsAndLogsAsync[ConflictDetectionStoreAccessError](
@@ -1789,6 +2096,25 @@ class ConflictDetectorTest
       state: Option[AcsContractState],
   )(clue: String): Future[Assertion] =
     acs.fetchState(coid).map(result => assert(result == state, clue))
+
+  def checkKeyState(
+      ckj: ContractKeyJournal,
+      key: LfGlobalKey,
+      keyState: (ContractKeyJournal.Status, TimeOfChange),
+  )(clue: String)(implicit position: Position): Future[Assertion] =
+    checkKeyState(ckj, key, Some(ContractKeyJournal.ContractKeyState(keyState._1, keyState._2)))(
+      clue
+    )
+
+  def checkKeyState(
+      ckj: ContractKeyJournal,
+      key: LfGlobalKey,
+      state: Option[ContractKeyJournal.ContractKeyState],
+  )(clue: String)(implicit position: Position): Future[Assertion] = {
+    val expected =
+      state.fold(Map.empty[LfGlobalKey, ContractKeyJournal.ContractKeyState])(ks => Map(key -> ks))
+    ckj.fetchStates(Seq(key)).map(result => assert(result == expected, clue))
+  }
 
   private[this] def mkState[A <: PrettyPrinting](
       state: Option[StateChange[A]],
@@ -1836,6 +2162,38 @@ class ConflictDetectorTest
       implicit pos: source.Position
   ): Assertion =
     assert(cd.getInternalContractState(coid).isEmpty, clue)
+
+  private def checkKeyState(
+      cd: ConflictDetector,
+      key: LfGlobalKey,
+      status: ContractKeyJournal.Status,
+      version: TimeOfChange,
+      pendingActivenessCount: Int,
+      locks: Int,
+      pendingWriteCount: Int,
+  )(clue: String): Assertion = {
+    val expected = mkState(
+      Some(ContractKeyState(status, version)),
+      pendingActivenessCount,
+      locks,
+      pendingWriteCount,
+    )
+    assert(cd.getInternalKeyState(key).contains(expected), clue)
+  }
+
+  private def checkKeyState(
+      cd: ConflictDetector,
+      key: LfGlobalKey,
+      pendingActivenessCount: Int,
+      locks: Int,
+      pendingWriteCount: Int,
+  )(clue: String): Assertion = {
+    val expected = mkState(None, pendingActivenessCount, locks, pendingWriteCount)
+    assert(cd.getInternalKeyState(key).contains(expected), clue)
+  }
+
+  private def checkKeyStateAbsent(cd: ConflictDetector, key: LfGlobalKey)(clue: String): Assertion =
+    assert(cd.getInternalKeyState(key).isEmpty, clue)
 
   private def prefetchAndCheck(
       cd: ConflictDetector,

@@ -14,12 +14,15 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import slick.jdbc.SetParameter
 
+import java.util.concurrent.atomic.AtomicBoolean
 import scala.annotation.unused
 import scala.concurrent.{ExecutionContext, Future}
 
 object DomainNodeSettingsStore {
   def create(
       storage: Storage,
+      staticDomainParametersFromConfig: StaticDomainParameters,
+      resetToConfig: Boolean,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit
@@ -30,6 +33,8 @@ object DomainNodeSettingsStore {
         new InMemoryBaseNodeConfigStore[StoredDomainNodeSettings](loggerFactory)
       case dbStorage: DbStorage =>
         new DbDomainNodeSettingsStore(
+          staticDomainParametersFromConfig,
+          resetToConfig,
           dbStorage,
           timeouts,
           loggerFactory,
@@ -38,6 +43,9 @@ object DomainNodeSettingsStore {
 }
 
 class DbDomainNodeSettingsStore(
+    // TODO(#15153) remove me once we can be sure that static domain parameters are persisted
+    staticDomainParametersFromConfig: StaticDomainParameters,
+    resetToConfig: Boolean,
     override protected val storage: DbStorage,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
@@ -52,9 +60,21 @@ class DbDomainNodeSettingsStore(
   // see create table sql for more details
   private val singleRowLockValue: String1 = String1.fromChar('X')
 
+  // reset configuration
+  private val runFixPreviousSettingsOnce = new AtomicBoolean(true)
+  private def fixPreviousSettingsOnce(): Unit = if (runFixPreviousSettingsOnce.getAndSet(false)) {
+    import TraceContext.Implicits.Empty.*
+    fixPreviousSettings(resetToConfig, timeouts.unbounded) { _ =>
+      saveSettings(StoredDomainNodeSettings(staticDomainParametersFromConfig))
+    }
+  }
+
   override def fetchSettings(implicit
       traceContext: TraceContext
-  ): EitherT[Future, BaseNodeSettingsStoreError, Option[StoredDomainNodeSettings]] =
+  ): EitherT[Future, BaseNodeSettingsStoreError, Option[StoredDomainNodeSettings]] = {
+    // we need to run this here since we introduced HA into the domain manager, as the pool
+    // might not be active, so would throw a PassiveInstanceException, taking the entire node down
+    fixPreviousSettingsOnce()
     EitherTUtil.fromFuture(
       storage
         .query(
@@ -65,6 +85,7 @@ class DbDomainNodeSettingsStore(
         .map(_.map(StoredDomainNodeSettings)),
       BaseNodeSettingsStoreError.DbError,
     )
+  }
 
   override def saveSettings(
       settings: StoredDomainNodeSettings

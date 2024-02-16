@@ -14,15 +14,14 @@ import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.*
 import org.apache.pekko.stream.Materializer
 
-// TODO(#14392) reenable this test once DB sequencer works with implicit member registration
-abstract class DatabaseSequencerApiTest extends NonBftDomainSequencerApiTest {
+class DatabaseSequencerApiTest extends NonBftDomainSequencerApiTest {
 
   def createSequencer(
       crypto: DomainSyncCryptoClient
   )(implicit materializer: Materializer): CantonSequencer = {
     val clock = new SimClock(loggerFactory = loggerFactory)
-    val crypto = TestingIdentityFactoryX(
-      TestingTopologyX(),
+    val crypto = TestingIdentityFactory(
+      TestingTopology(),
       loggerFactory,
       DynamicDomainParameters.initialValues(clock, testedProtocolVersion),
     ).forOwnerAndDomain(owner = mediatorId, domainId)

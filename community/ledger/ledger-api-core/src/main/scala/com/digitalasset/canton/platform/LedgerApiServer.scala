@@ -21,6 +21,8 @@ object LedgerApiServer {
       executionContext: ExecutionContext,
       tracer: Tracer,
       loggerFactory: NamedLoggerFactory,
+      multiDomainEnabled: Boolean,
+      maxEventsByContractKeyCacheSize: Option[Int],
   )(implicit
       traceContext: TraceContext
   ): ResourceOwner[(InMemoryState, InMemoryStateUpdater.UpdaterFlow)] = {
@@ -30,6 +32,7 @@ object LedgerApiServer {
         bufferedStreamsPageSize = indexServiceConfig.bufferedStreamsPageSize,
         maxContractStateCacheSize = indexServiceConfig.maxContractStateCacheSize,
         maxContractKeyStateCacheSize = indexServiceConfig.maxContractKeyStateCacheSize,
+        maxEventsByContractKeyCacheSize = maxEventsByContractKeyCacheSize,
         maxTransactionsInMemoryFanOutBufferSize =
           indexServiceConfig.maxTransactionsInMemoryFanOutBufferSize,
         executionContext = executionContext,
@@ -46,6 +49,7 @@ object LedgerApiServer {
           indexServiceConfig.preparePackageMetadataTimeOutWarning.underlying,
         metrics = metrics,
         loggerFactory = loggerFactory,
+        multiDomainEnabled = multiDomainEnabled,
       )
     } yield inMemoryState -> inMemoryStateUpdater
   }

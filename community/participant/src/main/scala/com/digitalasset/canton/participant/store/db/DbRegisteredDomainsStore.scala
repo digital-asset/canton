@@ -10,6 +10,7 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.store.DomainAliasAndIdStore.{
   DomainAliasAlreadyAdded,
   DomainIdAlreadyAdded,
@@ -33,9 +34,12 @@ class DbRegisteredDomainsStore(
   import DomainId.*
   import storage.api.*
 
+  private val processingTime: TimedLoadGauge =
+    storage.metrics.loadGaugeM("registered-domains-store")
+
   override def addMapping(alias: DomainAlias, domainId: DomainId)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, Error, Unit] =
+  ): EitherT[Future, Error, Unit] = processingTime.eitherTEvent {
     EitherT {
       val insert = storage.profile match {
         case _: DbStorage.Profile.Postgres =>
@@ -97,16 +101,18 @@ class DbRegisteredDomainsStore(
       }
       Monad[Future].tailRecM(())(step)
     }
+  }
 
   override def aliasToDomainIdMap(implicit
       traceContext: TraceContext
   ): Future[Map[DomainAlias, DomainId]] =
-    storage
-      .query(
-        sql"""select alias, domain_id from participant_domains"""
-          .as[(DomainAlias, DomainId)]
-          .map(_.toMap),
-        functionFullName,
-      )
-
+    processingTime.event {
+      storage
+        .query(
+          sql"""select alias, domain_id from participant_domains"""
+            .as[(DomainAlias, DomainId)]
+            .map(_.toMap),
+          functionFullName,
+        )
+    }
 }

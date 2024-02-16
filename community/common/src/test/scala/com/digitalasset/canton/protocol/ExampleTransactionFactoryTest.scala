@@ -51,6 +51,9 @@ class ExampleTransactionFactoryTest extends AnyWordSpec with BaseTest with HasEx
           "create the full informee tree" in {
             noException should be thrownBy example.fullInformeeTree
           }
+          "create a blinded informee tree" in {
+            noException should be thrownBy example.informeeTreeBlindedFor
+          }
           "create the transaction view trees with their reinterpreted subaction" in {
             noException should be thrownBy example.reinterpretedSubtransactions
           }
@@ -90,6 +93,7 @@ class ExampleTransactionFactoryTest extends AnyWordSpec with BaseTest with HasEx
           "with consistent transaction root hashes" in {
             example.transactionTree.transactionId shouldEqual example.transactionId
             example.fullInformeeTree.transactionId shouldEqual example.transactionId
+            example.informeeTreeBlindedFor._2.transactionId shouldEqual example.transactionId
             forEvery(example.transactionViewTrees) {
               _.transactionId shouldEqual example.transactionId
             }

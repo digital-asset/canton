@@ -5,9 +5,7 @@ package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.functor.*
 import cats.syntax.parallel.*
-import cats.syntax.traverse.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.LoggingConfig
 import com.digitalasset.canton.crypto.*
@@ -148,9 +146,6 @@ class ConfirmationRequestFactory(
       keySeed,
       protocolVersion,
     )
-    submittingParticipantSignature <- cryptoSnapshot
-      .sign(transactionTree.rootHash.unwrap)
-      .leftMap[ConfirmationRequestCreationError](TransactionSigningError)
   } yield {
     if (loggingConfig.eventDetails) {
       logger.debug(
@@ -158,10 +153,7 @@ class ConfirmationRequestFactory(
       )
     }
     ConfirmationRequest(
-      InformeeMessage(
-        transactionTree.tryFullInformeeTree(protocolVersion),
-        submittingParticipantSignature,
-      )(protocolVersion),
+      InformeeMessage(transactionTree.tryFullInformeeTree(protocolVersion))(protocolVersion),
       transactionViewEnvelopes,
       protocolVersion,
     )
@@ -170,33 +162,31 @@ class ConfirmationRequestFactory(
   private def assertSubmittersNodeAuthorization(
       submitters: List[LfPartyId],
       identities: TopologySnapshot,
-  )(implicit traceContext: TraceContext): EitherT[Future, ParticipantAuthorizationError, Unit] = {
-    EitherT(
-      identities
-        .hostedOn(submitters.toSet, submitterNode)
-        .map { partyWithParticipants =>
-          submitters
-            .traverse(submitter =>
-              partyWithParticipants
-                .get(submitter)
-                .toRight(
-                  ParticipantAuthorizationError(
-                    s"$submitterNode does not host $submitter or is not active."
-                  )
+  ): EitherT[Future, ParticipantAuthorizationError, Unit] = {
+
+    def assertSubmitterNodeAuthorization(submitter: LfPartyId) = {
+      for {
+        relationship <- EitherT(
+          identities
+            .hostedOn(submitter, submitterNode)
+            .map(
+              _.toRight(
+                ParticipantAuthorizationError(
+                  s"$submitterNode does not host $submitter or is not active."
                 )
-                .flatMap { relationship =>
-                  Either.cond(
-                    relationship.permission == Submission,
-                    (),
-                    ParticipantAuthorizationError(
-                      s"$submitterNode is not authorized to submit transactions for $submitter."
-                    ),
-                  )
-                }
+              )
             )
-            .void
-        }
-    )
+        )
+        _ <- EitherT.cond[Future](
+          relationship.permission == Submission,
+          (),
+          ParticipantAuthorizationError(
+            s"$submitterNode is not authorized to submit transactions for $submitter."
+          ),
+        )
+      } yield ()
+    }
+    submitters.parTraverse(assertSubmitterNodeAuthorization).map(_ => ())
   }
 
   private def createTransactionViewEnvelopes(
@@ -233,7 +223,7 @@ class ConfirmationRequestFactory(
     for {
       lightTreesWithMetadata <- EitherT.fromEither[Future](
         transactionTree
-          .allLightTransactionViewTreesWithWitnessesAndSeeds(keySeed, pureCrypto)
+          .allLightTransactionViewTreesWithWitnessesAndSeeds(keySeed, pureCrypto, protocolVersion)
           .leftMap(KeySeedError)
       )
 
@@ -252,9 +242,10 @@ class ConfirmationRequestFactory(
 
 object ConfirmationRequestFactory {
   def apply(submitterNode: ParticipantId, domainId: DomainId, protocolVersion: ProtocolVersion)(
-      cryptoOps: HashOps & HmacOps,
+      cryptoOps: HashOps with HmacOps,
       seedGenerator: SeedGenerator,
       loggingConfig: LoggingConfig,
+      uniqueContractKeys: Boolean,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): ConfirmationRequestFactory = {
 
@@ -264,6 +255,7 @@ object ConfirmationRequestFactory {
         domainId,
         protocolVersion,
         cryptoOps,
+        uniqueContractKeys,
         loggerFactory,
       )
 
@@ -313,6 +305,36 @@ object ConfirmationRequestFactory {
     override def pretty: Pretty[ContractConsistencyError] = prettyOfClass(unnamedParam(_.errors))
   }
 
+  /** Indicates that the given transaction is contract key-inconsistent. */
+  final case class ContractKeyConsistencyError(key: LfGlobalKey)
+      extends ConfirmationRequestCreationError
+      with PrettyPrinting {
+    override def pretty: Pretty[ContractKeyConsistencyError] =
+      prettyOfClass(
+        param("key", _.key)
+      )
+  }
+
+  /** Indicates that the given transaction yields a duplicate for a contract ID. */
+  final case class ContractIdDuplicateError(contractId: LfContractId)
+      extends ConfirmationRequestCreationError
+      with PrettyPrinting {
+    override def pretty: Pretty[ContractIdDuplicateError] =
+      prettyOfClass(
+        param("contractId", _.contractId)
+      )
+  }
+
+  /** Indicates that the given transaction yields a duplicate for a key. */
+  final case class ContractKeyDuplicateError(key: LfGlobalKey)
+      extends ConfirmationRequestCreationError
+      with PrettyPrinting {
+    override def pretty: Pretty[ContractKeyDuplicateError] =
+      prettyOfClass(
+        param("key", _.key)
+      )
+  }
+
   /** Indicates that the encrypted view message could not be created. */
   final case class EncryptedViewMessageCreationError(
       error: EncryptedViewMessageFactory.EncryptedViewMessageCreationError
@@ -337,10 +359,5 @@ object ConfirmationRequestFactory {
 
   final case class KeySeedError(cause: HkdfError) extends ConfirmationRequestCreationError {
     override def pretty: Pretty[KeySeedError] = prettyOfParam(_.cause)
-  }
-
-  final case class TransactionSigningError(cause: SyncCryptoError)
-      extends ConfirmationRequestCreationError {
-    override def pretty: Pretty[TransactionSigningError] = prettyOfClass(unnamedParam(_.cause))
   }
 }

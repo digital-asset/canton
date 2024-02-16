@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.ledger.api.client
 
+import com.daml.ledger.api.v2.TransactionOuterClass.Transaction as JavaTransactionV2
 import com.daml.ledger.javaapi.data.codegen.{
   Contract,
   ContractCompanion,
@@ -20,14 +21,7 @@ import com.daml.ledger.javaapi.data.{
 
 import scala.jdk.CollectionConverters.*
 
-/** Java event decoders
-  *
-  * If you use scalapb GRPC bindings, then you need to map the events to Java Proto using:
-  *   JavaCreatedEvent.fromProto(ScalaCreatedEvent.toJavaProto(scalaProtoEvent))
-  *   javaapi.data.Transaction.fromProto(Transaction.toJavaProto(scalaTx))
-  */
 object JavaDecodeUtil {
-
   def decodeCreated[TC](
       companion: ContractCompanion[TC, ?, ?]
   )(event: JavaCreatedEvent): Option[TC] =
@@ -48,8 +42,13 @@ object JavaDecodeUtil {
   def decodeAllCreated[TC](
       companion: ContractCompanion[TC, ?, ?]
   )(transaction: JavaTransaction): Seq[TC] =
+    decodeAllCreatedFromEvents(companion)(transaction.getEvents.asScala.toSeq)
+
+  def decodeAllCreatedV2[TC](
+      companion: ContractCompanion[TC, ?, ?]
+  )(transaction: JavaTransactionV2): Seq[TC] =
     decodeAllCreatedFromEvents(companion)(
-      transaction.getEvents.iterator.asScala.toSeq
+      transaction.getEventsList.asScala.toSeq.map(Event.fromProtoEvent)
     )
 
   def decodeAllCreatedFromEvents[TC](

@@ -238,7 +238,7 @@ object SequencedEventValidator extends HasLoggerName {
   }
 
   /** Validates the requested signing timestamp against the sequencing timestamp and the
-    * [[com.digitalasset.canton.protocol.DynamicDomainParameters.sequencerTopologyTimestampTolerance]]
+    * [[com.digitalasset.canton.protocol.DynamicDomainParameters.sequencerSigningTolerance]]
     * of the domain parameters valid at the requested signing timestamp.
     *
     * @param latestTopologyClientTimestamp The timestamp of an earlier event sent to the topology client
@@ -249,11 +249,11 @@ object SequencedEventValidator extends HasLoggerName {
     *                   instead of the proper snapshot for the signing timestamp.
     *                   During sequencer key rolling or while updating the dynamic domain parameters,
     *                   an event might have been signed by a key that was just revoked or with a signing key timestamp
-    *                   that exceeds the [[com.digitalasset.canton.protocol.DynamicDomainParameters.sequencerTopologyTimestampTolerance]].
+    *                   that exceeds the [[com.digitalasset.canton.protocol.DynamicDomainParameters.sequencerSigningTolerance]].
     *                   Optimistic validation may not catch such problems.
     * @return [[scala.Left$]] if the signing timestamp is after the sequencing timestamp or the sequencing timestamp
     *         is after the signing timestamp by more than the
-    *         [[com.digitalasset.canton.protocol.DynamicDomainParameters.sequencerTopologyTimestampTolerance]] valid at the signing timestamp.
+    *         [[com.digitalasset.canton.protocol.DynamicDomainParameters.sequencerSigningTolerance]] valid at the signing timestamp.
     *         [[scala.Right$]] the topology snapshot that can be used for signing the event
     *         and verifying the signature on the event;
     */
@@ -358,7 +358,7 @@ object SequencedEventValidator extends HasLoggerName {
         .map { dynamicDomainParametersE =>
           for {
             dynamicDomainParameters <- dynamicDomainParametersE.leftMap(NoDynamicDomainParameters)
-            tolerance = dynamicDomainParameters.sequencerTopologyTimestampTolerance
+            tolerance = dynamicDomainParameters.sequencerSigningTolerance
             withinSigningTolerance = {
               import scala.Ordered.orderingToOrdered
               tolerance.unwrap >= sequencingTimestamp - signingTimestamp
@@ -371,7 +371,7 @@ object SequencedEventValidator extends HasLoggerName {
     if (signingTimestamp > sequencingTimestamp) {
       EitherT.leftT[F, SyncCryptoApi](SigningTimestampAfterSequencingTime)
     } else if (optimistic) {
-      val approximateSnapshot = syncCryptoApi.currentSnapshotApproximation(traceContext)
+      val approximateSnapshot = syncCryptoApi.currentSnapshotApproximation
       val approximateSnapshotTime = approximateSnapshot.ipsSnapshot.timestamp
       // If the topology client has caught up to the signing timestamp,
       // use the right snapshot
@@ -625,7 +625,7 @@ class SequencedEventValidatorImpl(
               event.timestamp,
               lastTopologyClientTimestamp(priorEventO),
               protocolVersion,
-              warnIfApproximate = priorEventO.nonEmpty,
+              warnIfApproximate = true,
               optimistic,
             )
             .leftMap(InvalidTimestampOfSigningKey(event.timestamp, signingTs, _))
@@ -651,7 +651,7 @@ class SequencedEventValidatorImpl(
 
   private def checkNoTimestampOfSigningKey(event: OrdinarySerializedEvent): ValidationResult = {
     event.signedEvent.timestampOfSigningKey.traverse_(tsOfSigningKey =>
-      // Batches addressed to unauthenticated members must not specify a topology timestamp.
+      // Batches addressed to unauthenticated members must not specify a signing key timestamp.
       // As some sequencer implementations in some protocol versions set the timestampOfSigningKey field
       // always to the sequencing timestamp if no timestamp was requested,
       // we tolerate equality.

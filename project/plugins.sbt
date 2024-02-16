@@ -3,17 +3,14 @@ addSbtPlugin("org.wartremover" % "sbt-wartremover" % "3.1.4")
 addSbtPlugin("org.wartremover" % "sbt-wartremover-contrib" % "2.1.0")
 addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.4.6")
 addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.11.1")
-addSbtPlugin("com.lightbend.sbt" % "sbt-java-formatter" % "0.7.0")
 
 // Code coverage
-addSbtPlugin("org.scoverage" % "sbt-scoverage" % "2.0.9")
+addSbtPlugin("org.scoverage" % "sbt-scoverage" % "1.9.2")
 
 // documentation site creation
-// TODO(i17068) update to 1.5.0 when it's published to fix the scala-xml conflicts -- also remove the VersionScheme.Always line
 addSbtPlugin("com.typesafe.sbt" % "sbt-site" % "1.4.0")
-ThisBuild / libraryDependencySchemes += "org.scala-lang.modules" %% "scala-xml" % VersionScheme.Always
 
-// Ensure we have license headers in all relevant source files
+// Ensurewe have license headeres in all source
 addSbtPlugin("de.heikoseeberger" % "sbt-header" % "5.6.0")
 
 // Required to "reStart" command which improves working with server applications in sbt. Not spray specific.

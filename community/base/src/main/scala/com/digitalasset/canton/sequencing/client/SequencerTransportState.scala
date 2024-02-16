@@ -33,33 +33,12 @@ import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 import scala.util.{Failure, Random, Success, Try}
 
-trait SequencerTransportLookup {
-
-  /** Returns an arbitrary [[com.digitalasset.canton.sequencing.client.transports.SequencerClientTransportCommon]].
-    * Prefers healthy subscriptions to unhealthy ones.
-    *
-    * @throws java.lang.IllegalStateException if there are currently no
-    *                                         [[com.digitalasset.canton.sequencing.client.transports.SequencerClientTransportCommon]]s at all
-    */
-  def transport(implicit traceContext: TraceContext): SequencerClientTransportCommon
-
-  /** Returns the transport for the given [[com.digitalasset.canton.topology.SequencerId]].
-    *
-    * @throws java.lang.IllegalArgumentException if the [[com.digitalasset.canton.topology.SequencerId]] currently has not transport
-    */
-  // TODO(#13789) remove after having switched over to Pekko everywhere
-  def transport(sequencerId: SequencerId)(implicit
-      traceContext: TraceContext
-  ): UnlessShutdown[SequencerClientTransport]
-}
-
 class SequencersTransportState(
-    initialSequencerTransports: SequencerTransports[?],
+    initialSequencerTransports: SequencerTransports,
     val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
-    extends SequencerTransportLookup
-    with NamedLogging
+    extends NamedLogging
     with FlagCloseable {
 
   private val random: Random = new Random(1L)
@@ -99,7 +78,7 @@ class SequencersTransportState(
 
   private def updateTransport(
       sequencerId: SequencerId,
-      updatedTransport: SequencerTransportContainer[?],
+      updatedTransport: SequencerTransportContainer,
   )(implicit traceContext: TraceContext): UnlessShutdown[SequencerTransportState] =
     performUnlessClosing(functionFullName) {
       blocking(lock.synchronized {
@@ -112,7 +91,7 @@ class SequencersTransportState(
       })
     }.flatten
 
-  override def transport(implicit traceContext: TraceContext): SequencerClientTransportCommon =
+  def transport(implicit traceContext: TraceContext): SequencerClientTransportCommon =
     blocking(lock.synchronized {
       // Pick a random healthy sequencer to send to.
       // We can use a plain Random instance across all threads calling this method,
@@ -136,7 +115,7 @@ class SequencersTransportState(
       chosenSequencer.transport.clientTransport
     })
 
-  override def transport(sequencerId: SequencerId)(implicit
+  def transport(sequencerId: SequencerId)(implicit
       traceContext: TraceContext
   ): UnlessShutdown[SequencerClientTransport] =
     transportState(sequencerId).map(_.transport.clientTransport)
@@ -178,7 +157,7 @@ class SequencersTransportState(
     }.onShutdown(())
 
   def changeTransport(
-      sequencerTransports: SequencerTransports[?]
+      sequencerTransports: SequencerTransports
   )(implicit traceContext: TraceContext): Future[Unit] = blocking(lock.synchronized {
     sequencerTrustThreshold.set(sequencerTransports.sequencerTrustThreshold)
     val oldSequencerIds = state.keySet.toSet
@@ -310,12 +289,12 @@ class SequencersTransportState(
 }
 
 final case class SequencerTransportState(
-    transport: SequencerTransportContainer[?],
+    transport: SequencerTransportContainer,
     subscription: Option[SequencerTransportState.Subscription] = None,
 ) {
 
   def withTransport(
-      newTransport: SequencerTransportContainer[?]
+      newTransport: SequencerTransportContainer
   ): SequencerTransportState = {
     require(
       newTransport.sequencerId == transport.sequencerId,

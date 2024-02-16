@@ -16,7 +16,6 @@ import com.digitalasset.canton.domain.mediator.ResponseAggregation.ViewState
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.logging.NamedLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.{
   LocalApprove,
   LocalReject,
@@ -24,6 +23,7 @@ import com.digitalasset.canton.protocol.messages.{
   MediatorRequest,
   MediatorResponse,
 }
+import com.digitalasset.canton.protocol.{RequestId, ViewHash}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
@@ -80,6 +80,7 @@ final case class ResponseAggregation[VKEY](
     val MediatorResponse(
       requestId,
       sender,
+      _viewHashO,
       _viewPositionO,
       localVerdict,
       rootHashO,
@@ -159,7 +160,7 @@ final case class ResponseAggregation[VKEY](
             newlyResponded.foldLeft(consortiumVoting)((votes, confirmingParty) => {
               votes + (confirmingParty.party -> votes(confirmingParty.party).approveBy(sender))
             })
-          val newlyRespondedFullVotes = newlyResponded.filter { case ConfirmingParty(party, _) =>
+          val newlyRespondedFullVotes = newlyResponded.filter { case ConfirmingParty(party, _, _) =>
             consortiumVotingUpdated(party).isApproved
           }
           loggingContext.debug(
@@ -334,29 +335,43 @@ object ResponseAggregation {
   def fromRequest(
       requestId: RequestId,
       request: MediatorRequest,
+      protocolVersion: ProtocolVersion,
       topologySnapshot: TopologySnapshot,
   )(implicit
       requestTraceContext: TraceContext,
       ec: ExecutionContext,
   ): Future[ResponseAggregation[?]] =
-    for {
-      initialState <- mkInitialState(
-        request.informeesAndThresholdByViewPosition,
-        topologySnapshot,
-      )
-    } yield {
-      ResponseAggregation[ViewPosition](
-        requestId,
-        request,
-        requestId.unwrap,
-        Right(initialState),
-      )(requestTraceContext = requestTraceContext)
+    if (protocolVersion >= ProtocolVersion.v5) {
+      for {
+        initialState <- mkInitialState(
+          request.informeesAndThresholdByViewPosition,
+          topologySnapshot,
+        )
+      } yield {
+        ResponseAggregation[ViewPosition](
+          requestId,
+          request,
+          requestId.unwrap,
+          Right(initialState),
+        )(requestTraceContext = requestTraceContext)
+      }
+    } else {
+      for {
+        initialState <- mkInitialState(request.informeesAndThresholdByViewHash, topologySnapshot)
+      } yield {
+        ResponseAggregation[ViewHash](
+          requestId,
+          request,
+          requestId.unwrap,
+          Right(initialState),
+        )(requestTraceContext = requestTraceContext)
+      }
     }
 
   private def mkInitialState[K](
       informeesAndThresholdByView: Map[K, (Set[Informee], NonNegativeInt)],
       topologySnapshot: TopologySnapshot,
-  )(implicit ec: ExecutionContext, tc: TraceContext): Future[Map[K, ViewState]] = {
+  )(implicit ec: ExecutionContext): Future[Map[K, ViewState]] = {
     informeesAndThresholdByView.toSeq
       .parTraverse { case (viewKey, (informees, threshold)) =>
         val confirmingParties = informees.collect { case cp: ConfirmingParty => cp }

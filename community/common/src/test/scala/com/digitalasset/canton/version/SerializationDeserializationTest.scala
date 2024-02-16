@@ -3,23 +3,19 @@
 
 package com.digitalasset.canton.version
 
+import com.digitalasset.canton.SerializationDeserializationTestHelpers.DefaultValueUntilExclusive
 import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.{
-  AcknowledgeRequest,
-  AggregationRule,
-  Batch,
-  ClosedEnvelope,
   GeneratorsProtocol as GeneratorsProtocolSequencing,
   MaxRequestSizeToDeserialize,
-  SubmissionRequest,
 }
 import com.digitalasset.canton.topology.transaction.{
   GeneratorsTransaction,
-  SignedTopologyTransactionX,
-  TopologyTransactionX,
+  LegalIdentityClaim,
+  SignedTopologyTransaction,
 }
 import com.digitalasset.canton.{BaseTest, SerializationDeserializationTestHelpers}
 import org.scalatest.wordspec.AnyWordSpec
@@ -33,67 +29,80 @@ class SerializationDeserializationTest
   import com.digitalasset.canton.sequencing.GeneratorsSequencing.*
 
   forAll(Table("protocol version", ProtocolVersion.supported *)) { version =>
-    val generatorsProtocol = new GeneratorsProtocol(version)
-    val generatorsData =
-      new GeneratorsData(version, generatorsProtocol)
+    val generatorsDataTime = new GeneratorsDataTime()
+    val generatorsProtocol = new GeneratorsProtocol(version, generatorsDataTime)
+    val generatorsData = new GeneratorsData(version, generatorsDataTime, generatorsProtocol)
     val generatorsTransaction = new GeneratorsTransaction(version, generatorsProtocol)
     val generatorsLocalVerdict = GeneratorsLocalVerdict(version)
-    val generatorsVerdict = GeneratorsVerdict(version, generatorsLocalVerdict)
+    val generatorsVerdict = GeneratorsVerdict(version)
     val generatorsMessages = new GeneratorsMessages(
       version,
       generatorsData,
+      generatorsDataTime,
       generatorsProtocol,
+      generatorsTransaction,
       generatorsLocalVerdict,
       generatorsVerdict,
     )
     val generatorsProtocolSeq = new GeneratorsProtocolSequencing(
       version,
+      generatorsDataTime,
       generatorsMessages,
     )
     val generatorsTransferData = new GeneratorsTransferData(
       version,
+      generatorsDataTime,
       generatorsProtocol,
       generatorsProtocolSeq,
     )
 
     import generatorsData.*
-    import generatorsMessages.*
     import generatorsTransferData.*
+    import generatorsMessages.*
     import generatorsVerdict.*
     import generatorsLocalVerdict.*
-    import generatorsProtocol.*
     import generatorsProtocolSeq.*
     import generatorsTransaction.*
+    import generatorsProtocol.*
 
     s"Serialization and deserialization methods using protocol version $version" should {
       "compose to the identity" in {
         testProtocolVersioned(StaticDomainParameters)
-        testProtocolVersioned(DynamicDomainParameters)
+        testProtocolVersioned(com.digitalasset.canton.protocol.DynamicDomainParameters)
 
         testProtocolVersioned(AcsCommitment)
         testProtocolVersioned(Verdict)
         testProtocolVersioned(MediatorResponse)
-        testMemoizedProtocolVersionedWithCtx(TypedSignedProtocolMessageContent, version)
-        testProtocolVersionedWithCtx(SignedProtocolMessage, version)
+        if (version >= ProtocolVersion.v5) {
+          testProtocolVersionedWithCtx(SignedProtocolMessage, (TestHash, version))
+        }
 
         testProtocolVersioned(LocalVerdict)
         testProtocolVersioned(TransferResult)
         testProtocolVersioned(MalformedMediatorRequestResult)
-        testProtocolVersionedWithCtx(EnvelopeContent, (TestHash, version))
-        testMemoizedProtocolVersioned(TransactionResultMessage)
+        if (version >= ProtocolVersion.v4) {
+          testProtocolVersionedWithCtx(EnvelopeContent, (TestHash, version))
+        }
+        if (version >= ProtocolVersion.v5) {
+          /*
+          With pv < 5, the TransactionResultMessage expects a NotificationTree that we cannot generate yet.
+          Generating merkle trees will be done in the future.
+           */
+          testMemoizedProtocolVersionedWithCtx(TransactionResultMessage, (TestHash, version))
+        }
 
-        testProtocolVersioned(AcknowledgeRequest)
-        testProtocolVersioned(AggregationRule)
-        testProtocolVersioned(ClosedEnvelope)
+        testProtocolVersioned(com.digitalasset.canton.sequencing.protocol.AcknowledgeRequest)
+        testProtocolVersioned(com.digitalasset.canton.sequencing.protocol.ClosedEnvelope)
 
         testVersioned(ContractMetadata)(
           generatorsProtocol.contractMetadataArb(canHaveEmptyKey = true)
         )
-        testVersioned[SerializableContract](SerializableContract)(
-          generatorsProtocol.serializableContractArb(canHaveEmptyKey = true)
-        )
+        testVersioned[SerializableContract](
+          SerializableContract,
+          List(DefaultValueUntilExclusive(_.copy(contractSalt = None), ProtocolVersion.v4)),
+        )(generatorsProtocol.serializableContractArb(canHaveEmptyKey = true))
 
-        testProtocolVersioned(ActionDescription)
+        testProtocolVersioned(com.digitalasset.canton.data.ActionDescription)
 
         // Merkle tree leaves
         testMemoizedProtocolVersionedWithCtx(CommonMetadata, TestHash)
@@ -104,39 +113,49 @@ class SerializationDeserializationTest
         testMemoizedProtocolVersionedWithCtx(TransferOutCommonData, TestHash)
         testMemoizedProtocolVersionedWithCtx(TransferOutView, TestHash)
 
-        testMemoizedProtocolVersionedWithCtx(
-          ViewCommonData,
-          (TestHash, ConfirmationPolicy.Signatory),
-        )
+        if (version >= ProtocolVersion.v5) {
+          Seq(ConfirmationPolicy.Vip, ConfirmationPolicy.Signatory).map { confirmationPolicy =>
+            testMemoizedProtocolVersionedWithCtx(
+              com.digitalasset.canton.data.ViewCommonData,
+              (TestHash, confirmationPolicy),
+            )
+          }
+        }
 
-        testMemoizedProtocolVersioned(TopologyTransactionX)
-        testProtocolVersionedWithCtx(
-          SignedTopologyTransactionX,
+        testMemoizedProtocolVersionedWithCtx(
+          SignedTopologyTransaction,
           ProtocolVersionValidation(version),
         )
+
+        testMemoizedProtocolVersioned(LegalIdentityClaim)
 
         testMemoizedProtocolVersionedWithCtx(
           com.digitalasset.canton.data.ViewParticipantData,
           TestHash,
         )
-        testProtocolVersioned(Batch)
+        testProtocolVersioned(com.digitalasset.canton.sequencing.protocol.Batch)
         testMemoizedProtocolVersionedWithCtx(
-          SubmissionRequest,
+          com.digitalasset.canton.sequencing.protocol.SubmissionRequest,
           MaxRequestSizeToDeserialize.NoLimit,
         )
-        testVersioned(com.digitalasset.canton.sequencing.SequencerConnections)
+        testVersioned(
+          com.digitalasset.canton.sequencing.SequencerConnections
+        )
       }
 
     }
   }
 
   "be exhaustive" in {
-    val requiredTests = {
+    val requiredTests =
       findHasProtocolVersionedWrapperSubClasses("com.digitalasset.canton.protocol")
-        ++ findHasProtocolVersionedWrapperSubClasses("com.digitalasset.canton.topology")
-    }
 
-    val missingTests = requiredTests.diff(testedClasses.toList)
+    val notSerializedTests = Seq(
+      // Used for ACS commitments but not serialized
+      "com.digitalasset.canton.protocol.messages.TypedSignedProtocolMessageContent"
+    )
+
+    val missingTests = requiredTests.diff(testedClasses.toList).diff(notSerializedTests)
 
     /*
         If this test fails, it means that one class inheriting from HasProtocolVersionWrapper in the

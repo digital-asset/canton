@@ -41,9 +41,15 @@ class ConfirmationResponseFactory(
     def hostedConfirmingPartiesOfView(
         viewValidationResult: ViewValidationResult
     ): Future[Set[LfPartyId]] = {
-      val confirmingParties = viewValidationResult.view.viewCommonData.informees
-        .collect { case cp: ConfirmingParty => cp.party }
-      topologySnapshot.canConfirm(participantId, confirmingParties)
+      viewValidationResult.view.viewCommonData.informees.toList
+        .parTraverseFilter {
+          case ConfirmingParty(party, _, requiredTrustLevel) =>
+            topologySnapshot
+              .canConfirm(participantId, party, requiredTrustLevel)
+              .map(if (_) Some(party) else None)
+          case _ => Future.successful(None)
+        }
+        .map(_.toSet)
     }
 
     def verdictsForView(
@@ -58,6 +64,9 @@ class ConfirmationResponseFactory(
         inactive,
         alreadyLocked,
         existing,
+        duplicateKeys,
+        inconsistentKeys,
+        alreadyLockedKeys,
       ) =
         viewValidationResult.activenessResult
 
@@ -68,6 +77,18 @@ class ConfirmationResponseFactory(
       if (alreadyLocked.nonEmpty)
         logger.debug(
           show"View $viewHash of request $requestId rejected due to contention on contract(s) $alreadyLocked"
+        )
+      if (duplicateKeys.nonEmpty)
+        logger.debug(
+          show"View $viewHash of request $requestId rejected due to duplicate keys $duplicateKeys"
+        )
+      if (inconsistentKeys.nonEmpty)
+        logger.debug(
+          show"View $viewHash of request $requestId rejected due to inconsistent keys $inconsistentKeys"
+        )
+      if (alreadyLockedKeys.nonEmpty)
+        logger.debug(
+          show"View $viewHash of request $requestId rejected due to contention on key(s) $alreadyLockedKeys"
         )
 
       if (hostedConfirmingParties.isEmpty) {
@@ -89,6 +110,12 @@ class ConfirmationResponseFactory(
             .get(coid)
             .exists(_.stakeholders.intersect(hostedConfirmingParties).nonEmpty)
 
+        def extractKeysWithMaintainerBeingHostedConfirmingParty(
+            keysWithMaintainers: Map[LfGlobalKey, Set[LfPartyId]]
+        ): Seq[LfGlobalKey] = keysWithMaintainers.collect {
+          case (key, maintainers) if maintainers.intersect(hostedConfirmingParties).nonEmpty => key
+        }.toSeq
+
         // All informees are stakeholders of created contracts in the core of the view.
         // It therefore suffices to deal with input contracts by stakeholder.
         val createdAbsolute =
@@ -99,6 +126,13 @@ class ConfirmationResponseFactory(
 
         val inactiveInputs = inactive.filter(stakeholderOfUsedContractIsHostedConfirmingParty)
         val lockedInputs = alreadyLocked.filter(stakeholderOfUsedContractIsHostedConfirmingParty)
+        val lockedKeys = extractKeysWithMaintainerBeingHostedConfirmingParty(alreadyLockedKeys)
+        val duplicateKeysForParty = extractKeysWithMaintainerBeingHostedConfirmingParty(
+          duplicateKeys
+        )
+        val inconsistentKeysForParty = extractKeysWithMaintainerBeingHostedConfirmingParty(
+          inconsistentKeys
+        )
 
         if (inactiveInputs.nonEmpty) {
           // The transaction uses an inactive contract. Reject.
@@ -106,12 +140,30 @@ class ConfirmationResponseFactory(
             LocalReject.ConsistencyRejections.InactiveContracts
               .Reject(inactiveInputs.toSeq.map(_.coid))(verdictProtocolVersion)
           )
+        } else if (duplicateKeysForParty.nonEmpty) {
+          // The transaction would assign several contracts to the same key. Reject.
+          Some(
+            LocalReject.ConsistencyRejections.DuplicateKey
+              .Reject(duplicateKeysForParty.map(_.toString()))(verdictProtocolVersion)
+          )
+        } else if (inconsistentKeysForParty.nonEmpty) {
+          // The key lookups / creations / exercise by key have inconsistent key resolutions. Reject.
+          Some(
+            LocalReject.ConsistencyRejections.InconsistentKey
+              .Reject(inconsistentKeysForParty.map(_.toString()))(verdictProtocolVersion)
+          )
         } else if (lockedInputs.nonEmpty | lockedForActivation.nonEmpty) {
           // The transaction would create / use a locked contract. Reject.
           val allLocked = lockedForActivation ++ lockedInputs
           Some(
             LocalReject.ConsistencyRejections.LockedContracts
               .Reject(allLocked.toSeq.map(_.coid))(verdictProtocolVersion)
+          )
+        } else if (lockedKeys.nonEmpty) {
+          // The transaction would resolve a locked key. Reject.
+          Some(
+            LocalReject.ConsistencyRejections.LockedKeys
+              .Reject(lockedKeys.map(_.toString()))(verdictProtocolVersion)
           )
         } else {
           // Everything ok from the perspective of conflict detection.
@@ -245,6 +297,7 @@ class ConfirmationResponseFactory(
                   .tryCreate(
                     requestId,
                     participantId,
+                    Some(viewValidationResult.view.view.viewHash),
                     Some(viewPosition),
                     localVerdict,
                     Some(transactionValidationResult.transactionId.toRootHash),
@@ -287,9 +340,10 @@ class ConfirmationResponseFactory(
         .tryCreate(
           requestId,
           participantId,
-          // We don't have to specify a viewPosition.
+          // We don't have to specify a viewHash or viewPosition.
           // The mediator will interpret this as a rejection
           // for all views and on behalf of all declared confirming parties hosted by the participant.
+          None,
           None,
           logged(
             requestId,

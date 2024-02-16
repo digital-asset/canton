@@ -4,8 +4,11 @@
 package com.digitalasset.canton.sequencing.protocol
 
 import cats.Functor
+import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.{DefaultOpenEnvelope, ProtocolMessage}
+import com.digitalasset.canton.protocol.v0
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -32,10 +35,9 @@ final case class OpenEnvelope[+M <: ProtocolMessage](
     prettyOfClass(unnamedParam(_.protocolMessage), param("recipients", _.recipients))
 
   override def forRecipient(
-      member: Member,
-      groupAddresses: Set[GroupRecipient],
+      member: Member
   ): Option[OpenEnvelope[M]] = {
-    val subtrees = recipients.forMember(member, groupAddresses)
+    val subtrees = recipients.forMember(member)
     subtrees.map(s => this.copy(recipients = s))
   }
 
@@ -48,4 +50,14 @@ final case class OpenEnvelope[+M <: ProtocolMessage](
       protocolMessage: MM = protocolMessage,
       recipients: Recipients = recipients,
   ): OpenEnvelope[MM] = OpenEnvelope(protocolMessage, recipients)(protocolVersion)
+}
+
+object OpenEnvelope {
+
+  def fromProtoV0(
+      hashOps: HashOps,
+      protocolVersion: ProtocolVersion,
+  )(envelopeP: v0.Envelope): ParsingResult[DefaultOpenEnvelope] = {
+    ClosedEnvelope.fromProtoV0(envelopeP).flatMap(_.openEnvelope(hashOps, protocolVersion))
+  }
 }

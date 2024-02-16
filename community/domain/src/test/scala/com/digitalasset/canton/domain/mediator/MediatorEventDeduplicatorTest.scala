@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.domain.mediator
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
@@ -18,7 +17,7 @@ import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.protocol.{RequestId, v30}
+import com.digitalasset.canton.protocol.{RequestId, v0}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.DefaultTestIdentities.*
 import com.digitalasset.canton.tracing.TraceContext
@@ -105,11 +104,12 @@ class MediatorEventDeduplicatorTest
     OpenEnvelope(protocolMessage, Recipients.cc(mediator))(testedProtocolVersion)
 
   private lazy val response: DefaultOpenEnvelope = {
-    val message = SignedProtocolMessage(
-      mock[TypedSignedProtocolMessageContent[MediatorResponse]],
-      NonEmpty(Seq, SymbolicCrypto.emptySignature),
-      testedProtocolVersion,
-    )
+    val message =
+      SignedProtocolMessage(
+        mock[TypedSignedProtocolMessageContent[MediatorResponse]],
+        SymbolicCrypto.emptySignature,
+        testedProtocolVersion,
+      )
     mkDefaultOpenEnvelope(message)
   }
 
@@ -123,7 +123,7 @@ class MediatorEventDeduplicatorTest
     val reject = MediatorVerdict.MediatorReject(
       MediatorError.MalformedMessage.Reject(
         s"The request uuid (${request.requestUuid}) must not be used until $expireAfter.",
-        v30.MediatorRejection.Code.CODE_NON_UNIQUE_REQUEST_UUID,
+        v0.MediatorRejection.Code.NonUniqueRequestUuid,
       )
     )
 
@@ -375,7 +375,6 @@ class MediatorEventDeduplicatorTest
           requestId: RequestId,
           batch: Batch[DefaultOpenEnvelope],
           decisionTime: CantonTimestamp,
-          aggregationRule: Option[AggregationRule],
           sendVerdict: Boolean,
       )(implicit traceContext: TraceContext): Future[Unit] =
         Future.never

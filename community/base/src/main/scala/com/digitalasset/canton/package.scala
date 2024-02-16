@@ -9,8 +9,6 @@ import com.daml.lf.transaction.{ContractStateMachine, Versioned}
 import com.daml.lf.value.Value
 import com.digitalasset.canton.data.{Counter, CounterCompanion}
 import com.digitalasset.canton.ledger.configuration
-import com.digitalasset.canton.serialization.DeterministicEncoding.encodeLong
-import com.google.protobuf.ByteString
 
 package object canton {
 
@@ -55,9 +53,6 @@ package object canton {
 
   type LfPackageId = Ref.PackageId
   val LfPackageId: Ref.PackageId.type = Ref.PackageId
-
-  type LfPackageName = Ref.PackageName
-  val LfPackageName: Ref.PackageName.type = Ref.PackageName
 
   type LfInterfaceId = Ref.TypeConName
   val LfInterfaceId: Ref.TypeConName.type = Ref.TypeConName
@@ -111,20 +106,6 @@ package object canton {
   type RequestCounterDiscriminator
   type RequestCounter = Counter[RequestCounterDiscriminator]
 
-  /** The counter assigned to a contract to count the number of its transfers */
-  type TransferCounterDiscriminator
-  type TransferCounter = Counter[TransferCounterDiscriminator]
-
-  object TransferCounter extends CounterCompanion[TransferCounterDiscriminator] {
-    def encodeDeterministically(transferCounter: TransferCounter): ByteString = encodeLong(
-      transferCounter.unwrap
-    )
-  }
-
-  /** A transfer counter.
-    */
-  type TransferCounterO = Option[TransferCounter]
-
   object RequestCounter extends CounterCompanion[RequestCounterDiscriminator]
 
   /** Wrap a method call with this method to document that the caller is sure that the callee's preconditions are met. */
@@ -138,11 +119,4 @@ package object canton {
 
   implicit val lfPartyOrdering: Ordering[LfPartyId] =
     IdString.`Party order instance`.toScalaOrdering
-
-  /** Use this type when scalac struggles to infer `Nothing`
-    * due to it being treated specially.
-    *
-    * see https://www.reddit.com/r/scala/comments/73791p/nothings_twin_brother_the_better_one/
-    */
-  type Uninhabited <: Nothing
 }

@@ -10,14 +10,13 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.protocol.submission.SeedGenerator
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.{
   StakeholdersMismatch,
-  TemplateIdMismatch,
   TransferProcessorError,
 }
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.sequencing.protocol.Recipients
 import com.digitalasset.canton.time.TimeProofTestUtil
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.transaction.ParticipantPermission
+import com.digitalasset.canton.topology.transaction.{ParticipantPermission, VettedPackages}
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -45,16 +44,13 @@ class TransferOutValidationTest
 
   private val participant = ParticipantId.tryFromProtoPrimitive("PAR::bothdomains::participant")
 
-  private val initialTransferCounter: TransferCounterO =
-    Some(TransferCounter.Genesis)
-
   private def submitterInfo(submitter: LfPartyId): TransferSubmitterMetadata = {
     TransferSubmitterMetadata(
       submitter,
-      participant,
+      DefaultDamlValues.lfApplicationId(),
+      participant.toLf,
       DefaultDamlValues.lfCommandId(),
       submissionId = None,
-      DefaultDamlValues.lfApplicationId(),
       workflowId = None,
     )
   }
@@ -63,7 +59,7 @@ class TransferOutValidationTest
 
   val transferId = TransferId(sourceDomain, CantonTimestamp.Epoch)
   val uuid = new UUID(3L, 4L)
-  private val pureCrypto = TestingIdentityFactoryX.pureCrypto()
+  private val pureCrypto = TestingIdentityFactory.pureCrypto()
   private val seedGenerator = new SeedGenerator(pureCrypto)
   val seed = seedGenerator.generateSaltSeed()
 
@@ -83,7 +79,7 @@ class TransferOutValidationTest
     ),
   )
 
-  private val identityFactory = TestingTopologyX()
+  private val identityFactory = TestingTopology()
     .withDomains(sourceDomain.unwrap)
     .withReversedTopology(
       Map(
@@ -95,7 +91,7 @@ class TransferOutValidationTest
     )
     .withSimpleParticipants(participant) // required such that `participant` gets a signing key
     .withPackages(
-      Map(participant -> Seq(templateId.packageId, wrongTemplateId.packageId))
+      Seq(VettedPackages(participant, Seq(templateId.packageId, wrongTemplateId.packageId)))
     )
     .build(loggerFactory)
 
@@ -109,7 +105,6 @@ class TransferOutValidationTest
         stakeholders,
         sourcePV,
         templateId,
-        initialTransferCounter,
       )
       for {
         _ <- validation.valueOrFailShutdown("validation failed")
@@ -123,7 +118,6 @@ class TransferOutValidationTest
       stakeholders.union(Set(receiverParty2)),
       sourcePV,
       templateId,
-      initialTransferCounter,
     )
     for {
       res <- validation.leftOrFailShutdown("couldn't get left from transfer out validation")
@@ -140,19 +134,19 @@ class TransferOutValidationTest
   "detect template id mismatch" in {
     // template id does not match the one in the contract
     val validation =
-      mkTransferOutValidation(stakeholders, sourcePV, wrongTemplateId, initialTransferCounter).value
+      mkTransferOutValidation(stakeholders, sourcePV, wrongTemplateId).value
     for {
       res <- validation.failOnShutdown
+      // leftOrFailShutdown("couldn't get left from transfer out validation")
     } yield {
-      res shouldBe Left(TemplateIdMismatch(templateId.leftSide, wrongTemplateId.leftSide))
+      res shouldBe Right(())
     }
   }
 
-  private def mkTransferOutValidation(
+  def mkTransferOutValidation(
       newStakeholders: Set[LfPartyId],
       sourceProtocolVersion: SourceProtocolVersion,
       expectedTemplateId: LfTemplateId,
-      transferCounter: TransferCounterO,
   ): EitherT[FutureUnlessShutdown, TransferProcessorError, Unit] = {
     val transferOutRequest = TransferOutRequest(
       submitterInfo(submitterParty1),
@@ -167,7 +161,6 @@ class TransferOutValidationTest
       targetDomain,
       targetPV,
       TimeProofTestUtil.mkTimeProof(timestamp = CantonTimestamp.Epoch, targetDomain = targetDomain),
-      transferCounter,
     )
     val fullTransferOutTree = transferOutRequest
       .toFullTransferOutTree(

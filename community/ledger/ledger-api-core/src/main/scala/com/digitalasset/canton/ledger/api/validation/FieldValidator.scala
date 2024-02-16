@@ -22,7 +22,6 @@ import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator
   InvalidAnnotationsKeyError,
 }
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.*
-import com.digitalasset.canton.ledger.api.validation.ValueValidator.*
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.topology.DomainId
 import com.google.protobuf.timestamp.Timestamp
@@ -51,6 +50,38 @@ object FieldValidator {
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, String] =
     Either.cond(s.nonEmpty, s, missingField(fieldName))
+
+  def requireIdentifier(s: String)(implicit
+      contextualizedErrorLogger: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, Ref.Name] =
+    Ref.Name.fromString(s).left.map(invalidArgument)
+
+  private def requireNonEmptyParsedId[T](parser: String => Either[String, T])(
+      s: String,
+      fieldName: String,
+  )(implicit
+      contextualizedErrorLogger: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, T] =
+    if (s.isEmpty)
+      Left(missingField(fieldName))
+    else
+      parser(s).left.map(invalidField(fieldName, _))
+
+  def requireName(
+      s: String,
+      fieldName: String,
+  )(implicit
+      contextualizedErrorLogger: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, Ref.Name] =
+    requireNonEmptyParsedId(Ref.Name.fromString)(s, fieldName)
+
+  def requirePackageId(
+      s: String,
+      fieldName: String,
+  )(implicit
+      contextualizedErrorLogger: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, Ref.PackageId] =
+    requireNonEmptyParsedId(Ref.PackageId.fromString)(s, fieldName)
 
   def requireParty(s: String)(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
@@ -134,16 +165,6 @@ object FieldValidator {
     }
   }
 
-  def optionalEventSequentialId(
-      s: String,
-      fieldName: String,
-      message: String,
-  )(implicit
-      contextualizedErrorLogger: ContextualizedErrorLogger
-  ): Either[StatusRuntimeException, Option[Long]] = optionalString(s) { s =>
-    eventSequentialId(s, fieldName, message)
-  }
-
   def requireIdentityProviderId(
       s: String,
       fieldName: String,
@@ -223,6 +244,14 @@ object FieldValidator {
     if (s.isEmpty) Left(missingField(fieldName))
     else ContractId.fromString(s).left.map(invalidField(fieldName, _))
 
+  def requireDottedName(
+      s: String,
+      fieldName: String,
+  )(implicit
+      contextualizedErrorLogger: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, Ref.DottedName] =
+    Ref.DottedName.fromString(s).left.map(invalidField(fieldName, _))
+
   def requireNonEmpty[M[_] <: Iterable[_], T](
       s: M[T],
       fieldName: String,
@@ -231,6 +260,21 @@ object FieldValidator {
   ): Either[StatusRuntimeException, M[T]] =
     if (s.nonEmpty) Right(s)
     else Left(missingField(fieldName))
+
+  def requirePresence[T](option: Option[T], fieldName: String)(implicit
+      contextualizedErrorLogger: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, T] =
+    option.fold[Either[StatusRuntimeException, T]](
+      Left(missingField(fieldName))
+    )(Right(_))
+
+  def validateIdentifier(identifier: Identifier)(implicit
+      contextualizedErrorLogger: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, Ref.Identifier] =
+    for {
+      qualifiedName <- validateTemplateQualifiedName(identifier.moduleName, identifier.entityName)
+      packageId <- requirePackageId(identifier.packageId, "package_id")
+    } yield Ref.Identifier(packageId, qualifiedName)
 
   def validateTypeConRef(identifier: Identifier)(upgradingEnabled: Boolean)(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
@@ -321,4 +365,11 @@ object FieldValidator {
   ): Either[StatusRuntimeException, Option[U]] =
     t.map(validation).map(_.map(Some(_))).getOrElse(Right(None))
 
+  private def validateTemplateQualifiedName(moduleName: String, entityName: String)(implicit
+      contextualizedErrorLogger: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, Ref.QualifiedName] =
+    for {
+      mn <- requireDottedName(moduleName, "module_name")
+      en <- requireDottedName(entityName, "entity_name")
+    } yield Ref.QualifiedName(mn, en)
 }

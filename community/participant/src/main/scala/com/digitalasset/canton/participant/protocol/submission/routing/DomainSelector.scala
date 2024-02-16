@@ -181,8 +181,6 @@ private[routing] class DomainSelector(
         .subflatMap(
           _.toRight[TransactionRoutingError](NoDomainForSubmission.Error(allUnusableDomains))
         )
-
-      _ = logger.debug(s"Candidates for submission: $usableDomainsNE")
     } yield usableDomainsNE.toSet
   }
 

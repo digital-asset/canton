@@ -13,7 +13,6 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   RegisterMemberError,
   SequencerWriteError,
 }
-import com.digitalasset.canton.domain.sequencing.sequencer.traffic.SequencerTrafficStatus
 import com.digitalasset.canton.health.HealthListener
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.lifecycle.FlagCloseable
@@ -43,10 +42,9 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
   val messageId = MessageId.tryCreate("test-message-id")
   def mkBatch(recipients: Set[Member]): Batch[ClosedEnvelope] =
     Batch[ClosedEnvelope](
-      ClosedEnvelope.create(
+      ClosedEnvelope(
         ByteString.EMPTY,
         Recipients.ofSet(recipients).value,
-        Seq.empty,
         testedProtocolVersion,
       ) :: Nil,
       testedProtocolVersion,
@@ -58,7 +56,6 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
       isRequest = true,
       mkBatch(to),
       CantonTimestamp.MaxValue,
-      None,
       None,
       testedProtocolVersion,
     )
@@ -145,16 +142,22 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
       ???
     override def disableMember(member: Member)(implicit traceContext: TraceContext): Future[Unit] =
       ???
+    override def isLedgerIdentityRegistered(identity: LedgerIdentity)(implicit
+        traceContext: TraceContext
+    ): Future[Boolean] = ???
+
+    override def authorizeLedgerIdentity(identity: LedgerIdentity)(implicit
+        traceContext: TraceContext
+    ): EitherT[Future, String, Unit] = ???
+
     override protected def healthInternal(implicit
         traceContext: TraceContext
     ): Future[SequencerHealthStatus] = Future.successful(SequencerHealthStatus(isActive = true))
-    override private[sequencing] def firstSequencerCounterServeableForSequencer: SequencerCounter =
-      ???
-    override def trafficStatus(members: Seq[Member])(implicit
-        traceContext: TraceContext
-    ): Future[SequencerTrafficStatus] = ???
 
     override protected def timeouts: ProcessingTimeout = ProcessingTimeout()
+
+    override private[sequencing] def firstSequencerCounterServeableForSequencer: SequencerCounter =
+      ???
   }
 
   Seq(("sendAsync", false), ("sendAsyncSigned", true)).foreach { case (name, useSignedSend) =>

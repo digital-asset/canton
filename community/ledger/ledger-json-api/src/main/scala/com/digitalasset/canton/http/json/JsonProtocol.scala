@@ -395,6 +395,7 @@ object JsonProtocol extends JsonProtocolLow {
       domain.SearchForeverRequest(NonEmptyList((single.convertTo[domain.SearchForeverQuery], 0)))
   }
 
+
   implicit def DisclosedContractFormat[TmplId: JsonFormat]
       : JsonFormat[domain.DisclosedContract[TmplId]] = {
     val rawJsonFormat = jsonFormat3(domain.DisclosedContract[TmplId].apply)
@@ -402,7 +403,7 @@ object JsonProtocol extends JsonProtocolLow {
     new JsonFormat[DisclosedContract[TmplId]] {
       override def read(json: JsValue): DisclosedContract[TmplId] = {
         val raw = rawJsonFormat.read(json)
-        if ((Base64 unwrap raw.createdEventBlob).isEmpty)
+        if((Base64 unwrap raw.createdEventBlob).isEmpty)
           deserializationError("DisclosedContract.createdEventBlob must not be empty")
         else raw
       }
@@ -421,7 +422,8 @@ object JsonProtocol extends JsonProtocolLow {
 
   implicit val WorkflowIdFormat: JsonFormat[domain.WorkflowId] = taggedJsonFormat
 
-  implicit def CommandMetaFormat[TmplId: JsonFormat]: JsonFormat[domain.CommandMeta[TmplId]] =
+  implicit def CommandMetaFormat[TmplId: JsonFormat]
+      : JsonFormat[domain.CommandMeta[TmplId]] =
     jsonFormat7(domain.CommandMeta.apply[TmplId])
 
   // exposed for testing

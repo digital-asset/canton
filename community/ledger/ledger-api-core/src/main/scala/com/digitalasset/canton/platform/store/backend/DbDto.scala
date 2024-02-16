@@ -12,6 +12,22 @@ sealed trait DbDto
 
 object DbDto {
 
+  final case class EventDivulgence(
+      event_offset: Option[String],
+      command_id: Option[String],
+      workflow_id: Option[String],
+      application_id: Option[String],
+      submitters: Option[Set[String]],
+      contract_id: String,
+      template_id: Option[String],
+      package_name: Option[String],
+      tree_event_witnesses: Set[String],
+      create_argument: Option[Array[Byte]],
+      create_argument_compression: Option[Int],
+      event_sequential_id: Long,
+      domain_id: Option[String] = None,
+  ) extends DbDto
+
   final case class EventCreate(
       event_offset: Option[String],
       transaction_id: Option[String],
@@ -24,6 +40,7 @@ object DbDto {
       event_id: Option[String],
       contract_id: String,
       template_id: Option[String],
+      package_name: Option[String],
       flat_event_witnesses: Set[String],
       tree_event_witnesses: Set[String],
       create_argument: Option[Array[Byte]],
@@ -37,7 +54,7 @@ object DbDto {
       create_key_value_compression: Option[Int],
       event_sequential_id: Long,
       driver_metadata: Option[Array[Byte]],
-      domain_id: String,
+      domain_id: Option[String] = None,
       trace_context: Array[Byte],
   ) extends DbDto
 
@@ -66,7 +83,7 @@ object DbDto {
       exercise_argument_compression: Option[Int],
       exercise_result_compression: Option[Int],
       event_sequential_id: Long,
-      domain_id: String,
+      domain_id: Option[String] = None,
       trace_context: Array[Byte],
   ) extends DbDto
 
@@ -169,7 +186,7 @@ object DbDto {
       deduplication_duration_seconds: Option[Long],
       deduplication_duration_nanos: Option[Int],
       deduplication_start: Option[Long],
-      domain_id: String,
+      domain_id: Option[String] = None,
       trace_context: Array[Byte],
   ) extends DbDto
 

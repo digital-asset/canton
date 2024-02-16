@@ -6,8 +6,9 @@ package com.digitalasset.canton.data
 import cats.syntax.either.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.data.CommonMetadata.singleMediatorError
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.protocol.{ConfirmationPolicy, v30}
+import com.digitalasset.canton.protocol.{v0, *}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology.*
@@ -49,14 +50,19 @@ final case class CommonMetadata private (
 
   @transient override protected lazy val companionObj: CommonMetadata.type = CommonMetadata
 
-  private def toProtoV30: v30.CommonMetadata = {
-    v30.CommonMetadata(
-      confirmationPolicy = confirmationPolicy.toProtoPrimitive,
-      domainId = domainId.toProtoPrimitive,
-      salt = Some(salt.toProtoV30),
-      uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
-      mediator = mediator.toProtoPrimitive,
-    )
+  private def toProtoV0: v0.CommonMetadata = {
+    mediator match {
+      case MediatorRef(mediatorId) =>
+        v0.CommonMetadata(
+          confirmationPolicy = confirmationPolicy.toProtoPrimitive,
+          domainId = domainId.toProtoPrimitive,
+          salt = Some(salt.toProtoV0),
+          uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
+          mediatorId = mediatorId.toProtoPrimitive,
+        )
+      case _ =>
+        throw new IllegalStateException(singleMediatorError(representativeProtocolVersion))
+    }
   }
 }
 
@@ -68,13 +74,17 @@ object CommonMetadata
   override val name: String = "CommonMetadata"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v30)(v30.CommonMetadata)(
-      supportedProtoVersionMemoized(_)(fromProtoV30),
-      _.toProtoV30.toByteString,
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.CommonMetadata)(
+      supportedProtoVersionMemoized(_)(fromProtoV0),
+      _.toProtoV0.toByteString,
     )
   )
 
-  def create(
+  private def singleMediatorError(
+      rpv: RepresentativeProtocolVersion[CommonMetadata.type]
+  ): String = s"Only single mediator exist in for the representative protocol version $rpv"
+
+  def apply(
       hashOps: HashOps,
       protocolVersion: ProtocolVersion,
   )(
@@ -83,12 +93,12 @@ object CommonMetadata
       mediator: MediatorRef,
       salt: Salt,
       uuid: UUID,
-  ): CommonMetadata = create(
+  ): CommonMetadata = apply(
     hashOps,
     protocolVersionRepresentativeFor(protocolVersion),
   )(confirmationPolicy, domain, mediator, salt, uuid)
 
-  def create(
+  def apply(
       hashOps: HashOps,
       protocolVersion: RepresentativeProtocolVersion[CommonMetadata.type],
   )(
@@ -104,7 +114,7 @@ object CommonMetadata
       None,
     )
 
-  private def fromProtoV30(hashOps: HashOps, metaDataP: v30.CommonMetadata)(
+  private def fromProtoV0(hashOps: HashOps, metaDataP: v0.CommonMetadata)(
       bytes: ByteString
   ): ParsingResult[CommonMetadata] =
     for {
@@ -113,20 +123,26 @@ object CommonMetadata
         .leftMap(e =>
           ProtoDeserializationError.ValueDeserializationError("confirmationPolicy", e.show)
         )
-      v30.CommonMetadata(saltP, _confirmationPolicyP, domainIdP, uuidP, mediatorP) = metaDataP
+      v0.CommonMetadata(saltP, _confirmationPolicyP, domainIdP, uuidP, mediatorIdP) = metaDataP
       domainUid <- UniqueIdentifier
         .fromProtoPrimitive_(domainIdP)
         .leftMap(ProtoDeserializationError.ValueDeserializationError("domainId", _))
-      mediator <- MediatorRef
-        .fromProtoPrimitive(mediatorP, "CommonMetadata.mediator_id")
+      mediatorId <- MediatorId
+        .fromProtoPrimitive(mediatorIdP, "CommonMetadata.mediator_id")
       salt <- ProtoConverter
-        .parseRequired(Salt.fromProtoV30, "salt", saltP)
+        .parseRequired(Salt.fromProtoV0, "salt", saltP)
         .leftMap(_.inField("salt"))
       uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP).leftMap(_.inField("uuid"))
-      pv <- protocolVersionRepresentativeFor(ProtoVersion(30))
-    } yield CommonMetadata(confirmationPolicy, DomainId(domainUid), mediator, salt, uuid)(
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(0))
+    } yield CommonMetadata(
+      confirmationPolicy,
+      DomainId(domainUid),
+      MediatorRef(mediatorId),
+      salt,
+      uuid,
+    )(
       hashOps,
-      pv,
+      rpv,
       Some(bytes),
     )
 }

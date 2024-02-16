@@ -41,16 +41,16 @@ import com.digitalasset.canton.participant.store.{
   SyncDomainPersistentState,
   TransferStoreTest,
 }
-import com.digitalasset.canton.protocol.ExampleTransactionFactory.{submitter, submittingParticipant}
+import com.digitalasset.canton.protocol.ExampleTransactionFactory.{submitter, submitterParticipant}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.{IndexedDomain, SessionKeyStore}
-import com.digitalasset.canton.time.{DomainTimeTracker, TimeProofTestUtil, WallClock}
+import com.digitalasset.canton.time.{DomainTimeTracker, TimeProofTestUtil}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
+import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
-import com.digitalasset.canton.version.{HasTestCloseContext, ProtocolVersion}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -85,37 +85,33 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
     UniqueIdentifier.tryFromProtoPrimitive("bothdomains::participant")
   )
 
-  private val initialTransferCounter: TransferCounterO =
-    Some(TransferCounter.Genesis)
-
   private def submitterInfo(submitter: LfPartyId): TransferSubmitterMetadata = {
     TransferSubmitterMetadata(
       submitter,
-      participant,
+      LedgerApplicationId.assertFromString("tests"),
+      participant.toLf,
       LedgerCommandId.assertFromString("transfer-in-processing-steps-command-id"),
       submissionId = None,
-      LedgerApplicationId.assertFromString("tests"),
       workflowId = None,
     )
   }
 
-  private val identityFactory = TestingTopologyX()
+  private val identityFactory = TestingTopology()
     .withDomains(sourceDomain.unwrap)
     .withReversedTopology(
-      Map(submittingParticipant -> Map(party1 -> ParticipantPermission.Submission))
+      Map(submitterParticipant -> Map(party1 -> ParticipantPermission.Submission))
     )
     .withSimpleParticipants(participant) // required such that `participant` gets a signing key
     .build(loggerFactory)
 
   private val cryptoSnapshot =
     identityFactory
-      .forOwnerAndDomain(submittingParticipant, sourceDomain.unwrap)
+      .forOwnerAndDomain(submitterParticipant, sourceDomain.unwrap)
       .currentSnapshotApproximation
 
-  private val clock = new WallClock(timeouts, loggerFactory)
-  private val crypto = TestingIdentityFactoryX.newCrypto(loggerFactory)(participant)
+  private val pureCrypto = TestingIdentityFactory.pureCrypto()
 
-  private val seedGenerator = new SeedGenerator(crypto.pureCrypto)
+  private val seedGenerator = new SeedGenerator(pureCrypto)
 
   private val transferInProcessingSteps =
     testInstance(targetDomain, Set(party1), Set(party1), cryptoSnapshot, None)
@@ -124,16 +120,14 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
       : Future[(SyncDomainPersistentState, SyncDomainEphemeralState)] = {
     val multiDomainEventLog = mock[MultiDomainEventLog]
     val persistentState =
-      new InMemorySyncDomainPersistentStateX(
-        clock,
-        crypto,
+      new InMemorySyncDomainPersistentStateOld(
         IndexedDomain.tryCreate(targetDomain.unwrap, 1),
         testedProtocolVersion,
+        pureCrypto,
         enableAdditionalConsistencyChecks = true,
-        enableTopologyTransactionValidation = false,
-        loggerFactory = loggerFactory,
-        timeouts = timeouts,
-        futureSupervisor = futureSupervisor,
+        loggerFactory,
+        timeouts,
+        futureSupervisor,
       )
     for {
       _ <- persistentState.parameterStore.setParameters(defaultStaticDomainParameters)
@@ -146,7 +140,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
         ProcessingStartingPoints.default,
         _ => mock[DomainTimeTracker],
         ParticipantTestMetrics.domain,
-        CachingConfigs.defaultSessionKeyCache,
+        CachingConfigs.defaultSessionKeyCacheConfig,
         DefaultProcessingTimeouts.testing,
         loggerFactory = loggerFactory,
         FutureSupervisor.Noop,
@@ -221,15 +215,14 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
           timestamp = CantonTimestamp.Epoch,
           targetDomain = targetDomain,
         ),
-        initialTransferCounter,
       )
       val uuid = new UUID(1L, 2L)
       val seed = seedGenerator.generateSaltSeed()
       val transferData2 = {
         val fullTransferOutTree = transferOutRequest
           .toFullTransferOutTree(
-            crypto.pureCrypto,
-            crypto.pureCrypto,
+            pureCrypto,
+            pureCrypto,
             seed,
             uuid,
           )
@@ -315,9 +308,9 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
 
     "fail when participant does not have submission permission for party" in {
 
-      val failingTopology = TestingTopologyX(domains = Set(sourceDomain.unwrap))
+      val failingTopology = TestingTopology(domains = Set(sourceDomain.unwrap))
         .withReversedTopology(
-          Map(submittingParticipant -> Map(party1 -> ParticipantPermission.Observation))
+          Map(submitterParticipant -> Map(party1 -> ParticipantPermission.Observation))
         )
         .build(loggerFactory)
       val cryptoSnapshot2 = failingTopology
@@ -372,31 +365,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
         }
       }
     }
-
-    "fail when protocol version are incompatible" in {
-      // source domain does not support transfer counters
-      val submissionParam2 =
-        submissionParam.copy(sourceProtocolVersion = SourceProtocolVersion(ProtocolVersion.v30))
-      for {
-        transferData <- transferDataF
-        deps <- statefulDependencies
-        (persistentState, ephemeralState) = deps
-        _ <- setUpOrFail(transferData, transferOutResult, persistentState)
-        preparedSubmission <-
-          transferInProcessingSteps
-            .prepareSubmission(
-              submissionParam2,
-              targetMediator,
-              ephemeralState,
-              cryptoSnapshot,
-            )
-            .value
-            .failOnShutdown
-      } yield {
-        preparedSubmission should matchPattern { case Right(_) => }
-      }
-
-    }
   }
 
   "receive request" should {
@@ -410,14 +378,13 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
       TransferResultHelpers.transferOutResult(
         sourceDomain,
         cryptoSnapshot,
-        submittingParticipant,
+        submitterParticipant,
       )
     val inTree =
       makeFullTransferInTree(
         party1,
         Set(party1),
         contract,
-        TransferCounter.Genesis,
         transactionId1,
         targetDomain,
         targetMediator,
@@ -437,7 +404,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
       }
 
     "succeed without errors" in {
-      val sessionKeyStore = SessionKeyStore(CachingConfigs.defaultSessionKeyCache)
+      val sessionKeyStore = SessionKeyStore(CachingConfigs.defaultSessionKeyCacheConfig)
       for {
         inRequest <- encryptFullTransferInTree(inTree, sessionKeyStore)
         envelopes = NonEmpty(
@@ -471,7 +438,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
         party1,
         Set(party1),
         contract,
-        TransferCounter.Genesis,
         transactionId1,
         TargetDomainId(anotherDomain),
         anotherMediator,
@@ -536,7 +502,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
       TransferResultHelpers.transferOutResult(
         sourceDomain,
         cryptoSnapshot,
-        submittingParticipant,
+        submitterParticipant,
       )
 
     "fail when wrong stakeholders given" in {
@@ -549,7 +515,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
           party1,
           stakeholders = Set(party1, party2),
           contract,
-          TransferCounter.Genesis,
           transactionId1,
           targetDomain,
           targetMediator,
@@ -566,12 +531,14 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
         )
 
         transferLookup = ephemeralState.transferCache
+        contractLookup = ephemeralState.contractLookup
 
         result <- leftOrFail(
           transferInProcessingSteps
             .constructPendingDataAndResponse(
               pendingDataAndResponseArgs2,
               transferLookup,
+              contractLookup,
               FutureUnlessShutdown.pure(mkActivenessResult()),
               targetMediator,
               freshOwnTimelyTx = true,
@@ -596,7 +563,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
           party1,
           Set(party1),
           contract,
-          TransferCounter.Genesis,
           transactionId1,
           targetDomain,
           targetMediator,
@@ -611,11 +577,12 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
           transferringParticipant = true,
         )
 
-        _result <- valueOrFail(
+        result <- valueOrFail(
           transferInProcessingSteps
             .constructPendingDataAndResponse(
               pendingDataAndResponseArgs,
               transferLookup,
+              contractLookup,
               FutureUnlessShutdown.pure(mkActivenessResult()),
               targetMediator,
               freshOwnTimelyTx = true,
@@ -648,7 +615,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
         SequencerCounter(1),
         rootHash,
         contract,
-        initialTransferCounter,
         submitterInfo(submitter),
         transactionId1,
         isTransferringParticipant = false,
@@ -670,7 +636,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
             Right(inRes),
             pendingRequestData,
             state.pendingTransferInSubmissions,
-            crypto.pureCrypto,
+            pureCrypto,
           )
         )("get commit set and contracts to be stored and event failed")
       } yield succeed
@@ -691,7 +657,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
 
     new TransferInProcessingSteps(
       targetDomain,
-      submittingParticipant,
+      submitterParticipant,
       damle,
       TestTransferCoordination.apply(
         Set(),
@@ -710,7 +676,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
       submitter: LfPartyId,
       stakeholders: Set[LfPartyId],
       contract: SerializableContract,
-      transferCounter: TransferCounter,
       creatingTransactionId: TransactionId,
       targetDomain: TargetDomainId,
       targetMediator: MediatorRef,
@@ -721,12 +686,11 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
 
     valueOrFail(
       TransferInProcessingSteps.makeFullTransferInTree(
-        crypto.pureCrypto,
+        pureCrypto,
         seed,
         submitterInfo(submitter),
         stakeholders,
         contract,
-        initialTransferCounter,
         creatingTransactionId,
         targetDomain,
         targetMediator,

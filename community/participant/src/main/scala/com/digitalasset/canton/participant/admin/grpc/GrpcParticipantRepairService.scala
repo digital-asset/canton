@@ -7,32 +7,35 @@ import better.files.*
 import cats.data.EitherT
 import cats.syntax.all.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.admin.participant.v30.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, RepairContract}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.data.ActiveContract.loadFromByteString
+import com.digitalasset.canton.participant.admin.data.SerializableContractWithDomainId
 import com.digitalasset.canton.participant.admin.grpc.GrpcParticipantRepairService.{
   DefaultChunkSize,
+  ValidDownloadRequest,
   ValidExportAcsRequest,
 }
 import com.digitalasset.canton.participant.admin.inspection
 import com.digitalasset.canton.participant.admin.repair.RepairServiceError
 import com.digitalasset.canton.participant.admin.repair.RepairServiceError.ImportAcsError
+import com.digitalasset.canton.participant.admin.v0.*
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.participant.sync.CantonSyncService
-import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.protocol.{LfContractId, SerializableContract}
 import com.digitalasset.canton.topology.{DomainId, PartyId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, ResourceUtil}
+import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, OptionUtil, ResourceUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DomainAlias, LfPartyId}
 import com.google.protobuf.ByteString
+import com.google.protobuf.timestamp.Timestamp
 import io.grpc.stub.StreamObserver
 
 import java.io.ByteArrayOutputStream
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 
@@ -43,6 +46,79 @@ object GrpcParticipantRepairService {
     PositiveInt.tryCreate(1024 * 1024 * 2)
 
   private val DefaultBatchSize = 1000
+
+  // TODO(i14441): Remove deprecated ACS download / upload functionality
+  @deprecated("Use ValidExportAcsRequest", since = "2.8.0")
+  private object ValidDownloadRequest {
+
+    // 2MB - This is half of the default max message size of gRPC
+    val DefaultChunkSize: PositiveInt =
+      PositiveInt.tryCreate(1024 * 1024 * 2)
+
+    private val DefaultBatchSize = 1000
+
+    private def validateParties(parties: Seq[String]): Either[String, Seq[LfPartyId]] =
+      parties
+        .map(party => UniqueIdentifier.fromProtoPrimitive_(party).map(PartyId(_).toLf))
+        .sequence
+
+    private def validateTimestamp(
+        timestamp: Option[Timestamp]
+    ): Either[String, Option[CantonTimestamp]] =
+      timestamp.map(CantonTimestamp.fromProtoPrimitive).sequence.leftMap(_.message)
+
+    private def validateProtocolVersion(
+        protocolVersion: String
+    ): Either[String, Option[ProtocolVersion]] =
+      OptionUtil.emptyStringAsNone(protocolVersion).traverse(ProtocolVersion.create(_))
+
+    private def validateContractDomainRenames(
+        contractDomainRenames: Map[String, String]
+    ): Either[String, List[(DomainId, DomainId)]] =
+      contractDomainRenames.toList.traverse { case (source, target) =>
+        for {
+          sourceId <- DomainId.fromString(source)
+          targetId <- DomainId.fromString(target)
+        } yield (sourceId, targetId)
+      }
+
+    private def validateChunkSize(chunkSize: Option[Int]): Either[String, PositiveInt] =
+      chunkSize.traverse(PositiveInt.create).bimap(_.message, _.getOrElse(DefaultChunkSize))
+
+    private def validateAll(request: DownloadRequest): Either[String, ValidDownloadRequest] =
+      for {
+        parties <- validateParties(request.parties)
+        timestamp <- validateTimestamp(request.timestamp)
+        protocolVersion <- validateProtocolVersion(request.protocolVersion)
+        contractDomainRenames <- validateContractDomainRenames(request.contractDomainRenames)
+        chunkSize <- validateChunkSize(request.chunkSize)
+      } yield ValidDownloadRequest(
+        parties.toSet,
+        timestamp,
+        protocolVersion,
+        contractDomainRenames.toMap,
+        chunkSize,
+      )
+
+    def apply(request: DownloadRequest)(implicit
+        elc: ErrorLoggingContext
+    ): Either[RepairServiceError, ValidDownloadRequest] =
+      for {
+        validRequest <- validateAll(request).leftMap(RepairServiceError.InvalidArgument.Error(_))
+        _ <- validRequest.protocolVersion.traverse_(isSupported)
+      } yield validRequest
+
+  }
+
+  // TODO(i14441): Remove deprecated ACS download / upload functionality
+  @deprecated("Use ValidExportAcsRequest", since = "2.8.0")
+  private final case class ValidDownloadRequest private (
+      parties: Set[LfPartyId],
+      timestamp: Option[CantonTimestamp],
+      protocolVersion: Option[ProtocolVersion],
+      contractDomainRenames: Map[DomainId, DomainId],
+      chunkSize: PositiveInt,
+  )
 
   private object ValidExportAcsRequest {
 
@@ -97,7 +173,6 @@ object GrpcParticipantRepairService {
         parties.toSet,
         timestamp,
         contractDomainRenames.toMap,
-        force = request.force,
       )
     }
 
@@ -116,8 +191,16 @@ object GrpcParticipantRepairService {
       parties: Set[LfPartyId],
       timestamp: Option[CantonTimestamp],
       contractDomainRenames: Map[DomainId, (DomainId, ProtocolVersion)],
-      force: Boolean, // if true, does not check whether `timestamp` is clean
   )
+
+  private def isSupported(protocolVersion: ProtocolVersion)(implicit
+      elc: ErrorLoggingContext
+  ): Either[RepairServiceError, Unit] =
+    EitherUtil.condUnitE(
+      protocolVersion.isSupported,
+      RepairServiceError.UnsupportedProtocolVersionParticipant.Error(protocolVersion),
+    )
+
 }
 
 final class GrpcParticipantRepairService(
@@ -182,8 +265,20 @@ final class GrpcParticipantRepairService(
           .from(cids)
           .toRight(RepairServiceError.InvalidArgument.Error("Missing contract ids to purge"))
 
+        offboardedParties <- request.offboardedParties
+          .traverse(LfPartyId.fromString)
+          .leftMap(err =>
+            RepairServiceError.InvalidArgument
+              .Error(s"Unable to parse party from `offboarded_parties`: $err")
+          )
+
         _ <- sync.repairService
-          .purgeContracts(domain, cidsNE, request.ignoreAlreadyPurged)
+          .purgeContracts(
+            domain,
+            cidsNE,
+            NonEmpty.from(offboardedParties.toSet),
+            request.ignoreAlreadyPurged,
+          )
           .leftMap(RepairServiceError.ContractPurgeError.Error(domain, _))
       } yield ()
 
@@ -191,6 +286,88 @@ final class GrpcParticipantRepairService(
         err => Future.failed(err.asGrpcError),
         _ => Future.successful(PurgeContractsResponse()),
       )
+    }
+  }
+
+  /** get contracts for a party
+    */
+  @deprecated(
+    "Use exportAcs",
+    since = "2.8.0",
+  ) // TODO(i14441): Remove deprecated ACS download / upload functionality
+  override def download(
+      request: DownloadRequest,
+      responseObserver: StreamObserver[AcsSnapshotChunk],
+  ): Unit = {
+    TraceContext.withNewTraceContext { implicit traceContext =>
+      val (temporaryFile, outputStream) =
+        if (request.gzipFormat) {
+          val file = File.newTemporaryFile(AcsSnapshotTemporaryFileNamePrefix, suffix = ".gz")
+          file -> file.newGzipOutputStream()
+        } else {
+          val file = File.newTemporaryFile(AcsSnapshotTemporaryFileNamePrefix)
+          file -> file.newOutputStream()
+        }
+
+      def createAcsSnapshotTemporaryFile(
+          validRequest: ValidDownloadRequest
+      ): EitherT[Future, RepairServiceError, Unit] = {
+        val timestampAsString = validRequest.timestamp.fold("head")(ts => s"at $ts")
+        logger.info(
+          s"Downloading active contract set ($timestampAsString) to $temporaryFile for parties ${validRequest.parties}"
+        )
+        ResourceUtil
+          .withResourceEitherT(outputStream)(
+            sync.stateInspection
+              .dumpActiveContracts(
+                _,
+                _.filterString.startsWith(request.filterDomainId),
+                validRequest.parties,
+                validRequest.timestamp,
+                validRequest.protocolVersion,
+                validRequest.contractDomainRenames,
+              )
+          )
+          .leftMap(toRepairServiceError)
+      }
+
+      // Create a context that will be automatically cancelled after the processing timeout deadline
+      val context = io.grpc.Context.current().withCancellation()
+
+      context.run { () =>
+        val result =
+          for {
+            validRequest <- EitherT.fromEither[Future](ValidDownloadRequest(request))
+            _ <- createAcsSnapshotTemporaryFile(validRequest)
+          } yield {
+            temporaryFile.newInputStream
+              .buffered(validRequest.chunkSize.value)
+              .autoClosed { s =>
+                Iterator
+                  .continually(s.readNBytes(validRequest.chunkSize.value))
+                  .takeWhile(_.nonEmpty && !context.isCancelled)
+                  .foreach { chunk =>
+                    responseObserver.onNext(AcsSnapshotChunk(ByteString.copyFrom(chunk)))
+                  }
+              }
+          }
+
+        Await
+          .result(result.value, processingTimeout.unbounded.duration) match {
+          case Right(_) =>
+            if (!context.isCancelled) responseObserver.onCompleted()
+            else {
+              context.cancel(new io.grpc.StatusRuntimeException(io.grpc.Status.CANCELLED))
+              ()
+            }
+          case Left(error) =>
+            responseObserver.onError(error.asGrpcError)
+            context.cancel(new io.grpc.StatusRuntimeException(io.grpc.Status.CANCELLED))
+            ()
+        }
+        // clean the temporary file used to store the acs
+        temporaryFile.delete()
+      }
     }
   }
 
@@ -222,7 +399,6 @@ final class GrpcParticipantRepairService(
                 validRequest.parties,
                 validRequest.timestamp,
                 validRequest.contractDomainRenames,
-                skipCleanTimestampCheck = validRequest.force,
               )
           )
           .leftMap(toRepairServiceError)
@@ -270,6 +446,51 @@ final class GrpcParticipantRepairService(
     }
   }
 
+  /** upload contracts for a party
+    */
+  @deprecated(
+    "Use importAcs",
+    since = "2.8.0",
+  ) // TODO(i14441): Remove deprecated ACS download / upload functionality
+  override def upload(
+      responseObserver: StreamObserver[UploadResponse]
+  ): StreamObserver[UploadRequest] = {
+    // TODO(i12481): This buffer will contain the whole ACS snapshot.
+    val outputStream = new ByteArrayOutputStream()
+    val gzip = new AtomicBoolean(false)
+
+    new StreamObserver[UploadRequest] {
+      override def onNext(value: UploadRequest): Unit = {
+        if (value.gzipFormat && !gzip.get())
+          gzip.set(true)
+        Try(outputStream.write(value.acsSnapshot.toByteArray)) match {
+          case Failure(exception) =>
+            outputStream.close()
+            responseObserver.onError(exception)
+          case Success(_) =>
+        }
+      }
+
+      override def onError(t: Throwable): Unit = {
+        responseObserver.onError(t)
+        outputStream.close()
+      }
+
+      // TODO(i12481): implement a solution to prevent the client from sending infinite streams
+      override def onCompleted(): Unit = {
+        val res =
+          convertAndAddContractsToStore(ByteString.copyFrom(outputStream.toByteArray), gzip.get())
+        Try(Await.result(res, processingTimeout.unbounded.duration)) match {
+          case Failure(exception) => responseObserver.onError(exception)
+          case Success(_) =>
+            responseObserver.onNext(UploadResponse())
+            responseObserver.onCompleted()
+        }
+        outputStream.close()
+      }
+    }
+  }
+
   /** New endpoint to upload contracts for a party which uses the versioned ActiveContract
     */
   override def importAcs(
@@ -277,16 +498,58 @@ final class GrpcParticipantRepairService(
   ): StreamObserver[ImportAcsRequest] = {
     // TODO(i12481): This buffer will contain the whole ACS snapshot.
     val outputStream = new ByteArrayOutputStream()
-    val workflowIdPrefix = new AtomicReference[String]
+
+    val workflowIdPrefix = new AtomicReference[Option[String]](None)
+    val hostedParties = new AtomicReference[Option[Set[LfPartyId]]](None)
+
+    /* Update the atomic reference with the new value if there is not conflict
+     * return An error if the parsed value differs from the previously read value
+     */
+    def updateValue[T](existing: AtomicReference[Option[T]], parsed: T): Either[String, Unit] = {
+      val oldValueO = existing.getAndSet(Some(parsed))
+
+      oldValueO match {
+        case Some(oldValue) =>
+          Either.cond(oldValue == parsed, (), s"Cannot override `$oldValue` with parsed `$parsed`")
+        case None => Right(())
+      }
+    }
 
     new StreamObserver[ImportAcsRequest] {
-      override def onNext(value: ImportAcsRequest): Unit = {
-        Try(outputStream.write(value.acsSnapshot.toByteArray)) match {
+      override def onNext(importAcsRequest: ImportAcsRequest): Unit = {
+        Try(outputStream.write(importAcsRequest.acsSnapshot.toByteArray)) match {
           case Failure(exception) =>
             outputStream.close()
             responseObserver.onError(exception)
+
           case Success(_) =>
-            workflowIdPrefix.set(value.workflowIdPrefix)
+            updateValue(workflowIdPrefix, importAcsRequest.workflowIdPrefix).left.foreach { err =>
+              outputStream.close()
+              responseObserver.onError(
+                new IllegalArgumentException(
+                  s"Unable to update from `workflowIdPrefix`: $err"
+                )
+              )
+            }
+
+            val res = for {
+              _ <- updateValue(workflowIdPrefix, importAcsRequest.workflowIdPrefix).leftMap(err =>
+                s"Unable to update from `workflow_id_prefix`: $err"
+              )
+
+              parsedOnboardedParties <- importAcsRequest.onboardedParties
+                .traverse(LfPartyId.fromString)
+                .leftMap(err => s"Unable to parse hosted_parties: $err")
+
+              _ <- updateValue(hostedParties, parsedOnboardedParties.toSet).leftMap(err =>
+                s"Unable to update from `hosted_parties`: $err"
+              )
+            } yield ()
+
+            res.left.foreach { error =>
+              outputStream.close()
+              responseObserver.onError(new IllegalArgumentException(error))
+            }
         }
       }
 
@@ -325,12 +588,12 @@ final class GrpcParticipantRepairService(
                           RepairContract(
                             c.contract,
                             Set.empty,
-                            c.transferCounter,
                           )
                         ),
                         ignoreAlreadyAdded = true,
                         ignoreStakeholderCheck = true,
-                        workflowIdPrefix = Option(workflowIdPrefix.get()),
+                        hostedParties = hostedParties.get().flatMap(NonEmpty.from),
+                        workflowIdPrefix = workflowIdPrefix.get(),
                       )
                     )
                   } yield ()
@@ -339,7 +602,7 @@ final class GrpcParticipantRepairService(
 
           resultE.value.flatMap {
             case Left(error) => Future.failed(ImportAcsError.Error(error).asGrpcError)
-            case Right(_) => Future.successful(())
+            case Right(_) => Future.successful(UploadResponse())
           }
         }
 
@@ -365,7 +628,7 @@ final class GrpcParticipantRepairService(
               request.targetDomainConnectionConfig
                 .toRight("The target domain connection configuration is required")
                 .flatMap(
-                  DomainConnectionConfig.fromProtoV30(_).leftMap(_.toString)
+                  DomainConnectionConfig.fromProtoV0(_).leftMap(_.toString)
                 )
             )
           _ <- EitherT(
@@ -395,6 +658,68 @@ final class GrpcParticipantRepairService(
             .asRuntimeException()
         )
     }
+  }
+
+  @deprecated(
+    "Use importAcs functionality instead",
+    since = "2.8.0",
+  ) // TODO(i14441): Remove deprecated ACS download / upload functionality
+  private def convertAndAddContractsToStore(
+      content: ByteString,
+      gzip: Boolean,
+  ): Future[UploadResponse] = {
+    TraceContext.withNewTraceContext { implicit traceContext =>
+      val resultE: EitherT[Future, String, Unit] = for {
+        lazyContracts <- EitherT.fromEither[Future](
+          SerializableContractWithDomainId.loadFromByteString(content, gzip)
+        )
+        grouped = lazyContracts
+          .grouped(GrpcParticipantRepairService.DefaultBatchSize)
+          .map(
+            _.groupMap(_.domainId)(_.contract)
+          ) // TODO(#14822): group by domain first, and then batch
+        _ <- LazyList
+          .from(grouped)
+          .parTraverse(_.toList.parTraverse {
+            case (
+                  domainId,
+                  contracts,
+                ) => // TODO(#12481): large number of groups = large number of requests
+              addContractToStore(domainId, contracts)
+          })
+      } yield ()
+
+      resultE.value.flatMap {
+        case Left(error) => Future.failed(ImportAcsError.Error(error).asGrpcError)
+        case Right(_) => Future.successful(UploadResponse())
+      }
+
+    }
+  }
+
+  @deprecated(
+    "Use importAcs functionality instead",
+    since = "2.8.0",
+  ) // TODO(i14441): Remove deprecated ACS download / upload functionality
+  private def addContractToStore(domainId: DomainId, contracts: LazyList[SerializableContract])(
+      implicit traceContext: TraceContext
+  ): EitherT[Future, String, Unit] = {
+    for {
+      alias <- EitherT.fromEither[Future](
+        sync.aliasManager
+          .aliasForDomainId(domainId)
+          .toRight(s"Not able to find domain alias for ${domainId.toString}")
+      )
+      _ <- EitherT.fromEither[Future](
+        sync.repairService.addContracts(
+          alias,
+          contracts.map(contract => RepairContract(contract, Set.empty)),
+          hostedParties = None,
+          ignoreAlreadyAdded = true,
+          ignoreStakeholderCheck = true,
+        )
+      )
+    } yield ()
   }
 
 }

@@ -9,7 +9,9 @@ import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.{MediatorRequest, MediatorResponse, Verdict}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
+import scala.Ordered.orderingToOrdered
 import scala.concurrent.{ExecutionContext, Future}
 
 final case class FinalizedResponse(
@@ -34,6 +36,7 @@ final case class FinalizedResponse(
     val MediatorResponse(
       _requestId,
       sender,
+      viewHashO,
       viewPositionO,
       localVerdict,
       rootHashO,
@@ -60,6 +63,10 @@ final case class FinalizedResponse(
       }).value.map(_.flatten)
     }
 
-    go(viewPositionO)
+    if (
+      verdict.representativeProtocolVersion >=
+        Verdict.protocolVersionRepresentativeFor(ProtocolVersion.v5)
+    ) go(viewPositionO)
+    else go(viewHashO)
   }
 }

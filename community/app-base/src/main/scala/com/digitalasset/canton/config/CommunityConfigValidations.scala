@@ -51,6 +51,7 @@ object CommunityConfigValidations
       s"DbAccess($urlNoPassword, $user)"
   }
 
+  private val Valid: Validated[NonEmpty[Seq[String]], Unit] = Validated.valid(())
   type Validation = CantonCommunityConfig => Validated[NonEmpty[Seq[String]], Unit]
 
   override protected val validations: List[Validation] =
@@ -62,8 +63,11 @@ object CommunityConfigValidations
   private[config] def genericValidations[C <: CantonConfig]
       : List[C => Validated[NonEmpty[Seq[String]], Unit]] =
     List(
+      backwardsCompatibleLoggingConfig,
+      developmentProtocolSafetyCheckDomains,
       developmentProtocolSafetyCheckParticipants,
       warnIfUnsafeMinProtocolVersion,
+      warnIfUnsafeProtocolVersionEmbeddedDomain,
       adminTokenSafetyCheckParticipants,
     )
 
@@ -132,11 +136,7 @@ object CommunityConfigValidations
       config: CantonCommunityConfig
   ): Validated[NonEmpty[Seq[String]], Unit] = {
     val dbAccessToNodes =
-      extractNormalizedDbAccess(
-        config.participantsByString,
-        config.sequencersByString,
-        config.mediatorsByString,
-      )
+      extractNormalizedDbAccess(config.participantsByString, config.domainsByString)
 
     dbAccessToNodes.toSeq
       .traverse_ {
@@ -153,12 +153,10 @@ object CommunityConfigValidations
       config: CantonCommunityConfig
   ): Validated[NonEmpty[Seq[String]], Unit] = {
     val CantonCommunityConfig(
-      participantsX,
-      sequencersX,
-      mediatorsX,
-      remoteParticipantsX,
-      remoteSequencersX,
-      remoteMediatorsX,
+      domains,
+      participants,
+      remoteDomains,
+      remoteParticipants,
       _,
       _,
       _,
@@ -166,18 +164,45 @@ object CommunityConfigValidations
       config
     Validated.cond(
       Seq(
-        participantsX,
-        remoteParticipantsX,
-        mediatorsX,
-        remoteMediatorsX,
-        sequencersX,
-        remoteSequencersX,
+        domains,
+        participants,
+        remoteDomains,
+        remoteParticipants,
       )
         .exists(_.nonEmpty),
       (),
       NonEmpty(Seq, "At least one node must be defined in the configuration"),
     )
 
+  }
+
+  /** Check that logging configs are backwards compatible but consistent */
+  private def backwardsCompatibleLoggingConfig(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] = {
+    (config.monitoring.logMessagePayloads, config.monitoring.logging.api.messagePayloads) match {
+      case (Some(fst), Some(snd)) =>
+        Validated.cond(
+          fst == snd,
+          (),
+          NonEmpty(Seq, backwardsCompatibleLoggingConfigErr),
+        )
+      case _ => Valid
+    }
+  }
+
+  private[config] val backwardsCompatibleLoggingConfigErr =
+    "Inconsistent configuration of canton.monitoring.log-message-payloads and canton.monitoring.logging.api.message-payloads. Please use the latter in your configuration"
+
+  private def developmentProtocolSafetyCheckDomains(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] = {
+    developmentProtocolSafetyCheck(
+      config.parameters.nonStandardConfig,
+      config.domains.toSeq.map { case (k, v) =>
+        (k, v.init.domainParameters)
+      },
+    )
   }
 
   private def developmentProtocolSafetyCheckParticipants(
@@ -193,7 +218,7 @@ object CommunityConfigValidations
         (),
         NonEmpty(
           Seq,
-          s"Enabling dev-version-support for participant $name requires you to explicitly set canton.parameters.non-standard-config = yes",
+          s"Enabling dev-version-support for participant ${name} requires you to explicitly set canton.parameters.non-standard-config = yes",
         ),
       )
     }
@@ -220,6 +245,17 @@ object CommunityConfigValidations
     Validated.valid(())
   }
 
+  private def warnIfUnsafeProtocolVersionEmbeddedDomain(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] = {
+    config.domains.toSeq.foreach { case (name, config) =>
+      val pv = config.init.domainParameters.protocolVersion.unwrap
+      if (pv.isDeprecated && !config.init.domainParameters.dontWarnOnDeprecatedPV)
+        DeprecatedProtocolVersion.WarnDomain(name, pv).discard
+    }
+    Validated.valid(())
+  }
+
   private[config] def developmentProtocolSafetyCheck(
       allowUnstableProtocolVersion: Boolean,
       namesAndConfig: Seq[(InstanceName, DomainParametersConfig)],
@@ -234,7 +270,7 @@ object CommunityConfigValidations
         (),
         NonEmpty(
           Seq,
-          s"Using non-stable protocol $protocolVersion for node $name requires you to explicitly set canton.parameters.non-standard-config = yes",
+          s"Using non-stable protocol ${protocolVersion} for node ${name} requires you to explicitly set canton.parameters.non-standard-config = yes",
         ),
       )
     }
@@ -262,7 +298,7 @@ object CommunityConfigValidations
         (),
         NonEmpty(
           Seq,
-          s"Setting ledger-api.admin-token for participant $name requires you to explicitly set canton.parameters.non-standard-config = yes",
+          s"Setting ledger-api.admin-token for participant ${name} requires you to explicitly set canton.parameters.non-standard-config = yes",
         ),
       )
     }

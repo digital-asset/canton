@@ -39,7 +39,7 @@ final class CommandsValidator(
     validateUpgradingPackageResolutions: ValidateUpgradingPackageResolutions =
       ValidateUpgradingPackageResolutions.UpgradingDisabled,
     upgradingEnabled: Boolean = false,
-    validateDisclosedContracts: ValidateDisclosedContracts = new ValidateDisclosedContracts,
+    validateDisclosedContracts: ValidateDisclosedContracts = new ValidateDisclosedContracts(false),
 ) {
 
   import FieldValidator.*
@@ -290,11 +290,13 @@ object CommandsValidator {
       ledgerId: LedgerId,
       validateUpgradingPackageResolutions: ValidateUpgradingPackageResolutions,
       upgradingEnabled: Boolean,
+      enableExplicitDisclosure: Boolean,
   ) =
     new CommandsValidator(
       ledgerId = ledgerId,
       validateUpgradingPackageResolutions = validateUpgradingPackageResolutions,
       upgradingEnabled = upgradingEnabled,
+      validateDisclosedContracts = new ValidateDisclosedContracts(enableExplicitDisclosure),
     )
 
   /** Effective submitters of a command
@@ -318,12 +320,18 @@ object CommandsValidator {
   }
 
   def effectiveSubmitters(commands: V2.Commands): Submitters[String] = {
-    val actAs = commands.actAs.toSet
+    val actAs = effectiveActAs(commands)
     val readAs = commands.readAs.toSet -- actAs
     Submitters(actAs, readAs)
   }
 
   def effectiveActAs(commands: V1.Commands): Set[String] =
+    if (commands.party.isEmpty)
+      commands.actAs.toSet
+    else
+      commands.actAs.toSet + commands.party
+
+  def effectiveActAs(commands: V2.Commands): Set[String] =
     if (commands.party.isEmpty)
       commands.actAs.toSet
     else

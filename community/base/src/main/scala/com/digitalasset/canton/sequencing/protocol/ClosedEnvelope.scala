@@ -3,33 +3,19 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
-import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.foldable.*
-import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.crypto.{
-  HashOps,
-  HashPurpose,
-  Signature,
-  SignatureCheckError,
-  SyncCryptoApi,
-}
+import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
   EnvelopeContent,
   ProtocolMessage,
-  SignedProtocolMessage,
-  TypedSignedProtocolMessageContent,
 }
-import com.digitalasset.canton.protocol.v30
+import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{
   HasProtocolVersionedCompanion,
   HasProtocolVersionedWrapper,
@@ -41,8 +27,6 @@ import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import monocle.Lens
 
-import scala.concurrent.{ExecutionContext, Future}
-
 /** A [[ClosedEnvelope]]'s contents are serialized as a [[com.google.protobuf.ByteString]].
   *
   * The serialization is interpreted as a [[com.digitalasset.canton.protocol.messages.EnvelopeContent]]
@@ -52,74 +36,47 @@ import scala.concurrent.{ExecutionContext, Future}
 final case class ClosedEnvelope private (
     bytes: ByteString,
     override val recipients: Recipients,
-    signatures: Seq[Signature],
 )(override val representativeProtocolVersion: RepresentativeProtocolVersion[ClosedEnvelope.type])
     extends Envelope[ByteString]
     with HasProtocolVersionedWrapper[ClosedEnvelope] {
+
+  // Ensures the invariants related to default values hold
+  validateInstance().valueOr(err => throw new IllegalArgumentException(err))
 
   @transient override protected lazy val companionObj: ClosedEnvelope.type = ClosedEnvelope
 
   def openEnvelope(
       hashOps: HashOps,
       protocolVersion: ProtocolVersion,
-  ): ParsingResult[DefaultOpenEnvelope] = {
-    NonEmpty.from(signatures) match {
-      case None =>
-        EnvelopeContent
-          .fromByteStringLegacy(protocolVersion)((hashOps, protocolVersion))(bytes)
-          .map { envelopeContent =>
-            OpenEnvelope(envelopeContent.message, recipients)(protocolVersion)
-          }
-      case Some(signaturesNE) =>
-        TypedSignedProtocolMessageContent
-          .fromByteString(protocolVersion)(bytes)
-          .map { typedMessage =>
-            OpenEnvelope(
-              SignedProtocolMessage(typedMessage, signaturesNE, protocolVersion),
-              recipients,
-            )(protocolVersion)
-          }
-    }
-  }
+  ): ParsingResult[DefaultOpenEnvelope] =
+    EnvelopeContent
+      .fromByteStringLegacy(protocolVersion)((hashOps, protocolVersion))(bytes)
+      .map { envelopeContent =>
+        OpenEnvelope(envelopeContent.message, recipients)(protocolVersion)
+      }
 
   override def pretty: Pretty[ClosedEnvelope] = prettyOfClass(
-    param("recipients", _.recipients),
-    paramIfNonEmpty("signatures", _.signatures),
+    param("recipients", _.recipients)
   )
 
   override def forRecipient(
-      member: Member,
-      groupRecipients: Set[GroupRecipient],
+      member: Member
   ): Option[ClosedEnvelope] =
-    recipients.forMember(member, groupRecipients).map(r => this.copy(recipients = r))
+    recipients.forMember(member).map(r => this.copy(recipients = r))
 
   override def closeEnvelope: this.type = this
 
-  def toProtoV30: v30.Envelope = v30.Envelope(
+  def toProtoV0: v0.Envelope = v0.Envelope(
     content = bytes,
-    recipients = Some(recipients.toProtoV30),
-    signatures = signatures.map(_.toProtoV30),
+    recipients = Some(recipients.toProtoV0),
   )
 
   @VisibleForTesting
   def copy(
       bytes: ByteString = this.bytes,
       recipients: Recipients = this.recipients,
-      signatures: Seq[Signature] = this.signatures,
   ): ClosedEnvelope =
-    ClosedEnvelope.create(bytes, recipients, signatures, representativeProtocolVersion)
-
-  def verifySignatures(
-      snapshot: SyncCryptoApi,
-      sender: Member,
-  )(implicit
-      ec: ExecutionContext,
-      traceContext: TraceContext,
-  ): EitherT[Future, SignatureCheckError, Unit] = {
-    NonEmpty
-      .from(signatures)
-      .traverse_(ClosedEnvelope.verifySignatures(snapshot, sender, bytes, _))
-  }
+    ClosedEnvelope(bytes, recipients)(representativeProtocolVersion)
 }
 
 object ClosedEnvelope extends HasProtocolVersionedCompanion[ClosedEnvelope] {
@@ -129,48 +86,30 @@ object ClosedEnvelope extends HasProtocolVersionedCompanion[ClosedEnvelope] {
   override def name: String = "ClosedEnvelope"
 
   override def supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(30) -> VersionedProtoConverter(
-      ProtocolVersion.v30
-    )(v30.Envelope)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.Envelope)(
       protoCompanion =>
-        ProtoConverter.protoParser(protoCompanion.parseFrom)(_).flatMap(fromProtoV30),
-      _.toProtoV30.toByteString,
+        ProtoConverter.protoParser(protoCompanion.parseFrom)(_).flatMap(fromProtoV0),
+      _.toProtoV0.toByteString,
     )
   )
 
-  def create(
+  def apply(
       bytes: ByteString,
       recipients: Recipients,
-      signatures: Seq[Signature],
-      representativeProtocolVersion: RepresentativeProtocolVersion[ClosedEnvelope.type],
-  ): ClosedEnvelope =
-    ClosedEnvelope(bytes, recipients, signatures)(representativeProtocolVersion)
-
-  def create(
-      bytes: ByteString,
-      recipients: Recipients,
-      signatures: Seq[Signature],
       protocolVersion: ProtocolVersion,
   ): ClosedEnvelope =
-    create(bytes, recipients, signatures, protocolVersionRepresentativeFor(protocolVersion))
+    ClosedEnvelope(bytes, recipients)(protocolVersionRepresentativeFor(protocolVersion))
 
-  private[protocol] def fromProtoV30(envelopeP: v30.Envelope): ParsingResult[ClosedEnvelope] = {
-    val v30.Envelope(contentP, recipientsP, signaturesP) = envelopeP
+  private[protocol] def fromProtoV0(envelopeP: v0.Envelope): ParsingResult[ClosedEnvelope] = {
+    val v0.Envelope(contentP, recipientsP) = envelopeP
     for {
       recipients <- ProtoConverter.parseRequired(
-        Recipients.fromProtoV30(_, supportGroupAddressing = true),
+        Recipients.fromProtoV0(_),
         "recipients",
         recipientsP,
       )
-      signatures <- signaturesP.traverse(Signature.fromProtoV30)
-      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
-      closedEnvelope = ClosedEnvelope
-        .create(
-          contentP,
-          recipients,
-          signatures,
-          rpv,
-        )
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(0))
+      closedEnvelope = ClosedEnvelope(contentP, recipients)(rpv)
     } yield closedEnvelope
   }
 
@@ -192,42 +131,10 @@ object ClosedEnvelope extends HasProtocolVersionedCompanion[ClosedEnvelope] {
       protocolMessage: ProtocolMessage,
       recipients: Recipients,
       protocolVersion: ProtocolVersion,
-  ): ClosedEnvelope = {
-    protocolMessage match {
-      case SignedProtocolMessage(typedMessageContent, signatures) =>
-        ClosedEnvelope.create(
-          typedMessageContent.toByteString,
-          recipients,
-          signatures,
-          protocolVersion,
-        )
-      case _ =>
-        ClosedEnvelope.create(
-          EnvelopeContent.tryCreate(protocolMessage, protocolVersion).toByteString,
-          recipients,
-          Seq.empty,
-          protocolVersion,
-        )
-    }
-  }
-
-  def verifySignatures(
-      snapshot: SyncCryptoApi,
-      sender: Member,
-      content: ByteString,
-      signatures: NonEmpty[Seq[Signature]],
-  )(implicit traceContext: TraceContext): EitherT[Future, SignatureCheckError, Unit] = {
-    val hash = snapshot.pureCrypto.digest(HashPurpose.SignedProtocolMessageSignature, content)
-    snapshot.verifySignatures(hash, sender, signatures)
-  }
-
-  def verifySignatures(
-      snapshot: SyncCryptoApi,
-      mediatorGroupIndex: MediatorGroupIndex,
-      content: ByteString,
-      signatures: NonEmpty[Seq[Signature]],
-  )(implicit traceContext: TraceContext): EitherT[Future, SignatureCheckError, Unit] = {
-    val hash = snapshot.pureCrypto.digest(HashPurpose.SignedProtocolMessageSignature, content)
-    snapshot.verifySignatures(hash, mediatorGroupIndex, signatures)
-  }
+  ): ClosedEnvelope =
+    ClosedEnvelope(
+      EnvelopeContent.tryCreate(protocolMessage, protocolVersion).toByteString,
+      recipients,
+      protocolVersion,
+    )
 }

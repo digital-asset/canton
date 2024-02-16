@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.*
 import cats.syntax.bifunctor.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata}
 import com.digitalasset.canton.error.{BaseCantonError, MediatorError}
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -17,6 +18,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.version.Transfer.SourceProtocolVersion
 import com.digitalasset.canton.{DiscardOps, LfPartyId}
@@ -41,16 +43,13 @@ private[participant] object AutomaticTransferIn {
     implicit val traceContext: TraceContext = elc.traceContext
 
     def hostedStakeholders(snapshot: TopologySnapshot): Future[Set[LfPartyId]] = {
-      snapshot
-        .hostedOn(stakeholders, participantId)
-        .map(partiesWithAttributes =>
-          partiesWithAttributes.collect {
-            case (partyId, attributes)
-                if attributes.permission == ParticipantPermission.Submission =>
-              partyId
-          }.toSet
-        )
-
+      stakeholders.toList
+        .parTraverseFilter { partyId =>
+          snapshot
+            .hostedOn(partyId, participantId)
+            .map(x => x.filter(_.permission == ParticipantPermission.Submission).map(_ => partyId))
+        }
+        .map(_.toSet)
     }
 
     def performAutoInOnce: EitherT[Future, TransferProcessorError, com.google.rpc.status.Status] = {
@@ -80,10 +79,10 @@ private[participant] object AutomaticTransferIn {
             targetDomain,
             TransferSubmitterMetadata(
               inParty,
-              participantId,
+              transferOutSubmitterMetadata.applicationId,
+              participantId.toLf,
               transferOutSubmitterMetadata.commandId,
               submissionId = None,
-              transferOutSubmitterMetadata.applicationId,
               workflowId = None,
             ),
             id,

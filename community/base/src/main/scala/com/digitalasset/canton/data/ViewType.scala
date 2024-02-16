@@ -5,7 +5,7 @@ package com.digitalasset.canton.data
 
 import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, ValueConversionError}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.{RequestProcessor, v30}
+import com.digitalasset.canton.protocol.{RequestProcessor, v0}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.HasVersionedToByteString
 
@@ -18,11 +18,9 @@ sealed trait ViewType extends Product with Serializable with PrettyPrinting {
 
   type FullView <: ViewTree
 
-  type ViewSubmitterMetadata
-
   type Processor = RequestProcessor[this.type]
 
-  def toProtoEnum: v30.ViewType
+  def toProtoEnum: v0.ViewType
 
   override def pretty: Pretty[ViewType.this.type] = prettyOfObject[ViewType.this.type]
 }
@@ -32,13 +30,13 @@ trait ViewTypeTest extends ViewType
 
 object ViewType {
 
-  def fromProtoEnum: v30.ViewType => ParsingResult[ViewType] = {
-    case v30.ViewType.VIEW_TYPE_TRANSACTION => Right(TransactionViewType)
-    case v30.ViewType.VIEW_TYPE_TRANSFER_OUT => Right(TransferOutViewType)
-    case v30.ViewType.VIEW_TYPE_TRANSFER_IN => Right(TransferInViewType)
-    case v30.ViewType.VIEW_TYPE_UNSPECIFIED => Left(FieldNotSet("view_type"))
-    case v30.ViewType.Unrecognized(value) =>
-      Left(ValueConversionError("view_type", s"Unrecognized value $value"))
+  def fromProtoEnum: v0.ViewType => ParsingResult[ViewType] = {
+    case v0.ViewType.TransactionViewType => Right(TransactionViewType)
+    case v0.ViewType.TransferOutViewType => Right(TransferOutViewType)
+    case v0.ViewType.TransferInViewType => Right(TransferInViewType)
+    case v0.ViewType.MissingViewType => Left(FieldNotSet("viewType"))
+    case v0.ViewType.Unrecognized(value) =>
+      Left(ValueConversionError("viewType", s"Unrecognized value $value"))
   }
 
   case object TransactionViewType extends ViewType {
@@ -46,27 +44,24 @@ object ViewType {
 
     override type FullView = FullTransactionViewTree
 
-    override type ViewSubmitterMetadata = SubmitterMetadata
-
-    override def toProtoEnum: v30.ViewType = v30.ViewType.VIEW_TYPE_TRANSACTION
+    override def toProtoEnum: v0.ViewType = v0.ViewType.TransactionViewType
   }
   type TransactionViewType = TransactionViewType.type
 
   sealed trait TransferViewType extends ViewType {
     type View <: TransferViewTree with HasVersionedToByteString
     type FullView = View
-    override type ViewSubmitterMetadata = TransferSubmitterMetadata
   }
 
   case object TransferOutViewType extends TransferViewType {
     override type View = FullTransferOutTree
-    override def toProtoEnum: v30.ViewType = v30.ViewType.VIEW_TYPE_TRANSFER_OUT
+    override def toProtoEnum: v0.ViewType = v0.ViewType.TransferOutViewType
   }
   type TransferOutViewType = TransferOutViewType.type
 
   case object TransferInViewType extends TransferViewType {
     override type View = FullTransferInTree
-    override def toProtoEnum: v30.ViewType = v30.ViewType.VIEW_TYPE_TRANSFER_IN
+    override def toProtoEnum: v0.ViewType = v0.ViewType.TransferInViewType
   }
   type TransferInViewType = TransferInViewType.type
 }

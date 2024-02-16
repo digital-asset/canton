@@ -102,7 +102,7 @@ class PackageService(
     packageLoader.loadPackage(
       packageId,
       getLfArchive,
-      metrics.ledgerApiServer.execution.getLfPackage,
+      metrics.ledgerApiServer.daml.execution.getLfPackage,
     )
 
   def removePackage(
@@ -236,18 +236,7 @@ class PackageService(
         .leftMap(p => new CannotRemoveOnlyDarForPackage(p, darDescriptor))
         .mapK(FutureUnlessShutdown.outcomeK)
 
-      packagesThatCanBeRemoved <- EitherT
-        .liftF(
-          packagesDarsStore
-            .determinePackagesExclusivelyInDar(packages, darDescriptor)
-        )
-        .mapK(FutureUnlessShutdown.outcomeK)
-
-      _unit <- revokeVettingForDar(
-        mainPkg,
-        packagesThatCanBeRemoved.toList,
-        darDescriptor,
-      )
+      _unit <- revokeVettingForDar(mainPkg, packages, darDescriptor)
 
       _unit <-
         EitherT.liftF(packagesDarsStore.removePackage(mainPkg))

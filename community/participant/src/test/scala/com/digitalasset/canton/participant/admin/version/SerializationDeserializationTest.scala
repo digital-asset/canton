@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.admin.version
 
+import com.digitalasset.canton.data.GeneratorsDataTime
 import com.digitalasset.canton.participant.admin.data.{ActiveContract, GeneratorsData}
 import com.digitalasset.canton.protocol.GeneratorsProtocol
 import com.digitalasset.canton.version.ProtocolVersion
@@ -17,7 +18,8 @@ class SerializationDeserializationTest
     with SerializationDeserializationTestHelpers {
 
   forAll(Table("protocol version", ProtocolVersion.supported *)) { version =>
-    val generatorsProtocol = new GeneratorsProtocol(version)
+    val generatorsDataTime = new GeneratorsDataTime()
+    val generatorsProtocol = new GeneratorsProtocol(version, generatorsDataTime)
     val generatorsData = new GeneratorsData(version, generatorsProtocol)
     import generatorsData.*
 

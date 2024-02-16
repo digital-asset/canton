@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.sequencing
 
-import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.data.CantonTimestamp
@@ -33,18 +32,14 @@ class SequencedEventMonotonicityChecker(
   import SequencedEventMonotonicityChecker.*
 
   /** Pekko version of the check. Pulls the kill switch and drains the source when a violation is detected. */
-  def flow[E]: Flow[
-    WithKillSwitch[Either[E, OrdinarySerializedEvent]],
-    WithKillSwitch[Either[E, OrdinarySerializedEvent]],
+  def flow: Flow[
+    WithKillSwitch[OrdinarySerializedEvent],
+    WithKillSwitch[OrdinarySerializedEvent],
     NotUsed,
   ] = {
-    Flow[WithKillSwitch[Either[E, OrdinarySerializedEvent]]]
+    Flow[WithKillSwitch[OrdinarySerializedEvent]]
       .statefulMap(() => initialState)(
-        (state, eventAndKillSwitch) =>
-          eventAndKillSwitch.traverse {
-            case left @ Left(_) => state -> Emit(left)
-            case Right(event) => onNext(state, event).map(_.map(Right(_)))
-          },
+        (state, eventAndKillSwitch) => eventAndKillSwitch.traverse(onNext(state, _)),
         _ => None,
       )
       .mapConcat { actionAndKillSwitch =>
@@ -89,10 +84,7 @@ class SequencedEventMonotonicityChecker(
   private def initialState: State =
     GoodState(firstSequencerCounter, firstTimestampLowerBoundInclusive)
 
-  private def onNext(
-      state: State,
-      event: OrdinarySerializedEvent,
-  ): (State, Action[OrdinarySerializedEvent]) = state match {
+  private def onNext(state: State, event: OrdinarySerializedEvent): (State, Action) = state match {
     case Failed => (state, Drop)
     case GoodState(nextSequencerCounter, lowerBoundTimestamp) =>
       val monotonic =
@@ -109,26 +101,18 @@ class SequencedEventMonotonicityChecker(
 
 object SequencedEventMonotonicityChecker {
 
-  private sealed trait Action[+A] extends Product with Serializable {
-    def map[B](f: A => B): Action[B]
-  }
-  private final case class Emit[+A](event: A) extends Action[A] {
-    override def map[B](f: A => B): Emit[B] = Emit(f(event))
-  }
-  private case object Drop extends Action[Nothing] {
-    override def map[B](f: Nothing => B): this.type = this
-  }
+  private sealed trait Action extends Product with Serializable
+  private final case class Emit(event: OrdinarySerializedEvent) extends Action
+  private case object Drop extends Action
   private final case class MonotonicityFailure(
       expectedSequencerCounter: SequencerCounter,
       timestampLowerBound: CantonTimestamp,
       event: OrdinarySerializedEvent,
-  ) extends Action[Nothing] {
+  ) extends Action {
     def message: String =
       s"Sequencer counters and timestamps do not increase monotonically. Expected next counter=$expectedSequencerCounter with timestamp lower bound $timestampLowerBound, but received ${event.signedEvent.content}"
 
     def asException: Exception = new MonotonicityFailureException(message)
-
-    override def map[B](f: Nothing => B): this.type = this
   }
   @VisibleForTesting
   class MonotonicityFailureException(message: String) extends Exception(message)

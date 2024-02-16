@@ -9,7 +9,7 @@ import com.digitalasset.canton.data.{FullTransactionViewTree, ViewPosition}
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 
@@ -23,7 +23,7 @@ class AuthorizationValidator(participantId: ParticipantId, enableContractUpgradi
       requestId: RequestId,
       rootViews: NonEmpty[Seq[FullTransactionViewTree]],
       snapshot: TopologySnapshot,
-  )(implicit traceContext: TraceContext): Future[Map[ViewPosition, String]] =
+  ): Future[Map[ViewPosition, String]] =
     rootViews.forgetNE
       .parTraverseFilter { rootView =>
         val authorizers =
@@ -47,30 +47,45 @@ class AuthorizationValidator(participantId: ParticipantId, enableContractUpgradi
               )
             } else {
               for {
-                notAllowedBySubmittingParticipant <- snapshot.canNotSubmit(
-                  submitterMetadata.submittingParticipant,
-                  submitterMetadata.actAs.toSeq,
-                )
+                notHostedBySubmitterParticipant <- submitterMetadata.actAs.toSeq.forgetNE
+                  .parTraverseFilter(p =>
+                    snapshot
+                      .hostedOn(p, submitterMetadata.submitterParticipant)
+                      .map {
+                        case Some(attributes)
+                            if attributes.permission == ParticipantPermission.Submission =>
+                          None
+                        case _ => Some(p)
+                      }
+                  )
               } yield
-                if (notAllowedBySubmittingParticipant.nonEmpty) {
+                if (notHostedBySubmitterParticipant.nonEmpty)
                   Some(
                     err(
-                      show"The submitting participant ${submitterMetadata.submittingParticipant} is not authorized to submit on behalf of the submitting parties ${notAllowedBySubmittingParticipant.toSeq}."
+                      show"The submitting parties $notHostedBySubmitterParticipant are not hosted by the submitting participant ${submitterMetadata.submitterParticipant}."
                     )
                   )
-                } else None
+                else None
             }
           case None =>
             // The submitter metadata is blinded -> rootView is not a top-level view
-            snapshot.hostedOn(authorizers, participantId).map { hostedAuthorizers =>
+
+            for {
+              hostedAuthorizers <- authorizers.toSeq
+                .parTraverseFilter { authorizer =>
+                  for {
+                    attributesO <- snapshot.hostedOn(authorizer, participantId)
+                  } yield attributesO.map(_ => authorizer)
+                }
+            } yield {
               // If this participant hosts an authorizer, it should also have received the parent view.
               // As rootView is not a top-level (submitter metadata is blinded), there is a gap in the authorization chain.
 
-              Option.when(hostedAuthorizers.nonEmpty)(
-                err(
-                  show"Missing authorization for ${hostedAuthorizers.keys.toSeq.sorted}, ${rootView.viewPosition}."
+              if (hostedAuthorizers.isEmpty) None
+              else
+                Some(
+                  err(show"Missing authorization for $hostedAuthorizers, ${rootView.viewPosition}.")
                 )
-              )
             }
         }
 

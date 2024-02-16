@@ -46,7 +46,7 @@ abstract class TransactionTreeFactoryImpl(
     participantId: ParticipantId,
     domainId: DomainId,
     protocolVersion: ProtocolVersion,
-    contractSerializer: LfContractInst => SerializableRawContractInstance,
+    contractSerializer: (LfContractInst, AgreementText) => SerializableRawContractInstance,
     cryptoOps: HashOps & HmacOps,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -54,10 +54,11 @@ abstract class TransactionTreeFactoryImpl(
     with NamedLogging {
 
   private val unicumGenerator = new UnicumGenerator(cryptoOps)
-  private val cantonContractIdVersion = AuthenticatedContractIdVersionV2
-  private val transactionViewDecompositionFactory: TransactionViewDecompositionFactory =
-    TransactionViewDecompositionFactory()
-  private val contractEnrichmentFactory = ContractEnrichmentFactory()
+  private val cantonContractIdVersion = CantonContractIdVersion.fromProtocolVersion(protocolVersion)
+  private val transactionViewDecompositionFactory = TransactionViewDecompositionFactory(
+    protocolVersion
+  )
+  private val contractEnrichmentFactory = ContractEnrichmentFactory(protocolVersion)
 
   protected type State <: TransactionTreeFactoryImpl.State
 
@@ -127,14 +128,13 @@ abstract class TransactionTreeFactoryImpl(
         Some(participantId.adminParty.toLf),
       )
 
-    val commonMetadata = CommonMetadata
-      .create(cryptoOps, protocolVersion)(
-        confirmationPolicy,
-        domainId,
-        mediator,
-        commonMetadataSalt,
-        transactionUuid,
-      )
+    val commonMetadata = CommonMetadata(cryptoOps, protocolVersion)(
+      confirmationPolicy,
+      domainId,
+      mediator,
+      commonMetadataSalt,
+      transactionUuid,
+    )
 
     for {
       submitterMetadata <- EitherT.fromEither[Future](
@@ -145,7 +145,7 @@ abstract class TransactionTreeFactoryImpl(
             submitterCommandId = submitterInfo.commandId,
             submitterSubmissionId = submitterInfo.submissionId,
             submitterDeduplicationPeriod = submitterInfo.deduplicationPeriod,
-            submittingParticipant = participantId,
+            submitterParticipant = participantId,
             salt = submitterMetadataSalt,
             maxSequencingTime,
             protocolVersion = protocolVersion,
@@ -158,7 +158,7 @@ abstract class TransactionTreeFactoryImpl(
         val numRootViews = rootViewDecompositions.length
         val numViews = TransactionViewDecomposition.countNestedViews(rootViewDecompositions)
         logger.debug(
-          s"Computed transaction tree with total=$numViews for #root-nodes=$numRootViews"
+          s"Computed transaction tree with total=${numViews} for #root-nodes=${numRootViews}"
         )
       }
 
@@ -412,7 +412,8 @@ abstract class TransactionTreeFactoryImpl(
           Predef.identity,
         )
     )
-    val serializedCantonContractInst = contractSerializer(cantonContractInst)
+    val serializedCantonContractInst =
+      contractSerializer(cantonContractInst, AgreementText(createNode.agreementText))
 
     val discriminator = createNode.coid match {
       case LfContractId.V1(discriminator, suffix) if suffix.isEmpty =>
@@ -445,7 +446,7 @@ abstract class TransactionTreeFactoryImpl(
       rawContractInstance = serializedCantonContractInst,
       metadata = contractMetadata,
       ledgerCreateTime = LedgerCreateTime(state.ledgerTime),
-      contractSalt = Some(contractSalt.unwrap),
+      contractSalt = Option.when(protocolVersion >= ProtocolVersion.v4)(contractSalt.unwrap),
     )
     state.setCreatedContractInfo(contractId, createdInfo)
 
@@ -573,26 +574,29 @@ object TransactionTreeFactoryImpl {
 
   /** Creates a `TransactionTreeFactory`. */
   def apply(
-      submittingParticipant: ParticipantId,
+      submitterParticipant: ParticipantId,
       domainId: DomainId,
       protocolVersion: ProtocolVersion,
       cryptoOps: HashOps & HmacOps,
+      uniqueContractKeys: Boolean,
       loggerFactory: NamedLoggerFactory,
   )(implicit ex: ExecutionContext): TransactionTreeFactoryImpl =
     new TransactionTreeFactoryImplV3(
-      submittingParticipant,
+      submitterParticipant,
       domainId,
       protocolVersion,
       contractSerializer,
       cryptoOps,
+      uniqueContractKeys,
       loggerFactory,
     )
 
   private[submission] def contractSerializer(
-      contractInst: LfContractInst
+      contractInst: LfContractInst,
+      agreementText: AgreementText,
   ): SerializableRawContractInstance =
     SerializableRawContractInstance
-      .create(contractInst)
+      .create(contractInst, agreementText)
       .leftMap { err =>
         throw new IllegalArgumentException(
           s"Unable to serialize contract instance, although it is contained in a well-formed transaction.\n$err\n$contractInst"

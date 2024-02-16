@@ -7,15 +7,8 @@ import cats.data.EitherT
 import cats.syntax.foldable.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.sequencing.protocol.{
-  MemberRecipient,
-  ParticipantsOfParty,
-  Recipients,
-  RecipientsTree,
-}
-import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.sequencing.protocol.{Recipient, Recipients, RecipientsTree}
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient
-import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -32,10 +25,7 @@ final case class Witnesses(unwrap: NonEmpty[Seq[Set[Informee]]]) {
   /** Derive a recipient tree that mirrors the given hierarchy of witnesses. */
   def toRecipients(
       topology: PartyTopologySnapshotClient
-  )(implicit
-      ec: ExecutionContext,
-      tc: TraceContext,
-  ): EitherT[Future, InvalidWitnesses, Recipients] =
+  )(implicit ec: ExecutionContext): EitherT[Future, InvalidWitnesses, Recipients] =
     for {
       recipientsList <- unwrap.forgetNE.foldLeftM(Seq.empty[RecipientsTree]) {
         (children, informees) =>
@@ -60,15 +50,11 @@ final case class Witnesses(unwrap: NonEmpty[Seq[Set[Informee]]]) {
                 ),
               )
             }
-            partiesWithGroupAddressing <- EitherT.right(
-              topology.partiesWithGroupAddressing(parties)
-            )
-            recipients = informeeParticipants.toList.flatMap { case (party, participants) =>
-              if (partiesWithGroupAddressing.contains(party))
-                Seq(ParticipantsOfParty(PartyId.tryFromLfParty(party)))
-              else
-                participants.map(MemberRecipient)
-            }.toSet
+            recipients = informeeParticipants.toList
+              .flatMap { case (_, participants) =>
+                participants.map(Recipient(_))
+              }
+              .toSet[Recipient]
 
             informeeRecipientSet <- EitherT.fromOption[Future](
               NonEmpty.from(recipients),

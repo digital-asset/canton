@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.pruning
 
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.protocol.DomainParameters
 import com.digitalasset.canton.protocol.messages.CommitmentPeriod
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveSeconds, SimClock}
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySnapshot}
@@ -13,8 +14,10 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
+import scala.annotation.nowarn
 import scala.concurrent.Future
 
+@nowarn("msg=deprecated")
 class SortedReconciliationIntervalsProviderTest
     extends AnyWordSpec
     with BaseTest
@@ -23,7 +26,7 @@ class SortedReconciliationIntervalsProviderTest
 
   "SortedReconciliationIntervalsProvider" must {
     "allow to query reconciliation intervals (PV >= 4)" in {
-      val protocolVersion = ProtocolVersion.latest
+      val protocolVersion = ProtocolVersion.v4
 
       val clock = new SimClock(fromEpoch(0), loggerFactory)
 
@@ -45,7 +48,9 @@ class SortedReconciliationIntervalsProviderTest
         Future.successful(topologySnapshot)
       }
 
-      val provider = new SortedReconciliationIntervalsProvider(
+      val provider = SortedReconciliationIntervalsProvider(
+        staticDomainParameters =
+          BaseTest.defaultStaticDomainParametersWith(protocolVersion = protocolVersion),
         topologyClient = topologyClient,
         futureSupervisor = FutureSupervisor.Noop,
         loggerFactory = loggerFactory,
@@ -69,7 +74,59 @@ class SortedReconciliationIntervalsProviderTest
         .tryOfSeconds(2)
     }
 
+    "allow to query reconciliation intervals (PV < 4)" in {
+      val protocolVersion = ProtocolVersion.v3
+
+      val clock = new SimClock(fromEpoch(0), loggerFactory)
+      val defaultReconciliationInterval = defaultStaticDomainParameters.reconciliationInterval
+
+      val updatedStaticDomainParameters =
+        BaseTest.defaultStaticDomainParametersWith(
+          reconciliationInterval =
+            PositiveSeconds.tryOfSeconds(defaultReconciliationInterval.unwrap.getSeconds + 1),
+          protocolVersion = protocolVersion,
+        )
+
+      // When PV is old enough, we have constant sorted reconciliation interval
+      def expectedSortedReconciliationIntervals(validAt: CantonTimestamp) =
+        SortedReconciliationIntervals
+          .create(
+            Seq(
+              DomainParameters.WithValidity(
+                CantonTimestamp.MinValue,
+                None,
+                updatedStaticDomainParameters.reconciliationInterval,
+              )
+            ),
+            validUntil = validAt,
+          )
+          .value
+
+      val provider = SortedReconciliationIntervalsProvider(
+        staticDomainParameters = updatedStaticDomainParameters,
+        topologyClient = mock[DomainTopologyClient],
+        futureSupervisor = FutureSupervisor.Noop,
+        loggerFactory = loggerFactory,
+      )
+
+      provider.getApproximateLatestReconciliationInterval shouldBe None
+
+      def query(secondsFromEpoch: Long) =
+        provider.reconciliationIntervals(fromEpoch(secondsFromEpoch)).futureValue
+
+      val ts1 = 1L
+      clock.advanceTo(fromEpoch(ts1))
+      query(ts1) shouldBe expectedSortedReconciliationIntervals(CantonTimestamp.ofEpochSecond(ts1))
+
+      val ts2 = 10000L
+      clock.advanceTo(fromEpoch(ts2))
+      query(ts2) shouldBe expectedSortedReconciliationIntervals(CantonTimestamp.ofEpochSecond(ts2))
+      provider.getApproximateLatestReconciliationInterval.value.intervalLength shouldBe updatedStaticDomainParameters.reconciliationInterval
+    }
+
     "return an error if topology is not known" in {
+      val protocolVersion = ProtocolVersion.v4
+
       val topologyKnownAt = fromEpoch(10)
 
       val topologySnapshot = mock[TopologySnapshot]
@@ -82,7 +139,9 @@ class SortedReconciliationIntervalsProviderTest
         Future.successful(topologySnapshot)
       }
 
-      val provider = new SortedReconciliationIntervalsProvider(
+      val provider = SortedReconciliationIntervalsProvider(
+        staticDomainParameters =
+          BaseTest.defaultStaticDomainParametersWith(protocolVersion = protocolVersion),
         topologyClient = topologyClient,
         futureSupervisor = FutureSupervisor.Noop,
         loggerFactory = loggerFactory,
@@ -107,6 +166,8 @@ class SortedReconciliationIntervalsProviderTest
 
     "compute the correct reconciliation intervals covering a period" in {
 
+      val protocolVersion = ProtocolVersion.v4
+
       val clock = new SimClock(fromEpoch(0), loggerFactory)
 
       val domainParameters = Vector(
@@ -125,7 +186,9 @@ class SortedReconciliationIntervalsProviderTest
         Future.successful(topologySnapshot)
       }
 
-      val provider = new SortedReconciliationIntervalsProvider(
+      val provider = SortedReconciliationIntervalsProvider(
+        staticDomainParameters =
+          BaseTest.defaultStaticDomainParametersWith(protocolVersion = protocolVersion),
         topologyClient = topologyClient,
         futureSupervisor = FutureSupervisor.Noop,
         loggerFactory = loggerFactory,

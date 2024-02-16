@@ -336,12 +336,10 @@ class CantonGrpcUtilTest extends FixtureAnyWordSpec with BaseTest with HasExecut
 
         val requestF = loggerFactory.assertLogs(
           sendRequest().value,
-          err => {
-            err.errorMessage shouldBe
-              """Request failed for serverName.
-                |  GrpcServerError: UNKNOWN/Application error processing RPC
-                |  Request: command""".stripMargin
-          },
+          _.errorMessage shouldBe
+            """Request failed for serverName.
+              |  GrpcServerError: UNKNOWN/Application error processing RPC
+              |  Request: command""".stripMargin,
         )
 
         val err = Await.result(requestF, 2.seconds).left.value

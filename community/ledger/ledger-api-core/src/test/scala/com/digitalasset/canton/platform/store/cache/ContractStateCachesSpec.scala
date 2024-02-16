@@ -7,6 +7,7 @@ import com.daml.lf.crypto.Hash
 import com.daml.lf.data.{ImmArray, Ref, Time}
 import com.daml.lf.transaction.{GlobalKey, TransactionVersion, Versioned}
 import com.daml.lf.value.Value.{ContractInstance, ValueInt64, ValueRecord}
+import com.digitalasset.canton.BaseTest.pvPackageName
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
@@ -173,6 +174,7 @@ class ContractStateCachesSpec
     GlobalKey.assertBuild(
       Identifier.assertFromString(s"some:template:name"),
       ValueInt64(id.toLong),
+      shared = true,
     )
 
   private def contract(id: Int): Contract = {
@@ -181,7 +183,11 @@ class ContractStateCachesSpec
       Some(templateId),
       ImmArray(None -> ValueInt64(id.toLong)),
     )
-    val contractInstance = ContractInstance(template = templateId, arg = contractArgument)
+    val contractInstance = ContractInstance(
+      template = templateId,
+      packageName = pvPackageName,
+      arg = contractArgument,
+    )
     Versioned(TransactionVersion.StableVersions.max, contractInstance)
   }
 

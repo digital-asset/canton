@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
+import cats.syntax.traverse.*
 import com.daml.ledger.api.v1.transaction.TreeEvent
 import com.daml.ledger.api.v1.event as apiEvent
 import com.daml.ledger.api.v2.reassignment.{
@@ -21,9 +22,11 @@ import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.{Identifier, Party}
 import com.daml.lf.transaction.{FatContractInstance, GlobalKeyWithMaintainers, Node}
 import com.daml.lf.value.Value.ContractId
+import com.digitalasset.canton.ledger.api.util.TimestampConversion
 import com.digitalasset.canton.ledger.api.util.TimestampConversion.fromInstant
-import com.digitalasset.canton.ledger.api.util.{LfEngineToApi, TimestampConversion}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.platform.api.v1.event.EventOps.TreeEventOps
+import com.digitalasset.canton.platform.participant.util.LfEngineToApi
 import com.digitalasset.canton.platform.store.ScalaPbStreamingOptimizations.*
 import com.digitalasset.canton.platform.store.dao.EventProjectionProperties
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
@@ -31,7 +34,6 @@ import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.{
   CreatedEvent,
   ExercisedEvent,
 }
-import com.digitalasset.canton.platform.store.utils.EventOps.TreeEventOps
 import com.digitalasset.canton.platform.{ApiOffset, TemplatePartiesFilter, Value}
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, Traced}
 import com.google.protobuf.ByteString
@@ -39,12 +41,13 @@ import com.google.protobuf.timestamp.Timestamp
 
 import scala.concurrent.{ExecutionContext, Future}
 
-private[events] object TransactionLogUpdatesConversions {
+private[platform] object TransactionLogUpdatesConversions {
   object ToFlatTransaction {
     def filter(
         wildcardParties: Set[Party],
         templateSpecificParties: Map[Identifier, Set[Party]],
         requestingParties: Set[Party],
+        multiDomainEnabled: Boolean,
     ): Traced[TransactionLogUpdate] => Option[Traced[TransactionLogUpdate]] = traced =>
       traced.traverse {
         case transaction: TransactionLogUpdate.TransactionAccepted =>
@@ -69,7 +72,7 @@ private[events] object TransactionLogUpdatesConversions {
         case _: TransactionLogUpdate.TransactionRejected => None
         case u: TransactionLogUpdate.ReassignmentAccepted =>
           Option.when(
-            u.reassignmentInfo.hostedStakeholders.exists(party =>
+            multiDomainEnabled && u.reassignmentInfo.hostedStakeholders.exists(party =>
               wildcardParties(party) || templateSpecificParties
                 .get(u.reassignment match {
                   case TransactionLogUpdate.ReassignmentAccepted.Unassigned(unassign) =>
@@ -127,7 +130,7 @@ private[events] object TransactionLogUpdatesConversions {
         loggingContext: LoggingContextWithTrace,
         executionContext: ExecutionContext,
     ): Future[Option[GetTransactionResponse]] =
-      filter(requestingParties, Map.empty, requestingParties)(transactionLogUpdate)
+      filter(requestingParties, Map.empty, requestingParties, false)(transactionLogUpdate)
         .collect {
           case traced @ Traced(transactionAccepted: TransactionLogUpdate.TransactionAccepted) =>
             toFlatTransaction(
@@ -247,7 +250,8 @@ private[events] object TransactionLogUpdatesConversions {
 
   object ToTransactionTree {
     def filter(
-        requestingParties: Set[Party]
+        requestingParties: Set[Party],
+        multiDomainEnabled: Boolean,
     ): Traced[TransactionLogUpdate] => Option[Traced[TransactionLogUpdate]] = traced =>
       traced.traverse {
         case transaction: TransactionLogUpdate.TransactionAccepted =>
@@ -260,7 +264,7 @@ private[events] object TransactionLogUpdatesConversions {
         case _: TransactionLogUpdate.TransactionRejected => None
         case u: TransactionLogUpdate.ReassignmentAccepted =>
           Option.when(
-            u.reassignmentInfo.hostedStakeholders.exists(requestingParties)
+            multiDomainEnabled && u.reassignmentInfo.hostedStakeholders.exists(requestingParties)
           )(u)
       }
 
@@ -272,7 +276,7 @@ private[events] object TransactionLogUpdatesConversions {
         loggingContext: LoggingContextWithTrace,
         executionContext: ExecutionContext,
     ): Future[Option[GetTransactionTreeResponse]] =
-      filter(requestingParties)(transactionLogUpdate)
+      filter(requestingParties, false)(transactionLogUpdate)
         .collect { case traced @ Traced(tx: TransactionLogUpdate.TransactionAccepted) =>
           toTransactionTree(
             transactionAccepted = tx,
@@ -345,9 +349,16 @@ private[events] object TransactionLogUpdatesConversions {
           )
           .map { treeEvents =>
             val visible = treeEvents.map(_.eventId)
-            val visibleSet = visible.toSet
+            val visibleOrder = visible.view.zipWithIndex.toMap
             val eventsById = treeEvents.iterator
-              .map(e => e.eventId -> e.filterChildEventIds(visibleSet))
+              .map(e =>
+                e.eventId -> e
+                  .filterChildEventIds(visibleOrder.contains)
+                  // childEventIds need to be returned in the event order in the original transaction.
+                  // Unfortunately, we did not store them ordered in the past so we have to sort it to recover this order.
+                  // The order is determined by the order of the events, which follows the event order of the original transaction.
+                  .sortChildEventIdsBy(visibleOrder)
+              )
               .toMap
 
             // All event identifiers that appear as a child of another item in this response
@@ -495,6 +506,7 @@ private[events] object TransactionLogUpdatesConversions {
               Node.Create(
                 coid = createdEvent.contractId,
                 templateId = createdEvent.templateId,
+                packageName = createdEvent.packageName,
                 arg = createdEvent.createArgument.unversioned,
                 agreementText = createdEvent.createAgreementText.getOrElse(""),
                 signatories = createdEvent.createSignatories,
@@ -524,6 +536,7 @@ private[events] object TransactionLogUpdatesConversions {
           eventId = createdEvent.eventId.toLedgerString,
           contractId = createdEvent.contractId.coid,
           templateId = Some(LfEngineToApi.toApiIdentifier(createdEvent.templateId)),
+          packageName = createdEvent.packageName,
           contractKey = apiContractData.contractKey,
           createArguments = apiContractData.createArguments,
           createdEventBlob = apiContractData.createdEventBlob.getOrElse(ByteString.EMPTY),

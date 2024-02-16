@@ -37,6 +37,7 @@ class BufferedCommandCompletionsReader(
       persistenceFetchArgs = applicationId -> parties,
       bufferFilter = filterCompletions(_, parties, applicationId),
       toApiResponse = (response: CompletionStreamResponse) => Future.successful(response),
+      multiDomainEnabled = false, // for completions it does not matter
     )
 
   private def filterCompletions(
@@ -84,6 +85,7 @@ object BufferedCommandCompletionsReader {
           startExclusive: Offset,
           endInclusive: Offset,
           filter: (ApplicationId, Parties),
+          multiDomainEnabled: Boolean,
       )(implicit
           loggingContext: LoggingContextWithTrace
       ): Source[(Offset, CompletionStreamResponse), NotUsed] = {

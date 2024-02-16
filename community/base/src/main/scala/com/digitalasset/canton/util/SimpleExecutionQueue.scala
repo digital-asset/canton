@@ -178,7 +178,7 @@ class SimpleExecutionQueue(
       AsyncCloseable(
         s"simple-exec-queue: $name",
         flush(),
-        timeouts.shutdownProcessing,
+        timeouts.shutdownProcessing.duration,
         // In the event where the flush does not complete within the allocated timeout,
         // forcibly shutdown the remaining queued tasks, except the currently running one
         onTimeout = _ => forceShutdownTasks(),

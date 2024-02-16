@@ -12,17 +12,21 @@ import org.scalatest.wordspec.{AsyncWordSpec, AsyncWordSpecLike}
 import scala.concurrent.Future
 
 trait DomainNodeSettingsStoreTest {
-  this: AsyncWordSpecLike & BaseTest =>
+  this: AsyncWordSpecLike with BaseTest =>
 
-  protected lazy val config: StoredDomainNodeSettings =
-    StoredDomainNodeSettings(defaultStaticDomainParameters)
+  protected def makeConfig(uniqueKeys: Boolean = false) =
+    StoredDomainNodeSettings(
+      defaultStaticDomainParameters.update(uniqueContractKeys = uniqueKeys)
+    )
 
   protected def domainNodeSettingsStoreTest(
       // argument: reset static domain parameters
-      mkStore: => BaseNodeSettingsStore[StoredDomainNodeSettings]
+      mkStore: Boolean => BaseNodeSettingsStore[StoredDomainNodeSettings]
   ): Unit = {
+
     "returns stored values" in {
-      val store = mkStore
+      val store = mkStore(false)
+      val config = makeConfig()
       for {
         _ <- store.saveSettings(config).valueOrFail("save")
         current <- store.fetchSettings.valueOrFail("fetch")
@@ -30,7 +34,24 @@ trait DomainNodeSettingsStoreTest {
         current should contain(config)
       }
     }
+
+    "supports updating values" in {
+      defaultStaticDomainParameters.uniqueContractKeys shouldBe false // test assumes that this default doesn't change
+      val store = mkStore(false)
+      val config = makeConfig()
+      val updateConfig = makeConfig(true)
+
+      for {
+        _ <- store.saveSettings(config).valueOrFail("save")
+        _ <- store.saveSettings(updateConfig).valueOrFail("save")
+        current <- store.fetchSettings.valueOrFail("fetch")
+      } yield {
+        current should contain(updateConfig)
+      }
+    }
+
   }
+
 }
 
 class DomainNodeSettingsStoreTestInMemory
@@ -38,7 +59,7 @@ class DomainNodeSettingsStoreTestInMemory
     with BaseTest
     with DomainNodeSettingsStoreTest {
 
-  behave like domainNodeSettingsStoreTest(
+  behave like domainNodeSettingsStoreTest(_ =>
     new InMemoryBaseNodeConfigStore[StoredDomainNodeSettings](loggerFactory)
   )
 }
@@ -63,12 +84,41 @@ trait DbDomainNodeSettingsStoreTest
 
   behave like domainNodeSettingsStoreTest(mkStore)
 
-  private def mkStore =
+  private def mkStore(resetToConfig: Boolean) =
     new DbDomainNodeSettingsStore(
+      defaultStaticDomainParameters,
+      resetToConfig,
       storage,
       timeouts,
       loggerFactory,
     )
+
+  "prepopulates empty stores" in {
+    val store = mkStore(false)
+    for {
+      current <- store.fetchSettings.value.map(_.value)
+    } yield {
+      current should contain(makeConfig())
+    }
+  }
+
+  "supports resetting static configs" in {
+    val nonDefaultConfig = makeConfig(true)
+    val store = mkStore(false)
+
+    for {
+      _ <- store.saveSettings(nonDefaultConfig).valueOrFail("save")
+      store2 = mkStore(true)
+      current <-
+        loggerFactory.assertLogs(
+          store2.fetchSettings.valueOrFail("fetch"),
+          _.warningMessage should include("Resetting static domain parameters to the ones "),
+        )
+    } yield {
+      current should contain(makeConfig()) // should be default config
+    }
+  }
+
 }
 
 class DbDomainNodeSettingsStoreTestPostgres extends DbDomainNodeSettingsStoreTest with PostgresTest

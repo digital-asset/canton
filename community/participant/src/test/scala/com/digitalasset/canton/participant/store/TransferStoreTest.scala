@@ -8,7 +8,12 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata}
+import com.digitalasset.canton.data.{
+  CantonTimestamp,
+  TransferInView,
+  TransferOutView,
+  TransferSubmitterMetadata,
+}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.protocol.submission.SeedGenerator
@@ -31,6 +36,7 @@ import com.digitalasset.canton.protocol.{
   ContractMetadata,
   ExampleTransactionFactory,
   LfContractId,
+  LfTemplateId,
   RequestId,
   SerializableContract,
   SourceDomainId,
@@ -43,18 +49,17 @@ import com.digitalasset.canton.time.TimeProofTestUtil
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.util.{Checked, MonadUtil}
+import com.digitalasset.canton.util.{Checked, FutureUtil, MonadUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{
   BaseTest,
   LedgerApplicationId,
   LedgerCommandId,
+  LedgerParticipantId,
   LfPartyId,
   RequestCounter,
   SequencerCounter,
-  TransferCounter,
-  TransferCounterO,
-  config,
 }
 import org.scalatest.wordspec.AsyncWordSpec
 import org.scalatest.{Assertion, EitherValues}
@@ -65,7 +70,7 @@ import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.language.implicitConversions
 
 trait TransferStoreTest {
-  this: AsyncWordSpec & BaseTest =>
+  this: AsyncWordSpec with BaseTest =>
 
   import TransferStoreTest.*
   private implicit val _ec: ExecutionContext = ec
@@ -73,36 +78,27 @@ trait TransferStoreTest {
   private implicit def toGlobalOffset(i: Long): GlobalOffset = GlobalOffset.tryFromLong(i)
 
   protected def transferStore(mk: TargetDomainId => TransferStore): Unit = {
-    val transferData =
-      config
-        .NonNegativeFiniteDuration(10.seconds)
-        .await("make transfer data")(mkTransferData(transfer10, mediator1))
-
-    val transferData2 =
-      config
-        .NonNegativeFiniteDuration(10.seconds)
-        .await("make transfer data")(mkTransferData(transfer11, mediator1))
-
-    val transferData3 =
-      config
-        .NonNegativeFiniteDuration(10.seconds)
-        .await("make transfer data")(mkTransferData(transfer20, mediator1))
+    val transferData = FutureUtil.noisyAwaitResult(
+      mkTransferData(transfer10, mediator1),
+      "make transfer data",
+      10.seconds,
+    )
 
     def transferDataFor(
         transferId: TransferId,
         contract: SerializableContract,
         transferOutGlobalOffset: Option[GlobalOffset] = None,
-    ): TransferData =
-      config
-        .NonNegativeFiniteDuration(10.seconds)
-        .await("make transfer data")(
-          mkTransferData(
-            transferId,
-            mediator1,
-            contract = contract,
-            transferOutGlobalOffset = transferOutGlobalOffset,
-          )
-        )
+    ) =
+      FutureUtil.noisyAwaitResult(
+        mkTransferData(
+          transferId,
+          mediator1,
+          contract = contract,
+          transferOutGlobalOffset = transferOutGlobalOffset,
+        ),
+        "make transfer data",
+        10.seconds,
+      )
 
     val transferOutResult = mkTransferOutResult(transferData)
     val withTransferOutResult = transferData.copy(transferOutResult = Some(transferOutResult))
@@ -809,184 +805,6 @@ trait TransferStoreTest {
       }
     }
 
-    "find first incomplete" should {
-
-      "find incomplete transfers (transfer-out done)" in {
-        val store = mk(targetDomain)
-        val transferId = transferData.transferId
-
-        val transferOutOffset = 10L
-        val transferInOffset = 20L
-        for {
-          _ <- valueOrFail(store.addTransfer(transferData))("add failed")
-
-          _ <- store
-            .addTransfersOffsets(Map(transferId -> TransferOutGlobalOffset(transferOutOffset)))
-            .valueOrFailShutdown(
-              "add transfer-out offset failed"
-            )
-          lookupAfterTransferOut <- store.findEarliestIncomplete()
-
-          _ <- store
-            .addTransfersOffsets(Map(transferId -> TransferInGlobalOffset(transferInOffset)))
-            .valueOrFailShutdown(
-              "add transfer-in offset failed"
-            )
-
-          lookupAfterTransferIn <- store.findEarliestIncomplete()
-        } yield {
-          inside(lookupAfterTransferOut) { case Some((offset, _, _)) =>
-            offset shouldBe GlobalOffset.tryFromLong(transferOutOffset)
-          }
-          lookupAfterTransferIn shouldBe None
-        }
-      }
-
-      "find incomplete transfers (transfer-in done)" in {
-        val store = mk(targetDomain)
-        val transferId = transferData.transferId
-
-        val transferOutOffset = 10L
-        val transferInOffset = 20L
-
-        for {
-          _ <- valueOrFail(store.addTransfer(transferData))("add failed")
-
-          _ <- store
-            .addTransfersOffsets(Map(transferId -> TransferInGlobalOffset(transferInOffset)))
-            .valueOrFailShutdown(
-              "add transfer-in offset failed"
-            )
-          lookupAfterTransferIn <- store.findEarliestIncomplete()
-
-          _ <- store
-            .addTransfersOffsets(Map(transferId -> TransferOutGlobalOffset(transferOutOffset)))
-            .valueOrFailShutdown(
-              "add transfer-out offset failed"
-            )
-          lookupAfterTransferOut <- store.findEarliestIncomplete()
-
-        } yield {
-          inside(lookupAfterTransferIn) { case Some((offset, _, _)) =>
-            offset shouldBe GlobalOffset.tryFromLong(transferInOffset)
-          }
-          lookupAfterTransferOut shouldBe None
-        }
-      }
-
-      "returns None when transfer store is empty or each transfer is either complete or has no offset information" in {
-        val store = mk(targetDomain)
-        val transferId1 = transferData.transferId
-        val transferId3 = transferData3.transferId
-
-        val transferOutOffset1 = 10L
-        val transferInOffset1 = 20L
-
-        val transferOutOffset3 = 30L
-        val transferInOffset3 = 35L
-
-        for {
-          lookupEmpty <- store.findEarliestIncomplete()
-          _ <- valueOrFail(store.addTransfer(transferData))("add failed")
-          _ <- valueOrFail(store.addTransfer(transferData3))("add failed")
-
-          lookupAllInFlight <- store.findEarliestIncomplete()
-
-          _ <- store
-            .addTransfersOffsets(Map(transferId1 -> TransferInGlobalOffset(transferInOffset1)))
-            .valueOrFailShutdown(
-              "add transfer-in offset failed"
-            )
-
-          _ <- store
-            .addTransfersOffsets(Map(transferId1 -> TransferOutGlobalOffset(transferOutOffset1)))
-            .valueOrFailShutdown(
-              "add transfer-out offset failed"
-            )
-
-          lookupInFlightOrComplete <- store.findEarliestIncomplete()
-
-          _ <- store
-            .addTransfersOffsets(Map(transferId3 -> TransferInGlobalOffset(transferInOffset3)))
-            .valueOrFailShutdown(
-              "add transfer-in offset failed"
-            )
-
-          _ <- store
-            .addTransfersOffsets(Map(transferId3 -> TransferOutGlobalOffset(transferOutOffset3)))
-            .valueOrFailShutdown(
-              "add transfer-out offset failed"
-            )
-          lookupAllComplete <- store.findEarliestIncomplete()
-
-        } yield {
-          lookupEmpty shouldBe None
-          lookupAllInFlight shouldBe None
-          lookupInFlightOrComplete shouldBe None
-          lookupAllComplete shouldBe None
-        }
-      }
-
-      "works in complex scenario" in {
-        val store = mk(targetDomain)
-        val transferId1 = transferData.transferId
-        val transferId2 = transferData2.transferId
-        val transferId3 = transferData3.transferId
-
-        val transferOutOffset1 = 10L
-        val transferInOffset1 = 20L
-
-        // transfer 2 is incomplete
-        val transferOutOffset2 = 12L
-
-        val transferOutOffset3 = 30L
-        val transferInOffset3 = 35L
-
-        for {
-          _ <- valueOrFail(store.addTransfer(transferData))("add failed")
-          _ <- valueOrFail(store.addTransfer(transferData2))("add failed")
-          _ <- valueOrFail(store.addTransfer(transferData3))("add failed")
-
-          _ <- store
-            .addTransfersOffsets(Map(transferId1 -> TransferInGlobalOffset(transferInOffset1)))
-            .valueOrFailShutdown(
-              "add transfer-in offset failed"
-            )
-
-          _ <- store
-            .addTransfersOffsets(Map(transferId1 -> TransferOutGlobalOffset(transferOutOffset1)))
-            .valueOrFailShutdown(
-              "add transfer-out offset failed"
-            )
-
-          _ <- store
-            .addTransfersOffsets(Map(transferId2 -> TransferInGlobalOffset(transferOutOffset2)))
-            .valueOrFailShutdown(
-              "add transfer-out offset failed"
-            )
-
-          _ <- store
-            .addTransfersOffsets(Map(transferId3 -> TransferInGlobalOffset(transferInOffset3)))
-            .valueOrFailShutdown(
-              "add transfer-in offset failed"
-            )
-
-          _ <- store
-            .addTransfersOffsets(Map(transferId3 -> TransferOutGlobalOffset(transferOutOffset3)))
-            .valueOrFailShutdown(
-              "add transfer-out offset failed"
-            )
-
-          lookupEnd <- store.findEarliestIncomplete()
-
-        } yield {
-          inside(lookupEnd) { case Some((offset, _, _)) =>
-            offset shouldBe GlobalOffset.tryFromLong(transferOutOffset2)
-          }
-        }
-      }
-    }
-
     "addTransfer" should {
       "be idempotent" in {
         val store = mk(targetDomain)
@@ -1311,11 +1129,11 @@ object TransferStoreTest extends EitherValues with NoTracing {
   )
   private implicit val _ec: ExecutionContext = ec
   val cryptoFactory =
-    TestingIdentityFactoryX(loggerFactoryNotUsed).forOwnerAndDomain(
+    TestingIdentityFactory(loggerFactoryNotUsed).forOwnerAndDomain(
       DefaultTestIdentities.sequencerId
     )
   val sequencerKey =
-    TestingIdentityFactoryX(loggerFactoryNotUsed)
+    TestingIdentityFactory(loggerFactoryNotUsed)
       .newSigningPublicKey(DefaultTestIdentities.sequencerId)
       .fingerprint
   val privateCrypto = cryptoFactory.crypto.privateCrypto
@@ -1332,28 +1150,28 @@ object TransferStoreTest extends EitherValues with NoTracing {
     )
   }
 
-  private val initialTransferCounter: TransferCounterO = Some(TransferCounter.Genesis)
-
   val seedGenerator = new SeedGenerator(pureCryptoApi)
 
   private def submitterMetadata(submitter: LfPartyId): TransferSubmitterMetadata = {
 
-    val submittingParticipant: ParticipantId = DefaultTestIdentities.participant1
+    val submittingParticipant: LedgerParticipantId =
+      TransferInView.submittingParticipantDefaultValue
 
-    val applicationId: LedgerApplicationId =
-      LedgerApplicationId.assertFromString("application-tests")
+    val applicationId: LedgerApplicationId = TransferInView.applicationIdDefaultValue
 
-    val commandId: LedgerCommandId = LedgerCommandId.assertFromString("transfer-store-command-id")
+    val commandId: LedgerCommandId = TransferInView.commandIdDefaultValue
 
     TransferSubmitterMetadata(
       submitter,
+      applicationId,
       submittingParticipant,
       commandId,
       submissionId = None,
-      applicationId,
       workflowId = None,
     )
   }
+
+  private[participant] val templateId: LfTemplateId = TransferOutView.templateIdDefaultValue
 
   def mkTransferDataForDomain(
       transferId: TransferId,
@@ -1365,6 +1183,15 @@ object TransferStoreTest extends EitherValues with NoTracing {
       transferOutGlobalOffset: Option[GlobalOffset] = None,
   ): Future[TransferData] = {
 
+    /*
+      Method TransferOutView.fromProtoV0 set protocol version to v3 (not present in Protobuf v0).
+     */
+    val targetProtocolVersion =
+      if (BaseTest.testedProtocolVersion <= ProtocolVersion.v3)
+        TargetProtocolVersion(ProtocolVersion.v3)
+      else
+        TargetProtocolVersion(BaseTest.testedProtocolVersion)
+
     val transferOutRequest = TransferOutRequest(
       submitterMetadata(submittingParty),
       Set(submittingParty),
@@ -1375,12 +1202,11 @@ object TransferStoreTest extends EitherValues with NoTracing {
       SourceProtocolVersion(BaseTest.testedProtocolVersion),
       sourceMediator,
       targetDomainId,
-      TargetProtocolVersion(BaseTest.testedProtocolVersion),
+      targetProtocolVersion,
       TimeProofTestUtil.mkTimeProof(
         timestamp = CantonTimestamp.Epoch,
         targetDomain = targetDomainId,
       ),
-      initialTransferCounter,
     )
     val uuid = new UUID(10L, 0L)
     val seed = seedGenerator.generateSaltSeed()
@@ -1428,8 +1254,7 @@ object TransferStoreTest extends EitherValues with NoTracing {
     DeliveredTransferOutResult {
       val requestId = RequestId(transferData.transferOutTimestamp)
 
-      val mediatorMessage =
-        transferData.transferOutRequest.tree.mediatorMessage(Signature.noSignature)
+      val mediatorMessage = transferData.transferOutRequest.tree.mediatorMessage
       val result = mediatorMessage.createMediatorResult(
         requestId,
         Verdict.Approve(BaseTest.testedProtocolVersion),

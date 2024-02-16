@@ -3,12 +3,13 @@
 
 package com.digitalasset.canton.participant.admin
 
+import cats.syntax.foldable.*
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApiProvider}
 import com.digitalasset.canton.protocol.{LfGlobalKey, LfGlobalKeyWithMaintainers, TransactionId}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -29,34 +30,41 @@ package object repair {
     TransactionId(hash)
   }
 
-  private[repair] def hostsParties(
-      snapshot: TopologySnapshot,
-      parties: Set[LfPartyId],
-      participantId: ParticipantId,
-  )(implicit
-      executionContext: ExecutionContext,
-      traceContext: TraceContext,
-  ): Future[Set[LfPartyId]] =
-    snapshot
-      .hostedOn(parties, participantId)
-      .map(_.collect { case (party, attributes) if attributes.permission.isActive => party }.toSet)
+  private[repair] def hostsParty(snapshot: TopologySnapshot, participantId: ParticipantId)(
+      party: LfPartyId
+  )(implicit executionContext: ExecutionContext): Future[Boolean] =
+    snapshot.hostedOn(party, participantId).map(_.exists(_.permission.isActive))
 
+  /*
+    Return the key if one of the two conditions is true
+      - the maintainer of the key is listed in `hostedPartiesO`
+      - the topology snapshot `snapshot` contains an active participant hosting the maintainer
+   */
   private[repair] def getKeyIfOneMaintainerIsLocal(
       snapshot: TopologySnapshot,
-      keyO: Option[LfGlobalKeyWithMaintainers],
       participantId: ParticipantId,
-  )(implicit
-      executionContext: ExecutionContext,
-      traceContext: TraceContext,
-  ): Future[Option[LfGlobalKey]] = {
+      hostedPartiesO: Option[NonEmpty[Set[LfPartyId]]],
+      keyO: Option[LfGlobalKeyWithMaintainers],
+  )(implicit executionContext: ExecutionContext): Future[Option[LfGlobalKey]] = {
     keyO.collect { case LfGlobalKeyWithMaintainers(key, maintainers) =>
       (maintainers, key)
     } match {
       case None => Future.successful(None)
       case Some((maintainers, key)) =>
-        snapshot
-          .hostedOn(maintainers, participantId)
-          .map(hostingParties => Option.when(hostingParties.exists(_._2.permission.isActive))(key))
+        def partyToParticipantExists(): Future[Boolean] =
+          maintainers.toList.findM(hostsParty(snapshot, participantId)).map(_.isDefined)
+
+        val isHostedF: Future[Boolean] = hostedPartiesO match {
+          case Some(hostedParties) =>
+            if (maintainers.toList.exists(hostedParties.contains))
+              Future.successful(true)
+            else partyToParticipantExists()
+
+          case None =>
+            partyToParticipantExists()
+        }
+
+        isHostedF.map(Option.when(_)(key))
     }
   }
 

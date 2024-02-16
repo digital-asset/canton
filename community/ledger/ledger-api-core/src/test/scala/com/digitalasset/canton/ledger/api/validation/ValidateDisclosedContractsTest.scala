@@ -14,10 +14,12 @@ import com.daml.lf.data.{Bytes, ImmArray, Ref, Time}
 import com.daml.lf.transaction.*
 import com.daml.lf.value.Value.{ContractId, ValueRecord}
 import com.daml.lf.value.Value as Lf
+import com.digitalasset.canton.BaseTest.{pvPackageName, pvTransactionVersion}
 import com.digitalasset.canton.LfValue
 import com.digitalasset.canton.ledger.api.domain.UpgradableDisclosedContract
 import com.digitalasset.canton.ledger.api.validation.ValidateDisclosedContractsTest.{
   api,
+  disabledValidateDisclosedContracts,
   lf,
   validateDisclosedContracts,
 }
@@ -38,6 +40,21 @@ class ValidateDisclosedContractsTest
 
   it should "validate the disclosed contracts when enabled" in {
     validateDisclosedContracts(api.protoCommands) shouldBe Right(lf.expectedDisclosedContracts)
+  }
+
+  it should "pass validation if feature disabled on empty disclosed contracts" in {
+    val input = ProtoCommands(disclosedContracts = scala.Seq.empty)
+    disabledValidateDisclosedContracts(input) shouldBe Right(ImmArray.empty)
+  }
+
+  it should "fail validation if feature disabled on provided disclosed contracts" in {
+    requestMustFailWith(
+      request = disabledValidateDisclosedContracts(api.protoCommands),
+      code = Status.Code.INVALID_ARGUMENT,
+      description =
+        "INVALID_FIELD(8,0): The submitted command has a field with invalid value: Invalid field disclosed_contracts: feature disabled: disclosed_contracts should not be set",
+      metadata = Map.empty,
+    )
   }
 
   it should "fail validation on missing created event blob" in {
@@ -210,10 +227,12 @@ class ValidateDisclosedContractsTest
 }
 
 object ValidateDisclosedContractsTest {
-
-  private val testTxVersion = TransactionVersion.maxVersion
-
-  private val validateDisclosedContracts = new ValidateDisclosedContracts
+  private val validateDisclosedContracts = new ValidateDisclosedContracts(
+    explicitDisclosureFeatureEnabled = true
+  )
+  private val disabledValidateDisclosedContracts = new ValidateDisclosedContracts(
+    explicitDisclosureFeatureEnabled = false
+  )
 
   private object api {
     val templateId: ProtoIdentifier =
@@ -273,6 +292,7 @@ object ValidateDisclosedContractsTest {
         ),
       ),
       api.keyMaintainers,
+      shared = Util.sharedKey(pvTransactionVersion),
     )
 
     private val keyHash: Hash = keyWithMaintainers.globalKey.hash
@@ -281,12 +301,13 @@ object ValidateDisclosedContractsTest {
       create = Node.Create(
         coid = lf.lfContractId,
         templateId = lf.templateId,
+        packageName = pvPackageName,
         arg = lf.createArg,
         agreementText = "",
         signatories = api.signatories,
         stakeholders = api.stakeholders,
         keyOpt = Some(lf.keyWithMaintainers),
-        version = testTxVersion,
+        version = pvTransactionVersion,
       ),
       createTime = Time.Timestamp.assertFromLong(api.createdAtSeconds * 1000000L),
       cantonData = lf.driverMetadataBytes,
@@ -294,7 +315,9 @@ object ValidateDisclosedContractsTest {
 
     val expectedDisclosedContracts: ImmArray[UpgradableDisclosedContract] = ImmArray(
       UpgradableDisclosedContract(
+        pvTransactionVersion,
         templateId,
+        pvPackageName,
         lfContractId,
         argument = createArgWithoutLabels,
         createdAt = Time.Timestamp.assertFromLong(api.createdAtSeconds * 1000000L),

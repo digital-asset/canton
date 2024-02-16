@@ -10,10 +10,11 @@ import cats.syntax.either.*
 import cats.syntax.parallel.*
 import cats.{Functor, Show}
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.SequencerCounter
+import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.sequencing.integrations.state.EphemeralState
 import com.digitalasset.canton.domain.sequencing.sequencer.PruningError.UnsafePruningPoint
 import com.digitalasset.canton.domain.sequencing.sequencer.store.SequencerStore.SequencerPruningResult
 import com.digitalasset.canton.domain.sequencing.sequencer.{
@@ -30,6 +31,7 @@ import com.digitalasset.canton.sequencing.protocol.{
   MessageId,
   SequencedEvent,
   SequencerDeliverError,
+  SequencerErrors,
 }
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
@@ -39,7 +41,6 @@ import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{ProtoDeserializationError, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import com.google.rpc.status.Status
@@ -133,7 +134,7 @@ sealed trait StoreEvent[+PayloadReference] extends HasTraceContext {
 
 /** Structure for storing a deliver events.
   * @param members should include the sender and event recipients as they all will read the event
-  * @param topologyTimestampO The timestamp of the snapshot to be used for determining the signing key of this event, resolving group addresses, and for checking signatures on envelopes
+  * @param signingTimestampO The timestamp of the snapshot to be used for determining the signing key of this event
   *                          [[scala.None]] means that the sequencing timestamp should be used.
   */
 final case class DeliverStoreEvent[P](
@@ -141,7 +142,7 @@ final case class DeliverStoreEvent[P](
     messageId: MessageId,
     override val members: NonEmpty[SortedSet[SequencerMemberId]],
     payload: P,
-    topologyTimestampO: Option[CantonTimestamp],
+    signingTimestampO: Option[CantonTimestamp],
     override val traceContext: TraceContext,
 ) extends StoreEvent[P] {
   def mapPayload[Q](map: P => Q): DeliverStoreEvent[Q] = copy(payload = map(payload))
@@ -167,7 +168,7 @@ object DeliverStoreEvent {
       messageId: MessageId,
       members: Set[SequencerMemberId],
       payload: Payload,
-      topologyTimestampO: Option[CantonTimestamp],
+      signingTimestampO: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): DeliverStoreEvent[Payload] = {
     // ensure that sender is a recipient
     val recipientsWithSender = NonEmpty(SortedSet, sender, members.toSeq: _*)
@@ -176,18 +177,24 @@ object DeliverStoreEvent {
       messageId,
       recipientsWithSender,
       payload,
-      topologyTimestampO,
+      signingTimestampO,
       traceContext,
     )
   }
 }
 
-final case class DeliverErrorStoreEvent(
+final case class DeliverErrorStoreEvent private (
     sender: SequencerMemberId,
     messageId: MessageId,
+    message: String256M,
     error: Option[ByteString],
     override val traceContext: TraceContext,
 ) extends StoreEvent[Nothing] {
+  require(
+    error.isEmpty ^ message.str.isEmpty,
+    "`message` and `error` fields must not be set together or both be empty",
+  )
+
   override val notifies: WriteNotification = WriteNotification.Members(SortedSet(sender))
   override val description: String = show"deliver-error[message-id:$messageId]"
   override def members: NonEmpty[Set[SequencerMemberId]] = NonEmpty(Set, sender)
@@ -199,40 +206,51 @@ object DeliverErrorStoreEvent {
   def serializeError(
       error: SequencerDeliverError,
       protocolVersion: ProtocolVersion,
-  ): ByteString =
-    VersionedStatus
-      .create(error.rpcStatusWithoutLoggingContext(), protocolVersion)
-      .toByteString
+  ): (String256M, Option[ByteString]) =
+    (String256M(error.cause)(), None)
 
-  def apply(
+  def create(
+      sender: SequencerMemberId,
+      messageId: MessageId,
+      message: String256M,
+      error: Option[ByteString],
+      traceContext: TraceContext,
+  ): Either[String, DeliverErrorStoreEvent] = Either
+    .catchOnly[IllegalArgumentException](
+      DeliverErrorStoreEvent(sender, messageId, message, error, traceContext)
+    )
+    .leftMap(_.getMessage)
+
+  def create(
       sender: SequencerMemberId,
       messageId: MessageId,
       error: SequencerDeliverError,
       protocolVersion: ProtocolVersion,
       traceContext: TraceContext,
   ): DeliverErrorStoreEvent = {
-    val serializedError =
+    val (message, serializedError) =
       DeliverErrorStoreEvent.serializeError(error, protocolVersion)
 
     DeliverErrorStoreEvent(
       sender,
       messageId,
-      Some(serializedError),
+      message,
+      serializedError,
       traceContext,
     )
   }
 
-  def fromByteString(
+  def deserializeError(
+      errorMessage: String256M,
       serializedErrorO: Option[ByteString],
       protocolVersion: ProtocolVersion,
   ): ParsingResult[Status] =
-    serializedErrorO.fold[ParsingResult[Status]](
-      Left(ProtoDeserializationError.FieldNotSet("error"))
-    )(serializedError =>
-      VersionedStatus
-        .fromByteString(protocolVersion)(serializedError)
-        .map(_.status)
+    Right(
+      SequencerErrors
+        .SubmissionRequestRefused(errorMessage.unwrap)
+        .rpcStatusWithoutLoggingContext()
     )
+
 }
 
 final case class Presequenced[+E <: StoreEvent[_]](
@@ -737,43 +755,6 @@ trait SequencerStore extends NamedLogging with AutoCloseable {
   def locatePruningTimestamp(skip: NonNegativeInt)(implicit
       traceContext: TraceContext
   ): Future[Option[CantonTimestamp]]
-
-  /** The state returned here is used to initialize a separate database sequencer (that does not share the same database as this one)
-    * using [[initializeSeparateFromState]] such that this new sequencer has enough information (registered members, checkpoints, etc)
-    * to be able to process new events from the same point as this sequencer to the same clients.
-    * This is typically used by block sequencers that use the database sequencer as local storage such that they will process the same
-    * events in the same order and they need to be able to spin up new block sequencers from a specific point in time.
-    * @return state at the given time
-    */
-  def readStateAtTimestamp(timestamp: CantonTimestamp)(implicit
-      traceContext: TraceContext
-  ): Future[EphemeralState]
-
-  // probably a good idea to implement this as an atomic db transaction on the DbSequencerStore
-  def initializeSeparateFromState(state: EphemeralState)(implicit
-      traceContext: TraceContext,
-      closeContext: CloseContext,
-  ): Future[Unit] = {
-    val timestamps = state.checkpoints.map(_._2.timestamp)
-    val lowerBound = timestamps.minOption.getOrElse(CantonTimestamp.MinValue)
-    val watermark = timestamps.maxOption.getOrElse(CantonTimestamp.MinValue)
-    for {
-      _ <- saveWatermark(0, watermark).value.map(_ => ())
-      _ <- saveLowerBound(lowerBound).value.map(_ => ())
-      _ <- Future.traverse(state.status.members) { memberStatus =>
-        for {
-          id <- registerMember(memberStatus.member, memberStatus.registeredAt)
-          _ <- if (!memberStatus.enabled) disableMember(id) else Future.unit
-          _ <- memberStatus.lastAcknowledged.fold(Future.unit)(ack => acknowledge(id, ack))
-          _ <- state.checkpoints
-            .get(memberStatus.member)
-            .fold(Future.unit)(checkpoint =>
-              saveCounterCheckpoint(id, checkpoint).value.map(_ => ())
-            )
-        } yield ()
-      }
-    } yield ()
-  }
 }
 
 object SequencerStore {

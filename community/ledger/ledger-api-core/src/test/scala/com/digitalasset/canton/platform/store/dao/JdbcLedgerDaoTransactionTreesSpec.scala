@@ -11,8 +11,8 @@ import com.daml.lf.transaction.{Node, NodeId}
 import com.digitalasset.canton.ledger.api.util.TimestampConversion
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.platform.ApiOffset
+import com.digitalasset.canton.platform.api.v1.event.EventOps.TreeEventOps
 import com.digitalasset.canton.platform.store.entries.LedgerEntry
-import com.digitalasset.canton.platform.store.utils.EventOps.TreeEventOps
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.{Sink, Source}
 import org.scalatest.*
@@ -225,6 +225,7 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
               verbose = true,
               wildcardWitnesses = Set(alice, bob, charlie),
             ),
+            multiDomainEnabled = false,
           )
       )
     } yield {
@@ -258,6 +259,7 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
               verbose = true,
               wildcardWitnesses = Set(alice),
             ),
+            multiDomainEnabled = false,
           )
       )
       resultForBob <- transactionsOf(
@@ -270,6 +272,7 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
               verbose = true,
               wildcardWitnesses = Set(bob),
             ),
+            multiDomainEnabled = false,
           )
       )
       resultForCharlie <- transactionsOf(
@@ -282,6 +285,7 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
               verbose = true,
               wildcardWitnesses = Set(charlie),
             ),
+            multiDomainEnabled = false,
           )
       )
     } yield {

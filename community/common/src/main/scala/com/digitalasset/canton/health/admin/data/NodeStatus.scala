@@ -11,7 +11,7 @@ import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.health.ComponentHealthState.UnhealthyState
 import com.digitalasset.canton.health.admin.data.NodeStatus.{multiline, portsString}
-import com.digitalasset.canton.health.admin.v30
+import com.digitalasset.canton.health.admin.v0
 import com.digitalasset.canton.health.{
   ComponentHealthState,
   ComponentStatus,
@@ -72,7 +72,7 @@ object NodeStatus {
     def uptime: Duration
     def ports: Map[String, Port]
     def active: Boolean
-    def toProtoV30: v30.StatusResponse.Status // explicitly making it public
+    def toProtoV0: v0.NodeStatus.Status // explicitly making it public
     def components: Seq[ComponentStatus]
   }
 
@@ -103,20 +103,20 @@ final case class SimpleStatus(
       ).mkString(System.lineSeparator())
     )
 
-  def toProtoV30: v30.StatusResponse.Status =
-    v30.StatusResponse.Status(
+  def toProtoV0: v0.NodeStatus.Status =
+    v0.NodeStatus.Status(
       uid.toProtoPrimitive,
       Some(DurationConverter.toProtoPrimitive(uptime)),
       ports.fmap(_.unwrap),
       ByteString.EMPTY,
       active,
-      topologyQueues = Some(topologyQueue.toProto),
-      components = components.map(_.toProtoV30),
+      topologyQueues = Some(topologyQueue.toProtoV0),
+      components = components.map(_.toProtoV0),
     )
 }
 
 object SimpleStatus {
-  def fromProtoV30(proto: v30.StatusResponse.Status): ParsingResult[SimpleStatus] = {
+  def fromProtoV0(proto: v0.NodeStatus.Status): ParsingResult[SimpleStatus] = {
     for {
       uid <- UniqueIdentifier.fromProtoPrimitive(proto.id, "Status.id")
       uptime <- ProtoConverter
@@ -132,7 +132,7 @@ object SimpleStatus {
         "topologyQueues",
         proto.topologyQueues,
       )
-      components <- proto.components.toList.traverse(ComponentStatus.fromProtoV30)
+      components <- proto.components.toList.traverse(ComponentStatus.fromProtoV0)
     } yield SimpleStatus(
       uid,
       uptime,
@@ -150,7 +150,7 @@ object SimpleStatus {
 final case class SequencerHealthStatus(isActive: Boolean, details: Option[String] = None)
     extends ToComponentHealthState
     with PrettyPrinting {
-  def toProtoV30: v30.SequencerHealthStatus = v30.SequencerHealthStatus(isActive, details)
+  def toProtoV0: v0.SequencerHealthStatus = v0.SequencerHealthStatus(isActive, details)
 
   override def toComponentHealthState: ComponentHealthState = if (isActive)
     ComponentHealthState.Ok(details)
@@ -166,7 +166,7 @@ object SequencerHealthStatus extends PrettyUtil with ShowUtil {
     SequencerHealthStatus(isActive = false, details = Some("Sequencer is closed"))
 
   def fromProto(
-      statusP: v30.SequencerHealthStatus
+      statusP: v0.SequencerHealthStatus
   ): ParsingResult[SequencerHealthStatus] =
     Right(SequencerHealthStatus(statusP.active, statusP.details))
 
@@ -187,8 +187,8 @@ object SequencerHealthStatus extends PrettyUtil with ShowUtil {
   */
 final case class TopologyQueueStatus(manager: Int, dispatcher: Int, clients: Int)
     extends PrettyPrinting {
-  def toProto: v30.TopologyQueueStatus =
-    v30.TopologyQueueStatus(manager = manager, dispatcher = dispatcher, clients = clients)
+  def toProtoV0: v0.TopologyQueueStatus =
+    v0.TopologyQueueStatus(manager = manager, dispatcher = dispatcher, clients = clients)
 
   def isIdle: Boolean = Seq(manager, dispatcher, clients).forall(_ == 0)
 
@@ -201,9 +201,9 @@ final case class TopologyQueueStatus(manager: Int, dispatcher: Int, clients: Int
 
 object TopologyQueueStatus {
   def fromProto(
-      statusP: v30.TopologyQueueStatus
+      statusP: v0.TopologyQueueStatus
   ): ParsingResult[TopologyQueueStatus] = {
-    val v30.TopologyQueueStatus(manager, dispatcher, clients) = statusP
+    val v0.TopologyQueueStatus(manager, dispatcher, clients) = statusP
     Right(TopologyQueueStatus(manager = manager, dispatcher = dispatcher, clients = clients))
   }
 }
@@ -234,22 +234,22 @@ final case class DomainStatus(
       ).mkString(System.lineSeparator())
     )
 
-  def toProtoV30: v30.StatusResponse.Status = {
+  def toProtoV0: v0.NodeStatus.Status = {
     val participants = connectedParticipants.map(_.toProtoPrimitive)
-    SimpleStatus(uid, uptime, ports, active, topologyQueue, components).toProtoV30
+    SimpleStatus(uid, uptime, ports, active, topologyQueue, components).toProtoV0
       .copy(
-        extra = v30.DomainStatusInfo(participants, Some(sequencer.toProtoV30)).toByteString
+        extra = v0.DomainStatusInfo(participants, Some(sequencer.toProtoV0)).toByteString
       )
   }
 }
 
 object DomainStatus {
-  def fromProtoV30(proto: v30.StatusResponse.Status): ParsingResult[DomainStatus] =
+  def fromProtoV0(proto: v0.NodeStatus.Status): ParsingResult[DomainStatus] =
     for {
-      status <- SimpleStatus.fromProtoV30(proto)
+      status <- SimpleStatus.fromProtoV0(proto)
       domainStatus <- ProtoConverter
-        .parse[DomainStatus, v30.DomainStatusInfo](
-          v30.DomainStatusInfo.parseFrom,
+        .parse[DomainStatus, v0.DomainStatusInfo](
+          v0.DomainStatusInfo.parseFrom,
           domainStatusInfoP => {
             for {
               participants <- domainStatusInfoP.connectedParticipants.traverse(pId =>
@@ -299,22 +299,22 @@ final case class ParticipantStatus(
       ).mkString(System.lineSeparator())
     )
 
-  def toProtoV30: v30.StatusResponse.Status = {
+  def toProtoV0: v0.NodeStatus.Status = {
     val domains = connectedDomains.map { case (domainId, healthy) =>
-      v30.ParticipantStatusInfo.ConnectedDomain(
+      v0.ParticipantStatusInfo.ConnectedDomain(
         domain = domainId.toProtoPrimitive,
         healthy = healthy,
       )
     }.toList
-    SimpleStatus(uid, uptime, ports, active, topologyQueue, components).toProtoV30
-      .copy(extra = v30.ParticipantStatusInfo(domains, active).toByteString)
+    SimpleStatus(uid, uptime, ports, active, topologyQueue, components).toProtoV0
+      .copy(extra = v0.ParticipantStatusInfo(domains, active).toByteString)
   }
 }
 
 object ParticipantStatus {
 
-  private def connectedDomainFromProtoV30(
-      proto: v30.ParticipantStatusInfo.ConnectedDomain
+  private def connectedDomainFromProtoV0(
+      proto: v0.ParticipantStatusInfo.ConnectedDomain
   ): ParsingResult[(DomainId, Boolean)] = {
     DomainId.fromProtoPrimitive(proto.domain, s"ParticipantStatus.connectedDomains").map {
       domainId =>
@@ -322,18 +322,18 @@ object ParticipantStatus {
     }
   }
 
-  def fromProtoV30(
-      proto: v30.StatusResponse.Status
+  def fromProtoV0(
+      proto: v0.NodeStatus.Status
   ): ParsingResult[ParticipantStatus] =
     for {
-      status <- SimpleStatus.fromProtoV30(proto)
+      status <- SimpleStatus.fromProtoV0(proto)
       participantStatus <- ProtoConverter
-        .parse[ParticipantStatus, v30.ParticipantStatusInfo](
-          v30.ParticipantStatusInfo.parseFrom,
+        .parse[ParticipantStatus, v0.ParticipantStatusInfo](
+          v0.ParticipantStatusInfo.parseFrom,
           participantStatusInfoP =>
             for {
               connectedDomains <- participantStatusInfoP.connectedDomains.traverse(
-                connectedDomainFromProtoV30
+                connectedDomainFromProtoV0
               )
             } yield ParticipantStatus(
               status.uid,
@@ -360,11 +360,11 @@ final case class SequencerNodeStatus(
     components: Seq[ComponentStatus],
 ) extends NodeStatus.Status {
   override def active: Boolean = sequencer.isActive
-  def toProtoV30: v30.StatusResponse.Status = {
+  def toProtoV0: v0.NodeStatus.Status = {
     val participants = connectedParticipants.map(_.toProtoPrimitive)
-    SimpleStatus(uid, uptime, ports, active, topologyQueue, components).toProtoV30.copy(
-      extra = v30
-        .SequencerNodeStatus(participants, sequencer.toProtoV30.some, domainId.toProtoPrimitive)
+    SimpleStatus(uid, uptime, ports, active, topologyQueue, components).toProtoV0.copy(
+      extra = v0
+        .SequencerNodeStatus(participants, sequencer.toProtoV0.some, domainId.toProtoPrimitive)
         .toByteString
     )
   }
@@ -385,13 +385,13 @@ final case class SequencerNodeStatus(
 }
 
 object SequencerNodeStatus {
-  def fromProtoV30(
-      sequencerP: v30.StatusResponse.Status
+  def fromProtoV0(
+      sequencerP: v0.NodeStatus.Status
   ): ParsingResult[SequencerNodeStatus] =
     for {
-      status <- SimpleStatus.fromProtoV30(sequencerP)
-      sequencerNodeStatus <- ProtoConverter.parse[SequencerNodeStatus, v30.SequencerNodeStatus](
-        v30.SequencerNodeStatus.parseFrom,
+      status <- SimpleStatus.fromProtoV0(sequencerP)
+      sequencerNodeStatus <- ProtoConverter.parse[SequencerNodeStatus, v0.SequencerNodeStatus](
+        v0.SequencerNodeStatus.parseFrom,
         sequencerNodeStatusP =>
           for {
             participants <- sequencerNodeStatusP.connectedParticipants.traverse(pId =>
@@ -443,20 +443,20 @@ final case class MediatorNodeStatus(
       ).mkString(System.lineSeparator())
     )
 
-  def toProtoV30: v30.StatusResponse.Status =
-    SimpleStatus(uid, uptime, ports, active, topologyQueue, components).toProtoV30.copy(
-      extra = v30
+  def toProtoV0: v0.NodeStatus.Status =
+    SimpleStatus(uid, uptime, ports, active, topologyQueue, components).toProtoV0.copy(
+      extra = v0
         .MediatorNodeStatus(domainId.toProtoPrimitive)
         .toByteString
     )
 }
 
 object MediatorNodeStatus {
-  def fromProtoV30(proto: v30.StatusResponse.Status): ParsingResult[MediatorNodeStatus] =
+  def fromProtoV0(proto: v0.NodeStatus.Status): ParsingResult[MediatorNodeStatus] =
     for {
-      status <- SimpleStatus.fromProtoV30(proto)
-      mediatorNodeStatus <- ProtoConverter.parse[MediatorNodeStatus, v30.MediatorNodeStatus](
-        v30.MediatorNodeStatus.parseFrom,
+      status <- SimpleStatus.fromProtoV0(proto)
+      mediatorNodeStatus <- ProtoConverter.parse[MediatorNodeStatus, v0.MediatorNodeStatus](
+        v0.MediatorNodeStatus.parseFrom,
         mediatorNodeStatusP =>
           for {
             domainId <- DomainId.fromProtoPrimitive(

@@ -12,10 +12,14 @@ object DbDtoToStringsForInterning {
       templateIds = dbDtos.iterator.flatMap(templateIdsOf),
       parties = dbDtos.iterator.flatMap(partiesOf),
       domainIds = dbDtos.iterator.flatMap(domainIdsOf),
+      packageNames = dbDtos.iterator.flatMap(packageNamesOf),
     )
 
   private def templateIdsOf(dbDto: DbDto): Iterator[String] =
     dbDto match {
+      case dbDto: DbDto.EventDivulgence =>
+        dbDto.template_id.iterator
+
       case dbDto: DbDto.EventExercise =>
         dbDto.template_id.iterator
 
@@ -31,8 +35,21 @@ object DbDtoToStringsForInterning {
       case _ => Iterator.empty
     }
 
+  private def packageNamesOf(dbDto: DbDto): Iterator[String] =
+    dbDto match {
+      case dbDto: DbDto.EventCreate =>
+        dbDto.package_name.iterator
+      case dbDto: DbDto.EventDivulgence =>
+        dbDto.package_name.iterator
+      case _ => Iterator.empty
+    }
+
   private def partiesOf(dbDto: DbDto): Iterator[String] =
     dbDto match {
+      case dbDto: DbDto.EventDivulgence =>
+        dbDto.submitters.getOrElse(Set.empty).iterator ++
+          dbDto.tree_event_witnesses.iterator
+
       case dbDto: DbDto.EventExercise =>
         dbDto.submitters.getOrElse(Set.empty).iterator ++
           dbDto.tree_event_witnesses.iterator ++
@@ -65,7 +82,7 @@ object DbDtoToStringsForInterning {
 
       case dbDto: DbDto.PartyEntry =>
         // Party identifiers not only interned on demand: we also intern as we see parties created,
-        // since this information is stored in the lapi_party_entries as well
+        // since this information is stored in the party_entries as well
         dbDto.party.iterator
 
       case _ => Iterator.empty
@@ -73,11 +90,12 @@ object DbDtoToStringsForInterning {
 
   private def domainIdsOf(dbDto: DbDto): Iterator[String] =
     dbDto match {
-      case dbDto: DbDto.EventExercise => Iterator(dbDto.domain_id)
-      case dbDto: DbDto.EventCreate => Iterator(dbDto.domain_id)
+      case dbDto: DbDto.EventDivulgence => dbDto.domain_id.iterator
+      case dbDto: DbDto.EventExercise => dbDto.domain_id.iterator
+      case dbDto: DbDto.EventCreate => dbDto.domain_id.iterator
       case dbDto: DbDto.EventUnassign => Iterator(dbDto.source_domain_id, dbDto.target_domain_id)
       case dbDto: DbDto.EventAssign => Iterator(dbDto.source_domain_id, dbDto.target_domain_id)
-      case dbDto: DbDto.CommandCompletion => Iterator(dbDto.domain_id)
+      case dbDto: DbDto.CommandCompletion => dbDto.domain_id.iterator
       case _ => Iterator.empty
     }
 }

@@ -11,7 +11,7 @@ import scala.annotation.nowarn
 
 class LAPIMetrics(
     val prefix: MetricName,
-    @nowarn("cat=deprecation") val metricsFactory: MetricsFactory,
+    @deprecated("Use LabeledMetricsFactory", since = "2.7.0") val factory: MetricsFactory,
 ) {
 
   object threadpool {
@@ -37,7 +37,8 @@ class LAPIMetrics(
                       |to all clients.""",
       qualification = Traffic,
     )
-    val transactionTrees: Counter = metricsFactory.counter(prefix :+ "transaction_trees_sent")
+    @nowarn("cat=deprecation")
+    val transactionTrees: Counter = factory.counter(prefix :+ "transaction_trees_sent")
 
     @MetricDoc.Tag(
       summary = "The number of the flat transactions sent over the ledger api.",
@@ -45,7 +46,8 @@ class LAPIMetrics(
                       |all clients.""",
       qualification = Traffic,
     )
-    val transactions: Counter = metricsFactory.counter(prefix :+ "transactions_sent")
+    @nowarn("cat=deprecation")
+    val transactions: Counter = factory.counter(prefix :+ "transactions_sent")
 
     @MetricDoc.Tag(
       summary = "The number of the update trees sent over the ledger api.",
@@ -53,7 +55,8 @@ class LAPIMetrics(
                       |to all clients.""",
       qualification = Traffic,
     )
-    val updateTrees: Counter = metricsFactory.counter(prefix :+ "update_trees_sent")
+    @nowarn("cat=deprecation")
+    val updateTrees: Counter = factory.counter(prefix :+ "update_trees_sent")
 
     @MetricDoc.Tag(
       summary = "The number of the flat updates sent over the ledger api.",
@@ -61,7 +64,8 @@ class LAPIMetrics(
                       |all clients.""",
       qualification = Traffic,
     )
-    val updates: Counter = metricsFactory.counter(prefix :+ "transactions_sent")
+    @nowarn("cat=deprecation")
+    val updates: Counter = factory.counter(prefix :+ "transactions_sent")
 
     @MetricDoc.Tag(
       summary = "The number of the command completions sent by the ledger api.",
@@ -69,7 +73,8 @@ class LAPIMetrics(
                       |clients.""",
       qualification = Traffic,
     )
-    val completions: Counter = metricsFactory.counter(prefix :+ "completions_sent")
+    @nowarn("cat=deprecation")
+    val completions: Counter = factory.counter(prefix :+ "completions_sent")
 
     @MetricDoc.Tag(
       summary = "The number of the active contracts sent by the ledger api.",
@@ -77,7 +82,8 @@ class LAPIMetrics(
                       |clients.""",
       qualification = Traffic,
     )
-    val acs: Counter = metricsFactory.counter(prefix :+ "acs_sent")
+    @nowarn("cat=deprecation")
+    val acs: Counter = factory.counter(prefix :+ "acs_sent")
 
     val activeName: MetricName = prefix :+ "active"
 
@@ -86,8 +92,9 @@ class LAPIMetrics(
       description = "The number of ledger api streams currently being served to all clients.",
       qualification = Debug,
     )
+    @nowarn("cat=deprecation")
     val active: MetricHandle.Gauge[Int] =
-      metricsFactory.gauge(
+      factory.gauge(
         activeName,
         0,
         "The number of ledger api streams currently being served to all clients.",

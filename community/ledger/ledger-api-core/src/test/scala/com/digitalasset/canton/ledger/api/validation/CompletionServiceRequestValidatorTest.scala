@@ -5,7 +5,8 @@ package com.digitalasset.canton.ledger.api.validation
 
 import com.daml.error.{ContextualizedErrorLogger, NoLogging}
 import com.daml.ledger.api.v1.command_completion_service.{
-  CompletionStreamRequest as GrpcCompletionStreamRequest
+  CompletionEndRequest,
+  CompletionStreamRequest as GrpcCompletionStreamRequest,
 }
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset.LedgerBoundary
@@ -22,20 +23,23 @@ class CompletionServiceRequestValidatorTest
     with MockitoSugar {
   private implicit val noLogging: ContextualizedErrorLogger = NoLogging
   private val grpcCompletionReq = GrpcCompletionStreamRequest(
-    "",
+    expectedLedgerId,
     expectedApplicationId,
     List(party),
     Some(LedgerOffset(LedgerOffset.Value.Absolute(absoluteOffset))),
   )
   private val completionReq = CompletionStreamRequest(
-    None,
+    Some(domain.LedgerId(expectedLedgerId)),
     Ref.ApplicationId.assertFromString(expectedApplicationId),
     List(party).toSet,
     Some(domain.LedgerOffset.Absolute(Ref.LedgerString.assertFromString(absoluteOffset))),
   )
 
+  private val endReq = CompletionEndRequest(expectedLedgerId)
+
   private val validator = new CompletionServiceRequestValidator(
-    PartyNameChecker.AllowAllParties
+    domain.LedgerId(expectedLedgerId),
+    PartyNameChecker.AllowAllParties,
   )
 
   "CompletionRequestValidation" when {
@@ -135,6 +139,7 @@ class CompletionServiceRequestValidatorTest
             ledgerEnd,
           )
         ) { case Right(req) =>
+          req.ledgerId shouldEqual Some(expectedLedgerId)
           req.applicationId shouldEqual expectedApplicationId
           req.parties shouldEqual Set(party)
           req.offset shouldEqual None
@@ -142,9 +147,32 @@ class CompletionServiceRequestValidatorTest
       }
     }
 
+    "validating completions end requests" should {
+
+      "fail on ledger ID mismatch" in {
+        requestMustFailWith(
+          request =
+            validator.validateCompletionEndRequest(endReq.withLedgerId("mismatchedLedgerId")),
+          code = NOT_FOUND,
+          description =
+            "LEDGER_ID_MISMATCH(11,0): Ledger ID 'mismatchedLedgerId' not found. Actual Ledger ID is 'expectedLedgerId'.",
+          metadata = Map.empty,
+        )
+      }
+
+      "return passed ledger ID" in {
+        inside(
+          validator.validateCompletionEndRequest(endReq)
+        ) { case Right(_) =>
+          succeed
+        }
+      }
+    }
+
     "applying party name checks" should {
       val partyRestrictiveValidator = new CompletionServiceRequestValidator(
-        PartyNameChecker.AllowPartySet(Set(party))
+        domain.LedgerId(expectedLedgerId),
+        PartyNameChecker.AllowPartySet(Set(party)),
       )
 
       val unknownParties = List("party", "Alice", "Bob").map(Ref.Party.assertFromString).toSet

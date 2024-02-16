@@ -15,6 +15,7 @@ import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTr
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.config.TransactionFlatStreamsConfig
+import com.digitalasset.canton.platform.indexer.parallel.BatchN
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
 import com.digitalasset.canton.platform.store.backend.common.{
   EventIdSourceForStakeholders,
@@ -34,7 +35,7 @@ import com.digitalasset.canton.platform.store.utils.{
   Telemetry,
 }
 import com.digitalasset.canton.platform.{ApiOffset, TemplatePartiesFilter}
-import com.digitalasset.canton.util.PekkoUtil.syntax.*
+import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Attributes
@@ -48,7 +49,7 @@ class TransactionsFlatStreamReader(
     globalIdQueriesLimiter: ConcurrencyLimiter,
     globalPayloadQueriesLimiter: ConcurrencyLimiter,
     dbDispatcher: DbDispatcher,
-    queryValidRange: QueryValidRange,
+    queryNonPruned: QueryNonPruned,
     eventStorageBackend: EventStorageBackend,
     lfValueTranslation: LfValueTranslation,
     metrics: Metrics,
@@ -60,7 +61,7 @@ class TransactionsFlatStreamReader(
   import TransactionsReader.*
   import config.*
 
-  private val dbMetrics = metrics.index.db
+  private val dbMetrics = metrics.daml.index.db
 
   private val orderBySequentialEventId =
     Ordering.by[EventStorageBackend.Entry[Raw.FlatEvent], Long](_.eventSequentialId)
@@ -71,6 +72,7 @@ class TransactionsFlatStreamReader(
       queryRange: EventsRange,
       filteringConstraints: TemplatePartiesFilter,
       eventProjectionProperties: EventProjectionProperties,
+      multiDomainEnabled: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, GetUpdatesResponse), NotUsed] = {
@@ -89,6 +91,7 @@ class TransactionsFlatStreamReader(
       queryRange,
       filteringConstraints,
       eventProjectionProperties,
+      multiDomainEnabled,
     )
       .wireTap(_ match {
         case (_, getTransactionsResponse) =>
@@ -111,6 +114,7 @@ class TransactionsFlatStreamReader(
       queryRange: EventsRange,
       filteringConstraints: TemplatePartiesFilter,
       eventProjectionProperties: EventProjectionProperties,
+      multiDomainEnabled: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, GetUpdatesResponse), NotUsed] = {
@@ -125,9 +129,11 @@ class TransactionsFlatStreamReader(
     val decomposedFilters = FilterUtils.decomposeFilters(filteringConstraints).toVector
     val idPageSizing = IdPageSizing.calculateFrom(
       maxIdPageSize = maxIdsPerIdPage,
-      // The ids for flat transactions are retrieved from 4 separate id tables: (create, archive, assign, unassign)
-      // To account for that we assign a quarter of the working memory to each table.
-      workingMemoryInBytesForIdPages = maxWorkingMemoryInBytesForIdPages / 4,
+      // The ids for flat transactions are retrieved from two separate id tables.
+      // To account for that we assign a half of the working memory to each table.
+      workingMemoryInBytesForIdPages = maxWorkingMemoryInBytesForIdPages / (
+        if (multiDomainEnabled) 4 else 2
+      ),
       numOfDecomposedFilters = decomposedFilters.size,
       numOfPagesInIdPageBuffer = maxPagesPerIdPagesBuffer,
       loggerFactory = loggerFactory,
@@ -166,9 +172,11 @@ class TransactionsFlatStreamReader(
           )
         }
         .pipe(EventIdsUtils.sortAndDeduplicateIds)
-        .batchN(
-          maxBatchSize = maxPayloadsPerPayloadsPage,
-          maxBatchCount = maxOutputBatchCount,
+        .via(
+          BatchN(
+            maxBatchSize = maxPayloadsPerPayloadsPage,
+            maxBatchCount = maxOutputBatchCount,
+          )
         )
     }
 
@@ -186,21 +194,17 @@ class TransactionsFlatStreamReader(
           payloadQueriesLimiter.execute {
             globalPayloadQueriesLimiter.execute {
               dbDispatcher.executeSql(dbMetric) { implicit connection =>
-                queryValidRange.withRangeNotPruned(
-                  minOffsetExclusive = queryRange.startExclusiveOffset,
-                  maxOffsetInclusive = queryRange.endInclusiveOffset,
-                  errorPruning = (prunedOffset: Offset) =>
-                    s"Transactions request from ${queryRange.startExclusiveOffset.toHexString} to ${queryRange.endInclusiveOffset.toHexString} precedes pruned offset ${prunedOffset.toHexString}",
-                  errorLedgerEnd = (ledgerEndOffset: Offset) =>
-                    s"Transactions request from ${queryRange.startExclusiveOffset.toHexString} to ${queryRange.endInclusiveOffset.toHexString} is beyond ledger end offset ${ledgerEndOffset.toHexString}",
-                ) {
-                  eventStorageBackend.transactionStreamingQueries
+                queryNonPruned.executeSql(
+                  query = eventStorageBackend.transactionStreamingQueries
                     .fetchEventPayloadsFlat(target = target)(
                       eventSequentialIds = ids,
                       allFilterParties = filteringConstraints.allFilterParties,
-                    )(connection)
-                }
-              }
+                    )(connection),
+                  minOffsetExclusive = queryRange.startExclusiveOffset,
+                  error = (prunedOffset: Offset) =>
+                    s"Transactions request from ${queryRange.startExclusiveOffset.toHexString} to ${queryRange.endInclusiveOffset.toHexString} precedes pruned offset ${prunedOffset.toHexString}",
+                )
+              }(LoggingContextWithTrace(TraceContext.empty))
             }
           }
         )
@@ -248,33 +252,37 @@ class TransactionsFlatStreamReader(
         responses.map { case (offset, response) => ApiOffset.assertFromString(offset) -> response }
       }
 
-    reassignmentStreamReader
-      .streamReassignments(
-        ReassignmentStreamQueryParams(
-          queryRange = queryRange,
-          filteringConstraints = filteringConstraints,
-          eventProjectionProperties = eventProjectionProperties,
-          payloadQueriesLimiter = payloadQueriesLimiter,
-          deserializationQueriesLimiter = deserializationQueriesLimiter,
-          idPageSizing = idPageSizing,
-          decomposedFilters = decomposedFilters,
-          maxParallelIdAssignQueries = maxParallelIdAssignQueries,
-          maxParallelIdUnassignQueries = maxParallelIdUnassignQueries,
-          maxPagesPerIdPagesBuffer = maxPagesPerIdPagesBuffer,
-          maxPayloadsPerPayloadsPage = maxPayloadsPerPayloadsPage,
-          maxParallelPayloadAssignQueries = maxParallelPayloadAssignQueries,
-          maxParallelPayloadUnassignQueries = maxParallelPayloadUnassignQueries,
-          deserializationProcessingParallelism = transactionsProcessingParallelism,
+    if (multiDomainEnabled) {
+      reassignmentStreamReader
+        .streamReassignments(
+          ReassignmentStreamQueryParams(
+            queryRange = queryRange,
+            filteringConstraints = filteringConstraints,
+            eventProjectionProperties = eventProjectionProperties,
+            payloadQueriesLimiter = payloadQueriesLimiter,
+            deserializationQueriesLimiter = deserializationQueriesLimiter,
+            idPageSizing = idPageSizing,
+            decomposedFilters = decomposedFilters,
+            maxParallelIdAssignQueries = maxParallelIdAssignQueries,
+            maxParallelIdUnassignQueries = maxParallelIdUnassignQueries,
+            maxPagesPerIdPagesBuffer = maxPagesPerIdPagesBuffer,
+            maxPayloadsPerPayloadsPage = maxPayloadsPerPayloadsPage,
+            maxParallelPayloadAssignQueries = maxParallelPayloadAssignQueries,
+            maxParallelPayloadUnassignQueries = maxParallelPayloadUnassignQueries,
+            deserializationProcessingParallelism = transactionsProcessingParallelism,
+          )
         )
-      )
-      .map { case (offset, reassignment) =>
-        offset -> GetUpdatesResponse(
-          GetUpdatesResponse.Update.Reassignment(reassignment)
+        .map { case (offset, reassignment) =>
+          offset -> GetUpdatesResponse(
+            GetUpdatesResponse.Update.Reassignment(reassignment)
+          )
+        }
+        .mergeSorted(sourceOfTransactions)(
+          Ordering.by(_._1)
         )
-      }
-      .mergeSorted(sourceOfTransactions)(
-        Ordering.by(_._1)
-      )
+    } else {
+      sourceOfTransactions
+    }
   }
 
   private def deserializeLfValues(

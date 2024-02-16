@@ -39,9 +39,16 @@ class ContractStoreBasedMaximumLedgerTimeService(
 
         case (resultSoFar, contractId :: otherContractIds) =>
           contractStore
-            .lookupContractState(contractId)
+            .lookupContractStateWithoutDivulgence(contractId)
             .flatMap {
-              case ContractState.Archived | ContractState.NotFound =>
+              case ContractState.NotFound =>
+                // If cannot be found: no create or archive event for the contract.
+                // Since this contract is part of the input, it was able to be looked up once.
+                // So this is the case of a divulged contract, which was not archived.
+                // Divulged contract does not change maximumLedgerTime
+                goAsync(maximumLedgerTime, otherContractIds)
+
+              case ContractState.Archived =>
                 // early termination on the first archived contract in sight
                 Future.successful(MaximumLedgerTime.Archived(Set(contractId)))
 

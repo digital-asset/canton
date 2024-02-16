@@ -17,8 +17,12 @@ import com.digitalasset.canton.lifecycle.{
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.time.*
-import com.digitalasset.canton.topology.store.{TopologyStoreId, TopologyStoreX}
-import com.digitalasset.canton.topology.transaction.DomainParametersStateX
+import com.digitalasset.canton.topology.store.TopologyStore.Change
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
+import com.digitalasset.canton.topology.transaction.{
+  DomainParametersChange,
+  DomainTopologyTransactionType,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
 
@@ -241,6 +245,45 @@ class TopologyTimestampPlusEpsilonTracker(
 
 object TopologyTimestampPlusEpsilonTracker {
 
+  def epsilonForTimestamp(
+      store: TopologyStore[TopologyStoreId.DomainStore],
+      asOfExclusive: CantonTimestamp,
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): FutureUnlessShutdown[TopologyStore.Change.TopologyDelay] = {
+    FutureUnlessShutdown
+      .outcomeF(
+        store
+          .findPositiveTransactions(
+            asOf = asOfExclusive,
+            asOfInclusive = false,
+            includeSecondary = false,
+            types = Seq(DomainTopologyTransactionType.DomainParameters),
+            filterUid = None,
+            filterNamespace = None,
+          )
+      )
+      .map { txs =>
+        txs.replaces.result
+          .map(x => (x.transaction.transaction.element.mapping, x))
+          .collectFirst { case (change: DomainParametersChange, tx) =>
+            TopologyStore.Change.TopologyDelay(
+              tx.sequenced,
+              tx.validFrom,
+              change.domainParameters.topologyChangeDelay,
+            )
+          }
+          .getOrElse(
+            TopologyStore.Change.TopologyDelay(
+              SequencedTime(CantonTimestamp.MinValue),
+              EffectiveTime(CantonTimestamp.MinValue),
+              DynamicDomainParameters.topologyChangeDelayIfAbsent,
+            )
+          )
+      }
+  }
+
   /** Initialize tracker
     *
     * @param processorTs Timestamp strictly (just) before the first message that will be passed:
@@ -250,9 +293,9 @@ object TopologyTimestampPlusEpsilonTracker {
     *                    Normally, it's the timestamp of the last message that was successfully
     *                    processed before the one that will be passed first.
     */
-  def initializeX(
+  def initialize(
       tracker: TopologyTimestampPlusEpsilonTracker,
-      store: TopologyStoreX[TopologyStoreId.DomainStore],
+      store: TopologyStore[TopologyStoreId.DomainStore],
       processorTs: CantonTimestamp,
   )(implicit
       traceContext: TraceContext,
@@ -266,7 +309,7 @@ object TopologyTimestampPlusEpsilonTracker {
       store
         .findUpcomingEffectiveChanges(processorTs)
         .map(_.collect {
-          case tdc: TopologyStoreX.Change.TopologyDelay
+          case tdc: Change.TopologyDelay
               // filter anything out that might be replayed
               if tdc.sequenced.value <= processorTs =>
             tdc
@@ -290,44 +333,4 @@ object TopologyTimestampPlusEpsilonTracker {
     }
     eff <- tracker.adjustTimestampForTick(SequencedTime(processorTs))
   } yield eff
-
-  def epsilonForTimestamp(
-      store: TopologyStoreX[TopologyStoreId.DomainStore],
-      asOfExclusive: CantonTimestamp,
-  )(implicit
-      traceContext: TraceContext,
-      executionContext: ExecutionContext,
-  ): FutureUnlessShutdown[TopologyStoreX.Change.TopologyDelay] = {
-    FutureUnlessShutdown
-      .outcomeF(
-        store
-          .findPositiveTransactions(
-            asOf = asOfExclusive,
-            asOfInclusive = false,
-            isProposal = false,
-            types = Seq(DomainParametersStateX.code),
-            filterUid = None,
-            filterNamespace = None,
-          )
-      )
-      .map { txs =>
-        txs.result
-          .map(x => (x.transaction.transaction.mapping, x))
-          .collectFirst { case (change: DomainParametersStateX, tx) =>
-            TopologyStoreX.Change.TopologyDelay(
-              tx.sequenced,
-              tx.validFrom,
-              change.parameters.topologyChangeDelay,
-            )
-          }
-          .getOrElse(
-            TopologyStoreX.Change.TopologyDelay(
-              SequencedTime(CantonTimestamp.MinValue),
-              EffectiveTime(CantonTimestamp.MinValue),
-              DynamicDomainParameters.topologyChangeDelayIfAbsent,
-            )
-          )
-      }
-  }
-
 }

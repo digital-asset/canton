@@ -4,12 +4,15 @@
 package com.digitalasset.canton.resource
 
 import cats.syntax.foldable.*
+import cats.syntax.functorFilter.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.tracing.TraceContext
 import slick.dbio.{DBIOAction, Effect, NoStream}
 
+import scala.annotation.tailrec
 import scala.concurrent.{ExecutionContext, Future}
 
 /** A store update operation that can be executed transactionally with other independent update operations.
@@ -61,7 +64,7 @@ object TransactionalStoreUpdate {
         s"Cannot execute transactional updates across multiple DB storage objects: $storages",
       )
 
-      storages.headOption
+      lazy val updatesF = storages.headOption
         .traverse_ { storage =>
           import storage.api.*
           val dbUpdatesTransaction = DBIO.seq(dbUpdates.map(_.sql): _*).transactionally
@@ -69,6 +72,19 @@ object TransactionalStoreUpdate {
         }
         .map(_ => inMemUpdates.foreach(_.perform()))
 
+      // We wrap all the metrics around everything. This makes them possibly overreport the timing,
+      // but it's the safest thing to do as a metric could cause a failure and thus
+      // lead to a transactionality violation.
+      val metrics = dbUpdates.mapFilter(_.metric)
+      // Even though this method is tailrec, the recursion is probably not stack-safe because
+      // we're building up a pile of lazy closures that then get unravelled in the `Nil` case.
+      @tailrec def wrapMetrics(fut: => Future[Unit], metrics: List[TimedLoadGauge]): Future[Unit] =
+        metrics match {
+          case Nil => fut
+          case metric :: rest =>
+            wrapMetrics(metric.event(fut), rest)
+        }
+      wrapMetrics(updatesF, metrics)
   }
 
   /** Transactional update of an in-memory store.
@@ -97,6 +113,7 @@ object TransactionalStoreUpdate {
   private[canton] class DbTransactionalStoreUpdate(
       val sql: DBIOAction[_, NoStream, Effect.Write with Effect.Transactional],
       val storage: DbStorage,
+      val metric: Option[TimedLoadGauge],
       override protected val loggerFactory: NamedLoggerFactory,
   )(implicit val ec: ExecutionContext)
       extends TransactionalStoreUpdate
@@ -104,8 +121,9 @@ object TransactionalStoreUpdate {
     override def runStandalone()(implicit
         traceContext: TraceContext,
         callerCloseContext: CloseContext,
-    ): Future[Unit] =
-      storage.update_(sql, functionFullName)(traceContext, callerCloseContext)
-
+    ): Future[Unit] = {
+      lazy val runDbF = storage.update_(sql, functionFullName)(traceContext, callerCloseContext)
+      metric.fold(runDbF)(_.event(runDbF))
+    }
   }
 }

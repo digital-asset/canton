@@ -60,6 +60,7 @@ private[events] class BufferedTransactionsReader(
       endInclusive: Offset,
       filter: TemplatePartiesFilter,
       eventProjectionProperties: EventProjectionProperties,
+      multiDomainEnabled: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, GetUpdatesResponse), NotUsed] = {
@@ -73,6 +74,7 @@ private[events] class BufferedTransactionsReader(
             filter.wildcardParties,
             filter.relation,
             filter.allFilterParties,
+            multiDomainEnabled = multiDomainEnabled,
           ),
         toApiResponse = ToFlatTransaction
           .toGetTransactionsResponse(
@@ -83,6 +85,7 @@ private[events] class BufferedTransactionsReader(
             loggingContext,
             executionContext,
           ),
+        multiDomainEnabled = multiDomainEnabled,
       )
   }
 
@@ -91,6 +94,7 @@ private[events] class BufferedTransactionsReader(
       endInclusive: Offset,
       requestingParties: Set[Party],
       eventProjectionProperties: EventProjectionProperties,
+      multiDomainEnabled: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, GetUpdateTreesResponse), NotUsed] =
@@ -99,7 +103,10 @@ private[events] class BufferedTransactionsReader(
         startExclusive = startExclusive,
         endInclusive = endInclusive,
         persistenceFetchArgs = (requestingParties, eventProjectionProperties),
-        bufferFilter = ToTransactionTree.filter(requestingParties),
+        bufferFilter = ToTransactionTree.filter(
+          requestingParties,
+          multiDomainEnabled = multiDomainEnabled,
+        ),
         toApiResponse = ToTransactionTree
           .toGetTransactionTreesResponse(
             requestingParties,
@@ -109,6 +116,7 @@ private[events] class BufferedTransactionsReader(
             loggingContext,
             executionContext,
           ),
+        multiDomainEnabled = multiDomainEnabled,
       )
 
   override def lookupFlatTransactionById(
@@ -127,10 +135,11 @@ private[events] class BufferedTransactionsReader(
       activeAt: Offset,
       filter: TemplatePartiesFilter,
       eventProjectionProperties: EventProjectionProperties,
+      multiDomainEnabled: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed] =
-    delegate.getActiveContracts(activeAt, filter, eventProjectionProperties)
+    delegate.getActiveContracts(activeAt, filter, eventProjectionProperties, multiDomainEnabled)
 }
 
 private[platform] object BufferedTransactionsReader {
@@ -158,6 +167,7 @@ private[platform] object BufferedTransactionsReader {
               startExclusive: Offset,
               endInclusive: Offset,
               filter: (TemplatePartiesFilter, EventProjectionProperties),
+              multiDomainEnabled: Boolean,
           )(implicit
               loggingContext: LoggingContextWithTrace
           ): Source[(Offset, GetUpdatesResponse), NotUsed] = {
@@ -167,6 +177,7 @@ private[platform] object BufferedTransactionsReader {
               endInclusive,
               partyTemplateFilter,
               eventProjectionProperties,
+              multiDomainEnabled = multiDomainEnabled,
             )
           }
         },
@@ -190,6 +201,7 @@ private[platform] object BufferedTransactionsReader {
               startExclusive: Offset,
               endInclusive: Offset,
               filter: (Set[Party], EventProjectionProperties),
+              multiDomainEnabled: Boolean,
           )(implicit
               loggingContext: LoggingContextWithTrace
           ): Source[(Offset, GetUpdateTreesResponse), NotUsed] = {
@@ -199,6 +211,7 @@ private[platform] object BufferedTransactionsReader {
               endInclusive,
               requestingParties,
               eventProjectionProperties,
+              multiDomainEnabled = multiDomainEnabled,
             )
           }
         },

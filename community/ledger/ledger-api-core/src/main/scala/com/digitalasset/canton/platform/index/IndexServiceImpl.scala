@@ -18,7 +18,7 @@ import com.daml.ledger.api.v2.update_service.{
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.{ApplicationId, Identifier, PackageRef, TypeConRef}
 import com.daml.lf.data.Time.Timestamp
-import com.daml.lf.transaction.GlobalKey
+import com.daml.lf.transaction.{GlobalKey, Util}
 import com.daml.lf.value.Value.{ContractId, VersionedContractInstance}
 import com.daml.metrics.InstrumentedGraph.*
 import com.daml.tracing.{Event, SpanAttribute, Spans}
@@ -34,6 +34,7 @@ import com.digitalasset.canton.ledger.api.domain.{
   TransactionId,
 }
 import com.digitalasset.canton.ledger.api.health.HealthStatus
+import com.digitalasset.canton.ledger.api.messages.event.KeyContinuationToken
 import com.digitalasset.canton.ledger.api.{TraceIdentifiers, domain}
 import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.error.CommonErrors
@@ -49,17 +50,13 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
 }
 import com.digitalasset.canton.metrics.Metrics
-import com.digitalasset.canton.pekkostreams.dispatcher.Dispatcher
-import com.digitalasset.canton.pekkostreams.dispatcher.DispatcherImpl.DispatcherIsClosedException
-import com.digitalasset.canton.pekkostreams.dispatcher.SubSource.RangeSource
 import com.digitalasset.canton.platform.ApiOffset.ApiOffsetConverter
 import com.digitalasset.canton.platform.index.IndexServiceImpl.*
-import com.digitalasset.canton.platform.store.dao.{
-  EventProjectionProperties,
-  LedgerDaoCommandCompletionsReader,
-  LedgerDaoTransactionsReader,
-  LedgerReadDao,
-}
+import com.digitalasset.canton.platform.pekkostreams.dispatcher.Dispatcher
+import com.digitalasset.canton.platform.pekkostreams.dispatcher.DispatcherImpl.DispatcherIsClosedException
+import com.digitalasset.canton.platform.pekkostreams.dispatcher.SubSource.RangeSource
+import com.digitalasset.canton.platform.store.cache.PackageLanguageVersionCache
+import com.digitalasset.canton.platform.store.dao.*
 import com.digitalasset.canton.platform.store.entries.PartyLedgerEntry
 import com.digitalasset.canton.platform.store.packagemeta.{PackageMetadata, PackageMetadataView}
 import com.digitalasset.canton.platform.{ApiOffset, Party, PruneBuffers, TemplatePartiesFilter}
@@ -77,10 +74,12 @@ private[index] class IndexServiceImpl(
     ledgerDao: LedgerReadDao,
     transactionsReader: LedgerDaoTransactionsReader,
     commandCompletionsReader: LedgerDaoCommandCompletionsReader,
+    eventsReader: LedgerDaoEventsReader,
     contractStore: ContractStore,
     pruneBuffers: PruneBuffers,
     dispatcher: () => Dispatcher[Offset],
     packageMetadataView: PackageMetadataView,
+    packageLanguageVersionCache: PackageLanguageVersionCache,
     metrics: Metrics,
     override protected val loggerFactory: NamedLoggerFactory,
 ) extends IndexService
@@ -113,6 +112,7 @@ private[index] class IndexServiceImpl(
       endInclusive: Option[domain.LedgerOffset],
       transactionFilter: domain.TransactionFilter,
       verbose: Boolean,
+      multiDomainEnabled: Boolean,
   )(implicit loggingContext: LoggingContextWithTrace): Source[GetUpdatesResponse, NotUsed] =
     withValidatedFilter(transactionFilter, packageMetadataView.current()) {
       between(startExclusive, endInclusive) { (from, to) =>
@@ -142,6 +142,7 @@ private[index] class IndexServiceImpl(
                         endInclusive,
                         templateFilter,
                         eventProjectionProperties,
+                        multiDomainEnabled,
                       )
                   }
             },
@@ -149,7 +150,7 @@ private[index] class IndexServiceImpl(
           )
           .mapError(shutdownError)
           .map(_._2)
-          .buffered(metrics.index.flatTransactionsBufferSize, LedgerApiStreamsBufferSize)
+          .buffered(metrics.daml.index.flatTransactionsBufferSize, LedgerApiStreamsBufferSize)
       }.wireTap(
         _.update match {
           case GetUpdatesResponse.Update.Transaction(transaction) =>
@@ -166,6 +167,7 @@ private[index] class IndexServiceImpl(
       endInclusive: Option[LedgerOffset],
       transactionFilter: domain.TransactionFilter,
       verbose: Boolean,
+      multiDomainEnabled: Boolean,
   )(implicit loggingContext: LoggingContextWithTrace): Source[GetUpdateTreesResponse, NotUsed] =
     withValidatedFilter(transactionFilter, packageMetadataView.current()) {
       val parties = transactionFilter.filtersByParty.keySet
@@ -196,6 +198,7 @@ private[index] class IndexServiceImpl(
                         endInclusive,
                         parties, // on the query filter side we treat every party as wildcard party
                         eventProjectionProperties,
+                        multiDomainEnabled,
                       )
                   }
             },
@@ -203,7 +206,7 @@ private[index] class IndexServiceImpl(
           )
           .mapError(shutdownError)
           .map(_._2)
-          .buffered(metrics.index.transactionTreesBufferSize, LedgerApiStreamsBufferSize)
+          .buffered(metrics.daml.index.transactionTreesBufferSize, LedgerApiStreamsBufferSize)
       }.wireTap(
         _.update match {
           case GetUpdateTreesResponse.Update.TransactionTree(transactionTree) =>
@@ -236,7 +239,7 @@ private[index] class IndexServiceImpl(
           .mapError(shutdownError)
           .map(_._2)
       }
-      .buffered(metrics.index.completionsBufferSize, LedgerApiStreamsBufferSize)
+      .buffered(metrics.daml.index.completionsBufferSize, LedgerApiStreamsBufferSize)
 
   override def getCompletions(
       startExclusive: LedgerOffset,
@@ -254,16 +257,18 @@ private[index] class IndexServiceImpl(
         .mapError(shutdownError)
         .map(_._2)
     }
-      .buffered(metrics.index.completionsBufferSize, LedgerApiStreamsBufferSize)
+      .buffered(metrics.daml.index.completionsBufferSize, LedgerApiStreamsBufferSize)
 
   override def getActiveContracts(
       transactionFilter: TransactionFilter,
       verbose: Boolean,
       activeAtO: Option[Offset],
+      multiDomainEnabled: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed] = {
-    implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContext)
+    implicit val errorLoggingContext: ErrorLoggingContext =
+      ErrorLoggingContext(logger, loggingContext)
     foldToSource {
       for {
         _ <- checkUnknownIdentifiers(transactionFilter, packageMetadataView.current()).left
@@ -286,6 +291,7 @@ private[index] class IndexServiceImpl(
                 activeAt = activeAt,
                 filter = templateFilter,
                 eventProjectionProperties = eventProjectionProperties,
+                multiDomainEnabled = multiDomainEnabled,
               )
           }
         activeContractsSource
@@ -294,7 +300,7 @@ private[index] class IndexServiceImpl(
               GetActiveContractsResponse(offset = ApiOffset.toApiString(activeAt))
             )
           )
-          .buffered(metrics.index.activeContractsBufferSize, LedgerApiStreamsBufferSize)
+          .buffered(metrics.daml.index.activeContractsBufferSize, LedgerApiStreamsBufferSize)
       }
     }
   }
@@ -324,24 +330,30 @@ private[index] class IndexServiceImpl(
       contractId: ContractId,
       requestingParties: Set[Ref.Party],
   )(implicit loggingContext: LoggingContextWithTrace): Future[GetEventsByContractIdResponse] =
-    ledgerDao.eventsReader.getEventsByContractId(
-      contractId,
-      requestingParties,
-    )
+    eventsReader.getEventsByContractId(contractId, requestingParties)
 
   override def getEventsByContractKey(
       contractKey: com.daml.lf.value.Value,
       templateId: Ref.Identifier,
       requestingParties: Set[Ref.Party],
-      endExclusiveSeqId: Option[Long],
+      keyContinuationToken: KeyContinuationToken,
   )(implicit loggingContext: LoggingContextWithTrace): Future[GetEventsByContractKeyResponse] = {
-    ledgerDao.eventsReader.getEventsByContractKey(
-      contractKey,
-      templateId,
-      requestingParties,
-      endExclusiveSeqId,
-      maxIterations = 1000,
-    )
+
+    packageLanguageVersionCache
+      .get(templateId.packageId)
+      .flatMap({
+        case None =>
+          Future.successful(GetEventsByContractKeyResponse())
+        case Some(languageVersion) =>
+          val globalKey =
+            GlobalKey.assertBuild(templateId, contractKey, Util.sharedKey(languageVersion))
+          eventsReader.getEventsByContractKey(
+            contractKey = globalKey,
+            requestingParties = requestingParties,
+            keyContinuationToken = keyContinuationToken,
+            maxIterations = 1000,
+          )
+      })(directEc)
   }
 
   override def getParties(parties: Seq[Ref.Party])(implicit
@@ -437,15 +449,11 @@ private[index] class IndexServiceImpl(
           }
       )
 
-  override def prune(
-      pruneUpToInclusive: Offset,
-      pruneAllDivulgedContracts: Boolean,
-      incompletReassignmentOffsets: Vector[Offset],
-  )(implicit
+  override def prune(pruneUpToInclusive: Offset, pruneAllDivulgedContracts: Boolean)(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Unit] = {
     pruneBuffers(pruneUpToInclusive)
-    ledgerDao.prune(pruneUpToInclusive, pruneAllDivulgedContracts, incompletReassignmentOffsets)
+    ledgerDao.prune(pruneUpToInclusive, pruneAllDivulgedContracts)
   }
 
   override def getMeteringReportData(
@@ -532,10 +540,10 @@ private[index] class IndexServiceImpl(
       .Reject("Index Service")(ErrorLoggingContext(logger, loggingContext))
       .asGrpcError
 
-  override def lookupContractState(contractId: ContractId)(implicit
+  override def lookupContractStateWithoutDivulgence(contractId: ContractId)(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[ContractState] =
-    contractStore.lookupContractState(contractId)
+    contractStore.lookupContractStateWithoutDivulgence(contractId)
 
   override def lookupMaximumLedgerTimeAfterInterpretation(ids: Set[ContractId])(implicit
       loggingContext: LoggingContextWithTrace
@@ -638,7 +646,7 @@ object IndexServiceImpl {
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.Var"))
-  private[index] def memoizedTransactionFilterProjection(
+  private[platform] def memoizedTransactionFilterProjection(
       packageMetadataView: PackageMetadataView,
       transactionFilter: domain.TransactionFilter,
       verbose: Boolean,

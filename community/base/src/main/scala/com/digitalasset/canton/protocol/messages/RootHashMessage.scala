@@ -9,7 +9,7 @@ import com.digitalasset.canton.data.ViewType
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.messages.RootHashMessage.RootHashMessagePayloadCast
-import com.digitalasset.canton.protocol.{RootHash, v30}
+import com.digitalasset.canton.protocol.{RootHash, v0, v1, v2, v3}
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
@@ -34,13 +34,26 @@ final case class RootHashMessage[+Payload <: RootHashMessagePayload](
     viewType: ViewType,
     payload: Payload,
 )(override val representativeProtocolVersion: RepresentativeProtocolVersion[RootHashMessage.type])
-    extends UnsignedProtocolMessage
+    extends ProtocolMessage
+    with ProtocolMessageV0
+    with ProtocolMessageV1
+    with ProtocolMessageV2
+    with ProtocolMessageV3
     with PrettyPrinting {
 
-  override def toProtoSomeEnvelopeContentV30: v30.EnvelopeContent.SomeEnvelopeContent =
-    v30.EnvelopeContent.SomeEnvelopeContent.RootHashMessage(toProtoV30)
+  override def toProtoEnvelopeContentV0: v0.EnvelopeContent =
+    v0.EnvelopeContent(v0.EnvelopeContent.SomeEnvelopeContent.RootHashMessage(toProtoV0))
 
-  def toProtoV30: v30.RootHashMessage = v30.RootHashMessage(
+  override def toProtoEnvelopeContentV1: v1.EnvelopeContent =
+    v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.RootHashMessage(toProtoV0))
+
+  override def toProtoEnvelopeContentV2: v2.EnvelopeContent =
+    v2.EnvelopeContent(v2.EnvelopeContent.SomeEnvelopeContent.RootHashMessage(toProtoV0))
+
+  override def toProtoEnvelopeContentV3: v3.EnvelopeContent =
+    v3.EnvelopeContent(v3.EnvelopeContent.SomeEnvelopeContent.RootHashMessage(toProtoV0))
+
+  def toProtoV0: v0.RootHashMessage = v0.RootHashMessage(
     rootHash = rootHash.toProtoPrimitive,
     domainId = domainId.toProtoPrimitive,
     viewType = viewType.toProtoEnum,
@@ -90,9 +103,9 @@ object RootHashMessage
     ], ByteString => ParsingResult[RootHashMessagePayload]] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v30)(v30.RootHashMessage)(
-      supportedProtoVersion(_)((deserializer, proto) => fromProtoV30(deserializer)(proto)),
-      _.toProtoV30.toByteString,
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.RootHashMessage)(
+      supportedProtoVersion(_)((deserializer, proto) => fromProtoV0(deserializer)(proto)),
+      _.toProtoV0.toByteString,
     )
   )
 
@@ -109,18 +122,18 @@ object RootHashMessage
     payload,
   )(protocolVersionRepresentativeFor(protocolVersion))
 
-  def fromProtoV30[Payload <: RootHashMessagePayload](
+  def fromProtoV0[Payload <: RootHashMessagePayload](
       payloadDeserializer: ByteString => ParsingResult[Payload]
   )(
-      rootHashMessageP: v30.RootHashMessage
+      rootHashMessageP: v0.RootHashMessage
   ): ParsingResult[RootHashMessage[Payload]] = {
-    val v30.RootHashMessage(rootHashP, domainIdP, viewTypeP, payloadP) = rootHashMessageP
+    val v0.RootHashMessage(rootHashP, domainIdP, viewTypeP, payloadP) = rootHashMessageP
     for {
       rootHash <- RootHash.fromProtoPrimitive(rootHashP)
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain_id")
       viewType <- ViewType.fromProtoEnum(viewTypeP)
       payloadO <- payloadDeserializer(payloadP)
-      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(0))
     } yield RootHashMessage(
       rootHash,
       domainId,

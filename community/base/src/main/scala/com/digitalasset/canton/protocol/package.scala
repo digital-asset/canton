@@ -8,7 +8,7 @@ import com.daml.lf.data.Ref
 import com.daml.lf.transaction.*
 import com.daml.lf.value.Value
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.data.ViewType
+import com.digitalasset.canton.data.{RepairContract, ViewType}
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessage
 import com.digitalasset.canton.sequencing.protocol.OpenEnvelope
 
@@ -105,6 +105,9 @@ package object protocol {
   type LfTemplateId = Ref.TypeConName
   val LfTemplateId: Ref.TypeConName.type = Ref.TypeConName
 
+  type LfPackageName = Ref.PackageName
+  val LfPackageName: Ref.PackageName.type = Ref.PackageName
+
   type LfChoiceName = Ref.ChoiceName
   val LfChoiceName: Ref.ChoiceName.type = Ref.ChoiceName
 
@@ -113,5 +116,9 @@ package object protocol {
 
   def maxTransactionVersion(versions: NonEmpty[Seq[LfTransactionVersion]]): LfTransactionVersion =
     versions.reduceLeft[LfTransactionVersion](LfTransactionVersion.Ordering.max)
+
+  // Enables backward-compatibility so that existing repair scripts do not break
+  // TODO(#14441): Remove this alias
+  type SerializableContractWithWitnesses = RepairContract
 
 }

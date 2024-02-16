@@ -235,18 +235,18 @@ object ApiPackageManagementServiceSpec {
     val pkg = Ast.GenPackage[Expr](
       Map.empty,
       Set.empty,
-      // TODO(#14706): revert to LanguageVersion.default once default's major version is 2
-      LanguageVersion.v2_1,
-      Ast.PackageMetadata(
-        Ref.PackageName.assertFromString("aPackage"),
-        Ref.PackageVersion.assertFromString("0.0.0"),
-        None,
+      LanguageVersion.default,
+      Some(
+        Ast.PackageMetadata(
+          Ref.PackageName.assertFromString("aPackage"),
+          Ref.PackageVersion.assertFromString("0.0.0"),
+          None,
+        )
       ),
     )
     Encode.encodeArchive(
       Ref.PackageId.assertFromString("-pkgId-") -> pkg,
-      // TODO(#14706): revert to LanguageVersion.default once default's major version is 2
-      LanguageVersion.v2_1,
+      LanguageVersion.default,
     )
   }
 

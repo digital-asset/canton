@@ -86,6 +86,7 @@ final class ApiStateService(
               filter = filters,
               verbose = request.verbose,
               activeAtO = activeAtO,
+              multiDomainEnabled = true,
             )
         }
       }
@@ -98,7 +99,7 @@ final class ApiStateService(
           identity,
         )
         .via(logger.logErrorsOnStream)
-        .via(StreamMetrics.countElements(metrics.lapi.streams.acs))
+        .via(StreamMetrics.countElements(metrics.daml.lapi.streams.acs))
     }
   }
 

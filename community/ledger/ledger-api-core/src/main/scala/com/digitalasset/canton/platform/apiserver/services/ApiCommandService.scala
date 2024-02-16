@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.platform.apiserver.services
 
-import com.daml.ledger.api.v2.command_service.CommandServiceGrpc.CommandService as CommandServiceGrpc
-import com.daml.ledger.api.v2.command_service.*
+import com.daml.ledger.api.v1.command_service.CommandServiceGrpc.CommandService as CommandServiceGrpc
+import com.daml.ledger.api.v1.command_service.*
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.services.CommandService
@@ -45,10 +45,10 @@ class ApiCommandService(
   override def submitAndWait(request: SubmitAndWaitRequest): Future[Empty] =
     enrichRequestAndSubmit(request)(service.submitAndWait)
 
-  override def submitAndWaitForUpdateId(
+  override def submitAndWaitForTransactionId(
       request: SubmitAndWaitRequest
-  ): Future[SubmitAndWaitForUpdateIdResponse] =
-    enrichRequestAndSubmit(request)(service.submitAndWaitForUpdateId)
+  ): Future[SubmitAndWaitForTransactionIdResponse] =
+    enrichRequestAndSubmit(request)(service.submitAndWaitForTransactionId)
 
   override def submitAndWaitForTransaction(
       request: SubmitAndWaitRequest
@@ -66,15 +66,13 @@ class ApiCommandService(
   private def enrichRequestAndSubmit[T](
       request: SubmitAndWaitRequest
   )(submit: SubmitAndWaitRequest => LoggingContextWithTrace => Future[T]): Future[T] = {
-    val traceContext = getAnnotedCommandTraceContextV2(request.commands, telemetry)
+    val traceContext = getAnnotedCommandTraceContext(request.commands, telemetry)
     implicit val loggingContext: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory)(traceContext)
     val requestWithSubmissionId = generateSubmissionIdIfEmpty(request)
     validator
       .validate(
-        ApiConversions.toV1(
-          requestWithSubmissionId
-        ), // it is enough to validate V1 only, since at submission the SubmitRequest will be validated again (and the domainId as well)
+        requestWithSubmissionId,
         currentLedgerTime(),
         currentUtcTime(),
         maxDeduplicationDuration(),

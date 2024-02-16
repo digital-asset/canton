@@ -11,26 +11,27 @@ import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
-import com.digitalasset.canton.topology.admin.v30
+import com.digitalasset.canton.topology.admin.v0
 import com.digitalasset.canton.topology.client.*
-import com.digitalasset.canton.topology.store.{TopologyStoreId, TopologyStoreX}
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreCommon, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.*
-import com.digitalasset.canton.topology.{DomainId, MemberCode, ParticipantId, PartyId}
+import com.digitalasset.canton.topology.{DomainId, KeyOwnerCode, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{MonadUtil, OptionUtil}
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
 
 import scala.concurrent.{ExecutionContext, Future}
 
 abstract class GrpcTopologyAggregationServiceCommon[
-    Store <: TopologyStoreX[TopologyStoreId.DomainStore]
+    Store <: TopologyStoreCommon[TopologyStoreId.DomainStore, _, _, _]
 ](
     stores: => Seq[Store],
     ips: IdentityProvidingServiceClient,
     val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
-    extends v30.TopologyAggregationServiceGrpc.TopologyAggregationService
+    extends v0.TopologyAggregationServiceGrpc.TopologyAggregationService
     with NamedLogging {
 
   protected def getTopologySnapshot(
@@ -77,7 +78,7 @@ abstract class GrpcTopologyAggregationServiceCommon[
       filterParty: String,
       filterParticipant: String,
       limit: Int,
-  )(implicit traceContext: TraceContext): Future[Set[PartyId]] = MonadUtil
+  ): Future[Set[PartyId]] = MonadUtil
     .foldLeftM((Set.empty[PartyId], false), clients) { case ((res, isDone), (_, client)) =>
       if (isDone) Future.successful((res, true))
       else
@@ -91,8 +92,6 @@ abstract class GrpcTopologyAggregationServiceCommon[
   private def findParticipants(
       clients: List[(DomainId, TopologySnapshotLoader)],
       partyId: PartyId,
-  )(implicit
-      traceContext: TraceContext
   ): Future[Map[ParticipantId, Map[DomainId, ParticipantPermission]]] =
     clients
       .parFlatTraverse { case (domainId, client) =>
@@ -106,13 +105,11 @@ abstract class GrpcTopologyAggregationServiceCommon[
         (k, v.map { case (domain, _, permission) => (domain, permission) }.toMap)
       })
 
-  override def listParties(
-      request: v30.ListPartiesRequest
-  ): Future[v30.ListPartiesResponse] = {
+  override def listParties(request: v0.ListPartiesRequest): Future[v0.ListPartiesResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val v30.ListPartiesRequest(asOfP, limit, filterDomain, filterParty, filterParticipant) =
+    val v0.ListPartiesRequest(asOfP, limit, filterDomain, filterParty, filterParticipant) =
       request
-    val res: EitherT[Future, CantonError, v30.ListPartiesResponse] = for {
+    val res: EitherT[Future, CantonError, v0.ListPartiesResponse] = for {
       matched <- snapshots(filterDomain, asOfP)
       parties <- EitherT.right(
         findMatchingParties(matched, filterParty, filterParticipant, limit)
@@ -121,15 +118,15 @@ abstract class GrpcTopologyAggregationServiceCommon[
         findParticipants(matched, partyId).map(res => (partyId, res))
       })
     } yield {
-      v30.ListPartiesResponse(
+      v0.ListPartiesResponse(
         results = results.map { case (partyId, participants) =>
-          v30.ListPartiesResponse.Result(
+          v0.ListPartiesResponse.Result(
             party = partyId.toProtoPrimitive,
             participants = participants.map { case (participantId, domains) =>
-              v30.ListPartiesResponse.Result.ParticipantDomains(
+              v0.ListPartiesResponse.Result.ParticipantDomains(
                 participant = participantId.toProtoPrimitive,
                 domains = domains.map { case (domainId, permission) =>
-                  v30.ListPartiesResponse.Result.ParticipantDomains.DomainPermissions(
+                  v0.ListPartiesResponse.Result.ParticipantDomains.DomainPermissions(
                     domain = domainId.toProtoPrimitive,
                     permission = permission.toProtoEnum,
                   )
@@ -143,16 +140,14 @@ abstract class GrpcTopologyAggregationServiceCommon[
     CantonGrpcUtil.mapErrNew(res)
   }
 
-  override def listKeyOwners(
-      request: v30.ListKeyOwnersRequest
-  ): Future[v30.ListKeyOwnersResponse] = {
+  override def listKeyOwners(request: v0.ListKeyOwnersRequest): Future[v0.ListKeyOwnersResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val res: EitherT[Future, CantonError, v30.ListKeyOwnersResponse] = for {
+    val res: EitherT[Future, CantonError, v0.ListKeyOwnersResponse] = for {
       keyOwnerTypeO <- wrapErr(
         OptionUtil
           .emptyStringAsNone(request.filterKeyOwnerType)
-          .traverse(code => MemberCode.fromProtoPrimitive(code, "filterKeyOwnerType"))
-      ): EitherT[Future, CantonError, Option[MemberCode]]
+          .traverse(code => KeyOwnerCode.fromProtoPrimitive(code, "filterKeyOwnerType"))
+      ): EitherT[Future, CantonError, Option[KeyOwnerCode]]
       matched <- snapshots(request.filterDomain, request.asOf)
       res <- EitherT.right(matched.parTraverse { case (storeId, client) =>
         client.inspectKeys(request.filterKeyOwnerUid, keyOwnerTypeO, request.limit).map { res =>
@@ -165,14 +160,14 @@ abstract class GrpcTopologyAggregationServiceCommon[
           (storeId, owner, keys)
         }
       })
-      v30.ListKeyOwnersResponse(
+      v0.ListKeyOwnersResponse(
         results = mapped.toSeq.flatMap { case (owner, domainData) =>
           domainData.map { case (domain, keys) =>
-            v30.ListKeyOwnersResponse.Result(
+            v0.ListKeyOwnersResponse.Result(
               keyOwner = owner.toProtoPrimitive,
               domain = domain.toProtoPrimitive,
-              signingKeys = keys.signingKeys.map(_.toProtoV30),
-              encryptionKeys = keys.encryptionKeys.map(_.toProtoV30),
+              signingKeys = keys.signingKeys.map(_.toProtoV0),
+              encryptionKeys = keys.encryptionKeys.map(_.toProtoV0),
             )
           }
         }
@@ -182,24 +177,26 @@ abstract class GrpcTopologyAggregationServiceCommon[
   }
 }
 
-class GrpcTopologyAggregationServiceX(
-    stores: => Seq[TopologyStoreX[TopologyStoreId.DomainStore]],
+class GrpcTopologyAggregationService(
+    stores: => Seq[TopologyStore[TopologyStoreId.DomainStore]],
     ips: IdentityProvidingServiceClient,
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
-    extends GrpcTopologyAggregationServiceCommon[TopologyStoreX[TopologyStoreId.DomainStore]](
+    extends GrpcTopologyAggregationServiceCommon[TopologyStore[TopologyStoreId.DomainStore]](
       stores,
       ips,
       loggerFactory,
     ) {
   override protected def getTopologySnapshot(
       asOf: CantonTimestamp,
-      store: TopologyStoreX[TopologyStoreId.DomainStore],
-  ): TopologySnapshotLoader =
-    new StoreBasedTopologySnapshotX(
-      asOf,
-      store,
-      StoreBasedDomainTopologyClient.NoPackageDependencies,
-      loggerFactory,
-    )
+      store: TopologyStore[TopologyStoreId.DomainStore],
+  ): TopologySnapshotLoader = new StoreBasedTopologySnapshot(
+    asOf,
+    store,
+    Map(),
+    useStateTxs = true,
+    StoreBasedDomainTopologyClient.NoPackageDependencies,
+    loggerFactory,
+    ProtocolVersionValidation.NoValidation,
+  )
 }

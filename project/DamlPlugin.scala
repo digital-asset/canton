@@ -16,6 +16,7 @@ object DamlPlugin extends AutoPlugin {
   sealed trait Codegen
   object Codegen {
     object Java extends Codegen
+    object Scala extends Codegen
   }
 
   object autoImport {
@@ -31,11 +32,11 @@ object DamlPlugin extends AutoPlugin {
         "List of directory names used to sort the Daml building by order in this list"
       )
     val damlDarOutput = settingKey[File]("Directory to put generated DAR files in")
-    val damlDarLfVersion =
-      settingKey[String]("Lf version for which to generate DAR files")
     val useVersionedDarName = settingKey[Boolean](
       "If enabled, the output DAR file name is <project-name>-<project-version>.dar otherwise it is <project-name>.dar"
     )
+    val damlScalaCodegenOutput =
+      settingKey[File]("Directory to put Scala sources generated from DARs")
     val damlJavaCodegenOutput =
       settingKey[File]("Directory to put Java sources generated from DARs")
     val damlCompilerVersion =
@@ -65,6 +66,8 @@ object DamlPlugin extends AutoPlugin {
       taskKey[Unit]("Update the checked in DAR with a DAR built with the current Daml version")
     val damlEnableJavaCodegen =
       settingKey[Boolean]("Enable Java codegen")
+    val damlEnableScalaCodegen =
+      settingKey[Boolean]("Enable Scala codegen")
 
     lazy val baseDamlPluginSettings: Seq[Def.Setting[_]] = Seq(
       sourceGenerators += damlGenerateCode.taskValue,
@@ -72,26 +75,30 @@ object DamlPlugin extends AutoPlugin {
       damlSourceDirectory := sourceDirectory.value / "daml",
       damlCompileDirectory := target.value / "daml",
       damlDarOutput := resourceManaged.value,
-      damlDarLfVersion := "",
       damlDependencies := Seq(),
+      damlScalaCodegenOutput := sourceManaged.value / "daml-codegen-scala",
       damlJavaCodegenOutput := sourceManaged.value / "daml-codegen-java",
       damlBuildOrder := Seq(),
       damlCodeGeneration := Seq(),
       damlEnableJavaCodegen := true,
+      damlEnableScalaCodegen := false,
       useVersionedDarName := false,
       damlGenerateCode := {
         // for the time being we assume if we're using code generation then the DARs must first be built
         damlBuild.value
 
         val settings = damlCodeGeneration.value
+        val scalaOutputDirectory = damlScalaCodegenOutput.value
         val javaOutputDirectory = damlJavaCodegenOutput.value
         val cacheDirectory = streams.value.cacheDirectory
         val log = streams.value.log
         val enableJavaCodegen = damlEnableJavaCodegen.value
+        val enableScalaCodegen = damlEnableScalaCodegen.value
 
         val cache = FileFunction.cached(cacheDirectory, FileInfo.hash) { input =>
           val codegens =
-            if (enableJavaCodegen) Seq((Codegen.Java, javaOutputDirectory)) else Seq.empty
+            (if (enableScalaCodegen) Seq((Codegen.Scala, scalaOutputDirectory)) else Seq.empty) ++
+              (if (enableJavaCodegen) Seq((Codegen.Java, javaOutputDirectory)) else Seq.empty)
           codegens.foreach { case (_, outputDirectory) => IO.delete(outputDirectory) }
           settings.flatMap { case (damlProjectDirectory, darFile, packageName) =>
             codegens
@@ -114,7 +121,6 @@ object DamlPlugin extends AutoPlugin {
       damlBuild := {
         val dependencies = damlDependencies.value
         val outputDirectory = damlDarOutput.value
-        val outputLfVersion = damlDarLfVersion.value
         val buildDirectory = damlCompileDirectory.value
         val sourceDirectory = damlSourceDirectory.value
         // we don't really know dependencies between daml files, so just assume if any change then we need to rebuild all packages
@@ -155,7 +161,6 @@ object DamlPlugin extends AutoPlugin {
                 sourceDirectory,
                 buildDirectory,
                 outputDirectory,
-                outputLfVersion,
                 useVersionedDarFileName,
                 sourceDirectory.toPath.relativize(projectFile.toPath).toFile,
                 damlCompilerVersion.value,
@@ -290,20 +295,14 @@ object DamlPlugin extends AutoPlugin {
     )
 
     val values = readDamlYaml(damlProjectFile)
-    if (values != null) {
-      projectVersionOverride.foreach(values.put("version", _))
-      values.put("sdk-version", damlVersion)
+    projectVersionOverride.foreach(values.put("version", _))
 
-      val writer = new YamlWriter(new FileWriter(damlProjectFile))
-      try {
-        writer.write(values)
-      } finally writer.close()
-    } else {
-      println(
-        s"Could not read daml.yaml file [${damlProjectFile.getAbsoluteFile}] most likely because another concurrent " +
-          "damlUpdateProjectVersions task has already updated it. (Likely ledger-common-dars updating the same files from multiple projects)"
-      )
-    }
+    values.put("sdk-version", damlVersion)
+
+    val writer = new YamlWriter(new FileWriter(damlProjectFile))
+    try {
+      writer.write(values)
+    } finally writer.close()
   }
 
   /** We intentionally take the unusual step of checking in certain DARs to ensure stable package ids across different Daml versions.
@@ -331,7 +330,6 @@ object DamlPlugin extends AutoPlugin {
       sourceDirectory: File,
       buildDirectory: File,
       outputDirectory: File,
-      outputLfVersion: String,
       useVersionedDarName: Boolean,
       relativeDamlProjectFile: File,
       damlVersion: String,
@@ -355,14 +353,19 @@ object DamlPlugin extends AutoPlugin {
       tarballPath = Seq("damlc", "damlc"),
     )
 
+    // so far canton system dars depend on daml-script, but maybe daml-triggers or others some day?
+    val damlLibsDependencyTypes = Seq("daml-script")
+    val damlLibsDependencyVersions = damlLanguageVersions.foldLeft(Seq(""))(_ :+ "-" + _)
     val damlScriptDars = for {
-      depVersion <- damlLanguageVersions
+      depType <- damlLibsDependencyTypes
+      depVersion <- damlLibsDependencyVersions
     } yield {
-      ("daml-script", s"daml3-script-$depVersion")
+      (depType, s"$depType$depVersion")
     }
+    val daml3ScriptDars = ("daml-script", "daml3-script-2.dev")
 
     val damlLibsEnv = (for {
-      (depType, artifactName) <- damlScriptDars
+      (depType, artifactName) <- damlScriptDars :+ daml3ScriptDars
     } yield {
       ensureArtifactAvailable(
         url = url + s"$depType/",
@@ -382,7 +385,6 @@ object DamlPlugin extends AutoPlugin {
     // copy project directory into target tree
     // the reason for this is that `daml build` caches files in a `.daml` directory of the source tree
     // making sbt to believe that the source code changed
-    IO.delete(projectBuildDirectory) // to not let deleted files stick around in build directory
     IO.copyDirectory(originalDamlProjectFile.getAbsoluteFile.getParentFile, projectBuildDirectory)
 
     val damlYamlMap = readDamlYaml(originalDamlProjectFile)
@@ -395,24 +397,18 @@ object DamlPlugin extends AutoPlugin {
       }
     val processLogger = new BufferedLogger
 
-    val damlcCommand = damlc.getAbsolutePath :: "build" :: "--ghc-option" :: "-Werror" ::
-      "--project-root" :: projectBuildDirectory.toString ::
-      "--output" :: outputDar.getAbsolutePath :: Nil
-    val command =
-      // if the damlDarLfVersion is not set the daml.yaml is expected to contain the target lf-version in the build-options
-      if (outputLfVersion.isEmpty) damlcCommand
-      else damlcCommand ::: ("--target" :: outputLfVersion :: Nil)
-
     val result = Process(
-      command = command,
+      command = damlc.getAbsolutePath :: "build" ::
+        "--project-root" :: projectBuildDirectory.toString ::
+        "--output" :: outputDar.getAbsolutePath :: Nil,
       cwd = projectBuildDirectory,
       extraEnv = damlLibsEnv: _*, // env variable set so that damlc finds daml-script dar
     ) ! processLogger
 
     if (result != 0) {
       throw new MessageOnlyException(s"""
-           |damlc build failed [$originalDamlProjectFile]:
-           |${processLogger.output("  ")}
+          |damlc build failed [$originalDamlProjectFile]:
+          |${processLogger.output("  ")}
         """.stripMargin.trim)
     }
 
@@ -518,9 +514,17 @@ object DamlPlugin extends AutoPlugin {
         (
           s"https://repo.maven.apache.org/maven2/com/daml/codegen-jvm-main/${damlVersion}/",
           s"codegen-jvm-main-${damlVersion}.jar",
-          basePackageName + (if (!basePackageName.contains("java")) ".java" else ""),
+          basePackageName + ".java",
           "java",
           Seq("java"),
+        )
+      case Codegen.Scala =>
+        (
+          s"https://repo.maven.apache.org/maven2/com/daml/codegen-scala-main/${damlVersion}/",
+          s"codegen-scala-main-${damlVersion}.jar",
+          basePackageName,
+          "scala",
+          Seq(),
         )
     }
 

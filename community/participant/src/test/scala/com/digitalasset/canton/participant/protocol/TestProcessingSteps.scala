@@ -17,7 +17,6 @@ import com.digitalasset.canton.data.{
   ViewTree,
   ViewTypeTest,
 }
-import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
@@ -43,6 +42,7 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.{
   ActivenessSet,
 }
 import com.digitalasset.canton.participant.store.{
+  ContractLookup,
   SyncDomainEphemeralState,
   SyncDomainEphemeralStateLookup,
   TransferLookup,
@@ -54,7 +54,7 @@ import com.digitalasset.canton.protocol.{
   DynamicDomainParametersWithValidity,
   RootHash,
   ViewHash,
-  v30,
+  v0,
 }
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.SessionKeyStore
@@ -133,10 +133,9 @@ class TestProcessingSteps(
     .decisionTimeFor(requestTs)
     .leftMap(err => TestProcessorError(DomainParametersError(parameters.domainId, err)))
 
-  override def getSubmitterInformation(
+  override def getSubmissionDataForTracker(
       views: Seq[DecryptedView]
-  ): (Option[ViewSubmitterMetadata], Option[SubmissionTracker.SubmissionData]) =
-    (None, submissionDataForTrackerO)
+  ): Option[SubmissionTracker.SubmissionData] = submissionDataForTrackerO
 
   override def participantResponseDeadlineFor(
       parameters: DynamicDomainParametersWithValidity,
@@ -240,6 +239,7 @@ class TestProcessingSteps(
   override def constructPendingDataAndResponse(
       pendingDataAndResponseArgs: PendingDataAndResponseArgs,
       transferLookup: TransferLookup,
+      contractLookup: ContractLookup,
       activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       mediator: MediatorRef,
       freshOwnTimelyTx: Boolean,
@@ -269,14 +269,12 @@ class TestProcessingSteps(
       traceContext: com.digitalasset.canton.tracing.TraceContext
   ): Seq[com.digitalasset.canton.protocol.messages.MediatorResponse] = Seq.empty
 
-  override def eventAndSubmissionIdForRejectedCommand(
+  override def eventAndSubmissionIdForInactiveMediator(
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      submitterMetadata: ViewSubmitterMetadata,
-      rootHash: RootHash,
+      fullViews: NonEmpty[Seq[WithRecipients[DecryptedView]]],
       freshOwnTimelyTx: Boolean,
-      error: TransactionError,
   )(implicit traceContext: TraceContext): (Option[TimestampedEvent], Option[PendingSubmissionId]) =
     (None, None)
 
@@ -301,8 +299,9 @@ class TestProcessingSteps(
     EitherT.pure[Future, TestProcessingError](result)
   }
 
-  override def postProcessSubmissionRejectedCommand(
-      error: TransactionError,
+  override def postProcessSubmissionForInactiveMediator(
+      declaredMediator: MediatorRef,
+      timestamp: CantonTimestamp,
       pendingSubmission: Unit,
   )(implicit traceContext: TraceContext): Unit = ()
 
@@ -340,7 +339,7 @@ object TestProcessingSteps {
     override type View = TestViewTree
     override type FullView = TestViewTree
 
-    override def toProtoEnum: v30.ViewType =
+    override def toProtoEnum: v0.ViewType =
       throw new UnsupportedOperationException("TestViewType cannot be serialized")
   }
   type TestViewType = TestViewType.type
