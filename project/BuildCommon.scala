@@ -1298,7 +1298,6 @@ object BuildCommon {
       Compile / damlSourceDirectory := baseDirectory.value / ".." / "src",
       Compile / damlCodeGeneration := (for (
         name <- Seq(
-          "benchtool",
           "model",
           "semantic",
           "package_management",
