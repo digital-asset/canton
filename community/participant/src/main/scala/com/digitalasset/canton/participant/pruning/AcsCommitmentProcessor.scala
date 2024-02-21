@@ -307,7 +307,18 @@ class AcsCommitmentProcessor(
   ): Future[Boolean] =
     for {
       config <- catchUpConfig(timestamp)
-    } yield config.isDefined && catchUpToTimestamp == timestamp
+      sortedReconciliationIntervals <- sortedReconciliationIntervalsProvider
+        .reconciliationIntervals(timestamp)
+    } yield config.exists(cfg =>
+      sortedReconciliationIntervals.intervals.headOption match {
+        case Some(interval) =>
+          (timestamp.getEpochSecond % (cfg.catchUpIntervalSkip.value * interval.intervalLength.duration.getSeconds) == 0) && timestamp <= catchUpToTimestamp
+        case None =>
+          throw new IllegalStateException(
+            s"Cannot determine catch-up boundary: No valid reconciliation interval at time $timestamp"
+          )
+      }
+    )
 
   /** Detects whether the participant should trigger or exit catch-up.
     * In case a catch-up should start, returns the catch-up timestamp; the participant will catch up to the
