@@ -41,4 +41,4 @@ lazy val `ledger-api-string-interning-benchmark` =
 
 lazy val root = (project in file("."))
   .disablePlugins(WartRemover)
-  .aggregate((CommunityProjects.allProjects ++ DamlProjects.allProjects).toSeq.map(_.project) *)
+  .aggregate((CommunityProjects.allProjects ++ DamlProjects.allProjects).toSeq.map(_.project)*)

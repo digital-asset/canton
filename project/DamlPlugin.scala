@@ -164,7 +164,7 @@ object DamlPlugin extends AutoPlugin {
             }.toSet
           }
 
-        cache(allDamlFiles.get.toSet ++ dependencies).toSeq
+        cache(allDamlFiles.get.toSet ++ damlProjectFiles.get.toSet ++ dependencies).toSeq
       },
       // Declare dependency so that Daml packages in test scope may depend on packages in compile scope.
       (Test / damlBuild) := (Test / damlBuild).dependsOn(Compile / damlBuild).value,
