@@ -14,16 +14,18 @@ object DamlLfVersionToProtocolVersions {
   /** This Map links the Daml Lf-version to the minimum protocol version that supports it. */
   val damlLfVersionToMinimumProtocolVersions: SortedMap[TransactionVersion, ProtocolVersion] =
     SortedMap(
-      TransactionVersion.V31 -> ProtocolVersion.v30,
-      TransactionVersion.VDev -> ProtocolVersion.v30,
+      TransactionVersion.V14 -> ProtocolVersion.v3,
+      // Interfaces
+      TransactionVersion.V15 -> ProtocolVersion.v4,
+      TransactionVersion.VDev -> ProtocolVersion.dev,
     )
 
   def getMinimumSupportedProtocolVersion(
       transactionVersion: TransactionVersion
   ): ProtocolVersion = {
     assert(
-      transactionVersion >= TransactionVersion.V31,
-      s"Canton only supports transaction versions more recent or equal to ${TransactionVersion.V31}",
+      transactionVersion >= TransactionVersion.V14,
+      s"Canton only supports transaction versions more recent or equal to ${TransactionVersion.V14}",
     )
     damlLfVersionToMinimumProtocolVersions(transactionVersion)
   }

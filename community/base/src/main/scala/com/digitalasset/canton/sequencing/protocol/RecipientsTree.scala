@@ -9,7 +9,7 @@ import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.v30
+import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
 
@@ -44,31 +44,22 @@ final case class RecipientsTree(
     }
 
   def forMember(
-      member: Member,
-      groupRecipients: Set[GroupRecipient],
+      member: Member
   ): Seq[RecipientsTree] =
-    if (
-      recipientGroup
-        .exists {
-          case MemberRecipient(m) => member == m
-          case g: GroupRecipient =>
-            groupRecipients.contains(g)
-        }
-    ) {
+    if (recipientGroup.exists(_.member == member))
       Seq(this)
-    } else {
-      children.flatMap(c => c.forMember(member, groupRecipients))
-    }
+    else
+      children.flatMap(_.forMember(member))
 
   lazy val leafRecipients: NonEmpty[Set[Recipient]] = children match {
     case NonEmpty(cs) => cs.toNEF.reduceLeftTo(_.leafRecipients)(_ ++ _.leafRecipients)
     case _ => recipientGroup.map(m => m: Recipient)
   }
 
-  def toProtoV30: v30.RecipientsTree = {
+  def toProtoV0: v0.RecipientsTree = {
     val recipientsP = recipientGroup.toSeq.map(_.toProtoPrimitive).sorted
-    val childrenP = children.map(_.toProtoV30)
-    new v30.RecipientsTree(recipientsP, childrenP)
+    val childrenP = children.map(_.toProtoV0)
+    new v0.RecipientsTree(recipientsP, childrenP)
   }
 }
 
@@ -81,23 +72,20 @@ object RecipientsTree {
   def ofMembers(
       recipientGroup: NonEmpty[Set[Member]],
       children: Seq[RecipientsTree],
-  ): RecipientsTree = RecipientsTree(recipientGroup.map(MemberRecipient), children)
+  ): RecipientsTree = RecipientsTree(recipientGroup.map(Recipient(_)), children)
 
   def leaf(group: NonEmpty[Set[Member]]): RecipientsTree =
-    RecipientsTree(group.map(MemberRecipient), Seq.empty)
+    RecipientsTree(group.map(Recipient(_)), Seq.empty)
 
   def recipientsLeaf(group: NonEmpty[Set[Recipient]]): RecipientsTree =
     RecipientsTree(group, Seq.empty)
 
-  def fromProtoV30(
-      treeProto: v30.RecipientsTree,
-      supportGroupAddressing: Boolean,
+  def fromProtoV0(
+      treeProto: v0.RecipientsTree
   ): ParsingResult[RecipientsTree] = {
     for {
       members <- treeProto.recipients.traverse(str =>
-        if (supportGroupAddressing)
-          Recipient.fromProtoPrimitive(str, "RecipientsTreeProto.recipients")
-        else Member.fromProtoPrimitive(str, "RecipientsTreeProto.recipients").map(MemberRecipient)
+        Member.fromProtoPrimitive(str, "RecipientsTreeProto.recipients").map(Recipient(_))
       )
       recipientsNonEmpty <- NonEmpty
         .from(members)
@@ -108,7 +96,7 @@ object RecipientsTree {
           )
         )
       children = treeProto.children
-      childTrees <- children.toList.traverse(fromProtoV30(_, supportGroupAddressing))
+      childTrees <- children.toList.traverse(fromProtoV0)
     } yield RecipientsTree(
       recipientsNonEmpty.toSet,
       childTrees,

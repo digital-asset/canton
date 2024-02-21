@@ -4,4 +4,3 @@
 -- This is a dummy column we are adding in order to test that adding dev version migrations
 -- works properly. DO NOT MOVE THIS TO STABLE
 ALTER TABLE node_id ADD COLUMN test_column INT NOT NULL DEFAULT 0;
-

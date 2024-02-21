@@ -13,7 +13,6 @@ import io.grpc.health.v1.HealthCheckResponse.ServingStatus
 import io.grpc.protobuf.services.HealthStatusManager
 
 import scala.concurrent.blocking
-import scala.util.Try
 
 /** This class updates gRPC health service with updates coming from Canton's ServiceHealth instances.
   * See https://github.com/grpc/grpc/blob/master/doc/health-checking.md
@@ -84,17 +83,7 @@ class GrpcHealthReporter(override val loggerFactory: NamedLoggerFactory)
           override def name: String = "GrpcHealthReporter"
 
           override def poke()(implicit traceContext: TraceContext): Unit = {
-            Try(updateHealthManager(healthStatusManager, service))
-              .recover {
-                // Can happen if we update the status while a listening RPC is being cancelled
-                case sre: io.grpc.StatusRuntimeException
-                    if sre.getStatus.getCode.value() == io.grpc.Status.CANCELLED.getCode.value() =>
-                  logger.info(
-                    s"RPC was cancelled while updating health manager ${healthStatusManager.name} with service ${service.name}",
-                    sre,
-                  )
-              }
-              .discard[Try[Unit]]
+            updateHealthManager(healthStatusManager, service)
           }
         })
         .discard[Boolean]

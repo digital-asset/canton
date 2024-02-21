@@ -3,18 +3,20 @@
 
 package com.digitalasset.canton.domain.mediator
 
+import com.daml.metrics.api.MetricName
 import com.digitalasset.canton.config.CachingConfigs
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, Signature, TestHash}
+import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.store.{
   InMemoryFinalizedResponseStore,
   InMemoryMediatorDeduplicationStore,
   MediatorState,
 }
-import com.digitalasset.canton.domain.metrics.MediatorTestMetrics
+import com.digitalasset.canton.domain.metrics.{DomainTestMetrics, MediatorMetrics}
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.metrics.MetricHandle.NoOpMetricsFactory
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.*
@@ -35,9 +37,9 @@ import scala.concurrent.Future
 class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with HasTestCloseContext {
   self =>
   private lazy val domainId = DefaultTestIdentities.domainId
-  private lazy val mediatorId = DefaultTestIdentities.mediatorIdX
-  private lazy val mediatorMetrics = MediatorTestMetrics
-  private lazy val confirmationResponseTimeout = NonNegativeFiniteDuration.tryOfSeconds(10)
+  private lazy val mediatorId = DefaultTestIdentities.mediator
+  private lazy val mediatorMetrics = DomainTestMetrics.mediator
+  private lazy val participantResponseTimeout = NonNegativeFiniteDuration.tryOfSeconds(10)
   private lazy val factory = new ExampleTransactionFactory()(domainId = domainId)
   private lazy val fullInformeeTree = factory.MultipleRootsAndViewNestings.fullInformeeTree
 
@@ -49,7 +51,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
       DomainParameters.WithValidity(
         CantonTimestamp.Epoch,
         None,
-        initialDomainParameters.tryUpdate(confirmationResponseTimeout = confirmationResponseTimeout),
+        initialDomainParameters.tryUpdate(participantResponseTimeout = participantResponseTimeout),
       )
     )
 
@@ -66,13 +68,13 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
       mock[Clock],
       mediatorMetrics,
       testedProtocolVersion,
-      CachingConfigs.defaultFinalizedMediatorConfirmationRequestsCache,
+      CachingConfigs.defaultFinalizedMediatorRequestsCache,
       timeouts,
       loggerFactory,
     )
 
-    val domainSyncCryptoApi: DomainSyncCryptoClient = new TestingIdentityFactoryX(
-      TestingTopologyX(),
+    val domainSyncCryptoApi: DomainSyncCryptoClient = new TestingIdentityFactory(
+      TestingTopology(),
       loggerFactory,
       dynamicDomainParameters,
     ).forOwnerAndDomain(
@@ -101,7 +103,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
       },
       testedProtocolVersion,
       noopDeduplicator,
-      MediatorTestMetrics,
+      new MediatorMetrics(MetricName("mediator-event-state-processor"), NoOpMetricsFactory),
       loggerFactory,
     )
 
@@ -116,17 +118,14 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
         None,
         Batch.of(
           testedProtocolVersion,
-          (
-            InformeeMessage(fullInformeeTree, Signature.noSignature)(testedProtocolVersion),
-            Recipients.cc(mediatorId),
-          ),
+          (InformeeMessage(fullInformeeTree)(testedProtocolVersion), Recipients.cc(mediatorId)),
         ),
         testedProtocolVersion,
       )
 
     def handle(events: RawProtocolEvent*): FutureUnlessShutdown[Unit] =
       processor
-        .handle(events.map(e => Traced(e -> None)(traceContext)))
+        .handle(events.map(e => Traced(e)(traceContext)))
         .flatMap(_.unwrap)
 
     def receivedEventsFor(requestId: RequestId): Seq[MediatorEvent] =
@@ -145,15 +144,15 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
 
     val informeeMessage = mock[InformeeMessage]
     when(informeeMessage.domainId).thenReturn(domainId)
-    when(informeeMessage.rootHash).thenReturn(RootHash(TestHash.digest(0)))
+    when(informeeMessage.rootHash).thenReturn(None)
 
-    val confirmationResponse = mock[ConfirmationResponse]
-    when(confirmationResponse.representativeProtocolVersion).thenReturn(
-      ConfirmationResponse.protocolVersionRepresentativeFor(testedProtocolVersion)
+    val mediatorResponse = mock[MediatorResponse]
+    when(mediatorResponse.representativeProtocolVersion).thenReturn(
+      MediatorResponse.protocolVersionRepresentativeFor(testedProtocolVersion)
     )
 
     val signedConfirmationResponse =
-      SignedProtocolMessage.from(confirmationResponse, testedProtocolVersion, Signature.noSignature)
+      SignedProtocolMessage.from(mediatorResponse, testedProtocolVersion, Signature.noSignature)
     when(signedConfirmationResponse.message.domainId).thenReturn(domainId)
     val informeeMessageWithWrongDomainId = mock[InformeeMessage]
     when(informeeMessageWithWrongDomainId.domainId)
@@ -165,7 +164,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
           informeeMessage -> RecipientsTest.testInstance,
           informeeMessage -> RecipientsTest.testInstance,
         ),
-        List("Received more than one mediator confirmation request."),
+        List("Received more than one mediator request."),
       ),
       (
         Batch.of[ProtocolMessage](
@@ -173,7 +172,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
           informeeMessage -> RecipientsTest.testInstance,
           signedConfirmationResponse -> RecipientsTest.testInstance,
         ),
-        List("Received both mediator confirmation requests and confirmation responses."),
+        List("Received both mediator requests and mediator responses."),
       ),
       (
         Batch.of[ProtocolMessage](
@@ -196,7 +195,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
               batch,
               testedProtocolVersion,
             )
-          ).map(e => Traced(e -> None)(traceContext))
+          ).map(e => Traced(e)(traceContext))
         ),
         expectedMessages map { error => (logEntry: LogEntry) =>
           logEntry.errorMessage should include(error)
@@ -215,7 +214,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
       for {
         pendingRequest <- pendingRequestF
         _ <- env.state.add(pendingRequest)
-        deliverTs = pendingRequestTs.add(confirmationResponseTimeout.unwrap).addMicros(1)
+        deliverTs = pendingRequestTs.add(participantResponseTimeout.unwrap).addMicros(1)
         _ <- env.handle(env.deliver(deliverTs)).onShutdown(fail())
       } yield {
         env.receivedEventsFor(pendingRequestId).loneElement should matchPattern {
@@ -230,14 +229,14 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
         DomainParameters.WithValidity(
           CantonTimestamp.Epoch,
           Some(CantonTimestamp.ofEpochSecond(5)),
-          initialDomainParameters.tryUpdate(confirmationResponseTimeout =
+          initialDomainParameters.tryUpdate(participantResponseTimeout =
             NonNegativeFiniteDuration.tryOfSeconds(4)
           ),
         ),
         DomainParameters.WithValidity(
           CantonTimestamp.ofEpochSecond(5),
           None,
-          initialDomainParameters.tryUpdate(confirmationResponseTimeout =
+          initialDomainParameters.tryUpdate(participantResponseTimeout =
             NonNegativeFiniteDuration.tryOfSeconds(6)
           ),
         ),
@@ -299,7 +298,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
       val env = new Env
       val firstRequestTs = CantonTimestamp.Epoch.plusMillis(1)
       val requestId = RequestId(firstRequestTs)
-      val timesOutAt = firstRequestTs.add(confirmationResponseTimeout.unwrap).addMicros(1)
+      val timesOutAt = firstRequestTs.add(participantResponseTimeout.unwrap).addMicros(1)
 
       for {
         _ <- env.handle(env.request(firstRequestTs), env.deliver(timesOutAt)).onShutdown(fail())
@@ -309,8 +308,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
                 MediatorEvent.Request(
                   _,
                   `firstRequestTs`,
-                  InformeeMessage(_, _),
-                  _,
+                  InformeeMessage(_),
                   _,
                 ),
                 MediatorEvent.Timeout(_, `timesOutAt`, `requestId`),
@@ -322,13 +320,13 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
 
   private def responseAggregation(requestId: RequestId): Future[ResponseAggregation[?]] = {
     val mockTopologySnapshot = mock[TopologySnapshot]
-    when(mockTopologySnapshot.consortiumThresholds(any[Set[LfPartyId]])(anyTraceContext))
-      .thenAnswer { (parties: Set[LfPartyId]) =>
-        Future.successful(parties.map(x => x -> PositiveInt.one).toMap)
-      }
+    when(mockTopologySnapshot.consortiumThresholds(any[Set[LfPartyId]])).thenAnswer {
+      (parties: Set[LfPartyId]) => Future.successful(parties.map(x => x -> PositiveInt.one).toMap)
+    }
     ResponseAggregation.fromRequest(
       requestId,
-      InformeeMessage(fullInformeeTree, Signature.noSignature)(testedProtocolVersion),
+      InformeeMessage(fullInformeeTree)(testedProtocolVersion),
+      testedProtocolVersion,
       mockTopologySnapshot,
     )
   }

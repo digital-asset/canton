@@ -500,7 +500,6 @@ class InMemoryFanoutBufferSpec
       completionDetails = None,
       commandId = "",
       domainId = None,
-      recordTime = Time.Timestamp.Epoch,
     )
 
   private def txRejected(idx: Long, offset: Offset) =

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.validation
 
+import cats.syntax.alternative.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.LfPartyId
@@ -12,14 +13,9 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.WrongRecipients
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.RequestId
-import com.digitalasset.canton.sequencing.protocol.{
-  MemberRecipient,
-  ParticipantsOfParty,
-  Recipient,
-  Recipients,
-}
+import com.digitalasset.canton.sequencing.protocol.{Recipient, Recipients}
+import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient
-import com.digitalasset.canton.topology.{ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{ErrorUtil, IterableUtil}
@@ -65,9 +61,7 @@ class RecipientsValidator[I](
       requestId: RequestId,
       inputs: Seq[I],
       snapshot: PartyTopologySnapshotClient,
-  )(implicit
-      traceContext: TraceContext
-  ): Future[(Seq[WrongRecipients], Seq[I])] = {
+  )(implicit traceContext: TraceContext): Future[(Seq[WrongRecipients], Seq[I])] = {
 
     val rootHashes = inputs.map(viewOfInput(_).rootHash).distinct
     ErrorUtil.requireArgument(
@@ -75,20 +69,13 @@ class RecipientsValidator[I](
       s"Views with different root hashes are not supported: $rootHashes",
     )
 
-    val allInformees = inputs
-      .flatMap { viewOfInput(_).informees.map(_.party) }
-      .distinct
-      .toList
-
     for {
-      informeesWithGroupAddressing <- snapshot.partiesWithGroupAddressing(parties = allInformees)
-
       informeeParticipantsOfPositionAndParty <-
         computeInformeeParticipantsOfPositionAndParty(inputs, snapshot)
 
     } yield {
       val context =
-        Context(requestId, informeesWithGroupAddressing, informeeParticipantsOfPositionAndParty)
+        Context(requestId, informeeParticipantsOfPositionAndParty)
 
       // Check Condition 1, i.e., detect inputs where the view has an informee without an active participant
       val inactivePartyPositions = computeInactivePartyPositions(context)
@@ -102,7 +89,7 @@ class RecipientsValidator[I](
       val badViewPositions = invalidRecipientPositions ++ inactivePartyPositions
 
       // Check Condition 4, i.e., remove inputs that have a bad view position as descendant.
-      inputs.partitionMap { input =>
+      inputs.map { input =>
         val viewTree = viewOfInput(input)
 
         val isGood = badViewPositions.forall(badViewPosition =>
@@ -114,7 +101,7 @@ class RecipientsValidator[I](
           input,
           WrongRecipients(viewTree),
         )
-      }
+      }.separate
     }
   }
 
@@ -124,8 +111,6 @@ class RecipientsValidator[I](
   private def computeInformeeParticipantsOfPositionAndParty(
       inputs: Seq[I],
       snapshot: PartyTopologySnapshotClient,
-  )(implicit
-      traceContext: TraceContext
   ): Future[Map[List[MerklePathElement], Map[LfPartyId, Set[ParticipantId]]]] =
     inputs
       .parTraverse { input =>
@@ -145,7 +130,7 @@ class RecipientsValidator[I](
   private def computeInactivePartyPositions(
       context: Context
   )(implicit traceContext: TraceContext): Seq[ViewPosition] = {
-    val Context(requestId, _, informeeParticipantsOfPositionAndParty) = context
+    val Context(requestId, informeeParticipantsOfPositionAndParty) = context
 
     informeeParticipantsOfPositionAndParty.toSeq.mapFilter {
       case (viewPositionSeq, informeeParticipantsOfParty) =>
@@ -231,7 +216,7 @@ class RecipientsValidator[I](
       mainViewPosition: List[MerklePathElement],
       recipientsPathViewToRoot: Seq[Set[Recipient]],
   )(implicit traceContext: TraceContext): Option[(ViewPosition, SyncServiceAlarm.Warn)] = {
-    val Context(requestId, informeesWithGroupAddressing, informeeParticipantsOfPositionAndParty) =
+    val Context(requestId, informeeParticipantsOfPositionAndParty) =
       context
 
     IterableUtil
@@ -295,13 +280,11 @@ class RecipientsValidator[I](
           val informeeParticipantsOfParty =
             informeeParticipantsOfPositionAndParty(viewPosition)
 
-          val informeeRecipients = informeeParticipantsOfParty.toList.flatMap {
-            case (party, participants) =>
-              if (informeesWithGroupAddressing.contains(party))
-                Seq(ParticipantsOfParty(PartyId.tryFromLfParty(party)))
-              else
-                participants.map(MemberRecipient)
-          }.toSet
+          val informeeRecipients = informeeParticipantsOfParty.toList
+            .flatMap { case (_party, participants) =>
+              participants.map(Recipient(_))
+            }
+            .toSet[Recipient]
 
           val extraRecipients = recipientGroup -- informeeRecipients
           if (extraRecipients.nonEmpty)
@@ -332,7 +315,6 @@ object RecipientsValidator {
 
   private final case class Context(
       requestId: RequestId,
-      informeesWithGroupAddressing: Set[LfPartyId],
       informeeParticipantsOfPositionAndParty: Map[
         List[MerklePathElement],
         Map[LfPartyId, Set[ParticipantId]],

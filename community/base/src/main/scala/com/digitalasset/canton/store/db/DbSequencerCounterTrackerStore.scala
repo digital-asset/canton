@@ -25,6 +25,7 @@ class DbSequencerCounterTrackerStore(
       client,
       storage,
       DbSequencerCounterTrackerStore.cursorTable,
+      storage.metrics.loadGaugeM("sequencer-counter-tracker-store"),
       timeouts,
       loggerFactory,
     )

@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.admin.inspection
 import cats.Eval
 import cats.data.{EitherT, OptionT}
 import cats.syntax.foldable.*
-import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
@@ -14,7 +13,10 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.data.ActiveContract
+import com.digitalasset.canton.participant.admin.data.{
+  ActiveContract,
+  SerializableContractWithDomainId,
+}
 import com.digitalasset.canton.participant.admin.inspection.Error.{
   InvariantIssue,
   SerializationIssue,
@@ -56,13 +58,7 @@ import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{
-  DomainAlias,
-  LedgerTransactionId,
-  LfPartyId,
-  RequestCounter,
-  TransferCounterO,
-}
+import com.digitalasset.canton.{DomainAlias, LedgerTransactionId, LfPartyId, RequestCounter}
 
 import java.io.OutputStream
 import java.time.Instant
@@ -134,7 +130,7 @@ final class SyncStateInspection(
       domainAlias: DomainAlias
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, AcsError, Map[LfContractId, (CantonTimestamp, TransferCounterO)]] = {
+  ): EitherT[Future, AcsError, Map[LfContractId, CantonTimestamp]] = {
 
     for {
       state <- EitherT.fromEither[Future](
@@ -144,7 +140,7 @@ final class SyncStateInspection(
       )
 
       snapshotO <- EitherT.liftF(AcsInspection.getCurrentSnapshot(state).map(_.map(_.snapshot)))
-    } yield snapshotO.fold(Map.empty[LfContractId, (CantonTimestamp, TransferCounterO)])(
+    } yield snapshotO.fold(Map.empty[LfContractId, CantonTimestamp])(
       _.toMap
     )
   }
@@ -161,8 +157,8 @@ final class SyncStateInspection(
       timeouts.inspection.await("findContracts") {
         syncDomainPersistentStateManager
           .getByAlias(domain)
-          .traverse(AcsInspection.findContracts(_, filterId, filterPackage, filterTemplate, limit))
-
+          .map(AcsInspection.findContracts(_, filterId, filterPackage, filterTemplate, limit))
+          .sequence
       },
       domain,
     )
@@ -182,6 +178,45 @@ final class SyncStateInspection(
     EitherT.right(disabledCleaningF)
   }
 
+  // TODO(i14441): Remove deprecated ACS download / upload functionality
+  @deprecated("Use exportAcsDumpActiveContracts", since = "2.8.0")
+  def dumpActiveContracts(
+      outputStream: OutputStream,
+      filterDomain: DomainId => Boolean,
+      parties: Set[LfPartyId],
+      timestamp: Option[CantonTimestamp],
+      protocolVersion: Option[ProtocolVersion],
+      contractDomainRenames: Map[DomainId, DomainId],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, Error, Unit] = {
+    val allDomains = syncDomainPersistentStateManager.getAll
+    // disable journal cleaning for the duration of the dump
+    disableJournalCleaningForFilter(allDomains, filterDomain).flatMap { _ =>
+      MonadUtil.sequentialTraverse_(allDomains) {
+        case (domainId, state) if filterDomain(domainId) =>
+          val domainIdForExport = contractDomainRenames.getOrElse(domainId, domainId)
+          val useProtocolVersion = protocolVersion.getOrElse(state.protocolVersion)
+          val ret = for {
+            _ <- AcsInspection
+              .forEachVisibleActiveContract(domainId, state, parties, timestamp) { contract =>
+                val domainToContract =
+                  SerializableContractWithDomainId(domainIdForExport, contract)
+                val encodedContract = domainToContract.encode(useProtocolVersion)
+                outputStream.write(encodedContract.getBytes)
+                Right(outputStream.flush())
+              }
+          } yield ()
+          // re-enable journal cleaning after the dump
+          ret.thereafter { _ =>
+            journalCleaningControl.enable(domainId)
+          }
+        case _ =>
+          EitherTUtil.unit
+      }
+    }
+  }
+
   def allProtocolVersions: Map[DomainId, ProtocolVersion] =
     syncDomainPersistentStateManager.getAll.view.mapValues(_.protocolVersion).toMap
 
@@ -191,7 +226,6 @@ final class SyncStateInspection(
       parties: Set[LfPartyId],
       timestamp: Option[CantonTimestamp],
       contractDomainRenames: Map[DomainId, (DomainId, ProtocolVersion)],
-      skipCleanTimestampCheck: Boolean,
       partiesOffboarding: Boolean,
   )(implicit
       traceContext: TraceContext
@@ -207,17 +241,9 @@ final class SyncStateInspection(
 
           val ret = for {
             result <- AcsInspection
-              .forEachVisibleActiveContract(
-                domainId,
-                state,
-                parties,
-                timestamp,
-                skipCleanTimestampCheck = skipCleanTimestampCheck,
-              ) { case (contract, transferCounter) =>
+              .forEachVisibleActiveContract(domainId, state, parties, timestamp) { contract =>
                 val activeContractE =
-                  ActiveContract.create(domainIdForExport, contract, transferCounter)(
-                    protocolVersion
-                  )
+                  ActiveContract.create(domainIdForExport, contract)(protocolVersion)
 
                 activeContractE match {
                   case Left(e) =>
@@ -447,16 +473,6 @@ final class SyncStateInspection(
     timeouts.inspection.await(s"$functionFullName from $start to $end on $domain")(
       getOrFail(persistentState, domain).acsCommitmentStore
         .outstanding(start, end, counterParticipant)
-    )
-  }
-
-  def bufferedCommitments(
-      domain: DomainAlias,
-      endAtOrBefore: CantonTimestamp,
-  )(implicit traceContext: TraceContext): Iterable[AcsCommitment] = {
-    val persistentState = getPersistentState(domain)
-    timeouts.inspection.await(s"$functionFullName to and including $endAtOrBefore on $domain")(
-      getOrFail(persistentState, domain).acsCommitmentStore.queue.peekThrough(endAtOrBefore)
     )
   }
 

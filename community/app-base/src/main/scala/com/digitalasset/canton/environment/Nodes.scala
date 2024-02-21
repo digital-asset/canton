@@ -11,17 +11,8 @@ import cats.{Applicative, Id}
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.{DbConfig, LocalNodeConfig, ProcessingTimeout, StorageConfig}
-import com.digitalasset.canton.domain.mediator.{
-  MediatorNodeBootstrapX,
-  MediatorNodeConfigCommon,
-  MediatorNodeParameters,
-  MediatorNodeX,
-}
-import com.digitalasset.canton.domain.sequencing.config.{
-  SequencerNodeConfigCommon,
-  SequencerNodeParameters,
-}
-import com.digitalasset.canton.domain.sequencing.{SequencerNodeBootstrapX, SequencerNodeX}
+import com.digitalasset.canton.domain.config.DomainConfig
+import com.digitalasset.canton.domain.{Domain, DomainNodeBootstrap, DomainNodeParameters}
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.*
@@ -295,7 +286,7 @@ class ManagedNodes[
     val runningInstances = nodes.toList
     import TraceContext.Implicits.Empty.*
     runningInstances.map { case (name, stage) =>
-      AsyncCloseable(s"node-$name", stopStage(name)(stage).value, timeouts.closing)
+      AsyncCloseable(s"node-$name", stopStage(name)(stage).value, timeouts.closing.duration)
     }
   }
 
@@ -390,7 +381,7 @@ class ParticipantNodes[B <: CantonNodeBootstrap[N], N <: CantonNode, PC <: Local
       timeouts,
       configs,
       parametersFor,
-      startUpGroup = 2,
+      startUpGroup = 0,
       loggerFactory,
     ) {
   private def migrateIndexerDatabase(name: InstanceName): Either[StartupError, Unit] = {
@@ -423,47 +414,25 @@ class ParticipantNodes[B <: CantonNodeBootstrap[N], N <: CantonNode, PC <: Local
 }
 
 object ParticipantNodes {
-  type ParticipantNodesX[PC <: LocalParticipantConfig] =
-    ParticipantNodes[ParticipantNodeBootstrapX, ParticipantNodeX, PC]
+  type ParticipantNodesOld[PC <: LocalParticipantConfig] =
+    ParticipantNodes[ParticipantNodeBootstrap, ParticipantNode, PC]
 }
 
-class SequencerNodesX[SC <: SequencerNodeConfigCommon](
-    create: (String, SC) => SequencerNodeBootstrapX,
+class DomainNodes[DC <: DomainConfig](
+    create: (String, DC) => DomainNodeBootstrap,
     migrationsFactory: DbMigrationsFactory,
     timeouts: ProcessingTimeout,
-    configs: Map[String, SC],
-    parameters: String => SequencerNodeParameters,
+    configs: Map[String, DC],
+    parameters: String => DomainNodeParameters,
     loggerFactory: NamedLoggerFactory,
-)(implicit ec: ExecutionContext)
-    extends ManagedNodes[SequencerNodeX, SC, SequencerNodeParameters, SequencerNodeBootstrapX](
+)(implicit
+    protected val executionContext: ExecutionContextIdlenessExecutorService
+) extends ManagedNodes[Domain, DC, DomainNodeParameters, DomainNodeBootstrap](
       create,
       migrationsFactory,
       timeouts,
       configs,
       parameters,
       startUpGroup = 0,
-      loggerFactory,
-    )
-
-class MediatorNodesX[MNC <: MediatorNodeConfigCommon](
-    create: (String, MNC) => MediatorNodeBootstrapX,
-    migrationsFactory: DbMigrationsFactory,
-    timeouts: ProcessingTimeout,
-    configs: Map[String, MNC],
-    parameters: String => MediatorNodeParameters,
-    loggerFactory: NamedLoggerFactory,
-)(implicit ec: ExecutionContext)
-    extends ManagedNodes[
-      MediatorNodeX,
-      MNC,
-      MediatorNodeParameters,
-      MediatorNodeBootstrapX,
-    ](
-      create,
-      migrationsFactory,
-      timeouts,
-      configs,
-      parameters,
-      startUpGroup = 1,
       loggerFactory,
     )

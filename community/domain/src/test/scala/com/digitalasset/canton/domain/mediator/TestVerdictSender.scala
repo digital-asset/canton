@@ -40,7 +40,7 @@ class TestVerdictSender(
 
   override def sendResult(
       requestId: RequestId,
-      request: MediatorConfirmationRequest,
+      request: MediatorRequest,
       verdict: Verdict,
       decisionTime: CantonTimestamp,
   )(implicit traceContext: TraceContext): Future[Unit] = {
@@ -50,7 +50,7 @@ class TestVerdictSender(
 
   override def sendReject(
       requestId: RequestId,
-      requestO: Option[MediatorConfirmationRequest],
+      requestO: Option[MediatorRequest],
       rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
       rejectionReason: Verdict.MediatorReject,
       decisionTime: CantonTimestamp,
@@ -64,7 +64,7 @@ object TestVerdictSender {
   final case class Result(
       requestId: RequestId,
       decisionTime: CantonTimestamp,
-      request: Option[MediatorConfirmationRequest],
+      request: Option[MediatorRequest],
       verdict: Option[Verdict],
   )
 }

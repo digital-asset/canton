@@ -9,10 +9,9 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.protocol.submission.DomainSelectionFixture.Transactions.ExerciseByInterface
 import com.digitalasset.canton.participant.protocol.submission.DomainSelectionFixture.*
 import com.digitalasset.canton.participant.protocol.submission.DomainsFilterTest.*
-import com.digitalasset.canton.protocol.{LfTransactionVersion, LfVersionedTransaction}
+import com.digitalasset.canton.protocol.LfVersionedTransaction
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.{DamlLfVersionToProtocolVersions, ProtocolVersion}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPackageId, LfPartyId}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -71,12 +70,11 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
       )
     }
 
-    // TODO(#15561) Re-enable this test when we have a stable protocol version
-    "reject domains when the minimum protocol version is not satisfied " ignore {
+    "reject domains when the minimum protocol version is not satisfied" in {
       import SimpleTopology.*
 
       // LanguageVersion.VDev needs pv=dev so we use pv=6
-      val currentDomainPV = ProtocolVersion.v30
+      val currentDomainPV = ProtocolVersion.v6
       val filter =
         DomainsFilterForTx(Transactions.Create.tx(TransactionVersion.VDev), currentDomainPV)
 
@@ -84,14 +82,11 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
         filter
           .split(loggerFactory, correctTopology, Transactions.Create.correctPackages)
           .futureValue
-      val requiredPV = DamlLfVersionToProtocolVersions.damlLfVersionToMinimumProtocolVersions
-        .get(LfTransactionVersion.VDev)
-        .value
       unusableDomains shouldBe List(
         UsableDomain.UnsupportedMinimumProtocolVersion(
           domainId = DefaultTestIdentities.domainId,
           currentPV = currentDomainPV,
-          requiredPV = requiredPV,
+          requiredPV = ProtocolVersion.dev,
           lfVersion = TransactionVersion.VDev,
         )
       )
@@ -159,8 +154,7 @@ private[submission] object DomainsFilterTest {
         topology: Map[LfPartyId, List[ParticipantId]],
         packages: Seq[LfPackageId] = Seq(),
     )(implicit
-        ec: ExecutionContext,
-        tc: TraceContext,
+        ec: ExecutionContext
     ): Future[(List[UsableDomain.DomainNotUsedReason], List[DomainId])] = {
       val domains = List(
         (

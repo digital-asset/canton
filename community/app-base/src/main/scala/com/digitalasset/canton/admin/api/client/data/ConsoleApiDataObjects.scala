@@ -4,7 +4,7 @@
 package com.digitalasset.canton.admin.api.client.data
 
 import com.digitalasset.canton.DomainAlias
-import com.digitalasset.canton.admin.participant.v30 as participantAdminV30
+import com.digitalasset.canton.participant.admin.{v0 as participantAdminV0}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.*
 
@@ -15,11 +15,10 @@ final case class ListConnectedDomainsResult(
 )
 
 object ListConnectedDomainsResult {
-
-  def fromProtoV30(
-      value: participantAdminV30.ListConnectedDomainsResponse.Result
+  def fromProtoV0(
+      value: participantAdminV0.ListConnectedDomainsResponse.Result
   ): ParsingResult[ListConnectedDomainsResult] = {
-    val participantAdminV30.ListConnectedDomainsResponse.Result(domainAlias, domainId, healthy) =
+    val participantAdminV0.ListConnectedDomainsResponse.Result(domainAlias, domainId, healthy) =
       value
     for {
       domainId <- DomainId.fromProtoPrimitive(domainId, "domainId")
@@ -30,6 +29,7 @@ object ListConnectedDomainsResult {
       domainId = domainId,
       healthy = healthy,
     )
+
   }
 }
 
@@ -41,12 +41,12 @@ final case class DarMetadata(
 )
 
 object DarMetadata {
-
-  def fromProtoV30(
-      value: participantAdminV30.ListDarContentsResponse
+  def fromProtoV0(
+      value: participantAdminV0.ListDarContentsResponse
   ): ParsingResult[DarMetadata] = {
-    val participantAdminV30.ListDarContentsResponse(description, main, packages, dependencies) =
+    val participantAdminV0.ListDarContentsResponse(description, main, packages, dependencies) =
       value
     Right(DarMetadata(description, main, packages, dependencies))
   }
+
 }

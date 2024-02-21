@@ -48,9 +48,7 @@ trait BlockOrderer extends AutoCloseable {
   /** Send a request.
     * Requests are ordered and delivered as [[com.digitalasset.canton.domain.block.BlockOrderer.Block]] to subscribers.
     */
-  def sendRequest(tag: String, body: ByteString, signature: Option[TransactionSignature] = None)(
-      implicit traceContext: TraceContext
-  ): Future[Unit]
+  def sendRequest(tag: String, body: ByteString)(implicit traceContext: TraceContext): Future[Unit]
 
   // Read operations
 

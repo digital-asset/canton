@@ -11,20 +11,20 @@ import org.scalatest.wordspec.AnyWordSpec
 
 class PrettyPrintingTest extends AnyWordSpec with BaseTest {
 
-  private case object ExampleSingleton extends PrettyPrinting {
+  case object ExampleSingleton extends PrettyPrinting {
     override def pretty: Pretty[ExampleSingleton.type] = prettyOfObject[ExampleSingleton.type]
   }
 
-  private val singletonInst: ExampleSingleton.type = ExampleSingleton
-  private val singletonStr: String = "ExampleSingleton"
+  val singletonInst: ExampleSingleton.type = ExampleSingleton
+  val singletonStr: String = "ExampleSingleton"
 
   /** Example of a class where pretty printing needs to be implemented separately.
     */
-  private case class ExampleAlienClass(p1: String, p2: String)
+  case class ExampleAlienClass(p1: String, p2: String)
 
   /** Enable pretty printing for [[ExampleAlienClass]].
     */
-  private implicit val prettyAlien: Pretty[ExampleAlienClass] = {
+  implicit val prettyAlien: Pretty[ExampleAlienClass] = {
     import Pretty.*
     prettyOfClass(
       param("p1", _.p1.doubleQuoted),
@@ -36,58 +36,50 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
     )
   }
 
-  private val alienInst: ExampleAlienClass = ExampleAlienClass("p1Val", "p2Val")
-  private val alienStr: String =
+  val alienInst: ExampleAlienClass = ExampleAlienClass("p1Val", "p2Val")
+  val alienStr: String =
     """ExampleAlienClass(p1 = "p1Val", "p2Val", allParams: {'p1Val', 'p2Val'}, confidential = ...)"""
 
   /** Example of a class that extends [[PrettyPrinting]].
     */
-  private case class ExampleCaseClass(alien: ExampleAlienClass, singleton: ExampleSingleton.type)
+  case class ExampleCaseClass(alien: ExampleAlienClass, singleton: ExampleSingleton.type)
       extends PrettyPrinting {
     override def pretty: Pretty[ExampleCaseClass] =
       prettyOfClass(param("alien", _.alien), param("singleton", _.singleton))
   }
 
-  private val caseClassInst: ExampleCaseClass = ExampleCaseClass(alienInst, ExampleSingleton)
-  private val caseClassStr: String =
-    s"ExampleCaseClass(alien = $alienStr, singleton = $singletonStr)"
+  val caseClassInst: ExampleCaseClass = ExampleCaseClass(alienInst, ExampleSingleton)
+  val caseClassStr: String = s"ExampleCaseClass(alien = $alienStr, singleton = $singletonStr)"
 
   /** Example of a class that uses ad hoc pretty printing.
     */
-  private case class ExampleAdHocCaseClass(alien: ExampleAlienClass, caseClass: ExampleCaseClass)
+  case class ExampleAdHocCaseClass(alien: ExampleAlienClass, caseClass: ExampleCaseClass)
       extends PrettyPrinting {
     override def pretty: Pretty[ExampleAdHocCaseClass] = adHocPrettyInstance
   }
 
-  private val adHocCaseClassInst: ExampleAdHocCaseClass =
-    ExampleAdHocCaseClass(alienInst, caseClassInst)
-  private val adHocCaseClassStr: String =
+  val adHocCaseClassInst: ExampleAdHocCaseClass = ExampleAdHocCaseClass(alienInst, caseClassInst)
+  val adHocCaseClassStr: String =
     s"""ExampleAdHocCaseClass(
        |  ExampleAlienClass("p1Val", "p2Val"),
        |  $caseClassStr
        |)""".stripMargin
 
-  private case object ExampleAdHocObject extends PrettyPrinting {
+  case object ExampleAdHocObject extends PrettyPrinting {
     override def pretty: Pretty[this.type] = adHocPrettyInstance
   }
 
-  private val adHocObjectInst: ExampleAdHocObject.type = ExampleAdHocObject
-  private val adHocObjectStr: String = "ExampleAdHocObject"
+  val adHocObjectInst: ExampleAdHocObject.type = ExampleAdHocObject
+  val adHocObjectStr: String = "ExampleAdHocObject"
 
-  private case class ExampleAbstractCaseClass(content: Int) extends PrettyPrinting {
+  case class ExampleAbstractCaseClass(content: Int) extends PrettyPrinting {
     override def pretty: Pretty[ExampleAbstractCaseClass] = prettyOfClass(
       param("content", _.content)
     )
   }
 
-  private val abstractCaseClass: ExampleAbstractCaseClass = ExampleAbstractCaseClass(42)
-  private val abstractCaseClassStr: String = "ExampleAbstractCaseClass(content = 42)"
-
-  private case class ExampleInfix(first: Int, second: Boolean) extends PrettyPrinting {
-    override def pretty: Pretty[ExampleInfix] = prettyInfix(_.first, "~>", _.second)
-  }
-  private val exampleInfix: ExampleInfix = ExampleInfix(1, true)
-  private val exampleInfixStr: String = "1 ~> true"
+  val abstractCaseClass: ExampleAbstractCaseClass = ExampleAbstractCaseClass(42)
+  val abstractCaseClassStr: String = "ExampleAbstractCaseClass(content = 42)"
 
   "show is pretty" in {
     singletonInst.show shouldBe singletonStr
@@ -96,7 +88,6 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
     adHocCaseClassInst.show shouldBe adHocCaseClassStr
     adHocObjectInst.show shouldBe adHocObjectStr
     abstractCaseClass.show shouldBe abstractCaseClassStr
-    exampleInfix.show shouldBe exampleInfixStr
   }
 
   "show interpolator is pretty" in {
@@ -106,7 +97,6 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
     show"Showing $adHocCaseClassInst" shouldBe s"Showing $adHocCaseClassStr"
     show"Showing $adHocObjectInst" shouldBe s"Showing $adHocObjectStr"
     show"Showing $abstractCaseClass" shouldBe s"Showing $abstractCaseClassStr"
-    show"Showing $exampleInfix" shouldBe s"Showing $exampleInfixStr"
   }
 
   "toString is pretty" in {
@@ -115,7 +105,6 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
     adHocCaseClassInst.toString shouldBe adHocCaseClassStr
     adHocObjectInst.toString shouldBe adHocObjectStr
     abstractCaseClass.toString shouldBe abstractCaseClassStr
-    exampleInfix.toString shouldBe exampleInfixStr
   }
 
   "toString is not pretty" in {
@@ -132,29 +121,6 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
     import Pretty.PrettyOps
     (the[SmartNullPointerException] thrownBy mockedInst.toPrettyString()).getMessage should
       endWith("exampleCaseClass.pretty();\n")
-  }
-
-  "print null values gracefully" in {
-    val nullValue: ExampleCaseClass = null
-    show"$nullValue" shouldBe "null"
-
-    val nestedNullValue = ExampleCaseClass(null, null)
-    nestedNullValue.toString shouldBe "ExampleCaseClass(alien = null, singleton = null)"
-
-    val nullObject: ExampleSingleton.type = null
-    show"$nullObject" shouldBe "null"
-
-    val nullAdhoc: ExampleAdHocCaseClass = null
-    show"$nullAdhoc" shouldBe "null"
-
-    val nullAdhocObject: ExampleAdHocObject.type = null
-    show"$nullAdhocObject" shouldBe "null"
-
-    val nullThrowable: Throwable = null
-    show"$nullThrowable" shouldBe "null"
-
-    val nullInfix: ExampleInfix = null
-    show"$nullInfix" shouldBe "null"
   }
 
   "catch exception when pretty printing invalid control-chars" in {
@@ -186,8 +152,9 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
     }
 
     "work for Null" in {
+      @SuppressWarnings(Array("org.wartremover.warts.Null"))
       val nulll = Pretty.prettyOfClass[Null]().treeOf(null)
-      nulll.show shouldBe "null"
+      nulll.show shouldBe "Null()"
     }
 
     "work for AnyRef" in {

@@ -137,10 +137,13 @@ trait SortedReconciliationIntervalsHelpers {
       )
     }
 
-    new SortedReconciliationIntervalsProvider(
+    SortedReconciliationIntervalsProvider(
+      staticDomainParameters =
+        BaseTest.defaultStaticDomainParametersWith(reconciliationInterval = reconciliationInterval),
       topologyClient = topologyClient,
       futureSupervisor = FutureSupervisor.Noop,
       loggerFactory = loggerFactory,
     )
   }
+
 }

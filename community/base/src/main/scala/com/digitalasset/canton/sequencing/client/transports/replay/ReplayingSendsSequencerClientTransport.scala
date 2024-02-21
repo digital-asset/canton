@@ -5,6 +5,7 @@ package com.digitalasset.canton.sequencing.client.transports.replay
 
 import cats.data.EitherT
 import cats.syntax.traverse.*
+import com.codahale.metrics.{ConsoleReporter, MetricFilter, MetricRegistry}
 import com.daml.metrics.api.MetricsContext.withEmptyMetricsContext
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -12,7 +13,7 @@ import com.digitalasset.canton.crypto.HashPurpose
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.metrics.{MetricValue, SequencerClientMetrics}
+import com.digitalasset.canton.metrics.SequencerClientMetrics
 import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.client.transports.{
   SequencerClientTransport,
@@ -27,18 +28,17 @@ import com.digitalasset.canton.sequencing.{
   SerializedEventHandler,
 }
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
-import com.digitalasset.canton.tracing.{NoTracing, TraceContext, Traced}
-import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
+import com.digitalasset.canton.util.ResourceUtil.withResource
 import com.digitalasset.canton.util.{ErrorUtil, OptionUtil, PekkoUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, SequencerCounter}
-import io.opentelemetry.sdk.metrics.data.MetricData
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
 
+import java.io.{ByteArrayOutputStream, PrintStream}
 import java.nio.file.Path
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
@@ -69,7 +69,7 @@ trait ReplayingSendsSequencerClientTransport extends SequencerClientTransportCom
   ): Future[EventsReceivedReport]
 
   /** Dump the submission related metrics into a string for periodic reporting during the replay test */
-  def metricReport(snapshot: Seq[MetricData]): String
+  def metricReport(registry: MetricRegistry): String
 }
 
 object ReplayingSendsSequencerClientTransport {
@@ -195,21 +195,26 @@ abstract class ReplayingSendsSequencerClientTransportCommon(
 
     TraceContext.withNewTraceContext { traceContext =>
       val withExtendedMst = extendMaxSequencingTime(submission)
-      val sendET = for {
-        // We need a new signature because we've modified the max sequencing time.
-        signedRequest <- requestSigner
-          .signRequest(withExtendedMst, HashPurpose.SubmissionRequestSignature)(
-            implicitly,
-            traceContext,
-          )
-          .leftMap(error =>
-            SendAsyncClientError.RequestRefused(SendAsyncError.RequestRefused(error))
-          )
-        _ <- underlyingTransport.sendAsyncSigned(
-          signedRequest,
-          replaySendsConfig.sendTimeout.toScala,
-        )(traceContext)
-      } yield ()
+      val sendET = if (SubmissionRequest.usingSignedSubmissionRequest(protocolVersion)) {
+        for {
+          // We need a new signature because we've modified the max sequencing time.
+          signedRequest <- requestSigner
+            .signRequest(withExtendedMst, HashPurpose.SubmissionRequestSignature)(
+              implicitly,
+              traceContext,
+            )
+            .leftMap(error =>
+              SendAsyncClientError.RequestRefused(SendAsyncError.RequestRefused(error))
+            )
+          _ <- underlyingTransport.sendAsyncSigned(
+            signedRequest,
+            replaySendsConfig.sendTimeout.toScala,
+          )(traceContext)
+        } yield ()
+      } else {
+        underlyingTransport
+          .sendAsync(withExtendedMst, replaySendsConfig.sendTimeout.toScala)(traceContext)
+      }
 
       sendET.value
         .map(handleSendResult)
@@ -242,14 +247,22 @@ abstract class ReplayingSendsSequencerClientTransportCommon(
   }
 
   /** Dump the submission related metrics into a string for periodic reporting during the replay test */
-  override def metricReport(snapshot: Seq[MetricData]): String = {
-    val metricName = metrics.submissions.prefix.toString()
-    val out = snapshot.flatMap {
-      case metric if metric.getName.startsWith(metricName) => MetricValue.fromMetricData(metric)
-      case _ => Seq.empty
+  override def metricReport(registry: MetricRegistry): String =
+    withResource(new ByteArrayOutputStream()) { os =>
+      withResource(new PrintStream(os)) { ps =>
+        withResource(
+          ConsoleReporter
+            .forRegistry(registry)
+            .filter(MetricFilter.startsWith(metrics.submissions.prefix.toString()))
+            .outputTo(ps)
+            .build()
+        ) { reporter =>
+          reporter.report()
+          ps.flush()
+          os.toString()
+        }
+      }
     }
-    out.show
-  }
 
   protected def subscribe(
       request: SubscriptionRequest,
@@ -269,24 +282,23 @@ abstract class ReplayingSendsSequencerClientTransportCommon(
       with NamedLogging {
     private case class State(
         startedAt: CantonTimestamp,
-        lastEventAt: Option[CantonTimestamp],
+        lastEventAt: CantonTimestamp,
         eventCounter: Int,
         lastCounter: SequencerCounter,
     )
 
-    private val stateRef: AtomicReference[State] = new AtomicReference(
-      State(
-        startedAt = CantonTimestamp.now(),
-        lastEventAt = None,
-        eventCounter = 0,
-        lastCounter = readFrom,
-      )
-    )
+    private val lastDeliverRef: AtomicReference[Option[State]] = new AtomicReference(None)
     private val idleP = Promise[EventsReceivedReport]()
 
     private def scheduleCheck(): Unit = {
       performUnlessClosing(functionFullName) {
-        val nextCheckDuration = idlenessDuration.toJava.minus(elapsed(stateRef.get()))
+        val elapsed = lastDeliverRef
+          .get()
+          .map(_.lastEventAt.toInstant)
+          .map(java.time.Duration.between(_, Instant.now()))
+          .getOrElse(java.time.Duration.ZERO)
+        val nextCheckDuration = idlenessDuration.toJava.minus(elapsed)
+
         val _ = materializer.scheduleOnce(nextCheckDuration.toScala, () => checkIfIdle())
       }.onShutdown(())
     }
@@ -294,38 +306,50 @@ abstract class ReplayingSendsSequencerClientTransportCommon(
     scheduleCheck() // kick off checks
 
     private def updateLastDeliver(counter: SequencerCounter): Unit = {
-      val _ = stateRef.updateAndGet { case state @ State(_, _, eventCounter, _) =>
-        state.copy(
-          lastEventAt = Some(CantonTimestamp.now()),
-          lastCounter = counter,
-          eventCounter = eventCounter + 1,
-        )
+      val _ = lastDeliverRef.updateAndGet {
+        case None =>
+          Some(
+            State(
+              startedAt = CantonTimestamp.now(),
+              lastEventAt = CantonTimestamp.now(),
+              eventCounter = 1,
+              lastCounter = counter,
+            )
+          )
+        case Some(state @ State(_, _, eventCounter, _)) =>
+          Some(
+            state.copy(
+              lastEventAt = CantonTimestamp.now(),
+              lastCounter = counter,
+              eventCounter = eventCounter + 1,
+            )
+          )
       }
     }
 
     private def checkIfIdle(): Unit = {
-      val stateSnapshot = stateRef.get()
-      val elapsedDuration = elapsed(stateSnapshot)
-      val isIdle = elapsedDuration.compareTo(idlenessDuration.toJava) >= 0
+      val isIdle = lastDeliverRef.get() exists {
+        case State(_startedAt, lastEventAt, eventCounter, lastCounter) =>
+          val elapsed =
+            java.time.Duration.between(lastEventAt.toInstant, CantonTimestamp.now().toInstant)
+          val isIdle = elapsed.compareTo(idlenessDuration.toJava) >= 0
 
-      if (isIdle) {
-        idleP
-          .trySuccess(
-            EventsReceivedReport(
-              elapsedDuration.toScala,
-              totalEventsReceived = stateSnapshot.eventCounter,
-              finishedAtCounter = stateSnapshot.lastCounter,
-            )
-          )
-          .discard
-      } else {
-        scheduleCheck() // schedule the next check
+          if (isIdle) {
+            idleP
+              .trySuccess(
+                EventsReceivedReport(
+                  elapsed.toScala,
+                  totalEventsReceived = eventCounter,
+                  finishedAtCounter = lastCounter,
+                )
+              )
+              .discard
+          }
+
+          isIdle
       }
-    }
 
-    private def elapsed(stateSnapshot: State) = {
-      val from = stateSnapshot.lastEventAt.getOrElse(stateSnapshot.startedAt)
-      java.time.Duration.between(from.toInstant, Instant.now())
+      if (!isIdle) scheduleCheck() // schedule the next check
     }
 
     private def updateMetrics(event: SequencedEvent[ClosedEnvelope]): Unit =
@@ -365,14 +389,21 @@ abstract class ReplayingSendsSequencerClientTransportCommon(
   }
 
   /** We're replaying sends so shouldn't allow the app to send any new ones */
+  override def sendAsync(
+      request: SubmissionRequest,
+      timeout: Duration,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, SendAsyncClientError, Unit] = EitherT.rightT(())
+
+  /** We're replaying sends so shouldn't allow the app to send any new ones */
   override def sendAsyncSigned(
       request: SignedContent[SubmissionRequest],
       timeout: Duration,
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] =
     EitherT.rightT(())
 
-  /** We're replaying sends so shouldn't allow the app to send any new ones */
-  override def sendAsyncUnauthenticatedVersioned(
+  override def sendAsyncUnauthenticated(
       request: SubmissionRequest,
       timeout: Duration,
   )(implicit
@@ -393,11 +424,6 @@ abstract class ReplayingSendsSequencerClientTransportCommon(
   ): EitherT[Future, HandshakeRequestError, HandshakeResponse] =
     EitherT.rightT(HandshakeResponse.Success(protocolVersion))
 
-  override def downloadTopologyStateForInit(request: TopologyStateForInitRequest)(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, String, TopologyStateForInitResponse] =
-    EitherT.rightT(TopologyStateForInitResponse(Traced(StoredTopologyTransactionsX.empty)))
-
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = Seq(
     SyncCloseable("underlying-transport", underlyingTransport.close())
   )
@@ -409,7 +435,7 @@ class ReplayingSendsSequencerClientTransportImpl(
     recordedPath: Path,
     replaySendsConfig: ReplayAction.SequencerSends,
     member: Member,
-    val underlyingTransport: SequencerClientTransport & SequencerClientTransportPekko,
+    underlyingTransport: SequencerClientTransport,
     requestSigner: RequestSigner,
     metrics: SequencerClientMetrics,
     timeouts: ProcessingTimeout,
@@ -426,8 +452,7 @@ class ReplayingSendsSequencerClientTransportImpl(
       timeouts,
       loggerFactory,
     )
-    with SequencerClientTransport
-    with SequencerClientTransportPekko {
+    with SequencerClientTransport {
   override def subscribe[E](request: SubscriptionRequest, handler: SerializedEventHandler[E])(
       implicit traceContext: TraceContext
   ): SequencerSubscription[E] = new SequencerSubscription[E] {
@@ -456,19 +481,6 @@ class ReplayingSendsSequencerClientTransportImpl(
   ): AutoCloseable =
     underlyingTransport.subscribe(request, handler)
 
-  override type SubscriptionError = underlyingTransport.SubscriptionError
-
-  override def subscribe(request: SubscriptionRequest)(implicit
-      traceContext: TraceContext
-  ): SequencerSubscriptionPekko[SubscriptionError] = underlyingTransport.subscribe(request)
-
-  override def subscribeUnauthenticated(request: SubscriptionRequest)(implicit
-      traceContext: TraceContext
-  ): SequencerSubscriptionPekko[SubscriptionError] =
-    underlyingTransport.subscribeUnauthenticated(request)
-
-  override def subscriptionRetryPolicyPekko: SubscriptionErrorRetryPolicyPekko[SubscriptionError] =
-    SubscriptionErrorRetryPolicyPekko.never
 }
 
 class ReplayingSendsSequencerClientTransportPekko(
@@ -476,7 +488,7 @@ class ReplayingSendsSequencerClientTransportPekko(
     recordedPath: Path,
     replaySendsConfig: ReplayAction.SequencerSends,
     member: Member,
-    underlyingTransport: SequencerClientTransportPekko & SequencerClientTransport,
+    val underlyingTransport: SequencerClientTransportPekko & SequencerClientTransport,
     requestSigner: RequestSigner,
     metrics: SequencerClientMetrics,
     timeouts: ProcessingTimeout,
@@ -496,6 +508,8 @@ class ReplayingSendsSequencerClientTransportPekko(
     )
     with SequencerClientTransportPekko {
 
+  override type SubscriptionError = underlyingTransport.SubscriptionError
+
   override protected def subscribe(
       request: SubscriptionRequest,
       handler: SerializedEventHandler[NotUsed],
@@ -514,4 +528,21 @@ class ReplayingSendsSequencerClientTransportPekko(
       }
     }
   }
+
+  override def subscribe(request: SubscriptionRequest)(implicit
+      traceContext: TraceContext
+  ): SequencerSubscriptionPekko[SubscriptionError] = underlyingTransport.subscribe(request)
+
+  override def subscribeUnauthenticated(request: SubscriptionRequest)(implicit
+      traceContext: TraceContext
+  ): SequencerSubscriptionPekko[SubscriptionError] =
+    underlyingTransport.subscribeUnauthenticated(request)
+
+  override def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy =
+    SubscriptionErrorRetryPolicy.never
+
+  /** The transport can decide which errors will cause the sequencer client to not try to reestablish a subscription */
+  override def subscriptionRetryPolicyPekko
+      : SubscriptionErrorRetryPolicyPekko[underlyingTransport.SubscriptionError] =
+    SubscriptionErrorRetryPolicyPekko.never
 }

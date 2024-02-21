@@ -15,7 +15,9 @@ import com.digitalasset.canton.sequencing.protocol.Recipients
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.SourceProtocolVersion
 
 import scala.concurrent.ExecutionContext
@@ -60,16 +62,19 @@ private[transfer] sealed abstract case class TransferOutValidationTransferringPa
   }
 
   private def checkVetted(stakeholders: Set[LfPartyId], templateId: LfTemplateId)(implicit
-      ec: ExecutionContext,
-      tc: TraceContext,
+      ec: ExecutionContext
   ): EitherT[FutureUnlessShutdown, TransferProcessorError, Unit] =
-    TransferKnownAndVetted(
-      stakeholders,
-      targetTopology,
-      request.contractId,
-      templateId.packageId,
-      request.targetDomain,
-    )
+    // Before version 5 the transfer-out request did not include the template ID, so this check can't be done
+    EitherTUtil.ifThenET(sourceProtocolVersion.v >= ProtocolVersion.v5) {
+      TransferKnownAndVetted(
+        stakeholders,
+        targetTopology,
+        request.contractId,
+        templateId.packageId,
+        request.targetDomain,
+      )
+    }
+
 }
 
 private[transfer] object TransferOutValidationTransferringParticipant {

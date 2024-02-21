@@ -14,6 +14,7 @@ import com.digitalasset.canton.http.domain.ContractTypeId.ResolvedOf
 import com.digitalasset.canton.http.domain.Choice
 import com.digitalasset.canton.http.util.IdentifierConverters
 import com.digitalasset.canton.http.util.Logging.InstanceUUID
+import com.digitalasset.canton.ledger.api.domain as LedgerApiDomain
 import com.digitalasset.canton.ledger.service.LedgerReader.PackageStore
 import com.digitalasset.canton.ledger.service.{LedgerReader, TemplateIds}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -29,7 +30,8 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class PackageService(
     reloadPackageStoreIfChanged: (
-        Jwt
+        Jwt,
+        LedgerApiDomain.LedgerId,
     ) => PackageService.ReloadPackageStore,
     val loggerFactory: NamedLoggerFactory,
     timeoutInSeconds: Long = 60L,
@@ -49,7 +51,7 @@ class PackageService(
   ) {
 
     def append(diff: PackageStore): State = {
-      val newPackageStore = this.packageStore ++ resolveChoicesIn(diff)
+      val newPackageStore = appendAndResolveRetroactiveInterfaces(resolveChoicesIn(diff))
       val (tpIdMap, ifaceIdMap) = getTemplateIdInterfaceMaps(newPackageStore)
       State(
         packageIds = newPackageStore.keySet,
@@ -68,6 +70,16 @@ class PackageService(
       diff.transform((_, iface) => iface resolveChoicesAndIgnoreUnresolvedChoices findIface)
     }
 
+    private[this] def appendAndResolveRetroactiveInterfaces(diff: PackageStore): PackageStore = {
+      def lookupIf(packageStore: PackageStore, pkId: Ref.PackageId) =
+        packageStore
+          .get(pkId)
+          .map((_, { (newSig: typesig.PackageSignature) => packageStore.updated(pkId, newSig) }))
+
+      val (packageStore2, diffElems) =
+        typesig.PackageSignature.resolveRetroImplements(packageStore, diff.values.toSeq)(lookupIf)
+      packageStore2 ++ diffElems.view.map(p => (p.packageId, p))
+    }
   }
 
   private class StateCache private () {
@@ -99,7 +111,7 @@ class PackageService(
     def packagesShouldBeFetchedAgain: Boolean =
       lastUpdated.until(Instant.now(), temporal.ChronoUnit.SECONDS) >= timeoutInSeconds
 
-    def reload(jwt: Jwt)(implicit
+    def reload(jwt: Jwt, ledgerId: LedgerApiDomain.LedgerId)(implicit
         ec: ExecutionContext,
         lc: LoggingContextOf[InstanceUUID],
     ): Future[Error \/ Unit] = {
@@ -107,7 +119,7 @@ class PackageService(
         .eitherT(
           Future(
             logger.debug(s"Trying to execute a package update, ${lc.makeString}")
-          ) *> reloadPackageStoreIfChanged(jwt)(_state.packageIds)
+          ) *> reloadPackageStoreIfChanged(jwt, ledgerId)(_state.packageIds)
         )
         .map {
           case Some(diff) =>
@@ -151,10 +163,10 @@ class PackageService(
   private def state: State = cache.state
 
   @inline
-  def reload(jwt: Jwt)(implicit
+  def reload(jwt: Jwt, ledgerId: LedgerApiDomain.LedgerId)(implicit
       ec: ExecutionContext,
       lc: LoggingContextOf[InstanceUUID],
-  ): Future[Error \/ Unit] = cache.reload(jwt)
+  ): Future[Error \/ Unit] = cache.reload(jwt, ledgerId)
 
   def packageStore: PackageStore = state.packageStore
 
@@ -170,7 +182,7 @@ class PackageService(
     import ResolveContractTypeId.Overload as O
     import com.digitalasset.canton.http.domain.ContractTypeId as C
 
-    override def apply[U, R](jwt: Jwt)(
+    override def apply[U, R](jwt: Jwt, ledgerId: LedgerApiDomain.LedgerId)(
         x: U with ContractTypeId.OptionalPkg
     )(implicit
         lc: LoggingContextOf[InstanceUUID],
@@ -200,7 +212,7 @@ class PackageService(
             }
           }
       }
-      def doReloadAndSearchAgain() = EitherT(reload(jwt)).map(_ => doSearch())
+      def doReloadAndSearchAgain() = EitherT(reload(jwt, ledgerId)).map(_ => doSearch())
       def keep(it: ResultType) = EitherT.pure(it): ET[ResultType]
       for {
         result <- EitherT.pure(doSearch()): ET[ResultType]
@@ -262,15 +274,16 @@ class PackageService(
           )
       )
 
-  def allTemplateIds(implicit ec: ExecutionContext): AllTemplateIds = { implicit lc => jwt =>
-    val f =
-      if (cache.packagesShouldBeFetchedAgain) {
-        logger.trace(
-          s"no package id and we do have the package, refresh because of timeout, ${lc.makeString}"
-        )
-        reload(jwt)
-      } else Future.successful(())
-    f.map(_ => state.templateIdMap.all.keySet)
+  def allTemplateIds(implicit ec: ExecutionContext): AllTemplateIds = {
+    implicit lc => (jwt, ledgerId) =>
+      val f =
+        if (cache.packagesShouldBeFetchedAgain) {
+          logger.trace(
+            s"no package id and we do have the package, refresh because of timeout, ${lc.makeString}"
+          )
+          reload(jwt, ledgerId)
+        } else Future.successful(())
+      f.map(_ => state.templateIdMap.all.keySet)
   }
 
   // See the above comment on resolveTemplateId
@@ -299,7 +312,7 @@ object PackageService {
 
   sealed abstract class ResolveContractTypeId {
     import ResolveContractTypeId.Overload
-    def apply[U, R](jwt: Jwt)(
+    def apply[U, R](jwt: Jwt, ledgerId: LedgerApiDomain.LedgerId)(
         x: U with ContractTypeId.OptionalPkg
     )(implicit lc: LoggingContextOf[InstanceUUID], overload: Overload[U, R]): Future[
       PackageService.Error \/ Option[R]
@@ -334,7 +347,7 @@ object PackageService {
   type AllTemplateIds =
     LoggingContextOf[
       InstanceUUID
-    ] => Jwt => Future[Set[ContractTypeId.Template.Resolved]]
+    ] => (Jwt, LedgerApiDomain.LedgerId) => Future[Set[ContractTypeId.Template.Resolved]]
 
   type ResolveChoiceArgType =
     (

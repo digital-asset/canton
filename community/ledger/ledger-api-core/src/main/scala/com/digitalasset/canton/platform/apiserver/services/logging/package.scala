@@ -14,10 +14,12 @@ import com.digitalasset.canton.ledger.api.domain.{
   Commands,
   EventId,
   LedgerId,
-  ParticipantOffset,
+  LedgerOffset,
   TransactionFilter,
   TransactionId,
 }
+import com.digitalasset.canton.ledger.api.messages.event.KeyContinuationToken
+import com.digitalasset.canton.ledger.api.messages.event.KeyContinuationToken.toTokenString
 import scalaz.syntax.tag.ToTagOps
 
 package object logging {
@@ -50,13 +52,14 @@ package object logging {
   private[services] def readAsStrings(partyNames: Iterable[String]): LoggingEntry =
     readAs(partyNames.asInstanceOf[Iterable[Party]])
 
-  private[services] def startExclusive(offset: ParticipantOffset): LoggingEntry =
+  private[services] def startExclusive(offset: LedgerOffset): LoggingEntry =
     "startExclusive" -> offset
 
-  private[services] def endInclusive(
-      offset: Option[ParticipantOffset]
-  ): LoggingEntry =
+  private[services] def endInclusive(offset: Option[LedgerOffset]): LoggingEntry =
     "endInclusive" -> offset
+
+  private[services] def offset(offset: Option[LedgerOffset]): LoggingEntry =
+    "offset" -> offset
 
   private[services] def offset(offset: String): LoggingEntry =
     "offset" -> offset
@@ -69,6 +72,9 @@ package object logging {
 
   private[services] def eventSequentialId(seqId: Option[Long]): LoggingEntry =
     "eventSequentialId" -> OfString(seqId.map(_.toString).getOrElse("<empty-sequential-id>"))
+
+  private[services] def keyContinuationToken(token: KeyContinuationToken): LoggingEntry =
+    "keyContinuationToken" -> OfString(toTokenString(token))
 
   private[services] def eventId(id: EventId): LoggingEntry =
     "eventId" -> OfString(id.unwrap)
@@ -117,4 +123,5 @@ package object logging {
 
   private[services] def templateId(id: Identifier): LoggingEntry =
     "templateId" -> id.toString
+
 }

@@ -34,6 +34,7 @@ import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.Tra
 import com.digitalasset.canton.error.*
 import com.digitalasset.canton.health.MutableHealthComponent
 import com.digitalasset.canton.ledger.api.health.HealthStatus
+import com.digitalasset.canton.ledger.configuration.*
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.error.{CommonErrors, PackageServiceErrors}
 import com.digitalasset.canton.ledger.participant.state
@@ -58,7 +59,6 @@ import com.digitalasset.canton.participant.admin.inspection.{
   SyncStateInspection,
 }
 import com.digitalasset.canton.participant.admin.repair.RepairService
-import com.digitalasset.canton.participant.admin.workflows.java.canton
 import com.digitalasset.canton.participant.domain.*
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
@@ -86,7 +86,6 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.{
 }
 import com.digitalasset.canton.participant.topology.*
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
-import com.digitalasset.canton.participant.traffic.TrafficStateController
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
 import com.digitalasset.canton.protocol.*
@@ -112,8 +111,8 @@ import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Source
 import org.slf4j.event.Level
 
-import java.util.concurrent.CompletionStage
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.{CompletableFuture, CompletionStage}
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future}
@@ -159,6 +158,8 @@ class CantonSyncService(
     val isActive: () => Boolean,
     futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
+    skipRecipientsCheck: Boolean,
+    multiDomainLedgerAPIEnabled: Boolean,
 )(implicit ec: ExecutionContext, mat: Materializer, val tracer: Tracer)
     extends state.v2.WriteService
     with WriteParticipantPruningService
@@ -166,8 +167,7 @@ class CantonSyncService(
     with FlagCloseable
     with Spanning
     with NamedLogging
-    with HasCloseContext
-    with InternalStateServiceProviderImpl {
+    with HasCloseContext {
 
   import ShowUtil.*
 
@@ -182,38 +182,12 @@ class CantonSyncService(
     participantNodePersistentState.value.settingsStore.settings.maxDeduplicationDuration
       .getOrElse(throw new RuntimeException("Max deduplication duration is not available"))
 
-  // Augment event with transaction statistics "as late as possible" as stats are redundant data and so that
-  // we don't need to persist stats and deal with versioning stats changes. Also every event is usually consumed
-  // only once.
-  private[sync] def augmentTransactionStatistics(
-      e: LedgerSyncEvent
-  ): LedgerSyncEvent = e match {
-    case e: LedgerSyncEvent.TransactionAccepted =>
-      e.copy(completionInfoO =
-        e.completionInfoO.map(completionInfo =>
-          completionInfo.copy(statistics =
-            Some(LedgerTransactionNodeStatistics(e.transaction, excludedPackageIds))
-          )
-        )
-      )
-    case e => e
-  }
+  val eventTranslationStrategy = new EventTranslationStrategy(
+    multiDomainLedgerAPIEnabled = multiDomainLedgerAPIEnabled,
+    excludeInfrastructureTransactions = parameters.excludeInfrastructureTransactions,
+  )
 
-  private val excludedPackageIds: Set[LfPackageId] =
-    if (parameters.excludeInfrastructureTransactions) {
-      Set(
-        canton.internal.ping.Ping.TEMPLATE_ID,
-        canton.internal.bong.BongProposal.TEMPLATE_ID,
-        canton.internal.bong.Bong.TEMPLATE_ID,
-        canton.internal.bong.Merge.TEMPLATE_ID,
-        canton.internal.bong.Explode.TEMPLATE_ID,
-        canton.internal.bong.Collapse.TEMPLATE_ID,
-      ).map(x => LfPackageId.assertFromString(x.getPackageId))
-    } else {
-      Set.empty[LfPackageId]
-    }
-
-  private type ConnectionListener = Traced[DomainId] => Unit
+  type ConnectionListener = DomainAlias => Unit
 
   // Listeners to domain connections
   private val connectionListeners = new AtomicReference[List[ConnectionListener]](List.empty)
@@ -267,7 +241,7 @@ class CantonSyncService(
     sync.ready
   }
 
-  private[canton] def syncDomainForAlias(alias: DomainAlias): Option[SyncDomain] =
+  private def syncDomainForAlias(alias: DomainAlias): Option[SyncDomain] =
     aliasManager.domainIdForAlias(alias).flatMap(connectedDomainsMap.get)
 
   private val domainRouter =
@@ -391,7 +365,6 @@ class CantonSyncService(
   // Submit a transaction (write service implementation)
   override def submitTransaction(
       submitterInfo: SubmitterInfo,
-      optDomainId: Option[DomainId],
       transactionMeta: TransactionMeta,
       transaction: LfSubmittedTransaction,
       _estimatedInterpretationCost: Long,
@@ -406,7 +379,6 @@ class CantonSyncService(
       logger.debug(s"Received submit-transaction ${submitterInfo.commandId} from ledger-api server")
       submitTransactionF(
         submitterInfo,
-        optDomainId,
         transactionMeta,
         transaction,
         keyResolver,
@@ -514,7 +486,6 @@ class CantonSyncService(
 
   private def submitTransactionF(
       submitterInfo: SubmitterInfo,
-      optDomainId: Option[DomainId],
       transactionMeta: TransactionMeta,
       transaction: LfSubmittedTransaction,
       keyResolver: LfKeyResolver,
@@ -551,7 +522,6 @@ class CantonSyncService(
     } else {
       val submittedFF = domainRouter.submitTransaction(
         submitterInfo,
-        optDomainId,
         transactionMeta,
         keyResolver,
         transaction,
@@ -564,18 +534,18 @@ class CantonSyncService(
             // Reply with ACK as soon as the submission has been registered as in-flight,
             // and asynchronously send it to the sequencer.
             logger.debug(s"Command ${submitterInfo.commandId} is now in flight.")
-            val loggedF = sequencedF.transformIntoSuccess { result =>
-              result match {
-                case Success(UnlessShutdown.Outcome(_)) =>
-                  logger.debug(s"Successfully submitted transaction ${submitterInfo.commandId}.")
-                case Success(UnlessShutdown.AbortedDueToShutdown) =>
-                  logger.debug(
-                    s"Transaction submission aborted due to shutdown ${submitterInfo.commandId}."
-                  )
-                case Failure(ex) =>
-                  logger.error(s"Command submission for ${submitterInfo.commandId} failed", ex)
-              }
-              UnlessShutdown.unit
+            val loggedF = sequencedF.transform {
+              case Success(UnlessShutdown.Outcome(_)) =>
+                logger.debug(s"Successfully submitted transaction ${submitterInfo.commandId}.")
+                Success(UnlessShutdown.Outcome(()))
+              case Success(UnlessShutdown.AbortedDueToShutdown) =>
+                logger.debug(
+                  s"Transaction submission aborted due to shutdown ${submitterInfo.commandId}."
+                )
+                Success(UnlessShutdown.Outcome(()))
+              case Failure(ex) =>
+                logger.error(s"Command submission for ${submitterInfo.commandId} failed", ex)
+                Success(UnlessShutdown.Outcome(()))
             }
             Right(loggedF)
           case Success(Left(submissionError)) =>
@@ -594,6 +564,17 @@ class CantonSyncService(
         Success(loggedResult)
       }
     }
+  }
+
+  override def submitConfiguration(
+      _maxRecordTimeToBeRemovedUpstream: participant.LedgerSyncRecordTime,
+      submissionId: LedgerSubmissionId,
+      config: Configuration,
+  )(implicit
+      traceContext: TraceContext
+  ): CompletionStage[SubmissionResult] = {
+    logger.info("Canton does not support dynamic reconfiguration of time model")
+    CompletableFuture.completedFuture(TransactionError.NotSupported)
   }
 
   /** Build source for subscription (for ledger api server indexer).
@@ -615,12 +596,9 @@ class CantonSyncService(
               .subscribe(beginStartingAt)
               .mapConcat { case (offset, event) =>
                 event
-                  .map(augmentTransactionStatistics)
-                  .traverse(_.toDamlUpdate)
+                  .traverse(eventTranslationStrategy.translate)
                   .map { e =>
-                    logger.debug(show"Emitting event at offset $offset. Event: ${event.value}")(
-                      e.traceContext
-                    )
+                    logger.debug(show"Emitting event at offset $offset. Event: ${event.value}")
                     (UpstreamOffsetConvert.fromGlobalOffset(offset), e)
                   }
               },
@@ -1190,7 +1168,7 @@ class CantonSyncService(
                     loggerFactory,
                   ),
                 domainMetrics,
-                parameters.cachingConfigs.sessionKeyCache,
+                parameters.cachingConfigs.sessionKeyCacheConfig,
                 participantId,
               )
           )
@@ -1203,14 +1181,6 @@ class CantonSyncService(
           domainHandle.topologyClient,
           domainCrypto.crypto.cryptoPrivateStore,
           loggerFactory,
-        )
-
-        trafficStateController = new TrafficStateController(
-          participantId,
-          loggerFactory,
-          domainHandle.topologyClient,
-          metrics.domainMetrics(domainAlias),
-          clock,
         )
 
         syncDomain = syncDomainFactory.create(
@@ -1232,7 +1202,6 @@ class CantonSyncService(
               missingKeysAlerter,
               domainHandle.topologyClient,
               domainCrypto,
-              trafficStateController,
               ephemeral.recordOrderPublisher,
               domainHandle.staticParameters.protocolVersion,
             ),
@@ -1242,9 +1211,9 @@ class CantonSyncService(
           clock,
           metrics.pruning,
           domainMetrics,
-          trafficStateController,
           futureSupervisor,
           domainLoggerFactory,
+          skipRecipientsCheck = skipRecipientsCheck,
         )
 
         // update list of connected domains
@@ -1311,9 +1280,7 @@ class CantonSyncService(
       ): UnlessShutdown[Either[SyncServiceError, Unit]] =
         outcome match {
           case x @ UnlessShutdown.Outcome(Right(())) =>
-            aliasManager.domainIdForAlias(domainAlias).foreach { domainId =>
-              connectionListeners.get().foreach(_(Traced(domainId)))
-            }
+            connectionListeners.get().foreach(_(domainAlias))
             x
           case UnlessShutdown.AbortedDueToShutdown =>
             disconnectOn()
@@ -1447,7 +1414,7 @@ class CantonSyncService(
   }
 
   private val emitWarningOnDetailLoggingAndHighLoad =
-    (parameters.general.loggingConfig.eventDetails || parameters.general.loggingConfig.api.messagePayloads) && parameters.general.loggingConfig.api.warnBeyondLoad.nonEmpty
+    (parameters.general.loggingConfig.eventDetails || parameters.general.loggingConfig.api.logMessagePayloads) && parameters.general.loggingConfig.api.warnBeyondLoad.nonEmpty
 
   def checkOverloaded(traceContext: TraceContext): Option[state.v2.SubmissionResult] = {
     implicit val errorLogger: ErrorLoggingContext =
@@ -1493,7 +1460,7 @@ class CantonSyncService(
       sequencerClientHealth,
     )
 
-    Lifecycle.close(instances*)(logger)
+    Lifecycle.close(instances: _*)(logger)
   }
 
   override def toString: String = s"CantonSyncService($participantId)"
@@ -1558,7 +1525,7 @@ class CantonSyncService(
               submitterMetadata = TransferSubmitterMetadata(
                 submitter = submitter,
                 applicationId = applicationId,
-                submittingParticipant = participantId,
+                submittingParticipant = participantId.toLf,
                 commandId = commandId,
                 submissionId = submissionId,
                 workflowId = workflowId,
@@ -1578,7 +1545,7 @@ class CantonSyncService(
               submitterMetadata = TransferSubmitterMetadata(
                 submitter = submitter,
                 applicationId = applicationId,
-                submittingParticipant = participantId,
+                submittingParticipant = participantId.toLf,
                 commandId = commandId,
                 submissionId = submissionId,
                 workflowId = workflowId,
@@ -1609,19 +1576,14 @@ class CantonSyncService(
       .collect { case (domainAlias, (domainId, true)) =>
         for {
           topology <- getSnapshot(domainAlias, domainId)
-          partyWithAttributes <- topology.hostedOn(
-            Set(request.party),
-            participantId = participantId,
+          attributesO <- topology.hostedOn(request.party, participantId = participantId)
+        } yield attributesO.map(attributes =>
+          ConnectedDomainResponse.ConnectedDomain(
+            domainAlias,
+            domainId,
+            attributes.permission,
           )
-        } yield partyWithAttributes
-          .get(request.party)
-          .map(attributes =>
-            ConnectedDomainResponse.ConnectedDomain(
-              domainAlias,
-              domainId,
-              attributes.permission,
-            )
-          )
+        )
       }.toSeq
 
     Future.sequence(result).map(_.flatten).map(ConnectedDomainResponse.apply)
@@ -1686,6 +1648,8 @@ object CantonSyncService {
         sequencerInfoLoader: SequencerInfoLoader,
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
+        skipRecipientsCheck: Boolean,
+        multiDomainLedgerAPIEnabled: Boolean,
     )(implicit ec: ExecutionContext, mat: Materializer, tracer: Tracer): T
   }
 
@@ -1715,6 +1679,8 @@ object CantonSyncService {
         sequencerInfoLoader: SequencerInfoLoader,
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
+        skipRecipientsCheck: Boolean,
+        multiDomainLedgerAPIEnabled: Boolean,
     )(implicit
         ec: ExecutionContext,
         mat: Materializer,
@@ -1747,6 +1713,8 @@ object CantonSyncService {
         () => storage.isActive,
         futureSupervisor,
         loggerFactory,
+        skipRecipientsCheck = skipRecipientsCheck,
+        multiDomainLedgerAPIEnabled: Boolean,
       )
   }
 }
@@ -1836,6 +1804,8 @@ object SyncServiceError extends SyncServiceErrorGroup {
 
   abstract class DomainRegistryErrorGroup extends ErrorGroup()
 
+  abstract class TrafficControlErrorGroup extends ErrorGroup()
+
   final case class SyncServiceFailedDomainConnection(
       domain: DomainAlias,
       parent: DomainRegistryError,
@@ -1866,11 +1836,9 @@ object SyncServiceError extends SyncServiceErrorGroup {
   }
 
   @Explanation(
-    "This error is logged when the synchronization service shuts down because the remote sequencer API is denying access."
+    "This error is logged when the synchronization service shuts down because the remote domain has disabled this participant."
   )
-  @Resolution(
-    "Contact the sequencer operator and inquire why you are not allowed to connect anymore."
-  )
+  @Resolution("Contact the domain operator and inquire why you have been booted out.")
   object SyncServiceDomainDisabledUs
       extends ErrorCode(
         "SYNC_SERVICE_DOMAIN_DISABLED_US",

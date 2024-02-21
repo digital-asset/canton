@@ -3,11 +3,12 @@
 
 package com.digitalasset.canton.ledger.api.messages.transaction
 
-import com.digitalasset.canton.ledger.api.domain.{ParticipantOffset, TransactionFilter}
+import com.digitalasset.canton.ledger.api.domain.{LedgerId, LedgerOffset, TransactionFilter}
 
 final case class GetTransactionsRequest(
-    startExclusive: ParticipantOffset,
-    endInclusive: Option[ParticipantOffset],
+    ledgerId: Option[LedgerId],
+    startExclusive: LedgerOffset,
+    endInclusive: Option[LedgerOffset],
     filter: TransactionFilter,
     verbose: Boolean,
 )

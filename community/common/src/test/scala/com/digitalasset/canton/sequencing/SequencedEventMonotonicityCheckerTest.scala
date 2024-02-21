@@ -120,12 +120,11 @@ class SequencedEventMonotonicityCheckerTest
         loggerFactory,
       )
       val eventsF = Source(bobEvents)
-        .map(Right(_))
         .withUniqueKillSwitchMat()(Keep.left)
         .via(checker.flow)
         .toMat(Sink.seq)(Keep.right)
         .run()
-      eventsF.futureValue.map(_.unwrap) shouldBe bobEvents.map(Right(_))
+      eventsF.futureValue.map(_.unwrap) shouldBe bobEvents
     }
 
     "kill the stream upon a gap in the counters" in { env =>
@@ -139,7 +138,6 @@ class SequencedEventMonotonicityCheckerTest
       val (batch1, batch2) = bobEvents.splitAt(2)
       val eventsF = loggerFactory.assertLogs(
         Source(batch1 ++ batch2.drop(1))
-          .map(Right(_))
           .withUniqueKillSwitchMat()(Keep.left)
           .via(checker.flow)
           .toMat(Sink.seq)(Keep.right)
@@ -148,7 +146,7 @@ class SequencedEventMonotonicityCheckerTest
           "Sequencer counters and timestamps do not increase monotonically"
         ),
       )
-      eventsF.futureValue.map(_.unwrap) shouldBe batch1.map(Right(_))
+      eventsF.futureValue.map(_.unwrap) shouldBe batch1
     }
 
     "detect non-monotonic timestamps" in { env =>
@@ -170,7 +168,6 @@ class SequencedEventMonotonicityCheckerTest
       )
       val eventsF = loggerFactory.assertLogs(
         Source(Seq(event1, event2))
-          .map(Right(_))
           .withUniqueKillSwitchMat()(Keep.left)
           .via(checker.flow)
           .toMat(Sink.seq)(Keep.right)
@@ -179,7 +176,7 @@ class SequencedEventMonotonicityCheckerTest
           "Sequencer counters and timestamps do not increase monotonically"
         ),
       )
-      eventsF.futureValue.map(_.unwrap) shouldBe Seq(Right(event1))
+      eventsF.futureValue.map(_.unwrap) shouldBe Seq(event1)
     }
   }
 }

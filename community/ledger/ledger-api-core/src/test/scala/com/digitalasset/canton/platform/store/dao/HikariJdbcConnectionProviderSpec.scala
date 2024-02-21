@@ -100,6 +100,7 @@ class HikariJdbcConnectionProviderSpec
           minimumIdle = 10,
           maxPoolSize = 10,
           connectionTimeout = FiniteDuration(10, "seconds"),
+          metrics = None,
         )
         _ <- DataSourceConnectionProvider.owner(
           dataSource = hikariDataSource,
@@ -126,7 +127,7 @@ class HikariJdbcConnectionProviderSpec
             val start = System.currentTimeMillis()
             connectionGate.set(false);
             Threading.sleep(
-              600
+              500
             ) // so that the Hikari isValid bypass default duration of 500 millis pass (otherwise getting connection from the pool is not necessary checked)
             val failingConnection = getConnection
             Threading.sleep(500) // so that health check already hangs (this is polled every second)
@@ -136,14 +137,14 @@ class HikariJdbcConnectionProviderSpec
         }
         .flatMap { case (start, failingConnection) =>
           val released = System.currentTimeMillis()
-          released - start should be > 1099L
-          released - start should be < 1600L // because we are not waiting for the healthcheck to be finished
+          released - start should be > 1000L
+          released - start should be < 1500L // because we are not waiting for the healthcheck to be finished
           failingConnection.isCompleted shouldBe false // failing connection will hang for 10 seconds
           failingConnection.failed.map(_ => start)
         }
         .map { start =>
           val failedConnectionFinished = System.currentTimeMillis()
-          failedConnectionFinished - start should be > 9999L
+          failedConnectionFinished - start should be > 10000L
           eventually {
             val logEntries = loggerFactory.fetchRecordedLogEntries
             logEntries.size shouldBe 1

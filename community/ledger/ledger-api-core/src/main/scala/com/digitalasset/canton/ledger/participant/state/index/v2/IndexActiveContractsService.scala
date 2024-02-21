@@ -19,5 +19,6 @@ trait IndexActiveContractsService {
       filter: TransactionFilter,
       verbose: Boolean,
       activeAtO: Option[Offset],
+      multiDomainEnabled: Boolean,
   )(implicit loggingContext: LoggingContextWithTrace): Source[GetActiveContractsResponse, NotUsed]
 }

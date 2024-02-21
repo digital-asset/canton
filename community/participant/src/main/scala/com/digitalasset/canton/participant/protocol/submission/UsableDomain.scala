@@ -5,13 +5,13 @@ package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
+import cats.syntax.foldable.*
 import cats.syntax.parallel.*
 import com.daml.lf.transaction.TransactionVersion
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.PackageUnknownTo
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
-import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.{DamlLfVersionToProtocolVersions, ProtocolVersion}
@@ -28,8 +28,7 @@ object UsableDomain {
       requiredPackagesByParty: Map[LfPartyId, Set[LfPackageId]],
       transactionVersion: TransactionVersion,
   )(implicit
-      ec: ExecutionContext,
-      tc: TraceContext,
+      ec: ExecutionContext
   ): EitherT[Future, DomainNotUsedReason, Unit] = {
 
     val packageVetted: EitherT[Future, UnknownPackage, Unit] =
@@ -54,16 +53,15 @@ object UsableDomain {
       snapshot: TopologySnapshot,
       parties: Set[LfPartyId],
   )(implicit
-      ec: ExecutionContext,
-      tc: TraceContext,
+      ec: ExecutionContext
   ): EitherT[Future, MissingActiveParticipant, Unit] =
     snapshot
-      .allHaveActiveParticipants(parties)
+      .allHaveActiveParticipants(parties, _.isActive)
       .leftMap(MissingActiveParticipant(domainId, _))
 
   private def unknownPackages(snapshot: TopologySnapshot)(
       participantIdAndRequiredPackages: (ParticipantId, Set[LfPackageId])
-  )(implicit ec: ExecutionContext, tc: TraceContext): Future[List[PackageUnknownTo]] = {
+  )(implicit ec: ExecutionContext): Future[List[PackageUnknownTo]] = {
     val (participantId, required) = participantIdAndRequiredPackages
     snapshot.findUnvettedPackagesOrDependencies(participantId, required).value.map {
       case Right(notVetted) =>
@@ -76,22 +74,19 @@ object UsableDomain {
   private def resolveParticipants(
       snapshot: TopologySnapshot,
       requiredPackagesByParty: Map[LfPartyId, Set[LfPackageId]],
-  )(implicit
-      ec: ExecutionContext,
-      tc: TraceContext,
-  ): EitherT[Future, Nothing, Map[ParticipantId, Set[LfPackageId]]] = EitherT.right(
-    snapshot.activeParticipantsOfPartiesWithAttributes(requiredPackagesByParty.keySet.toSeq).map {
-      partyToParticipants =>
-        requiredPackagesByParty.toList.foldLeft(Map.empty[ParticipantId, Set[LfPackageId]]) {
-          case (acc, (party, packages)) =>
-            val participants = partyToParticipants.getOrElse(party, Map.empty)
-            // add the required packages for this party to the set of required packages of this participant
-            participants.foldLeft(acc) { case (res, (participantId, _)) =>
-              res.updated(participantId, res.getOrElse(participantId, Set()).union(packages))
-            }
+  )(implicit ec: ExecutionContext) =
+    requiredPackagesByParty.toList.foldM(Map.empty[ParticipantId, Set[LfPackageId]]) {
+      case (acc, (party, packages)) =>
+        for {
+          // fetch all participants of this party
+          participants <- EitherT.right(snapshot.activeParticipantsOf(party))
+        } yield {
+          // add the required packages for this party to the set of required packages of this participant
+          participants.foldLeft(acc) { case (res, (participantId, _)) =>
+            res.updated(participantId, res.getOrElse(participantId, Set()).union(packages))
+          }
         }
     }
-  )
 
   /** The following is checked:
     *
@@ -119,8 +114,7 @@ object UsableDomain {
       snapshot: TopologySnapshot,
       requiredPackagesByParty: Map[LfPartyId, Set[LfPackageId]],
   )(implicit
-      ec: ExecutionContext,
-      tc: TraceContext,
+      ec: ExecutionContext
   ): EitherT[Future, UnknownPackage, Unit] =
     resolveParticipants(snapshot, requiredPackagesByParty).flatMap(
       checkPackagesVetted(domainId, snapshot, _)
@@ -131,8 +125,7 @@ object UsableDomain {
       snapshot: TopologySnapshot,
       requiredPackages: Map[ParticipantId, Set[LfPackageId]],
   )(implicit
-      ec: ExecutionContext,
-      traceContext: TraceContext,
+      ec: ExecutionContext
   ): EitherT[Future, UnknownPackage, Unit] =
     EitherT(
       requiredPackages.toList

@@ -48,9 +48,9 @@ object JdbcIndexer {
       executionContext: ExecutionContext,
       tracer: Tracer,
       loggerFactory: NamedLoggerFactory,
+      multiDomainEnabled: Boolean,
       dataSourceProperties: DataSourceProperties,
       highAvailability: HaConfig,
-      indexerDbDispatcherOverride: Option[DbDispatcher] = None,
   )(implicit materializer: Materializer) {
 
     def initialized(
@@ -100,10 +100,7 @@ object JdbcIndexer {
           maxInputBufferSize = config.maxInputBufferSize.unwrap,
           inputMappingParallelism = config.inputMappingParallelism.unwrap,
           batchingParallelism = config.batchingParallelism.unwrap,
-          ingestionParallelism =
-            // override is just there for H2
-            if (indexerDbDispatcherOverride.isDefined) 1
-            else config.ingestionParallelism.unwrap,
+          ingestionParallelism = config.ingestionParallelism.unwrap,
           submissionBatchSize = config.submissionBatchSize,
           maxTailerBatchSize = config.maxTailerBatchSize,
           maxOutputBatchedBufferSize = config.maxOutputBatchedBufferSize,
@@ -112,6 +109,7 @@ object JdbcIndexer {
           stringInterningView = inMemoryState.stringInterningView,
           tracer = tracer,
           loggerFactory = loggerFactory,
+          multiDomainEnabled = multiDomainEnabled,
         ),
         meteringAggregator = new MeteringAggregator.Owner(
           meteringStore = meteringStoreBackend,
@@ -146,7 +144,6 @@ object JdbcIndexer {
               ),
             ),
         loggerFactory = loggerFactory,
-        indexerDbDispatcherOverride = indexerDbDispatcherOverride,
       )
 
       indexer
@@ -164,7 +161,7 @@ object JdbcIndexer {
       (fromExclusive, toInclusive) => {
         implicit val loggingContext: LoggingContextWithTrace =
           LoggingContextWithTrace.empty
-        dbDispatcher.executeSql(metrics.index.db.loadStringInterningEntries) {
+        dbDispatcher.executeSql(metrics.daml.index.db.loadStringInterningEntries) {
           stringInterningStorageBackend.loadStringInterningEntries(
             fromExclusive,
             toInclusive,

@@ -4,24 +4,26 @@
 package com.digitalasset.canton.participant.metrics
 
 import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
-import com.daml.metrics.api.MetricHandle.{Histogram, Timer}
-import com.daml.metrics.api.{MetricDoc, MetricName, MetricsContext}
-import com.digitalasset.canton.metrics.CantonLabeledMetricsFactory
+import com.daml.metrics.api.MetricHandle.{Histogram, MetricsFactory, Timer}
+import com.daml.metrics.api.{MetricDoc, MetricName}
+
+import scala.annotation.nowarn
 
 class TransactionProcessingMetrics(
     val prefix: MetricName,
-    factory: CantonLabeledMetricsFactory,
-)(implicit context: MetricsContext) {
+    @deprecated("Use LabeledMetricsFactory", since = "2.7.0") factory: MetricsFactory,
+) {
 
   object protocolMessages {
     private val prefix = TransactionProcessingMetrics.this.prefix :+ "protocol-messages"
 
     @MetricDoc.Tag(
-      summary = "Time to create a transaction confirmation request",
+      summary = "Time to create a confirmation request",
       description =
-        """The time that the transaction protocol processor needs to create a transaction confirmation request.""",
+        """The time that the transaction protocol processor needs to create a confirmation request.""",
       qualification = Debug,
     )
+    @nowarn("cat=deprecation")
     val confirmationRequestCreation: Timer =
       factory.timer(prefix :+ "confirmation-request-creation")
 
@@ -31,6 +33,7 @@ class TransactionProcessingMetrics(
         """The time that the transaction protocol processor needs to parse and decrypt an incoming confirmation request.""",
       qualification = Debug,
     )
+    @nowarn("cat=deprecation")
     val transactionMessageReceipt: Timer = factory.timer(prefix :+ "transaction-message-receipt")
 
     @MetricDoc.Tag(
@@ -39,6 +42,7 @@ class TransactionProcessingMetrics(
         """Records the histogram of the sizes of (transaction) confirmation requests.""",
       qualification = Debug,
     )
+    @nowarn("cat=deprecation")
     val confirmationRequestSize: Histogram =
       factory.histogram(prefix :+ "confirmation-request-size")
   }

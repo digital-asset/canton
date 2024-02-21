@@ -5,17 +5,8 @@ package com.digitalasset.canton.admin.api.client.data
 
 import cats.Show
 import com.digitalasset.canton.admin.api.client.data.CantonStatus.splitSuccessfulAndFailedStatus
-import com.digitalasset.canton.console.{
-  MediatorReference,
-  ParticipantReference,
-  SequencerNodeReference,
-}
-import com.digitalasset.canton.health.admin.data.{
-  MediatorNodeStatus,
-  NodeStatus,
-  ParticipantStatus,
-  SequencerNodeStatus,
-}
+import com.digitalasset.canton.console.{DomainReference, ParticipantReference}
+import com.digitalasset.canton.health.admin.data.{DomainStatus, NodeStatus, ParticipantStatus}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.util.ShowUtil.*
 
@@ -70,22 +61,17 @@ object CantonStatus {
 
 object CommunityCantonStatus {
   def getStatus(
-      sequencers: Map[String, () => NodeStatus[SequencerNodeStatus]],
-      mediators: Map[String, () => NodeStatus[MediatorNodeStatus]],
+      domains: Map[String, () => NodeStatus[DomainStatus]],
       participants: Map[String, () => NodeStatus[ParticipantStatus]],
   ): CommunityCantonStatus = {
-    val (sequencerStatus, unreachableSequencers) =
-      splitSuccessfulAndFailedStatus(sequencers, SequencerNodeReference.InstanceType)
-    val (mediatorStatus, unreachableMediators) =
-      splitSuccessfulAndFailedStatus(mediators, MediatorReference.InstanceType)
+    val (domainStatus, unreachableDomains) =
+      splitSuccessfulAndFailedStatus(domains, DomainReference.InstanceType)
     val (participantStatus, unreachableParticipants) =
       splitSuccessfulAndFailedStatus(participants, ParticipantReference.InstanceType)
 
     CommunityCantonStatus(
-      sequencerStatus,
-      unreachableSequencers,
-      mediatorStatus,
-      unreachableMediators,
+      domainStatus,
+      unreachableDomains,
       participantStatus,
       unreachableParticipants,
     )
@@ -93,26 +79,19 @@ object CommunityCantonStatus {
 }
 
 final case class CommunityCantonStatus(
-    sequencerStatus: Map[String, SequencerNodeStatus],
-    unreachableSequencers: Map[String, NodeStatus.Failure],
-    mediatorStatus: Map[String, MediatorNodeStatus],
-    unreachableMediators: Map[String, NodeStatus.Failure],
+    domainStatus: Map[String, DomainStatus],
+    unreachableDomains: Map[String, NodeStatus.Failure],
     participantStatus: Map[String, ParticipantStatus],
     unreachableParticipants: Map[String, NodeStatus.Failure],
 ) extends CantonStatus {
-  def tupled: (Map[String, SequencerNodeStatus], Map[String, ParticipantStatus]) =
-    (sequencerStatus, participantStatus)
+  def tupled: (Map[String, DomainStatus], Map[String, ParticipantStatus]) =
+    (domainStatus, participantStatus)
 
   override def pretty: Pretty[CommunityCantonStatus] = prettyOfString { _ =>
-    val sequencers = descriptions(
-      sequencerStatus,
-      unreachableSequencers,
-      SequencerNodeReference.InstanceType,
-    )
-    val mediators = descriptions(
-      mediatorStatus,
-      unreachableMediators,
-      MediatorReference.InstanceType,
+    val domains = descriptions(
+      domainStatus,
+      unreachableDomains,
+      DomainReference.InstanceType,
     )
     val participants =
       descriptions(
@@ -120,6 +99,6 @@ final case class CommunityCantonStatus(
         unreachableParticipants,
         ParticipantReference.InstanceType,
       )
-    (sequencers ++ mediators ++ participants).mkString(System.lineSeparator() * 2)
+    (domains ++ participants).mkString(System.lineSeparator() * 2)
   }
 }

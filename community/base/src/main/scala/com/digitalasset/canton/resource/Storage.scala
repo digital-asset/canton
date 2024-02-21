@@ -557,7 +557,7 @@ object DbStorage {
       GetResult(r => r.nextBytesOption().map(ByteString.copyFrom))
 
     implicit val setContractSalt: SetParameter[Option[Salt]] =
-      (c, pp) => pp >> c.map(_.toProtoV30.toByteString)
+      (c, pp) => pp >> c.map(_.toProtoV0.toByteString)
     implicit val getContractSalt: GetResult[Option[Salt]] =
       implicitly[GetResult[Option[ByteString]]] andThen {
         _.map(byteString =>
@@ -565,8 +565,8 @@ object DbStorage {
             .parse(
               // Even though it is versioned, the Salt is considered static
               // as it's used for authenticating contract ids which are immutable
-              com.digitalasset.canton.crypto.v30.Salt.parseFrom,
-              Salt.fromProtoV30,
+              com.digitalasset.canton.crypto.v0.Salt.parseFrom,
+              Salt.fromProtoV0,
               byteString,
             )
             .valueOr(err =>
@@ -599,9 +599,6 @@ object DbStorage {
     }
     def ++(other: SQLActionBuilderChain): SQLActionBuilderChain = {
       new SQLActionBuilderChain(builders.concat(other.builders))
-    }
-    def ++(others: Seq[SQLActionBuilderChain]): SQLActionBuilderChain = {
-      others.foldLeft(this)(_ ++ _)
     }
     def intercalate(item: SQLActionBuilder): SQLActionBuilderChain = {
       new SQLActionBuilderChain(

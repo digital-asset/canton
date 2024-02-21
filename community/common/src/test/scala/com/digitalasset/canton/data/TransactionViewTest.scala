@@ -4,6 +4,7 @@
 package com.digitalasset.canton.data
 
 import cats.syntax.either.*
+import com.daml.lf.transaction.Util
 import com.daml.lf.value.Value
 import com.digitalasset.canton.crypto.{HashOps, Salt, TestSalt}
 import com.digitalasset.canton.data.ViewParticipantData.InvalidViewParticipantData
@@ -21,7 +22,8 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
 
   private val contractInst: LfContractInst = ExampleTransactionFactory.contractInstance()
 
-  private val cantonContractIdVersion: CantonContractIdVersion = AuthenticatedContractIdVersionV2
+  private val cantonContractIdVersion: CantonContractIdVersion =
+    CantonContractIdVersion.fromProtocolVersion(testedProtocolVersion)
   private val createdId: LfContractId =
     cantonContractIdVersion.fromDiscriminator(
       ExampleTransactionFactory.lfHash(3),
@@ -34,8 +36,9 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
   private val globalKey: LfGlobalKey =
     LfGlobalKey
       .build(
-        LfTransactionBuilder.defaultTemplateId,
-        Value.ValueInt64(100L),
+        templateId = LfTransactionBuilder.defaultTemplateId,
+        key = Value.ValueInt64(100L),
+        shared = Util.sharedKey(LfTransactionBuilder.defaultLanguageVersion),
       )
       .value
 
@@ -71,7 +74,7 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
       val view = factory.SingleCreate(seed = ExampleTransactionFactory.lfHash(3)).view0
       val subViews = TransactionSubviews(Seq(view))(testedProtocolVersion, factory.cryptoOps)
       "reject creation" in {
-        val firstSubviewIndex = TransactionSubviews.indices(1).head.toString
+        val firstSubviewIndex = TransactionSubviews.indices(testedProtocolVersion, 1).head.toString
         TransactionView.create(hashOps)(
           view.viewCommonData,
           view.viewParticipantData,

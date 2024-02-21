@@ -24,7 +24,6 @@ object DocsOpenBuild {
     def docsVersionDirectory(docsOpenDir: File, cantonVersion: String, log: ManagedLogger): File = {
       val cantonRoot = repositoryRoot(docsOpenDir)
       val version = extractVersion(cantonVersion)
-
       val docsDirectory = cantonRoot / "docs.daml.com" / "docs"
       val pathFinder = docsDirectory * version.majorMinorWildcard() filter (_.isDirectory)
 
@@ -32,8 +31,7 @@ object DocsOpenBuild {
       if (directoryCandidates.lengthCompare(1) == 0) {
         val selectedDirectory = directoryCandidates.head
         log.info(
-          s"[versionDirectorySelection] Using '$selectedDirectory' for '${version
-              .majorMinor()}' of '$cantonVersion'"
+          s"[versionDirectorySelection] Using '$selectedDirectory' for '${version.majorMinor()}' of '$cantonVersion'"
         )
         selectedDirectory
       } else {

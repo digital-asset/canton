@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing.client
 import cats.data.EitherT
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.*
@@ -58,7 +59,7 @@ trait SequencerClientFactory {
       materializer: Materializer,
       tracer: Tracer,
       traceContext: TraceContext,
-  ): EitherT[Future, String, RichSequencerClient]
+  ): EitherT[Future, String, SequencerClient]
 
 }
 
@@ -67,6 +68,7 @@ object SequencerClientFactory {
       domainId: DomainId,
       syncCryptoApi: SyncCryptoClient[SyncCryptoApi],
       crypto: Crypto,
+      agreedAgreementId: Option[ServiceAgreementId],
       config: SequencerClientConfig,
       traceContextPropagation: TracingConfig.Propagation,
       testingConfig: TestingConfigInternal,
@@ -98,7 +100,7 @@ object SequencerClientFactory {
           materializer: Materializer,
           tracer: Tracer,
           traceContext: TraceContext,
-      ): EitherT[Future, String, RichSequencerClient] = {
+      ): EitherT[Future, String, SequencerClient] = {
         // initialize recorder if it's been configured for the member (should only be used for testing)
         val recorderO = recordingConfigForMember(member).map { recordingConfig =>
           new SequencerClientRecorder(
@@ -127,7 +129,6 @@ object SequencerClientFactory {
               sequencerTransportsMap,
               expectedSequencers,
               sequencerConnections.sequencerTrustThreshold,
-              sequencerConnections.submissionRequestAmplification,
             )
           )
 
@@ -160,7 +161,7 @@ object SequencerClientFactory {
                 )
               }
           }
-        } yield new RichSequencerClientImpl(
+        } yield new SequencerClientImpl(
           domainId,
           member,
           sequencerTransports,
@@ -189,32 +190,37 @@ object SequencerClientFactory {
           connection: SequencerConnection,
           member: Member,
           requestSigner: RequestSigner,
-          allowReplay: Boolean = true,
       )(implicit
           executionContext: ExecutionContextExecutor,
           executionSequencerFactory: ExecutionSequencerFactory,
           materializer: Materializer,
           traceContext: TraceContext,
-      ): EitherT[Future, String, SequencerClientTransport & SequencerClientTransportPekko] = {
-        // TODO(#13789) Use only `SequencerClientTransportPekko` as the return type
-        def mkRealTransport(): SequencerClientTransport & SequencerClientTransportPekko =
+      ): EitherT[Future, String, SequencerClientTransport] = {
+        def mkRealTransport(): SequencerClientTransport =
           connection match {
             case grpc: GrpcSequencerConnection => grpcTransport(grpc, member)
           }
 
-        val transport: SequencerClientTransport & SequencerClientTransportPekko =
-          replayConfigForMember(member).filter(_ => allowReplay) match {
+        // TODO(#13789) Use only `SequencerClientTransportPekko` as the return type
+        def mkRealTransportPekko(): SequencerClientTransportPekko & SequencerClientTransport =
+          connection match {
+            case grpc: GrpcSequencerConnection => grpcTransportPekko(grpc, member)
+          }
+
+        val transport: SequencerClientTransport =
+          replayConfigForMember(member) match {
             case None => mkRealTransport()
             case Some(ReplayConfig(recording, SequencerEvents)) =>
               new ReplayingEventsSequencerClientTransport(
                 domainParameters.protocolVersion,
                 recording.fullFilePath,
+                metrics,
                 processingTimeout,
                 loggerFactory,
               )
             case Some(ReplayConfig(recording, replaySendsConfig: SequencerSends)) =>
               if (replaySendsConfig.usePekko) {
-                val underlyingTransport = mkRealTransport()
+                val underlyingTransport = mkRealTransportPekko()
                 new ReplayingSendsSequencerClientTransportPekko(
                   domainParameters.protocolVersion,
                   recording.fullFilePath,
@@ -295,6 +301,7 @@ object SequencerClientFactory {
           domainId,
           member,
           crypto,
+          agreedAgreementId,
           channelPerEndpoint,
           supportedProtocolVersions,
           config.authToken,
@@ -305,10 +312,26 @@ object SequencerClientFactory {
       }
 
       private def grpcTransport(connection: GrpcSequencerConnection, member: Member)(implicit
+          executionContext: ExecutionContextExecutor
+      ): SequencerClientTransport = {
+        val channel = createChannel(connection)
+        val auth = grpcSequencerClientAuth(connection, member)
+        val callOptions = callOptionsForEndpoints(connection.endpoints)
+        new GrpcSequencerClientTransport(
+          channel,
+          callOptions,
+          auth,
+          metrics,
+          processingTimeout,
+          loggerFactory,
+          domainParameters.protocolVersion,
+        )
+      }
+
+      private def grpcTransportPekko(connection: GrpcSequencerConnection, member: Member)(implicit
           executionContext: ExecutionContextExecutor,
           executionSequencerFactory: ExecutionSequencerFactory,
-          materializer: Materializer,
-      ): SequencerClientTransport & SequencerClientTransportPekko = {
+      ): GrpcSequencerClientTransportPekko = {
         val channel = createChannel(connection)
         val auth = grpcSequencerClientAuth(connection, member)
         val callOptions = callOptionsForEndpoints(connection.endpoints)
@@ -318,7 +341,7 @@ object SequencerClientFactory {
           auth,
           metrics,
           processingTimeout,
-          loggerFactory.append("sequencerConnection", connection.sequencerAlias.unwrap),
+          loggerFactory,
           domainParameters.protocolVersion,
         )
       }

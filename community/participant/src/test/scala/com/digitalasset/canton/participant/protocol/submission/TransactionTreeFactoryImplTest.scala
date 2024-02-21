@@ -42,10 +42,11 @@ final class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
 
   def createTransactionTreeFactory(version: ProtocolVersion): TransactionTreeFactoryImpl =
     TransactionTreeFactoryImpl(
-      ExampleTransactionFactory.submittingParticipant,
+      ExampleTransactionFactory.submitterParticipant,
       factory.domainId,
       version,
       factory.cryptoOps,
+      uniqueContractKeys = true,
       loggerFactory,
     )
 
@@ -63,7 +64,7 @@ final class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
       submitterInfo,
       factory.confirmationPolicy,
       Some(WorkflowId.assertFromString("testWorkflowId")),
-      factory.mediatorGroup,
+      factory.mediatorRef,
       factory.transactionSeed,
       factory.transactionUuid,
       snapshot,
@@ -147,7 +148,7 @@ final class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
             example.wellFormedUnsuffixedTransaction,
             successfulLookup(example),
             example.keyResolver,
-            snapshot = defaultTestingTopology.withPackages(Map.empty).build().topologySnapshot(),
+            snapshot = defaultTestingTopology.withPackages(Seq.empty).build().topologySnapshot(),
           ).value.flatMap(_ should matchPattern { case Left(UnknownPackageError(_)) => })
         }
         "fail if some dependency is not vetted" in {

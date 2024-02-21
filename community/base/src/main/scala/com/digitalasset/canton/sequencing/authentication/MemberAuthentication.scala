@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing.authentication
 import cats.data.EitherT
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
   AuthenticationError,
@@ -23,6 +24,7 @@ sealed trait MemberAuthentication {
   def hashDomainNonce(
       nonce: Nonce,
       domainId: DomainId,
+      agreementId: Option[ServiceAgreementId],
       pureCrypto: CryptoPureApi,
   ): Hash
 
@@ -33,12 +35,13 @@ sealed trait MemberAuthentication {
       nonce: Nonce,
       domainId: DomainId,
       possibleSigningKeys: NonEmpty[Seq[Fingerprint]],
+      agreementId: Option[ServiceAgreementId],
       crypto: Crypto,
   )(implicit
       ec: ExecutionContext,
       tc: TraceContext,
   ): EitherT[Future, AuthenticationError, Signature] = {
-    val hash = hashDomainNonce(nonce, domainId, crypto.pureCrypto)
+    val hash = hashDomainNonce(nonce, domainId, agreementId, crypto.pureCrypto)
 
     for {
       // see if we have any of the possible keys that could be used to sign
@@ -69,9 +72,11 @@ object ParticipantAuthentication extends MemberAuthentication {
   def hashDomainNonce(
       nonce: Nonce,
       domainId: DomainId,
+      agreementId: Option[ServiceAgreementId],
       pureApi: CryptoPureApi,
   ): Hash = {
     val builder = commonNonce(pureApi, nonce, domainId)
+    agreementId.foreach(ag => builder.add(ag.unwrap))
     builder.finish()
   }
 }
@@ -80,6 +85,7 @@ object DomainEntityAuthentication extends MemberAuthentication {
   override def hashDomainNonce(
       nonce: Nonce,
       domainId: DomainId,
+      agreementId: Option[ServiceAgreementId],
       pureApi: CryptoPureApi,
   ): Hash =
     // we don't expect domain entities to use the agreement-id, so just exclude it
@@ -120,27 +126,22 @@ object MemberAuthentication {
       )
   final case class NonMatchingDomainId(member: Member, domainId: DomainId)
       extends AuthenticationError(
-        show"Domain id $domainId provided by member $member does not match the domain id of the domain the ${member.description} is trying to connect to",
+        show"Domain id $domainId provided by member $member does not match the domain id of the domain the participant is trying to connect to",
         "NonMatchingDomainId",
       )
-  final case class ParticipantAccessDisabled(participantId: ParticipantId)
-      extends AuthenticationError(
-        s"Participant $participantId access is disabled",
-        "ParticipantAccessDisabled",
-      )
+  final case class ParticipantDisabled(participantId: ParticipantId)
+      extends AuthenticationError(s"Participant $participantId is disabled", "ParticipantDisabled")
 
-  final case class MediatorAccessDisabled(mediator: MediatorId)
-      extends AuthenticationError(
-        s"Mediator $mediator access is disabled",
-        "MediatorAccessDisabled",
-      )
+  final case class MediatorDisabled(mediator: MediatorId)
+      extends AuthenticationError(s"Mediator $mediator is disabled", "MediatorDisabled")
 
   final case class TokenVerificationException(member: String)
       extends AuthenticationError(
         s"Due to an internal error, the server side token lookup for member $member failed",
         "VerifyTokenTimeout",
       )
-
+  final case class ServiceAgreementAcceptanceError(member: Member, error: String)
+      extends AuthenticationError(reason = error, code = "ServiceAgreementAcceptanceError")
   final case class AuthenticationNotSupportedForMember(member: Member)
       extends AuthenticationError(
         reason = s"Authentication for member type is not supported: $member",

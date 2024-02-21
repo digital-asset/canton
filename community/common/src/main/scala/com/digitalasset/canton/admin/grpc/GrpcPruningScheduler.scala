@@ -6,8 +6,8 @@ package com.digitalasset.canton.admin.grpc
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
-import com.digitalasset.canton.admin.pruning.v30
 import com.digitalasset.canton.logging.NamedLogging
+import com.digitalasset.canton.pruning.admin.v0
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.scheduler.{Cron, PruningSchedule, PruningScheduler}
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -22,29 +22,29 @@ import scala.util.Failure
 trait GrpcPruningScheduler {
   this: HasPruningScheduler & NamedLogging =>
 
-  def setSchedule(request: v30.SetSchedule.Request): Future[v30.SetSchedule.Response] = {
+  def setSchedule(request: v0.SetSchedule.Request): Future[v0.SetSchedule.Response] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     for {
       scheduler <- ensureScheduler
-      schedule <- convertRequiredF("schedule", request.schedule, PruningSchedule.fromProtoV30)
+      schedule <- convertRequiredF("schedule", request.schedule, PruningSchedule.fromProtoV0)
       _scheduleSuccessfullySet <- handlePassiveHAStorageError(
         scheduler.setSchedule(schedule),
         "set_schedule",
       )
-    } yield v30.SetSchedule.Response()
+    } yield v0.SetSchedule.Response()
   }
 
   def clearSchedule(
-      request: v30.ClearSchedule.Request
-  ): Future[v30.ClearSchedule.Response] = {
+      request: v0.ClearSchedule.Request
+  ): Future[v0.ClearSchedule.Response] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     for {
       scheduler <- ensureScheduler
       _ <- handlePassiveHAStorageError(scheduler.clearSchedule(), "clear_schedule")
-    } yield v30.ClearSchedule.Response()
+    } yield v0.ClearSchedule.Response()
   }
 
-  def setCron(request: v30.SetCron.Request): Future[v30.SetCron.Response] = {
+  def setCron(request: v0.SetCron.Request): Future[v0.SetCron.Response] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     for {
       scheduler <- ensureScheduler
@@ -53,12 +53,12 @@ trait GrpcPruningScheduler {
         handleUserError(scheduler.updateCron(cron)),
         "set_cron",
       )
-    } yield v30.SetCron.Response()
+    } yield v0.SetCron.Response()
   }
 
   def setMaxDuration(
-      request: v30.SetMaxDuration.Request
-  ): Future[v30.SetMaxDuration.Response] = {
+      request: v0.SetMaxDuration.Request
+  ): Future[v0.SetMaxDuration.Response] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     for {
       scheduler <- ensureScheduler
@@ -70,12 +70,12 @@ trait GrpcPruningScheduler {
         handleUserError(scheduler.updateMaxDuration(positiveDuration)),
         "set_max_duration",
       )
-    } yield v30.SetMaxDuration.Response()
+    } yield v0.SetMaxDuration.Response()
   }
 
   def setRetention(
-      request: v30.SetRetention.Request
-  ): Future[v30.SetRetention.Response] = {
+      request: v0.SetRetention.Request
+  ): Future[v0.SetRetention.Response] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     for {
       scheduler <- ensureScheduler
@@ -87,20 +87,20 @@ trait GrpcPruningScheduler {
         handleUserError(scheduler.updateRetention(positiveDuration)),
         "set_retention",
       )
-    } yield v30.SetRetention.Response()
+    } yield v0.SetRetention.Response()
   }
 
   def getSchedule(
-      request: v30.GetSchedule.Request
-  ): Future[v30.GetSchedule.Response] = {
+      request: v0.GetSchedule.Request
+  ): Future[v0.GetSchedule.Response] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     for {
       scheduler <- ensureScheduler
       scheduleWithRetention <- scheduler.getSchedule()
-    } yield v30.GetSchedule.Response(scheduleWithRetention.map(_.toProtoV30))
+    } yield v0.GetSchedule.Response(scheduleWithRetention.map(_.toProtoV0))
   }
 
-  private def convertF[T](f: => ProtoConverter.ParsingResult[T])(implicit
+  protected def convertF[T](f: => ProtoConverter.ParsingResult[T])(implicit
       traceContext: TraceContext
   ): Future[T] = f
     .leftMap(err => ProtoDeserializationFailure.Wrap(err).asGrpcError)

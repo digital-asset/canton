@@ -4,7 +4,6 @@
 package com.digitalasset.canton.topology
 
 import com.daml.error.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{PositiveInt, PositiveLong}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.{CryptoPrivateStoreError, CryptoPublicStoreError}
@@ -12,14 +11,8 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.TopologyManagementErrorGroup.TopologyManagerErrorGroup
 import com.digitalasset.canton.error.{Alarm, AlarmErrorCode, CantonError}
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.protocol.OnboardingRestriction
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.topology.processing.EffectiveTime
-import com.digitalasset.canton.topology.store.ValidatedTopologyTransactionX.GenericValidatedTopologyTransactionX
-import com.digitalasset.canton.topology.transaction.TopologyTransactionX.{
-  GenericTopologyTransactionX,
-  TxHash,
-}
+import com.digitalasset.canton.topology.store.ValidatedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.*
 
 sealed trait TopologyManagerError extends CantonError
@@ -64,8 +57,8 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         )
         with TopologyManagerError
 
-    final case class IncompatibleOpMapping(op: TopologyChangeOpX, mapping: TopologyMappingX)(
-        implicit val loggingContext: ErrorLoggingContext
+    final case class IncompatibleOpMapping(op: TopologyChangeOp, mapping: TopologyMapping)(implicit
+        val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = "The operation is incompatible with the mapping"
         )
@@ -78,7 +71,7 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         )
         with TopologyManagerError
 
-    final case class ReplaceExistingFailed(invalid: GenericValidatedTopologyTransactionX)(implicit
+    final case class ReplaceExistingFailed(invalid: ValidatedTopologyTransaction)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = "Replacing existing transaction failed upon removal"
@@ -94,26 +87,8 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         override val loggingContext: ErrorLoggingContext
     ) extends Alarm(cause)
         with TopologyManagerError {
-      override def logOnCreation: Boolean = false
+      override lazy val logOnCreation: Boolean = false
     }
-  }
-
-  @Explanation("This error indicates that a topology transaction could not be found.")
-  @Resolution(
-    "The topology transaction either has been rejected, is not valid anymore, is not yet valid, or does not yet exist."
-  )
-  object TopologyTransactionNotFound
-      extends ErrorCode(
-        id = "TOPOLOGY_TRANSACTION_NOT_FOUND",
-        ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
-      ) {
-    final case class Failure(txHash: TxHash, effective: EffectiveTime)(implicit
-        val loggingContext: ErrorLoggingContext
-    ) extends CantonError.Impl(
-          cause =
-            s"Topology transaction with hash ${txHash} does not exist or is not active or is not an active proposal at $effective"
-        )
-        with TopologyManagerError
   }
 
   @Explanation(
@@ -199,7 +174,7 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         ErrorCategory.InvalidGivenCurrentSystemStateResourceExists,
       ) {
     final case class Failure(
-        transaction: GenericTopologyTransactionX,
+        transaction: TopologyTransaction[TopologyChangeOp],
         authKey: Fingerprint,
     )(implicit
         val loggingContext: ErrorLoggingContext
@@ -224,11 +199,11 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         id = "TOPOLOGY_MAPPING_ALREADY_EXISTS",
         ErrorCategory.InvalidGivenCurrentSystemStateResourceExists,
       ) {
-    final case class FailureX(existing: TopologyMappingX, keys: NonEmpty[Set[Fingerprint]])(implicit
-        val loggingContext: ErrorLoggingContext
+    final case class Failure(existing: TopologyStateElement[TopologyMapping], authKey: Fingerprint)(
+        implicit val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause =
-            "A matching topology mapping x authorized with the same keys already exists in this state"
+            "A matching topology mapping authorized with the same key already exists in this state"
         )
         with TopologyManagerError
   }
@@ -260,28 +235,34 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
   )
   object UnauthorizedTransaction extends AlarmErrorCode(id = "UNAUTHORIZED_TOPOLOGY_TRANSACTION") {
 
-    final case class Failure(reason: String)(implicit
-        override val loggingContext: ErrorLoggingContext
-    ) extends Alarm(cause = s"Topology transaction is not properly authorized: $reason")
+    final case class Failure()(implicit override val loggingContext: ErrorLoggingContext)
+        extends Alarm(cause = "Topology transaction is not properly authorized")
         with TopologyManagerError
   }
 
   @Explanation(
-    """This error indicates that the attempt to add a removal transaction was rejected, as the mapping affecting the removal did not exist."""
+    """This error indicates that the attempt to add a removal transaction was rejected, as the mapping / element affecting the removal did not exist."""
   )
   @Resolution(
-    """Inspect the topology state and ensure the mapping of the active transaction you are trying to revoke matches your revocation arguments."""
+    """Inspect the topology state and ensure the mapping and the element id of the active transaction you are trying to revoke matches your revocation arguments."""
   )
   object NoCorrespondingActiveTxToRevoke
       extends ErrorCode(
         id = "NO_CORRESPONDING_ACTIVE_TX_TO_REVOKE",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    final case class Mapping(mapping: TopologyMappingX)(implicit
+    final case class Mapping(mapping: TopologyMapping)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause =
             "There is no active topology transaction matching the mapping of the revocation request"
+        )
+        with TopologyManagerError
+    final case class Element(element: TopologyStateElement[TopologyMapping])(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause =
+            "There is no active topology transaction matching the element of the revocation request"
         )
         with TopologyManagerError
   }
@@ -473,29 +454,6 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
           cause =
             s"Cannot remove domain trust certificate for $participantId because it still hosts parties ${parties.sorted
                 .mkString(",")}"
-        )
-        with TopologyManagerError
-  }
-
-  @Explanation(
-    """This error indicates that a participant was not able to onboard to a domain because onboarding restrictions are in place."""
-  )
-  @Resolution(
-    """Verify the onboarding restrictions of the domain. If the domain is not locked, then the participant needs first to be put on the allow list by issuing a ParticipantDomainPermission transaction."""
-  )
-  object ParticipantOnboardingRefused
-      extends ErrorCode(
-        id = "PARTICIPANT_ONBOARDING_REFUSED",
-        ErrorCategory.InvalidGivenCurrentSystemStateOther,
-      ) {
-    final case class Reject(
-        participantId: ParticipantId,
-        restriction: OnboardingRestriction,
-    )(implicit
-        override val loggingContext: ErrorLoggingContext
-    ) extends CantonError.Impl(
-          cause =
-            s"The $participantId can not join the domain because onboarding restrictions are in place"
         )
         with TopologyManagerError
   }

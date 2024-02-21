@@ -4,14 +4,14 @@
 package com.digitalasset.canton.platform.apiserver.services.command
 
 import com.daml.error.ContextualizedErrorLogger
-import com.daml.ledger.api.v2.checkpoint.Checkpoint
-import com.daml.ledger.api.v2.command_service.*
-import com.daml.ledger.api.v2.command_submission_service.{SubmitRequest, SubmitResponse}
-import com.daml.ledger.api.v2.commands.Commands
-import com.daml.ledger.api.v2.update_service.{
+import com.daml.ledger.api.v1.command_completion_service.Checkpoint
+import com.daml.ledger.api.v1.command_service.*
+import com.daml.ledger.api.v1.command_submission_service.SubmitRequest
+import com.daml.ledger.api.v1.commands.Commands
+import com.daml.ledger.api.v1.transaction_service.{
+  GetFlatTransactionResponse,
   GetTransactionByIdRequest,
   GetTransactionResponse,
-  GetTransactionTreeResponse,
 }
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.config
@@ -49,7 +49,7 @@ import scala.util.{Failure, Success, Try}
 private[apiserver] final class CommandServiceImpl private[services] (
     transactionServices: TransactionServices,
     submissionTracker: SubmissionTracker,
-    submit: Traced[SubmitRequest] => Future[SubmitResponse],
+    submit: Traced[SubmitRequest] => Future[Empty],
     defaultTrackingTimeout: config.NonNegativeFiniteDuration,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
@@ -75,13 +75,13 @@ private[apiserver] final class CommandServiceImpl private[services] (
       }
     }
 
-  def submitAndWaitForUpdateId(
+  def submitAndWaitForTransactionId(
       request: SubmitAndWaitRequest
-  )(loggingContext: LoggingContextWithTrace): Future[SubmitAndWaitForUpdateIdResponse] =
+  )(loggingContext: LoggingContextWithTrace): Future[SubmitAndWaitForTransactionIdResponse] =
     withCommandsLoggingContext(request.getCommands, loggingContext) { (errorLogger, traceContext) =>
       submitAndWaitInternal(request)(errorLogger, traceContext).map { response =>
-        SubmitAndWaitForUpdateIdResponse.of(
-          updateId = response.completion.updateId,
+        SubmitAndWaitForTransactionIdResponse.of(
+          transactionId = response.completion.updateId,
           completionOffset = offsetFromCheckpoint(response.checkpoint),
         )
       }
@@ -97,11 +97,12 @@ private[apiserver] final class CommandServiceImpl private[services] (
       submitAndWaitInternal(request)(errorLogger, traceContext).flatMap { resp =>
         val effectiveActAs = CommandsValidator.effectiveSubmitters(request.getCommands).actAs
         val txRequest = GetTransactionByIdRequest(
-          updateId = resp.completion.updateId,
+          ledgerId = request.getCommands.ledgerId,
+          transactionId = resp.completion.updateId,
           requestingParties = effectiveActAs.toList,
         )
         transactionServices
-          .getTransactionById(txRequest)
+          .getFlatTransactionById(txRequest)
           .map(transactionResponse =>
             SubmitAndWaitForTransactionResponse
               .of(
@@ -119,11 +120,12 @@ private[apiserver] final class CommandServiceImpl private[services] (
       submitAndWaitInternal(request)(errorLogger, traceContext).flatMap { resp =>
         val effectiveActAs = CommandsValidator.effectiveSubmitters(request.getCommands).actAs
         val txRequest = GetTransactionByIdRequest(
-          updateId = resp.completion.updateId,
+          ledgerId = request.getCommands.ledgerId,
+          transactionId = resp.completion.updateId,
           requestingParties = effectiveActAs.toList,
         )
         transactionServices
-          .getTransactionTreeById(txRequest)
+          .getTransactionById(txRequest)
           .map(resp =>
             SubmitAndWaitForTransactionTreeResponse
               .of(resp.transaction, resp.transaction.map(_.offset).getOrElse(""))
@@ -158,7 +160,7 @@ private[apiserver] final class CommandServiceImpl private[services] (
           commandId = commands.commandId,
           submissionId = commands.submissionId,
           applicationId = commands.applicationId,
-          parties = commands.actAs.toSet,
+          parties = CommandsValidator.effectiveActAs(commands),
         ),
         timeout = nonNegativeTimeout,
         submit = childContext => submit(Traced(SubmitRequest(Some(commands)))(childContext)),
@@ -192,6 +194,7 @@ private[apiserver] final class CommandServiceImpl private[services] (
     LoggingContextWithTrace.withEnrichedLoggingContext(
       logging.submissionId(commands.submissionId),
       logging.commandId(commands.commandId),
+      logging.partyString(commands.party),
       logging.actAsStrings(commands.actAs),
       logging.readAsStrings(commands.readAs),
     ) { loggingContext =>
@@ -213,7 +216,7 @@ private[apiserver] object CommandServiceImpl {
   def createApiService(
       submissionTracker: SubmissionTracker,
       commandsValidator: CommandsValidator,
-      submit: Traced[SubmitRequest] => Future[SubmitResponse],
+      submit: Traced[SubmitRequest] => Future[Empty],
       defaultTrackingTimeout: config.NonNegativeFiniteDuration,
       transactionServices: TransactionServices,
       timeProvider: TimeProvider,
@@ -242,8 +245,8 @@ private[apiserver] object CommandServiceImpl {
     )
 
   final class TransactionServices(
-      val getTransactionTreeById: GetTransactionByIdRequest => Future[GetTransactionTreeResponse],
       val getTransactionById: GetTransactionByIdRequest => Future[GetTransactionResponse],
+      val getFlatTransactionById: GetTransactionByIdRequest => Future[GetFlatTransactionResponse],
   )
 
   private[apiserver] def validateRequestTimeout(

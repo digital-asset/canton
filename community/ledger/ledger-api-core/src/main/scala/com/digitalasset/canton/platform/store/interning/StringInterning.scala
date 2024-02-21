@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.platform.store.interning
 
-import com.digitalasset.canton.platform.{Identifier, PackageName, Party}
+import com.daml.lf.data.Ref.PackageName
+import com.digitalasset.canton.platform.{Identifier, Party}
 import com.digitalasset.canton.topology.DomainId
 
 /** The facade for all supported string-interning domains

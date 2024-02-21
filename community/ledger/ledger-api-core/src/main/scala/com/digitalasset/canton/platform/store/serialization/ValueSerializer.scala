@@ -17,14 +17,14 @@ private[platform] object ValueSerializer {
       errorContext: => String,
   ): Array[Byte] =
     ValueCoder
-      .encodeVersionedValue(versionedValue = value)
+      .encodeVersionedValue(ValueCoder.CidEncoder, value)
       .fold(error => sys.error(s"$errorContext (${error.errorMessage})"), _.toByteArray)
 
   def serializeValueAny(
       value: VersionedValue,
       errorContext: => String,
   ): Any = ValueCoder
-    .encodeVersionedValue(versionedValue = value)
+    .encodeVersionedValue(ValueCoder.CidEncoder, value)
     .fold(
       error => sys.error(s"$errorContext (${error.errorMessage})"),
       versionedValue => Any.fromJavaProto(JavaAny.pack(versionedValue)),
@@ -36,7 +36,8 @@ private[platform] object ValueSerializer {
   ): VersionedValue =
     ValueCoder
       .decodeVersionedValue(
-        protoValue0 = ValueOuterClass.VersionedValue.parseFrom(stream)
+        ValueCoder.CidDecoder,
+        ValueOuterClass.VersionedValue.parseFrom(stream),
       )
       .fold(
         error =>

@@ -3,32 +3,31 @@
 
 package com.daml.ledger.javaapi.data;
 
-import com.daml.ledger.api.v2.UpdateServiceOuterClass;
-import org.checkerframework.checker.nullness.qual.NonNull;
-
+import com.daml.ledger.api.v1.TransactionServiceOuterClass;
 import java.util.Objects;
+import org.checkerframework.checker.nullness.qual.NonNull;
 
 public final class GetTransactionResponse {
 
-  @NonNull private final Transaction transaction;
+  private final TransactionTree transaction;
 
-  private GetTransactionResponse(@NonNull Transaction transaction) {
+  public GetTransactionResponse(@NonNull TransactionTree transaction) {
     this.transaction = transaction;
   }
 
-  public Transaction getTransaction() {
-    return transaction;
-  }
-
   public static GetTransactionResponse fromProto(
-      UpdateServiceOuterClass.GetTransactionResponse response) {
-    return new GetTransactionResponse(Transaction.fromProto(response.getTransaction()));
+      TransactionServiceOuterClass.GetTransactionResponse response) {
+    return new GetTransactionResponse(TransactionTree.fromProto(response.getTransaction()));
   }
 
-  public UpdateServiceOuterClass.GetTransactionResponse toProto() {
-    return UpdateServiceOuterClass.GetTransactionResponse.newBuilder()
-        .setTransaction(transaction.toProto())
+  public TransactionServiceOuterClass.GetTransactionResponse toProto() {
+    return TransactionServiceOuterClass.GetTransactionResponse.newBuilder()
+        .setTransaction(this.transaction.toProto())
         .build();
+  }
+
+  public TransactionTree getTransaction() {
+    return transaction;
   }
 
   @Override
@@ -46,6 +45,7 @@ public final class GetTransactionResponse {
 
   @Override
   public int hashCode() {
+
     return Objects.hash(transaction);
   }
 }

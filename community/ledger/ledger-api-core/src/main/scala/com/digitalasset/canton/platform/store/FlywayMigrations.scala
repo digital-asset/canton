@@ -37,7 +37,7 @@ class FlywayMigrations(
   private def configurationBase(dataSource: DataSource): FluentConfiguration =
     Flyway
       .configure()
-      .locations((locations(dbType) ++ additionalMigrationPaths)*)
+      .locations((locations(dbType) ++ additionalMigrationPaths): _*)
       .dataSource(dataSource)
 
   private def checkFlywayHistory(flyway: Flyway): Unit = {

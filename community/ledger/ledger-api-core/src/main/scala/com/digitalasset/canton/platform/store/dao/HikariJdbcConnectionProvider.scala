@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.dao
 
+import com.codahale.metrics.MetricRegistry
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.metrics.{DatabaseMetrics, Timed}
 import com.daml.scalautil.Statement.discard
@@ -27,6 +28,7 @@ private[platform] object HikariDataSourceOwner {
       minimumIdle: Int,
       maxPoolSize: Int,
       connectionTimeout: FiniteDuration,
+      metrics: Option[MetricRegistry],
       connectionPoolPrefix: String = "daml.index.db.connection",
   ): ResourceOwner[DataSource] =
     ResourceOwner.forCloseable { () =>
@@ -37,6 +39,7 @@ private[platform] object HikariDataSourceOwner {
       config.setMinimumIdle(minimumIdle)
       config.setConnectionTimeout(connectionTimeout.toMillis)
       config.setPoolName(s"$connectionPoolPrefix.${serverRole.threadPoolSuffix}")
+      metrics.foreach(config.setMetricRegistry)
       new HikariDataSource(config)
     }
 }

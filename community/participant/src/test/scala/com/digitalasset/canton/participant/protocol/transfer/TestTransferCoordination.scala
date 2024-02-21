@@ -20,7 +20,8 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Observation,
   Submission,
 }
-import com.digitalasset.canton.topology.{DomainId, ParticipantId, TestingTopologyX}
+import com.digitalasset.canton.topology.transaction.VettedPackages
+import com.digitalasset.canton.topology.{DomainId, ParticipantId, TestingTopology}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.{BaseTest, LfPackageId}
 import org.mockito.ArgumentMatchers.any
@@ -100,17 +101,17 @@ private[transfer] object TestTransferCoordination {
       packages: Seq[LfPackageId],
       loggerFactory: NamedLoggerFactory,
   ): SyncCryptoApiProvider =
-    TestingTopologyX(domains = domains.toSet)
+    TestingTopology(domains = domains.toSet)
       .withReversedTopology(defaultTopology)
-      .withPackages(defaultTopology.keys.map(_ -> packages).toMap)
+      .withPackages(defaultTopology.keys.map(VettedPackages(_, packages)).toSeq)
       .build(loggerFactory)
-      .forOwner(submittingParticipant)
+      .forOwner(submitterParticipant)
 
   private val observerParticipant1: ParticipantId = ParticipantId("observerParticipant1")
   private val observerParticipant2: ParticipantId = ParticipantId("observerParticipant2")
 
   private val defaultTopology = Map(
-    submittingParticipant -> Map(submitter -> Submission),
+    submitterParticipant -> Map(submitter -> Submission),
     signatoryParticipant -> Map(signatory -> Submission),
     observerParticipant1 -> Map(observer -> Confirmation),
     observerParticipant2 -> Map(observer -> Observation),

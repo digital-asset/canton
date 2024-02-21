@@ -11,7 +11,7 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage
-import com.digitalasset.canton.protocol.v30
+import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{MediatorId, Member}
@@ -31,44 +31,38 @@ import com.google.protobuf.ByteString
   *  `recipients`,,i,, is the list of recipients of m,,i,,,
   *  for `0 <= i < n`.
   */
-final case class Batch[+Env <: Envelope[?]] private (envelopes: List[Env])(
+final case class Batch[+Env <: Envelope[_]] private (envelopes: List[Env])(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[Batch.type]
-) extends HasProtocolVersionedWrapper[Batch[Envelope[?]]]
+) extends HasProtocolVersionedWrapper[Batch[Envelope[_]]]
     with PrettyPrinting {
 
   @transient override protected lazy val companionObj: Batch.type = Batch
 
   /** builds a set of recipients from all messages in this message batch
     */
-  lazy val allMembers: Set[Member] = allRecipients.collect { case MemberRecipient(member) =>
-    member
-  }
+  lazy val allMembers: Set[Member] = allRecipients.map(_.member)
 
   lazy val allRecipients: Set[Recipient] = envelopes.flatMap { e =>
     e.recipients.allRecipients
   }.toSet
 
-  lazy val allMediatorRecipients: Set[Recipient] = {
-    allRecipients.collect {
-      case r @ MemberRecipient(_: MediatorId) => r
-      case r: MediatorsOfDomain => r
-      case AllMembersOfDomain => AllMembersOfDomain
-    }
+  lazy val allMediatorRecipients: Set[Recipient] = allRecipients.collect {
+    case r @ Recipient(_: MediatorId) => r
   }
 
-  private[protocol] def toProtoV30: v30.CompressedBatch = {
-    val batch = v30.Batch(envelopes = envelopes.map(_.closeEnvelope.toProtoV30))
+  private[protocol] def toProtoV0: v0.CompressedBatch = {
+    val batch = v0.Batch(envelopes = envelopes.map(_.closeEnvelope.toProtoV0))
     val compressed = ByteStringUtil.compressGzip(batch.toByteString)
-    v30.CompressedBatch(
-      algorithm = v30.CompressedBatch.CompressionAlgorithm.COMPRESSION_ALGORITHM_GZIP,
+    v0.CompressedBatch(
+      algorithm = v0.CompressedBatch.CompressionAlgorithm.Gzip,
       compressedBatch = compressed,
     )
   }
 
-  def map[Env2 <: Envelope[?]](f: Env => Env2): Batch[Env2] =
+  def map[Env2 <: Envelope[_]](f: Env => Env2): Batch[Env2] =
     Batch(envelopes.map(f))(representativeProtocolVersion)
 
-  def copy[Env2 <: Envelope[?]](envelopes: List[Env2]): Batch[Env2] =
+  def copy[Env2 <: Envelope[_]](envelopes: List[Env2]): Batch[Env2] =
     Batch(envelopes)(representativeProtocolVersion)
 
   def envelopesCount: Int = envelopes.size
@@ -78,21 +72,19 @@ final case class Batch[+Env <: Envelope[?]] private (envelopes: List[Env])(
   ): F[Batch[Env2]] =
     F.map(envelopes.traverse(f))(Batch(_)(representativeProtocolVersion))
 
-  override def pretty: Pretty[Batch[Envelope[?]]] = prettyOfClass(unnamedParam(_.envelopes))
+  override def pretty: Pretty[Batch[Envelope[_]]] = prettyOfClass(unnamedParam(_.envelopes))
 }
 
-object Batch extends HasProtocolVersionedCompanion2[Batch[Envelope[?]], Batch[ClosedEnvelope]] {
+object Batch extends HasProtocolVersionedCompanion2[Batch[Envelope[_]], Batch[ClosedEnvelope]] {
   override def name: String = "Batch"
 
   override val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(30) -> VersionedProtoConverter(
-      ProtocolVersion.v30
-    )(v30.CompressedBatch)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.CompressedBatch)(
       supportedProtoVersion(_)(
         // TODO(i10428) Prevent zip bombing when decompressing the request
-        Batch.fromProtoV30(_, maxRequestSize = MaxRequestSizeToDeserialize.NoLimit)
+        Batch.fromProtoV0(_, maxRequestSize = MaxRequestSizeToDeserialize.NoLimit)
       ),
-      _.toProtoV30.toByteString,
+      _.toProtoV0.toByteString,
     )
   )
 
@@ -117,30 +109,29 @@ object Batch extends HasProtocolVersionedCompanion2[Batch[Envelope[?]], Batch[Cl
   ): Batch[ClosedEnvelope] =
     Batch(envelopes.toList)(protocolVersionRepresentativeFor(protocolVersion))
 
-  private[protocol] def fromProtoV30(
-      batchProto: v30.CompressedBatch,
+  private[protocol] def fromProtoV0(
+      batchProto: v0.CompressedBatch,
       maxRequestSize: MaxRequestSizeToDeserialize,
   ): ParsingResult[Batch[ClosedEnvelope]] = {
-    val v30.CompressedBatch(algorithm, compressed) = batchProto
+    val v0.CompressedBatch(algorithm, compressed) = batchProto
 
     for {
       uncompressed <- decompress(algorithm, compressed, maxRequestSize.toOption)
-      uncompressedBatchProto <- ProtoConverter.protoParser(v30.Batch.parseFrom)(uncompressed)
-      v30.Batch(envelopesProto) = uncompressedBatchProto
-      envelopes <- envelopesProto.toList.traverse(ClosedEnvelope.fromProtoV30)
-      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
+      uncompressedBatchProto <- ProtoConverter.protoParser(v0.Batch.parseFrom)(uncompressed)
+      v0.Batch(envelopesProto) = uncompressedBatchProto
+      envelopes <- envelopesProto.toList.traverse(ClosedEnvelope.fromProtoV0)
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(0))
     } yield Batch[ClosedEnvelope](envelopes)(rpv)
   }
 
   private def decompress(
-      algorithm: v30.CompressedBatch.CompressionAlgorithm,
+      algorithm: v0.CompressedBatch.CompressionAlgorithm,
       compressed: ByteString,
       maxRequestSize: Option[NonNegativeInt],
   ): ParsingResult[ByteString] = {
     algorithm match {
-      case v30.CompressedBatch.CompressionAlgorithm.COMPRESSION_ALGORITHM_UNSPECIFIED =>
-        Right(compressed)
-      case v30.CompressedBatch.CompressionAlgorithm.COMPRESSION_ALGORITHM_GZIP =>
+      case v0.CompressedBatch.CompressionAlgorithm.None => Right(compressed)
+      case v0.CompressedBatch.CompressionAlgorithm.Gzip =>
         ByteStringUtil
           .decompressGzip(compressed, maxBytesLimit = maxRequestSize.map(_.unwrap))
           .leftMap(_.toProtoDeserializationError)
@@ -155,18 +146,16 @@ object Batch extends HasProtocolVersionedCompanion2[Batch[Envelope[?]], Batch[Cl
   def filterClosedEnvelopesFor(
       batch: Batch[ClosedEnvelope],
       member: Member,
-      groupRecipients: Set[GroupRecipient],
   ): Batch[ClosedEnvelope] = {
-    val newEnvs = batch.envelopes.mapFilter(e => e.forRecipient(member, groupRecipients))
+    val newEnvs = batch.envelopes.mapFilter(e => e.forRecipient(member))
     Batch(newEnvs)(batch.representativeProtocolVersion)
   }
 
   def filterOpenEnvelopesFor[T <: ProtocolMessage](
       batch: Batch[OpenEnvelope[T]],
       member: Member,
-      groupRecipients: Set[GroupRecipient],
   ): Batch[OpenEnvelope[T]] = {
-    val newEnvs = batch.envelopes.mapFilter(e => e.forRecipient(member, groupRecipients))
+    val newEnvs = batch.envelopes.mapFilter(e => e.forRecipient(member))
     Batch(newEnvs)(batch.representativeProtocolVersion)
   }
 

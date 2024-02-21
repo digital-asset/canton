@@ -17,6 +17,7 @@ import scala.concurrent.Future
 trait ContractStore {
 
   /** Looking up an active contract.
+    * Lookup will succeed even if the creating transaction is not visible, but only the contract is divulged to one of the readers.
     */
   def lookupActiveContract(
       readers: Set[Ref.Party],
@@ -30,8 +31,10 @@ trait ContractStore {
   ): Future[Option[ContractId]]
 
   /** Querying the state of the contracts.
+    * If a contract only divulged to some readers, but the transaction of the creation is not visible to the participant,
+    * then the lookup will result in a NotFound.
     */
-  def lookupContractState(
+  def lookupContractStateWithoutDivulgence(
       contractId: ContractId
   )(implicit
       loggingContext: LoggingContextWithTrace

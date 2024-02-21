@@ -4,7 +4,7 @@
 package com.digitalasset.canton.console.commands
 
 import com.digitalasset.canton.admin.api.client.commands.EnterpriseMediatorAdministrationCommands.{
-  InitializeX,
+  Initialize,
   LocatePruningTimestampCommand,
   Prune,
 }
@@ -23,12 +23,16 @@ import com.digitalasset.canton.console.{
   Help,
   Helpful,
 }
+import com.digitalasset.canton.crypto.{Fingerprint, PublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.admin.v30
+import com.digitalasset.canton.domain.admin.v0.EnterpriseMediatorAdministrationServiceGrpc
+import com.digitalasset.canton.domain.admin.v0.EnterpriseMediatorAdministrationServiceGrpc.EnterpriseMediatorAdministrationServiceStub
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.sequencing.SequencerConnections
+import com.digitalasset.canton.sequencing.{SequencerConnection, SequencerConnections}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.topology.store.StoredTopologyTransactions
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp
+import com.digitalasset.canton.topology.{DomainId, MediatorId}
 
 import scala.concurrent.duration.FiniteDuration
 
@@ -69,10 +73,8 @@ class MediatorPruningAdministrationGroup(
 ) extends PruningSchedulerAdministration(
       runner,
       consoleEnvironment,
-      new PruningSchedulerCommands[
-        v30.MediatorAdministrationServiceGrpc.MediatorAdministrationServiceStub
-      ](
-        v30.MediatorAdministrationServiceGrpc.stub,
+      new PruningSchedulerCommands[EnterpriseMediatorAdministrationServiceStub](
+        EnterpriseMediatorAdministrationServiceGrpc.stub,
         _.setSchedule(_),
         _.clearSchedule(_),
         _.setCron(_),
@@ -128,21 +130,66 @@ class MediatorPruningAdministrationGroup(
 
 }
 
-class MediatorXSetupGroup(consoleCommandGroup: ConsoleCommandGroup)
-    extends ConsoleCommandGroup.Impl(consoleCommandGroup) {
-  @Help.Summary("Assign a mediator to a domain")
-  def assign(
+class MediatorAdministrationGroup(
+    runner: AdminCommandRunner,
+    consoleEnvironment: ConsoleEnvironment,
+    loggerFactory: NamedLoggerFactory,
+) extends MediatorPruningAdministrationGroup(runner, consoleEnvironment, loggerFactory) {
+
+  private lazy val testing_ = new MediatorTestingGroup(runner, consoleEnvironment, loggerFactory)
+  @Help.Summary("Testing functionality for the mediator")
+  @Help.Group("Testing")
+  def testing: MediatorTestingGroup = testing_
+
+}
+
+@Help.Summary("Manage the mediator component")
+@Help.Group("Mediator")
+class MediatorAdministrationGroupWithInit(
+    runner: AdminCommandRunner,
+    consoleEnvironment: ConsoleEnvironment,
+    loggerFactory: NamedLoggerFactory,
+) extends MediatorAdministrationGroup(runner, consoleEnvironment, loggerFactory) {
+
+  @Help.Summary("Initialize a mediator")
+  def initialize(
       domainId: DomainId,
+      mediatorId: MediatorId,
       domainParameters: StaticDomainParameters,
       sequencerConnections: SequencerConnections,
-  ): Unit = consoleEnvironment.run {
+      topologySnapshot: Option[StoredTopologyTransactions[TopologyChangeOp.Positive]],
+      signingKeyFingerprint: Option[Fingerprint] = None,
+  ): PublicKey = consoleEnvironment.run {
     runner.adminCommand(
-      InitializeX(
+      Initialize(
         domainId,
+        mediatorId,
+        topologySnapshot,
         domainParameters.toInternal,
         sequencerConnections,
+        signingKeyFingerprint,
       )
     )
   }
 
+  @Help.Summary("Initialize a mediator")
+  def initialize(
+      domainId: DomainId,
+      mediatorId: MediatorId,
+      domainParameters: StaticDomainParameters,
+      sequencerConnection: SequencerConnection,
+      topologySnapshot: Option[StoredTopologyTransactions[TopologyChangeOp.Positive]],
+      signingKeyFingerprint: Option[Fingerprint],
+  ): PublicKey = consoleEnvironment.run {
+    runner.adminCommand(
+      Initialize(
+        domainId,
+        mediatorId,
+        topologySnapshot,
+        domainParameters.toInternal,
+        SequencerConnections.single(sequencerConnection),
+        signingKeyFingerprint,
+      )
+    )
+  }
 }

@@ -3,10 +3,10 @@
 
 package com.daml.ledger.javaapi.data
 
-import com.daml.ledger.javaapi.data.Generators.*
-import org.scalatest.flatspec.AnyFlatSpec
-import org.scalatest.matchers.should.Matchers
+import com.daml.ledger.javaapi.data.Generators._
 import org.scalatestplus.scalacheck.ScalaCheckDrivenPropertyChecks
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.flatspec.AnyFlatSpec
 
 class EventSpec extends AnyFlatSpec with Matchers with ScalaCheckDrivenPropertyChecks {
 
@@ -47,11 +47,13 @@ class EventSpec extends AnyFlatSpec with Matchers with ScalaCheckDrivenPropertyC
       mutatingWitnesses,
       base.getEventId,
       base.getTemplateId,
+      base.getPackageName,
       base.getContractId,
       base.getArguments,
       base.getCreatedEventBlob,
       mutatingIVs,
       mutatingFIVs,
+      base.getAgreementText,
       base.getContractKey,
       mutatingSignatories,
       mutatingObservers,

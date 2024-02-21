@@ -9,7 +9,6 @@ import com.daml.lf.data.Time.Timestamp
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.Update
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.platform.PackageName
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.{
   DbDto,
@@ -54,11 +53,11 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
     testee.store(someConnection, offset("01"), singlePartyFixture)
     ledgerEndCache() shouldBe (offset("01") -> 5)
     testee.store(someConnection, offset("02"), allEventsFixture)
-    ledgerEndCache() shouldBe (offset("02") -> 7)
+    ledgerEndCache() shouldBe (offset("02") -> 8)
     testee.store(someConnection, offset("03"), None)
-    ledgerEndCache() shouldBe (offset("03") -> 7)
+    ledgerEndCache() shouldBe (offset("03") -> 8)
     testee.store(someConnection, offset("04"), partyAndCreateFixture)
-    ledgerEndCache() shouldBe (offset("04") -> 8)
+    ledgerEndCache() shouldBe (offset("04") -> 9)
 
     storageBackendCaptor.captured(0) shouldBe someParty
     storageBackendCaptor.captured(1) shouldBe LedgerEnd(offset("01"), 5, 1)
@@ -75,12 +74,26 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
       .captured(5)
       .asInstanceOf[DbDto.EventExercise]
       .event_sequential_id shouldBe 7
-    storageBackendCaptor.captured(6) shouldBe LedgerEnd(offset("02"), 7, 1)
-    storageBackendCaptor.captured(7) shouldBe LedgerEnd(offset("03"), 7, 1)
-    storageBackendCaptor.captured(8) shouldBe someParty
-    storageBackendCaptor.captured(9).asInstanceOf[DbDto.EventCreate].event_sequential_id shouldBe 8
-    storageBackendCaptor.captured(10) shouldBe LedgerEnd(offset("04"), 8, 1)
-    storageBackendCaptor.captured should have size 11
+    storageBackendCaptor
+      .captured(6)
+      .asInstanceOf[DbDto.EventDivulgence]
+      .event_sequential_id shouldBe 8
+    storageBackendCaptor.captured(7).asInstanceOf[DbDto.StringInterningDto].internalId shouldBe 1
+    storageBackendCaptor
+      .captured(7)
+      .asInstanceOf[DbDto.StringInterningDto]
+      .externalString shouldBe "a"
+    storageBackendCaptor.captured(8).asInstanceOf[DbDto.StringInterningDto].internalId shouldBe 2
+    storageBackendCaptor
+      .captured(8)
+      .asInstanceOf[DbDto.StringInterningDto]
+      .externalString shouldBe "b"
+    storageBackendCaptor.captured(9) shouldBe LedgerEnd(offset("02"), 8, 2)
+    storageBackendCaptor.captured(10) shouldBe LedgerEnd(offset("03"), 8, 2)
+    storageBackendCaptor.captured(11) shouldBe someParty
+    storageBackendCaptor.captured(12).asInstanceOf[DbDto.EventCreate].event_sequential_id shouldBe 9
+    storageBackendCaptor.captured(13) shouldBe LedgerEnd(offset("04"), 9, 2)
+    storageBackendCaptor.captured should have size 14
   }
 
   it should "start event_seq_id from 1" in {
@@ -174,11 +187,6 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
         connection: Connection
     ): Option[Offset] =
       throw new UnsupportedOperationException
-
-    override def prunedUpToInclusiveAndLedgerEnd(
-        connection: Connection
-    ): ParameterStorageBackend.PruneUptoInclusiveAndLedgerEnd =
-      throw new UnsupportedOperationException
   }
 }
 
@@ -209,23 +217,23 @@ object SequentialWriteDaoSpec {
   )
 
   private val someEventCreated = DbDto.EventCreate(
-    event_offset = "",
-    transaction_id = "",
-    ledger_effective_time = 3,
+    event_offset = None,
+    transaction_id = None,
+    ledger_effective_time = None,
     command_id = None,
     workflow_id = None,
     application_id = None,
     submitters = None,
-    node_index = 3,
-    event_id = "",
+    node_index = None,
+    event_id = None,
     contract_id = "1",
-    template_id = "",
-    package_name = "2",
+    template_id = None,
+    package_name = None,
     flat_event_witnesses = Set.empty,
     tree_event_witnesses = Set.empty,
-    create_argument = Array.empty,
-    create_signatories = Set.empty,
-    create_observers = Set.empty,
+    create_argument = None,
+    create_signatories = None,
+    create_observers = None,
     create_agreement_text = None,
     create_key_value = None,
     create_key_maintainers = None,
@@ -234,39 +242,50 @@ object SequentialWriteDaoSpec {
     create_key_value_compression = None,
     event_sequential_id = 0,
     driver_metadata = None,
-    domain_id = "x::domain",
     trace_context = serializableTraceContext,
-    record_time = 0,
   )
 
   private val someEventExercise = DbDto.EventExercise(
     consuming = true,
-    event_offset = "",
-    transaction_id = "",
-    ledger_effective_time = 3,
+    event_offset = None,
+    transaction_id = None,
+    ledger_effective_time = None,
     command_id = None,
     workflow_id = None,
     application_id = None,
     submitters = None,
-    node_index = 3,
-    event_id = "",
+    node_index = None,
+    event_id = None,
     contract_id = "1",
-    template_id = "",
+    template_id = None,
     flat_event_witnesses = Set.empty,
     tree_event_witnesses = Set.empty,
     create_key_value = None,
-    exercise_choice = "",
-    exercise_argument = Array.empty,
+    exercise_choice = None,
+    exercise_argument = None,
     exercise_result = None,
-    exercise_actors = Set.empty,
-    exercise_child_event_ids = Vector.empty,
+    exercise_actors = None,
+    exercise_child_event_ids = None,
     create_key_value_compression = None,
     exercise_argument_compression = None,
     exercise_result_compression = None,
     event_sequential_id = 0,
-    domain_id = "x::domain",
     trace_context = serializableTraceContext,
-    record_time = 0,
+  )
+
+  private val someEventDivulgence = DbDto.EventDivulgence(
+    event_offset = None,
+    command_id = None,
+    workflow_id = None,
+    application_id = None,
+    submitters = None,
+    contract_id = "1",
+    template_id = None,
+    package_name = None,
+    tree_event_witnesses = Set.empty,
+    create_argument = None,
+    create_argument_compression = None,
+    event_sequential_id = 0,
   )
 
   val singlePartyFixture: Option[Update.PublicPackageUploadRejected] =
@@ -285,6 +304,7 @@ object SequentialWriteDaoSpec {
       DbDto.IdFilterCreateStakeholder(0L, "", ""),
       DbDto.IdFilterCreateStakeholder(0L, "", ""),
       someEventExercise,
+      someEventDivulgence,
     ),
   )
 
@@ -297,9 +317,8 @@ object SequentialWriteDaoSpec {
 
   private val dbDtoToStringsForInterningFixture: Iterable[DbDto] => DomainStringIterators = {
     case iterable if iterable.size == 5 =>
-      new DomainStringIterators(Iterator.empty, List("1").iterator, Iterator.empty, Iterator("2"))
-    case _ =>
-      new DomainStringIterators(Iterator.empty, Iterator.empty, Iterator.empty, Iterator.empty)
+      new DomainStringIterators(Iterator.empty, List("1").iterator, Iterator.empty)
+    case _ => new DomainStringIterators(Iterator.empty, Iterator.empty, Iterator.empty)
   }
 
   private val stringInterningViewFixture: StringInterning with InternizingStringInterningView = {
@@ -307,7 +326,7 @@ object SequentialWriteDaoSpec {
       override def templateId: StringInterningDomain[Ref.Identifier] =
         throw new NotImplementedException
 
-      override def packageName: StringInterningDomain[PackageName] =
+      override def packageName: StringInterningDomain[Ref.PackageName] =
         throw new NotImplementedException
 
       override def party: StringInterningDomain[Party] = throw new NotImplementedException

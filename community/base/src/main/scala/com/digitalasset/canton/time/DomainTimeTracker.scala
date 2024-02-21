@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.time
 
-import cats.Foldable
-import cats.syntax.foldable.*
 import cats.syntax.option.*
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
@@ -12,13 +10,9 @@ import com.digitalasset.canton.config.{DomainTimeTrackerConfig, ProcessingTimeou
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.sequencing.OrdinaryApplicationHandler
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.protocol.{Envelope, TimeProof}
-import com.digitalasset.canton.sequencing.{
-  BoxedEnvelope,
-  OrdinaryApplicationHandler,
-  OrdinaryEnvelopeBox,
-}
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.time.DomainTimeTracker.*
 import com.digitalasset.canton.tracing.TraceContext
@@ -27,8 +21,6 @@ import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
-import org.apache.pekko.NotUsed
-import org.apache.pekko.stream.scaladsl.Flow
 
 import java.util.concurrent.PriorityBlockingQueue
 import java.util.concurrent.atomic.AtomicReference
@@ -184,17 +176,6 @@ class DomainTimeTracker(
       maybeScheduleUpdate()
       promise.future.some
     }
-  }
-
-  def flow[F[_], Env <: Envelope[_]](implicit F: Foldable[F]): Flow[
-    F[BoxedEnvelope[OrdinaryEnvelopeBox, Env]],
-    F[BoxedEnvelope[OrdinaryEnvelopeBox, Env]],
-    NotUsed,
-  ] = Flow[F[BoxedEnvelope[OrdinaryEnvelopeBox, Env]]].map { tracedEventsF =>
-    tracedEventsF.toIterable.foreach(_.withTraceContext { implicit batchTraceContext => events =>
-      update(events)
-    })
-    tracedEventsF
   }
 
   /** Create a [[sequencing.OrdinaryApplicationHandler]] for updating this time tracker */

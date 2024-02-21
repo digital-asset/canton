@@ -37,6 +37,7 @@ class BufferedCommandCompletionsReader(
       persistenceFetchArgs = applicationId -> parties,
       bufferFilter = filterCompletions(_, parties, applicationId),
       toApiResponse = (response: CompletionStreamResponse) => Future.successful(response),
+      multiDomainEnabled = false, // for completions it does not matter
     )
 
   private def filterCompletions(
@@ -44,20 +45,10 @@ class BufferedCommandCompletionsReader(
       parties: Set[Party],
       applicationId: String,
   ): Option[CompletionStreamResponse] = (transactionLogUpdate.value match {
-    case TransactionLogUpdate.TransactionAccepted(
-          _,
-          _,
-          _,
-          _,
-          _,
-          _,
-          Some(completionDetails),
-          _,
-          _,
-        ) =>
+    case TransactionLogUpdate.TransactionAccepted(_, _, _, _, _, _, Some(completionDetails), _) =>
       Some(completionDetails)
     case TransactionLogUpdate.TransactionRejected(_, completionDetails) => Some(completionDetails)
-    case TransactionLogUpdate.TransactionAccepted(_, _, _, _, _, _, None, _, _) =>
+    case TransactionLogUpdate.TransactionAccepted(_, _, _, _, _, _, None, _) =>
       // Completion details missing highlights submitter is not local to this participant
       None
     case u: TransactionLogUpdate.ReassignmentAccepted => u.completionDetails
@@ -94,6 +85,7 @@ object BufferedCommandCompletionsReader {
           startExclusive: Offset,
           endInclusive: Offset,
           filter: (ApplicationId, Parties),
+          multiDomainEnabled: Boolean,
       )(implicit
           loggingContext: LoggingContextWithTrace
       ): Source[(Offset, CompletionStreamResponse), NotUsed] = {

@@ -6,7 +6,7 @@ package com.digitalasset.canton.console.commands
 import better.files.File
 import com.digitalasset.canton.admin.api.client.commands.{
   StatusAdminCommands,
-  TopologyAdminCommandsX,
+  TopologyAdminCommands,
 }
 import com.digitalasset.canton.config.{ConsoleCommandTimeout, NonNegativeDuration}
 import com.digitalasset.canton.console.CommandErrors.{CommandError, GenericCommandError}
@@ -22,7 +22,8 @@ import com.digitalasset.canton.console.{
   Helpful,
 }
 import com.digitalasset.canton.health.admin.data.NodeStatus
-import com.digitalasset.canton.health.admin.{data, v30}
+import com.digitalasset.canton.health.admin.v0.HealthDumpChunk
+import com.digitalasset.canton.health.admin.{data, v0}
 import com.digitalasset.canton.networking.grpc.GrpcError
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.ResourceUtil
@@ -31,11 +32,10 @@ import io.grpc.StatusRuntimeException
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{Await, Promise, TimeoutException}
 
-// TODO(#15161): fold HealthAdministrationCommon into HealthAdministrationX
 abstract class HealthAdministrationCommon[S <: data.NodeStatus.Status](
     runner: AdminCommandRunner,
     consoleEnvironment: ConsoleEnvironment,
-    deserialize: v30.StatusResponse.Status => ParsingResult[S],
+    deserialize: v0.NodeStatus.Status => ParsingResult[S],
 ) extends Helpful {
   private val initializedCache = new AtomicReference[Boolean](false)
   private def timeouts: ConsoleCommandTimeout = consoleEnvironment.commandTimeouts
@@ -70,7 +70,7 @@ abstract class HealthAdministrationCommon[S <: data.NodeStatus.Status](
   ): String = consoleEnvironment.run {
     val requestComplete = Promise[String]()
     val responseObserver =
-      new GrpcByteChunksToFileObserver[v30.HealthDumpResponse](outputFile, requestComplete)
+      new GrpcByteChunksToFileObserver[HealthDumpChunk](outputFile, requestComplete)
 
     def call = consoleEnvironment.run {
       adminCommand(new StatusAdminCommands.GetHealthDump(responseObserver, chunkSize))
@@ -100,7 +100,7 @@ abstract class HealthAdministrationCommon[S <: data.NodeStatus.Status](
       StatusAdminCommands.IsInitialized
     )
 
-  private def falseIfUnreachable(command: ConsoleCommandResult[Boolean]): Boolean =
+  def falseIfUnreachable(command: ConsoleCommandResult[Boolean]): Boolean =
     consoleEnvironment.run(CommandSuccessful(command match {
       case CommandSuccessful(result) => result
       case _: CommandError => false
@@ -148,15 +148,15 @@ abstract class HealthAdministrationCommon[S <: data.NodeStatus.Status](
   }
 }
 
-class HealthAdministrationX[S <: data.NodeStatus.Status](
+class HealthAdministration[S <: data.NodeStatus.Status](
     runner: AdminCommandRunner,
     consoleEnvironment: ConsoleEnvironment,
-    deserialize: v30.StatusResponse.Status => ParsingResult[S],
+    deserialize: v0.NodeStatus.Status => ParsingResult[S],
 ) extends HealthAdministrationCommon[S](runner, consoleEnvironment, deserialize) {
 
   override def has_identity(): Boolean = runner
     .adminCommand(
-      TopologyAdminCommandsX.Init.GetId()
+      TopologyAdminCommands.Init.GetId()
     )
     .toEither
     .isRight

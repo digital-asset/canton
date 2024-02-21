@@ -36,17 +36,17 @@ import org.scalatest.wordspec.AnyWordSpec
 @SuppressWarnings(Array("org.wartremover.warts.Any"))
 class MerkleTreeTest extends AnyWordSpec with BaseTest {
 
-  private val fullyBlindedTreeHash: RootHash = RootHash(TestHash.digest("test"))
-  private val fullyBlindedTree: BlindedNode[Nothing] = BlindedNode(fullyBlindedTreeHash)
+  val fullyBlindedTreeHash: RootHash = RootHash(TestHash.digest("test"))
+  val fullyBlindedTree: BlindedNode[Nothing] = BlindedNode(fullyBlindedTreeHash)
 
-  private val singletonLeaf1: Leaf1 =
+  val singletonLeaf1: Leaf1 =
     Leaf1(1)(AbstractLeaf.protocolVersionRepresentativeFor(testedProtocolVersion))
-  private val singletonLeaf2: Leaf2 =
+  val singletonLeaf2: Leaf2 =
     Leaf2(2)(AbstractLeaf.protocolVersionRepresentativeFor(testedProtocolVersion))
-  private val singletonLeaf3: Leaf3 =
+  val singletonLeaf3: Leaf3 =
     Leaf3(3)(AbstractLeaf.protocolVersionRepresentativeFor(testedProtocolVersion))
 
-  private def singletonLeafHash(index: Int): RootHash = RootHash {
+  def singletonLeafHash(index: Int): RootHash = RootHash {
     val salt = TestSalt.generateSalt(index)
     val data = DeterministicEncoding.encodeInt(index)
     val hashBuilder = TestHash.build
@@ -56,14 +56,14 @@ class MerkleTreeTest extends AnyWordSpec with BaseTest {
       .finish()
   }
 
-  private val singletonInnerNode: InnerNode1 = InnerNode1()
-  private val singletonInnerNodeHash: RootHash = RootHash {
+  val singletonInnerNode: InnerNode1 = InnerNode1()
+  val singletonInnerNodeHash: RootHash = RootHash {
     val hashBuilder = TestHash.build(HashPurpose.MerkleTreeInnerNode)
     hashBuilder.add(0).finish()
   }
 
-  private val innerNodeWithSingleChild: InnerNode1 = InnerNode1(singletonLeaf1)
-  private val innerNodeWithSingleChildHash: RootHash = RootHash {
+  val innerNodeWithSingleChild: InnerNode1 = InnerNode1(singletonLeaf1)
+  val innerNodeWithSingleChildHash: RootHash = RootHash {
     val hashBuilder = TestHash.build(HashPurpose.MerkleTreeInnerNode)
     hashBuilder
       .add(1)
@@ -71,8 +71,8 @@ class MerkleTreeTest extends AnyWordSpec with BaseTest {
       .finish()
   }
 
-  private val innerNodeWithTwoChildren: InnerNode2 = InnerNode2(singletonLeaf2, singletonLeaf3)
-  private val innerNodeWithTwoChildrenHash: RootHash = RootHash {
+  val innerNodeWithTwoChildren: InnerNode2 = InnerNode2(singletonLeaf2, singletonLeaf3)
+  val innerNodeWithTwoChildrenHash: RootHash = RootHash {
     val hashBuilder = TestHash.build(HashPurpose.MerkleTreeInnerNode)
     hashBuilder
       .add(2)
@@ -81,8 +81,8 @@ class MerkleTreeTest extends AnyWordSpec with BaseTest {
       .finish()
   }
 
-  private val threeLevelTree: InnerNode1 = InnerNode1(singletonLeaf1, innerNodeWithTwoChildren)
-  private val threeLevelTreeHash: RootHash = RootHash {
+  val threeLevelTree: InnerNode1 = InnerNode1(singletonLeaf1, innerNodeWithTwoChildren)
+  val threeLevelTreeHash: RootHash = RootHash {
     val hashBuilder = TestHash.build(HashPurpose.MerkleTreeInnerNode)
     hashBuilder
       .add(2)
@@ -91,7 +91,7 @@ class MerkleTreeTest extends AnyWordSpec with BaseTest {
       .finish()
   }
 
-  private val threeLevelTreePartiallyBlinded: InnerNode1 =
+  val threeLevelTreePartiallyBlinded: InnerNode1 =
     InnerNode1(BlindedNode(singletonLeafHash(1)), innerNodeWithTwoChildren)
 
   "Every Merkle tree" must {
@@ -208,22 +208,26 @@ object MerkleTreeTest {
     override def name: String = "AbstractLeaf"
     override def supportedProtoVersions: data.MerkleTreeTest.AbstractLeaf.SupportedProtoVersions =
       SupportedProtoVersions(
-        ProtoVersion(30) -> VersionedProtoConverter.raw(
-          ProtocolVersion.v30,
-          fromProto(30),
+        ProtoVersion(0) -> LegacyProtoConverter.raw(
+          ProtocolVersion.v3,
+          fromProto(0),
           _.getCryptographicEvidence,
-        )
+        ),
+        ProtoVersion(1) -> VersionedProtoConverter.raw(
+          ProtocolVersion.smallestStable,
+          fromProto(1),
+          _.getCryptographicEvidence,
+        ),
       )
 
-    def fromProto(protoVersion: Int)(bytes: ByteString): ParsingResult[Leaf1] = {
-
-      protocolVersionRepresentativeFor(ProtoVersion(protoVersion)).flatMap { rpv =>
-        leafFromByteString(i => Leaf1(i)(rpv))(bytes).leftMap(e =>
+    def fromProto(protoVersion: Int)(bytes: ByteString): ParsingResult[Leaf1] =
+      for {
+        rpv <- protocolVersionRepresentativeFor(ProtoVersion(protoVersion))
+        leaf <- leafFromByteString(i => Leaf1(i)(rpv))(bytes).leftMap(e =>
           ProtoDeserializationError.OtherError(e.message)
         )
-      }
+      } yield leaf
 
-    }
   }
 
   abstract class AbstractLeaf[A <: MerkleTree[
@@ -297,8 +301,8 @@ object MerkleTreeTest {
   }
 
   final case class InnerNode1(override val subtrees: MerkleTree[_]*)
-      extends AbstractInnerNode[InnerNode1](InnerNode1.apply, subtrees*) {}
+      extends AbstractInnerNode[InnerNode1](InnerNode1.apply, subtrees: _*) {}
 
   final case class InnerNode2(override val subtrees: MerkleTree[_]*)
-      extends AbstractInnerNode[InnerNode2](InnerNode2.apply, subtrees*) {}
+      extends AbstractInnerNode[InnerNode2](InnerNode2.apply, subtrees: _*) {}
 }

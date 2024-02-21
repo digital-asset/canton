@@ -22,7 +22,7 @@ object StringInterningStorageBackendImpl extends StringInterningStorageBackend {
   ): Iterable[(Int, String)] =
     SQL"""
          SELECT internal_id, external_string
-         FROM lapi_string_interning
+         FROM string_interning
          WHERE
            internal_id > $fromIdExclusive
            AND internal_id <= $untilIdInclusive

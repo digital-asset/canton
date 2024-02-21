@@ -3,12 +3,13 @@
 
 package com.daml.ledger.javaapi.data
 
-import com.daml.ledger.api.v1.ValueOuterClass
-import org.scalatest.flatspec.AnyFlatSpec
-import org.scalatest.matchers.should.Matchers
-
 import java.util.Collections
-import scala.jdk.CollectionConverters.*
+
+import com.daml.ledger.api.v1.ValueOuterClass
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.flatspec.AnyFlatSpec
+
+import scala.jdk.CollectionConverters._
 
 class DamlRecordSpec extends AnyFlatSpec with Matchers {
 

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.tracing
 
-import cats.{Applicative, Eval, Functor, Traverse}
+import cats.{Applicative, Eval, Traverse}
 
 trait HasTraceContext {
   def traceContext: TraceContext
@@ -19,12 +19,8 @@ final case class Traced[+A](value: A)(implicit override val traceContext: TraceC
   def mapWithTraceContext[B](fn: TraceContext => A => B): Traced[B] =
     Traced(withTraceContext(fn))
 
-  def traverse[F[_], B](f: A => F[B])(implicit F: Functor[F]): F[Traced[B]] =
-    F.map(f(value))(Traced(_))
-
   def withTraceContext[B](fn: TraceContext => A => B): B = fn(traceContext)(value)
 
-  def copy[B](value: B): Traced[B] = Traced(value)(traceContext)
   override def toString: String = s"Traced($value)($traceContext)"
 }
 
@@ -48,8 +44,11 @@ object Traced {
   implicit val traverseTraced: Traverse[Traced] = new Traverse[Traced] {
     override def traverse[G[_], A, B](
         traced: Traced[A]
-    )(f: A => G[B])(implicit G: Applicative[G]): G[Traced[B]] =
-      traced.traverse(f)
+    )(f: A => G[B])(implicit G: Applicative[G]): G[Traced[B]] = {
+      G.map(f(traced.value)) { newValue =>
+        traced.copy(value = newValue)(traced.traceContext)
+      }
+    }
 
     override def foldLeft[A, B](traced: Traced[A], b: B)(f: (B, A) => B): B = f(b, traced.value)
     override def foldRight[A, B](traced: Traced[A], lb: Eval[B])(

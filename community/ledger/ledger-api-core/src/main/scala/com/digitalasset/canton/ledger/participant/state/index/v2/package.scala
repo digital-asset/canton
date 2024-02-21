@@ -76,7 +76,7 @@ package v2 {
     */
   final case class TransactionMeta(
       transactionId: TransactionId,
-      offset: ParticipantOffset.Absolute,
+      offset: LedgerOffset.Absolute,
       ledgerEffectiveTime: Timestamp,
       recordTime: Timestamp,
       workflowId: WorkflowId,

@@ -4,6 +4,8 @@
 package com.digitalasset.canton.platform.apiserver.services
 
 import com.daml.grpc.adapter.ExecutionSequencerFactory
+import com.daml.ledger.api.v1.transaction_filter.TransactionFilter
+import com.daml.ledger.api.v1.transaction_service.GetTransactionsRequest
 import com.daml.ledger.api.v2.update_service.*
 import com.daml.lf.ledger.EventId
 import com.daml.logging.entries.LoggingEntries
@@ -12,7 +14,7 @@ import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.domain.TransactionId
 import com.digitalasset.canton.ledger.api.grpc.StreamingServiceLifecycleManagement
 import com.digitalasset.canton.ledger.api.validation.{
-  UpdateServiceRequestValidator,
+  TransactionServiceRequestValidator,
   ValidationErrors,
 }
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
@@ -38,7 +40,7 @@ final class ApiUpdateService(
     metrics: Metrics,
     telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
-    validator: UpdateServiceRequestValidator,
+    validator: TransactionServiceRequestValidator,
 )(implicit
     esf: ExecutionSequencerFactory,
     executionContext: ExecutionContext,
@@ -46,6 +48,8 @@ final class ApiUpdateService(
 ) extends UpdateServiceGrpc.UpdateService
     with StreamingServiceLifecycleManagement
     with NamedLogging {
+
+  import ApiConversions.*
 
   override def getUpdates(
       request: GetUpdatesRequest,
@@ -58,10 +62,11 @@ final class ApiUpdateService(
       logger.debug(s"Received new update request $request.")
       Source.future(transactionsService.currentLedgerEnd()).flatMapConcat { ledgerEnd =>
         val validation = validator.validate(
-          GetUpdatesRequest(
-            beginExclusive = request.beginExclusive,
-            endInclusive = request.endInclusive,
-            filter = request.filter,
+          GetTransactionsRequest(
+            ledgerId = "",
+            begin = request.beginExclusive.map(toV1),
+            end = request.endInclusive.map(toV1),
+            filter = request.filter.map(v2TxFilter => TransactionFilter(v2TxFilter.filtersByParty)),
             verbose = request.verbose,
           ),
           ledgerEnd,
@@ -85,10 +90,10 @@ final class ApiUpdateService(
               }
               logger.trace(s"Update request: $req.")
               transactionsService
-                .transactions(req.startExclusive, req.endInclusive, req.filter, req.verbose)
+                .transactions(req.startExclusive, req.endInclusive, req.filter, req.verbose, true)
                 .via(logger.enrichedDebugStream("Responding with updates.", updatesLoggable))
                 .via(logger.logErrorsOnStream)
-                .via(StreamMetrics.countElements(metrics.lapi.streams.updates))
+                .via(StreamMetrics.countElements(metrics.daml.lapi.streams.updates))
             },
         )
       }
@@ -106,10 +111,11 @@ final class ApiUpdateService(
       logger.debug(s"Received new update trees request $request.")
       Source.future(transactionsService.currentLedgerEnd()).flatMapConcat { ledgerEnd =>
         val validation = validator.validate(
-          GetUpdatesRequest(
-            beginExclusive = request.beginExclusive,
-            endInclusive = request.endInclusive,
-            filter = request.filter,
+          GetTransactionsRequest(
+            ledgerId = "",
+            begin = request.beginExclusive.map(toV1),
+            end = request.endInclusive.map(toV1),
+            filter = request.filter.map(v2TxFilter => TransactionFilter(v2TxFilter.filtersByParty)),
             verbose = request.verbose,
           ),
           ledgerEnd,
@@ -138,10 +144,11 @@ final class ApiUpdateService(
                   req.endInclusive,
                   req.filter,
                   req.verbose,
+                  true,
                 )
                 .via(logger.enrichedDebugStream("Responding with update trees.", updatesLoggable))
                 .via(logger.logErrorsOnStream)
-                .via(StreamMetrics.countElements(metrics.lapi.streams.updates))
+                .via(StreamMetrics.countElements(metrics.daml.lapi.streams.updates))
             },
         )
       }
@@ -155,7 +162,7 @@ final class ApiUpdateService(
     implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
 
     validator
-      .validateTransactionByEventId(req)
+      .validateTransactionByEventId(toV1(req))
       .fold(
         t => Future.failed(ValidationLogger.logFailureWithTrace(logger, req, t)),
         request => {
@@ -207,7 +214,7 @@ final class ApiUpdateService(
     implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
 
     validator
-      .validateTransactionById(req)
+      .validateTransactionById(toV1(req))
       .fold(
         t => Future.failed(ValidationLogger.logFailureWithTrace(logger, req, t)),
         request => {
@@ -250,7 +257,7 @@ final class ApiUpdateService(
     implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
 
     validator
-      .validateTransactionByEventId(req)
+      .validateTransactionByEventId(toV1(req))
       .fold(
         t => Future.failed(ValidationLogger.logFailureWithTrace(logger, req, t)),
         request => {
@@ -301,7 +308,7 @@ final class ApiUpdateService(
     implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
 
     validator
-      .validateTransactionById(req)
+      .validateTransactionById(toV1(req))
       .fold(
         t => Future.failed(ValidationLogger.logFailureWithTrace(logger, req, t)),
         request => {

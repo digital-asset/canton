@@ -5,9 +5,9 @@ package com.digitalasset.canton.platform.store.cache
 
 import com.daml.ledger.resources.Resource
 import com.daml.lf.crypto.Hash
+import com.daml.lf.data.ImmArray
 import com.daml.lf.data.Ref.IdString
 import com.daml.lf.data.Time.Timestamp
-import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.transaction.{GlobalKey, TransactionVersion, Versioned}
 import com.daml.lf.value.Value.{ContractInstance, ValueRecord, ValueText}
 import com.digitalasset.canton.ledger.offset.Offset
@@ -21,6 +21,7 @@ import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReade
   KeyAssigned,
   KeyUnassigned,
 }
+import com.digitalasset.canton.protocol.LfPackageName
 import com.digitalasset.canton.{HasExecutionContext, TestEssentials}
 import org.mockito.MockitoSugar
 import org.scalatest.matchers.should.Matchers
@@ -121,10 +122,28 @@ class MutableCacheBackedContractStoreSpec
         positiveLookup_cId6 <- store.lookupActiveContract(Set(alice), cId_6)
       } yield {
         negativeLookup_cId6 shouldBe Option.empty
-        positiveLookup_cId6 shouldBe Option.empty
+        positiveLookup_cId6 shouldBe Some(contract6)
 
-        verify(spyContractsReader, times(wantedNumberOfInvocations = 1))
+        verify(spyContractsReader, times(wantedNumberOfInvocations = 2))
           .lookupContractState(cId_6, offset1)
+        succeed
+      }
+    }
+
+    "resort to resolveDivulgenceLookup on not found" in {
+      val spyContractsReader = spy(ContractsReaderFixture())
+      for {
+        store <- contractStore(
+          cachesSize = 1L,
+          loggerFactory = loggerFactory,
+          spyContractsReader,
+        ).asFuture
+        _ = store.contractStateCaches.contractState.cacheIndex = offset1
+        resolvedLookup_cId7 <- store.lookupActiveContract(Set(bob), cId_7)
+      } yield {
+        resolvedLookup_cId7 shouldBe Some(contract7)
+
+        verify(spyContractsReader).lookupActiveContractAndLoadArgument(Set(bob), cId_7)
         succeed
       }
     }
@@ -148,10 +167,10 @@ class MutableCacheBackedContractStoreSpec
         cId2_lookup0 shouldBe Option.empty
 
         cId1_lookup1 shouldBe Option.empty
-        cid1_lookup1_archivalNotDivulged shouldBe None
+        cid1_lookup1_archivalNotDivulged shouldBe Some(contract1)
 
         cId2_lookup2 shouldBe Some(contract2)
-        cid2_lookup2_divulged shouldBe None
+        cid2_lookup2_divulged shouldBe Some(contract2)
         cid2_lookup2_nonVisible shouldBe Option.empty
       }
     }
@@ -248,9 +267,9 @@ class MutableCacheBackedContractStoreSpec
             cId_5 -> ContractStateValue.Archived(Set.empty),
           ),
         )
-        activeContractLookupResult <- store.lookupContractState(cId_4)
-        archivedContractLookupResult <- store.lookupContractState(cId_5)
-        nonExistentContractLookupResult <- store.lookupContractState(cId_7)
+        activeContractLookupResult <- store.lookupContractStateWithoutDivulgence(cId_4)
+        archivedContractLookupResult <- store.lookupContractStateWithoutDivulgence(cId_5)
+        nonExistentContractLookupResult <- store.lookupContractStateWithoutDivulgence(cId_7)
       } yield {
         activeContractLookupResult shouldBe stateActive
         archivedContractLookupResult shouldBe ContractState.Archived
@@ -261,9 +280,9 @@ class MutableCacheBackedContractStoreSpec
     "resolve lookup from the ContractsReader when not cached" in {
       for {
         store <- contractStore(cachesSize = 0L, loggerFactory).asFuture
-        activeContractLookupResult <- store.lookupContractState(cId_4)
-        archivedContractLookupResult <- store.lookupContractState(cId_5)
-        nonExistentContractLookupResult <- store.lookupContractState(cId_7)
+        activeContractLookupResult <- store.lookupContractStateWithoutDivulgence(cId_4)
+        archivedContractLookupResult <- store.lookupContractStateWithoutDivulgence(cId_5)
+        nonExistentContractLookupResult <- store.lookupContractStateWithoutDivulgence(cId_7)
       } yield {
         activeContractLookupResult shouldBe stateActive
         archivedContractLookupResult shouldBe ContractState.Archived
@@ -348,6 +367,32 @@ object MutableCacheBackedContractStoreSpec {
         case _ => Future.successful(Option.empty)
       }
     }
+
+    override def lookupActiveContractAndLoadArgument(
+        forParties: Set[Party],
+        contractId: ContractId,
+    )(implicit loggingContext: LoggingContextWithTrace): Future[Option[Contract]] =
+      (contractId, forParties) match {
+        case (`cId_2`, parties) if parties.contains(charlie) =>
+          // Purposely return a wrong associated contract than the cId so it can be distinguished upstream
+          // that the cached variant of this method was not used
+          Future.successful(Some(contract3))
+        case (`cId_1`, parties) if parties.contains(charlie) =>
+          Future.successful(Some(contract1))
+        case (`cId_7`, parties) if parties == Set(bob) => Future.successful(Some(contract7))
+        case _ => Future.successful(Option.empty)
+      }
+
+    override def lookupActiveContractWithCachedArgument(
+        forParties: Set[Party],
+        contractId: ContractId,
+        packageName: Option[LfPackageName],
+        createArgument: Value,
+    )(implicit loggingContext: LoggingContextWithTrace): Future[Option[Contract]] =
+      (contractId, forParties) match {
+        case (`cId_2`, parties) if parties.contains(charlie) => Future.successful(Some(contract2))
+        case _ => Future.successful(Option.empty)
+      }
   }
 
   private def activeContract(
@@ -384,14 +429,16 @@ object MutableCacheBackedContractStoreSpec {
 
   private def contract(templateName: String): Contract = {
     val templateId = Identifier.assertFromString(s"some:template:$templateName")
-    val packageName = Ref.PackageName.assertFromString("pkg-name")
-
+    val packageName = LfPackageName.assertFromString("some_package")
     val contractArgument = ValueRecord(
       Some(templateId),
       ImmArray.Empty,
     )
-    val contractInstance =
-      ContractInstance(packageName = packageName, template = templateId, arg = contractArgument)
+    val contractInstance = ContractInstance(
+      template = templateId,
+      packageName = Some(packageName),
+      arg = contractArgument,
+    )
     Versioned(TransactionVersion.StableVersions.max, contractInstance)
   }
 
@@ -402,6 +449,7 @@ object MutableCacheBackedContractStoreSpec {
     GlobalKey.assertBuild(
       Identifier.assertFromString(s"some:template:$desc"),
       ValueText(desc),
+      shared = true,
     )
 
   private def offset(idx: Long) = Offset.fromByteArray(BigInt(idx).toByteArray)

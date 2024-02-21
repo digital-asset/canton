@@ -3,7 +3,7 @@
 
 package com.daml.error
 
-import com.daml.error.utils.{DecodedCantonError, ErrorDetails}
+import com.daml.error.utils.{DeserializedCantonError, ErrorDetails}
 import com.google.rpc.Status
 import io.grpc.Status.Code
 import org.scalatest.EitherValues
@@ -311,10 +311,10 @@ class ErrorCodeSpec
 
     "truncate the trace-id if abnormaly large" in {
       val errWithLargeTraceId =
-        ErrorGenerator.defaultErrorGen.sample.value.copy(traceId = Some("x" * 1000)).asGrpcError
+        ErrorGenerator.defaultErrorGen.sample.value.copy(traceId = Some("x" * 1000)).asGrpcStatus
 
-      DecodedCantonError
-        .fromStatusRuntimeException(errWithLargeTraceId)
+      DeserializedCantonError
+        .fromGrpcStatus(com.google.rpc.status.Status.fromJavaProto(errWithLargeTraceId))
         .value
         .traceId
         .value shouldBe ("x" * 253 + "...")
@@ -324,10 +324,10 @@ class ErrorCodeSpec
       val errWithLargeTraceId =
         ErrorGenerator.defaultErrorGen.sample.value
           .copy(correlationId = Some("x" * 1000))
-          .asGrpcError
+          .asGrpcStatus
 
-      DecodedCantonError
-        .fromStatusRuntimeException(errWithLargeTraceId)
+      DeserializedCantonError
+        .fromGrpcStatus(com.google.rpc.status.Status.fromJavaProto(errWithLargeTraceId))
         .value
         .correlationId
         .value shouldBe ("x" * 253 + "...")

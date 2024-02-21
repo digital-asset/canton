@@ -11,7 +11,7 @@ import com.digitalasset.canton.protocol.{RequestId, TargetDomainId}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.DefaultTestIdentities.domainId
-import com.digitalasset.canton.version.v1.UntypedVersionedMessage
+import com.digitalasset.canton.version.UntypedVersionedMessage
 import com.digitalasset.canton.{BaseTestWordSpec, SequencerCounter}
 import com.google.protobuf.ByteString
 
@@ -50,6 +50,7 @@ class SequencedEventTest extends BaseTestWordSpec {
       val deserializedEvent = deserializeBytestring(deliverEventBS)
 
       deserializedEvent.value shouldBe deliver
+
     }
 
     "correctly serialize and deserialize a deliver error" in {

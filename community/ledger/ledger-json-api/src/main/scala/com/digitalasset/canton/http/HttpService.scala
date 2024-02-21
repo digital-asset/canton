@@ -9,6 +9,7 @@ import org.apache.pekko.http.scaladsl.Http.ServerBinding
 import org.apache.pekko.http.scaladsl.server.Route
 import org.apache.pekko.http.scaladsl.settings.ServerSettings
 import org.apache.pekko.stream.Materializer
+import ch.qos.logback.classic.Level as LogLevel
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.jwt.JwtDecoder
 import com.daml.jwt.domain.Jwt
@@ -28,12 +29,14 @@ import com.digitalasset.canton.http.metrics.HttpApiMetrics
 import com.digitalasset.canton.http.util.ApiValueToLfValueConverter
 import com.digitalasset.canton.http.util.FutureUtil.*
 import com.digitalasset.canton.http.util.Logging.InstanceUUID
+import com.digitalasset.canton.ledger.api.domain as LedgerApiDomain
 import com.digitalasset.canton.ledger.client.configuration.{
   CommandClientConfiguration,
   LedgerClientConfiguration,
+  LedgerIdRequirement,
 }
-import com.digitalasset.canton.ledger.client.services.pkg.PackageClient
-import com.digitalasset.canton.ledger.client.LedgerClient as DamlLedgerClient
+import com.digitalasset.canton.ledger.client.services.pkg.withoutledgerid.PackageClient
+import com.digitalasset.canton.ledger.client.withoutledgerid.LedgerClient as DamlLedgerClient
 import com.digitalasset.canton.ledger.service.LedgerReader
 import com.digitalasset.canton.ledger.service.LedgerReader.PackageStore
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -65,6 +68,9 @@ class HttpService(
 
   private val directEc = DirectExecutionContext(noTracingLogger)
 
+  private def isLogLevelEqualOrBelowDebug(logLevel: Option[LogLevel]) =
+    logLevel.exists(!_.isGreaterOrEqual(LogLevel.INFO))
+
   @SuppressWarnings(Array("org.wartremover.warts.NonUnitStatements"))
   def acquire()(implicit context: ResourceContext): Resource[ServerBinding] = Resource({
     logger.info(s"Starting JSON API server, ${lc.makeString}")
@@ -75,11 +81,11 @@ class HttpService(
     implicit val settings: ServerSettings = ServerSettings(asys).withTransparentHeadRequests(true)
     val clientConfig = LedgerClientConfiguration(
       applicationId = ApplicationId.unwrap(DummyApplicationId),
+      ledgerIdRequirement = LedgerIdRequirement.none,
       commandClient = CommandClientConfiguration.default,
     )
 
-    val ledgerClient: DamlLedgerClient =
-      DamlLedgerClient.withoutToken(channel, clientConfig, loggerFactory)
+    val ledgerClient: DamlLedgerClient = DamlLedgerClient(channel, clientConfig, loggerFactory)
     import org.apache.pekko.http.scaladsl.server.Directives.*
     val bindingEt: EitherT[Future, HttpService.Error, ServerBinding] = for {
       _ <- eitherT(Future.successful(\/-(ledgerClient)))
@@ -87,7 +93,7 @@ class HttpService(
 
       packageService = new PackageService(
         reloadPackageStoreIfChanged =
-          doLoad(ledgerClient.v2.packageService, LedgerReader(loggerFactory), packageCache),
+          doLoad(ledgerClient.packageClient, LedgerReader(loggerFactory), packageCache),
         loggerFactory = loggerFactory,
       )
 
@@ -103,6 +109,7 @@ class HttpService(
         packageService.resolveContractTypeId,
         packageService.allTemplateIds,
         ledgerClientJwt.getByContractId(ledgerClient),
+        ledgerClientJwt.getByContractKey(ledgerClient),
         ledgerClientJwt.getActiveContracts(ledgerClient),
         ledgerClientJwt.getCreatesAndArchivesSince(ledgerClient),
         loggerFactory,
@@ -117,14 +124,15 @@ class HttpService(
       packageManagementService = new PackageManagementService(
         ledgerClientJwt.listPackages(ledgerClient),
         ledgerClientJwt.getPackage(ledgerClient),
-        { case (jwt, byteString) =>
+        { case (jwt, ledgerId, byteString) =>
           implicit lc =>
             ledgerClientJwt
               .uploadDar(ledgerClient)(directEc)(
                 jwt,
+                ledgerId,
                 byteString,
               )(lc)
-              .flatMap(_ => packageService.reload(jwt))
+              .flatMap(_ => packageService.reload(jwt, ledgerId))
               .map(_ => ())
         },
       )
@@ -163,6 +171,7 @@ class HttpService(
         decoder,
         debugLoggingOfHttpBodies,
         ledgerClient.userManagementClient,
+        ledgerClient.identityClient,
         loggerFactory,
       )
 
@@ -178,6 +187,7 @@ class HttpService(
         HttpService.decodeJwt,
         websocketService,
         ledgerClient.userManagementClient,
+        ledgerClient.identityClient,
         loggerFactory,
       )
 
@@ -229,7 +239,7 @@ object HttpService {
       packageClient: PackageClient,
       ledgerReader: LedgerReader,
       loadCache: LedgerReader.LoadCache,
-  )(jwt: Jwt)(ids: Set[String])(implicit
+  )(jwt: Jwt, ledgerId: LedgerApiDomain.LedgerId)(ids: Set[String])(implicit
       ec: ExecutionContext,
       lc: LoggingContextOf[InstanceUUID],
   ): Future[PackageService.ServerError \/ Option[PackageStore]] =
@@ -238,6 +248,7 @@ object HttpService {
         packageClient,
         loadCache,
         some(jwt.value),
+        ledgerId,
       )(ids)
       .map(_.leftMap(e => PackageService.ServerError(e)))
 

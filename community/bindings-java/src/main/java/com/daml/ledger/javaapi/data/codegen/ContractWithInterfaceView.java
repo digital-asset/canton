@@ -3,6 +3,7 @@
 
 package com.daml.ledger.javaapi.data.codegen;
 
+import java.util.Optional;
 import java.util.Set;
 
 final class ContractWithInterfaceView<Id, View> extends Contract<Id, View> {
@@ -13,9 +14,10 @@ final class ContractWithInterfaceView<Id, View> extends Contract<Id, View> {
       InterfaceCompanion<?, Id, View> contractTypeCompanion,
       Id id,
       View interfaceView,
+      Optional<String> agreementText,
       Set<String> signatories,
       Set<String> observers) {
-    super(id, interfaceView, signatories, observers);
+    super(id, interfaceView, agreementText, signatories, observers);
     this.contractTypeCompanion = contractTypeCompanion;
   }
 

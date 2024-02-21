@@ -34,8 +34,8 @@ import com.digitalasset.canton.participant.sync.LedgerSyncEvent.TransactionAccep
 import com.digitalasset.canton.participant.sync.TimestampedEvent.EventId
 import com.digitalasset.canton.participant.topology.{
   LedgerServerPartyNotifier,
-  ParticipantTopologyDispatcherX,
-  ParticipantTopologyManagerOps,
+  ParticipantTopologyDispatcher,
+  ParticipantTopologyManager,
 }
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.participant.{
@@ -75,9 +75,9 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
     private val syncDomainPersistentStateManager = mock[SyncDomainPersistentStateManager]
     private val domainConnectionConfigStore = mock[DomainConnectionConfigStore]
     private val packageService = mock[PackageService]
-    val topologyManagerOps: ParticipantTopologyManagerOps = mock[ParticipantTopologyManagerOps]
+    val topologyManager: ParticipantTopologyManager = mock[ParticipantTopologyManager]
 
-    private val identityPusher = mock[ParticipantTopologyDispatcherX]
+    private val identityPusher = mock[ParticipantTopologyDispatcher]
     val partyNotifier = mock[LedgerServerPartyNotifier]
     private val syncCrypto = mock[SyncCryptoApiProvider]
     private val multiDomainEventLog = mock[MultiDomainEventLog]
@@ -146,12 +146,12 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       participantNodeEphemeralState,
       syncDomainPersistentStateManager,
       packageService,
-      topologyManagerOps,
+      topologyManager,
       identityPusher,
       partyNotifier,
       syncCrypto,
       pruningProcessor,
-      DAMLe.newEngine(enableLfDev = false, enableStackTraces = false),
+      DAMLe.newEngine(uniqueContractKeys = false, enableLfDev = false, enableStackTraces = false),
       syncDomainStateFactory,
       new SimClock(loggerFactory = loggerFactory),
       new ResourceManagementService.CommunityResourceManagementService(
@@ -167,6 +167,8 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       () => true,
       FutureSupervisor.Noop,
       SuppressingLogger(getClass),
+      skipRecipientsCheck = false,
+      multiDomainLedgerAPIEnabled = false,
     )
   }
 
@@ -178,7 +180,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
   "Canton sync service" should {
     "emit add party event" in { f =>
       when(
-        f.topologyManagerOps.allocateParty(
+        f.topologyManager.allocateParty(
           any[String255],
           any[PartyId],
           any[ParticipantId],
@@ -194,7 +196,6 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
           any[PartyId],
           any[ParticipantId],
           any[String255],
-          any[Option[String255]],
         )
       ).thenReturn(Right(()))
 
@@ -218,7 +219,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
         .asScala
 
       val result = fut.map(_ => {
-        verify(f.topologyManagerOps).allocateParty(
+        verify(f.topologyManager).allocateParty(
           eqTo(String255.tryCreate(submissionId)),
           eqTo(partyId),
           eqTo(f.participantId),
@@ -254,10 +255,9 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
         blindingInfoO = None,
         hostedWitnesses = Nil,
         contractMetadata = Map(),
-        domainId = DomainId.tryFromString("da::default"),
       )
 
-      Option(sync.augmentTransactionStatistics(event))
+      Option(sync.eventTranslationStrategy.augmentTransactionStatistics(event))
         .collect({ case ta: TransactionAccepted => ta })
         .flatMap(_.completionInfoO)
         .flatMap(_.statistics)
@@ -271,6 +271,10 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
 
     "not include ping-pong packages in metering" in { f =>
       stats(f.sync, PackageID.PingPong) shouldBe Some(0)
+    }
+
+    "not include dar-distribution packages in metering" in { f =>
+      stats(f.sync, PackageID.DarDistribution) shouldBe Some(0)
     }
 
   }

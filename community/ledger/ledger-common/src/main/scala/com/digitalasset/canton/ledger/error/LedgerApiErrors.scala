@@ -16,7 +16,6 @@ import org.slf4j.event.Level
 object LedgerApiErrors extends LedgerApiErrorGroup {
 
   val EarliestOffsetMetadataKey = "earliest_offset"
-  val LatestOffsetMetadataKey = "latest_offset"
 
   @Explanation(
     """This error occurs when a participant rejects a command due to excessive load.
@@ -131,7 +130,7 @@ object LedgerApiErrors extends LedgerApiErrorGroup {
         fullMethodName: String,
     )(implicit errorLogger: ContextualizedErrorLogger)
         extends DamlErrorWithDefiniteAnswer(
-          s"The $metricNameLabel ($name) queue size ($queued) has exceeded the maximum ($limit).",
+          s"The $metricNameLabel ($name) queue size ($queued) has exceeded the maximum ($limit). Metrics for queue size available at ${ExecutorServiceMetrics.CommonMetricsName.QueuedTasks}.",
           extraContext = Map(
             "name" -> name,
             "queued" -> queued,

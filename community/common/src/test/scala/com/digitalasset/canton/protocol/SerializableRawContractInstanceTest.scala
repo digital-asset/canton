@@ -32,18 +32,18 @@ class SerializableRawContractInstanceTest
         ("test description", "first contract instance", "second contract instance"),
         (
           "same transaction ID",
-          SerializableRawContractInstance.create(contractInst1).value,
-          SerializableRawContractInstance.create(contractInst2).value,
+          SerializableRawContractInstance.create(contractInst1, AgreementText.empty).value,
+          SerializableRawContractInstance.create(contractInst2, AgreementText("Agreement")).value,
         ),
         (
           "different transaction ID",
-          SerializableRawContractInstance.create(contractInst2).value,
-          SerializableRawContractInstance.create(contractInst3).value,
+          SerializableRawContractInstance.create(contractInst2, AgreementText("Agreement")).value,
+          SerializableRawContractInstance.create(contractInst3, AgreementText.empty).value,
         ),
         (
           "same contract ID, but different capture",
-          SerializableRawContractInstance.create(contractInst1).value,
-          SerializableRawContractInstance.create(contractInst12).value,
+          SerializableRawContractInstance.create(contractInst1, AgreementText.empty).value,
+          SerializableRawContractInstance.create(contractInst12, AgreementText.empty).value,
         ),
       )
 
@@ -55,13 +55,18 @@ class SerializableRawContractInstanceTest
       val nonSerializableContractInst = ExampleTransactionFactory.veryDeepContractInstance
 
       "fail if no serialization is given" in {
-        SerializableRawContractInstance.create(nonSerializableContractInst) should matchPattern {
-          case Left(_: ValueCoder.EncodeError) =>
+        SerializableRawContractInstance.create(
+          nonSerializableContractInst,
+          AgreementText.empty,
+        ) should matchPattern { case Left(_: ValueCoder.EncodeError) =>
         }
       }
 
       "not attempt serialization if the serialization is provided" in {
-        SerializableRawContractInstance.createWithSerialization(nonSerializableContractInst)(
+        SerializableRawContractInstance.createWithSerialization(
+          nonSerializableContractInst,
+          AgreementText.empty,
+        )(
           ByteString.EMPTY
         )
       }
@@ -72,7 +77,7 @@ class SerializableRawContractInstanceTest
 object SerializableRawContractInstanceTest {
   def toHexString(byte: Byte): String = {
     val s = byte.toInt.toHexString
-    if (s.length < 2) "0" + s else s
+    if (s.size < 2) "0" + s else s
   }
 
 }

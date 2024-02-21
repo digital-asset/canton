@@ -9,17 +9,18 @@ import com.digitalasset.canton.config.*
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.lifecycle.Lifecycle.toCloseableServer
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.metrics.CantonLabeledMetricsFactory
+import com.digitalasset.canton.metrics.MetricHandle
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.tracing.TracingConfig
 import io.grpc.health.v1.HealthCheckResponse.ServingStatus
 import io.grpc.protobuf.services.ProtoReflectionService
 
 import java.util.concurrent.ExecutorService
+import scala.annotation.nowarn
 
 class GrpcHealthServer(
     config: GrpcHealthServerConfig,
-    metrics: CantonLabeledMetricsFactory,
+    @nowarn("cat=deprecation") metrics: MetricHandle.MetricsFactory,
     executor: ExecutorService,
     override val loggerFactory: NamedLoggerFactory,
     apiConfig: ApiLoggingConfig,
@@ -32,7 +33,7 @@ class GrpcHealthServer(
   private val server = CantonServerBuilder
     .forConfig(
       config,
-      MetricName.Daml :+ "health",
+      MetricName("canton", "health"),
       metrics,
       executor,
       loggerFactory,
@@ -47,7 +48,7 @@ class GrpcHealthServer(
 
   private val closeable = toCloseableServer(server, logger, "HealthServer")
 
-  private def setStatus(serviceName: String, status: ServingStatus): Unit = {
+  def setStatus(serviceName: String, status: ServingStatus): Unit = {
     healthManager.setStatus(
       serviceName,
       status,

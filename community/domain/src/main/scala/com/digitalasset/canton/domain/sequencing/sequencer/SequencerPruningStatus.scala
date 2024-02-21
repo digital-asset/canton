@@ -5,7 +5,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 
 import cats.syntax.traverse.*
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.admin.v30
+import com.digitalasset.canton.domain.admin.v0
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseRequired}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
@@ -17,12 +17,11 @@ final case class SequencerMemberStatus(
     lastAcknowledged: Option[CantonTimestamp],
     enabled: Boolean = true,
 ) extends PrettyPrinting {
-
   def safePruningTimestamp: CantonTimestamp =
     lastAcknowledged.getOrElse(registeredAt)
 
-  def toProtoV30: v30.SequencerMemberStatus =
-    v30.SequencerMemberStatus(
+  def toProtoV0: v0.SequencerMemberStatus =
+    v0.SequencerMemberStatus(
       member.toProtoPrimitive,
       Some(registeredAt.toProtoPrimitive),
       lastAcknowledged.map(_.toProtoPrimitive),
@@ -69,11 +68,9 @@ trait AbstractSequencerPruningStatus {
 
 private[canton] final case class InternalSequencerPruningStatus(
     override val lowerBound: CantonTimestamp,
-    membersMap: Map[Member, SequencerMemberStatus],
+    override val members: Seq[SequencerMemberStatus],
 ) extends AbstractSequencerPruningStatus
     with PrettyPrinting {
-
-  override val members: Seq[SequencerMemberStatus] = membersMap.values.toSeq
   def toSequencerPruningStatus(now: CantonTimestamp): SequencerPruningStatus =
     SequencerPruningStatus(lowerBound, now, members)
 
@@ -87,14 +84,8 @@ private[canton] object InternalSequencerPruningStatus {
 
   /** Sentinel value to use for Sequencers that don't yet support the status endpoint */
   val Unimplemented =
-    InternalSequencerPruningStatus(CantonTimestamp.MinValue, membersMap = Map.empty)
+    InternalSequencerPruningStatus(CantonTimestamp.MinValue, members = Seq.empty)
 
-  def apply(
-      lowerBound: CantonTimestamp,
-      members: Seq[SequencerMemberStatus],
-  ): InternalSequencerPruningStatus = {
-    InternalSequencerPruningStatus(lowerBound, members.map(m => m.member -> m).toMap)
-  }
 }
 
 /** Pruning status of a Sequencer.
@@ -109,7 +100,7 @@ final case class SequencerPruningStatus(
     with PrettyPrinting {
 
   def toInternal: InternalSequencerPruningStatus =
-    InternalSequencerPruningStatus(lowerBound, members.map(m => m.member -> m).toMap)
+    InternalSequencerPruningStatus(lowerBound, members)
 
   /** Using the member details, calculate based on their acknowledgements when is the latest point we can
     * safely prune without losing any data that may still be read.
@@ -134,16 +125,16 @@ final case class SequencerPruningStatus(
     */
   def clientsPreventingPruning(timestamp: CantonTimestamp): SequencerClients =
     members.foldLeft(SequencerClients()) { (disabled, memberStatus) =>
-      if (memberStatus.safePruningTimestamp.isBefore(timestamp) && memberStatus.enabled) {
+      if (memberStatus.safePruningTimestamp.isBefore(timestamp)) {
         disabled.copy(members = disabled.members + memberStatus.member)
       } else disabled
     }
 
-  def toProtoV30: v30.SequencerPruningStatus =
-    v30.SequencerPruningStatus(
+  def toProtoV0: v0.SequencerPruningStatus =
+    v0.SequencerPruningStatus(
       earliestEventTimestamp = Some(lowerBound.toProtoPrimitive),
       now = Some(now.toProtoPrimitive),
-      members = members.map(_.toProtoV30),
+      members = members.map(_.toProtoV0),
     )
 
   override def pretty: Pretty[SequencerPruningStatus] = prettyOfClass(
@@ -154,9 +145,8 @@ final case class SequencerPruningStatus(
 }
 
 object SequencerMemberStatus {
-
-  def fromProtoV30(
-      memberStatusP: v30.SequencerMemberStatus
+  def fromProtoV0(
+      memberStatusP: v0.SequencerMemberStatus
   ): ParsingResult[SequencerMemberStatus] =
     for {
       member <- Member.fromProtoPrimitive(memberStatusP.member, "member")
@@ -174,11 +164,11 @@ object SequencerMemberStatus {
 object SequencerPruningStatus {
 
   /** Sentinel value to use for Sequencers that don't yet support the status endpoint */
-  lazy val Unimplemented: SequencerPruningStatus =
+  lazy val Unimplemented =
     SequencerPruningStatus(CantonTimestamp.MinValue, CantonTimestamp.MinValue, members = Seq.empty)
 
-  def fromProtoV30(
-      statusP: v30.SequencerPruningStatus
+  def fromProtoV0(
+      statusP: v0.SequencerPruningStatus
   ): ParsingResult[SequencerPruningStatus] =
     for {
       earliestEventTimestamp <- parseRequired(
@@ -187,6 +177,6 @@ object SequencerPruningStatus {
         statusP.earliestEventTimestamp,
       )
       now <- parseRequired(CantonTimestamp.fromProtoPrimitive, "now", statusP.now)
-      members <- statusP.members.traverse(SequencerMemberStatus.fromProtoV30)
+      members <- statusP.members.traverse(SequencerMemberStatus.fromProtoV0)
     } yield SequencerPruningStatus(earliestEventTimestamp, now, members)
 }

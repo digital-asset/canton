@@ -27,6 +27,12 @@ final case class CacheConfig(
 
 }
 
+/** Configurations settings for a single cache where elements are evicted after a certain time as elapsed
+  * (regardless of access).
+  *
+  * @param maximumSize the maximum size of the cache
+  * @param expireAfterTimeout how quickly after creation items should be expired from the cache
+  */
 final case class CacheConfigWithTimeout(
     maximumSize: PositiveNumeric[Long],
     expireAfterTimeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMinutes(10),
@@ -37,12 +43,18 @@ final case class CacheConfigWithTimeout(
 
 }
 
+final case class SessionKeyCacheConfig(
+    sessionKeyCacheEnabled: Boolean,
+    sessionKeyForSenderCache: CacheConfigWithTimeout,
+    sessionKeyForReceiverCache: CacheConfigWithTimeout,
+)
+
 /** Configuration settings for various internal caches
   *
   * @param indexedStrings cache size configuration for the static string index cache
   * @param contractStore cache size configuration for the contract store
   * @param topologySnapshot cache size configuration for topology snapshots
-  * @param finalizedMediatorConfirmationRequests cache size for the finalized mediator confirmation requests such the mediator does not have to
+  * @param finalizedMediatorRequests cache size for the finalized mediator requests such the mediator does not have to
   *                                  perform a db round-trip if we have slow responders.
   */
 final case class CachingConfigs(
@@ -52,14 +64,13 @@ final case class CachingConfigs(
     partyCache: CacheConfig = CachingConfigs.defaultPartyCache,
     participantCache: CacheConfig = CachingConfigs.defaultParticipantCache,
     keyCache: CacheConfig = CachingConfigs.defaultKeyCache,
-    sessionKeyCache: CacheConfigWithTimeout = CachingConfigs.defaultSessionKeyCache,
+    sessionKeyCacheConfig: SessionKeyCacheConfig = CachingConfigs.defaultSessionKeyCacheConfig,
     packageVettingCache: CacheConfig = CachingConfigs.defaultPackageVettingCache,
     mySigningKeyCache: CacheConfig = CachingConfigs.defaultMySigningKeyCache,
     trafficStatusCache: CacheConfig = CachingConfigs.defaultTrafficStatusCache,
     memberCache: CacheConfig = CachingConfigs.defaultMemberCache,
     kmsMetadataCache: CacheConfig = CachingConfigs.kmsMetadataCache,
-    finalizedMediatorConfirmationRequests: CacheConfig =
-      CachingConfigs.defaultFinalizedMediatorConfirmationRequestsCache,
+    finalizedMediatorRequests: CacheConfig = CachingConfigs.defaultFinalizedMediatorRequestsCache,
 )
 
 object CachingConfigs {
@@ -73,8 +84,17 @@ object CachingConfigs {
   val defaultParticipantCache: CacheConfig =
     CacheConfig(maximumSize = PositiveNumeric.tryCreate(1000))
   val defaultKeyCache: CacheConfig = CacheConfig(maximumSize = PositiveNumeric.tryCreate(1000))
-  val defaultSessionKeyCache: CacheConfigWithTimeout =
-    CacheConfigWithTimeout(maximumSize = PositiveNumeric.tryCreate(10000))
+  val defaultSessionKeyCacheConfig: SessionKeyCacheConfig = SessionKeyCacheConfig(
+    sessionKeyCacheEnabled = true,
+    sessionKeyForSenderCache = CacheConfigWithTimeout(
+      maximumSize = PositiveNumeric.tryCreate(10000),
+      expireAfterTimeout = NonNegativeFiniteDuration.ofSeconds(10),
+    ),
+    sessionKeyForReceiverCache = CacheConfigWithTimeout(
+      maximumSize = PositiveNumeric.tryCreate(10000),
+      expireAfterTimeout = NonNegativeFiniteDuration.ofSeconds(20),
+    ),
+  )
   val defaultPackageVettingCache: CacheConfig =
     CacheConfig(maximumSize = PositiveNumeric.tryCreate(10000))
   val defaultMySigningKeyCache: CacheConfig =
@@ -85,7 +105,7 @@ object CachingConfigs {
     CacheConfig(maximumSize = PositiveNumeric.tryCreate(1000))
   val kmsMetadataCache: CacheConfig =
     CacheConfig(maximumSize = PositiveNumeric.tryCreate(20))
-  val defaultFinalizedMediatorConfirmationRequestsCache =
+  val defaultFinalizedMediatorRequestsCache =
     CacheConfig(maximumSize = PositiveNumeric.tryCreate(1000))
   @VisibleForTesting
   val testing =

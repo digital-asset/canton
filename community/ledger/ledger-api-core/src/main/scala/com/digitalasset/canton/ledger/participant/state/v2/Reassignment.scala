@@ -10,9 +10,7 @@ import com.daml.lf.value.Value
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.{SourceDomainId, TargetDomainId}
 
-sealed trait Reassignment {
-  def kind: String
-}
+sealed trait Reassignment
 
 object Reassignment {
 
@@ -30,9 +28,7 @@ object Reassignment {
       templateId: Ref.Identifier,
       stakeholders: List[Ref.Party],
       assignmentExclusivity: Option[Timestamp],
-  ) extends Reassignment {
-    override def kind: String = "unassignment"
-  }
+  ) extends Reassignment
 
   /** Represents the update of assigning a contract to a domain.
     *
@@ -44,9 +40,7 @@ object Reassignment {
       ledgerEffectiveTime: Timestamp,
       createNode: Node.Create,
       contractMetadata: Bytes,
-  ) extends Reassignment {
-    override def kind: String = "assignment"
-  }
+  ) extends Reassignment
 }
 
 /** The common information for all reassigments.

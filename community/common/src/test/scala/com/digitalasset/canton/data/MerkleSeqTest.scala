@@ -22,28 +22,28 @@ class MerkleSeqTest extends AnyWordSpec with BaseTest {
 
   import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 
-  private val hashOps: HashOps = MerkleTreeTest.hashOps
+  val hashOps: HashOps = MerkleTreeTest.hashOps
 
-  private val DummyHash: Hash = TestHash.digest("dummy")
+  val DummyHash: Hash = TestHash.digest("dummy")
 
-  private def leaf(index: Int): Leaf1 =
+  def leaf(index: Int): Leaf1 =
     Leaf1(index)(AbstractLeaf.protocolVersionRepresentativeFor(testedProtocolVersion))
 
-  private def singleton(index: Int): Singleton[Leaf1] =
+  def singleton(index: Int): Singleton[Leaf1] =
     Singleton(leaf(index), testedProtocolVersion)(hashOps)
 
-  private def branch(
+  def branch(
       first: MerkleTree[MerkleSeqElement[Leaf1]],
       second: MerkleTree[MerkleSeqElement[Leaf1]],
   ): Branch[Leaf1] =
     Branch(first, second, testedProtocolVersion)(hashOps)
 
-  private val Empty: MerkleSeq[Nothing] = MerkleSeq(None, testedProtocolVersion)(hashOps)
+  val Empty: MerkleSeq[Nothing] = MerkleSeq(None, testedProtocolVersion)(hashOps)
 
-  private val OneUnblindedElement: MerkleSeq[Leaf1] =
+  val OneUnblindedElement: MerkleSeq[Leaf1] =
     MerkleSeq(Some(singleton(0)), testedProtocolVersion)(hashOps)
 
-  private val OneBlindedElement: MerkleSeq[Leaf1] =
+  val OneBlindedElement: MerkleSeq[Leaf1] =
     MerkleSeq(
       Some(
         Singleton(blinded(leaf(0)), testedProtocolVersion)(hashOps)
@@ -51,45 +51,43 @@ class MerkleSeqTest extends AnyWordSpec with BaseTest {
       testedProtocolVersion,
     )(hashOps)
 
-  private val OneElementFullyBlinded: MerkleSeq[Leaf1] =
+  val OneElementFullyBlinded: MerkleSeq[Leaf1] =
     MerkleSeq(Some(blinded(singleton(0))), testedProtocolVersion)(hashOps)
 
-  private val FullyBlinded: MerkleSeq[Leaf1] =
+  val FullyBlinded: MerkleSeq[Leaf1] =
     MerkleSeq(Some(BlindedNode(RootHash(DummyHash))), testedProtocolVersion)(hashOps)
 
-  private val TwoUnblindedElements: MerkleSeq[Leaf1] =
+  val TwoUnblindedElements: MerkleSeq[Leaf1] =
     MerkleSeq(Some(branch(singleton(0), singleton(1))), testedProtocolVersion)(hashOps)
 
-  private val TwoBlindedElements: MerkleSeq[Leaf1] =
+  val TwoBlindedElements: MerkleSeq[Leaf1] =
     MerkleSeq(Some(branch(blinded(singleton(0)), blinded(singleton(1)))), testedProtocolVersion)(
       hashOps
     )
 
-  private val OneBlindedOneUnblinded: MerkleSeq[Leaf1] =
+  val OneBlindedOneUnblinded: MerkleSeq[Leaf1] =
     MerkleSeq(Some(branch(blinded(singleton(0)), singleton(1))), testedProtocolVersion)(hashOps)
 
-  private val TwoElementsRootHash: RootHash =
+  val TwoElementsRootHash: RootHash =
     TwoUnblindedElements.rootOrEmpty
       .getOrElse(throw new IllegalStateException("Missing root element"))
       .rootHash
 
-  private val TwoElementsFullyBlinded: MerkleSeq[Leaf1] =
+  val TwoElementsFullyBlinded: MerkleSeq[Leaf1] =
     MerkleSeq(Some(BlindedNode(TwoElementsRootHash)), testedProtocolVersion)(hashOps)
 
-  private val SevenElementsLeft: Branch[Leaf1] =
+  val SevenElementsLeft: Branch[Leaf1] =
     branch(branch(singleton(0), singleton(1)), branch(singleton(2), singleton(3)))
-  private val SevenElementsRight: Branch[Leaf1] =
-    branch(branch(singleton(4), singleton(5)), singleton(6))
-  private val SevenElements: MerkleSeq[Leaf1] =
+  val SevenElementsRight: Branch[Leaf1] = branch(branch(singleton(4), singleton(5)), singleton(6))
+  val SevenElements: MerkleSeq[Leaf1] =
     MerkleSeq(Some(branch(SevenElementsLeft, SevenElementsRight)), testedProtocolVersion)(hashOps)
-  private val SevenElementsRootUnblinded: MerkleSeq[Leaf1] =
+  val SevenElementsRootUnblinded: MerkleSeq[Leaf1] =
     MerkleSeq(
       Some(branch(blinded(SevenElementsLeft), blinded(SevenElementsRight))),
       testedProtocolVersion,
     )(hashOps)
 
-  private val testCases
-      : TableFor4[String, Seq[MerkleTree[Leaf1]], MerkleSeq[Leaf1], MerkleSeq[Leaf1]] =
+  val testCases: TableFor4[String, Seq[MerkleTree[Leaf1]], MerkleSeq[Leaf1], MerkleSeq[Leaf1]] =
     Table[String, Seq[MerkleTree[Leaf1]], MerkleSeq[Leaf1], MerkleSeq[Leaf1]](
       ("name", "elements", "Merkle seq", "Merkle seq with root unblinded"),
       ("no elements", Seq.empty, Empty, Empty),

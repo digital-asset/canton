@@ -9,7 +9,6 @@ import com.digitalasset.canton.protocol.messages.CommitmentPeriod
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveSeconds, SimClock}
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -22,14 +21,13 @@ class SortedReconciliationIntervalsProviderTest
     with SortedReconciliationIntervalsHelpers {
 
   "SortedReconciliationIntervalsProvider" must {
-    "allow to query reconciliation intervals (PV >= 4)" in {
-      val protocolVersion = ProtocolVersion.latest
+    "allow to query reconciliation intervals" in {
 
       val clock = new SimClock(fromEpoch(0), loggerFactory)
 
       val domainParameters = Vector(
-        mkDynamicDomainParameters(0, 10, 1, protocolVersion),
-        mkDynamicDomainParameters(10, 2, protocolVersion),
+        mkDynamicDomainParameters(0, 10, 1, testedProtocolVersion),
+        mkDynamicDomainParameters(10, 2, testedProtocolVersion),
       )
 
       val reconciliationIntervals = domainParameters.map(_.map(_.reconciliationInterval))
@@ -45,7 +43,8 @@ class SortedReconciliationIntervalsProviderTest
         Future.successful(topologySnapshot)
       }
 
-      val provider = new SortedReconciliationIntervalsProvider(
+      val provider = SortedReconciliationIntervalsProvider(
+        staticDomainParameters = BaseTest.defaultStaticDomainParametersWith(),
         topologyClient = topologyClient,
         futureSupervisor = FutureSupervisor.Noop,
         loggerFactory = loggerFactory,
@@ -82,7 +81,8 @@ class SortedReconciliationIntervalsProviderTest
         Future.successful(topologySnapshot)
       }
 
-      val provider = new SortedReconciliationIntervalsProvider(
+      val provider = SortedReconciliationIntervalsProvider(
+        staticDomainParameters = BaseTest.defaultStaticDomainParametersWith(),
         topologyClient = topologyClient,
         futureSupervisor = FutureSupervisor.Noop,
         loggerFactory = loggerFactory,
@@ -100,7 +100,7 @@ class SortedReconciliationIntervalsProviderTest
 
       loggerFactory.assertThrowsAndLogsAsync[RuntimeException](
         provider.reconciliationIntervals(invalidQueryTime),
-        _ shouldBe (new RuntimeException(error)),
+        _ shouldBe new RuntimeException(error),
         _.warningMessage shouldBe error,
       )
     }
@@ -125,7 +125,8 @@ class SortedReconciliationIntervalsProviderTest
         Future.successful(topologySnapshot)
       }
 
-      val provider = new SortedReconciliationIntervalsProvider(
+      val provider = SortedReconciliationIntervalsProvider(
+        staticDomainParameters = BaseTest.defaultStaticDomainParametersWith(),
         topologyClient = topologyClient,
         futureSupervisor = FutureSupervisor.Noop,
         loggerFactory = loggerFactory,

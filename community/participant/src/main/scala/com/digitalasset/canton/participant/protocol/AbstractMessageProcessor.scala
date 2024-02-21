@@ -15,14 +15,14 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.Activeness
 import com.digitalasset.canton.participant.store.SyncDomainEphemeralState
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.{
-  ConfirmationResponse,
+  MediatorResponse,
   ProtocolMessage,
   SignedProtocolMessage,
 }
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
   SendCallback,
-  SequencerClientSend,
+  SequencerClient,
 }
 import com.digitalasset.canton.sequencing.protocol.{Batch, MessageId, Recipients}
 import com.digitalasset.canton.tracing.TraceContext
@@ -37,7 +37,7 @@ import scala.concurrent.{ExecutionContext, Future}
 abstract class AbstractMessageProcessor(
     ephemeral: SyncDomainEphemeralState,
     crypto: DomainSyncCryptoClient,
-    sequencerClient: SequencerClientSend,
+    sequencerClient: SequencerClient,
     protocolVersion: ProtocolVersion,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
@@ -76,21 +76,22 @@ abstract class AbstractMessageProcessor(
   protected def unlessCleanReplay(requestCounter: RequestCounter)(f: => Future[_]): Future[Unit] =
     if (isCleanReplay(requestCounter)) Future.unit else f.void
 
-  protected def signResponse(ips: DomainSnapshotSyncCryptoApi, response: ConfirmationResponse)(
-      implicit traceContext: TraceContext
-  ): Future[SignedProtocolMessage[ConfirmationResponse]] =
+  protected def signResponse(ips: DomainSnapshotSyncCryptoApi, response: MediatorResponse)(implicit
+      traceContext: TraceContext
+  ): Future[SignedProtocolMessage[MediatorResponse]] =
     SignedProtocolMessage.trySignAndCreate(response, ips, protocolVersion)
 
   // Assumes that we are not closing (i.e., that this is synchronized with shutdown somewhere higher up the call stack)
   protected def sendResponses(
       requestId: RequestId,
+      rc: RequestCounter,
       messages: Seq[(ProtocolMessage, Recipients)],
-      // use client.messageId. passed in here such that we can log it before sending
-      messageId: Option[MessageId] = None,
+      messageId: Option[MessageId] =
+        None, // use client.messageId. passed in here such that we can log it before sending
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] = {
     if (messages.isEmpty) EitherT.pure[Future, SendAsyncClientError](())
     else {
-      logger.trace(s"Request $requestId: ProtocolProcessor scheduling the sending of responses")
+      logger.trace(s"Request $rc: ProtocolProcessor scheduling the sending of responses")
 
       for {
         domainParameters <- EitherT.right(
@@ -98,16 +99,12 @@ abstract class AbstractMessageProcessor(
             .awaitSnapshot(requestId.unwrap)
             .flatMap(_.findDynamicDomainParametersOrDefault(protocolVersion))
         )
-        maxSequencingTime = requestId.unwrap.add(
-          domainParameters.confirmationResponseTimeout.unwrap
-        )
+        maxSequencingTime = requestId.unwrap.add(domainParameters.participantResponseTimeout.unwrap)
         _ <- sequencerClient.sendAsync(
-          Batch.of(protocolVersion, messages*),
-          topologyTimestamp = Some(requestId.unwrap),
+          Batch.of(protocolVersion, messages: _*),
           maxSequencingTime = maxSequencingTime,
           messageId = messageId.getOrElse(MessageId.randomMessageId()),
-          callback = SendCallback.log(s"Response message for request [$requestId]", logger),
-          amplify = true,
+          callback = SendCallback.log(s"Response message for request [$rc]", logger),
         )
       } yield ()
     }
@@ -115,7 +112,7 @@ abstract class AbstractMessageProcessor(
 
   /** Immediately moves the request to Confirmed and
     * register a timeout handler at the decision time with the request tracker
-    * to cover the case that the mediator does not send a confirmation result.
+    * to cover the case that the mediator does not send a mediator result.
     */
   protected def prepareForMediatorResultOfBadRequest(
       requestCounter: RequestCounter,
@@ -133,9 +130,7 @@ abstract class AbstractMessageProcessor(
         )
 
         def onTimeout: Future[Unit] = {
-          logger.debug(
-            s"Bad request $requestCounter: Timed out without a confirmation result message."
-          )
+          logger.debug(s"Bad request $requestCounter: Timed out without a mediator result message.")
           performUnlessClosingF(functionFullName) {
 
             decisionTimeF.flatMap(terminateRequest(requestCounter, sequencerCounter, timestamp, _))

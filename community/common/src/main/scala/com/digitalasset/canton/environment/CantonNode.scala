@@ -11,5 +11,4 @@ import scala.concurrent.Future
 trait CantonNode extends AutoCloseable {
   def status: Future[NodeStatus.Status]
   def isActive: Boolean
-
 }

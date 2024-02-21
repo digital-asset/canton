@@ -10,7 +10,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.TransactionView.InvalidView
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
-import com.digitalasset.canton.protocol.{v30, *}
+import com.digitalasset.canton.protocol.{v0, v1, *}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.{ErrorUtil, MapsUtil, NamedLoggingLazyVal}
 import com.digitalasset.canton.version.*
@@ -51,8 +51,8 @@ final case class TransactionView private (
     subviews.hashesConsistentWith(hashOps)(subviewHashes)
   }
 
-  override def subtrees: Seq[MerkleTree[?]] =
-    Seq[MerkleTree[?]](viewCommonData, viewParticipantData) ++ subviews.trees
+  override def subtrees: Seq[MerkleTree[_]] =
+    Seq[MerkleTree[_]](viewCommonData, viewParticipantData) ++ subviews.trees
 
   def tryUnblindViewParticipantData(
       fieldName: String
@@ -61,6 +61,17 @@ final case class TransactionView private (
       ErrorUtil.internalError(
         new IllegalStateException(
           s"$fieldName of view $viewHash can be computed only if the view participant data is unblinded"
+        )
+      )
+    )
+
+  private def tryUnblindSubview(subview: MerkleTree[TransactionView], fieldName: String)(implicit
+      loggingContext: NamedLoggingContext
+  ): TransactionView =
+    subview.unwrap.getOrElse(
+      ErrorUtil.internalError(
+        new IllegalStateException(
+          s"$fieldName of view $viewHash can be computed only if all subviews are unblinded, but ${subview.rootHash} is blinded"
         )
       )
     )
@@ -152,16 +163,24 @@ final case class TransactionView private (
     if (viewHash == h) v
     else this.copy(subviews = subviews.mapUnblinded(_.replace(h, v)))
 
-  protected def toProtoV30: v30.ViewNode = v30.ViewNode(
-    viewCommonData = Some(MerkleTree.toBlindableNodeV30(viewCommonData)),
-    viewParticipantData = Some(MerkleTree.toBlindableNodeV30(viewParticipantData)),
-    subviews = Some(subviews.toProtoV30),
+  protected def toProtoV0: v0.ViewNode = v0.ViewNode(
+    viewCommonData = Some(MerkleTree.toBlindableNodeV0(viewCommonData)),
+    viewParticipantData = Some(MerkleTree.toBlindableNodeV0(viewParticipantData)),
+    subviews = subviews.toProtoV0,
+  )
+
+  protected def toProtoV1: v1.ViewNode = v1.ViewNode(
+    viewCommonData = Some(MerkleTree.toBlindableNodeV1(viewCommonData)),
+    viewParticipantData = Some(MerkleTree.toBlindableNodeV1(viewParticipantData)),
+    subviews = Some(subviews.toProtoV1),
   )
 
   /** The global key inputs that the [[com.daml.lf.transaction.ContractStateMachine]] computes
     * while interpreting the root action of the view, enriched with the maintainers of the key and the
     * [[com.digitalasset.canton.protocol.LfTransactionVersion]] to be used for serializing the key.
     *
+    * @throws java.lang.UnsupportedOperationException
+    *   if the protocol version is below [[com.digitalasset.canton.version.ProtocolVersion.v3]]
     * @throws java.lang.IllegalStateException if the [[ViewParticipantData]] of this view or any subview is blinded
     */
   def globalKeyInputs(implicit
@@ -175,7 +194,7 @@ final case class TransactionView private (
       val viewParticipantData = tryUnblindViewParticipantData("Global key inputs")
 
       subviews.assertAllUnblinded(hash =>
-        s"Global key inputs of view $viewHash can be computed only if all subviews are unblinded, but $hash is blinded"
+        s"Global key inputs of view $viewHash can be computed only if all subviews are unblinded, but ${hash} is blinded"
       )
 
       subviews.unblindedElements.foldLeft(viewParticipantData.resolvedKeysWithMaintainers) {
@@ -277,6 +296,8 @@ final case class TransactionView private (
     *
     * Must only be used in mode [[com.daml.lf.transaction.ContractKeyUniquenessMode.Strict]]
     *
+    * @throws java.lang.UnsupportedOperationException
+    *   if the protocol version is below [[com.digitalasset.canton.version.ProtocolVersion.v3]]
     * @throws java.lang.IllegalStateException if the [[ViewParticipantData]] of this view or any subview is blinded.
     */
   def activeLedgerState(implicit
@@ -288,6 +309,8 @@ final case class TransactionView private (
     *
     * Must only be used in mode [[com.daml.lf.transaction.ContractKeyUniquenessMode.Strict]]
     *
+    * @throws java.lang.UnsupportedOperationException
+    *   if the protocol version is below [[com.digitalasset.canton.version.ProtocolVersion.v3]]
     * @throws java.lang.IllegalStateException if the [[ViewParticipantData]] of this view or any subview is blinded.
     */
   def updatedKeys(implicit loggingContext: NamedLoggingContext): Map[LfGlobalKey, Set[LfPartyId]] =
@@ -297,6 +320,8 @@ final case class TransactionView private (
     *
     * Must only be used in mode [[com.daml.lf.transaction.ContractKeyUniquenessMode.Strict]]
     *
+    * @throws java.lang.UnsupportedOperationException
+    *   if the protocol version is below [[com.digitalasset.canton.version.ProtocolVersion.v3]]
     * @throws java.lang.IllegalStateException if the [[ViewParticipantData]] of this view or any subview is blinded.
     */
   def updatedKeyValues(implicit
@@ -389,10 +414,14 @@ object TransactionView
   override def name: String = "TransactionView"
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
-      ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v30)(v30.ViewNode)(
-        supportedProtoVersion(_)(fromProtoV30),
-        _.toProtoV30.toByteString,
-      )
+      ProtoVersion(0) -> LegacyProtoConverter(ProtocolVersion.v3)(v0.ViewNode)(
+        supportedProtoVersion(_)(fromProtoV0),
+        _.toProtoV0.toByteString,
+      ),
+      ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v4)(v1.ViewNode)(
+        supportedProtoVersion(_)(fromProtoV1),
+        _.toProtoV1.toByteString,
+      ),
     )
 
   private def tryCreate(
@@ -400,11 +429,30 @@ object TransactionView
       viewParticipantData: MerkleTree[ViewParticipantData],
       subviews: TransactionSubviews,
       representativeProtocolVersion: RepresentativeProtocolVersion[TransactionView.type],
-  )(hashOps: HashOps): TransactionView =
+  )(hashOps: HashOps): TransactionView = {
+    // Check consistency between protocol version and subviews structure
+    val isProtoV0 =
+      representativeProtocolVersion == protocolVersionRepresentativeFor(ProtocolVersion.v3)
+    val isProtoV1 =
+      representativeProtocolVersion == protocolVersionRepresentativeFor(ProtocolVersion.v4)
+    val (isSubviewsV0, isSubviewsV1) = subviews match {
+      case _: TransactionSubviewsV0 => (true, false)
+      case _: TransactionSubviewsV1 => (false, true)
+    }
+    require(
+      !isSubviewsV0 || !isProtoV1,
+      s"TransactionSubviewsV0 cannot be used with representativeProtocolVersion $representativeProtocolVersion",
+    )
+    require(
+      !isSubviewsV1 || !isProtoV0,
+      s"TransactionSubviewsV1 cannot be used with representativeProtocolVersion $representativeProtocolVersion",
+    )
+
     new TransactionView(viewCommonData, viewParticipantData, subviews)(
       hashOps,
       representativeProtocolVersion,
     )
+  }
 
   /** Creates a view.
     *
@@ -471,22 +519,54 @@ object TransactionView
   val viewParticipantDataUnsafe: Lens[TransactionView, MerkleTree[ViewParticipantData]] =
     GenLens[TransactionView](_.viewParticipantData)
 
-  private def fromProtoV30(
+  /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
+  @VisibleForTesting
+  val subviewsUnsafe: Lens[TransactionView, TransactionSubviews] =
+    GenLens[TransactionView](_.subviews)
+
+  private def fromProtoV0(
       context: (HashOps, ConfirmationPolicy, ProtocolVersion),
-      protoView: v30.ViewNode,
+      protoView: v0.ViewNode,
   ): ParsingResult[TransactionView] = {
     val (hashOps, confirmationPolicy, expectedProtocolVersion) = context
     for {
-      commonData <- MerkleTree.fromProtoOptionV30(
+      commonData <- MerkleTree.fromProtoOptionV0(
         protoView.viewCommonData,
         ViewCommonData.fromByteString(expectedProtocolVersion)((hashOps, confirmationPolicy)),
       )
-      participantData <- MerkleTree.fromProtoOptionV30(
+      participantData <- MerkleTree.fromProtoOptionV0(
         protoView.viewParticipantData,
         ViewParticipantData.fromByteString(expectedProtocolVersion)(hashOps),
       )
-      subViews <- TransactionSubviews.fromProtoV30(context, protoView.subviews)
-      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
+      subViews <- TransactionSubviews.fromProtoV0(context, protoView.subviews)
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(0))
+      view <- createFromRepresentativePV(hashOps)(
+        commonData,
+        participantData,
+        subViews,
+        rpv,
+      ).leftMap(e =>
+        ProtoDeserializationError.OtherError(s"Unable to create transaction views: $e")
+      )
+    } yield view
+  }
+
+  private def fromProtoV1(
+      context: (HashOps, ConfirmationPolicy, ProtocolVersion),
+      protoView: v1.ViewNode,
+  ): ParsingResult[TransactionView] = {
+    val (hashOps, confirmationPolicy, expectedProtocolVersion) = context
+    for {
+      commonData <- MerkleTree.fromProtoOptionV1(
+        protoView.viewCommonData,
+        ViewCommonData.fromByteString(expectedProtocolVersion)((hashOps, confirmationPolicy)),
+      )
+      participantData <- MerkleTree.fromProtoOptionV1(
+        protoView.viewParticipantData,
+        ViewParticipantData.fromByteString(expectedProtocolVersion)(hashOps),
+      )
+      subViews <- TransactionSubviews.fromProtoV1(context, protoView.subviews)
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(1))
       view <- createFromRepresentativePV(hashOps)(
         commonData,
         participantData,

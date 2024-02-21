@@ -28,8 +28,13 @@ public abstract class ContractWithKey<Id, Data, Key> extends Contract<Id, Data> 
    * @hidden
    */
   protected ContractWithKey(
-      Id id, Data data, Optional<Key> key, Set<String> signatories, Set<String> observers) {
-    super(id, data, signatories, observers);
+      Id id,
+      Data data,
+      Optional<String> agreementText,
+      Optional<Key> key,
+      Set<String> signatories,
+      Set<String> observers) {
+    super(id, data, agreementText, signatories, observers);
     this.key = key;
   }
 
@@ -42,23 +47,29 @@ public abstract class ContractWithKey<Id, Data, Key> extends Contract<Id, Data> 
 
   @Override
   public final int hashCode() {
-    return Objects.hash(this.id, this.data, this.key, this.signatories, this.observers);
+    return Objects.hash(
+        this.id, this.data, this.agreementText, this.key, this.signatories, this.observers);
   }
 
   @Override
   public final String toString() {
     return String.format(
-        "%s.Contract(%s, %s, %s, %s, %s)",
+        "%s.Contract(%s, %s, %s, %s, %s, %s)",
         getCompanion().TEMPLATE_CLASS_NAME,
         this.id,
         this.data,
+        this.agreementText,
         this.key,
         this.signatories,
         this.observers);
   }
 
   // Returns an encoder for the key if present, or null otherwise.
-  public abstract JsonLfEncoder keyJsonEncoder();
+  // TODO(raphael-speyer-da): Make abstract once https://github.com/digital-asset/daml/pull/18198
+  // goes through and all generated classes do in fact define this method.
+  public JsonLfEncoder keyJsonEncoder() {
+    return null;
+  }
 
   public String keyToJson() {
     JsonLfEncoder enc = keyJsonEncoder();

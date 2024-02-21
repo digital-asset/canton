@@ -57,7 +57,8 @@ class SortedReconciliationIntervalsProviderFactory(
         potentialTopologyChange = true,
       )
 
-      new SortedReconciliationIntervalsProvider(
+      SortedReconciliationIntervalsProvider(
+        staticDomainParameters,
         topologyClient,
         futureSupervisor,
         loggerFactory,

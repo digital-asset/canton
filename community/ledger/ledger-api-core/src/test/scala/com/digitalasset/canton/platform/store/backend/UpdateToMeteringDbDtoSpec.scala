@@ -18,7 +18,6 @@ import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.Update
 import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.metrics.IndexedUpdatesMetrics
-import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -62,6 +61,7 @@ class UpdateToMeteringDbDtoSpec extends AnyWordSpec with MetricValues {
       optUsedPackages = None,
       optNodeSeeds = None,
       optByKeyNodes = None,
+      optDomainId = None,
     )
 
     val someTransactionAccepted = state.Update.TransactionAccepted(
@@ -72,10 +72,10 @@ class UpdateToMeteringDbDtoSpec extends AnyWordSpec with MetricValues {
       ),
       transactionId = Ref.TransactionId.assertFromString("TransactionId"),
       recordTime = someRecordTime,
+      divulgedContracts = List.empty,
       blindingInfoO = None,
       hostedWitnesses = Nil,
       Map.empty,
-      domainId = DomainId.tryFromString("da::default"),
     )
 
     "extract transaction metering" in {

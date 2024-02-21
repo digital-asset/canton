@@ -4,10 +4,10 @@
 package com.digitalasset.canton.config
 
 import cats.syntax.option.*
-import com.digitalasset.canton.admin.time.v30
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.time.admin.v0
 
 /** Configuration for the domain time tracker.
   * @param observationLatency Even if the host and domain clocks are perfectly synchronized there will always be some latency
@@ -34,11 +34,11 @@ final case class DomainTimeTrackerConfig(
       DomainTimeTrackerConfig.defaultMinObservationDuration,
     timeRequest: TimeProofRequestConfig = TimeProofRequestConfig(),
 ) extends PrettyPrinting {
-  def toProtoV30: v30.DomainTimeTrackerConfig = v30.DomainTimeTrackerConfig(
+  def toProtoV0: v0.DomainTimeTrackerConfig = v0.DomainTimeTrackerConfig(
     observationLatency.toProtoPrimitive.some,
     patienceDuration.toProtoPrimitive.some,
     minObservationDuration.toProtoPrimitive.some,
-    timeRequest.toProtoV30.some,
+    timeRequest.toProtoV0.some,
   )
 
   override def pretty: Pretty[DomainTimeTrackerConfig] = prettyOfClass(
@@ -72,7 +72,7 @@ object DomainTimeTrackerConfig {
     NonNegativeFiniteDuration.ofHours(24)
 
   def fromProto(
-      configP: v30.DomainTimeTrackerConfig
+      configP: v0.DomainTimeTrackerConfig
   ): ParsingResult[DomainTimeTrackerConfig] =
     for {
       observationLatency <- ProtoConverter.parseRequired(
@@ -91,7 +91,7 @@ object DomainTimeTrackerConfig {
         configP.minObservationDuration,
       )
       timeProofRequestConfig <- ProtoConverter.parseRequired(
-        TimeProofRequestConfig.fromProtoV30,
+        TimeProofRequestConfig.fromProtoV0,
         "time_proof_request",
         configP.timeProofRequest,
       )
