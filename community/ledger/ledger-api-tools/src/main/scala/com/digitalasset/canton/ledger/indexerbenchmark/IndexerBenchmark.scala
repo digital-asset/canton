@@ -3,9 +3,10 @@
 
 package com.digitalasset.canton.ledger.indexerbenchmark
 
+import com.codahale.metrics.MetricRegistry
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.metrics.JvmMetricSet
-import com.daml.metrics.api.MetricName
+import com.daml.metrics.api.dropwizard.DropwizardMetricsFactory
 import com.daml.metrics.api.opentelemetry.OpenTelemetryMetricsFactory
 import com.daml.metrics.api.testing.{InMemoryMetricsFactory, ProxyMetricsFactory}
 import com.daml.resources
@@ -14,11 +15,7 @@ import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.ledger.api.health.{HealthStatus, Healthy}
 import com.digitalasset.canton.ledger.offset.Offset
-import com.digitalasset.canton.ledger.participant.state.v2.{
-  InternalStateServiceProviderImpl,
-  ReadService,
-  Update,
-}
+import com.digitalasset.canton.ledger.participant.state.v2.{ReadService, Update}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.LedgerApiServer
@@ -33,7 +30,7 @@ import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Source
 
-import java.util.concurrent.Executors
+import java.util.concurrent.{Executors, TimeUnit}
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, ExecutionContextExecutor, Future}
 import scala.io.StdIn
@@ -81,6 +78,8 @@ class IndexerBenchmark extends NamedLogging {
               indexerExecutionContext,
               tracer,
               loggerFactory,
+              multiDomainEnabled = false,
+              maxEventsByContractKeyCacheSize = None,
             )
             .acquire()
         indexerFactory = new JdbcIndexer.Factory(
@@ -94,6 +93,7 @@ class IndexerBenchmark extends NamedLogging {
           servicesExecutionContext,
           tracer,
           loggerFactory,
+          multiDomainEnabled = false,
           dataSourceProperties,
           highAvailability,
         )
@@ -152,22 +152,27 @@ class IndexerBenchmark extends NamedLogging {
   private def metricsResource(config: Config) = {
     OpenTelemetryOwner(setAsGlobal = true, config.metricsReporter, Seq.empty).flatMap {
       openTelemetry =>
+        val registry = new MetricRegistry
+        val dropwizardFactory = new DropwizardMetricsFactory(registry)
         val openTelemetryFactory =
           new OpenTelemetryMetricsFactory(openTelemetry.getMeter("indexer-benchmark"))
         val inMemoryMetricFactory = new InMemoryMetricsFactory
         JvmMetricSet.registerObservers()
+        registry.registerAll(new JvmMetricSet)
         val metrics = new Metrics(
-          MetricName("test"),
+          new ProxyMetricsFactory(
+            dropwizardFactory,
+            inMemoryMetricFactory,
+          ),
           new ProxyMetricsFactory(openTelemetryFactory, inMemoryMetricFactory),
+          registry,
         )
         config.metricsReporter
-          .fold(ResourceOwner.unit) { _ =>
-            noTracingLogger.warn("metrics reporting is not supported yet")
-            ResourceOwner.unit
-          /*ResourceOwner
+          .fold(ResourceOwner.unit)(reporter =>
+            ResourceOwner
               .forCloseable(() => reporter.register(metrics.registry))
-              .map(_.start(config.metricsReportingInterval.getSeconds, TimeUnit.SECONDS))*/
-          }
+              .map(_.start(config.metricsReportingInterval.getSeconds, TimeUnit.SECONDS))
+          )
           .map(_ => metrics)
     }
   }
@@ -175,7 +180,7 @@ class IndexerBenchmark extends NamedLogging {
   private[this] def createReadService(
       updates: Source[(Offset, Traced[Update]), NotUsed]
   ): ReadService = {
-    new ReadService with InternalStateServiceProviderImpl {
+    new ReadService {
       override def stateUpdates(
           beginAfter: Option[Offset]
       )(implicit traceContext: TraceContext): Source[(Offset, Traced[Update]), NotUsed] = {

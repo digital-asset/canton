@@ -20,20 +20,18 @@ import com.digitalasset.canton.participant.protocol.submission.UsableDomain.{
 }
 import com.digitalasset.canton.participant.sync.TransactionRoutingError
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.ConfigurationErrors.InvalidPrescribedDomainId
-import com.digitalasset.canton.participant.sync.TransactionRoutingError.RoutingInternalError.InputContractsOnDifferentDomains
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.TopologyErrors.NoDomainForSubmission
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.UnableToQueryTopologySnapshot
 import com.digitalasset.canton.protocol.{LfContractId, LfTransactionVersion, LfVersionedTransaction}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.{DamlLfVersionToProtocolVersions, ProtocolVersion}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   DomainAlias,
   HasExecutionContext,
   LfPackageId,
-  LfPartyId,
   LfWorkflowId,
 }
 import org.scalatest.wordspec.AnyWordSpec
@@ -135,14 +133,10 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
       pickDomain(repair) shouldBe repair
     }
 
-    // TODO(#15561) Re-enable this test when we have a stable protocol version
-    "take minimum protocol version into account" ignore {
-      val oldPV = ProtocolVersion.v30
-
+    "take minimum protocol version into account" in {
+      val oldPV = ProtocolVersion.smallestStable
+      val newPV = ProtocolVersion.dev
       val transactionVersion = LfTransactionVersion.VDev
-      val newPV = DamlLfVersionToProtocolVersions.damlLfVersionToMinimumProtocolVersions
-        .get(transactionVersion)
-        .value
 
       val selectorOldPV = selectorForExerciseByInterface(
         transactionVersion = TransactionVersion.VDev, // requires protocol version dev
@@ -198,48 +192,6 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
 
       selector.forMultiDomain.leftValue shouldBe NoDomainForSubmission.Error(
         Map(da -> expectedError.toString)
-      )
-    }
-    "route to domain where all submitter have submission rights" in {
-      val treeExercises = ThreeExercises()
-      val domainOfContracts: Map[LfContractId, DomainId] =
-        Map(
-          treeExercises.inputContract1Id -> repair,
-          treeExercises.inputContract2Id -> repair,
-          treeExercises.inputContract3Id -> da,
-        )
-      val inputContractStakeholders: Map[LfContractId, Set[Ref.Party]] = Map(
-        treeExercises.inputContract1Id -> Set(party3, observer),
-        treeExercises.inputContract2Id -> Set(party3, observer),
-        treeExercises.inputContract3Id -> Set(signatory, party3),
-      )
-      val topology: Map[LfPartyId, List[ParticipantId]] = Map(
-        signatory -> List(submitterParticipantId),
-        observer -> List(observerParticipantId),
-        party3 -> List(participantId3),
-      )
-
-      // this test requires a transfer that is only possible from da to repair.
-      // All submitters are connected to the repair domain as follow:
-      //        Map(
-      //          submitterParticipantId -> Set(da, repair),
-      //          observerParticipantId -> Set(acme, repair),
-      //          participantId3 -> Set(da, acme, repair),
-      //        )
-      val selector = selectorForThreeExercises(
-        treeExercises,
-        admissibleDomains = NonEmpty.mk(Set, da, acme, repair),
-        connectedDomains = Set(da, acme, repair),
-        domainOfContracts = _ => domainOfContracts,
-        inputContractStakeholders = inputContractStakeholders,
-        topology = topology,
-      )
-
-      selector.forSingleDomain.leftValue shouldBe InputContractsOnDifferentDomains(Set(da, repair))
-      selector.forMultiDomain.futureValue shouldBe DomainRank(
-        transfers = Map(treeExercises.inputContract3Id -> (signatory, da)),
-        priority = 0,
-        domainId = repair,
       )
     }
 
@@ -486,20 +438,15 @@ private[routing] object DomainSelectorTest {
         prescribedDomainAlias: Option[String] = defaultPrescribedDomainAlias,
         domainProtocolVersion: DomainId => ProtocolVersion = defaultDomainProtocolVersion,
         vettedPackages: Seq[LfPackageId] = ExerciseByInterface.correctPackages,
-        inputContractStakeholders: Map[LfContractId, Set[Ref.Party]] = Map.empty,
-        topology: Map[LfPartyId, List[ParticipantId]] = correctTopology,
     )(implicit
         ec: ExecutionContext,
         traceContext: TraceContext,
         loggerFactory: NamedLoggerFactory,
     ): Selector = {
 
-      val contractStakeholders =
-        if (inputContractStakeholders.isEmpty)
-          threeExercises.inputContractIds.map { inputContractId =>
-            inputContractId -> Set(signatory, observer)
-          }.toMap
-        else inputContractStakeholders
+      val inputContractStakeholders = threeExercises.inputContractIds.map { inputContractId =>
+        inputContractId -> Set(signatory, observer)
+      }.toMap
 
       new Selector(loggerFactory)(
         priorityOfDomain,
@@ -512,8 +459,7 @@ private[routing] object DomainSelectorTest {
         domainProtocolVersion,
         vettedPackages,
         threeExercises.tx,
-        contractStakeholders,
-        topology,
+        inputContractStakeholders,
       )
     }
 
@@ -529,7 +475,6 @@ private[routing] object DomainSelectorTest {
         vettedPackages: Seq[LfPackageId],
         tx: LfVersionedTransaction,
         inputContractStakeholders: Map[LfContractId, Set[Ref.Party]],
-        topology: Map[LfPartyId, List[ParticipantId]] = correctTopology,
     )(implicit ec: ExecutionContext, traceContext: TraceContext) {
 
       import SimpleTopology.*
@@ -544,7 +489,7 @@ private[routing] object DomainSelectorTest {
             .cond(
               connectedDomains.contains(domainId),
               SimpleTopology.defaultTestingIdentityFactory(
-                topology,
+                correctTopology,
                 vettedPackages,
               ),
               UnableToQueryTopologySnapshot.Failed(domainId),

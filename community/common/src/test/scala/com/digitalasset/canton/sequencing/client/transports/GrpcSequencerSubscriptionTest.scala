@@ -4,10 +4,11 @@
 package com.digitalasset.canton.sequencing.client.transports
 
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
-import com.digitalasset.canton.crypto.v30 as cryptoproto
-import com.digitalasset.canton.domain.api.v30 as v30domain
+import com.digitalasset.canton.crypto.v0 as cryptoproto
+import com.digitalasset.canton.domain.api.v0 as v0domain
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.networking.grpc.GrpcError
-import com.digitalasset.canton.protocol.v30
+import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.sequencing.SequencerTestUtils.MockMessageContent
 import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason
 import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
@@ -25,47 +26,34 @@ import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.concurrent.{Future, Promise}
 
 class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasExecutionContext {
-  private lazy val domainId: DomainId = DomainId(
-    UniqueIdentifier.tryFromProtoPrimitive("da::default")
-  )
+  val domainId: DomainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("da::default"))
 
-  private lazy val messageP: v30domain.SubscriptionResponse = v30domain
+  val MessageP: v0domain.SubscriptionResponse = v0domain
     .SubscriptionResponse(
       Some(
-        v30.SignedContent(
+        v0.SignedContent(
           Some(
-            v30
-              .SequencedEvent(
-                timestamp = Some(Timestamp()),
-                batch = Some(
-                  v30.CompressedBatch(
-                    algorithm =
-                      v30.CompressedBatch.CompressionAlgorithm.COMPRESSION_ALGORITHM_UNSPECIFIED,
-                    compressedBatch = ByteStringUtil.compressGzip(
-                      v30
-                        .Batch(envelopes =
-                          Seq(
-                            v30.Envelope(
-                              content = MockMessageContent.toByteString,
-                              recipients = None,
-                              signatures = Nil,
-                            )
-                          )
-                        )
-                        .toByteString
-                    ),
-                  )
-                ),
-                domainId = domainId.toProtoPrimitive,
-                counter = 0L,
-                messageId = None,
-                deliverErrorReason = None,
-              )
-              .toByteString
+            v0.SequencedEvent(
+              timestamp = Some(Timestamp()),
+              batch = Some(
+                v0.CompressedBatch(
+                  algorithm = v0.CompressedBatch.CompressionAlgorithm.None,
+                  compressedBatch = ByteStringUtil.compressGzip(
+                    v0.Batch(envelopes =
+                      Seq(v0.Envelope(content = MockMessageContent.toByteString, recipients = None))
+                    ).toByteString
+                  ),
+                )
+              ),
+              domainId = domainId.toProtoPrimitive,
+              counter = 0L,
+              messageId = None,
+              deliverErrorReason = None,
+            ).toByteString
           ),
-          Seq(
+          Some(
             cryptoproto.Signature(
-              format = cryptoproto.SignatureFormat.SIGNATURE_FORMAT_RAW,
+              format = cryptoproto.SignatureFormat.RawSignatureFormat,
               signature = ByteString.copyFromUtf8("not checked in this test"),
               signedBy = "not checked",
             )
@@ -73,24 +61,25 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
           timestampOfSigningKey = None,
         )
       ),
-      Some(SerializableTraceContext.empty.toProtoV30),
+      Some(SerializableTraceContext.empty.toProtoV0),
     )
 
   val RequestDescription = "request description"
 
   val ServerName = "sequencer"
 
-  def expectedError(ex: StatusRuntimeException): Left[GrpcError, Nothing] =
+  def expectedError(ex: StatusRuntimeException) =
     Left(GrpcError(RequestDescription, ServerName, ex))
 
   def createSubscription(
-      handler: v30domain.SubscriptionResponse => Future[Either[String, Unit]] = _ =>
+      handler: v0domain.SubscriptionResponse => Future[Either[String, Unit]] = _ =>
         Future.successful(Right(())),
       context: CancellableContext = Context.ROOT.withCancellation(),
-  ): GrpcSequencerSubscription[String, v30domain.SubscriptionResponse] =
-    new GrpcSequencerSubscription[String, v30domain.SubscriptionResponse](
+  ): GrpcSequencerSubscription[String, v0domain.SubscriptionResponse] =
+    new GrpcSequencerSubscription[String, v0domain.SubscriptionResponse](
       context,
       tracedEvent => handler(tracedEvent.value), // ignore Traced[..] wrapper
+      CommonMockMetrics.sequencerClient,
       DefaultProcessingTimeouts.testing,
       loggerFactory,
     ) {
@@ -142,21 +131,21 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
     }
 
     "use the given handler to process received messages" in {
-      val messagePromise = Promise[v30domain.SubscriptionResponse]()
+      val messagePromise = Promise[v0domain.SubscriptionResponse]()
 
       val sut =
         createSubscription(handler = m => Future.successful(Right(messagePromise.success(m))))
 
-      sut.observer.onNext(messageP)
+      sut.observer.onNext(MessageP)
 
-      messagePromise.future.futureValue shouldBe messageP
+      messagePromise.future.futureValue shouldBe MessageP
     }
 
     "close with exception if the handler throws" in {
       val ex = new RuntimeException("Handler Error")
       val sut = createSubscription(handler = _ => Future.failed(ex))
 
-      sut.observer.onNext(messageP)
+      sut.observer.onNext(MessageP)
 
       sut.closeReason.futureValue shouldBe SubscriptionCloseReason.HandlerException(ex)
     }
@@ -166,7 +155,7 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
 
       val sut = createSubscription(handler = _ => handlerCompleted.future)
 
-      val onNextF = Future { sut.observer.onNext(messageP) }
+      val onNextF = Future { sut.observer.onNext(MessageP) }
 
       eventuallyForever(timeUntilSuccess = 0.seconds, durationOfSuccess = 100.milliseconds) {
         !onNextF.isCompleted
@@ -187,7 +176,7 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
       })
 
       // Processing this message takes forever...
-      Future { sut.observer.onNext(messageP) }.failed
+      Future { sut.observer.onNext(MessageP) }.failed
         .foreach(logger.error("Unexpected exception", _))
 
       // Make sure that the handler has been invoked before doing the next step.
@@ -198,14 +187,14 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
     }
 
     "not invoke the handler after closing" in {
-      val messagePromise = Promise[v30domain.SubscriptionResponse]()
+      val messagePromise = Promise[v0domain.SubscriptionResponse]()
 
       val sut =
         createSubscription(handler = m => Future.successful(Right(messagePromise.success(m))))
 
       sut.close()
 
-      sut.observer.onNext(messageP)
+      sut.observer.onNext(MessageP)
 
       eventuallyForever(timeUntilSuccess = 0.seconds, durationOfSuccess = 100.milliseconds) {
         !messagePromise.isCompleted
@@ -220,8 +209,8 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
         {
           // receive some items
           sut.observer.onNext(
-            v30domain.SubscriptionResponse.defaultInstance
-              .copy(traceContext = Some(SerializableTraceContext.empty.toProtoV30))
+            v0domain.SubscriptionResponse.defaultInstance
+              .copy(traceContext = Some(SerializableTraceContext.empty.toProtoV0))
           )
           sut.observer.onError(Status.INTERNAL.asRuntimeException())
           sut.close()

@@ -4,12 +4,10 @@
 package com.digitalasset.canton.data
 
 import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
-import com.digitalasset.canton.crypto.{GeneratorsCrypto, Salt, TestHash}
+import com.digitalasset.canton.crypto.{GeneratorsCrypto, HashPurpose, Salt, TestHash}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.{
   DeliveredTransferOutResult,
-  SetTrafficBalanceMessage,
   SignedProtocolMessage,
   TransferResult,
   Verdict,
@@ -17,11 +15,10 @@ import com.digitalasset.canton.protocol.messages.{
 import com.digitalasset.canton.sequencing.protocol.{
   Batch,
   GeneratorsProtocol as GeneratorsProtocolSequencing,
-  MediatorsOfDomain,
   SignedContent,
   TimeProof,
 }
-import com.digitalasset.canton.topology.{DomainId, Member, ParticipantId}
+import com.digitalasset.canton.topology.MediatorRef
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import magnolify.scalacheck.auto.*
@@ -31,16 +28,15 @@ import scala.concurrent.ExecutionContext
 
 final class GeneratorsTransferData(
     protocolVersion: ProtocolVersion,
+    generatorsDataTime: GeneratorsDataTime,
     generatorsProtocol: GeneratorsProtocol,
     generatorsProtocolSequencing: GeneratorsProtocolSequencing,
 ) {
-  import com.digitalasset.canton.Generators.*
   import com.digitalasset.canton.GeneratorsLf.*
   import com.digitalasset.canton.crypto.GeneratorsCrypto.*
-  import com.digitalasset.canton.config.GeneratorsConfig.*
-  import com.digitalasset.canton.data.GeneratorsDataTime.*
   import com.digitalasset.canton.topology.GeneratorsTopology.*
   import org.scalatest.EitherValues.*
+  import generatorsDataTime.*
   import generatorsProtocol.*
   import generatorsProtocolSequencing.*
 
@@ -54,37 +50,15 @@ final class GeneratorsTransferData(
   private val sourceProtocolVersion = SourceProtocolVersion(protocolVersion)
   private val targetProtocolVersion = TargetProtocolVersion(protocolVersion)
 
-  implicit val transferSubmitterMetadataArb: Arbitrary[TransferSubmitterMetadata] =
-    Arbitrary(
-      for {
-        submitter <- Arbitrary.arbitrary[LfPartyId]
-        applicationId <- applicationIdArb.arbitrary.map(_.unwrap)
-        submittingParticipant <- Arbitrary.arbitrary[ParticipantId]
-        commandId <- commandIdArb.arbitrary.map(_.unwrap)
-        submissionId <- Gen.option(ledgerSubmissionIdArb.arbitrary)
-        workflowId <- Gen.option(workflowIdArb.arbitrary.map(_.unwrap))
-
-      } yield TransferSubmitterMetadata(
-        submitter,
-        submittingParticipant,
-        commandId,
-        submissionId,
-        applicationId,
-        workflowId,
-      )
-    )
-
   implicit val transferInCommonData: Arbitrary[TransferInCommonData] = Arbitrary(
     for {
       salt <- Arbitrary.arbitrary[Salt]
       targetDomain <- Arbitrary.arbitrary[TargetDomainId]
 
-      targetMediator <- Arbitrary.arbitrary[MediatorsOfDomain]
+      targetMediator <- Arbitrary.arbitrary[MediatorRef]
 
       stakeholders <- Gen.containerOf[Set, LfPartyId](Arbitrary.arbitrary[LfPartyId])
       uuid <- Gen.uuid
-
-      submitterMetadata <- Arbitrary.arbitrary[TransferSubmitterMetadata]
 
       hashOps = TestHash // Not used for serialization
 
@@ -95,7 +69,6 @@ final class GeneratorsTransferData(
         targetMediator,
         stakeholders,
         uuid,
-        submitterMetadata,
         targetProtocolVersion,
       )
   )
@@ -105,13 +78,11 @@ final class GeneratorsTransferData(
       salt <- Arbitrary.arbitrary[Salt]
       sourceDomain <- Arbitrary.arbitrary[SourceDomainId]
 
-      sourceMediator <- Arbitrary.arbitrary[MediatorsOfDomain]
+      sourceMediator <- Arbitrary.arbitrary[MediatorRef]
 
       stakeholders <- Gen.containerOf[Set, LfPartyId](Arbitrary.arbitrary[LfPartyId])
       adminParties <- Gen.containerOf[Set, LfPartyId](Arbitrary.arbitrary[LfPartyId])
       uuid <- Gen.uuid
-
-      submitterMetadata <- Arbitrary.arbitrary[TransferSubmitterMetadata]
 
       hashOps = TestHash // Not used for serialization
 
@@ -123,10 +94,23 @@ final class GeneratorsTransferData(
         stakeholders,
         adminParties,
         uuid,
-        submitterMetadata,
         sourceProtocolVersion,
       )
   )
+
+  private implicit val transferSubmitterMetadata: Arbitrary[TransferSubmitterMetadata] =
+    Arbitrary(
+      for {
+        submitter <- Arbitrary.arbitrary[LfPartyId]
+      } yield TransferSubmitterMetadata(
+        submitter = submitter,
+        applicationId = TransferInView.applicationIdDefaultValue,
+        submittingParticipant = TransferInView.submittingParticipantDefaultValue,
+        commandId = TransferInView.commandIdDefaultValue,
+        submissionId = TransferInView.submissionIdDefaultValue,
+        workflowId = TransferInView.workflowIdDefaultValue,
+      )
+    )
 
   private def deliveryTransferOutResultGen(
       contract: SerializableContract,
@@ -151,10 +135,7 @@ final class GeneratorsTransferData(
         SignedProtocolMessage.from(
           result,
           protocolVersion,
-          GeneratorsCrypto.sign(
-            "TransferOutResult-mediator",
-            TestHash.testHashPurpose,
-          ),
+          GeneratorsCrypto.sign("TransferOutResult-mediator", HashPurpose.TransferResultSignature),
         )
 
       recipients <- recipientsArb.arbitrary
@@ -166,7 +147,7 @@ final class GeneratorsTransferData(
     } yield DeliveredTransferOutResult {
       SignedContent(
         deliver,
-        sign("TransferOutResult-sequencer", TestHash.testHashPurpose),
+        sign("TransferOutResult-sequencer", HashPurpose.TransferResultSignature),
         Some(transferOutTimestamp),
         protocolVersion,
       )
@@ -175,22 +156,22 @@ final class GeneratorsTransferData(
   implicit val transferInViewArb: Arbitrary[TransferInView] = Arbitrary(
     for {
       salt <- Arbitrary.arbitrary[Salt]
-      contract <- serializableContractArb(canHaveEmptyKey = true).arbitrary
+      contract <- serializableContractArb.arbitrary
       creatingTransactionId <- Arbitrary.arbitrary[TransactionId]
+      submitterMetadata <- Arbitrary.arbitrary[TransferSubmitterMetadata]
       transferOutResultEvent <- deliveryTransferOutResultGen(contract, sourceProtocolVersion)
-      transferCounter <- transferCounterOGen
 
       hashOps = TestHash // Not used for serialization
 
     } yield TransferInView
       .create(hashOps)(
         salt,
+        submitterMetadata,
         contract,
         creatingTransactionId,
         transferOutResultEvent,
         sourceProtocolVersion,
         targetProtocolVersion,
-        transferCounter,
       )
       .value
   )
@@ -199,41 +180,24 @@ final class GeneratorsTransferData(
     for {
       salt <- Arbitrary.arbitrary[Salt]
 
-      creatingTransactionId <- Arbitrary.arbitrary[TransactionId]
-      contract <- serializableContractArb(canHaveEmptyKey = true).arbitrary
+      submitterMetadata <- Arbitrary.arbitrary[TransferSubmitterMetadata]
+      contract <- generatorsProtocol.serializableContractArb.arbitrary
 
       targetDomain <- Arbitrary.arbitrary[TargetDomainId]
       timeProof <- Arbitrary.arbitrary[TimeProof]
-      transferCounter <- transferCounterOGen
 
       hashOps = TestHash // Not used for serialization
 
     } yield TransferOutView
       .create(hashOps)(
         salt,
-        creatingTransactionId,
+        submitterMetadata,
         contract,
         targetDomain,
         timeProof,
         sourceProtocolVersion,
         targetProtocolVersion,
-        transferCounter,
       )
-  )
-
-  implicit val setTrafficBalanceArb: Arbitrary[SetTrafficBalanceMessage] = Arbitrary(
-    for {
-      member <- Arbitrary.arbitrary[Member]
-      serial <- Arbitrary.arbitrary[NonNegativeLong]
-      trafficBalance <- Arbitrary.arbitrary[NonNegativeLong]
-      domainId <- Arbitrary.arbitrary[DomainId]
-    } yield SetTrafficBalanceMessage.apply(
-      member,
-      serial,
-      trafficBalance,
-      domainId,
-      protocolVersion,
-    )
   )
 
 }

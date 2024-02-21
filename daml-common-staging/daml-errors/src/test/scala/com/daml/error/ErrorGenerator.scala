@@ -25,12 +25,16 @@ object ErrorGenerator {
   private final case class TestErrorCode(override val id: String, errorCategory: ErrorCategory)
       extends ErrorCode(id, errorCategory)(ErrorClass.root()) {}
 
+  private final case class TestErrorResource(typ: String) extends ErrorResource {
+    override def asString: String = typ
+  }
+
   private[error] def asciiPrintableStrOfN(maxSize: Int) = for {
     chars <- Gen.listOfN(maxSize, Gen.alphaNumChar)
   } yield chars.mkString
 
   private val errorResourceGen = for {
-    typ <- asciiPrintableStrOfN(256).map(ErrorResource(_))
+    typ <- asciiPrintableStrOfN(256).map(TestErrorResource)
     msg <- asciiPrintableStrOfN(1024)
   } yield (typ, msg)
 

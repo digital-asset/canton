@@ -3,30 +3,30 @@
 
 package com.digitalasset.canton.demo
 
-import com.daml.ledger.api.v2.participant_offset.ParticipantOffset
+import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.javaapi.data.codegen.{Contract, ContractCompanion, ContractId}
 import com.daml.ledger.javaapi.data.{Template, TransactionTree}
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.config.{NonNegativeDuration, PositiveDurationSeconds}
 import com.digitalasset.canton.console.commands.DomainChoice
 import com.digitalasset.canton.console.{
   ConsoleEnvironment,
   ConsoleMacros,
+  DomainReference,
   ParticipantReference,
-  SequencerNodeReference,
 }
 import com.digitalasset.canton.demo.Step.{Action, Noop}
 import com.digitalasset.canton.demo.model.ai.java as ME
 import com.digitalasset.canton.demo.model.doctor.java as M
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
-import com.digitalasset.canton.platform.apiserver.services.ApiConversions
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.sequencing.{SequencerConnection, SequencerConnections}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DiscardOps, config}
 
 import java.time.{Duration, Instant}
 import java.util.concurrent.atomic.AtomicReference
@@ -36,7 +36,7 @@ import scala.concurrent.{Await, ExecutionContext, Future, blocking}
 import scala.jdk.CollectionConverters.*
 
 class ReferenceDemoScript(
-    participantsX: Seq[ParticipantReference],
+    participants: Seq[ParticipantReference],
     bankingConnection: SequencerConnection,
     medicalConnection: SequencerConnection,
     rootPath: String,
@@ -51,14 +51,12 @@ class ReferenceDemoScript(
 
   import scala.language.implicitConversions
 
-  import ReferenceDemoScript.*
-
   implicit def toPrimitive(partyId: PartyId): String = partyId.toProtoPrimitive
   implicit def toScalaSeq[A](l: java.util.List[A]): Seq[A] = l.asScala.toSeq
   implicit def toJavaList[A](l: List[A]): java.util.List[A] = l.asJava
 
-  require(participantsX.lengthIs > 5, "I need 6 participants for this demo")
-  private val sorted = participantsX.sortBy(_.name)
+  require(participants.length > 5, "I need 6 participants for this demo")
+  private val sorted = participants.sortBy(_.name)
 
   private val participant1 = sorted(0)
   private val participant2 = sorted(1)
@@ -71,36 +69,31 @@ class ReferenceDemoScript(
 
   val maxImage: Int = 28
 
-  private val readyToSubscribeM = new AtomicReference[Map[String, ParticipantOffset]](Map())
+  private val readyToSubscribeM = new AtomicReference[Map[String, LedgerOffset]](Map())
 
-  override def subscriptions(): Map[String, ParticipantOffset] = readyToSubscribeM.get()
+  override def subscriptions(): Map[String, LedgerOffset] = readyToSubscribeM.get()
 
-  def imagePath: String = s"file:$rootPath/images/"
+  def imagePath: String = s"file:${rootPath}/images/"
 
-  private val SequencerBankingAndConnection = (SequencerBanking, bankingConnection)
-  private val SequencerMedicalAndConnection = (SequencerMedical, medicalConnection)
+  private val medical = ("medical", medicalConnection)
+  private val banking = ("banking", bankingConnection)
 
   private val settings = Seq(
     (
       "Alice",
       participant1,
-      Seq(SequencerMedicalAndConnection),
+      Seq(medical),
       Seq("bank", "medical-records", "health-insurance", "doctor"),
     ),
     (
       "Doctor",
       participant2,
-      Seq(SequencerMedicalAndConnection, SequencerBankingAndConnection),
+      Seq(medical, banking),
       Seq("bank", "medical-records", "health-insurance", "doctor"),
     ),
-    (
-      "Insurance",
-      participant3,
-      Seq(SequencerBankingAndConnection, SequencerMedicalAndConnection),
-      Seq("bank", "health-insurance"),
-    ),
-    ("Bank", participant4, Seq(SequencerBankingAndConnection), Seq("bank")),
-    ("Registry", participant5, Seq(SequencerMedicalAndConnection), Seq("medical-records")),
+    ("Insurance", participant3, Seq(banking, medical), Seq("bank", "health-insurance")),
+    ("Bank", participant4, Seq(banking), Seq("bank")),
+    ("Registry", participant5, Seq(medical), Seq("medical-records")),
   )
 
   override def parties(): Seq[(String, ParticipantReference)] = partyIdCache.toSeq.map {
@@ -109,20 +102,18 @@ class ReferenceDemoScript(
 
   private val partyIdCache = mutable.LinkedHashMap[String, (PartyId, ParticipantReference)]()
   private def partyId(name: String): PartyId = {
-    partyIdCache.getOrElse(name, sys.error(s"Failed to lookup party $name"))._1
+    partyIdCache.getOrElse(name, sys.error(s"Failed to lookup party ${name}"))._1
   }
 
   private def darFile(dar: String): String =
-    darPath.map(path => s"$path/$dar.dar").getOrElse(s"$rootPath/dars/$dar.dar")
+    darPath.map(path => s"$path/${dar}.dar").getOrElse(s"${rootPath}/dars/${dar}.dar")
 
   private val lookupTimeoutSeconds: Long =
     System.getProperty("canton-demo.lookup-timeout-seconds", "40").toLong
   private val lookupTimeout =
-    config.NonNegativeDuration.tryFromJavaDuration(
-      java.time.Duration.ofSeconds(lookupTimeoutSeconds)
-    )
+    NonNegativeDuration.tryFromJavaDuration(java.time.Duration.ofSeconds(lookupTimeoutSeconds))
   private val syncTimeout = Some(
-    config.NonNegativeDuration.tryFromJavaDuration(
+    NonNegativeDuration.tryFromJavaDuration(
       java.time.Duration.ofSeconds(
         System.getProperty("canton-demo.sync-timeout-seconds", "30").toLong
       )
@@ -143,7 +134,7 @@ class ReferenceDemoScript(
   ](
       companion: ContractCompanion[TC, TCid, T]
   ): TC =
-    participant1.ledger_api.javaapi.state.acs.await(companion)(alice, timeout = lookupTimeout)
+    participant1.ledger_api.javaapi.acs.await(companion)(alice, timeout = lookupTimeout)
   private def doctorLookup[
       TC <: Contract[TCid, T],
       TCid <: ContractId[T],
@@ -151,7 +142,7 @@ class ReferenceDemoScript(
   ](
       companion: ContractCompanion[TC, TCid, T]
   ): TC =
-    participant2.ledger_api.javaapi.state.acs.await(companion)(doctor, timeout = lookupTimeout)
+    participant2.ledger_api.javaapi.acs.await(companion)(doctor, timeout = lookupTimeout)
   private def insuranceLookup[
       TC <: Contract[TCid, T],
       TCid <: ContractId[T],
@@ -159,8 +150,7 @@ class ReferenceDemoScript(
   ](
       companion: ContractCompanion[TC, TCid, T]
   ): TC =
-    participant3.ledger_api.javaapi.state.acs
-      .await(companion)(insurance, timeout = lookupTimeout)
+    participant3.ledger_api.javaapi.acs.await(companion)(insurance, timeout = lookupTimeout)
   private def processorLookup[
       TC <: Contract[TCid, T],
       TCid <: ContractId[T],
@@ -168,8 +158,7 @@ class ReferenceDemoScript(
   ](
       companion: ContractCompanion[TC, TCid, T]
   ): TC =
-    participant6.ledger_api.javaapi.state.acs
-      .await(companion)(processor, timeout = lookupTimeout)
+    participant6.ledger_api.javaapi.acs.await(companion)(processor, timeout = lookupTimeout)
   private def registryLookup[
       TC <: Contract[TCid, T],
       TCid <: ContractId[T],
@@ -177,7 +166,7 @@ class ReferenceDemoScript(
   ](
       companion: ContractCompanion[TC, TCid, T]
   ): TC =
-    participant5.ledger_api.javaapi.state.acs.await(companion)(registry, timeout = lookupTimeout)
+    participant5.ledger_api.javaapi.acs.await(companion)(registry, timeout = lookupTimeout)
 
   private def execute[T](futs: Seq[Future[T]]): Seq[T] = {
     import scala.concurrent.duration.*
@@ -185,21 +174,31 @@ class ReferenceDemoScript(
     Await.result(seq, 120.seconds)
   }
 
-  private def connectDomain(
+  private def registerDomain(
       participant: ParticipantReference,
       name: String,
       connection: SequencerConnection,
   ): Unit = {
-    participant.domains.connect(
+    val autoApprove = sys.env.getOrElse("CANTON_AUTO_APPROVE_AGREEMENTS", "no").toLowerCase == "yes"
+    participant.domains.register(
       DomainConnectionConfig(
         name,
         SequencerConnections.single(connection),
+        manualConnect = autoApprove,
       )
     )
-    participant.domains.reconnect(name).discard
+    if (autoApprove) {
+      val response = participant.domains.get_agreement(name)
+      response.foreach {
+        case (agreement, accepted) if !accepted =>
+          participant.domains.accept_agreement(name, agreement.id)
+        case _ => ()
+      }
+      participant.domains.reconnect(name).discard
+    }
   }
 
-  private val pruningOffset = new AtomicReference[Option[(ParticipantOffset, Instant)]](None)
+  val pruningOffset = new AtomicReference[Option[(LedgerOffset, Instant)]](None)
   val steps = TraceContext.withNewTraceContext { implicit traceContext =>
     List[Step](
       Noop, // pres page nr = page * 2 - 1
@@ -212,7 +211,7 @@ class ReferenceDemoScript(
         "participant.parties.enable(NAME)",
         () => {
           execute(settings.map { case (name, participant, _, _) =>
-            logger.info(s"Enabling party $name on participant ${participant.id.toString}")
+            logger.info(s"Enabling party ${name} on participant ${participant.id.toString}")
             Future {
               blocking {
                 val pid = participant.parties.enable(name)
@@ -223,7 +222,7 @@ class ReferenceDemoScript(
             partyIdCache.put(name, (pid, participant)).discard
             readyToSubscribeM
               .updateAndGet(cur => cur + (name -> ParticipantTab.LedgerBegin))
-              .discard[Map[String, ParticipantOffset]]
+              .discard[Map[String, LedgerOffset]]
           }
 
         },
@@ -239,7 +238,7 @@ class ReferenceDemoScript(
             domains.map { case (name, connection) =>
               Future {
                 blocking {
-                  connectDomain(participant, name, connection)
+                  registerDomain(participant, name, connection)
                 }
               }
             }
@@ -257,26 +256,31 @@ class ReferenceDemoScript(
         "admin-api",
         "participant.dars.upload(<filename>)",
         () => {
-          settings.foreach { case (name, participant, domains, dars) =>
-            // TODO(#14069) Uploading packages concurrently can lead to topology failures due to races between
-            //  vetting topology transactions, which can lead to the transaction serial not increasing and, thus,
-            //  to some transaction being rejected, so uploads are performed sequentially to avoid flakes.
-            dars.map(darFile).foreach { dar =>
-              logger.debug(s"Uploading dar $dar for $name")
-              val _ = participant.dars.upload(dar)
+          val res = settings.flatMap { case (name, participant, domains, dars) =>
+            dars.map(darFile).map { x =>
+              Future {
+                blocking {
+                  logger.debug(s"Uploading dar ${x} for ${name}")
+                  participant.dars.upload(x)
+                }
+              }
+            } :+ Future {
+              blocking {
+                // wait until parties are registered with all domains
+                ConsoleMacros.utils.retry_until_true(lookupTimeout) {
+                  participant.parties
+                    .hosted(filterParty = name)
+                    .flatMap(_.participants)
+                    .flatMap(_.domains)
+                    .length == domains.length
+                }
+                // Force the time proofs to be updated after topology transactions
+                // TODO(i13200) The following line can be removed once the ticket is closed
+                participant.testing.fetch_domain_times()
+              }
             }
-            // wait until parties are registered with all domains
-            ConsoleMacros.utils.retry_until_true(lookupTimeout) {
-              participant.parties
-                .hosted(filterParty = name)
-                .flatMap(_.participants)
-                .flatMap(_.domains)
-                .length == domains.length
-            }
-            // Force the time proofs to be updated after topology transactions
-            // TODO(i13200) The following line can be removed once the ticket is closed
-            participant.testing.fetch_domain_times()
           }
+          val _ = execute(res)
         },
       ),
       Action(
@@ -399,7 +403,7 @@ class ReferenceDemoScript(
             .discard[TransactionTree]
 
           def findCashCid =
-            participant3.ledger_api.javaapi.state.acs
+            participant3.ledger_api.javaapi.acs
               .await(M.bank.Cash.COMPANION)(insurance, _.data.amount.quantity == 15)
 
           // settle claim (will invoke auto-transfer to the banking domain)
@@ -427,10 +431,10 @@ class ReferenceDemoScript(
             .discard[TransactionTree]
           // wait until the acs of the registry is empty
           ConsoleMacros.utils.retry_until_true(lookupTimeout) {
-            participant5.ledger_api.state.acs.of_party(registry).isEmpty
+            participant5.ledger_api.acs.of_party(registry).isEmpty
           }
           // now, remember the offset to prune at
-          val participantOffset = participant5.ledger_api.state.end()
+          val ledgerOffset = participant5.ledger_api.transactions.end()
           // Trigger advancement of the clean head, so the previous contracts become safe to prune
           if (editionSupportsPruning) {
             participant5.health
@@ -440,7 +444,7 @@ class ReferenceDemoScript(
               )
               .discard // sequencer integrations can be veeeerrrry slow
           }
-          pruningOffset.set(Some((participantOffset, Instant.now)))
+          pruningOffset.set(Some((ledgerOffset, Instant.now)))
         },
       ),
       Action(
@@ -461,7 +465,7 @@ class ReferenceDemoScript(
                 val waitDuration =
                   if (waitDurationMaybeNegative.isNegative) Duration.ZERO
                   else waitDurationMaybeNegative
-                logger.info(s"I have to wait for $waitDuration before I can kick off pruning")
+                logger.info(s"I have to wait for ${waitDuration} before I can kick off pruning")
                 Threading.sleep(waitDuration.toMillis)
                 // now, flush all participants that have some business with this node
                 Seq(participant1, participant2, participant5).foreach(p =>
@@ -471,15 +475,15 @@ class ReferenceDemoScript(
                 )
                 // give the ACS commitment processor some time to catchup
                 Threading.sleep(5.seconds.toMillis)
-                logger.info(s"Pruning ledger up to offset $offset inclusively")
-                participant5.pruning.prune(ApiConversions.toV1(offset))
-                logger.info(s"Pruned ledger up to offset $offset inclusively.")
+                logger.info(s"Pruning ledger up to offset ${offset} inclusively")
+                participant5.pruning.prune(offset)
+                logger.info(s"Pruned ledger up to offset ${offset} inclusively.")
                 offset
               }
               .getOrElse(throw new RuntimeException("Unable to prune the ledger."))
             if (additionalChecks) {
               val transactions =
-                participant5.ledger_api.updates
+                participant5.ledger_api.transactions
                   .flat(Set(registry), completeAfter = 5, beginOffset = prunedOffset)
               // ensure we don't see any transactions
               require(transactions.isEmpty, s"transactions should be empty but was ${transactions}")
@@ -504,7 +508,7 @@ class ReferenceDemoScript(
         () => {
           val registerDomainF = Future {
             blocking {
-              connectDomain(participant6, SequencerMedical, medicalConnection)
+              registerDomain(participant6, "medical", medicalConnection)
             }
           }
           val filename = darFile("ai-analysis")
@@ -576,6 +580,7 @@ class ReferenceDemoScript(
           participant5.ledger_api.javaapi.commands
             .submit(Seq(registry), recordedResult, optTimeout = syncTimeout)
             .discard[TransactionTree]
+
         },
       ),
     )
@@ -583,49 +588,28 @@ class ReferenceDemoScript(
 }
 
 object ReferenceDemoScript {
-
-  private val SequencerBanking = "sequencerBanking"
-  private val SequencerMedical = "sequencerMedical"
-
-  private def computeMaxWaitForPruning = {
+  def computeMaxWaitForPruning: Duration = {
     val defaultDynamicDomainParameters = DynamicDomainParameters.initialValues(
       topologyChangeDelay = NonNegativeFiniteDuration.tryOfMillis(250),
       protocolVersion = ProtocolVersion.latest,
     )
     val mediatorReactionTimeout = defaultDynamicDomainParameters.mediatorReactionTimeout
-    val confirmationResponseTimeout = defaultDynamicDomainParameters.confirmationResponseTimeout
+    val participantResponseTimeout = defaultDynamicDomainParameters.participantResponseTimeout
 
-    mediatorReactionTimeout.unwrap.plus(confirmationResponseTimeout.unwrap)
+    mediatorReactionTimeout.unwrap.plus(participantResponseTimeout.unwrap)
   }
 
   def startup(adjustPath: Boolean, testScript: Boolean)(implicit
       consoleEnvironment: ConsoleEnvironment
   ): Unit = {
 
-    def getSequencer(str: String): SequencerNodeReference =
-      consoleEnvironment.sequencers.all
+    def getDomain(str: String): DomainReference =
+      consoleEnvironment.domains.all
         .find(_.name == str)
         .getOrElse(sys.error(s"can not find domain named ${str}"))
 
-    val bankingSequencers = consoleEnvironment.sequencers.all.filter(_.name == SequencerBanking)
-    val bankingMediators = consoleEnvironment.mediators.all.filter(_.name == "mediatorBanking")
-    val bankingDomainId = ConsoleMacros.bootstrap.domain(
-      domainName = SequencerBanking,
-      sequencers = bankingSequencers,
-      mediators = bankingMediators,
-      domainOwners = bankingSequencers ++ bankingMediators,
-    )
-    val medicalSequencers = consoleEnvironment.sequencers.all.filter(_.name == SequencerMedical)
-    val medicalMediators = consoleEnvironment.mediators.all.filter(_.name == "mediatorMedical")
-    val medicalDomainId = ConsoleMacros.bootstrap.domain(
-      domainName = SequencerMedical,
-      sequencers = medicalSequencers,
-      mediators = medicalMediators,
-      domainOwners = medicalSequencers ++ medicalMediators,
-    )
-
-    val banking = getSequencer(SequencerBanking)
-    val medical = getSequencer(SequencerMedical)
+    val banking = getDomain("banking")
+    val medical = getDomain("medical")
 
     // determine where the assets are
     val location = sys.env.getOrElse("DEMO_ROOT", "demo")
@@ -640,14 +624,9 @@ object ReferenceDemoScript {
     val loggerFactory = consoleEnvironment.environment.loggerFactory
 
     // update domain parameters
-    banking.topology.domain_parameters.set_reconciliation_interval(
-      bankingDomainId,
-      config.PositiveDurationSeconds.ofSeconds(1),
-    )
-    medical.topology.domain_parameters.set_reconciliation_interval(
-      medicalDomainId,
-      config.PositiveDurationSeconds.ofSeconds(1),
-    )
+    Seq(banking, medical).foreach {
+      _.service.set_reconciliation_interval(PositiveDurationSeconds.ofSeconds(1))
+    }
 
     val script = new ReferenceDemoScript(
       consoleEnvironment.participants.all,
@@ -673,4 +652,5 @@ object ReferenceDemoScript {
     }
     ()
   }
+
 }

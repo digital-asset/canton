@@ -11,8 +11,8 @@ class ConsoleCommandResultTest extends AnyWordSpec with BaseTest {
   "ConsoleCommandResult" should {
     "forAll" should {
       "return successfully if action runs on all instances" in {
-        val instance1 = mock[LocalInstanceReference]
-        val instance2 = mock[LocalInstanceReference]
+        val instance1 = mock[LocalInstanceReferenceCommon]
+        val instance2 = mock[LocalInstanceReferenceCommon]
 
         when(instance1.startCommand()).thenReturn(CommandSuccessful())
         when(instance2.startCommand()).thenReturn(CommandSuccessful())
@@ -43,8 +43,8 @@ class ConsoleCommandResultTest extends AnyWordSpec with BaseTest {
     }
   }
 
-  def mockInstance(name: String): LocalInstanceReference = {
-    val ref = mock[LocalInstanceReference]
+  def mockInstance(name: String): LocalInstanceReferenceCommon = {
+    val ref = mock[LocalInstanceReferenceCommon]
     when(ref.name).thenReturn(name)
     ref
   }

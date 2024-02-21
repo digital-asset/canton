@@ -4,13 +4,12 @@
 package com.digitalasset.canton.http
 
 import com.daml.ledger.api.v1 as lav1
-import com.daml.ledger.api.v2 as lav2
-import lav2.command_service.{
+import lav1.command_service.{
   SubmitAndWaitForTransactionResponse,
   SubmitAndWaitForTransactionTreeResponse,
   SubmitAndWaitRequest,
 }
-import lav2.transaction.{Transaction, TransactionTree}
+import lav1.transaction.{Transaction, TransactionTree}
 import com.digitalasset.canton.http.util.Logging as HLogging
 import com.daml.logging.LoggingContextOf
 import LoggingContextOf.{label, newLoggingContext}
@@ -80,6 +79,7 @@ class CommandServiceTest extends AsyncWordSpec with Matchers with Inside {
 
 object CommandServiceTest extends BaseTest {
   private val multiPartyJwp = domain.JwtWritePayload(
+    domain.LedgerId("what"),
     domain.ApplicationId("myapp"),
     submitter = domain.Party subst NonEmptyList("foo", "bar"),
     readAs = domain.Party subst List("baz", "quux"),
@@ -87,6 +87,7 @@ object CommandServiceTest extends BaseTest {
   private lazy val multiPartyJwt = jwtForParties(
     actAs = multiPartyJwp.submitter.toList,
     readAs = multiPartyJwp.readAs,
+    ledgerId = Some(multiPartyJwp.ledgerId.unwrap),
   )
   private val tplId = domain.ContractTypeId.Template("Foo", "Bar", "Baz")
   private[http] val applicationId: domain.ApplicationId = domain.ApplicationId("test")
@@ -99,6 +100,7 @@ object CommandServiceTest extends BaseTest {
   def jwtForParties(
       actAs: List[domain.Party],
       readAs: List[domain.Party],
+      ledgerId: Option[String] = None,
       withoutNamespace: Boolean = false,
       admin: Boolean = false,
   ): Jwt = {
@@ -106,7 +108,7 @@ object CommandServiceTest extends BaseTest {
     val payload: JsValue = {
       val customJwtPayload: AuthServiceJWTPayload =
         CustomDamlJWTPayload(
-          ledgerId = None,
+          ledgerId = ledgerId,
           applicationId = Some(applicationId.unwrap),
           actAs = domain.Party unsubst actAs,
           participantId = None,

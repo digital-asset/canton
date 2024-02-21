@@ -4,9 +4,10 @@
 package com.digitalasset.canton.ledger.api.messages.transaction
 
 import com.daml.lf.data.Ref.Party
-import com.digitalasset.canton.ledger.api.domain.TransactionId
+import com.digitalasset.canton.ledger.api.domain.{LedgerId, TransactionId}
 
 final case class GetTransactionByIdRequest(
+    ledgerId: Option[LedgerId],
     transactionId: TransactionId,
     requestingParties: Set[Party],
 )

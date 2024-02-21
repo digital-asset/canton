@@ -15,10 +15,10 @@ import com.digitalasset.canton.platform.store.interning.StringInterning
 
 private[postgresql] object PGSchema {
   private val PGFieldStrategy = new FieldStrategy {
-    override def stringArray[FROM](
-        extractor: StringInterning => FROM => Iterable[String]
-    ): Field[FROM, Iterable[String], _] =
-      PGStringArray(extractor)
+    override def stringArrayOptional[FROM](
+        extractor: StringInterning => FROM => Option[Iterable[String]]
+    ): Field[FROM, Option[Iterable[String]], _] =
+      PGStringArrayOptional(extractor)
 
     override def intArray[FROM](
         extractor: StringInterning => FROM => Iterable[Int]
@@ -38,16 +38,12 @@ private[postgresql] object PGSchema {
     override def insert[FROM](tableName: String)(
         fields: (String, Field[FROM, _, _])*
     ): Table[FROM] =
-      PGTable.transposedInsert(tableName)(fields*)
+      PGTable.transposedInsert(tableName)(fields: _*)
 
-    override def idempotentInsert[FROM](
-        tableName: String,
-        keyFieldIndex: Int,
-        ordering: Ordering[FROM],
-    )(
+    override def idempotentInsert[FROM](tableName: String, keyFieldIndex: Int)(
         fields: (String, Field[FROM, _, _])*
     ): Table[FROM] =
-      PGTable.idempotentTransposedInsert(tableName, keyFieldIndex, ordering)(fields*)
+      PGTable.idempotentTransposedInsert(tableName, keyFieldIndex)(fields: _*)
   }
 
   val schema: Schema[DbDto] = AppendOnlySchema(PGFieldStrategy)

@@ -31,11 +31,11 @@ import com.digitalasset.canton.participant.{
   DefaultParticipantStateValues,
   GlobalOffset,
   LedgerSyncOffset,
-  RequestOffset,
+  LocalOffset,
 }
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.time.SimClock
-import com.digitalasset.canton.topology.{DefaultTestIdentities, DomainId}
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, DefaultDamlValues, RequestCounter}
 import com.google.rpc.Code
@@ -62,7 +62,6 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
     blindingInfoO = None,
     hostedWitnesses = Nil,
     contractMetadata = Map(),
-    domainId = DomainId.tryFromString("da::default"),
   )
   private lazy val changeId1 = event1.completionInfoO.value.changeId
   private lazy val changeId1Hash = ChangeIdHash(changeId1)
@@ -75,7 +74,7 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
     event1.completionInfoO.value,
     new FinalReason(RpcStatus(code = Code.ABORTED_VALUE, message = "event1 rejection")),
     ProcessingSteps.RequestType.Transaction,
-    domainId,
+    Some(domainId),
   )
 
   private lazy val event3 = CommandRejected(
@@ -84,7 +83,7 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
       .completionInfo(List.empty, commandId = DefaultDamlValues.commandId(3), submissionId = None),
     FinalReason(RpcStatus(code = Code.NOT_FOUND_VALUE, message = "event3 message")),
     ProcessingSteps.RequestType.Transaction,
-    domainId,
+    Some(domainId),
   )
   private lazy val changeId3 = event3.completionInfo.changeId
   private lazy val changeId3Hash = ChangeIdHash(changeId3)
@@ -109,8 +108,8 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
 
   private implicit def toGlobalOffset(i: Long): GlobalOffset = GlobalOffset.tryFromLong(i)
 
-  private implicit def toLocalOffset(i: Long): RequestOffset =
-    RequestOffset(CantonTimestamp.ofEpochSecond(i), RequestCounter(i))
+  private implicit def toLocalOffset(i: Long): LocalOffset =
+    LocalOffset(RequestCounter(i))
 
   private def mk(lowerBound: CantonTimestamp = CantonTimestamp.MinValue): Fixture = {
     val store = new InMemoryCommandDeduplicationStore(loggerFactory)
@@ -124,14 +123,14 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
 
   private def mkPublication(
       globalOffset: GlobalOffset,
-      localOffset: RequestOffset,
+      localOffset: LocalOffset,
       publicationTime: CantonTimestamp,
       inFlightReference: Option[InFlightReference] = this.inFlightReference.some,
   ): MultiDomainEventLog.OnPublish.Publication = {
     val deduplicationInfo =
-      if (localOffset.requestCounter.unwrap < eventsInLog.size) {
+      if (localOffset.toLong < eventsInLog.size) {
         DeduplicationInfo.fromEvent(
-          eventsInLog(localOffset.requestCounter.unwrap.toInt),
+          eventsInLog(localOffset.toLong.toInt),
           TraceContext.empty,
         )
       } else None

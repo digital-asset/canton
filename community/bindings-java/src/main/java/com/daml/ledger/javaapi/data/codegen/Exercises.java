@@ -34,8 +34,4 @@ public interface Exercises<Cmd> {
   interface Archive<Cmd> extends Exercises<Cmd> {
     Update<Exercised<Unit>> exerciseArchive();
   }
-  // TODO(raphael-speyer-da): Replace `Archive` with `Archivable`.
-  interface Archivable<Cmd> extends Exercises<Cmd> {
-    Update<Exercised<Unit>> exerciseArchive();
-  }
 }

@@ -6,9 +6,11 @@ package com.digitalasset.canton.protocol
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.examples.java.iou.Iou
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
 class CantonContractIdVersionTest extends AnyWordSpec with BaseTest {
+
   "AuthenticatedContractIdVersionV2" when {
     val discriminator = ExampleTransactionFactory.lfHash(1)
     val hash =
@@ -28,8 +30,8 @@ class CantonContractIdVersionTest extends AnyWordSpec with BaseTest {
       }
     }
 
-    "ensuring canton contract id of AuthenticatedContractIdVersionV2" should {
-      "return a AuthenticatedContractIdVersionV2" in {
+    s"ensuring canton contract id of AuthenticatedContractIdVersionV2" should {
+      s"return a AuthenticatedContractIdVersionV2" in {
         CantonContractIdVersion.ensureCantonContractId(cid) shouldBe Right(
           AuthenticatedContractIdVersionV2
         )
@@ -49,6 +51,16 @@ class CantonContractIdVersionTest extends AnyWordSpec with BaseTest {
         val lfCid2 = apiCid.toLf
 
         lfCid2 shouldBe lfCid
+      }
+    }
+  }
+
+  CantonContractIdVersion.getClass.getSimpleName when {
+    "fromProtocolVersion" should {
+      "return the correct canton contract id version" in {
+        forAll(ProtocolVersion.supported.forgetNE) { pv =>
+          CantonContractIdVersion.fromProtocolVersion(pv) shouldBe AuthenticatedContractIdVersionV2
+        }
       }
     }
   }

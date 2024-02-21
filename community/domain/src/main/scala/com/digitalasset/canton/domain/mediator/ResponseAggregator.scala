@@ -12,8 +12,15 @@ import com.digitalasset.canton.data.{CantonTimestamp, ConfirmingParty, Informee,
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
-import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.protocol.{RequestId, RootHash}
+import com.digitalasset.canton.protocol.messages.{
+  LocalApprove,
+  LocalReject,
+  LocalVerdict,
+  Malformed,
+  MediatorRequest,
+  MediatorResponse,
+}
+import com.digitalasset.canton.protocol.{RequestId, RootHash, ViewHash}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.util.ErrorUtil
@@ -33,7 +40,7 @@ trait ResponseAggregator extends HasLoggerName with Product with Serializable {
     */
   def requestId: RequestId
 
-  def request: MediatorConfirmationRequest
+  def request: MediatorRequest
 
   /** The sequencer timestamp of the most recent message that affected this [[ResponseAggregator]]
     */
@@ -45,7 +52,7 @@ trait ResponseAggregator extends HasLoggerName with Product with Serializable {
     */
   def validateAndProgress(
       responseTimestamp: CantonTimestamp,
-      response: ConfirmationResponse,
+      response: MediatorResponse,
       topologySnapshot: TopologySnapshot,
   )(implicit
       loggingContext: NamedLoggingContext,
@@ -64,7 +71,6 @@ trait ResponseAggregator extends HasLoggerName with Product with Serializable {
       ec: ExecutionContext,
       loggingContext: NamedLoggingContext,
   ): OptionT[Future, List[(VKEY, Set[LfPartyId])]] = {
-    implicit val tc = loggingContext.traceContext
     def authorizedPartiesOfSender(
         viewKey: VKEY,
         declaredConfirmingParties: Set[ConfirmingParty],
@@ -75,15 +81,14 @@ trait ResponseAggregator extends HasLoggerName with Product with Serializable {
             Map("requestId" -> requestId.toString, "reportedBy" -> show"$sender")
           )
           val hostedConfirmingPartiesF =
-            topologySnapshot.canConfirm(
-              sender,
-              declaredConfirmingParties.map(_.party),
-            )
+            declaredConfirmingParties.toList
+              .parFilterA(p => topologySnapshot.canConfirm(sender, p.party, p.requiredTrustLevel))
+              .map(_.toSet)
           val res = hostedConfirmingPartiesF.map { hostedConfirmingParties =>
             loggingContext.debug(
               show"Malformed response $responseTimestamp for $viewKey considered as a rejection on behalf of $hostedConfirmingParties"
             )
-            Some(hostedConfirmingParties): Option[Set[LfPartyId]]
+            Some(hostedConfirmingParties.map(_.party)): Option[Set[LfPartyId]]
           }
           OptionT(res)
 
@@ -96,7 +101,7 @@ trait ResponseAggregator extends HasLoggerName with Product with Serializable {
               else {
                 MediatorError.MalformedMessage
                   .Reject(
-                    s"Received a confirmation response at $responseTimestamp by $sender for request $requestId with unexpected confirming parties $unexpectedConfirmingParties. Discarding response..."
+                    s"Received a mediator response at $responseTimestamp by $sender for request $requestId with unexpected confirming parties $unexpectedConfirmingParties. Discarding response..."
                   )
                   .report()
                 OptionT.none[Future, Unit]
@@ -105,21 +110,19 @@ trait ResponseAggregator extends HasLoggerName with Product with Serializable {
             expectedConfirmingParties =
               declaredConfirmingParties.filter(p => confirmingParties.contains(p.party))
             unauthorizedConfirmingParties <- OptionT.liftF(
-              topologySnapshot
-                .canConfirm(
-                  sender,
-                  expectedConfirmingParties.map(_.party),
-                )
-                .map { confirmingParties =>
-                  (expectedConfirmingParties.map(_.party) -- confirmingParties)
+              expectedConfirmingParties.toList
+                .parFilterA { p =>
+                  topologySnapshot.canConfirm(sender, p.party, p.requiredTrustLevel).map(x => !x)
                 }
+                .map(_.map(_.party))
+                .map(_.toSet)
             )
             _ <-
               if (unauthorizedConfirmingParties.isEmpty) OptionT.some[Future](())
               else {
                 MediatorError.MalformedMessage
                   .Reject(
-                    s"Received an unauthorized confirmation response at $responseTimestamp by $sender for request $requestId on behalf of $unauthorizedConfirmingParties. Discarding response..."
+                    s"Received an unauthorized mediator response at $responseTimestamp by $sender for request $requestId on behalf of $unauthorizedConfirmingParties. Discarding response..."
                   )
                   .report()
                 OptionT.none[Future, Unit]
@@ -129,10 +132,10 @@ trait ResponseAggregator extends HasLoggerName with Product with Serializable {
 
     for {
       _ <- OptionT.fromOption[Future](rootHashO.traverse_ { rootHash =>
-        if (request.rootHash == rootHash) Some(())
+        if (request.rootHash.forall(_ == rootHash)) Some(())
         else {
           val cause =
-            show"Received a confirmation response at $responseTimestamp by $sender for request $requestId with an invalid root hash $rootHash instead of ${request.rootHash}. Discarding response..."
+            show"Received a mediator response at $responseTimestamp by $sender for request $requestId with an invalid root hash $rootHash instead of ${request.rootHash.showValueOrNone}. Discarding response..."
           val alarm = MediatorError.MalformedMessage.Reject(cause)
           alarm.report()
 
@@ -143,7 +146,7 @@ trait ResponseAggregator extends HasLoggerName with Product with Serializable {
       viewKeysAndParties <- {
         viewKeyO match {
           case None =>
-            // If no view key is given, the local verdict is Malformed and confirming parties is empty by the invariants of ConfirmationResponse.
+            // If no view key is given, the local verdict is Malformed and confirming parties is empty by the invariants of MediatorResponse.
             // We treat this as a rejection for all parties hosted by the participant.
             localVerdict match {
               case malformed: Malformed =>
@@ -157,13 +160,17 @@ trait ResponseAggregator extends HasLoggerName with Product with Serializable {
             val informeesByView = ViewKey[VKEY].informeesAndThresholdByKey(request)
             val ret = informeesByView.toList
               .parTraverseFilter { case (viewKey, (informees, _threshold)) =>
-                val confirmingParties = informees.collect { case cp: ConfirmingParty => cp.party }
-                topologySnapshot.canConfirm(sender, confirmingParties).map { partiesCanConfirm =>
-                  val hostedConfirmingParties = confirmingParties.toSeq
-                    .filter(partiesCanConfirm.contains(_))
-                  Option.when(hostedConfirmingParties.nonEmpty)(
-                    viewKey -> hostedConfirmingParties.toSet
-                  )
+                val hostedConfirmingPartiesF = informees.toList.parTraverseFilter {
+                  case ConfirmingParty(party, _, requiredTrustLevel) =>
+                    topologySnapshot
+                      .canConfirm(sender, party, requiredTrustLevel)
+                      .map(x => if (x) Some(party) else None)
+                  case _ => Future.successful(None)
+                }
+                hostedConfirmingPartiesF.map { hostedConfirmingParties =>
+                  if (hostedConfirmingParties.nonEmpty)
+                    Some(viewKey -> hostedConfirmingParties.toSet)
+                  else None
                 }
               }
               .map { viewsWithConfirmingPartiesForSender =>
@@ -178,7 +185,7 @@ trait ResponseAggregator extends HasLoggerName with Product with Serializable {
               informeesAndThreshold <- OptionT.fromOption[Future](
                 ViewKey[VKEY].informeesAndThresholdByKey(request).get(viewKey).orElse {
                   val cause =
-                    s"Received a confirmation response at $responseTimestamp by $sender for request $requestId with an unknown view position $viewKey. Discarding response..."
+                    s"Received a mediator response at $responseTimestamp by $sender for request $requestId with an unknown view position $viewKey. Discarding response..."
                   val alarm = MediatorError.MalformedMessage.Reject(cause)
                   alarm.report()
 
@@ -202,10 +209,10 @@ trait ResponseAggregator extends HasLoggerName with Product with Serializable {
 trait ViewKey[VKEY] extends Pretty[VKEY] with Product with Serializable {
   def name: String
 
-  def keyOfResponse(response: ConfirmationResponse): Option[VKEY]
+  def keyOfResponse(response: MediatorResponse): Option[VKEY]
 
   def informeesAndThresholdByKey(
-      request: MediatorConfirmationRequest
+      request: MediatorRequest
   ): Map[VKEY, (Set[Informee], NonNegativeInt)]
 }
 object ViewKey {
@@ -214,14 +221,26 @@ object ViewKey {
   implicit case object ViewPositionKey extends ViewKey[ViewPosition] {
     override def name: String = "view position"
 
-    override def keyOfResponse(response: ConfirmationResponse): Option[ViewPosition] =
+    override def keyOfResponse(response: MediatorResponse): Option[ViewPosition] =
       response.viewPositionO
 
     override def informeesAndThresholdByKey(
-        request: MediatorConfirmationRequest
+        request: MediatorRequest
     ): Map[ViewPosition, (Set[Informee], NonNegativeInt)] =
       request.informeesAndThresholdByViewPosition
 
     override def treeOf(t: ViewPosition): Tree = t.pretty.treeOf(t)
+  }
+  implicit case object ViewHashKey extends ViewKey[ViewHash] {
+    override def name: String = "view hash"
+
+    override def keyOfResponse(response: MediatorResponse): Option[ViewHash] = response.viewHashO
+
+    override def informeesAndThresholdByKey(
+        request: MediatorRequest
+    ): Map[ViewHash, (Set[Informee], NonNegativeInt)] =
+      request.informeesAndThresholdByViewHash
+
+    override def treeOf(t: ViewHash): Tree = t.pretty.treeOf(t)
   }
 }

@@ -8,7 +8,6 @@ import cats.syntax.applicativeError.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.{
   TopologyErrors,
@@ -35,9 +34,7 @@ private[routing] final class AdmissibleDomains(
   // A `PartyTopology` is something gathered for each domain which maps, for
   // every party of the domain, on which participant it's hosted and with what
   // permissions and trust level (i.e. the `ParticipantAttributes`)
-  // and submitting party's confirmation threshold
-  private type PartyTopology =
-    Map[LfPartyId, (Map[ParticipantId, ParticipantAttributes], Option[PositiveInt])]
+  private type PartyTopology = Map[LfPartyId, Map[ParticipantId, ParticipantAttributes]]
 
   /** Domains that host both submitters and informees of the transaction:
     * - submitters have to be hosted on the local participant
@@ -56,19 +53,12 @@ private[routing] final class AdmissibleDomains(
       val allParties = submitters.view ++ informees.view
       partyTopologySnapshotClient
         .activeParticipantsOfPartiesWithAttributes(allParties.toSeq)
-        .zip(partyTopologySnapshotClient.consortiumThresholds(submitters))
         .attemptT
-        .map { case (partyTopology, thresholds) =>
-          val partyTopologyWithThresholds = partyTopology
-            .filter { case (_, hostingParticipants) => hostingParticipants.nonEmpty }
-            .map { case (partyId, participants) =>
-              val thresholdO = thresholds.get(partyId)
-              partyId -> (participants, thresholdO)
-            }
-          Option.when(partyTopologyWithThresholds.nonEmpty) {
-            domainId -> partyTopologyWithThresholds
-          }
-        }
+        .map(_.filter { case (_, attributes) => attributes.nonEmpty })
+        .map(partyTopology =>
+          if (partyTopology.isEmpty) None
+          else Some(domainId -> partyTopology)
+        )
         .leftMap { throwable =>
           logger.warn("Unable to query the topology information", throwable)
           UnableToQueryTopologySnapshot.Failed(domainId)
@@ -86,14 +76,15 @@ private[routing] final class AdmissibleDomains(
         required: Set[A],
         known: Set[A],
         ifUnknown: Set[A] => E,
-    ): EitherT[Future, E, Unit] = {
-      val unknown = required -- known
-      EitherT.cond[Future](
-        unknown.isEmpty,
-        (),
-        ifUnknown(unknown),
-      )
-    }
+    ): EitherT[Future, E, Unit] =
+      EitherT.fromEither[Future] {
+        val unknown = required -- known
+        if (unknown.isEmpty) {
+          Right(())
+        } else {
+          Left(ifUnknown(unknown))
+        }
+      }
 
     def ensureAllSubmittersAreKnown(
         knownParties: Set[LfPartyId]
@@ -155,8 +146,8 @@ private[routing] final class AdmissibleDomains(
       val suitableDomains =
         for {
           (domainId, topology) <- domainsWithAllSubmitters
-          (partyId, (participants, threshold)) <- topology
-          if submitters.contains(partyId) && threshold.contains(PositiveInt.one)
+          (partyId, participants) <- topology
+          if submitters.contains(partyId)
           (participantId, attributes) <- participants
           if participantId == localParticipantId && attributes.permission >= Submission
         } yield domainId

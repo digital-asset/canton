@@ -5,21 +5,15 @@ package com.digitalasset.canton.platform
 
 import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.ledger.resources.{Resource, ResourceContext}
-import com.daml.lf.VersionRange
 import com.daml.lf.data.Ref
-import com.daml.lf.engine.{Engine, EngineConfig}
-import com.daml.lf.language.LanguageVersion
+import com.daml.lf.engine.Engine
 import com.daml.lf.transaction.test.{NodeIdTransactionBuilder, TestNodeBuilder}
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.health.HealthStatus
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexService
-import com.digitalasset.canton.ledger.participant.state.v2.{
-  InternalStateServiceProviderImpl,
-  ReadService,
-  Update,
-}
+import com.digitalasset.canton.ledger.participant.state.v2.{ReadService, Update}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.IndexComponentTest.{TestReadService, TestServices}
@@ -34,7 +28,6 @@ import com.digitalasset.canton.platform.store.DbSupport.{
   DbConfig,
   ParticipantDataSourceConfig,
 }
-import com.digitalasset.canton.platform.store.backend.h2.H2StorageBackendFactory
 import com.digitalasset.canton.platform.store.dao.events.ContractLoader
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, Traced}
 import org.apache.pekko.NotUsed
@@ -58,6 +51,8 @@ trait IndexComponentTest extends PekkoBeforeAndAfterAll with BaseTest {
 
   // if we would need multi-db, polimorphism can come here, look for JdbcLedgerDaoBackend
   private val jdbcUrl = s"jdbc:h2:mem:${getClass.getSimpleName.toLowerCase};db_close_delay=-1"
+
+  private val multiDomainEnabled = true
 
   private val testServicesRef: AtomicReference[TestServices] = new AtomicReference()
 
@@ -97,6 +92,26 @@ trait IndexComponentTest extends PekkoBeforeAndAfterAll with BaseTest {
           executionContext = ec,
           tracer = NoReportingTracerProvider.tracer,
           loggerFactory = loggerFactory,
+          multiDomainEnabled = multiDomainEnabled,
+          maxEventsByContractKeyCacheSize = None,
+        )
+        _indexerHealth <- new IndexerServiceOwner(
+          participantId = Ref.ParticipantId.assertFromString("index-component-test-participant-id"),
+          participantDataSourceConfig = ParticipantDataSourceConfig(jdbcUrl),
+          readService = testReadService,
+          config = indexerConfig,
+          metrics = Metrics.ForTesting,
+          inMemoryState = inMemoryState,
+          inMemoryStateUpdaterFlow = updaterFlow,
+          executionContext = ec,
+          tracer = NoReportingTracerProvider.tracer,
+          loggerFactory = loggerFactory,
+          multiDomainEnabled = multiDomainEnabled,
+          startupMode = DefaultIndexerStartupMode,
+          dataSourceProperties = IndexerConfig.createDataSourcePropertiesForTesting(
+            indexerConfig.ingestionParallelism.unwrap
+          ),
+          highAvailability = HaConfig(),
         )
         dbSupport <- DbSupport
           .owner(
@@ -111,29 +126,6 @@ trait IndexComponentTest extends PekkoBeforeAndAfterAll with BaseTest {
             ),
             loggerFactory = loggerFactory,
           )
-        indexerDbDispatcherOverride = Option.when(
-          dbSupport.storageBackendFactory == H2StorageBackendFactory
-        )(
-          dbSupport.dbDispatcher
-        )
-        _indexerHealth <- new IndexerServiceOwner(
-          participantId = Ref.ParticipantId.assertFromString("index-component-test-participant-id"),
-          participantDataSourceConfig = ParticipantDataSourceConfig(jdbcUrl),
-          readService = testReadService,
-          config = indexerConfig,
-          metrics = Metrics.ForTesting,
-          inMemoryState = inMemoryState,
-          inMemoryStateUpdaterFlow = updaterFlow,
-          executionContext = ec,
-          tracer = NoReportingTracerProvider.tracer,
-          loggerFactory = loggerFactory,
-          startupMode = DefaultIndexerStartupMode,
-          dataSourceProperties = IndexerConfig.createDataSourcePropertiesForTesting(
-            indexerConfig.ingestionParallelism.unwrap
-          ),
-          highAvailability = HaConfig(),
-          indexerDbDispatcherOverride = indexerDbDispatcherOverride,
-        )
         contractLoader <- ContractLoader.create(
           contractStorageBackend = dbSupport.storageBackendFactory.createContractStorageBackend(
             inMemoryState.ledgerEndCache,
@@ -144,6 +136,7 @@ trait IndexComponentTest extends PekkoBeforeAndAfterAll with BaseTest {
           maxQueueSize = 10000,
           maxBatchSize = 50,
           parallelism = 5,
+          multiDomainEnabled = multiDomainEnabled,
           loggerFactory = loggerFactory,
         )
         indexService <- new IndexServiceOwner(
@@ -153,12 +146,7 @@ trait IndexComponentTest extends PekkoBeforeAndAfterAll with BaseTest {
           participantId = Ref.ParticipantId.assertFromString(IndexComponentTest.TestParticipantId),
           metrics = Metrics.ForTesting,
           servicesExecutionContext = ec,
-          // TODO(#14706): revert to new Engine() once the default engine config supports only 2.x
-          engine = new Engine(
-            EngineConfig(allowedLanguageVersions =
-              VersionRange(LanguageVersion.v2_1, LanguageVersion.v2_1)
-            )
-          ),
+          engine = new Engine(),
           inMemoryState = inMemoryState,
           tracer = NoReportingTracerProvider.tracer,
           loggerFactory = loggerFactory,
@@ -196,9 +184,7 @@ object IndexComponentTest {
 
   val maxUpdateCount = 1000000
 
-  class TestReadService(implicit val materializer: Materializer)
-      extends ReadService
-      with InternalStateServiceProviderImpl {
+  class TestReadService(implicit val materializer: Materializer) extends ReadService {
     private var currentEnd: Int = 0
     private var queue: Vector[(Offset, Traced[Update])] = Vector.empty
     private var subscription: BoundedSourceQueue[(Offset, Traced[Update])] = _

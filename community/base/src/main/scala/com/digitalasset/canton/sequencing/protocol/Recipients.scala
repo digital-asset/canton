@@ -9,7 +9,7 @@ import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.v30
+import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
 
@@ -25,17 +25,16 @@ final case class Recipients(trees: NonEmpty[Seq[RecipientsTree]]) extends Pretty
   def allPaths: NonEmpty[Seq[NonEmpty[Seq[NonEmpty[Set[Recipient]]]]]] = trees.flatMap(_.allPaths)
 
   def forMember(
-      member: Member,
-      groupRecipients: Set[GroupRecipient],
+      member: Member
   ): Option[Recipients] = {
-    val ts = trees.forgetNE.flatMap(t => t.forMember(member, groupRecipients))
+    val ts = trees.forgetNE.flatMap(t => t.forMember(member))
     val optTs = NonEmpty.from(ts)
     optTs.map(Recipients(_))
   }
 
-  def toProtoV30: v30.Recipients = {
-    val protoTrees = trees.map(_.toProtoV30)
-    new v30.Recipients(protoTrees.toList)
+  def toProtoV0: v0.Recipients = {
+    val protoTrees = trees.map(_.toProtoV0)
+    new v0.Recipients(protoTrees.toList)
   }
 
   override def pretty: Pretty[Recipients.this.type] =
@@ -58,14 +57,11 @@ final case class Recipients(trees: NonEmpty[Seq[RecipientsTree]]) extends Pretty
 
 object Recipients {
 
-  def fromProtoV30(
-      proto: v30.Recipients,
-      supportGroupAddressing: Boolean,
+  def fromProtoV0(
+      proto: v0.Recipients
   ): ParsingResult[Recipients] = {
     for {
-      trees <- proto.recipientsTree.traverse(t =>
-        RecipientsTree.fromProtoV30(t, supportGroupAddressing)
-      )
+      trees <- proto.recipientsTree.traverse(t => RecipientsTree.fromProtoV0(t))
       recipients <- NonEmpty
         .from(trees)
         .toRight(
@@ -81,10 +77,10 @@ object Recipients {
     * members that "see" each other.
     */
   def cc(first: Member, others: Member*): Recipients =
-    Recipients(NonEmpty(Seq, RecipientsTree.leaf(NonEmpty(Set, first, others*))))
+    Recipients(NonEmpty(Seq, RecipientsTree.leaf(NonEmpty(Set, first, others: _*))))
 
   def cc(recipient: Recipient, others: Recipient*): Recipients = {
-    Recipients(NonEmpty.mk(Seq, RecipientsTree(NonEmpty.mk(Set, recipient, others*), Seq.empty)))
+    Recipients(NonEmpty.mk(Seq, RecipientsTree(NonEmpty.mk(Set, recipient, others *), Seq.empty)))
   }
 
   /** Create a [[com.digitalasset.canton.sequencing.protocol.Recipients]] representing independent groups of members
@@ -101,7 +97,7 @@ object Recipients {
 
   def ofSet[T <: Member](set: Set[T]): Option[Recipients] = {
     val members = set.toList
-    NonEmpty.from(members).map(list => Recipients.cc(list.head1, list.tail1*))
+    NonEmpty.from(members).map(list => Recipients.cc(list.head1, list.tail1: _*))
   }
 
 }

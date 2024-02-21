@@ -15,27 +15,41 @@ import com.digitalasset.canton.data.ActionDescription.{
 }
 import com.digitalasset.canton.data.ViewPosition.{MerklePathElement, MerkleSeqIndex}
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
-import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.sequencing.protocol.MediatorsOfDomain
-import com.digitalasset.canton.topology.{DomainId, ParticipantId}
+import com.digitalasset.canton.protocol.{
+  ConfirmationPolicy,
+  CreatedContract,
+  GeneratorsProtocol,
+  InputContract,
+  LfChoiceName,
+  LfContractId,
+  LfGlobalKey,
+  LfHash,
+  LfTemplateId,
+  LfTransactionVersion,
+  RollbackContext,
+}
+import com.digitalasset.canton.topology.{DomainId, MediatorRef, ParticipantId}
 import com.digitalasset.canton.version.{ProtocolVersion, RepresentativeProtocolVersion}
 import com.digitalasset.canton.{LfInterfaceId, LfPartyId}
 import magnolify.scalacheck.auto.*
 import org.scalacheck.{Arbitrary, Gen}
 
+import scala.math.Ordered.orderingToOrdered
+
 final class GeneratorsData(
     protocolVersion: ProtocolVersion,
+    generatorsDataTime: GeneratorsDataTime,
     generatorsProtocol: GeneratorsProtocol,
 ) {
   import com.digitalasset.canton.Generators.*
   import com.digitalasset.canton.GeneratorsLf.*
   import com.digitalasset.canton.config.GeneratorsConfig.*
-  import com.digitalasset.canton.crypto.GeneratorsCrypto.*
-  import com.digitalasset.canton.data.GeneratorsDataTime.*
-  import com.digitalasset.canton.ledger.api.GeneratorsApi.*
   import com.digitalasset.canton.topology.GeneratorsTopology.*
-  import generatorsProtocol.*
+  import com.digitalasset.canton.crypto.GeneratorsCrypto.*
+  import com.digitalasset.canton.ledger.api.GeneratorsApi.*
   import org.scalatest.OptionValues.*
+  import generatorsProtocol.*
+  import generatorsDataTime.*
 
   // If this pattern match is not exhaustive anymore, update the generator below
   {
@@ -60,20 +74,19 @@ final class GeneratorsData(
       confirmationPolicy <- Arbitrary.arbitrary[ConfirmationPolicy]
       domainId <- Arbitrary.arbitrary[DomainId]
 
-      mediator <- Arbitrary.arbitrary[MediatorsOfDomain]
+      mediatorRef <- Arbitrary.arbitrary[MediatorRef]
 
       salt <- Arbitrary.arbitrary[Salt]
       uuid <- Gen.uuid
 
       hashOps = TestHash // Not used for serialization
-    } yield CommonMetadata
-      .create(hashOps, protocolVersion)(
-        confirmationPolicy,
-        domainId,
-        mediator,
-        salt,
-        uuid,
-      )
+    } yield CommonMetadata(hashOps, protocolVersion)(
+      confirmationPolicy,
+      domainId,
+      mediatorRef,
+      salt,
+      uuid,
+    )
   )
 
   implicit val participantMetadataArb: Arbitrary[ParticipantMetadata] = Arbitrary(
@@ -98,7 +111,7 @@ final class GeneratorsData(
       actAs <- nonEmptySet(lfPartyIdArb).arbitrary
       applicationId <- applicationIdArb.arbitrary
       commandId <- commandIdArb.arbitrary
-      submittingParticipant <- Arbitrary.arbitrary[ParticipantId]
+      submitterParticipant <- Arbitrary.arbitrary[ParticipantId]
       salt <- Arbitrary.arbitrary[Salt]
       submissionId <- Gen.option(ledgerSubmissionIdArb.arbitrary)
       dedupPeriod <- Arbitrary.arbitrary[DeduplicationPeriod]
@@ -108,7 +121,7 @@ final class GeneratorsData(
       actAs,
       applicationId,
       commandId,
-      submittingParticipant,
+      submitterParticipant,
       salt,
       submissionId,
       dedupPeriod,
@@ -140,11 +153,17 @@ final class GeneratorsData(
     for {
       inputContractId <- Arbitrary.arbitrary[LfContractId]
 
-      templateId <- Gen.option(Arbitrary.arbitrary[LfTemplateId])
+      templateId <-
+        if (rpv >= ExerciseActionDescription.templateIdSupportedSince)
+          Gen.option(Arbitrary.arbitrary[LfTemplateId])
+        else Gen.const(None)
 
       choice <- Arbitrary.arbitrary[LfChoiceName]
 
-      interfaceId <- Gen.option(Arbitrary.arbitrary[LfInterfaceId])
+      interfaceId <-
+        if (rpv >= ExerciseActionDescription.interfaceSupportedSince)
+          Gen.option(Arbitrary.arbitrary[LfInterfaceId])
+        else Gen.const(None)
 
       // We consider only this specific value because the goal is not exhaustive testing of LF (de)serialization
       chosenValue <- Gen.long.map(ValueInt64)
@@ -221,7 +240,9 @@ final class GeneratorsData(
       coreInputs <- Gen
         .listOf(
           Gen.zip(
-            generatorsProtocol.serializableContractArb(canHaveEmptyKey = false).arbitrary,
+            generatorsProtocol
+              .serializableContractArb(canHaveEmptyKey = false, Some(protocolVersion))
+              .arbitrary,
             Gen.oneOf(true, false),
           )
         )
@@ -230,7 +251,9 @@ final class GeneratorsData(
       createdCore <- Gen
         .listOf(
           Gen.zip(
-            generatorsProtocol.serializableContractArb(canHaveEmptyKey = false).arbitrary,
+            generatorsProtocol
+              .serializableContractArb(canHaveEmptyKey = false, Some(protocolVersion))
+              .arbitrary,
             Gen.oneOf(true, false),
             Gen.oneOf(true, false),
           )
@@ -255,6 +278,7 @@ final class GeneratorsData(
         AssignedKey must correspond to a contract in core input
        */
       coreInputWithResolvedKeys <- Gen.someOf(coreInputs)
+
       assignedResolvedKeys <- Gen.sequence[List[
         (LfGlobalKey, SerializableKeyResolution)
       ], (LfGlobalKey, SerializableKeyResolution)](coreInputWithResolvedKeys.map { contract =>
@@ -264,6 +288,7 @@ final class GeneratorsData(
           .zip(key, assignedKeyGen(contract.contractId))
           .map({ case (k, r) => (k.unversioned.globalKey, r.copy()(k.version)) })
       })
+
       freeResolvedKeys <- Gen.listOf(
         Gen
           .zip(Arbitrary.arbitrary[Versioned[LfGlobalKey]], Arbitrary.arbitrary[FreeKey])

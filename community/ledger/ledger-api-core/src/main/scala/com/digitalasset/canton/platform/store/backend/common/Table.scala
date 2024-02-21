@@ -12,17 +12,13 @@ private[backend] trait Table[FROM] {
   def executeUpdate: Array[Array[_]] => Connection => Unit
 }
 
-private[backend] abstract class BaseTable[FROM](
-    fields: Seq[(String, Field[FROM, _, _])],
-    ordering: Option[Ordering[FROM]] = None,
-) extends Table[FROM] {
+private[backend] abstract class BaseTable[FROM](fields: Seq[(String, Field[FROM, _, _])])
+    extends Table[FROM] {
   override def prepareData(
       in: Vector[FROM],
       stringInterning: StringInterning,
-  ): Array[Array[_]] = {
-    val sortedIn = ordering.map(in.sorted(_)).getOrElse(in)
-    fields.view.map(_._2.toArray(sortedIn, stringInterning)).toArray
-  }
+  ): Array[Array[_]] =
+    fields.view.map(_._2.toArray(in, stringInterning)).toArray
 }
 
 private[backend] object Table {

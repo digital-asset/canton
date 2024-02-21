@@ -57,16 +57,16 @@ private[backend] class ConfigurationStorageBackendTemplate(
     val ledgerEndOffset = ledgerEndCache()._1
     SQL"""
       select
-        lapi_configuration_entries.ledger_offset,
-        lapi_configuration_entries.recorded_at,
-        lapi_configuration_entries.submission_id,
-        lapi_configuration_entries.typ,
-        lapi_configuration_entries.configuration,
-        lapi_configuration_entries.rejection_reason
+        configuration_entries.ledger_offset,
+        configuration_entries.recorded_at,
+        configuration_entries.submission_id,
+        configuration_entries.typ,
+        configuration_entries.configuration,
+        configuration_entries.rejection_reason
       from
-        lapi_configuration_entries
+        configuration_entries
       where
-        lapi_configuration_entries.typ = '#$acceptType' and
+        configuration_entries.typ = '#$acceptType' and
         ${queryStrategy.offsetIsSmallerOrEqual(
         nonNullableColumn = "ledger_offset",
         endInclusive = ledgerEndOffset,
@@ -88,14 +88,14 @@ private[backend] class ConfigurationStorageBackendTemplate(
   )(connection: Connection): Vector[(Offset, ConfigurationEntry)] = {
     SQL"""
       select
-        lapi_configuration_entries.ledger_offset,
-        lapi_configuration_entries.recorded_at,
-        lapi_configuration_entries.submission_id,
-        lapi_configuration_entries.typ,
-        lapi_configuration_entries.configuration,
-        lapi_configuration_entries.rejection_reason
+        configuration_entries.ledger_offset,
+        configuration_entries.recorded_at,
+        configuration_entries.submission_id,
+        configuration_entries.typ,
+        configuration_entries.configuration,
+        configuration_entries.rejection_reason
       from
-        lapi_configuration_entries
+        configuration_entries
       where
         ${queryStrategy.offsetIsBetween(
         nonNullableColumn = "ledger_offset",

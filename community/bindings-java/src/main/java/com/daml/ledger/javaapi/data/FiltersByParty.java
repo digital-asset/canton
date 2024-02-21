@@ -3,14 +3,12 @@
 
 package com.daml.ledger.javaapi.data;
 
-import com.daml.ledger.api.v2.TransactionFilterOuterClass;
-import com.daml.ledger.api.v1.TransactionFilterOuterClass.Filters;
-import org.checkerframework.checker.nullness.qual.NonNull;
-
+import com.daml.ledger.api.v1.TransactionFilterOuterClass;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import org.checkerframework.checker.nullness.qual.NonNull;
 
 public final class FiltersByParty extends TransactionFilter {
 
@@ -27,7 +25,8 @@ public final class FiltersByParty extends TransactionFilter {
 
   @Override
   public TransactionFilterOuterClass.TransactionFilter toProto() {
-    HashMap<String, Filters> partyToFilters = new HashMap<>(this.partyToFilters.size());
+    HashMap<String, TransactionFilterOuterClass.Filters> partyToFilters =
+        new HashMap<>(this.partyToFilters.size());
     for (Map.Entry<String, Filter> entry : this.partyToFilters.entrySet()) {
       partyToFilters.put(entry.getKey(), entry.getValue().toProto());
     }
@@ -38,9 +37,10 @@ public final class FiltersByParty extends TransactionFilter {
 
   public static FiltersByParty fromProto(
       TransactionFilterOuterClass.TransactionFilter transactionFilter) {
-    Map<String, Filters> partyToFilters = transactionFilter.getFiltersByPartyMap();
+    Map<String, TransactionFilterOuterClass.Filters> partyToFilters =
+        transactionFilter.getFiltersByPartyMap();
     HashMap<String, Filter> converted = new HashMap<>(partyToFilters.size());
-    for (Map.Entry<String, Filters> entry : partyToFilters.entrySet()) {
+    for (Map.Entry<String, TransactionFilterOuterClass.Filters> entry : partyToFilters.entrySet()) {
       converted.put(entry.getKey(), Filter.fromProto(entry.getValue()));
     }
     return new FiltersByParty(converted);

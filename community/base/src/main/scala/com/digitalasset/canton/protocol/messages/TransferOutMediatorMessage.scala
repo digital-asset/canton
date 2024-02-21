@@ -6,14 +6,13 @@ package com.digitalasset.canton.protocol.messages
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.crypto.{HashOps, Signature}
+import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.{Informee, TransferOutViewTree, ViewPosition, ViewType}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.sequencing.protocol.MediatorsOfDomain
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.{DomainId, ParticipantId}
+import com.digitalasset.canton.topology.{DomainId, MediatorRef}
 import com.digitalasset.canton.util.EitherUtil
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWithContextCompanion,
@@ -30,16 +29,16 @@ import java.util.UUID
   * @throws java.lang.IllegalArgumentException if the common data is blinded or the view is not blinded
   */
 final case class TransferOutMediatorMessage(
-    tree: TransferOutViewTree,
-    override val submittingParticipantSignature: Signature,
-) extends MediatorConfirmationRequest
-    with UnsignedProtocolMessage {
+    tree: TransferOutViewTree
+) extends MediatorRequest
+    with ProtocolMessageV0
+    with ProtocolMessageV1
+    with ProtocolMessageV2
+    with ProtocolMessageV3 {
   require(tree.commonData.isFullyUnblinded, "The transfer-out common data must be unblinded")
   require(tree.view.isBlinded, "The transfer-out view must be blinded")
 
   private[this] val commonData = tree.commonData.tryUnwrap
-
-  override def submittingParticipant: ParticipantId = tree.submittingParticipant
 
   val protocolVersion = commonData.protocolVersion
 
@@ -49,9 +48,15 @@ final case class TransferOutMediatorMessage(
 
   override def domainId: DomainId = commonData.sourceDomain.unwrap
 
-  override def mediator: MediatorsOfDomain = commonData.sourceMediator
+  override def mediator: MediatorRef = commonData.sourceMediator
 
   override def requestUuid: UUID = commonData.uuid
+
+  override def informeesAndThresholdByViewHash: Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
+    val confirmingParties = commonData.confirmingParties
+    val threshold = NonNegativeInt.tryCreate(confirmingParties.size)
+    Map(tree.viewHash -> ((confirmingParties, threshold)))
+  }
 
   override def informeesAndThresholdByViewPosition
       : Map[ViewPosition, (Set[Informee], NonNegativeInt)] = {
@@ -62,11 +67,11 @@ final case class TransferOutMediatorMessage(
 
   override def minimumThreshold(informees: Set[Informee]): NonNegativeInt = NonNegativeInt.one
 
-  override def createConfirmationResult(
+  override def createMediatorResult(
       requestId: RequestId,
       verdict: Verdict,
       recipientParties: Set[LfPartyId],
-  ): ConfirmationResult with SignedProtocolMessageContent = {
+  ): MediatorResult with SignedProtocolMessageContent = {
     val informees = commonData.stakeholders ++ commonData.adminParties
     require(
       recipientParties.subsetOf(informees),
@@ -81,16 +86,25 @@ final case class TransferOutMediatorMessage(
     )
   }
 
-  def toProtoV30: v30.TransferOutMediatorMessage =
-    v30.TransferOutMediatorMessage(
-      tree = Some(tree.toProtoV30),
-      submittingParticipantSignature = Some(submittingParticipantSignature.toProtoV30),
-    )
+  def toProtoV0: v0.TransferOutMediatorMessage =
+    v0.TransferOutMediatorMessage(tree = Some(tree.toProtoV0))
 
-  override def toProtoSomeEnvelopeContentV30: v30.EnvelopeContent.SomeEnvelopeContent =
-    v30.EnvelopeContent.SomeEnvelopeContent.TransferOutMediatorMessage(toProtoV30)
+  def toProtoV1: v1.TransferOutMediatorMessage =
+    v1.TransferOutMediatorMessage(tree = Some(tree.toProtoV1))
 
-  override def rootHash: RootHash = tree.rootHash
+  override def toProtoEnvelopeContentV0: v0.EnvelopeContent =
+    v0.EnvelopeContent(v0.EnvelopeContent.SomeEnvelopeContent.TransferOutMediatorMessage(toProtoV0))
+
+  override def toProtoEnvelopeContentV1: v1.EnvelopeContent =
+    v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.TransferOutMediatorMessage(toProtoV1))
+
+  override def toProtoEnvelopeContentV2: v2.EnvelopeContent =
+    v2.EnvelopeContent(v2.EnvelopeContent.SomeEnvelopeContent.TransferOutMediatorMessage(toProtoV1))
+
+  override def toProtoEnvelopeContentV3: v3.EnvelopeContent =
+    v3.EnvelopeContent(v3.EnvelopeContent.SomeEnvelopeContent.TransferOutMediatorMessage(toProtoV1))
+
+  override def rootHash: Option[RootHash] = Some(tree.rootHash)
 
   override def viewType: ViewType = ViewType.TransferOutViewType
 
@@ -107,23 +121,27 @@ object TransferOutMediatorMessage
     ] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v30)(
-      v30.TransferOutMediatorMessage
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(
+      v0.TransferOutMediatorMessage
     )(
-      supportedProtoVersion(_)((context, proto) => fromProtoV30(context)(proto)),
-      _.toProtoV30.toByteString,
-    )
+      supportedProtoVersion(_)((context, proto) => fromProtoV0(context)(proto)),
+      _.toProtoV0.toByteString,
+    ),
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v4)(
+      v1.TransferOutMediatorMessage
+    )(
+      supportedProtoVersion(_)((context, proto) => fromProtoV1(context)(proto)),
+      _.toProtoV1.toByteString,
+    ),
   )
 
-  def fromProtoV30(context: (HashOps, ProtocolVersion))(
-      transferOutMediatorMessageP: v30.TransferOutMediatorMessage
-  ): ParsingResult[TransferOutMediatorMessage] = {
-    val v30.TransferOutMediatorMessage(treePO, submittingParticipantSignaturePO) =
-      transferOutMediatorMessageP
+  def fromProtoV0(context: (HashOps, ProtocolVersion))(
+      transferOutMediatorMessageP: v0.TransferOutMediatorMessage
+  ): ParsingResult[TransferOutMediatorMessage] =
     for {
       tree <- ProtoConverter
-        .required("TransferOutMediatorMessage.tree", treePO)
-        .flatMap(TransferOutViewTree.fromProtoV30(context))
+        .required("TransferOutMediatorMessage.tree", transferOutMediatorMessageP.tree)
+        .flatMap(TransferOutViewTree.fromProtoV0(context))
       _ <- EitherUtil.condUnitE(
         tree.commonData.isFullyUnblinded,
         OtherError(s"Transfer-out common data is blinded in request ${tree.rootHash}"),
@@ -132,14 +150,24 @@ object TransferOutMediatorMessage
         tree.view.isBlinded,
         OtherError(s"Transfer-out view data is not blinded in request ${tree.rootHash}"),
       )
-      submittingParticipantSignature <- ProtoConverter
-        .required(
-          "TransferOutMediatorMessage.submittingParticipantSignature",
-          submittingParticipantSignaturePO,
-        )
-        .flatMap(Signature.fromProtoV30)
-    } yield TransferOutMediatorMessage(tree, submittingParticipantSignature)
-  }
+    } yield TransferOutMediatorMessage(tree)
+
+  def fromProtoV1(context: (HashOps, ProtocolVersion))(
+      transferOutMediatorMessageP: v1.TransferOutMediatorMessage
+  ): ParsingResult[TransferOutMediatorMessage] =
+    for {
+      tree <- ProtoConverter
+        .required("TransferOutMediatorMessage.tree", transferOutMediatorMessageP.tree)
+        .flatMap(TransferOutViewTree.fromProtoV1(context))
+      _ <- EitherUtil.condUnitE(
+        tree.commonData.isFullyUnblinded,
+        OtherError(s"Transfer-out common data is blinded in request ${tree.rootHash}"),
+      )
+      _ <- EitherUtil.condUnitE(
+        tree.view.isBlinded,
+        OtherError(s"Transfer-out view data is not blinded in request ${tree.rootHash}"),
+      )
+    } yield TransferOutMediatorMessage(tree)
 
   override def name: String = "TransferOutMediatorMessage"
 }

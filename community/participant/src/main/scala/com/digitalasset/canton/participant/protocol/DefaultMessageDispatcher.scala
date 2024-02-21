@@ -40,6 +40,7 @@ import scala.util.{Failure, Success}
 
 class DefaultMessageDispatcher(
     override protected val protocolVersion: ProtocolVersion,
+    override protected val uniqueContractKeys: Boolean,
     override protected val domainId: DomainId,
     override protected val participantId: ParticipantId,
     override protected val requestTracker: RequestTracker,
@@ -91,7 +92,7 @@ class DefaultMessageDispatcher(
       case RequestKind(_) => runAsyncResult(run)
 
       case ResultKind(_) => runAsyncResult(run)
-      case MalformedMediatorConfirmationRequestMessage => runAsyncResult(run)
+      case MalformedMediatorRequestMessage => runAsyncResult(run)
 
       case DeliveryMessageKind => run
     }

@@ -30,8 +30,8 @@ object ComposableQuery {
       val (stringParts, valueParts) = flattenComposite(sc.parts, args)
 
       anorm
-        .SqlStringInterpolation(StringContext(stringParts*))
-        .SQL(valueParts*)
+        .SqlStringInterpolation(StringContext(stringParts: _*))
+        .SQL(valueParts: _*)
     }
 
     def cSQL(args: QueryPart*): CompositeSql = CompositeSql(sc.parts, args)

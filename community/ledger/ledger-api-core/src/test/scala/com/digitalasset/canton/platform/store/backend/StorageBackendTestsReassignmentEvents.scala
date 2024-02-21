@@ -222,7 +222,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
             updateId = offset(1).toHexString,
             contractId = hashCid("#1").coid,
             templateId = someTemplateId,
-            packageName = somePackageName,
+            packageName = None,
             witnessParties = Set("signatory"),
             signatories = Set("signatory"),
             observers = Set("observer"),
@@ -237,7 +237,6 @@ private[backend] trait StorageBackendTestsReassignmentEvents
             driverMetadata = someDriverMetadataBytes,
           ),
           traceContext = Some(emptyTraceContext),
-          recordTime = someTime,
         ),
         EventStorageBackend.RawAssignEvent(
           commandId = Some("command id 2"),
@@ -252,7 +251,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
             updateId = offset(2).toHexString,
             contractId = hashCid("#2").coid,
             templateId = someTemplateId,
-            packageName = somePackageName,
+            packageName = None,
             witnessParties = Set("signatory"),
             signatories = Set("signatory"),
             observers = Set("observer"),
@@ -267,7 +266,6 @@ private[backend] trait StorageBackendTestsReassignmentEvents
             driverMetadata = someDriverMetadataBytes,
           ),
           traceContext = Some(emptyTraceContext),
-          recordTime = someTime,
         ),
       )
     )
@@ -318,7 +316,6 @@ private[backend] trait StorageBackendTestsReassignmentEvents
         witnessParties = Set("signatory"),
         assignmentExclusivity = Some(Time.Timestamp.assertFromLong(11111)),
         traceContext = Some(emptyTraceContext),
-        recordTime = someTime,
       ),
       EventStorageBackend.RawUnassignEvent(
         commandId = Some("command id 2"),
@@ -335,7 +332,6 @@ private[backend] trait StorageBackendTestsReassignmentEvents
         witnessParties = Set("signatory"),
         assignmentExclusivity = Some(Time.Timestamp.assertFromLong(11111)),
         traceContext = Some(emptyTraceContext),
-        recordTime = someTime,
       ),
     )
   }
@@ -419,7 +415,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
         eventSequentialId = 1L,
         contractId = hashCid("#1"),
         commandId = "command id 1",
-        domainId = "x::domain1",
+        domainId = Some("x::domain1"),
         driverMetadata = Some(someDriverMetadataBytes),
       ),
       dtoCreate(
@@ -427,7 +423,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
         eventSequentialId = 2L,
         contractId = hashCid("#2"),
         commandId = "command id 2",
-        domainId = "x::domain1",
+        domainId = Some("x::domain1"),
         driverMetadata = Some(someDriverMetadataBytes),
       ),
       dtoExercise(
@@ -435,7 +431,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
         eventSequentialId = 3L,
         consuming = true,
         contractId = hashCid("#2"),
-        domainId = "x::domain2",
+        domainId = Some("x::domain2"),
       ),
       dtoUnassign(
         offset = offset(4),
@@ -448,7 +444,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
         eventSequentialId = 10L,
         consuming = true,
         contractId = hashCid("#2"),
-        domainId = "x::domain1",
+        domainId = Some("x::domain1"),
       ),
       dtoUnassign(
         offset = offset(11),
@@ -485,7 +481,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
           updateId = offset(1).toHexString,
           contractId = hashCid("#1").coid,
           templateId = someTemplateId,
-          packageName = somePackageName,
+          packageName = None,
           witnessParties = Set("observer"),
           signatories = Set("signatory"),
           observers = Set("observer"),
@@ -509,7 +505,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
           updateId = offset(2).toHexString,
           contractId = hashCid("#2").coid,
           templateId = someTemplateId,
-          packageName = somePackageName,
+          packageName = None,
           witnessParties = Set("observer"),
           signatories = Set("signatory"),
           observers = Set("observer"),
@@ -582,7 +578,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
         eventSequentialId = 4L,
         consuming = true,
         contractId = hashCid("#2"),
-        domainId = "x::domain2",
+        domainId = Some("x::domain2"),
       ),
       dtoUnassign(
         offset = offset(5),
@@ -595,7 +591,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
         eventSequentialId = 10L,
         consuming = true,
         contractId = hashCid("#2"),
-        domainId = "x::domain1",
+        domainId = Some("x::domain1"),
       ),
       dtoUnassign(
         offset = offset(11),
@@ -632,7 +628,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
           updateId = offset(2).toHexString,
           contractId = hashCid("#1").coid,
           templateId = someTemplateId,
-          packageName = somePackageName,
+          packageName = None,
           witnessParties = Set("observer"),
           signatories = Set("signatory"),
           observers = Set("observer"),
@@ -656,7 +652,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
           updateId = offset(3).toHexString,
           contractId = hashCid("#2").coid,
           templateId = someTemplateId,
-          packageName = somePackageName,
+          packageName = None,
           witnessParties = Set("observer"),
           signatories = Set("signatory"),
           observers = Set("observer"),
@@ -711,7 +707,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
         eventSequentialId = 1L,
         contractId = hashCid("#1"),
         commandId = "command id 1",
-        domainId = "x::domain1",
+        domainId = Some("x::domain1"),
         driverMetadata = Some(someDriverMetadataBytes),
       ),
       dtoCreate(
@@ -719,7 +715,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
         eventSequentialId = 2L,
         contractId = hashCid("#2"),
         commandId = "command id 2",
-        domainId = "x::domain1",
+        domainId = Some("x::domain1"),
         driverMetadata = Some(someDriverMetadataBytes),
       ),
       dtoExercise(
@@ -727,7 +723,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
         eventSequentialId = 3L,
         consuming = true,
         contractId = hashCid("#2"),
-        domainId = "x::domain2",
+        domainId = Some("x::domain2"),
       ),
       dtoUnassign(
         offset = offset(4),
@@ -752,7 +748,7 @@ private[backend] trait StorageBackendTestsReassignmentEvents
         eventSequentialId = 10L,
         consuming = true,
         contractId = hashCid("#2"),
-        domainId = "x::domain1",
+        domainId = Some("x::domain1"),
       ),
       dtoUnassign(
         offset = offset(11),

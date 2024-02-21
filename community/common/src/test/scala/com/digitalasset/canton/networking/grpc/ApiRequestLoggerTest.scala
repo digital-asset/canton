@@ -6,7 +6,6 @@ package com.digitalasset.canton.networking.grpc
 import com.digitalasset.canton.config.ApiLoggingConfig
 import com.digitalasset.canton.domain.api.v0.HelloServiceGrpc.HelloService
 import com.digitalasset.canton.domain.api.v0.{Hello, HelloServiceGrpc}
-import com.digitalasset.canton.logging.NamedEventCapturingLogger.eventToString
 import com.digitalasset.canton.logging.{NamedEventCapturingLogger, TracedLogger}
 import com.digitalasset.canton.sequencing.authentication.grpc.Constant
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
@@ -23,7 +22,7 @@ import org.slf4j.event.Level
 import org.slf4j.event.Level.*
 
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
+import java.util.concurrent.atomic.AtomicInteger
 import scala.annotation.nowarn
 import scala.concurrent.{Future, Promise}
 import scala.util.control.NonFatal
@@ -166,7 +165,7 @@ class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecutionCo
     capturingLogger.getLogger(classOf[ApiRequestLoggerTest])
   override protected val logger: TracedLogger = TracedLogger(noTracingLogger)
 
-  class Env(logMessagePayloads: Boolean, maxStringLength: Int, maxMetadataSize: Int) {
+  class Env(logMessagePayloads: Boolean, maxStringLenth: Int, maxMetadataSize: Int) {
     val service: HelloService = mock[HelloService]
 
     val helloServiceDefinition: ServerServiceDefinition =
@@ -176,8 +175,8 @@ class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecutionCo
       new ApiRequestLogger(
         capturingLogger,
         config = ApiLoggingConfig(
-          messagePayloads = logMessagePayloads,
-          maxStringLength = maxStringLength,
+          messagePayloads = Some(logMessagePayloads),
+          maxStringLength = maxStringLenth,
           maxMetadataSize = maxMetadataSize,
         ),
       )
@@ -222,26 +221,21 @@ class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecutionCo
   )(test: Env => T): T = {
     val env = new Env(logMessagePayloads, maxStringLength, maxMetadataSize)
     val cnt = testCounter.incrementAndGet()
-    val result = new AtomicReference[T]
     try {
       progressLogger.debug(s"Starting api-request-logger-test $cnt")
 
-      result.set(TraceContextGrpc.withGrpcContext(requestTraceContext) {
-        test(env)
-      })
+      val result = TraceContextGrpc.withGrpcContext(requestTraceContext) { test(env) }
 
       // Check this, unless test is failing.
       capturingLogger.assertNoMoreEvents()
-      result.get
+      progressLogger.debug(s"Finished api-request-logger-test $cnt with $result")
+      result
     } catch {
       case e: Throwable =>
         progressLogger.info("Test failed with exception", e)
-        capturingLogger.eventQueue.iterator().forEachRemaining { event =>
-          progressLogger.info(s"Remaining log event: ${eventToString(event)}")
-        }
+        env.close()
         throw e
     } finally {
-      progressLogger.debug(s"Finished api-request-logger-test $cnt with ${result.get}")
       env.close()
     }
   }

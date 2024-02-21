@@ -8,7 +8,6 @@ import cats.syntax.alternative.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps, Signature}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
-import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -29,6 +28,7 @@ import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessin
 import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessingSteps.PendingTransferOut
 import com.digitalasset.canton.participant.protocol.validation.PendingTransaction
 import com.digitalasset.canton.participant.store.{
+  ContractLookup,
   SyncDomainEphemeralState,
   SyncDomainEphemeralStateLookup,
   TransferLookup,
@@ -38,6 +38,7 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.SessionKeyStore
+import com.digitalasset.canton.topology.MediatorRef
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{LedgerSubmissionId, RequestCounter, SequencerCounter}
@@ -90,8 +91,6 @@ trait ProcessingSteps[
 
   type FullView = RequestViewType#FullView
 
-  type ViewSubmitterMetadata = RequestViewType#ViewSubmitterMetadata
-
   /** The type of data needed to generate the pending data and response in [[constructPendingDataAndResponse]].
     * The data is created by [[decryptViews]]
     */
@@ -141,7 +140,7 @@ trait ProcessingSteps[
     */
   def prepareSubmission(
       param: SubmissionParam,
-      mediator: MediatorsOfDomain,
+      mediator: MediatorRef,
       ephemeralState: SyncDomainEphemeralStateLookup,
       recentSnapshot: DomainSnapshotSyncCryptoApi,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SubmissionError, Submission]
@@ -154,12 +153,10 @@ trait ProcessingSteps[
       requestTs: CantonTimestamp,
   ): Either[RequestError with ResultError, CantonTimestamp]
 
-  /** Return the submitter metadata along with the submission data needed by the SubmissionTracker
-    *  to decide on transaction validity
-    */
-  def getSubmitterInformation(
-      views: Seq[DecryptedView]
-  ): (Option[ViewSubmitterMetadata], Option[SubmissionTracker.SubmissionData])
+  /** Return the submission data needed by the SubmissionTracker to decide on transaction validity */
+  def getSubmissionDataForTracker(
+      views: Seq[FullView]
+  ): Option[SubmissionTracker.SubmissionData]
 
   def participantResponseDeadlineFor(
       parameters: DynamicDomainParametersWithValidity,
@@ -377,49 +374,42 @@ trait ProcessingSteps[
       ],
       malformedPayloads: Seq[MalformedPayload],
       snapshot: DomainSnapshotSyncCryptoApi,
-      mediator: MediatorsOfDomain,
+      mediator: MediatorRef,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, RequestError, CheckActivenessAndWritePendingContracts]
 
-  /** Phase 3, step 2:
-    * Some good views, but we are rejecting (e.g. because the chosen mediator
-    * is inactive or there are no valid recipients).
+  /** Phase 3, step 2 (some good views, but the chosen mediator is inactive)
     *
-    * @param ts The timestamp of the request
-    * @param rc The [[com.digitalasset.canton.RequestCounter]] of the request
-    * @param sc The [[com.digitalasset.canton.SequencerCounter]] of the request
-    * @param submitterMetadata Metadata of the submitter
-    * @param rootHash Root hash of the transaction
-    * @param error Error to be included in the generated event
-    * @param freshOwnTimelyTx The resolved status from [[com.digitalasset.canton.participant.protocol.SubmissionTracker.register]]
-    *
+    * @param ts         The timestamp of the request
+    * @param rc         The [[com.digitalasset.canton.RequestCounter]] of the request
+    * @param sc         The [[com.digitalasset.canton.SequencerCounter]] of the request
+    * @param fullViews The decrypted views from step 1 with the right root hash
     * @return The optional rejection event to be published in the event log,
     *         and the optional submission ID corresponding to this request
     */
-  def eventAndSubmissionIdForRejectedCommand(
+  def eventAndSubmissionIdForInactiveMediator(
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      submitterMetadata: ViewSubmitterMetadata,
-      rootHash: RootHash,
+      fullViews: NonEmpty[Seq[WithRecipients[FullView]]],
       freshOwnTimelyTx: Boolean,
-      error: TransactionError,
   )(implicit
       traceContext: TraceContext
   ): (Option[TimestampedEvent], Option[PendingSubmissionId])
 
-  /** Phase 3, step 2 (rejected submission, e.g. chosen mediator is inactive, invalid recipients)
+  /** Phase 3, step 2 (submission where the chosen mediator is inactive)
     *
-    * Called when we are rejecting the submission and [[eventAndSubmissionIdForRejectedCommand]]
+    * Called if the chosen mediator is inactive and [[eventAndSubmissionIdForInactiveMediator]]
     * returned a submission ID that was pending.
     *
     * @param pendingSubmission The [[PendingSubmissionData]] for the submission ID returned by
-    *                          [[eventAndSubmissionIdForRejectedCommand]]
+    *                          [[eventAndSubmissionIdForInactiveMediator]]
     * @see com.digitalasset.canton.participant.protocol.ProcessingSteps.postProcessResult
     */
-  def postProcessSubmissionRejectedCommand(
-      error: TransactionError,
+  def postProcessSubmissionForInactiveMediator(
+      declaredMediator: MediatorRef,
+      timestamp: CantonTimestamp,
       pendingSubmission: PendingSubmissionData,
   )(implicit
       traceContext: TraceContext
@@ -442,10 +432,11 @@ trait ProcessingSteps[
   ): EitherT[Future, RequestError, Unit]
 
   /** Phase 3, step 3:
-    * Yields the pending data and confirmation responses for the case that at least one payload is well-formed.
+    * Yields the pending data and mediator responses for the case that at least one payload is well-formed.
     *
     * @param pendingDataAndResponseArgs Implementation-specific data passed from [[decryptViews]]
     * @param transferLookup             Read-only interface of the [[com.digitalasset.canton.participant.store.memory.TransferCache]]
+    * @param contractLookup             Read-only interface to the [[com.digitalasset.canton.participant.store.ContractStore]]
     * @param activenessResultFuture     Future of the result of the activeness check<
     * @param mediatorId                 The mediator that handles this request
     * @return Returns the `requestType.PendingRequestData` to be stored until Phase 7 and the responses to be sent to the mediator.
@@ -453,8 +444,9 @@ trait ProcessingSteps[
   def constructPendingDataAndResponse(
       pendingDataAndResponseArgs: PendingDataAndResponseArgs,
       transferLookup: TransferLookup,
+      contractLookup: ContractLookup, // TODO(#15152): remove after DAML 3.0
       activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
-      mediator: MediatorsOfDomain,
+      mediator: MediatorRef,
       freshOwnTimelyTx: Boolean,
   )(implicit
       traceContext: TraceContext
@@ -468,17 +460,17 @@ trait ProcessingSteps[
       malformedPayloads: Seq[MalformedPayload],
   )(implicit
       traceContext: TraceContext
-  ): Seq[ConfirmationResponse]
+  ): Seq[MediatorResponse]
 
   /** Phase 3:
     *
     * @param pendingData   The `requestType.PendingRequestData` to be stored until Phase 7
-    * @param confirmationResponses     The responses to be sent to the mediator
+    * @param mediatorResponses     The responses to be sent to the mediator
     * @param rejectionArgs The implementation-specific arguments needed to create a rejection event on timeout
     */
   case class StorePendingDataAndSendResponseAndCreateTimeout(
       pendingData: requestType.PendingRequestData,
-      confirmationResponses: Seq[(ConfirmationResponse, Recipients)],
+      mediatorResponses: Seq[(MediatorResponse, Recipients)],
       rejectionArgs: RejectionArgs,
   )
 
@@ -494,9 +486,9 @@ trait ProcessingSteps[
 
   /** Phase 7, step 2:
     *
-    * @param eventE             The signed [[com.digitalasset.canton.sequencing.protocol.Deliver]] event containing the confirmation result.
-    *                           It is ensured that the `event` contains exactly one [[com.digitalasset.canton.protocol.messages.ConfirmationResult]]
-    * @param resultE            The unpacked confirmation result that is contained in the `event`
+    * @param eventE             The signed [[com.digitalasset.canton.sequencing.protocol.Deliver]] event containing the mediator result.
+    *                           It is ensured that the `event` contains exactly one [[com.digitalasset.canton.protocol.messages.MediatorResult]]
+    * @param resultE            The unpacked mediator result that is contained in the `event`
     * @param pendingRequestData The `requestType.PendingRequestData` produced in Phase 3
     * @param pendingSubmissions The data stored on submissions in the [[PendingSubmissions]]
     * @return The [[com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet]],
@@ -508,7 +500,7 @@ trait ProcessingSteps[
         EventWithErrors[Deliver[DefaultOpenEnvelope]],
         SignedContent[Deliver[DefaultOpenEnvelope]],
       ],
-      resultE: Either[MalformedConfirmationRequestResult, Result],
+      resultE: Either[MalformedMediatorRequestResult, Result],
       pendingRequestData: requestType.PendingRequestData,
       pendingSubmissions: PendingSubmissions,
       hashOps: HashOps,
@@ -534,7 +526,7 @@ trait ProcessingSteps[
     *
     * Called after the request reached the state [[com.digitalasset.canton.participant.protocol.RequestJournal.RequestState.Clean]]
     * in the request journal, if the participant is the submitter.
-    * Also called if a timeout occurs with [[com.digitalasset.canton.protocol.messages.Verdict.MediatorReject]].
+    * Also called if a timeout occurs with [[com.digitalasset.canton.protocol.messages.Verdict.MediatorRejectV1]].
     *
     * @param verdict The verdict on the request
     */
@@ -610,13 +602,13 @@ object ProcessingSteps {
   trait PendingRequestData {
     def requestCounter: RequestCounter
     def requestSequencerCounter: SequencerCounter
-    def mediator: MediatorsOfDomain
+    def mediator: MediatorRef
   }
 
   object PendingRequestData {
     def unapply(
         arg: PendingRequestData
-    ): Some[(RequestCounter, SequencerCounter, MediatorsOfDomain)] = {
+    ): Some[(RequestCounter, SequencerCounter, MediatorRef)] = {
       Some((arg.requestCounter, arg.requestSequencerCounter, arg.mediator))
     }
   }

@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.networking.grpc
 
-import com.daml.error.utils.DecodedCantonError
+import com.digitalasset.canton.error.DecodedRpcStatus
 import com.digitalasset.canton.error.ErrorCodeUtils.errorCategoryFromString
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
   MissingToken,
-  ParticipantAccessDisabled,
+  ParticipantDisabled,
 }
 import com.digitalasset.canton.sequencing.authentication.grpc.Constant
 import com.digitalasset.canton.tracing.TraceContext
@@ -22,21 +22,18 @@ sealed trait GrpcError {
   def request: String
   def serverName: String
   def status: Status
-  def decodedCantonError: Option[DecodedCantonError]
+  def decodedRpcStatus: Option[DecodedRpcStatus]
   def optTrailers: Option[Metadata]
   def hint: String = ""
 
   protected def logFullCause: Boolean = true
 
   override def toString: String = {
-    val trailersString = (optTrailers, decodedCantonError) match {
+    val trailersString = (optTrailers, decodedRpcStatus) match {
       case (_, Some(rpc)) =>
-        val corrIdO = rpc.correlationId.toList.map(s => s"CorrelationId: $s")
-        val traceIdO = rpc.traceId.toList.map(tId => s"TraceId: $tId")
-        val retryIdO = rpc.retryIn.map(s => s"RetryIn: $s").toList
-        val context = Seq(s"Context: ${rpc.context}")
-
-        "\n  " + (corrIdO ++ traceIdO ++ retryIdO ++ context).mkString("\n  ")
+        "\n  " + (rpc.correlationId.toList.map(s => s"CorrelationId: $s") ++ rpc.retryIn
+          .map(s => s"RetryIn: $s")
+          .toList ++ Seq(s"Context: ${rpc.context}")).mkString("\n  ")
       case (Some(trailers), None) if !trailers.keys.isEmpty => s"\n  Trailers: $trailers"
       case _ => ""
     }
@@ -57,7 +54,7 @@ sealed trait GrpcError {
       logger.debug("The warning was caused by:", status.getCause)
     }
 
-  def retry: Boolean = decodedCantonError.exists(_.isRetryable)
+  def retry: Boolean = decodedRpcStatus.exists(_.isRetryable)
 }
 
 object GrpcError {
@@ -78,7 +75,7 @@ object GrpcError {
       serverName: String,
       status: Status,
       optTrailers: Option[Metadata],
-      decodedCantonError: Option[DecodedCantonError],
+      decodedRpcStatus: Option[DecodedRpcStatus],
   ) extends GrpcError {
     override def log(logger: TracedLogger)(implicit traceContext: TraceContext): Unit =
       logger.error(toString, status.getCause)
@@ -93,7 +90,7 @@ object GrpcError {
       serverName: String,
       status: Status,
       optTrailers: Option[Metadata],
-      decodedCantonError: Option[DecodedCantonError],
+      decodedRpcStatus: Option[DecodedRpcStatus],
   ) extends GrpcError {
     override def log(logger: TracedLogger)(implicit traceContext: TraceContext): Unit =
       logger.error(toString, status.getCause)
@@ -116,7 +113,7 @@ object GrpcError {
       serverName: String,
       status: Status,
       optTrailers: Option[Metadata],
-      decodedCantonError: Option[DecodedCantonError],
+      decodedRpcStatus: Option[DecodedRpcStatus],
   ) extends GrpcError {
 
     lazy val isAuthenticationTokenMissing: Boolean =
@@ -141,7 +138,7 @@ object GrpcError {
       serverName: String,
       status: Status,
       optTrailers: Option[Metadata],
-      decodedCantonError: Option[DecodedCantonError],
+      decodedRpcStatus: Option[DecodedRpcStatus],
   ) extends GrpcError {
 
     lazy val isClientCancellation: Boolean = status.getCode == CANCELLED && status.getCause == null
@@ -167,7 +164,7 @@ object GrpcError {
       serverName: String,
       status: Status,
       optTrailers: Option[Metadata],
-      decodedCantonError: Option[DecodedCantonError],
+      decodedRpcStatus: Option[DecodedRpcStatus],
   ) extends GrpcError {
     override def logFullCause: Boolean = _logFullCause
     override def hint: String = _hint
@@ -198,31 +195,31 @@ object GrpcError {
   def apply(request: String, serverName: String, e: StatusRuntimeException): GrpcError = {
     val status = e.getStatus
     val optTrailers = Option(e.getTrailers)
-    val decodedError = DecodedCantonError.fromStatusRuntimeException(e).toOption
+    val rpcStatus = DecodedRpcStatus.fromStatusRuntimeException(e)
 
     status.getCode match {
       case INVALID_ARGUMENT | UNAUTHENTICATED
           if !checkAuthenticationError(
             optTrailers,
-            Seq(MissingToken.toString, ParticipantAccessDisabled.toString),
+            Seq(MissingToken.toString, ParticipantDisabled.toString),
           ) =>
-        GrpcClientError(request, serverName, status, optTrailers, decodedError)
+        GrpcClientError(request, serverName, status, optTrailers, rpcStatus)
 
       case FAILED_PRECONDITION | NOT_FOUND | OUT_OF_RANGE | RESOURCE_EXHAUSTED | ABORTED |
           PERMISSION_DENIED | UNAUTHENTICATED | ALREADY_EXISTS =>
-        GrpcRequestRefusedByServer(request, serverName, status, optTrailers, decodedError)
+        GrpcRequestRefusedByServer(request, serverName, status, optTrailers, rpcStatus)
 
       case DEADLINE_EXCEEDED | CANCELLED =>
-        GrpcClientGaveUp(request, serverName, status, optTrailers, decodedError)
+        GrpcClientGaveUp(request, serverName, status, optTrailers, rpcStatus)
 
       case UNAVAILABLE if errorCategoryFromString(status.getDescription).nonEmpty =>
-        GrpcClientError(request, serverName, status, optTrailers, decodedError)
+        GrpcClientError(request, serverName, status, optTrailers, rpcStatus)
 
       case UNAVAILABLE | UNIMPLEMENTED =>
-        GrpcServiceUnavailable(request, serverName, status, optTrailers, decodedError)
+        GrpcServiceUnavailable(request, serverName, status, optTrailers, rpcStatus)
 
       case INTERNAL | UNKNOWN | DATA_LOSS =>
-        GrpcServerError(request, serverName, status, optTrailers, decodedError)
+        GrpcServerError(request, serverName, status, optTrailers, rpcStatus)
 
       case OK =>
         GrpcServerError(
@@ -230,7 +227,7 @@ object GrpcError {
           serverName,
           status,
           optTrailers,
-          decodedError,
+          rpcStatus,
         ) // broken, as a call should never fail with status OK
     }
   }

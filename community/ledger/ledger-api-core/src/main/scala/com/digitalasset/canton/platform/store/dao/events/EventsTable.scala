@@ -21,9 +21,9 @@ import com.daml.ledger.api.v2.update_service.{
 import com.digitalasset.canton.ledger.api.util.TimestampConversion
 import com.digitalasset.canton.ledger.error.IndexErrors
 import com.digitalasset.canton.platform.ApiOffset
+import com.digitalasset.canton.platform.api.v1.event.EventOps.{EventOps, TreeEventOps}
 import com.digitalasset.canton.platform.store.ScalaPbStreamingOptimizations.*
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.Entry
-import com.digitalasset.canton.platform.store.utils.EventOps.{EventOps, TreeEventOps}
 
 object EventsTable {
 
@@ -54,9 +54,8 @@ object EventsTable {
               workflowId = first.workflowId,
               offset = ApiOffset.toApiString(first.eventOffset),
               events = flatEvents,
-              domainId = first.domainId,
+              domainId = first.domainId.getOrElse(""),
               traceContext = extractTraceContext(events),
-              recordTime = Some(TimestampConversion.fromLf(first.recordTime)),
             )
           )
         else None
@@ -109,14 +108,21 @@ object EventsTable {
       // The identifiers of all visible events in this transactions, preserving
       // the order in which they are retrieved from the index
       val visible = events.map(_.event.eventId)
-      val visibleSet = visible.toSet
+      val visibleOrder = visible.view.zipWithIndex.toMap
 
       // All events in this transaction by their identifier, with their children
       // filtered according to those visible for this request
       val eventsById =
         events.iterator
           .map(_.event)
-          .map(e => e.eventId -> e.filterChildEventIds(visibleSet))
+          .map(e =>
+            e.eventId -> e
+              .filterChildEventIds(visibleOrder.contains)
+              // childEventIds need to be returned in the event order in the original transaction.
+              // Unfortunately, we did not store them ordered in the past so we have to sort it to recover this order.
+              // The order is determined by the order of the events, which follows the event order of the original transaction.
+              .sortChildEventIdsBy(visibleOrder)
+          )
           .toMap
 
       // All event identifiers that appear as a child of another item in this response
@@ -143,9 +149,8 @@ object EventsTable {
           offset = ApiOffset.toApiString(first.eventOffset),
           eventsById = eventsById,
           rootEventIds = rootEventIds,
-          domainId = first.domainId,
+          domainId = first.domainId.getOrElse(""),
           traceContext = traceContext,
-          recordTime = Some(TimestampConversion.fromLf(first.recordTime)),
         )
       }
 

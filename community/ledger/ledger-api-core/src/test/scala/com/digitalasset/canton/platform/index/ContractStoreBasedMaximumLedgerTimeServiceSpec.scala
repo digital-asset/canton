@@ -102,7 +102,7 @@ class ContractStoreBasedMaximumLedgerTimeServiceSpec
     )
   }
 
-  it should "find no maximum ledger time if there are some contracts which cannot be found" in {
+  it should "find the maximum ledger time if there are some contracts which cannot be found" in {
     testeeWithFixture(
       contractId1 -> active(timestamp1),
       contractId2 -> NotFound,
@@ -116,7 +116,7 @@ class ContractStoreBasedMaximumLedgerTimeServiceSpec
         contractId4,
       )
     ).map(
-      _ shouldBe MaximumLedgerTime.Archived(Set(contractId2))
+      _ shouldBe Max(timestamp3)
     )
   }
 
@@ -134,7 +134,7 @@ class ContractStoreBasedMaximumLedgerTimeServiceSpec
         contractId4,
       )
     ).map(
-      _ shouldBe MaximumLedgerTime.Archived(Set(contractId1))
+      _ shouldBe NotAvailable
     )
   }
 
@@ -146,7 +146,7 @@ class ContractStoreBasedMaximumLedgerTimeServiceSpec
         contractId1
       )
     ).map(
-      _ shouldBe MaximumLedgerTime.Archived(Set(contractId1))
+      _ shouldBe NotAvailable
     )
   }
 
@@ -264,7 +264,7 @@ class ContractStoreBasedMaximumLedgerTimeServiceSpec
         ): Future[Option[ContractId]] =
           throw new UnsupportedOperationException
 
-        override def lookupContractState(contractId: ContractId)(implicit
+        override def lookupContractStateWithoutDivulgence(contractId: ContractId)(implicit
             loggingContext: LoggingContextWithTrace
         ): Future[ContractState] =
           Future.successful(fixtureMap(contractId))

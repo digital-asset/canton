@@ -7,26 +7,29 @@ import com.daml.metrics.api.testing.InMemoryMetricsFactory.{MetricsByName, Metri
 import com.daml.metrics.api.testing.{InMemoryMetricsFactory, MetricValues}
 import com.daml.metrics.api.{MetricName, MetricsContext}
 
+import scala.annotation.nowarn
 import scala.collection.concurrent
 import scala.collection.concurrent.TrieMap
 import scala.language.implicitConversions
 
 trait MetricsFactoryValues extends MetricValues {
 
+  @nowarn("cat=deprecation")
   implicit def convertFactoryToValuable(
-      factory: CantonLabeledMetricsFactory
+      factory: MetricHandle.MetricsFactory
   ): MetricsFactoryValuable = MetricsFactoryValuable(
     factory
   )
 
-  // Not final due to scalac: "The outer reference in this type test cannot be checked at run time."
-  case class MetricsFactoryValuable(factory: CantonLabeledMetricsFactory) {
+  @nowarn("cat=deprecation")
+  case class MetricsFactoryValuable(factory: MetricHandle.MetricsFactory) {
 
     def asInMemory: InMemoryMetricsFactory = factory match {
       case inMemory: InMemoryMetricsFactory => inMemory
       case _ =>
         throw new IllegalArgumentException(s"Cannot convert $factory to in-memory factory.")
     }
+
   }
 
   implicit def inMemoryMetricToValuable[T](
@@ -76,7 +79,7 @@ trait MetricsFactoryValues extends MetricValues {
 
     def singleGauge(
         metricName: MetricName
-    ): InMemoryMetricsFactory.InMemoryGauge[?] = state.gauges
+    ): InMemoryMetricsFactory.InMemoryGauge[_] = state.gauges
       .getOrElse(
         metricName,
         throw new IllegalStateException(
@@ -84,8 +87,9 @@ trait MetricsFactoryValues extends MetricValues {
         ),
       )
       .singleMetric
-
-    def metricNames: collection.Set[MetricName] =
+    def metricNames: collection.Set[MetricName] = (
       state.meters.keySet ++ state.counters.keySet ++ state.gauges.keySet ++ state.asyncGauges.keySet ++ state.timers.keySet ++ state.histograms.keySet
+    )
+
   }
 }

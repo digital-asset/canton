@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.backend.oracle
 
+import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.store.backend.common.{
   EventStorageBackendTemplate,
@@ -10,6 +11,8 @@ import com.digitalasset.canton.platform.store.backend.common.{
 }
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.interning.StringInterning
+
+import java.sql.Connection
 
 class OracleEventStorageBackend(
     ledgerEndCache: LedgerEndCache,
@@ -22,4 +25,13 @@ class OracleEventStorageBackend(
       participantAllDivulgedContractsPrunedUpToInclusive =
         ParameterStorageBackendImpl.participantAllDivulgedContractsPrunedUpToInclusive,
       loggerFactory = loggerFactory,
-    ) {}
+    ) {
+
+  // Migration from mutable schema is not supported for Oracle
+  override def isPruningOffsetValidAgainstMigration(
+      pruneUpToInclusive: Offset,
+      pruneAllDivulgedContracts: Boolean,
+      connection: Connection,
+  ): Boolean = true
+
+}

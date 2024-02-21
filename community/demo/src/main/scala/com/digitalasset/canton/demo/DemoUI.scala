@@ -4,19 +4,19 @@
 package com.digitalasset.canton.demo
 
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.ledger.api.v1.transaction_filter.Filters
-import com.daml.ledger.api.v1.value.{Record, Value}
-import com.daml.ledger.api.v2.participant_offset.ParticipantOffset
-import com.daml.ledger.api.v2.transaction_filter.TransactionFilter
-import com.daml.ledger.api.v2.update_service.GetUpdatesResponse.Update
-import com.daml.ledger.api.v2.update_service.{
-  GetUpdatesRequest,
-  GetUpdatesResponse,
-  UpdateServiceGrpc,
+import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
+import com.daml.ledger.api.v1.ledger_offset.LedgerOffset.LedgerBoundary
+import com.daml.ledger.api.v1.transaction_filter.{Filters, TransactionFilter}
+import com.daml.ledger.api.v1.transaction_service.{
+  GetTransactionsRequest,
+  GetTransactionsResponse,
+  TransactionServiceGrpc,
 }
+import com.daml.ledger.api.v1.value.{Record, Value}
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.console.ParticipantReference
+import com.digitalasset.canton.ledger.configuration.LedgerId
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import com.digitalasset.canton.topology.{Identifier, UniqueIdentifier}
@@ -65,7 +65,7 @@ trait BaseScript extends NamedLogging {
 
   def steps: Seq[Step]
   def parties(): Seq[(String, ParticipantReference)]
-  def subscriptions(): Map[String, ParticipantOffset]
+  def subscriptions(): Map[String, LedgerOffset]
   def maxImage: Int
   def imagePath: String
 
@@ -149,9 +149,10 @@ class ParticipantTab(
   private def formatHash(str: String) = str.substring(0, 16)
   private def renderSum(value: Value.Sum): String = value match {
     case v: Value.Sum.Record => renderRecord(v.value)
-    case v: Value.Sum.Party =>
+    case v: Value.Sum.Party => {
       val uid = UniqueIdentifier.tryFromProtoPrimitive(v.value)
       uid.id.unwrap + "::" + formatHash(uid.namespace.fingerprint.unwrap)
+    }
     case v: Value.Sum.List => "{" + v.value.elements.map(x => renderSum(x.sum)).mkString(",") + "}"
     case v => v.value.toString
   }
@@ -160,7 +161,7 @@ class ParticipantTab(
     val stringify = record.fields
       .flatMap(x => x.value.map(v => (x.label, v.sum)).toList)
       .map { case (k, v) =>
-        s"$k=${renderSum(v)}"
+        s"${k}=${renderSum(v)}"
       }
     "{" + stringify.mkString(", ") + "}"
   }
@@ -170,7 +171,7 @@ class ParticipantTab(
       flushing: Boolean,
       channel: Option[ManagedChannel],
       resubscribe: Boolean,
-      subscribeFrom: ParticipantOffset,
+      subscribeFrom: LedgerOffset,
   )
 
   private val currentChannel = new AtomicReference[SubscriptionState](
@@ -183,7 +184,7 @@ class ParticipantTab(
     )
   )
 
-  private def terminateChannel(channel: ManagedChannel): Unit = {
+  private def terminateChannel(channel: ManagedChannel) = {
     logger.debug(s"Closing channel for ${uid.id}")
     channel.shutdownNow()
     val _ = channel.awaitTermination(3, TimeUnit.SECONDS)
@@ -211,7 +212,7 @@ class ParticipantTab(
               case (Some(channel), true) =>
                 terminateChannel(channel)
                 if (txdata.nonEmpty) {
-                  logger.info(s"Cleared data for $party")
+                  logger.info(s"Cleared data for ${party}")
                   txdata.clear()
                 }
                 currentChannel.updateAndGet(_.copy(channel = None))
@@ -238,7 +239,7 @@ class ParticipantTab(
         }
       } catch {
         case ex: Exception =>
-          logger.error(s"Flushing subscription state $current failed with exception", ex)
+          logger.error(s"Flushing subscription state ${current} failed with exception", ex)
           false
       } finally {
         val _ = currentChannel.updateAndGet(_.copy(flushing = false))
@@ -250,7 +251,7 @@ class ParticipantTab(
     }
   }
 
-  def reStart(newOffsetO: Option[ParticipantOffset] = None): Unit = {
+  def reStart(newOffsetO: Option[LedgerOffset] = None): Unit = {
     val cur = currentChannel.updateAndGet(x =>
       x.copy(resubscribe = true, subscribeFrom = newOffsetO.getOrElse(x.subscribeFrom))
     )
@@ -260,7 +261,7 @@ class ParticipantTab(
     }
   }
 
-  private def subscribeToChannel(offset: ParticipantOffset): Unit = {
+  private def subscribeToChannel(offset: LedgerOffset): Unit = {
     val channel =
       ClientChannelBuilder.createChannelToTrustedServer(participant.config.clientLedgerApi)
     logger.debug(s"Subscribing ${participant.name} at ${offset.toString}")
@@ -274,64 +275,50 @@ class ParticipantTab(
     }
     require(
       current.channel.isEmpty && current.resubscribe,
-      s"re-subscribing with inconsistent state??? $current",
+      s"re-subscribing with inconsistent state??? ${current}",
     )
-    val updatesService = UpdateServiceGrpc.stub(channel)
-    val obs = new StreamObserver[GetUpdatesResponse]() {
-      override def onNext(value: GetUpdatesResponse): Unit = {
-        value.update match {
-          case Update.Transaction(transaction) =>
-            import com.digitalasset.canton.protocol.LfContractId
-            val coids = transaction.events
-              .flatMap(_.event.created.toList)
-              .map(_.contractId)
-              .map(LfContractId.assertFromString)
-              .toSet
-            val coidMap =
-              if (isClosing) Map.empty[LfContractId, String]
-              else
-                participant.ledger_api.state.acs
-                  .of_all()
-                  .flatMap(_.entry.activeContract)
-                  .map(c => c.domainId -> c.createdEvent)
-                  .collect { case (domainId, Some(createdEvent)) =>
-                    LfContractId.assertFromString(createdEvent.contractId) -> domainId
-                  }
-                  .filter { case (contractId, createdEventO) =>
-                    coids.contains(contractId)
-                  }
-                  .toMap
-            transaction.events.foreach(event => {
-              event.event.created.foreach(ce =>
-                Platform.runLater {
-                  txdata.append(
-                    TxData(
-                      transaction.updateId,
-                      ce.contractId,
-                      getString(transaction.effectiveAt.map(_.seconds.toString)),
-                      activeO = true,
-                      getString(ce.templateId.map(x => x.moduleName + "." + x.entityName)),
-                      getString(ce.templateId.map(x => formatHash(x.packageId))),
-                      getString(ce.createArguments.map(r => renderRecord(r))),
-                      coidMap.getOrElse(LfContractId.assertFromString(ce.contractId), ""),
-                    )
+    val transactionService = TransactionServiceGrpc.stub(channel)
+    val obs = new StreamObserver[GetTransactionsResponse]() {
+      override def onNext(value: GetTransactionsResponse): Unit = {
+        value.transactions.foreach(transactions => {
+          import com.digitalasset.canton.protocol.LfContractId
+          val coids = transactions.events
+            .flatMap(_.event.created.toList)
+            .map(_.contractId)
+            .map(LfContractId.assertFromString)
+          val coidMap =
+            if (isClosing) Map.empty[LfContractId, String]
+            else participant.transfer.lookup_contract_domain(coids: _*)
+          transactions.events.foreach(event => {
+            event.event.created.foreach(ce =>
+              Platform.runLater {
+                txdata.append(
+                  TxData(
+                    transactions.transactionId,
+                    ce.contractId,
+                    getString(transactions.effectiveAt.map(_.seconds.toString)),
+                    activeO = true,
+                    getString(ce.templateId.map(x => x.moduleName + "." + x.entityName)),
+                    getString(ce.templateId.map(x => formatHash(x.packageId))),
+                    getString(ce.createArguments.map(r => renderRecord(r))),
+                    coidMap.getOrElse(LfContractId.assertFromString(ce.contractId), ""),
                   )
-                }
-              )
-              event.event.archived.foreach(ae =>
-                Platform.runLater {
-                  blocking(txdata.synchronized {
-                    val idx = txdata.indexWhere(x => x.cIdO == ae.contractId)
-                    if (idx > -1) {
-                      val item = txdata.get(idx)
-                      txdata.update(idx, item.copy(activeO = false))
-                    }
-                  })
-                }
-              )
-            })
-          case _ => ()
-        }
+                )
+              }
+            )
+            event.event.archived.foreach(ae =>
+              Platform.runLater {
+                blocking(txdata.synchronized {
+                  val idx = txdata.indexWhere(x => x.cIdO == ae.contractId)
+                  if (idx > -1) {
+                    val item = txdata.get(idx)
+                    txdata.update(idx, item.copy(activeO = false))
+                  }
+                })
+              }
+            )
+          })
+        })
       }
 
       @nowarn("msg=match may not be exhaustive")
@@ -349,10 +336,10 @@ class ParticipantTab(
             Try {
               val errorPattern(_badStartHexOffset, _endHexOffset, hexPrunedOffset) = message
               logger.info(s"Identified pruning offset position as ${hexPrunedOffset}")
-              new ParticipantOffset().withAbsolute(hexPrunedOffset)
+              new LedgerOffset().withAbsolute(hexPrunedOffset)
             } match {
               case Success(prunedOffset) =>
-                logger.info(s"Resubscribing from offset $prunedOffset instead")
+                logger.info(s"Resubscribing from offset ${prunedOffset} instead")
                 reStart(Some(prunedOffset))
               case Failure(t) =>
                 logger.error("Out-of-range error does not match pruning error", t)
@@ -366,12 +353,14 @@ class ParticipantTab(
     }
 
     val partyId = UniqueIdentifier(Identifier.tryCreate(party), uid.namespace).toProtoPrimitive
-    val req = new GetUpdatesRequest(
-      beginExclusive = Some(offset),
+    val req = new GetTransactionsRequest(
+      ledgerId = new LedgerId(uid.id.unwrap),
+      begin = Some(offset),
       filter = Some(TransactionFilter(filtersByParty = Map(partyId -> Filters()))),
       verbose = true,
     )
-    updatesService.getUpdates(req, obs)
+    transactionService.getTransactions(req, obs)
+
   }
 
   private val txdata = ObservableBuffer[TxData]()
@@ -537,9 +526,7 @@ class ParticipantTab(
 }
 
 object ParticipantTab {
-  val LedgerBegin: ParticipantOffset = ParticipantOffset(
-    ParticipantOffset.Value.Boundary(ParticipantOffset.ParticipantBoundary.PARTICIPANT_BEGIN)
-  )
+  val LedgerBegin: LedgerOffset = new LedgerOffset().withBoundary(LedgerBoundary.LEDGER_BEGIN)
 }
 
 class Controls(
@@ -551,7 +538,7 @@ class Controls(
     offset: Int,
 ) {
 
-  val view: ImageView = new ImageView() {
+  val view = new ImageView() {
     preserveRatio = true
     cache = true
     smooth = true
@@ -565,7 +552,7 @@ class Controls(
     style = "-fx-font-family: monospace"
   }
 
-  val backButton: Button = new Button("Previous") {
+  val backButton = new Button("Previous") {
     onAction = _ => backwards()
     graphic = new ImageView(new Image(imagePath + "left.png")) {
       fitWidth = 30
@@ -593,7 +580,7 @@ class Controls(
     }
   }
 
-  val runButton: Button = new Button("Run") {
+  val runButton = new Button("Run") {
     onAction = _ => run()
     disable = true
   }
@@ -711,7 +698,7 @@ class DemoUI(script: BaseScript, val loggerFactory: NamedLoggerFactory)
   private implicit val sequencerPool: ExecutionSequencerFactory =
     PekkoUtil.createExecutionSequencerFactory("demo-ui", noTracingLogger)(actorSystem)
 
-  private val participantTabs = mutable.HashMap[String, ParticipantTab]()
+  protected val participantTabs = mutable.HashMap[String, ParticipantTab]()
 
   private def addNewTabsIfNecessary(): Unit = {
     script.parties().foreach {
@@ -732,11 +719,11 @@ class DemoUI(script: BaseScript, val loggerFactory: NamedLoggerFactory)
 
   import javafx.stage.Screen
 
-  private lazy val dwidth = Screen.getPrimary.getBounds.getWidth
-  private lazy val dheight = Screen.getPrimary.getBounds.getHeight
+  lazy val dwidth = Screen.getPrimary.getBounds.getWidth
+  lazy val dheight = Screen.getPrimary.getBounds.getHeight
 
-  private lazy val adjustedWidth = Screen.getPrimary.getBounds.getWidth * 0.8
-  private lazy val adjustedHeight = Screen.getPrimary.getBounds.getHeight * 0.8
+  lazy val adjustedWidth = Screen.getPrimary.getBounds.getWidth * 0.8
+  lazy val adjustedHeight = Screen.getPrimary.getBounds.getHeight * 0.8
 
   override def start(): Unit = {
 
@@ -810,12 +797,12 @@ class DemoUI(script: BaseScript, val loggerFactory: NamedLoggerFactory)
   }
 
   private def showError(cmd: String, ex: Exception): Unit = {
-    logger.error(s"Command $cmd failed with an exception.", ex)
+    logger.error(s"Command ${cmd} failed with an exception.", ex)
     val _ = new Alert(AlertType.Error) {
       initOwner(stage)
       title = "Error"
       headerText = "The action failed due to an error."
-      contentText = s"Failed to run $cmd due to ${ex.getMessage}"
+      contentText = s"Failed to run ${cmd} due to ${ex.getMessage}"
     }.showAndWait()
   }
 
@@ -895,4 +882,5 @@ class DemoUI(script: BaseScript, val loggerFactory: NamedLoggerFactory)
       advanceTo(idx)
     }
   }
+
 }

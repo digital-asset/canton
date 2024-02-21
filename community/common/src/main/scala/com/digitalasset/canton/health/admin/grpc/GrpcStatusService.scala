@@ -6,9 +6,10 @@ package com.digitalasset.canton.health.admin.grpc
 import better.files.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.health.admin.grpc.GrpcStatusService.DefaultHealthDumpChunkSize
-import com.digitalasset.canton.health.admin.v30.{HealthDumpRequest, HealthDumpResponse}
-import com.digitalasset.canton.health.admin.{data, v30}
+import com.digitalasset.canton.health.admin.v0.{HealthDumpChunk, HealthDumpRequest}
+import com.digitalasset.canton.health.admin.{data, v0}
 import com.google.protobuf.ByteString
+import com.google.protobuf.empty.Empty
 import io.grpc.stub.StreamObserver
 
 import scala.concurrent.{Await, ExecutionContext, Future}
@@ -25,24 +26,22 @@ class GrpcStatusService(
     processingTimeout: ProcessingTimeout,
 )(implicit
     ec: ExecutionContext
-) extends v30.StatusServiceGrpc.StatusService {
+) extends v0.StatusServiceGrpc.StatusService {
 
-  override def status(request: v30.StatusRequest): Future[v30.StatusResponse] =
+  override def status(request: Empty): Future[v0.NodeStatus] =
     status.map {
       case data.NodeStatus.Success(status) =>
-        v30.StatusResponse(v30.StatusResponse.Response.Success(status.toProtoV30))
+        v0.NodeStatus(v0.NodeStatus.Response.Success(status.toProtoV0))
       case data.NodeStatus.NotInitialized(active) =>
-        v30.StatusResponse(
-          v30.StatusResponse.Response.NotInitialized(v30.StatusResponse.NotInitialized(active))
-        )
+        v0.NodeStatus(v0.NodeStatus.Response.NotInitialized(v0.NodeStatus.NotInitialized(active)))
       case data.NodeStatus.Failure(_msg) =>
         // The node's status should never return a Failure here.
-        v30.StatusResponse(v30.StatusResponse.Response.Empty)
+        v0.NodeStatus(v0.NodeStatus.Response.Empty)
     }
 
   override def healthDump(
       request: HealthDumpRequest,
-      responseObserver: StreamObserver[HealthDumpResponse],
+      responseObserver: StreamObserver[HealthDumpChunk],
   ): Unit = {
     // Create a context that will be automatically cancelled after the processing timeout deadline
     val context = io.grpc.Context
@@ -61,7 +60,7 @@ class GrpcStatusService(
               // This avoids the server reading the entire dump file for nothing if the client has already cancelled
               .takeWhile(_.nonEmpty && !context.isCancelled)
               .foreach { chunk =>
-                responseObserver.onNext(HealthDumpResponse(ByteString.copyFrom(chunk)))
+                responseObserver.onNext(HealthDumpChunk(ByteString.copyFrom(chunk)))
               }
           }
       }

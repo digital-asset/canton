@@ -3,24 +3,29 @@
 
 package com.digitalasset.canton.config
 
+import com.daml.metrics.api.MetricHandle.MetricsFactory
 import com.daml.metrics.api.MetricName
 import com.daml.metrics.grpc.GrpcServerMetrics
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.AdminServerConfig.defaultAddress
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, NonNegativeInt, Port}
 import com.digitalasset.canton.config.SequencerConnectionConfig.CertificateFile
+import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.ledger.api.tls.TlsVersion
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.CantonLabeledMetricsFactory
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.networking.grpc.{
   CantonCommunityServerInterceptors,
   CantonServerBuilder,
   CantonServerInterceptors,
 }
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.tracing.TracingConfig
 import io.netty.handler.ssl.{ClientAuth, SslContext}
 import org.slf4j.LoggerFactory
 
 import java.io.File
+import scala.annotation.nowarn
 import scala.math.Ordering.Implicits.infixOrderingOps
 
 /** Configuration for hosting a server api */
@@ -77,7 +82,7 @@ trait ServerConfig extends Product with Serializable {
       tracingConfig: TracingConfig,
       apiLoggingConfig: ApiLoggingConfig,
       metricsPrefix: MetricName,
-      metrics: CantonLabeledMetricsFactory,
+      @nowarn("cat=deprecation") metrics: MetricsFactory,
       loggerFactory: NamedLoggerFactory,
       grpcMetrics: GrpcServerMetrics,
   ): CantonServerInterceptors
@@ -89,7 +94,7 @@ trait CommunityServerConfig extends ServerConfig {
       tracingConfig: TracingConfig,
       apiLoggingConfig: ApiLoggingConfig,
       metricsPrefix: MetricName,
-      metrics: CantonLabeledMetricsFactory,
+      @nowarn("cat=deprecation") metrics: MetricsFactory,
       loggerFactory: NamedLoggerFactory,
       grpcMetrics: GrpcServerMetrics,
   ) = new CantonCommunityServerInterceptors(
@@ -172,6 +177,27 @@ final case class KeepAliveClientConfig(
     time: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(40),
     timeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(20),
 )
+
+sealed trait ApiType extends PrettyPrinting {
+  def toProtoEnum: v0.SequencerApiType
+}
+
+object ApiType {
+  case object Grpc extends ApiType {
+    def toProtoEnum: v0.SequencerApiType = v0.SequencerApiType.Grpc
+    override def pretty: Pretty[Grpc.type] = prettyOfObject[Grpc.type]
+  }
+
+  def fromProtoEnum(
+      field: String,
+      apiTypeP: v0.SequencerApiType,
+  ): ParsingResult[ApiType] =
+    apiTypeP match {
+      case v0.SequencerApiType.Grpc => Right(Grpc)
+      case v0.SequencerApiType.Unrecognized(value) =>
+        Left(ProtoDeserializationError.UnrecognizedEnum(field, value))
+    }
+}
 
 /** A client configuration to a corresponding server configuration */
 final case class ClientConfig(

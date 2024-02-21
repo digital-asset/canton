@@ -3,19 +3,12 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
-import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
-import com.digitalasset.canton.topology.{ParticipantId, PartyId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{MediatorId, MediatorRef, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.{BaseTest, ProtoDeserializationError}
 import org.scalatest.wordspec.AnyWordSpec
 
 class RecipientTest extends AnyWordSpec with BaseTest {
-  val alice = PartyId(UniqueIdentifier.tryFromProtoPrimitive(s"alice::party"))
-
-  val memberRecipient = MemberRecipient(ParticipantId("participant1"))
-  val participantsOfParty = ParticipantsOfParty(alice)
-  val sequencersOfDomain = SequencersOfDomain
-  val mediatorsOfDomain = MediatorsOfDomain(MediatorGroupIndex.tryCreate(99312312))
-  val allRecipients = AllMembersOfDomain
+  private val memberRecipient = Recipient(ParticipantId("participant1"))
 
   "recipient test serialization" should {
     "be able to convert back and forth" in {
@@ -23,26 +16,6 @@ class RecipientTest extends AnyWordSpec with BaseTest {
         memberRecipient.toProtoPrimitive,
         "recipient",
       ) shouldBe Right(memberRecipient)
-
-      Recipient.fromProtoPrimitive(
-        participantsOfParty.toProtoPrimitive,
-        "recipient",
-      ) shouldBe Right(participantsOfParty)
-
-      Recipient.fromProtoPrimitive(
-        sequencersOfDomain.toProtoPrimitive,
-        "recipient",
-      ) shouldBe Right(sequencersOfDomain)
-
-      Recipient.fromProtoPrimitive(
-        mediatorsOfDomain.toProtoPrimitive,
-        "recipient",
-      ) shouldBe Right(mediatorsOfDomain)
-
-      Recipient.fromProtoPrimitive(
-        allRecipients.toProtoPrimitive,
-        "recipient",
-      ) shouldBe Right(allRecipients)
     }
 
     "act sanely on invalid inputs" in {
@@ -67,6 +40,24 @@ class RecipientTest extends AnyWordSpec with BaseTest {
           .left
           .value shouldBe a[ProtoDeserializationError]
       }
+    }
+
+    "work on MediatorRecipient" in {
+      val mediatorMemberMR =
+        MediatorRef(MediatorId(UniqueIdentifier.tryCreate("mediator", "fingerprint")))
+
+      MediatorRef.fromProtoPrimitive(
+        mediatorMemberMR.toProtoPrimitive,
+        "mediator",
+      ) shouldBe (Right(mediatorMemberMR))
+
+      MediatorRef
+        .fromProtoPrimitive(
+          memberRecipient.toProtoPrimitive, // a participant
+          "mediator",
+        )
+        .left
+        .value shouldBe a[ProtoDeserializationError]
     }
   }
 }

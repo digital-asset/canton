@@ -7,28 +7,28 @@ import cats.data.EitherT
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.common.domain.{
-  RegisterTopologyTransactionHandle,
-  SequencerBasedRegisterTopologyTransactionHandleX,
+  RegisterTopologyTransactionHandleWithProcessor,
+  SequencerBasedRegisterTopologyTransactionHandle,
 }
-import com.digitalasset.canton.config.{DomainTimeTrackerConfig, ProcessingTimeout, TopologyXConfig}
+import com.digitalasset.canton.config.{DomainTimeTrackerConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
-import com.digitalasset.canton.participant.topology.DomainOnboardingOutboxX
-import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcastX
+import com.digitalasset.canton.participant.topology.DomainOnboardingOutbox
+import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.RequestSigner.UnauthenticatedRequestSigner
 import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerClientFactory}
 import com.digitalasset.canton.sequencing.handlers.DiscardIgnoredEvents
-import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, Deliver, SequencedEvent}
+import com.digitalasset.canton.sequencing.protocol.{Batch, ClosedEnvelope, Deliver, SequencedEvent}
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
+import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, DomainStore}
-import com.digitalasset.canton.topology.store.TopologyStoreX
-import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
+import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
 import com.digitalasset.canton.topology.{
   DomainId,
   ParticipantId,
@@ -67,10 +67,10 @@ abstract class ParticipantInitializeTopologyCommon[TX, State](
   protected def createHandler(
       client: SequencerClient,
       member: UnauthenticatedMemberId,
-  )(implicit ec: ExecutionContext): RegisterTopologyTransactionHandle
+  )(implicit ec: ExecutionContext): RegisterTopologyTransactionHandleWithProcessor[TX, State]
 
   protected def initiateOnboarding(
-      handle: RegisterTopologyTransactionHandle
+      handle: RegisterTopologyTransactionHandleWithProcessor[TX, State]
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
@@ -200,12 +200,12 @@ abstract class ParticipantInitializeTopologyCommon[TX, State](
   }
 }
 
-class ParticipantInitializeTopologyX(
+class ParticipantInitializeTopology(
     domainId: DomainId,
     alias: DomainAlias,
     participantId: ParticipantId,
-    authorizedStore: TopologyStoreX[AuthorizedStore],
-    targetStore: TopologyStoreX[DomainStore],
+    authorizedStore: TopologyStore[AuthorizedStore],
+    targetStore: TopologyStore[DomainStore],
     clock: Clock,
     timeTracker: DomainTimeTrackerConfig,
     processingTimeout: ProcessingTimeout,
@@ -213,13 +213,11 @@ class ParticipantInitializeTopologyX(
     sequencerClientFactory: SequencerClientFactory,
     connections: SequencerConnections,
     crypto: Crypto,
-    config: TopologyXConfig,
     protocolVersion: ProtocolVersion,
     expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
-) extends ParticipantInitializeTopologyCommon[
-      GenericSignedTopologyTransactionX,
-      TopologyTransactionsBroadcastX.State,
-    ](
+) extends ParticipantInitializeTopologyCommon[SignedTopologyTransaction[
+      TopologyChangeOp
+    ], RegisterTopologyTransactionResponseResult.State](
       alias,
       participantId,
       clock,
@@ -238,25 +236,32 @@ class ParticipantInitializeTopologyX(
       member: UnauthenticatedMemberId,
   )(implicit
       ec: ExecutionContext
-  ): RegisterTopologyTransactionHandle =
-    new SequencerBasedRegisterTopologyTransactionHandleX(
-      client,
+  ): RegisterTopologyTransactionHandleWithProcessor[SignedTopologyTransaction[
+    TopologyChangeOp
+  ], RegisterTopologyTransactionResponseResult.State] =
+    new SequencerBasedRegisterTopologyTransactionHandle(
+      (traceContext, env) =>
+        client.sendAsyncUnauthenticated(
+          Batch(List(env), protocolVersion)
+        )(traceContext),
       domainId,
       participantId,
-      clock,
-      config,
+      member,
       protocolVersion,
       processingTimeout,
       loggerFactory,
     )
 
   protected def initiateOnboarding(
-      handle: RegisterTopologyTransactionHandle
+      handle: RegisterTopologyTransactionHandleWithProcessor[
+        SignedTopologyTransaction[TopologyChangeOp],
+        RegisterTopologyTransactionResponseResult.State,
+      ]
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] =
-    DomainOnboardingOutboxX
+    DomainOnboardingOutbox
       .initiateOnboarding(
         alias,
         domainId,

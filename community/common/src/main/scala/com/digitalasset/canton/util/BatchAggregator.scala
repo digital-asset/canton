@@ -9,6 +9,7 @@ import com.digitalasset.canton.config.BatchAggregatorConfig
 import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
@@ -53,12 +54,14 @@ object BatchAggregator {
   def apply[A, B](
       processor: Processor[A, B],
       config: BatchAggregatorConfig,
+      processingTime: Option[TimedLoadGauge] = None,
   ): BatchAggregator[A, B] = config match {
     case BatchAggregatorConfig.Batching(maximumInFlight, maximumBatchSize) =>
       new BatchAggregatorImpl[A, B](
         processor,
         maximumInFlight = maximumInFlight.unwrap,
         maximumBatchSize = maximumBatchSize.unwrap,
+        processingTime = processingTime,
       )
 
     case BatchAggregatorConfig.NoBatching =>
@@ -131,6 +134,7 @@ class BatchAggregatorImpl[A, B](
     processor: BatchAggregator.Processor[A, B],
     private val maximumInFlight: Int,
     private val maximumBatchSize: Int,
+    processingTime: Option[TimedLoadGauge],
 ) extends BatchAggregator[A, B] {
 
   private val inFlight = new AtomicInteger(0)
@@ -157,7 +161,10 @@ class BatchAggregatorImpl[A, B](
       }
     }
 
-  private def maybeMeasureTime(f: => Future[B]): Future[B] = f
+  private def maybeMeasureTime(f: => Future[B])(implicit
+      ec: ExecutionContext
+  ): Future[B] =
+    processingTime.map(_.event(f)).getOrElse(f)
 
   private def runSingleWithoutIncrement(
       item: A

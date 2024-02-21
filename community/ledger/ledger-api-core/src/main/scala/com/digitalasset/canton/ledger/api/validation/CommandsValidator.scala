@@ -5,7 +5,6 @@ package com.digitalasset.canton.ledger.api.validation
 
 import cats.syntax.traverse.*
 import com.daml.error.ContextualizedErrorLogger
-import com.daml.ledger.api.v1.commands.Command
 import com.daml.ledger.api.v1.commands.Command.Command.{
   Create as ProtoCreate,
   CreateAndExercise as ProtoCreateAndExercise,
@@ -13,11 +12,12 @@ import com.daml.ledger.api.v1.commands.Command.Command.{
   Exercise as ProtoExercise,
   ExerciseByKey as ProtoExerciseByKey,
 }
-import com.daml.ledger.api.v2.commands.Commands
+import com.daml.ledger.api.v1.commands as V1
+import com.daml.ledger.api.v2.commands as V2
 import com.daml.lf.command.*
 import com.daml.lf.data.*
 import com.daml.lf.value.Value as Lf
-import com.digitalasset.canton.ledger.api.domain.LedgerId
+import com.digitalasset.canton.ledger.api.domain.{LedgerId, optionalLedgerId}
 import com.digitalasset.canton.ledger.api.util.{DurationConversion, TimestampConversion}
 import com.digitalasset.canton.ledger.api.validation.CommandsValidator.{
   Submitters,
@@ -31,6 +31,7 @@ import scalaz.syntax.tag.*
 
 import java.time.{Duration, Instant}
 import scala.Ordering.Implicits.infixOrderingOps
+import scala.annotation.nowarn
 import scala.collection.immutable
 
 final class CommandsValidator(
@@ -38,7 +39,7 @@ final class CommandsValidator(
     validateUpgradingPackageResolutions: ValidateUpgradingPackageResolutions =
       ValidateUpgradingPackageResolutions.UpgradingDisabled,
     upgradingEnabled: Boolean = false,
-    validateDisclosedContracts: ValidateDisclosedContracts = new ValidateDisclosedContracts,
+    validateDisclosedContracts: ValidateDisclosedContracts = new ValidateDisclosedContracts(false),
 ) {
 
   import FieldValidator.*
@@ -46,7 +47,7 @@ final class CommandsValidator(
   import ValueValidator.*
 
   def validateCommands(
-      commands: Commands,
+      commands: V1.Commands,
       currentLedgerTime: Instant,
       currentUtcTime: Instant,
       maxDeduplicationDuration: Option[Duration],
@@ -54,6 +55,7 @@ final class CommandsValidator(
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, domain.Commands] =
     for {
+      ledgerId <- matchLedgerId(ledgerId)(optionalLedgerId(commands.ledgerId))
       workflowId <-
         if (commands.workflowId.isEmpty) Right(None)
         else requireLedgerString(commands.workflowId).map(x => Some(domain.WorkflowId(x)))
@@ -81,6 +83,7 @@ final class CommandsValidator(
         commands.packageIdSelectionPreference
       )
     } yield domain.Commands(
+      ledgerId = ledgerId,
       workflowId = workflowId,
       applicationId = appId,
       commandId = commandId,
@@ -101,7 +104,7 @@ final class CommandsValidator(
 
   private def validateLedgerTime(
       currentTime: Instant,
-      commands: Commands,
+      commands: V1.Commands,
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, Instant] = {
@@ -124,7 +127,7 @@ final class CommandsValidator(
 
   // Public because it is used by Canton.
   def validateInnerCommands(
-      commands: Seq[Command]
+      commands: Seq[V1.Command]
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, immutable.Seq[ApiCommand]] =
@@ -139,7 +142,7 @@ final class CommandsValidator(
 
   // Public so that clients have an easy way to convert ProtoCommand.Command to ApiCommand.
   def validateInnerCommand(
-      command: Command.Command
+      command: V1.Command.Command
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, ApiCommand] =
@@ -208,7 +211,7 @@ final class CommandsValidator(
     }
 
   private def validateSubmitters(
-      commands: Commands
+      commands: V1.Commands
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, Submitters[Ref.Party]] = {
@@ -231,8 +234,11 @@ final class CommandsValidator(
 
   /** We validate only using current time because we set the currentTime as submitTime so no need to check both
     */
+  @nowarn(
+    "msg=class DeduplicationTime in object DeduplicationPeriod is deprecated"
+  )
   def validateDeduplicationPeriod(
-      deduplicationPeriod: Commands.DeduplicationPeriod,
+      deduplicationPeriod: V1.Commands.DeduplicationPeriod,
       optMaxDeduplicationDuration: Option[Duration],
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
@@ -245,14 +251,19 @@ final class CommandsValidator(
       )
     ) { maxDeduplicationDuration =>
       deduplicationPeriod match {
-        case Commands.DeduplicationPeriod.Empty =>
+        case V1.Commands.DeduplicationPeriod.Empty =>
           Right(DeduplicationPeriod.DeduplicationDuration(maxDeduplicationDuration))
-        case Commands.DeduplicationPeriod.DeduplicationDuration(duration) =>
+        case V1.Commands.DeduplicationPeriod.DeduplicationTime(duration) =>
           val deduplicationDuration = DurationConversion.fromProto(duration)
           DeduplicationPeriodValidator
             .validateNonNegativeDuration(deduplicationDuration)
             .map(DeduplicationPeriod.DeduplicationDuration)
-        case Commands.DeduplicationPeriod.DeduplicationOffset(offset) =>
+        case V1.Commands.DeduplicationPeriod.DeduplicationDuration(duration) =>
+          val deduplicationDuration = DurationConversion.fromProto(duration)
+          DeduplicationPeriodValidator
+            .validateNonNegativeDuration(deduplicationDuration)
+            .map(DeduplicationPeriod.DeduplicationDuration)
+        case V1.Commands.DeduplicationPeriod.DeduplicationOffset(offset) =>
           Ref.HexString
             .fromString(offset)
             .fold(
@@ -279,11 +290,13 @@ object CommandsValidator {
       ledgerId: LedgerId,
       validateUpgradingPackageResolutions: ValidateUpgradingPackageResolutions,
       upgradingEnabled: Boolean,
+      enableExplicitDisclosure: Boolean,
   ) =
     new CommandsValidator(
       ledgerId = ledgerId,
       validateUpgradingPackageResolutions = validateUpgradingPackageResolutions,
       upgradingEnabled = upgradingEnabled,
+      validateDisclosedContracts = new ValidateDisclosedContracts(enableExplicitDisclosure),
     )
 
   /** Effective submitters of a command
@@ -292,19 +305,37 @@ object CommandsValidator {
     */
   final case class Submitters[T](actAs: Set[T], readAs: Set[T])
 
-  def effectiveSubmitters(commands: Option[Commands]): Submitters[String] = {
+  def effectiveSubmitters(commands: Option[V1.Commands]): Submitters[String] = {
     commands.fold(noSubmitters)(effectiveSubmitters)
   }
 
-  def effectiveSubmittersV2(commands: Option[Commands]): Submitters[String] = {
+  def effectiveSubmittersV2(commands: Option[V2.Commands]): Submitters[String] = {
     commands.fold(noSubmitters)(effectiveSubmitters)
   }
 
-  def effectiveSubmitters(commands: Commands): Submitters[String] = {
-    val actAs = commands.actAs.toSet
+  def effectiveSubmitters(commands: V1.Commands): Submitters[String] = {
+    val actAs = effectiveActAs(commands)
     val readAs = commands.readAs.toSet -- actAs
     Submitters(actAs, readAs)
   }
+
+  def effectiveSubmitters(commands: V2.Commands): Submitters[String] = {
+    val actAs = effectiveActAs(commands)
+    val readAs = commands.readAs.toSet -- actAs
+    Submitters(actAs, readAs)
+  }
+
+  def effectiveActAs(commands: V1.Commands): Set[String] =
+    if (commands.party.isEmpty)
+      commands.actAs.toSet
+    else
+      commands.actAs.toSet + commands.party
+
+  def effectiveActAs(commands: V2.Commands): Set[String] =
+    if (commands.party.isEmpty)
+      commands.actAs.toSet
+    else
+      commands.actAs.toSet + commands.party
 
   val noSubmitters: Submitters[String] = Submitters(Set.empty, Set.empty)
 

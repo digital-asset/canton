@@ -7,7 +7,6 @@ import better.files.*
 import cats.data.EitherT
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.daml_lf_dev.DamlLf.Archive
-import com.daml.lf.archive
 import com.daml.lf.archive.DarParser
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.CantonRequireTypes.{String255, String256M}
@@ -38,7 +37,7 @@ import scala.concurrent.Future
 object PackageServiceTest {
 
   @SuppressWarnings(Array("org.wartremover.warts.TryPartial"))
-  def loadExampleDar(): archive.Dar[Archive] =
+  def loadExampleDar() =
     DarParser
       .readArchiveFromFile(new File(BaseTest.CantonExamplesPath))
       .getOrElse(throw new IllegalArgumentException("Failed to read dar"))
@@ -57,19 +56,19 @@ object PackageServiceTest {
 class PackageServiceTest extends AsyncWordSpec with BaseTest {
   private val examplePackages: List[Archive] = readCantonExamples()
   private val bytes = PackageServiceTest.readCantonExamplesBytes()
-  private val darName = String255.tryCreate("CantonExamples")
+  val darName = String255.tryCreate("CantonExamples")
   private val eventPublisher = mock[ParticipantEventPublisher]
   when(eventPublisher.publish(any[LedgerSyncEvent])(anyTraceContext))
     .thenAnswer(FutureUnlessShutdown.unit)
-  private val participantId = DefaultTestIdentities.participant1
+  val participantId = DefaultTestIdentities.participant1
 
   private class Env {
     val packageStore = new InMemoryDamlPackageStore(loggerFactory)
     private val processingTimeouts = ProcessingTimeout()
     val packageDependencyResolver =
       new PackageDependencyResolver(packageStore, processingTimeouts, loggerFactory)
-    private val engine =
-      DAMLe.newEngine(enableLfDev = false, enableStackTraces = false)
+    val engine =
+      DAMLe.newEngine(uniqueContractKeys = false, enableLfDev = false, enableStackTraces = false)
     val sut =
       new PackageService(
         engine,
@@ -88,7 +87,7 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
     test(env)
   }
 
-  private lazy val cantonExamplesDescription = String256M.tryCreate("CantonExamples")
+  lazy val cantonExamplesDescription = String256M.tryCreate("CantonExamples")
 
   "PackageService" should {
     "append DAR and packages from file" in withEnv { env =>
@@ -114,7 +113,7 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
         packages <- packageStore.listPackages()
         dar <- packageStore.getDar(hash)
       } yield {
-        packages should contain.only(expectedPackageIdsAndState*)
+        packages should contain.only(expectedPackageIdsAndState: _*)
         dar shouldBe Some(Dar(DarDescriptor(hash, darName), bytes))
       }
     }
@@ -131,8 +130,8 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
           .appendDarFromByteString(
             ByteString.copyFrom(bytes),
             "some/path/CantonExamples.dar",
-            vetAllPackages = false,
-            synchronizeVetting = false,
+            false,
+            false,
           )
           .value
           .map(_.valueOrFail("should be right"))
@@ -140,7 +139,7 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
         packages <- packageStore.listPackages()
         dar <- packageStore.getDar(hash)
       } yield {
-        packages should contain.only(expectedPackageIdsAndState*)
+        packages should contain.only(expectedPackageIdsAndState: _*)
         dar shouldBe Some(Dar(DarDescriptor(hash, darName), bytes))
       }
     }
@@ -156,8 +155,8 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
           .appendDarFromByteString(
             ByteString.copyFrom(bytes),
             "some/path/CantonExamples.dar",
-            vetAllPackages = false,
-            synchronizeVetting = false,
+            false,
+            false,
           )
           .valueOrFail("appending dar")
           .failOnShutdown

@@ -15,7 +15,6 @@ import com.digitalasset.canton.protocol.{LfContractId, TransferId}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
-import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -27,8 +26,7 @@ private[protocol] object CanSubmitTransfer {
       submitter: LfPartyId,
       participantId: ParticipantId,
   )(implicit
-      ec: ExecutionContext,
-      tc: TraceContext,
+      ec: ExecutionContext
   ): EitherT[FutureUnlessShutdown, TransferProcessorError, Unit] =
     check(s"transfer-out of $contractId", topologySnapshot, submitter, participantId)
       .mapK(FutureUnlessShutdown.outcomeK)
@@ -39,8 +37,7 @@ private[protocol] object CanSubmitTransfer {
       submitter: LfPartyId,
       participantId: ParticipantId,
   )(implicit
-      ec: ExecutionContext,
-      tc: TraceContext,
+      ec: ExecutionContext
   ): EitherT[Future, TransferProcessorError, Unit] =
     check(s"transfer-in `$transferId`", topologySnapshot, submitter, participantId)
 
@@ -50,15 +47,13 @@ private[protocol] object CanSubmitTransfer {
       submitter: LfPartyId,
       participantId: ParticipantId,
   )(implicit
-      ec: ExecutionContext,
-      tc: TraceContext,
+      ec: ExecutionContext
   ): EitherT[Future, TransferProcessorError, Unit] = {
     lazy val noPermission: TransferProcessorError =
       NoTransferSubmissionPermission(kind, submitter, participantId)
     EitherT(
       topologySnapshot
-        .hostedOn(Set(submitter), participantId)
-        .map(_.get(submitter))
+        .hostedOn(submitter, participantId)
         .flatMap {
           case Some(attribute) if attribute.permission == Submission => Future.successful(Right(()))
           case Some(attribute) if attribute.permission.canConfirm =>

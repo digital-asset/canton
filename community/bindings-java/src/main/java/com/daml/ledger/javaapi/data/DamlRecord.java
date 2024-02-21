@@ -7,7 +7,7 @@ import com.daml.ledger.api.v1.ValueOuterClass;
 import java.util.*;
 import org.checkerframework.checker.nullness.qual.NonNull;
 
-public final class DamlRecord extends Value {
+public class DamlRecord extends Value {
 
   private final Optional<Identifier> recordId;
 
@@ -120,7 +120,7 @@ public final class DamlRecord extends Value {
     return Objects.hash(recordId, fields);
   }
 
-  public static final class Field {
+  public static class Field {
 
     private final Optional<String> label;
 

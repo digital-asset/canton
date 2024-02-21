@@ -55,21 +55,28 @@ class ParticipantReferencesExtensions(participants: Seq[ParticipantReference])(i
   object domains extends Helpful {
 
     @Help.Summary("Disconnect from domain")
-    def disconnect(alias: DomainAlias): Unit =
-      ConsoleCommandResult
-        .runAll(participants)(ParticipantCommands.domains.disconnect(_, alias))
-        .discard
+    def disconnect(alias: DomainAlias): Unit = {
+      val _ =
+        ConsoleCommandResult.runAll(participants)(ParticipantCommands.domains.disconnect(_, alias))
+    }
+
+    @Help.Summary("Disconnect from a local domain")
+    def disconnect_local(domain: LocalDomainReference): Unit = {
+      val _ =
+        ConsoleCommandResult.runAll(participants)(
+          ParticipantCommands.domains.disconnect(_, DomainAlias.tryCreate(domain.name))
+        )
+    }
 
     @Help.Summary("Reconnect to domain")
     @Help.Description(
       "If retry is set to true (default), the command will return after the first attempt, but keep on trying in the background."
     )
-    def reconnect(alias: DomainAlias, retry: Boolean = true): Unit =
-      ConsoleCommandResult
-        .runAll(participants)(
-          ParticipantCommands.domains.reconnect(_, alias, retry)
-        )
-        .discard
+    def reconnect(alias: DomainAlias, retry: Boolean = true): Unit = {
+      val _ = ConsoleCommandResult.runAll(participants)(
+        ParticipantCommands.domains.reconnect(_, alias, retry)
+      )
+    }
 
     @Help.Summary("Reconnect to all domains for which `manualStart` = false")
     @Help.Description(
@@ -83,22 +90,21 @@ class ParticipantReferencesExtensions(participants: Seq[ParticipantReference])(i
     }
 
     @Help.Summary("Disconnect from all connected domains")
-    def disconnect_all(): Unit =
-      ConsoleCommandResult
-        .runAll(participants) { p =>
-          ConsoleCommandResult.fromEither(for {
-            connected <- ParticipantCommands.domains.list_connected(p).toEither
-            _ <- connected
-              .traverse(d => ParticipantCommands.domains.disconnect(p, d.domainAlias).toEither)
-          } yield ())
-        }
-        .discard
+    def disconnect_all(): Unit = {
+      val _ = ConsoleCommandResult.runAll(participants) { p =>
+        ConsoleCommandResult.fromEither(for {
+          connected <- ParticipantCommands.domains.list_connected(p).toEither
+          _ <- connected
+            .traverse(d => ParticipantCommands.domains.disconnect(p, d.domainAlias).toEither)
+        } yield ())
+      }
+    }
 
     @Help.Summary("Register and potentially connect to domain")
-    def register(config: DomainConnectionConfig): Unit =
-      ConsoleCommandResult
-        .runAll(participants)(ParticipantCommands.domains.register(_, config))
-        .discard
+    def register(config: DomainConnectionConfig): Unit = {
+      val _ =
+        ConsoleCommandResult.runAll(participants)(ParticipantCommands.domains.register(_, config))
+    }
 
     @Help.Summary("Register and potentially connect to new local domain")
     @Help.Description("""
@@ -108,17 +114,15 @@ class ParticipantReferencesExtensions(participants: Seq[ParticipantReference])(i
           synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.
         """)
     def connect_local(
-        domain: SequencerNodeReference,
-        alias: DomainAlias,
+        domain: InstanceReferenceWithSequencerConnection,
         manualConnect: Boolean = false,
         synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
     ): Unit = {
       val config =
-        ParticipantCommands.domains.reference_to_config(
+        ParticipantCommands.domains.referenceToConfig(
           NonEmpty.mk(Seq, SequencerAlias.Default -> domain).toMap,
-          alias,
           manualConnect,
         )
       register(config)
@@ -130,11 +134,9 @@ class ParticipantReferencesExtensions(participants: Seq[ParticipantReference])(i
 
 }
 
-class LocalParticipantReferencesExtensions(
-    participants: Seq[LocalParticipantReference]
-)(implicit
+class LocalParticipantReferencesExtensions(participants: Seq[LocalParticipantReference])(implicit
     override val consoleEnvironment: ConsoleEnvironment
 ) extends ParticipantReferencesExtensions(participants)
-    with LocalInstancesExtensions[LocalParticipantReference] {
-  override def instances: Seq[LocalParticipantReference] = participants
+    with LocalInstancesExtensions {
+  override def instances: Seq[LocalInstanceReferenceCommon] = participants
 }

@@ -3,42 +3,46 @@
 
 package com.daml.ledger.javaapi.data;
 
-import com.daml.ledger.api.v2.StateServiceOuterClass;
-import org.checkerframework.checker.nullness.qual.NonNull;
-
+import com.daml.ledger.api.v1.ActiveContractsServiceOuterClass;
 import java.util.Objects;
+import org.checkerframework.checker.nullness.qual.NonNull;
 
 public final class GetActiveContractsRequest {
 
-  @NonNull private final TransactionFilter transactionFilter;
+  private final String ledgerId;
+
+  private final TransactionFilter transactionFilter;
 
   private final boolean verbose;
 
-  @NonNull private final String activeAtOffset;
-
   public GetActiveContractsRequest(
+      @NonNull String ledgerId,
       @NonNull TransactionFilter transactionFilter,
-      boolean verbose,
-      @NonNull String activeAtOffset) {
+      @NonNull boolean verbose) {
+    this.ledgerId = ledgerId;
     this.transactionFilter = transactionFilter;
     this.verbose = verbose;
-    this.activeAtOffset = activeAtOffset;
   }
 
   public static GetActiveContractsRequest fromProto(
-      StateServiceOuterClass.GetActiveContractsRequest request) {
+      ActiveContractsServiceOuterClass.GetActiveContractsRequest request) {
+    String ledgerId = request.getLedgerId();
     TransactionFilter filters = TransactionFilter.fromProto(request.getFilter());
     boolean verbose = request.getVerbose();
-    String activeAtOffset = request.getActiveAtOffset();
-    return new GetActiveContractsRequest(filters, verbose, activeAtOffset);
+    return new GetActiveContractsRequest(ledgerId, filters, verbose);
   }
 
-  public StateServiceOuterClass.GetActiveContractsRequest toProto() {
-    return StateServiceOuterClass.GetActiveContractsRequest.newBuilder()
+  public ActiveContractsServiceOuterClass.GetActiveContractsRequest toProto() {
+    return ActiveContractsServiceOuterClass.GetActiveContractsRequest.newBuilder()
+        .setLedgerId(this.ledgerId)
         .setFilter(this.transactionFilter.toProto())
         .setVerbose(this.verbose)
-        .setActiveAtOffset(this.activeAtOffset)
         .build();
+  }
+
+  @NonNull
+  public String getLedgerId() {
+    return ledgerId;
   }
 
   @NonNull
@@ -50,37 +54,32 @@ public final class GetActiveContractsRequest {
     return verbose;
   }
 
-  @NonNull
-  public String getActiveAtOffset() {
-    return activeAtOffset;
-  }
-
   @Override
   public boolean equals(Object o) {
     if (this == o) return true;
     if (o == null || getClass() != o.getClass()) return false;
     GetActiveContractsRequest that = (GetActiveContractsRequest) o;
     return verbose == that.verbose
-        && Objects.equals(transactionFilter, that.transactionFilter)
-        && Objects.equals(activeAtOffset, that.activeAtOffset);
+        && Objects.equals(ledgerId, that.ledgerId)
+        && Objects.equals(transactionFilter, that.transactionFilter);
   }
 
   @Override
   public int hashCode() {
 
-    return Objects.hash(transactionFilter, verbose, activeAtOffset);
+    return Objects.hash(ledgerId, transactionFilter, verbose);
   }
 
   @Override
   public String toString() {
     return "GetActiveContractsRequest{"
-        + "transactionFilter="
+        + "ledgerId='"
+        + ledgerId
+        + '\''
+        + ", transactionFilter="
         + transactionFilter
         + ", verbose="
         + verbose
-        + ", activeAtOffset='"
-        + activeAtOffset
-        + '\''
         + '}';
   }
 }

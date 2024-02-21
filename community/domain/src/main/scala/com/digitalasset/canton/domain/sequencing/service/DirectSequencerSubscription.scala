@@ -117,12 +117,12 @@ private[service] class DirectSequencerSubscription[E](
     AsyncCloseable(
       s"flushing direct-sequencer-subscription for $member",
       done,
-      timeouts.shutdownNetwork,
+      timeouts.shutdownNetwork.duration,
     ),
     AsyncCloseable(
       s"flushing other sinks in direct-sequencer-subscription for $member",
       sourceDone,
-      timeouts.shutdownNetwork,
+      timeouts.shutdownNetwork.duration,
     ),
   )
 }

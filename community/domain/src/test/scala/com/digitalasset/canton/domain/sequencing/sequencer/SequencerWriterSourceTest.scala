@@ -6,7 +6,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 import cats.data.EitherT
 import cats.syntax.functor.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
-import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.SequencerError.PayloadToEventTimeBoundExceeded
@@ -17,13 +17,13 @@ import com.digitalasset.canton.lifecycle.{
   FlagCloseableAsync,
   SyncCloseable,
 }
-import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil
-import com.digitalasset.canton.{BaseTest, HasExecutorService, config}
+import com.digitalasset.canton.{BaseTest, HasExecutorService}
 import com.google.protobuf.ByteString
 import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.ActorSystem
@@ -68,19 +68,19 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
         member: Member,
         memberId: SequencerMemberId,
     )(implicit traceContext: TraceContext): Source[ReadSignal, NotUsed] =
-      fail("shouldn't be used")
+      ???
 
     override def close(): Unit = ()
   }
 
   private class Env(keepAliveInterval: Option[NonNegativeFiniteDuration])
       extends FlagCloseableAsync {
-    override val timeouts: ProcessingTimeout = SequencerWriterSourceTest.this.timeouts
-    protected val logger: TracedLogger = SequencerWriterSourceTest.this.logger
+    override val timeouts = SequencerWriterSourceTest.this.timeouts
+    protected val logger = SequencerWriterSourceTest.this.logger
     implicit val actorSystem: ActorSystem = ActorSystem()
     val instanceIndex: Int = 0
-    val testWriterConfig: SequencerWriterConfig.LowLatency =
-      SequencerWriterConfig.LowLatency()
+    val testWriterConfig =
+      SequencerWriterConfig.LowLatency(eventWriteBatchMaxSize = 1, payloadWriteBatchMaxSize = 1)
 
     class InMemoryStoreWithTimeAdvancement(lFactory: NamedLoggerFactory)(implicit
         ec: ExecutionContext
@@ -101,7 +101,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
 
     val store =
       new InMemoryStoreWithTimeAdvancement(loggerFactory) // allows setting time advancements
-    private val writerStore = SequencerWriterStore.singleInstance(store)
+    val writerStore = SequencerWriterStore.singleInstance(store)
     val clock = new SimClock(loggerFactory = loggerFactory)
 
     val eventSignaller = new MockEventSignaller
@@ -135,12 +135,8 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
     override protected def closeAsync(): Seq[AsyncOrSyncCloseable] =
       Seq(
         SyncCloseable("sequencer", writer.complete()),
-        AsyncCloseable("done", doneF, config.NonNegativeFiniteDuration(10.seconds)),
-        AsyncCloseable(
-          "actorSystem",
-          actorSystem.terminate(),
-          config.NonNegativeFiniteDuration(10.seconds),
-        ),
+        AsyncCloseable("done", doneF, 10.seconds),
+        AsyncCloseable("actorSystem", actorSystem.terminate(), 10.seconds),
       )
   }
 
@@ -153,8 +149,8 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
     result
   }
 
-  private def getErrorMessage(errorO: Option[ByteString]): String =
-    DeliverErrorStoreEvent.fromByteString(errorO, testedProtocolVersion).toString
+  private def getErrorMessage(message: String256M, errorO: Option[ByteString]): String =
+    message.unwrap
 
   private val alice = ParticipantId("alice")
   private val bob = ParticipantId("bob")
@@ -199,7 +195,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
           _.shouldBeCantonErrorCode(PayloadToEventTimeBoundExceeded),
         )
         events <- store.readEvents(aliceId)
-      } yield events.payloads shouldBe empty
+      } yield events.payloads should have size (0)
     }
   }
 
@@ -236,7 +232,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
 
         events <- store.readEvents(aliceId)
       } yield {
-        events.payloads should have size 1
+        events.payloads should have size (1)
         events.payloads.headOption.map(_.event).value should matchPattern {
           case DeliverStoreEvent(_, `messageId2`, _, _, _, _) =>
         }
@@ -244,11 +240,11 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
     }
   }
 
-  "topology timestamp tolerance" should {
-    def sendWithTopologyTimestamp(
+  "signing tolerance" should {
+    def sendWithSigningTimestamp(
         nowish: CantonTimestamp,
-        validTopologyTimestamp: CantonTimestamp,
-        invalidTopologyTimestamp: CantonTimestamp,
+        validSigningTimestamp: CantonTimestamp,
+        invalidSigningTimestamp: CantonTimestamp,
     )(implicit
         env: Env
     ): Future[Seq[StoreEvent[Payload]]] = {
@@ -263,21 +259,21 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
           messageId1,
           Set.empty,
           payload1,
-          Some(validTopologyTimestamp),
+          Some(validSigningTimestamp),
         )
         deliver2 = DeliverStoreEvent.ensureSenderReceivesEvent(
           aliceId,
           messageId2,
           Set.empty,
           payload1,
-          Some(invalidTopologyTimestamp),
+          Some(invalidSigningTimestamp),
         )
         _ = offerDeliverOrFail(Presequenced.alwaysValid(deliver1))
         _ = offerDeliverOrFail(Presequenced.alwaysValid(deliver2))
         _ <- completeFlow()
         events <- store.readEvents(aliceId)
       } yield {
-        events.payloads should have size 2
+        events.payloads should have size (2)
         events.payloads.map(_.event)
       }
     }
@@ -294,23 +290,24 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
 
       // upper bound is inclusive
       val margin = NonNegativeFiniteDuration.tryOfMillis(1)
-      val validTopologyTimestamp = nowish
+      val validSigningTimestamp = nowish
 
       for {
-        events <- sendWithTopologyTimestamp(
+        events <- sendWithSigningTimestamp(
           nowish,
-          validTopologyTimestamp = validTopologyTimestamp,
-          invalidTopologyTimestamp = validTopologyTimestamp + margin,
+          validSigningTimestamp = validSigningTimestamp,
+          invalidSigningTimestamp = validSigningTimestamp + margin,
         )
         sortedEvents = sortByMessageId(events)
       } yield {
-        inside(sortedEvents.head) { case event: DeliverStoreEvent[Payload] =>
+        inside(sortedEvents(0)) { case event: DeliverStoreEvent[Payload] =>
           event.messageId shouldBe messageId1
         }
 
-        inside(sortedEvents(1)) { case DeliverErrorStoreEvent(_, _, errorO, _) =>
-          getErrorMessage(errorO) should (include("Invalid topology timestamp")
-            and include("The topology timestamp must be before or at "))
+        inside(sortedEvents(1)) {
+          case DeliverErrorStoreEvent(_, `messageId2`, message, errorO, _) =>
+            getErrorMessage(message, errorO) should (include("Invalid signing timestamp")
+              and include("The signing timestamp must be before or at "))
         }
       }
     }
@@ -319,6 +316,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
   "deliver with unknown recipients" should {
     "instead write an error" in withEnv() { implicit env =>
       import env.*
+      val messageId = MessageId.tryCreate("test-unknown-recipients")
 
       for {
         aliceId <- store.registerMember(alice, CantonTimestamp.Epoch)
@@ -330,16 +328,14 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
               isRequest = true,
               batch = Batch.fromClosed(
                 testedProtocolVersion,
-                ClosedEnvelope.create(
+                ClosedEnvelope(
                   ByteString.EMPTY,
                   Recipients.cc(bob),
-                  Seq.empty,
                   testedProtocolVersion,
                 ),
               ),
               maxSequencingTime = CantonTimestamp.MaxValue,
-              topologyTimestamp = None,
-              aggregationRule = None,
+              timestampOfSigningKey = None,
               protocolVersion = testedProtocolVersion,
             )
           )
@@ -350,11 +346,13 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
             error = events.payloads.collectFirst {
               case Sequenced(
                     _,
-                    deliverError @ DeliverErrorStoreEvent(`aliceId`, _, _, _),
+                    deliverError @ DeliverErrorStoreEvent(`aliceId`, `messageId`, _, _, _),
                   ) =>
                 deliverError
             }.value
-          } yield getErrorMessage(error.error) should include(s"Unknown recipients: $bob")
+          } yield getErrorMessage(error.message, error.error) should include(
+            s"Unknown recipients: $bob"
+          )
         }
       } yield succeed
     }

@@ -18,7 +18,6 @@ import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConf
 import com.digitalasset.canton.platform.config.{
   ActiveContractsServiceStreamsConfig,
   CommandServiceConfig,
-  IdentityProviderManagementConfig,
   IndexServiceConfig,
   TransactionFlatStreamsConfig,
   TransactionTreeStreamsConfig,
@@ -30,6 +29,8 @@ import com.digitalasset.canton.platform.indexer.{
   IndexerStartupMode,
   PackageMetadataViewConfig,
 }
+import com.digitalasset.canton.platform.localstore.IdentityProviderManagementConfig
+import com.digitalasset.canton.platform.services.time.TimeProviderType
 import com.digitalasset.canton.platform.store.DbSupport.{
   ConnectionPoolConfig,
   DataSourceProperties,
@@ -164,6 +165,9 @@ class PureConfigReaderWriter(secure: Boolean = true) {
 
   implicit val commandConfigurationConvert: ConfigConvert[CommandServiceConfig] =
     deriveConvert[CommandServiceConfig]
+
+  implicit val timeProviderTypeConvert: ConfigConvert[TimeProviderType] =
+    deriveEnumerationConvert[TimeProviderType]
 
   implicit val dbConfigSynchronousCommitValueConvert: ConfigConvert[SynchronousCommitValue] =
     deriveEnumerationConvert[SynchronousCommitValue]

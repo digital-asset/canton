@@ -23,6 +23,7 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.event.RecordOrderPublisher.PendingPublish
 import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet
 import com.digitalasset.canton.participant.protocol.submission.{
@@ -42,7 +43,6 @@ import com.digitalasset.canton.participant.store.{
   SingleDimensionEventLog,
 }
 import com.digitalasset.canton.participant.sync.TimestampedEvent
-import com.digitalasset.canton.participant.{LocalOffset, RequestOffset, TopologyOffset}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
@@ -133,7 +133,8 @@ class RecordOrderPublisher(
         val task =
           EventPublicationTask(
             requestSequencerCounter,
-            RequestOffset(requestTimestamp, requestCounter),
+            LocalOffset(requestCounter),
+            requestTimestamp,
           )(
             eventO,
             Some(inFlightReference),
@@ -141,32 +142,6 @@ class RecordOrderPublisher(
         taskScheduler.scheduleTask(task)
       }
     }
-
-  /** Schedules the given `event` to be published on the `eventLog`, and schedules the causal "tick" defined by `clock`.
-    *
-    * @param sequencerCounter The sequencer counter associated with the message that corresponds to the request
-    * @param event            The timestamped event to be published
-    */
-  def schedulePublication(
-      sequencerCounter: SequencerCounter,
-      topologyOffset: TopologyOffset,
-      event: TimestampedEvent,
-  )(implicit traceContext: TraceContext): Future[Unit] = {
-    logger.debug(
-      s"Schedule publication for offset $topologyOffset derived from sc=$sequencerCounter"
-    )
-
-    for {
-      _ <- eventLog.insert(event)
-    } yield {
-      val task =
-        EventPublicationTask(sequencerCounter, topologyOffset)(
-          Some(event),
-          None,
-        )
-      taskScheduler.scheduleTask(task)
-    }
-  }
 
   def scheduleRecoveries(
       toRecover: Seq[PendingPublish]
@@ -271,7 +246,7 @@ class RecordOrderPublisher(
             task.localOffset.some,
             0, // EventPublicationTask comes before AcsChangePublicationTask if they have the same tie breaker. This is an arbitrary decision.
           ).some
-        case task: AcsChangePublicationTask => (task.requestOffsetO, 1).some
+        case task: AcsChangePublicationTask => (task.LocalOffsetO, 1).some
       }
   }
 
@@ -323,13 +298,12 @@ class RecordOrderPublisher(
   private[RecordOrderPublisher] case class EventPublicationTask(
       override val sequencerCounter: SequencerCounter,
       localOffset: LocalOffset,
+      override val timestamp: CantonTimestamp,
   )(
       val eventO: Option[TimestampedEvent],
       val inFlightReference: Option[InFlightReference],
   )(implicit val traceContext: TraceContext)
       extends PublicationTask {
-
-    def timestamp: CantonTimestamp = localOffset.effectiveTime
 
     override def perform(): FutureUnlessShutdown[Unit] = {
       for {
@@ -381,43 +355,35 @@ class RecordOrderPublisher(
       val traceContext: TraceContext
   ) extends PublicationTask {
 
-    val requestOffsetO: Option[RequestOffset] = requestCounterCommitSetPairO.map { case (rc, _) =>
-      RequestOffset(timestamp, rc)
+    val LocalOffsetO: Option[LocalOffset] = requestCounterCommitSetPairO.map { case (rc, _) =>
+      LocalOffset(rc)
     }
 
     override def perform(): FutureUnlessShutdown[Unit] = {
       // If the requestCounterCommitSetPairO is not set, then by default the commit set is empty, and
       // the request counter is the smallest possible value that does not throw an exception in
-      // ActiveContractStore.bulkContractsTransferCounterSnapshot, i.e., Genesis
-      val (requestCounter, commitSet) =
+      val (_requestCounter, commitSet) =
         requestCounterCommitSetPairO.getOrElse((RequestCounter.Genesis, CommitSet.empty))
-      // Augments the commit set with the updated transfer counters for archive events,
-      // computes the acs change and publishes it
+      // Computes the acs change and publishes it
       logger.debug(
         show"The received commit set contains creations ${commitSet.creations}" +
           show"transfer-ins ${commitSet.transferIns}" +
           show"archivals ${commitSet.archivals} transfer-outs ${commitSet.transferOuts}"
       )
-      val acsChangePublish =
-        for {
-          // Retrieves the transfer counters of the archived contracts from the latest state in the active contract store
-          archivalsWithTransferCountersOnly <- activeContractSnapshot
-            .bulkContractsTransferCounterSnapshot(commitSet.archivals.keySet, requestCounter)
 
-        } yield {
-          // Computes the ACS change by decorating the archive events in the commit set with their transfer counters
-          val acsChange = AcsChange.fromCommitSet(commitSet, archivalsWithTransferCountersOnly)
-          logger.debug(
-            s"Computed ACS change activations ${acsChange.activations} deactivations ${acsChange.deactivations}"
-          )
-          def recordTime: RecordTime =
-            RecordTime(
-              timestamp,
-              requestCounterCommitSetPairO.map(_._1.unwrap).getOrElse(RecordTime.lowestTiebreaker),
-            )
-          acsChangeListener.get.foreach(_.publish(recordTime, acsChange))
-        }
-      FutureUnlessShutdown.outcomeF(acsChangePublish)
+      // Computes the ACS change by decorating the archive events in the commit set
+      val acsChange = AcsChange.fromCommitSet(commitSet)
+      logger.debug(
+        s"Computed ACS change activations ${acsChange.activations} deactivations ${acsChange.deactivations}"
+      )
+      def recordTime: RecordTime =
+        RecordTime(
+          timestamp,
+          requestCounterCommitSetPairO.map(_._1.unwrap).getOrElse(RecordTime.lowestTiebreaker),
+        )
+      acsChangeListener.get.foreach(_.publish(recordTime, acsChange))
+
+      FutureUnlessShutdown.pure(())
     }
 
     override def pretty: Pretty[this.type] =

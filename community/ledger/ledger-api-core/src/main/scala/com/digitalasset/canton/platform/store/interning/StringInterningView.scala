@@ -3,9 +3,10 @@
 
 package com.digitalasset.canton.platform.store.interning
 
+import com.daml.lf.data.Ref.PackageName
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.platform.{Identifier, PackageName, Party}
+import com.digitalasset.canton.platform.{Identifier, Party}
 import com.digitalasset.canton.topology.DomainId
 
 import scala.concurrent.{Future, blocking}
@@ -14,7 +15,7 @@ class DomainStringIterators(
     val parties: Iterator[String],
     val templateIds: Iterator[String],
     val domainIds: Iterator[String],
-    val packageNames: Iterator[String],
+    val packageNames: Iterator[String] = Iterator.empty,
 )
 
 trait InternizingStringInterningView {
@@ -82,13 +83,21 @@ class StringInterningView(override protected val loggerFactory: NamedLoggerFacto
   private val TemplatePrefix = "t|"
   private val PartyPrefix = "p|"
   private val DomainIdPrefix = "d|"
-  private val PackageNamePrefix = "n|"
+  private val PackageNamePrefix = "k|"
 
   override val templateId: StringInterningDomain[Identifier] =
     StringInterningDomain.prefixing(
       prefix = TemplatePrefix,
       prefixedAccessor = rawAccessor,
       to = Identifier.assertFromString,
+      from = _.toString,
+    )
+
+  override val packageName: StringInterningDomain[PackageName] =
+    StringInterningDomain.prefixing(
+      prefix = PackageNamePrefix,
+      prefixedAccessor = rawAccessor,
+      to = PackageName.assertFromString,
       from = _.toString,
     )
 
@@ -108,22 +117,13 @@ class StringInterningView(override protected val loggerFactory: NamedLoggerFacto
       from = _.toProtoPrimitive,
     )
 
-  override val packageName: StringInterningDomain[PackageName] =
-    StringInterningDomain.prefixing(
-      prefix = PackageNamePrefix,
-      prefixedAccessor = rawAccessor,
-      to = PackageName.assertFromString,
-      from = _.toString,
-    )
-
   override def internize(domainStringIterators: DomainStringIterators): Iterable[(Int, String)] =
     blocking(synchronized {
       val allPrefixedStrings =
         domainStringIterators.parties.map(PartyPrefix + _) ++
           domainStringIterators.templateIds.map(TemplatePrefix + _) ++
-          domainStringIterators.domainIds.map(DomainIdPrefix + _) ++
-          domainStringIterators.packageNames.map(PackageNamePrefix + _)
-
+          domainStringIterators.packageNames.map(PackageNamePrefix + _) ++
+          domainStringIterators.domainIds.map(DomainIdPrefix + _)
       val newEntries = RawStringInterning.newEntries(
         strings = allPrefixedStrings,
         rawStringInterning = raw,

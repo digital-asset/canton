@@ -7,12 +7,8 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.HandlerResult
-import com.digitalasset.canton.sequencing.protocol.{
-  Deliver,
-  EventWithErrors,
-  MediatorsOfDomain,
-  SignedContent,
-}
+import com.digitalasset.canton.sequencing.protocol.{Deliver, EventWithErrors, SignedContent}
+import com.digitalasset.canton.topology.MediatorRef
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{RequestCounter, SequencerCounter}
 
@@ -36,7 +32,7 @@ trait Phase37Processor[RequestBatch] {
       traceContext: TraceContext
   ): HandlerResult
 
-  def processMalformedMediatorConfirmationRequestResult(
+  def processMalformedMediatorRequestResult(
       timestamp: CantonTimestamp,
       sequencerCounter: SequencerCounter,
       signedResultBatch: Either[
@@ -70,6 +66,6 @@ trait Phase37Processor[RequestBatch] {
 final case class RequestAndRootHashMessage[RequestEnvelope](
     requestEnvelopes: NonEmpty[Seq[RequestEnvelope]],
     rootHashMessage: RootHashMessage[SerializedRootHashMessagePayload],
-    mediator: MediatorsOfDomain,
+    mediator: MediatorRef,
     isReceipt: Boolean,
 )

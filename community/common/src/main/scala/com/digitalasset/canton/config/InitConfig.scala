@@ -55,5 +55,5 @@ trait InitConfigBase {
   * @param identity Controls how the node identity (prefix of the unique identifier) is determined
   */
 final case class InitConfig(
-    identity: Option[Identity] = Some(Identity())
+    identity: Option[Identity] = None
 ) extends InitConfigBase

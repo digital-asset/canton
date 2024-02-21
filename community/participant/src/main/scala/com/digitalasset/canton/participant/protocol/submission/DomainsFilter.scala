@@ -13,7 +13,6 @@ import com.digitalasset.canton.participant.protocol.submission.UsableDomain.Doma
 import com.digitalasset.canton.protocol.LfVersionedTransaction
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -24,7 +23,7 @@ private[submission] class DomainsFilter(
     domains: List[(DomainId, ProtocolVersion, TopologySnapshot)],
     transactionVersion: TransactionVersion,
     override protected val loggerFactory: NamedLoggerFactory,
-)(implicit ec: ExecutionContext, traceContext: TraceContext)
+)(implicit ec: ExecutionContext)
     extends NamedLogging {
   def split: Future[(List[DomainNotUsedReason], List[DomainId])] = domains
     .parTraverse { case (domainId, protocolVersion, snapshot) =>
@@ -47,7 +46,7 @@ private[submission] object DomainsFilter {
       submittedTransaction: LfVersionedTransaction,
       domains: List[(DomainId, ProtocolVersion, TopologySnapshot)],
       loggerFactory: NamedLoggerFactory,
-  )(implicit ec: ExecutionContext, tc: TraceContext) = new DomainsFilter(
+  )(implicit ec: ExecutionContext) = new DomainsFilter(
     Blinding.partyPackages(submittedTransaction),
     domains,
     submittedTransaction.version,

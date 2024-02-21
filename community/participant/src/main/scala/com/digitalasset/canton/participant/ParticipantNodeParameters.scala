@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant
 
+import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
 import com.digitalasset.canton.config.{
   ApiLoggingConfig,
@@ -33,12 +34,12 @@ final case class ParticipantNodeParameters(
     stores: ParticipantStoreConfig,
     transferTimeProofFreshnessProportion: NonNegativeInt,
     protocolConfig: ParticipantProtocolConfig,
+    uniqueContractKeys: Boolean,
     ledgerApiServerParameters: LedgerApiServerParametersConfig,
     excludeInfrastructureTransactions: Boolean,
     enableEngineStackTrace: Boolean,
     enableContractUpgrading: Boolean,
     iterationsBetweenInterruptions: Long,
-    journalGarbageCollectionDelay: NonNegativeFiniteDuration,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters {
   override def dontWarnOnDeprecatedPV: Boolean = protocolConfig.dontWarnOnDeprecatedPV
@@ -53,40 +54,41 @@ object ParticipantNodeParameters {
       tracing = TracingConfig(TracingConfig.Propagation.Disabled),
       delayLoggingThreshold = NonNegativeFiniteDuration.tryOfMillis(5000),
       enableAdditionalConsistencyChecks = true,
-      loggingConfig = LoggingConfig(api = ApiLoggingConfig(messagePayloads = true)),
+      loggingConfig = LoggingConfig(api = ApiLoggingConfig(messagePayloads = Some(true))),
       logQueryCost = None,
       processingTimeouts = DefaultProcessingTimeouts.testing,
       enablePreviewFeatures = false,
-      // TODO(i15561): Revert back to `false` once there is a stable Daml 3 protocol version
-      nonStandardConfig = true,
+      nonStandardConfig = false,
       cachingConfigs = CachingConfigs(),
-      batchingConfig = BatchingConfig(
-        maxPruningBatchSize = PositiveNumeric.tryCreate(10),
-        aggregator = BatchAggregatorConfig.defaultsForTesting,
-      ),
+      batchingConfig = BatchingConfig(),
       sequencerClient = SequencerClientConfig(),
       dbMigrateAndStart = false,
+      skipTopologyManagerSignatureValidation = false,
     ),
     partyChangeNotification = PartyNotificationConfig.Eager,
     adminWorkflow = AdminWorkflowConfig(
-      bongTestMaxLevel = NonNegativeInt.tryCreate(10)
+      bongTestMaxLevel = 10,
+      retries = 10,
+      submissionTimeout = config.NonNegativeFiniteDuration.ofHours(1),
     ),
     maxUnzippedDarSize = 10,
-    stores = ParticipantStoreConfig(),
+    stores = ParticipantStoreConfig(
+      maxPruningBatchSize = PositiveNumeric.tryCreate(10),
+      acsPruningInterval = config.NonNegativeFiniteDuration.ofSeconds(30),
+      dbBatchAggregationConfig = BatchAggregatorConfig.defaultsForTesting,
+    ),
     transferTimeProofFreshnessProportion = NonNegativeInt.tryCreate(3),
     protocolConfig = ParticipantProtocolConfig(
       Some(testedProtocolVersion),
-      // TODO(i15561): Revert back to `false` once there is a stable Daml 3 protocol version
-      devVersionSupport = true,
+      devVersionSupport = false,
       dontWarnOnDeprecatedPV = false,
       initialProtocolVersion = testedProtocolVersion,
     ),
+    uniqueContractKeys = false,
     ledgerApiServerParameters = LedgerApiServerParametersConfig(),
     excludeInfrastructureTransactions = true,
     enableEngineStackTrace = false,
     enableContractUpgrading = false,
-    iterationsBetweenInterruptions =
-      10000, // 10000 is the default value in the engine configuration
-    journalGarbageCollectionDelay = NonNegativeFiniteDuration.Zero,
+    iterationsBetweenInterruptions = 10000, // 10000 is the default value in the engine configuration
   )
 }

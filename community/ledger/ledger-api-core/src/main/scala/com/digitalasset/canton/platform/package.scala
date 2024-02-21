@@ -54,8 +54,6 @@ package object platform {
   private[platform] val ChoiceName = lfdata.Ref.ChoiceName
   private[platform] type PackageId = lfdata.Ref.PackageId
   private[platform] val PackageId = lfdata.Ref.PackageId
-  private[platform] type PackageName = lfdata.Ref.PackageName
-  private[platform] val PackageName = lfdata.Ref.PackageName
   private[platform] type Relation[A, B] = lfdata.Relation[A, B]
   private[platform] type UserId = lfdata.Ref.UserId
   private[platform] val UserId = lfdata.Ref.UserId

@@ -8,7 +8,7 @@ import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.grpc.adapter.client.pekko.ClientAdapter
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.domain.api.v30
+import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.health.HealthComponent.AlwaysHealthyComponent
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.SequencerClientMetrics
@@ -28,7 +28,6 @@ import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.Context.CancellableContext
 import io.grpc.stub.StreamObserver
 import io.grpc.{CallOptions, Context, ManagedChannel, Status, StatusRuntimeException}
-import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.{Keep, Source}
 
 import scala.concurrent.ExecutionContext
@@ -44,7 +43,6 @@ class GrpcSequencerClientTransportPekko(
 )(implicit
     executionContext: ExecutionContext,
     executionSequencerFactory: ExecutionSequencerFactory,
-    materializer: Materializer,
 )
 // TODO(#13789) Extend GrpcSequencerClientTransportCommon and drop support for non-Pekko subscriptions
     extends GrpcSequencerClientTransport(
@@ -77,15 +75,15 @@ class GrpcSequencerClientTransportPekko(
       requiresAuthentication: Boolean,
   )(implicit traceContext: TraceContext): SequencerSubscriptionPekko[SubscriptionError] = {
 
-    val subscriptionRequestP = subscriptionRequest.toProtoV30
+    val subscriptionRequestP = subscriptionRequest.toProtoV0
 
     def mkSubscription[Resp: HasProtoTraceContext](
-        subscriber: (v30.SubscriptionRequest, StreamObserver[Resp]) => Unit
+        subscriber: (v0.SubscriptionRequest, StreamObserver[Resp]) => Unit
     )(
         parseResponse: (Resp, TraceContext) => ParsingResult[SubscriptionResponse]
     ): SequencerSubscriptionPekko[SubscriptionError] = {
       val source = ClientAdapter
-        .serverStreaming[v30.SubscriptionRequest, Resp](
+        .serverStreaming[v0.SubscriptionRequest, Resp](
           subscriptionRequestP,
           stubWithFreshContext(subscriber),
         )
@@ -133,11 +131,19 @@ class GrpcSequencerClientTransportPekko(
       )
     }
 
-    val subscriber =
-      if (requiresAuthentication) sequencerServiceClient.subscribeVersioned _
-      else sequencerServiceClient.subscribeUnauthenticatedVersioned _
+    if (protocolVersion >= ProtocolVersion.v5) {
+      val subscriber =
+        if (requiresAuthentication) sequencerServiceClient.subscribeVersioned _
+        else sequencerServiceClient.subscribeUnauthenticatedVersioned _
 
-    mkSubscription(subscriber)(SubscriptionResponse.fromVersionedProtoV30(protocolVersion)(_)(_))
+      mkSubscription(subscriber)(SubscriptionResponse.fromVersionedProtoV0(protocolVersion)(_)(_))
+    } else {
+      val subscriber =
+        if (requiresAuthentication) sequencerServiceClient.subscribe _
+        else sequencerServiceClient.subscribeUnauthenticated _
+      mkSubscription(subscriber)(SubscriptionResponse.fromProtoV0(protocolVersion)(_)(_))
+    }
+
   }
 
   private def stubWithFreshContext[Req, Resp](
@@ -160,7 +166,7 @@ class GrpcSequencerClientTransportPekko(
     // we take the unusual step of immediately trying to deserialize the trace-context
     // so it is available here for logging
     implicit val traceContext: TraceContext = SerializableTraceContext
-      .fromProtoSafeV30Opt(noTracingLogger)(
+      .fromProtoSafeV0Opt(noTracingLogger)(
         implicitly[HasProtoTraceContext[R]].traceContext(subscriptionResponseP)
       )
       .unwrap
@@ -176,7 +182,7 @@ class GrpcSequencerClientTransportPekko(
       traceContext: TraceContext
   ): Throwable PartialFunction Either[GrpcSequencerSubscriptionError, Nothing] = {
     case s: StatusRuntimeException =>
-      val grpcError = if (s.getStatus.getCode == io.grpc.Status.CANCELLED.getCode) {
+      val grpcError = if (s.getStatus.getCode() == io.grpc.Status.CANCELLED) {
         // Since recoverOnError sits before the kill switch in the stream,
         // this error will be passed downstream only if the cancellation came from the server.
         // For if the subscription was cancelled by the client via the kill switch,

@@ -41,16 +41,15 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.{IndexedDomain, SessionKeyStore}
-import com.digitalasset.canton.time.{DomainTimeTracker, TimeProofTestUtil, WallClock}
-import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
+import com.digitalasset.canton.time.{DomainTimeTracker, TimeProofTestUtil}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Confirmation,
   Observation,
   Submission,
 }
+import com.digitalasset.canton.topology.transaction.{ParticipantPermission, VettedPackages}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
@@ -64,8 +63,6 @@ import com.digitalasset.canton.{
   LfPartyId,
   RequestCounter,
   SequencerCounter,
-  TransferCounter,
-  TransferCounterO,
 }
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -86,7 +83,9 @@ final class TransferOutProcessingStepsTest
   private val sourceDomain = SourceDomainId(
     DomainId(UniqueIdentifier.tryFromProtoPrimitive("source::domain"))
   )
-  private val sourceMediator = MediatorsOfDomain(MediatorGroupIndex.tryCreate(100))
+  private val sourceMediator = MediatorRef(
+    MediatorId(UniqueIdentifier.tryFromProtoPrimitive("source::mediator"))
+  )
   private val targetDomain = TargetDomainId(
     DomainId(UniqueIdentifier.tryFromProtoPrimitive("target::domain"))
   )
@@ -108,34 +107,28 @@ final class TransferOutProcessingStepsTest
   private val templateId =
     LfTemplateId.assertFromString("transferoutprocessingstepstestpackage:template:id")
 
-  private val initialTransferCounter: TransferCounterO =
-    Some(TransferCounter.Genesis)
-
   private def submitterMetadata(submitter: LfPartyId): TransferSubmitterMetadata = {
     TransferSubmitterMetadata(
       submitter,
-      submittingParticipant,
+      LedgerApplicationId.assertFromString("tests"),
+      submittingParticipant.toLf,
       LedgerCommandId.assertFromString("transfer-out-processing-steps-command-id"),
       submissionId = None,
-      LedgerApplicationId.assertFromString("tests"),
       workflowId = None,
     )
   }
 
   private val adminSubmitter: LfPartyId = submittingParticipant.adminParty.toLf
 
-  private val crypto = TestingIdentityFactoryX.newCrypto(loggerFactory)(submittingParticipant)
+  private val pureCrypto = TestingIdentityFactory.pureCrypto()
 
   private val multiDomainEventLog = mock[MultiDomainEventLog]
-  private val clock = new WallClock(timeouts, loggerFactory)
   private val persistentState =
-    new InMemorySyncDomainPersistentStateX(
-      clock,
-      crypto,
+    new InMemorySyncDomainPersistentStateOld(
       IndexedDomain.tryCreate(sourceDomain.unwrap, 1),
       testedProtocolVersion,
+      pureCrypto,
       enableAdditionalConsistencyChecks = true,
-      enableTopologyTransactionValidation = false,
       loggerFactory,
       timeouts,
       futureSupervisor,
@@ -150,7 +143,7 @@ final class TransferOutProcessingStepsTest
       ProcessingStartingPoints.default,
       _ => mock[DomainTimeTracker],
       ParticipantTestMetrics.domain,
-      CachingConfigs.defaultSessionKeyCache,
+      CachingConfigs.defaultSessionKeyCacheConfig,
       DefaultProcessingTimeouts.testing,
       loggerFactory,
       FutureSupervisor.Noop,
@@ -163,19 +156,25 @@ final class TransferOutProcessingStepsTest
 
   private def createTestingIdentityFactory(
       topology: Map[ParticipantId, Map[LfPartyId, ParticipantPermission]],
-      packages: Map[ParticipantId, Seq[LfPackageId]] = Map.empty,
+      packages: Seq[VettedPackages] = Seq.empty,
       domains: Set[DomainId] = Set(DefaultTestIdentities.domainId),
   ) =
-    TestingTopologyX(domains)
+    TestingTopology(domains)
       .withReversedTopology(topology)
       .withPackages(packages)
       .build(loggerFactory)
 
+  private def vet(
+      participants: Iterable[ParticipantId],
+      packages: Seq[LfPackageId],
+  ): Seq[VettedPackages] =
+    participants.view.map(VettedPackages(_, packages)).toSeq
+
   private def createTestingTopologySnapshot(
       topology: Map[ParticipantId, Map[LfPartyId, ParticipantPermission]],
-      packages: Map[ParticipantId, Seq[LfPackageId]] = Map.empty,
+      packages: Seq[LfPackageId] = Seq.empty,
   ): TopologySnapshot =
-    createTestingIdentityFactory(topology, packages).topologySnapshot()
+    createTestingIdentityFactory(topology, vet(topology.keys, packages)).topologySnapshot()
 
   private def createCryptoFactory(packages: Seq[LfPackageId] = Seq(templateId.packageId)) = {
     val topology = Map(
@@ -186,23 +185,21 @@ final class TransferOutProcessingStepsTest
     )
     createTestingIdentityFactory(
       topology = topology,
-      packages = topology.keys.map(_ -> packages).toMap,
+      packages = vet(topology.keys, packages),
       domains = Set(sourceDomain.unwrap, targetDomain.unwrap),
     )
   }
 
   private val cryptoFactory = createCryptoFactory()
 
-  private def createCryptoSnapshot(
-      testingIdentityFactory: TestingIdentityFactoryX = cryptoFactory
-  ) =
+  private def createCryptoSnapshot(testingIdentityFactory: TestingIdentityFactory = cryptoFactory) =
     testingIdentityFactory
       .forOwnerAndDomain(submittingParticipant, sourceDomain.unwrap)
       .currentSnapshotApproximation
 
   private val cryptoSnapshot = createCryptoSnapshot()
 
-  private val seedGenerator = new SeedGenerator(crypto.pureCrypto)
+  private val seedGenerator = new SeedGenerator(pureCrypto)
 
   private def createTransferCoordination(
       cryptoSnapshot: DomainSnapshotSyncCryptoApi = cryptoSnapshot
@@ -263,14 +260,12 @@ final class TransferOutProcessingStepsTest
 
   "TransferOutRequest.validated" should {
     val testingTopology = createTestingTopologySnapshot(
-      Map(
+      topology = Map(
         submittingParticipant -> Map(submitter -> Submission),
         participant1 -> Map(party1 -> Submission),
         participant2 -> Map(party2 -> Submission),
       ),
-      packages = Seq(submittingParticipant, participant1, participant2)
-        .map(_ -> Seq(templateId.packageId))
-        .toMap,
+      packages = Seq(templateId.packageId),
     )
 
     def mkTxOutRes(
@@ -293,7 +288,6 @@ final class TransferOutProcessingStepsTest
           TargetProtocolVersion(testedProtocolVersion),
           sourceTopologySnapshot,
           targetTopologySnapshot,
-          initialTransferCounter,
           logger,
         )
         .value
@@ -377,15 +371,14 @@ final class TransferOutProcessingStepsTest
 
     // TODO(i13201) This should ideally be covered in integration tests as well
     "fail if the package for the contract being transferred is unvetted on the target domain" in {
+
       val sourceDomainTopology =
         createTestingTopologySnapshot(
-          Map(
+          topology = Map(
             submittingParticipant -> Map(submitter -> Submission),
             participant1 -> Map(party1 -> Submission),
           ),
-          packages = Seq(submittingParticipant, participant1)
-            .map(_ -> Seq(templateId.packageId))
-            .toMap, // The package is known on the source domain
+          packages = Seq(templateId.packageId), // The package is known on the source domain
         )
 
       val targetDomainTopology =
@@ -394,7 +387,7 @@ final class TransferOutProcessingStepsTest
             submittingParticipant -> Map(submitter -> Submission),
             participant1 -> Map(party1 -> Submission),
           ),
-          packages = Map.empty, // The package is not known on the target domain
+          packages = Seq.empty, // The package is not known on the target domain
         )
 
       val result =
@@ -416,8 +409,10 @@ final class TransferOutProcessingStepsTest
             participant1 -> Map(party1 -> Submission),
           ),
           // On the source domain, the package is vetted on all participants
-          packages =
-            Seq(submittingParticipant, participant1).map(_ -> Seq(templateId.packageId)).toMap,
+          packages = Seq(
+            VettedPackages(submittingParticipant, Seq(templateId.packageId)),
+            VettedPackages(participant1, Seq(templateId.packageId)),
+          ),
         ).topologySnapshot()
 
       val targetDomainTopology =
@@ -427,7 +422,9 @@ final class TransferOutProcessingStepsTest
             participant1 -> Map(party1 -> Submission),
           ),
           // On the target domain, the package is not vetted on `participant1`
-          packages = Map(submittingParticipant -> Seq(templateId.packageId)),
+          packages = Seq(
+            VettedPackages(submittingParticipant, Seq(templateId.packageId))
+          ),
         ).topologySnapshot()
 
       // `party1` is a stakeholder hosted on `participant1`, but it has not vetted `templateId.packageId` on the target domain
@@ -468,7 +465,6 @@ final class TransferOutProcessingStepsTest
             targetDomain = targetDomain,
             targetProtocolVersion = TargetProtocolVersion(testedProtocolVersion),
             targetTimeProof = timeEvent,
-            transferCounter = initialTransferCounter,
           ),
           Set(submittingParticipant, participant1, participant2),
         )
@@ -478,18 +474,12 @@ final class TransferOutProcessingStepsTest
       val ipsSource = createTestingTopologySnapshot(
         Map(
           submittingParticipant -> Map(adminSubmitter -> Submission, submitter -> Submission),
-          participant1 -> Map(submitter -> Confirmation),
+          participant1 -> Map(adminSubmitter -> Observation, submitter -> Confirmation),
           participant2 -> Map(party1 -> Submission),
           participant3 -> Map(party1 -> Submission),
           participant4 -> Map(party1 -> Confirmation),
         ),
-        packages = Seq(
-          submittingParticipant,
-          participant1,
-          participant2,
-          participant3,
-          participant4,
-        ).map(_ -> Seq(templateId.packageId)).toMap,
+        packages = Seq(templateId.packageId),
       )
       val ipsTarget = createTestingTopologySnapshot(
         Map(
@@ -498,12 +488,7 @@ final class TransferOutProcessingStepsTest
           participant3 -> Map(party1 -> Submission),
           participant4 -> Map(party1 -> Confirmation),
         ),
-        packages = Seq(
-          submittingParticipant,
-          participant1,
-          participant3,
-          participant4,
-        ).map(_ -> Seq(templateId.packageId)).toMap,
+        packages = Seq(templateId.packageId),
       )
       val stakeholders = Set(submitter, party1)
       val result = mkTxOutRes(stakeholders, ipsSource, ipsTarget)
@@ -521,7 +506,6 @@ final class TransferOutProcessingStepsTest
             targetDomain = targetDomain,
             targetProtocolVersion = TargetProtocolVersion(testedProtocolVersion),
             targetTimeProof = timeEvent,
-            transferCounter = initialTransferCounter,
           ),
           Set(submittingParticipant, participant1, participant2, participant3, participant4),
         )
@@ -543,7 +527,6 @@ final class TransferOutProcessingStepsTest
             targetDomain = targetDomain,
             targetProtocolVersion = TargetProtocolVersion(testedProtocolVersion),
             targetTimeProof = timeEvent,
-            transferCounter = initialTransferCounter,
           ),
           Set(submittingParticipant, participant1),
         )
@@ -580,7 +563,7 @@ final class TransferOutProcessingStepsTest
         )
         _ <- persistentState.activeContractStore
           .markContractsActive(
-            Seq(contractId -> initialTransferCounter),
+            Seq(contractId),
             TimeOfChange(RequestCounter(1), timeEvent.timestamp),
           )
           .value
@@ -643,7 +626,6 @@ final class TransferOutProcessingStepsTest
       targetDomain,
       TargetProtocolVersion(testedProtocolVersion),
       timeEvent,
-      transferCounter = initialTransferCounter,
     )
     val outTree = makeFullTransferOutTree(outRequest)
 
@@ -660,7 +642,7 @@ final class TransferOutProcessingStepsTest
       }
 
     "succeed without errors" in {
-      val sessionKeyStore = SessionKeyStore(CachingConfigs.defaultSessionKeyCache)
+      val sessionKeyStore = SessionKeyStore(CachingConfigs.defaultSessionKeyCacheConfig)
       for {
         encryptedOutRequest <- encryptTransferOutTree(outTree, sessionKeyStore)
         envelopes =
@@ -681,7 +663,7 @@ final class TransferOutProcessingStepsTest
             NonEmptyUtil.fromUnsafe(decrypted.views),
             Seq.empty,
             cryptoSnapshot,
-            MediatorsOfDomain(MediatorGroupIndex.one),
+            MediatorRef(MediatorId(UniqueIdentifier.tryCreate("another", "mediator"))),
           )
         )("compute activeness set failed")
       } yield {
@@ -716,7 +698,6 @@ final class TransferOutProcessingStepsTest
         targetDomain,
         TargetProtocolVersion(testedProtocolVersion),
         timeEvent,
-        transferCounter = initialTransferCounter,
       )
       val fullTransferOutTree = makeFullTransferOutTree(outRequest)
       val dataAndResponseArgs = TransferOutProcessingSteps.PendingDataAndResponseArgs(
@@ -740,6 +721,7 @@ final class TransferOutProcessingStepsTest
         .constructPendingDataAndResponse(
           dataAndResponseArgs,
           state.transferCache,
+          state.contractStore,
           FutureUnlessShutdown.pure(mkActivenessResult()),
           sourceMediator,
           freshOwnTimelyTx = true,
@@ -757,7 +739,7 @@ final class TransferOutProcessingStepsTest
     }
 
     // TODO(i13201) This should ideally be covered in integration tests as well
-    "prevent the contract being transferred is not vetted on the target domain since version 5" in {
+    "prevent the contract being transferred is not vetted on the target domain" in {
       val outProcessingStepsWithoutPackages = {
         val f = createCryptoFactory(packages = Seq.empty)
         val s = createCryptoSnapshot(f)
@@ -768,6 +750,7 @@ final class TransferOutProcessingStepsTest
       constructPendingDataAndResponseWith(outProcessingStepsWithoutPackages).leftOrFail(
         "construction of pending data and response succeeded unexpectedly"
       ) shouldBe a[PackageIdUnknownOrUnvetted]
+
     }
   }
 
@@ -827,7 +810,6 @@ final class TransferOutProcessingStepsTest
           SequencerCounter(1),
           rootHash,
           WithContractHash(contractId, contractHash),
-          TransferCounter.Genesis,
           templateId = templateId,
           transferringParticipant = false,
           submitterMetadata = submitterMetadata(submitter),
@@ -837,7 +819,7 @@ final class TransferOutProcessingStepsTest
           Set(party1),
           timeEvent,
           Some(transferInExclusivity),
-          MediatorsOfDomain(MediatorGroupIndex.one),
+          MediatorRef(MediatorId(UniqueIdentifier.tryCreate("another", "mediator"))),
         )
         _ <- valueOrFail(
           outProcessingSteps
@@ -846,7 +828,7 @@ final class TransferOutProcessingStepsTest
               Right(transferResult),
               pendingOut,
               state.pendingTransferOutSubmissions,
-              crypto.pureCrypto,
+              pureCrypto,
             )
         )("get commit set and contract to be stored and event")
       } yield succeed
@@ -858,7 +840,7 @@ final class TransferOutProcessingStepsTest
       uuid: UUID = new UUID(6L, 7L),
   ): FullTransferOutTree = {
     val seed = seedGenerator.generateSaltSeed()
-    request.toFullTransferOutTree(crypto.pureCrypto, crypto.pureCrypto, seed, uuid)
+    request.toFullTransferOutTree(pureCrypto, pureCrypto, seed, uuid)
   }
 
   def encryptTransferOutTree(

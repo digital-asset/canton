@@ -5,17 +5,18 @@ package com.digitalasset.canton.participant.admin.inspection
 
 import cats.data.EitherT
 import cats.syntax.foldable.*
+import cats.syntax.parallel.*
 import cats.syntax.traverse.*
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.store.SyncDomainPersistentState
-import com.digitalasset.canton.protocol.ContractIdSyntax.orderingLfContractId
 import com.digitalasset.canton.protocol.{LfContractId, SerializableContract}
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.MonadUtil
-import com.digitalasset.canton.{LfPartyId, TransferCounterO}
 
 import scala.collection.immutable.SortedMap
 import scala.collection.mutable
@@ -65,17 +66,13 @@ private[inspection] object AcsInspection {
   def getCurrentSnapshot(state: SyncDomainPersistentState)(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): Future[Option[AcsSnapshot[SortedMap[LfContractId, (CantonTimestamp, TransferCounterO)]]]] =
+  ): Future[Option[AcsSnapshot[SortedMap[LfContractId, CantonTimestamp]]]] =
     for {
       cursorHeadO <- state.requestJournalStore.preheadClean
       snapshot <- cursorHeadO
         .traverse { cursorHead =>
           val ts = cursorHead.timestamp
-          val snapshotF = state.activeContractStore
-            .snapshot(ts)
-            .map(_.map { case (id, (timestamp, transferCounter)) =>
-              id -> (timestamp, transferCounter)
-            })
+          val snapshotF = state.activeContractStore.snapshot(ts)
 
           snapshotF.map(snapshot => Some(AcsSnapshot(snapshot, ts)))
         }
@@ -84,23 +81,17 @@ private[inspection] object AcsInspection {
 
   // fetch acs, checking that the requested timestamp is clean
   private def getSnapshotAt(domainId: DomainId, state: SyncDomainPersistentState)(
-      timestamp: CantonTimestamp,
-      skipCleanTimestampCheck: Boolean,
+      timestamp: CantonTimestamp
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): EitherT[Future, Error, AcsSnapshot[
-    SortedMap[LfContractId, (CantonTimestamp, TransferCounterO)]
-  ]] =
+  ): EitherT[Future, Error, AcsSnapshot[SortedMap[LfContractId, CantonTimestamp]]] =
     for {
-      _ <-
-        if (!skipCleanTimestampCheck)
-          TimestampValidation.beforePrehead(
-            domainId,
-            state.requestJournalStore.preheadClean,
-            timestamp,
-          )
-        else EitherT.pure[Future, Error](())
+      _ <- TimestampValidation.beforePrehead(
+        domainId,
+        state.requestJournalStore.preheadClean,
+        timestamp,
+      )
       snapshot <- EitherT.right(state.activeContractStore.snapshot(timestamp))
       // check after getting the snapshot in case a pruning was happening concurrently
       _ <- TimestampValidation.afterPruning(
@@ -115,21 +106,19 @@ private[inspection] object AcsInspection {
       domainId: DomainId,
       state: SyncDomainPersistentState,
       timestamp: Option[CantonTimestamp],
-      skipCleanTimestampCheck: Boolean,
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): EitherT[Future, Error, Option[
-    AcsSnapshot[Iterator[Seq[(LfContractId, TransferCounterO)]]]
+    AcsSnapshot[Iterator[Seq[LfContractId]]]
   ]] = {
 
     type MaybeSnapshot =
-      Option[AcsSnapshot[SortedMap[LfContractId, (CantonTimestamp, TransferCounterO)]]]
+      Option[AcsSnapshot[SortedMap[LfContractId, CantonTimestamp]]]
 
     val maybeSnapshotET: EitherT[Future, Error, MaybeSnapshot] = timestamp match {
       case Some(timestamp) =>
-        getSnapshotAt(domainId, state)(timestamp, skipCleanTimestampCheck = skipCleanTimestampCheck)
-          .map(Some(_))
+        getSnapshotAt(domainId, state)(timestamp).map(Some(_))
 
       case None =>
         EitherT.liftF[Future, Error, MaybeSnapshot](getCurrentSnapshot(state))
@@ -138,9 +127,7 @@ private[inspection] object AcsInspection {
     maybeSnapshotET.map(
       _.map { case AcsSnapshot(snapshot, ts) =>
         val groupedSnapshot = snapshot.iterator
-          .map { case (cid, (_, transferCounter)) =>
-            cid -> transferCounter
-          }
+          .map { case (cid, _) => cid }
           .toSeq
           .grouped(
             AcsInspection.BatchSize.value
@@ -156,18 +143,12 @@ private[inspection] object AcsInspection {
       state: SyncDomainPersistentState,
       parties: Set[LfPartyId],
       timestamp: Option[CantonTimestamp],
-      skipCleanTimestampCheck: Boolean = false,
-  )(f: (SerializableContract, TransferCounterO) => Either[Error, Unit])(implicit
+  )(f: SerializableContract => Either[Error, Unit])(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): EitherT[Future, Error, Option[(Set[LfPartyId], CantonTimestamp)]] = {
     for {
-      acsSnapshotO <- getAcsSnapshot(
-        domainId,
-        state,
-        timestamp,
-        skipCleanTimestampCheck = skipCleanTimestampCheck,
-      )
+      acsSnapshotO <- getAcsSnapshot(domainId, state, timestamp)
       allStakeholdersAndTs <- acsSnapshotO.traverse { acsSnapshot =>
         MonadUtil
           .sequentialTraverseMonoid(acsSnapshot.snapshot)(
@@ -197,12 +178,17 @@ private[inspection] object AcsInspection {
         topologyClient.awaitSnapshot(snapshotTs)
       )
 
-      hostedStakeholders <-
-        EitherT.liftF[Future, String, Seq[LfPartyId]](
+      hostedStakeholders <- EitherT.liftF[Future, String, Seq[LfPartyId]](
+        allStakeholders.toSeq.parTraverseFilter { stakeholder =>
           topologySnapshot
-            .hostedOn(allStakeholders, participantId)
-            .map(_.keysIterator.toSeq)
-        )
+            .hostedOn(stakeholder, participantId)
+            .map(
+              _.flatMap(participantAttributes =>
+                Option.when(participantAttributes.permission.isActive)(stakeholder)
+              )
+            )
+        }
+      )
 
       remainingHostedStakeholders = hostedStakeholders.diff(offboardedParties.toSeq)
 
@@ -223,13 +209,11 @@ private[inspection] object AcsInspection {
       domainId: DomainId,
       state: SyncDomainPersistentState,
       parties: Set[LfPartyId],
-      f: (SerializableContract, TransferCounterO) => Either[Error, Unit],
-  )(batch: Seq[(LfContractId, TransferCounterO)])(implicit
+      f: SerializableContract => Either[Error, Unit],
+  )(cids: Seq[LfContractId])(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): EitherT[Future, Error, Set[LfPartyId]] = {
-    val (cids, transferCounters) = batch.unzip
-
     val allStakeholders: mutable.Set[LfPartyId] = mutable.Set()
 
     for {
@@ -237,13 +221,11 @@ private[inspection] object AcsInspection {
         .lookupManyUncached(cids)
         .leftMap(missingContract => Error.InconsistentSnapshot(domainId, missingContract))
 
-      contractsWithTransferCounter = batch.zip(transferCounters)
-
-      stakeholdersE = contractsWithTransferCounter
-        .traverse_ { case (storedContract, transferCounter) =>
+      stakeholdersE = batch
+        .traverse_ { storedContract =>
           if (parties.exists(storedContract.contract.metadata.stakeholders)) {
             allStakeholders ++= storedContract.contract.metadata.stakeholders
-            f(storedContract.contract, transferCounter)
+            f(storedContract.contract)
           } else
             Right(())
         }

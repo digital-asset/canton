@@ -34,13 +34,13 @@ trait TestingIdentityFactoryBase { self: NamedLogging =>
     DirectExecutionContext(noTracingLogger)
 
   def forOwner(
-      owner: Member,
+      owner: KeyOwner,
       availableUpToInclusive: CantonTimestamp = CantonTimestamp.MaxValue,
   ): SyncCryptoApiProvider = {
     new SyncCryptoApiProvider(
       owner,
       ips(availableUpToInclusive),
-      TestingIdentityFactoryX.newCrypto(loggerFactory)(owner),
+      TestingIdentityFactory.newCrypto(loggerFactory)(owner),
       CachingConfigs.testing,
       DefaultProcessingTimeouts.testing,
       FutureSupervisor.Noop,
@@ -49,7 +49,7 @@ trait TestingIdentityFactoryBase { self: NamedLogging =>
   }
 
   def forOwnerAndDomain(
-      owner: Member,
+      owner: KeyOwner,
       domain: DomainId = DefaultTestIdentities.domainId,
       availableUpToInclusive: CantonTimestamp = CantonTimestamp.MaxValue,
   ): DomainSyncCryptoClient =

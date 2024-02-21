@@ -31,8 +31,7 @@ class CantonDynamicDomainParameterGetter(
       traceContext: TraceContext
   ): EitherT[Future, String, NonNegativeFiniteDuration] = {
     def getToleranceForDomain(
-        domainId: DomainId,
-        warnOnUsingDefault: Boolean,
+        domainId: DomainId
     ): EitherT[Future, String, NonNegativeFiniteDuration] =
       for {
         topoClient <- EitherT.fromOption[Future](
@@ -44,16 +43,11 @@ class CantonDynamicDomainParameterGetter(
           protocolVersionFor(domainId),
           s"Cannot get protocol version for domain $domainId",
         )
-        params <- EitherT.right(
-          snapshot.findDynamicDomainParametersOrDefault(
-            protocolVersion,
-            warnOnUsingDefault,
-          )
-        )
+        params <- EitherT.right(snapshot.findDynamicDomainParametersOrDefault(protocolVersion))
       } yield params.ledgerTimeRecordTimeTolerance
 
     domainIdO match {
-      case Some(domainId) => getToleranceForDomain(domainId, warnOnUsingDefault = true)
+      case Some(domainId) => getToleranceForDomain(domainId)
 
       case None =>
         // TODO(i15313):
@@ -68,11 +62,7 @@ class CantonDynamicDomainParameterGetter(
           )
           allTolerances <- EitherT.right(domainAliases.parTraverseFilter { domainId =>
             if (aliasManager.connectionStateForDomain(domainId).exists(_.isActive)) {
-              getToleranceForDomain(
-                domainId,
-                warnOnUsingDefault = // don't warn as the domain parameters might not be set up yet
-                  false,
-              )
+              getToleranceForDomain(domainId)
                 .leftMap { error =>
                   logger.info(s"Failed to get ledger time tolerance for domain $domainId: $error")
                 }

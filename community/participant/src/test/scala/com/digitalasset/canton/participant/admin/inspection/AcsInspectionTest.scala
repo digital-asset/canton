@@ -21,6 +21,7 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.protocol.ContractIdSyntax.orderingLfContractId
 import com.digitalasset.canton.protocol.SerializableContract.LedgerCreateTime
 import com.digitalasset.canton.protocol.{
+  AgreementText,
   ContractMetadata,
   LfContractId,
   LfTransactionVersion,
@@ -37,7 +38,6 @@ import com.digitalasset.canton.{
   LfVersioned,
   RequestCounter,
   RequestCounterDiscriminator,
-  TransferCounter,
 }
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.EitherValues
@@ -132,11 +132,12 @@ object AcsInspectionTest extends MockitoSugar with ArgumentMatchersSugar {
         LfVersioned(
           LfTransactionVersion.VDev,
           LfValue.ContractInstance(
-            packageName = Ref.PackageName.assertFromString("pkg-name"),
             template = Ref.Identifier.assertFromString("pkg:Mod:Template"),
+            packageName = None,
             arg = LfValue.ValueNil,
           ),
-        )
+        ),
+        AgreementText.empty,
       )
       .left
       .map(e => new RuntimeException(e.errorMessage))
@@ -166,7 +167,7 @@ object AcsInspectionTest extends MockitoSugar with ArgumentMatchersSugar {
 
     val allContractIds = contracts.keys ++ missingContracts
 
-    val snapshot = allContractIds.map(_ -> (CantonTimestamp.Epoch, Option.empty[TransferCounter]))
+    val snapshot = allContractIds.map(_ -> CantonTimestamp.Epoch)
 
     val acs = mock[ActiveContractStore]
     when(acs.snapshot(any[CantonTimestamp]))
@@ -205,12 +206,7 @@ object AcsInspectionTest extends MockitoSugar with ArgumentMatchersSugar {
     TraceContext.withNewTraceContext { implicit tc =>
       val builder = Vector.newBuilder[SerializableContract]
       AcsInspection
-        .forEachVisibleActiveContract(
-          FakeDomainId,
-          state,
-          parties,
-          timestamp = None,
-        ) { case (contract, _) =>
+        .forEachVisibleActiveContract(FakeDomainId, state, parties, timestamp = None) { contract =>
           builder += contract
           Right(())
         }

@@ -98,7 +98,6 @@ final case class Namespace(fingerprint: Fingerprint) extends PrettyPrinting {
   def unwrap: String = fingerprint.unwrap
   def toProtoPrimitive: String = fingerprint.toProtoPrimitive
   def toLengthLimitedString: String68 = fingerprint.toLengthLimitedString
-  def filterString: String = fingerprint.unwrap
   override def pretty: Pretty[Namespace] = prettyOfParam(_.fingerprint)
 }
 

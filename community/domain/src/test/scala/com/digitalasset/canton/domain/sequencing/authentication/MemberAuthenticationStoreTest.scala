@@ -151,7 +151,9 @@ trait DbMemberAuthenticationStoreTest extends MemberAuthenticationStoreTest {
 
     storage.update_(
       DBIO.seq(
-        Seq("nonces", "tokens").map(name => sqlu"truncate table sequencer_authentication_#$name")*
+        Seq("nonces", "tokens").map(name =>
+          sqlu"truncate table sequencer_authentication_#$name"
+        ): _*
       ),
       functionFullName,
     )

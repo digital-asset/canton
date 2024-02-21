@@ -5,10 +5,13 @@ package com.digitalasset.canton.participant.store.memory
 
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto.{Crypto, CryptoPureApi}
+import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.store.EventLogId.DomainEventLogId
-import com.digitalasset.canton.participant.store.SyncDomainPersistentState
+import com.digitalasset.canton.participant.store.{
+  SyncDomainPersistentState,
+  SyncDomainPersistentStateOld,
+}
 import com.digitalasset.canton.protocol.TargetDomainId
 import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.store.memory.{
@@ -16,32 +19,25 @@ import com.digitalasset.canton.store.memory.{
   InMemorySequencedEventStore,
   InMemorySequencerCounterTrackerStore,
 }
-import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
-import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStoreX
-import com.digitalasset.canton.topology.{DomainOutboxQueue, DomainTopologyManagerX}
+import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
-class InMemorySyncDomainPersistentStateX(
-    clock: Clock,
-    crypto: Crypto,
+abstract class InMemorySyncDomainPersistentStateCommon(
     override val domainId: IndexedDomain,
-    val protocolVersion: ProtocolVersion,
+    override val pureCryptoApi: CryptoPureApi,
     override val enableAdditionalConsistencyChecks: Boolean,
-    enableTopologyTransactionValidation: Boolean,
     val loggerFactory: NamedLoggerFactory,
-    val timeouts: ProcessingTimeout,
-    val futureSupervisor: FutureSupervisor,
+    timeouts: ProcessingTimeout,
 )(implicit ec: ExecutionContext)
     extends SyncDomainPersistentState {
-
-  override val pureCryptoApi: CryptoPureApi = crypto.pureCrypto
 
   val eventLog = new InMemorySingleDimensionEventLog(DomainEventLogId(domainId), loggerFactory)
   val contractStore = new InMemoryContractStore(loggerFactory)
   val activeContractStore = new InMemoryActiveContractStore(protocolVersion, loggerFactory)
+  val contractKeyJournal = new InMemoryContractKeyJournal(loggerFactory)
   val transferStore = new InMemoryTransferStore(TargetDomainId(domainId.item), loggerFactory)
   val sequencedEventStore = new InMemorySequencedEventStore(loggerFactory)
   val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
@@ -52,26 +48,30 @@ class InMemorySyncDomainPersistentStateX(
   val sendTrackerStore = new InMemorySendTrackerStore()
   val submissionTrackerStore = new InMemorySubmissionTrackerStore(loggerFactory)
 
-  override val topologyStore =
-    new InMemoryTopologyStoreX(
-      DomainStore(domainId.item),
+  override def isMemory(): Boolean = true
+
+  override def close(): Unit = ()
+}
+
+class InMemorySyncDomainPersistentStateOld(
+    domainId: IndexedDomain,
+    val protocolVersion: ProtocolVersion,
+    pureCryptoApi: CryptoPureApi,
+    enableAdditionalConsistencyChecks: Boolean,
+    loggerFactory: NamedLoggerFactory,
+    timeouts: ProcessingTimeout,
+    futureSupervisor: FutureSupervisor,
+)(implicit ec: ExecutionContext)
+    extends InMemorySyncDomainPersistentStateCommon(
+      domainId,
+      pureCryptoApi,
+      enableAdditionalConsistencyChecks,
       loggerFactory,
       timeouts,
     )
+    with SyncDomainPersistentStateOld {
 
-  override val domainOutboxQueue = new DomainOutboxQueue(loggerFactory)
-  override val topologyManager = new DomainTopologyManagerX(
-    clock,
-    crypto,
-    topologyStore,
-    domainOutboxQueue,
-    enableTopologyTransactionValidation,
-    timeouts,
-    futureSupervisor,
-    loggerFactory,
-  )
+  val topologyStore =
+    new InMemoryTopologyStore(DomainStore(domainId.item), loggerFactory, timeouts, futureSupervisor)
 
-  override def isMemory: Boolean = true
-
-  override def close(): Unit = ()
 }

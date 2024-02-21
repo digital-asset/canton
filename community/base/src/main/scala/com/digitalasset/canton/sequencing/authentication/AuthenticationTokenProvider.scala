@@ -8,17 +8,14 @@ import cats.syntax.either.*
 import cats.syntax.option.*
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{NonNegativeFiniteDuration, ProcessingTimeout}
 import com.digitalasset.canton.crypto.{Crypto, Fingerprint, Nonce}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.api.v30.SequencerAuthentication.{
-  AuthenticateRequest,
-  AuthenticateResponse,
-  ChallengeRequest,
-  ChallengeResponse,
-}
-import com.digitalasset.canton.domain.api.v30.SequencerAuthenticationServiceGrpc.SequencerAuthenticationServiceStub
+import com.digitalasset.canton.domain.api.v0.Authentication.Response.Value
+import com.digitalasset.canton.domain.api.v0.SequencerAuthenticationServiceGrpc.SequencerAuthenticationServiceStub
+import com.digitalasset.canton.domain.api.v0.{Authentication, Challenge}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.authentication.grpc.AuthenticationTokenWithExpiry
@@ -53,6 +50,7 @@ object AuthenticationTokenManagerConfig {
 class AuthenticationTokenProvider(
     domainId: DomainId,
     member: Member,
+    agreementId: Option[ServiceAgreementId],
     crypto: Crypto,
     supportedProtocolVersions: Seq[ProtocolVersion],
     config: AuthenticationTokenManagerConfig,
@@ -96,20 +94,19 @@ class AuthenticationTokenProvider(
 
   private def getChallenge(
       authenticationClient: SequencerAuthenticationServiceStub
-  ): EitherT[Future, Status, ChallengeResponse.Success] = EitherT {
+  ): EitherT[Future, Status, Challenge.Success] = EitherT {
+    import com.digitalasset.canton.domain.api.v0.Challenge.Response.Value.{Empty, Failure, Success}
     authenticationClient
       .challenge(
-        ChallengeRequest(
-          member.toProtoPrimitive,
-          supportedProtocolVersions.map(_.toProtoPrimitiveS),
-        )
+        Challenge
+          .Request(member.toProtoPrimitive, supportedProtocolVersions.map(_.toProtoPrimitiveS))
       )
       .map(response => response.value)
       .map {
-        case ChallengeResponse.Value.Success(success) => Right(success)
-        case ChallengeResponse.Value.Failure(ChallengeResponse.Failure(code, reason)) =>
+        case Success(success) => Right(success)
+        case Failure(Challenge.Failure(code, reason)) =>
           Left(Status.fromCodeValue(code).withDescription(reason))
-        case ChallengeResponse.Value.Empty =>
+        case Empty =>
           Left(
             Status.INTERNAL.withDescription(
               "Problem with domain handshake with challenge. Received empty response from domain."
@@ -141,23 +138,22 @@ class AuthenticationTokenProvider(
           nonce,
           domainId,
           fingerprintsNel,
+          agreementId,
           crypto,
         )
         .leftMap(err => Status.INTERNAL.withDescription(err.toString))
       token <- EitherT {
         authenticationClient
           .authenticate(
-            AuthenticateRequest(
+            Authentication.Request(
               member = member.toProtoPrimitive,
-              signature = signature.toProtoV30.some,
+              signature = signature.toProtoV0.some,
               nonce = nonce.toProtoPrimitive,
             )
           )
           .map(response => response.value)
           .map {
-            case AuthenticateResponse.Value.Success(
-                  AuthenticateResponse.Success(tokenP, expiryOP)
-                ) =>
+            case Value.Success(Authentication.Success(tokenP, expiryOP)) =>
               (for {
                 token <- AuthenticationToken.fromProtoPrimitive(tokenP).leftMap(_.toString)
                 expiresAtP <- ProtoConverter.required("expires_at", expiryOP).leftMap(_.toString)
@@ -166,9 +162,9 @@ class AuthenticationTokenProvider(
                 .leftMap(err =>
                   Status.INTERNAL.withDescription(s"Received invalid authentication token: $err")
                 )
-            case AuthenticateResponse.Value.Failure(AuthenticateResponse.Failure(code, reason)) =>
+            case Value.Failure(Authentication.Failure(code, reason)) =>
               Left(Status.fromCodeValue(code).withDescription(reason))
-            case AuthenticateResponse.Value.Empty =>
+            case Value.Empty =>
               Left(
                 Status.INTERNAL.withDescription(
                   "Problem authenticating participant. Received empty response from domain."

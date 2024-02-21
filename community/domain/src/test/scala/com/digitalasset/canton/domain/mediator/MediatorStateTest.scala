@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.domain.mediator
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CachingConfigs
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
@@ -14,21 +13,18 @@ import com.digitalasset.canton.domain.mediator.store.{
   InMemoryMediatorDeduplicationStore,
   MediatorState,
 }
-import com.digitalasset.canton.domain.metrics.MediatorTestMetrics
+import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.error.MediatorError
-import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.InformeeMessage
-import com.digitalasset.canton.sequencing.protocol.MediatorsOfDomain
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.DefaultTestIdentities
-import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.transaction.TrustLevel
+import com.digitalasset.canton.topology.{DefaultTestIdentities, MediatorRef}
 import com.digitalasset.canton.version.HasTestCloseContext
-import com.digitalasset.canton.{ApplicationId, BaseTest, CommandId, HasExecutionContext, LfPartyId}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPartyId}
 import org.scalatest.wordspec.AsyncWordSpec
 
-import java.time.Duration
 import java.util.UUID
 import scala.concurrent.duration.*
 import scala.concurrent.{Await, Future}
@@ -43,12 +39,12 @@ class MediatorStateTest
     val requestId = RequestId(CantonTimestamp.Epoch)
     val fullInformeeTree = {
       val domainId = DefaultTestIdentities.domainId
-      val participantId = DefaultTestIdentities.participant1
-      val aliceParty = LfPartyId.assertFromString("alice")
-      val alice = PlainInformee(aliceParty)
+      val mediatorId = DefaultTestIdentities.mediator
+      val alice = PlainInformee(LfPartyId.assertFromString("alice"))
       val bob = ConfirmingParty(
         LfPartyId.assertFromString("bob"),
         PositiveInt.tryCreate(2),
+        TrustLevel.Ordinary,
       )
       val hashOps: HashOps = new SymbolicPureCrypto
       val h: Int => Hash = TestHash.digest
@@ -67,29 +63,17 @@ class MediatorStateTest
         TransactionSubviews.empty(testedProtocolVersion, hashOps),
         testedProtocolVersion,
       )
-      val submitterMetadata = SubmitterMetadata(
-        NonEmpty(Set, aliceParty),
-        ApplicationId.assertFromString("kaese"),
-        CommandId.assertFromString("wurst"),
-        participantId,
-        salt = s(6638),
-        None,
-        DeduplicationPeriod.DeduplicationDuration(Duration.ZERO),
-        CantonTimestamp.MaxValue,
-        hashOps,
-        testedProtocolVersion,
+      val commonMetadata = CommonMetadata(hashOps, testedProtocolVersion)(
+        ConfirmationPolicy.Signatory,
+        domainId,
+        MediatorRef(mediatorId),
+        s(5417),
+        new UUID(0, 0),
       )
-      val commonMetadata = CommonMetadata
-        .create(hashOps, testedProtocolVersion)(
-          ConfirmationPolicy.Signatory,
-          domainId,
-          MediatorsOfDomain(MediatorGroupIndex.zero),
-          s(5417),
-          new UUID(0, 0),
-        )
+
       FullInformeeTree.tryCreate(
         GenTransactionTree.tryCreate(hashOps)(
-          submitterMetadata,
+          BlindedNode(rh(11)),
           commonMetadata,
           BlindedNode(rh(12)),
           MerkleSeq.fromSeq(hashOps, testedProtocolVersion)(view :: Nil),
@@ -97,20 +81,19 @@ class MediatorStateTest
         testedProtocolVersion,
       )
     }
-    val informeeMessage =
-      InformeeMessage(fullInformeeTree, Signature.noSignature)(testedProtocolVersion)
+    val informeeMessage = InformeeMessage(fullInformeeTree)(testedProtocolVersion)
     val mockTopologySnapshot = mock[TopologySnapshot]
-    when(mockTopologySnapshot.consortiumThresholds(any[Set[LfPartyId]])(anyTraceContext))
-      .thenAnswer { (parties: Set[LfPartyId]) =>
-        Future.successful(parties.map(x => x -> PositiveInt.one).toMap)
-      }
+    when(mockTopologySnapshot.consortiumThresholds(any[Set[LfPartyId]])).thenAnswer {
+      (parties: Set[LfPartyId]) => Future.successful(parties.map(x => x -> PositiveInt.one).toMap)
+    }
     val currentVersion =
       ResponseAggregation
         .fromRequest(
           requestId,
           informeeMessage,
+          testedProtocolVersion,
           mockTopologySnapshot,
-        )(traceContext, executorService)
+        )(anyTraceContext, executorService)
         .futureValue // without explicit ec it deadlocks on AnyTestSuite.serialExecutionContext
 
     def mediatorState: MediatorState = {
@@ -118,9 +101,9 @@ class MediatorStateTest
         new InMemoryFinalizedResponseStore(loggerFactory),
         new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts),
         mock[Clock],
-        MediatorTestMetrics,
+        DomainTestMetrics.mediator,
         testedProtocolVersion,
-        CachingConfigs.defaultFinalizedMediatorConfirmationRequestsCache,
+        CachingConfigs.defaultFinalizedMediatorRequestsCache,
         timeouts,
         loggerFactory,
       )

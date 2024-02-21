@@ -7,7 +7,7 @@ import cats.data.EitherT
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.client.TestSequencerClientSend.Request
-import com.digitalasset.canton.sequencing.protocol.{AggregationRule, Batch, MessageId}
+import com.digitalasset.canton.sequencing.protocol.{Batch, MessageId}
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.Future
@@ -25,15 +25,13 @@ class TestSequencerClientSend extends SequencerClientSend {
   override def sendAsync(
       batch: Batch[DefaultOpenEnvelope],
       sendType: SendType,
-      topologyTimestamp: Option[CantonTimestamp],
+      timestampOfSigningKey: Option[CantonTimestamp],
       maxSequencingTime: CantonTimestamp,
       messageId: MessageId,
-      aggregationRule: Option[AggregationRule],
       callback: SendCallback,
-      amplify: Boolean,
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] = {
     requestsQueue.add(
-      Request(batch, sendType, topologyTimestamp, maxSequencingTime, messageId, aggregationRule)
+      Request(batch, sendType, timestampOfSigningKey, maxSequencingTime, messageId)
     )
     EitherT[Future, SendAsyncClientError, Unit](Future.successful(Right(())))
   }
@@ -46,9 +44,8 @@ object TestSequencerClientSend {
   final case class Request(
       batch: Batch[DefaultOpenEnvelope],
       sendType: SendType,
-      topologyTimestamp: Option[CantonTimestamp],
+      timestampOfSigningKey: Option[CantonTimestamp],
       maxSequencingTime: CantonTimestamp,
       messageId: MessageId,
-      aggregationRule: Option[AggregationRule],
   )(implicit val traceContext: TraceContext)
 }

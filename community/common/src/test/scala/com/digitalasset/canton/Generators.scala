@@ -31,9 +31,6 @@ object Generators {
     Gen.stringOfN(32, Gen.alphaNumChar).map(WorkflowId.assertFromString)
   )
 
-  def transferCounterOGen: Gen[TransferCounterO] =
-    Gen.choose(0, Long.MaxValue).map(i => Some(TransferCounter(i)))
-
   def lengthLimitedStringGen[A <: AbstractLengthLimitedString](
       companion: LengthLimitedStringCompanion[A]
   ): Gen[A] = for {
@@ -45,7 +42,7 @@ object Generators {
     size <- Gen.choose(1, nonEmptyMaxSize - 1)
     element <- arb.arbitrary
     elements <- Gen.containerOfN[List, T](size, arb.arbitrary)
-  } yield NonEmpty(List, element, elements*)
+  } yield NonEmpty(List, element, elements: _*)
 
   def nonEmptySetGen[T](implicit arb: Arbitrary[T]): Gen[NonEmpty[Set[T]]] =
     nonEmptyListGen[T].map(_.toSet)

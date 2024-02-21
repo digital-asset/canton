@@ -14,13 +14,21 @@ trait ConsoleErrorHandler {
   def handleInternalError(): Nothing
 }
 
-final class CommandFailure() extends Throwable("Command execution failed.") with NoStackTrace
+/** @deprecated use [[CommandFailure]] or [[CantonInternalError]] instead.
+  */
+trait CommandExecutionFailedException extends Throwable
 
-final class CantonInternalError()
+class CommandFailure()
+    extends Throwable(s"Command execution failed.")
+    with NoStackTrace
+    with CommandExecutionFailedException
+
+class CantonInternalError()
     extends Throwable(
-      "Command execution failed due to an internal error. Please file a bug report."
+      s"Command execution failed due to an internal error. Please file a bug report."
     )
     with NoStackTrace
+    with CommandExecutionFailedException
 
 /** Throws a [[CommandFailure]] or [[CantonInternalError]] when a command fails.
   * The throwables do not have a stacktraces, to avoid noise in the interactive console.

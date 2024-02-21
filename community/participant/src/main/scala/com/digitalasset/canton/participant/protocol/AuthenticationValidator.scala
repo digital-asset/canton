@@ -8,7 +8,6 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, Signature}
 import com.digitalasset.canton.data.{FullTransactionViewTree, SubmitterMetadata, ViewPosition}
 import com.digitalasset.canton.protocol.RequestId
-import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 
@@ -22,11 +21,11 @@ class AuthenticationValidator()(implicit
       requestId: RequestId,
       rootViews: NonEmpty[Seq[(FullTransactionViewTree, Option[Signature])]],
       snapshot: DomainSnapshotSyncCryptoApi,
-  )(implicit traceContext: TraceContext): Future[Map[ViewPosition, String]] = {
+  ): Future[Map[ViewPosition, String]] = {
 
     def verifySignature(
         viewWithSignature: (FullTransactionViewTree, Option[Signature])
-    )(implicit traceContext: TraceContext): Future[Option[(ViewPosition, String)]] = {
+    ): Future[Option[(ViewPosition, String)]] = {
 
       val (view, signatureO) = viewWithSignature
 
@@ -40,22 +39,21 @@ class AuthenticationValidator()(implicit
         case Right(submitterMetadata: SubmitterMetadata) =>
           signatureO match {
             case Some(signature) =>
-              // check for an invalid signature
-              snapshot
-                .verifySignature(
+              (for {
+                // check for an invalid signature
+                _ <- snapshot.verifySignature(
                   view.rootHash.unwrap,
-                  submitterMetadata.submittingParticipant,
+                  submitterMetadata.submitterParticipant,
                   signature,
                 )
-                .swap
-                .toOption
-                .map { cause =>
+              } yield ()).value.map {
+                _.swap.toOption.map(cause =>
                   (
                     view.viewPosition,
                     err(s"View ${view.viewPosition} has an invalid signature: ${cause.show}."),
                   )
-                }
-                .value
+                )
+              }
 
             case None =>
               // the signature is missing
@@ -73,7 +71,7 @@ class AuthenticationValidator()(implicit
     }
 
     for {
-      signatureCheckErrors <- rootViews.forgetNE.parTraverseFilter(verifySignature)
-    } yield signatureCheckErrors.toMap
+      decryptionResult <- rootViews.forgetNE.parTraverseFilter(verifySignature)
+    } yield decryptionResult.toMap
   }
 }

@@ -6,13 +6,12 @@ package com.digitalasset.canton.participant.admin.grpc
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.error.ErrorCode
-import com.digitalasset.canton.admin.participant.v30
-import com.digitalasset.canton.admin.participant.v30.{DarDescription as ProtoDarDescription, *}
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
-import com.digitalasset.canton.participant.admin.PackageService
 import com.digitalasset.canton.participant.admin.PackageService.DarDescriptor
+import com.digitalasset.canton.participant.admin.*
+import com.digitalasset.canton.participant.admin.v0.{DarDescription as ProtoDarDescription, *}
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{EitherTUtil, OptionUtil}
 import com.digitalasset.canton.{LfPackageId, protocol}
@@ -35,7 +34,7 @@ class GrpcPackageService(
       activePackages <- service.listPackages(OptionUtil.zeroAsNone(request.limit))
     } yield ListPackagesResponse(activePackages.map {
       case protocol.PackageDescription(pid, sourceDescription) =>
-        v30.PackageDescription(pid, sourceDescription.unwrap)
+        v0.PackageDescription(pid, sourceDescription.unwrap)
     })
   }
 

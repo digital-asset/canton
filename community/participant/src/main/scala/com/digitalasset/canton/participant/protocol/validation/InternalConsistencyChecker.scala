@@ -32,6 +32,7 @@ import scala.annotation.tailrec
 import scala.concurrent.{ExecutionContext, Future}
 
 class InternalConsistencyChecker(
+    uniqueContractKeys: Boolean,
     protocolVersion: ProtocolVersion,
     override val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {
@@ -51,17 +52,24 @@ class InternalConsistencyChecker(
     for {
       _ <- checkRollbackScopes(rootViewTrees)
       _ <- checkContractState(rootViewTrees)
+      _ <- checkKeyState(rootViewTrees, hostedParty)
     } yield ()
   }
 
   private def checkRollbackScopes(
       rootViewTrees: NonEmpty[Seq[FullTransactionViewTree]]
-  ): Result[Unit] =
-    checkRollbackScopeOrder(
-      rootViewTrees.map(_.viewParticipantData.rollbackContext)
-    ).left.map { error =>
-      ErrorWithInternalConsistencyCheck(IncorrectRollbackScopeOrder(error))
+  ): Result[Unit] = {
+    // TransactionViewDecompositionFactory prior to ProtocolVersion.v5 did not enforce this
+    if (protocolVersion >= ProtocolVersion.v5) {
+      checkRollbackScopeOrder(
+        rootViewTrees.map(_.viewParticipantData.rollbackContext)
+      ).left.map { error =>
+        ErrorWithInternalConsistencyCheck(IncorrectRollbackScopeOrder(error))
+      }
+    } else {
+      Right(())
     }
+  }
 
   private def checkContractState(
       rootViewTrees: NonEmpty[Seq[FullTransactionViewTree]]
@@ -113,6 +121,54 @@ class InternalConsistencyChecker(
     }
   }
 
+  private def checkKeyState(
+      rootViewTrees: NonEmpty[Seq[FullTransactionViewTree]],
+      hostedParty: LfPartyId => Boolean,
+  )(implicit traceContext: TraceContext): Result[Unit] = {
+
+    if (uniqueContractKeys) {
+
+      // Validating only hosted keys (i.e. keys where this participant hosts a maintainer),
+      // because for non-hosted keys, we do not necessarily see all updates and may therefore
+      // raise a false alarm.
+      val hostedKeys =
+        rootViewTrees.map(_.view.globalKeyInputs).foldLeft(Set.empty[LfGlobalKey]) { (keys, gki) =>
+          keys ++ (gki -- keys).collect {
+            case (key, a) if a.maintainers.exists(hostedParty) => key
+          }
+        }
+
+      def hostedUpdatedKeys(rootViewTree: FullTransactionViewTree): KeyMapping =
+        rootViewTree.view.updatedKeyValues.view
+          .filterKeys(hostedKeys)
+          .toMap
+
+      MonadUtil
+        .foldLeftM[Result, KeyState, FullTransactionViewTree](KeyState.empty, rootViewTrees)(
+          (previous, rootViewTree) => {
+
+            val state = adjustRollbackScope[KeyState, KeyMapping](
+              previous,
+              rootViewTree.viewParticipantData.rollbackContext.rollbackScope,
+            )
+
+            val viewGlobal = rootViewTree.view.globalKeyInputs.view
+              .filterKeys(hostedKeys)
+              .mapValues(_.resolution)
+              .toMap
+
+            for {
+              _ <- checkConsistentKeyUse(state.inconsistentKeys(viewGlobal))
+            } yield state.update(viewGlobal, hostedUpdatedKeys(rootViewTree))
+
+          }
+        )
+        .map(_.discard)
+    } else {
+      Right(())
+    }
+  }
+
   /** @param inconsistent - the set of inconsistent keys or the empty set if no inconsistencies have been found,
     *                     see [[KeyState.inconsistentKeys]] to see how inconsistency is detected.
     * @return - returns a failed result if there are inconsistent keys
@@ -123,6 +179,7 @@ class InternalConsistencyChecker(
       case None => Right(())
     }
   }
+
 }
 
 object InternalConsistencyChecker {
@@ -329,7 +386,7 @@ object InternalConsistencyChecker {
       parties,
       participantId,
       topologySnapshot,
-    )(ec, loggingContext.traceContext)
+    )
   }
 
   private[validation] def checkRollbackScopeOrder(

@@ -26,8 +26,8 @@ final case class DriverContractMetadata(salt: Salt)
     param("contract salt", _.salt.forHashing)
   )
 
-  def toProtoV30: v30.DriverContractMetadata =
-    v30.DriverContractMetadata(Some(salt.toProtoV30))
+  def toProtoV0: v0.DriverContractMetadata =
+    v0.DriverContractMetadata(Some(salt.toProtoV0))
 
   def toLfBytes(protocolVersion: ProtocolVersion): LfBytes =
     toByteArray(protocolVersion).pipe(LfBytes.fromByteArray)
@@ -37,21 +37,21 @@ object DriverContractMetadata extends HasVersionedMessageCompanion[DriverContrac
   override def name: String = "driver contract metadata"
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v30,
-      supportedProtoVersion(v30.DriverContractMetadata)(fromProtoV30),
-      _.toProtoV30.toByteString,
+    ProtoVersion(0) -> ProtoCodec(
+      ProtocolVersion.v3,
+      supportedProtoVersion(v0.DriverContractMetadata)(fromProtoV0),
+      _.toProtoV0.toByteString,
     )
   )
 
-  def fromProtoV30(
-      driverContractMetadataP: v30.DriverContractMetadata
+  def fromProtoV0(
+      driverContractMetadataP: v0.DriverContractMetadata
   ): ParsingResult[DriverContractMetadata] = {
-    val v30.DriverContractMetadata(saltP) = driverContractMetadataP
+    val v0.DriverContractMetadata(saltP) = driverContractMetadataP
 
     ProtoConverter
       .required("salt", saltP)
-      .flatMap(Salt.fromProtoV30)
+      .flatMap(Salt.fromProtoV0)
       .map(DriverContractMetadata(_))
   }
 }

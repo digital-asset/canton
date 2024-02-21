@@ -15,6 +15,7 @@ import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTr
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.Metrics
 import com.digitalasset.canton.platform.config.TransactionTreeStreamsConfig
+import com.digitalasset.canton.platform.indexer.parallel.BatchN
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
 import com.digitalasset.canton.platform.store.backend.common.{
   EventIdSourceForInformees,
@@ -34,7 +35,6 @@ import com.digitalasset.canton.platform.store.utils.{
   Telemetry,
 }
 import com.digitalasset.canton.platform.{ApiOffset, Party, TemplatePartiesFilter}
-import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Attributes
@@ -48,7 +48,7 @@ class TransactionsTreeStreamReader(
     globalIdQueriesLimiter: ConcurrencyLimiter,
     globalPayloadQueriesLimiter: ConcurrencyLimiter,
     dbDispatcher: DbDispatcher,
-    queryValidRange: QueryValidRange,
+    queryNonPruned: QueryNonPruned,
     eventStorageBackend: EventStorageBackend,
     lfValueTranslation: LfValueTranslation,
     metrics: Metrics,
@@ -60,7 +60,7 @@ class TransactionsTreeStreamReader(
   import TransactionsReader.*
   import config.*
 
-  private val dbMetrics = metrics.index.db
+  private val dbMetrics = metrics.daml.index.db
 
   private val orderBySequentialEventId =
     Ordering.by[EventStorageBackend.Entry[Raw.TreeEvent], Long](_.eventSequentialId)
@@ -71,6 +71,7 @@ class TransactionsTreeStreamReader(
       queryRange: EventsRange,
       requestingParties: Set[Party],
       eventProjectionProperties: EventProjectionProperties,
+      multiDomainEnabled: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, GetUpdateTreesResponse), NotUsed] = {
@@ -89,6 +90,7 @@ class TransactionsTreeStreamReader(
       queryRange,
       requestingParties,
       eventProjectionProperties,
+      multiDomainEnabled,
     )
     sourceOfTreeTransactions
       .wireTap(_ match {
@@ -114,6 +116,7 @@ class TransactionsTreeStreamReader(
       queryRange: EventsRange,
       requestingParties: Set[Party],
       eventProjectionProperties: EventProjectionProperties,
+      multiDomainEnabled: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, GetUpdateTreesResponse), NotUsed] = {
@@ -130,16 +133,11 @@ class TransactionsTreeStreamReader(
     val filterParties = requestingParties.toVector
     val idPageSizing = IdPageSizing.calculateFrom(
       maxIdPageSize = maxIdsPerIdPage,
-      // The ids for tree transactions are retrieved from seven separate id tables:
-      //   * Create stakeholder
-      //   * Create non-stakeholder
-      //   * Exercise consuming stakeholder
-      //   * Exercise consuming non-stakeholder
-      //   * Exercise non-consuming
-      //   * Assing
-      //   * Unassing
-      // To account for that we assign a seventh of the working memory to each table.
-      workingMemoryInBytesForIdPages = maxWorkingMemoryInBytesForIdPages / 7,
+      // The ids for tree transactions are retrieved from five separate id tables.
+      // To account for that we assign a fifth of the working memory to each table.
+      workingMemoryInBytesForIdPages = maxWorkingMemoryInBytesForIdPages / (
+        if (multiDomainEnabled) 7 else 5
+      ),
       numOfDecomposedFilters = filterParties.size,
       numOfPagesInIdPageBuffer = maxPagesPerIdPagesBuffer,
       loggerFactory = loggerFactory,
@@ -189,21 +187,17 @@ class TransactionsTreeStreamReader(
           payloadQueriesLimiter.execute {
             globalPayloadQueriesLimiter.execute {
               dbDispatcher.executeSql(metric) { implicit connection =>
-                queryValidRange.withRangeNotPruned(
-                  minOffsetExclusive = queryRange.startExclusiveOffset,
-                  maxOffsetInclusive = queryRange.endInclusiveOffset,
-                  errorPruning = (prunedOffset: Offset) =>
-                    s"Transactions request from ${queryRange.startExclusiveOffset.toHexString} to ${queryRange.endInclusiveOffset.toHexString} precedes pruned offset ${prunedOffset.toHexString}",
-                  errorLedgerEnd = (ledgerEndOffset: Offset) =>
-                    s"Transactions request from ${queryRange.startExclusiveOffset.toHexString} to ${queryRange.endInclusiveOffset.toHexString} is beyond ledger end offset ${ledgerEndOffset.toHexString}",
-                ) {
-                  eventStorageBackend.transactionStreamingQueries.fetchEventPayloadsTree(
+                queryNonPruned.executeSql(
+                  query = eventStorageBackend.transactionStreamingQueries.fetchEventPayloadsTree(
                     target = target
                   )(
                     eventSequentialIds = ids,
                     allFilterParties = requestingParties,
-                  )(connection)
-                }
+                  )(connection),
+                  minOffsetExclusive = queryRange.startExclusiveOffset,
+                  error = (prunedOffset: Offset) =>
+                    s"Transactions request from ${queryRange.startExclusiveOffset.toHexString} to ${queryRange.endInclusiveOffset.toHexString} precedes pruned offset ${prunedOffset.toHexString}",
+                )
               }
             }
           }
@@ -301,36 +295,40 @@ class TransactionsTreeStreamReader(
         responses.map { case (offset, response) => ApiOffset.assertFromString(offset) -> response }
       }
 
-    reassignmentStreamReader
-      .streamReassignments(
-        ReassignmentStreamQueryParams(
-          queryRange = queryRange,
-          filteringConstraints = TemplatePartiesFilter(
-            relation = Map.empty,
-            wildcardParties = requestingParties,
-          ),
-          eventProjectionProperties = eventProjectionProperties,
-          payloadQueriesLimiter = payloadQueriesLimiter,
-          deserializationQueriesLimiter = deserializationQueriesLimiter,
-          idPageSizing = idPageSizing,
-          decomposedFilters = requestingParties.map(DecomposedFilter(_, None)).toVector,
-          maxParallelIdAssignQueries = maxParallelIdAssignQueries,
-          maxParallelIdUnassignQueries = maxParallelIdUnassignQueries,
-          maxPagesPerIdPagesBuffer = maxPagesPerIdPagesBuffer,
-          maxPayloadsPerPayloadsPage = maxPayloadsPerPayloadsPage,
-          maxParallelPayloadAssignQueries = maxParallelPayloadAssignQueries,
-          maxParallelPayloadUnassignQueries = maxParallelPayloadUnassignQueries,
-          deserializationProcessingParallelism = transactionsProcessingParallelism,
+    if (multiDomainEnabled) {
+      reassignmentStreamReader
+        .streamReassignments(
+          ReassignmentStreamQueryParams(
+            queryRange = queryRange,
+            filteringConstraints = TemplatePartiesFilter(
+              relation = Map.empty,
+              wildcardParties = requestingParties,
+            ),
+            eventProjectionProperties = eventProjectionProperties,
+            payloadQueriesLimiter = payloadQueriesLimiter,
+            deserializationQueriesLimiter = deserializationQueriesLimiter,
+            idPageSizing = idPageSizing,
+            decomposedFilters = requestingParties.map(DecomposedFilter(_, None)).toVector,
+            maxParallelIdAssignQueries = maxParallelIdAssignQueries,
+            maxParallelIdUnassignQueries = maxParallelIdUnassignQueries,
+            maxPagesPerIdPagesBuffer = maxPagesPerIdPagesBuffer,
+            maxPayloadsPerPayloadsPage = maxPayloadsPerPayloadsPage,
+            maxParallelPayloadAssignQueries = maxParallelPayloadAssignQueries,
+            maxParallelPayloadUnassignQueries = maxParallelPayloadUnassignQueries,
+            deserializationProcessingParallelism = transactionsProcessingParallelism,
+          )
         )
-      )
-      .map { case (offset, reassignment) =>
-        offset -> GetUpdateTreesResponse(
-          GetUpdateTreesResponse.Update.Reassignment(reassignment)
+        .map { case (offset, reassignment) =>
+          offset -> GetUpdateTreesResponse(
+            GetUpdateTreesResponse.Update.Reassignment(reassignment)
+          )
+        }
+        .mergeSorted(sourceOfTreeTransactions)(
+          Ordering.by(_._1)
         )
-      }
-      .mergeSorted(sourceOfTreeTransactions)(
-        Ordering.by(_._1)
-      )
+    } else {
+      sourceOfTreeTransactions
+    }
   }
 
   private def mergeSortAndBatch(
@@ -339,9 +337,11 @@ class TransactionsTreeStreamReader(
   )(sourcesOfIds: Vector[Source[Long, NotUsed]]): Source[Iterable[Long], NotUsed] = {
     EventIdsUtils
       .sortAndDeduplicateIds(sourcesOfIds)
-      .batchN(
-        maxBatchSize = maxOutputBatchSize,
-        maxBatchCount = maxOutputBatchCount,
+      .via(
+        BatchN(
+          maxBatchSize = maxOutputBatchSize,
+          maxBatchCount = maxOutputBatchCount,
+        )
       )
   }
 

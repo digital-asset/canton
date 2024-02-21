@@ -5,64 +5,54 @@ package com.digitalasset.canton.topology
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.option.*
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.common.domain.{
-  RegisterTopologyTransactionHandle,
-  SequencerBasedRegisterTopologyTransactionHandleX,
-}
-import com.digitalasset.canton.concurrent.{FutureSupervisor, HasFutureSupervision}
-import com.digitalasset.canton.config.{ProcessingTimeout, TopologyXConfig}
+import com.digitalasset.canton.common.domain.RegisterTopologyTransactionHandleCommon
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.*
-import com.digitalasset.canton.logging.{
-  ErrorLoggingContext,
-  LoggingContextWithTrace,
-  NamedLoggerFactory,
-  NamedLogging,
-  TracedLogger,
-}
-import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcastX
-import com.digitalasset.canton.sequencing.client.SequencerClient
-import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, DomainTopologyClientWithInit}
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
-import com.digitalasset.canton.topology.store.{TopologyStoreId, TopologyStoreX}
-import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
-import com.digitalasset.canton.topology.transaction.{
-  SignedTopologyTransactionX,
-  TopologyChangeOpX,
-  TopologyMappingX,
-}
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreCommon, TopologyStoreId}
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{DelayUtil, EitherTUtil, ErrorUtil, SingleUseCell}
+import com.digitalasset.canton.util.{DelayUtil, EitherTUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, DomainAlias}
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future, Promise}
-import scala.util.chaining.*
 
-// TODO(#15161) merge with common trait
-class StoreBasedDomainOutboxX(
+class StoreBasedDomainOutbox(
     domain: DomainAlias,
     domainId: DomainId,
     memberId: Member,
     protocolVersion: ProtocolVersion,
-    val handle: RegisterTopologyTransactionHandle,
+    val handle: RegisterTopologyTransactionHandleCommon[
+      GenericSignedTopologyTransaction,
+      RegisterTopologyTransactionResponseResult.State,
+    ],
     targetClient: DomainTopologyClientWithInit,
-    val authorizedStore: TopologyStoreX[TopologyStoreId.AuthorizedStore],
-    val targetStore: TopologyStoreX[TopologyStoreId.DomainStore],
+    val authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
+    val targetStore: TopologyStore[TopologyStoreId.DomainStore],
     timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
     crypto: Crypto,
+    // TODO(#9270) clean up how we parameterize our nodes
     batchSize: Int = 100,
-    maybeObserverCloseable: Option[AutoCloseable] = None,
-    futureSupervisor: FutureSupervisor,
 )(implicit ec: ExecutionContext)
-    extends StoreBasedDomainOutboxCommon(
+    extends StoreBasedDomainOutboxCommon[
+      GenericSignedTopologyTransaction,
+      RegisterTopologyTransactionResponseResult.State,
+      RegisterTopologyTransactionHandleCommon[
+        GenericSignedTopologyTransaction,
+        RegisterTopologyTransactionResponseResult.State,
+      ],
+      TopologyStore[TopologyStoreId.DomainStore],
+    ](
       domain,
       domainId,
       memberId,
@@ -71,22 +61,21 @@ class StoreBasedDomainOutboxX(
       timeouts,
       loggerFactory,
       crypto,
-      syncTransactionAfterDispatch = true,
-      futureSupervisor = futureSupervisor,
+      syncTransactionAfterDispatch = false,
     )
-    with StoreBasedDomainOutboxDispatchHelperX {
+    with DomainOutboxDispatchHelperOld {
   override protected def awaitTransactionObserved(
       client: DomainTopologyClient,
-      transaction: GenericSignedTopologyTransactionX,
+      transaction: GenericSignedTopologyTransaction,
       timeout: Duration,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] =
-    supervisedUS(s"Waiting for transaction $transaction to be observed")(
-      TopologyStoreX.awaitTxObserved(targetClient, transaction, targetStore, timeout)
-    )
+    TopologyStore.awaitTxObserved(targetClient, transaction, targetStore, timeout)
 
-  override protected def findPendingTransactions(watermarks: Watermarks)(implicit
+  override protected def findPendingTransactions(
+      watermarks: Watermarks
+  )(implicit
       traceContext: TraceContext
-  ): Future[PendingTransactions[GenericSignedTopologyTransactionX]] =
+  ): Future[PendingTransactions[GenericSignedTopologyTransaction]] =
     authorizedStore
       .findDispatchingTransactionsAfter(
         timestampExclusive = watermarks.dispatched,
@@ -101,13 +90,10 @@ class StoreBasedDomainOutboxX(
 
   override def maxAuthorizedStoreTimestamp()(implicit
       traceContext: TraceContext
-  ): Future[Option[(SequencedTime, EffectiveTime)]] = authorizedStore.maxTimestamp()
-
-  override protected def onClosed(): Unit = {
-    maybeObserverCloseable.foreach(_.close())
-    Lifecycle.close(handle)(logger)
-    super.onClosed()
-  }
+  ): Future[Option[(SequencedTime, EffectiveTime)]] =
+    authorizedStore.timestamp(useStateStore =
+      false // can't use TopologyStore.maxTimestamp which uses state-store
+    )
 }
 
 trait DomainOutboxHandle extends DomainOutboxStatus with FlagCloseable {
@@ -129,7 +115,12 @@ abstract class DomainOutboxCommon extends DomainOutboxHandle {
   ): FutureUnlessShutdown[Unit]
 }
 
-abstract class StoreBasedDomainOutboxCommon(
+abstract class StoreBasedDomainOutboxCommon[
+    TX,
+    State,
+    +H <: RegisterTopologyTransactionHandleCommon[TX, State],
+    +DTS <: TopologyStoreCommon[TopologyStoreId.DomainStore, ?, ?, TX],
+](
     domain: DomainAlias,
     val domainId: DomainId,
     val memberId: Member,
@@ -139,15 +130,13 @@ abstract class StoreBasedDomainOutboxCommon(
     val loggerFactory: NamedLoggerFactory,
     override protected val crypto: Crypto,
     syncTransactionAfterDispatch: Boolean,
-    override protected val futureSupervisor: FutureSupervisor,
-)(implicit override protected val executionContext: ExecutionContext)
+)(implicit val ec: ExecutionContext)
     extends DomainOutboxCommon
-    with DomainOutboxDispatch
-    with HasFutureSupervision {
-  this: DomainOutboxDispatchStoreSpecific =>
+    with DomainOutboxDispatch[TX, State, H, DTS] {
+  this: DomainOutboxDispatchStoreSpecific[TX, State] =>
 
-  def handle: RegisterTopologyTransactionHandle
-  def targetStore: TopologyStoreX[TopologyStoreId.DomainStore]
+  def handle: H
+  def targetStore: DTS
 
   runOnShutdown_(new RunOnShutdown {
     override def name: String = "close-participant-topology-outbox"
@@ -158,7 +147,7 @@ abstract class StoreBasedDomainOutboxCommon(
 
   protected def awaitTransactionObserved(
       client: DomainTopologyClient,
-      transaction: GenericSignedTopologyTransactionX,
+      transaction: TX,
       timeout: Duration,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean]
 
@@ -236,7 +225,7 @@ abstract class StoreBasedDomainOutboxCommon(
   /** a future we provide that gets fulfilled once we are done dispatching */
   private val idleFuture = new AtomicReference[Option[Promise[UnlessShutdown[Unit]]]](None)
   private val lastDispatched =
-    new AtomicReference[Option[GenericSignedTopologyTransactionX]](None)
+    new AtomicReference[Option[TX]](None)
   private def ensureIdleFutureIsSet(): Unit = idleFuture.updateAndGet {
     case None =>
       Some(Promise())
@@ -308,9 +297,7 @@ abstract class StoreBasedDomainOutboxCommon(
 
   protected def findPendingTransactions(
       watermarks: Watermarks
-  )(implicit
-      traceContext: TraceContext
-  ): Future[PendingTransactions[GenericSignedTopologyTransactionX]]
+  )(implicit traceContext: TraceContext): Future[PendingTransactions[TX]]
 
   protected final def flush(initialize: Boolean = false)(implicit
       traceContext: TraceContext
@@ -395,9 +382,9 @@ abstract class StoreBasedDomainOutboxCommon(
   }
 
   private def updateWatermark(
-      found: PendingTransactions[GenericSignedTopologyTransactionX],
-      applicable: Seq[GenericSignedTopologyTransactionX],
-      responses: Seq[TopologyTransactionsBroadcastX.State],
+      found: PendingTransactions[TX],
+      applicable: Seq[TX],
+      responses: Seq[State],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val valid = applicable.zipWithIndex.zip(responses).foldLeft(true) {
       case (valid, ((item, idx), response)) =>
@@ -425,210 +412,6 @@ abstract class StoreBasedDomainOutboxCommon(
       FutureUnlessShutdown.unit
     }
   }
-}
-
-/** Dynamic version of a TopologyManagerObserver allowing observers
-  * to be dynamically added or removed while the TopologyManager stays up.
-  * (This is helpful for MediatorNodeX failover where domain-outboxes are started
-  * and closed.)
-  */
-class DomainOutboxXDynamicObserver(val loggerFactory: NamedLoggerFactory)
-    extends TopologyManagerObserver
-    with NamedLogging {
-  private val outboxRef = new AtomicReference[Option[DomainOutboxCommon]](None)
-
-  override def addedNewTransactions(
-      timestamp: CantonTimestamp,
-      transactions: Seq[SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]],
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    outboxRef.get.fold(FutureUnlessShutdown.unit)(
-      _.newTransactionsAddedToAuthorizedStore(timestamp, transactions.size)
-    )
-  }
-
-  def addObserver(ob: DomainOutboxCommon)(implicit traceContext: TraceContext): Unit = {
-    val previous = outboxRef.getAndSet(ob.some)
-    if (previous.nonEmpty) {
-      logger.warn("Expecting previously added domain outbox-X to have been removed")
-    }
-  }
-
-  def removeObserver(): Unit = outboxRef.set(None)
-}
-
-class DomainOutboxXFactory(
-    domainId: DomainId,
-    memberId: Member,
-    authorizedTopologyManager: AuthorizedTopologyManagerX,
-    domainTopologyManager: DomainTopologyManagerX,
-    crypto: Crypto,
-    topologyXConfig: TopologyXConfig,
-    timeouts: ProcessingTimeout,
-    futureSupervisor: FutureSupervisor,
-    override val loggerFactory: NamedLoggerFactory,
-) extends NamedLogging {
-
-  private val authorizedObserverRef = new SingleUseCell[DomainOutboxXDynamicObserver]
-  private val domainObserverRef = new SingleUseCell[DomainOutboxXDynamicObserver]
-
-  def create(
-      protocolVersion: ProtocolVersion,
-      targetTopologyClient: DomainTopologyClientWithInit,
-      sequencerClient: SequencerClient,
-      clock: Clock,
-      domainLoggerFactory: NamedLoggerFactory,
-  )(implicit
-      ec: ExecutionContext,
-      traceContext: TraceContext,
-  ): DomainOutboxHandle = {
-    val handle = new SequencerBasedRegisterTopologyTransactionHandleX(
-      sequencerClient,
-      domainId,
-      memberId,
-      clock,
-      topologyXConfig,
-      protocolVersion,
-      timeouts,
-      domainLoggerFactory,
-    )
-    if (authorizedObserverRef.isEmpty) {
-      authorizedObserverRef
-        .putIfAbsent(
-          new DomainOutboxXDynamicObserver(loggerFactory).tap(authorizedTopologyManager.addObserver)
-        )
-        .discard
-    }
-    val authorizedObserver =
-      authorizedObserverRef.getOrElse(throw new IllegalStateException("Must have observer"))
-
-    val storeBasedDomainOutbox = new StoreBasedDomainOutboxX(
-      DomainAlias(domainId.uid.toLengthLimitedString),
-      domainId,
-      memberId = memberId,
-      protocolVersion = protocolVersion,
-      handle = handle,
-      targetClient = targetTopologyClient,
-      authorizedStore = authorizedTopologyManager.store,
-      targetStore = domainTopologyManager.store,
-      timeouts = timeouts,
-      loggerFactory = domainLoggerFactory,
-      crypto = crypto,
-      maybeObserverCloseable = new AutoCloseable {
-        override def close(): Unit = authorizedObserver.removeObserver()
-      }.some,
-      futureSupervisor = futureSupervisor,
-    )
-    authorizedObserver.addObserver(storeBasedDomainOutbox)
-
-    if (domainObserverRef.isEmpty) {
-      domainObserverRef
-        .putIfAbsent(
-          new DomainOutboxXDynamicObserver(loggerFactory).tap(domainTopologyManager.addObserver)
-        )
-        .discard
-    }
-    val domainObserver =
-      domainObserverRef.getOrElse(throw new IllegalStateException("Must have observer"))
-
-    val queueBasedDomainOutbox =
-      new QueueBasedDomainOutboxX(
-        DomainAlias(domainId.uid.toLengthLimitedString),
-        domainId,
-        memberId = memberId,
-        protocolVersion = protocolVersion,
-        handle = handle,
-        targetClient = targetTopologyClient,
-        domainOutboxQueue = domainTopologyManager.outboxQueue,
-        targetStore = domainTopologyManager.store,
-        timeouts = timeouts,
-        loggerFactory = domainLoggerFactory,
-        crypto = crypto,
-        maybeObserverCloseable = new AutoCloseable {
-          override def close(): Unit = authorizedObserver.removeObserver()
-        }.some,
-      )
-
-    domainObserver.addObserver(queueBasedDomainOutbox)
-
-    new DomainOutboxHandle {
-      override def startup()(implicit
-          traceContext: TraceContext
-      ): EitherT[FutureUnlessShutdown, String, Unit] =
-        storeBasedDomainOutbox.startup().flatMap(_ => queueBasedDomainOutbox.startup())
-
-      override def queueSize: Int =
-        storeBasedDomainOutbox.queueSize + queueBasedDomainOutbox.queueSize
-
-      override protected def onClosed(): Unit = {
-        Lifecycle.close(storeBasedDomainOutbox, queueBasedDomainOutbox)(
-          DomainOutboxXFactory.this.logger
-        )
-      }
-
-      override protected def timeouts: ProcessingTimeout = DomainOutboxXFactory.this.timeouts
-
-      override protected def logger: TracedLogger = DomainOutboxXFactory.this.logger
-    }
-  }
-}
-
-class DomainOutboxXFactorySingleCreate(
-    domainId: DomainId,
-    memberId: Member,
-    authorizedTopologyManager: AuthorizedTopologyManagerX,
-    domainTopologyManager: DomainTopologyManagerX,
-    crypto: Crypto,
-    topologyXConfig: TopologyXConfig,
-    override val timeouts: ProcessingTimeout,
-    futureSupervisor: FutureSupervisor,
-    loggerFactory: NamedLoggerFactory,
-) extends DomainOutboxXFactory(
-      domainId,
-      memberId,
-      authorizedTopologyManager,
-      domainTopologyManager,
-      crypto,
-      topologyXConfig,
-      timeouts,
-      futureSupervisor,
-      loggerFactory,
-    )
-    with FlagCloseable {
-  val outboxRef = new SingleUseCell[DomainOutboxHandle]
-
-  def createOnlyOnce(
-      protocolVersion: ProtocolVersion,
-      targetTopologyClient: DomainTopologyClientWithInit,
-      sequencerClient: SequencerClient,
-      clock: Clock,
-      domainLoggerFactory: NamedLoggerFactory,
-  )(implicit
-      ec: ExecutionContext,
-      traceContext: TraceContext,
-  ): DomainOutboxHandle = {
-    outboxRef.get.foreach { outbox =>
-      ErrorUtil.invalidState(s"DomainOutbox was already created. This is a bug.")(
-        ErrorLoggingContext(
-          domainLoggerFactory.getTracedLogger(getClass),
-          LoggingContextWithTrace(domainLoggerFactory),
-        )
-      )
-    }
-
-    create(
-      protocolVersion,
-      targetTopologyClient,
-      sequencerClient,
-      clock,
-      domainLoggerFactory,
-    )
-      .tap { case outbox =>
-        outboxRef.putIfAbsent(outbox).discard
-      }
-  }
-
-  override protected def onClosed(): Unit =
-    Lifecycle.close(outboxRef.get.toList*)(logger)
 }
 
 final case class PendingTransactions[TX](

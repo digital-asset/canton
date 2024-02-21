@@ -16,7 +16,7 @@ object MigrationTestSupport {
   def migrateTo(version: String)(implicit dataSource: DataSource, dbType: DbType): Unit = {
     Flyway
       .configure()
-      .locations(locations(dbType)*)
+      .locations(locations(dbType): _*)
       .dataSource(dataSource)
       .target(version)
       .load()
@@ -80,7 +80,7 @@ object MigrationTestSupport {
       inputs: (TableSchema, Seq[Row])*
   )(implicit connection: Connection): Unit = {
     inputs.foreach { case (tableSchema, rows) =>
-      insert(tableSchema, rows*)
+      insert(tableSchema, rows: _*)
     }
   }
 

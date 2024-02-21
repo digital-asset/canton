@@ -141,7 +141,7 @@ class FetchLatestEventsFlowTest
     create(Source.empty[ReadSignal]).discard
 
     for {
-      _ <- waitForAll(lookups*)
+      _ <- waitForAll(lookups: _*)
       lastCall <- lookup3.calledF
     } yield lastCall shouldBe State(ts(8))
   }

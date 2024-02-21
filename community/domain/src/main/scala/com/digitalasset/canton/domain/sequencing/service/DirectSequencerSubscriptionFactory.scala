@@ -33,12 +33,14 @@ class DirectSequencerSubscriptionFactory(
     * If the counter is invalid (currently will only happen if counter <0) a [[sequencer.errors.CreateSubscriptionError.InvalidCounter]] error will be returned.
     *
     * @param startingAt Counter of the next event to observe. (e.g. 0 will return the first event when it is available)
+    * @param identifier a name to attach to the connection
     * @param member Member to subscribe on behalf of.
     * @param handler The handler to invoke with sequencer events
     * @return A running subscription
     */
   def create[E](
       startingAt: SequencerCounter,
+      identifier: String,
       member: Member,
       handler: SerializedEventOrErrorHandler[E],
   )(implicit
@@ -56,4 +58,5 @@ class DirectSequencerSubscriptionFactory(
       subscription
     }
   }
+
 }

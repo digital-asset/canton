@@ -4,13 +4,18 @@
 package com.digitalasset.canton.ledger.api.validation
 
 import com.daml.error.ContextualizedErrorLogger
-import com.daml.ledger.api.v2.command_completion_service.CompletionStreamRequest as GrpcCompletionStreamRequest
-import com.digitalasset.canton.ledger.api.domain.ParticipantOffset
+import com.daml.ledger.api.v1.command_completion_service.{
+  CompletionEndRequest,
+  CompletionStreamRequest as GrpcCompletionStreamRequest,
+}
+import com.digitalasset.canton.ledger.api.domain.{LedgerId, LedgerOffset, optionalLedgerId}
+import com.digitalasset.canton.ledger.api.messages.command.completion
 import com.digitalasset.canton.ledger.api.messages.command.completion.CompletionStreamRequest
 import io.grpc.StatusRuntimeException
 
 class CompletionServiceRequestValidator(
-    partyNameChecker: PartyNameChecker
+    ledgerId: LedgerId,
+    partyNameChecker: PartyNameChecker,
 ) {
 
   private val partyValidator =
@@ -24,14 +29,12 @@ class CompletionServiceRequestValidator(
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, CompletionStreamRequest] =
     for {
+      validLedgerId <- matchLedgerId(ledgerId)(optionalLedgerId(request.ledgerId))
       appId <- requireApplicationId(request.applicationId, "application_id")
       parties <- requireParties(request.parties.toSet)
-      convertedOffset <- ParticipantOffsetValidator.validateOptional(
-        request.beginExclusive,
-        "offset",
-      )
+      convertedOffset <- LedgerOffsetValidator.validateOptional(request.offset, "offset")
     } yield CompletionStreamRequest(
-      None,
+      validLedgerId,
       appId,
       parties,
       convertedOffset,
@@ -39,12 +42,13 @@ class CompletionServiceRequestValidator(
 
   def validateCompletionStreamRequest(
       request: CompletionStreamRequest,
-      ledgerEnd: ParticipantOffset.Absolute,
+      ledgerEnd: LedgerOffset.Absolute,
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, CompletionStreamRequest] =
     for {
-      _ <- ParticipantOffsetValidator.offsetIsBeforeEndIfAbsolute(
+      _ <- matchLedgerId(ledgerId)(request.ledgerId)
+      _ <- LedgerOffsetValidator.offsetIsBeforeEndIfAbsolute(
         "Begin",
         request.offset,
         ledgerEnd,
@@ -52,5 +56,14 @@ class CompletionServiceRequestValidator(
       _ <- requireNonEmpty(request.parties, "parties")
       _ <- partyValidator.requireKnownParties(request.parties)
     } yield request
+
+  def validateCompletionEndRequest(
+      req: CompletionEndRequest
+  )(implicit
+      contextualizedErrorLogger: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, completion.CompletionEndRequest] =
+    for {
+      _ <- matchLedgerId(ledgerId)(optionalLedgerId(req.ledgerId))
+    } yield completion.CompletionEndRequest()
 
 }

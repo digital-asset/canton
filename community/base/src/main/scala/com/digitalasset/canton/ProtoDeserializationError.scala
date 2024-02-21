@@ -5,8 +5,8 @@ package com.digitalasset.canton
 
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.config.RequireTypes.InvariantViolation as PureInvariantViolation
+import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.error.CantonErrorGroups.ProtoDeserializationErrorGroup
-import com.digitalasset.canton.error.{BaseCantonError, CantonError}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.version.ProtoVersion
@@ -24,6 +24,8 @@ object ProtoDeserializationError extends ProtoDeserializationErrorGroup {
       extends ProtoDeserializationError {
     override val message = error.getMessage
   }
+
+  final case class CryptoKeyDeserializationError(message: String) extends ProtoDeserializationError
   final case class CryptoDeserializationError(error: DeserializationError)
       extends ProtoDeserializationError {
     override val message = error.message
@@ -39,29 +41,33 @@ object ProtoDeserializationError extends ProtoDeserializationErrorGroup {
   final case class FieldNotSet(field: String) extends ProtoDeserializationError {
     override val message = s"Field `$field` is not set"
   }
+  final case class NotImplementedYet(className: String) extends ProtoDeserializationError {
+    override val message = className
+  }
   final case class TimestampConversionError(message: String) extends ProtoDeserializationError
   final case class TimeModelConversionError(message: String) extends ProtoDeserializationError
+  final case class UnknownProtoVersion(version: ProtoVersion, protoMessage: String)
+      extends ProtoDeserializationError {
+    override def message =
+      s"Message $protoMessage has no versioning information corresponding to protobuf $version"
+  }
   final case class ValueConversionError(field: String, error: String)
       extends ProtoDeserializationError {
     override val message = s"Unable to convert field `$field`: $error"
   }
-  final case class RefinedDurationConversionError(field: String, error: String)
-      extends ProtoDeserializationError {
-    override val message = s"Unable to convert numeric field `$field`: $error"
-  }
   final case class InvariantViolation(error: String) extends ProtoDeserializationError {
     override def message = error
+  }
+  final case class VersionError(versionedMessage: String, invalidVersion: Int)
+      extends ProtoDeserializationError {
+    override val message =
+      s"Invalid version $invalidVersion in versioned message `$versionedMessage`"
   }
   final case class MaxBytesToDecompressExceeded(error: String) extends ProtoDeserializationError {
     override def message = error
   }
   final case class OtherError(error: String) extends ProtoDeserializationError {
     override def message = error
-  }
-  final case class UnknownProtoVersion(version: ProtoVersion, protoMessage: String)
-      extends ProtoDeserializationError {
-    override def message =
-      s"Message ${protoMessage} has no versioning information corresponding to protobuf $version"
   }
 
   /** Common Deserialization error code
@@ -78,23 +84,12 @@ object ProtoDeserializationError extends ProtoDeserializationErrorGroup {
         id = "PROTO_DESERIALIZATION_FAILURE",
         ErrorCategory.InvalidIndependentOfSystemState,
       ) {
-
     final case class Wrap(reason: ProtoDeserializationError)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = "Deserialization of protobuf message failed"
         )
         with CantonError
-
-    final case class WrapNoLogging(reason: ProtoDeserializationError)
-        extends BaseCantonError.Impl(
-          cause = "Deserialization of protobuf message failed"
-        )
-
-    final case class WrapNoLoggingStr(reason: String)
-        extends BaseCantonError.Impl(
-          cause = "Deserialization of protobuf message failed"
-        )
   }
 
   object InvariantViolation {

@@ -4,9 +4,10 @@
 package com.digitalasset.canton.sequencing.client.transports
 
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Crypto
-import com.digitalasset.canton.domain.api.v30.SequencerAuthenticationServiceGrpc.SequencerAuthenticationServiceStub
+import com.digitalasset.canton.domain.api.v0.SequencerAuthenticationServiceGrpc.SequencerAuthenticationServiceStub
 import com.digitalasset.canton.lifecycle.Lifecycle.CloseableChannel
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -38,6 +39,7 @@ class GrpcSequencerClientAuth(
     domainId: DomainId,
     member: Member,
     crypto: Crypto,
+    agreementId: Option[ServiceAgreementId],
     channelPerEndpoint: NonEmpty[Map[Endpoint, ManagedChannel]],
     supportedProtocolVersions: Seq[ProtocolVersion],
     tokenManagerConfig: AuthenticationTokenManagerConfig,
@@ -52,6 +54,7 @@ class GrpcSequencerClientAuth(
     new AuthenticationTokenProvider(
       domainId,
       member,
+      agreementId,
       crypto,
       supportedProtocolVersions,
       tokenManagerConfig,

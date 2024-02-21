@@ -20,6 +20,7 @@ import com.daml.lf.engine.Error as LfError
 import com.daml.lf.interpretation.Error as LfInterpretationError
 import com.daml.lf.language.{Ast, LanguageVersion}
 import com.daml.lf.transaction.{GlobalKey, TransactionVersion}
+import com.daml.lf.value.ValueCoder.CidEncoder
 import com.daml.lf.value.{Value, ValueCoder}
 import com.daml.lf.{VersionRange, language}
 import com.digitalasset.canton.ledger.error.ParticipantErrorGroup.LedgerApiErrorGroup.CommandExecutionErrorGroup
@@ -34,7 +35,7 @@ import scala.concurrent.duration.DurationInt
 object CommandExecutionErrors extends CommandExecutionErrorGroup {
   def encodeValue(v: Value): Either[ValueCoder.EncodeError, String] = {
     ValueCoder
-      .encodeValue(valueVersion = TransactionVersion.VDev, v0 = v)
+      .encodeValue(CidEncoder, TransactionVersion.VDev, v)
       .map(bs => BaseEncoding.base64().encode(bs.toByteArray))
   }
 

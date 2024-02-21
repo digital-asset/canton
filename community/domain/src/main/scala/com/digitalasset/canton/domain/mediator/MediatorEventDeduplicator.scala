@@ -14,12 +14,12 @@ import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
-  MediatorConfirmationRequest,
+  MediatorRequest,
   ProtocolMessage,
   RootHashMessage,
   SerializedRootHashMessagePayload,
 }
-import com.digitalasset.canton.protocol.{DynamicDomainParametersWithValidity, RequestId, v30}
+import com.digitalasset.canton.protocol.{DynamicDomainParametersWithValidity, RequestId, v0}
 import com.digitalasset.canton.sequencing.TracedProtocolEvent
 import com.digitalasset.canton.topology.client.DomainTopologyClient
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -54,11 +54,10 @@ private[mediator] trait MediatorEventDeduplicator {
       callerCloseContext: CloseContext,
   ): Future[(Seq[(TracedProtocolEvent, Seq[DefaultOpenEnvelope])], Future[Unit])] =
     MonadUtil
-      .sequentialTraverse(envelopesByEvent) { case (tracedProtocolEvent, envelopes) =>
-        implicit val traceContext: TraceContext = tracedProtocolEvent.traceContext
-        val (event, _) = tracedProtocolEvent.value
-        rejectDuplicates(event.timestamp, envelopes)(traceContext, callerCloseContext).map {
-          case (uniqueEnvelopes, storeF) => (tracedProtocolEvent, uniqueEnvelopes) -> storeF
+      .sequentialTraverse(envelopesByEvent) { case (event, envelopes) =>
+        implicit val traceContext: TraceContext = event.traceContext
+        rejectDuplicates(event.value.timestamp, envelopes)(traceContext, callerCloseContext).map {
+          case (uniqueEnvelopes, storeF) => (event, uniqueEnvelopes) -> storeF
         }
       }
       .map(_.separate)
@@ -137,7 +136,7 @@ class DefaultMediatorEventDeduplicator(
     MonadUtil
       .sequentialTraverse(envelopes) { envelope =>
         envelope.protocolMessage match {
-          case request: MediatorConfirmationRequest =>
+          case request: MediatorRequest =>
             processUuid(requestTimestamp, request, envelopes).map { case (hasUniqueUuid, storeF) =>
               Option.when(hasUniqueUuid)(envelope) -> storeF
             }
@@ -151,7 +150,7 @@ class DefaultMediatorEventDeduplicator(
 
   private def processUuid(
       requestTimestamp: CantonTimestamp,
-      request: MediatorConfirmationRequest,
+      request: MediatorRequest,
       envelopes: Seq[DefaultOpenEnvelope],
   )(implicit
       traceContext: TraceContext,
@@ -175,7 +174,7 @@ class DefaultMediatorEventDeduplicator(
         val expireAfter = previousUsagesNE.map(_.expireAfter).max1
         val rejection = MediatorError.MalformedMessage.Reject(
           s"The request uuid ($uuid) must not be used until $expireAfter.",
-          v30.MediatorRejection.Code.CODE_NON_UNIQUE_REQUEST_UUID,
+          v0.MediatorRejection.Code.NonUniqueRequestUuid,
         )
         rejection.report()
 

@@ -28,7 +28,7 @@ import com.digitalasset.canton.protocol.messages.{
 }
 import com.digitalasset.canton.protocol.{DynamicDomainParametersWithValidity, RequestId}
 import com.digitalasset.canton.sequencing.*
-import com.digitalasset.canton.sequencing.client.RichSequencerClient
+import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.handlers.DiscardIgnoredEvents
 import com.digitalasset.canton.sequencing.protocol.{
   ClosedEnvelope,
@@ -42,12 +42,7 @@ import com.digitalasset.canton.store.{SequencedEventStore, SequencerCounterTrack
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessorCommon
-import com.digitalasset.canton.topology.{
-  DomainId,
-  DomainOutboxStatus,
-  MediatorId,
-  TopologyManagerStatus,
-}
+import com.digitalasset.canton.topology.{DomainId, MediatorId, TopologyManagerStatus}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.FutureInstances.parallelFuture
@@ -64,12 +59,11 @@ private[mediator] class Mediator(
     val domain: DomainId,
     val mediatorId: MediatorId,
     @VisibleForTesting
-    val sequencerClient: RichSequencerClient,
+    val sequencerClient: SequencerClient,
     val topologyClient: DomainTopologyClientWithInit,
     private[canton] val syncCrypto: DomainSyncCryptoClient,
     topologyTransactionProcessor: TopologyTransactionProcessorCommon,
     val topologyManagerStatusO: Option[TopologyManagerStatus],
-    val domainOutboxStatusO: Option[DomainOutboxStatus],
     timeTrackerConfig: DomainTimeTrackerConfig,
     state: MediatorState,
     private[canton] val sequencerCounterTrackerStore: SequencerCounterTrackerStore,
@@ -91,7 +85,7 @@ private[mediator] class Mediator(
       clock,
       logger,
       parameters.delayLoggingThreshold,
-      metrics.sequencerClient.handler.delay,
+      metrics.sequencerClient.delay,
     )
 
   val timeTracker = DomainTimeTracker(
@@ -106,7 +100,7 @@ private[mediator] class Mediator(
   private val verdictSender =
     VerdictSender(sequencerClient, syncCrypto, mediatorId, protocolVersion, loggerFactory)
 
-  private val processor = new TransactionConfirmationResponseProcessor(
+  private val processor = new ConfirmationResponseProcessor(
     domain,
     mediatorId,
     verdictSender,
@@ -306,7 +300,7 @@ private[mediator] class Mediator(
               )
 
               if (rootHashMessages.nonEmpty) {
-                // In this case, we assume it is a Mediator Confirmation Request message
+                // In this case, we assume it is a Mediator Request message
                 sendMalformedRejection(
                   rootHashMessages,
                   closedEvent.timestamp,
@@ -315,12 +309,7 @@ private[mediator] class Mediator(
               } else Future.unit
             }
 
-            (
-              Traced(openEvent -> closedSignedEvent.signedEvent.timestampOfSigningKey)(
-                closedSignedEvent.traceContext
-              ),
-              rejectionsF,
-            )
+            (Traced(openEvent)(closedSignedEvent.traceContext), rejectionsF)
           }
 
           val (tracedOpenEvents, rejectionsF) = tracedOpenEventsWithRejectionsF.unzip
@@ -394,7 +383,7 @@ private[mediator] object Mediator {
       domainParameters: DynamicDomainParametersWithValidity,
       cleanTs: CantonTimestamp,
   ): PruningSafetyCheck = {
-    lazy val timeout = domainParameters.parameters.confirmationResponseTimeout
+    lazy val timeout = domainParameters.parameters.participantResponseTimeout
     lazy val cappedSafePruningTs = domainParameters.validFrom.max(cleanTs - timeout)
 
     if (cleanTs <= domainParameters.validFrom) // If these parameters apply only to the future

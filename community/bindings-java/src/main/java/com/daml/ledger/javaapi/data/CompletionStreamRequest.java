@@ -3,57 +3,55 @@
 
 package com.daml.ledger.javaapi.data;
 
-import com.daml.ledger.api.v2.CommandCompletionServiceOuterClass;
-import org.checkerframework.checker.nullness.qual.NonNull;
-
-import java.util.List;
+import com.daml.ledger.api.v1.CommandCompletionServiceOuterClass;
+import java.util.HashSet;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 
 public final class CompletionStreamRequest {
 
-  @NonNull private final String applicationId;
+  private final String ledgerId;
 
-  @NonNull private final List<@NonNull String> parties;
+  private final String applicationId;
 
-  @NonNull private final ParticipantOffset beginExclusive;
+  private final Set<String> parties;
 
-  public CompletionStreamRequest(
-      @NonNull String applicationId,
-      @NonNull List<@NonNull String> parties,
-      @NonNull ParticipantOffset beginExclusive) {
-    this.applicationId = applicationId;
-    this.parties = List.copyOf(parties);
-    this.beginExclusive = beginExclusive;
-  }
-
-  @NonNull
-  public String getApplicationId() {
-    return applicationId;
-  }
-
-  @NonNull
-  public List<@NonNull String> getParties() {
-    return parties;
-  }
-
-  public ParticipantOffset getBeginExclusive() {
-    return beginExclusive;
-  }
+  private final Optional<LedgerOffset> offset;
 
   public static CompletionStreamRequest fromProto(
       CommandCompletionServiceOuterClass.CompletionStreamRequest request) {
-    return new CompletionStreamRequest(
-        request.getApplicationId(),
-        request.getPartiesList(),
-        ParticipantOffset.fromProto(request.getBeginExclusive()));
+    String ledgerId = request.getLedgerId();
+    String applicationId = request.getApplicationId();
+    HashSet<String> parties = new HashSet<>(request.getPartiesList());
+    LedgerOffset offset = LedgerOffset.fromProto(request.getOffset());
+    return new CompletionStreamRequest(ledgerId, applicationId, parties, offset);
   }
 
   public CommandCompletionServiceOuterClass.CompletionStreamRequest toProto() {
-    return CommandCompletionServiceOuterClass.CompletionStreamRequest.newBuilder()
-        .setApplicationId(applicationId)
-        .addAllParties(parties)
-        .setBeginExclusive(beginExclusive.toProto())
-        .build();
+    CommandCompletionServiceOuterClass.CompletionStreamRequest.Builder protoBuilder =
+        CommandCompletionServiceOuterClass.CompletionStreamRequest.newBuilder()
+            .setLedgerId(this.ledgerId)
+            .setApplicationId(this.applicationId)
+            .addAllParties(this.parties);
+    this.offset.ifPresent(offset -> protoBuilder.setOffset(offset.toProto()));
+    return protoBuilder.build();
+  }
+
+  @Override
+  public String toString() {
+    return "CompletionStreamRequest{"
+        + "ledgerId='"
+        + ledgerId
+        + '\''
+        + ", applicationId='"
+        + applicationId
+        + '\''
+        + ", parties="
+        + parties
+        + ", offset="
+        + offset
+        + '}';
   }
 
   @Override
@@ -61,26 +59,56 @@ public final class CompletionStreamRequest {
     if (this == o) return true;
     if (o == null || getClass() != o.getClass()) return false;
     CompletionStreamRequest that = (CompletionStreamRequest) o;
-    return Objects.equals(applicationId, that.applicationId)
+    return Objects.equals(ledgerId, that.ledgerId)
+        && Objects.equals(applicationId, that.applicationId)
         && Objects.equals(parties, that.parties)
-        && Objects.equals(beginExclusive, that.beginExclusive);
+        && Objects.equals(offset, that.offset);
   }
 
   @Override
   public int hashCode() {
 
-    return Objects.hash(applicationId, parties, beginExclusive);
+    return Objects.hash(ledgerId, applicationId, parties, offset);
   }
 
-  @Override
-  public String toString() {
-    return "CompletionStreamRequest{"
-        + "applicationId="
-        + applicationId
-        + ", parties="
-        + parties
-        + ", beginExclusive="
-        + beginExclusive
-        + '}';
+  public String getLedgerId() {
+
+    return ledgerId;
+  }
+
+  public String getApplicationId() {
+    return applicationId;
+  }
+
+  public Set<String> getParties() {
+    return parties;
+  }
+
+  /**
+   * @deprecated Legacy, nullable version of {@link #getLedgerOffset()}, which should be used
+   *     instead.
+   */
+  @Deprecated
+  public LedgerOffset getOffset() {
+    return offset.orElse(null);
+  }
+
+  public Optional<LedgerOffset> getLedgerOffset() {
+    return offset;
+  }
+
+  public CompletionStreamRequest(String ledgerId, String applicationId, Set<String> parties) {
+    this.ledgerId = ledgerId;
+    this.applicationId = applicationId;
+    this.parties = parties;
+    this.offset = Optional.empty();
+  }
+
+  public CompletionStreamRequest(
+      String ledgerId, String applicationId, Set<String> parties, LedgerOffset offset) {
+    this.ledgerId = ledgerId;
+    this.applicationId = applicationId;
+    this.parties = parties;
+    this.offset = Optional.of(offset);
   }
 }

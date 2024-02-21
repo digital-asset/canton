@@ -36,9 +36,7 @@ trait SequencerClientTransportFactory {
       executionSequencerFactory: ExecutionSequencerFactory,
       materializer: Materializer,
       traceContext: TraceContext,
-  ): EitherT[Future, String, NonEmpty[
-    Map[SequencerAlias, SequencerClientTransport & SequencerClientTransportPekko]
-  ]] =
+  ): EitherT[Future, String, NonEmpty[Map[SequencerAlias, SequencerClientTransport]]] =
     MonadUtil
       .sequentialTraverse(sequencerConnections.connections)(conn =>
         makeTransport(conn, member, requestSigner)
@@ -83,13 +81,12 @@ trait SequencerClientTransportFactory {
       connection: SequencerConnection,
       member: Member,
       requestSigner: RequestSigner,
-      allowReplay: Boolean = true,
   )(implicit
       executionContext: ExecutionContextExecutor,
       executionSequencerFactory: ExecutionSequencerFactory,
       materializer: Materializer,
       traceContext: TraceContext,
-  ): EitherT[Future, String, SequencerClientTransport & SequencerClientTransportPekko]
+  ): EitherT[Future, String, SequencerClientTransport]
 
   def validateTransport(
       connection: SequencerConnection,

@@ -11,7 +11,6 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.client.DomainTopologyClient
 import com.digitalasset.canton.topology.processing.*
-import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -39,40 +38,35 @@ class MissingKeysAlerter(
     }
   }
 
-  def attachToTopologyProcessorX(): TopologyTransactionProcessingSubscriberX =
-    new TopologyTransactionProcessingSubscriberX {
+  def attachToTopologyProcessorOld(): TopologyTransactionProcessingSubscriber =
+    new TopologyTransactionProcessingSubscriber {
       override def observed(
           sequencedTimestamp: SequencedTime,
           effectiveTimestamp: EffectiveTime,
           sequencerCounter: SequencerCounter,
-          transactions: Seq[GenericSignedTopologyTransactionX],
+          transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
       )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
         FutureUnlessShutdown.pure(
-          processTransactionsX(effectiveTimestamp.value, transactions)
+          processTransactions(effectiveTimestamp.value, transactions)
         )
     }
 
-  private def processTransactionsX(
+  private def processTransactions(
       timestamp: CantonTimestamp,
-      transactions: Seq[GenericSignedTopologyTransactionX],
+      transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
   )(implicit traceContext: TraceContext): Unit = {
     // scan state and alarm if the domain suggest that I use a key which I don't have
     transactions.view
-      .filter(tx => tx.operation == TopologyChangeOpX.Replace && !tx.isProposal)
-      .map(_.transaction.mapping)
+      .filter(_.operation == TopologyChangeOp.Add)
+      .map(_.transaction.element.mapping)
       .foreach {
-        case ParticipantDomainPermissionX(
-              `domainId`,
-              `participantId`,
-              permission,
-              _,
-              _,
-            ) =>
+        case ParticipantState(side, `domainId`, `participantId`, permission, trustLevel)
+            if side != RequestSide.To =>
           logger.info(
-            s"Domain $domainId update my participant permission as of $timestamp to $permission"
+            s"Domain $domainId update my participant permission as of $timestamp to $permission, $trustLevel"
           )
-        case OwnerToKeyMappingX(`participantId`, _, keys) =>
-          keys.foreach(k => alertOnMissingKey(k.fingerprint, k.purpose))
+        case okm @ OwnerToKeyMapping(`participantId`, _) =>
+          alertOnMissingKey(okm.key.fingerprint, okm.key.purpose)
         case _ => ()
       }
   }

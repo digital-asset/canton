@@ -67,6 +67,7 @@ class SequencerAuthenticationServerInterceptorTest
       domainId,
       null,
       store,
+      None,
       new SimClock(loggerFactory = loggerFactory),
       JDuration.ofMinutes(1),
       JDuration.ofHours(1),

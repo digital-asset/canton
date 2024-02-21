@@ -72,7 +72,11 @@ object CryptoProvider {
         protocolVersion: ProtocolVersion
     ): NonEmpty[Set[CryptoKeyFormat]] =
       // Since Canton v2.7/PV5 we support Raw/DER through conversion
-      NonEmpty(Set, CryptoKeyFormat.Tink, CryptoKeyFormat.Raw, CryptoKeyFormat.Der)
+      if (protocolVersion >= ProtocolVersion.v5)
+        NonEmpty(Set, CryptoKeyFormat.Tink, CryptoKeyFormat.Raw, CryptoKeyFormat.Der)
+      else
+        NonEmpty.mk(Set, CryptoKeyFormat.Tink)
+
   }
 
   trait JceCryptoProvider extends CryptoProvider {
@@ -116,7 +120,10 @@ object CryptoProvider {
         protocolVersion: ProtocolVersion
     ): NonEmpty[Set[CryptoKeyFormat]] =
       // Since Canton v2.7/PV5 we support Tink through conversion
-      NonEmpty(Set, CryptoKeyFormat.Raw, CryptoKeyFormat.Der, CryptoKeyFormat.Tink)
+      if (protocolVersion >= ProtocolVersion.v5)
+        NonEmpty(Set, CryptoKeyFormat.Raw, CryptoKeyFormat.Der, CryptoKeyFormat.Tink)
+      else
+        NonEmpty(Set, CryptoKeyFormat.Raw, CryptoKeyFormat.Der)
   }
 
 }

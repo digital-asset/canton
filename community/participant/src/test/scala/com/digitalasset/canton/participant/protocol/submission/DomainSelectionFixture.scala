@@ -40,23 +40,21 @@ private[submission] object DomainSelectionFixture extends TestIdFactory {
     }.last
 
   lazy val fixtureLanguageVersion: LanguageVersion = {
-    // TODO(#14706): map fixtureTransactionVersion to the right 2.x LF version once there is a 1:1 correspondance
-    //  between the two versions
-    LanguageVersion.v2_1
+    LanguageVersion
+      .fromString(s"1.${fixtureTransactionVersion.protoValue}")
+      .fold(err => throw new IllegalArgumentException(err), identity)
   }
 
   /*
   Simple topology, with two parties (signatory, observer) each connected to one
-  participant (submittingParticipantId, observerParticipantId)
+  participant (submitterParticipantId, observerParticipantId)
    */
   object SimpleTopology {
     val submitterParticipantId: ParticipantId = ParticipantId("submitter")
     val observerParticipantId: ParticipantId = ParticipantId("counter")
-    val participantId3: ParticipantId = ParticipantId("participant3")
 
     val signatory: LfPartyId = LfPartyId.assertFromString("signatory::default")
     val observer: LfPartyId = LfPartyId.assertFromString("observer::default")
-    val party3: LfPartyId = LfPartyId.assertFromString("party3::default")
 
     val correctTopology: Map[LfPartyId, List[ParticipantId]] = Map(
       signatory -> List(submitterParticipantId),
@@ -68,12 +66,13 @@ private[submission] object DomainSelectionFixture extends TestIdFactory {
         packages: Seq[LfPackageId] = Seq(),
     ): TopologySnapshot = {
       val participants = topology.values.flatten
-      val testingIdentityFactory = TestingTopologyX(
+      val testingIdentityFactory = TestingTopology(
         topology = topology.map { case (partyId, participantIds) =>
           partyId -> participantIds.map(_ -> Submission).toMap
         },
-        participants = participants.map(_ -> ParticipantAttributes(Submission)).toMap,
-        packages = participants.view.map(_ -> packages).toMap,
+        participants =
+          participants.map(_ -> ParticipantAttributes(Submission, TrustLevel.Vip)).toMap,
+        packages = participants.view.map(VettedPackages(_, packages)).toSeq,
       ).build()
 
       testingIdentityFactory.topologySnapshot()
@@ -148,7 +147,7 @@ private[submission] object DomainSelectionFixture extends TestIdFactory {
 
       private val value =
         inputContractIds.map[NodeWrapper](buildExerciseNode(version, _, signatory, observer))
-      val tx: LfVersionedTransaction = toVersionedTransaction(value*)
+      val tx: LfVersionedTransaction = toVersionedTransaction(value *)
 
     }
 

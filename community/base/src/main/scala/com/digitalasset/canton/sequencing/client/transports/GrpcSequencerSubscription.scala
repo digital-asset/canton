@@ -6,7 +6,7 @@ package com.digitalasset.canton.sequencing.client.transports
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.domain.api.v30
+import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -46,18 +46,18 @@ final case class GrpcSubscriptionUnexpectedException(exception: Throwable)
     extends SubscriptionCloseReason.SubscriptionError
 
 trait HasProtoTraceContext[R] {
-  def traceContext(value: R): Option[com.digitalasset.canton.v30.TraceContext]
+  def traceContext(value: R): Option[com.digitalasset.canton.v0.TraceContext]
 }
 object HasProtoTraceContext {
-  implicit val subscriptionResponseTraceContext: HasProtoTraceContext[v30.SubscriptionResponse] =
-    new HasProtoTraceContext[v30.SubscriptionResponse] {
-      override def traceContext(value: v30.SubscriptionResponse) = value.traceContext
+  implicit val subscriptionResponseTraceContext: HasProtoTraceContext[v0.SubscriptionResponse] =
+    new HasProtoTraceContext[v0.SubscriptionResponse] {
+      override def traceContext(value: v0.SubscriptionResponse) = value.traceContext
     }
 
   implicit val versionedSubscriptionResponseTraceContext
-      : HasProtoTraceContext[v30.VersionedSubscriptionResponse] =
-    new HasProtoTraceContext[v30.VersionedSubscriptionResponse] {
-      override def traceContext(value: v30.VersionedSubscriptionResponse) = value.traceContext
+      : HasProtoTraceContext[v0.VersionedSubscriptionResponse] =
+    new HasProtoTraceContext[v0.VersionedSubscriptionResponse] {
+      override def traceContext(value: v0.VersionedSubscriptionResponse) = value.traceContext
     }
 }
 
@@ -65,6 +65,7 @@ object HasProtoTraceContext {
 class GrpcSequencerSubscription[E, R: HasProtoTraceContext] private[transports] (
     context: CancellableContext,
     callHandler: Traced[R] => Future[Either[E, Unit]],
+    metrics: SequencerClientMetrics,
     override val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -139,7 +140,7 @@ class GrpcSequencerSubscription[E, R: HasProtoTraceContext] private[transports] 
       AsyncCloseable(
         "grpc-sequencer-subscription",
         completionF,
-        timeouts.shutdownShort,
+        timeouts.shutdownShort.duration,
         onTimeout = onTimeout,
       ),
     )
@@ -152,7 +153,7 @@ class GrpcSequencerSubscription[E, R: HasProtoTraceContext] private[transports] 
       // so it is available here for logging
       implicit val traceContext: TraceContext =
         SerializableTraceContext
-          .fromProtoSafeV30Opt(loggerWithoutTracing(logger))(
+          .fromProtoSafeV0Opt(loggerWithoutTracing(logger))(
             implicitly[HasProtoTraceContext[R]].traceContext(value)
           )
           .unwrap
@@ -256,6 +257,27 @@ class GrpcSequencerSubscription[E, R: HasProtoTraceContext] private[transports] 
 }
 
 object GrpcSequencerSubscription {
+  def fromSubscriptionResponse[E](
+      context: CancellableContext,
+      handler: SerializedEventHandler[E],
+      metrics: SequencerClientMetrics,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+  )(protocolVersion: ProtocolVersion)(implicit
+      executionContext: ExecutionContext
+  ): GrpcSequencerSubscription[E, v0.SubscriptionResponse] =
+    new GrpcSequencerSubscription(
+      context,
+      deserializingSubscriptionHandler(
+        handler,
+        (value, traceContext) =>
+          SubscriptionResponse.fromProtoV0(protocolVersion)(value)(traceContext),
+      ),
+      metrics,
+      timeouts,
+      loggerFactory,
+    )
+
   def fromVersionedSubscriptionResponse[E](
       context: CancellableContext,
       handler: SerializedEventHandler[E],
@@ -264,14 +286,15 @@ object GrpcSequencerSubscription {
       loggerFactory: NamedLoggerFactory,
   )(protocolVersion: ProtocolVersion)(implicit
       executionContext: ExecutionContext
-  ): GrpcSequencerSubscription[E, v30.VersionedSubscriptionResponse] =
+  ): GrpcSequencerSubscription[E, v0.VersionedSubscriptionResponse] =
     new GrpcSequencerSubscription(
       context,
       deserializingSubscriptionHandler(
         handler,
         (value, traceContext) =>
-          SubscriptionResponse.fromVersionedProtoV30(protocolVersion)(value)(traceContext),
+          SubscriptionResponse.fromVersionedProtoV0(protocolVersion)(value)(traceContext),
       ),
+      metrics,
       timeouts,
       loggerFactory,
     )

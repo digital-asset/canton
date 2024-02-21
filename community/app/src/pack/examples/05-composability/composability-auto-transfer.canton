@@ -1,38 +1,23 @@
 // Composability tutorial part 1 - auto transfers section
 
-// create the domains
-val iouAlias = "iou"
-val paintAlias = "paint"
-
-val iouDomainOwner = iou_sequencer
-val iouId = bootstrap.domain(
-  iouAlias,
-  sequencers = Seq(iou_sequencer),
-  mediators = Seq(iou_mediator),
-  domainOwners = Seq(iouDomainOwner)
-)
-
-val paintDomainOwner = paint_sequencer
-val paintId = bootstrap.domain(
-  paintAlias,
-  sequencers = Seq(paint_sequencer),
-  mediators = Seq(paint_mediator),
-  domainOwners = Seq(paintDomainOwner)
-)
-
 // update parameters
-// disable automatic assignments
-iouDomainOwner.topology.domain_parameters
-  .set_transfer_exclusivity_timeout(iouId, 0 seconds)
-paintDomainOwner.topology.domain_parameters
-  .set_transfer_exclusivity_timeout(paintId, 2 seconds)
+iou.service.update_dynamic_domain_parameters(
+  _.update(transferExclusivityTimeout = Duration.Zero)
+) // disable automatic transfer-in
 
-// connect participants to the domains
-participant1.domains.connect_local(iou_sequencer, alias = iouAlias)
-participant2.domains.connect_local(iou_sequencer, alias = iouAlias)
-participant3.domains.connect_local(iou_sequencer, alias = iouAlias)
-participant2.domains.connect_local(paint_sequencer, alias = paintAlias)
-participant3.domains.connect_local(paint_sequencer, alias = paintAlias)
+paint.service.update_dynamic_domain_parameters(
+  _.update(transferExclusivityTimeout = 2.seconds)
+)
+
+// connect participants to the domain
+participant1.domains.connect_local(iou)
+participant2.domains.connect_local(iou)
+participant3.domains.connect_local(iou)
+participant2.domains.connect_local(paint)
+participant3.domains.connect_local(paint)
+
+val paintAlias = paint.name
+val iouAlias = iou.name
 
 // create the parties
 val Bank = participant1.parties.enable("Bank")
@@ -46,7 +31,7 @@ participant3.parties.await_topology_observed(partyAssignment)
 
 // upload the Daml model to all participants
 val darPath = Option(System.getProperty("canton-examples.dar-path")).getOrElse("dars/CantonExamples.dar")
-participantsX.all.dars.upload(darPath)
+participants.all.dars.upload(darPath)
 
 import com.digitalasset.canton.BigDecimalImplicits._
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
@@ -65,14 +50,14 @@ val createIouCmd = new Iou(
   List.empty.asJava
 ).create.commands.asScala.toSeq
 val Seq(iouContractUnshared) = decodeAllCreated(Iou.COMPANION)(
-  participant1.ledger_api.javaapi.commands.submit_flat(Seq(Bank), createIouCmd, domainId = Some(iouId)))
+  participant1.ledger_api.javaapi.commands.submit_flat(Seq(Bank), createIouCmd))
+
 // Wait until the house owner sees the IOU in the active contract store
-participant2.ledger_api.state.acs.await_active_contract(HouseOwner, iouContractUnshared.id.toLf)
+participant2.ledger_api.acs.await_active_contract(HouseOwner, iouContractUnshared.id.toLf)
 
 // The house owner adds the Painter as an observer on the IOU
 val showIouCmd = iouContractUnshared.id.exerciseShare(Painter.toProtoPrimitive).commands.asScala.toSeq
-val Seq(iouContract) = decodeAllCreated(Iou.COMPANION)(
-  participant2.ledger_api.javaapi.commands.submit_flat(Seq(HouseOwner), showIouCmd, domainId = Some(iouId)))
+val Seq(iouContract) = decodeAllCreated(Iou.COMPANION)(participant2.ledger_api.javaapi.commands.submit_flat(Seq(HouseOwner), showIouCmd))
 
 // The house owner creates a paint offer using participant 2 and the Paint domain
 val paintOfferCmd = new OfferToPaintHouseByOwner(
@@ -82,16 +67,16 @@ val paintOfferCmd = new OfferToPaintHouseByOwner(
   iouContract.id
 ).create.commands.asScala.toSeq
 val Seq(paintOffer) = decodeAllCreated(OfferToPaintHouseByOwner.COMPANION)(
-  participant2.ledger_api.javaapi.commands.submit_flat(Seq(HouseOwner), paintOfferCmd, domainId = Some(paintId)))
+  participant2.ledger_api.javaapi.commands.submit_flat(Seq(HouseOwner), paintOfferCmd, workflowId = paint.name))
 // architecture-handbook-entry-end: creation
 
 // architecture-handbook-entry-begin: accept
 // Wait until the painter sees the paint offer in the active contract store
-participant3.ledger_api.state.acs.await_active_contract(Painter, paintOffer.id.toLf)
+participant3.ledger_api.acs.await_active_contract(Painter, paintOffer.id.toLf)
 
 // Painter accepts the paint offer on the IOU domain
 val acceptCmd = paintOffer.id.exerciseAcceptByPainter().commands.asScala.toSeq
-val acceptTx = participant3.ledger_api.javaapi.commands.submit_flat(Seq(Painter), acceptCmd, domainId = Some(iouId))
+val acceptTx = participant3.ledger_api.javaapi.commands.submit_flat(Seq(Painter), acceptCmd)
 val Seq(painterIou) = decodeAllCreated(Iou.COMPANION)(acceptTx)
 val Seq(paintHouse) = decodeAllCreated(PaintHouse.COMPANION)(acceptTx)
 // architecture-handbook-entry-end: accept
@@ -101,6 +86,6 @@ val Seq(paintHouse) = decodeAllCreated(PaintHouse.COMPANION)(acceptTx)
 participant3.ledger_api.javaapi.commands.submit_flat(
   Seq(Painter),
   painterIou.id.exerciseCall().commands.asScala.toSeq,
-  domainId = Some(iouId)
+  iou.name
 )
 // architecture-handbook-entry-end: cash

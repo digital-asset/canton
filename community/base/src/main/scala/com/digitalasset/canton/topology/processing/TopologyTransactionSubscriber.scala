@@ -5,7 +5,7 @@ package com.digitalasset.canton.topology.processing
 
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
+import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
 import com.digitalasset.canton.tracing.TraceContext
 
 trait TopologyTransactionProcessingSubscriberCommon {
@@ -29,15 +29,14 @@ trait TopologyTransactionProcessingSubscriberCommon {
   )(implicit traceContext: TraceContext): Unit = ()
 }
 
-// TODO(#15161) callapse with base trait
-trait TopologyTransactionProcessingSubscriberX
+trait TopologyTransactionProcessingSubscriber
     extends TopologyTransactionProcessingSubscriberCommon {
 
   def observed(
       sequencedTimestamp: SequencedTime,
       effectiveTimestamp: EffectiveTime,
       sequencerCounter: SequencerCounter,
-      transactions: Seq[GenericSignedTopologyTransactionX],
+      transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 
 }

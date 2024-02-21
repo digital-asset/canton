@@ -7,7 +7,7 @@ import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.data.{Bytes, ImmArray}
-import com.daml.lf.transaction.Versioned
+import com.daml.lf.transaction.{Util, Versioned}
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.{
   ValueContractId,
@@ -25,26 +25,29 @@ import com.digitalasset.canton.data.TransactionViewDecomposition.{NewView, SameV
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationDuration
-import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
+import com.digitalasset.canton.protocol.ExampleTransactionFactory.{contractInstance, *}
 import com.digitalasset.canton.protocol.SerializableContract.LedgerCreateTime
-import com.digitalasset.canton.sequencing.protocol.MediatorsOfDomain
-import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.transaction.ParticipantAttributes
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Confirmation,
   Observation,
   Submission,
 }
+import com.digitalasset.canton.topology.transaction.{
+  ParticipantAttributes,
+  TrustLevel,
+  VettedPackages,
+}
 import com.digitalasset.canton.topology.{
   DomainId,
+  MediatorId,
+  MediatorRef,
   ParticipantId,
-  TestingIdentityFactoryX,
-  TestingTopologyX,
+  TestingIdentityFactory,
+  TestingTopology,
   UniqueIdentifier,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty.*
 import com.digitalasset.canton.util.LfTransactionUtil.{
   metadataFromCreate,
   metadataFromExercise,
@@ -69,12 +72,9 @@ object ExampleTransactionFactory {
   val languageVersion = LfTransactionBuilder.defaultLanguageVersion
   val packageId = LfTransactionBuilder.defaultPackageId
   val templateId = LfTransactionBuilder.defaultTemplateId
-  val packageName = LfTransactionBuilder.defaultPackageName
   val someOptUsedPackages = Some(Set(packageId))
   val defaultGlobalKey = LfTransactionBuilder.defaultGlobalKey
   val transactionVersion = LfTransactionBuilder.defaultTransactionVersion
-
-  private val random = new Random(0)
 
   private def valueCapturing(coid: List[LfContractId]): Value = {
     val captives = coid.map(c => (None, ValueContractId(c)))
@@ -87,11 +87,10 @@ object ExampleTransactionFactory {
   def contractInstance(
       capturedIds: Seq[LfContractId] = Seq.empty,
       templateId: LfTemplateId = templateId,
-      packageName: LfPackageName = packageName,
   ): LfContractInst =
     LfContractInst(
-      packageName = packageName,
       template = templateId,
+      packageName = None,
       arg = versionedValueCapturing(capturedIds.toList),
     )
 
@@ -105,7 +104,7 @@ object ExampleTransactionFactory {
     LfVersioned(transactionVersion, veryDeepValue)
 
   val veryDeepContractInstance: LfContractInst =
-    LfContractInst(packageName = packageName, template = templateId, arg = veryDeepVersionedValue)
+    LfContractInst(template = templateId, packageName = None, arg = veryDeepVersionedValue)
 
   def globalKey(
       templateId: LfTemplateId,
@@ -113,7 +112,7 @@ object ExampleTransactionFactory {
   ): Versioned[LfGlobalKey] =
     LfVersioned(
       transactionVersion,
-      LfGlobalKey.assertBuild(templateId, value),
+      LfGlobalKey.assertBuild(templateId, value, Util.sharedKey(transactionVersion)),
     )
 
   def globalKeyWithMaintainers(
@@ -133,8 +132,8 @@ object ExampleTransactionFactory {
   ): LfNodeFetch =
     LfNodeFetch(
       coid = cid,
-      packageName = packageName,
       templateId = templateId,
+      packageName = None,
       actingParties = actingParties,
       signatories = signatories,
       stakeholders = signatories ++ observers,
@@ -149,13 +148,15 @@ object ExampleTransactionFactory {
       signatories: Set[LfPartyId] = Set.empty,
       observers: Set[LfPartyId] = Set.empty,
       key: Option[LfGlobalKeyWithMaintainers] = None,
+      agreementText: String = "",
   ): LfNodeCreate = {
     val unversionedContractInst = contractInstance.unversioned
     LfNodeCreate(
       coid = cid,
-      packageName = unversionedContractInst.packageName,
       templateId = unversionedContractInst.template,
+      packageName = None,
       arg = unversionedContractInst.arg,
+      agreementText = agreementText,
       signatories = signatories,
       stakeholders = signatories ++ observers,
       keyOpt = key,
@@ -176,12 +177,11 @@ object ExampleTransactionFactory {
       key: Option[LfGlobalKeyWithMaintainers] = None,
       byKey: Boolean = false,
       templateId: LfTemplateId = templateId,
-      packageName: LfPackageName = packageName,
   ): LfNodeExercises =
     LfNodeExercises(
       targetCoid = targetCoid,
-      packageName = packageName,
       templateId = templateId,
+      packageName = None,
       interfaceId = None,
       choiceId = LfChoiceName.assertFromString("choice"),
       consuming = consuming,
@@ -225,8 +225,7 @@ object ExampleTransactionFactory {
   ): LfNodeLookupByKey =
     LfNodeLookupByKey(
       templateId = key.templateId,
-      // TODO(#16362): This should be taken from the LfGlobalKey which currently does not have it
-      packageName = packageName,
+      packageName = None,
       key = LfGlobalKeyWithMaintainers(key, maintainers),
       result = resolution,
       version = transactionVersion,
@@ -239,7 +238,7 @@ object ExampleTransactionFactory {
   )() // avoiding dependency on SeedService.staticRandom after move to ledger api server
 
   def transaction(rootIndices: Seq[Int], nodes: LfNode*): LfVersionedTransaction =
-    transactionFrom(rootIndices, 0, nodes*)
+    transactionFrom(rootIndices, 0, nodes *)
 
   def transactionFrom(
       rootIndices: Seq[Int],
@@ -250,7 +249,7 @@ object ExampleTransactionFactory {
 
     val nodesMap = HashMap(nodes.zipWithIndex.map { case (node, index) =>
       (nodeId(index + startIndex), node)
-    }*)
+    } *)
 
     val version = protocol.maxTransactionVersion(
       NonEmpty
@@ -289,9 +288,12 @@ object ExampleTransactionFactory {
   def rootViewPosition(index: Int, total: Int): ViewPosition =
     ViewPosition(List(MerkleSeq.indicesFromSeq(total)(index)))
 
-  def asSerializableRaw(contractInstance: LfContractInst): SerializableRawContractInstance =
+  def asSerializableRaw(
+      contractInstance: LfContractInst,
+      agreementText: String,
+  ): SerializableRawContractInstance =
     SerializableRawContractInstance
-      .create(contractInstance)
+      .create(contractInstance, AgreementText(agreementText))
       .fold(err => throw new IllegalArgumentException(err.toString), Predef.identity)
 
   def asSerializable(
@@ -299,11 +301,12 @@ object ExampleTransactionFactory {
       contractInstance: LfContractInst = this.contractInstance(),
       metadata: ContractMetadata = ContractMetadata.tryCreate(Set.empty, Set(this.signatory), None),
       ledgerTime: CantonTimestamp = CantonTimestamp.Epoch,
-      salt: Salt = TestSalt.generateSalt(random.nextInt()),
+      salt: Salt = TestSalt.generateSalt(0),
+      agreementText: String = "",
   ): SerializableContract =
     SerializableContract(
       contractId,
-      asSerializableRaw(contractInstance),
+      asSerializableRaw(contractInstance, agreementText),
       metadata,
       LedgerCreateTime(ledgerTime),
       Some(salt),
@@ -318,16 +321,17 @@ object ExampleTransactionFactory {
       node.versionedCoinst,
       metadataFromCreate(node),
       salt = salt,
+      agreementText = node.agreementText,
     )
   }
 
   // Parties and participants
 
-  val submittingParticipant: ParticipantId = ParticipantId("submittingParticipant")
+  val submitterParticipant: ParticipantId = ParticipantId("submitterParticipant")
   val signatoryParticipant: ParticipantId = ParticipantId("signatoryParticipant")
   val signatory: LfPartyId = LfPartyId.assertFromString("signatory::default")
   val observer: LfPartyId = LfPartyId.assertFromString("observer::default")
-  val submitter: LfPartyId = submittingParticipant.adminParty.toLf
+  val submitter: LfPartyId = submitterParticipant.adminParty.toLf
   val submitters: List[LfPartyId] = List(submitter)
 
   // Request metadata
@@ -336,10 +340,10 @@ object ExampleTransactionFactory {
   val commandId: CommandId = DefaultDamlValues.commandId()
   val workflowId: WorkflowId = WorkflowId.assertFromString("testWorkflowId")
 
-  val defaultTestingTopology: TestingTopologyX =
-    TestingTopologyX(
+  val defaultTestingTopology: TestingTopology =
+    TestingTopology(
       topology = Map(
-        submitter -> Map(submittingParticipant -> Submission),
+        submitter -> Map(submitterParticipant -> Submission),
         signatory -> Map(
           signatoryParticipant -> Confirmation
         ),
@@ -347,15 +351,13 @@ object ExampleTransactionFactory {
           signatoryParticipant -> Observation
         ),
       ),
-      participants = Map(submittingParticipant -> ParticipantAttributes(Submission)),
-      packages = Seq(submittingParticipant, signatoryParticipant)
-        .map(
-          _ -> Seq(ExampleTransactionFactory.packageId)
-        )
-        .toMap,
+      participants = Map(submitterParticipant -> ParticipantAttributes(Submission, TrustLevel.Vip)),
+      packages = Seq(submitterParticipant, signatoryParticipant).map(
+        VettedPackages(_, Seq(ExampleTransactionFactory.packageId))
+      ),
     )
 
-  def defaultTestingIdentityFactory: TestingIdentityFactoryX =
+  def defaultTestingIdentityFactory: TestingIdentityFactory =
     defaultTestingTopology.build()
 
   // Topology
@@ -378,7 +380,7 @@ object ExampleTransactionFactory {
   * Also provides convenience methods for creating [[ExampleTransaction]]s and parts thereof.
   */
 class ExampleTransactionFactory(
-    val cryptoOps: HashOps with HmacOps with HkdfOps with RandomOps = new SymbolicPureCrypto,
+    val cryptoOps: HashOps & HmacOps & HkdfOps & RandomOps = new SymbolicPureCrypto,
     versionOverride: Option[ProtocolVersion] = None,
 )(
     val transactionSalt: Salt = TestSalt.generateSalt(0),
@@ -386,7 +388,9 @@ class ExampleTransactionFactory(
     val transactionUuid: UUID = UUID.fromString("11111111-2222-3333-4444-555555555555"),
     val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.Signatory,
     val domainId: DomainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("example::default")),
-    val mediatorGroup: MediatorsOfDomain = MediatorsOfDomain(MediatorGroupIndex.zero),
+    val mediatorRef: MediatorRef = MediatorRef(
+      MediatorId(UniqueIdentifier.tryFromProtoPrimitive("mediator::default"))
+    ),
     val ledgerTime: CantonTimestamp = CantonTimestamp.Epoch,
     val ledgerTimeUsed: CantonTimestamp = CantonTimestamp.Epoch.minusSeconds(1),
     val submissionTime: CantonTimestamp = CantonTimestamp.Epoch.minusMillis(9),
@@ -395,7 +399,7 @@ class ExampleTransactionFactory(
     extends EitherValues {
 
   private val protocolVersion = versionOverride.getOrElse(BaseTest.testedProtocolVersion)
-  private val cantonContractIdVersion = AuthenticatedContractIdVersionV2
+  private val cantonContractIdVersion = CantonContractIdVersion.fromProtocolVersion(protocolVersion)
   private val random = new Random(0)
 
   private def createWithConfirmationPolicy(
@@ -412,7 +416,7 @@ class ExampleTransactionFactory(
     val rootRbContext = RollbackContext.empty
 
     val submittingAdminPartyO =
-      Option.when(isRoot)(submitterMetadata.submittingParticipant.adminParty.toLf)
+      Option.when(isRoot)(submitterMetadata.submitterParticipant.adminParty.toLf)
     confirmationPolicy
       .informeesAndThreshold(rootNode, topologySnapshot)
       .map { case (viewInformees, viewThreshold) =>
@@ -465,7 +469,7 @@ class ExampleTransactionFactory(
         capturedContractIds = Seq(suffixedId(-1, 0), suffixedId(-1, 1)),
         unsuffixedCapturedContractIds = Seq(suffixedId(-1, 0), suffixedId(-1, 1)),
       ),
-      SingleFetch(version = LfTransactionVersion.V31),
+      SingleFetch(version = LfTransactionVersion.V14),
       SingleExercise(seed = deriveNodeSeed(0)),
       SingleExerciseWithNonstakeholderActor(seed = deriveNodeSeed(0)),
       MultipleRoots,
@@ -494,7 +498,7 @@ class ExampleTransactionFactory(
 
   val lfTransactionSeed: LfHash = LfHash.deriveTransactionSeed(
     ExampleTransactionFactory.submissionSeed,
-    ExampleTransactionFactory.submittingParticipant.toLf,
+    ExampleTransactionFactory.submitterParticipant.toLf,
     submissionTime.toLf,
   )
 
@@ -511,20 +515,21 @@ class ExampleTransactionFactory(
       viewIndex: Int,
       createIndex: Int,
       suffixedContractInstance: LfContractInst,
+      agreementText: String,
       metadata: ContractMetadata,
   ): (Salt, Unicum) = {
     val viewParticipantDataSalt = participantDataSalt(viewIndex)
     val (contractSalt, unicum) = unicumGenerator
       .generateSaltAndUnicum(
         domainId,
-        mediatorGroup,
+        mediatorRef,
         transactionUuid,
         viewPosition,
         viewParticipantDataSalt,
         createIndex,
         LedgerCreateTime(ledgerTime),
         metadata,
-        asSerializableRaw(suffixedContractInstance),
+        asSerializableRaw(suffixedContractInstance, agreementText),
         cantonContractIdVersion,
       )
 
@@ -536,6 +541,7 @@ class ExampleTransactionFactory(
       viewIndex: Int,
       createIndex: Int,
       suffixedContractInstance: LfContractInst,
+      agreementText: String,
       discriminator: LfHash,
       signatories: Set[LfPartyId] = Set.empty,
       observers: Set[LfPartyId] = Set.empty,
@@ -552,6 +558,7 @@ class ExampleTransactionFactory(
         viewIndex,
         createIndex,
         suffixedContractInstance,
+        agreementText,
         metadata,
       )
     salt -> cantonContractIdVersion.fromDiscriminator(discriminator, unicum)
@@ -561,7 +568,7 @@ class ExampleTransactionFactory(
     ViewPosition(List(MerkleSeq.indicesFromSeq(total)(index)))
 
   def subViewIndex(index: Int, total: Int): MerklePathElement =
-    TransactionSubviews.indices(total)(index)
+    TransactionSubviews.indices(protocolVersion, total)(index)
 
   @SuppressWarnings(Array("org.wartremover.warts.TryPartial", "org.wartremover.warts.AsInstanceOf"))
   def view(
@@ -577,16 +584,17 @@ class ExampleTransactionFactory(
   ): TransactionView = {
 
     val submittingAdminPartyO =
-      Option.when(isRoot)(submitterMetadata.submittingParticipant.adminParty.toLf)
+      Option.when(isRoot)(submitterMetadata.submitterParticipant.adminParty.toLf)
     val (rawInformees, rawThreshold) =
       Await.result(
         confirmationPolicy.informeesAndThreshold(node, topologySnapshot),
         10.seconds,
       )
-    val (informees, threshold) = confirmationPolicy.withSubmittingAdminParty(submittingAdminPartyO)(
-      rawInformees,
-      rawThreshold,
-    )
+    val (informees, threshold) =
+      confirmationPolicy.withSubmittingAdminParty(submittingAdminPartyO)(
+        rawInformees,
+        rawThreshold,
+      )
 
     val viewCommonData =
       ViewCommonData.create(cryptoOps)(
@@ -648,7 +656,7 @@ class ExampleTransactionFactory(
       rootIndices: Seq[Int],
       nodes: LfNode*
   ): (LfVersionedTransaction, TransactionMetadata) = {
-    val tx = transaction(rootIndices, nodes*)
+    val tx = transaction(rootIndices, nodes *)
     val seeds = inventSeeds(tx)
     (tx, mkMetadata(seeds))
   }
@@ -658,7 +666,7 @@ class ExampleTransactionFactory(
       NonEmpty(Set, submitter),
       applicationId,
       commandId,
-      submittingParticipant,
+      submitterParticipant,
       Salt.tryDeriveSalt(transactionSeed, 0, cryptoOps),
       DefaultDamlValues.submissionId().some,
       DeduplicationDuration(JDuration.ofSeconds(100)),
@@ -668,14 +676,13 @@ class ExampleTransactionFactory(
     )
 
   val commonMetadata: CommonMetadata =
-    CommonMetadata
-      .create(cryptoOps, protocolVersion)(
-        confirmationPolicy,
-        domainId,
-        mediatorGroup,
-        Salt.tryDeriveSalt(transactionSeed, 1, cryptoOps),
-        transactionUuid,
-      )
+    CommonMetadata(cryptoOps, protocolVersion)(
+      confirmationPolicy,
+      domainId,
+      mediatorRef,
+      Salt.tryDeriveSalt(transactionSeed, 1, cryptoOps),
+      transactionUuid,
+    )
 
   val participantMetadata: ParticipantMetadata =
     ParticipantMetadata(cryptoOps)(
@@ -713,10 +720,10 @@ class ExampleTransactionFactory(
         )
     }
 
-  def mkFullInformeeTree(rootViews: MerkleTree[TransactionView]*): FullInformeeTree =
-    FullInformeeTree.tryCreate(
+  def informeeTree(rootViews: MerkleTree[TransactionView]*): InformeeTree =
+    InformeeTree.tryCreate(
       GenTransactionTree.tryCreate(cryptoOps)(
-        submitterMetadata,
+        blinded(submitterMetadata),
         commonMetadata,
         blinded(participantMetadata),
         MerkleSeq.fromSeq(cryptoOps, protocolVersion)(rootViews),
@@ -766,7 +773,7 @@ class ExampleTransactionFactory(
 
     override def keyResolver: LfKeyResolver = Map.empty
 
-    override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
+    override def cryptoOps: HashOps & RandomOps = ExampleTransactionFactory.this.cryptoOps
 
     override def toString: String = "empty transaction"
 
@@ -780,7 +787,10 @@ class ExampleTransactionFactory(
 
     override def transactionTree: GenTransactionTree = genTransactionTree()
 
-    override def fullInformeeTree: FullInformeeTree = mkFullInformeeTree()
+    override def fullInformeeTree: FullInformeeTree = informeeTree().tryToFullInformeeTree
+
+    override def informeeTreeBlindedFor: (Set[LfPartyId], InformeeTree) =
+      (Set.empty[LfPartyId], informeeTree())
 
     override def reinterpretedSubtransactions: Seq[
       (
@@ -816,6 +826,8 @@ class ExampleTransactionFactory(
 
     protected def contractInstance: LfContractInst
 
+    protected def agreementText: String
+
     def lfNode: LfActionNode
 
     def node: LfActionNode
@@ -832,6 +844,7 @@ class ExampleTransactionFactory(
             contractInstance,
             metadataFromCreate(n),
             salt = salt,
+            agreementText = agreementText,
           )
         )
       case _ => Seq.empty
@@ -845,6 +858,7 @@ class ExampleTransactionFactory(
             contractInstance,
             metadataFromExercise(n),
             salt = salt,
+            agreementText = agreementText,
           )
         )
       case n: LfNodeFetch =>
@@ -854,6 +868,7 @@ class ExampleTransactionFactory(
             contractInstance,
             metadataFromFetch(n),
             salt = salt,
+            agreementText = agreementText,
           )
         )
       case _ => Seq.empty
@@ -894,9 +909,12 @@ class ExampleTransactionFactory(
 
     override lazy val transactionTree: GenTransactionTree = genTransactionTree(view0)
 
-    override lazy val fullInformeeTree: FullInformeeTree = mkFullInformeeTree(
+    override lazy val fullInformeeTree: FullInformeeTree = informeeTree(
       blindedForInformeeTree(view0)
-    )
+    ).tryToFullInformeeTree
+
+    override lazy val informeeTreeBlindedFor: (Set[LfPartyId], InformeeTree) =
+      (Set.empty, informeeTree(blinded(view0)))
 
     override lazy val rootTransactionViewTrees: Seq[FullTransactionViewTree] = transactionViewTrees
 
@@ -945,10 +963,13 @@ class ExampleTransactionFactory(
 
     override val contractInstance: LfContractInst =
       ExampleTransactionFactory.contractInstance(capturedContractIds)
+    override val agreementText: String = ""
 
-    val serializableContractInstance: SerializableRawContractInstance = asSerializableRaw(
-      contractInstance
-    )
+    val serializableContractInstance: SerializableRawContractInstance =
+      asSerializableRaw(
+        contractInstance,
+        agreementText,
+      )
 
     val lfContractId: LfContractId = LfContractId.V1(discriminator, Bytes.Empty)
 
@@ -958,6 +979,7 @@ class ExampleTransactionFactory(
         viewIndex,
         0,
         contractInstance,
+        agreementText,
         discriminator,
         signatories,
         observers,
@@ -1005,12 +1027,14 @@ class ExampleTransactionFactory(
       lfContractId: LfContractId = suffixedId(-1, 0),
       contractId: LfContractId = suffixedId(-1, 0),
       fetchedContractInstance: LfContractInst = contractInstance(),
+      fetchedContractAgreementText: String = "single fetch",
       version: LfTransactionVersion = transactionVersion,
       salt: Salt = TestSalt.generateSalt(random.nextInt()),
   ) extends SingleNode(None) {
     override def created: Seq[SerializableContract] = Seq.empty
 
     override val contractInstance: LfContractInst = fetchedContractInstance
+    override val agreementText: String = fetchedContractAgreementText
 
     override def toString: String = "single fetch"
 
@@ -1044,11 +1068,13 @@ class ExampleTransactionFactory(
       lfContractId: LfContractId = suffixedId(-1, 0),
       contractId: LfContractId = suffixedId(-1, 0),
       inputContractInstance: LfContractInst = contractInstance(),
+      inputContractAgreementText: String = "single exercise",
       salt: Salt = TestSalt.generateSalt(random.nextInt()),
   ) extends SingleNode(Some(seed)) {
     override def toString: String = "single exercise"
 
     override val contractInstance: LfContractInst = inputContractInstance
+    override val agreementText: String = inputContractAgreementText
 
     private def genNode(id: LfContractId): LfNodeExercises =
       exerciseNodeWithoutChildren(
@@ -1079,11 +1105,13 @@ class ExampleTransactionFactory(
       lfContractId: LfContractId = suffixedId(-1, 0),
       contractId: LfContractId = suffixedId(-1, 0),
       inputContractInstance: LfContractInst = contractInstance(),
+      inputContractAgreementText: String = "single exercise",
       salt: Salt = TestSalt.generateSalt(random.nextInt()),
   ) extends SingleNode(Some(seed)) {
     override def toString: String = "single exercise"
 
     override val contractInstance: LfContractInst = inputContractInstance
+    override val agreementText: String = inputContractAgreementText
 
     private def genNode(id: LfContractId): LfNodeExercises =
       exerciseNodeWithoutChildren(
@@ -1107,6 +1135,7 @@ class ExampleTransactionFactory(
       lfContractId: LfContractId = suffixedId(-1, 0),
       contractId: LfContractId = suffixedId(-1, 0),
       contractInstance: LfContractInst = ExampleTransactionFactory.contractInstance(),
+      agreementText: String = "",
       salt: Salt = TestSalt.generateSalt(random.nextInt()),
       consuming: Boolean = true,
   ) extends SingleNode(Some(seed)) {
@@ -1130,6 +1159,7 @@ class ExampleTransactionFactory(
   ) extends SingleNode(Some(seed)) {
 
     override val contractInstance: LfContractInst = inputContractInstance
+    override val agreementText: String = "single exercise by non-stakeholder actor"
 
     private def genNode(id: LfContractId): LfActionNode =
       exerciseNodeWithoutChildren(
@@ -1158,7 +1188,7 @@ class ExampleTransactionFactory(
     */
   case object MultipleRoots extends ExampleTransaction {
 
-    override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
+    override def cryptoOps: HashOps & RandomOps = ExampleTransactionFactory.this.cryptoOps
 
     override def toString: String = "multiple roots"
 
@@ -1185,8 +1215,9 @@ class ExampleTransactionFactory(
         lfContractId = create0.lfContractId,
         contractId = create0.contractId,
         fetchedContractInstance = create0.contractInstance,
+        fetchedContractAgreementText = "",
         version =
-          LfTransactionVersion.V31, // ensure we test merging transactions with different versions
+          LfTransactionVersion.V14, // ensure we test merging transactions with different versions
         salt = create0.salt,
       )
     private val exercise4: SingleExercise =
@@ -1197,6 +1228,7 @@ class ExampleTransactionFactory(
       lfContractId = create1.lfContractId,
       contractId = create1.contractId,
       inputContractInstance = create1.contractInstance,
+      inputContractAgreementText = "",
       salt = create1.salt,
     )
 
@@ -1211,7 +1243,7 @@ class ExampleTransactionFactory(
     )
 
     override def versionedUnsuffixedTransaction: LfVersionedTransaction =
-      transaction(examples.map(_.nodeId.index), examples.map(_.lfNode)*)
+      transaction(examples.map(_.nodeId.index), examples.map(_.lfNode) *)
 
     override def keyResolver: LfKeyResolver = Map.empty // No keys involved here
 
@@ -1235,10 +1267,13 @@ class ExampleTransactionFactory(
     override def viewWithSubviews: Seq[(TransactionView, Seq[TransactionView])] =
       rootViews.map(view => view -> Seq(view))
 
-    override def transactionTree: GenTransactionTree = genTransactionTree(rootViews*)
+    override def transactionTree: GenTransactionTree = genTransactionTree(rootViews *)
 
     override def fullInformeeTree: FullInformeeTree =
-      mkFullInformeeTree(rootViews.map(blindedForInformeeTree(_))*)
+      informeeTree(rootViews.map(blindedForInformeeTree(_)) *).tryToFullInformeeTree
+
+    override def informeeTreeBlindedFor: (Set[LfPartyId], InformeeTree) =
+      (Set.empty, informeeTree(rootViews.map(blinded) *))
 
     override def reinterpretedSubtransactions: Seq[
       (
@@ -1251,7 +1286,7 @@ class ExampleTransactionFactory(
       examples.zipWithIndex.map { case (example, i) =>
         val rootViewsWithOneViewUnblinded = blindedRootViews.updated(i, rootViews(i))
         (
-          rootTransactionViewTree(rootViewsWithOneViewUnblinded*),
+          rootTransactionViewTree(rootViewsWithOneViewUnblinded *),
           (transactionFrom(Seq(i), i, example.reinterpretedNode), example.metadata, Map.empty),
           Witnesses(NonEmpty(List, example.view0.viewCommonData.tryUnwrap.informees)),
         )
@@ -1261,7 +1296,7 @@ class ExampleTransactionFactory(
     override def rootTransactionViewTrees: Seq[FullTransactionViewTree] = transactionViewTrees
 
     override def versionedSuffixedTransaction: LfVersionedTransaction =
-      transaction(0 until rootViewCount, examples.map(_.node)*)
+      transaction(0 until rootViewCount, examples.map(_.node) *)
   }
 
   /** Transaction structure:
@@ -1284,10 +1319,11 @@ class ExampleTransactionFactory(
     */
   case object MultipleRootsAndViewNestings extends ExampleTransaction {
 
-    override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
+    override def cryptoOps: HashOps & RandomOps = ExampleTransactionFactory.this.cryptoOps
 
     override def toString: String = "transaction with multiple roots and view nestings"
 
+    val create0Agreement = "create0"
     def create0Inst: LfContractInst = contractInstance()
     val create0seed: LfHash = deriveNodeSeed(0)
     val create0disc: LfHash = discriminator(deriveNodeSeed(0), Set(submitter, observer))
@@ -1297,6 +1333,7 @@ class ExampleTransactionFactory(
         contractInstance = create0Inst,
         signatories = Set(submitter),
         observers = Set(observer),
+        agreementText = create0Agreement,
       )
     val lfCreate0: LfNodeCreate = genCreate0(LfContractId.V1(create0disc))
 
@@ -1314,19 +1351,28 @@ class ExampleTransactionFactory(
 
     def create10Inst: LfContractInst = contractInstance()
     def create12Inst: LfContractInst = contractInstance()
-    def genCreate1x(cid: LfContractId, contractInstance: LfContractInst): LfNodeCreate =
+    def genCreate1x(
+        cid: LfContractId,
+        contractInstance: LfContractInst,
+        agreementText: String,
+    ): LfNodeCreate =
       createNode(
         cid,
         contractInstance = contractInstance,
         signatories = Set(submitter, signatory),
+        agreementText = agreementText,
       )
 
+    val create10Agreement = "create10"
     val create10seed: LfHash = deriveNodeSeed(1, 0)
     val create10disc: LfHash = discriminator(create10seed, Set(submitter, signatory))
-    val lfCreate10: LfNodeCreate = genCreate1x(LfContractId.V1(create10disc), create10Inst)
+    val lfCreate10: LfNodeCreate =
+      genCreate1x(LfContractId.V1(create10disc), create10Inst, create10Agreement)
+    val create12Agreement = "create12"
     val create12seed: LfHash = deriveNodeSeed(1, 2)
     val create12disc: LfHash = discriminator(create12seed, Set(submitter, signatory))
-    val lfCreate12: LfNodeCreate = genCreate1x(LfContractId.V1(create12disc), create12Inst)
+    val lfCreate12: LfNodeCreate =
+      genCreate1x(LfContractId.V1(create12disc), create12Inst, create12Agreement)
 
     def genFetch11(cid: LfContractId): LfNodeFetch =
       fetchNode(
@@ -1347,6 +1393,7 @@ class ExampleTransactionFactory(
       )
     val lfExercise13: LfNodeExercises = genExercise13(lfCreate12.coid)
 
+    val create130Agreement = "create130"
     def create130Inst: LfContractInst = contractInstance()
     val create130seed: LfHash = deriveNodeSeed(1, 3, 0)
     def genCreate130(cid: LfContractId): LfNodeCreate =
@@ -1354,6 +1401,7 @@ class ExampleTransactionFactory(
         cid,
         contractInstance = create130Inst,
         signatories = Set(signatory),
+        agreementText = create130Agreement,
       )
     val create130disc: LfHash = discriminator(create130seed, Set(signatory))
     val lfCreate130: LfNodeCreate = genCreate130(LfContractId.V1(create130disc))
@@ -1370,10 +1418,16 @@ class ExampleTransactionFactory(
     val lfExercise131Id: LfContractId = suffixedId(-1, 1)
     val lfExercise131: LfNodeExercises = genExercise131(lfExercise131Id)
 
+    val create1310Agreement = "create1310"
     def create1310Inst: LfContractInst = contractInstance()
     val create1310seed: LfHash = deriveNodeSeed(1, 3, 1, 0)
     def genCreate1310(cid: LfContractId): LfNodeCreate =
-      createNode(cid, contractInstance = create1310Inst, signatories = Set(submitter))
+      createNode(
+        cid,
+        contractInstance = create1310Inst,
+        signatories = Set(submitter),
+        agreementText = create1310Agreement,
+      )
     val create1310disc: LfHash = discriminator(create1310seed, Set(submitter))
     val lfCreate1310: LfNodeCreate = genCreate1310(LfContractId.V1(create1310disc))
 
@@ -1475,57 +1529,64 @@ class ExampleTransactionFactory(
 
     // Nodes with translated contract ids
     val create0SerInst: SerializableRawContractInstance =
-      asSerializableRaw(create0Inst)
+      asSerializableRaw(create0Inst, create0Agreement)
     val (salt0Id, create0Id): (Salt, LfContractId) =
       fromDiscriminator(
         rootViewPosition(0, 2),
         0,
         0,
         create0Inst,
+        create0Agreement,
         create0disc,
         signatories = Set(submitter),
         observers = Set(observer),
       )
     val create0: LfNodeCreate = genCreate0(create0Id)
 
+    val exercise1Agreement = "exercise1"
     val exercise1Id: LfContractId = suffixedId(-1, 0)
     val exercise1: LfNodeExercises = genExercise1(exercise1Id)
     val exercise1Instance: LfContractInst = contractInstance()
 
-    val create10SerInst: SerializableRawContractInstance = asSerializableRaw(create10Inst)
+    val create10SerInst: SerializableRawContractInstance =
+      asSerializableRaw(create10Inst, create10Agreement)
     val (salt10Id, create10Id): (Salt, LfContractId) =
       fromDiscriminator(
         rootViewPosition(1, 2),
         1,
         0,
         create10Inst,
+        create10Agreement,
         create10disc,
         signatories = Set(submitter, signatory),
       )
-    val create10: LfNodeCreate = genCreate1x(create10Id, create10Inst)
+    val create10: LfNodeCreate = genCreate1x(create10Id, create10Inst, create10Agreement)
 
     val fetch11: LfNodeFetch = lfFetch11
 
     val create12SerInst: SerializableRawContractInstance =
-      asSerializableRaw(create12Inst)
+      asSerializableRaw(create12Inst, create12Agreement)
     val (salt12Id, create12Id): (Salt, LfContractId) =
       fromDiscriminator(
         rootViewPosition(1, 2),
         1,
         1,
         create12Inst,
+        create12Agreement,
         create12disc,
         signatories = Set(submitter, signatory),
       )
-    val create12: LfNodeCreate = genCreate1x(create12Id, create12Inst)
+    val create12: LfNodeCreate = genCreate1x(create12Id, create12Inst, create12Agreement)
 
-    val create130SerInst: SerializableRawContractInstance = asSerializableRaw(create130Inst)
+    val create130SerInst: SerializableRawContractInstance =
+      asSerializableRaw(create130Inst, create1310Agreement)
     val (salt130Id, create130Id): (Salt, LfContractId) =
       fromDiscriminator(
         subViewIndex(0, 2) +: rootViewPosition(1, 2),
         2,
         0,
         create130Inst,
+        create130Agreement,
         create130disc,
         signatories = Set(signatory),
       )
@@ -1533,15 +1594,18 @@ class ExampleTransactionFactory(
 
     val exercise131Id: LfContractId = suffixedId(-1, 1)
     val exercise131: LfNodeExercises = genExercise131(exercise131Id)
+    val exercise131Agreement = "exercise131"
     val exercise131Instance: LfContractInst = contractInstance()
 
-    val create1310SerInst: SerializableRawContractInstance = asSerializableRaw(create1310Inst)
+    val create1310SerInst: SerializableRawContractInstance =
+      asSerializableRaw(create1310Inst, create1310Agreement)
     val (salt1310Id, create1310Id): (Salt, LfContractId) =
       fromDiscriminator(
         subViewIndex(0, 1) +: subViewIndex(1, 2) +: rootViewPosition(1, 2),
         4,
         0,
         create1310Inst,
+        create1310Agreement,
         create1310disc,
         signatories = Set(submitter),
       )
@@ -1593,6 +1657,7 @@ class ExampleTransactionFactory(
             contractInstance = exercise131Instance,
             metadata = metadataFromExercise(exercise131),
             ledgerTime = ledgerTime,
+            agreementText = exercise131Agreement,
           )
         ),
         Seq.empty,
@@ -1613,6 +1678,7 @@ class ExampleTransactionFactory(
             exercise1Instance,
             metadataFromExercise(exercise1),
             ledgerTime,
+            agreementText = exercise1Agreement,
           )
         ),
         Seq(
@@ -1640,12 +1706,21 @@ class ExampleTransactionFactory(
     override lazy val transactionTree: GenTransactionTree = genTransactionTree(view0, view1)
 
     override lazy val fullInformeeTree: FullInformeeTree =
-      mkFullInformeeTree(
+      informeeTree(
         blindedForInformeeTree(view0),
         blindedForInformeeTree(
           view1,
           blindedForInformeeTree(view10),
           blindedForInformeeTree(view11, blindedForInformeeTree(view110)),
+        ),
+      ).tryToFullInformeeTree
+
+    override lazy val informeeTreeBlindedFor: (Set[LfPartyId], InformeeTree) =
+      (
+        Set(observer),
+        informeeTree(
+          blindedForInformeeTree(view0),
+          leafsBlinded(view1, blinded(view10), blindedForInformeeTree(view11, blinded(view110))),
         ),
       )
 
@@ -1788,7 +1863,7 @@ class ExampleTransactionFactory(
     */
   case object ViewInterleavings extends ExampleTransaction {
 
-    override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
+    override def cryptoOps: HashOps & RandomOps = ExampleTransactionFactory.this.cryptoOps
 
     override def toString: String = "transaction with subviews and core nodes interleaved"
 
@@ -1796,19 +1871,22 @@ class ExampleTransactionFactory(
     def genCreateX(
         cid: LfContractId,
         contractInst: LfContractInst,
+        agreementText: String,
     ): LfNodeCreate =
       createNode(
         cid,
         contractInstance = contractInst,
         signatories = Set(submitter),
         observers = Set(observer),
+        agreementText = agreementText,
       )
 
+    val create0Agreement = "create0"
     val create0Inst: LfContractInst = contractInstance()
     val create0seed: LfHash = deriveNodeSeed(0)
     val create0disc: LfHash = discriminator(create0seed, stakeholdersX)
     val lfCreate0: LfNodeCreate =
-      genCreateX(LfContractId.V1(create0disc), create0Inst)
+      genCreateX(LfContractId.V1(create0disc), create0Inst, create0Agreement)
 
     def genExercise1(cid: LfContractId): LfNodeExercises =
       exerciseNode(
@@ -1839,39 +1917,45 @@ class ExampleTransactionFactory(
     def genCreate3X(
         cid: LfContractId,
         contractInst: LfContractInst,
+        agreementText: String,
     ): LfNodeCreate =
       createNode(
         cid,
         contractInstance = contractInst,
         signatories = Set(signatory),
         observers = Set(observer),
+        agreementText = agreementText,
       )
 
+    val create100Agreement = "create100"
     val create100Inst: LfContractInst = contractInstance()
     val create100seed: LfHash = deriveNodeSeed(1, 0, 0)
     val create100disc: LfHash = discriminator(create100seed, stakeholders3X)
     val lfCreate100Id: LfContractId = LfContractId.V1(create100disc)
-    val lfCreate100: LfNodeCreate = genCreate3X(lfCreate100Id, create100Inst)
+    val lfCreate100: LfNodeCreate = genCreate3X(lfCreate100Id, create100Inst, create100Agreement)
 
     def stakeholdersXX: Set[LfPartyId] = Set(signatory, submitter)
     def genCreateXX(
         cid: LfContractId,
         contractInst: LfContractInst,
+        agreementText: String,
     ): LfNodeCreate =
       createNode(
         cid,
         contractInstance = contractInst,
         signatories = stakeholdersXX,
         observers = Set.empty,
+        agreementText = agreementText,
       )
 
     def genCreate11Inst(capturedId: LfContractId): LfContractInst = contractInstance(
       Seq(capturedId)
     )
+    val create11Agreement = ""
     val create11seed: LfHash = deriveNodeSeed(1, 1)
     val create11disc: LfHash = discriminator(create11seed, stakeholdersXX)
     val lfCreate11: LfNodeCreate =
-      genCreateXX(LfContractId.V1(create11disc), genCreate11Inst(lfCreate100Id))
+      genCreateXX(LfContractId.V1(create11disc), genCreate11Inst(lfCreate100Id), create11Agreement)
 
     val lfExercise12: LfNodeExercises = genExercise1X(suffixedId(-1, 12), 6)
 
@@ -1879,10 +1963,11 @@ class ExampleTransactionFactory(
       Seq(capturedId)
     )
     val lfCreate120Inst: LfContractInst = genCreate120Inst(lfCreate100Id)
+    val create120Agreement = ""
     val create120seed: LfHash = deriveNodeSeed(1, 2, 0)
     val create120disc: LfHash = discriminator(create120seed, stakeholders3X)
     val lfCreate120Id: LfContractId = LfContractId.V1(create120disc)
-    val lfCreate120: LfNodeCreate = genCreate3X(lfCreate120Id, lfCreate120Inst)
+    val lfCreate120: LfNodeCreate = genCreate3X(lfCreate120Id, lfCreate120Inst, create120Agreement)
 
     def genCreate13Inst(capturedId: LfContractId): LfContractInst = contractInstance(
       Seq(capturedId)
@@ -1890,14 +1975,16 @@ class ExampleTransactionFactory(
     val create13seed: LfHash = deriveNodeSeed(1, 3)
     val create13disc: LfHash = discriminator(create13seed, stakeholdersXX)
     val lfCreate13Id: LfContractId = LfContractId.V1(create13disc)
+    val create13Agreement = ""
     val lfCreate13: LfNodeCreate =
-      genCreateXX(lfCreate13Id, genCreate13Inst(lfCreate120Id))
+      genCreateXX(lfCreate13Id, genCreate13Inst(lfCreate120Id), create13Agreement)
 
+    val create2Agreement = "create2"
     val create2Inst: LfContractInst = contractInstance()
     val create2seed: LfHash = deriveNodeSeed(2)
     val create2disc: LfHash = discriminator(create2seed, stakeholdersX)
     val lfCreate2: LfNodeCreate =
-      genCreateX(LfContractId.V1(create2disc), create2Inst)
+      genCreateX(LfContractId.V1(create2disc), create2Inst, create2Agreement)
 
     override lazy val versionedUnsuffixedTransaction: LfVersionedTransaction =
       transaction(
@@ -2013,97 +2100,110 @@ class ExampleTransactionFactory(
     }
 
     val create0SerInst: SerializableRawContractInstance =
-      asSerializableRaw(create0Inst)
+      asSerializableRaw(create0Inst, create0Agreement)
     val (salt0Id, create0Id): (Salt, LfContractId) =
       fromDiscriminator(
         rootViewPosition(0, 3),
         0,
         0,
         create0Inst,
+        create0Agreement,
         create0disc,
         signatories = Set(submitter),
         observers = Set(observer),
       )
-    val create0: LfNodeCreate = genCreateX(create0Id, create0Inst)
+    val create0: LfNodeCreate = genCreateX(create0Id, create0Inst, create0Agreement)
 
+    val exercise1Agreement = "exercise1"
     val exercise1Id: LfContractId = suffixedId(-1, 1)
     val exercise1: LfNodeExercises = genExercise1(exercise1Id)
     val exercise1Instance: LfContractInst = contractInstance()
 
+    val exercise10Agreement = "exercise10"
     val exercise10Id: LfContractId = suffixedId(-1, 10)
     val exercise10: LfNodeExercises = genExercise1X(exercise10Id, 3)
     val exercise10Instance: LfContractInst = contractInstance()
 
-    val create100SerInst: SerializableRawContractInstance = asSerializableRaw(create100Inst)
+    val create100SerInst: SerializableRawContractInstance =
+      asSerializableRaw(create100Inst, create100Agreement)
     val (salt100Id, create100Id): (Salt, LfContractId) =
       fromDiscriminator(
         subViewIndex(0, 1) +: subViewIndex(0, 2) +: rootViewPosition(1, 3),
         3,
         0,
         create100Inst,
+        create100Agreement,
         create100disc,
         signatories = Set(signatory),
         observers = Set(observer),
       )
-    val create100: LfNodeCreate = genCreate3X(create100Id, create100Inst)
+    val create100: LfNodeCreate = genCreate3X(create100Id, create100Inst, create100Agreement)
 
     val create11Inst: LfContractInst = genCreate11Inst(create100Id)
     val create11SerInst: SerializableRawContractInstance =
-      asSerializableRaw(create11Inst)
+      asSerializableRaw(create11Inst, create11Agreement)
     val (salt11Id, create11Id): (Salt, LfContractId) =
       fromDiscriminator(
         rootViewPosition(1, 3),
         1,
         0,
         create11Inst,
+        create11Agreement,
         create11disc,
         signatories = stakeholdersXX,
       )
-    val create11: LfNodeCreate = genCreateXX(create11Id, create11Inst)
+    val create11: LfNodeCreate = genCreateXX(create11Id, create11Inst, create11Agreement)
 
+    val exercise12Agreement = "exercise12"
     val exercise12Id: LfContractId = suffixedId(-1, 12)
     val exercise12: LfNodeExercises = genExercise1X(exercise12Id, 6)
     val exercise12Instance: LfContractInst = contractInstance()
 
     val create120Inst: LfContractInst = genCreate120Inst(create100Id)
-    val create120SerInst: SerializableRawContractInstance = asSerializableRaw(create120Inst)
+    val create120SerInst: SerializableRawContractInstance =
+      asSerializableRaw(create120Inst, create120Agreement)
     val (salt120Id, create120Id): (Salt, LfContractId) =
       fromDiscriminator(
         subViewIndex(0, 1) +: subViewIndex(1, 2) +: rootViewPosition(1, 3),
         5,
         0,
         create120Inst,
+        create120Agreement,
         create120disc,
         signatories = Set(signatory),
         observers = Set(observer),
       )
-    val create120: LfNodeCreate = genCreate3X(create120Id, create120Inst)
+    val create120: LfNodeCreate = genCreate3X(create120Id, create120Inst, create120Agreement)
 
     val create13Inst: LfContractInst = genCreate13Inst(create120Id)
-    val create13SerInst: SerializableRawContractInstance = asSerializableRaw(create13Inst)
+    val create13SerInst: SerializableRawContractInstance =
+      asSerializableRaw(create13Inst, create13Agreement)
     val (salt13Id, create13Id): (Salt, LfContractId) =
       fromDiscriminator(
         rootViewPosition(1, 3),
         1,
         1,
         create13Inst,
+        create13Agreement,
         create13disc,
         signatories = stakeholdersXX,
       )
-    val create13: LfNodeCreate = genCreateXX(create13Id, create13Inst)
+    val create13: LfNodeCreate = genCreateXX(create13Id, create13Inst, create13Agreement)
 
-    val create2SerInst: SerializableRawContractInstance = asSerializableRaw(create2Inst)
+    val create2SerInst: SerializableRawContractInstance =
+      asSerializableRaw(create2Inst, create2Agreement)
     val (salt2Id, create2Id): (Salt, LfContractId) =
       fromDiscriminator(
         rootViewPosition(2, 3),
         6,
         0,
         create2Inst,
+        create2Agreement,
         create2disc,
         signatories = Set(submitter),
         observers = Set(observer),
       )
-    val create2: LfNodeCreate = genCreateX(create2Id, create2Inst)
+    val create2: LfNodeCreate = genCreateX(create2Id, create2Inst, create2Agreement)
 
     val view0: TransactionView =
       view(
@@ -2139,6 +2239,7 @@ class ExampleTransactionFactory(
           exercise10Instance,
           metadataFromExercise(exercise10),
           ledgerTime,
+          agreementText = exercise10Agreement,
         )
       ),
       Seq.empty,
@@ -2171,6 +2272,7 @@ class ExampleTransactionFactory(
             exercise12Instance,
             metadataFromExercise(exercise12),
             ledgerTime,
+            agreementText = exercise12Agreement,
           )
         ),
         Seq.empty,
@@ -2191,6 +2293,8 @@ class ExampleTransactionFactory(
             exercise1Instance,
             metadataFromExercise(exercise1),
             ledgerTime,
+            TestSalt.generateSalt(random.nextInt()),
+            agreementText = exercise1Agreement,
           )
         ),
         Seq(
@@ -2232,7 +2336,7 @@ class ExampleTransactionFactory(
     override lazy val transactionTree: GenTransactionTree = genTransactionTree(view0, view1, view2)
 
     override lazy val fullInformeeTree: FullInformeeTree =
-      mkFullInformeeTree(
+      informeeTree(
         blindedForInformeeTree(view0),
         blindedForInformeeTree(
           view1,
@@ -2240,6 +2344,20 @@ class ExampleTransactionFactory(
           blindedForInformeeTree(view11, blindedForInformeeTree(view110)),
         ),
         blindedForInformeeTree(view2),
+      ).tryToFullInformeeTree
+
+    override lazy val informeeTreeBlindedFor: (Set[LfPartyId], InformeeTree) =
+      (
+        Set(observer),
+        informeeTree(
+          blindedForInformeeTree(view0),
+          leafsBlinded(
+            view1,
+            leafsBlinded(view10, blindedForInformeeTree(view100)),
+            leafsBlinded(view11, blindedForInformeeTree(view110)),
+          ),
+          blindedForInformeeTree(view2),
+        ),
       )
 
     val transactionViewTree0: FullTransactionViewTree =
@@ -2278,7 +2396,7 @@ class ExampleTransactionFactory(
       rootTransactionViewTree(blinded(view0), blinded(view1), view2)
 
     val create120reinterpret: LfNodeCreate =
-      genCreate3X(lfCreate120Id, genCreate120Inst(create100Id))
+      genCreate3X(lfCreate120Id, genCreate120Inst(create100Id), create120Agreement)
 
     override lazy val reinterpretedSubtransactions: Seq[
       (
@@ -2409,7 +2527,7 @@ class ExampleTransactionFactory(
     */
   case object TransientContracts extends ExampleTransaction {
 
-    override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
+    override def cryptoOps: HashOps & RandomOps = ExampleTransactionFactory.this.cryptoOps
 
     override def toString: String = "transaction with transient contracts"
 
@@ -2417,19 +2535,22 @@ class ExampleTransactionFactory(
     def genCreate(
         cid: LfContractId,
         contractInst: LfContractInst,
+        agreementText: String,
     ): LfNodeCreate =
       createNode(
         cid,
         contractInstance = contractInst,
         signatories = Set(submitter),
         observers = Set(observer),
+        agreementText = agreementText,
       )
 
+    val create0Agreement = "create0"
     val create0Inst: LfContractInst = contractInstance()
     val create0seed: LfHash = deriveNodeSeed(0)
     val create0disc: LfHash = discriminator(create0seed, stakeholders)
     val lfCreate0Id: LfContractId = LfContractId.V1(create0disc)
-    val lfCreate0: LfNodeCreate = genCreate(lfCreate0Id, create0Inst)
+    val lfCreate0: LfNodeCreate = genCreate(lfCreate0Id, create0Inst, create0Agreement)
 
     def genExercise(cid: LfContractId, childIndices: List[Int]): LfNodeExercises =
       exerciseNode(
@@ -2441,11 +2562,12 @@ class ExampleTransactionFactory(
       )
     val lfExercise1: LfNodeExercises = genExercise(lfCreate0Id, List(2, 3, 5, 6))
 
+    val create10Agreement = "create10"
     val create10Inst: LfContractInst = contractInstance()
     val create10seed: LfHash = deriveNodeSeed(1, 0)
     val create10disc: LfHash = discriminator(create10seed, stakeholders)
     val lfCreate10Id: LfContractId = LfContractId.V1(create10disc)
-    val lfCreate10: LfNodeCreate = genCreate(lfCreate10Id, create10Inst)
+    val lfCreate10: LfNodeCreate = genCreate(lfCreate10Id, create10Inst, create10Agreement)
 
     def genExerciseN(cid: LfContractId, childIndex: Int): LfNodeExercises =
       exerciseNode(
@@ -2463,17 +2585,20 @@ class ExampleTransactionFactory(
     def genCreate110(
         cid: LfContractId,
         contractInst: LfContractInst,
+        agreementText: String,
     ): LfNodeCreate =
       createNode(
         cid,
         contractInstance = contractInst,
         signatories = Set(submitter),
         observers = Set.empty,
+        agreementText = agreementText,
       )
 
+    val create110Agreement = "create110"
     val create110Inst: LfContractInst = contractInstance()
     val lfCreate110Id: LfContractId = LfContractId.V1(create110disc)
-    val lfCreate110: LfNodeCreate = genCreate110(lfCreate110Id, create110Inst)
+    val lfCreate110: LfNodeCreate = genCreate110(lfCreate110Id, create110Inst, create110Agreement)
 
     val lfExercise12: LfNodeExercises = genExercise(lfCreate110Id, List.empty)
 
@@ -2550,48 +2675,52 @@ class ExampleTransactionFactory(
     }
 
     val create0SerInst: SerializableRawContractInstance =
-      asSerializableRaw(create0Inst)
+      asSerializableRaw(create0Inst, create0Agreement)
     val (salt0Id, create0Id): (Salt, LfContractId) =
       fromDiscriminator(
         rootViewPosition(0, 2),
         0,
         0,
         create0Inst,
+        create0Agreement,
         create0disc,
         signatories = Set(submitter),
         observers = Set(observer),
       )
-    val create0: LfNodeCreate = genCreate(create0Id, create0Inst)
+    val create0: LfNodeCreate = genCreate(create0Id, create0Inst, create0Agreement)
 
     val exercise1: LfNodeExercises = genExercise(create0Id, List(2, 3, 5, 6))
 
     val create10SerInst: SerializableRawContractInstance =
-      asSerializableRaw(create10Inst)
+      asSerializableRaw(create10Inst, create10Agreement)
     val (salt10Id, create10Id): (Salt, LfContractId) =
       fromDiscriminator(
         rootViewPosition(1, 2),
         1,
         0,
         create10Inst,
+        create10Agreement,
         create10disc,
         signatories = Set(submitter),
         observers = Set(observer),
       )
-    val create10: LfNodeCreate = genCreate(create10Id, create10Inst)
+    val create10: LfNodeCreate = genCreate(create10Id, create10Inst, create10Agreement)
 
     val exercise11: LfNodeExercises = genExerciseN(create10Id, 4)
 
-    val create110SerInst: SerializableRawContractInstance = asSerializableRaw(create110Inst)
+    val create110SerInst: SerializableRawContractInstance =
+      asSerializableRaw(create110Inst, create110Agreement)
     val (salt110Id, create110Id): (Salt, LfContractId) =
       fromDiscriminator(
         subViewIndex(0, 1) +: rootViewPosition(1, 2),
         2,
         0,
         create110Inst,
+        create110Agreement,
         create110disc,
         signatories = Set(submitter),
       )
-    val create110: LfNodeCreate = genCreate110(create110Id, create110Inst)
+    val create110: LfNodeCreate = genCreate110(create110Id, create110Inst, create110Agreement)
 
     val exercise12: LfNodeExercises = genExercise(create110Id, List.empty)
 
@@ -2619,6 +2748,7 @@ class ExampleTransactionFactory(
           create10Inst,
           ContractMetadata.tryCreate(create10.signatories, create10.stakeholders, None),
           salt = salt10Id,
+          agreementText = create10Agreement,
         )
       ),
       Seq(serializableFromCreate(create110, salt110Id)),
@@ -2637,6 +2767,7 @@ class ExampleTransactionFactory(
           create0Inst,
           ContractMetadata.tryCreate(create0.signatories, create0.stakeholders, None),
           salt = salt0Id,
+          agreementText = create0Agreement,
         )
       ),
       Seq(serializableFromCreate(create10, salt10Id)),
@@ -2655,9 +2786,15 @@ class ExampleTransactionFactory(
       genTransactionTree(view0, view1)
 
     override def fullInformeeTree: FullInformeeTree =
-      mkFullInformeeTree(
+      informeeTree(
         blindedForInformeeTree(view0),
         blindedForInformeeTree(view1, blindedForInformeeTree(view10)),
+      ).tryToFullInformeeTree
+
+    override def informeeTreeBlindedFor: (Set[LfPartyId], InformeeTree) =
+      (
+        Set(observer),
+        informeeTree(blindedForInformeeTree(view0), blindedForInformeeTree(view1, blinded(view10))),
       )
 
     val transactionViewTree0: FullTransactionViewTree =

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.console
 
-import cats.data.EitherT
 import com.digitalasset.canton.admin.api.client.GrpcCtlRunner
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
@@ -24,7 +23,7 @@ import io.opentelemetry.api.trace.Tracer
 import java.util.concurrent.TimeUnit
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.{Duration, FiniteDuration}
-import scala.concurrent.{ExecutionContextExecutor, Future, blocking}
+import scala.concurrent.{ExecutionContextExecutor, blocking}
 
 /** Attempt to run a grpc admin-api command against whatever is pointed at in the config
   */
@@ -52,7 +51,7 @@ class GrpcAdminCommandRunner(
       command: GrpcAdminCommand[_, _, Result],
       clientConfig: ClientConfig,
       token: Option[String],
-  )(implicit traceContext: TraceContext): (NonNegativeDuration, EitherT[Future, String, Result]) = {
+  )(implicit traceContext: TraceContext) = {
     val awaitTimeout = command.timeoutType match {
       case CustomClientTimeout(timeout) => timeout
       // If a custom timeout for a console command is set, it involves some non-gRPC timeout mechanism

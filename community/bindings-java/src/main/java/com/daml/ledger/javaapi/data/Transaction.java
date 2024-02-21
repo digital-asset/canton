@@ -3,65 +3,79 @@
 
 package com.daml.ledger.javaapi.data;
 
-import com.daml.ledger.api.v1.TraceContextOuterClass;
-import com.daml.ledger.api.v2.TransactionOuterClass;
-import org.checkerframework.checker.nullness.qual.NonNull;
-
+import com.daml.ledger.api.v1.TransactionOuterClass;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
+import org.checkerframework.checker.nullness.qual.NonNull;
 
-public final class Transaction {
+public final class Transaction implements WorkflowEvent {
 
-  @NonNull private final String updateId;
+  private final String transactionId;
 
-  @NonNull private final String commandId;
+  private final String commandId;
 
-  @NonNull private final String workflowId;
+  private final String workflowId;
 
-  @NonNull private final Instant effectiveAt;
+  private final Instant effectiveAt;
 
-  @NonNull private final List<@NonNull Event> events;
+  private final java.util.List<Event> events;
 
-  @NonNull private final String offset;
-
-  @NonNull private final String domainId;
-
-  private final TraceContextOuterClass.@NonNull TraceContext traceContext;
+  private final String offset;
 
   public Transaction(
-      @NonNull String updateId,
+      @NonNull String transactionId,
       @NonNull String commandId,
       @NonNull String workflowId,
       @NonNull Instant effectiveAt,
       @NonNull List<@NonNull Event> events,
-      @NonNull String offset,
-      @NonNull String domainId,
-      TraceContextOuterClass.@NonNull TraceContext traceContext) {
-    this.updateId = updateId;
+      @NonNull String offset) {
+    this.transactionId = transactionId;
     this.commandId = commandId;
     this.workflowId = workflowId;
     this.effectiveAt = effectiveAt;
     this.events = events;
     this.offset = offset;
-    this.domainId = domainId;
-    this.traceContext = traceContext;
+  }
+
+  public static Transaction fromProto(TransactionOuterClass.Transaction transaction) {
+    String transactionId = transaction.getTransactionId();
+    String commandId = transaction.getCommandId();
+    Instant effectiveAt =
+        Instant.ofEpochSecond(
+            transaction.getEffectiveAt().getSeconds(), transaction.getEffectiveAt().getNanos());
+    String workflowId = transaction.getWorkflowId();
+    java.util.List<Event> events =
+        transaction.getEventsList().stream()
+            .map(Event::fromProtoEvent)
+            .collect(Collectors.toList());
+    String offset = transaction.getOffset();
+    return new Transaction(transactionId, commandId, workflowId, effectiveAt, events, offset);
+  }
+
+  public TransactionOuterClass.Transaction toProto() {
+    return TransactionOuterClass.Transaction.newBuilder()
+        .setTransactionId(this.transactionId)
+        .setCommandId(this.commandId)
+        .setEffectiveAt(
+            com.google.protobuf.Timestamp.newBuilder()
+                .setSeconds(this.effectiveAt.getEpochSecond())
+                .setNanos(this.effectiveAt.getNano())
+                .build())
+        .addAllEvents(this.events.stream().map(Event::toProtoEvent).collect(Collectors.toList()))
+        .setOffset(this.offset)
+        .build();
   }
 
   @NonNull
-  public String getUpdateId() {
-    return updateId;
+  public String getTransactionId() {
+    return transactionId;
   }
 
   @NonNull
   public String getCommandId() {
     return commandId;
-  }
-
-  @NonNull
-  public String getWorkflowId() {
-    return workflowId;
   }
 
   @NonNull
@@ -80,55 +94,15 @@ public final class Transaction {
   }
 
   @NonNull
-  public String getDomainId() {
-    return domainId;
-  }
-
-  public TraceContextOuterClass.@NonNull TraceContext getTraceContext() {
-    return traceContext;
-  }
-
-  public static Transaction fromProto(TransactionOuterClass.Transaction transaction) {
-    Instant effectiveAt =
-        Instant.ofEpochSecond(
-            transaction.getEffectiveAt().getSeconds(), transaction.getEffectiveAt().getNanos());
-    List<Event> events =
-        transaction.getEventsList().stream()
-            .map(Event::fromProtoEvent)
-            .collect(Collectors.toList());
-    return new Transaction(
-        transaction.getUpdateId(),
-        transaction.getCommandId(),
-        transaction.getWorkflowId(),
-        effectiveAt,
-        events,
-        transaction.getOffset(),
-        transaction.getDomainId(),
-        transaction.getTraceContext());
-  }
-
-  public TransactionOuterClass.Transaction toProto() {
-    return TransactionOuterClass.Transaction.newBuilder()
-        .setUpdateId(updateId)
-        .setCommandId(commandId)
-        .setWorkflowId(workflowId)
-        .setEffectiveAt(
-            com.google.protobuf.Timestamp.newBuilder()
-                .setSeconds(effectiveAt.getEpochSecond())
-                .setNanos(effectiveAt.getNano())
-                .build())
-        .addAllEvents(events.stream().map(Event::toProtoEvent).collect(Collectors.toList()))
-        .setOffset(offset)
-        .setDomainId(domainId)
-        .setTraceContext(traceContext)
-        .build();
+  public String getWorkflowId() {
+    return workflowId;
   }
 
   @Override
   public String toString() {
     return "Transaction{"
-        + "updateId='"
-        + updateId
+        + "transactionId='"
+        + transactionId
         + '\''
         + ", commandId='"
         + commandId
@@ -143,11 +117,6 @@ public final class Transaction {
         + ", offset='"
         + offset
         + '\''
-        + ", domainId='"
-        + domainId
-        + '\''
-        + ", traceContext="
-        + traceContext
         + '}';
   }
 
@@ -156,20 +125,17 @@ public final class Transaction {
     if (this == o) return true;
     if (o == null || getClass() != o.getClass()) return false;
     Transaction that = (Transaction) o;
-    return Objects.equals(updateId, that.updateId)
+    return Objects.equals(transactionId, that.transactionId)
         && Objects.equals(commandId, that.commandId)
         && Objects.equals(workflowId, that.workflowId)
         && Objects.equals(effectiveAt, that.effectiveAt)
         && Objects.equals(events, that.events)
-        && Objects.equals(offset, that.offset)
-        && Objects.equals(domainId, that.domainId)
-        && Objects.equals(traceContext, that.traceContext);
+        && Objects.equals(offset, that.offset);
   }
 
   @Override
   public int hashCode() {
 
-    return Objects.hash(
-        updateId, commandId, workflowId, effectiveAt, events, offset, domainId, traceContext);
+    return Objects.hash(transactionId, commandId, workflowId, effectiveAt, events, offset);
   }
 }

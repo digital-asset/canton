@@ -16,9 +16,11 @@ public final class CreateUserRequest {
   private final User user;
   private final List<User.Right> rights;
 
-  public CreateUserRequest(User user, User.Right... rights) {
+  public CreateUserRequest(User user, User.Right right, User.Right... rights) {
     this.user = user;
-    this.rights = Arrays.asList(rights);
+    this.rights = new ArrayList<>(rights.length + 1);
+    this.rights.add(right);
+    this.rights.addAll(Arrays.asList(rights));
   }
 
   public CreateUserRequest(@NonNull String id, @NonNull String primaryParty) {

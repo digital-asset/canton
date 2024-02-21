@@ -5,20 +5,20 @@ package com.digitalasset.canton.platform.apiserver.services.command
 
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.grpc.RpcProtoExtractors
-import com.daml.ledger.api.v1.commands.{Command, CreateCommand}
+import com.daml.ledger.api.v1.command_completion_service.Checkpoint
+import com.daml.ledger.api.v1.command_service.{CommandServiceGrpc, SubmitAndWaitRequest}
+import com.daml.ledger.api.v1.command_submission_service.SubmitRequest
+import com.daml.ledger.api.v1.commands.{Command, Commands, CreateCommand}
+import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.value.{Identifier, Record, RecordField, Value}
-import com.daml.ledger.api.v2.checkpoint.Checkpoint
-import com.daml.ledger.api.v2.command_service.{CommandServiceGrpc, SubmitAndWaitRequest}
-import com.daml.ledger.api.v2.command_submission_service.{SubmitRequest, SubmitResponse}
-import com.daml.ledger.api.v2.commands.Commands
 import com.daml.ledger.api.v2.completion.Completion
-import com.daml.ledger.api.v2.participant_offset.ParticipantOffset
 import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
 import com.daml.lf.data.Ref
 import com.daml.tracing.DefaultOpenTelemetry
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.validation.{
   CommandsValidator,
+  ValidateDisclosedContracts,
   ValidateUpgradingPackageResolutions,
 }
 import com.digitalasset.canton.logging.{ErrorLoggingContext, LoggingContextWithTrace}
@@ -32,6 +32,7 @@ import com.digitalasset.canton.platform.apiserver.services.{ApiCommandService, t
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, config}
+import com.google.protobuf.empty.Empty
 import com.google.rpc.Code
 import com.google.rpc.status.Status as StatusProto
 import io.grpc.inprocess.{InProcessChannelBuilder, InProcessServerBuilder}
@@ -74,13 +75,13 @@ class CommandServiceImplSpec
         )
       ).use { stub =>
         val request = SubmitAndWaitRequest.of(Some(commands))
-        stub.submitAndWaitForUpdateId(request).map { response =>
+        stub.submitAndWaitForTransactionId(request).map { response =>
           verify(submissionTracker).track(
             eqTo(expectedSubmissionKey),
             eqTo(config.NonNegativeFiniteDuration.ofSeconds(1000L)),
             any[TraceContext => Future[Any]],
           )(any[ContextualizedErrorLogger], any[TraceContext])
-          response.updateId should be("transaction ID")
+          response.transactionId should be("transaction ID")
           response.completionOffset shouldBe "offset"
         }
       }
@@ -108,14 +109,14 @@ class CommandServiceImplSpec
         val request = SubmitAndWaitRequest.of(Some(commands))
         stub
           .withDeadline(Deadline.after(3600L, TimeUnit.SECONDS, deadlineTicker))
-          .submitAndWaitForUpdateId(request)
+          .submitAndWaitForTransactionId(request)
           .map { response =>
             verify(submissionTracker).track(
               eqTo(expectedSubmissionKey),
               eqTo(config.NonNegativeFiniteDuration.ofSeconds(3600L)),
               any[TraceContext => Future[Any]],
             )(any[ContextualizedErrorLogger], any[TraceContext])
-            response.updateId should be("transaction ID")
+            response.transactionId should be("transaction ID")
             succeed
           }
       }
@@ -139,7 +140,7 @@ class CommandServiceImplSpec
       deadline
         .call(() => {
           service
-            .submitAndWaitForUpdateId(
+            .submitAndWaitForTransactionId(
               SubmitAndWaitRequest.of(Some(commands.copy(submissionId = submissionId)))
             )(
               LoggingContextWithTrace.ForTesting
@@ -195,7 +196,7 @@ class CommandServiceImplSpec
         service: CommandServiceImpl
       ).use { stub =>
         val request = SubmitAndWaitRequest.of(Some(commands))
-        stub.submitAndWaitForUpdateId(request).failed.map {
+        stub.submitAndWaitForTransactionId(request).failed.map {
           case RpcProtoExtractors.Exception(RpcProtoExtractors.Status(Code.DEADLINE_EXCEEDED)) =>
             succeed
           case unexpected => fail(s"Unexpected exception", unexpected)
@@ -225,13 +226,12 @@ class CommandServiceImplSpec
   private class TestContext {
     val trackerCompletionResponse = tracking.CompletionResponse(
       completion = completion,
-      checkpoint = Some(
-        Checkpoint(offset = Some(ParticipantOffset(ParticipantOffset.Value.Absolute("offset"))))
-      ),
+      checkpoint =
+        Some(Checkpoint(offset = Some(LedgerOffset(LedgerOffset.Value.Absolute("offset"))))),
     )
     val commands = someCommands()
     val submissionTracker = mock[SubmissionTracker]
-    val submit = mock[Traced[SubmitRequest] => Future[SubmitResponse]]
+    val submit = mock[Traced[SubmitRequest] => Future[Empty]]
     when(
       submissionTracker.track(
         eqTo(expectedSubmissionKey),
@@ -251,10 +251,11 @@ class CommandServiceImplSpec
       service: CommandServiceImpl,
       deadlineTicker: Deadline.Ticker = Deadline.getSystemTicker,
   ): ResourceOwner[CommandServiceGrpc.CommandServiceStub] = {
-    val commandsValidator = CommandsValidator(
+    val commandsValidator = new CommandsValidator(
       ledgerId = ledgerId,
       validateUpgradingPackageResolutions = ValidateUpgradingPackageResolutions.UpgradingDisabled,
       upgradingEnabled = false,
+      validateDisclosedContracts = new ValidateDisclosedContracts(false),
     )
     val apiService = new ApiCommandService(
       service = service,
@@ -285,9 +286,9 @@ class CommandServiceImplSpec
 
 object CommandServiceImplSpec {
   private val UnimplementedTransactionServices = new CommandServiceImpl.TransactionServices(
-    getTransactionTreeById = _ =>
-      Future.failed(new RuntimeException("This should never be called.")),
     getTransactionById = _ => Future.failed(new RuntimeException("This should never be called.")),
+    getFlatTransactionById = _ =>
+      Future.failed(new RuntimeException("This should never be called.")),
   )
 
   private val OkStatus = StatusProto.of(Status.Code.OK.value, "", Seq.empty)
@@ -327,9 +328,10 @@ object CommandServiceImplSpec {
   )
 
   private def someCommands() = Commands(
+    ledgerId = ledgerId.toString,
     commandId = commandId,
     applicationId = applicationId,
-    actAs = Seq(party),
+    party = party,
     commands = Seq(command),
   )
 }

@@ -4,8 +4,7 @@
 package com.digitalasset.canton.http
 
 import com.digitalasset.canton.http.domain.ContractTypeId
-import com.daml.ledger.api.{v1 as lav1}
-import com.daml.ledger.api.{v2 as lav2}
+import com.daml.ledger.api.{v1 => lav1}
 import org.scalacheck.Gen
 import scalaz.{-\/, \/, \/-}
 import spray.json.{JsNumber, JsObject, JsString, JsValue}
@@ -160,8 +159,8 @@ object Generators {
     Gen.posNum[Int].map(JsNumber(_): JsValue),
   )
 
-  def absoluteParticipantOffsetVal: Gen[lav2.participant_offset.ParticipantOffset.Value.Absolute] =
-    Gen.posNum[Long].map(n => lav2.participant_offset.ParticipantOffset.Value.Absolute(n.toString))
+  def absoluteLedgerOffsetVal: Gen[lav1.ledger_offset.LedgerOffset.Value.Absolute] =
+    Gen.posNum[Long].map(n => lav1.ledger_offset.LedgerOffset.Value.Absolute(n.toString))
 
   def genUnknownTemplateIds: Gen[domain.UnknownTemplateIds] =
     Gen

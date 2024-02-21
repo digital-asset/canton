@@ -124,6 +124,7 @@ class IdentifierTest extends AnyWordSpec with BaseTest {
   "key owner serialization" should {
     "be able to convert back and forth" in {
       val pid = DefaultTestIdentities.participant1
+      KeyOwner.fromProtoPrimitive(pid.toProtoPrimitive, "Pid") shouldBe Right(pid)
       Member.fromProtoPrimitive(pid.toProtoPrimitive, "Pid") shouldBe Right(pid)
     }
 
@@ -138,7 +139,7 @@ class IdentifierTest extends AnyWordSpec with BaseTest {
         "::da::default",
       )
         .foreach { str =>
-          Member.fromProtoPrimitive(str, "owner").left.value shouldBe a[ProtoDeserializationError]
+          KeyOwner.fromProtoPrimitive(str, "owner").left.value shouldBe a[ProtoDeserializationError]
         }
     }
 

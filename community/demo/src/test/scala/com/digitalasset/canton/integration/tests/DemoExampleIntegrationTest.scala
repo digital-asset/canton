@@ -5,16 +5,13 @@ package com.digitalasset.canton.integration.tests
 
 import better.files.{File as BetterFile, *}
 import com.digitalasset.canton.HasExecutionContext
-import com.digitalasset.canton.config.CommunityStorageConfig.Memory
-import com.digitalasset.canton.integration.plugins.UseCommunityReferenceBlockSequencer
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencerBase.MultiDomain
 import com.digitalasset.canton.integration.tests.DemoExampleIntegrationTest.referenceDemo
 
 object DemoExampleIntegrationTest {
   lazy val referenceDemo: BetterFile = "community" / "demo" / "src" / "pack" / "demo"
 }
 
-sealed abstract class DemoExampleIntegrationTest
+class DemoExampleIntegrationTest
     extends ExampleIntegrationTest(referenceDemo / "demo.conf")
     with HasExecutionContext {
 
@@ -27,13 +24,5 @@ sealed abstract class DemoExampleIntegrationTest
     )
     runScript(referenceDemo / "demo.sc")(env.environment)
   }
-}
 
-final class DemoExampleReferenceIntegrationTest extends DemoExampleIntegrationTest {
-  registerPlugin(
-    new UseCommunityReferenceBlockSequencer[Memory](
-      loggerFactory,
-      sequencerGroups = MultiDomain.tryCreate(Set("sequencerBanking"), Set("sequencerMedical")),
-    )
-  )
 }

@@ -12,7 +12,9 @@ import com.daml.lf.typesig.{DefDataType, PackageSignature}
 import com.daml.logging.LoggingContextOf
 import com.daml.scalautil.TraverseFMSyntax.*
 import com.daml.timer.RetryStrategy
+import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.client.services.pkg.PackageClient
+import com.digitalasset.canton.ledger.client.services.pkg.withoutledgerid.PackageClient as LoosePackageClient
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.NoTracing
 import scalaz.*
@@ -28,9 +30,10 @@ final case class LedgerReader(loggerFactory: NamedLoggerFactory)
   /** @return [[LedgerReader.UpToDate]] if packages did not change
     */
   def loadPackageStoreUpdates(
-      client: PackageClient,
+      client: LoosePackageClient,
       loadCache: LoadCache,
       token: Option[String],
+      ledgerId: LedgerId,
   )(
       loadedPackageIds: Set[String]
   )(implicit
@@ -38,47 +41,61 @@ final case class LedgerReader(loggerFactory: NamedLoggerFactory)
       lc: LoggingContextOf[Any],
   ): Future[Error \/ Option[PackageStore]] =
     for {
-      newPackageIds <- client.listPackages(token).map(_.packageIds.toList)
+      newPackageIds <- client.listPackages(ledgerId, token).map(_.packageIds.toList)
       diffIds = newPackageIds.filterNot(loadedPackageIds): List[String] // keeping the order
       result <-
         if (diffIds.isEmpty) UpToDate
-        else load[Option[PackageStore]](client, loadCache, diffIds, token)
+        else load[Option[PackageStore]](client, loadCache, diffIds, ledgerId, token)
     } yield result
 
+  /** @return [[LedgerReader.UpToDate]] if packages did not change
+    */
+  @deprecated("unused overload, see #15922", since = "2.5.2")
+  def loadPackageStoreUpdates(client: PackageClient, loadCache: LoadCache, token: Option[String])(
+      loadedPackageIds: Set[String]
+  )(implicit
+      ec: ExecutionContext,
+      lc: LoggingContextOf[Any],
+  ): Future[Error \/ Option[PackageStore]] =
+    loadPackageStoreUpdates(client.it, loadCache, token, client.ledgerId)(loadedPackageIds)
+
   private def load[PS >: Some[PackageStore]](
-      client: PackageClient,
+      client: LoosePackageClient,
       loadCache: LoadCache,
       packageIds: List[String],
+      ledgerId: LedgerId,
       token: Option[String],
   )(implicit ec: ExecutionContext, lc: LoggingContextOf[Any]): Future[Error \/ PS] = {
     util.Random
       .shuffle(packageIds.grouped(loadCache.ParallelLoadFactor).toList)
       .traverseFM {
-        _.traverse(getPackage(client, loadCache, token)(_))
+        _.traverse(getPackage(client, loadCache, ledgerId, token)(_))
       }
       .map(groups => createPackageStoreFromArchives(groups.flatten).map(Some(_)))
   }
 
   private def getPackage(
-      client: PackageClient,
+      client: LoosePackageClient,
       loadCache: LoadCache,
+      ledgerId: LedgerId,
       token: Option[String],
   )(
       pkid: String
   )(implicit ec: ExecutionContext, lc: LoggingContextOf[Any]): Future[Error \/ PackageSignature] = {
     import loadCache.cache
+    val ck = (ledgerId, pkid)
     retryLoop {
       cache
-        .getIfPresent(pkid)
+        .getIfPresent(ck)
         .cata(
           { v =>
             logger
               .trace(s"detected redundant package load before starting: $pkid, ${lc.makeString}")
             Future successful v
           },
-          client.getPackage(pkid, token).map { pkresp =>
+          client.getPackage(pkid, ledgerId, token).map { pkresp =>
             cache
-              .getIfPresent(pkid)
+              .getIfPresent(ck)
               .cata(
                 { decoded =>
                   logger
@@ -86,11 +103,11 @@ final case class LedgerReader(loggerFactory: NamedLoggerFactory)
                   decoded
                 }, {
                   val decoded = decodeInterfaceFromPackageResponse(pkresp)
-                  if (logger.underlying.isTraceEnabled && cache.getIfPresent(pkid).isDefined)
+                  if (logger.underlying.isTraceEnabled && cache.getIfPresent(ck).isDefined)
                     logger.trace(
                       s"detected redundant package load after decoding: $pkid, ${lc.makeString}"
                     )
-                  cache.put(pkid, decoded)
+                  cache.put(ck, decoded)
                   decoded
                 },
               )
@@ -148,7 +165,7 @@ object LedgerReader {
     // request pattern, so there isn't anything you can really do about it on
     // the server configuration.  100% miss rate means no redundant work is
     // happening; it does not mean the server is being slower.
-    private[LedgerReader] val cache = CaffeineCache[String, Error \/ PackageSignature](
+    private[LedgerReader] val cache = CaffeineCache[(LedgerId, String), Error \/ PackageSignature](
       Caffeine
         .newBuilder()
         .softValues()
