@@ -938,28 +938,46 @@ create table top_up_events (
 
 create index top_up_events_idx ON top_up_events (member);
 
+-- Stores the traffic balance updates
+create table sequencer_traffic_control_balance_updates (
+    -- member the traffic balance update is for
+       member varchar(300) not null,
+    -- timestamp at which the update was sequenced
+       sequencing_timestamp bigint not null,
+    -- total traffic balance after the update
+       balance bigint not null,
+    -- used to keep balance updates idempotent
+       serial bigint not null,
+    -- traffic states have a unique sequencing_timestamp per member
+       primary key (member, sequencing_timestamp)
+);
+
 --   BFT Ordering Tables
 
 -- Stores metadata for epochs completed in entirety
 -- Individual blocks/transactions exist in separate table
-create table completed_epochs (
+create table ord_completed_epochs (
     -- strictly-increasing, contiguous epoch number
-    epoch_number bigint not null primary key ,
+    epoch_number bigint not null primary key,
     -- first block sequence number (globally) of the epoch
     start_block_number bigint not null,
+    -- commit messages of the last block in the epoch
+    last_block_commits binary large object not null,
     -- number of total blocks in the epoch
     epoch_length integer not null
 );
 
 -- Stores consensus state for active epoch
-create table active_epoch (
+create table ord_active_epoch (
     -- epoch number that consensus is actively working on
     epoch_number bigint not null,
     -- global sequence number of the ordered block
-    block_number bigint not null primary key
+    block_number bigint not null primary key,
+    -- commit messages of the block
+    commit_messages binary large object not null
 );
 
-create table availability_batch(
+create table ord_availability_batch(
     id varchar(300) not null,
     batch binary large object not null,
     primary key (id)
