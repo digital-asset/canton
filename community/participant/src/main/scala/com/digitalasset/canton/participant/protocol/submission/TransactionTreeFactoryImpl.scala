@@ -446,7 +446,7 @@ abstract class TransactionTreeFactoryImpl(
       rawContractInstance = serializedCantonContractInst,
       metadata = contractMetadata,
       ledgerCreateTime = LedgerCreateTime(state.ledgerTime),
-      contractSalt = Option.when(protocolVersion >= ProtocolVersion.v4)(contractSalt.unwrap),
+      contractSalt = Some(contractSalt.unwrap),
     )
     state.setCreatedContractInfo(contractId, createdInfo)
 
@@ -474,8 +474,11 @@ abstract class TransactionTreeFactoryImpl(
   protected def createActionDescription(
       actionNode: LfActionNode,
       seed: Option[LfHash],
+      packagePreference: Set[LfPackageId],
   ): ActionDescription =
-    checked(ActionDescription.tryFromLfActionNode(actionNode, seed, protocolVersion))
+    checked(
+      ActionDescription.tryFromLfActionNode(actionNode, seed, packagePreference, protocolVersion)
+    )
 
   protected def createViewCommonData(
       rootView: TransactionViewDecomposition.NewView,
