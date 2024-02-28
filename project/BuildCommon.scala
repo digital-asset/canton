@@ -1296,6 +1296,8 @@ object BuildCommon {
     lazy val `ledger-common-dars-shared-settings` = Seq(
       Compile / damlEnableJavaCodegen := true,
       Compile / damlSourceDirectory := baseDirectory.value / ".." / "src",
+      Compile / useVersionedDarName := true,
+      Compile / damlEnableProjectVersionOverride := false,
       Compile / damlCodeGeneration := (for (
         name <- Seq(
           "model",
@@ -1308,9 +1310,25 @@ object BuildCommon {
       )
         yield (
           (Compile / damlSourceDirectory).value / "main" / "daml" / s"$name",
-          (Compile / damlDarOutput).value / s"${name.replace("_", "-")}-tests.dar",
+          (Compile / damlDarOutput).value / s"${name.replace("_", "-")}-tests-3.0.0.dar",
           s"com.daml.ledger.test.java.$name",
-        )),
+        )) ++ Seq(
+        (
+          (Compile / damlSourceDirectory).value / "main" / "daml" / "upgrade" / "1.0.0",
+          (Compile / damlDarOutput).value / "upgrade-tests-1.0.0.dar",
+          s"com.daml.ledger.test.java.upgrade_1_0_0",
+        ),
+        (
+          (Compile / damlSourceDirectory).value / "main" / "daml" / "upgrade" / "2.0.0",
+          (Compile / damlDarOutput).value / "upgrade-tests-2.0.0.dar",
+          s"com.daml.ledger.test.java.upgrade_2_0_0",
+        ),
+        (
+          (Compile / damlSourceDirectory).value / "main" / "daml" / "upgrade" / "3.0.0",
+          (Compile / damlDarOutput).value / "upgrade-tests-3.0.0.dar",
+          s"com.daml.ledger.test.java.upgrade_3_0_0",
+        ),
+      ),
     )
 
     lazy val `ledger-common-dars-lf-v2-1` = createLedgerCommonDarsProject(lfVersion = "2.1")

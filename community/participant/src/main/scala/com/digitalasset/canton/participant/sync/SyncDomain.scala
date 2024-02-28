@@ -60,7 +60,10 @@ import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.topology.ParticipantTopologyDispatcherCommon
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
-import com.digitalasset.canton.participant.traffic.TrafficStateController
+import com.digitalasset.canton.participant.traffic.{
+  ParticipantTrafficControlSubscriber,
+  TrafficStateController,
+}
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
 import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
@@ -68,7 +71,7 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.{PeriodicAcknowledgements, RichSequencerClient}
 import com.digitalasset.canton.sequencing.handlers.CleanSequencerCounterTracker
-import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, Envelope, EventWithErrors}
+import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, Envelope}
 import com.digitalasset.canton.store.SequencedEventStore
 import com.digitalasset.canton.store.SequencedEventStore.PossiblyIgnoredSequencedEvent
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
@@ -81,7 +84,7 @@ import com.digitalasset.canton.topology.processing.{
 }
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.traffic.MemberTrafficStatus
+import com.digitalasset.canton.traffic.{MemberTrafficStatus, TrafficControlProcessor}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, MonadUtil}
@@ -265,6 +268,13 @@ class SyncDomain(
     acsCommitmentProcessor.scheduleTopologyTick
   )
 
+  private val trafficProcessor =
+    new TrafficControlProcessor(domainCrypto, domainId, loggerFactory)
+
+  trafficProcessor.subscribe(
+    new ParticipantTrafficControlSubscriber(participantId, loggerFactory)
+  )
+
   private val badRootHashMessagesRequestProcessor: BadRootHashMessagesRequestProcessor =
     new BadRootHashMessagesRequestProcessor(
       ephemeral,
@@ -302,6 +312,7 @@ class SyncDomain(
       transferInProcessor,
       registerIdentityTransactionHandle.processor,
       topologyProcessor,
+      trafficProcessor,
       acsCommitmentProcessor.processBatch,
       ephemeral.requestCounterAllocator,
       ephemeral.recordOrderPublisher,
@@ -619,7 +630,10 @@ class SyncDomain(
               start: SubscriptionStart,
               domainTimeTracker: DomainTimeTracker,
           )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-            topologyProcessor.subscriptionStartsAt(start, domainTimeTracker)(traceContext)
+            Seq(
+              topologyProcessor.subscriptionStartsAt(start, domainTimeTracker)(traceContext),
+              trafficProcessor.subscriptionStartsAt(start, domainTimeTracker)(traceContext),
+            ).parSequence_
 
           override def apply(
               tracedEvents: BoxedEnvelope[Lambda[
@@ -634,17 +648,13 @@ class SyncDomain(
                   domainCrypto.crypto.pureCrypto,
                 )
 
-                openedEvent match {
-                  case Right(_) =>
-                  case Left(Traced(EventWithErrors(content, openingErrors, _isIgnored))) =>
-                    // Raise alarms
-                    // TODO(i11804): Send a rejection
-                    openingErrors.foreach { error =>
-                      val cause =
-                        s"Received an envelope at ${content.timestamp} that cannot be opened. " +
-                          s"Discarding envelope... Reason: $error"
-                      SyncServiceAlarm.Warn(cause).report()
-                    }
+                // Raise alarms
+                // TODO(i11804): Send a rejection
+                openedEvent.openingErrors.foreach { error =>
+                  val cause =
+                    s"Received an envelope at ${openedEvent.event.timestamp} that cannot be opened. " +
+                      s"Discarding envelope... Reason: $error"
+                  SyncServiceAlarm.Warn(cause).report()
                 }
 
                 openedEvent

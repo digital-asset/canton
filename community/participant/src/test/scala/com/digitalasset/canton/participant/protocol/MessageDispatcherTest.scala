@@ -8,6 +8,7 @@ import cats.syntax.option.*
 import com.daml.metrics.api.{MetricName, MetricsContext}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CantonRequireTypes.String255
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{
   AsymmetricEncrypted,
@@ -38,6 +39,7 @@ import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcastX.
 import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{
+  LocalRejectError,
   RequestAndRootHashMessage,
   RequestId,
   RequestProcessor,
@@ -57,6 +59,7 @@ import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{SequencedTime, TopologyTransactionTestFactoryX}
 import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.canton.traffic.TrafficControlProcessor
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.*
@@ -90,7 +93,7 @@ trait MessageDispatcherTest {
   private val mediatorGroup2 = MediatorsOfDomain(MediatorGroupIndex.one)
 
   private val encryptedRandomnessTest =
-    Encrypted.fromByteString[SecureRandomness](ByteString.EMPTY).value
+    Encrypted.fromByteString[SecureRandomness](ByteString.EMPTY)
   private val sessionKeyMapTest = NonEmpty(
     Seq,
     new AsymmetricEncrypted[SecureRandomness](ByteString.EMPTY, Fingerprint.tryCreate("dummy")),
@@ -106,6 +109,7 @@ trait MessageDispatcherTest {
           SequencedTime,
           Traced[List[DefaultOpenEnvelope]],
       ) => HandlerResult,
+      trafficProcessor: TrafficControlProcessor,
       acsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType,
       requestCounterAllocator: RequestCounterAllocator,
       recordOrderPublisher: RecordOrderPublisher,
@@ -123,6 +127,7 @@ trait MessageDispatcherTest {
             RequestTracker,
             RequestProcessors,
             (SequencerCounter, SequencedTime, Traced[List[DefaultOpenEnvelope]]) => HandlerResult,
+            TrafficControlProcessor,
             AcsCommitmentProcessor.ProcessorType,
             RequestCounterAllocator,
             RecordOrderPublisher,
@@ -153,10 +158,7 @@ trait MessageDispatcherTest {
           .thenReturn(processingRequestHandlerF)
         when(
           processor.processResult(
-            any[Either[
-              EventWithErrors[Deliver[DefaultOpenEnvelope]],
-              SignedContent[Deliver[DefaultOpenEnvelope]],
-            ]]
+            any[WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]]]
           )(anyTraceContext)
         )
           .thenReturn(processingResultHandlerF)
@@ -164,10 +166,7 @@ trait MessageDispatcherTest {
           processor.processMalformedMediatorConfirmationRequestResult(
             any[CantonTimestamp],
             any[SequencerCounter],
-            any[Either[
-              EventWithErrors[Deliver[DefaultOpenEnvelope]],
-              SignedContent[Deliver[DefaultOpenEnvelope]],
-            ]],
+            any[WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]]],
           )(anyTraceContext)
         )
           .thenReturn(processingResultHandlerF)
@@ -192,6 +191,15 @@ trait MessageDispatcherTest {
       )
         .thenReturn(HandlerResult.done)
 
+      val trafficProcessor = mock[TrafficControlProcessor]
+      when(
+        trafficProcessor.processSetTrafficBalanceEnvelopes(
+          any[CantonTimestamp],
+          any[Option[CantonTimestamp]],
+          any[List[DefaultOpenEnvelope]],
+        )(anyTraceContext)
+      ).thenReturn(FutureUnlessShutdown.unit)
+
       val acsCommitmentProcessor = mock[AcsCommitmentProcessor.ProcessorType]
       when(
         acsCommitmentProcessor.apply(
@@ -212,7 +220,7 @@ trait MessageDispatcherTest {
           any[CantonTimestamp],
           any[RootHash],
           any[MediatorsOfDomain],
-          any[LocalReject],
+          any[LocalRejectError],
         )(anyTraceContext)
       )
         .thenReturn(badRootHashMessagesRequestProcessorF)
@@ -252,6 +260,7 @@ trait MessageDispatcherTest {
         requestTracker,
         protocolProcessors,
         identityProcessor,
+        trafficProcessor,
         acsCommitmentProcessor,
         requestCounterAllocator,
         recordOrderPublisher,
@@ -268,6 +277,7 @@ trait MessageDispatcherTest {
         testViewProcessor,
         otherTestViewProcessor,
         identityProcessor,
+        trafficProcessor,
         acsCommitmentProcessor,
         requestCounterAllocator,
         recordOrderPublisher,
@@ -283,8 +293,9 @@ trait MessageDispatcherTest {
       sc: SequencerCounter = SequencerCounter(0),
       ts: CantonTimestamp = CantonTimestamp.Epoch,
       messageId: Option[MessageId] = None,
+      topologyTimestampO: Option[CantonTimestamp] = None,
   ): Deliver[DefaultOpenEnvelope] =
-    Deliver.create(sc, ts, domainId, messageId, batch, testedProtocolVersion)
+    Deliver.create(sc, ts, domainId, messageId, batch, topologyTimestampO, testedProtocolVersion)
 
   private def rootHash(index: Int): RootHash = RootHash(TestHash.digest(index))
 
@@ -296,7 +307,7 @@ trait MessageDispatcherTest {
   private val dummySignature = SymbolicCrypto.emptySignature
 
   private def emptyEncryptedViewTree =
-    Encrypted.fromByteString[CompressedView[MockViewTree]](ByteString.EMPTY).value
+    Encrypted.fromByteString[CompressedView[MockViewTree]](ByteString.EMPTY)
 
   private val encryptedTestView = EncryptedView(TestViewType)(emptyEncryptedViewTree)
   private val encryptedTestViewMessage =
@@ -356,6 +367,7 @@ trait MessageDispatcherTest {
           RequestTracker,
           RequestProcessors,
           (SequencerCounter, SequencedTime, Traced[List[DefaultOpenEnvelope]]) => HandlerResult,
+          TrafficControlProcessor,
           AcsCommitmentProcessor.ProcessorType,
           RequestCounterAllocator,
           RecordOrderPublisher,
@@ -502,20 +514,15 @@ trait MessageDispatcherTest {
 
     def checkProcessResult(processor: AnyProcessor): Assertion = {
       verify(processor).processResult(
-        any[Either[
-          EventWithErrors[Deliver[DefaultOpenEnvelope]],
-          SignedContent[Deliver[DefaultOpenEnvelope]],
-        ]]
-      )(
-        anyTraceContext
-      )
+        any[WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]]]
+      )(anyTraceContext)
       succeed
     }
 
-    def signAndTrace(event: RawProtocolEvent): Traced[Seq[Either[Traced[
-      EventWithErrors[SequencedEvent[OpenEnvelope[ProtocolMessage]]]
-    ], PossiblyIgnoredProtocolEvent]]] =
-      Traced(Seq(Right(OrdinarySequencedEvent(signEvent(event), None)(traceContext))))
+    def signAndTrace(
+        event: RawProtocolEvent
+    ): Traced[Seq[WithOpeningErrors[PossiblyIgnoredProtocolEvent]]] =
+      Traced(Seq(NoOpeningErrors(OrdinarySequencedEvent(signEvent(event), None)(traceContext))))
 
     def handle(sut: Fixture, event: RawProtocolEvent)(checks: => Assertion): Future[Assertion] = {
       for {
@@ -538,10 +545,7 @@ trait MessageDispatcherTest {
           sc.v,
           ts,
           domainId,
-          messageId = Some(
-            MessageId
-              .tryCreate(s"$prefix testing")
-          ),
+          messageId = Some(MessageId.tryCreate(s"$prefix testing")),
         )
         // Check that we're calling the topology manager before we're publishing the deliver event and ticking the
         // request tracker
@@ -562,6 +566,51 @@ trait MessageDispatcherTest {
         handle(sut, deliver) {
           verify(sut.recordOrderPublisher).scheduleEmptyAcsChangePublication(isEq(sc), isEq(ts))
           checkTicks(sut, sc, ts)
+        }.futureValue
+      }
+
+      "call the topology processor before calling the traffic control processor" in {
+        val setTrafficBalanceMsg = SignedProtocolMessage.from(
+          SetTrafficBalanceMessage(
+            participantId,
+            NonNegativeLong.zero,
+            NonNegativeLong.tryCreate(1000),
+            domainId,
+            testedProtocolVersion,
+          ),
+          testedProtocolVersion,
+          dummySignature,
+        )
+
+        val sut = mk()
+        val sc = SequencerCounter(1)
+        val ts = CantonTimestamp.Epoch
+
+        val event =
+          mkDeliver(
+            Batch.of(testedProtocolVersion, setTrafficBalanceMsg -> Recipients.cc(participantId)),
+            sc,
+            ts,
+          )
+
+        when(
+          sut.trafficProcessor.processSetTrafficBalanceEnvelopes(
+            any[CantonTimestamp],
+            any[Option[CantonTimestamp]],
+            any[Seq[DefaultOpenEnvelope]],
+          )(anyTraceContext)
+        ).thenAnswer {
+          checkTickTopologyProcessor(sut, sc, ts).discard
+          FutureUnlessShutdown.unit
+        }
+
+        handle(sut, event) {
+          verify(sut.trafficProcessor).processSetTrafficBalanceEnvelopes(
+            isEq(ts),
+            isEq(None),
+            any[Seq[DefaultOpenEnvelope]],
+          )(anyTraceContext)
+          succeed
         }.futureValue
       }
     }
@@ -895,7 +944,7 @@ trait MessageDispatcherTest {
                         eqTo(rootHash),
                         eqTo(mediatorId),
                         eqTo(
-                          LocalReject.MalformedRejects.BadRootHashMessages
+                          LocalRejectError.MalformedRejects.BadRootHashMessages
                             .Reject(reason, testedProtocolVersion)
                         ),
                       )(anyTraceContext)
@@ -1144,10 +1193,7 @@ trait MessageDispatcherTest {
               verify(processor(sut)).processMalformedMediatorConfirmationRequestResult(
                 isEq(CantonTimestamp.Epoch),
                 isEq(SequencerCounter(0)),
-                any[Either[
-                  EventWithErrors[Deliver[DefaultOpenEnvelope]],
-                  SignedContent[Deliver[DefaultOpenEnvelope]],
-                ]],
+                any[WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]]],
               )(anyTraceContext)
               checkTickTopologyProcessor(sut)
               checkTickRequestTracker(sut)
@@ -1192,7 +1238,7 @@ trait MessageDispatcherTest {
         )
 
         val sequencedEvents = Seq(deliver1, deliver2, deliver3, deliverError4).map(event =>
-          Right(OrdinarySequencedEvent(signEvent(event), None)(traceContext))
+          NoOpeningErrors(OrdinarySequencedEvent(signEvent(event), None)(traceContext))
         )
 
         sut.messageDispatcher
@@ -1246,7 +1292,7 @@ trait MessageDispatcherTest {
         )
 
         val sequencedEvents = Seq(deliver1, deliver2, deliver3).map(event =>
-          Right(OrdinarySequencedEvent(signEvent(event), None)(traceContext))
+          NoOpeningErrors(OrdinarySequencedEvent(signEvent(event), None)(traceContext))
         )
 
         loggerFactory

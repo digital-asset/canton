@@ -172,8 +172,8 @@ object Encrypted {
   private[this] def apply[M](ciphertext: ByteString): Encrypted[M] =
     throw new UnsupportedOperationException("Use encryption methods instead")
 
-  def fromByteString[M](byteString: ByteString): Either[DeserializationError, Encrypted[M]] =
-    Right(new Encrypted[M](byteString))
+  def fromByteString[M](byteString: ByteString): Encrypted[M] =
+    new Encrypted[M](byteString)
 }
 
 final case class AsymmetricEncrypted[+M](
@@ -431,6 +431,7 @@ final case class EncryptionPublicKeyWithName(
     override val name: Option[KeyName],
 ) extends PublicKeyWithName {
   type K = EncryptionPublicKey
+  override val id: Fingerprint = publicKey.id
 }
 
 object EncryptionPublicKeyWithName {

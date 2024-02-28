@@ -163,6 +163,7 @@ class ProtocolProcessorTest
                 domain,
                 Some(messageId),
                 Batch.filterOpenEnvelopesFor(batch, participant, Set.empty),
+                None,
                 testedProtocolVersion,
               )
             )
@@ -180,8 +181,8 @@ class ProtocolProcessorTest
     )(anyTraceContext)
   ).thenAnswer(Future.unit)
 
-  private val trm = mock[TransactionResultMessage]
-  when(trm.pretty).thenAnswer(Pretty.adHocPrettyInstance[TransactionResultMessage])
+  private val trm = mock[ConfirmationResultMessage]
+  when(trm.pretty).thenAnswer(Pretty.adHocPrettyInstance[ConfirmationResultMessage])
   when(trm.verdict).thenAnswer(Verdict.Approve(testedProtocolVersion))
   when(trm.rootHash).thenAnswer(rootHash)
   when(trm.domainId).thenAnswer(DefaultTestIdentities.domainId)
@@ -198,7 +199,7 @@ class ProtocolProcessorTest
   )
 
   private val encryptedRandomnessTest =
-    Encrypted.fromByteString[SecureRandomness](ByteString.EMPTY).value
+    Encrypted.fromByteString[SecureRandomness](ByteString.EMPTY)
   private val sessionKeyMapTest = NonEmpty(
     Seq,
     new AsymmetricEncrypted[SecureRandomness](ByteString.EMPTY, Fingerprint.tryCreate("dummy")),
@@ -209,7 +210,7 @@ class ProtocolProcessorTest
       Int,
       Unit,
       TestViewType,
-      TransactionResultMessage,
+      ConfirmationResultMessage,
       TestProcessingSteps.TestProcessingError,
     ]
 
@@ -334,7 +335,7 @@ class ProtocolProcessorTest
       Int,
       Unit,
       TestViewType,
-      TransactionResultMessage,
+      ConfirmationResultMessage,
       TestProcessingSteps.TestProcessingError,
     ] =
       new ProtocolProcessor(
@@ -349,7 +350,7 @@ class ProtocolProcessorTest
         FutureSupervisor.Noop,
       )(
         directExecutionContext: ExecutionContext,
-        TransactionResultMessage.transactionResultMessageCast,
+        ConfirmationResultMessage.transactionResultMessageCast,
       ) {
         override def participantId: ParticipantId = participant
 
@@ -363,7 +364,7 @@ class ProtocolProcessorTest
   private lazy val rootHash = RootHash(TestHash.digest(1))
   private lazy val viewHash = ViewHash(TestHash.digest(2))
   private lazy val encryptedView =
-    EncryptedView(TestViewType)(Encrypted.fromByteString(rootHash.toProtoPrimitive).value)
+    EncryptedView(TestViewType)(Encrypted.fromByteString(rootHash.toProtoPrimitive))
   private lazy val viewMessage: EncryptedViewMessage[TestViewType] = EncryptedViewMessage(
     submittingParticipantSignature = None,
     viewHash = viewHash,
@@ -607,7 +608,7 @@ class ProtocolProcessorTest
       val wrongRootHash = RootHash(TestHash.digest(3))
       val viewHash1 = ViewHash(TestHash.digest(2))
       val encryptedViewWrongRH =
-        EncryptedView(TestViewType)(Encrypted.fromByteString(wrongRootHash.toProtoPrimitive).value)
+        EncryptedView(TestViewType)(Encrypted.fromByteString(wrongRootHash.toProtoPrimitive))
       val viewMessageWrongRH = EncryptedViewMessage(
         submittingParticipantSignature = None,
         viewHash = viewHash1,
@@ -649,8 +650,7 @@ class ProtocolProcessorTest
         viewHash = viewHash,
         randomness = encryptedRandomnessTest,
         sessionKey = sessionKeyMapTest,
-        encryptedView =
-          EncryptedView(TestViewType)(Encrypted.fromByteString(ByteString.EMPTY).value),
+        encryptedView = EncryptedView(TestViewType)(Encrypted.fromByteString(ByteString.EMPTY)),
         domainId = DefaultTestIdentities.domainId,
         viewEncryptionScheme = SymmetricKeyScheme.Aes128Gcm,
         protocolVersion = testedProtocolVersion,
@@ -925,19 +925,23 @@ class ProtocolProcessorTest
         timestamp: CantonTimestamp,
         sut: TestInstance,
     ): EitherT[Future, sut.steps.ResultError, Unit] = {
-      val mockSignedProtocolMessage = mock[SignedProtocolMessage[TransactionResultMessage]]
+      val mockSignedProtocolMessage = mock[SignedProtocolMessage[ConfirmationResultMessage]]
       when(mockSignedProtocolMessage.message).thenReturn(trm)
       when(
         mockSignedProtocolMessage
-          .verifySignature(any[SyncCryptoApi], any[MediatorGroupIndex])(anyTraceContext)
+          .verifyMediatorSignatures(any[SyncCryptoApi], any[MediatorGroupIndex])(anyTraceContext)
       )
         .thenReturn(EitherT.rightT(()))
       sut
         .performResultProcessing(
-          mock[Either[
-            EventWithErrors[Deliver[DefaultOpenEnvelope]],
-            SignedContent[Deliver[DefaultOpenEnvelope]],
-          ]],
+          NoOpeningErrors(
+            SignedContent(
+              mock[Deliver[DefaultOpenEnvelope]],
+              Signature.noSignature,
+              None,
+              testedProtocolVersion,
+            )
+          ),
           Right(mockSignedProtocolMessage),
           requestId,
           timestamp,

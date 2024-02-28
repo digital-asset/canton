@@ -32,7 +32,12 @@ import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.select
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.protocol.{RequestAndRootHashMessage, RequestProcessor, RootHash}
+import com.digitalasset.canton.protocol.{
+  LocalRejectError,
+  RequestAndRootHashMessage,
+  RequestProcessor,
+  RootHash,
+}
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.processing.{
@@ -41,6 +46,7 @@ import com.digitalasset.canton.topology.processing.{
 }
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.traffic.TrafficControlProcessor
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{Checked, CheckedT, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -77,6 +83,7 @@ trait MessageDispatcher { this: NamedLogging =>
 
   protected def topologyProcessor
       : (SequencerCounter, SequencedTime, Traced[List[DefaultOpenEnvelope]]) => HandlerResult
+  protected def trafficProcessor: TrafficControlProcessor
   protected def acsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType
   protected def requestCounterAllocator: RequestCounterAllocator
   protected def recordOrderPublisher: RecordOrderPublisher
@@ -87,11 +94,7 @@ trait MessageDispatcher { this: NamedLogging =>
 
   implicit protected val ec: ExecutionContext
 
-  def handleAll(
-      events: Traced[Seq[Either[Traced[
-        EventWithErrors[SequencedEvent[DefaultOpenEnvelope]]
-      ], PossiblyIgnoredProtocolEvent]]]
-  ): HandlerResult
+  def handleAll(events: Traced[Seq[WithOpeningErrors[PossiblyIgnoredProtocolEvent]]]): HandlerResult
 
   /** Returns a future that completes when all calls to [[handleAll]]
     * whose returned [[scala.concurrent.Future]] has completed prior to this call have completed processing.
@@ -182,35 +185,30 @@ trait MessageDispatcher { this: NamedLogging =>
     * </ul>
     */
   protected def processBatch(
-      eventE: Either[
-        EventWithErrors[Deliver[DefaultOpenEnvelope]],
-        SignedContent[Deliver[DefaultOpenEnvelope]],
-      ]
+      eventE: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[ProcessingResult] = {
-    val content = eventE.fold(_.content, _.content)
-    val Deliver(sc, ts, _, _, batch) = content
+    val deliver = eventE.event.content
+    // TODO(#13883) Validate the topology timestamp
+    // TODO(#13883) Centralize the topology timestamp constraints in a single place so that they are well-documented
+    val Deliver(sc, ts, _, _, batch, topologyTimestampO) = deliver
 
     val envelopesWithCorrectDomainId = filterBatchForDomainId(batch, sc, ts)
 
+    // Sanity check the batch
+    // we can receive an empty batch if it was for a deliver we sent but were not a recipient
+    // or if the event validation has failed on the sequencer for another member's submission
+    if (deliver.isReceipt) {
+      logger.debug(show"Received the receipt for a previously sent batch:\n$deliver")
+    } else if (batch.envelopes.isEmpty) {
+      logger.debug(show"Received an empty batch.")
+    }
     for {
-      // Sanity check the batch
-      // we can receive an empty batch if it was for a deliver we sent but were not a recipient
-      sanityCheck <-
-        if (content.isReceipt) {
-          logger.debug(show"Received the receipt for a previously sent batch:\n$content")
-          FutureUnlessShutdown.pure(processingResultMonoid.empty)
-        } else if (batch.envelopes.isEmpty) {
-          doProcess(
-            MalformedMessage,
-            FutureUnlessShutdown.pure(alarm(sc, ts, "Received an empty batch.")),
-          )
-        } else FutureUnlessShutdown.pure(processingResultMonoid.empty)
-
       identityResult <- processTopologyTransactions(
         sc,
         SequencedTime(ts),
         envelopesWithCorrectDomainId,
       )
+      trafficResult <- processTraffic(ts, topologyTimestampO, envelopesWithCorrectDomainId)
       acsCommitmentResult <- processAcsCommitmentEnvelope(envelopesWithCorrectDomainId, sc, ts)
       // Make room for the repair requests that have been inserted before the current timestamp.
       //
@@ -228,8 +226,8 @@ trait MessageDispatcher { this: NamedLogging =>
       )
     } yield Foldable[List].fold(
       List(
-        sanityCheck,
         identityResult,
+        trafficResult,
         acsCommitmentResult,
         repairProcessorResult,
         transactionTransferResult,
@@ -247,11 +245,20 @@ trait MessageDispatcher { this: NamedLogging =>
       topologyProcessor(sc, ts, Traced(envelopes)),
     )
 
+  protected def processTraffic(
+      ts: CantonTimestamp,
+      timestampOfSigningKeyO: Option[CantonTimestamp],
+      envelopes: List[DefaultOpenEnvelope],
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[ProcessingResult] =
+    doProcess(
+      TrafficControlTransaction,
+      trafficProcessor.processSetTrafficBalanceEnvelopes(ts, timestampOfSigningKeyO, envelopes),
+    )
+
   private def processTransactionAndTransferMessages(
-      eventE: Either[
-        EventWithErrors[Deliver[DefaultOpenEnvelope]],
-        SignedContent[Deliver[DefaultOpenEnvelope]],
-      ],
+      eventE: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
       sc: SequencerCounter,
       ts: CantonTimestamp,
       envelopes: List[DefaultOpenEnvelope],
@@ -311,7 +318,7 @@ trait MessageDispatcher { this: NamedLogging =>
 
         val containsTopologyTransactionsX = DefaultOpenEnvelopesFilter.containsTopologyX(envelopes)
 
-        val isReceipt = eventE.fold(_.content, _.content).messageIdO.isDefined
+        val isReceipt = eventE.event.content.messageIdO.isDefined
         processEncryptedViewsAndRootHashMessages(
           encryptedViews = encryptedViews,
           rootHashMessages = rootHashMessages,
@@ -396,7 +403,7 @@ trait MessageDispatcher { this: NamedLogging =>
               ts,
               rootHash,
               mediator,
-              LocalReject.MalformedRejects.BadRootHashMessages.Reject(reason, protocolVersion),
+              LocalRejectError.MalformedRejects.BadRootHashMessages.Reject(reason, protocolVersion),
             ),
           )
       }
@@ -610,7 +617,7 @@ trait MessageDispatcher { this: NamedLogging =>
       events: Seq[RawProtocolEvent]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[ProcessingResult] = {
     val receipts = events.mapFilter {
-      case Deliver(counter, timestamp, _domainId, messageIdO, batch) =>
+      case Deliver(counter, timestamp, _domainId, messageIdO, batch, _) =>
         // The event was submitted by the current participant iff the message ID is set.
         messageIdO.foreach(_ => recordEventDelivered())
         messageIdO.map(_ -> SequencedSubmission(counter, timestamp))
@@ -702,11 +709,11 @@ trait MessageDispatcher { this: NamedLogging =>
       sc: SequencerCounter,
       ts: CantonTimestamp,
       msgId: Option[MessageId],
-      err: EventWithErrors[SequencedEvent[DefaultOpenEnvelope]],
+      err: WithOpeningErrors[SequencedEvent[DefaultOpenEnvelope]],
   )(implicit traceContext: TraceContext): Unit =
     logger.info(
       show"Skipping faulty event at sc=${sc}, ts=${ts}${withMsgId(msgId)}, with errors=${err.openingErrors
-          .map(_.message)} and contents=${err.content.envelopes
+          .map(_.message)} and contents=${err.event.envelopes
           .map(_.protocolMessage)}"
     )
 
@@ -772,6 +779,7 @@ private[participant] object MessageDispatcher {
   }
 
   case object TopologyTransaction extends MessageKind[AsyncResult]
+  case object TrafficControlTransaction extends MessageKind[Unit]
   final case class RequestKind(viewType: ViewType) extends MessageKind[AsyncResult] {
     override def pretty: Pretty[RequestKind] = prettyOfParam(unnamedParam(_.viewType))
   }
@@ -811,6 +819,7 @@ private[participant] object MessageDispatcher {
             SequencedTime,
             Traced[List[DefaultOpenEnvelope]],
         ) => HandlerResult,
+        trafficProcessor: TrafficControlProcessor,
         acsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType,
         requestCounterAllocator: RequestCounterAllocator,
         recordOrderPublisher: RecordOrderPublisher,
@@ -831,6 +840,7 @@ private[participant] object MessageDispatcher {
         transferInProcessor: TransferInProcessor,
         registerTopologyTransactionResponseProcessor: EnvelopeHandler,
         topologyProcessor: TopologyTransactionProcessorCommon,
+        trafficProcessor: TrafficControlProcessor,
         acsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType,
         requestCounterAllocator: RequestCounterAllocator,
         recordOrderPublisher: RecordOrderPublisher,
@@ -871,6 +881,7 @@ private[participant] object MessageDispatcher {
         requestTracker,
         requestProcessors,
         identityProcessor,
+        trafficProcessor,
         acsCommitmentProcessor,
         requestCounterAllocator,
         recordOrderPublisher,
@@ -895,6 +906,7 @@ private[participant] object MessageDispatcher {
             SequencedTime,
             Traced[List[DefaultOpenEnvelope]],
         ) => HandlerResult,
+        trafficProcessor: TrafficControlProcessor,
         acsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType,
         requestCounterAllocator: RequestCounterAllocator,
         recordOrderPublisher: RecordOrderPublisher,
@@ -911,6 +923,7 @@ private[participant] object MessageDispatcher {
         requestTracker,
         requestProcessors,
         topologyProcessor,
+        trafficProcessor,
         acsCommitmentProcessor,
         requestCounterAllocator,
         recordOrderPublisher,
