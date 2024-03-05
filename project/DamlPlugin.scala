@@ -346,11 +346,21 @@ object DamlPlugin extends AutoPlugin {
     )
     val url =
       s"https://storage.googleapis.com/daml-binaries/split-releases/${damlVersion}/"
+
+    def platform = {
+      val osName = System.getProperty("os.name").toLowerCase
+      val osArch = System.getProperty("os.arch").toLowerCase
+
+      if (osName.startsWith("mac os x"))
+        "macos"
+      else if (osArch.startsWith("aarch") || osArch.startsWith("arm"))
+        "linux-arm"
+      else "linux-intel"
+    }
+
     val damlc = ensureArtifactAvailable(
       url = url,
-      artifactFilename =
-        s"damlc-${damlVersion}-${if (System.getProperty("os.name").toLowerCase.startsWith("mac os x")) "macos"
-          else "linux"}.tar.gz",
+      artifactFilename = s"damlc-$damlVersion-$platform.tar.gz",
       damlVersion = damlVersion,
       tarballPath = Seq("damlc", "damlc"),
     )

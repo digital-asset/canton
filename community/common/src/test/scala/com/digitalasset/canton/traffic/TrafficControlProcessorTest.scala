@@ -5,7 +5,7 @@ package com.digitalasset.canton.traffic
 
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CantonRequireTypes.String255
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
@@ -34,6 +34,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.traffic.TrafficControlErrors.InvalidTrafficControlBalanceMessage
+import com.digitalasset.canton.traffic.TrafficControlProcessor
 import com.digitalasset.canton.traffic.TrafficControlProcessor.TrafficControlSubscriber
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
 import org.scalatest.wordspec.AnyWordSpec
@@ -41,6 +42,7 @@ import org.scalatest.wordspec.AnyWordSpec
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
+import scala.concurrent.Future
 
 class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
@@ -82,7 +84,7 @@ class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExec
   ): SignedProtocolMessage[SetTrafficBalanceMessage] = {
     val setBalance = SetTrafficBalanceMessage(
       participantId,
-      NonNegativeLong.one,
+      PositiveInt.one,
       NonNegativeLong.tryCreate(100),
       domainId,
       testedProtocolVersion,
@@ -123,9 +125,12 @@ class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExec
           traceContext: TraceContext
       ): Unit = observedTs.updateAndGet(_ += timestamp)
 
-      override def balanceUpdate(update: SetTrafficBalanceMessage)(implicit
+      override def balanceUpdate(
+          update: SetTrafficBalanceMessage,
+          sequencingTimestamp: CantonTimestamp,
+      )(implicit
           traceContext: TraceContext
-      ): Unit = updates.updateAndGet(_ += update)
+      ): Future[Unit] = Future.successful(updates.updateAndGet(_ += update))
     })
 
     (tcp, observedTs, updates)

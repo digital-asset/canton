@@ -707,6 +707,7 @@ object BuildCommon {
           scaffeine,
           slick_hikaricp,
           scalatest % "test",
+          tink,
         ),
         Compile / PB.targets := Seq(
           scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
@@ -787,7 +788,6 @@ object BuildCommon {
           log4j_core,
           log4j_api,
           h2,
-          tink,
           slick,
           sttp,
           sttp_circe,
@@ -1290,10 +1290,10 @@ object BuildCommon {
         .settings(
           sharedSettings,
           Compile / damlDarLfVersion := lfVersion,
-          `ledger-common-dars-shared-settings`,
+          ledgerCommonDarsSharedSettings(lfVersion),
         )
 
-    lazy val `ledger-common-dars-shared-settings` = Seq(
+    def ledgerCommonDarsSharedSettings(lfVersion: String) = Seq(
       Compile / damlEnableJavaCodegen := true,
       Compile / damlSourceDirectory := baseDirectory.value / ".." / "src",
       Compile / useVersionedDarName := true,
@@ -1303,10 +1303,9 @@ object BuildCommon {
           "model",
           "semantic",
           "package_management",
-          "experimental",
           "carbonv1",
           "carbonv2",
-        )
+        ) ++ (if (lfVersion == "2.dev") Seq("experimental") else Seq.empty)
       )
         yield (
           (Compile / damlSourceDirectory).value / "main" / "daml" / s"$name",
@@ -1328,6 +1327,11 @@ object BuildCommon {
           (Compile / damlDarOutput).value / "upgrade-tests-3.0.0.dar",
           s"com.daml.ledger.test.java.upgrade_3_0_0",
         ),
+      ),
+      Compile / damlBuildOrder := Seq(
+        // define the packages that have a dependency in the right order, the omitted will be compiled before those listed
+        "carbonv1",
+        "carbonv2",
       ),
     )
 
@@ -1448,10 +1452,15 @@ object BuildCommon {
           JvmRulesPlugin.damlRepoHeaderSettings,
           Test / damlCodeGeneration := Seq(
             (
-              (Test / sourceDirectory).value / "daml",
+              (Test / sourceDirectory).value / "daml" / "v2_1",
               (Test / damlDarOutput).value / "JsonEncodingTest.dar",
               "com.digitalasset.canton.http.json.encoding",
-            )
+            ),
+            (
+              (Test / sourceDirectory).value / "daml" / "v2_dev",
+              (Test / damlDarOutput).value / "JsonEncodingTestDev.dar",
+              "com.digitalasset.canton.http.json.encoding.dev",
+            ),
           ),
         )
 

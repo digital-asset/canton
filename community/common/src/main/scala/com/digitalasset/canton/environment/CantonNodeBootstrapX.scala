@@ -215,7 +215,7 @@ abstract class CantonNodeBootstrapX[
         clock,
         crypto,
         authorizedStore,
-        config.topologyX.enableTopologyTransactionValidation,
+        config.topology.enableTopologyTransactionValidation,
         timeouts,
         futureSupervisor,
         loggerFactory,
@@ -379,7 +379,7 @@ abstract class CantonNodeBootstrapX[
         .map { res =>
           val done = res.result
             .filterNot(_.transaction.isProposal)
-            .map(_.transaction.transaction.mapping)
+            .map(_.mapping)
             .exists {
               case OwnerToKeyMappingX(`myMember`, None, keys) =>
                 // stage is clear if we have a general signing key and possibly also an encryption key

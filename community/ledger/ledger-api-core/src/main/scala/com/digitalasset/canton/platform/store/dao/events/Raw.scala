@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
-import com.daml.ledger.api.v1.event.{
+import com.daml.ledger.api.v2.event.{
   ArchivedEvent as PbArchivedEvent,
   CreatedEvent as PbCreatedEvent,
   Event as PbFlatEvent,
   ExercisedEvent as PbExercisedEvent,
 }
-import com.daml.ledger.api.v1.transaction.TreeEvent as PbTreeEvent
+import com.daml.ledger.api.v2.transaction.TreeEvent as PbTreeEvent
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.Ref.PackageName
 import com.daml.lf.data.Time.Timestamp
@@ -94,7 +94,6 @@ object Raw {
         packageName: PackageName,
         createSignatories: ArraySeq[String],
         createObservers: ArraySeq[String],
-        createAgreementText: Option[String],
         eventWitnesses: ArraySeq[String],
         createKeyHash: Option[Hash],
         ledgerEffectiveTime: Timestamp,
@@ -109,7 +108,6 @@ object Raw {
         witnessParties = eventWitnesses,
         signatories = createSignatories,
         observers = createObservers,
-        agreementText = createAgreementText.orElse(Some("")),
         createdAt = Some(TimestampConversion.fromLf(ledgerEffectiveTime)),
       )
   }
@@ -154,7 +152,6 @@ object Raw {
           createArgumentCompression: Option[Int],
           createSignatories: ArraySeq[String],
           createObservers: ArraySeq[String],
-          createAgreementText: Option[String],
           createKeyValue: Option[Array[Byte]],
           createKeyHash: Option[Hash],
           createKeyValueCompression: Option[Int],
@@ -171,7 +168,6 @@ object Raw {
             packageName = packageName,
             createSignatories = createSignatories,
             createObservers = createObservers,
-            createAgreementText = createAgreementText,
             eventWitnesses = eventWitnesses,
             createKeyHash = createKeyHash,
             ledgerEffectiveTime = ledgerEffectiveTime,
@@ -262,7 +258,6 @@ object Raw {
           createArgumentCompression: Option[Int],
           createSignatories: ArraySeq[String],
           createObservers: ArraySeq[String],
-          createAgreementText: Option[String],
           createKeyValue: Option[Array[Byte]],
           createKeyHash: Option[Hash],
           createKeyValueCompression: Option[Int],
@@ -279,7 +274,6 @@ object Raw {
             packageName = packageName,
             createSignatories = createSignatories,
             createObservers = createObservers,
-            createAgreementText = createAgreementText,
             eventWitnesses = eventWitnesses,
             createKeyHash = createKeyHash,
             ledgerEffectiveTime = ledgerEffectiveTime,

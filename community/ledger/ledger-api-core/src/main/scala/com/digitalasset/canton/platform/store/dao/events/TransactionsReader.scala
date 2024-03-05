@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
-import com.daml.ledger.api.v1.event.CreatedEvent
+import com.daml.ledger.api.v2.event.CreatedEvent
 import com.daml.ledger.api.v2.reassignment.{AssignedEvent, UnassignedEvent}
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.ledger.api.v2.update_service.{
@@ -312,7 +312,6 @@ private[dao] object TransactionsReader {
           witnessParties = rawCreatedEvent.witnessParties.toList,
           signatories = rawCreatedEvent.signatories.toList,
           observers = rawCreatedEvent.observers.toList,
-          agreementText = rawCreatedEvent.agreementText.orElse(Some("")),
           createdAt = Some(TimestampConversion.fromLf(rawCreatedEvent.ledgerEffectiveTime)),
           packageName = rawCreatedEvent.packageName,
         )
