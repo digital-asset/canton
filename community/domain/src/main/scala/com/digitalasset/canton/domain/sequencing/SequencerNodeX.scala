@@ -27,11 +27,8 @@ import com.digitalasset.canton.domain.sequencing.sequencer.store.{
   SequencerDomainConfigurationStore,
 }
 import com.digitalasset.canton.domain.sequencing.service.GrpcSequencerInitializationServiceX
-import com.digitalasset.canton.domain.sequencing.traffic.store.TrafficLimitsStore
-import com.digitalasset.canton.domain.sequencing.traffic.{
-  EnterpriseSequencerRateLimitManager,
-  TopologyTransactionTrafficSubscription,
-}
+import com.digitalasset.canton.domain.sequencing.traffic.TrafficBalanceManager
+import com.digitalasset.canton.domain.sequencing.traffic.store.TrafficBalanceStore
 import com.digitalasset.canton.domain.server.DynamicDomainGrpcServer
 import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.health.{ComponentStatus, GrpcHealthReporter, HealthService}
@@ -40,7 +37,6 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.resource.Storage
-import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.*
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{EffectiveTime, TopologyTransactionProcessorX}
@@ -149,7 +145,7 @@ class SequencerNodeBootstrapX(
   ) extends BootstrapStageWithStorage[
         SequencerNodeX,
         StartupNode,
-        (StaticDomainParameters, SequencerFactory, DomainTopologyManagerX, TrafficLimitsStore),
+        (StaticDomainParameters, SequencerFactory, DomainTopologyManagerX),
       ](
         "wait-for-sequencer-to-domain-init",
         bootstrapStageCallback,
@@ -157,6 +153,21 @@ class SequencerNodeBootstrapX(
         config.init.autoInit,
       )
       with GrpcSequencerInitializationServiceX.Callback {
+    private val balanceStore = TrafficBalanceStore(
+      storage,
+      arguments.parameterConfig.processingTimeouts,
+      loggerFactory,
+      arguments.parameterConfig.batchingConfig.aggregator,
+    )
+    private val balanceManager = new TrafficBalanceManager(
+      balanceStore,
+      clock,
+      arguments.config.trafficConfig,
+      futureSupervisor,
+      arguments.metrics,
+      arguments.parameterConfig.processingTimeouts,
+      loggerFactory,
+    )
 
     // add initialization service
     adminServerRegistry.addServiceU(
@@ -196,15 +207,6 @@ class SequencerNodeBootstrapX(
       ret
     }
 
-    private def mkTrafficLimitsStore(protocolVersion: ProtocolVersion) = {
-      TrafficLimitsStore(
-        storage,
-        protocolVersion,
-        timeouts,
-        loggerFactory,
-      )
-    }
-
     /** if node is not initialized, create a dynamic domain server such that we can serve a health end-point until
       * we are initialised
       */
@@ -231,7 +233,7 @@ class SequencerNodeBootstrapX(
     override protected def stageCompleted(implicit
         traceContext: TraceContext
     ): Future[Option[
-      (StaticDomainParameters, SequencerFactory, DomainTopologyManagerX, TrafficLimitsStore)
+      (StaticDomainParameters, SequencerFactory, DomainTopologyManagerX)
     ]] = {
       domainConfigurationStore.fetchConfiguration.toOption
         .map {
@@ -245,12 +247,11 @@ class SequencerNodeBootstrapX(
                   crypto,
                   store = createDomainTopologyStore(existing.domainId),
                   outboxQueue = new DomainOutboxQueue(loggerFactory),
-                  config.topologyX.enableTopologyTransactionValidation,
+                  config.topology.enableTopologyTransactionValidation,
                   timeouts,
                   futureSupervisor,
                   loggerFactory,
                 ),
-                mkTrafficLimitsStore(existing.domainParameters.protocolVersion),
               )
             )
           case None =>
@@ -274,10 +275,9 @@ class SequencerNodeBootstrapX(
             StaticDomainParameters,
             SequencerFactory,
             DomainTopologyManagerX,
-            TrafficLimitsStore,
         )
     ): StartupNode = {
-      val (domainParameters, sequencerFactory, domainTopologyMgr, trafficLimitsStore) = result
+      val (domainParameters, sequencerFactory, domainTopologyMgr) = result
       if (domainTopologyManager.putIfAbsent(domainTopologyMgr).nonEmpty) {
         // TODO(#14048) how to handle this error properly?
         throw new IllegalStateException("domainTopologyManager shouldn't have been set before")
@@ -293,12 +293,12 @@ class SequencerNodeBootstrapX(
         nonInitializedSequencerNodeServer.getAndSet(None),
         healthReporter,
         healthService,
-        trafficLimitsStore,
+        balanceManager,
       )
     }
 
     override protected def autoCompleteStage(): EitherT[FutureUnlessShutdown, String, Option[
-      (StaticDomainParameters, SequencerFactory, DomainTopologyManagerX, TrafficLimitsStore)
+      (StaticDomainParameters, SequencerFactory, DomainTopologyManagerX)
     ]] =
       EitherT.rightT(None) // this stage doesn't have auto-init
 
@@ -310,11 +310,11 @@ class SequencerNodeBootstrapX(
       snapshot.result
         .flatMap(_.selectMapping[TrafficControlStateX])
         .map { tx =>
-          tx.transaction.transaction.mapping.member ->
+          tx.mapping.member ->
             TopUpEvent(
-              tx.transaction.transaction.mapping.totalExtraTrafficLimit,
+              tx.mapping.totalExtraTrafficLimit,
               tx.validFrom.value,
-              tx.transaction.transaction.serial,
+              tx.serial,
             )
         }
         .toMap
@@ -336,12 +336,9 @@ class SequencerNodeBootstrapX(
           )
           val sequencerFactory = mkFactory(request.domainParameters.protocolVersion)
           val domainIds = request.topologySnapshot.result
-            .map(_.transaction.transaction.mapping)
+            .map(_.mapping)
             .collect { case SequencerDomainStateX(domain, _, _, _) => domain }
             .toSet
-          val trafficControlStore = mkTrafficLimitsStore(
-            request.domainParameters.protocolVersion
-          )
           for {
             // TODO(#12390) validate initalisation request, as from here on, it must succeed
             //    - authorization validation etc is done during manager.add
@@ -363,14 +360,7 @@ class SequencerNodeBootstrapX(
                 )
                 // TODO(#14070) make initialize idempotent to support crash recovery during init
                 sequencerFactory
-                  .initialize(initialState, sequencerId)
-                  .flatMap { _ =>
-                    val topUps = extractTopUpEventsFromTopologySnapshot(
-                      request.topologySnapshot,
-                      initialState.latestTopologyClientTimestamp,
-                    )
-                    EitherT.liftF[Future, String, Unit](trafficControlStore.initialize(topUps))
-                  }
+                  .initialize(initialState, sequencerId, balanceManager)
                   .mapK(FutureUnlessShutdown.outcomeK)
               }
               .getOrElse {
@@ -384,7 +374,7 @@ class SequencerNodeBootstrapX(
               crypto,
               store,
               outboxQueue,
-              config.topologyX.enableTopologyTransactionValidation,
+              config.topology.enableTopologyTransactionValidation,
               timeouts,
               futureSupervisor,
               loggerFactory,
@@ -409,7 +399,7 @@ class SequencerNodeBootstrapX(
               )
               .leftMap(e => s"Unable to save parameters: ${e.toString}")
               .mapK(FutureUnlessShutdown.outcomeK)
-          } yield (request.domainParameters, sequencerFactory, topologyManager, trafficControlStore)
+          } yield (request.domainParameters, sequencerFactory, topologyManager)
         }.map { _ =>
           InitializeSequencerResponseX(replicated = config.sequencer.supportsReplicas)
         }
@@ -428,7 +418,7 @@ class SequencerNodeBootstrapX(
       preinitializedServer: Option[DynamicDomainGrpcServer],
       healthReporter: GrpcHealthReporter,
       healthService: HealthService,
-      trafficLimitsStore: TrafficLimitsStore,
+      balanceManager: TrafficBalanceManager,
   ) extends BootstrapStage[SequencerNodeX, RunningNode[SequencerNodeX]](
         description = "Startup sequencer node",
         bootstrapStageCallback,
@@ -440,27 +430,6 @@ class SequencerNodeBootstrapX(
 
     preinitializedServer.foreach(x => addCloseable(x.publicServer))
 
-    private def createRateLimitManager(
-        topologyProcessor: TopologyTransactionProcessorX
-    ) = {
-      val rateLimiter = new EnterpriseSequencerRateLimitManager(
-        trafficLimitsStore,
-        loggerFactory,
-        futureSupervisor,
-        timeouts,
-        arguments.metrics,
-      )
-
-      topologyProcessor.subscribe(
-        new TopologyTransactionTrafficSubscription(
-          rateLimiter,
-          domainLoggerFactory,
-        )
-      )
-      addCloseable(rateLimiter)
-      Some(rateLimiter)
-    }
-
     override protected def attempt()(implicit
         traceContext: TraceContext
     ): EitherT[FutureUnlessShutdown, String, Option[RunningNode[SequencerNodeX]]] = {
@@ -471,7 +440,7 @@ class SequencerNodeBootstrapX(
         authorizedTopologyManager,
         domainTopologyManager,
         crypto,
-        config.topologyX,
+        config.topology,
         timeouts,
         arguments.futureSupervisor,
         loggerFactory,
@@ -482,13 +451,6 @@ class SequencerNodeBootstrapX(
       addCloseable(domainOutboxFactory)
 
       performUnlessClosingEitherU("starting up runtime") {
-        val indexedStringStore = IndexedStringStore.create(
-          storage,
-          parameterConfig.cachingConfigs.indexedStrings,
-          timeouts,
-          domainLoggerFactory,
-        )
-        addCloseable(indexedStringStore)
         for {
           processorAndClient <- EitherT.right(
             TopologyTransactionProcessorX.createProcessorAndClientForDomain(
@@ -497,15 +459,13 @@ class SequencerNodeBootstrapX(
               staticDomainParameters.protocolVersion,
               crypto.pureCrypto,
               parameters,
-              config.topologyX.enableTopologyTransactionValidation,
+              config.topology.enableTopologyTransactionValidation,
               clock,
               futureSupervisor,
               domainLoggerFactory,
             )
           )
           (topologyProcessor, topologyClient) = processorAndClient
-          // Create a rate limiter manager
-          rateLimiter = createRateLimitManager(topologyProcessor)
           maxStoreTimestamp <- EitherT.right(domainTopologyStore.maxTimestamp())
           membersToRegister <- {
             ips.add(topologyClient)
@@ -556,6 +516,7 @@ class SequencerNodeBootstrapX(
             domainLoggerFactory,
             topologyProcessor,
           )
+          _ <- EitherT.liftF(balanceManager.initialize)
           sequencer <- createSequencerRuntime(
             sequencerFactory,
             domainId,
@@ -567,7 +528,6 @@ class SequencerNodeBootstrapX(
             staticDomainParameters,
             storage,
             crypto,
-            indexedStringStore,
             Future.unit, // domain is already initialised
             Future.successful(true),
             arguments,
@@ -579,8 +539,9 @@ class SequencerNodeBootstrapX(
             ),
             Some(domainOutboxFactory),
             memberAuthServiceFactory,
-            rateLimiter,
             domainLoggerFactory,
+            config.trafficConfig,
+            balanceManager,
           )
           // TODO(#14073) subscribe to processor BEFORE sequencer client is created
           _ = addCloseable(sequencer)

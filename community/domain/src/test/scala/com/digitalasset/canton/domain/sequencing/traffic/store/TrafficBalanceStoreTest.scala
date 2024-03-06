@@ -3,10 +3,12 @@
 
 package com.digitalasset.canton.domain.sequencing.traffic.store
 
+import cats.syntax.parallel.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.sequencing.traffic.TrafficBalanceManager.TrafficBalance
+import com.digitalasset.canton.domain.sequencing.traffic.TrafficBalance
 import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.{BaseTest, ProtocolVersionChecksAsyncWordSpec}
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.wordspec.AsyncWordSpec
@@ -20,9 +22,11 @@ trait TrafficBalanceStoreTest
   def trafficBalanceStore(mk: () => TrafficBalanceStore): Unit = {
     val alice = ParticipantId("alice")
     val bob = ParticipantId("bob")
-    val t1 = CantonTimestamp.Epoch
+    val t0 = CantonTimestamp.Epoch
+    val t1 = t0.plusSeconds(1)
     val t2 = t1.plusSeconds(1)
-    val t3 = t2.plusSeconds(2)
+    val t3 = t2.plusSeconds(1)
+    val t4 = t3.plusSeconds(1)
 
     "trafficBalanceStore" should {
       "store and lookup balances" in {
@@ -153,6 +157,80 @@ trait TrafficBalanceStoreTest
           aliceEvents <- store.lookup(alice)
         } yield {
           aliceEvents should contain theSameElementsInOrderAs List(balanceAlice3)
+        }
+      }
+
+      "return the correct max timestamp" in {
+        val store = mk()
+        val balance1 =
+          TrafficBalance(alice.member, PositiveInt.one, NonNegativeLong.tryCreate(5L), t1)
+        val balance2 =
+          TrafficBalance(bob.member, PositiveInt.tryCreate(2), NonNegativeLong.tryCreate(10L), t2)
+
+        for {
+          max0 <- store.maxTsO
+          _ <- store.store(balance1)
+          max1 <- store.maxTsO
+          _ <- store.store(balance2)
+          max2 <- store.maxTsO
+        } yield {
+          max0 shouldBe None
+          max1 shouldBe Some(t1)
+          max2 shouldBe Some(t2)
+        }
+      }
+
+      "set and get the initial timestamp" in {
+        val store = mk()
+
+        for {
+          // We should not really ever set the initial timestamp twice, but if we do make sure
+          // we take the highest one
+          _ <- store.setInitialTimestamp(t1)
+          _ <- store.setInitialTimestamp(t0)
+          t1get <- store.getInitialTimestamp
+        } yield {
+          t1get shouldBe Some(t1)
+        }
+      }
+
+      "return latest balances at given timestamp" in {
+        val store = mk()
+
+        val aliceBalances = Seq(
+          TrafficBalance(alice.member, PositiveInt.one, NonNegativeLong.tryCreate(5L), t1),
+          TrafficBalance(alice.member, PositiveInt.tryCreate(2), NonNegativeLong.tryCreate(55L), t3),
+        )
+        val bobBalances = Seq(
+          TrafficBalance(bob.member, PositiveInt.one, NonNegativeLong.tryCreate(10L), t2),
+          TrafficBalance(bob.member, PositiveInt.tryCreate(2), NonNegativeLong.tryCreate(100L), t4),
+        )
+
+        val expectedBalancesAtT1 = Seq(aliceBalances(0))
+        val expectedBalancesAtT2 = Seq(aliceBalances(0), bobBalances(0))
+        val expectedBalancesAtT3 = Seq(aliceBalances(1), bobBalances(0))
+        val expectedBalancesAtT4 = Seq(aliceBalances(1), bobBalances(1))
+
+        for {
+          _ <- (aliceBalances ++ bobBalances).parTraverse(store.store(_))
+          balancesAtT0 <- store.lookupLatestBeforeInclusive(t0)
+          balancesAtT1 <- store.lookupLatestBeforeInclusive(t1)
+          balancesAtT2 <- store.lookupLatestBeforeInclusive(t2)
+          balancesAtT2_5 <- store.lookupLatestBeforeInclusive(t2.plusMillis(500))
+          balancesAtT3 <- store.lookupLatestBeforeInclusive(t3)
+          balancesAtT3_5 <- store.lookupLatestBeforeInclusive(t3.plusMillis(500))
+          balancesAtT4 <- store.lookupLatestBeforeInclusive(t4)
+          balancesAtT4_5 <- store.lookupLatestBeforeInclusive(t4.plusMillis(500))
+        } yield {
+          balancesAtT0 shouldBe Seq.empty
+
+          balancesAtT1 should contain theSameElementsAs expectedBalancesAtT1
+          balancesAtT2 should contain theSameElementsAs expectedBalancesAtT2
+          balancesAtT2_5 should contain theSameElementsAs expectedBalancesAtT2
+          balancesAtT3 should contain theSameElementsAs expectedBalancesAtT3
+          balancesAtT3_5 should contain theSameElementsAs expectedBalancesAtT3
+          balancesAtT4 should contain theSameElementsAs expectedBalancesAtT4
+          balancesAtT4_5 should contain theSameElementsAs expectedBalancesAtT4
         }
       }
     }

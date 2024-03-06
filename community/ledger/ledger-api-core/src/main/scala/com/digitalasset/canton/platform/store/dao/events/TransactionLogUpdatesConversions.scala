@@ -3,20 +3,23 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
-import com.daml.ledger.api.v1.transaction.TreeEvent
-import com.daml.ledger.api.v1.event as apiEvent
 import com.daml.ledger.api.v2.reassignment.{
   AssignedEvent as ApiAssignedEvent,
   Reassignment as ApiReassignment,
   UnassignedEvent as ApiUnassignedEvent,
 }
-import com.daml.ledger.api.v2.transaction.{Transaction as FlatTransaction, TransactionTree}
+import com.daml.ledger.api.v2.transaction.{
+  Transaction as FlatTransaction,
+  TransactionTree,
+  TreeEvent,
+}
 import com.daml.ledger.api.v2.update_service.{
   GetTransactionResponse,
   GetTransactionTreeResponse,
   GetUpdateTreesResponse,
   GetUpdatesResponse,
 }
+import com.daml.ledger.api.v2.event as apiEvent
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.{Identifier, Party}
 import com.daml.lf.transaction.{FatContractInstance, GlobalKeyWithMaintainers, Node}
@@ -497,7 +500,6 @@ private[events] object TransactionLogUpdatesConversions {
                 templateId = createdEvent.templateId,
                 packageName = createdEvent.packageName,
                 arg = createdEvent.createArgument.unversioned,
-                agreementText = createdEvent.createAgreementText.getOrElse(""),
                 signatories = createdEvent.createSignatories,
                 stakeholders = createdEvent.createSignatories ++ createdEvent.createObservers,
                 keyOpt = createdEvent.createKey.flatMap(k =>
@@ -533,7 +535,6 @@ private[events] object TransactionLogUpdatesConversions {
           witnessParties = requestingParties.view.filter(createdWitnesses(createdEvent)).toSeq,
           signatories = createdEvent.createSignatories.toSeq,
           observers = createdEvent.createObservers.toSeq,
-          agreementText = createdEvent.createAgreementText.orElse(Some("")),
           createdAt = Some(TimestampConversion.fromLf(createdEvent.ledgerEffectiveTime)),
         )
       )

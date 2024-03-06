@@ -7,6 +7,7 @@ import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -47,7 +48,10 @@ final case class StoredTopologyTransactionX[+Op <: TopologyChangeOpX, +M <: Topo
     validFrom: EffectiveTime,
     validUntil: Option[EffectiveTime],
     transaction: SignedTopologyTransactionX[Op, M],
-) extends PrettyPrinting {
+) extends DelegatedTopologyTransactionLike[Op, M]
+    with PrettyPrinting {
+  override protected def transactionLikeDelegate: TopologyTransactionLike[Op, M] = transaction
+
   override def pretty: Pretty[StoredTopologyTransactionX.this.type] =
     prettyOfClass(
       unnamedParam(_.transaction),
@@ -65,8 +69,6 @@ final case class StoredTopologyTransactionX[+Op <: TopologyChangeOpX, +M <: Topo
   def selectOp[TargetOp <: TopologyChangeOpX: ClassTag] = transaction
     .selectOp[TargetOp]
     .map(_ => this.asInstanceOf[StoredTopologyTransactionX[TargetOp, M]])
-
-  def mapping: M = transaction.transaction.mapping
 }
 
 object StoredTopologyTransactionX {
@@ -78,7 +80,11 @@ final case class ValidatedTopologyTransactionX[+Op <: TopologyChangeOpX, +M <: T
     transaction: SignedTopologyTransactionX[Op, M],
     rejectionReason: Option[TopologyTransactionRejection] = None,
     expireImmediately: Boolean = false,
-) extends PrettyPrinting {
+) extends DelegatedTopologyTransactionLike[Op, M]
+    with PrettyPrinting {
+
+  override protected def transactionLikeDelegate: TopologyTransactionLike[Op, M] = transaction
+
   def nonDuplicateRejectionReason: Option[TopologyTransactionRejection] = rejectionReason match {
     case Some(Duplicate(_)) => None
     case otherwise => otherwise
@@ -175,7 +181,7 @@ abstract class TopologyStoreX[+StoreID <: TopologyStoreId](implicit
   def update(
       sequenced: SequencedTime,
       effective: EffectiveTime,
-      removeMapping: Set[MappingHash],
+      removeMapping: Map[MappingHash, PositiveInt],
       removeTxs: Set[TxHash],
       additions: Seq[GenericValidatedTopologyTransactionX],
   )(implicit
@@ -306,7 +312,7 @@ object TopologyStoreX {
       items: Seq[StoredTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
   ): Seq[Change] = {
     items
-      .map(x => (x, x.transaction.transaction.mapping))
+      .map(x => (x, x.mapping))
       .map {
         case (tx, x: DomainParametersStateX) =>
           Change.TopologyDelay(tx.sequenced, tx.validFrom, x.parameters.topologyChangeDelay)

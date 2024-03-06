@@ -50,6 +50,7 @@ import com.digitalasset.canton.domain.sequencing.config.{
 }
 import com.digitalasset.canton.domain.sequencing.sequencer.*
 import com.digitalasset.canton.domain.sequencing.sequencer.block.DriverBlockSequencerFactory
+import com.digitalasset.canton.domain.sequencing.sequencer.traffic.SequencerTrafficConfig
 import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.http.{HttpApiConfig, StaticContentConfig, WebsocketConfig}
 import com.digitalasset.canton.ledger.runner.common.PureConfigReaderWriter.Secure.{
@@ -378,6 +379,7 @@ trait CantonConfig {
         iterationsBetweenInterruptions = participantParameters.iterationsBetweenInterruptions,
         journalGarbageCollectionDelay =
           participantParameters.journalGarbageCollectionDelay.toInternal,
+        disableUpgradeValidation = participantParameters.disableUpgradeValidation,
       )
     }
 
@@ -482,7 +484,7 @@ trait CantonConfig {
   }
 }
 
-private[config] object CantonNodeParameterConverter {
+private[canton] object CantonNodeParameterConverter {
   import com.digitalasset.canton.time.EnrichedDurations.*
 
   def general(parent: CantonConfig, node: LocalNodeConfig): CantonNodeParameters.General = {
@@ -499,6 +501,7 @@ private[config] object CantonNodeParameterConverter {
       node.parameters.batching,
       parent.parameters.nonStandardConfig,
       node.storage.parameters.migrateAndStart,
+      node.parameters.useNewTrafficControl,
     )
   }
 
@@ -799,8 +802,8 @@ object CantonConfig {
       deriveReader[ActiveContractsServiceStreamsConfig]
     lazy implicit val packageMetadataViewConfigReader: ConfigReader[PackageMetadataViewConfig] =
       deriveReader[PackageMetadataViewConfig]
-    lazy implicit val topologyXConfigReader: ConfigReader[TopologyXConfig] =
-      deriveReader[TopologyXConfig]
+    lazy implicit val topologyXConfigReader: ConfigReader[TopologyConfig] =
+      deriveReader[TopologyConfig]
     lazy implicit val sequencerConnectionConfigCertificateFileReader
         : ConfigReader[SequencerConnectionConfig.CertificateFile] =
       deriveReader[SequencerConnectionConfig.CertificateFile]
@@ -874,7 +877,8 @@ object CantonConfig {
       deriveReader[AcsCommitmentsCatchUpConfig]
     lazy implicit val deadlockDetectionConfigReader: ConfigReader[DeadlockDetectionConfig] =
       deriveReader[DeadlockDetectionConfig]
-
+    lazy implicit val sequencerTrafficConfigReader: ConfigReader[SequencerTrafficConfig] =
+      deriveReader[SequencerTrafficConfig]
     lazy implicit val metricsFilterConfigReader: ConfigReader[MetricsConfig.MetricsFilterConfig] =
       deriveReader[MetricsConfig.MetricsFilterConfig]
     lazy implicit val metricsConfigPrometheusReader
@@ -1156,7 +1160,8 @@ object CantonConfig {
       deriveWriter[RateLimitingConfig]
     lazy implicit val ledgerApiServerConfigWriter: ConfigWriter[LedgerApiServerConfig] =
       deriveWriter[LedgerApiServerConfig]
-
+    lazy implicit val sequencerTrafficConfigWriter: ConfigWriter[SequencerTrafficConfig] =
+      deriveWriter[SequencerTrafficConfig]
     implicit val throttleModeCfgWriter: ConfigWriter[ThrottleMode] =
       ConfigWriter.toString[ThrottleMode] {
         case ThrottleMode.Shaping => "shaping"
@@ -1179,8 +1184,8 @@ object CantonConfig {
       deriveWriter[ActiveContractsServiceStreamsConfig]
     lazy implicit val packageMetadataViewConfigWriter: ConfigWriter[PackageMetadataViewConfig] =
       deriveWriter[PackageMetadataViewConfig]
-    lazy implicit val topologyXConfigWriter: ConfigWriter[TopologyXConfig] =
-      deriveWriter[TopologyXConfig]
+    lazy implicit val topologyXConfigWriter: ConfigWriter[TopologyConfig] =
+      deriveWriter[TopologyConfig]
     lazy implicit val sequencerConnectionConfigCertificateFileWriter
         : ConfigWriter[SequencerConnectionConfig.CertificateFile] =
       deriveWriter[SequencerConnectionConfig.CertificateFile]

@@ -12,10 +12,10 @@ import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.{Level, Logger}
 import ch.qos.logback.core.spi.AppenderAttachable
 import ch.qos.logback.core.{Appender, FileAppender}
-import com.daml.ledger.api.v1.commands.{Command, CreateCommand, ExerciseCommand}
-import com.daml.ledger.api.v1.event.CreatedEvent
-import com.daml.ledger.api.v1.value.Value.Sum
-import com.daml.ledger.api.v1.value.{
+import com.daml.ledger.api.v2.commands.{Command, CreateCommand, ExerciseCommand}
+import com.daml.ledger.api.v2.event.CreatedEvent
+import com.daml.ledger.api.v2.value.Value.Sum
+import com.daml.ledger.api.v2.value.{
   Identifier as IdentifierV1,
   List as ListV1,
   Optional,
@@ -788,7 +788,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
 
       // require that all proposed or previously existing transactions have the same hash,
       // otherwise there is no chance for success
-      if (proposedOrExisting.distinctBy(_.transaction.hash).sizeIs != 1) {
+      if (proposedOrExisting.distinctBy(_.hash).sizeIs != 1) {
         throw new IllegalStateException(
           s"Proposed or previously existing transactions disagree on the founding of the domain's decentralized namespace:\n$proposedOrExisting"
         )
@@ -807,7 +807,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
 
       owners.foreach(_.topology.transactions.load(foundingTransactions, store = store))
 
-      (decentralizedNamespaceDefinition.transaction.mapping.namespace, foundingTransactions)
+      (decentralizedNamespaceDefinition.mapping.namespace, foundingTransactions)
     }
 
     private def expected_namespace(
@@ -949,7 +949,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
           .withDefaultValue(5)
 
       val merged = initialTopologyState
-        .groupBy1(_.transaction.hash)
+        .groupBy1(_.hash)
         .values
         .map(
           // combine signatures of transactions with the same hash
@@ -958,7 +958,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
           }.copy(isProposal = false)
         )
         .toSeq
-        .sortBy(tx => orderingMap(tx.transaction.mapping.code))
+        .sortBy(tx => orderingMap(tx.mapping.code))
 
       sequencers
         .filterNot(_.health.initialized())

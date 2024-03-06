@@ -5,7 +5,7 @@ package com.digitalasset.canton.domain.sequencing.traffic.store
 
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.sequencing.traffic.TrafficBalanceManager.TrafficBalance
+import com.digitalasset.canton.domain.sequencing.traffic.TrafficBalance
 import com.digitalasset.canton.domain.sequencing.traffic.store.db.DbTrafficBalanceStore
 import com.digitalasset.canton.domain.sequencing.traffic.store.memory.InMemoryTrafficBalanceStore
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -52,6 +52,13 @@ trait TrafficBalanceStore extends AutoCloseable {
       traceContext: TraceContext
   ): Future[Seq[TrafficBalance]]
 
+  /** Looks up the latest traffic balance for all members, that were sequenced before
+    * the given timestamp (inclusive).
+    */
+  def lookupLatestBeforeInclusive(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): Future[Seq[TrafficBalance]]
+
   /** Deletes all balances for a given member, if their timestamp is strictly lower than the maximum existing timestamp
     * for that member that is lower or equal to the provided timestamp.
     * In practice this means that we will keep enough to provide the correct balance for any timestamp above or equal the
@@ -64,4 +71,19 @@ trait TrafficBalanceStore extends AutoCloseable {
   )(implicit
       traceContext: TraceContext
   ): Future[Unit]
+
+  /** Returns the maximum timestamp present in a member balance.
+    */
+  def maxTsO(implicit traceContext: TraceContext): Future[Option[CantonTimestamp]]
+
+  /** Persists the timestamp of the last sequenced event in the snapshot with which the sequencer is initialized.
+    * This allows to recover from a crash just after onboarding by reading back this timestamp to tick the balance manager.
+    */
+  def setInitialTimestamp(cantonTimestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): Future[Unit]
+
+  /** Gets the timestamp of the last sequenced event in the snapshot the sequencer is initialized with.
+    */
+  def getInitialTimestamp(implicit traceContext: TraceContext): Future[Option[CantonTimestamp]]
 }

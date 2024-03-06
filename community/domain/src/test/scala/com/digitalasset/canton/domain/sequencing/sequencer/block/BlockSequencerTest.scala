@@ -19,6 +19,7 @@ import com.digitalasset.canton.domain.block.data.{
   BlockEphemeralState,
   BlockInfo,
   BlockUpdateClosureWithHeight,
+  EphemeralState,
 }
 import com.digitalasset.canton.domain.block.{
   BlockSequencerStateManager,
@@ -27,12 +28,13 @@ import com.digitalasset.canton.domain.block.{
   SequencerDriverHealthStatus,
 }
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
-import com.digitalasset.canton.domain.sequencing.integrations.state.EphemeralState
 import com.digitalasset.canton.domain.sequencing.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   RegisterMemberError,
   SequencerWriteError,
 }
+import com.digitalasset.canton.domain.sequencing.traffic.RateLimitManagerTesting
+import com.digitalasset.canton.domain.sequencing.traffic.store.memory.InMemoryTrafficBalanceStore
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.logging.pretty.CantonPrettyPrinter
@@ -68,7 +70,11 @@ import org.scalatest.wordspec.AsyncWordSpec
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Await, Future, Promise}
 
-class BlockSequencerTest extends AsyncWordSpec with BaseTest with HasExecutionContext {
+class BlockSequencerTest
+    extends AsyncWordSpec
+    with BaseTest
+    with HasExecutionContext
+    with RateLimitManagerTesting {
 
   "BlockSequencer" should {
     "process a lot of blocks during catch up" in withEnv() { implicit env =>
@@ -103,7 +109,7 @@ class BlockSequencerTest extends AsyncWordSpec with BaseTest with HasExecutionCo
       .update(
         SequencedTime(CantonTimestamp.Epoch),
         EffectiveTime(CantonTimestamp.Epoch),
-        removeMapping = Set.empty,
+        removeMapping = Map.empty,
         removeTxs = Set.empty,
         additions = Seq(
           topologyTransactionFactory.ns1k1_k1,
@@ -148,6 +154,8 @@ class BlockSequencerTest extends AsyncWordSpec with BaseTest with HasExecutionCo
       1.second,
     )
 
+    private val balanceStore = new InMemoryTrafficBalanceStore(loggerFactory)
+
     val fakeBlockSequencerOps = new FakeBlockSequencerOps(N)
     private val fakeBlockSequencerStateManager = new FakeBlockSequencerStateManager
     private val storage = new MemoryStorage(loggerFactory, timeouts)
@@ -156,17 +164,17 @@ class BlockSequencerTest extends AsyncWordSpec with BaseTest with HasExecutionCo
         fakeBlockSequencerOps,
         name = "test",
         domainId,
-        initialBlockHeight = None,
         cryptoApi,
-        topologyClientMember = sequencer1,
+        sequencerId = sequencer1,
         fakeBlockSequencerStateManager,
         store,
+        balanceStore,
         storage,
         FutureSupervisor.Noop,
         health = None,
         new SimClock(loggerFactory = loggerFactory),
         testedProtocolVersion,
-        rateLimitManager = None,
+        blockRateLimitManager = defaultRateLimiter,
         OrderingTimeFixMode.MakeStrictlyIncreasing,
         processingTimeouts = BlockSequencerTest.this.timeouts,
         logEventDetails = true,
