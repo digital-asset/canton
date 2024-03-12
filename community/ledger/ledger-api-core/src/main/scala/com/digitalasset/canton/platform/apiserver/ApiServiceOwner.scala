@@ -65,11 +65,11 @@ object ApiServiceOwner {
       port: Port = DefaultPort,
       tls: Option[TlsConfiguration] = DefaultTls,
       seeding: Seeding = DefaultSeeding,
-      configurationLoadTimeout: NonNegativeFiniteDuration =
-        ApiServiceOwner.DefaultConfigurationLoadTimeout,
+      initSyncTimeout: NonNegativeFiniteDuration = ApiServiceOwner.DefaultInitSyncTimeout,
       managementServiceTimeout: NonNegativeFiniteDuration =
         ApiServiceOwner.DefaultManagementServiceTimeout,
       ledgerFeatures: LedgerFeatures,
+      maxDeduplicationDuration: NonNegativeFiniteDuration,
       jwtTimestampLeeway: Option[JwtTimestampLeeway],
       tokenExpiryGracePeriodForStreams: Option[NonNegativeDuration],
       upgradingEnabled: Boolean,
@@ -155,7 +155,7 @@ object ApiServiceOwner {
             TimeProviderType.Static
           ),
         submissionTracker = submissionTracker,
-        configurationLoadTimeout = configurationLoadTimeout.underlying,
+        initSyncTimeout = initSyncTimeout.underlying,
         commandConfig = command,
         optTimeServiceBackend = timeServiceBackend,
         servicesExecutionContext = servicesExecutionContext,
@@ -169,6 +169,7 @@ object ApiServiceOwner {
         identityProviderConfigStore = identityProviderConfigStore,
         partyRecordStore = partyRecordStore,
         ledgerFeatures = ledgerFeatures,
+        maxDeduplicationDuration = maxDeduplicationDuration,
         userManagementServiceConfig = userManagement,
         apiStreamShutdownTimeout = apiStreamShutdownTimeout.underlying,
         meteringReportKey = meteringReportKey,
@@ -216,7 +217,7 @@ object ApiServiceOwner {
   val DefaultAddress: Option[String] = None
   val DefaultTls: Option[TlsConfiguration] = None
   val DefaultMaxInboundMessageSize: Int = 64 * 1024 * 1024
-  val DefaultConfigurationLoadTimeout: NonNegativeFiniteDuration =
+  val DefaultInitSyncTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(10)
   val DefaultSeeding: Seeding = Seeding.Strong
   val DefaultManagementServiceTimeout: NonNegativeFiniteDuration =
