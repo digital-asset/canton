@@ -60,6 +60,7 @@ import com.digitalasset.canton.{
   LedgerApplicationId,
   LedgerCommandId,
   LfPackageId,
+  LfPackageName,
   LfPartyId,
   RequestCounter,
   SequencerCounter,
@@ -106,6 +107,8 @@ final class TransferOutProcessingStepsTest
 
   private val templateId =
     LfTemplateId.assertFromString("transferoutprocessingstepstestpackage:template:id")
+  private val packageName =
+    LfPackageName.assertFromString("transferoutprocessingstepstestpackagename")
 
   private val initialTransferCounter: TransferCounterO =
     Some(TransferCounter.Genesis)
@@ -681,6 +684,7 @@ final class TransferOutProcessingStepsTest
             Seq.empty,
             cryptoSnapshot,
             MediatorsOfDomain(MediatorGroupIndex.one),
+            None,
           )
         )("compute activeness set failed")
       } yield {
@@ -781,7 +785,7 @@ final class TransferOutProcessingStepsTest
           sourceDomain.id,
           TransferOutViewType,
           RequestId(CantonTimestamp.Epoch),
-          Some(rootHash),
+          rootHash,
           Verdict.Approve(testedProtocolVersion),
           Set(),
           testedProtocolVersion,
@@ -830,6 +834,7 @@ final class TransferOutProcessingStepsTest
           WithContractHash(contractId, contractHash),
           TransferCounter.Genesis,
           templateId = templateId,
+          packageName = packageName,
           transferringParticipant = false,
           submitterMetadata = submitterMetadata(submitter),
           transferId,
@@ -844,7 +849,7 @@ final class TransferOutProcessingStepsTest
           outProcessingSteps
             .getCommitSetAndContractsToBeStoredAndEvent(
               NoOpeningErrors(signedContent),
-              transferResult,
+              transferResult.verdict,
               pendingOut,
               state.pendingTransferOutSubmissions,
               crypto.pureCrypto,

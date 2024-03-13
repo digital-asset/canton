@@ -1558,7 +1558,6 @@ object BuildCommon {
       .in(file("community/ledger-api"))
       .dependsOn(`google-common-protos-scala`)
       .disablePlugins(
-        BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
         WartRemover,

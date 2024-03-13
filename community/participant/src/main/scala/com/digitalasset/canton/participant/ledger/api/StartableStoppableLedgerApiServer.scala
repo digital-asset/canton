@@ -31,6 +31,7 @@ import com.digitalasset.canton.ledger.participant.state.v2.metrics.{
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.{ApiRequestLogger, ClientChannelBuilder}
+import com.digitalasset.canton.participant.admin.MutablePackageNameMapResolver
 import com.digitalasset.canton.participant.config.LedgerApiServerConfig
 import com.digitalasset.canton.participant.protocol.SerializableContractAuthenticatorImpl
 import com.digitalasset.canton.platform.LedgerApiServer
@@ -79,6 +80,7 @@ class StartableStoppableLedgerApiServer(
     dbConfig: DbSupport.DbConfig,
     telemetry: Telemetry,
     futureSupervisor: FutureSupervisor,
+    packageNameMapResolver: MutablePackageNameMapResolver,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     actorSystem: ActorSystem,
@@ -205,6 +207,14 @@ class StartableStoppableLedgerApiServer(
           tracer,
           loggerFactory,
         )
+      packageMetadataStore = new InMemoryPackageMetadataStore(
+        inMemoryState.packageMetadataView
+      )
+      _ <- ResourceOwner.forReleasable(() =>
+        packageNameMapResolver.setReference(() =>
+          packageMetadataStore.getSnapshot.getUpgradablePackageMap
+        )
+      )(_ => Future.successful(packageNameMapResolver.unset()))
       timedReadService = new TimedReadService(config.syncService, config.metrics)
       dbSupport <- DbSupport
         .owner(
@@ -287,10 +297,6 @@ class StartableStoppableLedgerApiServer(
         executionContext = executionContext,
         loggerFactory = loggerFactory,
       )
-
-      packageMetadataStore = new InMemoryPackageMetadataStore(
-        inMemoryState.packageMetadataView
-      )
       serializableContractAuthenticator = new SerializableContractAuthenticatorImpl(
         new UnicumGenerator(config.syncService.pureCryptoApi)
       )
@@ -314,7 +320,7 @@ class StartableStoppableLedgerApiServer(
         participantId = config.participantId,
         apiStreamShutdownTimeout = config.serverConfig.apiStreamShutdownTimeout,
         command = config.serverConfig.commandService,
-        configurationLoadTimeout = config.serverConfig.configurationLoadTimeout,
+        initSyncTimeout = config.serverConfig.initSyncTimeout,
         managementServiceTimeout = config.serverConfig.managementServiceTimeout,
         userManagement = config.serverConfig.userManagementService,
         tls = config.serverConfig.tls
@@ -339,6 +345,7 @@ class StartableStoppableLedgerApiServer(
         servicesExecutionContext = executionContext,
         checkOverloaded = config.syncService.checkOverloaded,
         ledgerFeatures = getLedgerFeatures,
+        maxDeduplicationDuration = config.maxDeduplicationDuration,
         authService = authService,
         jwtVerifierLoader = jwtVerifierLoader,
         jwtTimestampLeeway =

@@ -46,9 +46,9 @@ private[store] trait TopologyStoreXTestBase extends BaseTest with HasExecutionCo
       proposals: Boolean = false,
       recentTimestampO: Option[CantonTimestamp] = None,
       op: Option[TopologyChangeOpX] = None,
-      typ: Option[TopologyMappingX.Code] = None,
-      idFilter: String = "",
-      namespaceOnly: Boolean = false,
+      types: Seq[TopologyMappingX.Code] = Nil,
+      idFilter: Option[String] = None,
+      namespaceFilter: Option[String] = None,
   )(implicit
       traceContext: TraceContext
   ): Future[StoredTopologyTransactionsX[TopologyChangeOpX, TopologyMappingX]] =
@@ -57,9 +57,9 @@ private[store] trait TopologyStoreXTestBase extends BaseTest with HasExecutionCo
       timeQuery,
       recentTimestampO,
       op,
-      typ,
+      types,
       idFilter,
-      namespaceOnly,
+      namespaceFilter,
     )
 
   protected def inspectKnownParties(
