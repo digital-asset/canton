@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
@@ -59,7 +58,7 @@ object EncryptedViewMessageFactory {
     val randomness: SecureRandomness =
       optRandomness.getOrElse(cryptoPureApi.generateSecureRandomness(randomnessLength))
 
-    val informeeParties = viewTree.informees.map(_.party).toList
+    val informeeParties = viewTree.informees.toList
 
     def eitherT[B](
         value: Either[EncryptedViewMessageCreationError, B]
