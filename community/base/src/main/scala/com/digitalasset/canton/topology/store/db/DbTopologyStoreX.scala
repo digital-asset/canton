@@ -377,6 +377,31 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
       TopologyChangeOpX.Replace.some,
     ).map(_.collectOfType[TopologyChangeOpX.Replace])
 
+  override def findFirstSequencerStateForSequencer(sequencerId: SequencerId)(implicit
+      traceContext: TraceContext
+  ): Future[Option[StoredTopologyTransactionX[Replace, SequencerDomainStateX]]] = {
+    logger.debug(s"Querying first sequencer state for $sequencerId")
+
+    queryForTransactions(
+      // We don't expect too many MediatorDomainStateX mappings in a single domain, so fetching them all from the db
+      // is acceptable and also because we don't expect to run this query frequently. We can only evaluate the
+      // `mediatorId` field locally as the mediator-id is not exposed in a separate column.
+      sql" AND is_proposal = false" ++
+        sql" AND operation = ${TopologyChangeOpX.Replace}" ++
+        sql" AND transaction_type = ${SequencerDomainStateX.code}",
+      operation = "firstSequencerState",
+    ).map(
+      _.collectOfMapping[SequencerDomainStateX]
+        .collectOfType[Replace]
+        .result
+        .filter {
+          _.mapping.allSequencers.contains(sequencerId)
+        }
+        .sortBy(_.serial)
+        .headOption
+    )
+  }
+
   override def findFirstMediatorStateForMediator(mediatorId: MediatorId)(implicit
       traceContext: TraceContext
   ): Future[Option[StoredTopologyTransactionX[Replace, MediatorDomainStateX]]] = {
@@ -426,14 +451,19 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
     )
   }
 
-  override def findEssentialStateForMember(member: Member, asOfInclusive: CantonTimestamp)(implicit
+  override def findEssentialStateAtSequencedTime(
+      asOfInclusive: SequencedTime,
+      excludeMappings: Seq[TopologyMappingX.Code],
+  )(implicit
       traceContext: TraceContext
   ): Future[GenericStoredTopologyTransactionsX] = {
-    val timeFilter = sql" AND sequenced <= $asOfInclusive"
+    val timeFilter = sql" AND sequenced <= ${asOfInclusive.value}"
+    val mappingFilter = excludeMapping(excludeMappings.toSet)
+    logger.debug(s"Querying essential state as of asOfInclusive")
 
-    logger.debug(s"Querying essential state for member $member as of $asOfInclusive")
-
-    queryForTransactions(timeFilter, "essentialState").map(_.asSnapshotAtMaxEffectiveTime)
+    queryForTransactions(timeFilter ++ mappingFilter, "essentialState").map(
+      _.asSnapshotAtMaxEffectiveTime.retainAuthorizedHistoryAndEffectiveProposals
+    )
   }
 
   override def bootstrap(snapshot: GenericStoredTopologyTransactionsX)(implicit
@@ -678,6 +708,14 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
     if (types.isEmpty) sql""
     else
       sql" AND transaction_type IN (" ++ types.toSeq
+        .map(t => sql"$t")
+        .intercalate(sql", ") ++ sql")"
+  }
+
+  private def excludeMapping(types: Set[TopologyMappingX.Code]): SQLActionBuilderChain = {
+    if (types.isEmpty) sql""
+    else
+      sql" AND transaction_type NOT IN (" ++ types.toSeq
         .map(t => sql"$t")
         .intercalate(sql", ") ++ sql")"
   }

@@ -242,7 +242,7 @@ class SyncDomain(
     loggerFactory,
   )
 
-  private val acsCommitmentProcessor = {
+  private[canton] val acsCommitmentProcessor = {
     val listener = new AcsCommitmentProcessor(
       domainId,
       participantId,
@@ -253,7 +253,6 @@ class SyncDomain(
       journalGarbageCollector.observer,
       pruningMetrics,
       staticDomainParameters.protocolVersion,
-      staticDomainParameters.acsCommitmentsCatchUp,
       timeouts,
       futureSupervisor,
       persistent.activeContractStore,
@@ -437,8 +436,8 @@ class SyncDomain(
           val changeWithAdjustedTransferCountersForUnassignments = ActiveContractIdsChange(
             change.activations,
             change.deactivations.fmap {
-              case StateChangeType(ContractChange.Unassigned, transferCounter) =>
-                StateChangeType(ContractChange.Unassigned, transferCounter.map(_ - 1))
+              case StateChangeType(ContractChange.TransferredOut, transferCounter) =>
+                StateChangeType(ContractChange.TransferredOut, transferCounter - 1)
               case change => change
             },
           )

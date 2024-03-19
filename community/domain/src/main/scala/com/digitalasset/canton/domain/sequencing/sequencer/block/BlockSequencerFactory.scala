@@ -198,23 +198,23 @@ abstract class BlockSequencerFactory(
       if (nodeParameters.useNewTrafficControl) newTrafficBalanceClient
       else topologyTrafficBalanceClient
 
-    val rateLimitManager = makeRateLimitManager(balanceUpdateClient, futureSupervisor)
+    val rateLimitManager = makeRateLimitManager(
+      balanceUpdateClient,
+      futureSupervisor,
+    )
 
     val domainLoggerFactory = loggerFactory.append("domainId", domainId.toString)
 
-    val stateManagerF = {
-      implicit val closeContext = CloseContext(domainSyncCryptoApi)
-      BlockSequencerStateManager(
-        protocolVersion,
-        domainId,
-        sequencerId,
-        store,
-        nodeParameters.enableAdditionalConsistencyChecks,
-        nodeParameters.processingTimeouts,
-        domainLoggerFactory,
-        rateLimitManager,
-      )
-    }
+    val stateManagerF = BlockSequencerStateManager(
+      protocolVersion,
+      domainId,
+      sequencerId,
+      store,
+      nodeParameters.enableAdditionalConsistencyChecks,
+      nodeParameters.processingTimeouts,
+      domainLoggerFactory,
+      rateLimitManager,
+    )
 
     for {
       _ <- balanceManager.initialize

@@ -189,7 +189,7 @@ class ReferenceDemoScript(
       name: String,
       connection: SequencerConnection,
   ): Unit = {
-    participant.domains.connect(
+    participant.domains.connect_by_config(
       DomainConnectionConfig(
         name,
         SequencerConnections.single(connection),
@@ -639,13 +639,13 @@ object ReferenceDemoScript {
     val loggerFactory = consoleEnvironment.environment.loggerFactory
 
     // update domain parameters
-    banking.topology.domain_parameters.set_reconciliation_interval(
+    banking.topology.domain_parameters.propose_update(
       bankingDomainId,
-      config.PositiveDurationSeconds.ofSeconds(1),
+      _.update(reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1)),
     )
-    medical.topology.domain_parameters.set_reconciliation_interval(
+    medical.topology.domain_parameters.propose_update(
       medicalDomainId,
-      config.PositiveDurationSeconds.ofSeconds(1),
+      _.update(reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1)),
     )
 
     val script = new ReferenceDemoScript(

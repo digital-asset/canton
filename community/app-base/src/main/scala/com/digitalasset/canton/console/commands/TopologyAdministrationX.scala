@@ -10,8 +10,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.commands.TopologyAdminCommandsX
 import com.digitalasset.canton.admin.api.client.data.topologyx.*
 import com.digitalasset.canton.admin.api.client.data.{
-  DynamicDomainParameters as ConsoleDynamicDomainParameters,
-  TrafficControlParameters,
+  DynamicDomainParameters as ConsoleDynamicDomainParameters
 }
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt, PositiveLong}
 import com.digitalasset.canton.config.{NonNegativeDuration, RequireTypes}
@@ -33,7 +32,6 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.health.admin.data.TopologyQueueStatus
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.protocol.OnboardingRestriction
 import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.{BaseQueryX, TopologyStore}
@@ -133,11 +131,9 @@ class TopologyAdministrationGroup(
     )
     def identity_transactions()
         : Seq[SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]] = {
-      val excludeExceptTopologyMappings =
-        TopologyMappingX.Code.all.diff(Seq(NamespaceDelegationX.code, OwnerToKeyMappingX.code))
       instance.topology.transactions
         .list(
-          excludeMappings = excludeExceptTopologyMappings,
+          filterMappings = Seq(NamespaceDelegationX.code, OwnerToKeyMappingX.code),
           filterNamespace = instance.id.uid.namespace.filterString,
         )
         .result
@@ -149,11 +145,9 @@ class TopologyAdministrationGroup(
       "Transactions serialized this way should be loaded into another node with load_from_file"
     )
     def export_identity_transactions(file: String): Unit = {
-      val excludeExceptTopologyMappings =
-        TopologyMappingX.Code.all.diff(Seq(NamespaceDelegationX.code, OwnerToKeyMappingX.code))
       val bytes = instance.topology.transactions
         .export_topology_snapshot(
-          excludeMappings = excludeExceptTopologyMappings,
+          filterMappings = Seq(NamespaceDelegationX.code, OwnerToKeyMappingX.code),
           filterNamespace = instance.id.uid.namespace.filterString,
         )
       writeToFile(file, bytes)
@@ -212,11 +206,22 @@ class TopologyAdministrationGroup(
         proposals: Boolean = false,
         timeQuery: TimeQuery = TimeQuery.HeadState,
         operation: Option[TopologyChangeOpX] = None,
+        filterMappings: Seq[TopologyMappingX.Code] = Nil,
         excludeMappings: Seq[TopologyMappingX.Code] = Nil,
         filterAuthorizedKey: Option[Fingerprint] = None,
         protocolVersion: Option[String] = None,
         filterNamespace: String = "",
     ): StoredTopologyTransactionsX[TopologyChangeOpX, TopologyMappingX] = {
+      if (filterMappings.nonEmpty && excludeMappings.nonEmpty) {
+        consoleEnvironment.run(
+          CommandErrors
+            .GenericCommandError("Cannot specify both filterMappings and excludeMappings")
+        )
+      }
+      val excludeMappingsCodes = if (filterMappings.nonEmpty) {
+        TopologyMappingX.Code.all.diff(filterMappings).map(_.code)
+      } else excludeMappings.map(_.code)
+
       consoleEnvironment
         .run {
           adminCommand(
@@ -229,7 +234,7 @@ class TopologyAdministrationGroup(
                 filterSigningKey = filterAuthorizedKey.map(_.toProtoPrimitive).getOrElse(""),
                 protocolVersion.map(ProtocolVersion.tryCreate),
               ),
-              excludeMappings = excludeMappings.map(_.code),
+              excludeMappings = excludeMappingsCodes,
               filterNamespace = filterNamespace,
             )
           )
@@ -251,11 +256,22 @@ class TopologyAdministrationGroup(
         proposals: Boolean = false,
         timeQuery: TimeQuery = TimeQuery.HeadState,
         operation: Option[TopologyChangeOpX] = None,
+        filterMappings: Seq[TopologyMappingX.Code] = Nil,
         excludeMappings: Seq[TopologyMappingX.Code] = Nil,
         filterAuthorizedKey: Option[Fingerprint] = None,
         protocolVersion: Option[String] = None,
         filterNamespace: String = "",
     ): ByteString = {
+      if (filterMappings.nonEmpty && excludeMappings.nonEmpty) {
+        consoleEnvironment.run(
+          CommandErrors
+            .GenericCommandError("Cannot specify both filterMappings and excludeMappings")
+        )
+      }
+      val excludeMappingsCodes = if (filterMappings.nonEmpty) {
+        TopologyMappingX.Code.all.diff(filterMappings).map(_.code)
+      } else excludeMappings.map(_.code)
+
       consoleEnvironment
         .run {
           adminCommand(
@@ -268,35 +284,11 @@ class TopologyAdministrationGroup(
                 filterSigningKey = filterAuthorizedKey.map(_.toProtoPrimitive).getOrElse(""),
                 protocolVersion.map(ProtocolVersion.tryCreate),
               ),
-              excludeMappings = excludeMappings.map(_.code),
+              excludeMappings = excludeMappingsCodes,
               filterNamespace = filterNamespace,
             )
           )
         }
-    }
-    @Help.Summary("export topology snapshot to a file")
-    def export_topology_snapshot_to_file(
-        filterStore: String = AuthorizedStore.filterName,
-        proposals: Boolean = false,
-        outputFile: String = TopologyAdministrationX.exportTransactionsDefaultFile,
-        timeQuery: TimeQuery = TimeQuery.HeadState,
-        operation: Option[TopologyChangeOpX] = None,
-        excludeMappings: Seq[TopologyMappingX.Code] = Nil,
-        filterAuthorizedKey: Option[Fingerprint] = None,
-        protocolVersion: Option[String] = None,
-        filterNamespace: String = "",
-    ): Unit = {
-      val bytes = export_topology_snapshot(
-        filterStore,
-        proposals,
-        timeQuery,
-        operation,
-        excludeMappings,
-        filterAuthorizedKey,
-        protocolVersion,
-        filterNamespace,
-      )
-      writeToFile(outputFile, bytes)
     }
 
     @Help.Summary("Find the latest transaction for a given mapping hash")
@@ -1975,14 +1967,116 @@ class TopologyAdministrationGroup(
     }
 
     @Help.Summary("Propose changes to the mediator topology")
+    @Help.Description(
+      """
+     domainId: the target domain
+     group: the mediator group identifier
+     adds: The unique identifiers of the active mediators to add.
+     removes: The unique identifiers of the mediators that should no longer be active mediators.
+     observerAdds: The unique identifiers of the observer mediators to add.
+     observerRemoves: The unique identifiers of the mediators that should no longer be observer mediators.
+     updateThreshold: Optionally an updated value for the threshold of the mediator group.
+     await: optional timeout to wait for the proposal to be persisted in the specified topology store
+     mustFullyAuthorize: when set to true, the proposal's previously received signatures and the signature of this node must be
+                         sufficient to fully authorize the topology transaction. if this is not the case, the request fails.
+                         when set to false, the proposal retains the proposal status until enough signatures are accumulated to
+                         satisfy the mapping's authorization requirements.
+     signedBy: the fingerprint of the key to be used to sign this proposal"""
+    )
+    def propose_delta(
+        domainId: DomainId,
+        group: NonNegativeInt,
+        adds: List[MediatorId] = Nil,
+        removes: List[MediatorId] = Nil,
+        observerAdds: List[MediatorId] = Nil,
+        observerRemoves: List[MediatorId] = Nil,
+        updateThreshold: Option[PositiveInt] = None,
+        await: Option[config.NonNegativeDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+        mustFullyAuthorize: Boolean = false,
+        // TODO(#14056) don't use the instance's root namespace key by default.
+        //  let the grpc service figure out the right key to use, once that's implemented
+        signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
+    ): Unit = {
+
+      MediatorGroupDeltaComputations
+        .verifyProposalConsistency(adds, removes, observerAdds, observerRemoves, updateThreshold)
+        .valueOr(err => throw new IllegalArgumentException(err))
+
+      def queryStore(proposals: Boolean): Option[MediatorDomainStateX] = expectAtMostOneResult(
+        list(
+          domainId.filterString,
+          group = Some(group),
+          operation = Some(TopologyChangeOpX.Replace),
+          proposals = proposals,
+        )
+      ).map(_.item)
+
+      val mdsO = queryStore(proposals = false)
+
+      MediatorGroupDeltaComputations
+        .verifyProposalAgainstCurrentState(
+          mdsO,
+          adds,
+          removes,
+          observerAdds,
+          observerRemoves,
+          updateThreshold,
+        )
+        .valueOr(err => throw new IllegalArgumentException(err))
+
+      val (threshold, active, observers) = mdsO match {
+        case Some(mds) =>
+          (
+            mds.threshold,
+            mds.active.forgetNE.concat(adds).diff(removes),
+            mds.observers.concat(observerAdds).diff(observerRemoves),
+          )
+        case None =>
+          (PositiveInt.one, adds, observerAdds)
+      }
+
+      propose(
+        domainId,
+        updateThreshold.getOrElse(threshold),
+        active,
+        observers,
+        group,
+        store = Some(domainId.filterString),
+        synchronize = None, // no synchronize - instead rely on await below
+        mustFullyAuthorize = mustFullyAuthorize,
+        signedBy = signedBy,
+      ).discard
+
+      await.foreach { timeout =>
+        ConsoleMacros.utils.retry_until_true(timeout) {
+          def areAllChangesPersisted(mds: MediatorDomainStateX): Boolean = {
+            adds.forall(mds.active.contains) && removes.forall(!mds.active.contains(_)) &&
+            observerAdds.forall(mds.observers.contains) && observerRemoves.forall(
+              !mds.observers.contains(_)
+            ) && updateThreshold.forall(_ == mds.threshold)
+          }
+
+          if (mustFullyAuthorize) {
+            queryStore(proposals = false).exists(areAllChangesPersisted)
+          } else {
+            // If the proposal does not need to be authorized, first check for proposals then for an authorized transaction
+            queryStore(proposals = true).exists(areAllChangesPersisted) || queryStore(proposals =
+              false
+            ).exists(areAllChangesPersisted)
+          }
+        }
+      }
+    }
+
+    @Help.Summary("Replace the mediator topology")
     @Help.Description("""
          domainId: the target domain
          threshold: the minimum number of mediators that need to come to a consensus for a message to be sent to other members.
          active: the list of mediators that will take part in the mediator consensus in this mediator group
          passive: the mediators that will receive all messages but will not participate in mediator consensus
          group: the mediator group identifier
-
-
          store: - "Authorized": the topology transaction will be stored in the node's authorized store and automatically
                                 propagated to connected domains, if applicable.
                 - "<domain-id>": the topology transaction will be directly submitted to the specified domain without
@@ -2269,7 +2363,7 @@ class TopologyAdministrationGroup(
       waitForParameters(TopologyAdministrationGroup.this)
       waitForParticipants
         .filter(p =>
-          p.health.running() && p.health.initialized() && p.domains.is_connected(domainId)
+          p.health.is_running() && p.health.initialized() && p.domains.is_connected(domainId)
         )
         .map(_.topology)
         .foreach(waitForParameters)
@@ -2331,38 +2425,6 @@ class TopologyAdministrationGroup(
         ).discard
       }
     }
-
-    @Help.Summary(
-      "Update the confirmation response timeout (for participants) in the dynamic domain parameters"
-    )
-    def set_confirmation_response_timeout(
-        domainId: DomainId,
-        timeout: config.NonNegativeFiniteDuration,
-    ): Unit = propose_update(domainId, _.update(confirmationResponseTimeout = timeout))
-
-    @Help.Summary("Update the mediator reaction timeout in the dynamic domain parameters")
-    def set_mediator_reaction_timeout(
-        domainId: DomainId,
-        timeout: config.NonNegativeFiniteDuration,
-    ): Unit = propose_update(domainId, _.update(mediatorReactionTimeout = timeout))
-
-    @Help.Summary("Update the transfer exclusivity timeout in the dynamic domain parameters")
-    def set_transfer_exclusivity_timeout(
-        domainId: DomainId,
-        timeout: config.NonNegativeFiniteDuration,
-    ): Unit = propose_update(domainId, _.update(transferExclusivityTimeout = timeout))
-
-    @Help.Summary("Update the topology change delay in the dynamic domain parameters")
-    def set_topology_change_delay(
-        domainId: DomainId,
-        delay: config.NonNegativeFiniteDuration,
-    ): Unit = propose_update(domainId, _.update(topologyChangeDelay = delay))
-
-    @Help.Summary("Update the onboarding restrictions")
-    def set_onboarding_restrictions(
-        domainId: DomainId,
-        restriction: OnboardingRestriction,
-    ): Unit = propose_update(domainId, _.update(onboardingRestriction = restriction))
 
     @Help.Summary("Update the ledger time record time tolerance in the dynamic domain parameters")
     @Help.Description(
@@ -2523,61 +2585,6 @@ class TopologyAdministrationGroup(
         force = true,
       )
     }
-
-    @Help.Summary("Update the mediator deduplication timeout in the dynamic domain parameters")
-    def set_mediator_deduplication_timeout(
-        domainId: DomainId,
-        timeout: config.NonNegativeFiniteDuration,
-    ): Unit = propose_update(domainId, _.update(mediatorDeduplicationTimeout = timeout))
-
-    @Help.Summary("Update the reconciliation interval in the dynamic domain parameters")
-    def set_reconciliation_interval(
-        domainId: DomainId,
-        interval: config.PositiveDurationSeconds,
-    ): Unit = propose_update(domainId, _.update(reconciliationInterval = interval))
-
-    @Help.Summary(
-      "Update the maximum rate of confirmation requests per participant in the dynamic domain parameters"
-    )
-    def set_confirmation_requests_max_rate(
-        domainId: DomainId,
-        rate: NonNegativeInt,
-    ): Unit = propose_update(domainId, _.update(confirmationRequestsMaxRate = rate))
-
-    @Help.Summary("Update the maximum request size in the dynamic domain parameters")
-    @Help.Description(
-      """The update won't have any effect until the sequencers are restarted."""
-    )
-    def set_max_request_size(
-        domainId: DomainId,
-        size: NonNegativeInt,
-    ): Unit = propose_update(domainId, _.update(maxRequestSize = size))
-
-    @Help.Summary(
-      "Update the sequencer aggregate submission timeout in the dynamic domain parameters"
-    )
-    def set_sequencer_aggregate_submission_timeout(
-        domainId: DomainId,
-        timeout: config.NonNegativeFiniteDuration,
-    ): Unit =
-      propose_update(domainId, _.update(sequencerAggregateSubmissionTimeout = timeout))
-
-    @Help.Summary(
-      "Update the `trafficControlParameters` in the dynamic domain parameters"
-    )
-    def set_traffic_control_parameters(
-        domainId: DomainId,
-        trafficControlParameters: TrafficControlParameters,
-    ): Unit = propose_update(
-      domainId,
-      _.update(trafficControlParameters = Some(trafficControlParameters)),
-    )
-
-    @Help.Summary(
-      "Clear the traffic control parameters in the dynamic domain parameters"
-    )
-    def clear_traffic_control_parameters(domainId: DomainId): Unit =
-      propose_update(domainId, _.update(trafficControlParameters = None))
   }
 
   @Help.Summary("Inspect topology stores")

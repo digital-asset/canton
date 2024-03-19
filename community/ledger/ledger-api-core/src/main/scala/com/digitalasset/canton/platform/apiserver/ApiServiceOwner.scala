@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.platform.apiserver
 
-import com.daml.buildinfo.BuildInfo
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.lf.data.Ref
@@ -17,7 +16,6 @@ import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.health.HealthChecks
 import com.digitalasset.canton.ledger.api.tls.TlsConfiguration
 import com.digitalasset.canton.ledger.api.util.TimeProvider
-import com.digitalasset.canton.ledger.configuration.LedgerId
 import com.digitalasset.canton.ledger.localstore.api.{
   IdentityProviderConfigStore,
   PartyRecordStore,
@@ -75,7 +73,6 @@ object ApiServiceOwner {
       upgradingEnabled: Boolean,
       disableUpgradeValidation: Boolean,
       // immutable configuration parameters
-      ledgerId: LedgerId,
       participantId: Ref.ParticipantId,
       meteringReportKey: MeteringReportKey = CommunityKey,
       // objects
@@ -114,7 +111,6 @@ object ApiServiceOwner {
 
     val authorizer = new Authorizer(
       Clock.systemUTC.instant _,
-      ledgerId,
       participantId,
       userManagementStore,
       servicesExecutionContext,
@@ -130,7 +126,7 @@ object ApiServiceOwner {
     val healthChecksWithIndexService = healthChecks + ("index" -> indexService)
 
     val identityProviderConfigLoader = new IdentityProviderConfigLoader {
-      override def getIdentityProviderConfig(issuer: LedgerId)(implicit
+      override def getIdentityProviderConfig(issuer: String)(implicit
           loggingContext: LoggingContextWithTrace
       ): Future[domain.IdentityProviderConfig] =
         identityProviderConfigStore.getActiveIdentityProviderByIssuer(issuer)(
@@ -207,7 +203,8 @@ object ApiServiceOwner {
       loggerFactory
         .getTracedLogger(getClass)
         .info(
-          s"Initialized API server version ${BuildInfo.Version} with ledger-id = $ledgerId, port = ${apiService.port}."
+          s"Initialized API server listening to port = ${apiService.port} ${if (tls.isDefined) "using tls"
+            else "without tls"}."
         )
       apiService
     }
