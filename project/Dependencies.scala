@@ -85,7 +85,10 @@ object Dependencies {
   lazy val snakeyaml_version = "2.0"
   lazy val spray_json_derived_codecs_version = "2.3.10"
   lazy val sttp_version = "3.8.16"
+
+  // Note that later versions of testcontainers (e.g. 1.19.7 give problems with Oracle when running the data continuity tests"
   lazy val testcontainers_version = "1.15.1"
+
   lazy val tink_version = "1.3.0"
   lazy val toxiproxy_java_version = "2.1.7"
   lazy val web3j_version = "4.9.7"
