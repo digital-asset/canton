@@ -137,10 +137,11 @@
         "opentelemetry-sdk",
         "opentelemetry-sdk-testing",
         "opentelemetry-exporter-zipkin",
-        "opentelemetry-exporter-jaeger",
-        "opentelemetry-exporter-otlp-trace"
+        "opentelemetry-exporter-otlp",
+        "opentelemetry-exporter-common",
+        "opentelemetry-sdk-extension-autoconfigure"
       ],
-      "version": "1.12.0",
+      "version": "1.36.0",
       "description": "Opentelemetry libraries",
       "users": [
         "Canton",
@@ -150,10 +151,9 @@
     {
       "org": "io.opentelemetry",
       "artifacts": [
-        "opentelemetry-sdk-extension-autoconfigure",
         "opentelemetry-exporter-prometheus"
       ],
-      "version": "1.12.0-alpha",
+      "version": "1.36.0-alpha",
       "description": "Opentelemetry libraries, alpha version",
       "users": [
         "Canton",
@@ -164,10 +164,10 @@
       "org": "io.opentelemetry.instrumentation",
       "artifacts": [
         "opentelemetry-grpc-1.6",
-        "opentelemetry-runtime-metrics"
+        "opentelemetry-runtime-telemetry-java8"
       ],
-      "version": "1.12.0-alpha",
-      "description": "Opentelemetry instrumentation libraries, alpha version",
+      "version": "2.1.0-alpha",
+      "description": "Opentelemetry instrumentation libraries, alpha (unstable apis) version",
       "users": [
         "Canton",
         "DamlSDK"

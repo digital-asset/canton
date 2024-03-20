@@ -399,6 +399,8 @@ object BuildCommon {
     case path if path.contains("module-info.class") => MergeStrategy.discard
     case PathList("org", "jline", _ @_*) => MergeStrategy.first
     case "META-INF/FastDoubleParser-LICENSE" => MergeStrategy.first
+    // complains about okio.kotlin_module clash
+    case PathList("META-INF", "okio.kotlin_module") => MergeStrategy.last
     case x => oldStrategy(x)
   }
 
@@ -419,6 +421,7 @@ object BuildCommon {
     Compile / compile / wartremoverErrors += Wart.custom("com.digitalasset.canton.NonUnitForEach"),
     wartremoverErrors += Wart.custom("com.digitalasset.canton.RequireBlocking"),
     wartremoverErrors += Wart.custom("com.digitalasset.canton.SlickString"),
+    wartremoverErrors += Wart.custom("com.digitalasset.canton.SynchronizedFuture"),
     wartremoverErrors += Wart.custom("com.digitalasset.canton.TryFailed"),
     wartremover.WartRemover.dependsOnLocalProjectWarts(CommunityProjects.`wartremover-extension`),
   ).flatMap(_.settings)
@@ -533,6 +536,7 @@ object BuildCommon {
           scala_collection_contrib,
           pureconfig_core,
           pureconfig_generic,
+          shapeless,
           scalatest % Test,
           mockito_scala % Test,
           scalatestMockito % Test,
@@ -581,12 +585,8 @@ object BuildCommon {
           log4j_api,
           opentelemetry_api,
           opentelemetry_sdk,
-          opentelemetry_sdk_autoconfigure,
-          opentelemetry_instrumentation_grpc,
           opentelemetry_exporter_zipkin,
-          opentelemetry_exporter_jaeger,
           opentelemetry_exporter_otlp,
-          opentelemetry_exporter_prometheus,
         ),
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
         coverageEnabled := false,
@@ -620,7 +620,6 @@ object BuildCommon {
           pekko_http_testkit % Test,
           cats,
           better_files,
-          opentelemetry_instrumentation_runtime_metrics,
           monocle_macro,
           scala_logging,
         ),
@@ -666,6 +665,12 @@ object BuildCommon {
           jul_to_slf4j,
           pureconfig_cats,
           pureconfig_core,
+          opentelemetry_instrumentation_grpc,
+          opentelemetry_instrumentation_runtime_metrics,
+          opentelemetry_exporter_otlp,
+          opentelemetry_exporter_prometheus,
+          opentelemetry_exporter_common,
+          opentelemetry_sdk_autoconfigure,
         ),
       )
 
@@ -798,7 +803,6 @@ object BuildCommon {
           opentelemetry_sdk_autoconfigure,
           opentelemetry_instrumentation_grpc,
           opentelemetry_exporter_zipkin,
-          opentelemetry_exporter_jaeger,
           opentelemetry_exporter_otlp,
         ),
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
@@ -1245,6 +1249,7 @@ object BuildCommon {
           commons_codec,
           commons_io,
           daml_metrics,
+          daml_libs_scala_ledger_resources,
           daml_lf_archive_reader,
           daml_lf_transaction,
           daml_lf_engine,
@@ -1257,6 +1262,7 @@ object BuildCommon {
           grpc_api,
           reflections,
           grpc_netty,
+          scopt,
           netty_boring_ssl, // This should be a Runtime dep, but needs to be declared at Compile scope due to https://github.com/sbt/sbt/issues/5568
           netty_handler,
           scalapb_runtime,

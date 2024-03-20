@@ -62,7 +62,7 @@ object Dependencies {
   lazy val oracle_version = "19.18.0.0"
   lazy val postgres_version = "42.6.0"
   lazy val pprint_version = "0.8.1"
-  lazy val prometheus_version = "0.14.1"
+  lazy val prometheus_version = "0.16.0"
   lazy val pureconfig_version = "0.14.0"
   lazy val reflections_version = "0.10.2"
   lazy val scaffeine_version = "5.2.1"
@@ -82,7 +82,7 @@ object Dependencies {
   lazy val snakeyaml_version = "2.0"
   lazy val spray_json_derived_codecs_version = "2.3.10"
   lazy val sttp_version = "3.8.16"
-  lazy val testcontainers_version = "1.15.1"
+  lazy val testcontainers_version = "1.19.7"
   lazy val tink_version = "1.3.0"
   lazy val toxiproxy_java_version = "2.1.7"
 
@@ -239,10 +239,10 @@ object Dependencies {
     resolveDependency("io.opentelemetry", "opentelemetry-sdk-extension-autoconfigure")
   lazy val opentelemetry_exporter_zipkin =
     resolveDependency("io.opentelemetry", "opentelemetry-exporter-zipkin")
-  lazy val opentelemetry_exporter_jaeger =
-    resolveDependency("io.opentelemetry", "opentelemetry-exporter-jaeger")
   lazy val opentelemetry_exporter_otlp =
-    resolveDependency("io.opentelemetry", "opentelemetry-exporter-otlp-trace")
+    resolveDependency("io.opentelemetry", "opentelemetry-exporter-otlp")
+  lazy val opentelemetry_exporter_common =
+    resolveDependency("io.opentelemetry", "opentelemetry-exporter-common")
   lazy val opentelemetry_exporter_prometheus =
     resolveDependency("io.opentelemetry", "opentelemetry-exporter-prometheus")
   lazy val opentelemetry_proto =
@@ -251,7 +251,7 @@ object Dependencies {
   lazy val opentelemetry_instrumentation_grpc =
     resolveDependency("io.opentelemetry.instrumentation", "opentelemetry-grpc-1.6")
   lazy val opentelemetry_instrumentation_runtime_metrics =
-    resolveDependency("io.opentelemetry.instrumentation", "opentelemetry-runtime-metrics")
+    resolveDependency("io.opentelemetry.instrumentation", "opentelemetry-runtime-telemetry-java8")
 
   lazy val better_files = "com.github.pathikrit" %% "better-files" % better_files_version
 
@@ -350,6 +350,8 @@ object Dependencies {
   lazy val daml_libs_struct_spray_json = "com.daml" %% "struct-spray-json" % daml_libraries_version
   lazy val daml_libs_scala_scalatest_utils =
     "com.daml" %% "scalatest-utils" % daml_libraries_version
+  lazy val daml_libs_scala_ledger_resources =
+    "com.daml" %% "ledger-resources" % daml_libraries_version
   lazy val daml_rs_grpc_pekko = "com.daml" %% "rs-grpc-pekko" % daml_libraries_version
   lazy val daml_lf_encoder = "com.daml" %% "daml-lf-encoder" % daml_libraries_version
   lazy val daml_lf_api_type_signature =
