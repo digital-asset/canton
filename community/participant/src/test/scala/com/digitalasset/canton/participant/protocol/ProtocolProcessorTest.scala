@@ -195,6 +195,7 @@ class ProtocolProcessorTest
     DynamicDomainParameters.initialValues(NonNegativeFiniteDuration.Zero, testedProtocolVersion),
     CantonTimestamp.MinValue,
     None,
+    PositiveInt.one,
     domain,
   )
 
@@ -316,7 +317,7 @@ class ProtocolProcessorTest
         startingPoints,
         _ => timeTracker,
         ParticipantTestMetrics.domain,
-        CachingConfigs.defaultSessionKeyCache,
+        CachingConfigs.defaultSessionKeyCacheConfig,
         timeouts,
         loggerFactory,
         FutureSupervisor.Noop,
@@ -509,7 +510,12 @@ class ProtocolProcessorTest
     }
 
     "transit to confirmed" in {
-      val pd = TestPendingRequestData(rc, requestSc, MediatorsOfDomain(MediatorGroupIndex.one))
+      val pd = TestPendingRequestData(
+        rc,
+        requestSc,
+        MediatorsOfDomain(MediatorGroupIndex.one),
+        locallyRejected = false,
+      )
       val (sut, _persistent, ephemeral) =
         testProcessingSteps(overrideConstructedPendingRequestDataO = Some(pd))
       val before = ephemeral.requestJournal.query(rc).value.futureValue
@@ -530,7 +536,12 @@ class ProtocolProcessorTest
 
     "leave the request state unchanged when doing a clean replay" in {
       val pendingData =
-        TestPendingRequestData(rc, requestSc, MediatorsOfDomain(MediatorGroupIndex.one))
+        TestPendingRequestData(
+          rc,
+          requestSc,
+          MediatorsOfDomain(MediatorGroupIndex.one),
+          locallyRejected = false,
+        )
       val (sut, _persistent, ephemeral) =
         testProcessingSteps(
           overrideConstructedPendingRequestDataO = Some(pendingData),
@@ -564,7 +575,12 @@ class ProtocolProcessorTest
     }
 
     "trigger a timeout when the result doesn't arrive" in {
-      val pd = TestPendingRequestData(rc, requestSc, MediatorsOfDomain(MediatorGroupIndex.one))
+      val pd = TestPendingRequestData(
+        rc,
+        requestSc,
+        MediatorsOfDomain(MediatorGroupIndex.one),
+        locallyRejected = false,
+      )
       val (sut, _persistent, ephemeral) =
         testProcessingSteps(overrideConstructedPendingRequestDataO = Some(pd))
 
@@ -911,7 +927,12 @@ class ProtocolProcessorTest
         .complete(
           Some(
             WrappedPendingRequestData(
-              TestPendingRequestData(rc, requestSc, MediatorsOfDomain(MediatorGroupIndex.one))
+              TestPendingRequestData(
+                rc,
+                requestSc,
+                MediatorsOfDomain(MediatorGroupIndex.one),
+                locallyRejected = false,
+              )
             )
           )
         )
@@ -1038,6 +1059,7 @@ class ProtocolProcessorTest
               rc,
               requestSc,
               MediatorsOfDomain(MediatorGroupIndex.one),
+              locallyRejected = false,
             )
           )
         )

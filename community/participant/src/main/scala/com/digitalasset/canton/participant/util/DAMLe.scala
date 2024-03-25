@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.util
 import cats.data.EitherT
 import com.daml.lf.VersionRange
 import com.daml.lf.data.Ref.PackageId
-import com.daml.lf.data.{ImmArray, Time}
+import com.daml.lf.data.{ImmArray, Ref, Time}
 import com.daml.lf.engine.*
 import com.daml.lf.interpretation.Error as LfInterpretationError
 import com.daml.lf.language.Ast.Package
@@ -35,7 +35,6 @@ object DAMLe {
       enableLfDev: Boolean,
       enableStackTraces: Boolean,
       profileDir: Option[Path] = None,
-      enableContractUpgrading: Boolean = false,
       iterationsBetweenInterruptions: Long =
         10000, // 10000 is the default value in the engine configuration
   ): Engine =
@@ -55,7 +54,7 @@ object DAMLe {
         profileDir = profileDir,
         requireSuffixedGlobalContractId = true,
         contractKeyUniqueness = ContractKeyUniquenessMode.Off,
-        enableContractUpgrading = enableContractUpgrading,
+        enableContractUpgrading = true,
         iterationsBetweenInterruptions = iterationsBetweenInterruptions,
       )
     )
@@ -118,6 +117,7 @@ class DAMLe(
       submissionTime: CantonTimestamp,
       rootSeed: Option[LfHash],
       expectFailure: Boolean,
+      packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
   )(implicit
       traceContext: TraceContext
   ): EitherT[
@@ -176,6 +176,7 @@ class DAMLe(
         nodeSeed = rootSeed,
         submissionTime = submissionTime.toLf,
         ledgerEffectiveTime = ledgerTime.toLf,
+        packageResolution = packageResolution,
       )
     }
 
@@ -202,6 +203,7 @@ class DAMLe(
         nodeSeed = Some(DAMLe.zeroSeed),
         submissionTime = Time.Timestamp.Epoch, // Only used to compute contract ids
         ledgerEffectiveTime = ledgerEffectiveTime.ts.underlying,
+        packageResolution = Map.empty,
       )
       for {
         txWithMetadata <- EitherT(
