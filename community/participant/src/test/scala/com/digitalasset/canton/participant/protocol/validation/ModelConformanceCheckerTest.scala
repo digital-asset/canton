@@ -6,8 +6,10 @@ package com.digitalasset.canton.participant.protocol.validation
 import cats.data.EitherT
 import cats.syntax.parallel.*
 import com.daml.lf.data.ImmArray
-import com.daml.lf.data.Ref.PackageId
+import com.daml.lf.data.Ref.{PackageId, PackageName}
 import com.daml.lf.engine
+import com.daml.lf.language.Ast.{Expr, GenPackage, PackageMetadata}
+import com.daml.lf.language.LanguageVersion
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.data.{
   CantonTimestamp,
@@ -23,6 +25,7 @@ import com.digitalasset.canton.participant.protocol.{
   TransactionProcessingSteps,
 }
 import com.digitalasset.canton.participant.store.ContractLookup
+import com.digitalasset.canton.participant.util.DAMLe.PackageResolver
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{lfHash, submittingParticipant}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -30,7 +33,15 @@ import com.digitalasset.canton.topology.transaction.VettedPackagesX
 import com.digitalasset.canton.topology.{TestingIdentityFactoryX, TestingTopologyX}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.{BaseTest, LfCommand, LfKeyResolver, LfPartyId, RequestCounter}
+import com.digitalasset.canton.{
+  BaseTest,
+  LfCommand,
+  LfKeyResolver,
+  LfPackageName,
+  LfPackageVersion,
+  LfPartyId,
+  RequestCounter,
+}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 import pprint.Tree
@@ -53,7 +64,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
       context: TraceContext,
   ): EitherT[Future, ContractValidationFailure, Unit] = EitherT.pure(())
 
-  def reinterpret(example: ExampleTransaction, enableContractUpgrading: Boolean = false)(
+  def reinterpret(example: ExampleTransaction)(
       _contracts: ContractLookup,
       _submitters: Set[LfPartyId],
       cmd: LfCommand,
@@ -63,6 +74,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
       _inRollback: Boolean,
       _viewHash: ViewHash,
       _traceContext: TraceContext,
+      _packageResolution: Map[PackageName, PackageId],
   ): EitherT[Future, DAMLeError, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver)] = {
 
     ledgerTime shouldEqual factory.ledgerTime
@@ -70,7 +82,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
 
     val (_viewTree, (reinterpretedTx, metadata, keyResolver), _witnesses) =
       example.reinterpretedSubtransactions.find { case (viewTree, (tx, md, keyResolver), _) =>
-        viewTree.viewParticipantData.rootAction(enableContractUpgrading).command == cmd &&
+        viewTree.viewParticipantData.rootAction.command == cmd &&
         // Commands are otherwise not sufficiently unique (whereas with nodes, we can produce unique nodes).
         rootSeed == md.seeds.get(tx.roots(0))
       }.value
@@ -88,6 +100,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
       _inRollback: Boolean,
       _viewHash: ViewHash,
       _traceContext: TraceContext,
+      _packageResolution: Map[PackageName, PackageId],
   ): EitherT[Future, DAMLeError, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver)] =
     fail("Reinterpret should not be called by this test case.")
 
@@ -132,6 +145,14 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
     mcc.check(rootViewTrees, keyResolvers, RequestCounter(0), ips, commonData)
   }
 
+  val packageName: LfPackageName = PackageName.assertFromString("package-name")
+  val packageVersion: LfPackageVersion = LfPackageVersion.assertFromString("1.0.0")
+  val packageMetadata: PackageMetadata = PackageMetadata(packageName, packageVersion, None)
+  val genPackage: GenPackage[Expr] =
+    GenPackage(Map.empty, Set.empty, LanguageVersion.default, packageMetadata)
+  val packageResolver: PackageResolver = pkgId =>
+    traceContext => Future.successful(Some(genPackage))
+
   "A model conformance checker" when {
     val relevantExamples = factory.standardHappyCases.filter {
       // If the transaction is empty there is no transaction view message. Therefore, the checker is not invoked.
@@ -149,7 +170,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
             transactionTreeFactory,
             submittingParticipant,
             dummyAuthenticator,
-            enableContractUpgrading = false,
+            packageResolver,
             loggerFactory,
           )
 
@@ -199,7 +220,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
         transactionTreeFactory,
         submittingParticipant,
         dummyAuthenticator,
-        enableContractUpgrading = false,
+        packageResolver,
         loggerFactory,
       )
 
@@ -228,7 +249,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
       val error = DAMLeError(mock[engine.Error], mockViewHash)
 
       val sut = new ModelConformanceChecker(
-        (_, _, _, _, _, _, _, _, _) =>
+        (_, _, _, _, _, _, _, _, _, _) =>
           EitherT.leftT[Future, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver)](
             error
           ),
@@ -236,7 +257,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
         transactionTreeFactory,
         submittingParticipant,
         dummyAuthenticator,
-        enableContractUpgrading = false,
+        packageResolver,
         loggerFactory,
       )
       val example = factory.MultipleRootsAndViewNestings
@@ -270,12 +291,12 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
 
         val sut =
           new ModelConformanceChecker(
-            reinterpret(example, enableContractUpgrading = true),
+            reinterpret(example),
             validateContractOk,
             transactionTreeFactory,
             submittingParticipant,
             dummyAuthenticator,
-            enableContractUpgrading = true,
+            packageResolver,
             loggerFactory,
           )
 
@@ -301,7 +322,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
           ),
         )
         val sut = new ModelConformanceChecker(
-          (_, _, _, _, _, _, _, _, _) =>
+          (_, _, _, _, _, _, _, _, _, _) =>
             EitherT.pure[Future, DAMLeError](
               (reinterpreted, subviewMissing.metadata, subviewMissing.keyResolver)
             ),
@@ -309,7 +330,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
           transactionTreeFactory,
           submittingParticipant,
           dummyAuthenticator,
-          enableContractUpgrading = false,
+          packageResolver,
           loggerFactory,
         )
         for {
@@ -387,7 +408,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
         transactionTreeFactory = transactionTreeFactory,
         participantId = submittingParticipant,
         serializableContractAuthenticator = dummyAuthenticator,
-        enableContractUpgrading = false,
+        packageResolver = packageResolver,
         loggerFactory,
       )
 
