@@ -60,9 +60,10 @@ object Dependencies {
   lazy val netty_version = "4.1.100.Final"
 
   lazy val oracle_version = "19.18.0.0"
-  lazy val postgres_version = "42.6.0"
+  lazy val postgres_version = "42.7.3"
   lazy val pprint_version = "0.8.1"
   lazy val prometheus_version = "0.16.0"
+  lazy val protoc_gen_doc_version = "1.5.1"
   lazy val pureconfig_version = "0.14.0"
   lazy val reflections_version = "0.10.2"
   lazy val scaffeine_version = "5.2.1"
@@ -168,17 +169,8 @@ object Dependencies {
   lazy val mockito_scala = "org.mockito" %% "mockito-scala" % mockito_scala_version
   lazy val scalatestMockito = "org.scalatestplus" %% "mockito-3-4" % ("3.2.10.0")
 
-  /*
-  "org.junit.jupiter:junit-jupiter-api:5.9.2",
-  "org.junit.jupiter:junit-jupiter-engine:5.9.2",
-  "org.junit.platform:junit-platform-engine:1.9.2",
-  "org.junit.platform:junit-platform-runner:1.9.2",
-   */
-
-  lazy val junit_jupiter_api = "org.junit.jupiter" % "junit-jupiter-api" % "5.9.2"
-  lazy val junit_jupiter_engine = "org.junit.jupiter" % "junit-jupiter-engine" % "5.9.2"
-  lazy val junit_platform_runner = "org.junit.platform" % "junit-platform-runner" % "1.9.2"
   lazy val jupiter_interface = "net.aichler" % "jupiter-interface" % "0.9.0"
+  lazy val junit_interface = "com.github.sbt" % "junit-interface" % "0.13.3"
 
   lazy val checkerFramework = "org.checkerframework" % "checker-qual" % checkerFramework_version
 
@@ -290,6 +282,8 @@ object Dependencies {
   lazy val awaitility = "org.awaitility" % "awaitility" % awaitility_version
 
   lazy val munit = "org.scalameta" % "munit_2.13" % munit_version
+
+  lazy val protoc_gen_doc = "io.github.pseudomuto" % "protoc-gen-doc" % protoc_gen_doc_version
 
   object resolveDependency {
     import io.circe.*, io.circe.parser.*, io.circe.generic.auto.*, io.circe.syntax.*

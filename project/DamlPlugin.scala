@@ -268,7 +268,11 @@ object DamlPlugin extends AutoPlugin {
       val damlVersion = values.get(fieldName).toString
       // With Daml 0.13.56 characters are no longer allowed in project versions as
       // GHC does not like non-numbers in versions.
-      val sbtNonSnapshotVersion = sbtVersion.stripSuffix("-SNAPSHOT")
+      val sbtNonSnapshotVersion = sbtVersion
+        .stripSuffix("-SNAPSHOT")
+        // Take into account the 3.0.0-SNAPSHOT.100000000 naming scheme
+        .replaceAll("-SNAPSHOT.([0-9]+)$", "")
+
       if (sbtNonSnapshotVersion != damlVersion) {
         throw new MessageOnlyException(
           s"daml.yaml $fieldName value [$damlVersion] does not match the '-SNAPSHOT'-stripped value in our sbt project [$sbtVersion] in file [$damlProjectFile]"
