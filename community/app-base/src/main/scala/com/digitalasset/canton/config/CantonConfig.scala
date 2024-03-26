@@ -243,10 +243,8 @@ final case class CantonParameters(
     enableAdditionalConsistencyChecks: Boolean = false,
     manualStart: Boolean = false,
     startupParallelism: Option[PositiveInt] = None,
-    // TODO(i15561): Revert back to `false` once there is a stable Daml 3 protocol version
-    nonStandardConfig: Boolean = true,
-    // TODO(i15561): Revert back to `false` once there is a stable Daml 3 protocol version
-    devVersionSupport: Boolean = true,
+    nonStandardConfig: Boolean = false,
+    devVersionSupport: Boolean = false,
     portsFile: Option[String] = None,
     timeouts: TimeoutSettings = TimeoutSettings(),
     retentionPeriodDefaults: RetentionPeriodDefaults = RetentionPeriodDefaults(),
@@ -285,6 +283,9 @@ trait CantonConfig {
   ]
   type MediatorNodeXConfigType <: MediatorNodeConfigCommon
   type SequencerNodeXConfigType <: SequencerNodeConfigCommon
+
+  def allNodes: Map[InstanceName, LocalNodeConfig] =
+    (participants: Map[InstanceName, LocalNodeConfig]) ++ sequencers ++ mediators
 
   /** all participants that this Canton process can operate or connect to
     *
