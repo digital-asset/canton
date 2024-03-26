@@ -63,7 +63,7 @@ object Dependencies {
   lazy val opentelemetry_sdk_autoconfigure_version = s"$opentelemetry_version-alpha"
   lazy val opentelemetry_version = "1.12.0"
   lazy val oracle_version = "19.18.0.0"
-  lazy val postgres_version = "42.6.0"
+  lazy val postgres_version = "42.7.3"
   lazy val pprint_version = "0.8.1"
   lazy val prometheus_version = "0.14.1"
   lazy val pureconfig_version = "0.14.0"
@@ -320,7 +320,7 @@ object Dependencies {
     case class Dependency(coord: String)
 
     val deps = decode[Dependencies](
-      file"daml/maven_install_2.13.json".contentAsString
+      file"daml/sdk/maven_install_2.13.json".contentAsString
     ).valueOr { err =>
       throw new RuntimeException(s"Failed to parse daml repo maven json file: $err")
     }

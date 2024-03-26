@@ -67,7 +67,7 @@ object BuildCommon {
           "Redhat GA for s390x natives" at "https://maven.repository.redhat.com/ga"
         ) ++ resolvers.value,
         ideExcludedDirectories := Seq(
-          baseDirectory.value / "daml" / "canton",
+          baseDirectory.value / "daml" / "sdk" / "canton",
           baseDirectory.value / "target",
         ),
         // scalacOptions += "-Ystatistics", // re-enable if you need to debug compile times
@@ -1297,7 +1297,7 @@ object BuildCommon {
 
     import CommunityProjects.`community-base`
 
-    lazy val damlFolder = Def.setting((ThisBuild / baseDirectory).value / "daml")
+    lazy val damlFolder = Def.setting((ThisBuild / baseDirectory).value / "daml" / "sdk")
 
     lazy val allProjects = Set(
       `daml-copy-macro`,
