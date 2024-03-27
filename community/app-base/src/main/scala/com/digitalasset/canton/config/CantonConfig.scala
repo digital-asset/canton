@@ -286,6 +286,9 @@ trait CantonConfig {
   type MediatorNodeXConfigType <: MediatorNodeConfigCommon
   type SequencerNodeXConfigType <: SequencerNodeConfigCommon
 
+  def allNodes: Map[InstanceName, LocalNodeConfig] =
+    (participants: Map[InstanceName, LocalNodeConfig]) ++ sequencers ++ mediators
+
   /** all participants that this Canton process can operate or connect to
     *
     * participants are grouped by their local name
@@ -377,7 +380,6 @@ trait CantonConfig {
         ledgerApiServerParameters = participantParameters.ledgerApiServer,
         excludeInfrastructureTransactions = participantParameters.excludeInfrastructureTransactions,
         enableEngineStackTrace = participantParameters.enableEngineStackTraces,
-        enableContractUpgrading = participantParameters.enableContractUpgrading,
         iterationsBetweenInterruptions = participantParameters.iterationsBetweenInterruptions,
         journalGarbageCollectionDelay =
           participantParameters.journalGarbageCollectionDelay.toInternal,
@@ -491,20 +493,21 @@ private[canton] object CantonNodeParameterConverter {
 
   def general(parent: CantonConfig, node: LocalNodeConfig): CantonNodeParameters.General = {
     CantonNodeParameters.General.Impl(
-      parent.monitoring.tracing,
-      parent.monitoring.delayLoggingThreshold.toInternal,
-      parent.monitoring.logQueryCost,
-      parent.monitoring.logging,
-      parent.parameters.enableAdditionalConsistencyChecks,
-      parent.features.enablePreviewCommands,
-      parent.parameters.timeouts.processing,
-      node.sequencerClient,
-      node.parameters.caching,
-      node.parameters.batching,
-      parent.parameters.nonStandardConfig,
-      node.storage.parameters.migrateAndStart,
-      node.parameters.useNewTrafficControl,
-      parent.parameters.exitOnFatalFailures,
+      tracing = parent.monitoring.tracing,
+      delayLoggingThreshold = parent.monitoring.delayLoggingThreshold.toInternal,
+      logQueryCost = parent.monitoring.logQueryCost,
+      loggingConfig = parent.monitoring.logging,
+      enableAdditionalConsistencyChecks = parent.parameters.enableAdditionalConsistencyChecks,
+      enablePreviewFeatures = parent.features.enablePreviewCommands,
+      processingTimeouts = parent.parameters.timeouts.processing,
+      sequencerClient = node.sequencerClient,
+      cachingConfigs = node.parameters.caching,
+      batchingConfig = node.parameters.batching,
+      nonStandardConfig = parent.parameters.nonStandardConfig,
+      dbMigrateAndStart = node.storage.parameters.migrateAndStart,
+      useNewTrafficControl = node.parameters.useNewTrafficControl,
+      exitOnFatalFailures = parent.parameters.exitOnFatalFailures,
+      useUnifiedSequencer = node.parameters.useUnifiedSequencer,
     )
   }
 
@@ -921,6 +924,8 @@ object CantonConfig {
       deriveReader[CacheConfig]
     lazy implicit val cacheConfigWithTimeoutReader: ConfigReader[CacheConfigWithTimeout] =
       deriveReader[CacheConfigWithTimeout]
+    lazy implicit val sessionKeyCacheConfigReader: ConfigReader[SessionKeyCacheConfig] =
+      deriveReader[SessionKeyCacheConfig]
     lazy implicit val cachingConfigsReader: ConfigReader[CachingConfigs] =
       deriveReader[CachingConfigs]
     lazy implicit val adminWorkflowConfigReader: ConfigReader[AdminWorkflowConfig] =
@@ -1309,6 +1314,8 @@ object CantonConfig {
       deriveWriter[CacheConfig]
     lazy implicit val cacheConfigWithTimeoutWriter: ConfigWriter[CacheConfigWithTimeout] =
       deriveWriter[CacheConfigWithTimeout]
+    lazy implicit val sessionKeyCacheConfigWriter: ConfigWriter[SessionKeyCacheConfig] =
+      deriveWriter[SessionKeyCacheConfig]
     lazy implicit val cachingConfigsWriter: ConfigWriter[CachingConfigs] =
       deriveWriter[CachingConfigs]
     lazy implicit val adminWorkflowConfigWriter: ConfigWriter[AdminWorkflowConfig] =

@@ -144,7 +144,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
         ProcessingStartingPoints.default,
         _ => mock[DomainTimeTracker],
         ParticipantTestMetrics.domain,
-        CachingConfigs.defaultSessionKeyCache,
+        CachingConfigs.defaultSessionKeyCacheConfig,
         DefaultProcessingTimeouts.testing,
         loggerFactory = loggerFactory,
         FutureSupervisor.Noop,
@@ -434,7 +434,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
       }
 
     "succeed without errors" in {
-      val sessionKeyStore = SessionKeyStore(CachingConfigs.defaultSessionKeyCache)
+      val sessionKeyStore = SessionKeyStore(CachingConfigs.defaultSessionKeyCacheConfig)
       for {
         inRequest <- encryptFullTransferInTree(inTree, sessionKeyStore)
         envelopes = NonEmpty(
@@ -652,6 +652,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
         transferId,
         contract.metadata.stakeholders,
         MediatorsOfDomain(MediatorGroupIndex.one),
+        locallyRejected = false,
       )
 
       for {

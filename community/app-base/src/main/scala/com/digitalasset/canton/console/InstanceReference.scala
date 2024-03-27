@@ -7,6 +7,7 @@ import com.digitalasset.canton.*
 import com.digitalasset.canton.admin.api.client.commands.EnterpriseSequencerAdminCommands.LocatePruningTimestampCommand
 import com.digitalasset.canton.admin.api.client.commands.{
   EnterpriseSequencerAdminCommands,
+  EnterpriseSequencerBftAdminCommands,
   GrpcAdminCommand,
   PruningSchedulerCommands,
   SequencerAdminCommands,
@@ -29,6 +30,7 @@ import com.digitalasset.canton.domain.sequencing.config.{
   RemoteSequencerConfig,
   SequencerNodeConfigCommon,
 }
+import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.admin.EnterpriseSequencerBftAdminData.PeerNetworkStatus
 import com.digitalasset.canton.domain.sequencing.sequencer.{
   SequencerClients,
   SequencerPruningStatus,
@@ -39,6 +41,7 @@ import com.digitalasset.canton.health.admin.data.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.metrics.MetricValue
+import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.participant.config.{
   BaseParticipantConfig,
   LocalParticipantConfig,
@@ -103,6 +106,8 @@ trait InstanceReference
   type Status <: NodeStatus.Status
 
   def id: NodeIdentity
+
+  def maybeId: Option[NodeIdentity]
 
   def health: HealthAdministrationCommon[Status]
 
@@ -493,6 +498,12 @@ abstract class ParticipantReference(
   )
   override def id: ParticipantId = topology.idHelper(ParticipantId(_))
 
+  @Help.Summary(
+    "Yields Some(id) of this participant if id present. " +
+      "Returns None, if the id has not yet been allocated (e.g., the participant has not yet been initialised)."
+  )
+  override def maybeId: Option[ParticipantId] = topology.maybeIdHelper(ParticipantId(_))
+
   def config: BaseParticipantConfig
 
   @Help.Summary("Health and diagnostic related commands")
@@ -767,7 +778,13 @@ abstract class SequencerNodeReference(
     "Yields the globally unique id of this sequencer. " +
       "Throws an exception, if the id has not yet been allocated (e.g., the sequencer has not yet been started)."
   )
-  def id: SequencerId = topology.idHelper(SequencerId(_))
+  override def id: SequencerId = topology.idHelper(SequencerId(_))
+
+  @Help.Summary(
+    "Yields Some(id) of this sequencer if id present. " +
+      "Returns None, if the id has not yet been allocated (e.g., the sequencer has not yet been initialised)."
+  )
+  override def maybeId: Option[SequencerId] = topology.maybeIdHelper(SequencerId(_))
 
   private lazy val setup_ = new SequencerXSetupGroup(this)
 
@@ -1150,6 +1167,26 @@ abstract class SequencerNodeReference(
       runner.adminCommand(EnterpriseSequencerAdminCommands.DisableMember(member))
     }
   }
+
+  @Help.Summary("Methods used to manage BFT sequencers; they'll fail on non-BFT sequencers")
+  object bft {
+
+    @Help.Summary("Add a new peer endpoint")
+    def add_peer_endpoint(endpoint: Endpoint): Unit = consoleEnvironment.run {
+      runner.adminCommand(EnterpriseSequencerBftAdminCommands.AddPeerEndpoint(endpoint))
+    }
+
+    @Help.Summary("Remove a peer endpoint")
+    def remove_peer_endpoint(endpoint: Endpoint): Unit = consoleEnvironment.run {
+      runner.adminCommand(EnterpriseSequencerBftAdminCommands.RemovePeerEndpoint(endpoint))
+    }
+
+    @Help.Summary("Get peer network status")
+    def get_peer_network_status(endpoints: Option[Iterable[Endpoint]]): PeerNetworkStatus =
+      consoleEnvironment.run {
+        runner.adminCommand(EnterpriseSequencerBftAdminCommands.GetPeerNetworkStatus(endpoints))
+      }
+  }
 }
 
 class LocalSequencerNodeReference(
@@ -1226,7 +1263,13 @@ abstract class MediatorReference(val consoleEnvironment: ConsoleEnvironment, nam
     "Yields the mediator id of this mediator. " +
       "Throws an exception, if the id has not yet been allocated (e.g., the mediator has not yet been initialised)."
   )
-  def id: MediatorId = topology.idHelper(MediatorId(_))
+  override def id: MediatorId = topology.idHelper(MediatorId(_))
+
+  @Help.Summary(
+    "Yields Some(id) of this mediator if id present. " +
+      "Returns None, if the id has not yet been allocated (e.g., the mediator has not yet been initialised)."
+  )
+  override def maybeId: Option[MediatorId] = topology.maybeIdHelper(MediatorId(_))
 
   @Help.Summary("Health and diagnostic related commands")
   @Help.Group("Health")
