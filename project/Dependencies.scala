@@ -40,12 +40,12 @@ object Dependencies {
   lazy val flyway_version = "9.15.2"
   lazy val gcp_kms_version = "2.36.0"
   lazy val h2_version = "2.1.210"
-  lazy val janino_version = "3.1.4"
+  lazy val janino_version = "3.1.12"
   // TODO(i8460) Don't upgrade until https://github.com/sbt/sbt/issues/6564 is fixed
   lazy val javafx_all_version = "17-ea+8"
   lazy val javax_annotations_version = "1.3.2"
-  lazy val log4j_version = "2.17.0"
-  lazy val logback_version = "1.4.14"
+  lazy val log4j_version = "2.23.1"
+  lazy val logback_version = "1.5.3"
   lazy val logstash_version = "6.6"
   lazy val magnolia_version = "1.1.3"
   lazy val magnolifyScalacheck_version = "0.6.2"
@@ -57,7 +57,7 @@ object Dependencies {
   // required for ALPN (which is required for TLS+HTTP/2) when running on Java 8. JSSE will be used on Java 9+.
   lazy val grpc_version = "1.60.0"
   lazy val netty_boring_ssl_version = "2.0.61.Final"
-  lazy val netty_version = "4.1.100.Final"
+  lazy val netty_version = "4.1.108.Final"
 
   lazy val oracle_version = "19.18.0.0"
   lazy val postgres_version = "42.7.3"
@@ -84,7 +84,7 @@ object Dependencies {
   lazy val spray_json_derived_codecs_version = "2.3.10"
   lazy val sttp_version = "3.8.16"
   lazy val testcontainers_version = "1.19.7"
-  lazy val tink_version = "1.3.0"
+  lazy val tink_version = "1.12.0"
   lazy val toxiproxy_java_version = "2.1.7"
 
   lazy val reflections = "org.reflections" % "reflections" % reflections_version
