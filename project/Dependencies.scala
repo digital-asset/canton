@@ -57,7 +57,7 @@ object Dependencies {
   // required for ALPN (which is required for TLS+HTTP/2) when running on Java 8. JSSE will be used on Java 9+.
   lazy val grpc_version = "1.60.0"
   lazy val netty_boring_ssl_version = "2.0.61.Final"
-  lazy val netty_version = "4.1.100.Final"
+  lazy val netty_version = "4.1.108.Final"
 
   lazy val oracle_version = "19.18.0.0"
   lazy val postgres_version = "42.7.3"
