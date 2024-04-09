@@ -375,7 +375,6 @@ trait CantonConfig {
           minimumProtocolVersion = participantParameters.minimumProtocolVersion.map(_.unwrap),
           devVersionSupport = participantParameters.devVersionSupport,
           dontWarnOnDeprecatedPV = participantParameters.dontWarnOnDeprecatedPV,
-          initialProtocolVersion = participantParameters.initialProtocolVersion.unwrap,
         ),
         ledgerApiServerParameters = participantParameters.ledgerApiServer,
         excludeInfrastructureTransactions = participantParameters.excludeInfrastructureTransactions,
@@ -384,6 +383,8 @@ trait CantonConfig {
         journalGarbageCollectionDelay =
           participantParameters.journalGarbageCollectionDelay.toInternal,
         disableUpgradeValidation = participantParameters.disableUpgradeValidation,
+        allowForUnauthenticatedContractIds =
+          participantParameters.allowForUnauthenticatedContractIds,
       )
     }
 
@@ -515,7 +516,6 @@ private[canton] object CantonNodeParameterConverter {
     CantonNodeParameters.Protocol.Impl(
       devVersionSupport = parent.parameters.devVersionSupport || config.devVersionSupport,
       dontWarnOnDeprecatedPV = config.dontWarnOnDeprecatedPV,
-      initialProtocolVersion = config.initialProtocolVersion,
     )
 
 }
