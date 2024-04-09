@@ -258,8 +258,7 @@ class CantonSyncService(
       aliasManager,
       syncCrypto.pureCrypto,
       participantId,
-      autoTransferTransaction = parameters.enablePreviewFeatures,
-      parameters.processingTimeouts,
+      parameters,
       loggerFactory,
     )(ec)
 
@@ -878,7 +877,8 @@ class CantonSyncService(
                 // if the error is retryable, we'll reschedule an automatic retry so this domain gets connected eventually
                 if (parent.retryable.nonEmpty) {
                   logger.warn(
-                    s"Skipping failing domain $con after ${parent.code.toMsg(parent.cause, traceContext.traceId)}. Will schedule subsequent retry."
+                    s"Skipping failing domain $con after ${parent.code
+                        .toMsg(parent.cause, traceContext.traceId, limit = None)}. Will schedule subsequent retry."
                   )
                   attemptReconnect
                     .put(
@@ -896,7 +896,8 @@ class CantonSyncService(
                   )
                 } else {
                   logger.warn(
-                    s"Skipping failing domain $con after ${parent.code.toMsg(parent.cause, traceContext.traceId)}. Will not schedule retry. Please connect it manually."
+                    s"Skipping failing domain $con after ${parent.code
+                        .toMsg(parent.cause, traceContext.traceId, limit = None)}. Will not schedule retry. Please connect it manually."
                   )
                 }
                 Right(false)
@@ -1033,7 +1034,7 @@ class CantonSyncService(
               if keepRetrying && err.retryable.nonEmpty =>
             if (initial)
               logger.warn(s"Initial connection attempt to ${domainAlias} failed with ${err.code
-                  .toMsg(err.cause, traceContext.traceId)}. Will keep on trying.")
+                  .toMsg(err.cause, traceContext.traceId, limit = None)}. Will keep on trying.")
             else
               logger.info(
                 s"Initial connection attempt to ${domainAlias} failed. Will keep on trying."
