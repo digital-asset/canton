@@ -181,9 +181,8 @@ enum SymmetricKeyScheme {
 enum CryptoKeyFormat {
   CRYPTO_KEY_FORMAT_UNSPECIFIED = 0;
 
-  // Tink's KeySet proto serialization format
-  // https://github.com/google/tink/tree/1.5/proto
-  CRYPTO_KEY_FORMAT_TINK = 1;
+  // Previously Tink's proto serialization format
+  reserved 1;
 
   // ASN.1 + DER encoding
   CRYPTO_KEY_FORMAT_DER = 2;

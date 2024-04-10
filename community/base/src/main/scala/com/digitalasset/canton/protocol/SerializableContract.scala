@@ -90,7 +90,7 @@ object SerializableContract
     with HasVersionedMessageCompanionDbHelpers[SerializableContract] {
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v30,
+      ProtocolVersion.v31,
       supportedProtoVersion(v30.SerializableContract)(fromProtoV30),
       _.toProtoV30.toByteString,
     )
@@ -150,7 +150,7 @@ object SerializableContract
       cantonContractMetadata <- ContractMetadata.create(
         signatories = create.signatories,
         stakeholders = create.stakeholders,
-        maybeKeyWithMaintainers = create.keyOpt,
+        maybeKeyWithMaintainersVersioned = create.versionedKeyOpt,
       )
       contract <- SerializableContract(
         contractId = disclosedContract.contractId,
