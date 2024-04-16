@@ -1572,6 +1572,10 @@ class BlockUpdateGeneratorImpl(
           )
           OptionT.none[FutureUnlessShutdown, Unit]
         } else OptionT.some[FutureUnlessShutdown](())
+      _ = logger.trace(
+        s"Consuming traffic cost for event with messageId ${request.messageId}" +
+          s" from sender $sender at $sequencingTimestamp"
+      )
       // Consume traffic for the sender
       newSenderTrafficState <- OptionT.liftF(
         rateLimitManager

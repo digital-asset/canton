@@ -49,6 +49,7 @@ object GrpcParticipantRepairService {
     private def validateContractDomainRenames(
         contractDomainRenames: Map[String, ExportAcsRequest.TargetDomain],
         allProtocolVersions: Map[DomainId, ProtocolVersion],
+        force: Boolean,
     ): Either[String, List[(DomainId, (DomainId, ProtocolVersion))]] =
       contractDomainRenames.toList.traverse {
         case (source, ExportAcsRequest.TargetDomain(targetDomain, targetProtocolVersionRaw)) =>
@@ -69,7 +70,7 @@ object GrpcParticipantRepairService {
               .get(targetDomainId)
               .map { foundProtocolVersion =>
                 EitherUtil.condUnitE(
-                  foundProtocolVersion == targetProtocolVersion,
+                  foundProtocolVersion == targetProtocolVersion || force,
                   s"Inconsistent protocol versions for domain $targetDomainId: found version is $foundProtocolVersion, passed is $targetProtocolVersion",
                 )
               }
@@ -92,6 +93,7 @@ object GrpcParticipantRepairService {
         contractDomainRenames <- validateContractDomainRenames(
           request.contractDomainRenames,
           allProtocolVersions,
+          force = request.force,
         )
       } yield ValidExportAcsRequest(
         parties.toSet,
