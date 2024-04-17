@@ -41,6 +41,7 @@ import com.daml.ledger.javaapi.data.{
 import com.daml.ledger.javaapi as javab
 import com.daml.lf.data.Ref
 import com.daml.metrics.api.MetricHandle.{Histogram, Meter}
+import com.daml.metrics.api.MetricsContext.Implicits.empty
 import com.daml.metrics.api.{MetricName, MetricsContext}
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.CompletionWrapper

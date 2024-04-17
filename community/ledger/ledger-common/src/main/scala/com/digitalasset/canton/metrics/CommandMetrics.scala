@@ -3,14 +3,16 @@
 
 package com.digitalasset.canton.metrics
 
-import com.daml.metrics.api.MetricDoc.MetricQualification.{Debug, Latency}
 import com.daml.metrics.api.MetricHandle.{Counter, LabeledMetricsFactory, Meter, Timer}
+import com.daml.metrics.api.MetricQualification.{Debug, Latency}
 import com.daml.metrics.api.{MetricDoc, MetricName}
 
 class CommandMetrics(
     prefix: MetricName,
     factory: LabeledMetricsFactory,
 ) {
+
+  import com.daml.metrics.api.MetricsContext.Implicits.empty
 
   @MetricDoc.Tag(
     summary = "The time to validate a Daml command.",

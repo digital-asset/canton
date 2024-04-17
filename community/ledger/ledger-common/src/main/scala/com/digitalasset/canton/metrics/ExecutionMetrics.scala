@@ -4,14 +4,16 @@
 package com.digitalasset.canton.metrics
 
 import com.daml.metrics.CacheMetrics
-import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
-import com.daml.metrics.api.MetricHandle.*
+import com.daml.metrics.api.MetricHandle.{Counter, Histogram, LabeledMetricsFactory, Meter, Timer}
+import com.daml.metrics.api.MetricQualification.Debug
 import com.daml.metrics.api.{MetricDoc, MetricName}
 
 class ExecutionMetrics(
     prefix: MetricName,
     openTelemetryMetricsFactory: LabeledMetricsFactory,
 ) {
+
+  import com.daml.metrics.api.MetricsContext.Implicits.empty
 
   @MetricDoc.Tag(
     summary = "The time to lookup individual active contracts during interpretation.",
