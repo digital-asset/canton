@@ -118,9 +118,11 @@ class ParticipantRepairAdministration(
         |- filterDomainId: restrict the export to a given domain
         |- timestamp: optionally a timestamp for which we should take the state (useful to reconcile states of a domain)
         |- contractDomainRenames: As part of the export, allow to rename the associated domain id of contracts from one domain to another based on the mapping.
-        |- force: if is set to true, then the check that the timestamp is clean will not be done.
-        |         For this option to yield a consistent snapshot, you need to wait at least
-        |         confirmationResponseTimeout + mediatorReactionTimeout after the last submitted request.
+        |- force: if is set to true, some validations are skipped:
+        |    - Check that the timestamp is clean
+        |      For this option to yield a consistent snapshot, you need to wait at least
+        |      confirmationResponseTimeout + mediatorReactionTimeout after the last submitted request.
+        |    - Check that the protocol version in contractDomainRenames is correct.
         """
   )
   def export_acs(
