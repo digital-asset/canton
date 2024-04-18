@@ -450,7 +450,6 @@ abstract class ProtocolProcessor[
           messageId = messageId,
           amplify = true,
         )
-        .mapK(FutureUnlessShutdown.outcomeK)
         .leftMap { err =>
           removePendingSubmission()
           embedSubmissionError(SequencerRequestError(err))
@@ -792,7 +791,7 @@ abstract class ProtocolProcessor[
                   mediator,
                   snapshot,
                   malformedPayloads,
-                ).mapK(FutureUnlessShutdown.outcomeK)
+                )
             }
 
           case Some(goodViewsWithSignatures) =>
@@ -1127,12 +1126,11 @@ abstract class ProtocolProcessor[
           )
           sendResponses(requestId, signedResponsesTo, Some(messageId))
             .leftMap(err => steps.embedRequestError(SequencerRequestError(err)))
-            .mapK(FutureUnlessShutdown.outcomeK)
         } else {
           logger.info(
             s"Phase 4: Finished validation for request=${requestId.unwrap} with nothing to approve."
           )
-          EitherT.rightT[FutureUnlessShutdown, steps.RequestError](())
+          EitherTUtil.unitUS[steps.RequestError]
         }
 
     } yield ()
@@ -1150,16 +1148,20 @@ abstract class ProtocolProcessor[
       mediatorGroup: MediatorsOfDomain,
       snapshot: DomainSnapshotSyncCryptoApi,
       malformedPayloads: Seq[MalformedPayload],
-  )(implicit traceContext: TraceContext): EitherT[Future, steps.RequestError, Unit] = {
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, steps.RequestError, Unit] = {
 
     val requestId = RequestId(ts)
 
     if (isCleanReplay(rc)) {
       ephemeral.requestTracker.tick(sc, ts)
-      EitherT.rightT(())
+      EitherTUtil.unitUS
     } else {
       for {
-        _ <- EitherT.right(ephemeral.requestJournal.insert(rc, ts))
+        _ <- EitherT
+          .right(ephemeral.requestJournal.insert(rc, ts))
+          .mapK(FutureUnlessShutdown.outcomeK)
 
         _ = ephemeral.requestTracker.tick(sc, ts)
 
@@ -1169,16 +1171,20 @@ abstract class ProtocolProcessor[
           malformedPayloads,
         )
         recipients = Recipients.cc(mediatorGroup)
-        messages <- EitherT.right(responses.parTraverse { response =>
-          signResponse(snapshot, response).map(_ -> recipients)
-        })
+        messages <- EitherT
+          .right(responses.parTraverse { response =>
+            signResponse(snapshot, response).map(_ -> recipients)
+          })
+          .mapK(FutureUnlessShutdown.outcomeK)
 
         _ <- sendResponses(requestId, messages)
           .leftMap(err => steps.embedRequestError(SequencerRequestError(err)))
 
         _ = handleRequestData.complete(None)
 
-        _ <- EitherT.right[steps.RequestError](terminateRequest(rc, sc, ts, ts))
+        _ <- EitherT.right[steps.RequestError](
+          FutureUnlessShutdown.outcomeF(terminateRequest(rc, sc, ts, ts))
+        )
       } yield ()
     }
   }
