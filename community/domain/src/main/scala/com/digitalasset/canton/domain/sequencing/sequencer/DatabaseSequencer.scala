@@ -284,7 +284,7 @@ class DatabaseSequencer(
     } yield ()
 
   protected def blockSequencerWriteInternal(
-      outcome: SubmissionRequestOutcome
+      outcome: DeliverableSubmissionOutcome
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncError, Unit] =

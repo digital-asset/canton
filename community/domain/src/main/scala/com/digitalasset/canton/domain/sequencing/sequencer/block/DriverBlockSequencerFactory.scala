@@ -85,6 +85,7 @@ class DriverBlockSequencerFactory[C](
           nodeParameters.nonStandardConfig,
           driverClock,
           initialBlockHeight,
+          domainId.toString,
           domainLoggerFactory,
         ),
         protocolVersion,

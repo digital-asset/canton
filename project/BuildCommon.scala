@@ -1244,6 +1244,7 @@ object BuildCommon {
         Test / unmanagedResourceDirectories += (`ledger-common-dars-lf-v2-1` / Compile / resourceManaged).value,
         addProtobufFilesToHeaderCheck(Compile),
         libraryDependencies ++= Seq(
+          bouncycastle_bcpkix_jdk15on,
           caffeine,
           commons_codec,
           commons_io,
