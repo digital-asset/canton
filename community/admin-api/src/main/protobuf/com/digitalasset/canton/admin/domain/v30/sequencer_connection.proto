@@ -46,7 +46,10 @@ message SequencerConnections {
   // This value must be positive.
   uint32 sequencerTrustThreshold = 2;
 
-  SubmissionRequestAmplification submission_request_amplification = 3;
+  // Equivalent to submission_request_amplification.factor with patience 0. Ignored when submission_request_amplification is set.
+  uint32 legacy_submission_request_amplification = 3;
+
+  SubmissionRequestAmplification submission_request_amplification = 4;
 }
 
 message SubmissionRequestAmplification {

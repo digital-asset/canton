@@ -26,7 +26,7 @@ class SequencerMetrics(
   override val prefix: MetricName = parent
   private implicit val mc: MetricsContext = MetricsContext.Empty
   override def storageMetrics: DbStorageMetrics = dbStorage
-
+  object block extends BlockMetrics(prefix, openTelemetryMetricsFactory)
   object sequencerClient extends SequencerClientMetrics(prefix, openTelemetryMetricsFactory)
 
   @MetricDoc.Tag(
