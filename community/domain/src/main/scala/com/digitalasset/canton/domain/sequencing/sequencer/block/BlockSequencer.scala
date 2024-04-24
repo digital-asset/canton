@@ -125,6 +125,7 @@ class BlockSequencer(
       stateManager.maybeLowerTopologyTimestampBound,
       blockRateLimitManager,
       orderingTimeFixMode,
+      metrics.block,
       loggerFactory,
       unifiedSequencer = unifiedSequencer,
     )(CloseContext(cryptoApi))

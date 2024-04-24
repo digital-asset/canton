@@ -20,7 +20,7 @@ import com.digitalasset.canton.version.{
   ProtoVersion,
   ProtocolVersion,
 }
-import com.digitalasset.canton.{ProtoDeserializationError, SequencerAlias}
+import com.digitalasset.canton.{ProtoDeserializationError, SequencerAlias, config}
 import com.google.protobuf.ByteString
 
 import java.net.URI
@@ -110,7 +110,8 @@ final case class SequencerConnections private (
     new v30.SequencerConnections(
       connections.map(_.toProtoV30),
       sequencerTrustThreshold.unwrap,
-      Some(submissionRequestAmplification.toProtoV30),
+      legacySubmissionRequestAmplification = submissionRequestAmplification.factor.unwrap,
+      submissionRequestAmplification = Some(submissionRequestAmplification.toProtoV30),
     )
 
   @transient override protected lazy val companionObj
@@ -172,15 +173,19 @@ object SequencerConnections
     val v30.SequencerConnections(
       sequencerConnectionsP,
       sequencerTrustThresholdP,
+      legacySubmissionRequestAmplification,
       submissionRequestAmplificationP,
     ) = sequencerConnectionsProto
     for {
       sequencerTrustThreshold <- ProtoConverter.parsePositiveInt(sequencerTrustThresholdP)
-      submissionRequestAmplification <- ProtoConverter.parseRequired(
-        SubmissionRequestAmplification.fromProtoV30,
-        "submission_request_amplification",
-        submissionRequestAmplificationP,
-      )
+      submissionRequestAmplification <- submissionRequestAmplificationP match {
+        case None =>
+          ProtoConverter.parsePositiveInt(legacySubmissionRequestAmplification).map { factor =>
+            SubmissionRequestAmplification(factor, config.NonNegativeFiniteDuration.Zero)
+          }
+        case Some(amplificationP) =>
+          SubmissionRequestAmplification.fromProtoV30(amplificationP)
+      }
       sequencerConnectionsNes <- ProtoConverter.parseRequiredNonEmpty(
         SequencerConnection.fromProtoV30,
         "sequencer_connections",

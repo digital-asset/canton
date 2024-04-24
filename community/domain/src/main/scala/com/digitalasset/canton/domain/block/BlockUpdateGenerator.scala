@@ -13,6 +13,7 @@ import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.error.BaseError
+import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.CantonRequireTypes.String73
@@ -29,6 +30,7 @@ import com.digitalasset.canton.domain.block.data.{
   BlockInfo,
   BlockUpdateEphemeralState,
 }
+import com.digitalasset.canton.domain.metrics.BlockMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.InFlightAggregation.AggregationBySender
 import com.digitalasset.canton.domain.sequencing.sequencer.*
 import com.digitalasset.canton.domain.sequencing.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
@@ -42,6 +44,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.traffic.{
 import com.digitalasset.canton.error.BaseAlarm
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.protocol.messages.{SignedProtocolMessage, UnsignedProtocolMessage}
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.sequencing.client.SequencedEventValidator
 import com.digitalasset.canton.sequencing.client.SequencedEventValidator.TopologyTimestampVerificationError
@@ -51,7 +54,7 @@ import com.digitalasset.canton.topology.{DomainId, Member, PartyId, SequencerId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, IterableUtil, MapsUtil, MonadUtil}
+import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
 
@@ -123,6 +126,7 @@ class BlockUpdateGeneratorImpl(
     maybeLowerTopologyTimestampBound: Option[CantonTimestamp],
     rateLimitManager: SequencerRateLimitManager,
     orderingTimeFixMode: OrderingTimeFixMode,
+    metrics: BlockMetrics,
     protected val loggerFactory: NamedLoggerFactory,
     unifiedSequencer: Boolean,
 )(implicit val closeContext: CloseContext)
@@ -175,6 +179,7 @@ class BlockUpdateGeneratorImpl(
     }
 
     val blockHeight = block.height
+    metrics.height.updateValue(blockHeight)
 
     IterableUtil
       .splitAfter(block.events)(event => possibleEventToThisSequencer(event.value))
@@ -235,6 +240,11 @@ class BlockUpdateGeneratorImpl(
       // Discard the timestamp of the `Send` event as this one is obsolete
       (ts, ev.map(_ => sendEvent.signedSubmissionRequest))
     }
+
+    FutureUtil.doNotAwait(
+      recordSubmissionMetrics(fixedTsChanges.map(_._2)),
+      "submission metric updating failed",
+    )
 
     for {
       submissionRequestsWithSnapshots <- addSnapshots(
@@ -330,6 +340,7 @@ class BlockUpdateGeneratorImpl(
         finalEphemeralState,
         lastSequencerEventTimestamp,
       ) = result
+
       val finalEphemeralStateWithAggregationExpiry =
         finalEphemeralState.evictExpiredInFlightAggregations(lastTs)
       val chunkUpdate = ChunkUpdate(
@@ -348,6 +359,36 @@ class BlockUpdateGeneratorImpl(
         finalEphemeralStateWithAggregationExpiry,
       )
       (newState, chunkUpdate)
+    }
+  }
+
+  private def recordSubmissionMetrics(
+      value: Seq[Traced[LedgerBlockEvent]]
+  )(implicit executionContext: ExecutionContext): Future[Unit] = Future {
+    val hashOps = domainSyncCryptoApi.crypto.pureCrypto
+    value.map(_.value).foreach {
+      case LedgerBlockEvent.Send(_, signedSubmissionRequest) =>
+        val mc = MetricsContext("sender" -> signedSubmissionRequest.content.sender.toString)
+        metrics.sends.mark()(mc.withExtraLabels("type" -> "send"))
+        signedSubmissionRequest.content.batch.envelopes
+          .flatMap(
+            _.openEnvelope(hashOps, protocolVersion).toOption.toList
+          )
+          .map(_.protocolMessage)
+          .foreach {
+            case SignedProtocolMessage(typedMessage, _) =>
+              metrics.envelopes.mark()(
+                mc.withExtraLabels("type" -> typedMessage.content.getClass.getSimpleName)
+              )
+            case message: UnsignedProtocolMessage =>
+              metrics.envelopes.mark()(mc.withExtraLabels("type" -> message.getClass.getSimpleName))
+            case _ =>
+              metrics.envelopes.mark()(mc.withExtraLabels("type" -> "unsigned-unknown"))
+          }
+      case LedgerBlockEvent.AddMember(_) => metrics.sends.mark()(MetricsContext("type" -> "send"))
+      case LedgerBlockEvent.Acknowledgment(request) =>
+        metrics.sends
+          .mark()(MetricsContext("sender" -> request.content.member.toString, "type" -> "send"))
     }
   }
 
