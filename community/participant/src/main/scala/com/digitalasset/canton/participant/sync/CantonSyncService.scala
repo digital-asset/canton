@@ -142,7 +142,7 @@ class CantonSyncService(
     private[canton] val syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
     private[canton] val packageService: PackageService,
     topologyManagerOps: ParticipantTopologyManagerOps,
-    identityPusher: ParticipantTopologyDispatcherCommon,
+    identityPusher: ParticipantTopologyDispatcher,
     partyNotifier: LedgerServerPartyNotifier,
     val syncCrypto: SyncCryptoApiProvider,
     val pruningProcessor: PruningProcessor,
@@ -894,6 +894,8 @@ class CantonSyncService(
     connectQueue.executeEUS(
       performReconnectDomains(ignoreFailures),
       "reconnect domains",
+      // If sequencer is down for a long time and comes back, we don't want to cache previous failures.
+      runIfFailed = true,
     )
 
   private def performReconnectDomains(ignoreFailures: Boolean)(implicit
@@ -1238,7 +1240,7 @@ class CantonSyncService(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] = {
-    def createDomainHandle(
+    def connect(
         config: DomainConnectionConfig
     ): EitherT[FutureUnlessShutdown, SyncServiceError, DomainHandle] =
       EitherT(domainRegistry.connect(config)).leftMap(err =>
@@ -1278,7 +1280,7 @@ class CantonSyncService(
           SyncServiceError.SyncServiceDomainIsNotActive
             .Error(domainAlias, domainConnectionConfig.status): SyncServiceError,
         )
-        domainHandle <- createDomainHandle(domainConnectionConfig.config)
+        domainHandle <- connect(domainConnectionConfig.config)
 
         persistent = domainHandle.domainPersistentState
         domainId = domainHandle.domainId
@@ -1340,10 +1342,8 @@ class CantonSyncService(
               partyNotifier,
               missingKeysAlerter,
               domainHandle.topologyClient,
-              domainCrypto,
               trafficStateController,
               ephemeral.recordOrderPublisher,
-              domainHandle.staticParameters.protocolVersion,
               parameters.useNewTrafficControl,
             ),
           missingKeysAlerter,
@@ -1829,7 +1829,7 @@ object CantonSyncService {
         syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
         packageService: PackageService,
         topologyManagerOps: ParticipantTopologyManagerOps,
-        identityPusher: ParticipantTopologyDispatcherCommon,
+        identityPusher: ParticipantTopologyDispatcher,
         partyNotifier: LedgerServerPartyNotifier,
         syncCrypto: SyncCryptoApiProvider,
         engine: Engine,
@@ -1859,7 +1859,7 @@ object CantonSyncService {
         syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
         packageService: PackageService,
         topologyManagerOps: ParticipantTopologyManagerOps,
-        identityPusher: ParticipantTopologyDispatcherCommon,
+        identityPusher: ParticipantTopologyDispatcher,
         partyNotifier: LedgerServerPartyNotifier,
         syncCrypto: SyncCryptoApiProvider,
         engine: Engine,

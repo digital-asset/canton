@@ -43,6 +43,7 @@ object BlockOrderingSequencer {
         nonStandardConfig: Boolean,
         timeProvider: TimeProvider,
         firstBlockHeight: Option[Long],
+        domainId: String,
         loggerFactory: NamedLoggerFactory,
     )(implicit executionContext: ExecutionContext, materializer: Materializer): SequencerDriver =
       new Driver(

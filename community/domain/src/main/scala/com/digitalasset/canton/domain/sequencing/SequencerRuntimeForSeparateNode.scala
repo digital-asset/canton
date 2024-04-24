@@ -13,6 +13,7 @@ import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.config.PublicServerConfig
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.authentication.MemberAuthenticationServiceFactory
+import com.digitalasset.canton.domain.sequencing.config.SequencerNodeParameters
 import com.digitalasset.canton.domain.sequencing.sequencer.{
   DirectSequencerClientTransport,
   Sequencer,
@@ -50,10 +51,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessorCommon
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
-import com.digitalasset.canton.topology.store.{
-  TopologyStateForInitializationService,
-  TopologyStoreX,
-}
+import com.digitalasset.canton.topology.store.{TopologyStateForInitializationService, TopologyStore}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.traffic.TrafficControlProcessor
 import io.grpc.ServerServiceDefinition
@@ -70,14 +68,14 @@ class SequencerRuntimeForSeparateNode(
     sequencerId: SequencerId,
     sequencer: Sequencer,
     staticDomainParameters: StaticDomainParameters,
-    localNodeParameters: CantonNodeWithSequencerParameters,
+    localNodeParameters: SequencerNodeParameters,
     publicServerConfig: PublicServerConfig,
     timeTrackerConfig: DomainTimeTrackerConfig,
     testingConfig: TestingConfigInternal,
     metrics: SequencerMetrics,
     indexedDomain: IndexedDomain,
     syncCrypto: DomainSyncCryptoClient,
-    topologyStore: TopologyStoreX[DomainStore],
+    topologyStore: TopologyStore[DomainStore],
     topologyClient: DomainTopologyClientWithInit,
     topologyProcessor: TopologyTransactionProcessorCommon,
     topologyManagerStatusO: Option[TopologyManagerStatus],

@@ -14,7 +14,7 @@ import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v30
 import com.digitalasset.canton.domain.metrics.SequencerTestMetrics
-import com.digitalasset.canton.domain.sequencing.SequencerParameters
+import com.digitalasset.canton.domain.sequencing.config.SequencerParameters
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.SequencerError
 import com.digitalasset.canton.domain.sequencing.service.SubscriptionPool.PoolClosed
@@ -37,10 +37,10 @@ import com.digitalasset.canton.topology.processing.{
   SequencedTime,
   TopologyTransactionTestFactoryX,
 }
-import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX.GenericStoredTopologyTransactionsX
+import com.digitalasset.canton.topology.store.StoredTopologyTransactions.GenericStoredTopologyTransactions
 import com.digitalasset.canton.topology.store.{
-  StoredTopologyTransactionX,
-  StoredTopologyTransactionsX,
+  StoredTopologyTransaction,
+  StoredTopologyTransactions,
   TopologyStateForInitializationService,
 }
 import com.digitalasset.canton.tracing.TraceContext
@@ -125,7 +125,8 @@ class GrpcSequencerServiceTest
         loggerFactory,
       )
     private val params = new SequencerParameters {
-      override def maxBurstFactor: PositiveDouble = PositiveDouble.tryCreate(1e-6)
+      override def maxConfirmationRequestsBurstFactor: PositiveDouble =
+        PositiveDouble.tryCreate(1e-6)
       override def processingTimeouts: ProcessingTimeout = timeouts
     }
 
@@ -139,13 +140,13 @@ class GrpcSequencerServiceTest
         override def initialSnapshot(member: Member)(implicit
             executionContext: ExecutionContext,
             traceContext: TraceContext,
-        ): Future[GenericStoredTopologyTransactionsX] = Future.successful(
-          StoredTopologyTransactionsX(
+        ): Future[GenericStoredTopologyTransactions] = Future.successful(
+          StoredTopologyTransactions(
             // As we don't expect the actual transactions in this test, we can repeat the same transaction a bunch of times
             List
               .fill(maxItemsInTopologyBatch * numBatches)(factoryX.ns1k1_k1)
               .map(
-                StoredTopologyTransactionX(
+                StoredTopologyTransaction(
                   SequencedTime.MinValue,
                   EffectiveTime.MinValue,
                   None,

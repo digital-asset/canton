@@ -592,11 +592,6 @@ class BlockUpdateGeneratorImpl(
             newAggregationO,
             signingSnapshotO,
             _,
-            _,
-            _,
-            _,
-            _,
-            _,
           ) =>
         NonEmpty.from(deliverEvents) match {
           case None => // No state update if there is nothing to deliver
@@ -647,14 +642,12 @@ class BlockUpdateGeneratorImpl(
                 trafficUpdatedState.trafficState.view.mapValues(_.toSequencedEventTrafficState),
                 traceContext,
               )
-              val outcomeWithUpdateTrafficState =
-                outcome.copy(trafficStateO = Some(trafficUpdatedState.trafficState))
               (
                 unsignedEvents +: reversedEvents,
                 newInFlightAggregationUpdates,
                 trafficUpdatedState,
                 sequencerEventTimestampO,
-                outcomeWithUpdateTrafficState +: revOutcomes,
+                outcome +: revOutcomes,
               )
             }
         }
@@ -778,8 +771,13 @@ class BlockUpdateGeneratorImpl(
   ] = {
     val submissionRequest = signedSubmissionRequest.content
 
-    // In the following EitherT, Lefts are used to stop processing the submission request and immediately produce the sequenced events
-    val resultET = for {
+    // Below are a 3 functions, each a for-comprehension of EitherT.
+    // In each Lefts are used to stop processing the submission request and immediately produce the sequenced events
+    // They are split into 3 functions to make it possible to re-use intermediate results (specifically BlockUpdateEphemeralState
+    // containing updated traffic states), even if further processing fails.
+
+    // This first function performs initial validations and resolves groups to members
+    def performInitialValidations = for {
       _ <- EitherT.cond[FutureUnlessShutdown](
         st.registeredMembers.contains(submissionRequest.sender),
         (),
@@ -855,6 +853,15 @@ class BlockUpdateGeneratorImpl(
         topologySnapshot,
         st,
       )
+    } yield groupToMembers
+
+    // This second function consumes traffic for the sender and update the ephemeral state
+    def validateAndUpdateTraffic: EitherT[
+      FutureUnlessShutdown,
+      SubmissionRequestOutcome,
+      (Map[GroupRecipient, Set[Member]], BlockUpdateEphemeralState),
+    ] = for {
+      groupToMembers <- performInitialValidations
       stateAfterTrafficConsume <- updateRateLimiting(
         submissionRequest,
         sequencingTimestamp,
@@ -864,6 +871,18 @@ class BlockUpdateGeneratorImpl(
         latestSequencerEventTimestamp,
         warnIfApproximate = st.headCounterAboveGenesis(sequencerId),
       )
+    } yield (groupToMembers, stateAfterTrafficConsume)
+
+    // This last function performs additional checks and runs the aggregation logic
+    // If this succeeds, it will produce a SubmissionRequestOutcome containing DeliverEvents
+    def finalizeProcessing(
+        groupToMembers: Map[GroupRecipient, Set[Member]],
+        stateAfterTrafficConsume: BlockUpdateEphemeralState,
+    ): EitherT[
+      FutureUnlessShutdown,
+      SubmissionRequestOutcome,
+      (BlockUpdateEphemeralState, SubmissionRequestOutcome, Option[CantonTimestamp]),
+    ] = for {
       _ <- EitherT.cond[FutureUnlessShutdown](
         SequencerValidations.checkToAtMostOneMediator(submissionRequest),
         (), {
@@ -876,7 +895,7 @@ class BlockUpdateGeneratorImpl(
       aggregationIdO = submissionRequest.aggregationId(domainSyncCryptoApi.pureCrypto)
       aggregationOutcome <- EitherT.fromEither[FutureUnlessShutdown](
         aggregationIdO.traverse { aggregationId =>
-          val inFlightAggregation = st.inFlightAggregations.get(aggregationId)
+          val inFlightAggregation = stateAfterTrafficConsume.inFlightAggregations.get(aggregationId)
           validateAggregationRuleAndUpdateInFlightAggregation(
             submissionRequest,
             sequencingTimestamp,
@@ -963,19 +982,31 @@ class BlockUpdateGeneratorImpl(
           events,
           aggregationUpdate,
           signingSnapshotO,
-          submissionRequest,
-          sequencingTimestamp,
-          members,
-          None,
-          Some(aggregatedBatch),
+          outcome = SubmissionOutcome.Deliver(
+            submissionRequest,
+            sequencingTimestamp,
+            members,
+            aggregatedBatch,
+          ),
         ),
         sequencerEventTimestampO,
       )
     }
-    resultET.value.map {
-      case Left(outcome) => (st, outcome, None)
-      case Right(newStateAndOutcome) => newStateAndOutcome
-    }
+
+    // A bit more convoluted than we'd like here, but the goal is to be able to use the traffic updated state in the result,
+    // even if the aggregation logic performed in 'finalizeProcessing' short-circuits (for instance because we've already reached the aggregation threshold)
+    validateAndUpdateTraffic
+      .flatMap { case (groupToMembers, stateAfterTrafficConsume) =>
+        finalizeProcessing(groupToMembers, stateAfterTrafficConsume)
+          // Use the traffic updated ephemeral state in the response even if the rest of the processing stopped
+          .recover { errorSubmissionOutcome =>
+            (stateAfterTrafficConsume, errorSubmissionOutcome, None)
+          }
+      }
+      .leftMap { errorSubmissionOutcome =>
+        (st, errorSubmissionOutcome, None)
+      }
+      .merge
   }
 
   private def checkRecipientsAreKnown(
@@ -1244,11 +1275,7 @@ class BlockUpdateGeneratorImpl(
             Map(submissionRequest.sender -> deliverReceiptEvent),
             Some(aggregationId -> fullInFlightAggregationUpdate),
             None,
-            submissionRequest,
-            sequencingTimestamp,
-            Set(submissionRequest.sender),
-            Some(deliverReceiptEvent),
-            Some(Batch.empty(protocolVersion)),
+            outcome = SubmissionOutcome.DeliverReceipt(submissionRequest, sequencingTimestamp),
           )
         },
       )
