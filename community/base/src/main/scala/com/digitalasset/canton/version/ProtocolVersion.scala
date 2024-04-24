@@ -237,7 +237,8 @@ object ProtocolVersion {
 
   /** Like [[create]] ensures a supported protocol version; but throws a runtime exception for errors.
     */
-  def tryCreate(rawVersion: String): ProtocolVersion = create(rawVersion).valueOr(sys.error)
+  def tryCreate(rawVersion: String, allowDeleted: Boolean = false): ProtocolVersion =
+    create(rawVersion, allowDeleted).valueOr(sys.error)
 
   /** Like [[create]] ensures a supported protocol version; tailored to (de-)serialization purposes.
     */
@@ -252,8 +253,11 @@ object ProtocolVersion {
 
   /** Like [[create]] ensures a supported protocol version; tailored to (de-)serialization purposes.
     */
-  def fromProtoPrimitiveS(rawVersion: String): ParsingResult[ProtocolVersion] = {
-    ProtocolVersion.create(rawVersion).leftMap(OtherError)
+  def fromProtoPrimitiveS(
+      rawVersion: String,
+      allowDeleted: Boolean = false,
+  ): ParsingResult[ProtocolVersion] = {
+    ProtocolVersion.create(rawVersion, allowDeleted).leftMap(OtherError)
   }
 
   final case class InvalidProtocolVersion(override val description: String) extends FailureReason
@@ -310,6 +314,12 @@ object ProtocolVersion {
   lazy val v4: ProtocolVersionWithStatus[Stable] = ProtocolVersion.stable(4)
   lazy val v5: ProtocolVersionWithStatus[Stable] = ProtocolVersion.stable(5)
   lazy val v6: ProtocolVersionWithStatus[Unstable] = ProtocolVersion.unstable(6)
+  /*
+  If you add a new protocol version, ensure that you add the corresponding CI
+  jobs (`test_protocol_version_X`) so that tests are run with this new protocol version.
+  Additionally, bump the protocol version (`domain-parameters.protocol-version`) in
+  the config files if you change the default protocol version.
+   */
 
   // Minimum stable protocol version introduced
   // We still use v3 instead of v5 because we still want to deserialize v3 messages for hard domain migration purposes.

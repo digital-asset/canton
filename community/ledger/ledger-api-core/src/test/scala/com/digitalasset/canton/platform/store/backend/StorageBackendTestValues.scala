@@ -92,6 +92,7 @@ private[store] object StorageBackendTestValues {
       party: String = someParty,
       isLocal: Boolean = true,
       displayNameOverride: Option[Option[String]] = None,
+      reject: Boolean = false,
   ): DbDto.PartyEntry = {
     val displayName = displayNameOverride.getOrElse(Some(party))
     DbDto.PartyEntry(
@@ -100,8 +101,8 @@ private[store] object StorageBackendTestValues {
       submission_id = Some("submission_id"),
       party = Some(party),
       display_name = displayName,
-      typ = JdbcLedgerDao.acceptType,
-      rejection_reason = None,
+      typ = if (reject) JdbcLedgerDao.rejectType else JdbcLedgerDao.acceptType,
+      rejection_reason = Option.when(reject)("some rejection reason"),
       is_local = Some(isLocal),
     )
   }
@@ -209,6 +210,7 @@ private[store] object StorageBackendTestValues {
       event_id = Some(EventId(transactionId, NodeId(0)).toLedgerString),
       contract_id = contractId.coid,
       template_id = Some(someTemplateId.toString),
+      package_name = None,
       flat_event_witnesses = if (consuming) Set(signatory) else Set.empty,
       tree_event_witnesses = Set(signatory, actor),
       create_key_value = None,
