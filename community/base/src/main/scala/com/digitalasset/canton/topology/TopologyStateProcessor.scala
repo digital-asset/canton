@@ -10,6 +10,7 @@ import cats.syntax.functor.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.CryptoPureApi
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.processing.{
   EffectiveTime,
@@ -43,7 +44,7 @@ import scala.concurrent.{ExecutionContext, Future}
 /** @param outboxQueue If a [[DomainOutboxQueue]] is provided, the processed transactions are not directly stored,
   *                    but rather sent to the domain via an ephemeral queue (i.e. no persistence).
   * @param enableTopologyTransactionValidation If disabled, all of the authorization validation logic in
-  *                                            IncomingTopologyTransactionAuthorizationValidatorX is skipped.
+  *                                            IncomingTopologyTransactionAuthorizationValidator is skipped.
   */
 class TopologyStateProcessor(
     val store: TopologyStore[TopologyStoreId],

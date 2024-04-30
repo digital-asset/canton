@@ -512,6 +512,7 @@ object BuildCommon {
       `demo`,
       `daml-errors`,
       `daml-adjustable-clock`,
+      `daml-tls`,
       `ledger-common`,
       `ledger-common-dars-lf-v2-1`,
       `ledger-common-dars-lf-v2-dev`,
@@ -523,10 +524,9 @@ object BuildCommon {
 
     // Project for utilities that are also used outside of the Canton repo
     lazy val `util-external` = project
-      .in(file("community/util-external"))
+      .in(file("daml-common-staging/util-external"))
       .dependsOn(
-        `pekko-fork`,
-        `ledger-common`,
+        `daml-errors`,
         `wartremover-extension` % "compile->compile;test->test",
       )
       .settings(
@@ -563,9 +563,8 @@ object BuildCommon {
     lazy val `util-logging` = project
       .in(file("community/util-logging"))
       .dependsOn(
-        `daml-errors`,
+        `daml-errors` % "compile->compile;test->test",
         `daml-grpc-utils`,
-        `wartremover-extension` % "compile->compile;test->test",
       )
       .settings(
         sharedSettings ++ cantonWarts,
@@ -683,8 +682,8 @@ object BuildCommon {
       .in(file("community/base"))
       .enablePlugins(BuildInfoPlugin)
       .dependsOn(
-        `slick-fork`,
-        `util-external`,
+        `daml-tls`,
+        `util-logging`,
         `community-admin-api`,
         `magnolify-addon` % "compile->test",
         DamlProjects.`bindings-java`,
@@ -696,6 +695,8 @@ object BuildCommon {
         libraryDependencies ++= Seq(
           daml_executors,
           daml_nonempty_cats,
+          daml_nameof,
+          daml_lf_transaction,
           daml_rs_grpc_bridge,
           daml_rs_grpc_pekko,
           better_files,
@@ -753,11 +754,8 @@ object BuildCommon {
       .dependsOn(
         blake2b,
         `pekko-fork` % "compile->compile;test->test",
-        `community-base`,
+        `community-testing` % "compile->compile;test->test",
         `wartremover-extension` % "compile->compile;test->test",
-        `ledger-common` % "compile->compile;test->test",
-        `util-external`,
-        `community-testing` % Test,
       )
       .settings(
         sharedCantonSettings,
@@ -767,6 +765,8 @@ object BuildCommon {
           logback_classic,
           logback_core,
           daml_lf_transaction_test_lib % Test,
+          daml_lf_engine,
+          daml_testing_utils,
           reflections % Test,
           scala_logging,
           scala_collection_contrib,
@@ -783,6 +783,7 @@ object BuildCommon {
           circe_generic_extras,
           circe_core,
           jul_to_slf4j % Test,
+          grpc_inprocess % Test,
           grpc_netty,
           netty_boring_ssl,
           netty_native,
@@ -830,6 +831,7 @@ object BuildCommon {
         `community-common` % "compile->compile;test->test",
         `community-admin-api` % "compile->compile;test->test",
         `pekko-fork`,
+        `ledger-common` % "compile->compile;test->test",
         `sequencer-driver-api`,
         `community-reference-driver`,
         `community-testing` % Test,
@@ -876,7 +878,6 @@ object BuildCommon {
         `community-common` % "compile->compile;test->test",
         `community-admin-api`,
         `community-testing` % Test,
-        `ledger-common`,
         `ledger-api-core`,
         `ledger-json-api`,
       )
@@ -1011,7 +1012,10 @@ object BuildCommon {
     // Project for specifying the sequencer driver API
     lazy val `sequencer-driver-api` = project
       .in(file("community/sequencer-driver"))
-      .dependsOn(`util-external`)
+      .dependsOn(
+        `util-external`,
+        `util-logging`,
+      )
       .settings(
         sharedCantonSettings,
         libraryDependencies ++= Seq(
@@ -1217,6 +1221,31 @@ object BuildCommon {
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
+    lazy val `daml-tls` = project
+      .in(file("daml-common-staging/daml-tls"))
+      .dependsOn(
+        `util-external` % "test->compile",
+        `wartremover-extension` % "compile->compile;test->test",
+      )
+      .settings(
+        sharedSettings ++ cantonWarts,
+        scalacOptions += "-Wconf:src=src_managed/.*:silent",
+        libraryDependencies ++= Seq(
+          commons_io,
+          grpc_netty,
+          netty_handler,
+          netty_native,
+          netty_boring_ssl, // This should be a Runtime dep, but needs to be declared at Compile scope due to https://github.com/sbt/sbt/issues/5568
+          scalatest % Test,
+          scalacheck % Test,
+          scalatestScalacheck % Test,
+          scopt,
+          slf4j_api,
+        ),
+        coverageEnabled := false,
+        JvmRulesPlugin.damlRepoHeaderSettings,
+      )
+
     lazy val `daml-adjustable-clock` = project
       .in(file("daml-common-staging/adjustable-clock"))
       .settings(
@@ -1229,10 +1258,9 @@ object BuildCommon {
       .in(file("community/ledger/ledger-common"))
       .dependsOn(
         DamlProjects.`ledger-api`,
-        `daml-errors` % "compile->compile;test->test",
-        `util-logging`,
-        `wartremover-extension` % "compile->compile;test->test",
+        `util-logging` % "compile->compile;test->test",
         `ledger-common-dars-lf-v2-1` % "test",
+        `daml-tls`,
       )
       .settings(
         sharedSettings, // Upgrade to sharedCantonSettings when com.digitalasset.canton.concurrent.Threading moved out of community-base
@@ -1368,11 +1396,12 @@ object BuildCommon {
     lazy val `ledger-api-core` = project
       .in(file("community/ledger/ledger-api-core"))
       .dependsOn(
+        `daml-errors` % "test->test",
+        `daml-tls` % "test->test",
         `ledger-common` % "compile->compile;test->test",
-        `community-base`,
-        `community-common` % "compile->compile;test->test",
-        `community-testing` % "test->test",
-        `daml-adjustable-clock` % "test",
+        `community-common` % "test->test",
+        `community-testing` % "compile->compile;test->test",
+        `daml-adjustable-clock` % "test->test",
       )
       .settings(
         sharedCantonSettings,
@@ -1404,7 +1433,6 @@ object BuildCommon {
           scalapb_runtime_grpc,
           daml_rs_grpc_testing_utils % Test,
           daml_lf_transaction_test_lib % Test,
-          // daml_libs_scala_ledger_resources_test_lib % Test,
           daml_observability_tracing_test_lib % Test,
           daml_libs_scala_grpc_test_utils % Test,
           daml_lf_encoder % Test,
@@ -1447,6 +1475,7 @@ object BuildCommon {
             pekko_http,
             pekko_http_core,
             spray_json_derived_codecs,
+            daml_libs_scala_ledger_resources,
             daml_libs_scala_scalatest_utils % Test,
             pekko_stream_testkit % Test,
             scalatest % Test,

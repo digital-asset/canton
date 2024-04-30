@@ -569,7 +569,6 @@ create table common_sequenced_event_store_pruning (
 create table mediator_domain_configuration (
   -- this lock column ensures that there can only ever be a single row: https://stackoverflow.com/questions/3967372/sql-server-how-to-constrain-a-table-to-contain-a-single-row
   lock char(1) not null default 'X' primary key check (lock = 'X'),
-  initial_key_context varchar(300) not null,
   domain_id varchar(300) not null,
   static_domain_parameters binary large object not null,
   sequencer_connection binary large object not null
@@ -838,7 +837,7 @@ CREATE TABLE common_topology_transactions (
     -- the timestamp at which the transaction is sequenced by the sequencer
     -- UTC timestamp in microseconds relative to EPOCH
     sequenced bigint not null,
-    -- type of transaction (refer to TopologyMappingX.Code)
+    -- type of transaction (refer to TopologyMapping.Code)
     transaction_type int not null,
     -- the namespace this transaction is operating on
     namespace varchar(300) not null,
@@ -853,8 +852,8 @@ CREATE TABLE common_topology_transactions (
     -- (redundant also embedded in instance)
     serial_counter int not null,
     -- validity window, UTC timestamp in microseconds relative to EPOCH
-    -- so `TopologyChangeOpX.Replace` transactions have an effect for valid_from < t <= valid_until
-    -- a `TopologyChangeOpX.Remove` will have valid_from = valid_until
+    -- so `TopologyChangeOp.Replace` transactions have an effect for valid_from < t <= valid_until
+    -- a `TopologyChangeOp.Remove` will have valid_from = valid_until
     valid_from bigint not null,
     valid_until bigint null,
     -- operation

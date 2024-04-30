@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.console
 
-import com.digitalasset.canton.*
 import com.digitalasset.canton.admin.api.client.commands.EnterpriseSequencerAdminCommands.LocatePruningTimestampCommand
 import com.digitalasset.canton.admin.api.client.commands.{
   EnterpriseSequencerAdminCommands,
@@ -20,9 +19,10 @@ import com.digitalasset.canton.console.CommandErrors.NodeNotStarted
 import com.digitalasset.canton.console.commands.*
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.domain.mediator.{
   MediatorNode,
-  MediatorNodeBootstrapX,
+  MediatorNodeBootstrap,
   MediatorNodeConfigCommon,
   RemoteMediatorConfig,
 }
@@ -35,7 +35,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.{
   SequencerClients,
   SequencerPruningStatus,
 }
-import com.digitalasset.canton.domain.sequencing.{SequencerNodeBootstrapX, SequencerNodeX}
+import com.digitalasset.canton.domain.sequencing.{SequencerNode, SequencerNodeBootstrap}
 import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.health.admin.data.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -47,11 +47,7 @@ import com.digitalasset.canton.participant.config.{
   LocalParticipantConfig,
   RemoteParticipantConfig,
 }
-import com.digitalasset.canton.participant.{
-  ParticipantNodeBootstrapX,
-  ParticipantNodeCommon,
-  ParticipantNodeX,
-}
+import com.digitalasset.canton.participant.{ParticipantNode, ParticipantNodeBootstrap}
 import com.digitalasset.canton.sequencer.admin.v30.SequencerPruningAdministrationServiceGrpc
 import com.digitalasset.canton.sequencer.admin.v30.SequencerPruningAdministrationServiceGrpc.SequencerPruningAdministrationServiceStub
 import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnections}
@@ -70,10 +66,13 @@ import scala.util.hashing.MurmurHash3
 
 trait InstanceReference
     extends AdminCommandRunner
+    with HasUniqueIdentifier
     with Helpful
     with NamedLogging
     with FeatureFlagFilter
     with PrettyPrinting {
+
+  @inline final override def uid: UniqueIdentifier = id.uid
 
   val name: String
   protected val instanceType: String
@@ -109,7 +108,7 @@ trait InstanceReference
 
   def maybeId: Option[NodeIdentity]
 
-  def health: HealthAdministrationCommon[Status]
+  def health: HealthAdministration[Status]
 
   def keys: KeyAdministrationGroup
 
@@ -121,8 +120,6 @@ trait InstanceReference
 
   private lazy val trafficControl_ =
     new TrafficControlAdministrationGroup(
-      this,
-      topology,
       this,
       consoleEnvironment,
       loggerFactory,
@@ -508,8 +505,8 @@ abstract class ParticipantReference(
 
   @Help.Summary("Health and diagnostic related commands")
   @Help.Group("Health")
-  override def health: ParticipantHealthAdministrationX =
-    new ParticipantHealthAdministrationX(this, consoleEnvironment, loggerFactory)
+  override def health: ParticipantHealthAdministration =
+    new ParticipantHealthAdministration(this, consoleEnvironment, loggerFactory)
 
   override def parties: ParticipantPartiesAdministrationGroup
 
@@ -662,7 +659,7 @@ class LocalParticipantReference(
     name: String,
 ) extends ParticipantReference(consoleEnvironment, name)
     with LocalInstanceReference
-    with BaseInspection[ParticipantNodeX] {
+    with BaseInspection[ParticipantNode] {
 
   override private[console] val nodes = consoleEnvironment.environment.participants
 
@@ -670,10 +667,10 @@ class LocalParticipantReference(
   def config: LocalParticipantConfig =
     consoleEnvironment.environment.config.participantsByString(name)
 
-  override def runningNode: Option[ParticipantNodeBootstrapX] =
+  override def runningNode: Option[ParticipantNodeBootstrap] =
     consoleEnvironment.environment.participants.getRunning(name)
 
-  override def startingNode: Option[ParticipantNodeBootstrapX] =
+  override def startingNode: Option[ParticipantNodeBootstrap] =
     consoleEnvironment.environment.participants.getStarting(name)
 
   /** secret, not publicly documented way to get the admin token */
@@ -702,7 +699,7 @@ class LocalParticipantReference(
 
   private lazy val repair_ =
     new LocalParticipantRepairAdministration(consoleEnvironment, this, loggerFactory) {
-      override protected def access[T](handler: ParticipantNodeCommon => T): T =
+      override protected def access[T](handler: ParticipantNode => T): T =
         LocalParticipantReference.this.access(handler)
     }
 
@@ -786,23 +783,21 @@ abstract class SequencerNodeReference(
   )
   override def maybeId: Option[SequencerId] = topology.maybeIdHelper(SequencerId(_))
 
-  private lazy val setup_ = new SequencerXSetupGroup(this)
+  private lazy val setup_ = new SequencerSetupGroup(this)
 
   @Help.Summary("Methods used for node initialization")
-  def setup: SequencerXSetupGroup = setup_
+  def setup: SequencerSetupGroup = setup_
 
   @Help.Summary("Health and diagnostic related commands")
   @Help.Group("Health")
   override def health =
-    new HealthAdministrationX[SequencerNodeStatus](
+    new HealthAdministration[SequencerNodeStatus](
       this,
       consoleEnvironment,
       SequencerNodeStatus.fromProtoV30,
     )
 
-  private lazy val sequencerXTrafficControl = new TrafficControlSequencerAdministrationGroup(
-    this,
-    topology,
+  private lazy val sequencerTrafficControl = new TrafficControlSequencerAdministrationGroup(
     this,
     consoleEnvironment,
     loggerFactory,
@@ -811,7 +806,7 @@ abstract class SequencerNodeReference(
   @Help.Summary("Admin traffic control related commands")
   @Help.Group("Traffic")
   override def traffic_control: TrafficControlSequencerAdministrationGroup =
-    sequencerXTrafficControl
+    sequencerTrafficControl
 
   @Help.Summary("Return domain id of the domain")
   def domain_id: DomainId = {
@@ -844,7 +839,6 @@ abstract class SequencerNodeReference(
       ): Unit = {
 
         val domainId = domain_id
-        val staticDomainParameters = domain_parameters.static.get()
 
         val mediators = active ++ observers
 
@@ -867,7 +861,6 @@ abstract class SequencerNodeReference(
         mediators.foreach(
           _.setup.assign(
             domainId,
-            staticDomainParameters,
             SequencerConnections.single(sequencerConnection),
           )
         )
@@ -886,8 +879,6 @@ abstract class SequencerNodeReference(
           additionalActive: Seq[MediatorReference],
           additionalObservers: Seq[MediatorReference] = Nil,
       ): Unit = {
-
-        val staticDomainParameters = domain_parameters.static.get()
         val domainId = domain_id
 
         val currentMediators = topology.mediators
@@ -921,7 +912,6 @@ abstract class SequencerNodeReference(
         newMediators.foreach(
           _.setup.assign(
             domainId,
-            staticDomainParameters,
             SequencerConnections.single(sequencerConnection),
           )
         )
@@ -1194,7 +1184,7 @@ class LocalSequencerNodeReference(
     val name: String,
 ) extends SequencerNodeReference(consoleEnvironment, name)
     with LocalInstanceReference
-    with BaseInspection[SequencerNodeX] {
+    with BaseInspection[SequencerNode] {
 
   override protected[canton] def executionContext: ExecutionContext =
     consoleEnvironment.environment.executionContext
@@ -1207,13 +1197,13 @@ class LocalSequencerNodeReference(
     config.publicApi.toSequencerConnectionConfig.toConnection
       .fold(err => sys.error(s"Sequencer $name has invalid connection config: $err"), identity)
 
-  private[console] val nodes: SequencerNodesX[?] =
+  private[console] val nodes: SequencerNodes[?] =
     consoleEnvironment.environment.sequencers
 
-  override protected[console] def runningNode: Option[SequencerNodeBootstrapX] =
+  override protected[console] def runningNode: Option[SequencerNodeBootstrap] =
     nodes.getRunning(name)
 
-  override protected[console] def startingNode: Option[SequencerNodeBootstrapX] =
+  override protected[console] def startingNode: Option[SequencerNodeBootstrap] =
     nodes.getStarting(name)
 
   protected lazy val publicApiClient: SequencerPublicApiClient = new SequencerPublicApiClient(
@@ -1257,7 +1247,7 @@ abstract class MediatorReference(val consoleEnvironment: ConsoleEnvironment, nam
   override protected val instanceType: String = MediatorReference.InstanceType
   override protected val loggerFactory: NamedLoggerFactory =
     consoleEnvironment.environment.loggerFactory
-      .append(MediatorNodeBootstrapX.LoggerFactoryKeyName, name)
+      .append(MediatorNodeBootstrap.LoggerFactoryKeyName, name)
 
   @Help.Summary(
     "Yields the mediator id of this mediator. " +
@@ -1274,7 +1264,7 @@ abstract class MediatorReference(val consoleEnvironment: ConsoleEnvironment, nam
   @Help.Summary("Health and diagnostic related commands")
   @Help.Group("Health")
   override def health =
-    new HealthAdministrationX[MediatorNodeStatus](
+    new HealthAdministration[MediatorNodeStatus](
       this,
       consoleEnvironment,
       MediatorNodeStatus.fromProtoV30,
@@ -1300,10 +1290,10 @@ abstract class MediatorReference(val consoleEnvironment: ConsoleEnvironment, nam
       case _ => false
     }
 
-  private lazy val setup_ = new MediatorXSetupGroup(this)
+  private lazy val setup_ = new MediatorSetupGroup(this)
 
   @Help.Summary("Methods used to initialize the node")
-  def setup: MediatorXSetupGroup = setup_
+  def setup: MediatorSetupGroup = setup_
 
   private lazy val testing_ = new MediatorTestingGroup(runner, consoleEnvironment, loggerFactory)
 
@@ -1332,12 +1322,12 @@ class LocalMediatorReference(consoleEnvironment: ConsoleEnvironment, val name: S
   override def config: MediatorNodeConfigCommon =
     consoleEnvironment.environment.config.mediatorsByString(name)
 
-  private[console] val nodes: MediatorNodesX[?] = consoleEnvironment.environment.mediators
+  private[console] val nodes: MediatorNodes[?] = consoleEnvironment.environment.mediators
 
-  override protected[console] def runningNode: Option[MediatorNodeBootstrapX] =
+  override protected[console] def runningNode: Option[MediatorNodeBootstrap] =
     nodes.getRunning(name)
 
-  override protected[console] def startingNode: Option[MediatorNodeBootstrapX] =
+  override protected[console] def startingNode: Option[MediatorNodeBootstrap] =
     nodes.getStarting(name)
 }
 

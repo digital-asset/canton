@@ -18,18 +18,11 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminateProcessingTicker
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
-import com.digitalasset.canton.participant.traffic.{
-  TrafficStateController,
-  TrafficStateTopUpSubscription,
-}
+import com.digitalasset.canton.participant.traffic.TrafficStateController
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.topology.client.*
-import com.digitalasset.canton.topology.processing.{
-  EffectiveTime,
-  TopologyTransactionProcessor,
-  TopologyTransactionProcessorCommon,
-}
+import com.digitalasset.canton.topology.processing.{EffectiveTime, TopologyTransactionProcessor}
 import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -45,7 +38,7 @@ class TopologyComponentFactory(
     futureSupervisor: FutureSupervisor,
     caching: CachingConfigs,
     batching: BatchingConfig,
-    topologyXConfig: TopologyConfig,
+    topologyConfig: TopologyConfig,
     topologyStore: TopologyStore[DomainStore],
     loggerFactory: NamedLoggerFactory,
 ) {
@@ -56,11 +49,10 @@ class TopologyComponentFactory(
       topologyClient: DomainTopologyClientWithInit,
       trafficStateController: TrafficStateController,
       recordOrderPublisher: RecordOrderPublisher,
-      useNewTrafficControl: Boolean,
-  ): TopologyTransactionProcessorCommon.Factory = new TopologyTransactionProcessorCommon.Factory {
+  ): TopologyTransactionProcessor.Factory = new TopologyTransactionProcessor.Factory {
     override def create(
         acsCommitmentScheduleEffectiveTime: Traced[EffectiveTime] => Unit
-    )(implicit executionContext: ExecutionContext): TopologyTransactionProcessorCommon = {
+    )(implicit executionContext: ExecutionContext): TopologyTransactionProcessor = {
 
       val terminateTopologyProcessing = new ParticipantTopologyTerminateProcessingTicker(
         recordOrderPublisher,
@@ -73,19 +65,15 @@ class TopologyComponentFactory(
         topologyStore,
         acsCommitmentScheduleEffectiveTime,
         terminateTopologyProcessing,
-        topologyXConfig.enableTopologyTransactionValidation,
+        topologyConfig.enableTopologyTransactionValidation,
         futureSupervisor,
         timeouts,
         loggerFactory,
       )
       // subscribe party notifier to topology processor
       processor.subscribe(partyNotifier.attachToTopologyProcessor())
-      processor.subscribe(missingKeysAlerter.attachToTopologyProcessorX())
+      processor.subscribe(missingKeysAlerter.attachToTopologyProcessor())
       processor.subscribe(topologyClient)
-      if (!useNewTrafficControl)
-        processor.subscribe(
-          new TrafficStateTopUpSubscription(trafficStateController, loggerFactory)
-        )
       processor
     }
   }

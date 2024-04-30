@@ -4,14 +4,13 @@
 package com.digitalasset.canton.topology.transaction
 
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt, PositiveLong}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{GeneratorsCrypto, PublicKey, Signature, SigningPublicKey}
 import com.digitalasset.canton.protocol.GeneratorsProtocol
 import com.digitalasset.canton.topology.{
   DomainId,
   GeneratorsTopology,
   MediatorId,
-  Member,
   Namespace,
   SequencerId,
 }
@@ -63,7 +62,7 @@ final class GeneratorsTransaction(
       } yield DecentralizedNamespaceDefinition.create(namespace, threshold, owners).value
     )
 
-  implicit val mediatorDomainStateXArb: Arbitrary[MediatorDomainState] = Arbitrary(
+  implicit val mediatorDomainStateArb: Arbitrary[MediatorDomainState] = Arbitrary(
     for {
       domainId <- Arbitrary.arbitrary[DomainId]
       group <- Arbitrary.arbitrary[NonNegativeInt]
@@ -74,7 +73,7 @@ final class GeneratorsTransaction(
     } yield MediatorDomainState.create(domainId, group, threshold, active, observers).value
   )
 
-  implicit val namespaceDelegationXArb: Arbitrary[NamespaceDelegation] = Arbitrary(
+  implicit val namespaceDelegationArb: Arbitrary[NamespaceDelegation] = Arbitrary(
     for {
       namespace <- Arbitrary.arbitrary[Namespace]
       target <- Arbitrary.arbitrary[SigningPublicKey]
@@ -83,14 +82,14 @@ final class GeneratorsTransaction(
     } yield NamespaceDelegation.create(namespace, target, isRootDelegation).value
   )
 
-  implicit val purgeTopologyTransactionXArb: Arbitrary[PurgeTopologyTransaction] = Arbitrary(
+  implicit val purgeTopologyTransactionArb: Arbitrary[PurgeTopologyTransaction] = Arbitrary(
     for {
       domain <- Arbitrary.arbitrary[DomainId]
       mappings <- Arbitrary.arbitrary[NonEmpty[Seq[TopologyMapping]]]
     } yield PurgeTopologyTransaction.create(domain, mappings).value
   )
 
-  implicit val sequencerDomainStateXArb: Arbitrary[SequencerDomainState] = Arbitrary(
+  implicit val sequencerDomainStateArb: Arbitrary[SequencerDomainState] = Arbitrary(
     for {
       domain <- Arbitrary.arbitrary[DomainId]
       active <- Arbitrary.arbitrary[NonEmpty[Seq[SequencerId]]]
@@ -98,14 +97,6 @@ final class GeneratorsTransaction(
       threshold <- Gen.choose(1, active.size).map(PositiveInt.tryCreate)
       observers <- Arbitrary.arbitrary[NonEmpty[Seq[SequencerId]]]
     } yield SequencerDomainState.create(domain, threshold, active, observers).value
-  )
-
-  implicit val trafficControlStateXArb: Arbitrary[TrafficControlState] = Arbitrary(
-    for {
-      domain <- Arbitrary.arbitrary[DomainId]
-      member <- Arbitrary.arbitrary[Member]
-      totalExtraTrafficLimit <- Arbitrary.arbitrary[PositiveLong]
-    } yield TrafficControlState.create(domain, member, totalExtraTrafficLimit).value
   )
 
   implicit val topologyTransactionArb

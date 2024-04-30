@@ -3,13 +3,14 @@
 
 package com.digitalasset.canton.topology
 
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 
 import scala.concurrent.blocking
 
-/** The [[DomainOutboxQueue]] connects a [[DomainTopologyManager]] and a `DomainOutboxX`.
+/** The [[DomainOutboxQueue]] connects a [[DomainTopologyManager]] and a `DomainOutbox`.
   * The topology manager enqueues transactions that the domain outbox will pick up and send
   * to the domain to be sequenced and distributed to the nodes in the domain.
   *

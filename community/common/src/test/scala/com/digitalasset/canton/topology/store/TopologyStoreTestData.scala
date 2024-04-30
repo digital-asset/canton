@@ -47,59 +47,33 @@ class TopologyStoreTestData(
   val Seq(ts1, ts2, ts3, ts4, ts5, ts6, ts7, ts8, ts9, ts10) =
     (1L to 10L).map(CantonTimestamp.Epoch.plusSeconds)
 
-  val factory: TestingOwnerWithKeysX =
-    new TestingOwnerWithKeysX(
+  val factory: TestingOwnerWithKeys =
+    new TestingOwnerWithKeys(
       SequencerId(
-        UniqueIdentifier(
-          Identifier.tryCreate("da"),
-          Namespace(Fingerprint.tryCreate("sequencer")),
-        )
+        UniqueIdentifier.tryCreate("da", "sequencer")
       ),
       loggerFactory,
       executionContext,
     )
 
   val daDomainNamespace = Namespace(Fingerprint.tryCreate("default"))
-  val daDomainUid = UniqueIdentifier(
-    Identifier.tryCreate("da"),
+  val daDomainUid = UniqueIdentifier.tryCreate(
+    "da",
     daDomainNamespace,
   )
   val Seq(participantId1, participantId2) = Seq("participant1", "participant2").map(p =>
-    ParticipantId(
-      UniqueIdentifier(
-        Identifier.tryCreate(p),
-        Namespace(Fingerprint.tryCreate("participants")),
-      )
-    )
+    ParticipantId(UniqueIdentifier.tryCreate(p, "participants"))
   )
   val domainId1 = DomainId(
-    UniqueIdentifier(
-      Identifier.tryCreate("domain1"),
-      Namespace(Fingerprint.tryCreate("domains")),
-    )
+    UniqueIdentifier.tryCreate("domain1", "domains")
   )
-  val mediatorId1 = MediatorId(
-    Identifier.tryCreate("mediator1"),
-    Namespace(Fingerprint.tryCreate("mediators")),
-  )
-  val mediatorId2 = MediatorId(
-    Identifier.tryCreate("mediator2"),
-    Namespace(Fingerprint.tryCreate("mediators")),
-  )
-  val sequencerId1 = SequencerId(
-    Identifier.tryCreate("sequencer1"),
-    Namespace(Fingerprint.tryCreate("sequencers")),
-  )
-  val sequencerId2 = SequencerId(
-    Identifier.tryCreate("sequencer2"),
-    Namespace(Fingerprint.tryCreate("sequencers")),
-  )
+  val mediatorId1 = MediatorId(UniqueIdentifier.tryCreate("mediator1", "mediators"))
+  val mediatorId2 = MediatorId(UniqueIdentifier.tryCreate("mediator2", "mediators"))
+  val sequencerId1 = SequencerId(UniqueIdentifier.tryCreate("sequencer1", "sequencers"))
+  val sequencerId2 = SequencerId(UniqueIdentifier.tryCreate("sequencer2", "sequencers"))
   val signingKeys = NonEmpty(Seq, factory.SigningKeys.key1)
   val owners = NonEmpty(Set, Namespace(Fingerprint.tryCreate("owner1")))
-  val fredOfCanton = PartyId(
-    Identifier.tryCreate("fred"),
-    Namespace(Fingerprint.tryCreate("canton")),
-  )
+  val fredOfCanton = PartyId(UniqueIdentifier.tryCreate("fred", "canton"))
 
   val tx1_NSD_Proposal = makeSignedTx(
     NamespaceDelegation

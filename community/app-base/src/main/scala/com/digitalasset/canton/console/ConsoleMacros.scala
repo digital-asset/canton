@@ -32,6 +32,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.ConsoleEnvironment.Implicits.*
 import com.digitalasset.canton.crypto.{CryptoPureApi, Salt}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.admin.data.{
   MediatorNodeStatus,
   NodeStatus,
@@ -151,7 +152,6 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
 
     @nowarn("cat=lint-byname-implicit") // https://github.com/scala/bug/issues/12072
     private object GenerateDamlScriptParticipantsConf {
-      import ConsoleEnvironment.Implicits.*
 
       private val filename = "participant-config.json"
 
@@ -197,7 +197,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
       def apply(
           file: Option[String] = None,
           useParticipantAlias: Boolean = true,
-          defaultParticipantX: Option[ParticipantReference] = None,
+          defaultParticipant: Option[ParticipantReference] = None,
       )(implicit env: ConsoleEnvironment): JFile = {
 
         def toLedgerApi(participantConfig: BaseParticipantConfig) =
@@ -215,7 +215,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         val uidToAlias = allParticipants.map(p => (p.id, p.name)).toMap
 
         val default_participant =
-          defaultParticipantX.map(participantReference => toLedgerApi(participantReference.config))
+          defaultParticipant.map(participantReference => toLedgerApi(participantReference.config))
 
         val participantJson = Participants(
           default_participant,
@@ -237,18 +237,18 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         |It takes three arguments:
         |- file (default to "participant-config.json")
         |- useParticipantAlias (default to true): participant aliases are used instead of UIDs
-        |- defaultParticipantX (default to None): adds a default participant if provided
+        |- defaultParticipant (default to None): adds a default participant if provided
         |"""
     )
     def generate_daml_script_participants_conf(
         file: Option[String] = None,
         useParticipantAlias: Boolean = true,
-        defaultParticipantX: Option[ParticipantReference] = None,
+        defaultParticipant: Option[ParticipantReference] = None,
     )(implicit env: ConsoleEnvironment): JFile =
       GenerateDamlScriptParticipantsConf(
         file,
         useParticipantAlias,
-        defaultParticipantX,
+        defaultParticipant,
       )
 
     // TODO(i7387): add check that flag is set
@@ -668,7 +668,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
           )
         )
       val expectedDNS = DecentralizedNamespaceDefinition.computeNamespace(
-        owners.map(_.id.member.uid.namespace).toSet
+        owners.map(_.namespace).toSet
       )
       val proposedOrExisting = ownersNE
         .map { owner =>
@@ -683,7 +683,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
 
           existingDnsO.getOrElse(
             owner.topology.decentralized_namespaces.propose(
-              owners.map(_.id.member.uid.namespace).toSet,
+              owners.map(_.namespace).toSet,
               PositiveInt.tryCreate(1.max(owners.size - 1)),
               store = store,
             )
@@ -719,7 +719,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
     ): Either[String, Option[Namespace]] = {
       val expectedNamespace =
         DecentralizedNamespaceDefinition.computeNamespace(
-          owners.map(_.id.member.uid.namespace).toSet
+          owners.map(_.namespace).toSet
         )
       val recordedNamespaces =
         owners.map(
@@ -886,7 +886,6 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         .foreach(
           _.setup.assign(
             domainId,
-            staticDomainParameters,
             SequencerConnections.tryMany(
               sequencers
                 .map(s => s.sequencerConnection.withAlias(SequencerAlias.tryCreate(s.name))),
