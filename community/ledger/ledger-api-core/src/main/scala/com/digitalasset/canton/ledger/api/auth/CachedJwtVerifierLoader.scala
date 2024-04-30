@@ -52,15 +52,13 @@ class CachedJwtVerifierLoader(
     CacheKey,
     JwtVerifier,
   ] =
-    new CaffeineCache.AsyncLoadingCaffeineCache(
+    CaffeineCache(
       caffeine.Caffeine
         .newBuilder()
         .expireAfterWrite(cacheExpirationTime, cacheExpirationUnit)
-        .maximumSize(cacheMaxSize)
-        .buildAsync(
-          new FutureAsyncCacheLoader[CacheKey, JwtVerifier](key => getVerifier(key))
-        ),
+        .maximumSize(cacheMaxSize),
       metrics.identityProviderConfigStore.verifierCache,
+      new FutureAsyncCacheLoader[CacheKey, JwtVerifier](key => getVerifier(key)),
     )
 
   override def loadJwtVerifier(jwksUrl: JwksUrl, keyId: Option[String]): Future[JwtVerifier] =

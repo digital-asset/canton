@@ -8,7 +8,6 @@ import cats.syntax.bifunctor.*
 import cats.syntax.flatMap.*
 import com.digitalasset.canton.caching.CaffeineCache
 import com.digitalasset.canton.caching.CaffeineCache.FutureAsyncCacheLoader
-import com.digitalasset.canton.checked
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
@@ -21,6 +20,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
 import com.github.benmanes.caffeine.cache as caffeine
 
@@ -68,22 +68,26 @@ class TrafficBalanceManager(
   private val trafficBalances
       : CaffeineCache.AsyncLoadingCaffeineCache[Member, BalancesForMember] = {
     import TraceContext.Implicits.Empty.emptyTraceContext
-    new CaffeineCache.AsyncLoadingCaffeineCache(
+    CaffeineCache.apply(
       caffeine.Caffeine
         .newBuilder()
         // Automatically cleans up inactive members from the cache
         .expireAfterAccess(trafficConfig.pruningRetentionWindow.asJava)
-        .maximumSize(trafficConfig.maximumTrafficBalanceCacheSize.value.toLong)
-        .buildAsync(
-          new FutureAsyncCacheLoader[Member, BalancesForMember](
-            store
-              .lookup(_)
-              .map(balances =>
-                BalancesForMember(SortedMap(balances.map(b => b.sequencingTimestamp -> b)*))
-              )
-          )
-        ),
+        .maximumSize(trafficConfig.maximumTrafficBalanceCacheSize.value.toLong),
       sequencerMetrics.trafficControl.balanceCache,
+      new FutureAsyncCacheLoader[Member, BalancesForMember](member =>
+        store
+          .lookup(member)
+          .map { balances =>
+            logger.debug(
+              s"Cache miss on traffic balances for $member, fetched from store: $balances"
+            )
+            balances
+          }
+          .map(balances =>
+            BalancesForMember(SortedMap(balances.map(b => b.sequencingTimestamp -> b)*))
+          )
+      ),
     )
   }
 
@@ -142,12 +146,16 @@ class TrafficBalanceManager(
                       if existingBalances.values.maxOption.forall(_.serial < balance.serial) =>
                     logger.trace(s"Updating with new balance: $balance")
                     balanceForMember.copy(
-                      trafficBalances = existingBalances
-                        // Limit how many balances we keep in memory
-                        // trafficBalanceCacheSizePerMember is a PositiveInt so this will be 0 at the lowest
-                        .takeRight(
-                          checked(trafficConfig.trafficBalanceCacheSizePerMember.value - 1)
-                        ) + (balance.sequencingTimestamp -> balance)
+                      trafficBalances =
+                        // Keep balances above the "eligible for pruning threshold" when it's set
+                        // DB pruning is only called later in this function, so we're sure that
+                        // we'll do this cache trimming here before DB pruning is done and eligibleForPruningBefore is set to None again
+                        existingBalances.dropWhile(
+                          _._1 < balanceForMember.eligibleForPruningBefore
+                            .get()
+                            .getOrElse(CantonTimestamp.MinValue)
+                        ) +
+                          (balance.sequencingTimestamp -> balance)
                     )
                   case balanceForMember @ BalancesForMember(existingBalances, _) =>
                     logger.debug(
@@ -234,45 +242,29 @@ class TrafficBalanceManager(
     * If the balance cannot be found in the DB despite having at least one balance persisted,
     * return an error, as it means the balance at that timestamp must have been pruned.
     */
-  private def getBalanceAt(member: Member, timestamp: CantonTimestamp)(implicit
-      traceContext: TraceContext
+  private def getBalanceAt(
+      member: Member,
+      timestamp: CantonTimestamp,
   ): EitherT[FutureUnlessShutdown, TrafficBalanceManagerError, Option[TrafficBalance]] = {
     EitherT
       .liftF[Future, TrafficBalanceManagerError, BalancesForMember](trafficBalances.get(member))
-      .flatMap {
-        // We've got *some* balance in the cache
-        case BalancesForMember(balances, _) =>
-          // See if we have the requested timestamp
-          balanceValidAt(balances, timestamp) match {
-            case Some(value) =>
-              EitherT.rightT[Future, TrafficBalanceManagerError](Option(value))
-            // If not, load balances from the DB
-            // Note that the caffeine cache would have loaded the balances if the cache was empty for that member.
-            // But because we don't keep all balances in the cache, if the cacne is not empty, we won't reload from the DB,
-            // and we might not have all the values in the cache. So to be sure, we explicitly get all balances from the DB.
-            // If this happen too frequently, one should consider increasing the trafficBalanceCacheSizePerMember config value.
-            case _ =>
-              sequencerMetrics.trafficControl.balanceCacheMissesForTimestamp.inc()
-              EitherT
-                .liftF[Future, TrafficBalanceManagerError, Seq[TrafficBalance]](
-                  store.lookup(member)
-                )
-                .map(balanceValidAt(_, timestamp))
-                .flatMap {
-                  // If we can't find the balance in the DB, and the timestamp we're asking is older than safeToPruneBeforeExclusive,
-                  // return an error, because the balance may have been pruned.
-                  case None if safeToPruneBeforeExclusive.get().exists(timestamp < _) =>
-                    EitherT
-                      .leftT[Future, Option[TrafficBalance]](
-                        TrafficBalanceAlreadyPruned(member, timestamp)
-                      )
-                      .leftWiden[TrafficBalanceManagerError]
-                  // Otherwise return the balance as is
-                  case balance =>
-                    EitherT.rightT[Future, TrafficBalanceManagerError](balance)
-
-                }
-          }
+      .flatMap { case BalancesForMember(balances, _) =>
+        // See if we have the requested timestamp
+        balanceValidAt(balances, timestamp) match {
+          case Some(value) =>
+            EitherT.rightT[Future, TrafficBalanceManagerError](Option(value))
+          // If we don't, and the timestamp we're asking is older than safeToPruneBeforeExclusive,
+          // return an error, because the balance may have been pruned.
+          case None if safeToPruneBeforeExclusive.get().exists(timestamp < _) =>
+            EitherT
+              .leftT[Future, Option[TrafficBalance]](
+                TrafficBalanceAlreadyPruned(member, timestamp)
+              )
+              .leftWiden[TrafficBalanceManagerError]
+          // Otherwise, return an empty balance, which is a valid result if the member has never topped up
+          case _ =>
+            EitherT.rightT[Future, TrafficBalanceManagerError](Option.empty[TrafficBalance])
+        }
       }
       .mapK(FutureUnlessShutdown.outcomeK)
   }
@@ -347,6 +339,7 @@ class TrafficBalanceManager(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TrafficBalanceManagerError, Option[TrafficBalance]] = {
+    val timer = sequencerMetrics.trafficControl.balanceRetrievalTime.startAsync()
     val lastUpdate = lastUpdateAt.get()
     val result = (lastUpdate, lastSeenO) match {
       // Desired timestamp is before or equal the timestamp just after last update, so the balance is correct and we can provide it immediately
@@ -369,14 +362,18 @@ class TrafficBalanceManager(
         getBalanceAt(member, desired)
       case (_, Some(lastSeen)) =>
         val promiseO = makePromiseForBalance(member, desired, lastSeen)
-        promiseO.map(promise => EitherT(promise.futureUS)).getOrElse(getBalanceAt(member, desired))
+        promiseO
+          .map(promise => EitherT(promise.futureUS))
+          .getOrElse(getBalanceAt(member, desired))
     }
-    result.flatTap { balance =>
-      logger.trace(
-        s"Providing balance for $member at $desired with lastSeen = $lastSeenO. Last update: $lastUpdate. Balance is $balance"
-      )
-      EitherT.pure(())
-    }
+    result
+      .thereafter(_ => timer.stop())
+      .flatTap { balance =>
+        logger.trace(
+          s"Providing balance for $member at $desired with lastSeen = $lastSeenO. Last update: $lastUpdate. Balance is $balance"
+        )
+        EitherT.pure(())
+      }
   }
 
   private[traffic] def makePromiseForBalance(

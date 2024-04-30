@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.metrics
 
 import com.daml.metrics.api.MetricDoc.MetricQualification.{Debug, Traffic}
-import com.daml.metrics.api.MetricHandle.{Counter, Gauge, Meter}
+import com.daml.metrics.api.MetricHandle.{Counter, Gauge, Histogram, Meter, Timer}
 import com.daml.metrics.api.{MetricDoc, MetricName, MetricsContext}
 import com.daml.metrics.grpc.{DamlGrpcServerMetrics, GrpcServerMetrics}
 import com.daml.metrics.{CacheMetrics, HealthMetrics}
@@ -56,7 +56,8 @@ class SequencerMetrics(
         |the contents of these fields do not contribute to this metric.""",
     qualification = Debug,
   )
-  val bytesProcessed: Meter = openTelemetryMetricsFactory.meter(prefix :+ "processed-bytes")
+  val bytesProcessed: Meter =
+    openTelemetryMetricsFactory.meter(prefix :+ s"processed-${Histogram.Bytes}")
 
   @MetricDoc.Tag(
     summary = "Number of time requests received by the sequencer",
@@ -91,6 +92,16 @@ class SequencerMetrics(
       new CacheMetrics(prefix :+ "balance-cache", openTelemetryMetricsFactory)
 
     @MetricDoc.Tag(
+      summary =
+        "Time needed to retrieve a traffic balance from the balance manager for a given timestamp.",
+      description =
+        """Measures how long it takes to retrieve a traffic balance. Latency can increase if a balance update is in flight.""",
+      qualification = Traffic,
+    )
+    val balanceRetrievalTime: Timer = openTelemetryMetricsFactory
+      .timer(prefix :+ "balance-retrieval-time")
+
+    @MetricDoc.Tag(
       summary = "Raw size of an event received in the sequencer.",
       description =
         """This the raw payload size of an event, on the write path. Final event cost calculation.""",
@@ -120,16 +131,6 @@ class SequencerMetrics(
     )
     val balanceUpdateProcessed: Counter =
       openTelemetryMetricsFactory.counter(prefix :+ "balance-update")
-
-    @MetricDoc.Tag(
-      summary = "Counts cache misses when trying to retrieve a balance for a given timestamp.",
-      description = """The per member cache only keeps in memory a subset of all the non-pruned balance updates persisted in the database.
-          |If the cache contains *some* balances for a member but not the one requested, a DB call will be made to try to retrieve it.
-          |When that happens, this metric is incremented. If this occurs too frequently, consider increasing the config value of trafficBalanceCacheSizePerMember.""",
-      qualification = Traffic,
-    )
-    val balanceCacheMissesForTimestamp: Counter =
-      openTelemetryMetricsFactory.counter(prefix :+ "balance-cache-miss-for-timestamp")
   }
 }
 
