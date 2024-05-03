@@ -9,6 +9,7 @@ import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.KeyPurpose
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.DynamicDomainParametersWithValidity
 import com.digitalasset.canton.topology.*
@@ -92,7 +93,7 @@ class StoreBasedTopologySnapshot(
             ).getOrElse(throw new IllegalStateException("Unable to locate domain parameters state"))
               .discard
 
-            // TODO(#14054) Once the non-proto DynamicDomainParametersX is available, use it
+            // TODO(#14054) Once the non-proto DynamicDomainParameters is available, use it
             //   _.parameters.requiredPackages
             Seq.empty[PackageId]
           }
@@ -204,7 +205,7 @@ class StoreBasedTopologySnapshot(
             seq.sortBy(_.validFrom),
           ).getOrElse(
             throw new IllegalStateException(
-              "Group-by would not have produced empty PartyToParticipantX seq"
+              "Group-by would not have produced empty PartyToParticipant seq"
             )
           )
         }
@@ -348,40 +349,6 @@ class StoreBasedTopologySnapshot(
       SequencerGroup(sds.active, sds.observers, sds.threshold)
     }
   }
-
-  def trafficControlStatus(
-      members: Seq[Member]
-  )(implicit traceContext: TraceContext): Future[Map[Member, Option[MemberTrafficControlState]]] =
-    findTransactions(
-      asOfInclusive = false,
-      types = Seq(TopologyMapping.Code.TrafficControlState),
-      filterUid = Some(members.map(_.uid)),
-      filterNamespace = None,
-    ).map { txs =>
-      val membersWithState = txs
-        .collectOfMapping[TrafficControlState]
-        .result
-        .groupBy(_.mapping.member)
-        .flatMap { case (member, mappings) =>
-          collectLatestTransaction(
-            TopologyMapping.Code.TrafficControlState,
-            mappings.sortBy(_.validFrom),
-          ).map { tx =>
-            val mapping = tx.mapping
-            Some(
-              MemberTrafficControlState(
-                totalExtraTrafficLimit = mapping.totalExtraTrafficLimit,
-                tx.serial,
-                tx.validFrom.value,
-              )
-            )
-          }.map(member -> _)
-        }
-
-      val membersWithoutState = members.toSet.diff(membersWithState.keySet).map(_ -> None).toMap
-
-      membersWithState ++ membersWithoutState
-    }
 
   /** Returns a list of all known parties on this domain */
   override def inspectKnownParties(

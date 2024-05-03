@@ -4,10 +4,12 @@
 package com.digitalasset.canton.topology.transaction
 
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.RequireTypes.{PositiveInt, PositiveLong}
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, OnboardingRestriction}
+import com.digitalasset.canton.topology.DefaultTestIdentities.{mediatorId, sequencerId}
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
+import com.digitalasset.canton.topology.store.TopologyTransactionRejection.InvalidTopologyMapping
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransaction,
@@ -21,11 +23,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Submission,
 }
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
-import com.digitalasset.canton.topology.{
-  DefaultTestIdentities,
-  ParticipantId,
-  TestingOwnerWithKeysX,
-}
+import com.digitalasset.canton.topology.{DefaultTestIdentities, ParticipantId, TestingOwnerWithKeys}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, ProtocolVersionChecksAnyWordSpec}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -37,8 +35,8 @@ class ValidatingTopologyMappingChecksTest
     with HasExecutionContext
     with ProtocolVersionChecksAnyWordSpec {
 
-  private lazy val factory = new TestingOwnerWithKeysX(
-    DefaultTestIdentities.mediatorIdX,
+  private lazy val factory = new TestingOwnerWithKeys(
+    DefaultTestIdentities.mediatorId,
     loggerFactory,
     initEc = parallelExecutionContext,
   )
@@ -49,16 +47,23 @@ class ValidatingTopologyMappingChecksTest
     (check, store)
   }
 
-  "TopologyMappingXChecks" when {
-    import DefaultTestIdentities.{participant1, participant2, participant3, party1, domainId}
+  "TopologyMappingChecks" when {
+    import DefaultTestIdentities.{domainId, participant1, participant2, participant3, party1}
     import factory.TestingTransactions.*
+
+    def checkTransaction(
+        checks: TopologyMappingChecks,
+        toValidate: GenericSignedTopologyTransaction,
+        inStore: Option[GenericSignedTopologyTransaction] = None,
+    ): Either[TopologyTransactionRejection, Unit] =
+      checks.checkTransaction(EffectiveTime.MaxValue, toValidate, inStore).value.futureValue
 
     implicit def toHostingParticipant(
         participantToPermission: (ParticipantId, ParticipantPermission)
     ): HostingParticipant =
       HostingParticipant(participantToPermission._1, participantToPermission._2)
 
-    "validating PartyToParticipantX" should {
+    "validating PartyToParticipant" should {
 
       "reject an invalid threshold" in {
         val (checks, _) = mk()
@@ -80,11 +85,9 @@ class ValidatingTopologyMappingChecksTest
               groupAddressing = false,
             )
           )
-          val result = checks.checkTransaction(EffectiveTime.MaxValue, ptp, None)
-          result.value.futureValue should matchPattern {
-            case Left(
-                  TopologyTransactionRejection.ThresholdTooHigh(`threshold`.value, _)
-                ) =>
+
+          checkTransaction(checks, ptp) should matchPattern {
+            case Left(TopologyTransactionRejection.ThresholdTooHigh(`threshold`.value, _)) =>
           }
         }
       }
@@ -105,8 +108,7 @@ class ValidatingTopologyMappingChecksTest
               groupAddressing = false,
             )
           )
-          val result = checks.checkTransaction(EffectiveTime.MaxValue, ptp, None)
-          result.value.futureValue shouldBe Left(
+          checkTransaction(checks, ptp) shouldBe Left(
             TopologyTransactionRejection.UnknownMembers(Seq(participant1))
           )
         }
@@ -135,8 +137,7 @@ class ValidatingTopologyMappingChecksTest
               groupAddressing = false,
             )
           )
-          val result = checks.checkTransaction(EffectiveTime.MaxValue, ptp, None)
-          result.value.futureValue shouldBe Left(
+          checkTransaction(checks, ptp) shouldBe Left(
             TopologyTransactionRejection.InsufficientKeys(Seq(participant))
           )
         }
@@ -168,14 +169,13 @@ class ValidatingTopologyMappingChecksTest
               groupAddressing = false,
             )
           )
-          val result = checks.checkTransaction(EffectiveTime.MaxValue, ptp, None)
-          result.value.futureValue shouldBe Right(())
+          checkTransaction(checks, ptp) shouldBe Right(())
         }
       }
 
     }
 
-    "validating DomainTrustCertificateX" should {
+    "validating DomainTrustCertificate" should {
       "reject a removal when the participant still hosts a party" in {
         val (checks, store) = mk()
         val ptp = factory.mkAdd(
@@ -196,8 +196,7 @@ class ValidatingTopologyMappingChecksTest
         val dtc =
           factory.mkRemove(DomainTrustCertificate(participant1, domainId, false, Seq.empty))
 
-        val result = checks.checkTransaction(EffectiveTime.MaxValue, dtc, Some(prior))
-        result.value.futureValue shouldBe Left(
+        checkTransaction(checks, dtc, Some(prior)) shouldBe Left(
           TopologyTransactionRejection.ParticipantStillHostsParties(participant1, Seq(party1))
         )
 
@@ -220,8 +219,7 @@ class ValidatingTopologyMappingChecksTest
             val dtc =
               factory.mkAdd(DomainTrustCertificate(participant1, domainId, false, Seq.empty))
 
-            val result = checks.checkTransaction(EffectiveTime.MaxValue, dtc, None)
-            result.value.futureValue shouldBe Left(
+            checkTransaction(checks, dtc) shouldBe Left(
               TopologyTransactionRejection.OnboardingRestrictionInPlace(
                 participant1,
                 restriction,
@@ -255,11 +253,11 @@ class ValidatingTopologyMappingChecksTest
           ),
         )
 
-        val dtc =
-          factory.mkAdd(DomainTrustCertificate(participant2, domainId, false, Seq.empty))
-
-        val result1 = checks.checkTransaction(EffectiveTime.MaxValue, dtc, None)
-        result1.value.futureValue shouldBe Left(
+        // participant2 does not have permission from the domain to join
+        checkTransaction(
+          checks,
+          factory.mkAdd(DomainTrustCertificate(participant2, domainId, false, Seq.empty)),
+        ) shouldBe Left(
           TopologyTransactionRejection.OnboardingRestrictionInPlace(
             participant2,
             OnboardingRestriction.RestrictedOpen,
@@ -267,73 +265,71 @@ class ValidatingTopologyMappingChecksTest
           )
         )
 
-        val result2 = checks.checkTransaction(
-          EffectiveTime.MaxValue,
+        // participant1 has been permissioned by the domain
+        checkTransaction(
+          checks,
           factory.mkAdd(DomainTrustCertificate(participant1, domainId, false, Seq.empty)),
           None,
-        )
-        result2.value.futureValue shouldBe Right(())
-
+        ) shouldBe Right(())
       }
-
     }
 
-    "validating TrafficControlStateX" should {
-      def trafficControlState(limit: Int): TrafficControlState =
-        TrafficControlState
-          .create(domainId, participant1, PositiveLong.tryCreate(limit.toLong))
-          .getOrElse(sys.error("Error creating TrafficControlStateX"))
-
-      val limit5 = factory.mkAdd(trafficControlState(5))
-      val limit10 = factory.mkAdd(trafficControlState(10))
-      val removal10 = factory.mkRemove(trafficControlState(10))
-
-      "reject non monotonically increasing extra traffict limits" in {
-        val (checks, _) = mk()
-
-        val result =
-          checks.checkTransaction(
-            EffectiveTime.MaxValue,
-            toValidate = limit5,
-            inStore = Some(limit10),
-          )
-        result.value.futureValue shouldBe
-          Left(
-            TopologyTransactionRejection.ExtraTrafficLimitTooLow(
-              participant1,
-              PositiveLong.tryCreate(5),
-              PositiveLong.tryCreate(10),
-            )
-          )
-
-      }
-
+    "validating OwnerToKeyMapping" should {
       "report no errors for valid mappings" in {
         val (checks, _) = mk()
+        val okm_sequencer = factory.mkAddMultiKey(
+          OwnerToKeyMapping(sequencerId, None, NonEmpty(Seq, factory.SigningKeys.key1)),
+          NonEmpty(Set, factory.SigningKeys.key1),
+        )
+        val okm_mediator = factory.mkAddMultiKey(
+          OwnerToKeyMapping(mediatorId, None, NonEmpty(Seq, factory.SigningKeys.key1)),
+          NonEmpty(Set, factory.SigningKeys.key1),
+        )
+        val okm_participant = factory.mkAddMultiKey(
+          OwnerToKeyMapping(
+            participant1,
+            None,
+            NonEmpty(Seq, factory.EncryptionKeys.key1, factory.SigningKeys.key1),
+          ),
+          NonEmpty(Set, factory.SigningKeys.key1),
+        )
 
-        def runSuccessfulCheck(
-            toValidate: SignedTopologyTransaction[TopologyChangeOp, TrafficControlState],
-            inStore: Option[SignedTopologyTransaction[TopologyChangeOp, TrafficControlState]],
-        ) =
-          checks
-            .checkTransaction(EffectiveTime.MaxValue, toValidate, inStore)
-            .value
-            .futureValue shouldBe Right(())
+        checkTransaction(checks, okm_sequencer) shouldBe Right(())
+        checkTransaction(checks, okm_mediator) shouldBe Right(())
+        checkTransaction(checks, okm_participant) shouldBe Right(())
+      }
+      "reject minimum key violations" in {
+        val (checks, _) = mk()
+        val okm_sequencerNoSigningKey = factory.mkAddMultiKey(
+          OwnerToKeyMapping(sequencerId, None, NonEmpty(Seq, factory.EncryptionKeys.key1)),
+          NonEmpty(Set, factory.SigningKeys.key1),
+        )
+        val okm_mediatorNoSigningKey = factory.mkAddMultiKey(
+          OwnerToKeyMapping(mediatorId, None, NonEmpty(Seq, factory.EncryptionKeys.key1)),
+          NonEmpty(Set, factory.SigningKeys.key1),
+        )
+        val okm_participantNoSigningKey = factory.mkAddMultiKey(
+          OwnerToKeyMapping(participant1, None, NonEmpty(Seq, factory.EncryptionKeys.key1)),
+          NonEmpty(Set, factory.SigningKeys.key1),
+        )
+        val okm_participantNoEncryptionKey = factory.mkAddMultiKey(
+          OwnerToKeyMapping(participant1, None, NonEmpty(Seq, factory.SigningKeys.key1)),
+          NonEmpty(Set, factory.SigningKeys.key1),
+        )
 
-        // first limit for member
-        runSuccessfulCheck(limit10, None)
-
-        // increase limit
-        runSuccessfulCheck(limit10, Some(limit5))
-
-        // same limit
-        runSuccessfulCheck(limit5, Some(limit5))
-
-        // reset monotonicity after removal
-        runSuccessfulCheck(limit5, Some(removal10))
-
-        // remove traffic control state for member
-        runSuccessfulCheck(removal10, Some(limit10))
+        Seq(okm_sequencerNoSigningKey, okm_mediatorNoSigningKey, okm_participantNoSigningKey)
+          .foreach(tx =>
+            checkTransaction(checks, tx) shouldBe Left(
+              InvalidTopologyMapping(
+                "OwnerToKeyMapping must contain at least 1 signing key."
+              )
+            )
+          )
+        checkTransaction(checks, okm_participantNoEncryptionKey) shouldBe Left(
+          InvalidTopologyMapping(
+            "OwnerToKeyMapping for participants must contain at least 1 encryption key."
+          )
+        )
       }
     }
   }

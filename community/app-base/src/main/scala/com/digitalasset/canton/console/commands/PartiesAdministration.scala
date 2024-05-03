@@ -35,8 +35,9 @@ import com.digitalasset.canton.console.{
   LocalParticipantReference,
   ParticipantReference,
 }
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.participant.ParticipantNodeX
+import com.digitalasset.canton.participant.ParticipantNode
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
 import com.digitalasset.canton.topology.transaction.*
@@ -158,7 +159,7 @@ class ParticipantPartiesAdministrationGroup(
       |""")
   def enable(
       name: String,
-      namespace: Namespace = participantId.uid.namespace,
+      namespace: Namespace = participantId.namespace,
       participants: Seq[ParticipantId] = Seq(participantId),
       threshold: PositiveInt = PositiveInt.one,
       displayName: Option[String] = None,
@@ -231,14 +232,13 @@ class ParticipantPartiesAdministrationGroup(
         for {
           // validating party and display name here to prevent, e.g., a party being registered despite it having an invalid display name
           // assert that name is valid ParticipantId
-          id <- Identifier.create(name)
-          partyId = PartyId(id, namespace)
+          partyId <- UniqueIdentifier.create(name, namespace).map(PartyId(_))
           _ <- Either
             .catchOnly[IllegalArgumentException](LedgerParticipantId.assertFromString(name))
             .leftMap(_.getMessage)
           validDisplayName <- displayName.map(String255.create(_, Some("display name"))).sequence
           // find the domain ids
-          domainIds <- findDomainIds(this.participantId.uid.id.unwrap, primaryConnected)
+          domainIds <- findDomainIds(this.participantId.identifier.unwrap, primaryConnected)
           // find the domain ids the additional participants are connected to
           additionalSync <- synchronizeParticipants.traverse { p =>
             findDomainIds(
@@ -322,7 +322,7 @@ class ParticipantPartiesAdministrationGroup(
             ),
             groupAddressing,
           ),
-          signedBy = Seq(this.participantId.uid.namespace.fingerprint),
+          signedBy = Seq(this.participantId.fingerprint),
           serial = None,
           store = AuthorizedStore.filterName,
           mustFullyAuthorize = mustFullyAuthorize,
@@ -332,10 +332,10 @@ class ParticipantPartiesAdministrationGroup(
 
   @Help.Summary("Disable party on participant")
   // TODO(#14067): reintroduce `force` once it is implemented on the server side and threaded through properly.
-  def disable(name: Identifier /*, force: Boolean = false*/ ): Unit = {
+  def disable(name: String /*, force: Boolean = false*/ ): Unit = {
     runner.topology.party_to_participant_mappings
       .propose_delta(
-        PartyId(name, runner.id.member.uid.namespace),
+        PartyId(runner.id.member.uid.tryChangeId(name)),
         removes = List(this.participantId),
       )
       .discard
@@ -373,7 +373,7 @@ class ParticipantPartiesAdministrationGroup(
 class LocalParticipantPartiesAdministrationGroup(
     reference: LocalParticipantReference,
     runner: AdminCommandRunner
-      & BaseInspection[ParticipantNodeX]
+      & BaseInspection[ParticipantNode]
       & ParticipantAdministration
       & BaseLedgerApiAdministration
       & InstanceReference,

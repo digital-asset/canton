@@ -44,9 +44,10 @@ import com.digitalasset.canton.console.{
 }
 import com.digitalasset.canton.crypto.SyncCryptoApiProvider
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.admin.data.ParticipantStatus
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
-import com.digitalasset.canton.participant.ParticipantNodeCommon
+import com.digitalasset.canton.participant.ParticipantNode
 import com.digitalasset.canton.participant.admin.ResourceLimits
 import com.digitalasset.canton.participant.admin.grpc.TransferSearchResult
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
@@ -71,7 +72,7 @@ import com.digitalasset.canton.topology.{DomainId, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
-import com.digitalasset.canton.{DiscardOps, DomainAlias, SequencerAlias, config}
+import com.digitalasset.canton.{DomainAlias, SequencerAlias, config}
 
 import java.time.Instant
 import scala.concurrent.duration.Duration
@@ -339,7 +340,7 @@ class ParticipantTestingGroup(
 }
 
 class LocalParticipantTestingGroup(
-    participantRef: ParticipantReference with BaseInspection[ParticipantNodeCommon],
+    participantRef: ParticipantReference with BaseInspection[ParticipantNode],
     consoleEnvironment: ConsoleEnvironment,
     loggerFactory: NamedLoggerFactory,
 ) extends ParticipantTestingGroup(participantRef, consoleEnvironment, loggerFactory)
@@ -676,7 +677,7 @@ class ParticipantPruningAdministrationGroup(
 }
 
 class LocalCommitmentsAdministrationGroup(
-    runner: AdminCommandRunner with BaseInspection[ParticipantNodeCommon],
+    runner: AdminCommandRunner with BaseInspection[ParticipantNode],
     val consoleEnvironment: ConsoleEnvironment,
     val loggerFactory: NamedLoggerFactory,
 ) extends FeatureFlagFilter
@@ -1034,7 +1035,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     def active(domainAlias: DomainAlias): Boolean = {
       list_connected().exists(r => {
         // TODO(#14053): Filter out participants that are not permissioned on the domain. The TODO is because the daml 2.x
-        //  also asks the domain whether the participant is permissioned, i.e. do we need to for a ParticipantDomainPermissionX?
+        //  also asks the domain whether the participant is permissioned, i.e. do we need to for a ParticipantDomainPermission?
         r.domainAlias == domainAlias &&
         r.healthy &&
         participantIsActiveOnDomain(r.domainId, id)
@@ -1546,7 +1547,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
 }
 
 trait ParticipantHealthAdministrationCommon extends FeatureFlagFilter {
-  this: HealthAdministrationCommon[ParticipantStatus] =>
+  this: HealthAdministration[ParticipantStatus] =>
 
   protected def runner: AdminCommandRunner
 
@@ -1609,11 +1610,11 @@ trait ParticipantHealthAdministrationCommon extends FeatureFlagFilter {
   }
 }
 
-class ParticipantHealthAdministrationX(
+class ParticipantHealthAdministration(
     val runner: AdminCommandRunner,
     val consoleEnvironment: ConsoleEnvironment,
     override val loggerFactory: NamedLoggerFactory,
-) extends HealthAdministrationX(
+) extends HealthAdministration(
       runner,
       consoleEnvironment,
       ParticipantStatus.fromProtoV30,

@@ -8,21 +8,15 @@ import cats.data.EitherT
 import cats.instances.future.*
 import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.*
-import com.digitalasset.canton.crypto.{
-  Crypto,
-  CryptoHandshakeValidator,
-  DomainSyncCryptoClient,
-  Fingerprint,
-}
+import com.digitalasset.canton.crypto.{Crypto, CryptoHandshakeValidator, DomainSyncCryptoClient}
 import com.digitalasset.canton.domain.Domain
 import com.digitalasset.canton.domain.mediator.admin.gprc.{
   InitializeMediatorRequest,
-  InitializeMediatorResponseX,
+  InitializeMediatorResponse,
 }
 import com.digitalasset.canton.domain.mediator.service.GrpcMediatorInitializationService
 import com.digitalasset.canton.domain.mediator.store.{
@@ -50,13 +44,7 @@ import com.digitalasset.canton.sequencing.client.{
   SequencerClientConfig,
   SequencerClientFactory,
 }
-import com.digitalasset.canton.store.{
-  IndexedDomain,
-  IndexedStringStore,
-  SendTrackerStore,
-  SequencedEventStore,
-  SequencerCounterTrackerStore,
-}
+import com.digitalasset.canton.store.*
 import com.digitalasset.canton.time.{Clock, HasUptime}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
@@ -101,7 +89,6 @@ final case class MediatorNodeParameterConfig(
     override val dontWarnOnDeprecatedPV: Boolean = false,
     override val batching: BatchingConfig = BatchingConfig(),
     override val caching: CachingConfigs = CachingConfigs(),
-    override val useNewTrafficControl: Boolean = false,
     override val useUnifiedSequencer: Boolean = false,
 ) extends ProtocolConfig
     with LocalNodeParametersConfig
@@ -121,7 +108,7 @@ final case class RemoteMediatorConfig(
 
 /** Community Mediator Node configuration that defaults to auto-init
   */
-final case class CommunityMediatorNodeXConfig(
+final case class CommunityMediatorNodeConfig(
     override val adminApi: CommunityAdminServerConfig = CommunityAdminServerConfig(),
     override val storage: CommunityStorageConfig = CommunityStorageConfig.Memory(),
     override val crypto: CommunityCryptoConfig = CommunityCryptoConfig(),
@@ -143,20 +130,20 @@ final case class CommunityMediatorNodeXConfig(
       parameters,
       monitoring,
     )
-    with ConfigDefaults[DefaultPorts, CommunityMediatorNodeXConfig] {
+    with ConfigDefaults[DefaultPorts, CommunityMediatorNodeConfig] {
 
   override val nodeTypeName: String = "mediator"
 
   override def replicationEnabled: Boolean = false
 
-  override def withDefaults(ports: DefaultPorts): CommunityMediatorNodeXConfig = {
+  override def withDefaults(ports: DefaultPorts): CommunityMediatorNodeConfig = {
     this
       .focus(_.adminApi.internalPort)
       .modify(ports.mediatorAdminApiPort.setDefaultPort)
   }
 }
 
-class MediatorNodeBootstrapX(
+class MediatorNodeBootstrap(
     arguments: CantonNodeBootstrapCommonArguments[
       MediatorNodeConfigCommon,
       MediatorNodeParameters,
@@ -169,7 +156,7 @@ class MediatorNodeBootstrapX(
     implicit val executionSequencerFactory: ExecutionSequencerFactory,
     scheduler: ScheduledExecutorService,
     actorSystem: ActorSystem,
-) extends CantonNodeBootstrapX[
+) extends CantonNodeBootstrapImpl[
       MediatorNode,
       MediatorNodeConfigCommon,
       MediatorNodeParameters,
@@ -255,42 +242,39 @@ class MediatorNodeBootstrapX(
 
     override def initialize(request: InitializeMediatorRequest)(implicit
         traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, String, InitializeMediatorResponseX] = {
+    ): EitherT[FutureUnlessShutdown, String, InitializeMediatorResponse] = {
       if (isInitialized) {
         logger.info(
           "Received a request to initialize an already initialized mediator. Skipping initialization!"
         )
-        EitherT.pure(InitializeMediatorResponseX())
+        EitherT.pure(InitializeMediatorResponse())
       } else {
-        val configToStore = MediatorDomainConfiguration(
-          Fingerprint.tryCreate(
-            "unused"
-          ), // x-nodes do not need to return the initial key
-          request.domainId,
-          request.domainParameters,
-          request.sequencerConnections,
-        )
-        val sequencerInfoLoader = createSequencerInfoLoader(configToStore)
-        lazy val validatedET = sequencerInfoLoader.validateSequencerConnection(
-          DomainAlias.tryCreate("domain"),
-          Some(request.domainId),
-          configToStore.sequencerConnections,
-          request.sequencerConnectionValidation,
-        )
+        val domainAlias = DomainAlias.tryCreate("domain")
+        val sequencerInfoLoader = createSequencerInfoLoader()
         completeWithExternal {
           logger.info(
             s"Assigning mediator to ${request.domainId} via sequencers ${request.sequencerConnections}"
           )
           for {
-            _ <- validatedET.leftMap { errors =>
-              s"Invalid sequencer connections provided for initialisation: $errors"
-            }
+            sequencerAggregatedInfo <- sequencerInfoLoader
+              .loadAndAggregateSequencerEndpoints(
+                domainAlias,
+                Some(request.domainId),
+                request.sequencerConnections,
+                request.sequencerConnectionValidation,
+              )
+              .leftMap(error => s"Error loading sequencer endpoint information: $error")
+            configToStore = MediatorDomainConfiguration(
+              request.domainId,
+              sequencerAggregatedInfo.staticDomainParameters,
+              request.sequencerConnections,
+            )
             _ <-
               domainConfigurationStore
                 .saveConfiguration(configToStore)
                 .leftMap(_.toString)
           } yield request.domainId
-        }.map(_ => InitializeMediatorResponseX())
+        }.map(_ => InitializeMediatorResponse())
       }
     }
 
@@ -336,6 +320,7 @@ class MediatorNodeBootstrapX(
         val outboxQueue = new DomainOutboxQueue(loggerFactory)
 
         val topologyManager = new DomainTopologyManager(
+          nodeId = mediatorId.uid,
           clock = clock,
           crypto = crypto,
           store = domainTopologyStore,
@@ -427,15 +412,16 @@ class MediatorNodeBootstrapX(
     }
   }
 
-  private def createSequencerInfoLoader(config: MediatorDomainConfiguration) =
+  private def createSequencerInfoLoader() = {
     new SequencerInfoLoader(
       timeouts = timeouts,
       traceContextPropagation = parameters.tracing.propagation,
-      clientProtocolVersions = NonEmpty.mk(Seq, config.domainParameters.protocolVersion),
-      minimumProtocolVersion = Some(config.domainParameters.protocolVersion),
+      clientProtocolVersions = ProtocolVersion.supported,
+      minimumProtocolVersion = Some(ProtocolVersion.minimum),
       dontWarnOnDeprecatedPV = parameterConfig.dontWarnOnDeprecatedPV,
       loggerFactory = loggerFactory,
     )
+  }
 
   private def mkMediatorRuntime(
       mediatorId: MediatorId,
@@ -453,7 +439,7 @@ class MediatorNodeBootstrapX(
     val domainId = domainConfig.domainId
     val domainLoggerFactory = loggerFactory.append("domainId", domainId.toString)
     val domainAlias = DomainAlias(domainConfig.domainId.uid.toLengthLimitedString)
-    val sequencerInfoLoader = createSequencerInfoLoader(domainConfig)
+    val sequencerInfoLoader = createSequencerInfoLoader()
     def getSequencerConnectionFromStore = fetchConfig()
       .map(_.map(_.sequencerConnections))
 
@@ -539,6 +525,7 @@ class MediatorNodeBootstrapX(
           sequencerClientFactory,
           sequencerInfoLoader,
           domainAlias,
+          domainId,
         )
       // we wait here until the sequencer becomes active. this allows to reconfigure the
       // sequencer client address
@@ -633,7 +620,7 @@ class MediatorNodeBootstrapX(
 
 }
 
-object MediatorNodeBootstrapX {
+object MediatorNodeBootstrap {
   val LoggerFactoryKeyName: String = "mediator"
 }
 

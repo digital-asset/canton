@@ -232,7 +232,7 @@ trait TopologyStoreTest extends AsyncWordSpec with TopologyStoreTestBase {
               proposalTransactions,
               Seq(
                 tx1_NSD_Proposal
-              ), // only proposal transaction, TimeQueryX.Range is inclusive on both sides
+              ), // only proposal transaction, TimeQuery.Range is inclusive on both sides
             )
             expectTransactions(
               proposalTransactionsFiltered,
@@ -242,7 +242,7 @@ trait TopologyStoreTest extends AsyncWordSpec with TopologyStoreTestBase {
             )
             expectTransactions(
               proposalTransactionsFiltered2,
-              Nil, // no proposal transaction of type PartyToParticipantX in the range
+              Nil, // no proposal transaction of type PartyToParticipant in the range
             )
             expectTransactions(positiveProposals, Seq(tx1_NSD_Proposal))
 
@@ -302,7 +302,7 @@ trait TopologyStoreTest extends AsyncWordSpec with TopologyStoreTestBase {
             )
             expectTransactions(
               proposalTransactionsFiltered2,
-              Nil, // no proposal transaction of type PartyToParticipantX in the range
+              Nil, // no proposal transaction of type PartyToParticipant in the range
             )
           }
         }
@@ -377,6 +377,43 @@ trait TopologyStoreTest extends AsyncWordSpec with TopologyStoreTestBase {
             fredFullySpecified shouldBe Set(tx5_PTP.mapping.partyId)
             onlyParticipant2 shouldBe Set(tx5_DTC.mapping.participantId.adminParty)
             neitherParty shouldBe Set.empty
+          }
+        }
+        "able to findEssentialStateAtSequencedTime" in {
+          val store = mk()
+          for {
+            _ <- update(store, ts2, add = Seq(tx2_OTK))
+            _ <- update(store, ts5, add = Seq(tx5_DTC))
+            _ <- update(store, ts6, add = Seq(tx6_MDS))
+
+            proposalTransactions <- store.findEssentialStateAtSequencedTime(
+              asOfInclusive = SequencedTime(ts6),
+              excludeMappings = Nil,
+            )
+
+            proposalTransactionsFiltered <- store.findEssentialStateAtSequencedTime(
+              asOfInclusive = SequencedTime(ts6),
+              excludeMappings = TopologyMapping.Code.all.diff(
+                Seq(DomainTrustCertificate.code, OwnerToKeyMapping.code)
+              ),
+            )
+
+          } yield {
+            expectTransactions(
+              proposalTransactions,
+              Seq(
+                tx2_OTK,
+                tx5_DTC,
+                tx6_MDS,
+              ),
+            )
+            expectTransactions(
+              proposalTransactionsFiltered,
+              Seq(
+                tx2_OTK,
+                tx5_DTC,
+              ),
+            )
           }
         }
 

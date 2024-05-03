@@ -15,6 +15,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata}
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.{
   AtomicHealthComponent,
   CloseableHealthComponent,
@@ -81,7 +82,7 @@ import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.Autho
 import com.digitalasset.canton.topology.processing.{
   ApproximateTime,
   EffectiveTime,
-  TopologyTransactionProcessorCommon,
+  TopologyTransactionProcessor,
 }
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -118,7 +119,7 @@ class SyncDomain(
     val packageService: PackageService,
     domainCrypto: DomainSyncCryptoClient,
     identityPusher: ParticipantTopologyDispatcher,
-    topologyProcessorFactory: TopologyTransactionProcessorCommon.Factory,
+    topologyProcessorFactory: TopologyTransactionProcessor.Factory,
     missingKeysAlerter: MissingKeysAlerter,
     transferCoordination: TransferCoordination,
     inFlightSubmissionTracker: InFlightSubmissionTracker,
@@ -282,11 +283,9 @@ class SyncDomain(
       loggerFactory,
     )
 
-  if (parameters.useNewTrafficControl) {
-    trafficProcessor.subscribe(
-      new ParticipantTrafficControlSubscriber(trafficStateController, participantId, loggerFactory)
-    )
-  }
+  trafficProcessor.subscribe(
+    new ParticipantTrafficControlSubscriber(trafficStateController, participantId, loggerFactory)
+  )
 
   private val badRootHashMessagesRequestProcessor: BadRootHashMessagesRequestProcessor =
     new BadRootHashMessagesRequestProcessor(
@@ -584,13 +583,12 @@ class SyncDomain(
       initializationTraceContext: TraceContext
   ): Future[Either[SyncDomainInitializationError, Unit]] = {
 
-    val delayLogger =
-      new DelayLogger(
-        clock,
-        logger,
-        parameters.delayLoggingThreshold,
-        metrics.sequencerClient.handler.delay,
-      )
+    val delayLogger = new DelayLogger(
+      clock,
+      logger,
+      parameters.delayLoggingThreshold,
+      metrics.sequencerClient.handler.delay,
+    )
 
     def firstUnpersistedEventScF: Future[SequencerCounter] =
       persistent.sequencedEventStore
@@ -982,7 +980,7 @@ object SyncDomain {
         packageService: PackageService,
         domainCrypto: DomainSyncCryptoClient,
         identityPusher: ParticipantTopologyDispatcher,
-        topologyProcessorFactory: TopologyTransactionProcessorCommon.Factory,
+        topologyProcessorFactory: TopologyTransactionProcessor.Factory,
         missingKeysAlerter: MissingKeysAlerter,
         transferCoordination: TransferCoordination,
         inFlightSubmissionTracker: InFlightSubmissionTracker,
@@ -1010,7 +1008,7 @@ object SyncDomain {
         packageService: PackageService,
         domainCrypto: DomainSyncCryptoClient,
         identityPusher: ParticipantTopologyDispatcher,
-        topologyProcessorFactory: TopologyTransactionProcessorCommon.Factory,
+        topologyProcessorFactory: TopologyTransactionProcessor.Factory,
         missingKeysAlerter: MissingKeysAlerter,
         transferCoordination: TransferCoordination,
         inFlightSubmissionTracker: InFlightSubmissionTracker,
