@@ -35,17 +35,15 @@ class CachedIdentityProviderConfigStore(
     String,
     Result[IdentityProviderConfig],
   ] =
-    new CaffeineCache.AsyncLoadingCaffeineCache(
+    CaffeineCache(
       caffeine.Caffeine
         .newBuilder()
         .expireAfterWrite(cacheExpiryAfterWrite.toJava)
-        .maximumSize(maximumCacheSize.toLong)
-        .buildAsync(
-          new FutureAsyncCacheLoader[String, Result[IdentityProviderConfig]](issuer =>
-            delegate.getIdentityProviderConfig(issuer)
-          )
-        ),
+        .maximumSize(maximumCacheSize.toLong),
       metrics.identityProviderConfigStore.idpConfigCache,
+      new FutureAsyncCacheLoader[String, Result[IdentityProviderConfig]](issuer =>
+        delegate.getIdentityProviderConfig(issuer)
+      ),
     )
 
   override def createIdentityProviderConfig(identityProviderConfig: IdentityProviderConfig)(implicit

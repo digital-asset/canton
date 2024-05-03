@@ -43,14 +43,13 @@ import com.digitalasset.canton.domain.sequencing.sequencer.traffic.{
 }
 import com.digitalasset.canton.error.BaseAlarm
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.protocol.messages.{SignedProtocolMessage, UnsignedProtocolMessage}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.sequencing.client.SequencedEventValidator
 import com.digitalasset.canton.sequencing.client.SequencedEventValidator.TopologyTimestampVerificationError
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
-import com.digitalasset.canton.topology.{DomainId, Member, PartyId, SequencerId}
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
@@ -171,7 +170,7 @@ class BlockUpdateGeneratorImpl(
     // We must start a new chunk whenever the chunk processing advances lastSequencerEventTimestamp
     // Otherwise the logic for retrieving a topology snapshot or traffic state could deadlock
     def possibleEventToThisSequencer(event: LedgerBlockEvent): Boolean = event match {
-      case Send(_, signedSubmissionRequest) =>
+      case Send(_, signedSubmissionRequest, _) =>
         val allRecipients = signedSubmissionRequest.content.batch.allRecipients
         allRecipients.contains(AllMembersOfDomain) ||
         allRecipients.contains(SequencersOfDomain)
@@ -365,31 +364,38 @@ class BlockUpdateGeneratorImpl(
   private def recordSubmissionMetrics(
       value: Seq[Traced[LedgerBlockEvent]]
   )(implicit executionContext: ExecutionContext): Future[Unit] = Future {
-    val hashOps = domainSyncCryptoApi.crypto.pureCrypto
-    value.map(_.value).foreach {
-      case LedgerBlockEvent.Send(_, signedSubmissionRequest) =>
-        val mc = MetricsContext("sender" -> signedSubmissionRequest.content.sender.toString)
-        metrics.sends.mark()(mc.withExtraLabels("type" -> "send"))
-        signedSubmissionRequest.content.batch.envelopes
-          .flatMap(
-            _.openEnvelope(hashOps, protocolVersion).toOption.toList
-          )
-          .map(_.protocolMessage)
-          .foreach {
-            case SignedProtocolMessage(typedMessage, _) =>
-              metrics.envelopes.mark()(
-                mc.withExtraLabels("type" -> typedMessage.content.getClass.getSimpleName)
+    value.foreach(_.withTraceContext { implicit traceContext =>
+      {
+        case LedgerBlockEvent.Send(_, signedSubmissionRequest, payloadSize) =>
+          signedSubmissionRequest.content.batch.allRecipients
+            .foldLeft(RecipientStats()) {
+              case (acc, MemberRecipient(ParticipantId(_)) | ParticipantsOfParty(_)) =>
+                acc.copy(participants = true)
+              case (acc, MemberRecipient(MediatorId(_)) | MediatorsOfDomain(_)) =>
+                acc.copy(mediators = true)
+              case (acc, MemberRecipient(SequencerId(_)) | SequencersOfDomain) =>
+                acc.copy(sequencers = true)
+              case (
+                    acc,
+                    MemberRecipient(DomainTopologyManagerId(_)) |
+                    MemberRecipient(UnauthenticatedMemberId(_)),
+                  ) =>
+                acc // not used
+              case (acc, AllMembersOfDomain) => acc.copy(broadcast = true)
+            }
+            .updateMetric(signedSubmissionRequest.content.sender, payloadSize, logger, metrics)
+        case LedgerBlockEvent.AddMember(_) =>
+          metrics.blockEvents.mark()(MetricsContext("type" -> "add-member"))
+        case LedgerBlockEvent.Acknowledgment(request) =>
+          metrics.blockEvents
+            .mark()(
+              MetricsContext(
+                "sender" -> request.content.member.toString,
+                "type" -> "ack",
               )
-            case message: UnsignedProtocolMessage =>
-              metrics.envelopes.mark()(mc.withExtraLabels("type" -> message.getClass.getSimpleName))
-            case _ =>
-              metrics.envelopes.mark()(mc.withExtraLabels("type" -> "unsigned-unknown"))
-          }
-      case LedgerBlockEvent.AddMember(_) => metrics.sends.mark()(MetricsContext("type" -> "send"))
-      case LedgerBlockEvent.Acknowledgment(request) =>
-        metrics.sends
-          .mark()(MetricsContext("sender" -> request.content.member.toString, "type" -> "send"))
-    }
+            )
+      }
+    })
   }
 
   private def addSnapshots(
@@ -1554,6 +1560,11 @@ class BlockUpdateGeneratorImpl(
       .flatMap {
         case Some(parameters) =>
           val states = members
+            .filterNot {
+              // No need to update traffic state for sequencers
+              case _: SequencerId => true
+              case _ => false
+            }
             .flatMap(member => ephemeralState.trafficState.get(member).map(member -> _))
             .toMap
           rateLimitManager
@@ -1722,5 +1733,55 @@ object BlockUpdateGeneratorImpl {
       sequencingSnapshot: SyncCryptoApi,
       topologySnapshotO: Option[SyncCryptoApi],
   )(val traceContext: TraceContext)
+
+  private final case class RecipientStats(
+      participants: Boolean = false,
+      mediators: Boolean = false,
+      sequencers: Boolean = false,
+      broadcast: Boolean = false,
+  ) {
+    private[block] def updateMetric(
+        sender: Member,
+        payloadSize: Int,
+        logger: TracedLogger,
+        metrics: BlockMetrics,
+    )(implicit traceContext: TraceContext): Unit = {
+      val messageType = {
+        // by looking at the recipient lists and the sender, we'll figure out what type of message we've been getting
+        (sender, participants, mediators, sequencers, broadcast) match {
+          case (ParticipantId(_), false, true, false, false) =>
+            "send-confirmation-response"
+          case (ParticipantId(_), true, true, false, false) =>
+            "send-confirmation-request"
+          case (MediatorId(_), true, false, false, false) =>
+            "send-verdict"
+          case (ParticipantId(_), true, false, false, false) =>
+            "send-commitment"
+          case (SequencerId(_), true, false, true, false) =>
+            "send-topup"
+          case (SequencerId(_), false, true, true, false) =>
+            "send-topup-med"
+          case (_, false, false, false, true) =>
+            "send-topology"
+          case (_, false, false, false, false) =>
+            "send-time-proof"
+          case _ =>
+            def r(boolean: Boolean, s: String) = if (boolean) Seq(s) else Seq.empty
+            val recipients = r(participants, "participants") ++
+              r(mediators, "mediators") ++
+              r(sequencers, "sequencers") ++
+              r(broadcast, "broadcast")
+            logger.warn(s"Unexpected message from ${sender} to " + recipients.mkString(","))
+            "send-unexpected"
+        }
+      }
+      val mc = MetricsContext(
+        "sender" -> sender.toString,
+        "type" -> messageType,
+      )
+      metrics.blockEvents.mark()(mc)
+      metrics.blockEventBytes.mark(payloadSize.longValue)(mc)
+    }
+  }
 
 }

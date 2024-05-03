@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.metrics
 
-import com.daml.metrics.api.MetricHandle.{Gauge, Meter}
+import com.daml.metrics.api.MetricHandle.{Gauge, Histogram, Meter}
 import com.daml.metrics.api.{MetricName, MetricsContext}
 import com.digitalasset.canton.metrics.CantonLabeledMetricsFactory
 
@@ -16,8 +16,9 @@ class BlockMetrics(
   private val prefix: MetricName = parent :+ "block"
 
   val height: Gauge[Long] =
-    openTelemetryMetricsFactory.gauge(prefix :+ "block-height", 0L)(MetricsContext.Empty)
-  val sends: Meter = openTelemetryMetricsFactory.meter(prefix :+ "sends")
-  val envelopes: Meter = openTelemetryMetricsFactory.meter(prefix :+ "envelopes")
+    openTelemetryMetricsFactory.gauge(prefix :+ "height", 0L)(MetricsContext.Empty)
+  val blockEvents: Meter = openTelemetryMetricsFactory.meter(prefix :+ "events")
+  val blockEventBytes: Meter =
+    openTelemetryMetricsFactory.meter(prefix :+ s"event-${Histogram.Bytes}")
 
 }

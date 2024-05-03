@@ -32,17 +32,15 @@ class CachedUserManagementStore(
     with NamedLogging {
 
   private val cache: CaffeineCache.AsyncLoadingCaffeineCache[CacheKey, Result[UserInfo]] =
-    new CaffeineCache.AsyncLoadingCaffeineCache(
+    CaffeineCache(
       caffeine.Caffeine
         .newBuilder()
         .expireAfterWrite(Duration.ofSeconds(expiryAfterWriteInSeconds.toLong))
-        .maximumSize(maximumCacheSize.toLong)
-        .buildAsync(
-          new FutureAsyncCacheLoader[CacheKey, Result[UserInfo]](key =>
-            delegate.getUserInfo(key.id, key.identityProviderId)
-          )
-        ),
+        .maximumSize(maximumCacheSize.toLong),
       metrics.userManagement.cache,
+      new FutureAsyncCacheLoader[CacheKey, Result[UserInfo]](key =>
+        delegate.getUserInfo(key.id, key.identityProviderId)
+      ),
     )
 
   override def getUserInfo(id: UserId, identityProviderId: IdentityProviderId)(implicit

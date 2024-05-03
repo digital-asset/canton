@@ -40,7 +40,7 @@ import com.digitalasset.canton.topology.{DomainId, Member, SequencerId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{ErrorUtil, MapsUtil, MonadUtil}
+import com.digitalasset.canton.util.{ErrorUtil, LoggerUtil, MapsUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.stream.KillSwitches
@@ -214,6 +214,7 @@ class BlockSequencerStateManager(
           implicit val traceContext: TraceContext = TraceContext.ofBatch(blockEvents.events)(logger)
           // Set the current block height to the new block's height instead of + 1 of the previous value
           // so that we support starting from an arbitrary block height
+          logger.debug(s"Processing block $height")
           currentBlockHeight = height
           Seq(Traced(blockEvents))
         }
@@ -259,13 +260,19 @@ class BlockSequencerStateManager(
     Flow[Traced[BlockUpdate[SignedChunkEvents]]].statefulMapAsync(getHeadState) {
       (priorHead, update) =>
         implicit val traceContext = update.traceContext
+        val currentBlockNumber = priorHead.block.height + 1
         val fut = update.value match {
           case LocalBlockUpdate(local) =>
-            handleLocalEvent(priorHead, local)(TraceContext.todo)
+            handleLocalEvent(priorHead, local)(traceContext)
           case chunk: ChunkUpdate[SignedChunkEvents] =>
-            handleChunkUpdate(priorHead, chunk)(TraceContext.todo)
+            val chunkNumber = priorHead.chunk.chunkNumber + 1
+            LoggerUtil.clueF(
+              s"Adding block updates for chunk $chunkNumber for block $currentBlockNumber"
+            )(handleChunkUpdate(priorHead, chunk)(traceContext))
           case complete: CompleteBlockUpdate =>
-            handleComplete(priorHead, complete.block)(TraceContext.todo)
+            LoggerUtil.clueF(
+              s"Storing completion of block $currentBlockNumber"
+            )(handleComplete(priorHead, complete.block)(traceContext))
         }
         fut.map(newHead => newHead -> Traced(newHead.block.lastTs))
     }
@@ -432,19 +439,20 @@ class BlockSequencerStateManager(
   ): Future[HeadState] = {
     val priorState = priorHead.chunk
     val chunkNumber = priorState.chunkNumber + 1
+    val currentBlockNumber = priorHead.block.height + 1
     assert(
       update.newMembers.values.forall(_ >= priorState.lastTs),
-      s"newMembers in chunk $chunkNumber should be assigned a timestamp after the timestamp of the previous chunk or block",
+      s"newMembers in chunk $chunkNumber of block $currentBlockNumber should be assigned a timestamp after the timestamp of the previous chunk or block",
     )
     assert(
       update.events.view.flatMap(_.timestamps).forall(_ > priorState.lastTs),
-      s"Events in chunk $chunkNumber have timestamp lower than in the previous chunk or block",
+      s"Events in chunk $chunkNumber of block $currentBlockNumber have timestamp lower than in the previous chunk or block",
     )
     assert(
       update.lastSequencerEventTimestamp.forall(last =>
         priorState.latestSequencerEventTimestamp.forall(_ < last)
       ),
-      s"The last sequencer's event timestamp ${update.lastSequencerEventTimestamp} in chunk $chunkNumber must be later than the previous chunk's or block's latest sequencer event timestamp at ${priorState.latestSequencerEventTimestamp}",
+      s"The last sequencer's event timestamp ${update.lastSequencerEventTimestamp} in chunk $chunkNumber of block $currentBlockNumber  must be later than the previous chunk's or block's latest sequencer event timestamp at ${priorState.latestSequencerEventTimestamp}",
     )
 
     def checkFirstSequencerCounters: Boolean = {
@@ -462,7 +470,7 @@ class BlockSequencerStateManager(
 
     assert(
       checkFirstSequencerCounters,
-      s"There is a gap in sequencer counters between chunks $chunkNumber and the previous chunk or block.",
+      s"There is a gap in sequencer counters between the chunk $chunkNumber of block $currentBlockNumber and the previous chunk or block.",
     )
 
     val lastTs =
@@ -476,7 +484,6 @@ class BlockSequencerStateManager(
       update.lastSequencerEventTimestamp.orElse(priorState.latestSequencerEventTimestamp),
     )
 
-    logger.debug(s"Adding block updates for chunk $chunkNumber to store")
     for {
       _ <- store.partialBlockUpdate(
         newMembers = update.newMembers,

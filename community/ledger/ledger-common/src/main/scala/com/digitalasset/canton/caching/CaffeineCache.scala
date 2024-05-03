@@ -44,7 +44,16 @@ object CaffeineCache {
     override def invalidateAll(): Unit = cache.invalidateAll()
   }
 
-  final class AsyncLoadingCaffeineCache[Key <: AnyRef, Value <: AnyRef](
+  def apply[Key <: AnyRef, Value <: AnyRef](
+      builder: caffeine.Caffeine[_ >: Key, _ >: Value],
+      metrics: CacheMetrics,
+      asyncCacheLoader: AsyncCacheLoader[Key, Value],
+  ): AsyncLoadingCaffeineCache[Key, Value] = {
+    builder.recordStats(() => new DropwizardStatsCounter(metrics))
+    new AsyncLoadingCaffeineCache(builder.buildAsync[Key, Value](asyncCacheLoader), metrics)
+  }
+
+  final class AsyncLoadingCaffeineCache[Key <: AnyRef, Value <: AnyRef] private[caching] (
       cache: caffeine.AsyncLoadingCache[Key, Value],
       cacheMetrics: CacheMetrics,
   ) {
