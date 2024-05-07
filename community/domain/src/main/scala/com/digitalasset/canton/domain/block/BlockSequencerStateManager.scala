@@ -214,7 +214,15 @@ class BlockSequencerStateManager(
           implicit val traceContext: TraceContext = TraceContext.ofBatch(blockEvents.events)(logger)
           // Set the current block height to the new block's height instead of + 1 of the previous value
           // so that we support starting from an arbitrary block height
-          logger.debug(s"Processing block $height")
+
+          logger.debug(
+            s"Processing block $height with ${blockEvents.events.size} block events.${blockEvents.events
+                .map(_.value)
+                .collectFirst { case LedgerBlockEvent.Send(timestamp, _, _) =>
+                  s" First timestamp in block: $timestamp"
+                }
+                .getOrElse("")}"
+          )
           currentBlockHeight = height
           Seq(Traced(blockEvents))
         }
@@ -248,7 +256,11 @@ class BlockSequencerStateManager(
       .mapAsyncAndDrainUS(parallelism = chunkSigningParallelism)(
         _.traverse {
           case chunk: ChunkUpdate[UnsignedChunkEvents] =>
-            chunk.events.parTraverse(bug.signChunkEvents).map(signed => chunk.copy(events = signed))
+            lazy val signEvents = chunk.events
+              .parTraverse(bug.signChunkEvents)
+              .map(signed => chunk.copy(events = signed))
+            LoggerUtil.clueF(s"Signing ${chunk.events.size} events")(signEvents.unwrap).discard
+            signEvents
           case complete: CompleteBlockUpdate => FutureUnlessShutdown.pure(complete)
         }
       )
@@ -267,7 +279,9 @@ class BlockSequencerStateManager(
           case chunk: ChunkUpdate[SignedChunkEvents] =>
             val chunkNumber = priorHead.chunk.chunkNumber + 1
             LoggerUtil.clueF(
-              s"Adding block updates for chunk $chunkNumber for block $currentBlockNumber"
+              s"Adding block updates for chunk $chunkNumber for block $currentBlockNumber. " +
+                s"Contains ${chunk.events.size} events, ${chunk.acknowledgements.size} acks, ${chunk.newMembers.size} new members, " +
+                s"and ${chunk.inFlightAggregationUpdates.size} in-flight aggregation updates"
             )(handleChunkUpdate(priorHead, chunk)(traceContext))
           case complete: CompleteBlockUpdate =>
             LoggerUtil.clueF(

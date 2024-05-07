@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.domain.sequencing.traffic
 
+import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.topology.Member
@@ -14,6 +16,8 @@ trait SequencerMemberRateLimiterFactory {
       loggerFactory: NamedLoggerFactory,
       metrics: SequencerMetrics,
       eventCostCalculator: EventCostCalculator,
+      futureSupervisor: FutureSupervisor,
+      timeouts: ProcessingTimeout,
   ): SequencerMemberRateLimiter
 }
 
@@ -23,10 +27,14 @@ object DefaultSequencerMemberRateLimiterFactory extends SequencerMemberRateLimit
       loggerFactory: NamedLoggerFactory,
       metrics: SequencerMetrics,
       eventCostCalculator: EventCostCalculator,
+      futureSupervisor: FutureSupervisor,
+      timeouts: ProcessingTimeout,
   ): SequencerMemberRateLimiter = new SequencerMemberRateLimiter(
     member,
     loggerFactory,
     metrics,
     eventCostCalculator,
+    futureSupervisor,
+    timeouts,
   )
 }

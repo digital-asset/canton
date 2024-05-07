@@ -3,22 +3,29 @@
 
 package com.digitalasset.canton.domain.sequencing.traffic
 
+import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.traffic.SequencerRateLimitError.AboveTrafficLimit
-import com.digitalasset.canton.domain.sequencing.sequencer.traffic.SequencerRateLimitManager
 import com.digitalasset.canton.domain.sequencing.traffic.EnterpriseSequencerRateLimitManager.TrafficStateUpdateResult
 import com.digitalasset.canton.domain.sequencing.traffic.store.memory.InMemoryTrafficBalanceStore
+import com.digitalasset.canton.metrics.CantonLabeledMetricsFactory.CantonOpenTelemetryMetricsFactory
+import com.digitalasset.canton.metrics.{MetricValue, OpenTelemetryOnDemandMetricsReader}
 import com.digitalasset.canton.sequencing.TrafficControlParameters
 import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.DefaultTestIdentities.*
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.traffic.EventCostCalculator
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.google.protobuf.ByteString
+import io.opentelemetry.sdk.OpenTelemetrySdk
+import io.opentelemetry.sdk.metrics.SdkMeterProvider
+import io.opentelemetry.sdk.trace.SdkTracerProvider
 import org.scalatest.FutureOutcome
 import org.scalatest.flatspec.FixtureAsyncFlatSpec
+
+import scala.reflect.ClassTag
 
 class EnterpriseSequencerRateLimitManagerTest
     extends FixtureAsyncFlatSpec
@@ -39,31 +46,60 @@ class EnterpriseSequencerRateLimitManagerTest
     Seq.empty,
     testedProtocolVersion,
   )
-  private val eventCost = 5L
-  private val eventCostCalculator = mock[EventCostCalculator]
+  private val eventCost = NonNegativeLong.tryCreate(5L)
   private val batch: Batch[ClosedEnvelope] = Batch(List(envelope1), testedProtocolVersion)
-  when(
-    eventCostCalculator.computeEventCost(batch, trafficConfig.readVsWriteScalingFactor, Map.empty)
-  )
-    .thenReturn(NonNegativeLong.tryCreate(eventCost))
   private val sequencingTs = CantonTimestamp.Epoch.plusSeconds(1)
-  private val someState = TrafficState
-    .empty(sequencingTs)
-    .copy(extraTrafficRemainder =
-      NonNegativeLong.tryCreate(15L)
-    ) // value is irrelevant, just different from inState
   private val inState = TrafficState.empty(CantonTimestamp.Epoch)
 
   case class Env(
       trafficConfig: TrafficControlParameters,
       batch: Batch[ClosedEnvelope],
-      rlm: SequencerRateLimitManager,
+      rlm: EnterpriseSequencerRateLimitManager,
       balanceManager: TrafficBalanceManager,
-  )
+      onDemandMetricsReader: OpenTelemetryOnDemandMetricsReader,
+  ) {
+    def getMetricValues[TargetType <: MetricValue](name: String)(implicit
+        M: ClassTag[TargetType]
+    ) = {
+      MetricValue
+        .fromMetricData(
+          onDemandMetricsReader
+            .read()
+            .find(_.getName.contains(name))
+            .value
+        )
+        .flatMap { metricData =>
+          metricData.select[TargetType]
+        }
+    }
+
+    def assertMemberAndTypeAreInContext(name: String) = {
+      val values = getMetricValues[MetricValue.LongPoint](name).headOption
+      values
+        .flatMap(_.attributes.get("member")) shouldBe Some(sender.toString)
+      values
+        .flatMap(_.attributes.get("type")) shouldBe Some("request_type")
+    }
+
+    def assertOnlyMemberIsInContext(name: String) = {
+      getMetricValues[MetricValue.LongPoint](name).headOption
+        .flatMap(_.attributes.get("member")) shouldBe Some(sender.toString)
+    }
+
+    def assertLongValue(name: String, expected: Long) = {
+      getMetricValues[MetricValue.LongPoint](name).headOption.map(_.value) shouldBe Some(expected)
+    }
+  }
 
   override type FixtureParam = Env
 
   it should "consume from traffic balance" in { implicit f =>
+    val expectedState = TrafficState(
+      extraTrafficRemainder = NonNegativeLong.tryCreate(10L),
+      extraTrafficConsumed = NonNegativeLong.tryCreate(5L),
+      baseTrafficRemainder = NonNegativeLong.zero,
+      sequencingTs,
+    )
     for {
       _ <- f.balanceManager.addTrafficBalance(
         TrafficBalance(
@@ -81,20 +117,29 @@ class EnterpriseSequencerRateLimitManagerTest
           inState,
           trafficConfig,
           Map.empty,
+          () => MetricsContext("type" -> "request_type"),
         )
         .value
         .failOnShutdown
         .map { state =>
-          state shouldBe Right(
-            TrafficState(
-              extraTrafficRemainder = NonNegativeLong.tryCreate(10L),
-              extraTrafficConsumed = NonNegativeLong.tryCreate(5L),
-              baseTrafficRemainder = NonNegativeLong.zero,
-              sequencingTs,
-            )
-          )
+          state shouldBe Right(expectedState)
         }
-    } yield res
+    } yield {
+      eventually() {
+        f.assertMemberAndTypeAreInContext("event-delivered-cost")
+        f.assertOnlyMemberIsInContext("last-traffic-update")
+        f.assertOnlyMemberIsInContext("extra-traffic-limit")
+        f.assertOnlyMemberIsInContext("extra-traffic-consumed")
+        f.assertOnlyMemberIsInContext("base-traffic-remainder")
+
+        f.assertLongValue("last-traffic-update", sequencingTs.getEpochSecond)
+        f.assertLongValue("event-delivered-cost", eventCost.value)
+        f.assertLongValue("extra-traffic-limit", expectedState.extraTrafficLimit.value.value)
+        f.assertLongValue("extra-traffic-consumed", expectedState.extraTrafficConsumed.value)
+        f.assertLongValue("base-traffic-remainder", expectedState.baseTrafficRemainder.value)
+      }
+      res
+    }
   }
 
   it should "consume from traffic balance and base rate" in { implicit f =>
@@ -118,6 +163,7 @@ class EnterpriseSequencerRateLimitManagerTest
             maxBaseTrafficAmount = NonNegativeLong.tryCreate(2),
           ),
           Map.empty,
+          () => MetricsContext.Empty,
         )
         .value
         .failOnShutdown
@@ -155,6 +201,7 @@ class EnterpriseSequencerRateLimitManagerTest
             maxBaseTrafficAmount = NonNegativeLong.tryCreate(10),
           ),
           Map.empty,
+          () => MetricsContext.Empty,
         )
         .value
         .failOnShutdown
@@ -196,6 +243,7 @@ class EnterpriseSequencerRateLimitManagerTest
           initState,
           trafficConfigWithBaseRate,
           Map.empty,
+          () => MetricsContext.Empty,
           Option(sequencingTs),
         )
         .valueOrFail("Consuming from base rate")
@@ -251,6 +299,7 @@ class EnterpriseSequencerRateLimitManagerTest
           inState,
           trafficConfig,
           Map.empty,
+          () => MetricsContext.Empty,
           Option(sequencingTs),
         )
         .value
@@ -282,12 +331,29 @@ class EnterpriseSequencerRateLimitManagerTest
   override def withFixture(test: OneArgAsyncTest): FutureOutcome = {
     val store = new InMemoryTrafficBalanceStore(loggerFactory)
     val manager = mkTrafficBalanceManager(store)
-    val rateLimiter = mkRateLimiter(manager)
+    val onDemandMetricsReader = new OpenTelemetryOnDemandMetricsReader
+    val sdkBuilder = OpenTelemetrySdk.builder()
+    val meterProvider = SdkMeterProvider.builder()
+    meterProvider.registerMetricReader(onDemandMetricsReader)
+    sdkBuilder.setMeterProvider(meterProvider.build())
+    val openTelemetry = ConfiguredOpenTelemetry(
+      sdkBuilder.build(),
+      SdkTracerProvider.builder(),
+      onDemandMetricsReader,
+      metricsEnabled = false,
+    )
+
+    val factory = new CantonOpenTelemetryMetricsFactory(
+      openTelemetry.openTelemetry.meterBuilder("test").build(),
+      MetricsContext.Empty,
+    )
+    val rateLimiter = mkRateLimiter(manager, factory)
     val env = Env(
       trafficConfig,
       batch,
       rateLimiter,
       manager,
+      onDemandMetricsReader,
     )
 
     withFixture(test.toNoArgAsyncTest(env))
