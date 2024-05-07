@@ -167,6 +167,7 @@ class SyncDomain(
       authorityResolver,
       Some(domainId),
       engine,
+      parameters.engine.validationPhaseLogging,
       loggerFactory,
     )
 
@@ -193,6 +194,7 @@ class SyncDomain(
     SourceDomainId(domainId),
     participantId,
     damle,
+    staticDomainParameters,
     transferCoordination,
     inFlightSubmissionTracker,
     ephemeral,
@@ -210,6 +212,7 @@ class SyncDomain(
     TargetDomainId(domainId),
     participantId,
     damle,
+    staticDomainParameters,
     transferCoordination,
     inFlightSubmissionTracker,
     ephemeral,
@@ -277,6 +280,7 @@ class SyncDomain(
       sequencerClient,
       domainId,
       participantId,
+      staticDomainParameters,
       staticDomainParameters.protocolVersion,
       timeouts,
       loggerFactory,
@@ -708,6 +712,7 @@ class SyncDomain(
                 AutomaticTransferIn.perform(
                   data.transferId,
                   TargetDomainId(domainId),
+                  staticDomainParameters,
                   transferCoordination,
                   data.contract.metadata.stakeholders,
                   data.transferOutRequest.submitterMetadata,
