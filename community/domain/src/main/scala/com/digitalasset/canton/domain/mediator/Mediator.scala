@@ -9,8 +9,8 @@ import cats.instances.future.*
 import cats.syntax.bifunctor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.config.{DomainTimeTrackerConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.Mediator.PruningError
@@ -50,7 +50,6 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.EitherUtil.RichEither
-import com.digitalasset.canton.util.FutureInstances.parallelFuture
 import com.digitalasset.canton.util.FutureUtil
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
@@ -59,7 +58,10 @@ import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.{ExecutionContext, Future}
 
-/** The Mediator that acts as transaction coordinator. */
+/** Responsible for events processing.
+  * Reads mediator confirmation requests and confirmation responses from a sequencer and produces ConfirmationResultMessages.
+  * For scaling / high-availability, several instances need to be created.
+  */
 private[mediator] class Mediator(
     val domain: DomainId,
     val mediatorId: MediatorId,
@@ -70,7 +72,7 @@ private[mediator] class Mediator(
     topologyTransactionProcessor: TopologyTransactionProcessor,
     val topologyManagerStatus: TopologyManagerStatus,
     val domainOutboxHandle: DomainOutboxHandle,
-    timeTrackerConfig: DomainTimeTrackerConfig,
+    val timeTracker: DomainTimeTracker,
     state: MediatorState,
     private[canton] val sequencerCounterTrackerStore: SequencerCounterTrackerStore,
     sequencedEventStore: SequencedEventStore,
@@ -93,15 +95,6 @@ private[mediator] class Mediator(
       parameters.delayLoggingThreshold,
       metrics.sequencerClient.handler.delay,
     )
-
-  val timeTracker = DomainTimeTracker(
-    timeTrackerConfig,
-    clock,
-    sequencerClient,
-    protocolVersion,
-    timeouts,
-    loggerFactory,
-  )
 
   private val verdictSender =
     VerdictSender(sequencerClient, syncCrypto, mediatorId, protocolVersion, loggerFactory)
@@ -263,16 +256,20 @@ private[mediator] class Mediator(
           rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
           timestamp: CantonTimestamp,
           verdict: MediatorVerdict.MediatorReject,
-      )(implicit tc: TraceContext): Future[Unit] = {
+      )(implicit tc: TraceContext): FutureUnlessShutdown[Unit] = {
         val requestId = RequestId(timestamp)
 
         for {
-          snapshot <- syncCrypto.awaitSnapshot(timestamp)
-          domainParameters <- snapshot.ipsSnapshot
-            .findDynamicDomainParameters()
-            .flatMap(_.toFuture(new RuntimeException(_)))
+          snapshot <- syncCrypto.awaitSnapshotUS(timestamp)
+          domainParameters <- FutureUnlessShutdown.outcomeF(
+            snapshot.ipsSnapshot
+              .findDynamicDomainParameters()
+              .flatMap(_.toFuture(new RuntimeException(_)))
+          )
 
-          decisionTime <- domainParameters.decisionTimeForF(timestamp)
+          decisionTime <- FutureUnlessShutdown.outcomeF(
+            domainParameters.decisionTimeForF(timestamp)
+          )
           _ <- verdictSender.sendReject(
             requestId,
             None,
@@ -312,7 +309,7 @@ private[mediator] class Mediator(
                   closedEvent.timestamp,
                   MediatorVerdict.MediatorReject(alarm),
                 )
-              } else Future.unit
+              } else FutureUnlessShutdown.unit
             }
 
             (
@@ -333,7 +330,8 @@ private[mediator] class Mediator(
             "Failed to handle Mediator events",
             closeContext = Some(closeContext),
           )
-          FutureUnlessShutdown.outcomeF(rejectionsF.sequence_).flatMap { case () => result }
+
+          rejectionsF.sequence_.flatMap { case () => result }
         }
       }
     }

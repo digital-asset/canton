@@ -95,12 +95,13 @@ import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.time.*
 import com.digitalasset.canton.time.admin.v30.DomainTimeServiceGrpc
 import com.digitalasset.canton.topology.client.{
+  DomainTopologyClientWithInit,
   IdentityProvidingServiceClient,
   StoreBasedDomainTopologyClient,
   StoreBasedTopologySnapshot,
 }
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
-import com.digitalasset.canton.topology.store.{PartyMetadataStore, TopologyStore}
+import com.digitalasset.canton.topology.store.{PartyMetadataStore, TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.{
   HostingParticipant,
   ParticipantPermission,
@@ -172,6 +173,15 @@ class ParticipantNodeBootstrap(
   override protected def sequencedTopologyManagers: Seq[DomainTopologyManager] =
     cantonSyncService.get.toList.flatMap(_.syncDomainPersistentStateManager.getAll.values).collect {
       case s: SyncDomainPersistentState => s.topologyManager
+    }
+
+  override protected def lookupTopologyClient(
+      storeId: TopologyStoreId
+  ): Option[DomainTopologyClientWithInit] =
+    storeId match {
+      case DomainStore(domainId, _) =>
+        cantonSyncService.get.flatMap(_.lookupTopologyClient(domainId))
+      case _ => None
     }
 
   override protected def customNodeStages(
@@ -860,8 +870,9 @@ object ParticipantNodeBootstrap {
     override protected def createEngine(arguments: Arguments): Engine =
       DAMLe.newEngine(
         enableLfDev = arguments.parameterConfig.devVersionSupport,
-        enableStackTraces = arguments.parameterConfig.enableEngineStackTrace,
-        iterationsBetweenInterruptions = arguments.parameterConfig.iterationsBetweenInterruptions,
+        enableStackTraces = arguments.parameterConfig.engine.enableEngineStackTraces,
+        iterationsBetweenInterruptions =
+          arguments.parameterConfig.engine.iterationsBetweenInterruptions,
       )
 
     override protected def createResourceService(
