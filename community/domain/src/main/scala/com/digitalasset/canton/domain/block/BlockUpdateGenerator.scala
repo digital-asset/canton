@@ -200,12 +200,13 @@ class BlockUpdateGeneratorImpl(
         )
         FutureUnlessShutdown.pure(newState -> update)
       case NextChunk(height, index, events) =>
-        processChunk(height, state, events)
+        processChunk(height, index, state, events)
     }
   }
 
   private def processChunk(
       height: Long,
+      index: Int,
       state: State,
       chunk: NonEmpty[Seq[Traced[LedgerBlockEvent]]],
   )(implicit
@@ -223,11 +224,13 @@ class BlockUpdateGeneratorImpl(
           case send: LedgerBlockEvent.Send =>
             val ts = ensureStrictlyIncreasingTimestamp(lastTs, send.timestamp)
             logger.info(
-              show"Observed Send with messageId ${send.signedSubmissionRequest.content.messageId.singleQuoted} in block $height and assigned it timestamp $ts"
+              show"Observed Send with messageId ${send.signedSubmissionRequest.content.messageId.singleQuoted} in block $height, chunk $index and assigned it timestamp $ts"
             )(event.traceContext)
             (ts, (ts, event) +: events)
           case _ =>
-            logger.info(s"Observed ${event.value} in block $height at timestamp $lastTs")(
+            logger.info(
+              s"Observed ${event.value} in block $height, chunk $index at timestamp $lastTs"
+            )(
               event.traceContext
             )
             (lastTs, (lastTs, event) +: events)
@@ -309,7 +312,7 @@ class BlockUpdateGeneratorImpl(
                 .get(member)
                 .fold {
                   logger.debug(
-                    s"Ack at $timestamp for $member being ignored because the member has not yet been registered."
+                    s"Ack at $timestamp for $member (block $height, chunk $index) being ignored because the member has not yet been registered."
                   )
                   membersMap
                 } { memberStatus =>
@@ -361,38 +364,51 @@ class BlockUpdateGeneratorImpl(
     }
   }
 
+  private def computeSubmissionRequestRecipientStats(
+      submissionRequest: SubmissionRequest
+  ): RecipientStats = {
+    submissionRequest.batch.allRecipients
+      .foldLeft(RecipientStats()) {
+        case (acc, MemberRecipient(ParticipantId(_)) | ParticipantsOfParty(_)) =>
+          acc.copy(participants = true)
+        case (acc, MemberRecipient(MediatorId(_)) | MediatorsOfDomain(_)) =>
+          acc.copy(mediators = true)
+        case (acc, MemberRecipient(SequencerId(_)) | SequencersOfDomain) =>
+          acc.copy(sequencers = true)
+        case (
+              acc,
+              MemberRecipient(DomainTopologyManagerId(_)) |
+              MemberRecipient(UnauthenticatedMemberId(_)),
+            ) =>
+          acc // not used
+        case (acc, AllMembersOfDomain) => acc.copy(broadcast = true)
+      }
+  }
+
   private def recordSubmissionMetrics(
       value: Seq[Traced[LedgerBlockEvent]]
   )(implicit executionContext: ExecutionContext): Future[Unit] = Future {
     value.foreach(_.withTraceContext { implicit traceContext =>
       {
         case LedgerBlockEvent.Send(_, signedSubmissionRequest, payloadSize) =>
-          signedSubmissionRequest.content.batch.allRecipients
-            .foldLeft(RecipientStats()) {
-              case (acc, MemberRecipient(ParticipantId(_)) | ParticipantsOfParty(_)) =>
-                acc.copy(participants = true)
-              case (acc, MemberRecipient(MediatorId(_)) | MediatorsOfDomain(_)) =>
-                acc.copy(mediators = true)
-              case (acc, MemberRecipient(SequencerId(_)) | SequencersOfDomain) =>
-                acc.copy(sequencers = true)
-              case (
-                    acc,
-                    MemberRecipient(DomainTopologyManagerId(_)) |
-                    MemberRecipient(UnauthenticatedMemberId(_)),
-                  ) =>
-                acc // not used
-              case (acc, AllMembersOfDomain) => acc.copy(broadcast = true)
-            }
+          computeSubmissionRequestRecipientStats(signedSubmissionRequest.content)
             .updateMetric(signedSubmissionRequest.content.sender, payloadSize, logger, metrics)
         case LedgerBlockEvent.AddMember(_) =>
           metrics.blockEvents.mark()(MetricsContext("type" -> "add-member"))
         case LedgerBlockEvent.Acknowledgment(request) =>
+          // record the event
           metrics.blockEvents
             .mark()(
               MetricsContext(
                 "sender" -> request.content.member.toString,
                 "type" -> "ack",
               )
+            )
+          // record the timestamp of the acknowledgment
+          metrics
+            .updateAcknowledgementGauge(
+              request.content.member.toString,
+              request.content.timestamp.underlying.micros,
             )
       }
     })
@@ -1628,6 +1644,15 @@ class BlockUpdateGeneratorImpl(
         s"Consuming traffic cost for event with messageId ${request.messageId}" +
           s" from sender $sender at $sequencingTimestamp"
       )
+      // A function to compute the metrics context lazily. This allows the rate limit manager to push metrics
+      // with the request type as a label in an async future, so that we don't waste any time here computing the type
+      // The rate limit manager will merge this context with one containing the member so that the metric is per member
+      metricsContextFn = () => {
+        MetricsContext(
+          "type" -> computeSubmissionRequestRecipientStats(request)
+            .messageTypeAsString(sender, logger)
+        )
+      }
       // Consume traffic for the sender
       newSenderTrafficState <- OptionT.liftF(
         rateLimitManager
@@ -1638,6 +1663,7 @@ class BlockUpdateGeneratorImpl(
             trafficState,
             parameters,
             groupToMembers,
+            metricsContextFn = metricsContextFn,
             lastBalanceUpdateTimestamp = lastSeenTopologyTimestamp,
             warnIfApproximate = warnIfApproximate,
           )
@@ -1740,41 +1766,45 @@ object BlockUpdateGeneratorImpl {
       sequencers: Boolean = false,
       broadcast: Boolean = false,
   ) {
+    private[block] def messageTypeAsString(sender: Member, logger: TracedLogger)(implicit
+        traceContext: TraceContext
+    ) = {
+      // by looking at the recipient lists and the sender, we'll figure out what type of message we've been getting
+      (sender, participants, mediators, sequencers, broadcast) match {
+        case (ParticipantId(_), false, true, false, false) =>
+          "send-confirmation-response"
+        case (ParticipantId(_), true, true, false, false) =>
+          "send-confirmation-request"
+        case (MediatorId(_), true, false, false, false) =>
+          "send-verdict"
+        case (ParticipantId(_), true, false, false, false) =>
+          "send-commitment"
+        case (SequencerId(_), true, false, true, false) =>
+          "send-topup"
+        case (SequencerId(_), false, true, true, false) =>
+          "send-topup-med"
+        case (_, false, false, false, true) =>
+          "send-topology"
+        case (_, false, false, false, false) =>
+          "send-time-proof"
+        case _ =>
+          def r(boolean: Boolean, s: String) = if (boolean) Seq(s) else Seq.empty
+          val recipients = r(participants, "participants") ++
+            r(mediators, "mediators") ++
+            r(sequencers, "sequencers") ++
+            r(broadcast, "broadcast")
+          logger.warn(s"Unexpected message from ${sender} to " + recipients.mkString(","))
+          "send-unexpected"
+      }
+    }
+
     private[block] def updateMetric(
         sender: Member,
         payloadSize: Int,
         logger: TracedLogger,
         metrics: BlockMetrics,
     )(implicit traceContext: TraceContext): Unit = {
-      val messageType = {
-        // by looking at the recipient lists and the sender, we'll figure out what type of message we've been getting
-        (sender, participants, mediators, sequencers, broadcast) match {
-          case (ParticipantId(_), false, true, false, false) =>
-            "send-confirmation-response"
-          case (ParticipantId(_), true, true, false, false) =>
-            "send-confirmation-request"
-          case (MediatorId(_), true, false, false, false) =>
-            "send-verdict"
-          case (ParticipantId(_), true, false, false, false) =>
-            "send-commitment"
-          case (SequencerId(_), true, false, true, false) =>
-            "send-topup"
-          case (SequencerId(_), false, true, true, false) =>
-            "send-topup-med"
-          case (_, false, false, false, true) =>
-            "send-topology"
-          case (_, false, false, false, false) =>
-            "send-time-proof"
-          case _ =>
-            def r(boolean: Boolean, s: String) = if (boolean) Seq(s) else Seq.empty
-            val recipients = r(participants, "participants") ++
-              r(mediators, "mediators") ++
-              r(sequencers, "sequencers") ++
-              r(broadcast, "broadcast")
-            logger.warn(s"Unexpected message from ${sender} to " + recipients.mkString(","))
-            "send-unexpected"
-        }
-      }
+      val messageType = messageTypeAsString(sender, logger)
       val mc = MetricsContext(
         "sender" -> sender.toString,
         "type" -> messageType,

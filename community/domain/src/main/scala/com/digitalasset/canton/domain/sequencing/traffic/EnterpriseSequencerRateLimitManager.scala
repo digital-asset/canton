@@ -6,6 +6,7 @@ package com.digitalasset.canton.domain.sequencing.traffic
 import cats.data.EitherT
 import cats.instances.list.*
 import cats.syntax.parallel.*
+import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
@@ -42,7 +43,7 @@ class EnterpriseSequencerRateLimitManager(
     override protected val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
     override val timeouts: ProcessingTimeout,
-    metrics: SequencerMetrics,
+    private[traffic] val metrics: SequencerMetrics,
     sequencerMemberRateLimiterFactory: SequencerMemberRateLimiterFactory =
       DefaultSequencerMemberRateLimiterFactory,
     eventCostCalculator: EventCostCalculator,
@@ -63,6 +64,8 @@ class EnterpriseSequencerRateLimitManager(
           loggerFactory,
           metrics,
           eventCostCalculator,
+          futureSupervisor,
+          timeouts,
         )
         rateLimitsPerMember.addOne(member -> rateLimiter).discard
         rateLimiter
@@ -97,6 +100,7 @@ class EnterpriseSequencerRateLimitManager(
       trafficState: TrafficState,
       trafficControlParameters: TrafficControlParameters,
       groupToMembers: Map[GroupRecipient, Set[Member]],
+      metricsContextFn: () => MetricsContext,
       lastBalanceUpdateTimestamp: Option[CantonTimestamp],
       warnIfApproximate: Boolean,
   )(implicit
@@ -125,6 +129,7 @@ class EnterpriseSequencerRateLimitManager(
               trafficState,
               groupToMembers,
               currentBalance.map(_.balance).getOrElse(NonNegativeLong.zero),
+              metricsContextFn,
             )
         )
     } yield {
@@ -177,6 +182,7 @@ class EnterpriseSequencerRateLimitManager(
                   NonNegativeLong.zero,
                   originalState,
                   balanceO.map(_.balance).getOrElse(NonNegativeLong.zero),
+                  () => MetricsContext.Empty,
                 )
                 ._1
               member -> TrafficStateUpdateResult(state, balanceO.map(_.serial))

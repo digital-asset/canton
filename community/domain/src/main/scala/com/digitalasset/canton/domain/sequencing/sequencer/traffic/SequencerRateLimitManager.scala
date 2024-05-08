@@ -4,6 +4,7 @@
 package com.digitalasset.canton.domain.sequencing.sequencer.traffic
 
 import cats.data.EitherT
+import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.traffic.EnterpriseSequencerRateLimitManager.TrafficStateUpdateResult
@@ -51,6 +52,7 @@ trait SequencerRateLimitManager extends AutoCloseable {
       trafficState: TrafficState,
       trafficControlConfig: TrafficControlParameters,
       groupToMembers: Map[GroupRecipient, Set[Member]],
+      metricsContextFn: () => MetricsContext,
       lastBalanceUpdateTimestamp: Option[CantonTimestamp] = None,
       warnIfApproximate: Boolean = true,
   )(implicit
