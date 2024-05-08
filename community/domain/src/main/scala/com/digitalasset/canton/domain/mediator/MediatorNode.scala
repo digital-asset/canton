@@ -8,6 +8,7 @@ import cats.data.EitherT
 import cats.instances.future.*
 import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
@@ -45,11 +46,12 @@ import com.digitalasset.canton.sequencing.client.{
   SequencerClientFactory,
 }
 import com.digitalasset.canton.store.*
-import com.digitalasset.canton.time.{Clock, HasUptime}
+import com.digitalasset.canton.time.{Clock, DomainTimeTracker, HasUptime}
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
-import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ResourceUtil, SingleUseCell}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionCompatibility}
@@ -173,6 +175,11 @@ class MediatorNodeBootstrap(
   override protected def sequencedTopologyManagers: Seq[DomainTopologyManager] =
     domainTopologyManager.get.toList
 
+  // TODO(#14048): Align the semantics with the participant.
+  override protected def lookupTopologyClient(
+      storeId: TopologyStoreId
+  ): Option[DomainTopologyClientWithInit] = None
+
   private lazy val deferredSequencerClientHealth =
     MutableHealthComponent(loggerFactory, SequencerClient.healthName, timeouts)
   override protected def mkNodeHealthService(storage: Storage): HealthService =
@@ -207,7 +214,7 @@ class MediatorNodeBootstrap(
           )
       )
 
-    protected val domainConfigurationStore =
+    private val domainConfigurationStore =
       MediatorDomainConfigurationStore(storage, timeouts, loggerFactory)
     addCloseable(domainConfigurationStore)
     addCloseable(deferredSequencerClientHealth)
@@ -325,7 +332,6 @@ class MediatorNodeBootstrap(
           crypto = crypto,
           store = domainTopologyStore,
           outboxQueue = outboxQueue,
-          enableTopologyTransactionValidation = config.topology.enableTopologyTransactionValidation,
           protocolVersion = protocolVersion,
           timeouts = timeouts,
           futureSupervisor = futureSupervisor,
@@ -416,7 +422,13 @@ class MediatorNodeBootstrap(
     new SequencerInfoLoader(
       timeouts = timeouts,
       traceContextPropagation = parameters.tracing.propagation,
-      clientProtocolVersions = ProtocolVersion.supported,
+      clientProtocolVersions =
+        if (parameterConfig.devVersionSupport) ProtocolVersion.supported
+        else
+          // TODO(#15561) Remove NonEmpty construct once stableAndSupported is NonEmpty again
+          NonEmpty
+            .from(ProtocolVersion.stableAndSupported)
+            .getOrElse(sys.error("no protocol version is considered stable in this release")),
       minimumProtocolVersion = Some(ProtocolVersion.minimum),
       dontWarnOnDeprecatedPV = parameterConfig.dontWarnOnDeprecatedPV,
       loggerFactory = loggerFactory,
@@ -470,7 +482,6 @@ class MediatorNodeBootstrap(
             domainConfig.domainParameters.protocolVersion,
             crypto.pureCrypto,
             arguments.parameterConfig,
-            config.topology.enableTopologyTransactionValidation,
             arguments.clock,
             arguments.futureSupervisor,
             domainLoggerFactory,
@@ -572,6 +583,16 @@ class MediatorNodeBootstrap(
       _ = sequencerClientRef.set(sequencerClient)
       _ = deferredSequencerClientHealth.set(sequencerClient.healthComponent)
 
+      timeTracker = DomainTimeTracker(
+        config.timeTracker,
+        clock,
+        sequencerClient,
+        domainConfig.domainParameters.protocolVersion,
+        timeouts,
+        loggerFactory,
+      )
+      _ = topologyClient.setDomainTimeTracker(timeTracker)
+
       // can just new up the enterprise mediator factory here as the mediator node is only available in enterprise setups
       mediatorRuntime <- mediatorRuntimeFactory.create(
         mediatorId,
@@ -585,7 +606,7 @@ class MediatorNodeBootstrap(
         topologyProcessor,
         topologyManagerStatus,
         domainOutboxFactory,
-        config.timeTracker,
+        timeTracker,
         parameters,
         domainConfig.domainParameters.protocolVersion,
         clock,

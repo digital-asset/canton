@@ -37,12 +37,10 @@ object Dependencies {
   lazy val chimney_version = "0.6.1"
   lazy val circe_version = "0.14.2"
   lazy val dropwizard_version = "4.1.33"
-  lazy val flyway_version = "9.15.2"
+  lazy val flyway_version = "10.12.0"
   lazy val gcp_kms_version = "2.36.0"
   lazy val h2_version = "2.1.210"
   lazy val janino_version = "3.1.12"
-  // TODO(i8460) Don't upgrade until https://github.com/sbt/sbt/issues/6564 is fixed
-  lazy val javafx_all_version = "17-ea+8"
   lazy val javax_annotations_version = "1.3.2"
   lazy val log4j_version = "2.23.1"
   lazy val logback_version = "1.5.3"
@@ -68,7 +66,6 @@ object Dependencies {
   lazy val reflections_version = "0.10.2"
   lazy val scaffeine_version = "5.2.1"
   lazy val scala_collections_contrib_version = "0.2.2"
-  lazy val scala_parser_combinators_version = "1.1.2"
   lazy val scala_csv_version = "1.3.10"
   lazy val scala_logging_version = "3.9.5"
   lazy val scalacheck_version = "1.15.4"
@@ -80,7 +77,6 @@ object Dependencies {
   lazy val slf4j_version = "2.0.6"
   // if you update the slick version, please also update our forked code in common/slick.util.*
   lazy val slick_version = "3.3.3"
-  lazy val snakeyaml_version = "2.0"
   lazy val spray_json_derived_codecs_version = "2.3.10"
   lazy val sttp_version = "3.8.16"
   lazy val testcontainers_version = "1.19.7"
@@ -97,13 +93,9 @@ object Dependencies {
 
   lazy val scala_collection_contrib =
     "org.scala-lang.modules" %% "scala-collection-contrib" % scala_collections_contrib_version
-  lazy val scala_parser_combinators =
-    "org.scala-lang.modules" %% "scala-parser-combinators" % scala_parser_combinators_version
   lazy val scala_reflect = "org.scala-lang" % "scala-reflect" % scala_version
-  lazy val scala_compiler = "org.scala-lang" % "scala-compiler" % scala_version
   lazy val shapeless = "com.chuusai" %% "shapeless" % shapeless_version
 
-  lazy val monocle_core = "dev.optics" %% "monocle-core" % monocle_version
   lazy val monocle_macro = "dev.optics" %% "monocle-macro" % monocle_version
 
   // ammonite requires the full scala version including patch number
@@ -113,7 +105,7 @@ object Dependencies {
   lazy val h2 = "com.h2database" % "h2" % h2_version
   lazy val postgres = "org.postgresql" % "postgresql" % postgres_version
   lazy val flyway = "org.flywaydb" % "flyway-core" % flyway_version
-  lazy val flyway_commandline = "org.flywaydb" % "flyway-commandline" % flyway_version
+  lazy val flyway_postgres = "org.flywaydb" % "flyway-database-postgresql" % flyway_version
   lazy val oracle = "com.oracle.database.jdbc" % "ojdbc8" % oracle_version
 
   // Picked up automatically by the scalapb compiler. Contains common dependencies such as protocol buffers like google/protobuf/timestamp.proto
@@ -146,6 +138,7 @@ object Dependencies {
 
   lazy val scopt = "com.github.scopt" %% "scopt" % scopt_version
 
+  lazy val pekko_actor = "org.apache.pekko" %% "pekko-actor" % pekko_version
   lazy val pekko_actor_typed = "org.apache.pekko" %% "pekko-actor-typed" % pekko_version
   lazy val pekko_actor_testkit_typed =
     "org.apache.pekko" %% "pekko-actor-testkit-typed" % pekko_version
@@ -154,7 +147,6 @@ object Dependencies {
   lazy val pekko_slf4j =
     "org.apache.pekko" %% "pekko-slf4j" % pekko_version excludeAll (incompatibleLogging: _*)
   lazy val pekko_http = "org.apache.pekko" %% "pekko-http" % pekko_http_version
-  lazy val pekko_http_core = "org.apache.pekko" %% "pekko-http-core" % pekko_http_version
   lazy val pekko_http_testkit = "org.apache.pekko" %% "pekko-http-testkit" % pekko_http_version
 
   lazy val spray_json_derived_codecs =
@@ -207,8 +199,6 @@ object Dependencies {
   lazy val circe_core = "io.circe" %% "circe-core" % circe_version
   lazy val circe_generic =
     "io.circe" %% "circe-generic" % circe_version exclude ("com.chuusai", s"shapeless_$scala_version_short")
-  lazy val circe_generic_extras =
-    "io.circe" %% "circe-generic-extras" % circe_version exclude ("com.chuusai", s"shapeless_$scala_version_short")
   lazy val circe_parser = "io.circe" %% "circe-parser" % circe_version
   lazy val circe_yaml = "io.circe" %% "circe-yaml" % circe_version
 
@@ -225,8 +215,6 @@ object Dependencies {
 
   lazy val opentelemetry_api = resolveDependency("io.opentelemetry", "opentelemetry-api")
   lazy val opentelemetry_sdk = resolveDependency("io.opentelemetry", "opentelemetry-sdk")
-  lazy val opentelemetry_sdk_testing =
-    resolveDependency("io.opentelemetry", "opentelemetry-sdk-testing")
   lazy val opentelemetry_sdk_autoconfigure =
     resolveDependency("io.opentelemetry", "opentelemetry-sdk-extension-autoconfigure")
   lazy val opentelemetry_exporter_zipkin =
@@ -256,8 +244,6 @@ object Dependencies {
   lazy val testcontainers_postgresql = "org.testcontainers" % "postgresql" % testcontainers_version
 
   lazy val sttp = "com.softwaremill.sttp.client3" %% "core" % sttp_version
-  lazy val sttp_circe = "com.softwaremill.sttp.client3" %% "circe" % sttp_version
-  lazy val sttp_slf4j = "com.softwaremill.sttp.client3" %% "slf4j-backend" % sttp_version
 
   // demo dependencies (you also need to update demo.sc)
   lazy val scalafx = "org.scalafx" %% "scalafx" % scalafx_version
@@ -330,7 +316,6 @@ object Dependencies {
   lazy val daml_lf_archive_reader = "com.daml" %% "daml-lf-archive-reader" % daml_libraries_version
   lazy val daml_lf_engine = "com.daml" %% "daml-lf-engine" % daml_libraries_version
   lazy val daml_lf_transaction = "com.daml" %% "daml-lf-transaction" % daml_libraries_version
-  lazy val daml_nameof = "com.daml" %% "nameof" % daml_libraries_version
   lazy val daml_non_empty = "com.daml" %% "nonempty" % daml_libraries_version
   lazy val daml_nonempty_cats = "com.daml" %% "nonempty-cats" % daml_libraries_version
   lazy val daml_metrics = "com.daml" %% "metrics" % daml_libraries_version
@@ -367,12 +352,7 @@ object Dependencies {
     "com.daml" %% "grpc-test-utils" % daml_libraries_version
 
   // daml repo dependencies
-  // TODO(#10852) scalaz or cats. let's pick one.
-  lazy val scalaz_core = resolveDependency("org.scalaz", "scalaz-core")
-  lazy val scalaz_scalacheck = resolveDependency("org.scalaz", "scalaz-scalacheck-binding")
   lazy val fasterjackson_core = resolveDependency("com.fasterxml.jackson.core", "jackson-core")
-  // TODO(#10852) yet another json library
-  lazy val spray = resolveDependency("io.spray", "spray-json")
   lazy val google_protobuf_java = resolveDependency("com.google.protobuf", "protobuf-java")
   lazy val protobuf_version = google_protobuf_java.revision
   // To override 3.19.2 from the daml repo's maven_install_2.13.json
@@ -383,20 +363,11 @@ object Dependencies {
   lazy val google_common_protos =
     resolveDependency("com.google.api.grpc", "proto-google-common-protos")
 
-  lazy val apache_commons_text = resolveDependency("org.apache.commons", "commons-text")
-  lazy val typelevel_paiges = resolveDependency("org.typelevel", "paiges-core")
   lazy val commons_io = resolveDependency("commons-io", "commons-io")
-  lazy val commons_codec = resolveDependency("commons-codec", "commons-codec")
-  lazy val lihaoyi_sourcecode = resolveDependency("com.lihaoyi", "sourcecode")
-  lazy val totososhi = resolveDependency("com.github.tototoshi", "scala-csv")
   lazy val auth0_java = resolveDependency("com.auth0", "java-jwt")
   lazy val auth0_jwks = resolveDependency("com.auth0", "jwks-rsa")
   lazy val guava = resolveDependency("com.google.guava", "guava")
   // TODO(#10852) one database library, not two
   lazy val anorm = resolveDependency("org.playframework.anorm", "anorm")
   lazy val scalapb_json4s = resolveDependency("com.thesamet.scalapb", "scalapb-json4s")
-
-  // it should be kept up-to-date with the scaffeine version to avoid incompatibilities
-  lazy val caffeine = resolveDependency("com.github.ben-manes.caffeine", "caffeine")
-  lazy val hikaricp = resolveDependency("com.zaxxer", "HikariCP")
 }

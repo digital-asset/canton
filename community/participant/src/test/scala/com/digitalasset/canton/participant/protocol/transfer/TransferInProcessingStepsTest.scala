@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.Eval
 import cats.implicits.*
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{CachingConfigs, DefaultProcessingTimeouts}
@@ -15,7 +15,7 @@ import com.digitalasset.canton.data.ViewType.TransferInViewType
 import com.digitalasset.canton.data.{CantonTimestamp, FullTransferInTree, TransferSubmitterMetadata}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
-import com.digitalasset.canton.participant.protocol.ProcessingStartingPoints
+import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
 import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetectionHelpers.{
   mkActivenessResult,
   mkActivenessSet,
@@ -29,10 +29,11 @@ import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessin
 import com.digitalasset.canton.participant.protocol.transfer.TransferInValidation.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.{
   NoTransferSubmissionPermission,
-  ReceivedMultipleRequests,
+  ParsedTransferRequest,
   StakeholdersMismatch,
   SubmittingPartyMustBeStakeholderIn,
 }
+import com.digitalasset.canton.participant.protocol.{EngineController, ProcessingStartingPoints}
 import com.digitalasset.canton.participant.store.TransferStoreTest.{contract, transactionId1}
 import com.digitalasset.canton.participant.store.memory.*
 import com.digitalasset.canton.participant.store.{
@@ -41,6 +42,7 @@ import com.digitalasset.canton.participant.store.{
   SyncDomainPersistentState,
   TransferStoreTest,
 }
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{submitter, submittingParticipant}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
@@ -53,7 +55,6 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.version.{HasTestCloseContext, ProtocolVersion}
-import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
@@ -128,7 +129,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
         IndexedDomain.tryCreate(targetDomain.unwrap, 1),
         testedProtocolVersion,
         enableAdditionalConsistencyChecks = true,
-        enableTopologyTransactionValidation = false,
         indexedStringStore = indexedStringStore,
         loggerFactory = loggerFactory,
         timeouts = timeouts,
@@ -153,6 +153,26 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
       (persistentState, state)
     }
   }
+
+  def mkParsedRequest(
+      view: FullTransferInTree,
+      recipients: Recipients = RecipientsTest.testInstance,
+      signatureO: Option[Signature] = None,
+  ): ParsedTransferRequest[FullTransferInTree] = ParsedTransferRequest(
+    RequestCounter(1),
+    CantonTimestamp.Epoch,
+    SequencerCounter(1),
+    view,
+    recipients,
+    signatureO,
+    None,
+    isFreshOwnTimelyRequest = true,
+    transferringParticipant = false,
+    Seq.empty,
+    targetMediator,
+    cryptoSnapshot,
+    cryptoSnapshot.ipsSnapshot.findDynamicDomainParameters().futureValue.value,
+  )
 
   "prepare submission" should {
     def setUpOrFail(
@@ -194,7 +214,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
         _ <- setUpOrFail(transferData, transferOutResult, persistentState)
         _preparedSubmission <-
           transferInProcessingSteps
-            .prepareSubmission(
+            .createSubmission(
               submissionParam,
               targetMediator,
               state,
@@ -249,7 +269,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
         (persistentState, state) = deps
         _ <- setUpOrFail(transferData2, transferOutResult, persistentState)
         preparedSubmission <- leftOrFailShutdown(
-          transferInProcessingSteps.prepareSubmission(
+          transferInProcessingSteps.createSubmission(
             submissionParam,
             targetMediator,
             state,
@@ -272,7 +292,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
           "add transfer data failed"
         )
         preparedSubmission <- leftOrFailShutdown(
-          transferInProcessingSteps.prepareSubmission(
+          transferInProcessingSteps.createSubmission(
             submissionParam,
             targetMediator,
             state,
@@ -299,7 +319,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
         (persistentState, state) = deps
         _ <- setUpOrFail(transferData, transferOutResult, persistentState)
         preparedSubmission <- leftOrFailShutdown(
-          transferInProcessingSteps.prepareSubmission(
+          transferInProcessingSteps.createSubmission(
             submissionParam2,
             targetMediator,
             state,
@@ -329,7 +349,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
         (persistentState, state) = deps
         _ <- setUpOrFail(transferData, transferOutResult, persistentState)
         preparedSubmission <- leftOrFailShutdown(
-          transferInProcessingSteps.prepareSubmission(
+          transferInProcessingSteps.createSubmission(
             submissionParam,
             targetMediator,
             state,
@@ -359,7 +379,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
         (persistentState, ephemeralState) = deps
         _ <- setUpOrFail(transferData2, transferOutResult, persistentState)
         preparedSubmission <- leftOrFailShutdown(
-          transferInProcessingSteps.prepareSubmission(
+          transferInProcessingSteps.createSubmission(
             submissionParam2,
             targetMediator,
             ephemeralState,
@@ -383,7 +403,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
         _ <- setUpOrFail(transferData, transferOutResult, persistentState)
         preparedSubmission <-
           transferInProcessingSteps
-            .prepareSubmission(
+            .createSubmission(
               submissionParam2,
               targetMediator,
               ephemeralState,
@@ -422,18 +442,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
         transferOutResult,
       )
 
-    def checkSuccessful(
-        result: transferInProcessingSteps.CheckActivenessAndWritePendingContracts
-    ): Assertion =
-      result match {
-        case transferInProcessingSteps.CheckActivenessAndWritePendingContracts(
-              activenessSet,
-              _,
-            ) =>
-          assert(activenessSet == mkActivenessSet(tfIn = Set(contractId)))
-        case _ => fail()
-      }
-
     "succeed without errors" in {
       val sessionKeyStore = SessionKeyStore(CachingConfigs.defaultSessionKeyCacheConfig)
       for {
@@ -442,26 +450,26 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
           Seq,
           OpenEnvelope(inRequest, RecipientsTest.testInstance)(testedProtocolVersion),
         )
-        decrypted <- valueOrFail(
-          transferInProcessingSteps.decryptViews(envelopes, cryptoSnapshot, sessionKeyStore)
-        )(
-          "decrypt request failed"
-        )
-        result <- valueOrFail(
-          transferInProcessingSteps.computeActivenessSetAndPendingContracts(
-            CantonTimestamp.Epoch,
-            RequestCounter(1),
-            SequencerCounter(1),
-            NonEmptyUtil.fromUnsafe(decrypted.views),
-            Seq.empty,
-            cryptoSnapshot,
-            MediatorGroupRecipient(MediatorGroupIndex.one),
-            None,
-          )
-        )("compute activeness set failed")
+        decrypted <-
+          transferInProcessingSteps
+            .decryptViews(envelopes, cryptoSnapshot, sessionKeyStore)
+            .valueOrFailShutdown(
+              "decrypt request failed"
+            )
+        (WithRecipients(view, recipients), signature) = decrypted.views.loneElement
+        activenessSet =
+          transferInProcessingSteps
+            .computeActivenessSet(
+              mkParsedRequest(
+                view,
+                recipients,
+                signature,
+              )
+            )
+            .value
       } yield {
         decrypted.decryptionErrors shouldBe Seq.empty
-        checkSuccessful(result)
+        activenessSet shouldBe mkActivenessSet(tfIn = Set(contractId))
       }
     }
 
@@ -475,51 +483,48 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
         anotherMediator,
         transferOutResult,
       )
-      for {
-        result <- leftOrFail(
-          transferInProcessingSteps.computeActivenessSetAndPendingContracts(
-            CantonTimestamp.Epoch,
-            RequestCounter(1),
-            SequencerCounter(1),
-            NonEmpty(Seq, (WithRecipients(inTree2, RecipientsTest.testInstance), None)),
-            Seq.empty,
-            cryptoSnapshot,
-            MediatorGroupRecipient(MediatorGroupIndex.one),
-            None,
-          )
-        )("compute activeness set did not return a left")
-      } yield {
-        result match {
-          case UnexpectedDomain(_, targetD, currentD) =>
-            assert(targetD == anotherDomain)
-            assert(currentD == targetDomain.unwrap)
-          case x => fail(x.toString)
-        }
+      val error =
+        transferInProcessingSteps.computeActivenessSet(mkParsedRequest(inTree2)).left.value
+
+      inside(error) { case UnexpectedDomain(_, targetD, currentD) =>
+        assert(targetD == anotherDomain)
+        assert(currentD == targetDomain.unwrap)
       }
     }
 
-    "fail when multiple requests are present" in {
+    "deduplicate requests with an alarm" in {
       // Send the same transfer-in request twice
+      val parsedRequest = mkParsedRequest(inTree)
+      val viewWithMetadata = (
+        WithRecipients(parsedRequest.fullViewTree, parsedRequest.recipients),
+        parsedRequest.signatureO,
+      )
       for {
-        result <- leftOrFail(
-          transferInProcessingSteps.computeActivenessSetAndPendingContracts(
-            CantonTimestamp.Epoch,
-            RequestCounter(1),
-            SequencerCounter(1),
-            NonEmpty(
-              Seq,
-              (WithRecipients(inTree, RecipientsTest.testInstance), None),
-              (WithRecipients(inTree, RecipientsTest.testInstance), None),
+        result <-
+          loggerFactory.assertLogs(
+            transferInProcessingSteps.computeParsedRequest(
+              parsedRequest.rc,
+              parsedRequest.requestTimestamp,
+              parsedRequest.sc,
+              NonEmpty(
+                Seq,
+                viewWithMetadata,
+                viewWithMetadata,
+              ),
+              parsedRequest.submitterMetadataO,
+              parsedRequest.isFreshOwnTimelyRequest,
+              parsedRequest.malformedPayloads,
+              parsedRequest.mediator,
+              parsedRequest.snapshot,
+              parsedRequest.domainParameters,
             ),
-            Seq.empty,
-            cryptoSnapshot,
-            MediatorGroupRecipient(MediatorGroupIndex.one),
-            None,
+            _.shouldBeCantonError(
+              SyncServiceAlarm,
+              _ shouldBe s"Received 2 instead of 1 views in Request ${CantonTimestamp.Epoch}. Discarding all but the first view.",
+            ),
           )
-        )("compute activenss set did not return a left")
       } yield {
-        result should matchPattern { case ReceivedMultipleRequests(Seq(_, _)) =>
-        }
+        result shouldBe parsedRequest
       }
     }
   }
@@ -555,26 +560,18 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
           transferOutResult,
         )
 
-        pendingDataAndResponseArgs2 = TransferInProcessingSteps.PendingDataAndResponseArgs(
-          fullTransferInTree2,
-          CantonTimestamp.Epoch,
-          RequestCounter(1),
-          SequencerCounter(1),
-          cryptoSnapshot,
-          transferringParticipant = true,
-        )
-
         transferLookup = ephemeralState.transferCache
 
         result <- leftOrFail(
           transferInProcessingSteps
             .constructPendingDataAndResponse(
-              pendingDataAndResponseArgs2,
+              mkParsedRequest(fullTransferInTree2),
               transferLookup,
               FutureUnlessShutdown.pure(mkActivenessResult()),
-              targetMediator,
-              freshOwnTimelyTx = true,
+              engineController =
+                EngineController(participant, RequestId(CantonTimestamp.Epoch), loggerFactory),
             )
+            .flatMap(_.confirmationResponsesF)
         )("construction of pending data and response did not return a left").failOnShutdown
       } yield {
         result should matchPattern { case StakeholdersMismatch(_, _, _, _) =>
@@ -600,23 +597,15 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
           targetMediator,
           transferOutResult,
         )
-        pendingDataAndResponseArgs = TransferInProcessingSteps.PendingDataAndResponseArgs(
-          fullTransferInTree,
-          CantonTimestamp.Epoch,
-          RequestCounter(1),
-          SequencerCounter(1),
-          cryptoSnapshot,
-          transferringParticipant = true,
-        )
 
         _result <- valueOrFail(
           transferInProcessingSteps
             .constructPendingDataAndResponse(
-              pendingDataAndResponseArgs,
+              mkParsedRequest(fullTransferInTree),
               transferLookup,
               FutureUnlessShutdown.pure(mkActivenessResult()),
-              targetMediator,
-              freshOwnTimelyTx = true,
+              engineController =
+                EngineController(participant, RequestId(CantonTimestamp.Epoch), loggerFactory),
             )
         )("construction of pending data and response failed").failOnShutdown
       } yield {
@@ -653,7 +642,9 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
         transferId,
         contract.metadata.stakeholders,
         MediatorGroupRecipient(MediatorGroupIndex.one),
-        locallyRejected = false,
+        locallyRejectedF = FutureUnlessShutdown.pure(false),
+        abortEngine = _ => (),
+        engineAbortStatusF = FutureUnlessShutdown.pure(EngineAbortStatus.notAborted),
       )
 
       for {
@@ -746,8 +737,5 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest with Has
   ): Future[EncryptedViewMessage[TransferInViewType]] =
     EncryptedViewMessageFactory
       .create(TransferInViewType)(tree, cryptoSnapshot, sessionKeyStore, testedProtocolVersion)
-      .fold(
-        error => throw new IllegalArgumentException(s"Cannot encrypt transfer-in request: $error"),
-        Predef.identity,
-      )
+      .valueOrFailShutdown("cannot encrypt transfer-in request")
 }
