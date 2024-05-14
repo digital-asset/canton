@@ -48,7 +48,11 @@ import com.digitalasset.canton.platform.apiserver.services.command.{
   CommandSubmissionServiceImpl,
 }
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
-import com.digitalasset.canton.platform.config.{CommandServiceConfig, UserManagementServiceConfig}
+import com.digitalasset.canton.platform.config.{
+  CommandServiceConfig,
+  PackageManagementServiceConfig,
+  UserManagementServiceConfig,
+}
 import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataStore
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.BindableService
@@ -105,6 +109,7 @@ object ApiServices {
       maxDeduplicationDuration: config.NonNegativeFiniteDuration,
       userManagementServiceConfig: UserManagementServiceConfig,
       apiStreamShutdownTimeout: FiniteDuration,
+      packageManagementServiceConfig: PackageManagementServiceConfig,
       meteringReportKey: MeteringReportKey,
       authenticateContract: AuthenticateContract,
       telemetry: Telemetry,
@@ -351,6 +356,7 @@ object ApiServices {
         )
 
         val apiPackageManagementService = ApiPackageManagementService.createApiService(
+          packageManagementServiceConfig.enablePackageUpload,
           indexService,
           transactionsService,
           packageMetadataStore,

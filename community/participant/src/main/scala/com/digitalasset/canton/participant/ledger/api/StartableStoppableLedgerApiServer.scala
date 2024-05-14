@@ -320,6 +320,7 @@ class StartableStoppableLedgerApiServer(
         initSyncTimeout = config.serverConfig.initSyncTimeout,
         managementServiceTimeout = config.serverConfig.managementServiceTimeout,
         userManagement = config.serverConfig.userManagementService,
+        packageManagementServiceConfig = config.serverConfig.packageManagementService,
         tls = config.serverConfig.tls
           .map(LedgerApiServerConfig.ledgerApiServerTlsConfigFromCantonServerConfig),
         address = Some(config.serverConfig.address),

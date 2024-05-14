@@ -116,9 +116,11 @@ sealed trait AcsCommitmentProcessorBaseTest
 
   protected def ts(i: CantonTimestamp): CantonTimestampSecond =
     CantonTimestampSecond.ofEpochSecond(i.getEpochSecond)
-  protected def ts(i: Int): CantonTimestampSecond = CantonTimestampSecond.ofEpochSecond(i.longValue)
 
-  protected def toc(timestamp: Int, requestCounter: Int = 0): TimeOfChange =
+  protected def ts(i: Long): CantonTimestampSecond =
+    CantonTimestampSecond.ofEpochSecond(i.longValue)
+
+  protected def toc(timestamp: Long, requestCounter: Int = 0): TimeOfChange =
     TimeOfChange(RequestCounter(requestCounter), ts(timestamp).forgetRefinement)
 
   protected def mkChangeIdHash(index: Int) = ChangeIdHash(DefaultDamlValues.lfhash(index))
@@ -264,6 +266,7 @@ sealed trait AcsCommitmentProcessorBaseTest
       acsCommitmentsCatchUpModeEnabled: Boolean = false,
       domainParametersUpdates: List[DomainParameters.WithValidity[DynamicDomainParameters]] =
         List.empty,
+      reconciliationIntervalsUpdates: List[DynamicDomainParametersWithValidity] = List.empty,
   )(implicit ec: ExecutionContext): (
       AcsCommitmentProcessor,
       AcsCommitmentStore,
@@ -807,7 +810,7 @@ sealed trait AcsCommitmentProcessorBaseTest
 
   protected def withTestHash[A]: A => WithContractHash[A] = WithContractHash[A](_, testHash)
 
-  protected def rt(timestamp: Int, tieBreaker: Int): RecordTime =
+  protected def rt(timestamp: Long, tieBreaker: Int): RecordTime =
     RecordTime(ts(timestamp).forgetRefinement, tieBreaker.toLong)
 
   protected val coid = (txId, discriminator) =>
@@ -878,9 +881,10 @@ class AcsCommitmentProcessorTest
           Map[LfContractId, TransferCounter],
           CantonTimestampSecond,
           CantonTimestampSecond,
+          Option[PositiveSeconds],
       )
   ): Future[SignedProtocolMessage[AcsCommitment]] = {
-    val (remote, contracts, fromExclusive, toInclusive) = params
+    val (remote, contracts, fromExclusive, toInclusive, reconciliationInterval) = params
 
     val crypto =
       TestingTopologyX().withSimpleParticipants(remote).build().forOwnerAndDomain(remote)
@@ -889,7 +893,11 @@ class AcsCommitmentProcessorTest
     val snapshotF = crypto.snapshot(CantonTimestamp.Epoch)
     val period =
       CommitmentPeriod
-        .create(fromExclusive.forgetRefinement, toInclusive.forgetRefinement, interval)
+        .create(
+          fromExclusive.forgetRefinement,
+          toInclusive.forgetRefinement,
+          reconciliationInterval.getOrElse(interval),
+        )
         .value
     val payload =
       AcsCommitment.create(domainId, remote, localId, period, cmt, testedProtocolVersion)
@@ -1251,8 +1259,8 @@ class AcsCommitmentProcessorTest
         testSetupDontPublish(timeProofs, contractSetup, topology)
 
       val remoteCommitments = List(
-        (remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(0), ts(5)),
-        (remoteId2, Map((coid(0, 1), initialTransferCounter)), ts(5), ts(10)),
+        (remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(0), ts(5), None),
+        (remoteId2, Map((coid(0, 1), initialTransferCounter)), ts(5), ts(10), None),
       )
 
       for {
@@ -1340,7 +1348,7 @@ class AcsCommitmentProcessorTest
       )
 
       val remoteCommitments =
-        List((remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(5), ts(10)))
+        List((remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(5), ts(10), None))
 
       for {
         remote <- remoteCommitments.parTraverse(commitmentMsg)
@@ -1833,7 +1841,7 @@ class AcsCommitmentProcessorTest
       )
       rc.update(rt(3, 0), ch3)
       val snap3 = rc.snapshot()
-      snap3.recordTime shouldBe (rt(3, 0))
+      snap3.recordTime shouldBe rt(3, 0)
       snap3.active.keySet shouldBe Set(SortedSet(alice, carol), SortedSet(bob, carol))
       snap3.delta.keySet shouldBe Set(SortedSet(alice, carol))
       snap3.deleted shouldBe Set.empty
@@ -2056,6 +2064,13 @@ class AcsCommitmentProcessorTest
           config <- processor.catchUpConfig(cantonTimestamp)
         } yield {
           config match {
+            case Some(cfg)
+                if cfg.catchUpIntervalSkip == AcsCommitmentsCatchUpConfig
+                  .disabledCatchUp()
+                  .catchUpIntervalSkip && cfg.nrIntervalsToTriggerCatchUp == AcsCommitmentsCatchUpConfig
+                  .disabledCatchUp()
+                  .nrIntervalsToTriggerCatchUp =>
+              succeed
             case Some(cfg) => fail(s"Canton config is defined ($cfg) at $cantonTimestamp")
             case None => succeed
           }
@@ -2095,16 +2110,17 @@ class AcsCommitmentProcessorTest
           )
 
         val remoteCommitments = List(
-          (remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(0), ts(5)),
-          (remoteId2, Map((coid(0, 1), initialTransferCounter)), ts(10), ts(15)),
+          (remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(0), ts(5), None),
+          (remoteId2, Map((coid(0, 1), initialTransferCounter)), ts(10), ts(15), None),
           (
             remoteId2,
             Map((coid(1, 0), initialTransferCounter), (coid(0, 1), initialTransferCounter)),
             ts(15),
             ts(20),
+            None,
           ),
-          (remoteId2, Map((coid(1, 0), initialTransferCounter)), ts(20), ts(25)),
-          (remoteId2, Map((coid(1, 0), initialTransferCounter)), ts(25), ts(30)),
+          (remoteId2, Map((coid(1, 0), initialTransferCounter)), ts(20), ts(25), None),
+          (remoteId2, Map((coid(1, 0), initialTransferCounter)), ts(25), ts(30), None),
         )
 
         for {
@@ -2148,6 +2164,258 @@ class AcsCommitmentProcessorTest
         }
       }
 
+      "catch up parameters overflow causes exception" in {
+        assertThrows[IllegalArgumentException]({
+          new AcsCommitmentsCatchUpConfig(
+            PositiveInt.tryCreate(Int.MaxValue / 2),
+            PositiveInt.tryCreate(Int.MaxValue / 2),
+          )
+        })
+      }
+
+      "catch up with maximum reconciliation interval and catch-up parameters logs error" in {
+        loggerFactory.assertLoggedWarningsAndErrorsSeq(
+          {
+            // maximum reconciliation interval in seconds allowed by the CantonTimestamp
+            // the last division by 11 is to have valid CantonTimestamps for all the time bounds in the test sequences
+            val reconciliationInterval = CantonTimestamp.MaxValue.getEpochSecond / 11 - 1
+            val testSequences =
+              (1 to 10)
+                .map(i => i * reconciliationInterval)
+                .map(CantonTimestamp.ofEpochSecond)
+                .toList
+
+            val contractSetup = Map(
+              // contract ID to stakeholders, creation and archival time
+              (
+                coid(0, 0),
+                (
+                  Set(alice, bob),
+                  toc(1),
+                  toc(CantonTimestamp.MaxValue.getEpochSecond),
+                  initialTransferCounter,
+                  initialTransferCounter,
+                ),
+              )
+            )
+
+            val topology = Map(
+              localId -> Set(alice),
+              remoteId1 -> Set(bob),
+            )
+
+            // maximum catch-up config parameters so that their multiplication is allowed
+            val startConfig =
+              new AcsCommitmentsCatchUpConfig(
+                PositiveInt.tryCreate(Int.MaxValue / 8),
+                PositiveInt.tryCreate(8),
+              )
+            val startConfigWithValidity = DomainParameters.WithValidity(
+              validFrom = CantonTimestamp.MinValue,
+              validUntil = Some(CantonTimestamp.MaxValue),
+              serial = PositiveInt.MaxValue,
+              parameter = defaultParameters.tryUpdate(acsCommitmentsCatchUpConfigParameter =
+                Some(startConfig)
+              ),
+            )
+
+            val (processor, store, sequencerClient, changes) =
+              testSetupDontPublish(
+                testSequences,
+                contractSetup,
+                topology,
+                acsCommitmentsCatchUpModeEnabled = true,
+                domainParametersUpdates = List(startConfigWithValidity),
+                overrideDefaultSortedReconciliationIntervalsProvider = Some(
+                  constantSortedReconciliationIntervalsProvider(
+                    PositiveSeconds.tryOfSeconds(reconciliationInterval.toLong)
+                  )
+                ),
+              )
+
+            for {
+              _ <- checkCatchUpModeCfgCorrect(
+                processor,
+                testSequences.head,
+                startConfig.nrIntervalsToTriggerCatchUp,
+                startConfig.catchUpIntervalSkip,
+              )
+
+              // we apply any changes (contract deployment) that happens before our windows
+              _ = changes
+                .filter(a => a._1 < testSequences.head)
+                .foreach { case (ts, tb, change) =>
+                  processor.publish(RecordTime(ts, tb.v), change)
+                }
+              _ <- processor.flush()
+              _ <- testSequence(
+                testSequences,
+                processor,
+                changes,
+                store,
+                reconciliationInterval.longValue,
+                noLogSuppression = true,
+                justProcessingNoChecks = true,
+              )
+            } yield {
+              succeed
+            }
+          },
+          // the computed timestamp to catch up to represents an out of bound CantonTimestamp, therefore we log an error
+          LogEntry.assertLogSeq(
+            Seq(
+              (
+                _.message should (include("Error when computing the catch up timestamp")),
+                "invalid catchUpTo timestamp did not cause an error",
+              )
+            )
+          ),
+        )
+      }
+
+      "catch up in correct skip steps scenario1" in {
+        val reconciliationInterval = 5L
+        val testSequences =
+          (1L to 14)
+            .map(i => i * reconciliationInterval)
+            .map(CantonTimestamp.ofEpochSecond)
+            .toList
+        val contractSetup = Map(
+          // contract ID to stakeholders, creation and archival time
+          (
+            coid(0, 0),
+            (Set(alice, bob), toc(1), toc(20000), initialTransferCounter, initialTransferCounter),
+          )
+        )
+
+        val topology = Map(
+          localId -> Set(alice),
+          remoteId1 -> Set(bob),
+        )
+
+        val startConfig =
+          new AcsCommitmentsCatchUpConfig(PositiveInt.tryCreate(2), PositiveInt.tryCreate(3))
+        val startConfigWithValidity = DomainParameters.WithValidity(
+          validFrom = testSequences.head.addMicros(-1),
+          validUntil = Some(CantonTimestamp.MaxValue),
+          serial = PositiveInt.MaxValue,
+          parameter =
+            defaultParameters.tryUpdate(acsCommitmentsCatchUpConfigParameter = Some(startConfig)),
+        )
+
+        val (processor, store, sequencerClient, changes) =
+          testSetupDontPublish(
+            testSequences,
+            contractSetup,
+            topology,
+            acsCommitmentsCatchUpModeEnabled = true,
+            domainParametersUpdates = List(startConfigWithValidity),
+          )
+
+        for {
+          _ <- checkCatchUpModeCfgCorrect(
+            processor,
+            testSequences.head,
+            startConfig.nrIntervalsToTriggerCatchUp,
+            startConfig.catchUpIntervalSkip,
+          )
+
+          // we apply any changes (contract deployment) that happens before our windows
+          _ = changes
+            .filter(a => a._1 < testSequences.head)
+            .foreach { case (ts, tb, change) =>
+              processor.publish(RecordTime(ts, tb.v), change)
+            }
+          _ <- processor.flush()
+          _ <- testSequence(
+            testSequences,
+            processor,
+            changes,
+            store,
+            reconciliationInterval,
+          )
+          // first catch-up step to 30, in steps of 2*5 => 3 sends at [10,20,30]
+          // second catch-up step to 60, in steps of 2*5 => 2 sends at [40,50,60]
+          // third catch-up would be up to 90, in steps of 2*5, but only if we are 3*5 = 15 seconds behind
+          // as the last tick is 70, we don't trigger catch-up mode, and instead send commitments every 5 seconds
+          // so the timestamps are [5,10,20,30,40,50,60,65,70]
+          _ = sequencerClient.requests.size shouldBe 9
+        } yield {
+          succeed
+        }
+      }
+
+      "catch up in correct skip steps scenario2" in {
+        val reconciliationInterval = 5L
+        val testSequences =
+          (1L to 45)
+            .map(i => i * reconciliationInterval)
+            .map(CantonTimestamp.ofEpochSecond)
+            .toList
+        val contractSetup = Map(
+          // contract ID to stakeholders, creation and archival time
+          (
+            coid(0, 0),
+            (Set(alice, bob), toc(1), toc(20000), initialTransferCounter, initialTransferCounter),
+          )
+        )
+
+        val topology = Map(
+          localId -> Set(alice),
+          remoteId1 -> Set(bob),
+        )
+
+        val startConfig =
+          new AcsCommitmentsCatchUpConfig(PositiveInt.tryCreate(10), PositiveInt.tryCreate(2))
+        val startConfigWithValidity = DomainParameters.WithValidity(
+          validFrom = testSequences.head.addMicros(-1),
+          validUntil = Some(CantonTimestamp.MaxValue),
+          serial = PositiveInt.MaxValue,
+          parameter =
+            defaultParameters.tryUpdate(acsCommitmentsCatchUpConfigParameter = Some(startConfig)),
+        )
+
+        val (processor, store, sequencerClient, changes) =
+          testSetupDontPublish(
+            testSequences,
+            contractSetup,
+            topology,
+            acsCommitmentsCatchUpModeEnabled = true,
+            domainParametersUpdates = List(startConfigWithValidity),
+          )
+
+        for {
+          _ <- checkCatchUpModeCfgCorrect(
+            processor,
+            testSequences.head,
+            startConfig.nrIntervalsToTriggerCatchUp,
+            startConfig.catchUpIntervalSkip,
+          )
+
+          // we apply any changes (contract deployment) that happens before our windows
+          _ = changes
+            .filter(a => a._1 < testSequences.head)
+            .foreach { case (ts, tb, change) =>
+              processor.publish(RecordTime(ts, tb.v), change)
+            }
+          _ <- processor.flush()
+          _ <- testSequence(
+            testSequences,
+            processor,
+            changes,
+            store,
+            reconciliationInterval,
+          )
+          // we get an initial send at 5
+          // first catch-up step to 100, in steps of 10*5 => 2 sends at [50,100]
+          // second catch-up to 200, in steps of 10*5 => 2 sends at [150,200]
+          // at time 200 we end catch-up mode, and send 5 more commitments at 205,210,215,220,225
+          _ = sequencerClient.requests.size shouldBe 10
+        } yield {
+          succeed
+        }
+      }
+
       "pruning works correctly for a participant ahead of a counter-participant that catches up" in {
         val timeProofs = List(5L, 10, 15, 20, 25, 30).map(CantonTimestamp.ofEpochSecond)
         val contractSetup = Map(
@@ -2181,15 +2449,16 @@ class AcsCommitmentProcessorTest
           )
 
         val remoteCommitments = List(
-          (remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(0), ts(5)),
-          (remoteId2, Map((coid(0, 1), initialTransferCounter)), ts(10), ts(15)),
+          (remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(0), ts(5), None),
+          (remoteId2, Map((coid(0, 1), initialTransferCounter)), ts(10), ts(15), None),
           (
             remoteId2,
             Map((coid(1, 0), initialTransferCounter), (coid(0, 1), initialTransferCounter)),
             ts(15),
             ts(20),
+            None,
           ),
-          (remoteId2, Map((coid(1, 0), initialTransferCounter)), ts(20), ts(30)),
+          (remoteId2, Map((coid(1, 0), initialTransferCounter)), ts(20), ts(30), None),
         )
 
         for {
@@ -2264,8 +2533,8 @@ class AcsCommitmentProcessorTest
           )
 
         val remoteCommitments = List(
-          (remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(0), ts(5)),
-          (remoteId2, Map((coid(0, 1), initialTransferCounter)), ts(10), ts(15)),
+          (remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(0), ts(5), None),
+          (remoteId2, Map((coid(0, 1), initialTransferCounter)), ts(10), ts(15), None),
           // wrong contract, causes mismatch
           (
             remoteId2,
@@ -2275,9 +2544,10 @@ class AcsCommitmentProcessorTest
             ),
             ts(15),
             ts(20),
+            None,
           ),
-          (remoteId2, Map((coid(1, 0), initialTransferCounter)), ts(20), ts(25)),
-          (remoteId2, Map((coid(1, 0), initialTransferCounter)), ts(25), ts(30)),
+          (remoteId2, Map((coid(1, 0), initialTransferCounter)), ts(20), ts(25), None),
+          (remoteId2, Map((coid(1, 0), initialTransferCounter)), ts(25), ts(30), None),
         )
 
         for {
@@ -2342,8 +2612,9 @@ class AcsCommitmentProcessorTest
           assert(outstanding == Some(toc(30).timestamp))
         }
       }
+
       "dynamically change, disable & re-enable catch-up config during a catch-up" in {
-        val reconciliationInterval = 5
+        val reconciliationInterval = 5L
         val testSequences =
           List(
             // we split them up by large amounts to avoid potential overlaps
@@ -2376,6 +2647,7 @@ class AcsCommitmentProcessorTest
 
         val midConfig =
           new AcsCommitmentsCatchUpConfig(PositiveInt.tryCreate(1), PositiveInt.tryCreate(2))
+        val disabledConfig = AcsCommitmentsCatchUpConfig.disabledCatchUp()
         val changedConfigWithValidity = DomainParameters.WithValidity(
           validFrom = testSequences.last.head,
           validUntil = None,
@@ -2388,7 +2660,8 @@ class AcsCommitmentProcessorTest
           validFrom = testSequences.apply(1).head,
           validUntil = Some(testSequences.apply(1).last),
           serial = PositiveInt.one,
-          parameter = defaultParameters,
+          parameter =
+            defaultParameters.tryUpdate(acsCommitmentsCatchUpConfigParameter = Some(disabledConfig)),
         )
 
         val (processor, store, sequencerClient, changes) =
@@ -2444,15 +2717,15 @@ class AcsCommitmentProcessorTest
             reconciliationInterval,
             expectDegradation = true,
           )
-          // catchup is re-enabled so we send only 3 commitments (plus 5 & 3 previous)
-          _ = sequencerClient.requests.size shouldBe (3 + 5 + 3)
+          // catchup is re-enabled but with a step of 1 so we send 5 commitments (plus 5 & 3 previous)
+          _ = sequencerClient.requests.size shouldBe (3 + 5 + 5)
         } yield {
           succeed
         }
       }
 
       "disable catch-up config during catch-up mode" in {
-        val reconciliationInterval = 5
+        val reconciliationInterval = 5L
         val testSequences =
           (1L to 10)
             .map(i => i * reconciliationInterval)
@@ -2486,7 +2759,7 @@ class AcsCommitmentProcessorTest
           validFrom = changeConfigTimestamp,
           validUntil = None,
           serial = PositiveInt.MaxValue,
-          parameter = defaultParameters,
+          parameter = defaultParameters.tryUpdate(acsCommitmentsCatchUpConfigParameter = None),
         )
         val (processor, store, sequencerClient, changes) =
           testSetupDontPublish(
@@ -2513,6 +2786,7 @@ class AcsCommitmentProcessorTest
               processor.publish(RecordTime(ts, tb.v), change)
             }
           _ <- processor.flush()
+
           _ <- testSequence(
             testSequences,
             processor,
@@ -2530,7 +2804,7 @@ class AcsCommitmentProcessorTest
       }
 
       "change catch-up config during catch-up mode" in {
-        val reconciliationInterval = 5
+        val reconciliationInterval = 5L
         val testSequences =
           (1L to 11)
             .map(i => i * reconciliationInterval)
@@ -2597,8 +2871,10 @@ class AcsCommitmentProcessorTest
             .filter(a => a._1 <= testSequences.head)
             .foreach { case (ts, tb, change) =>
               processor.publish(RecordTime(ts, tb.v), change)
+
             }
           _ <- processor.flush()
+
           _ <- testSequence(
             testSequences,
             processor,
@@ -2608,15 +2884,20 @@ class AcsCommitmentProcessorTest
             expectDegradation = true,
           )
           // here we get the times: [5,10,15,20,25,30,35,40,45,50,55]
-          // we change the config at 36.
-          // expected send timestamps are: [5,15,30,50]
-          _ = sequencerClient.requests.size shouldBe 4
+          // the sends with a catch-up of (3,1) are [5,15,30,45]
+          // we change the config at 36 to (2,1), while we were catching up to 45
+          // at the next tick, 40, we realize we are at a boundary according to the new catch-up parameters and we send
+          // the catch-up is extended to 50, and we also send at 50
+          // expected send timestamps are: [5,15,30,40,50]
+          // 55 is not expected since at 45 we are still behind (so next catchup boundary would be 60)
+          _ = sequencerClient.requests.size shouldBe 5
         } yield {
           succeed
         }
       }
+
       "should mark as unhealthy when not caught up" in {
-        val reconciliationInterval = 5
+        val reconciliationInterval = 5L
         val testSequences =
           (1L to 10)
             .map(i => i * reconciliationInterval)
@@ -2681,8 +2962,10 @@ class AcsCommitmentProcessorTest
           processor: AcsCommitmentProcessor,
           changes: List[(CantonTimestamp, RequestCounter, AcsChange)],
           store: AcsCommitmentStore,
-          reconciliationInterval: Int,
+          reconciliationInterval: Long,
           expectDegradation: Boolean = false,
+          noLogSuppression: Boolean = false,
+          justProcessingNoChecks: Boolean = false,
       ): Future[Assertion] = {
         val remoteCommitments = sequence
           .map(i =>
@@ -2690,7 +2973,8 @@ class AcsCommitmentProcessorTest
               remoteId1,
               Map((coid(0, 0), initialTransferCounter)),
               ts(i),
-              ts(i.plusSeconds(reconciliationInterval.toLong)),
+              ts(i.plusSeconds(reconciliationInterval)),
+              Some(PositiveSeconds.tryOfSeconds(reconciliationInterval)),
             )
           )
         for {
@@ -2709,6 +2993,7 @@ class AcsCommitmentProcessorTest
             .filter(a => a._1 >= sequence.head && a._1 <= endOfRemoteCommitsPeriod)
 
           // First ask for the remote commitments to be processed, and then compute locally
+          // This triggers catch-up mode
           _ <- delivered
             .parTraverse_ { case (ts, batch) =>
               processor.processBatchInternal(ts.forgetRefinement, batch)
@@ -2718,7 +3003,9 @@ class AcsCommitmentProcessorTest
             processor,
             store,
             changesApplied,
+            noLogSuppression,
           )
+
           received <- store.searchReceivedBetween(
             sequence.head,
             endOfRemoteCommitsPeriod,
@@ -2733,9 +3020,12 @@ class AcsCommitmentProcessorTest
           else {
             assert(processor.healthComponent.isOk)
           }
-          if (changesApplied.last._1 >= sequence.last)
-            assert(computed.size === sequence.length)
-          assert(received.size === sequence.length)
+
+          if (!justProcessingNoChecks) {
+            if (changesApplied.last._1 >= sequence.last)
+              assert(computed.size === sequence.length)
+            assert(received.size === sequence.length)
+          } else succeed
         }
       }
 
@@ -2773,8 +3063,8 @@ class AcsCommitmentProcessorTest
           )
 
         val remoteCommitments = List(
-          (remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(0), ts(5)),
-          (remoteId2, Map((coid(0, 1), initialTransferCounter)), ts(10), ts(15)),
+          (remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(0), ts(5), None),
+          (remoteId2, Map((coid(0, 1), initialTransferCounter)), ts(10), ts(15), None),
           // wrong contract, causes mismatch
           (
             remoteId2,
@@ -2784,10 +3074,11 @@ class AcsCommitmentProcessorTest
             ),
             ts(15),
             ts(20),
+            None,
           ),
-          (remoteId2, Map((coid(1, 0), initialTransferCounter)), ts(20), ts(25)),
+          (remoteId2, Map((coid(1, 0), initialTransferCounter)), ts(20), ts(25), None),
           // wrong contract, causes mismatch
-          (remoteId2, Map((coid(1, 1), initialTransferCounter)), ts(25), ts(30)),
+          (remoteId2, Map((coid(1, 1), initialTransferCounter)), ts(25), ts(30), None),
         )
 
         for {
@@ -2800,6 +3091,7 @@ class AcsCommitmentProcessorTest
             )
           )
           // First ask for the remote commitments to be processed, and then compute locally
+          // This triggers catch-up mode
           _ <- delivered
             .parTraverse_ { case (ts, batch) =>
               processor.processBatchInternal(ts.forgetRefinement, batch)
@@ -2856,8 +3148,7 @@ class AcsCommitmentProcessorTest
       }
 
       "not report errors about skipped commitments due to catch-up mode" in {
-
-        val reconciliationInterval = 5
+        val reconciliationInterval = 5L
         val timeProofs =
           (1L to 7)
             .map(i => i * reconciliationInterval)
@@ -2892,17 +3183,65 @@ class AcsCommitmentProcessorTest
           )
 
         val remoteCommitmentsFast = List(
-          (remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(0), ts(5)),
-          (remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(5), ts(10)),
-          (remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(10), ts(15)),
-          (remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(15), ts(20)),
-          (remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(20), ts(25)),
-          (remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(25), ts(30)),
+          (
+            remoteId1,
+            Map((coid(0, 0), initialTransferCounter)),
+            ts(0),
+            ts(5),
+            Some(PositiveSeconds.tryOfSeconds(reconciliationInterval)),
+          ),
+          (
+            remoteId1,
+            Map((coid(0, 0), initialTransferCounter)),
+            ts(5),
+            ts(10),
+            Some(PositiveSeconds.tryOfSeconds(reconciliationInterval)),
+          ),
+          (
+            remoteId1,
+            Map((coid(0, 0), initialTransferCounter)),
+            ts(10),
+            ts(15),
+            Some(PositiveSeconds.tryOfSeconds(reconciliationInterval)),
+          ),
+          (
+            remoteId1,
+            Map((coid(0, 0), initialTransferCounter)),
+            ts(15),
+            ts(20),
+            Some(PositiveSeconds.tryOfSeconds(reconciliationInterval)),
+          ),
+          (
+            remoteId1,
+            Map((coid(0, 0), initialTransferCounter)),
+            ts(20),
+            ts(25),
+            Some(PositiveSeconds.tryOfSeconds(reconciliationInterval)),
+          ),
+          (
+            remoteId1,
+            Map((coid(0, 0), initialTransferCounter)),
+            ts(25),
+            ts(30),
+            Some(PositiveSeconds.tryOfSeconds(reconciliationInterval)),
+          ),
         )
 
         val remoteCommitmentsNormal = List(
-          (remoteId2, Map((coid(0, 0), initialTransferCounter)), ts(10), ts(15)),
-          (remoteId2, Map((coid(0, 0), initialTransferCounter)), ts(20), ts(25)),
+          (
+            remoteId2,
+            Map((coid(0, 0), initialTransferCounter)),
+            ts(10),
+            ts(15),
+            Some(PositiveSeconds.tryOfSeconds(reconciliationInterval)),
+          ),
+          (
+            remoteId2,
+            Map((coid(0, 0), initialTransferCounter)),
+            ts(20),
+            ts(25),
+            Some(PositiveSeconds.tryOfSeconds(reconciliationInterval)),
+          ),
         )
 
         for {
@@ -2977,7 +3316,7 @@ class AcsCommitmentProcessorTest
 
       "perform match for fine-grained commitments in case of mismatch at catch-up boundary" in {
 
-        val reconciliationInterval = 5
+        val reconciliationInterval = 5L
         val timeProofs =
           (1L to 7)
             .map(i => i * reconciliationInterval)
@@ -3012,8 +3351,20 @@ class AcsCommitmentProcessorTest
           )
 
         val remoteCommitmentsFast = List(
-          (remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(0), ts(5)),
-          (remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(5), ts(10)),
+          (
+            remoteId1,
+            Map((coid(0, 0), initialTransferCounter)),
+            ts(0),
+            ts(5),
+            Some(PositiveSeconds.tryOfSeconds(reconciliationInterval)),
+          ),
+          (
+            remoteId1,
+            Map((coid(0, 0), initialTransferCounter)),
+            ts(5),
+            ts(10),
+            Some(PositiveSeconds.tryOfSeconds(reconciliationInterval)),
+          ),
           // coid (0,1) is not shared: the mismatch appears here, but is skipped initially during catch-up
           // this commitment is buffered and checked later
           (
@@ -3021,6 +3372,7 @@ class AcsCommitmentProcessorTest
             Map((coid(0, 0), initialTransferCounter), (coid(0, 1), initialTransferCounter)),
             ts(10),
             ts(15),
+            Some(PositiveSeconds.tryOfSeconds(reconciliationInterval)),
           ),
           // coid (0,1) is not shared, should cause a mismatch at catch-up boundary and fine-grained sending
           (
@@ -3028,13 +3380,32 @@ class AcsCommitmentProcessorTest
             Map((coid(0, 0), initialTransferCounter), (coid(0, 1), initialTransferCounter)),
             ts(15),
             ts(20),
+            Some(PositiveSeconds.tryOfSeconds(reconciliationInterval)),
           ),
-          (remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(20), ts(25)),
-          (remoteId1, Map((coid(0, 0), initialTransferCounter)), ts(25), ts(30)),
+          (
+            remoteId1,
+            Map((coid(0, 0), initialTransferCounter)),
+            ts(20),
+            ts(25),
+            Some(PositiveSeconds.tryOfSeconds(reconciliationInterval)),
+          ),
+          (
+            remoteId1,
+            Map((coid(0, 0), initialTransferCounter)),
+            ts(25),
+            ts(30),
+            Some(PositiveSeconds.tryOfSeconds(reconciliationInterval)),
+          ),
         )
 
         val remoteCommitmentsNormal = List(
-          (remoteId2, Map((coid(0, 0), initialTransferCounter)), ts(15), ts(20)),
+          (
+            remoteId2,
+            Map((coid(0, 0), initialTransferCounter)),
+            ts(15),
+            ts(20),
+            Some(PositiveSeconds.tryOfSeconds(reconciliationInterval)),
+          ),
           // coid (0,2) is not shared, but does not cause a mismatch because we hadn't computed fine-grained
           // commitments for remoteId2
           (
@@ -3042,8 +3413,15 @@ class AcsCommitmentProcessorTest
             Map((coid(0, 0), initialTransferCounter), (coid(0, 2), initialTransferCounter)),
             ts(10),
             ts(15),
+            Some(PositiveSeconds.tryOfSeconds(reconciliationInterval)),
           ),
-          (remoteId2, Map((coid(0, 0), initialTransferCounter)), ts(20), ts(25)),
+          (
+            remoteId2,
+            Map((coid(0, 0), initialTransferCounter)),
+            ts(20),
+            ts(25),
+            Some(PositiveSeconds.tryOfSeconds(reconciliationInterval)),
+          ),
         )
 
         loggerFactory.assertLoggedWarningsAndErrorsSeq(
@@ -3160,6 +3538,7 @@ class AcsCommitmentProcessorTest
         processor: AcsCommitmentProcessor,
         store: AcsCommitmentStore,
         changes: List[(CantonTimestamp, RequestCounter, AcsChange)],
+        noLogSuppression: Boolean = false,
     ): Future[Unit] = {
       lazy val fut = {
         changes.foreach { case (ts, tb, change) =>
@@ -3171,8 +3550,9 @@ class AcsCommitmentProcessorTest
         config <- processor.catchUpConfig(changes.head._1)
         remote <- store.searchReceivedBetween(changes.head._1, changes.last._1)
         _ <- config match {
-          case _ if remote.isEmpty => fut
+          case _ if (remote.isEmpty || noLogSuppression) => fut
           case None => fut
+          case Some(cfg) if !cfg.isCatchUpEnabled() => fut
           case Some(cfg) if cfg.catchUpIntervalSkip.value == 1 =>
             loggerFactory.assertLogs(
               fut,

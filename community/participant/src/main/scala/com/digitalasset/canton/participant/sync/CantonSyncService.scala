@@ -355,6 +355,13 @@ class CantonSyncService(
   val cantonAuthorityResolver: AuthorityResolver =
     new CantonAuthorityResolver(connectedDomainsLookup, loggerFactory)
 
+  private val connectQueue = new SimpleExecutionQueue(
+    "sync-service-connect-and-repair-queue",
+    futureSupervisor,
+    timeouts,
+    loggerFactory,
+  )
+
   val repairService: RepairService = new RepairService(
     participantId,
     syncCrypto,
@@ -367,6 +374,9 @@ class CantonSyncService(
     Storage.threadsAvailableForWriting(storage),
     indexedStringStore,
     connectedDomainsLookup.isConnected,
+    // Share the sync service queue with the repair service, so that repair operations cannot run concurrently with
+    // domain connections.
+    connectQueue,
     futureSupervisor,
     loggerFactory,
   )
@@ -1167,13 +1177,6 @@ class CantonSyncService(
       domainAlias: DomainAlias
   ): EitherT[Future, MissingConfigForAlias, StoredDomainConnectionConfig] =
     EitherT.fromEither[Future](domainConnectionConfigStore.get(domainAlias))
-
-  private val connectQueue = new SimpleExecutionQueue(
-    "sync-service-connect-queue",
-    futureSupervisor,
-    timeouts,
-    loggerFactory,
-  )
 
   private def performDomainConnectionOrHandshake(
       domainAlias: DomainAlias,

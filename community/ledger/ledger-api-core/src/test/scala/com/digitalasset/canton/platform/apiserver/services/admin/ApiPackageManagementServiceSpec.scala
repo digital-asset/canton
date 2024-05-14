@@ -147,6 +147,7 @@ class ApiPackageManagementServiceSpec
         )
 
       val apiPackageManagementService = ApiPackageManagementService.createApiService(
+        enablePackageUpload = true,
         mockIndexPackagesService,
         mockIndexTransactionsService,
         mockPackageMetadataStore,
@@ -251,6 +252,7 @@ class ApiPackageManagementServiceSpec
       mockedServices()
 
     ApiPackageManagementService.createApiService(
+      enablePackageUpload = true,
       mockIndexPackagesService,
       mockIndexTransactionsService,
       mockPackageMetadataStore,

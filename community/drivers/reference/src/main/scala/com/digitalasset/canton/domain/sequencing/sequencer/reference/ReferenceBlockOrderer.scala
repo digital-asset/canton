@@ -67,7 +67,10 @@ class ReferenceBlockOrderer(
 
   override def subscribe(fromHeight: Long)(implicit
       traceContext: TraceContext
-  ): Source[BlockOrderer.Block, KillSwitch] =
+  ): Source[BlockOrderer.Block, KillSwitch] = {
+    logger.debug(
+      s"Subscription started from height $fromHeight, current max height in DB is ${store.maxBlockHeight()}"
+    )
     Source
       .tick(
         initialDelay = 0.milli,
@@ -105,6 +108,7 @@ class ReferenceBlockOrderer(
         }
       }
       .mapConcat(_._2)
+  }
 
   override def health(implicit traceContext: TraceContext): Future[SequencerDriverHealthStatus] = {
     val isStorageActive = storage.isActive
