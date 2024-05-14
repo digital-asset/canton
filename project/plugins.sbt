@@ -5,10 +5,12 @@ addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.4.6")
 addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.11.1")
 
 // Code coverage
-addSbtPlugin("org.scoverage" % "sbt-scoverage" % "1.9.2")
+addSbtPlugin("org.scoverage" % "sbt-scoverage" % "2.0.9")
 
 // documentation site creation
+// TODO(i17068) update to 1.5.0 when it's published to fix the scala-xml conflicts -- also remove the VersionScheme.Always line
 addSbtPlugin("com.typesafe.sbt" % "sbt-site" % "1.4.0")
+ThisBuild / libraryDependencySchemes += "org.scala-lang.modules" %% "scala-xml" % VersionScheme.Always
 
 // Ensurewe have license headeres in all source
 addSbtPlugin("de.heikoseeberger" % "sbt-header" % "5.6.0")

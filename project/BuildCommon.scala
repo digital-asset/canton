@@ -72,6 +72,7 @@ object BuildCommon {
         ),
         // scalacOptions += "-Ystatistics", // re-enable if you need to debug compile times
         // scalacOptions in Test += "-Ystatistics",
+        javacOptions ++= Seq("--release", "11"),
       )
     )
 
