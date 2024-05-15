@@ -16,6 +16,7 @@ import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.domain.{PackageEntry, ParticipantOffset}
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.util.TimestampConversion
+import com.digitalasset.canton.ledger.error.CommonErrors.UnsupportedOperation
 import com.digitalasset.canton.ledger.error.PackageServiceErrors.Validation
 import com.digitalasset.canton.ledger.error.groups.AdminServiceErrors
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
@@ -48,6 +49,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Try, Using}
 
 private[apiserver] final class ApiPackageManagementService private (
+    enablePackageUpload: Boolean,
     packagesIndex: IndexPackagesService,
     transactionsService: IndexTransactionsService,
     packagesWrite: state.WritePackagesService,
@@ -105,6 +107,12 @@ private[apiserver] final class ApiPackageManagementService private (
       .andThen(logger.logErrorsOnCall[ListKnownPackagesResponse])
   }
 
+  private def uploadEnabled(implicit loggingContext: LoggingContextWithTrace): Future[Unit] =
+    if (enablePackageUpload)
+      Future.successful(())
+    else
+      Future.failed(UnsupportedOperation.Reject("Uploading packages not allowed").asGrpcError)
+
   private def decodeAndValidate(
       darFile: ByteString
   )(implicit
@@ -144,6 +152,7 @@ private[apiserver] final class ApiPackageManagementService private (
       logger.info(s"Uploading DAR file, ${loggingContext.serializeFiltered("submissionId")}.")
 
       val response = for {
+        _ <- uploadEnabled
         dar <- decodeAndValidate(request.darFile)
         ledgerEndbeforeRequest <- transactionsService.currentLedgerEnd().map(Some(_))
         _ <- synchronousResponse.submitAndWait(
@@ -166,6 +175,7 @@ private[apiserver] final class ApiPackageManagementService private (
 private[apiserver] object ApiPackageManagementService {
 
   def createApiService(
+      enablePackageUpload: Boolean,
       readBackend: IndexPackagesService,
       transactionsService: IndexTransactionsService,
       packageMetadataStore: PackageMetadataStore,
@@ -188,6 +198,7 @@ private[apiserver] object ApiPackageManagementService {
         loggerFactory = loggerFactory,
       )
     new ApiPackageManagementService(
+      enablePackageUpload,
       readBackend,
       transactionsService,
       writeBackend,

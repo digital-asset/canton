@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.admin.repair
 
 import cats.Eval
 import cats.data.{EitherT, OptionT}
+import cats.syntax.apply.*
 import cats.syntax.either.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
@@ -61,6 +62,7 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.version.ProtocolVersion
+import com.google.common.annotations.VisibleForTesting
 
 import java.time.Instant
 import scala.Ordered.orderingToOrdered
@@ -82,6 +84,12 @@ import scala.concurrent.{ExecutionContext, Future}
   * </ol>
   * If anything goes wrong before advancing the clean request prehead,
   * the already persisted data will be cleaned up upon the next repair request or reconnection to the domain.
+  *
+  * @param executionQueue Sequential execution queue on which repair actions must be run.
+  *                       This queue is shared with the CantonSyncService, which uses it for domain connections.
+  *                       Sharing it ensures that we cannot connect to the domain while a repair action is running and vice versa.
+  *                       It also ensure only one repair runs at a time. This ensures concurrent activity
+  *                       among repair operations does not corrupt state.
   */
 final class RepairService(
     participantId: ParticipantId,
@@ -95,6 +103,8 @@ final class RepairService(
     threadsAvailableForWriting: PositiveInt,
     indexedStringStore: IndexedStringStore,
     isConnected: DomainId => Boolean,
+    @VisibleForTesting
+    private[canton] val executionQueue: SimpleExecutionQueue,
     futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -103,15 +113,6 @@ final class RepairService(
     with HasCloseContext {
 
   override protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
-
-  // Ensure only one repair runs at a time. This ensures concurrent activity among repair operations does
-  // not corrupt state.
-  private val executionQueue = new SimpleExecutionQueue(
-    "repair-service-queue",
-    futureSupervisor,
-    timeouts,
-    loggerFactory,
-  )
 
   private def aliasToUnconnectedDomainId(alias: DomainAlias): EitherT[Future, String, DomainId] =
     for {
@@ -319,12 +320,10 @@ final class RepairService(
     if (contracts.isEmpty) {
       Either.right(logger.info("No contracts to add specified"))
     } else {
-      lockAndAwaitEitherT(
-        "repair.add", {
+      lockAndAwaitEitherTDomainAlias(
+        "repair.add",
+        domainId => {
           for {
-            // Ensure domain is configured but not connected to avoid race conditions.
-            domainId <- aliasToUnconnectedDomainId(domain)
-
             domain <- readDomainData(domainId)
 
             filteredContracts <- contracts.parTraverseFilter(
@@ -393,6 +392,7 @@ final class RepairService(
               )
           } yield ()
         },
+        domain,
       )
     }
   }
@@ -424,10 +424,10 @@ final class RepairService(
     logger.info(
       s"Purging ${contractIds.length} contracts from $domain with ignoreAlreadyPurged=$ignoreAlreadyPurged"
     )
-    lockAndAwaitEitherT(
-      "repair.purge", {
+    lockAndAwaitEitherTDomainAlias(
+      "repair.purge",
+      domainId => {
         for {
-          domainId <- aliasToUnconnectedDomainId(domain)
           repair <- initRepairRequestAndVerifyPreconditions(domainId)
 
           // Note the following purposely fails if any contract fails which results in not all contracts being processed.
@@ -443,6 +443,7 @@ final class RepairService(
 
         } yield ()
       },
+      domain,
     )
   }
 
@@ -465,11 +466,10 @@ final class RepairService(
     logger.info(
       s"Change assignation request for ${contractIds.length} contracts from $sourceDomain to $targetDomain with skipInactive=$skipInactive"
     )
-    lockAndAwaitEitherT(
-      "repair.change_assignation", {
+    lockAndAwaitEitherTDomainPair(
+      "repair.change_assignation",
+      (sourceDomainId, targetDomainId) => {
         for {
-          sourceDomainId <- aliasToUnconnectedDomainId(sourceDomain)
-          targetDomainId <- aliasToUnconnectedDomainId(targetDomain)
           _ <- changeAssignation(
             contractIds,
             sourceDomainId,
@@ -479,6 +479,7 @@ final class RepairService(
           )
         } yield ()
       },
+      (sourceDomain, targetDomain),
     )
   }
 
@@ -536,14 +537,14 @@ final class RepairService(
       implicit traceContext: TraceContext
   ): Either[String, Unit] = {
     logger.info(s"Ignoring sequenced events from $from to $to (force = $force).")
-    lockAndAwaitEitherT(
+    lockAndAwaitEitherTDomainId(
       "repair.skip_messages",
       for {
-        _ <- domainNotConnected(domain)
         _ <- performIfRangeSuitableForIgnoreOperations(domain, from, force)(
           _.ignoreEvents(from, to).leftMap(_.toString)
         )
       } yield (),
+      domain,
     )
   }
 
@@ -590,14 +591,14 @@ final class RepairService(
       force: Boolean,
   )(implicit traceContext: TraceContext): Either[String, Unit] = {
     logger.info(s"Unignoring sequenced events from $from to $to (force = $force).")
-    lockAndAwaitEitherT(
+    lockAndAwaitEitherTDomainId(
       "repair.unskip_messages",
       for {
-        _ <- domainNotConnected(domain)
         _ <- performIfRangeSuitableForIgnoreOperations(domain, from, force)(sequencedEventStore =>
           sequencedEventStore.unignoreEvents(from, to).leftMap(_.toString)
         )
       } yield (),
+      domain,
     )
   }
 
@@ -1248,16 +1249,76 @@ final class RepairService(
       )
     } yield dp
 
-  private def lockAndAwaitEitherT[B](description: String, code: => EitherT[Future, String, B])(
-      implicit traceContext: TraceContext
+  private def lockAndAwaitEitherT[A, B](
+      description: String,
+      code: => EitherT[Future, String, B],
+      domainIds: EitherT[Future, String, Seq[DomainId]],
+  )(implicit
+      traceContext: TraceContext
   ): Either[String, B] = {
     logger.info(s"Queuing $description")
     // repair commands can take an unbounded amount of time
     parameters.processingTimeouts.unbounded.await(description)(
       executionQueue
-        .executeE(code, description)
+        .executeE(
+          domainIds
+            // Ensure we're not connected to any of the domains before running the code
+            .flatMap(_.parTraverse_(domainNotConnected))
+            .flatMap(_ => code),
+          description,
+        )
         .value
         .onShutdown(Left(s"$description aborted due to shutdown"))
+    )
+  }
+
+  private def lockAndAwaitEitherTDomainId[B](
+      description: String,
+      code: => EitherT[Future, String, B],
+      domainId: DomainId,
+  )(implicit
+      traceContext: TraceContext
+  ): Either[String, B] = {
+    lockAndAwaitEitherT(
+      description,
+      code,
+      EitherT.pure(Seq(domainId)),
+    )
+  }
+
+  private def lockAndAwaitEitherTDomainAlias[B](
+      description: String,
+      code: DomainId => EitherT[Future, String, B],
+      domainAlias: DomainAlias,
+  )(implicit
+      traceContext: TraceContext
+  ): Either[String, B] = {
+    val domainId = EitherT.fromEither[Future](
+      aliasManager.domainIdForAlias(domainAlias).toRight(s"Could not find $domainAlias")
+    )
+
+    lockAndAwaitEitherT(
+      description,
+      domainId.flatMap(code),
+      domainId.map(Seq(_)),
+    )
+  }
+
+  private def lockAndAwaitEitherTDomainPair[B](
+      description: String,
+      code: (DomainId, DomainId) => EitherT[Future, String, B],
+      domainAliases: (DomainAlias, DomainAlias),
+  )(implicit
+      traceContext: TraceContext
+  ): Either[String, B] = {
+    val domainIds = (
+      aliasToUnconnectedDomainId(domainAliases._1),
+      aliasToUnconnectedDomainId(domainAliases._2),
+    ).tupled
+    lockAndAwaitEitherT[(DomainId, DomainId), B](
+      description,
+      domainIds.flatMap(Function.tupled(code)),
+      domainIds.map({ case (d1, d2) => Seq(d1, d2) }),
     )
   }
 

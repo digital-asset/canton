@@ -19,6 +19,7 @@ import com.digitalasset.canton.platform.config.{
   CommandServiceConfig,
   IdentityProviderManagementConfig,
   IndexServiceConfig,
+  PackageManagementServiceConfig,
   TransactionFlatStreamsConfig,
   TransactionTreeStreamsConfig,
   UserManagementServiceConfig,
@@ -114,6 +115,13 @@ class PureConfigReaderWriter(secure: Boolean = true) {
 
   implicit val userManagementServiceConfigConvert: ConfigConvert[UserManagementServiceConfig] =
     deriveConvert[UserManagementServiceConfig]
+
+  implicit val packageManagementServiceConfigHint: ProductHint[PackageManagementServiceConfig] =
+    ProductHint[PackageManagementServiceConfig](allowUnknownKeys = false)
+
+  implicit val packageManagementServiceConfigConvert
+      : ConfigConvert[PackageManagementServiceConfig] =
+    deriveConvert[PackageManagementServiceConfig]
 
   implicit val identityProviderManagementConfigHint: ProductHint[IdentityProviderManagementConfig] =
     ProductHint[IdentityProviderManagementConfig](allowUnknownKeys = false)

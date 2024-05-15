@@ -19,6 +19,7 @@ import com.digitalasset.canton.platform.config.{
   CommandServiceConfig,
   IdentityProviderManagementConfig,
   IndexServiceConfig as LedgerIndexServiceConfig,
+  PackageManagementServiceConfig,
   UserManagementServiceConfig,
 }
 import com.digitalasset.canton.platform.indexer.IndexerConfig
@@ -179,6 +180,7 @@ final case class LedgerApiServerConfig(
       LedgerApiServerConfig.DefaultInitSyncTimeout,
     commandService: CommandServiceConfig = CommandServiceConfig(),
     userManagementService: UserManagementServiceConfig = UserManagementServiceConfig(),
+    packageManagementService: PackageManagementServiceConfig = PackageManagementServiceConfig(),
     managementServiceTimeout: config.NonNegativeFiniteDuration =
       LedgerApiServerConfig.DefaultManagementServiceTimeout,
     postgresDataSource: PostgresDataSourceConfig = PostgresDataSourceConfig(),
