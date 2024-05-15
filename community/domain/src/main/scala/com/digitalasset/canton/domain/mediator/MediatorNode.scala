@@ -13,6 +13,8 @@ import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.*
+import com.digitalasset.canton.connection.GrpcApiInfoService
+import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
 import com.digitalasset.canton.crypto.{Crypto, CryptoHandshakeValidator, DomainSyncCryptoClient}
 import com.digitalasset.canton.domain.Domain
 import com.digitalasset.canton.domain.mediator.admin.gprc.{
@@ -30,13 +32,15 @@ import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.health.admin.data.MediatorNodeStatus
 import com.digitalasset.canton.health.{
   ComponentStatus,
+  DependenciesHealthService,
   GrpcHealthReporter,
-  HealthService,
+  LivenessHealthService,
   MutableHealthComponent,
 }
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.mediator.admin.v30.MediatorInitializationServiceGrpc
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.sequencing.client.{
@@ -48,12 +52,12 @@ import com.digitalasset.canton.sequencing.client.{
 import com.digitalasset.canton.store.*
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, HasUptime}
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
+import com.digitalasset.canton.topology.client.DomainTopologyClient
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ResourceUtil, SingleUseCell}
+import com.digitalasset.canton.util.{EitherTUtil, ResourceUtil, SingleUseCell}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionCompatibility}
 import monocle.Lens
 import monocle.macros.syntax.lens.*
@@ -92,6 +96,7 @@ final case class MediatorNodeParameterConfig(
     override val batching: BatchingConfig = BatchingConfig(),
     override val caching: CachingConfigs = CachingConfigs(),
     override val useUnifiedSequencer: Boolean = false,
+    override val watchdog: Option[WatchdogConfig] = None,
 ) extends ProtocolConfig
     with LocalNodeParametersConfig
 
@@ -168,6 +173,7 @@ class MediatorNodeBootstrap(
   override protected def member(uid: UniqueIdentifier): Member = MediatorId(uid)
 
   private val domainTopologyManager = new SingleUseCell[DomainTopologyManager]()
+  private val topologyClient = new SingleUseCell[DomainTopologyClient]()
 
   override protected def sequencedTopologyStores: Seq[TopologyStore[DomainStore]] =
     domainTopologyManager.get.map(_.store).toList
@@ -175,28 +181,44 @@ class MediatorNodeBootstrap(
   override protected def sequencedTopologyManagers: Seq[DomainTopologyManager] =
     domainTopologyManager.get.toList
 
-  // TODO(#14048): Align the semantics with the participant.
   override protected def lookupTopologyClient(
       storeId: TopologyStoreId
-  ): Option[DomainTopologyClientWithInit] = None
+  ): Option[DomainTopologyClient] =
+    storeId match {
+      case DomainStore(domainId, _) =>
+        topologyClient.get.filter(_.domainId == domainId)
+      case _ => None
+    }
 
   private lazy val deferredSequencerClientHealth =
     MutableHealthComponent(loggerFactory, SequencerClient.healthName, timeouts)
-  override protected def mkNodeHealthService(storage: Storage): HealthService =
-    HealthService(
-      "mediator",
+
+  override protected def mkNodeHealthService(
+      storage: Storage
+  ): (DependenciesHealthService, LivenessHealthService) = {
+    val readiness =
+      DependenciesHealthService(
+        "mediator",
+        logger,
+        timeouts,
+        Seq(storage),
+        softDependencies = Seq(deferredSequencerClientHealth),
+      )
+
+    val liveness = LivenessHealthService(
       logger,
       timeouts,
-      Seq(storage),
-      softDependencies = Seq(deferredSequencerClientHealth),
+      fatalDependencies = Seq(deferredSequencerClientHealth),
     )
+    (readiness, liveness)
+  }
 
   private class WaitForMediatorToDomainInit(
       storage: Storage,
       crypto: Crypto,
       mediatorId: MediatorId,
       authorizedTopologyManager: AuthorizedTopologyManager,
-      healthService: HealthService,
+      healthService: DependenciesHealthService,
   ) extends BootstrapStageWithStorage[MediatorNode, StartupNode, DomainId](
         "wait-for-mediator-to-domain-init",
         bootstrapStageCallback,
@@ -213,6 +235,12 @@ class MediatorNodeBootstrap(
             executionContext,
           )
       )
+    adminServerRegistry.addServiceU(
+      ApiInfoServiceGrpc.bindService(
+        new GrpcApiInfoService(CantonGrpcUtil.ApiName.AdminApi),
+        executionContext,
+      )
+    )
 
     private val domainConfigurationStore =
       MediatorDomainConfigurationStore(storage, timeouts, loggerFactory)
@@ -221,25 +249,32 @@ class MediatorNodeBootstrap(
 
     override protected def stageCompleted(implicit
         traceContext: TraceContext
-    ): Future[Option[DomainId]] = domainConfigurationStore.fetchConfiguration.toOption.mapFilter {
-      case Some(mediatorDomainConfiguration) => Some(mediatorDomainConfiguration.domainId)
-      case None => None
-    }.value
+    ): Future[Option[DomainId]] = domainConfigurationStore.fetchConfiguration.toOption
+      .mapFilter {
+        case Some(mediatorDomainConfiguration) => Some(mediatorDomainConfiguration.domainId)
+        case None => None
+      }
+      .value
+      .onShutdown(None)
 
-    override protected def buildNextStage(domainId: DomainId): StartupNode = {
+    override protected def buildNextStage(
+        domainId: DomainId
+    ): EitherT[FutureUnlessShutdown, String, StartupNode] = {
       val domainTopologyStore =
         TopologyStore(DomainStore(domainId), storage, timeouts, loggerFactory)
       addCloseable(domainTopologyStore)
 
-      new StartupNode(
-        storage,
-        crypto,
-        mediatorId,
-        authorizedTopologyManager,
-        domainId,
-        domainConfigurationStore,
-        domainTopologyStore,
-        healthService,
+      EitherT.rightT(
+        new StartupNode(
+          storage,
+          crypto,
+          mediatorId,
+          authorizedTopologyManager,
+          domainId,
+          domainConfigurationStore,
+          domainTopologyStore,
+          healthService,
+        )
       )
     }
 
@@ -258,7 +293,7 @@ class MediatorNodeBootstrap(
       } else {
         val domainAlias = DomainAlias.tryCreate("domain")
         val sequencerInfoLoader = createSequencerInfoLoader()
-        completeWithExternal {
+        completeWithExternalUS {
           logger.info(
             s"Assigning mediator to ${request.domainId} via sequencers ${request.sequencerConnections}"
           )
@@ -270,6 +305,7 @@ class MediatorNodeBootstrap(
                 request.sequencerConnections,
                 request.sequencerConnectionValidation,
               )
+              .mapK(FutureUnlessShutdown.outcomeK)
               .leftMap(error => s"Error loading sequencer endpoint information: $error")
             configToStore = MediatorDomainConfiguration(
               request.domainId,
@@ -295,7 +331,7 @@ class MediatorNodeBootstrap(
       domainId: DomainId,
       domainConfigurationStore: MediatorDomainConfigurationStore,
       domainTopologyStore: TopologyStore[DomainStore],
-      healthService: HealthService,
+      healthService: DependenciesHealthService,
   ) extends BootstrapStage[MediatorNode, RunningNode[MediatorNode]](
         description = "Startup mediator node",
         bootstrapStageCallback,
@@ -346,12 +382,17 @@ class MediatorNodeBootstrap(
       }
 
       val fetchConfig: () => EitherT[Future, String, Option[MediatorDomainConfiguration]] = () =>
-        domainConfigurationStore.fetchConfiguration.leftMap(_.toString)
+        domainConfigurationStore.fetchConfiguration
+          .leftMap(_.toString)
+          .onShutdown(throw new RuntimeException("Aborted due to shutdown during startup"))
 
       val saveConfig: MediatorDomainConfiguration => EitherT[Future, String, Unit] =
-        domainConfigurationStore.saveConfiguration(_).leftMap(_.toString)
+        domainConfigurationStore
+          .saveConfiguration(_)
+          .leftMap(_.toString)
+          .onShutdown(throw new RuntimeException("Aborted due to shutdown during startup"))
 
-      performUnlessClosingEitherU("starting up mediator node") {
+      performUnlessClosingEitherUSF("starting up mediator node") {
         for {
           domainConfig <- fetchConfig()
             .leftMap(err => s"Failed to fetch domain configuration: $err")
@@ -362,8 +403,9 @@ class MediatorNodeBootstrap(
                 )
               )
             }
+            .mapK(FutureUnlessShutdown.outcomeK)
 
-          domainTopologyManager <- EitherT.fromEither(
+          domainTopologyManager <- EitherT.fromEither[FutureUnlessShutdown](
             createDomainTopologyManager(domainConfig.domainParameters.protocolVersion)
           )
           domainOutboxFactory = createDomainOutboxFactory(domainTopologyManager)
@@ -447,7 +489,7 @@ class MediatorNodeBootstrap(
       topologyManagerStatus: TopologyManagerStatus,
       domainTopologyStateInit: DomainTopologyInitializationCallback,
       domainOutboxFactory: DomainOutboxFactory,
-  ): EitherT[Future, String, MediatorRuntime] = {
+  ): EitherT[FutureUnlessShutdown, String, MediatorRuntime] = {
     val domainId = domainConfig.domainId
     val domainLoggerFactory = loggerFactory.append("domainId", domainId.toString)
     val domainAlias = DomainAlias(domainConfig.domainId.uid.toLengthLimitedString)
@@ -459,7 +501,10 @@ class MediatorNodeBootstrap(
       _ <- CryptoHandshakeValidator
         .validate(domainConfig.domainParameters, config.crypto)
         .toEitherT
-      indexedDomainId <- EitherT.right(IndexedDomain.indexed(indexedStringStore)(domainId))
+        .mapK(FutureUnlessShutdown.outcomeK)
+      indexedDomainId <- EitherT
+        .right(IndexedDomain.indexed(indexedStringStore)(domainId))
+        .mapK(FutureUnlessShutdown.outcomeK)
       sequencedEventStore = SequencedEventStore(
         storage,
         indexedDomainId,
@@ -475,20 +520,28 @@ class MediatorNodeBootstrap(
         domainLoggerFactory,
       )
       topologyProcessorAndClient <-
-        EitherT.right(
-          TopologyTransactionProcessor.createProcessorAndClientForDomain(
-            domainTopologyStore,
-            domainId,
-            domainConfig.domainParameters.protocolVersion,
-            crypto.pureCrypto,
-            arguments.parameterConfig,
-            arguments.clock,
-            arguments.futureSupervisor,
-            domainLoggerFactory,
+        EitherT
+          .right(
+            TopologyTransactionProcessor.createProcessorAndClientForDomain(
+              domainTopologyStore,
+              domainId,
+              domainConfig.domainParameters.protocolVersion,
+              crypto.pureCrypto,
+              arguments.parameterConfig,
+              arguments.clock,
+              arguments.futureSupervisor,
+              domainLoggerFactory,
+            )
           )
-        )
+          .mapK(FutureUnlessShutdown.outcomeK)
       (topologyProcessor, topologyClient) = topologyProcessorAndClient
       _ = ips.add(topologyClient)
+      _ <- EitherTUtil
+        .condUnitET(
+          MediatorNodeBootstrap.this.topologyClient.putIfAbsent(topologyClient).isEmpty,
+          "Unexpected state during initialization: topology client shouldn't have been set before",
+        )
+        .mapK(FutureUnlessShutdown.outcomeK)
       syncCryptoApi = new DomainSyncCryptoClient(
         mediatorId,
         domainId,
@@ -540,20 +593,24 @@ class MediatorNodeBootstrap(
         )
       // we wait here until the sequencer becomes active. this allows to reconfigure the
       // sequencer client address
-      info <- GrpcSequencerConnectionService.waitUntilSequencerConnectionIsValid(
-        sequencerInfoLoader,
-        this,
-        futureSupervisor,
-        getSequencerConnectionFromStore,
-      )
+      info <- GrpcSequencerConnectionService
+        .waitUntilSequencerConnectionIsValid(
+          sequencerInfoLoader,
+          this,
+          futureSupervisor,
+          getSequencerConnectionFromStore,
+        )
+        .mapK(FutureUnlessShutdown.outcomeK)
 
       requestSigner = RequestSigner(syncCryptoApi, domainConfig.domainParameters.protocolVersion)
       _ <- {
         val headSnapshot = topologyClient.headSnapshot
         for {
           // TODO(i12076): Request topology information from all sequencers and reconcile
-          isMediatorActive <- EitherT.right[String](headSnapshot.isMediatorActive(mediatorId))
-          _ <- Monad[EitherT[Future, String, *]].whenA(!isMediatorActive)(
+          isMediatorActive <- EitherT
+            .right[String](headSnapshot.isMediatorActive(mediatorId))
+            .mapK(FutureUnlessShutdown.outcomeK)
+          _ <- Monad[EitherT[FutureUnlessShutdown, String, *]].whenA(!isMediatorActive)(
             sequencerClientFactory
               .makeTransport(
                 info.sequencerConnections.default,
@@ -561,24 +618,29 @@ class MediatorNodeBootstrap(
                 requestSigner,
                 allowReplay = false,
               )
+              .mapK(FutureUnlessShutdown.outcomeK)
               .flatMap(
-                ResourceUtil.withResourceEitherT(_)(
-                  domainTopologyStateInit
-                    .callback(topologyClient, _, domainConfig.domainParameters.protocolVersion)
-                )
+                ResourceUtil
+                  .withResourceEitherT(_)(
+                    domainTopologyStateInit
+                      .callback(topologyClient, _, domainConfig.domainParameters.protocolVersion)
+                  )
+                  .mapK(FutureUnlessShutdown.outcomeK)
               )
           )
         } yield {}
       }
 
-      sequencerClient <- sequencerClientFactory.create(
-        mediatorId,
-        sequencedEventStore,
-        sendTrackerStore,
-        requestSigner,
-        info.sequencerConnections,
-        info.expectedSequencers,
-      )
+      sequencerClient <- sequencerClientFactory
+        .create(
+          mediatorId,
+          sequencedEventStore,
+          sendTrackerStore,
+          requestSigner,
+          info.sequencerConnections,
+          info.expectedSequencers,
+        )
+        .mapK(FutureUnlessShutdown.outcomeK)
 
       _ = sequencerClientRef.set(sequencerClient)
       _ = deferredSequencerClientHealth.set(sequencerClient.healthComponent)
@@ -624,7 +686,7 @@ class MediatorNodeBootstrap(
       nodeId: UniqueIdentifier,
       authorizedTopologyManager: AuthorizedTopologyManager,
       healthServer: GrpcHealthReporter,
-      healthService: HealthService,
+      healthService: DependenciesHealthService,
   ): BootstrapStageOrLeaf[MediatorNode] = {
     new WaitForMediatorToDomainInit(
       storage,

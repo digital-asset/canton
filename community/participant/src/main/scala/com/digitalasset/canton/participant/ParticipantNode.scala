@@ -15,6 +15,8 @@ import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.CantonRequireTypes
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.connection.GrpcApiInfoService
+import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
 import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService.CommunityGrpcVaultServiceFactory
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CommunityCryptoPrivateStoreFactory
 import com.digitalasset.canton.crypto.{
@@ -28,13 +30,14 @@ import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.health.admin.data.ParticipantStatus
 import com.digitalasset.canton.health.{
   ComponentStatus,
+  DependenciesHealthService,
   GrpcHealthReporter,
-  HealthService,
+  LivenessHealthService,
   MutableHealthComponent,
 }
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.networking.grpc.StaticGrpcServices
+import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, StaticGrpcServices}
 import com.digitalasset.canton.participant.admin.grpc.{
   GrpcDomainConnectivityService,
   GrpcInspectionService,
@@ -95,7 +98,7 @@ import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.time.*
 import com.digitalasset.canton.time.admin.v30.DomainTimeServiceGrpc
 import com.digitalasset.canton.topology.client.{
-  DomainTopologyClientWithInit,
+  DomainTopologyClient,
   IdentityProvidingServiceClient,
   StoreBasedDomainTopologyClient,
   StoreBasedTopologySnapshot,
@@ -177,7 +180,7 @@ class ParticipantNodeBootstrap(
 
   override protected def lookupTopologyClient(
       storeId: TopologyStoreId
-  ): Option[DomainTopologyClientWithInit] =
+  ): Option[DomainTopologyClient] =
     storeId match {
       case DomainStore(domainId, _) =>
         cantonSyncService.get.flatMap(_.lookupTopologyClient(domainId))
@@ -190,7 +193,7 @@ class ParticipantNodeBootstrap(
       nodeId: UniqueIdentifier,
       manager: AuthorizedTopologyManager,
       healthReporter: GrpcHealthReporter,
-      healthService: HealthService,
+      healthService: DependenciesHealthService,
   ): BootstrapStageOrLeaf[ParticipantNode] =
     new StartupNode(storage, crypto, nodeId, manager, healthReporter, healthService)
 
@@ -200,7 +203,7 @@ class ParticipantNodeBootstrap(
       nodeId: UniqueIdentifier,
       topologyManager: AuthorizedTopologyManager,
       healthReporter: GrpcHealthReporter,
-      healthService: HealthService,
+      healthService: DependenciesHealthService,
   ) extends BootstrapStage[ParticipantNode, RunningNode[ParticipantNode]](
         description = "Startup participant node",
         bootstrapStageCallback,
@@ -415,8 +418,10 @@ class ParticipantNodeBootstrap(
 
   override protected def member(uid: UniqueIdentifier): Member = ParticipantId(uid)
 
-  override protected def mkNodeHealthService(storage: Storage): HealthService =
-    HealthService(
+  override protected def mkNodeHealthService(
+      storage: Storage
+  ): (DependenciesHealthService, LivenessHealthService) = {
+    val readiness = DependenciesHealthService(
       "participant",
       logger,
       timeouts,
@@ -430,6 +435,9 @@ class ParticipantNodeBootstrap(
         syncDomainAcsCommitmentProcessorHealth,
       ),
     )
+    val liveness = LivenessHealthService.alwaysAlive(logger, timeouts)
+    (readiness, liveness)
+  }
 
   private def setPostInitCallbacks(
       sync: CantonSyncService
@@ -813,6 +821,13 @@ class ParticipantNodeBootstrap(
               parameterConfig.processingTimeouts,
               loggerFactory,
             ),
+            executionContext,
+          )
+        )
+      adminServerRegistry
+        .addServiceU(
+          ApiInfoServiceGrpc.bindService(
+            new GrpcApiInfoService(CantonGrpcUtil.ApiName.AdminApi),
             executionContext,
           )
         )

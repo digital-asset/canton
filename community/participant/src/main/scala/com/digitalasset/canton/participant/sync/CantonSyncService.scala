@@ -36,8 +36,8 @@ import com.digitalasset.canton.ledger.api.health.HealthStatus
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.error.{CommonErrors, PackageServiceErrors}
 import com.digitalasset.canton.ledger.participant.state
-import com.digitalasset.canton.ledger.participant.state.v2.ReadService.ConnectedDomainResponse
-import com.digitalasset.canton.ledger.participant.state.v2.*
+import com.digitalasset.canton.ledger.participant.state.ReadService.ConnectedDomainResponse
+import com.digitalasset.canton.ledger.participant.state.*
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
@@ -157,9 +157,9 @@ class CantonSyncService(
     protected val loggerFactory: NamedLoggerFactory,
     testingConfig: TestingConfigInternal,
 )(implicit ec: ExecutionContextExecutor, mat: Materializer, val tracer: Tracer)
-    extends state.v2.WriteService
+    extends state.WriteService
     with WriteParticipantPruningService
-    with state.v2.ReadService
+    with state.ReadService
     with FlagCloseable
     with Spanning
     with NamedLogging
@@ -240,6 +240,7 @@ class CantonSyncService(
     parameters,
     isActive,
     connectedDomainsLookup,
+    timeouts,
     loggerFactory,
   )
 
@@ -352,6 +353,13 @@ class CantonSyncService(
   val cantonAuthorityResolver: AuthorityResolver =
     new CantonAuthorityResolver(connectedDomainsLookup, loggerFactory)
 
+  private val connectQueue = new SimpleExecutionQueue(
+    "sync-service-connect-and-repair-queue",
+    futureSupervisor,
+    timeouts,
+    loggerFactory,
+  )
+
   val repairService: RepairService = new RepairService(
     participantId,
     syncCrypto,
@@ -364,6 +372,9 @@ class CantonSyncService(
     Storage.threadsAvailableForWriting(storage),
     indexedStringStore,
     connectedDomainsLookup.isConnected,
+    // Share the sync service queue with the repair service, so that repair operations cannot run concurrently with
+    // domain connections.
+    connectQueue,
     futureSupervisor,
     loggerFactory,
   )
@@ -1031,11 +1042,17 @@ class CantonSyncService(
   ): EitherT[Future, SyncServiceError, Unit] =
     EitherTUtil
       .fromFuture(
-        syncDomain.start(),
+        syncDomain.startFUS(),
         t => SyncServiceError.SyncServiceInternalError.Failure(alias, t),
       )
       .subflatMap[SyncServiceError, Unit](
         _.leftMap(error => SyncServiceError.SyncServiceStartupError.InitError(alias, error))
+      )
+      .onShutdown(
+        Left(
+          SyncServiceError.SyncServiceStartupError
+            .InitError(alias, AbortedDueToShutdownError("Aborted due to shutdown"))
+        )
       )
 
   /** Connect the sync service to the given domain.
@@ -1173,13 +1190,6 @@ class CantonSyncService(
   ): EitherT[Future, MissingConfigForAlias, StoredDomainConnectionConfig] =
     EitherT.fromEither[Future](domainConnectionConfigStore.get(domainAlias))
 
-  private val connectQueue = new SimpleExecutionQueue(
-    "sync-service-connect-queue",
-    futureSupervisor,
-    timeouts,
-    loggerFactory,
-  )
-
   private def performDomainConnectionOrHandshake(
       domainAlias: DomainAlias,
       connectDomain: ConnectDomain,
@@ -1285,8 +1295,10 @@ class CantonSyncService(
         )
         domainHandle <- connect(domainConnectionConfig.config)
 
-        persistent = domainHandle.domainPersistentState
         domainId = domainHandle.domainId
+        domainLoggerFactory = loggerFactory.append("domainId", domainId.toString)
+        persistent = domainHandle.domainPersistentState
+
         domainCrypto = syncCrypto.tryForDomain(domainId, Some(domainAlias))
 
         ephemeral <- EitherT.right[SyncServiceError](
@@ -1296,14 +1308,14 @@ class CantonSyncService(
                 persistent,
                 participantNodePersistentState.map(_.multiDomainEventLog),
                 inFlightSubmissionTracker,
-                (loggerFactory: NamedLoggerFactory) => {
+                () => {
                   val tracker = DomainTimeTracker(
                     domainConnectionConfig.config.timeTracker,
                     clock,
                     domainHandle.sequencerClient,
                     domainHandle.staticParameters.protocolVersion,
                     timeouts,
-                    loggerFactory,
+                    domainLoggerFactory,
                   )
                   domainHandle.topologyClient.setDomainTimeTracker(tracker)
                   tracker
@@ -1314,19 +1326,18 @@ class CantonSyncService(
               )
           )
         )
-        domainLoggerFactory = loggerFactory.append("domainId", domainId.toString)
 
         missingKeysAlerter = new MissingKeysAlerter(
           participantId,
           domainId,
           domainHandle.topologyClient,
           domainCrypto.crypto.cryptoPrivateStore,
-          loggerFactory,
+          domainLoggerFactory,
         )
 
         trafficStateController = new TrafficStateController(
           participantId,
-          loggerFactory,
+          domainLoggerFactory,
           metrics.domainMetrics(domainAlias),
         )
 
@@ -1355,7 +1366,6 @@ class CantonSyncService(
           transferCoordination,
           inFlightSubmissionTracker,
           clock,
-          metrics.pruning,
           domainMetrics,
           trafficStateController,
           futureSupervisor,
@@ -1563,7 +1573,7 @@ class CantonSyncService(
   private val emitWarningOnDetailLoggingAndHighLoad =
     (parameters.general.loggingConfig.eventDetails || parameters.general.loggingConfig.api.messagePayloads) && parameters.general.loggingConfig.api.warnBeyondLoad.nonEmpty
 
-  def checkOverloaded(traceContext: TraceContext): Option[state.v2.SubmissionResult] = {
+  def checkOverloaded(traceContext: TraceContext): Option[state.SubmissionResult] = {
     implicit val errorLogger: ErrorLoggingContext =
       ErrorLoggingContext.fromTracedLogger(logger)(traceContext)
     val load = computeTotalLoad

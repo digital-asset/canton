@@ -17,9 +17,9 @@ import com.daml.metrics.Timed
 import com.daml.timer.FutureCheck.*
 import com.digitalasset.canton.data.DeduplicationPeriod.{DeduplicationDuration, DeduplicationOffset}
 import com.digitalasset.canton.data.Offset
-import com.digitalasset.canton.ledger.participant.state.v2.{CompletionInfo, Reassignment, Update}
+import com.digitalasset.canton.ledger.participant.state.{CompletionInfo, Reassignment, Update}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
-import com.digitalasset.canton.metrics.Metrics
+import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater.{PrepareResult, UpdaterFlow}
 import com.digitalasset.canton.platform.indexer.TransactionTraversalUtils
@@ -40,7 +40,7 @@ import scala.concurrent.{ExecutionContext, Future}
 /** Builder of the in-memory state updater Pekko flow.
   *
   * This flow is attached at the end of the Indexer pipeline,
-  * consumes the [[com.digitalasset.canton.ledger.participant.state.v2.Update]]s (that have been ingested by the Indexer
+  * consumes the [[com.digitalasset.canton.ledger.participant.state.Update]]s (that have been ingested by the Indexer
   * into the Index database) for populating the Ledger API server in-memory state (see [[InMemoryState]]).
   */
 private[platform] object InMemoryStateUpdaterFlow {
@@ -50,7 +50,7 @@ private[platform] object InMemoryStateUpdaterFlow {
       prepareUpdatesExecutionContext: ExecutionContext,
       updateCachesExecutionContext: ExecutionContext,
       preparePackageMetadataTimeOutWarning: FiniteDuration,
-      metrics: Metrics,
+      metrics: LedgerApiServerMetrics,
       logger: TracedLogger,
   )(
       prepare: (Vector[(Offset, Traced[Update])], Long) => PrepareResult,
@@ -90,7 +90,7 @@ private[platform] object InMemoryStateUpdater {
       inMemoryState: InMemoryState,
       prepareUpdatesParallelism: Int,
       preparePackageMetadataTimeOutWarning: FiniteDuration,
-      metrics: Metrics,
+      metrics: LedgerApiServerMetrics,
       loggerFactory: NamedLoggerFactory,
   )(implicit traceContext: TraceContext): ResourceOwner[UpdaterFlow] = for {
     prepareUpdatesExecutor <- ResourceOwner.forExecutorService(() =>

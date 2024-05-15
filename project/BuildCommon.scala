@@ -1401,7 +1401,6 @@ object BuildCommon {
             daml_observability_pekko_http_metrics,
             daml_timer_utils,
             pekko_http,
-            spray_json_derived_codecs,
             daml_libs_scala_scalatest_utils % Test,
             pekko_stream_testkit % Test,
           ),

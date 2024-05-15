@@ -7,6 +7,8 @@ import cats.data.EitherT
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.NonNegativeFiniteDuration as _
+import com.digitalasset.canton.connection.GrpcApiInfoService
+import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
 import com.digitalasset.canton.crypto.{Crypto, DomainSyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -31,8 +33,9 @@ import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.health.admin.data.{SequencerHealthStatus, SequencerNodeStatus}
 import com.digitalasset.canton.health.{
   ComponentStatus,
+  DependenciesHealthService,
   GrpcHealthReporter,
-  HealthService,
+  LivenessHealthService,
   MutableHealthQuasiComponent,
 }
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasCloseContext, Lifecycle}
@@ -64,7 +67,7 @@ import com.digitalasset.canton.store.{
 }
 import com.digitalasset.canton.time.*
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
+import com.digitalasset.canton.topology.client.DomainTopologyClient
 import com.digitalasset.canton.topology.processing.{EffectiveTime, TopologyTransactionProcessor}
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.store.{
@@ -131,7 +134,7 @@ class SequencerNodeBootstrap(
       nodeId: UniqueIdentifier,
       manager: AuthorizedTopologyManager,
       healthReporter: GrpcHealthReporter,
-      healthService: HealthService,
+      healthService: DependenciesHealthService,
   ): BootstrapStageOrLeaf[SequencerNode] = {
     new WaitForSequencerToDomainInit(
       storage,
@@ -144,6 +147,7 @@ class SequencerNodeBootstrap(
   }
 
   private val domainTopologyManager = new SingleUseCell[DomainTopologyManager]()
+  private val topologyClient = new SingleUseCell[DomainTopologyClient]()
 
   override protected def sequencedTopologyStores: Seq[TopologyStore[DomainStore]] =
     domainTopologyManager.get.map(_.store).toList
@@ -151,10 +155,14 @@ class SequencerNodeBootstrap(
   override protected def sequencedTopologyManagers: Seq[DomainTopologyManager] =
     domainTopologyManager.get.toList
 
-  // TODO(#14048): Align the semantics with the participant.
   override protected def lookupTopologyClient(
       storeId: TopologyStoreId
-  ): Option[DomainTopologyClientWithInit] = None
+  ): Option[DomainTopologyClient] =
+    storeId match {
+      case DomainStore(domainId, _) =>
+        topologyClient.get.filter(_.domainId == domainId)
+      case _ => None
+    }
 
   private class WaitForSequencerToDomainInit(
       storage: Storage,
@@ -162,7 +170,7 @@ class SequencerNodeBootstrap(
       sequencerId: SequencerId,
       manager: AuthorizedTopologyManager,
       healthReporter: GrpcHealthReporter,
-      healthService: HealthService,
+      healthService: DependenciesHealthService,
   ) extends BootstrapStageWithStorage[
         SequencerNode,
         StartupNode,
@@ -179,6 +187,12 @@ class SequencerNodeBootstrap(
     adminServerRegistry.addServiceU(
       SequencerInitializationServiceGrpc.bindService(
         new GrpcSequencerInitializationService(this, loggerFactory)(executionContext),
+        executionContext,
+      )
+    )
+    adminServerRegistry.addServiceU(
+      ApiInfoServiceGrpc.bindService(
+        new GrpcApiInfoService(CantonGrpcUtil.ApiName.AdminApi),
         executionContext,
       )
     )
@@ -283,24 +297,27 @@ class SequencerNodeBootstrap(
             SequencerFactory,
             DomainTopologyManager,
         )
-    ): StartupNode = {
+    ): EitherT[FutureUnlessShutdown, String, StartupNode] = {
       val (domainParameters, sequencerFactory, domainTopologyMgr) = result
-      if (domainTopologyManager.putIfAbsent(domainTopologyMgr).nonEmpty) {
-        // TODO(#14048) how to handle this error properly?
-        throw new IllegalStateException("domainTopologyManager shouldn't have been set before")
+      for {
+        _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+          domainTopologyManager.putIfAbsent(domainTopologyMgr).isEmpty,
+          "Unexpected state during initialization: domain topology manager shouldn't have been set before",
+        )
+      } yield {
+        new StartupNode(
+          storage,
+          crypto,
+          sequencerId,
+          sequencerFactory,
+          domainParameters,
+          manager,
+          domainTopologyMgr,
+          nonInitializedSequencerNodeServer.getAndSet(None),
+          healthReporter,
+          healthService,
+        )
       }
-      new StartupNode(
-        storage,
-        crypto,
-        sequencerId,
-        sequencerFactory,
-        domainParameters,
-        manager,
-        domainTopologyMgr,
-        nonInitializedSequencerNodeServer.getAndSet(None),
-        healthReporter,
-        healthService,
-      )
     }
 
     override protected def autoCompleteStage(): EitherT[FutureUnlessShutdown, String, Option[
@@ -406,7 +423,7 @@ class SequencerNodeBootstrap(
       domainTopologyManager: DomainTopologyManager,
       preinitializedServer: Option[DynamicDomainGrpcServer],
       healthReporter: GrpcHealthReporter,
-      healthService: HealthService,
+      healthService: DependenciesHealthService,
   ) extends BootstrapStage[SequencerNode, RunningNode[SequencerNode]](
         description = "Startup sequencer node",
         bootstrapStageCallback,
@@ -461,8 +478,12 @@ class SequencerNodeBootstrap(
           )
           (topologyProcessor, topologyClient) = processorAndClient
           maxStoreTimestamp <- EitherT.right(domainTopologyStore.maxTimestamp())
+          _ = ips.add(topologyClient)
+          _ <- EitherTUtil.condUnitET[Future](
+            SequencerNodeBootstrap.this.topologyClient.putIfAbsent(topologyClient).isEmpty,
+            "Unexpected state during initialization: topology client shouldn't have been set before",
+          )
           membersToRegister <- {
-            ips.add(topologyClient)
             addCloseable(topologyProcessor)
             addCloseable(topologyClient)
             // TODO(#14073) more robust initialization: if we upload the genesis state, we need to poke
@@ -690,20 +711,25 @@ class SequencerNodeBootstrap(
 
   // The service exposed by the gRPC health endpoint of sequencer public API
   // This will be used by sequencer clients who perform client-side load balancing to determine sequencer health
-  private lazy val sequencerPublicApiHealthService = HealthService(
+  private lazy val sequencerPublicApiHealthService = DependenciesHealthService(
     CantonGrpcUtil.sequencerHealthCheckServiceName,
     logger,
     timeouts,
     criticalDependencies = Seq(sequencerHealth),
   )
 
-  override protected def mkNodeHealthService(storage: Storage): HealthService =
-    HealthService(
+  override protected def mkNodeHealthService(
+      storage: Storage
+  ): (DependenciesHealthService, LivenessHealthService) = {
+    val readiness = DependenciesHealthService(
       "sequencer",
       logger,
       timeouts,
       Seq(storage),
     )
+    val liveness = LivenessHealthService.alwaysAlive(logger, timeouts)
+    (readiness, liveness)
+  }
 
   // Creates a dynamic domain server that initially only exposes a health endpoint, and can later be
   // setup with the sequencer runtime to provide the full sequencer domain API
