@@ -77,7 +77,6 @@ object Dependencies {
   lazy val slf4j_version = "2.0.6"
   // if you update the slick version, please also update our forked code in common/slick.util.*
   lazy val slick_version = "3.3.3"
-  lazy val spray_json_derived_codecs_version = "2.3.10"
   lazy val sttp_version = "3.8.16"
   lazy val testcontainers_version = "1.19.7"
   lazy val tink_version = "1.12.0"
@@ -148,9 +147,6 @@ object Dependencies {
     "org.apache.pekko" %% "pekko-slf4j" % pekko_version excludeAll (incompatibleLogging: _*)
   lazy val pekko_http = "org.apache.pekko" %% "pekko-http" % pekko_http_version
   lazy val pekko_http_testkit = "org.apache.pekko" %% "pekko-http-testkit" % pekko_http_version
-
-  lazy val spray_json_derived_codecs =
-    "io.github.paoloboni" %% "spray-json-derived-codecs" % spray_json_derived_codecs_version exclude ("com.chuusai", s"shapeless_$scala_version_short")
 
   lazy val scala_logging =
     "com.typesafe.scala-logging" %% "scala-logging" % scala_logging_version excludeAll (incompatibleLogging: _*)
