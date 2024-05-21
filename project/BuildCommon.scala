@@ -1319,7 +1319,14 @@ object BuildCommon {
     )
 
     lazy val removeCompileFlagsForDaml =
-      Seq("-Xsource:3", "-deprecation", "-Xfatal-warnings", "-Ywarn-unused", "-Ywarn-value-discard")
+      Seq(
+        "-Xsource:3",
+        "-deprecation",
+        "-Xfatal-warnings",
+        "-Ywarn-unused",
+        "-Ywarn-value-discard",
+        "-Wnonunit-statement",
+      )
 
     lazy val `daml-copy-macro` = project
       .in(file("community/lib/daml-copy-macro"))
