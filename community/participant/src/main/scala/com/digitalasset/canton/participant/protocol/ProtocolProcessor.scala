@@ -1124,8 +1124,9 @@ abstract class ProtocolProcessor[
                   }
               s"approved=${approved}, rejected=${rejected}" }"
           )
-          sendResponses(requestId, signedResponsesTo, Some(messageId))
-            .leftMap(err => steps.embedRequestError(SequencerRequestError(err)))
+          EitherT.liftF[FutureUnlessShutdown, steps.RequestError, Unit](
+            sendResponses(requestId, signedResponsesTo, Some(messageId))
+          )
         } else {
           logger.info(
             s"Phase 4: Finished validation for request=${requestId.unwrap} with nothing to approve."
@@ -1177,8 +1178,7 @@ abstract class ProtocolProcessor[
           })
           .mapK(FutureUnlessShutdown.outcomeK)
 
-        _ <- sendResponses(requestId, messages)
-          .leftMap(err => steps.embedRequestError(SequencerRequestError(err)))
+        _ <- EitherT.liftF(sendResponses(requestId, messages))
 
         _ = handleRequestData.complete(None)
 

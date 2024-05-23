@@ -67,6 +67,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
         .registerReporters(config.monitoring.metrics, loggerFactory),
       config.monitoring.tracing.tracer,
       config.monitoring.metrics.histograms,
+      config.monitoring.metrics.cardinality.unwrap,
       loggerFactory,
     )
   }
