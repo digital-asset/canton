@@ -5,11 +5,10 @@ package com.digitalasset.canton.domain.sequencing.sequencer.reference.store
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.block.BlockOrderer
+import com.digitalasset.canton.domain.block.BlockFormat
 import com.digitalasset.canton.domain.sequencing.sequencer.reference.store.ReferenceBlockOrderingStore.TimestampedBlock
 import com.digitalasset.canton.domain.sequencing.sequencer.reference.store.ReferenceSequencerDriverStore.{
   sequencedAcknowledgement,
-  sequencedRegisterMember,
   sequencedSend,
 }
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction
@@ -20,9 +19,9 @@ import org.scalatest.wordspec.AsyncWordSpec
 trait ReferenceBlockOrderingStoreTest extends AsyncWordSpec with BaseTest {
 
   private val event1 =
-    sequencedSend(payload = ByteString.copyFromUtf8("payload"), microsecondsSinceEpoch = 0)
+    sequencedSend(payload = ByteString.copyFromUtf8("payload1"), microsecondsSinceEpoch = 0)
   private val event2 =
-    sequencedRegisterMember(payload = ByteString.copyFromUtf8("member"), microsecondsSinceEpoch = 1)
+    sequencedSend(payload = ByteString.copyFromUtf8("payload2"), microsecondsSinceEpoch = 1)
   private val event3 =
     sequencedAcknowledgement(
       payload = ByteString.copyFromUtf8("acknowledge"),
@@ -36,9 +35,9 @@ trait ReferenceBlockOrderingStoreTest extends AsyncWordSpec with BaseTest {
   val traceContext3: TraceContext =
     W3CTraceContext("00-7a5e6a5c6f8d8646adce33d4f0b1c3b1-8546d5a6a5f6c5b6-01").toTraceContext
 
-  private def block(height: Long, tracedEvent: Traced[BlockOrderer.OrderedRequest]) =
+  private def block(height: Long, tracedEvent: Traced[BlockFormat.OrderedRequest]) =
     TimestampedBlock(
-      BlockOrderer.Block(height, Seq(tracedEvent)),
+      BlockFormat.Block(height, Seq(tracedEvent)),
       CantonTimestamp.ofEpochMicro(tracedEvent.value.microsecondsSinceEpoch),
       SignedTopologyTransaction.InitialTopologySequencingTime,
     )

@@ -25,6 +25,7 @@ import com.digitalasset.canton.serialization.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.{
+  HasToByteString,
   HasVersionedMessageCompanion,
   HasVersionedMessageCompanionDbHelpers,
   HasVersionedToByteString,
@@ -32,13 +33,10 @@ import com.digitalasset.canton.version.{
   ProtoVersion,
   ProtocolVersion,
 }
-import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
-import monocle.Lens
-import monocle.macros.GenLens
 import slick.jdbc.GetResult
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 
 /** Encryption operations that do not require access to a private key store but operates with provided keys. */
 trait EncryptionOps {
@@ -63,11 +61,21 @@ trait EncryptionOps {
       scheme: SymmetricKeyScheme = defaultSymmetricKeyScheme,
   ): Either[EncryptionKeyCreationError, SymmetricKey]
 
-  /** Encrypts the given bytes using the given public key */
+  /** Encrypts the bytes of the serialized message using the given public key.
+    * The given protocol version determines the message serialization.
+    */
   def encryptWith[M <: HasVersionedToByteString](
       message: M,
       publicKey: EncryptionPublicKey,
       version: ProtocolVersion,
+  ): Either[EncryptionError, AsymmetricEncrypted[M]]
+
+  /** Encrypts the bytes of the serialized message using the given public key.
+    * Where the message embedded protocol version determines the message serialization.
+    */
+  def encryptWith[M <: HasToByteString](
+      message: M,
+      publicKey: EncryptionPublicKey,
   ): Either[EncryptionError, AsymmetricEncrypted[M]]
 
   /** Deterministically encrypts the given bytes using the given public key.
@@ -93,11 +101,21 @@ trait EncryptionOps {
     message <- decryptWithInternal(encrypted, privateKey)(deserialize)
   } yield message
 
-  /** Encrypts the given message with the given symmetric key */
+  /** Encrypts the bytes of the serialized message using the given symmetric key.
+    * The given protocol version determines the message serialization.
+    */
   def encryptWith[M <: HasVersionedToByteString](
       message: M,
       symmetricKey: SymmetricKey,
       version: ProtocolVersion,
+  ): Either[EncryptionError, Encrypted[M]]
+
+  /** Encrypts the bytes of the serialized message using the given symmetric key.
+    * Where the message embedded protocol version determines the message serialization.
+    */
+  def encryptWith[M <: HasToByteString](
+      message: M,
+      symmetricKey: SymmetricKey,
   ): Either[EncryptionError, Encrypted[M]]
 
   /** Decrypts a message encrypted using `encryptWith` */
@@ -152,7 +170,7 @@ trait EncryptionPrivateStoreOps extends EncryptionPrivateOps {
   /** Internal method to generate and return the entire encryption key pair */
   protected[crypto] def generateEncryptionKeypair(scheme: EncryptionKeyScheme)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, EncryptionKeyGenerationError, EncryptionKeyPair]
+  ): EitherT[FutureUnlessShutdown, EncryptionKeyGenerationError, EncryptionKeyPair]
 
   override def generateEncryptionKey(
       scheme: EncryptionKeyScheme = defaultEncryptionKeyScheme,
@@ -161,7 +179,7 @@ trait EncryptionPrivateStoreOps extends EncryptionPrivateOps {
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, EncryptionKeyGenerationError, EncryptionPublicKey] =
     for {
-      keypair <- generateEncryptionKeypair(scheme).mapK(FutureUnlessShutdown.outcomeK)
+      keypair <- generateEncryptionKeypair(scheme)
       _ <- store
         .storeDecryptionKey(keypair.privateKey, name)
         .leftMap[EncryptionKeyGenerationError](
@@ -344,23 +362,13 @@ object EncryptionKeyPair {
     throw new UnsupportedOperationException("Use generate or deserialization methods")
 
   private[crypto] def create(
-      id: Fingerprint,
       format: CryptoKeyFormat,
       publicKeyBytes: ByteString,
       privateKeyBytes: ByteString,
       scheme: EncryptionKeyScheme,
   ): EncryptionKeyPair = {
-    val publicKey = new EncryptionPublicKey(id, format, publicKeyBytes, scheme)
+    val publicKey = new EncryptionPublicKey(format, publicKeyBytes, scheme)
     val privateKey = new EncryptionPrivateKey(publicKey.id, format, privateKeyBytes, scheme)
-    new EncryptionKeyPair(publicKey, privateKey)
-  }
-
-  @VisibleForTesting
-  def wrongEncryptionKeyPairWithPublicKeyUnsafe(
-      publicKey: EncryptionPublicKey
-  ): EncryptionKeyPair = {
-    val privateKey =
-      new EncryptionPrivateKey(publicKey.id, publicKey.format, publicKey.key, publicKey.scheme)
     new EncryptionKeyPair(publicKey, privateKey)
   }
 
@@ -382,7 +390,6 @@ object EncryptionKeyPair {
 }
 
 final case class EncryptionPublicKey private[crypto] (
-    id: Fingerprint,
     format: CryptoKeyFormat,
     protected[crypto] val key: ByteString,
     scheme: EncryptionKeyScheme,
@@ -390,7 +397,7 @@ final case class EncryptionPublicKey private[crypto] (
     with PrettyPrinting
     with HasVersionedWrapper[EncryptionPublicKey] {
 
-  override protected def companionObj = EncryptionPublicKey
+  override protected def companionObj: EncryptionPublicKey.type = EncryptionPublicKey
 
   // TODO(#15649): Make EncryptionPublicKey object invariant
   protected def validated: Either[ProtoDeserializationError.CryptoDeserializationError, this.type] =
@@ -406,7 +413,6 @@ final case class EncryptionPublicKey private[crypto] (
 
   def toProtoV30: v30.EncryptionPublicKey =
     v30.EncryptionPublicKey(
-      id = id.toProtoPrimitive,
       format = format.toProtoEnum,
       publicKey = key,
       scheme = scheme.toProtoEnum,
@@ -432,26 +438,19 @@ object EncryptionPublicKey
   )
 
   private[crypto] def create(
-      id: Fingerprint,
       format: CryptoKeyFormat,
       key: ByteString,
       scheme: EncryptionKeyScheme,
   ): Either[ProtoDeserializationError.CryptoDeserializationError, EncryptionPublicKey] =
-    new EncryptionPublicKey(id, format, key, scheme).validated
-
-  @VisibleForTesting
-  val idUnsafe: Lens[EncryptionPublicKey, Fingerprint] =
-    GenLens[EncryptionPublicKey](_.id)
+    new EncryptionPublicKey(format, key, scheme).validated
 
   def fromProtoV30(
       publicKeyP: v30.EncryptionPublicKey
   ): ParsingResult[EncryptionPublicKey] =
     for {
-      id <- Fingerprint.fromProtoPrimitive(publicKeyP.id)
       format <- CryptoKeyFormat.fromProtoEnum("format", publicKeyP.format)
       scheme <- EncryptionKeyScheme.fromProtoEnum("scheme", publicKeyP.scheme)
       encryptionPublicKey <- EncryptionPublicKey.create(
-        id,
         format,
         publicKeyP.publicKey,
         scheme,

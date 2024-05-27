@@ -16,25 +16,23 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.block.BlockSequencerStateManager.ChunkState
 import com.digitalasset.canton.domain.block.data.memory.InMemorySequencerBlockStore
 import com.digitalasset.canton.domain.block.data.{BlockEphemeralState, BlockInfo, EphemeralState}
+import com.digitalasset.canton.domain.block.update.{
+  BlockUpdate,
+  BlockUpdateGenerator,
+  OrderedBlockUpdate,
+  SignedChunkEvents,
+}
 import com.digitalasset.canton.domain.block.{
   BlockEvents,
   BlockSequencerStateManager,
   BlockSequencerStateManagerBase,
-  BlockUpdate,
-  BlockUpdateGenerator,
-  OrderedBlockUpdate,
   RawLedgerBlock,
   SequencerDriverHealthStatus,
-  SignedChunkEvents,
 }
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer.SignedOrderingRequest
 import com.digitalasset.canton.domain.sequencing.sequencer.SequencerIntegration
 import com.digitalasset.canton.domain.sequencing.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
-import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
-  RegisterMemberError,
-  SequencerWriteError,
-}
 import com.digitalasset.canton.domain.sequencing.traffic.RateLimitManagerTesting
 import com.digitalasset.canton.domain.sequencing.traffic.store.memory.InMemoryTrafficPurchasedStore
 import com.digitalasset.canton.lifecycle.AsyncOrSyncCloseable
@@ -77,7 +75,7 @@ class BlockSequencerTest
 
   "BlockSequencer" should {
     "process a lot of blocks during catch up" in withEnv { implicit env =>
-      env.fakeBlockSequencerOps.completed.future.map(_ => succeed)
+      env.fakeBlockOrderer.completed.future.map(_ => succeed)
     }
   }
 
@@ -139,6 +137,7 @@ class BlockSequencerTest
       // This works even though the crypto owner is the domain manager!!!
       topologyTransactionFactory.cryptoApi.crypto,
       CachingConfigs.testing,
+      defaultStaticDomainParameters,
       DefaultProcessingTimeouts.testing,
       FutureSupervisor.Noop,
       loggerFactory,
@@ -149,12 +148,12 @@ class BlockSequencerTest
 
     private val balanceStore = new InMemoryTrafficPurchasedStore(loggerFactory)
 
-    val fakeBlockSequencerOps = new FakeBlockSequencerOps(N)
+    val fakeBlockOrderer = new FakeBlockOrderer(N)
     private val fakeBlockSequencerStateManager = new FakeBlockSequencerStateManager
     private val storage = new MemoryStorage(loggerFactory, timeouts)
     private val blockSequencer =
       new BlockSequencer(
-        fakeBlockSequencerOps,
+        fakeBlockOrderer,
         name = "test",
         domainId,
         cryptoApi,
@@ -190,7 +189,7 @@ class BlockSequencerTest
     }
   }
 
-  class FakeBlockSequencerOps(n: Int) extends BlockSequencerOps {
+  class FakeBlockOrderer(n: Int) extends BlockOrderer {
 
     val completed: Promise[Unit] = Promise()
 
@@ -217,14 +216,15 @@ class BlockSequencerTest
     override def send(signedSubmission: SignedOrderingRequest)(implicit
         traceContext: TraceContext
     ): EitherT[Future, SendAsyncError, Unit] = ???
-    override def register(member: Member)(implicit
-        traceContext: TraceContext
-    ): EitherT[Future, SequencerWriteError[RegisterMemberError], Unit] = ???
     override def health(implicit traceContext: TraceContext): Future[SequencerDriverHealthStatus] =
       ???
     override def acknowledge(signedAcknowledgeRequest: SignedContent[AcknowledgeRequest])(implicit
         traceContext: TraceContext
     ): Future[Unit] = ???
+
+    override def firstBlockHeight: Long = ???
+
+    override def orderingTimeFixMode: OrderingTimeFixMode = ???
   }
 
   class FakeBlockSequencerStateManager extends BlockSequencerStateManagerBase {

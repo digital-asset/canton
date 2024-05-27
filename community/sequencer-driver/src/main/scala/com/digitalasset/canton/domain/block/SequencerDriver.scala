@@ -120,6 +120,8 @@ trait SequencerDriverFactory {
   */
 trait SequencerDriver extends AutoCloseable {
 
+  def firstBlockHeight: Long
+
   // Admin end points
 
   /** Services for administering the ledger driver.
@@ -128,13 +130,6 @@ trait SequencerDriver extends AutoCloseable {
   def adminServices: Seq[ServerServiceDefinition]
 
   // Write operations
-
-  /** Register the given member.
-    * Results in a [[com.digitalasset.canton.domain.block.RawLedgerBlock.RawBlockEvent.AddMember]].
-    */
-  def registerMember(member: String)(implicit
-      traceContext: TraceContext
-  ): Future[Unit]
 
   /** Distribute an acknowledgement request.
     * Results in a [[com.digitalasset.canton.domain.block.RawLedgerBlock.RawBlockEvent.Acknowledgment]].
@@ -197,8 +192,6 @@ object RawLedgerBlock {
         request: ByteString,
         microsecondsSinceEpoch: Long,
     ) extends RawBlockEvent
-
-    final case class AddMember(member: String) extends RawBlockEvent
 
     final case class Acknowledgment(acknowledgement: ByteString) extends RawBlockEvent
   }

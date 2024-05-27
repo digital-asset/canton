@@ -7,11 +7,15 @@ import cats.data.EitherT
 import cats.syntax.functorFilter.*
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.crypto.KeyPurpose
+import com.digitalasset.canton.crypto.{KeyPurpose, SigningPublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.protocol.DynamicDomainParametersWithValidity
+import com.digitalasset.canton.protocol.{
+  DynamicDomainParametersWithValidity,
+  DynamicSequencingParametersWithValidity,
+}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.{
   AuthorityOfDelegation,
@@ -147,6 +151,32 @@ class StoreBasedTopologySnapshot(
           )
         }
       } yield domainParameters
+    }
+
+  override def findDynamicSequencingParameters()(implicit
+      traceContext: TraceContext
+  ): Future[Either[String, DynamicSequencingParametersWithValidity]] =
+    findTransactions(
+      asOfInclusive = false,
+      types = Seq(TopologyMapping.Code.SequencingDynamicParametersState),
+      filterUid = None,
+      filterNamespace = None,
+    ).map { transactions =>
+      for {
+        storedTx <- collectLatestTransaction(
+          TopologyMapping.Code.SequencingDynamicParametersState,
+          transactions
+            .collectOfMapping[DynamicSequencingParametersState]
+            .result,
+        ).toRight(s"Unable to fetch sequencing parameters at $timestamp")
+
+        mapping = storedTx.mapping
+      } yield DynamicSequencingParametersWithValidity(
+        mapping.parameters,
+        storedTx.validFrom.value,
+        storedTx.validUntil.map(_.value),
+        mapping.domain,
+      )
     }
 
   /** List all the dynamic domain parameters (past and current) */
@@ -566,15 +596,6 @@ class StoreBasedTopologySnapshot(
         pid -> pdp.toParticipantAttributes
       })
 
-  override def participants()(implicit
-      traceContext: TraceContext
-  ): Future[Seq[(ParticipantId, ParticipantPermission)]] =
-    Future.failed(
-      new UnsupportedOperationException(
-        s"Participants lookup not supported by StoreBasedDomainTopologyClient. This is a coding bug."
-      )
-    )
-
   /** abstract loading function used to obtain the full key collection for a key owner */
   override def allKeys(owner: Member)(implicit traceContext: TraceContext): Future[KeyCollection] =
     allKeys(Seq(owner)).map(_.getOrElse(owner, KeyCollection.empty))
@@ -695,4 +716,7 @@ class StoreBasedTopologySnapshot(
     transactions.lastOption
   }
 
+  override def signingKeysUS(owner: Member)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[SigningPublicKey]] = FutureUnlessShutdown.outcomeF(signingKeys(owner))
 }

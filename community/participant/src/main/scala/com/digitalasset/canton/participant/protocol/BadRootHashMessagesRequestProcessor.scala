@@ -11,12 +11,16 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.store.SyncDomainEphemeralState
 import com.digitalasset.canton.protocol.messages.ConfirmationResponse
-import com.digitalasset.canton.protocol.{LocalRejectError, RequestId, RootHash}
+import com.digitalasset.canton.protocol.{
+  LocalRejectError,
+  RequestId,
+  RootHash,
+  StaticDomainParameters,
+}
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.protocol.{MediatorGroupRecipient, Recipients}
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, SequencerCounter, checked}
 
@@ -28,6 +32,7 @@ class BadRootHashMessagesRequestProcessor(
     sequencerClient: SequencerClient,
     domainId: DomainId,
     participantId: ParticipantId,
+    staticDomainParameters: StaticDomainParameters,
     protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
@@ -36,6 +41,7 @@ class BadRootHashMessagesRequestProcessor(
       ephemeral,
       crypto,
       sequencerClient,
+      staticDomainParameters,
       protocolVersion,
     ) {
 
@@ -70,9 +76,6 @@ class BadRootHashMessagesRequestProcessor(
         _ <- sendResponses(
           requestId,
           Seq(signedRejection -> Recipients.cc(mediator)),
-        ).valueOr(error =>
-          // This is a best-effort response anyway, so we merely log the failure and continue
-          logger.warn(show"Failed to send best-effort rejection of malformed request: $error")
         )
         _ = ephemeral.recordOrderPublisher.tick(sequencerCounter, timestamp)
       } yield ()

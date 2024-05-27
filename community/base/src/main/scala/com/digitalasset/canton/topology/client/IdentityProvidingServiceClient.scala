@@ -19,6 +19,7 @@ import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.protocol.{
   DynamicDomainParameters,
   DynamicDomainParametersWithValidity,
+  DynamicSequencingParametersWithValidity,
 }
 import com.digitalasset.canton.sequencing.TrafficControlParameters
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
@@ -345,6 +346,10 @@ trait KeyTopologySnapshotClient {
   /** returns all signing keys */
   def signingKeys(owner: Member)(implicit traceContext: TraceContext): Future[Seq[SigningPublicKey]]
 
+  def signingKeysUS(owner: Member)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[SigningPublicKey]]
+
   def signingKeys(members: Seq[Member])(implicit
       traceContext: TraceContext
   ): Future[Map[Member, Seq[SigningPublicKey]]]
@@ -381,12 +386,6 @@ trait KeyTopologySnapshotClient {
 trait ParticipantTopologySnapshotClient {
 
   this: BaseTopologySnapshotClient =>
-
-  // used by domain to fetch all participants
-  @Deprecated(since = "3.0")
-  def participants()(implicit
-      traceContext: TraceContext
-  ): Future[Seq[(ParticipantId, ParticipantPermission)]]
 
   /** Checks whether the provided participant exists and is active */
   def isParticipantActive(participantId: ParticipantId)(implicit
@@ -515,6 +514,10 @@ trait DomainGovernanceSnapshotClient {
   def findDynamicDomainParameters()(implicit
       traceContext: TraceContext
   ): Future[Either[String, DynamicDomainParametersWithValidity]]
+
+  def findDynamicSequencingParameters()(implicit
+      traceContext: TraceContext
+  ): Future[Either[String, DynamicSequencingParametersWithValidity]]
 
   /** List all the dynamic domain parameters (past and current) */
   def listDynamicDomainParametersChanges()(implicit

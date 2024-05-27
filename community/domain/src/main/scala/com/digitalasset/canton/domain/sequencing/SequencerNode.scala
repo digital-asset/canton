@@ -30,7 +30,12 @@ import com.digitalasset.canton.domain.sequencing.sequencer.store.{
 import com.digitalasset.canton.domain.sequencing.service.GrpcSequencerInitializationService
 import com.digitalasset.canton.domain.server.DynamicDomainGrpcServer
 import com.digitalasset.canton.environment.*
-import com.digitalasset.canton.health.admin.data.{SequencerHealthStatus, SequencerNodeStatus}
+import com.digitalasset.canton.health.admin.data.{
+  SequencerHealthStatus,
+  SequencerNodeStatus,
+  WaitingForExternalInput,
+  WaitingForInitialization,
+}
 import com.digitalasset.canton.health.{
   ComponentStatus,
   DependenciesHealthService,
@@ -320,6 +325,9 @@ class SequencerNodeBootstrap(
       }
     }
 
+    override def waitingFor: Option[WaitingForExternalInput] =
+      Some(WaitingForInitialization)
+
     override protected def autoCompleteStage(): EitherT[FutureUnlessShutdown, String, Option[
       (StaticDomainParameters, SequencerFactory, DomainTopologyManager)
     ]] =
@@ -544,6 +552,7 @@ class SequencerNodeBootstrap(
             topologyClient,
             crypto,
             parameters.cachingConfigs,
+            staticDomainParameters,
             parameters.processingTimeouts,
             futureSupervisor,
             loggerFactory,
@@ -808,6 +817,7 @@ class SequencerNode(
       participants,
       healthStatus,
       topologyQueue = sequencer.topologyQueue,
+      admin = sequencer.adminStatus,
       healthData,
     )
   }

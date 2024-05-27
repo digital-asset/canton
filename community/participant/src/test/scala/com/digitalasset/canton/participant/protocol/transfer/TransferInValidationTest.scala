@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.protocol.transfer
 import cats.implicits.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.{CantonTimestamp, FullTransferInTree, TransferSubmitterMetadata}
 import com.digitalasset.canton.participant.protocol.submission.SeedGenerator
 import com.digitalasset.canton.participant.protocol.transfer.TransferInValidation.*
@@ -29,7 +30,9 @@ import scala.concurrent.{Future, Promise}
 class TransferInValidationTest
     extends AsyncWordSpec
     with BaseTest
-    with ProtocolVersionChecksAsyncWordSpec {
+    with ProtocolVersionChecksAsyncWordSpec
+    with HasActorSystem
+    with HasExecutionContext {
   private val sourceDomain = SourceDomainId(
     DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::source"))
   )
@@ -76,7 +79,7 @@ class TransferInValidationTest
       .forOwnerAndDomain(submittingParticipant, sourceDomain.unwrap)
       .currentSnapshotApproximation
 
-  private val pureCrypto = TestingIdentityFactory.pureCrypto()
+  private val pureCrypto = new SymbolicPureCrypto
 
   private val seedGenerator = new SeedGenerator(pureCrypto)
 
@@ -286,6 +289,7 @@ class TransferInValidationTest
 
     new TransferInValidation(
       domainId,
+      defaultStaticDomainParameters,
       submittingParticipant,
       damle,
       TestTransferCoordination.apply(

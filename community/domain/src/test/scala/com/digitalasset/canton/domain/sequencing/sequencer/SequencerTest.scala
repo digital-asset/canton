@@ -83,7 +83,7 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
       )
         .build(loggerFactory)
         .forOwner(SequencerId(domainId.uid))
-        .forDomain(domainId)
+        .forDomain(domainId, defaultStaticDomainParameters)
         .toRight("crypto error")
     )("building crypto")
     val metrics: SequencerMetrics = SequencerMetrics.noop("sequencer-test")
@@ -178,7 +178,6 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
       val submission = SubmissionRequest.tryCreate(
         alice,
         messageId,
-        isRequest = true,
         Batch.closeEnvelopes(
           Batch.of(
             testedProtocolVersion,
