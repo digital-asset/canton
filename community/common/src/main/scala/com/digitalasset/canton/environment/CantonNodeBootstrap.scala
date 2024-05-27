@@ -34,7 +34,12 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.environment.CantonNodeBootstrap.HealthDumpFunction
 import com.digitalasset.canton.error.FatalError
-import com.digitalasset.canton.health.admin.data.NodeStatus
+import com.digitalasset.canton.health.admin.data.{
+  NodeStatus,
+  WaitingForExternalInput,
+  WaitingForId,
+  WaitingForNodeTopology,
+}
 import com.digitalasset.canton.health.admin.grpc.GrpcStatusService
 import com.digitalasset.canton.health.admin.v30.StatusServiceGrpc
 import com.digitalasset.canton.health.{
@@ -198,7 +203,23 @@ abstract class CantonNodeBootstrapImpl[
   private def status: Future[NodeStatus[NodeStatus.Status]] = {
     getNode
       .map(_.status.map(NodeStatus.Success(_)))
-      .getOrElse(Future.successful(NodeStatus.NotInitialized(isActive)))
+      .getOrElse(
+        Future.successful(NodeStatus.NotInitialized(isActive, waitingFor))
+      )
+  }
+
+  private def waitingFor: Option[WaitingForExternalInput] = {
+    def nextStage(stage: BootstrapStage[?, ?]): Option[BootstrapStage[?, ?]] = {
+      stage.next match {
+        case Some(s: BootstrapStage[_, _]) => nextStage(s)
+        case Some(_: RunningNode[_]) => None
+        // BootstrapStageOrLeaf is not a sealed class, therefore we need to catch any other
+        // possible subclass
+        case Some(_) => None
+        case None => Some(stage)
+      }
+    }
+    nextStage(startupStage).flatMap(_.waitingFor)
   }
 
   protected def registerHealthGauge(): Unit = {
@@ -481,6 +502,8 @@ abstract class CantonNodeBootstrapImpl[
           )
       )
 
+    override def waitingFor: Option[WaitingForExternalInput] = Some(WaitingForId)
+
     override protected def stageCompleted(implicit
         traceContext: TraceContext
     ): Future[Option[UniqueIdentifier]] = initializationStore.uid
@@ -622,6 +645,8 @@ abstract class CantonNodeBootstrapImpl[
       super.start()
     }
 
+    override def waitingFor: Option[WaitingForExternalInput] = Some(WaitingForNodeTopology)
+
     override protected def stageCompleted(implicit
         traceContext: TraceContext
     ): Future[Option[Unit]] = {
@@ -673,7 +698,6 @@ abstract class CantonNodeBootstrapImpl[
         namespaceKeyO <- crypto.cryptoPublicStore
           .signingKey(nodeId.fingerprint)
           .leftMap(_.toString)
-          .mapK(FutureUnlessShutdown.outcomeK)
         namespaceKey <- EitherT.fromEither[FutureUnlessShutdown](
           namespaceKeyO.toRight(
             s"Performing auto-init but can't find key ${nodeId.fingerprint} from previous step"
@@ -794,7 +818,11 @@ object CantonNodeBootstrapImpl {
 
   private def getKeyByFingerprint[P <: PublicKey](
       typ: String,
-      findPubKeyIdByFingerprint: Fingerprint => EitherT[Future, CryptoPublicStoreError, Option[P]],
+      findPubKeyIdByFingerprint: Fingerprint => EitherT[
+        FutureUnlessShutdown,
+        CryptoPublicStoreError,
+        Option[P],
+      ],
       existPrivateKeyByFp: Fingerprint => EitherT[
         FutureUnlessShutdown,
         CryptoPrivateStoreError,
@@ -806,7 +834,6 @@ object CantonNodeBootstrapImpl {
       .leftMap(err =>
         s"Failure while looking for $typ fingerprint $fingerprint in public store: $err"
       )
-      .mapK(FutureUnlessShutdown.outcomeK)
     pubKey <- keyIdO.fold(
       EitherT.leftT[FutureUnlessShutdown, P](
         s"$typ key with fingerprint $fingerprint does not exist"
@@ -828,7 +855,9 @@ object CantonNodeBootstrapImpl {
 
   private def getOrCreateKey[P <: PublicKey](
       typ: String,
-      findPubKeyIdByName: KeyName => EitherT[Future, CryptoPublicStoreError, Option[P]],
+      findPubKeyIdByName: KeyName => EitherT[FutureUnlessShutdown, CryptoPublicStoreError, Option[
+        P
+      ]],
       generateKey: Option[KeyName] => EitherT[FutureUnlessShutdown, String, P],
       existPrivateKeyByFp: Fingerprint => EitherT[
         FutureUnlessShutdown,
@@ -840,7 +869,6 @@ object CantonNodeBootstrapImpl {
     keyName <- EitherT.fromEither[FutureUnlessShutdown](KeyName.create(name))
     keyIdO <- findPubKeyIdByName(keyName)
       .leftMap(err => s"Failure while looking for $typ key $name in public store: $err")
-      .mapK(FutureUnlessShutdown.outcomeK)
     pubKey <- keyIdO.fold(
       generateKey(Some(keyName))
         .leftMap(err => s"Failure while generating $typ key for $name: $err")

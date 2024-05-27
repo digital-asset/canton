@@ -6,13 +6,20 @@ package com.digitalasset.canton.domain.sequencing.sequencer.reference
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.{ProcessingTimeout, QueryCostMonitoringConfig, StorageConfig}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.block.BlockOrderingSequencer.BatchTag
+import com.digitalasset.canton.domain.block.BlockFormat.{
+  AcknowledgeTag,
+  BatchTag,
+  SendTag,
+  blockOrdererBlockToRawLedgerBlock,
+}
 import com.digitalasset.canton.domain.block.{
-  BlockOrderer,
+  BlockFormat,
+  RawLedgerBlock,
+  SequencerDriver,
   SequencerDriverHealthStatus,
   TransactionSignature,
 }
-import com.digitalasset.canton.domain.sequencing.sequencer.reference.ReferenceBlockOrderer.{
+import com.digitalasset.canton.domain.sequencing.sequencer.reference.ReferenceSequencerDriver.{
   TimestampedRequest,
   batchRequests,
 }
@@ -36,7 +43,7 @@ import com.digitalasset.canton.logging.{
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.time.TimeProvider
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.{ErrorUtil, PekkoUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.util.{ErrorUtil, PekkoUtil}
 import com.google.protobuf.ByteString
 import io.grpc.ServerServiceDefinition
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
@@ -51,10 +58,11 @@ import org.apache.pekko.stream.{
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 
-class ReferenceBlockOrderer(
+class ReferenceSequencerDriver(
     store: ReferenceBlockOrderingStore,
-    config: ReferenceBlockOrderer.Config[_ <: StorageConfig],
+    config: ReferenceSequencerDriver.Config[_ <: StorageConfig],
     timeProvider: TimeProvider,
+    override val firstBlockHeight: Long,
     storage: Storage,
     closeable: AutoCloseable,
     val loggerFactory: NamedLoggerFactory,
@@ -62,7 +70,7 @@ class ReferenceBlockOrderer(
 )(implicit
     executionContext: ExecutionContext,
     materializer: Materializer,
-) extends BlockOrderer
+) extends SequencerDriver
     with NamedLogging
     with FlagCloseableAsync {
 
@@ -82,27 +90,26 @@ class ReferenceBlockOrderer(
         }
         .map(req =>
           store.insertRequest(
-            BlockOrderer.OrderedRequest(req.microsecondsSinceEpoch, req.tag, req.body)
+            BlockFormat.OrderedRequest(req.microsecondsSinceEpoch, req.tag, req.body)
           )(TraceContext.empty)
         )
         .toMat(Sink.ignore)(Keep.both),
     )
 
-  override def grpcServices: Seq[ServerServiceDefinition] = Seq()
+  override def subscribe()(implicit
+      traceContext: TraceContext
+  ): Source[RawLedgerBlock, KillSwitch] =
+    ReferenceSequencerDriver
+      .subscribe(firstBlockHeight)(store, config.pollInterval, logger)
+      .map(blockOrdererBlockToRawLedgerBlock(logger))
 
-  override def sendRequest(
-      tag: String,
-      body: ByteString,
-      signature: Option[TransactionSignature] = None,
-  )(implicit
+  override def send(request: ByteString)(implicit traceContext: TraceContext): Future[Unit] =
+    sendRequest(SendTag, request)
+
+  override def acknowledge(acknowledgement: ByteString)(implicit
       traceContext: TraceContext
   ): Future[Unit] =
-    Future.successful(storeRequest(timeProvider, tag, body))
-
-  override def subscribe(fromHeight: Long)(implicit
-      traceContext: TraceContext
-  ): Source[BlockOrderer.Block, KillSwitch] =
-    ReferenceBlockOrderer.subscribe(fromHeight)(store, config.pollInterval, logger)
+    sendRequest(AcknowledgeTag, acknowledgement)
 
   override def health(implicit traceContext: TraceContext): Future[SequencerDriverHealthStatus] = {
     val isStorageActive = storage.isActive
@@ -124,6 +131,17 @@ class ReferenceBlockOrderer(
       SyncCloseable("closeable", closeable.close()),
     )
   }
+
+  override def adminServices: Seq[ServerServiceDefinition] = Seq.empty
+
+  private def sendRequest(
+      tag: String,
+      body: ByteString,
+      signature: Option[TransactionSignature] = None,
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Unit] =
+    Future.successful(storeRequest(timeProvider, tag, body))
 
   private[sequencer] def storeRequest(
       timeProvider: TimeProvider,
@@ -157,7 +175,7 @@ class ReferenceBlockOrderer(
   }
 }
 
-object ReferenceBlockOrderer {
+object ReferenceSequencerDriver {
 
   /** Reference sequencer driver configuration
     * @param storage storage configuration for requests storage
@@ -174,35 +192,12 @@ object ReferenceBlockOrderer {
 
   final case class TimestampedRequest(tag: String, body: ByteString, microsecondsSinceEpoch: Long)
 
-  private[sequencer] def storeBatch(
-      blockHeight: Long,
-      timestamp: CantonTimestamp,
-      lastTopologyTimestamp: CantonTimestamp,
-      sendQueue: SimpleExecutionQueue,
-      store: ReferenceBlockOrderingStore,
-      requests: Seq[Traced[TimestampedRequest]],
-  )(implicit
-      executionContext: ExecutionContext,
-      errorLoggingContext: ErrorLoggingContext,
-      traceContext: TraceContext,
-  ): Future[Unit] =
-    sendQueue
-      .execute(
-        store.insertRequestWithHeight(
-          blockHeight,
-          batchRequests(timestamp.toMicros, lastTopologyTimestamp, requests, traceContext),
-        ),
-        s"send request at $timestamp",
-      )
-      .unwrap
-      .map(_ => ())
-
   private def batchRequests(
       timestamp: Long,
       lastTopologyTimestamp: CantonTimestamp,
       requests: Seq[Traced[TimestampedRequest]],
       traceContext: TraceContext,
-  ): BlockOrderer.OrderedRequest = {
+  ): BlockFormat.OrderedRequest = {
     val batchTraceparent = traceContext.asW3CTraceContext.map(_.parent).getOrElse("")
     val body =
       TracedBatchedBlockOrderingRequests
@@ -221,7 +216,7 @@ object ReferenceBlockOrderer {
           lastTopologyTimestamp.toMicros,
         )
         .toByteString
-    BlockOrderer.OrderedRequest(timestamp, BatchTag, body)
+    BlockFormat.OrderedRequest(timestamp, BatchTag, body)
   }
 
   def subscribe(fromHeight: Long)(
@@ -231,7 +226,7 @@ object ReferenceBlockOrderer {
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
-  ): Source[BlockOrderer.Block, KillSwitch] = {
+  ): Source[BlockFormat.Block, KillSwitch] = {
     logger.debug(
       s"Subscription started from height $fromHeight, current max height in DB is ${store.maxBlockHeight()}"
     )
@@ -243,7 +238,7 @@ object ReferenceBlockOrderer {
       )
       .viaMat(KillSwitches.single)(Keep.right)
       .scanAsync(
-        fromHeight -> Seq[BlockOrderer.Block]()
+        fromHeight -> Seq[BlockFormat.Block]()
       ) { case ((nextFromHeight, _), _tick) =>
         for {
           newBlocks <-

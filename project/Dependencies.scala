@@ -346,6 +346,10 @@ object Dependencies {
     "com.daml" %% "tracing-test-lib" % daml_libraries_version
   lazy val daml_libs_scala_grpc_test_utils =
     "com.daml" %% "grpc-test-utils" % daml_libraries_version
+  lazy val daml_lf_parser =
+    "com.daml" %% "daml-lf-parser" % daml_libraries_version
+  lazy val daml_lf_archive_encoder =
+    "com.daml" %% "daml-lf-archive-encoder" % daml_libraries_version
 
   // daml repo dependencies
   lazy val fasterjackson_core = resolveDependency("com.fasterxml.jackson.core", "jackson-core")

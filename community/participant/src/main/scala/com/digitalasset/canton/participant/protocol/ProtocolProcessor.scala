@@ -93,6 +93,7 @@ abstract class ProtocolProcessor[
     crypto: DomainSyncCryptoClient,
     sequencerClient: SequencerClientSend,
     domainId: DomainId,
+    staticDomainParameters: StaticDomainParameters,
     protocolVersion: ProtocolVersion,
     override protected val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
@@ -102,6 +103,7 @@ abstract class ProtocolProcessor[
       ephemeral,
       crypto,
       sequencerClient,
+      staticDomainParameters,
       protocolVersion,
     )
     with RequestProcessor[RequestViewType] {
@@ -459,7 +461,6 @@ abstract class ProtocolProcessor[
       _ <- sequencerClient
         .sendAsync(
           batch,
-          SendType.ConfirmationRequest,
           callback = res => sendResultP.trySuccess(res).discard,
           maxSequencingTime = maxSequencingTime,
           messageId = messageId,
@@ -1132,8 +1133,9 @@ abstract class ProtocolProcessor[
                   }
               s"approved=${approved}, rejected=${rejected}" }"
           )
-          sendResponses(requestId, signedResponsesTo, Some(messageId))
-            .leftMap(err => steps.embedRequestError(SequencerRequestError(err)))
+          EitherT.liftF[FutureUnlessShutdown, steps.RequestError, Unit](
+            sendResponses(requestId, signedResponsesTo, Some(messageId))
+          )
         } else {
           logger.info(
             s"Phase 4: Finished validation for request=${requestId.unwrap} with nothing to approve."
@@ -1185,8 +1187,7 @@ abstract class ProtocolProcessor[
             signResponse(snapshot, response).map(_ -> recipients)
           })
 
-        _ <- sendResponses(requestId, messages)
-          .leftMap(err => steps.embedRequestError(SequencerRequestError(err)))
+        _ <- EitherT.liftF(sendResponses(requestId, messages))
 
         _ = requestDataHandle.complete(None)
 
@@ -1485,7 +1486,6 @@ abstract class ProtocolProcessor[
                 steps.pendingSubmissions(ephemeral),
                 crypto.pureCrypto,
               )
-              .mapK(FutureUnlessShutdown.outcomeK)
           } yield {
             val steps.CommitAndStoreContractsAndPublishEvent(
               commitSetOF,
@@ -1525,8 +1525,7 @@ abstract class ProtocolProcessor[
       _ <- EitherT.right(
         FutureUnlessShutdown.outcomeF(
           ephemeral.contractStore.storeCreatedContracts(
-            requestCounter,
-            contractsToBeStored,
+            contractsToBeStored.map((_, requestCounter))
           )
         )
       )

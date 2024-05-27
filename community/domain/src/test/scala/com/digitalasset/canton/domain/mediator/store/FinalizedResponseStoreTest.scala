@@ -18,8 +18,8 @@ import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
-import com.digitalasset.canton.topology.{DefaultTestIdentities, TestingIdentityFactory}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{ApplicationId, BaseTest, CommandId, LfPartyId}
@@ -36,8 +36,8 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
   def ts(n: Int): CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(n.toLong)
   def requestIdTs(n: Int): RequestId = RequestId(ts(n))
 
-  val requestId = RequestId(CantonTimestamp.Epoch)
-  val fullInformeeTree = {
+  val requestId: RequestId = RequestId(CantonTimestamp.Epoch)
+  val fullInformeeTree: FullInformeeTree = {
     val domainId = DefaultTestIdentities.domainId
     val participantId = DefaultTestIdentities.participant1
 
@@ -54,9 +54,11 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
     def s(i: Int): Salt = TestSalt.generateSalt(i)
 
     val viewCommonData =
-      ViewCommonData.create(hashOps)(
-        Set(aliceInformee, bobConfirmingParty),
-        NonNegativeInt.tryCreate(2),
+      ViewCommonData.tryCreate(hashOps)(
+        ViewConfirmationParameters.tryCreate(
+          Set(aliceInformee.party, bobConfirmingParty.party),
+          Seq(Quorum.create(Set(bobConfirmingParty), NonNegativeInt.tryCreate(2))),
+        ),
         s(999),
         testedProtocolVersion,
       )
@@ -96,9 +98,9 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
       testedProtocolVersion,
     )
   }
-  val informeeMessage =
+  val informeeMessage: InformeeMessage =
     InformeeMessage(fullInformeeTree, Signature.noSignature)(testedProtocolVersion)
-  val currentVersion = FinalizedResponse(
+  val currentVersion: FinalizedResponse = FinalizedResponse(
     requestId,
     informeeMessage,
     requestId.unwrap,
@@ -172,8 +174,6 @@ trait DbFinalizedResponseStoreTest
     with FinalizedResponseStoreTest {
   this: DbTest =>
 
-  val pureCryptoApi: CryptoPureApi = TestingIdentityFactory.pureCrypto()
-
   def cleanDb(storage: DbStorage): Future[Int] = {
     import storage.api.*
     storage.update(sqlu"truncate table med_response_aggregations", functionFullName)
@@ -182,7 +182,7 @@ trait DbFinalizedResponseStoreTest
     behave like finalizedResponseStore(() =>
       new DbFinalizedResponseStore(
         storage,
-        pureCryptoApi,
+        new SymbolicPureCrypto,
         testedProtocolVersion,
         timeouts,
         loggerFactory,

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.sequencing.client.transports
 
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.domain.api.v30.SequencerAuthenticationServiceGrpc.SequencerAuthenticationServiceStub
@@ -43,10 +42,9 @@ class GrpcSequencerClientAuth(
     supportedProtocolVersions: Seq[ProtocolVersion],
     tokenManagerConfig: AuthenticationTokenManagerConfig,
     clock: Clock,
-    futureSupervisor: FutureSupervisor,
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
-)(implicit executionContext: ExecutionContext)
+)(implicit executionContext: ExecutionContext, traceContext: TraceContext)
     extends FlagCloseable
     with NamedLogging {
 

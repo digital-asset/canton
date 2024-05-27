@@ -13,21 +13,17 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, H
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.participant.protocol.conflictdetection.ActivenessSet
 import com.digitalasset.canton.participant.store.SyncDomainEphemeralState
-import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.{
   ConfirmationResponse,
   ProtocolMessage,
   SignedProtocolMessage,
 }
-import com.digitalasset.canton.sequencing.client.{
-  SendAsyncClientError,
-  SendCallback,
-  SequencerClientSend,
-}
+import com.digitalasset.canton.protocol.{RequestId, StaticDomainParameters}
+import com.digitalasset.canton.sequencing.client.{SendCallback, SequencerClientSend}
 import com.digitalasset.canton.sequencing.protocol.{Batch, MessageId, Recipients}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, FutureUtil}
+import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{RequestCounter, SequencerCounter}
 
@@ -38,6 +34,7 @@ abstract class AbstractMessageProcessor(
     ephemeral: SyncDomainEphemeralState,
     crypto: DomainSyncCryptoClient,
     sequencerClient: SequencerClientSend,
+    staticDomainParameters: StaticDomainParameters,
     protocolVersion: ProtocolVersion,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
@@ -89,12 +86,12 @@ abstract class AbstractMessageProcessor(
       messageId: Option[MessageId] = None,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SendAsyncClientError, Unit] = {
-    if (messages.isEmpty) EitherTUtil.unitUS[SendAsyncClientError]
+  ): FutureUnlessShutdown[Unit] = {
+    if (messages.isEmpty) FutureUnlessShutdown.unit
     else {
       logger.trace(s"Request $requestId: ProtocolProcessor scheduling the sending of responses")
 
-      for {
+      val result = for {
         domainParameters <- EitherT.right(
           crypto.ips
             .awaitSnapshotUS(requestId.unwrap)
@@ -116,6 +113,13 @@ abstract class AbstractMessageProcessor(
           amplify = true,
         )
       } yield ()
+
+      result.valueOr {
+        // Swallow Left errors to avoid stopping request processing, as sending response could fail for arbitrary reasons
+        // if the sequencer rejects them (e.g max sequencing time has elapsed)
+        err =>
+          logger.warn(s"Request $requestId: Failed to send responses: ${err.show}")
+      }
     }
   }
 

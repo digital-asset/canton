@@ -12,16 +12,18 @@ trait CryptoPublicStoreTest extends BaseTest { this: AsyncWordSpec =>
 
   def cryptoPublicStore(newStore: => CryptoPublicStore, backedByDatabase: Boolean): Unit = {
 
-    val sigKey1: SigningPublicKey = SymbolicCrypto.signingPublicKey("sigKey1")
+    val crypto = SymbolicCrypto.create(testedReleaseProtocolVersion, timeouts, loggerFactory)
+
+    val sigKey1: SigningPublicKey = crypto.generateSymbolicSigningKey(Some("sigKey1"))
     val sigKey1WithName: SigningPublicKeyWithName =
       SigningPublicKeyWithName(sigKey1, Some(KeyName.tryCreate("sigKey1")))
-    val sigKey2: SigningPublicKey = SymbolicCrypto.signingPublicKey("sigKey2")
+    val sigKey2: SigningPublicKey = crypto.generateSymbolicSigningKey(Some("sigKey2"))
     val sigKey2WithName: SigningPublicKeyWithName = SigningPublicKeyWithName(sigKey2, None)
 
-    val encKey1: EncryptionPublicKey = SymbolicCrypto.encryptionPublicKey("encKey1")
+    val encKey1: EncryptionPublicKey = crypto.generateSymbolicEncryptionKey(Some("encKey1"))
     val encKey1WithName: EncryptionPublicKeyWithName =
       EncryptionPublicKeyWithName(encKey1, Some(KeyName.tryCreate("encKey1")))
-    val encKey2: EncryptionPublicKey = SymbolicCrypto.encryptionPublicKey("encKey2")
+    val encKey2: EncryptionPublicKey = crypto.generateSymbolicEncryptionKey(Some("encKey2"))
     val encKey2WithName: EncryptionPublicKeyWithName = EncryptionPublicKeyWithName(encKey2, None)
 
     "save encryption keys correctly when added incrementally" in {
@@ -35,7 +37,7 @@ trait CryptoPublicStoreTest extends BaseTest { this: AsyncWordSpec =>
         result shouldEqual Set(encKey1, encKey2)
         result2 shouldEqual Set(encKey1WithName, encKey2WithName)
       }
-    }
+    }.failOnShutdown
 
     if (backedByDatabase) {
       "not rely solely on cache" in {
@@ -58,7 +60,7 @@ trait CryptoPublicStoreTest extends BaseTest { this: AsyncWordSpec =>
           result3 shouldEqual Some(sigKey1)
           result4 shouldEqual Some(sigKey2)
         }
-      }
+      }.failOnShutdown
     }
 
     "save signing keys correctly when added incrementally" in {
@@ -72,7 +74,7 @@ trait CryptoPublicStoreTest extends BaseTest { this: AsyncWordSpec =>
         result shouldEqual Set(sigKey1, sigKey2)
         result2 shouldEqual Set(sigKey1WithName, sigKey2WithName)
       }
-    }
+    }.failOnShutdown
 
     "idempotent store of encryption keys" in {
       val store = newStore
@@ -89,12 +91,12 @@ trait CryptoPublicStoreTest extends BaseTest { this: AsyncWordSpec =>
         // Should fail due to different name
         failedInsert <- store.storeEncryptionKey(encKey1, None).value
 
-        result <- store.listEncryptionKeys
+        result <- store.listEncryptionKeys.valueOrFail("listing encryption keys")
       } yield {
         failedInsert.left.value shouldBe a[CryptoPublicStoreError]
         result shouldEqual Set(encKey1WithName)
       }
-    }
+    }.failOnShutdown
 
     "idempotent store of signing keys" in {
       val store = newStore
@@ -111,12 +113,12 @@ trait CryptoPublicStoreTest extends BaseTest { this: AsyncWordSpec =>
         // Should fail due to different name
         failedInsert <- store.storeSigningKey(sigKey1, None).value
 
-        result <- store.listSigningKeys
+        result <- store.listSigningKeys.valueOrFail("listing encryption keys")
       } yield {
         failedInsert.left.value shouldBe a[CryptoPublicStoreError]
         result shouldEqual Set(sigKey1WithName)
       }
-    }
+    }.failOnShutdown
 
   }
 }

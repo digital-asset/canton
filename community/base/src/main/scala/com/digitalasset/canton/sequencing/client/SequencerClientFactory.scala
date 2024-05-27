@@ -80,7 +80,7 @@ object SequencerClientFactory {
       loggerFactory: NamedLoggerFactory,
       supportedProtocolVersions: Seq[ProtocolVersion],
       minimumProtocolVersion: Option[ProtocolVersion],
-  ): SequencerClientFactory with SequencerClientTransportFactory =
+  ): SequencerClientFactory & SequencerClientTransportFactory =
     new SequencerClientFactory with SequencerClientTransportFactory {
 
       override def create(
@@ -294,7 +294,10 @@ object SequencerClientFactory {
       private def grpcSequencerClientAuth(
           connection: GrpcSequencerConnection,
           member: Member,
-      )(implicit executionContext: ExecutionContextExecutor): GrpcSequencerClientAuth = {
+      )(implicit
+          executionContext: ExecutionContextExecutor,
+          traceContext: TraceContext,
+      ): GrpcSequencerClientAuth = {
         val channelPerEndpoint = connection.endpoints.map { endpoint =>
           val subConnection = connection.copy(endpoints = NonEmpty.mk(Seq, endpoint))
           endpoint -> createChannel(subConnection)
@@ -307,7 +310,6 @@ object SequencerClientFactory {
           supportedProtocolVersions,
           config.authToken,
           clock,
-          futureSupervisor,
           processingTimeout,
           loggerFactory,
         )
@@ -317,6 +319,7 @@ object SequencerClientFactory {
           executionContext: ExecutionContextExecutor,
           executionSequencerFactory: ExecutionSequencerFactory,
           materializer: Materializer,
+          traceContext: TraceContext,
       ): SequencerClientTransport & SequencerClientTransportPekko = {
         val channel = createChannel(connection)
         val auth = grpcSequencerClientAuth(connection, member)
