@@ -685,6 +685,25 @@ class StoreBasedTopologySnapshot(
     }
   }
 
+  override def memberFirstKnownAt(
+      member: Member
+  )(implicit traceContext: TraceContext): Future[Option[CantonTimestamp]] = {
+    member match {
+      case participantId: ParticipantId =>
+        store.findFirstTrustCertificateForParticipant(participantId).map(_.map(_.validFrom.value))
+      case mediatorId: MediatorId =>
+        store.findFirstMediatorStateForMediator(mediatorId).map(_.map(_.validFrom.value))
+      case sequencerId: SequencerId =>
+        store.findFirstSequencerStateForSequencer(sequencerId).map(_.map(_.validFrom.value))
+      case _ =>
+        Future.failed(
+          new IllegalArgumentException(
+            s"Checking whether member is known for an unexpected member type: $member"
+          )
+        )
+    }
+  }
+
   private def collectLatestMapping[T <: TopologyMapping](
       typ: TopologyMapping.Code,
       transactions: Seq[StoredTopologyTransaction[TopologyChangeOp.Replace, T]],

@@ -288,6 +288,11 @@ private class ForwardingTopologySnapshotClient(
   override def isMemberKnown(member: Member)(implicit traceContext: TraceContext): Future[Boolean] =
     parent.isMemberKnown(member)
 
+  override def memberFirstKnownAt(member: Member)(implicit
+      traceContext: TraceContext
+  ): Future[Option[CantonTimestamp]] =
+    parent.memberFirstKnownAt(member)
+
   override def findDynamicDomainParameters()(implicit
       traceContext: TraceContext
   ): Future[Either[String, DynamicDomainParametersWithValidity]] =
@@ -498,6 +503,17 @@ class CachingTopologySnapshot(
 
   override def isMemberKnown(member: Member)(implicit traceContext: TraceContext): Future[Boolean] =
     memberCache.get(member)
+
+  override def memberFirstKnownAt(
+      member: Member
+  )(implicit traceContext: TraceContext): Future[Option[CantonTimestamp]] = {
+    isMemberKnown(member).flatMap {
+      // TODO(#18399): Consider caching this call as well,
+      //  should only happen during first time member is registered at a sequencer
+      case true => parent.memberFirstKnownAt(member)
+      case false => Future.successful(None)
+    }
+  }
 
   /** Returns the value if it is present in the cache. Otherwise, use the
     * `getter` to fetch it and cache the result.

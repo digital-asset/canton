@@ -22,11 +22,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer.{
 }
 import com.digitalasset.canton.domain.sequencing.sequencer.*
 import com.digitalasset.canton.domain.sequencing.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
-import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
-  CreateSubscriptionError,
-  RegisterMemberError,
-  SequencerWriteError,
-}
+import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.domain.sequencing.sequencer.traffic.{
   SequencerRateLimitManager,
   SequencerTrafficStatus,
@@ -277,6 +273,7 @@ class BlockSequencer(
       _ <- validateMaxSequencingTime(submission).mapK(FutureUnlessShutdown.outcomeK)
       memberCheck <- EitherT
         .right[SendAsyncError](
+          // TODO(#18399): currentApproximation vs headSnapshot?
           cryptoApi.currentSnapshotApproximation.ipsSnapshot
             .allMembers()
             .map(allMembers =>
@@ -284,6 +281,7 @@ class BlockSequencer(
             )
         )
         .mapK(FutureUnlessShutdown.outcomeK)
+      // TODO(#18399): Why we don't check group recipients here?
       _ <- SequencerValidations
         .checkSenderAndRecipientsAreRegistered(
           submission,
@@ -342,17 +340,6 @@ class BlockSequencer(
     } else {
       if (!member.isAuthenticated) Future.successful(true)
       else cryptoApi.headSnapshot.ipsSnapshot.isMemberKnown(member)
-    }
-  }
-
-  override def registerMember(member: Member)(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, SequencerWriteError[RegisterMemberError], Unit] = {
-    if (unifiedSequencer) {
-      super.registerMember(member)
-    } else {
-      // there is nothing extra to be done for member registration in Canton 3.x
-      EitherT.rightT[Future, SequencerWriteError[RegisterMemberError]](())
     }
   }
 
@@ -426,7 +413,10 @@ class BlockSequencer(
               .tap(snapshot =>
                 if (logger.underlying.isDebugEnabled()) {
                   logger.debug(
-                    s"Snapshot for timestamp $timestamp: $snapshot with ephemeral state: $blockEphemeralState"
+                    s"Snapshot for timestamp $timestamp generated from ephemeral state:\n$blockEphemeralState"
+                  )
+                  logger.debug(
+                    s"Resulting snapshot for timestamp $timestamp:\n$snapshot"
                   )
                 }
               ),
@@ -586,6 +576,8 @@ class BlockSequencer(
           // Filter by authenticated, enabled members that have been requested
           val disabledMembers = headEphemeral.status.disabledMembers
           val knownValidMembers = headEphemeral.status.membersMap.keySet.collect {
+            // TODO(#18399): Sequencers are giving warnings in the logs, but are excluded?
+            // case m @ (_: ParticipantId | _: MediatorId | _: SequencerId)
             case m @ (_: ParticipantId | _: MediatorId)
                 if !disabledMembers.contains(m) &&
                   (requestedMembers.isEmpty || requestedMembers.contains(m)) =>

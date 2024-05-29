@@ -8,6 +8,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.store.InMemorySequencerStore
 import com.digitalasset.canton.lifecycle.{
@@ -194,7 +195,10 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
 
       for {
         _ <- valueOrFail(
-          List(alice, bob, carole, topologyClientMember).parTraverse(sequencer.registerMember)
+          List(alice, bob, carole, topologyClientMember).parTraverse(
+            TestDatabaseSequencerWrapper(sequencer)
+              .registerMemberInternal(_, CantonTimestamp.Epoch)
+          )
         )(
           "member registration"
         )

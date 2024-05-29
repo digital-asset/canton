@@ -531,6 +531,10 @@ trait MembersTopologySnapshotClient {
   def allMembers()(implicit traceContext: TraceContext): Future[Set[Member]]
 
   def isMemberKnown(member: Member)(implicit traceContext: TraceContext): Future[Boolean]
+
+  def memberFirstKnownAt(member: Member)(implicit
+      traceContext: TraceContext
+  ): Future[Option[CantonTimestamp]]
 }
 
 trait TopologySnapshot
