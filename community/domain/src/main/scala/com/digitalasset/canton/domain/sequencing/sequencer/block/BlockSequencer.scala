@@ -276,9 +276,7 @@ class BlockSequencer(
           // TODO(#18399): currentApproximation vs headSnapshot?
           cryptoApi.currentSnapshotApproximation.ipsSnapshot
             .allMembers()
-            .map(allMembers =>
-              (member: Member) => allMembers.contains(member) || !member.isAuthenticated
-            )
+            .map(allMembers => (member: Member) => allMembers.contains(member))
         )
         .mapK(FutureUnlessShutdown.outcomeK)
       // TODO(#18399): Why we don't check group recipients here?
@@ -313,22 +311,15 @@ class BlockSequencer(
     if (unifiedSequencer) {
       super.readInternal(member, offset)
     } else {
-      if (!member.isAuthenticated) {
-        // allowing unauthenticated members to read events is the same as automatically registering an unauthenticated member
-        // and then proceeding with the subscription.
-        // optimization: if the member is unauthenticated, we don't need to fetch all members from the snapshot
-        EitherT.fromEither[Future](stateManager.readEventsForMember(member, offset))
-      } else {
-        EitherT
-          .right(cryptoApi.currentSnapshotApproximation.ipsSnapshot.isMemberKnown(member))
-          .flatMap { isKnown =>
-            if (isKnown) {
-              EitherT.fromEither[Future](stateManager.readEventsForMember(member, offset))
-            } else {
-              EitherT.leftT(CreateSubscriptionError.UnknownMember(member))
-            }
+      EitherT
+        .right(cryptoApi.currentSnapshotApproximation.ipsSnapshot.isMemberKnown(member))
+        .flatMap { isKnown =>
+          if (isKnown) {
+            EitherT.fromEither[Future](stateManager.readEventsForMember(member, offset))
+          } else {
+            EitherT.leftT(CreateSubscriptionError.UnknownMember(member))
           }
-      }
+        }
     }
   }
 
@@ -338,8 +329,7 @@ class BlockSequencer(
     if (unifiedSequencer) {
       super.isRegistered(member)
     } else {
-      if (!member.isAuthenticated) Future.successful(true)
-      else cryptoApi.headSnapshot.ipsSnapshot.isMemberKnown(member)
+      cryptoApi.headSnapshot.ipsSnapshot.isMemberKnown(member)
     }
   }
 
@@ -374,7 +364,7 @@ class BlockSequencer(
     }
   }
 
-  override protected def localSequencerMember: DomainMember = sequencerId
+  override protected def localSequencerMember: Member = sequencerId
 
   override def acknowledge(member: Member, timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext

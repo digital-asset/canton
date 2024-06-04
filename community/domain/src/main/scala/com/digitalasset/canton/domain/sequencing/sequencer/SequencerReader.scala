@@ -246,8 +246,7 @@ class SequencerReader(
         signingSnapshot <- OptionT
           .fromOption[FutureUnlessShutdown](topologySnapshotO)
           .getOrElseF {
-            val warnIfApproximate =
-              (event.counter > SequencerCounter.Genesis) && member.isAuthenticated
+            val warnIfApproximate = event.counter > SequencerCounter.Genesis
             SyncCryptoClient.getSnapshotForTimestampUS(
               syncCryptoApi,
               event.timestamp,
@@ -320,8 +319,7 @@ class SequencerReader(
             sequencingTimestamp,
             topologyClientTimestampBefore,
             protocolVersion,
-            // This warning should only trigger on unauthenticated members,
-            // but batches addressed to unauthenticated members must not specify a topology timestamp.
+            // This warning should never be triggered.
             warnIfApproximate = true,
           )
           .value

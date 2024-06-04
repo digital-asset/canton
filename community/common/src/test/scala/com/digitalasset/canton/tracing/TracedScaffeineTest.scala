@@ -8,6 +8,7 @@ import com.digitalasset.canton.config.CachingConfigs
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import org.scalatest.wordspec.AsyncWordSpec
 
+import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.Future
 
 class TracedScaffeineTest extends AsyncWordSpec with BaseTest {
@@ -40,11 +41,40 @@ class TracedScaffeineTest extends AsyncWordSpec with BaseTest {
 
       for {
         result <-
-          keysCache.getUS(10).failed
+          keysCache.getUS(10).unwrap
       } yield {
-        succeed
+        result shouldBe UnlessShutdown.AbortedDueToShutdown
+      }
+    }
+
+    "Allow entries to be cleared" in {
+
+      val loads = new AtomicInteger(0)
+      def getValueCount(input: Int): FutureUnlessShutdown[Int] = {
+        loads.incrementAndGet()
+        FutureUnlessShutdown.pure(input)
+      }
+
+      val keysCache =
+        TracedScaffeine.buildTracedAsyncFutureUS[Int, Int](
+          cache = CachingConfigs.testing.mySigningKeyCache.buildScaffeine(),
+          loader = traceContext => input => getValueCount(input),
+        )(logger)
+
+      for {
+        _ <- keysCache.getUS(2)
+        _ <- keysCache.getUS(3)
+        _ <- keysCache.getAllUS(Seq(2, 3)).map { m =>
+          keysCache.clear((i, _) => i == 2)
+          m
+        }
+        _ <- keysCache.getUS(2)
+        _ <- keysCache.getUS(3)
+      } yield {
+        loads.get() shouldBe 3 // Initial 2 + 1 reload
       }
     }.failOnShutdown
+
   }
 
 }

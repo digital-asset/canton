@@ -291,7 +291,7 @@ final class RepairService(
 
       topologySnapshot = topologyFactory.createTopologySnapshot(
         startingPoints.processing.prenextTimestamp,
-        packageId => packageDependencyResolver.packageDependencies(List(packageId)),
+        packageDependencyResolver,
         preferCaching = true,
       )
       domainParameters <- OptionT(persistentState.parameterStore.lastParameters)
@@ -966,9 +966,7 @@ final class RepairService(
     choiceAuthorizers = None, // default (signatories + actingParties)
     children = ImmArray.empty[LfNodeId],
     exerciseResult = Some(LfValue.ValueNone),
-    // Not setting the contract key as the indexer deletes contract keys along with contracts.
-    // If the contract keys were needed, we'd have to reinterpret the contract to look up the key.
-    keyOpt = None,
+    keyOpt = c.metadata.maybeKeyWithMaintainers,
     byKey = false,
     version = c.rawContractInstance.contractInstance.version,
   )
@@ -1420,6 +1418,7 @@ object RepairService {
     def contractDataToInstance(
         templateId: Identifier,
         packageName: LfPackageName,
+        packageVersion: Option[LfPackageVersion],
         createArguments: Record,
         signatories: Set[String],
         observers: Set[String],
@@ -1442,7 +1441,7 @@ object RepairService {
         lfContractInst = LfContractInst(
           packageName = packageName,
           template = template,
-          packageVersion = None,
+          packageVersion = packageVersion,
           arg = argsVersionedValue,
         )
 
@@ -1474,6 +1473,7 @@ object RepairService {
       (
           Identifier,
           LfPackageName,
+          Option[LfPackageVersion],
           Record,
           Set[String],
           Set[String],
@@ -1494,6 +1494,7 @@ object RepairService {
             (
               LfEngineToApi.toApiIdentifier(contractInstance.unversioned.template),
               contractInstance.unversioned.packageName,
+              contractInstance.unversioned.packageVersion,
               record,
               signatories,
               stakeholders -- signatories,
