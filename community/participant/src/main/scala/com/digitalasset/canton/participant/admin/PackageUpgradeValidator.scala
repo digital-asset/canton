@@ -39,9 +39,7 @@ class PackageUpgradeValidator(
     val packageMap = getPackageMap(loggingContext.traceContext)
     val upgradingPackageId = upgradingPackage._1
     val optUpgradingDar = Some(upgradingPackage)
-    logger.info(
-      s"Uploading DAR file for $upgradingPackageId in submission ID ${loggingContext.serializeFiltered("submissionId")}."
-    )
+    logger.info(s"Uploading DAR file for $upgradingPackageId.")
     existingVersionedPackageId(upgradingPackageMetadata, packageMap) match {
       case Some(uploadedPackageId) =>
         if (uploadedPackageId == upgradingPackageId)

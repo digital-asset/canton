@@ -16,7 +16,7 @@ import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLogging, SuppressingLogger}
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.{CatchUpConfig, StaticDomainParameters}
-import com.digitalasset.canton.time.PositiveSeconds
+import com.digitalasset.canton.time.{PositiveSeconds, WallClock}
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, W3CTraceContext}
 import com.digitalasset.canton.util.CheckedT
@@ -98,6 +98,8 @@ trait TestEssentials
   override val loggerFactory: SuppressingLogger = SuppressingLogger(getClass)
 
   val futureSupervisor: FutureSupervisor = FutureSupervisor.Noop
+
+  lazy val wallClock = new WallClock(timeouts, loggerFactory)
 
   // Make sure that JUL logging is redirected to SLF4J
   if (!SLF4JBridgeHandler.isInstalled) {
@@ -396,15 +398,15 @@ object BaseTest {
     testedProtocolVersion
   )
 
-  lazy val pvPackageName: Option[PackageName] = {
-    Option.when(testedProtocolVersion >= ProtocolVersion.dev)(
-      PackageName.assertFromString("package_name")
-    )
-  }
+  lazy val pvPackageName: Option[PackageName] = Option.when(
+    testedProtocolVersion >= ProtocolVersion.v6
+  )(PackageName.assertFromString("package_name"))
 
-  lazy val pvTransactionVersion: TransactionVersion = {
-    if (testedProtocolVersion >= ProtocolVersion.dev) TransactionVersion.maxVersion
-    else TransactionVersion.StableVersions.max
+  lazy val pvTransactionVersion: TransactionVersion = testedProtocolVersion match {
+    case ProtocolVersion.`dev` => TransactionVersion.maxVersion
+    case ProtocolVersion.`v6` => TransactionVersion.V16
+    case ProtocolVersion.`v5` => TransactionVersion.V15
+    case unexpectedPV => sys.error(s"Unexpected protocol version $unexpectedPV.")
   }
 
   lazy val CantonExamplesPath: String = getResourcePath("CantonExamples.dar")

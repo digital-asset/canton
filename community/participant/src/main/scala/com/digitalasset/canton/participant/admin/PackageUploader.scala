@@ -72,7 +72,7 @@ class PackageUploader(
     with FlagCloseable {
 
   private val loggingSubject = "Upgradable Package Resolution View"
-  private val upgradablePackageResolutionMapRef
+  private[admin] val upgradablePackageResolutionMapRef
       : AtomicReference[Option[Map[LfPackageId, (LfPackageName, LfPackageVersion)]]] =
     new AtomicReference(None)
   private val uploadDarExecutionQueue = new SimpleExecutionQueue(
@@ -91,7 +91,6 @@ class PackageUploader(
   def validateAndStorePackages(
       darPayload: ByteString,
       fileNameO: Option[String],
-      sourceDescriptionO: Option[String],
       submissionId: LedgerSubmissionId,
   )(implicit
       traceContext: TraceContext
@@ -117,19 +116,11 @@ class PackageUploader(
           darPayload.toByteArray,
         )
       )
-      sourceDescriptionLenLimit <- EitherT.fromEither[FutureUnlessShutdown](
-        String256M
-          .create(sourceDescriptionO.getOrElse(""), Some("package source description"))
-          .leftMap(PackageServiceErrors.InternalError.Generic.apply)
-      )
-      sourceDescription = lengthValidatedNameO
-        .map(_.asString1GB)
-        .getOrElse(sourceDescriptionLenLimit)
       dar <- catchUpstreamErrors(
         DarParser.readArchive(darNameO.getOrElse("package-upload"), stream)
       ).thereafter(_ => stream.close())
       _ = logger.debug(
-        s"Processing package upload of ${dar.all.length} packages from source $sourceDescription"
+        s"Processing package upload of ${dar.all.length} packages${lengthValidatedNameO.map(src => s" from source $src").getOrElse("")}"
       )
       mainPackage <- catchUpstreamErrors(Decode.decodeArchive(dar.main)).map(dar.main -> _)
       dependencies <- dar.dependencies.parTraverse(archive =>
@@ -141,7 +132,7 @@ class PackageUploader(
             darO = darDescriptorO,
             mainPackage = mainPackage,
             dependencies = dependencies,
-            sourceDescription = sourceDescription,
+            sourceDescription = lengthValidatedNameO.map(_.asString1GB).getOrElse(String256M("")()),
             submissionId = submissionId,
           ),
           description = "store DAR",
@@ -161,15 +152,15 @@ class PackageUploader(
       submissionId: LedgerSubmissionId,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Either[DamlError, Unit]] = {
     def persist(allPackages: List[(DamlLf.Archive, (LfPackageId, Ast.Package))]) = {
-      val packagesToStore = allPackages.map { case (archive, (_, astPackage)) =>
+      val packagesToStore = allPackages.map { case (archive, (pkgId, astPackage)) =>
         val upgradingPkg = astPackage.languageVersion >= LanguageVersion.Features.packageUpgrades
         // Package-name and package versions are only relevant for LF versions supporting smart contract upgrading
         val pkgNameO = astPackage.metadata.filter(_ => upgradingPkg).map(_.name)
         val pkgVersionO = astPackage.metadata.filter(_ => upgradingPkg).map(_.version)
-        (archive, pkgNameO, pkgVersionO)
+        pkgId -> (archive, pkgNameO, pkgVersionO)
       }
       for {
-        _ <- packagesDarsStore.append(packagesToStore, sourceDescription, darO)
+        _ <- packagesDarsStore.append(packagesToStore.map(_._2), sourceDescription, darO)
         // update our dependency cache
         // we need to do this due to an issue we can hit if we have pre-populated the cache
         // with the information about the package not being present (with a None)
@@ -184,9 +175,17 @@ class PackageUploader(
           )
         )
         _ = logger.debug(
-          s"Managed to upload one or more archives in submissionId $submissionId and sourceDescription $sourceDescription"
+          s"Managed to upload one or more archives in submissionId $submissionId${if (sourceDescription.str.isEmpty) ""
+            else s" and sourceDescription $sourceDescription"}"
         )
-        _ = allPackages.foreach { case (_, (pkgId, pkg)) => updateWithPackage(pkgId, pkg) }
+        _ = packagesToStore.foreach {
+          case (pkgId, (_, Some(pkgName), Some(pkgVersion))) =>
+            updateWithPackage(pkgId, pkgName, pkgVersion)
+          case _other =>
+            // Do nothing as package-name and package-version were filtered before to only be present
+            // for packages with language version >= 1.16 (supporting smart contract upgrading)
+            ()
+        }
       } yield ()
     }
 
@@ -264,40 +263,39 @@ class PackageUploader(
             PackageServiceErrors.Validation.handleLfEnginePackageError(_): DamlError
           )
       )
-      _ <- EitherTUtil.ifThenET(enableUpgradeValidation)(
-        mainPackage._2.metadata match {
-          case Some(packageMetadata) =>
-            packageUpgradeValidator
-              .validateUpgrade(mainPackage, packageMetadata)(
-                LoggingContextWithTrace(loggerFactory)
+      _ <-
+        if (enableUpgradeValidation)
+          mainPackage._2.metadata match {
+            case Some(packageMetadata) =>
+              packageUpgradeValidator
+                .validateUpgrade(mainPackage, packageMetadata)(
+                  LoggingContextWithTrace(loggerFactory)
+                )
+                .mapK(FutureUnlessShutdown.outcomeK)
+            case None =>
+              logger.info(
+                s"Package metadata is not defined for ${mainPackage._1}. Skipping upgrade validation."
               )
-              .mapK(FutureUnlessShutdown.outcomeK)
-          case None =>
-            logger.info(
-              s"Package metadata is not defined for ${mainPackage._1}. Skipping upgrade validation."
-            )
-            EitherTUtil.unitUS[DamlError]
+              EitherTUtil.unitUS[DamlError]
+          }
+        else {
+          logger.info(s"Skipping upgrade validation for package ${mainPackage._1}.")
+          EitherT.pure[FutureUnlessShutdown, DamlError](())
         }
-      )
     } yield ()
 
   private def updateWithPackage(
       pkgId: LfPackageId,
-      pkg: Package,
+      pkgName: Ref.PackageName,
+      pkgVersion: Ref.PackageVersion,
   )(implicit traceContext: TraceContext): Unit =
     if (enableUpgradeValidation) {
-      // Smart contract upgrading works only for LF versions 1.16 and above
-      // for which the package metadata must be defined.
-      // Hence, if not defined, no need to update the upgrading package resolution map.
-      pkg.metadata.foreach(pkgMeta =>
-        upgradablePackageResolutionMapRef.updateAndGet {
-          case None =>
-            logger.error(s"Trying to update an uninitialized $loggingSubject")
-            None
-          case Some(current) =>
-            Some(current + (pkgId -> (pkgMeta.name, pkgMeta.version)))
-        }.discard
-      )
+      upgradablePackageResolutionMapRef.updateAndGet {
+        case None =>
+          logger.error(s"Trying to update an uninitialized $loggingSubject")
+          None
+        case Some(current) => Some(current + (pkgId -> (pkgName, pkgVersion)))
+      }.discard
     }
 
   def initialize(implicit tc: TraceContext): Future[Unit] =

@@ -854,15 +854,16 @@ final class RepairService(
       .batchedSequentialTraverse(threadsAvailableForWriting * PositiveInt.two, batchSize)(
         contractIds
       )(
-        MigrateContracts(
-          _,
-          repairSource,
-          repairTarget,
-          skipInactive,
-          participantId,
-          syncCrypto,
-          loggerFactory,
-        )
+        MigrateContracts
+          .apply(
+            _,
+            repairSource,
+            repairTarget,
+            skipInactive,
+            participantId,
+            syncCrypto,
+            loggerFactory,
+          )
           .map(_ => Seq[Unit]())
       )
       .map(_ => ())
@@ -955,9 +956,7 @@ final class RepairService(
     choiceAuthorizers = None, // default (signatories + actingParties)
     children = ImmArray.empty[LfNodeId],
     exerciseResult = Some(LfValue.ValueNone),
-    // Not setting the contract key as the indexer deletes contract keys along with contracts.
-    // If the contract keys were needed, we'd have to reinterpret the contract to look up the key.
-    keyOpt = None,
+    keyOpt = c.metadata.maybeKeyWithMaintainers,
     byKey = false,
     version = c.rawContractInstance.contractInstance.version,
   )
