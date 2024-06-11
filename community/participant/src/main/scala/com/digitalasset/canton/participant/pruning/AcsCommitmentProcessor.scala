@@ -13,8 +13,8 @@ import cats.syntax.validated.*
 import com.daml.error.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
-import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{PositiveInt, PositiveNumeric}
+import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.AcsCommitmentErrorGroup
@@ -55,6 +55,7 @@ import com.digitalasset.canton.sequencing.client.SendAsyncClientError.RequestRef
 import com.digitalasset.canton.sequencing.client.{SendType, SequencerClientSend}
 import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, Recipients, SendAsyncError}
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -154,6 +155,17 @@ import scala.math.Ordering.Implicits.*
   *                      If not None, it specifies the number of reconciliation intervals that the
   *                      participant skips in catch-up mode, and the number of catch-up intervals
   *                      intervals a participant should lag behind in order to enter catch-up mode.
+  *
+  * @param maxCommitmentSendDelay Optional parameter to specify the maximum delay for sending out commitments.
+  *                               To avoid a spike in network activity at the end of each reconciliation period,
+  *                               commitment sending is delayed by default with a random amount uniformly
+  *                               distributed between 0 and max. Commitment sending should not be delayed by more
+  *                               than a reconciliation interval, for two reasons: (1) it'll overlap with the
+  *                               next round of commitment sends, defeating somewhat the purpose of delaying commitment
+  *                               sends; and (2) and might not interact well with the catch-up mode, depending on the
+  *                               parameters there.
+  *                               If this is not specified, the maximum delay is testingConfig.maxCommitmentSendDelay
+  *                               if specified, otherwise the maximum delay is 2/3 of the reconciliation interval.
   */
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
 class AcsCommitmentProcessor(
@@ -172,6 +184,9 @@ class AcsCommitmentProcessor(
     contractStore: ContractStore,
     enableAdditionalConsistencyChecks: Boolean,
     protected val loggerFactory: NamedLoggerFactory,
+    testingConfig: TestingConfigInternal,
+    clock: Clock,
+    maxCommitmentSendDelay: Option[java.time.Duration] = None,
 )(implicit ec: ExecutionContext)
     extends AcsChangeListener
     with FlagCloseable
@@ -202,6 +217,9 @@ class AcsCommitmentProcessor(
     noTracingLogger.info(s"Will use parallelism $count when computing ACS commitments")
     PositiveNumeric.tryCreate(count)
   }
+
+  // used to generate randomized commitment sending delays
+  private val rand = new scala.util.Random
 
   /* The sequencer timestamp for which we are ready to process remote commitments.
      Continuously updated as new local commitments are computed.
@@ -1335,9 +1353,20 @@ class AcsCommitmentProcessor(
       period: CommitmentPeriod,
       msgs: Map[ParticipantId, SignedProtocolMessage[AcsCommitment]],
   )(implicit traceContext: TraceContext): Unit = {
-    val batchForm = msgs.toList.map { case (pid, msg) => (msg, Recipients.cc(pid)) }
-    val batch = Batch.of[ProtocolMessage](protocolVersion, batchForm*)
-    if (batch.envelopes.nonEmpty) {
+
+    // delay sending out commitments by at most (in this order): maxCommitmentSendDelayMillis, or
+    // testingConfig.maxCommitmentSendDelayMillis, or 2/3 of the reconciliation interval
+    val maxDelayMillis =
+      maxCommitmentSendDelay.fold(testingConfig.maxCommitmentSendDelay.fold({
+        val latestReconciliationInterval =
+          sortedReconciliationIntervalsProvider.getApproximateLatestReconciliationInterval
+            .map(_.intervalLength.toScala)
+            .getOrElse(Duration.Zero)
+        2 * latestReconciliationInterval.toMillis / 3
+      })(_.toMillis))(_.toMillis)
+    val delayMillis = if (maxDelayMillis > 0) rand.nextLong(maxDelayMillis) else 0
+
+    def sendUnlessClosing(batch: Batch[OpenEnvelope[ProtocolMessage]])(ts: CantonTimestamp) = {
       performUnlessClosingUSF(functionFullName) {
         def message = s"Failed to send commitment message batch for period $period"
         FutureUtil.logOnFailureUnlessShutdown(
@@ -1360,7 +1389,23 @@ class AcsCommitmentProcessor(
             .value,
           message,
         )
-      }.discard
+      }
+    }
+
+    val batchForm = msgs.toList.map { case (pid, msg) => (msg, Recipients.cc(pid)) }
+    val batch = Batch.of[ProtocolMessage](protocolVersion, batchForm*)
+    if (batch.envelopes.nonEmpty) {
+      FutureUtil
+        .logOnFailureUnlessShutdown(
+          clock
+            .scheduleAfter(
+              sendUnlessClosing(batch),
+              java.time.Duration.ofMillis(delayMillis),
+            ),
+          s"Failed to schedule sending commitment message batch for period $period at time ${clock.now
+              .add(java.time.Duration.ofMillis(delayMillis))}",
+        )
+        .discard
     }
   }
 
