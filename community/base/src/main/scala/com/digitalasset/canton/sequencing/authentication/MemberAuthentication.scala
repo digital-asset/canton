@@ -44,7 +44,6 @@ object MemberAuthentication extends MemberAuthentication {
   def apply(member: Member): Either[AuthenticationError, MemberAuthentication] = member match {
     case _: ParticipantId | _: MediatorId => Right(this)
     case _: SequencerId => Left(AuthenticationNotSupportedForMember(member))
-    case _: UnauthenticatedMemberId => Left(AuthenticationNotSupportedForMember(member))
   }
 
   sealed abstract class AuthenticationError(val reason: String, val code: String)
@@ -72,18 +71,11 @@ object MemberAuthentication extends MemberAuthentication {
         show"Domain id $domainId provided by member $member does not match the domain id of the domain the ${member.description} is trying to connect to",
         "NonMatchingDomainId",
       )
-  final case class ParticipantAccessDisabled(participantId: ParticipantId)
+  final case class MemberAccessDisabled(member: Member)
       extends AuthenticationError(
-        s"Participant $participantId access is disabled",
-        "ParticipantAccessDisabled",
+        s"Member $member access is disabled",
+        "MemberAccessDisabled",
       )
-
-  final case class MediatorAccessDisabled(mediator: MediatorId)
-      extends AuthenticationError(
-        s"Mediator $mediator access is disabled",
-        "MediatorAccessDisabled",
-      )
-
   final case class TokenVerificationException(member: String)
       extends AuthenticationError(
         s"Due to an internal error, the server side token lookup for member $member failed",

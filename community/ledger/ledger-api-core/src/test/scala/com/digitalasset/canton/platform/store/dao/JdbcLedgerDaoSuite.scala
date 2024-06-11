@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.store.dao
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.lf.archive.{DarParser, Decode}
 import com.daml.lf.crypto.Hash
-import com.daml.lf.data.Ref.{Identifier, PackageId, PackageName, Party}
+import com.daml.lf.data.Ref.{Identifier, PackageId, PackageName, PackageVersion, Party}
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.data.{FrontStack, ImmArray, Ref, Time}
 import com.daml.lf.language.LanguageVersion
@@ -17,7 +17,6 @@ import com.daml.lf.value.Value as LfValue
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.domain.TemplateFilter
 import com.digitalasset.canton.ledger.participant.state
-import com.digitalasset.canton.ledger.participant.state.index
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.store.entries.LedgerEntry
 import com.digitalasset.canton.testing.utils.TestModels
@@ -29,6 +28,7 @@ import java.util.UUID
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 import scala.concurrent.Future
 import scala.language.implicitConversions
+import scala.math.Ordering.Implicits.infixOrderingOps
 import scala.util.chaining.*
 
 private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionValues {
@@ -52,18 +52,13 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
     def toLong: Long = BigInt(offset.toByteArray).toLong
   }
 
-  private val now = Timestamp.now()
-
   private[this] lazy val dar =
     TestModels.com_daml_ledger_test_ModelTestDar_path
       .pipe(JarResourceUtils.resourceFileFromJar)
       .pipe(DarParser.assertReadArchiveFromFile)
 
-  protected final lazy val packages: List[(DamlLf.Archive, index.PackageDetails)] =
-    dar.all.map(dar => dar -> index.PackageDetails(dar.getSerializedSize.toLong, now, None))
-
   protected final lazy val packageMap =
-    packages.map { case (archive, _) => archive.getHash -> archive }.toMap
+    dar.all.map { archive => archive.getHash -> archive }.toMap
 
   private val testPackageId: Ref.PackageId = Ref.PackageId.assertFromString(dar.main.getHash)
   override def loadPackage: PackageId => Future[Option[DamlLf.Archive]] = pkgId =>
@@ -98,6 +93,7 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
 
   protected final val someTemplateId = testIdentifier("ParameterShowcase")
   protected final val somePackageName = PackageName.assertFromString("pkg-name")
+  protected final val somePackageVersion = PackageVersion.assertFromString("1.0")
   protected final val someTemplateIdFilter =
     TemplateFilter(someTemplateId, includeCreatedEventBlob = false)
   protected final val someValueText = LfValue.ValueText("some text")
@@ -227,16 +223,20 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
       key: Option[GlobalKeyWithMaintainers] = None,
       templateId: Identifier = someTemplateId,
       contractArgument: LfValue = someContractArgument,
+      // PackageVersion is populated only for LF version > 2.1
+      packageVersion: Option[Ref.PackageVersion] = None,
+      transactionVersion: TransactionVersion = TransactionVersion.V31,
   ): Node.Create =
     Node.Create(
       coid = absCid,
       templateId = templateId,
       packageName = somePackageName,
+      packageVersion = packageVersion,
       arg = contractArgument,
       signatories = signatories,
       stakeholders = stakeholders,
       keyOpt = key,
-      version = txVersion,
+      version = transactionVersion,
     )
 
   protected final def exerciseNode(
@@ -686,6 +686,7 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
             .assertBuild(someTemplateId, someContractKey(party, key), Set(party), somePackageName)
         ),
         version = txVersion,
+        packageVersion = Option.when(txVersion > TransactionVersion.V31)(somePackageVersion),
       )
     )
     nextOffset() ->

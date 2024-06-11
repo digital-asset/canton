@@ -127,6 +127,7 @@ class SequencerRuntime(
     val metrics: SequencerMetrics,
     indexedDomain: IndexedDomain,
     syncCrypto: DomainSyncCryptoClient,
+    domainTopologyManager: DomainTopologyManager,
     topologyStore: TopologyStore[DomainStore],
     topologyClient: DomainTopologyClientWithInit,
     topologyProcessor: TopologyTransactionProcessor,
@@ -173,15 +174,19 @@ class SequencerRuntime(
 
     def registerInitialMembers = {
       logger.debug(s"Registering initial sequencer members: $staticMembersToRegister")
-      // only register the sequencer itself if we have remote sequencers that will necessitate topology transactions
-      // being sent to them
       staticMembersToRegister
-        .parTraverse_(sequencer.registerMember)
+        .parTraverse_ { member =>
+          topologyClient.headSnapshot.memberFirstKnownAt(member).map {
+            case Some(firstKnownAt) => sequencer.registerMemberInternal(member, firstKnownAt)
+            case None =>
+              ErrorUtil.invalidState(s"Initial sequencer member $member not known in topology")
+          }
+        }
     }
 
     for {
       _ <- keyCheckET
-      _ <- registerInitialMembers.leftMap(_.toString)
+      _ <- EitherT.right[String](registerInitialMembers)
     } yield {
       // if we run embedded, we complete the future here
       if (topologyInitIsCompleted) {
@@ -208,6 +213,7 @@ class SequencerRuntime(
     sequencerDomainParamsLookup,
     localNodeParameters,
     staticDomainParameters.protocolVersion,
+    domainTopologyManager,
     topologyStateForInitializationService,
     loggerFactory,
   )
@@ -322,6 +328,7 @@ class SequencerRuntime(
             domainId,
             sequencerId,
             staticDomainParameters,
+            domainTopologyManager,
             syncCrypto,
             loggerFactory,
           )(
@@ -367,39 +374,37 @@ class SequencerRuntime(
       loggerFactory,
     )
 
-  if (localNodeParameters.useUnifiedSequencer) {
-    logger.info("Subscribing to topology transactions for auto-registering members")
-    // TODO(#18399): This listener runs after the snapshot became available, thus can be late with registering a member,
-    //  if a concurrent code is already using that member. Need to find a solution to that.
-    topologyProcessor.subscribe(new TopologyTransactionProcessingSubscriber {
-      override def observed(
-          sequencedTimestamp: SequencedTime,
-          effectiveTimestamp: EffectiveTime,
-          sequencerCounter: SequencerCounter,
-          transactions: Seq[GenericSignedTopologyTransaction],
-      )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+  logger.info("Subscribing to topology transactions for auto-registering members")
+  topologyProcessor.subscribe(new TopologyTransactionProcessingSubscriber {
+    override val executionOrder: Int = 5
 
-        val possibleNewMembers = transactions.map(_.mapping).flatMap {
-          case dtc: DomainTrustCertificate => Seq(dtc.participantId)
-          case mds: MediatorDomainState => mds.active ++ mds.observers
-          case sds: SequencerDomainState => sds.active ++ sds.observers
-          case _ => Seq.empty
-        }
+    override def observed(
+        sequencedTimestamp: SequencedTime,
+        effectiveTimestamp: EffectiveTime,
+        sequencerCounter: SequencerCounter,
+        transactions: Seq[GenericSignedTopologyTransaction],
+    )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
 
-        // TODO(#18399): Batch the member registrations?
-        // TODO(#18399): Change F to FUS in registerMember
-        val f = possibleNewMembers
-          .parTraverse_ { member =>
-            logger.info(s"Topology change has triggered sequencer registration of member $member")
-            sequencer.registerMember(member)
-          }
-          .valueOr(e =>
-            ErrorUtil.internalError(new RuntimeException(s"Failed to register member: $e"))
-          )
-        lifecycle.FutureUnlessShutdown.outcomeF(f)
+      val possibleNewMembers = transactions.map(_.mapping).flatMap {
+        case dtc: DomainTrustCertificate => Seq(dtc.participantId)
+        case mds: MediatorDomainState => mds.active ++ mds.observers
+        case sds: SequencerDomainState => sds.active ++ sds.observers
+        case _ => Seq.empty
       }
-    })
-  }
+
+      // TODO(#18394): Batch the member registrations?
+      // TODO(#18401): Change F to FUS in registerMemberInternal
+      val f = possibleNewMembers
+        .parTraverse_ { member =>
+          logger.info(s"Topology change has triggered sequencer registration of member $member")
+          sequencer.registerMemberInternal(member, effectiveTimestamp.value)
+        }
+        .valueOr(e =>
+          ErrorUtil.internalError(new RuntimeException(s"Failed to register member: $e"))
+        )
+      lifecycle.FutureUnlessShutdown.outcomeF(f)
+    }
+  })
 
   private lazy val domainOutboxO: Option[DomainOutboxHandle] =
     maybeDomainOutboxFactory

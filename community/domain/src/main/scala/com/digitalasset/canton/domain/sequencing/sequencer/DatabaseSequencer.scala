@@ -25,30 +25,16 @@ import com.digitalasset.canton.metrics.MetricsHelper
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.PruningScheduler
 import com.digitalasset.canton.sequencing.client.SequencerClient
-import com.digitalasset.canton.sequencing.protocol.{
-  AcknowledgeRequest,
-  MemberRecipient,
-  SendAsyncError,
-  SignedContent,
-  SubmissionRequest,
-  TrafficState,
-}
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors
 import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
-import com.digitalasset.canton.topology.{
-  AuthenticatedMember,
-  DomainId,
-  DomainMember,
-  Member,
-  SequencerId,
-  UnauthenticatedMemberId,
-}
+import com.digitalasset.canton.topology.{DomainId, Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
+import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.FutureUtil.doNotAwait
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
@@ -169,6 +155,8 @@ class DatabaseSequencer(
 
   private val store = writer.generalStore
 
+  protected val memberValidator: SequencerMemberValidator = store
+
   // Only start pruning scheduler after `store` variable above has been initialized to avoid racy NPE
   withNewTraceContext { implicit traceContext =>
     timeouts.unbounded.await(s"Waiting for sequencer writer to fully start")(
@@ -239,46 +227,25 @@ class DatabaseSequencer(
   override def isRegistered(member: Member)(implicit traceContext: TraceContext): Future[Boolean] =
     store.lookupMember(member).map(_.isDefined)
 
-  override def registerMember(member: Member)(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, RegisterError, Unit] = {
-    if (!member.isAuthenticated) {
-      for {
-        isRegistered <- EitherT.right[RegisterError](isRegistered(member))
-        _ <- EitherTUtil.ifThenET[Future, RegisterError](
-          !isRegistered
-        ) {
-          registerMemberInternal(member, clock.now)
-        }
-      } yield ()
-    } else {
-      for {
-        firstKnownAtO <- EitherT.right[RegisterError](
-          cryptoApi.headSnapshot.ipsSnapshot.memberFirstKnownAt(member)
-        )
-        _ <- firstKnownAtO match {
-          case Some(firstKnownAt) =>
-            logger.debug(s"Registering member $member with timestamp $firstKnownAt")
-            registerMemberInternal(member, firstKnownAt)
-
-          case None =>
-            val error: RegisterError =
-              OperationError[RegisterMemberError](
-                RegisterMemberError.UnexpectedError(
-                  member,
-                  s"Member $member is not known in the topology",
-                )
-              )
-            EitherT.leftT[Future, Unit](error)
-        }
-      } yield ()
-    }
+  override def isEnabled(member: Member)(implicit traceContext: TraceContext): Future[Boolean] = {
+    for {
+      memberIdO <- store.lookupMember(member).map(_.map(_.memberId))
+      isEnabled <- memberIdO match {
+        // TODO(#18394): store.isEnabled is not cached like store.lookupMember, called on every Send/Subscribe
+        case Some(memberId) => store.isEnabled(memberId)
+        case None =>
+          logger.warn(
+            s"Attempted to check if member $member is enabled but they are not registered"
+          )
+          Future.successful(false)
+      }
+    } yield isEnabled
   }
 
   /**  Package private to use access method in tests, see `TestDatabaseSequencerWrapper`.
     */
-  final private[sequencer] def registerMemberInternal(member: Member, timestamp: CantonTimestamp)(
-      implicit traceContext: TraceContext
+  override final def registerMemberInternal(member: Member, timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
   ): EitherT[Future, RegisterError, Unit] = {
     EitherT
       .right[RegisterError](store.registerMember(member, timestamp))
@@ -325,74 +292,47 @@ class DatabaseSequencer(
 
   override def readInternal(member: Member, offset: SequencerCounter)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, CreateSubscriptionError, Sequencer.EventSource] = {
-    if (!unifiedSequencer) {
-      reader.read(member, offset)
-    } else {
-      if (!member.isAuthenticated) {
-        // allowing unauthenticated members to read events is the same as automatically registering an unauthenticated member
-        // and then proceeding with the subscription.
-        // optimization: if the member is unauthenticated, we don't need to fetch all members from the snapshot
-        reader.read(member, offset)
-      } else {
-        for {
-          isKnown <- EitherT.right[CreateSubscriptionError](
-            cryptoApi.currentSnapshotApproximation.ipsSnapshot.isMemberKnown(member)
-          )
-          _ <- EitherTUtil.condUnitET[Future](
-            isKnown,
-            CreateSubscriptionError.UnknownMember(member): CreateSubscriptionError,
-          )
-          isRegistered <- EitherT.right(isRegistered(member))
-          _ <- EitherTUtil.ifThenET[Future, CreateSubscriptionError](!isRegistered) {
-            registerMember(member).leftMap(CreateSubscriptionError.MemberRegisterError)
-          }
-          eventSource <- reader.read(member, offset)
-        } yield eventSource
-      }
+  ): EitherT[Future, CreateSubscriptionError, Sequencer.EventSource] = reader.read(member, offset)
+
+  /** Internal method to be used in the sequencer integration.
+    */
+  // TODO(#18401): Refactor ChunkUpdate and merge/remove this method with `acknowledgeSignedInternal` below
+  final protected def writeAcknowledgementInternal(
+      member: Member,
+      timestamp: CantonTimestamp,
+  )(implicit traceContext: TraceContext): Future[Unit] = {
+    withExpectedRegisteredMember(member, "Acknowledge") {
+      store.acknowledge(_, timestamp)
     }
   }
 
   override protected def acknowledgeSignedInternal(
       signedAcknowledgeRequest: SignedContent[AcknowledgeRequest]
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    val request = signedAcknowledgeRequest.content
-    acknowledge(request.member, request.timestamp)
-  }
-
-  override def acknowledge(member: Member, timestamp: CantonTimestamp)(implicit
-      traceContext: TraceContext
-  ): Future[Unit] =
     // it is unlikely that the ack operation will be called without the member being registered
     // as the sequencer-client will need to be registered to send and subscribe.
     // rather than introduce an error to deal with this case in the database sequencer we'll just
     // fail the operation.
-    withExpectedRegisteredMember(member, "Acknowledge") {
-      store.acknowledge(_, timestamp)
-    }
+    val req = signedAcknowledgeRequest.content
+    writeAcknowledgementInternal(req.member, req.timestamp)
+  }
 
   protected def disableMemberInternal(
       member: Member
   )(implicit traceContext: TraceContext): Future[Unit] = {
     withExpectedRegisteredMember(member, "Disable member") { memberId =>
-      member match {
-        // Unauthenticated members being disabled get automatically unregistered
-        case unauthenticated: UnauthenticatedMemberId =>
-          store.unregisterUnauthenticatedMember(unauthenticated)
-        case _: AuthenticatedMember =>
-          store.disableMember(memberId)
-      }
+      store.disableMember(memberId)
     }
   }
 
   // For the database sequencer, the SequencerId serves as the local sequencer identity/member
   // until the database and block sequencers are unified.
-  override protected def localSequencerMember: DomainMember = SequencerId(domainId.uid)
+  override protected def localSequencerMember: Member = SequencerId(domainId.uid)
 
   /** helper for performing operations that are expected to be called with a registered member so will just throw if we
     * find the member is unregistered.
     */
-  private def withExpectedRegisteredMember[A](member: Member, operationName: String)(
+  final protected def withExpectedRegisteredMember[A](member: Member, operationName: String)(
       fn: SequencerMemberId => Future[A]
   )(implicit traceContext: TraceContext): Future[A] =
     for {
