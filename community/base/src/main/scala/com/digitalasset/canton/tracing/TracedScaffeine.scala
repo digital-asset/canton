@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.tracing
 
+import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.AbortedDueToShutdownException
@@ -79,12 +80,13 @@ class TracedAsyncLoadingCache[K, V](
   def get(key: K)(implicit traceContext: TraceContext): Future[V] =
     underlying.get(TracedKey(key)(traceContext))
 
+  // Remove those mappings for which the predicate p returns true
+  def clear(filter: (K, V) => Boolean): Unit = {
+    discard(underlying.synchronous().asMap().filterInPlace((t, v) => !filter(t.key, v)))
+  }
+
   def getUS(key: K)(implicit traceContext: TraceContext): FutureUnlessShutdown[V] = {
-    try
-      FutureUnlessShutdown.outcomeF(underlying.get(TracedKey(key)(traceContext)))
-    catch {
-      case _: AbortedDueToShutdownException => FutureUnlessShutdown.abortedDueToShutdown
-    }
+    FutureUnlessShutdown.transformAbortedF(get(key))
   }
 
   /** @see com.github.blemale.scaffeine.AsyncLoadingCache.getAll

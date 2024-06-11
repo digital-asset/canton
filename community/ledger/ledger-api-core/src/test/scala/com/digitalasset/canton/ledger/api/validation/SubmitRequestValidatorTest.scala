@@ -16,6 +16,7 @@ import com.daml.ledger.api.v2.value.{
 import com.daml.lf.command.{ApiCommand as LfCommand, ApiCommands as LfCommands}
 import com.daml.lf.data.Ref.TypeConRef
 import com.daml.lf.data.*
+import com.daml.lf.transaction.TransactionVersion
 import com.daml.lf.value.Value.ValueRecord
 import com.daml.lf.value.Value as Lf
 import com.digitalasset.canton.data.{DeduplicationPeriod, Offset}
@@ -121,10 +122,12 @@ class SubmitRequestValidatorTest
         keyHash = None,
         driverMetadata = Bytes.Empty,
         packageName = Ref.PackageName.assertFromString("package"),
+        packageVersion = Some(Ref.PackageVersion.assertFromString("1.0.0")),
         signatories = Set(Ref.Party.assertFromString("party")),
         stakeholders = Set(Ref.Party.assertFromString("party")),
         keyMaintainers = None,
         keyValue = None,
+        transactionVersion = TransactionVersion.maxVersion,
       )
     )
 
@@ -488,7 +491,8 @@ class SubmitRequestValidatorTest
         when(validateDisclosedContractsMock(any[Commands])(any[ContextualizedErrorLogger]))
           .thenReturn(Right(internal.disclosedContracts))
 
-        val packageMap = Map(packageId -> (packageName, Ref.PackageVersion.assertFromString("1.0")))
+        val packageMap =
+          Map(packageId -> (packageName, Ref.PackageVersion.assertFromString("1.0.0")))
         val validateUpgradingPackageResolutions = new ValidateUpgradingPackageResolutions {
           override def apply(userPackageIdPreferences: Seq[String])(implicit
               contextualizedErrorLogger: ContextualizedErrorLogger

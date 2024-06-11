@@ -143,6 +143,7 @@ class BlockSequencer(
       metrics.block,
       loggerFactory,
       unifiedSequencer = unifiedSequencer,
+      memberValidator = memberValidator,
     )(CloseContext(cryptoApi))
 
     val driverSource = blockOrderer
@@ -273,15 +274,14 @@ class BlockSequencer(
       _ <- validateMaxSequencingTime(submission).mapK(FutureUnlessShutdown.outcomeK)
       memberCheck <- EitherT
         .right[SendAsyncError](
-          // TODO(#18399): currentApproximation vs headSnapshot?
+          // Using currentSnapshotApproximation due to members registration date
+          // expected to be before submission sequencing time
           cryptoApi.currentSnapshotApproximation.ipsSnapshot
             .allMembers()
-            .map(allMembers =>
-              (member: Member) => allMembers.contains(member) || !member.isAuthenticated
-            )
+            .map(allMembers => (member: Member) => allMembers.contains(member))
         )
         .mapK(FutureUnlessShutdown.outcomeK)
-      // TODO(#18399): Why we don't check group recipients here?
+      // TODO(#19476): Why we don't check group recipients here?
       _ <- SequencerValidations
         .checkSenderAndRecipientsAreRegistered(
           submission,
@@ -313,22 +313,15 @@ class BlockSequencer(
     if (unifiedSequencer) {
       super.readInternal(member, offset)
     } else {
-      if (!member.isAuthenticated) {
-        // allowing unauthenticated members to read events is the same as automatically registering an unauthenticated member
-        // and then proceeding with the subscription.
-        // optimization: if the member is unauthenticated, we don't need to fetch all members from the snapshot
-        EitherT.fromEither[Future](stateManager.readEventsForMember(member, offset))
-      } else {
-        EitherT
-          .right(cryptoApi.currentSnapshotApproximation.ipsSnapshot.isMemberKnown(member))
-          .flatMap { isKnown =>
-            if (isKnown) {
-              EitherT.fromEither[Future](stateManager.readEventsForMember(member, offset))
-            } else {
-              EitherT.leftT(CreateSubscriptionError.UnknownMember(member))
-            }
+      EitherT
+        .right(cryptoApi.currentSnapshotApproximation.ipsSnapshot.isMemberKnown(member))
+        .flatMap { isKnown =>
+          if (isKnown) {
+            EitherT.fromEither[Future](stateManager.readEventsForMember(member, offset))
+          } else {
+            EitherT.leftT(CreateSubscriptionError.UnknownMember(member))
           }
-      }
+        }
     }
   }
 
@@ -338,8 +331,7 @@ class BlockSequencer(
     if (unifiedSequencer) {
       super.isRegistered(member)
     } else {
-      if (!member.isAuthenticated) Future.successful(true)
-      else cryptoApi.headSnapshot.ipsSnapshot.isMemberKnown(member)
+      cryptoApi.headSnapshot.ipsSnapshot.isMemberKnown(member)
     }
   }
 
@@ -350,38 +342,30 @@ class BlockSequencer(
   override protected def disableMemberInternal(
       member: Member
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    if (unifiedSequencer) {
-      super.disableMemberInternal(member)
+    if (!stateManager.isMemberRegistered(member)) {
+      logger.warn(s"disableMember attempted to use member [$member] but they are not registered")
+      Future.unit
+    } else if (!stateManager.isMemberEnabled(member)) {
+      logger.debug(
+        s"disableMember attempted to use member [$member] but they are already disabled"
+      )
+      Future.unit
     } else {
-      if (!stateManager.isMemberRegistered(member)) {
-        logger.warn(s"disableMember attempted to use member [$member] but they are not registered")
-        Future.unit
-      } else if (!stateManager.isMemberEnabled(member)) {
-        logger.debug(
-          s"disableMember attempted to use member [$member] but they are already disabled"
+      val disabledF =
+        futureSupervisor.supervised(s"Waiting for member $member to be disabled")(
+          stateManager.waitForMemberToBeDisabled(member)
         )
-        Future.unit
-      } else {
-        val disabledF =
-          futureSupervisor.supervised(s"Waiting for member $member to be disabled")(
-            stateManager.waitForMemberToBeDisabled(member)
-          )
-        for {
-          _ <- placeLocalEvent(BlockSequencer.DisableMember(member))
-          _ <- disabledF
-        } yield ()
-      }
+      for {
+        _ <- placeLocalEvent(BlockSequencer.DisableMember(member))
+        _ <- disabledF
+        _ <- super.disableMemberInternal(
+          member
+        ) // Now members are also always stored in DBS, so we disable there as well
+      } yield ()
     }
   }
 
-  override protected def localSequencerMember: DomainMember = sequencerId
-
-  override def acknowledge(member: Member, timestamp: CantonTimestamp)(implicit
-      traceContext: TraceContext
-  ): Future[Unit] = {
-    logger.debug("Block sequencers only support signed acknowledgements")
-    Future.unit
-  }
+  override protected def localSequencerMember: Member = sequencerId
 
   override protected def acknowledgeSignedInternal(
       signedAcknowledgeRequest: SignedContent[AcknowledgeRequest]
@@ -437,8 +421,26 @@ class BlockSequencer(
     } yield finalSnapshot
   }
 
-  override def pruningStatus(implicit traceContext: TraceContext): Future[SequencerPruningStatus] =
-    store.pruningStatus().map(_.toSequencerPruningStatus(clock.now))
+  override def pruningStatus(implicit
+      traceContext: TraceContext
+  ): Future[SequencerPruningStatus] = {
+    if (unifiedSequencer) {
+      for {
+        blockPruningStatus <- store
+          .pruningStatus()
+          .map(_.toSequencerPruningStatus(clock.now))
+        dbsStatus <- super[DatabaseSequencer].pruningStatus
+      } yield {
+        dbsStatus.copy(
+          lowerBound = dbsStatus.lowerBound.min(blockPruningStatus.lowerBound),
+          // TODO(#19526): Combine pruning statuses?
+          members = dbsStatus.members ++ blockPruningStatus.members,
+        )
+      }
+    } else {
+      store.pruningStatus().map(_.toSequencerPruningStatus(clock.now))
+    }
+  }
 
   /** Important: currently both the disable member and the prune functionality on the block sequencer are
     * purely local operations that do not affect other block sequencers that share the same source of
@@ -472,7 +474,20 @@ class BlockSequencer(
           placeLocalEvent(BlockSequencer.UpdateInitialMemberCounters(requestedTimestamp))
         )
         _ <- EitherT.right(supervisedPruningF)
-      } yield msg
+        dbsMsg <-
+          if (unifiedSequencer) {
+            // TODO(#19526): Move in together within the pruningQueue.execute above
+            super[DatabaseSequencer].prune(requestedTimestamp)
+          } else {
+            EitherT.pure[Future, PruningError]("")
+          }
+      } yield {
+        if (unifiedSequencer) {
+          s"${msg}\n${dbsMsg}"
+        } else {
+          msg
+        }
+      }
     else
       EitherT.right(
         supervisedPruningF.map(_ =>
@@ -576,8 +591,6 @@ class BlockSequencer(
           // Filter by authenticated, enabled members that have been requested
           val disabledMembers = headEphemeral.status.disabledMembers
           val knownValidMembers = headEphemeral.status.membersMap.keySet.collect {
-            // TODO(#18399): Sequencers are giving warnings in the logs, but are excluded?
-            // case m @ (_: ParticipantId | _: MediatorId | _: SequencerId)
             case m @ (_: ParticipantId | _: MediatorId)
                 if !disabledMembers.contains(m) &&
                   (requestedMembers.isEmpty || requestedMembers.contains(m)) =>

@@ -26,13 +26,7 @@ import com.digitalasset.canton.topology.DefaultTestIdentities.{
   participant2,
   sequencerId,
 }
-import com.digitalasset.canton.topology.{
-  DomainMember,
-  Member,
-  SequencerId,
-  UnauthenticatedMemberId,
-  UniqueIdentifier,
-}
+import com.digitalasset.canton.topology.{Member, SequencerId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import com.google.protobuf.ByteString
@@ -70,9 +64,6 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
 
   private implicit val materializer: Materializer = mock[Materializer] // not used
 
-  private val unauthenticatedMemberId =
-    UniqueIdentifier.fromProtoPrimitive_("unm1::default").map(new UnauthenticatedMemberId(_)).value
-
   class StubSequencer(existingMembers: Set[Member])
       extends BaseSequencer(
         loggerFactory,
@@ -108,12 +99,13 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
     ): Future[Boolean] =
       Future.successful(existingMembers.contains(member))
 
-    override def registerMember(member: Member)(implicit
+    override def registerMemberInternal(member: Member, timestamp: CantonTimestamp)(implicit
         traceContext: TraceContext
     ): EitherT[Future, RegisterError, Unit] = {
       newlyRegisteredMembers.add(member)
       EitherT.pure(())
     }
+
     override def readInternal(member: Member, offset: SequencerCounter)(implicit
         traceContext: TraceContext
     ): EitherT[Future, CreateSubscriptionError, Sequencer.EventSource] =
@@ -122,9 +114,6 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
           .viaMat(KillSwitches.single)(Keep.right)
           .mapMaterializedValue(_ -> Future.successful(Done))
       )
-    override def acknowledge(member: Member, timestamp: CantonTimestamp)(implicit
-        traceContext: TraceContext
-    ): Future[Unit] = ???
 
     override protected def acknowledgeSignedInternal(
         signedAcknowledgeRequest: SignedContent[AcknowledgeRequest]
@@ -148,7 +137,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
         traceContext: TraceContext
     ): EitherT[Future, String, SequencerSnapshot] =
       ???
-    override protected val localSequencerMember: DomainMember = sequencerId
+    override protected val localSequencerMember: Member = sequencerId
     override protected def disableMemberInternal(member: Member)(implicit
         traceContext: TraceContext
     ): Future[Unit] = Future.unit
@@ -181,6 +170,9 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
         traceContext: TraceContext
     ): FutureUnlessShutdown[Map[Member, TrafficState]] =
       FutureUnlessShutdown.pure(Map.empty)
+
+    override def isEnabled(member: Member)(implicit traceContext: TraceContext): Future[Boolean] =
+      Future.successful(existingMembers.contains(member))
   }
 
   Seq(("sendAsync", false), ("sendAsyncSigned", true)).foreach { case (name, useSignedSend) =>
@@ -193,16 +185,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
 
     name should {
 
-      "sends from an unauthenticated member should auto register this member" in {
-        val sequencer = new StubSequencer(existingMembers = Set(participant1))
-        val request =
-          submission(from = unauthenticatedMemberId, to = Set(participant1, participant2))
-        for {
-          _ <- send(sequencer)(request).value.failOnShutdown
-        } yield sequencer.newlyRegisteredMembers should contain only unauthenticatedMemberId
-      }
-
-      "sends from anyone else should not auto register" in {
+      "sends should not auto register" in {
         val sequencer = new StubSequencer(existingMembers = Set(participant1))
         val request = submission(from = participant1, to = Set(participant1, participant2))
 
@@ -210,17 +193,6 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
           _ <- send(sequencer)(request).value.failOnShutdown
         } yield sequencer.newlyRegisteredMembers shouldBe empty
       }
-    }
-  }
-
-  "read" should {
-    "read from an unauthenticated member should auto register this member" in {
-      val sequencer = new StubSequencer(existingMembers = Set(participant1))
-      for {
-        _ <- sequencer
-          .read(unauthenticatedMemberId, SequencerCounter(0))
-          .value
-      } yield sequencer.newlyRegisteredMembers should contain only unauthenticatedMemberId
     }
   }
 

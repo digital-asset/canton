@@ -316,7 +316,6 @@ object Dependencies {
   lazy val daml_nonempty_cats = "com.daml" %% "nonempty-cats" % daml_libraries_version
   lazy val daml_metrics = "com.daml" %% "metrics" % daml_libraries_version
   lazy val daml_tracing = "com.daml" %% "tracing" % daml_libraries_version
-  lazy val daml_telemetry = "com.daml" %% "telemetry" % daml_libraries_version
 
   lazy val daml_observability_pekko_http_metrics =
     "com.daml" %% "pekko-http-metrics" % daml_libraries_version

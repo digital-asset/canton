@@ -37,7 +37,6 @@ import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.ReadService.ConnectedDomainResponse
 import com.digitalasset.canton.ledger.participant.state.*
-import com.digitalasset.canton.ledger.participant.state.index.PackageDetails
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
@@ -482,46 +481,50 @@ class CantonSyncService(
           )
         }
       _pruned <- pruningProcessor.pruneLedgerEvents(pruneUpToMultiDomainGlobalOffset)
-    } yield ()).transform {
-      case Left(err @ LedgerPruningNothingToPrune(_, _)) =>
-        logger.info(
-          s"Could not locate pruning point: ${err.message}. Considering success for idempotency"
+    } yield ()).transform(pruningErrorToCantonError)
+
+  private def pruningErrorToCantonError(pruningResult: Either[LedgerPruningError, Unit])(implicit
+      traceContext: TraceContext
+  ): Either[CantonError, Unit] = pruningResult match {
+    case Left(err @ LedgerPruningNothingToPrune(_, _)) =>
+      logger.info(
+        s"Could not locate pruning point: ${err.message}. Considering success for idempotency"
+      )
+      Right(())
+    case Left(err @ LedgerPruningOnlySupportedInEnterpriseEdition) =>
+      logger.warn(
+        s"Canton participant pruning not supported in canton-open-source edition: ${err.message}"
+      )
+      Left(PruningServiceError.PruningNotSupportedInCommunityEdition.Error())
+    case Left(err: LedgerPruningOffsetNonCantonFormat) =>
+      logger.info(err.message)
+      Left(PruningServiceError.NonCantonOffset.Error(err.message))
+    case Left(err: LedgerPruningOffsetUnsafeToPrune) =>
+      logger.info(s"Unsafe to prune: ${err.message}")
+      Left(
+        PruningServiceError.UnsafeToPrune.Error(
+          err.cause,
+          err.message,
+          err.lastSafeOffset.fold("")(UpstreamOffsetConvert.fromGlobalOffset(_).toHexString),
         )
-        Right(())
-      case Left(err @ LedgerPruningOnlySupportedInEnterpriseEdition) =>
-        logger.warn(
-          s"Canton participant pruning not supported in canton-open-source edition: ${err.message}"
+      )
+    case Left(err: LedgerPruningOffsetUnsafeDomain) =>
+      logger.info(s"Unsafe to prune ${err.domain}: ${err.message}")
+      Left(
+        PruningServiceError.UnsafeToPrune.Error(
+          s"no suitable offset for domain ${err.domain}",
+          err.message,
+          "none",
         )
-        Left(PruningServiceError.PruningNotSupportedInCommunityEdition.Error())
-      case Left(err: LedgerPruningOffsetNonCantonFormat) =>
-        logger.info(err.message)
-        Left(PruningServiceError.NonCantonOffset.Error(err.message))
-      case Left(err: LedgerPruningOffsetUnsafeToPrune) =>
-        logger.info(s"Unsafe to prune: ${err.message}")
-        Left(
-          PruningServiceError.UnsafeToPrune.Error(
-            err.cause,
-            err.message,
-            err.lastSafeOffset.fold("")(UpstreamOffsetConvert.fromGlobalOffset(_).toHexString),
-          )
-        )
-      case Left(err: LedgerPruningOffsetUnsafeDomain) =>
-        logger.info(s"Unsafe to prune ${err.domain}: ${err.message}")
-        Left(
-          PruningServiceError.UnsafeToPrune.Error(
-            s"no suitable offset for domain ${err.domain}",
-            err.message,
-            "none",
-          )
-        )
-      case Left(LedgerPruningCancelledDueToShutdown) =>
-        logger.info(s"Pruning interrupted due to shutdown")
-        Left(PruningServiceError.ParticipantShuttingDown.Error())
-      case Left(err) =>
-        logger.warn(s"Internal error while pruning: $err")
-        Left(PruningServiceError.InternalServerError.Error(err.message))
-      case Right(()) => Right(())
-    }
+      )
+    case Left(LedgerPruningCancelledDueToShutdown) =>
+      logger.info(s"Pruning interrupted due to shutdown")
+      Left(PruningServiceError.ParticipantShuttingDown.Error())
+    case Left(err) =>
+      logger.warn(s"Internal error while pruning: $err")
+      Left(PruningServiceError.InternalServerError.Error(err.message))
+    case Right(()) => Right(())
+  }
 
   private def submitTransactionF(
       submitterInfo: SubmitterInfo,
@@ -693,20 +696,8 @@ class CantonSyncService(
 
   override def listLfPackages()(implicit
       traceContext: TraceContext
-  ): Future[Map[PackageId, PackageDetails]] =
-    packageService.value
-      .listPackages()
-      .map(
-        _.view
-          .map { pkgDesc =>
-            pkgDesc.packageId -> PackageDetails(
-              size = pkgDesc.packageSize.toLong,
-              knownSince = pkgDesc.uploadedAt.underlying,
-              sourceDescription = Some(pkgDesc.sourceDescription.str),
-            )
-          }
-          .toMap
-      )
+  ): Future[Seq[PackageDescription]] =
+    packageService.value.listPackages()
 
   override def getPackageMetadataSnapshot(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
@@ -920,6 +911,36 @@ class CantonSyncService(
             ),
           "migrate domain",
         )
+    } yield ()
+  }
+
+  /* Verify that specified domain has inactive status and selectively prune sync domain stores.
+   */
+  def purgeDeactivatedDomain(domain: DomainAlias)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, CantonError, Unit] = {
+    for {
+      domainId <- EitherT.fromEither[FutureUnlessShutdown](
+        aliasManager
+          .domainIdForAlias(domain)
+          .toRight(SyncServiceError.SyncServiceUnknownDomain.Error(domain))
+      )
+      domainConfig <- performUnlessClosingEitherU(functionFullName)(
+        domainConnectionConfigByAlias(domain).leftMap(_ =>
+          SyncServiceError.SyncServiceUnknownDomain.Error(domain)
+        )
+      )
+      _ <- EitherT.cond[FutureUnlessShutdown](
+        domainConfig.status == DomainConnectionConfigStore.Inactive,
+        (),
+        SyncServiceError.SyncServiceDomainStatusMustBeInactive.Error(domain, domainConfig.status),
+      )
+      _ = logger.info(
+        s"Purging deactivated domain with alias $domain with domain id $domainId"
+      )
+      _ <- pruningProcessor
+        .pruneSelectedDeactivatedDomainStores(domainId)
+        .transform(pruningErrorToCantonError)
     } yield ()
   }
 

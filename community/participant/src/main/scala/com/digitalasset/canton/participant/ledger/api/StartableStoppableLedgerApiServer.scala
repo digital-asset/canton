@@ -292,10 +292,8 @@ class StartableStoppableLedgerApiServer(
         )(implicit traceContext: TraceContext): Source[GetActiveContractsResponse, NotUsed] =
           indexService.getActiveContracts(
             filter = TransactionFilter(
-              filtersByParty = partyIds.view.map(_ -> Filters.noFilter).toMap,
-              filtersForAnyParty =
-                None, // TODO(#18362) use Some(Filters.noFilter) and remove the filtersByParty?
-              alwaysPopulateCreatedEventBlob = true,
+              filtersByParty = partyIds.view.map(_ -> Filters.templateWildcardFilter(true)).toMap,
+              filtersForAnyParty = None,
             ),
             verbose = false,
             activeAtO = validAt,
