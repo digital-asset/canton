@@ -58,7 +58,6 @@ import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportK
 import com.digitalasset.canton.resource.*
 import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig}
 import com.digitalasset.canton.store.IndexedStringStore
-import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.time.*
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{
@@ -117,7 +116,7 @@ class ParticipantNodeBootstrap(
 
   /** per session created admin token for in-process connections to ledger-api */
   val adminToken: CantonAdminToken = config.ledgerApi.adminToken.fold(
-    CantonAdminToken.create(crypto.value.pureCrypto)
+    CantonAdminToken.create(crypto.pureCrypto)
   )(token => CantonAdminToken(secret = token))
 
   override def config: LocalParticipantConfig = arguments.config
@@ -131,7 +130,7 @@ class ParticipantNodeBootstrap(
       "participant",
       logger,
       timeouts,
-      criticalDependencies = Seq(storage),
+      criticalDependencies = Seq(storage, crypto),
       // The sync service won't be reporting Ok until the node is initialized, but that shouldn't prevent traffic from
       // reaching the node
       softDependencies = Seq(
@@ -156,7 +155,7 @@ class ParticipantNodeBootstrap(
     new ParticipantTopologyManager(
       clock,
       authorizedTopologyStore,
-      crypto.value,
+      crypto,
       packageDependencyResolver,
       parameterConfig.processingTimeouts,
       config.parameters.initialProtocolVersion.unwrap,
@@ -177,17 +176,17 @@ class ParticipantNodeBootstrap(
       for {
         // create keys
         namespaceKey <- CantonNodeBootstrapCommon
-          .getOrCreateSigningKey(crypto.value)(
+          .getOrCreateSigningKey(crypto)(
             s"$name-namespace"
           )
           .mapK(FutureUnlessShutdown.outcomeK)
         signingKey <- CantonNodeBootstrapCommon
-          .getOrCreateSigningKey(crypto.value)(
+          .getOrCreateSigningKey(crypto)(
             s"$name-signing"
           )
           .mapK(FutureUnlessShutdown.outcomeK)
         encryptionKey <- CantonNodeBootstrapCommon
-          .getOrCreateEncryptionKey(crypto.value)(
+          .getOrCreateEncryptionKey(crypto)(
             s"$name-encryption"
           )
           .mapK(FutureUnlessShutdown.outcomeK)
@@ -274,7 +273,7 @@ class ParticipantNodeBootstrap(
             storage,
             indexedStringStore,
             parameters,
-            crypto.value.pureCrypto,
+            crypto.pureCrypto,
             clock,
             futureSupervisor,
             loggerFactory,
@@ -284,7 +283,7 @@ class ParticipantNodeBootstrap(
               topologyManager,
               participantId,
               manager,
-              crypto.value,
+              crypto,
               clock,
               parameterConfig.processingTimeouts,
               loggerFactory,
@@ -336,7 +335,7 @@ class ParticipantNodeBootstrap(
 
       createParticipantServices(
         participantId,
-        crypto.value,
+        crypto,
         storage,
         persistentStateFactory,
         packageUploaderFactory,
@@ -372,7 +371,7 @@ class ParticipantNodeBootstrap(
             storage,
             clock,
             topologyManager,
-            crypto.value.pureCrypto,
+            crypto.pureCrypto,
             topologyDispatcher,
             partyNotifier,
             ips,

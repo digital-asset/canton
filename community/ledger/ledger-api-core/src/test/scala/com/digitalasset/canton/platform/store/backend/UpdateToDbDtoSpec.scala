@@ -7,6 +7,7 @@ import com.daml.daml_lf_dev.DamlLf
 import com.daml.ledger.api.v1.event.{CreatedEvent, ExercisedEvent}
 import com.daml.lf.crypto
 import com.daml.lf.crypto.Hash.KeyPackageName
+import com.daml.lf.data.Ref.PackageName
 import com.daml.lf.data.{Bytes, Ref, Time}
 import com.daml.lf.ledger.EventId
 import com.daml.lf.transaction.test.TestNodeBuilder.CreateKey
@@ -46,7 +47,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks.*
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.time.Duration
+import java.time.{Duration, Instant}
 import scala.concurrent.{ExecutionContext, Future}
 
 // Note: this suite contains hand-crafted updates that are impossible to produce on some ledgers
@@ -60,7 +61,10 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
 
   object TxBuilder {
     def apply(): NodeIdTransactionBuilder & TestNodeBuilder = new NodeIdTransactionBuilder
-      with TestNodeBuilder
+      with TestNodeBuilder {
+      override val defaultPackageName: Option[PackageName] =
+        Some(Ref.PackageName.assertFromString("package-name"))
+    }
   }
 
   "UpdateToDbDto" should {
@@ -2430,7 +2434,8 @@ object UpdateToDbDtoSpec {
   private val otherParticipantId =
     Ref.ParticipantId.assertFromString("UpdateToDbDtoSpecRemoteParticipant")
   private val someOffset = Offset.fromHexString(Ref.HexString.assertFromString("abcdef"))
-  private val someRecordTime = Time.Timestamp.assertFromString("2000-01-01T00:00:00.000000Z")
+  private val someRecordTime =
+    Time.Timestamp.assertFromInstant(Instant.parse("2000-01-01T00:00:00.000000Z"))
   private val someApplicationId =
     Ref.ApplicationId.assertFromString("UpdateToDbDtoSpecApplicationId")
   private val someCommandId = Ref.CommandId.assertFromString("UpdateToDbDtoSpecCommandId")
