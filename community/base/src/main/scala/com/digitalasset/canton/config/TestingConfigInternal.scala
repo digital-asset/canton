@@ -12,11 +12,16 @@ import com.digitalasset.canton.metrics.MetricsFactoryType.External
   * [[com.digitalasset.canton.sequencing.client.DelayedSequencerClient]] for testing
   * @param initializeGlobalOpenTelemetry Determines whether the OpenTelemetry instance we build is set as the global OpenTelemetry instance. This is set to false during tests to
   *                                      prevent failures as the global OpenTelemetry instance can be initialized just once.
+  * @param maxCommitmentSendDelay The maximum delay for sending commitments. If not set, commitment sending is delayed
+  *                               by a random amount at most the default value.
+  * @param sequencerTransportSeed The seed to be used for choosing threshold number of sequencer transports.
   */
 final case class TestingConfigInternal(
     testSequencerClientFor: Set[TestSequencerClientFor] = Set.empty,
     metricsFactoryType: MetricsFactoryType = External,
     initializeGlobalOpenTelemetry: Boolean = true,
+    maxCommitmentSendDelay: Option[java.time.Duration] = None,
+    sequencerTransportSeed: Option[Long] = None,
 )
 
 /** @param environmentId ID used to disambiguate tests running in parallel
