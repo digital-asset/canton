@@ -37,7 +37,11 @@ import com.digitalasset.canton.domain.sequencing.service.*
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.domain.service.grpc.GrpcDomainService
 import com.digitalasset.canton.health.HealthListener
-import com.digitalasset.canton.health.admin.data.{SequencerHealthStatus, TopologyQueueStatus}
+import com.digitalasset.canton.health.admin.data.{
+  SequencerAdminStatus,
+  SequencerHealthStatus,
+  TopologyQueueStatus,
+}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
@@ -239,6 +243,9 @@ class SequencerRuntime(
     dispatcher = 0,
     clients = topologyClient.numPendingChanges,
   )
+
+  def adminStatus: SequencerAdminStatus =
+    sequencer.adminStatus
 
   def fetchActiveMembers(): Future[Seq[Member]] =
     Future.successful(sequencerService.membersWithActiveSubscriptions)

@@ -63,6 +63,7 @@ class ParticipantRepairAdministration(
       |stakeholders are no longer available to agree to their archival. The participant needs to be disconnected from
       |the domain on which the contracts with "contractIds" reside at the time of the call, and as of now the domain
       |cannot have had any inflight requests.
+      |The effects of the command will take affect upon reconnecting to the sync domain.
       |The "ignoreAlreadyPurged" flag makes it possible to invoke the command multiple times with the same
       |parameters in case an earlier command invocation has failed.
       |As repair commands are powerful tools to recover from unforeseen data corruption, but dangerous under normal
@@ -93,23 +94,32 @@ class ParticipantRepairAdministration(
 
   @Help.Summary("Migrate contracts from one domain to another one.")
   @Help.Description(
-    """This method can be used to migrate all the contracts associated with a domain to a new domain connection.
-         This method will register the new domain, connect to it and then re-associate all contracts on the source
-         domain to the target domain. Please note that this migration needs to be done by all participants
-         at the same time. The domain should only be used once all participants have finished their migration.
-
-         The arguments are:
-         source: the domain alias of the source domain
-         target: the configuration for the target domain
-         """
+    """Migrates all contracts associated with a domain to a new domain.
+        |This method will register the new domain, connect to it and then re-associate all contracts from the source
+        |domain to the target domain. Please note that this migration needs to be done by all participants
+        |at the same time. The target domain should only be used once all participants have finished their migration.
+        |
+        |WARNING: The migration does not start in case of in-flight transactions on the source domain. Forcing the
+        |migration may lead to a ledger fork! Instead of forcing the migration, ensure the source domain has no
+        |in-flight transactions by reconnecting all participants to the source domain, halting activity on these
+        |participants and waiting for the in-flight transactions to complete or time out.
+        |Forcing a migration is intended for disaster recovery when a source domain cannot be recovered anymore.
+        |
+        |The arguments are:
+        |source: the domain alias of the source domain
+        |target: the configuration for the target domain
+        |force: if true, migration is forced ignoring in-flight transactions. Defaults to false.
+        """
   )
   def migrate_domain(
       source: DomainAlias,
       target: DomainConnectionConfig,
+      force: Boolean = false,
   ): Unit = {
     consoleEnvironment.run {
       runner.adminCommand(
-        ParticipantAdminCommands.ParticipantRepairManagement.MigrateDomain(source, target)
+        ParticipantAdminCommands.ParticipantRepairManagement
+          .MigrateDomain(source, target, force = force)
       )
     }
   }
@@ -325,6 +335,7 @@ class ParticipantRepairAdministration(
         |contracts have somehow gotten out of sync and need to be manually created. The participant needs to be
         |disconnected from the specified "domain" at the time of the call, and as of now the domain cannot have had
         |any inflight requests.
+        |The effects of the command will take affect upon reconnecting to the sync domain.
         |As repair commands are powerful tools to recover from unforeseen data corruption, but dangerous under normal
         |operation, use of this command requires (temporarily) enabling the "features.enable-repair-commands"
         |configuration. In addition repair commands can run for an unbounded time depending on the number of
@@ -376,6 +387,80 @@ class ParticipantRepairAdministration(
     }
   }
 
+  @Help.Summary("Purge select data of a deactivated domain.")
+  @Help.Description(
+    """This command deletes selected domain data and helps to ensure that stale data in the specified, deactivated domain
+       |is not acted upon anymore. The specified domain needs to be in the `Inactive` status for purging to occur.
+       |Purging a deactivated domain is typically performed automatically as part of a hard domain migration via
+       |``repair.migrate_domain``."""
+  )
+  def purge_deactivated_domain(domain: DomainAlias): Unit = {
+    check(FeatureFlag.Repair) {
+      consoleEnvironment.run {
+        runner.adminCommand(
+          ParticipantAdminCommands.ParticipantRepairManagement.PurgeDeactivatedDomain(domain)
+        )
+      }
+    }
+  }
+
+  @Help.Summary("Mark sequenced events as ignored.")
+  @Help.Description(
+    """This is the last resort to ignore events that the participant is unable to process.
+      |Ignoring events may lead to subsequent failures, e.g., if the event creating a contract is ignored and
+      |that contract is subsequently used. It may also lead to ledger forks if other participants still process
+      |the ignored events.
+      |It is possible to mark events as ignored that the participant has not yet received.
+      |
+      |The command will fail, if marking events between `fromInclusive` and `toInclusive` as ignored would result in a gap in sequencer counters,
+      |namely if `from <= to` and `from` is greater than `maxSequencerCounter + 1`,
+      |where `maxSequencerCounter` is the greatest sequencer counter of a sequenced event stored by the underlying participant.
+      |
+      |The command will also fail, if `force == false` and `from` is smaller than the sequencer counter of the last event
+      |that has been marked as clean.
+      |(Ignoring such events would normally have no effect, as they have already been processed.)"""
+  )
+  def ignore_events(
+      domainId: DomainId,
+      fromInclusive: SequencerCounter,
+      toInclusive: SequencerCounter,
+      force: Boolean = false,
+  ): Unit =
+    check(FeatureFlag.Repair) {
+      consoleEnvironment.run {
+        runner.adminCommand(
+          ParticipantAdminCommands.ParticipantRepairManagement
+            .IgnoreEvents(domainId, fromInclusive, toInclusive, force)
+        )
+      }
+    }
+
+  @Help.Summary("Remove the ignored status from sequenced events.")
+  @Help.Description(
+    """This command has no effect on ordinary (i.e., not ignored) events and on events that do not exist.
+      |
+      |The command will fail, if marking events between `fromInclusive` and `toInclusive` as unignored would result in a gap in sequencer counters,
+      |namely if there is one empty ignored event with sequencer counter between `from` and `to` and
+      |another empty ignored event with sequencer counter greater than `to`.
+      |An empty ignored event is an event that has been marked as ignored and not yet received by the participant.
+      |
+      |The command will also fail, if `force == false` and `from` is smaller than the sequencer counter of the last event
+      |that has been marked as clean.
+      |(Unignoring such events would normally have no effect, as they have already been processed.)"""
+  )
+  def unignore_events(
+      domainId: DomainId,
+      fromInclusive: SequencerCounter,
+      toInclusive: SequencerCounter,
+      force: Boolean = false,
+  ): Unit = check(FeatureFlag.Repair) {
+    consoleEnvironment.run {
+      runner.adminCommand(
+        ParticipantAdminCommands.ParticipantRepairManagement
+          .UnignoreEvents(domainId, fromInclusive, toInclusive, force)
+      )
+    }
+  }
 }
 
 abstract class LocalParticipantRepairAdministration(
@@ -479,59 +564,6 @@ abstract class LocalParticipantRepairAdministration(
           PositiveInt.tryCreate(batchSize),
         )(tc)
       )
-    )
-
-  @Help.Summary("Mark sequenced events as ignored.")
-  @Help.Description(
-    """This is the last resort to ignore events that the participant is unable to process.
-      |Ignoring events may lead to subsequent failures, e.g., if the event creating a contract is ignored and
-      |that contract is subsequently used. It may also lead to ledger forks if other participants still process
-      |the ignored events.
-      |It is possible to mark events as ignored that the participant has not yet received.
-      |
-      |The command will fail, if marking events between `from` and `to` as ignored would result in a gap in sequencer counters,
-      |namely if `from <= to` and `from` is greater than `maxSequencerCounter + 1`,
-      |where `maxSequencerCounter` is the greatest sequencer counter of a sequenced event stored by the underlying participant.
-      |
-      |The command will also fail, if `force == false` and `from` is smaller than the sequencer counter of the last event
-      |that has been marked as clean.
-      |(Ignoring such events would normally have no effect, as they have already been processed.)"""
-  )
-  def ignore_events(
-      domainId: DomainId,
-      from: SequencerCounter,
-      to: SequencerCounter,
-      force: Boolean = false,
-  ): Unit =
-    runRepairCommand(tc =>
-      access {
-        _.sync.repairService.ignoreEvents(domainId, from, to, force)(tc)
-      }
-    )
-
-  @Help.Summary("Remove the ignored status from sequenced events.")
-  @Help.Description(
-    """This command has no effect on ordinary (i.e., not ignored) events and on events that do not exist.
-      |
-      |The command will fail, if marking events between `from` and `to` as unignored would result in a gap in sequencer counters,
-      |namely if there is one empty ignored event with sequencer counter between `from` and `to` and
-      |another empty ignored event with sequencer counter greater than `to`.
-      |An empty ignored event is an event that has been marked as ignored and not yet received by the participant.
-      |
-      |The command will also fail, if `force == false` and `from` is smaller than the sequencer counter of the last event
-      |that has been marked as clean.
-      |(Unignoring such events would normally have no effect, as they have already been processed.)"""
-  )
-  def unignore_events(
-      domainId: DomainId,
-      from: SequencerCounter,
-      to: SequencerCounter,
-      force: Boolean = false,
-  ): Unit =
-    runRepairCommand(tc =>
-      access {
-        _.sync.repairService.unignoreEvents(domainId, from, to, force)(tc)
-      }
     )
 }
 
