@@ -13,8 +13,8 @@ import cats.data.Validated
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import com.daml.jwt.JwtTimestampLeeway
-import com.daml.metrics.MetricsFilterConfig
 import com.daml.metrics.api.MetricQualification
+import com.daml.metrics.{HistogramDefinition, MetricsFilterConfig}
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.{
@@ -31,6 +31,7 @@ import com.digitalasset.canton.config.ConfigErrors.{
   SubstitutionError,
 }
 import com.digitalasset.canton.config.InitConfigBase.NodeIdentifierConfig
+import com.digitalasset.canton.config.PackageMetadataViewConfig
 import com.digitalasset.canton.config.RequireTypes.*
 import com.digitalasset.canton.console.{AmmoniteConsoleConfig, FeatureFlag}
 import com.digitalasset.canton.crypto.*
@@ -75,14 +76,12 @@ import com.digitalasset.canton.platform.apiserver.configuration.{
   RateLimitingConfig,
 }
 import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfig
-import com.digitalasset.canton.platform.indexer.PackageMetadataViewConfig
 import com.digitalasset.canton.protocol.AcsCommitmentsCatchUpConfig
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.pureconfigutils.HttpServerConfig
 import com.digitalasset.canton.pureconfigutils.SharedConfigReaders.catchConvertError
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
-import com.digitalasset.canton.telemetry.HistogramDefinition
 import com.digitalasset.canton.time.EnrichedDurations.RichNonNegativeFiniteDurationConfig
 import com.digitalasset.canton.tracing.TracingConfig
 import com.typesafe.config.ConfigException.UnresolvedSubstitution
@@ -230,7 +229,6 @@ object ClockConfig {
 final case class RetentionPeriodDefaults(
     sequencer: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofDays(7),
     mediator: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofDays(7),
-    unauthenticatedMembers: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofHours(1),
 )
 
 /** Parameters for testing Canton. Use default values in a production environment.

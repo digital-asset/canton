@@ -8,6 +8,7 @@ import cats.syntax.alternative.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
+import cats.syntax.traverse.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.SequencerCounter
@@ -25,11 +26,13 @@ import com.digitalasset.canton.domain.metrics.BlockMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.*
 import com.digitalasset.canton.domain.sequencing.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.SequencerError
+import com.digitalasset.canton.domain.sequencing.sequencer.store.SequencerMemberValidator
 import com.digitalasset.canton.domain.sequencing.sequencer.traffic.SequencerRateLimitManager
 import com.digitalasset.canton.error.BaseAlarm
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.GroupAddressResolver
+import com.digitalasset.canton.sequencing.client.SequencedEventValidator
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -52,6 +55,8 @@ private[update] final class BlockChunkProcessor(
     orderingTimeFixMode: OrderingTimeFixMode,
     override val loggerFactory: NamedLoggerFactory,
     metrics: BlockMetrics,
+    unifiedSequencer: Boolean,
+    memberValidator: SequencerMemberValidator,
 )(implicit closeContext: CloseContext)
     extends NamedLogging {
 
@@ -63,6 +68,8 @@ private[update] final class BlockChunkProcessor(
       sequencerId,
       rateLimitManager,
       loggerFactory,
+      unifiedSequencer = unifiedSequencer,
+      memberValidator = memberValidator,
     )
 
   def processChunk(
@@ -95,7 +102,16 @@ private[update] final class BlockChunkProcessor(
           state.ephemeral.headCounter(sequencerId),
           submissionRequests,
         )
-      newMembers <- detectMembersWithoutSequencerCounters(state, sequencedSubmissionsWithSnapshots)
+      newMembers <-
+        if (unifiedSequencer) {
+          // Unified sequencer mode doesn't store members in the ephemeral state.
+          // By the point we are processing a submission with topology/sequencing time topology snapshot,
+          // all the valid members will be already in the members database of DBS
+          FutureUnlessShutdown.pure(Map.empty[Member, CantonTimestamp])
+        } else {
+          detectMembersWithoutSequencerCounters(state, sequencedSubmissionsWithSnapshots)
+        }
+
       _ = if (newMembers.nonEmpty) {
         logger.info(s"Detected new members without sequencer counter: $newMembers")
       }
@@ -155,8 +171,10 @@ private[update] final class BlockChunkProcessor(
       // validations to fail down the line. That's why we need to compute it using only validated events, instead of
       // using the lastTs computed initially pre-validation.
       lastChunkTsOfSuccessfulEvents =
-        reversedSignedEvents
-          .map(_.sequencingTimestamp)
+        reversedOutcomes
+          .collect { case SubmissionRequestOutcome(_, _, o: DeliverableSubmissionOutcome) =>
+            o.sequencingTime
+          }
           .maxOption
           .orElse(newMembers.values.maxOption)
           .getOrElse(state.lastChunkTs)
@@ -240,32 +258,48 @@ private[update] final class BlockChunkProcessor(
         // Warn if we use an approximate snapshot but only after we've read at least one
         val warnIfApproximate = sequencersSequencerCounter.exists(_ > SequencerCounter.Genesis)
         for {
-          sequencingSnapshot <- SyncCryptoClient.getSnapshotForTimestampUS(
-            domainSyncCryptoApi,
-            sequencingTimestamp,
-            latestSequencerEventTimestamp,
-            protocolVersion,
-            warnIfApproximate,
-          )
-          topologySnapshotO <- submissionRequest.content.topologyTimestamp match {
-            case None => FutureUnlessShutdown.pure(None)
-            case Some(topologyTimestamp) if topologyTimestamp <= sequencingTimestamp =>
-              SyncCryptoClient
-                .getSnapshotForTimestampUS(
+          topologySnapshotOrErrO <- submissionRequest.content.topologyTimestamp.traverse(
+            topologyTimestamp =>
+              SequencedEventValidator
+                .validateTopologyTimestampUS(
                   domainSyncCryptoApi,
                   topologyTimestamp,
+                  sequencingTimestamp,
                   latestSequencerEventTimestamp,
                   protocolVersion,
                   warnIfApproximate,
                 )
-                .map(Some(_))
-            case _ => FutureUnlessShutdown.pure(None)
+                .leftMap {
+                  case SequencedEventValidator.TopologyTimestampAfterSequencingTime =>
+                    SequencerErrors.TopologyTimestampAfterSequencingTimestamp(
+                      topologyTimestamp,
+                      sequencingTimestamp,
+                    )
+                  case SequencedEventValidator.TopologyTimestampTooOld(_) |
+                      SequencedEventValidator.NoDynamicDomainParameters(_) =>
+                    SequencerErrors.TopoologyTimestampTooEarly(
+                      topologyTimestamp,
+                      sequencingTimestamp,
+                    )
+                }
+                .value
+          )
+          topologyOrSequencingSnapshot <- topologySnapshotOrErrO match {
+            case Some(Right(topologySnapshot)) => FutureUnlessShutdown.pure(topologySnapshot)
+            case _ =>
+              SyncCryptoClient.getSnapshotForTimestampUS(
+                domainSyncCryptoApi,
+                sequencingTimestamp,
+                latestSequencerEventTimestamp,
+                protocolVersion,
+                warnIfApproximate,
+              )
           }
         } yield SequencedSubmission(
           sequencingTimestamp,
           submissionRequest,
-          sequencingSnapshot,
-          topologySnapshotO,
+          topologyOrSequencingSnapshot,
+          topologySnapshotOrErrO.mapFilter(_.swap.toOption),
         )(traceContext)
       }
     }
@@ -360,18 +394,14 @@ private[update] final class BlockChunkProcessor(
   ): FutureUnlessShutdown[Map[Member, CantonTimestamp]] =
     sequencedSubmissions
       .parFoldMapA { sequencedSubmission =>
-        val SequencedSubmission(sequencingTimestamp, event, sequencingSnapshot, topologySnapshotO) =
+        val SequencedSubmission(sequencingTimestamp, event, topologyOrSequencingSnapshot, _) =
           sequencedSubmission
 
-        def recipientIsKnown(member: Member): Future[Option[Member]] = {
-          if (!member.isAuthenticated) Future.successful(None)
-          else
-            sequencingSnapshot.ipsSnapshot
-              .isMemberKnown(member)
-              .map(Option.when(_)(member))
-        }
+        def recipientIsKnown(member: Member): Future[Option[Member]] =
+          topologyOrSequencingSnapshot.ipsSnapshot
+            .isMemberKnown(member)
+            .map(Option.when(_)(member))
 
-        val topologySnapshot = topologySnapshotO.getOrElse(sequencingSnapshot).ipsSnapshot
         import event.content.sender
         for {
           groupToMembers <- FutureUnlessShutdown.outcomeF(
@@ -379,7 +409,7 @@ private[update] final class BlockChunkProcessor(
               event.content.batch.allRecipients.collect { case groupRecipient: GroupRecipient =>
                 groupRecipient
               },
-              topologySnapshot,
+              topologyOrSequencingSnapshot.ipsSnapshot,
             )
           )
           memberRecipients = event.content.batch.allRecipients.collect {
@@ -394,10 +424,9 @@ private[update] final class BlockChunkProcessor(
           )
         } yield {
           val knownGroupMembers = groupToMembers.values.flatten
-          val allowUnauthenticatedSender = Option.when(!sender.isAuthenticated)(sender).toList
 
           val allMembersInSubmission =
-            Set.empty ++ knownGroupMembers ++ knownMemberRecipientsOrSender ++ allowUnauthenticatedSender
+            Set.empty ++ knownGroupMembers ++ knownMemberRecipientsOrSender
           (allMembersInSubmission -- state.ephemeral.registeredMembers)
             .map(_ -> sequencingTimestamp)
             .toSeq
@@ -482,11 +511,6 @@ private[update] final class BlockChunkProcessor(
                   acc.copy(mediators = true)
                 case (acc, MemberRecipient(SequencerId(_)) | SequencersOfDomain) =>
                   acc.copy(sequencers = true)
-                case (
-                      acc,
-                      MemberRecipient(UnauthenticatedMemberId(_)),
-                    ) =>
-                  acc // not used
                 case (acc, AllMembersOfDomain) => acc.copy(broadcast = true)
               }
               .updateMetric(

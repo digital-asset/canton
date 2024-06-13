@@ -583,7 +583,6 @@ object BuildCommon {
           daml_libs_scala_contextualized_logging,
           daml_metrics,
           daml_non_empty,
-          daml_telemetry,
           daml_tracing,
           logback_classic,
           logback_core,

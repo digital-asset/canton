@@ -12,9 +12,10 @@ import com.daml.logging.entries.ToLoggingKey.*
 import com.daml.logging.entries.{LoggingEntries, LoggingEntry, LoggingKey, LoggingValue}
 import com.digitalasset.canton.ledger.api.domain.{
   Commands,
+  CumulativeFilter,
   EventId,
-  Filters,
   ParticipantOffset,
+  TemplateWildcardFilter,
   TransactionFilter,
   TransactionId,
 }
@@ -84,12 +85,28 @@ package object logging {
       )
     )
 
-  private def filtersToLoggingValue(filters: Filters): LoggingValue =
-    filters.inclusive match {
-      case None => LoggingValue.from("all-templates")
-      case Some(inclusiveFilters) =>
-        LoggingValue.from(inclusiveFilters.templateFilters.map(_.templateTypeRef))
-    }
+  private def filtersToLoggingValue(filter: CumulativeFilter): LoggingValue =
+    LoggingValue.Nested(
+      LoggingEntries.fromMap(
+        Map(
+          "templates" -> LoggingValue.from(
+            filter.templateFilters.map(_.templateTypeRef)
+          ),
+          "interfaces" -> LoggingValue.from(
+            filter.interfaceFilters.map(_.interfaceId)
+          ),
+        )
+          ++ (filter.templateWildcardFilter match {
+            case Some(TemplateWildcardFilter(includeCreatedEventBlob)) =>
+              Map(
+                "all-templates, created_event_blob" -> LoggingValue.from(
+                  includeCreatedEventBlob
+                )
+              )
+            case None => Map.empty
+          })
+      )
+    )
 
   private[services] def submissionId(id: String): LoggingEntry =
     "submissionId" -> id

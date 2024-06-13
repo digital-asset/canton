@@ -13,11 +13,12 @@ import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.{CantonTimestamp, Counter}
+import com.digitalasset.canton.domain.block.UninitializedBlockHeight
 import com.digitalasset.canton.domain.sequencing.sequencer.*
 import com.digitalasset.canton.domain.sequencing.sequencer.store.InMemorySequencerStore.CheckpointDataAtCounter
 import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.topology.{Member, UnauthenticatedMemberId}
+import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, retry}
@@ -74,22 +75,13 @@ class InMemorySequencerStore(
       members
         .getOrElseUpdate(
           member,
-          RegisteredMember(SequencerMemberId(nextNewMemberId.getAndIncrement()), timestamp),
+          RegisteredMember(
+            SequencerMemberId(nextNewMemberId.getAndIncrement()),
+            timestamp,
+          ),
         )
         .memberId
     }
-
-  override def unregisterUnauthenticatedMember(member: UnauthenticatedMemberId)(implicit
-      traceContext: TraceContext
-  ): Future[Unit] = {
-    disabledClientsRef
-      .getAndUpdate(disabledClients =>
-        disabledClients.copy(members = disabledClients.members - member)
-      )
-
-    evictFromCache(member)
-    Future.successful(members.remove(member)).void
-  }
 
   protected override def lookupMemberInternal(member: Member)(implicit
       traceContext: TraceContext
@@ -429,14 +421,11 @@ class InMemorySequencerStore(
 
   override def isEnabled(memberId: SequencerMemberId)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, MemberDisabledError.type, Unit] = {
+  ): Future[Boolean] = {
     val member = lookupExpectedMember(memberId)
-    EitherT
-      .cond[Future](
-        !disabledClientsRef.get().members.contains(member),
-        (),
-        MemberDisabledError,
-      )
+    Future.successful(
+      !disabledClientsRef.get().members.contains(member)
+    )
   }
 
   /** There can be no other sequencers sharing this storage */
@@ -501,6 +490,7 @@ class InMemorySequencerStore(
     Future.successful(
       SequencerSnapshot(
         lastTs,
+        UninitializedBlockHeight,
         memberCheckpoints.fmap(_.counter),
         internalStatus(lastTs),
         Map.empty,

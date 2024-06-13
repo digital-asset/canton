@@ -59,27 +59,25 @@ trait ValidatorTestUtils extends Matchers with Inside with OptionValues {
     filtersByParty should have size 1
     inside(filtersByParty.headOption.value) { case (p, filters) =>
       p shouldEqual party
-      filters shouldEqual domain.Filters(
-        Some(
-          domain.InclusiveFilters(
-            templateFilters =
-              expectedTemplates.map(TemplateFilter(_, includeCreatedEventBlob = false)),
-            interfaceFilters = Set(
-              InterfaceFilter(
-                interfaceId = Ref.Identifier(
-                  Ref.PackageId.assertFromString(packageId),
-                  Ref.QualifiedName(
-                    Ref.DottedName.assertFromString(includedModule),
-                    Ref.DottedName.assertFromString(includedTemplate),
-                  ),
+      filters shouldEqual
+        domain.CumulativeFilter(
+          templateFilters =
+            expectedTemplates.map(TemplateFilter(_, includeCreatedEventBlob = false)),
+          interfaceFilters = Set(
+            InterfaceFilter(
+              interfaceId = Ref.Identifier(
+                Ref.PackageId.assertFromString(packageId),
+                Ref.QualifiedName(
+                  Ref.DottedName.assertFromString(includedModule),
+                  Ref.DottedName.assertFromString(includedTemplate),
                 ),
-                includeView = true,
-                includeCreatedEventBlob = true,
-              )
-            ),
-          )
+              ),
+              includeView = true,
+              includeCreatedEventBlob = true,
+            )
+          ),
+          templateWildcardFilter = None,
         )
-      )
     }
   }
 

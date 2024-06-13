@@ -40,7 +40,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks.*
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.time.Duration
+import java.time.{Duration, Instant}
 import scala.concurrent.{ExecutionContext, Future}
 
 // Note: this suite contains hand-crafted updates that are impossible to produce on some ledgers
@@ -221,6 +221,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         contract_id = createNode.coid.coid,
         template_id = createNode.templateId.toString,
         package_name = createNode.packageName.toString,
+        package_version = createNode.packageVersion.map(_.toString()),
         flat_event_witnesses =
           Set("signatory1", "signatory2", "signatory3", "observer"), // stakeholders
         tree_event_witnesses =
@@ -922,6 +923,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         contract_id = createNode.coid.coid,
         template_id = createNode.templateId.toString,
         package_name = createNode.packageName.toString,
+        package_version = createNode.packageVersion.map(_.toString()),
         flat_event_witnesses = Set("signatory", "observer"),
         tree_event_witnesses = Set("signatory", "observer"),
         create_argument = emptyArray,
@@ -1126,6 +1128,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         contract_id = createNode.coid.coid,
         template_id = createNode.templateId.toString,
         package_name = createNode.packageName.toString,
+        package_version = createNode.packageVersion.map(_.toString()),
         flat_event_witnesses = Set("signatory", "observer"),
         tree_event_witnesses = Set("signatory", "observer"),
         create_argument = emptyArray,
@@ -1191,6 +1194,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         contract_id = createNode.coid.coid,
         template_id = createNode.templateId.toString,
         package_name = createNode.packageName.toString,
+        package_version = createNode.packageVersion.map(_.toString()),
         flat_event_witnesses = Set("signatory", "observer"),
         tree_event_witnesses = Set("signatory", "observer"),
         create_argument = emptyArray,
@@ -1331,6 +1335,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             contract_id = createNode.coid.coid,
             template_id = createNode.templateId.toString,
             package_name = createNode.packageName.toString,
+            package_version = createNode.packageVersion.map(_.toString()),
             flat_event_witnesses = Set("signatory", "observer"), // stakeholders
             tree_event_witnesses = Set("signatory", "observer"), // informees
             create_argument = emptyArray,
@@ -1423,6 +1428,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         contract_id = createNode.coid.coid,
         template_id = createNode.templateId.toString,
         package_name = createNode.packageName.toString,
+        package_version = createNode.packageVersion.map(_.toString()),
         flat_event_witnesses = Set("signatory", "observer", "observer2"),
         create_argument = emptyArray,
         create_signatories = Set("signatory"),
@@ -1630,7 +1636,8 @@ object UpdateToDbDtoSpec {
   private val otherParticipantId =
     Ref.ParticipantId.assertFromString("UpdateToDbDtoSpecRemoteParticipant")
   private val someOffset = Offset.fromHexString(Ref.HexString.assertFromString("abcdef"))
-  private val someRecordTime = Time.Timestamp.assertFromString("2000-01-01T00:00:00.000000Z")
+  private val someRecordTime =
+    Time.Timestamp.assertFromInstant(Instant.parse(("2000-01-01T00:00:00.000000Z")))
   private val someApplicationId =
     Ref.ApplicationId.assertFromString("UpdateToDbDtoSpecApplicationId")
   private val someCommandId = Ref.CommandId.assertFromString("UpdateToDbDtoSpecCommandId")

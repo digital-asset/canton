@@ -291,7 +291,7 @@ final class RepairService(
 
       topologySnapshot = topologyFactory.createTopologySnapshot(
         startingPoints.processing.prenextTimestamp,
-        packageId => packageDependencyResolver.packageDependencies(List(packageId)),
+        packageDependencyResolver,
         preferCaching = true,
       )
       domainParameters <- OptionT(persistentState.parameterStore.lastParameters)
@@ -604,15 +604,20 @@ final class RepairService(
       }
       .getOrElse(EitherT.rightT(()))
 
-  def ignoreEvents(domain: DomainId, from: SequencerCounter, to: SequencerCounter, force: Boolean)(
-      implicit traceContext: TraceContext
-  ): Either[String, Unit] = {
-    logger.info(s"Ignoring sequenced events from $from to $to (force = $force).")
+  def ignoreEvents(
+      domain: DomainId,
+      fromInclusive: SequencerCounter,
+      toInclusive: SequencerCounter,
+      force: Boolean,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, Unit] = {
+    logger.info(s"Ignoring sequenced events from $fromInclusive to $toInclusive (force = $force).")
     lockAndAwaitDomainId(
       "repair.skip_messages",
       for {
-        _ <- performIfRangeSuitableForIgnoreOperations(domain, from, force)(
-          _.ignoreEvents(from, to).leftMap(_.toString)
+        _ <- performIfRangeSuitableForIgnoreOperations(domain, fromInclusive, force)(
+          _.ignoreEvents(fromInclusive, toInclusive).leftMap(_.toString)
         )
       } yield (),
       domain,
@@ -657,16 +662,19 @@ final class RepairService(
 
   def unignoreEvents(
       domain: DomainId,
-      from: SequencerCounter,
-      to: SequencerCounter,
+      fromInclusive: SequencerCounter,
+      toInclusive: SequencerCounter,
       force: Boolean,
-  )(implicit traceContext: TraceContext): Either[String, Unit] = {
-    logger.info(s"Unignoring sequenced events from $from to $to (force = $force).")
+  )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] = {
+    logger.info(
+      s"Unignoring sequenced events from $fromInclusive to $toInclusive (force = $force)."
+    )
     lockAndAwaitDomainId(
       "repair.unskip_messages",
       for {
-        _ <- performIfRangeSuitableForIgnoreOperations(domain, from, force)(sequencedEventStore =>
-          sequencedEventStore.unignoreEvents(from, to).leftMap(_.toString)
+        _ <- performIfRangeSuitableForIgnoreOperations(domain, fromInclusive, force)(
+          sequencedEventStore =>
+            sequencedEventStore.unignoreEvents(fromInclusive, toInclusive).leftMap(_.toString)
         )
       } yield (),
       domain,
@@ -966,9 +974,7 @@ final class RepairService(
     choiceAuthorizers = None, // default (signatories + actingParties)
     children = ImmArray.empty[LfNodeId],
     exerciseResult = Some(LfValue.ValueNone),
-    // Not setting the contract key as the indexer deletes contract keys along with contracts.
-    // If the contract keys were needed, we'd have to reinterpret the contract to look up the key.
-    keyOpt = None,
+    keyOpt = c.metadata.maybeKeyWithMaintainers,
     byKey = false,
     version = c.rawContractInstance.contractInstance.version,
   )
@@ -1324,7 +1330,7 @@ final class RepairService(
       )
     } yield dp
 
-  private def lockAndAwait[A, B](
+  private def lockAndAwait[B](
       description: String,
       code: => EitherT[Future, String, B],
       domainIds: EitherT[Future, String, Seq[DomainId]],
@@ -1332,8 +1338,22 @@ final class RepairService(
       traceContext: TraceContext
   ): Either[String, B] = {
     logger.info(s"Queuing $description")
+
     // repair commands can take an unbounded amount of time
     parameters.processingTimeouts.unbounded.await(description)(
+      lock(description, code, domainIds).value
+    )
+  }
+
+  private def lock[B](
+      description: String,
+      code: => EitherT[Future, String, B],
+      domainIds: EitherT[Future, String, Seq[DomainId]],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, B] = {
+    logger.info(s"Queuing $description")
+    EitherT(
       executionQueue
         .executeE(
           domainIds
@@ -1353,13 +1373,12 @@ final class RepairService(
       domainId: DomainId,
   )(implicit
       traceContext: TraceContext
-  ): Either[String, B] = {
-    lockAndAwait(
+  ): EitherT[Future, String, B] =
+    lock(
       description,
       code,
       EitherT.pure(Seq(domainId)),
     )
-  }
 
   private def lockAndAwaitDomainAlias[B](
       description: String,
@@ -1390,7 +1409,7 @@ final class RepairService(
       aliasToUnconnectedDomainId(domainAliases._1),
       aliasToUnconnectedDomainId(domainAliases._2),
     ).tupled
-    lockAndAwait[(DomainId, DomainId), B](
+    lockAndAwait[B](
       description,
       domainIds.flatMap(Function.tupled(code)),
       domainIds.map({ case (d1, d2) => Seq(d1, d2) }),
@@ -1420,6 +1439,7 @@ object RepairService {
     def contractDataToInstance(
         templateId: Identifier,
         packageName: LfPackageName,
+        packageVersion: Option[LfPackageVersion],
         createArguments: Record,
         signatories: Set[String],
         observers: Set[String],
@@ -1442,7 +1462,7 @@ object RepairService {
         lfContractInst = LfContractInst(
           packageName = packageName,
           template = template,
-          packageVersion = None,
+          packageVersion = packageVersion,
           arg = argsVersionedValue,
         )
 
@@ -1474,6 +1494,7 @@ object RepairService {
       (
           Identifier,
           LfPackageName,
+          Option[LfPackageVersion],
           Record,
           Set[String],
           Set[String],
@@ -1494,6 +1515,7 @@ object RepairService {
             (
               LfEngineToApi.toApiIdentifier(contractInstance.unversioned.template),
               contractInstance.unversioned.packageName,
+              contractInstance.unversioned.packageVersion,
               record,
               signatories,
               stakeholders -- signatories,

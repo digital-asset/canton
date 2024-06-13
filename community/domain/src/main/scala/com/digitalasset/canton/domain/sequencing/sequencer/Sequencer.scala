@@ -82,13 +82,11 @@ trait Sequencer
     */
   def isRegistered(member: Member)(implicit traceContext: TraceContext): Future[Boolean]
 
-  /** Registers member within the sequencer's persistent state.
-    *  For authenticated member requires it to be known in topology at head.
-    *  Authenticated members are always registered at their first topology tx effective timestamp.
-    *  Unauthenticated members are registered at the current time using sequencer's `clock`.
-    *  Idempotent, can be called multiple times for the same member.
+  /** True if registered member has not been disabled.
     */
-  def registerMember(member: Member)(implicit
+  def isEnabled(member: Member)(implicit traceContext: TraceContext): Future[Boolean]
+
+  def registerMemberInternal(member: Member, timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): EitherT[Future, RegisterError, Unit]
 
@@ -208,24 +206,6 @@ trait SequencerPruning {
   def reportMaxEventAgeMetric(
       oldestEventTimestamp: Option[CantonTimestamp]
   ): Either[PruningSupportError, Unit]
-
-  /** Acknowledge that a member has successfully handled all events up to and including the timestamp provided.
-    * Makes earlier events for this member available for pruning.
-    * The timestamp is in sequencer time and will likely correspond to an event that the client has processed however
-    * this is not validated.
-    * It is assumed that members in consecutive calls will never acknowledge an earlier timestamp however this is also
-    * not validated (and could be invalid if the member has many subscriptions from the same or many processes).
-    * It is expected that members will periodically call this endpoint with their latest clean timestamp rather than
-    * calling it for every event they process. The default interval is in the range of once a minute.
-    *
-    * A member should only acknowledge timestamps it has actually received.
-    * The behaviour of the sequencer is implementation-defined when a member acknowledges a later timestamp.
-    *
-    * @see com.digitalasset.canton.sequencing.client.SequencerClientConfig.acknowledgementInterval for the default interval
-    */
-  def acknowledge(member: Member, timestamp: CantonTimestamp)(implicit
-      traceContext: TraceContext
-  ): Future[Unit]
 
   /** Newer version of acknowledgements.
     * To be active for protocol versions >= 4.

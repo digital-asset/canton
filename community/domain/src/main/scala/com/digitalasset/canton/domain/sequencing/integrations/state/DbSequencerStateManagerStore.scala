@@ -30,7 +30,7 @@ import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.db.DbDeserializationException
-import com.digitalasset.canton.topology.{Member, UnauthenticatedMemberId}
+import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.util.{ErrorUtil, RangeUtil}
 import com.digitalasset.canton.version.*
@@ -440,6 +440,25 @@ class DbSequencerStateManagerStore(
          """
     } yield ()
 
+  def bulkUpdateAcknowledgementsDBIO(
+      acks: Map[Member, CantonTimestamp]
+  )(implicit batchTraceContext: TraceContext): DBIOAction[Array[Int], NoStream, Effect.All] = {
+
+    val updateAckSql =
+      """ update seq_state_manager_members set latest_acknowledgement = ?
+          where member = ? and (latest_acknowledgement < ? or latest_acknowledgement is null)
+        """
+
+    DbStorage.bulkOperation(updateAckSql, acks.toList, storage.profile) { pp => entry =>
+      entry match {
+        case (member, ackTimestamp) =>
+          pp >> ackTimestamp
+          pp >> member
+          pp >> ackTimestamp
+      }
+    }
+  }
+
   override def disableMember(member: Member)(implicit traceContext: TraceContext): Future[Unit] =
     storage.update_(
       disableMemberDBIO(member),
@@ -448,15 +467,6 @@ class DbSequencerStateManagerStore(
 
   def disableMemberDBIO(member: Member): DbAction.WriteOnly[Unit] = for {
     _ <- sqlu"update seq_state_manager_members set enabled = ${false} where member = $member"
-  } yield ()
-
-  def unregisterUnauthenticatedMember(
-      member: UnauthenticatedMemberId
-  ): DbAction.WriteOnly[Unit] = for {
-    _ <-
-      sqlu"delete from seq_state_manager_events where member = $member"
-    _ <-
-      sqlu"delete from seq_state_manager_members where member = $member"
   } yield ()
 
   override def isEnabled(member: Member)(implicit traceContext: TraceContext): Future[Boolean] =

@@ -8,6 +8,7 @@ import com.daml.lf.crypto
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.data.logging.*
 import com.daml.lf.data.{Bytes, ImmArray, Ref}
+import com.daml.lf.transaction.TransactionVersion
 import com.daml.lf.value.Value as Lf
 import com.daml.logging.entries.{LoggingValue, ToLoggingValue}
 import com.digitalasset.canton.data.DeduplicationPeriod
@@ -19,18 +20,9 @@ import scalaz.syntax.tag.*
 import scala.collection.immutable
 
 final case class TransactionFilter(
-    filtersByParty: immutable.Map[Ref.Party, Filters],
-    filtersForAnyParty: Option[Filters] = None,
-    alwaysPopulateCreatedEventBlob: Boolean = false,
+    filtersByParty: immutable.Map[Ref.Party, CumulativeFilter],
+    filtersForAnyParty: Option[CumulativeFilter] = None,
 )
-
-final case class Filters(inclusive: Option[InclusiveFilters])
-
-object Filters {
-  val noFilter: Filters = Filters(None)
-
-  def apply(inclusive: InclusiveFilters) = new Filters(Some(inclusive))
-}
 
 final case class InterfaceFilter(
     interfaceId: Ref.Identifier,
@@ -43,6 +35,10 @@ final case class TemplateFilter(
     includeCreatedEventBlob: Boolean,
 )
 
+final case class TemplateWildcardFilter(
+    includeCreatedEventBlob: Boolean
+)
+
 object TemplateFilter {
   def apply(templateId: Ref.Identifier, includeCreatedEventBlob: Boolean): TemplateFilter =
     TemplateFilter(
@@ -51,10 +47,22 @@ object TemplateFilter {
     )
 }
 
-final case class InclusiveFilters(
+final case class CumulativeFilter(
     templateFilters: immutable.Set[TemplateFilter],
     interfaceFilters: immutable.Set[InterfaceFilter],
+    templateWildcardFilter: Option[TemplateWildcardFilter],
 )
+
+object CumulativeFilter {
+  def templateWildcardFilter(includeCreatedEventBlob: Boolean = false): CumulativeFilter =
+    CumulativeFilter(
+      templateFilters = Set.empty,
+      interfaceFilters = Set.empty,
+      templateWildcardFilter =
+        Some(TemplateWildcardFilter(includeCreatedEventBlob = includeCreatedEventBlob)),
+    )
+
+}
 
 sealed abstract class ParticipantOffset extends Product with Serializable
 
@@ -115,6 +123,7 @@ final case class Commands(
 final case class DisclosedContract(
     templateId: Ref.TypeConName,
     packageName: Ref.PackageName,
+    packageVersion: Option[Ref.PackageVersion],
     contractId: Lf.ContractId,
     argument: Value,
     createdAt: Timestamp,
@@ -124,6 +133,7 @@ final case class DisclosedContract(
     keyMaintainers: Option[Set[Ref.Party]],
     keyValue: Option[Value],
     driverMetadata: Bytes,
+    transactionVersion: TransactionVersion,
 ) {
   def toLf: LfDisclosedContract =
     LfDisclosedContract(

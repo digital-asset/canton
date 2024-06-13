@@ -15,9 +15,12 @@ import com.digitalasset.canton.domain.block.update.BlockUpdateGeneratorImpl.{
 import com.digitalasset.canton.domain.block.update.SequencedSubmissionsValidator.SequencedSubmissionsValidationResult
 import com.digitalasset.canton.domain.block.update.SubmissionRequestValidator.SubmissionRequestValidationResult
 import com.digitalasset.canton.domain.sequencing.sequencer.*
-import com.digitalasset.canton.domain.sequencing.sequencer.store.CounterCheckpoint
+import com.digitalasset.canton.domain.sequencing.sequencer.store.{
+  CounterCheckpoint,
+  SequencerMemberValidator,
+}
 import com.digitalasset.canton.domain.sequencing.sequencer.traffic.SequencerRateLimitManager
-import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.*
@@ -36,8 +39,9 @@ private[update] final class SequencedSubmissionsValidator(
     sequencerId: SequencerId,
     rateLimitManager: SequencerRateLimitManager,
     override val loggerFactory: NamedLoggerFactory,
-)(implicit closeContext: CloseContext)
-    extends NamedLogging {
+    unifiedSequencer: Boolean,
+    memberValidator: SequencerMemberValidator,
+) extends NamedLogging {
 
   private val submissionRequestValidator =
     new SubmissionRequestValidator(
@@ -47,6 +51,8 @@ private[update] final class SequencedSubmissionsValidator(
       sequencerId,
       rateLimitManager,
       loggerFactory,
+      unifiedSequencer = unifiedSequencer,
+      memberValidator = memberValidator,
     )
 
   def validateSequencedSubmissions(
@@ -82,8 +88,8 @@ private[update] final class SequencedSubmissionsValidator(
     val SequencedSubmission(
       sequencingTimestamp,
       signedSubmissionRequest,
-      sequencingSnapshot,
-      signingSnapshot,
+      topologyOrSequencingSnapshot,
+      topologyTimestampError,
     ) = sequencedSubmissionRequest
 
     implicit val traceContext: TraceContext = sequencedSubmissionRequest.traceContext
@@ -99,8 +105,8 @@ private[update] final class SequencedSubmissionsValidator(
           stateFromPartialResult,
           sequencingTimestamp,
           signedSubmissionRequest,
-          sequencingSnapshot,
-          signingSnapshot,
+          topologyOrSequencingSnapshot,
+          topologyTimestampError,
           latestSequencerEventTimestamp,
         )
       SubmissionRequestValidationResult(newState, outcome, sequencerEventTimestamp) =
@@ -111,7 +117,7 @@ private[update] final class SequencedSubmissionsValidator(
           outcome,
           resultIfNoDeliverEvents = partialResult,
           inFlightAggregationUpdates,
-          sequencingSnapshot,
+          topologyOrSequencingSnapshot,
           sequencingTimestamp,
           sequencerEventTimestamp,
           latestSequencerEventTimestamp,
@@ -169,7 +175,7 @@ private[update] final class SequencedSubmissionsValidator(
       outcome: SubmissionRequestOutcome,
       resultIfNoDeliverEvents: SequencedSubmissionsValidationResult,
       inFlightAggregationUpdates: InFlightAggregationUpdates,
-      sequencingSnapshot: SyncCryptoApi,
+      topologyOrSequencingSnapshot: SyncCryptoApi,
       sequencingTimestamp: CantonTimestamp,
       sequencerEventTimestamp: Option[CantonTimestamp],
       latestSequencerEventTimestamp: Option[CantonTimestamp],
@@ -183,71 +189,109 @@ private[update] final class SequencedSubmissionsValidator(
     val SubmissionRequestOutcome(
       deliverEvents,
       newAggregationO,
-      signingSnapshotO,
-      _,
+      unifiedOutcome,
     ) = outcome
 
-    NonEmpty.from(deliverEvents) match {
-      case None => // No state update if there is nothing to deliver
-        FutureUnlessShutdown.pure(resultIfNoDeliverEvents)
-      case Some(deliverEventsNE) =>
-        val newCheckpoints = state.checkpoints ++ deliverEvents.fmap(d =>
-          CounterCheckpoint(d.counter, d.timestamp, None)
-        ) // ordering of the two operands matters
-        val (newInFlightAggregations, newInFlightAggregationUpdates) =
-          newAggregationO.fold(state.inFlightAggregations -> inFlightAggregationUpdates) {
-            case (aggregationId, inFlightAggregationUpdate) =>
-              InFlightAggregations.tryApplyUpdates(
-                state.inFlightAggregations,
-                Map(aggregationId -> inFlightAggregationUpdate),
-                ignoreInFlightAggregationErrors = false,
-              ) ->
-                MapsUtil.extendedMapWith(
-                  inFlightAggregationUpdates,
-                  Iterable(aggregationId -> inFlightAggregationUpdate),
-                )(_ tryMerge _)
-          }
-        val newState =
-          state.copy(
-            inFlightAggregations = newInFlightAggregations,
-            checkpoints = newCheckpoints,
-          )
-
-        // If we haven't yet computed a snapshot for signing,
-        // we now get one for the sequencing timestamp
-        val signingSnapshot = signingSnapshotO.getOrElse(sequencingSnapshot)
-        for {
+    if (unifiedSequencer) {
+      unifiedOutcome match {
+        case deliverableOutcome: DeliverableSubmissionOutcome =>
+          val (newInFlightAggregations, newInFlightAggregationUpdates) =
+            newAggregationO.fold(state.inFlightAggregations -> inFlightAggregationUpdates) {
+              case (aggregationId, inFlightAggregationUpdate) =>
+                InFlightAggregations.tryApplyUpdates(
+                  state.inFlightAggregations,
+                  Map(aggregationId -> inFlightAggregationUpdate),
+                  ignoreInFlightAggregationErrors = false,
+                ) ->
+                  MapsUtil.extendedMapWith(
+                    inFlightAggregationUpdates,
+                    Iterable(aggregationId -> inFlightAggregationUpdate),
+                  )(_ tryMerge _)
+            }
+          val newState = state.copy(inFlightAggregations = newInFlightAggregations)
           // Update the traffic status of the recipients before generating the events below.
           // Typically traffic state might change even for recipients if a top up becomes effective at that timestamp
           // Doing this here ensures that the traffic state persisted for the event is correct
           // It's also important to do this here after group -> Set[member] resolution has been performed so we get
           // the actual member recipients
-          trafficUpdatedState <-
-            updateTrafficStates(
-              newState,
-              deliverEventsNE.keySet,
-              sequencingTimestamp,
-              sequencingSnapshot,
-              latestSequencerEventTimestamp,
-            )
-        } yield {
-          val unsignedEvents = UnsignedChunkEvents(
-            signedSubmissionRequest.content.sender,
-            deliverEventsNE,
-            signingSnapshot,
+          updateTrafficStates(
+            newState,
+            deliverableOutcome.deliverToMembers,
             sequencingTimestamp,
-            sequencingSnapshot,
-            trafficUpdatedState.trafficState.view.mapValues(_.toSequencedEventTrafficState),
-            traceContext,
+            topologyOrSequencingSnapshot,
+            latestSequencerEventTimestamp,
+          ).map(trafficUpdatedState =>
+            SequencedSubmissionsValidationResult(
+              trafficUpdatedState,
+              Seq.empty,
+              newInFlightAggregationUpdates,
+              sequencerEventTimestamp,
+              outcome +: remainingReversedOutcomes,
+            )
           )
-          SequencedSubmissionsValidationResult(
-            trafficUpdatedState,
-            unsignedEvents +: remainingReversedEvents,
-            newInFlightAggregationUpdates,
-            sequencerEventTimestamp,
-            outcome +: remainingReversedOutcomes,
-          )
-        }
+        case _ => // Discarded submission
+          FutureUnlessShutdown.pure(resultIfNoDeliverEvents)
+      }
+    } else {
+      NonEmpty.from(deliverEvents) match {
+        case None => // No state update if there is nothing to deliver
+          FutureUnlessShutdown.pure(resultIfNoDeliverEvents)
+        case Some(deliverEventsNE) =>
+          val newCheckpoints = state.checkpoints ++ deliverEvents.fmap(d =>
+            CounterCheckpoint(d.counter, d.timestamp, None)
+          ) // ordering of the two operands matters
+          val (newInFlightAggregations, newInFlightAggregationUpdates) =
+            newAggregationO.fold(state.inFlightAggregations -> inFlightAggregationUpdates) {
+              case (aggregationId, inFlightAggregationUpdate) =>
+                InFlightAggregations.tryApplyUpdates(
+                  state.inFlightAggregations,
+                  Map(aggregationId -> inFlightAggregationUpdate),
+                  ignoreInFlightAggregationErrors = false,
+                ) ->
+                  MapsUtil.extendedMapWith(
+                    inFlightAggregationUpdates,
+                    Iterable(aggregationId -> inFlightAggregationUpdate),
+                  )(_ tryMerge _)
+            }
+          val newState =
+            state.copy(
+              inFlightAggregations = newInFlightAggregations,
+              checkpoints = newCheckpoints,
+            )
+
+          for {
+            // Update the traffic status of the recipients before generating the events below.
+            // Typically traffic state might change even for recipients if a top up becomes effective at that timestamp
+            // Doing this here ensures that the traffic state persisted for the event is correct
+            // It's also important to do this here after group -> Set[member] resolution has been performed so we get
+            // the actual member recipients
+            trafficUpdatedState <-
+              updateTrafficStates(
+                newState,
+                deliverEventsNE.keySet,
+                sequencingTimestamp,
+                topologyOrSequencingSnapshot,
+                latestSequencerEventTimestamp,
+              )
+          } yield {
+            val unsignedEvents = UnsignedChunkEvents(
+              signedSubmissionRequest.content.sender,
+              deliverEventsNE,
+              topologyOrSequencingSnapshot,
+              sequencingTimestamp,
+              latestSequencerEventTimestamp,
+              trafficUpdatedState.trafficState.view.mapValues(_.toSequencedEventTrafficState),
+              traceContext,
+            )
+            SequencedSubmissionsValidationResult(
+              trafficUpdatedState,
+              unsignedEvents +: remainingReversedEvents,
+              newInFlightAggregationUpdates,
+              sequencerEventTimestamp,
+              outcome +: remainingReversedOutcomes,
+            )
+          }
+      }
     }
   }
 }

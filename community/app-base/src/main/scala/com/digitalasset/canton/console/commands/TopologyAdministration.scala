@@ -291,7 +291,7 @@ class TopologyAdministrationGroup(
         filterStore: String = AuthorizedStore.filterName,
         proposals: Boolean = false,
         timeQuery: TimeQuery = TimeQuery.HeadState,
-        operation: Option[TopologyChangeOp] = None,
+        operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterMappings: Seq[TopologyMapping.Code] = Nil,
         excludeMappings: Seq[TopologyMapping.Code] = Nil,
         filterAuthorizedKey: Option[Fingerprint] = None,
@@ -377,6 +377,31 @@ class TopologyAdministrationGroup(
         }
     }
 
+    @Help.Summary(
+      "Download the genesis state for a sequencer. This method should be used when performing a major domain upgrade."
+    )
+    @Help.Description(
+      """Download the topology snapshot which includes the entire history of topology transactions to initialize a sequencer for a major domain upgrades. The validFrom and validUntil are set to SignedTopologyTransaction.InitialTopologySequencingTime.
+        |filterDomainStore: Must be specified if the genesis state is requested from a participant node.
+        |timestamp: If not specified, the max effective time of the latest topology transaction is used. Otherwise, the given timestamp is used.
+        |""".stripMargin
+    )
+    def genesis_state(
+        filterDomainStore: String = "",
+        timestamp: Option[CantonTimestamp] = None,
+    ): ByteString = {
+      consoleEnvironment
+        .run {
+          adminCommand(
+            TopologyAdminCommands.Read.GenesisState(
+              filterDomainStore = OptionUtil
+                .emptyStringAsNone(filterDomainStore),
+              timestamp = timestamp,
+            )
+          )
+        }
+    }
+
     @Help.Summary("Find the latest transaction for a given mapping hash")
     @Help.Description(
       """
@@ -411,7 +436,7 @@ class TopologyAdministrationGroup(
           filterStore: String = "",
           proposals: Boolean = false,
           timeQuery: TimeQuery = TimeQuery.HeadState,
-          operation: Option[TopologyChangeOp] = None,
+          operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
           filterDomain: String = "",
           filterSigningKey: String = "",
           protocolVersion: Option[String] = None,
@@ -517,7 +542,7 @@ class TopologyAdministrationGroup(
         filterStore: String = "",
         proposals: Boolean = false,
         timeQuery: TimeQuery = TimeQuery.HeadState,
-        operation: Option[TopologyChangeOp] = None,
+        operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterNamespace: String = "",
         filterSigningKey: String = "",
         protocolVersion: Option[String] = None,
@@ -757,7 +782,7 @@ class TopologyAdministrationGroup(
         filterStore: String = "",
         proposals: Boolean = false,
         timeQuery: TimeQuery = TimeQuery.HeadState,
-        operation: Option[TopologyChangeOp] = None,
+        operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterNamespace: String = "",
         filterSigningKey: String = "",
         filterTargetKey: Option[Fingerprint] = None,
@@ -836,7 +861,7 @@ class TopologyAdministrationGroup(
         filterStore: String = "",
         proposals: Boolean = false,
         timeQuery: TimeQuery = TimeQuery.HeadState,
-        operation: Option[TopologyChangeOp] = None,
+        operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterUid: String = "",
         filterSigningKey: String = "",
         filterTargetKey: Option[Fingerprint] = None,
@@ -869,7 +894,7 @@ class TopologyAdministrationGroup(
         filterStore: String = "",
         proposals: Boolean = false,
         timeQuery: TimeQuery = TimeQuery.HeadState,
-        operation: Option[TopologyChangeOp] = None,
+        operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterKeyOwnerType: Option[MemberCode] = None,
         filterKeyOwnerUid: String = "",
         filterSigningKey: String = "",
@@ -1221,10 +1246,23 @@ class TopologyAdministrationGroup(
 
       val currentO = TopologyStoreId(store) match {
         case TopologyStoreId.DomainStore(domainId, _) =>
-          expectAtMostOneResult(list(domainId, filterParty = party.filterString))
+          expectAtMostOneResult(
+            list(
+              domainId,
+              filterParty = party.filterString,
+              // fetch both REPLACE and REMOVE to correctly determine the next serial
+              operation = None,
+            )
+          )
 
         case TopologyStoreId.AuthorizedStore =>
-          expectAtMostOneResult(list_from_authorized(filterParty = party.filterString))
+          expectAtMostOneResult(
+            list_from_authorized(
+              filterParty = party.filterString,
+              // fetch both REPLACE and REMOVE to correctly determine the next serial
+              operation = None,
+            )
+          )
       }
 
       val (existingPermissions, newSerial, threshold, groupAddressing) = currentO match {
@@ -1245,7 +1283,12 @@ class TopologyAdministrationGroup(
             current.item.groupAddressing,
           )
         case None =>
-          (Map.empty[ParticipantId, ParticipantPermission], None, PositiveInt.one, false)
+          (
+            Map.empty[ParticipantId, ParticipantPermission],
+            Some(PositiveInt.one),
+            PositiveInt.one,
+            false,
+          )
       }
 
       val newPermissions = new PartyToParticipantComputations(loggerFactory)
@@ -1358,7 +1401,7 @@ class TopologyAdministrationGroup(
         domain: DomainId,
         proposals: Boolean = false,
         timeQuery: TimeQuery = TimeQuery.HeadState,
-        operation: Option[TopologyChangeOp] = None,
+        operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterParty: String = "",
         filterParticipant: String = "",
         filterSigningKey: String = "",
@@ -1401,7 +1444,7 @@ class TopologyAdministrationGroup(
     def list_from_authorized(
         proposals: Boolean = false,
         timeQuery: TimeQuery = TimeQuery.HeadState,
-        operation: Option[TopologyChangeOp] = None,
+        operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterParty: String = "",
         filterParticipant: String = "",
         filterSigningKey: String = "",
@@ -1444,7 +1487,7 @@ class TopologyAdministrationGroup(
     def list_from_all(
         proposals: Boolean = false,
         timeQuery: TimeQuery = TimeQuery.HeadState,
-        operation: Option[TopologyChangeOp] = None,
+        operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterParty: String = "",
         filterParticipant: String = "",
         filterSigningKey: String = "",
@@ -1474,7 +1517,7 @@ class TopologyAdministrationGroup(
         filterStore: String = "",
         proposals: Boolean = false,
         timeQuery: TimeQuery = TimeQuery.HeadState,
-        operation: Option[TopologyChangeOp] = None,
+        operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         // TODO(#14048) should be filterDomain and filterParticipant
         filterUid: String = "",
         filterSigningKey: String = "",
@@ -1620,7 +1663,7 @@ class TopologyAdministrationGroup(
         filterStore: String = "",
         proposals: Boolean = false,
         timeQuery: TimeQuery = TimeQuery.HeadState,
-        operation: Option[TopologyChangeOp] = None,
+        operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterUid: String = "",
         filterSigningKey: String = "",
         protocolVersion: Option[String] = None,
@@ -1662,7 +1705,7 @@ class TopologyAdministrationGroup(
         filterStore: String = "",
         proposals: Boolean = false,
         timeQuery: TimeQuery = TimeQuery.HeadState,
-        operation: Option[TopologyChangeOp] = None,
+        operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterUid: String = "",
         filterSigningKey: String = "",
         protocolVersion: Option[String] = None,
@@ -1865,7 +1908,7 @@ class TopologyAdministrationGroup(
         filterStore: String = "",
         proposals: Boolean = false,
         timeQuery: TimeQuery = TimeQuery.HeadState,
-        operation: Option[TopologyChangeOp] = None,
+        operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterParticipant: String = "",
         filterSigningKey: String = "",
         protocolVersion: Option[String] = None,
@@ -1946,7 +1989,7 @@ class TopologyAdministrationGroup(
         filterStore: String = "",
         proposals: Boolean = false,
         timeQuery: TimeQuery = TimeQuery.HeadState,
-        operation: Option[TopologyChangeOp] = None,
+        operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterParty: String = "",
         filterSigningKey: String = "",
         protocolVersion: Option[String] = None,
@@ -1974,7 +2017,7 @@ class TopologyAdministrationGroup(
         filterStore: String = "",
         proposals: Boolean = false,
         timeQuery: TimeQuery = TimeQuery.HeadState,
-        operation: Option[TopologyChangeOp] = None,
+        operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterDomain: String = "",
         filterSigningKey: String = "",
         protocolVersion: Option[String] = None,
@@ -2214,7 +2257,7 @@ class TopologyAdministrationGroup(
         filterStore: String = "",
         proposals: Boolean = false,
         timeQuery: TimeQuery = TimeQuery.HeadState,
-        operation: Option[TopologyChangeOp] = None,
+        operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterDomain: String = "",
         filterSigningKey: String = "",
         protocolVersion: Option[String] = None,
@@ -2291,7 +2334,7 @@ class TopologyAdministrationGroup(
         filterStore: String = "",
         proposals: Boolean = false,
         timeQuery: TimeQuery = TimeQuery.HeadState,
-        operation: Option[TopologyChangeOp] = None,
+        operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
         filterDomain: String = "",
         filterSigningKey: String = "",
         protocolVersion: Option[String] = None,

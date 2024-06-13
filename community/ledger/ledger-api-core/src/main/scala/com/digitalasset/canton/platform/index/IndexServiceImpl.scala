@@ -23,8 +23,7 @@ import com.daml.tracing.{Event, SpanAttribute, Spans}
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.domain.{
-  Filters,
-  InclusiveFilters,
+  CumulativeFilter,
   ParticipantOffset,
   TransactionFilter,
   TransactionId,
@@ -170,7 +169,10 @@ private[index] class IndexServiceImpl(
       transactionFilter,
       getPackageMetadataSnapshot(contextualizedErrorLogger),
     ) {
-      val parties = transactionFilter.filtersByParty.keySet
+      val parties =
+        if (transactionFilter.filtersForAnyParty.isEmpty)
+          Some(transactionFilter.filtersByParty.keySet)
+        else None // party-wildcard
       between(startExclusive, endInclusive) { (from, to) =>
         from.foreach(offset =>
           Spans.setCurrentSpanAttribute(SpanAttribute.OffsetFrom, offset.toHexString)
@@ -196,7 +198,9 @@ private[index] class IndexServiceImpl(
                       .getTransactionTrees(
                         startExclusive,
                         endInclusive,
-                        parties, // on the query filter side we treat every party as template-wildcard party // TODO(#18362) [transaction trees] take into account party-wildcard
+                        // on the query filter side we treat every party as template-wildcard party,
+                        // if the party-wildcard is given then the transactions for all the templates and all the parties are fetched
+                        parties,
                         eventProjectionProperties,
                       )
                   }
@@ -506,15 +510,16 @@ object IndexServiceImpl {
         if (!metadata.templates.contains(templateId)) unknownTemplateIds += templateId
     }
 
-    val inclusiveFilters = domainTransactionFilter.filtersByParty.iterator.flatMap(
-      _._2.inclusive.iterator
-    ) ++ domainTransactionFilter.filtersForAnyParty.flatMap(_.inclusive).iterator
+    val cumulativeFilters = domainTransactionFilter.filtersByParty.iterator.map(
+      _._2
+    ) ++ domainTransactionFilter.filtersForAnyParty.iterator
 
-    inclusiveFilters.foreach { case InclusiveFilters(templateFilters, interfaceFilters) =>
-      templateFilters.iterator.map(_.templateTypeRef).foreach(checkTypeConRef)
-      interfaceFilters.iterator.map(_.interfaceId).foreach { interfaceId =>
-        if (!metadata.interfaces.contains(interfaceId)) unknownInterfaceIds += interfaceId
-      }
+    cumulativeFilters.foreach {
+      case CumulativeFilter(templateFilters, interfaceFilters, _wildacrdFilter) =>
+        templateFilters.iterator.map(_.templateTypeRef).foreach(checkTypeConRef)
+        interfaceFilters.iterator.map(_.interfaceId).foreach { interfaceId =>
+          if (!metadata.interfaces.contains(interfaceId)) unknownInterfaceIds += interfaceId
+        }
     }
 
     val packageNames = unknownPackageNames.result()
@@ -611,8 +616,7 @@ object IndexServiceImpl {
       metadata: PackageMetadata,
       alwaysPopulateArguments: Boolean,
   ): Option[(TemplatePartiesFilter, EventProjectionProperties)] = {
-    val templateFilter
-        : Map[Identifier, Option[Set[Party]]] = // TODO(#18362) use type SetOrWildcard[Party] (see at the bottom of the file its definition)
+    val templateFilter: Map[Identifier, Option[Set[Party]]] =
       IndexServiceImpl.templateFilter(metadata, transactionFilter)
 
     val templateWildcardFilter: Option[Set[Party]] =
@@ -674,14 +678,14 @@ object IndexServiceImpl {
 
   private def templateIds(
       metadata: PackageMetadata,
-      inclusiveFilters: InclusiveFilters,
+      cumulativeFilter: CumulativeFilter,
   ): Set[Identifier] = {
-    val fromInterfacesDefs = inclusiveFilters.interfaceFilters.view
+    val fromInterfacesDefs = cumulativeFilter.interfaceFilters.view
       .map(_.interfaceId)
       .flatMap(metadata.interfacesImplementedBy.getOrElse(_, Set.empty))
       .toSet
 
-    val fromTemplateDefs = inclusiveFilters.templateFilters.view
+    val fromTemplateDefs = cumulativeFilter.templateFilters.view
       .map(_.templateTypeRef)
       .flatMap {
         case TypeConRef(PackageRef.Name(packageName), qualifiedName) =>
@@ -698,22 +702,17 @@ object IndexServiceImpl {
   ): Map[Identifier, Option[Set[Party]]] = {
     val templatesFilterByParty =
       transactionFilter.filtersByParty.view.foldLeft(Map.empty[Identifier, Option[Set[Party]]]) {
-        case (acc, (party, Filters(Some(inclusiveFilters)))) =>
-          templateIds(metadata, inclusiveFilters).foldLeft(acc) { case (acc, templateId) =>
+        case (acc, (party, cumulativeFilter)) =>
+          templateIds(metadata, cumulativeFilter).foldLeft(acc) { case (acc, templateId) =>
             val updatedPartySet = acc.getOrElse(templateId, Some(Set.empty[Party])).map(_ + party)
             acc.updated(templateId, updatedPartySet)
           }
-        case (acc, _) => acc
       }
 
     // templates filter for all the parties
     val templatesFilterForAnyParty: Map[Identifier, Option[Set[Party]]] =
       transactionFilter.filtersForAnyParty
-        .fold(Set.empty[Identifier]) {
-          case Filters(Some(inclusiveFilters)) =>
-            templateIds(metadata, inclusiveFilters)
-          case _ => Set.empty
-        }
+        .fold(Set.empty[Identifier])(templateIds(metadata, _))
         .map((_, None))
         .toMap
 
@@ -723,36 +722,34 @@ object IndexServiceImpl {
 
   }
 
+  // template-wildcard for the parties or party-wildcards of the filter given
   private[index] def wildcardFilter(
       transactionFilter: domain.TransactionFilter
   ): Option[Set[Party]] = {
+    val emptyFiltersMessage =
+      "Found transaction filter with both template and interface filters being empty, but the" +
+        "request should have already been rejected in validation"
     transactionFilter.filtersForAnyParty match {
-      case Some(Filters(None)) => None
-      case Some(Filters(Some(InclusiveFilters(templateIds, interfaceFilters))))
-          if templateIds.isEmpty && interfaceFilters.isEmpty =>
-        None
+      case Some(CumulativeFilter(_, _, templateWildcardFilter))
+          if templateWildcardFilter.isDefined =>
+        None // party-wildcard
+      case Some(
+            CumulativeFilter(templateIds, interfaceFilters, templateWildcardFilter)
+          ) if templateIds.isEmpty && interfaceFilters.isEmpty && templateWildcardFilter.isEmpty =>
+        throw new RuntimeException(emptyFiltersMessage)
       case _ =>
         Some(transactionFilter.filtersByParty.view.collect {
-          case (party, Filters(None)) =>
+          case (party, CumulativeFilter(_, _, templateWildcardFilter))
+              if templateWildcardFilter.isDefined =>
             party
-          case (party, Filters(Some(InclusiveFilters(templateIds, interfaceFilters))))
-              if templateIds.isEmpty && interfaceFilters.isEmpty =>
-            party
+          case (
+                _party,
+                CumulativeFilter(templateIds, interfaceFilters, templateWildcardFilter),
+              )
+              if templateIds.isEmpty && interfaceFilters.isEmpty && templateWildcardFilter.isEmpty =>
+            throw new RuntimeException(emptyFiltersMessage)
         }.toSet)
     }
   }
-
-// TODO(#18362)
-//  sealed trait SetOrWildcard[A]  {
-//    final def isWildcard: Boolean = this eq Wildcard
-//    def isEmpty: Boolean
-//  }
-//  final object Wildcard extends SetOrWildcard[Nothing] {
-//    def isEmpty: Boolean = false
-//
-//  }
-//  final case class ExplicitSet[A](set: Set[A]) extends SetOrWildcard[A] {
-//    def isEmpty: Boolean = set.isEmpty
-//  }
 
 }

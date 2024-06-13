@@ -19,10 +19,9 @@ import com.digitalasset.canton.sequencing.protocol.{
 }
 import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.time.{Clock, PeriodicAction}
-import com.digitalasset.canton.topology.{DomainMember, Member, UnauthenticatedMemberId}
+import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.Spanning.SpanWrapper
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
-import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil.*
 import io.opentelemetry.api.trace.Tracer
 
@@ -69,11 +68,16 @@ abstract class BaseSequencer(
           )
           .leftMap(e => SendAsyncError.RequestRefused(e))
           .mapK(FutureUnlessShutdown.outcomeK)
-        _ <- EitherT
-          .right(
-            autoRegisterUnauthenticatedSender(submission)
-          )
-          .mapK(FutureUnlessShutdown.outcomeK) // TODO(#18399): Propagate FUS
+        isMemberEnabled <- EitherT.right[SendAsyncError.RequestRefused](
+          FutureUnlessShutdown.outcomeF(isEnabled(submission.sender))
+        )
+        _ <- EitherT.cond[FutureUnlessShutdown](
+          isMemberEnabled,
+          (),
+          SendAsyncError.RequestRefused(
+            s"Member ${submission.sender} is disabled at the sequencer"
+          ),
+        )
         _ <- sendAsyncSignedInternal(signedSubmissionWithFixedTs)
       } yield ()
   }
@@ -102,11 +106,6 @@ abstract class BaseSequencer(
     withSpan("Sequencer.sendAsync") { implicit traceContext => span =>
       setSpanAttributes(span, submission)
       for {
-        _ <- EitherT
-          .right(
-            autoRegisterUnauthenticatedSender(submission)
-          )
-          .mapK(FutureUnlessShutdown.outcomeK) // TODO(#18399): Propagate FUS
         _ <- sendAsyncInternal(submission)
       } yield ()
     }
@@ -116,19 +115,7 @@ abstract class BaseSequencer(
     span.setAttribute("message_id", submission.messageId.unwrap)
   }
 
-  private def autoRegisterUnauthenticatedSender(
-      submission: SubmissionRequest
-  )(implicit traceContext: TraceContext): Future[Unit] =
-    submission.sender match {
-      case member: UnauthenticatedMemberId =>
-        registerMember(member).valueOr(error =>
-          // this error should not happen, as currently registration errors are only for authenticated users
-          ErrorUtil.invalidState(s"Unexpected error: $error")
-        )
-      case _ => Future.unit
-    }
-
-  protected def localSequencerMember: DomainMember
+  protected def localSequencerMember: Member
   protected def disableMemberInternal(member: Member)(implicit
       traceContext: TraceContext
   ): Future[Unit]
@@ -164,7 +151,6 @@ abstract class BaseSequencer(
       traceContext: TraceContext
   ): EitherT[Future, CreateSubscriptionError, Sequencer.EventSource] =
     for {
-      _ <- registerMember(member).leftMap(CreateSubscriptionError.MemberRegisterError)
       source <- readInternal(member, offset)
     } yield source
 

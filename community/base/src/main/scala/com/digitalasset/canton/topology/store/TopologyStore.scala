@@ -3,7 +3,9 @@
 
 package com.digitalasset.canton.topology.store
 
+import cats.data.EitherT
 import cats.syntax.traverse.*
+import com.daml.lf.data.Ref.PackageId
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.CantonRequireTypes.{LengthLimitedString, String255}
@@ -448,8 +450,6 @@ object TopologyStore {
     TopologyMapping.Code.OwnerToKeyMapping,
     // TODO(#14060) - potentially revisit this once we implement TopologyStore.filterInitialParticipantDispatchingTransactions
     TopologyMapping.Code.NamespaceDelegation,
-    TopologyMapping.Code.IdentifierDelegation,
-    TopologyMapping.Code.DecentralizedNamespaceDefinition,
   )
 
   def filterInitialParticipantDispatchingTransactions(
@@ -548,4 +548,12 @@ object TimeQuery {
           toO <- value.until.traverse(CantonTimestamp.fromProtoTimestamp)
         } yield Range(fromO, toO)
     }
+}
+
+trait PackageDependencyResolverUS {
+
+  def packageDependencies(packageId: PackageId)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, PackageId, Set[PackageId]]
+
 }

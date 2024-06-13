@@ -8,10 +8,10 @@ import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.{Identifier, Party, QualifiedName, TypeConRef}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ledger.api.domain.{
-  Filters,
-  InclusiveFilters,
+  CumulativeFilter,
   InterfaceFilter,
   TemplateFilter,
+  TemplateWildcardFilter,
   TransactionFilter,
 }
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
@@ -57,7 +57,13 @@ class IndexServiceImplSpec
     val memoFunc = memoizedTransactionFilterProjection(
       getPackageMetadataSnapshot = getPackageMetadata,
       transactionFilter = TransactionFilter(
-        filtersByParty = Map(party -> Filters(InclusiveFilters(Set(), Set(iface1Filter))))
+        filtersByParty = Map(
+          party -> CumulativeFilter(
+            templateFilters = Set(),
+            interfaceFilters = Set(iface1Filter),
+            templateWildcardFilter = None,
+          )
+        )
       ),
       verbose = true,
       alwaysPopulateArguments = false,
@@ -71,9 +77,11 @@ class IndexServiceImplSpec
       (
         TemplatePartiesFilter(Map(template1 -> Some(Set(party))), Some(Set())),
         EventProjectionProperties(
-          true,
-          Some(Set.empty),
-          Map(Some(party.toString) -> Map(template1 -> Projection(Set(iface1), false, false))),
+          verbose = true,
+          templateWildcardWitnesses = Some(Set.empty),
+          templateWildcardCreatedEventBlobParties = Some(Set.empty),
+          witnessTemplateProjections =
+            Map(Some(party.toString) -> Map(template1 -> Projection(Set(iface1), false, false))),
         ),
       )
     ) // filter gets complicated, filters template1 for iface1, projects iface1
@@ -92,14 +100,15 @@ class IndexServiceImplSpec
           templateWildcardParties = Some(Set()),
         ),
         EventProjectionProperties(
-          true,
-          Some(Set.empty),
-          Map(
+          verbose = true,
+          templateWildcardWitnesses = Some(Set.empty),
+          witnessTemplateProjections = Map(
             Some(party.toString) -> Map(
               template1 -> Projection(Set(iface1), false, false),
               template2 -> Projection(Set(iface1), false, false),
             )
           ),
+          templateWildcardCreatedEventBlobParties = Some(Set.empty),
         ),
       )
     ) // filter gets even more complicated, filters template1 and template2 for iface1, projects iface1 for both templates
@@ -112,7 +121,13 @@ class IndexServiceImplSpec
     val memoFunc = memoizedTransactionFilterProjection(
       getPackageMetadataSnapshot = getPackageMetadata,
       transactionFilter = TransactionFilter(
-        filtersByParty = Map(party -> Filters(InclusiveFilters(Set(), Set(iface1Filter))))
+        filtersByParty = Map(
+          party -> CumulativeFilter(
+            templateFilters = Set(),
+            interfaceFilters = Set(iface1Filter),
+            templateWildcardFilter = None,
+          )
+        )
       ),
       verbose = true,
       alwaysPopulateArguments = true,
@@ -121,9 +136,11 @@ class IndexServiceImplSpec
       (
         TemplatePartiesFilter(Map(template1 -> Some(Set(party))), Some(Set())),
         EventProjectionProperties(
-          true,
-          Some(Set(party)),
-          Map(Some(party.toString) -> Map(template1 -> Projection(Set(iface1), false, false))),
+          verbose = true,
+          templateWildcardWitnesses = Some(Set(party)),
+          witnessTemplateProjections =
+            Map(Some(party.toString) -> Map(template1 -> Projection(Set(iface1), false, false))),
+          templateWildcardCreatedEventBlobParties = Some(Set.empty),
         ),
       )
     )
@@ -141,8 +158,10 @@ class IndexServiceImplSpec
     wildcardFilter(
       TransactionFilter(
         filtersByParty = Map(
-          party2 -> Filters(
-            Some(InclusiveFilters(templateFilters = Set(template1Filter), interfaceFilters = Set()))
+          party2 -> CumulativeFilter(
+            templateFilters = Set(template1Filter),
+            interfaceFilters = Set(),
+            templateWildcardFilter = None,
           )
         )
       )
@@ -152,8 +171,10 @@ class IndexServiceImplSpec
       TransactionFilter(
         filtersByParty = Map.empty,
         filtersForAnyParty = Some(
-          Filters(
-            Some(InclusiveFilters(templateFilters = Set(template1Filter), interfaceFilters = Set()))
+          CumulativeFilter(
+            templateFilters = Set(template1Filter),
+            interfaceFilters = Set(),
+            templateWildcardFilter = None,
           )
         ),
       )
@@ -163,11 +184,39 @@ class IndexServiceImplSpec
 
   it should "provide a party filter for template-wildcard filter" in new Scope {
     wildcardFilter(
-      TransactionFilter(filtersByParty = Map(party -> Filters(None)))
+      TransactionFilter(filtersByParty = Map(party -> CumulativeFilter.templateWildcardFilter()))
     ) shouldBe Some(Set(party))
 
     wildcardFilter(
-      TransactionFilter(filtersByParty = Map.empty, filtersForAnyParty = Some(Filters(None)))
+      TransactionFilter(filtersByParty =
+        Map(
+          party -> CumulativeFilter(
+            templateFilters = Set.empty,
+            interfaceFilters = Set.empty,
+            templateWildcardFilter = Some(TemplateWildcardFilter(includeCreatedEventBlob = false)),
+          )
+        )
+      )
+    ) shouldBe Some(Set(party))
+
+    wildcardFilter(
+      TransactionFilter(
+        filtersByParty = Map.empty,
+        filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter()),
+      )
+    ) shouldBe None
+
+    wildcardFilter(
+      TransactionFilter(
+        filtersByParty = Map.empty,
+        filtersForAnyParty = Some(
+          CumulativeFilter(
+            templateFilters = Set.empty,
+            interfaceFilters = Set.empty,
+            templateWildcardFilter = Some(TemplateWildcardFilter(includeCreatedEventBlob = false)),
+          )
+        ),
+      )
     ) shouldBe None
   }
 
@@ -175,8 +224,8 @@ class IndexServiceImplSpec
     wildcardFilter(
       TransactionFilter(
         filtersByParty = Map(
-          party -> Filters(None),
-          party2 -> Filters(None),
+          party -> CumulativeFilter.templateWildcardFilter(),
+          party2 -> CumulativeFilter.templateWildcardFilter(),
         )
       )
     ) shouldBe Some(
@@ -189,9 +238,11 @@ class IndexServiceImplSpec
     wildcardFilter(
       TransactionFilter(
         filtersByParty = Map(
-          party -> Filters(None),
-          party2 -> Filters(
-            Some(InclusiveFilters(templateFilters = Set(template1Filter), interfaceFilters = Set()))
+          party -> CumulativeFilter.templateWildcardFilter(),
+          party2 -> CumulativeFilter(
+            templateFilters = Set(template1Filter),
+            interfaceFilters = Set(),
+            templateWildcardFilter = None,
           ),
         )
       )
@@ -202,37 +253,40 @@ class IndexServiceImplSpec
     wildcardFilter(
       TransactionFilter(
         filtersByParty = Map(
-          party -> Filters(None),
-          party2 -> Filters(None),
+          party -> CumulativeFilter.templateWildcardFilter(),
+          party2 -> CumulativeFilter.templateWildcardFilter(),
         ),
-        filtersForAnyParty = Some(Filters(None)),
+        filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter()),
       )
     ) shouldBe None
 
     wildcardFilter(
       TransactionFilter(
         filtersByParty = Map(
-          party -> Filters(None),
-          party2 -> Filters(
-            Some(InclusiveFilters(templateFilters = Set(template1Filter), interfaceFilters = Set()))
+          party -> CumulativeFilter.templateWildcardFilter(),
+          party2 -> CumulativeFilter(
+            templateFilters = Set(template1Filter),
+            interfaceFilters = Set(),
+            templateWildcardFilter = None,
           ),
         ),
-        filtersForAnyParty = Some(Filters(None)),
+        filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter()),
       )
     ) shouldBe None
   }
 
   it should "be treated as wildcard filter if templateIds and interfaceIds are empty" in new Scope {
-    wildcardFilter(
-      TransactionFilter(filtersByParty = Map(party -> Filters(InclusiveFilters(Set(), Set()))))
-    ) shouldBe Some(Set(party))
+    a[RuntimeException] should be thrownBy
+      wildcardFilter(
+        TransactionFilter(filtersByParty = Map(party -> CumulativeFilter(Set(), Set(), None)))
+      )
 
-    wildcardFilter(
+    a[RuntimeException] should be thrownBy wildcardFilter(
       TransactionFilter(
         filtersByParty = Map.empty,
-        filtersForAnyParty = Some(Filters(InclusiveFilters(Set(), Set()))),
+        filtersForAnyParty = Some(CumulativeFilter(Set(), Set(), None)),
       )
-    ) shouldBe None
+    )
   }
 
   behavior of "IndexServiceImpl.templateFilter"
@@ -247,19 +301,22 @@ class IndexServiceImplSpec
   it should "provide an empty template filter for template-wildcard filters" in new Scope {
     templateFilter(
       PackageMetadata(),
-      TransactionFilter(filtersByParty = Map(party -> Filters(None))),
-    ) shouldBe Map.empty
-
-    templateFilter(
-      PackageMetadata(),
-      TransactionFilter(filtersByParty = Map.empty, filtersForAnyParty = Some(Filters(None))),
+      TransactionFilter(filtersByParty = Map(party -> CumulativeFilter.templateWildcardFilter())),
     ) shouldBe Map.empty
 
     templateFilter(
       PackageMetadata(),
       TransactionFilter(
-        filtersByParty = Map(party -> Filters(None)),
-        filtersForAnyParty = Some(Filters(None)),
+        filtersByParty = Map.empty,
+        filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter()),
+      ),
+    ) shouldBe Map.empty
+
+    templateFilter(
+      PackageMetadata(),
+      TransactionFilter(
+        filtersByParty = Map(party -> CumulativeFilter.templateWildcardFilter()),
+        filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter()),
       ),
     ) shouldBe Map.empty
   }
@@ -269,10 +326,10 @@ class IndexServiceImplSpec
       PackageMetadata(),
       TransactionFilter(
         filtersByParty = Map(
-          party -> Filters(None),
-          party2 -> Filters(None),
+          party -> CumulativeFilter.templateWildcardFilter(),
+          party2 -> CumulativeFilter.templateWildcardFilter(),
         ),
-        filtersForAnyParty = Some(Filters(None)),
+        filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter()),
       ),
     ) shouldBe Map.empty
 
@@ -280,9 +337,11 @@ class IndexServiceImplSpec
       PackageMetadata(),
       TransactionFilter(
         filtersByParty = Map(
-          party -> Filters(None),
-          party2 -> Filters(
-            Some(InclusiveFilters(templateFilters = Set(template1Filter), interfaceFilters = Set()))
+          party -> CumulativeFilter.templateWildcardFilter(),
+          party2 -> CumulativeFilter(
+            templateFilters = Set(template1Filter),
+            interfaceFilters = Set(),
+            templateWildcardFilter = None,
           ),
         )
       ),
@@ -294,11 +353,13 @@ class IndexServiceImplSpec
       PackageMetadata(),
       TransactionFilter(
         filtersByParty = Map(
-          party2 -> Filters(
-            Some(InclusiveFilters(templateFilters = Set(template1Filter), interfaceFilters = Set()))
+          party2 -> CumulativeFilter(
+            templateFilters = Set(template1Filter),
+            interfaceFilters = Set(),
+            templateWildcardFilter = None,
           )
         ),
-        filtersForAnyParty = Some(Filters(None)),
+        filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter()),
       ),
     ) shouldBe Map(
       template1 -> Some(Set(party2))
@@ -308,14 +369,14 @@ class IndexServiceImplSpec
   it should "ignore template-wildcard filter of the shape where templateIds and interfaceIds are empty" in new Scope {
     templateFilter(
       PackageMetadata(),
-      TransactionFilter(filtersByParty = Map(party -> Filters(InclusiveFilters(Set(), Set())))),
+      TransactionFilter(filtersByParty = Map(party -> CumulativeFilter(Set(), Set(), None))),
     ) shouldBe Map.empty
 
     templateFilter(
       PackageMetadata(),
       TransactionFilter(
         filtersByParty = Map.empty,
-        filtersForAnyParty = Some(Filters(InclusiveFilters(Set(), Set()))),
+        filtersForAnyParty = Some(CumulativeFilter(Set(), Set(), None)),
       ),
     ) shouldBe Map.empty
   }
@@ -324,7 +385,7 @@ class IndexServiceImplSpec
     templateFilter(
       PackageMetadata(),
       TransactionFilter(filtersByParty =
-        Map(party -> Filters(InclusiveFilters(Set(template1Filter), Set())))
+        Map(party -> CumulativeFilter(Set(template1Filter), Set(), None))
       ),
     ) shouldBe Map(template1 -> Some(Set(party)))
 
@@ -332,7 +393,7 @@ class IndexServiceImplSpec
       PackageMetadata(),
       TransactionFilter(
         filtersByParty = Map.empty,
-        filtersForAnyParty = Some(Filters(InclusiveFilters(Set(template1Filter), Set()))),
+        filtersForAnyParty = Some(CumulativeFilter(Set(template1Filter), Set(), None)),
       ),
     ) shouldBe Map(template1 -> None)
   }
@@ -341,7 +402,7 @@ class IndexServiceImplSpec
     templateFilter(
       PackageMetadata(),
       TransactionFilter(
-        filtersByParty = Map(party -> Filters(InclusiveFilters(Set(), Set(iface1Filter))))
+        filtersByParty = Map(party -> CumulativeFilter(Set(), Set(iface1Filter), None))
       ),
     ) shouldBe Map.empty
 
@@ -349,7 +410,7 @@ class IndexServiceImplSpec
       PackageMetadata(),
       TransactionFilter(
         filtersByParty = Map.empty,
-        filtersForAnyParty = Some(Filters(InclusiveFilters(Set(), Set(iface1Filter)))),
+        filtersForAnyParty = Some(CumulativeFilter(Set(), Set(iface1Filter), None)),
       ),
     ) shouldBe Map.empty
   }
@@ -358,7 +419,7 @@ class IndexServiceImplSpec
     templateFilter(
       PackageMetadata(interfacesImplementedBy = Map(iface1 -> Set(template1))),
       TransactionFilter(
-        filtersByParty = Map(party -> Filters(InclusiveFilters(Set(), Set(iface1Filter))))
+        filtersByParty = Map(party -> CumulativeFilter(Set(), Set(iface1Filter), None))
       ),
     ) shouldBe Map(template1 -> Some(Set(party)))
 
@@ -366,7 +427,7 @@ class IndexServiceImplSpec
       PackageMetadata(interfacesImplementedBy = Map(iface1 -> Set(template1))),
       TransactionFilter(
         filtersByParty = Map.empty,
-        filtersForAnyParty = Some(Filters(InclusiveFilters(Set(), Set(iface1Filter)))),
+        filtersForAnyParty = Some(CumulativeFilter(Set(), Set(iface1Filter), None)),
       ),
     ) shouldBe Map(template1 -> None)
   }
@@ -376,9 +437,7 @@ class IndexServiceImplSpec
       PackageMetadata(interfacesImplementedBy = Map(iface1 -> Set(template2))),
       TransactionFilter(
         filtersByParty = Map(
-          party -> Filters(
-            InclusiveFilters(Set(template1Filter), Set(iface1Filter))
-          )
+          party -> CumulativeFilter(Set(template1Filter), Set(iface1Filter), None)
         )
       ),
     ) shouldBe Map(template1 -> Some(Set(party)), template2 -> Some(Set(party)))
@@ -388,9 +447,7 @@ class IndexServiceImplSpec
       TransactionFilter(
         filtersByParty = Map.empty,
         filtersForAnyParty = Some(
-          Filters(
-            InclusiveFilters(Set(template1Filter), Set(iface1Filter))
-          )
+          CumulativeFilter(Set(template1Filter), Set(iface1Filter), None)
         ),
       ),
     ) shouldBe Map(template1 -> None, template2 -> None)
@@ -404,15 +461,15 @@ class IndexServiceImplSpec
       ),
       TransactionFilter(
         filtersByParty = Map(
-          party -> Filters(
-            InclusiveFilters(
+          party ->
+            CumulativeFilter(
               templateFilters = Set(TemplateFilter(template3, false)),
               interfaceFilters = Set(
                 iface1Filter,
                 iface2Filter,
               ),
+              templateWildcardFilter = None,
             )
-          )
         )
       ),
     ) shouldBe Map(
@@ -429,23 +486,21 @@ class IndexServiceImplSpec
       ),
       TransactionFilter(
         filtersByParty = Map(
-          party -> Filters(
-            InclusiveFilters(
-              templateFilters = Set.empty,
-              interfaceFilters = Set(
-                iface1Filter
-              ),
-            )
+          party -> CumulativeFilter(
+            templateFilters = Set.empty,
+            interfaceFilters = Set(
+              iface1Filter
+            ),
+            templateWildcardFilter = None,
           )
         ),
         filtersForAnyParty = Some(
-          Filters(
-            InclusiveFilters(
-              templateFilters = Set.empty,
-              interfaceFilters = Set(
-                iface2Filter
-              ),
-            )
+          CumulativeFilter(
+            templateFilters = Set.empty,
+            interfaceFilters = Set(
+              iface2Filter
+            ),
+            templateWildcardFilter = None,
           )
         ),
       ),
@@ -460,23 +515,22 @@ class IndexServiceImplSpec
       PackageMetadata(interfacesImplementedBy = Map(iface1 -> Set(template1))),
       TransactionFilter(
         filtersByParty = Map(
-          party -> Filters(
-            InclusiveFilters(
+          party ->
+            CumulativeFilter(
               templateFilters = Set.empty,
               interfaceFilters = Set(
                 iface1Filter
               ),
+              templateWildcardFilter = None,
             )
-          )
         ),
         filtersForAnyParty = Some(
-          Filters(
-            InclusiveFilters(
-              templateFilters = Set.empty,
-              interfaceFilters = Set(
-                iface1Filter
-              ),
-            )
+          CumulativeFilter(
+            templateFilters = Set.empty,
+            interfaceFilters = Set(
+              iface1Filter
+            ),
+            templateWildcardFilter = None,
           )
         ),
       ),
@@ -495,7 +549,7 @@ class IndexServiceImplSpec
   }
 
   it should "return an unknown template for not known template" in new Scope {
-    val filters = Filters(InclusiveFilters(Set(template1Filter), Set()))
+    val filters = CumulativeFilter(Set(template1Filter), Set(), None)
 
     checkUnknownIdentifiers(
       TransactionFilter(filtersByParty = Map(party -> filters)),
@@ -516,7 +570,7 @@ class IndexServiceImplSpec
   }
 
   it should "return an unknown interface for not known interface" in new Scope {
-    val filters = Filters(InclusiveFilters(Set(), Set(iface1Filter)))
+    val filters = CumulativeFilter(Set(), Set(iface1Filter), None)
 
     checkUnknownIdentifiers(
       TransactionFilter(filtersByParty = Map(party -> filters)),
@@ -537,12 +591,12 @@ class IndexServiceImplSpec
     checkUnknownIdentifiers(
       TransactionFilter(
         filtersByParty = Map(
-          party -> Filters(
-            InclusiveFilters(
-              Set(template1Filter, packageNameScopedTemplateFilter),
-              Set(iface1Filter),
+          party ->
+            CumulativeFilter(
+              templateFilters = Set(template1Filter, packageNameScopedTemplateFilter),
+              interfaceFilters = Set(iface1Filter),
+              templateWildcardFilter = None,
             )
-          )
         )
       ),
       PackageMetadata(),
@@ -562,11 +616,10 @@ class IndexServiceImplSpec
     checkUnknownIdentifiers(
       TransactionFilter(
         filtersByParty = Map(
-          party -> Filters(
-            InclusiveFilters(
-              Set(template1Filter, unknownTemplateRefFilter),
-              Set(iface1Filter),
-            )
+          party -> CumulativeFilter(
+            templateFilters = Set(template1Filter, unknownTemplateRefFilter),
+            interfaceFilters = Set(iface1Filter),
+            templateWildcardFilter = None,
           )
         )
       ),
@@ -583,11 +636,10 @@ class IndexServiceImplSpec
   }
 
   it should "succeed for all query filter identifiers known" in new Scope {
-    val filters = Filters(
-      InclusiveFilters(
-        Set(template1Filter, packageNameScopedTemplateFilter),
-        Set(iface1Filter),
-      )
+    val filters = CumulativeFilter(
+      templateFilters = Set(template1Filter, packageNameScopedTemplateFilter),
+      interfaceFilters = Set(iface1Filter),
+      templateWildcardFilter = None,
     )
 
     checkUnknownIdentifiers(
@@ -618,10 +670,8 @@ class IndexServiceImplSpec
     checkUnknownIdentifiers(
       TransactionFilter(
         filtersByParty = Map(
-          party -> Filters(InclusiveFilters(Set(template1Filter), Set(iface1Filter))),
-          party2 -> Filters(
-            InclusiveFilters(Set(template2Filter, template3Filter), Set(iface2Filter))
-          ),
+          party -> CumulativeFilter(Set(template1Filter), Set(iface1Filter), None),
+          party2 -> CumulativeFilter(Set(template2Filter, template3Filter), Set(iface2Filter), None),
         )
       ),
       PackageMetadata(templates = Set(template1), interfaces = Set(iface1)),

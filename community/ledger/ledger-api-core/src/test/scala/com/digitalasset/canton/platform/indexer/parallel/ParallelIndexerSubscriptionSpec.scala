@@ -79,6 +79,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers with Nam
     contract_id = "1",
     template_id = "",
     package_name = "",
+    package_version = None,
     flat_event_witnesses = Set.empty,
     tree_event_witnesses = Set.empty,
     create_argument = Array.empty,
@@ -136,6 +137,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers with Nam
     contract_id = "",
     template_id = "",
     package_name = "",
+    package_version = None,
     flat_event_witnesses = Set.empty,
     create_argument = Array.empty,
     create_signatories = Set.empty,
@@ -239,7 +241,8 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers with Nam
 
     val someHash = Hash.hashPrivateKey("p0")
 
-    val someRecordTime = Time.Timestamp.assertFromString("2000-01-01T00:00:00.000000Z")
+    val someRecordTime =
+      Time.Timestamp.assertFromInstant(Instant.parse("2000-01-01T00:00:00.000000Z"))
 
     val someCompletionInfo = state.CompletionInfo(
       actAs = Nil,

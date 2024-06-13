@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer
 
+import cats.data.EitherT
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
@@ -10,6 +11,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, HashPurpose, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.SequencerError.ExceededMaxSequencingTime
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer as CantonSequencer
 import com.digitalasset.canton.lifecycle.Lifecycle
@@ -20,8 +22,9 @@ import com.digitalasset.canton.sequencing.protocol.SendAsyncError.RequestInvalid
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.{Clock, SimClock}
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.util.PekkoUtil
+import com.digitalasset.canton.util.{ErrorUtil, PekkoUtil}
 import com.google.protobuf.ByteString
 import com.google.rpc.status.Status
 import org.apache.pekko.actor.ActorSystem
@@ -47,12 +50,33 @@ abstract class SequencerApiTest
     implicit lazy val actorSystem: ActorSystem =
       PekkoUtil.createActorSystem(loggerFactory.threadName)(parallelExecutionContext)
 
-    lazy val sequencer: CantonSequencer =
-      SequencerApiTest.this.createSequencer(
+    lazy val sequencer: CantonSequencer = {
+      val sequencer = SequencerApiTest.this.createSequencer(
         topologyFactory.forOwnerAndDomain(owner = mediatorId, domainId)
       )
+      registerAllTopologyMembers(topologyFactory.topologySnapshot(), sequencer)
+      sequencer
+    }
 
     def topologyFactory: TestingIdentityFactory
+
+    def sign(
+        request: SubmissionRequest
+    ): SignedContent[SubmissionRequest] = {
+      val cryptoSnapshot =
+        topologyFactory.forOwnerAndDomain(request.sender).currentSnapshotApproximation
+      SignedContent
+        .create(
+          cryptoSnapshot.pureCrypto,
+          cryptoSnapshot,
+          request,
+          Some(cryptoSnapshot.ipsSnapshot.timestamp),
+          HashPurpose.SubmissionRequestSignature,
+          testedProtocolVersion,
+        )
+        .futureValueUS
+        .value
+    }
 
     def close(): Unit = {
       sequencer.close()
@@ -108,7 +132,7 @@ abstract class SequencerApiTest
         val request: SubmissionRequest = createSendRequest(sender, messageContent, recipients)
 
         for {
-          _ <- sequencer.sendAsync(request).valueOrFailShutdown("Sent async")
+          _ <- sequencer.sendAsyncSigned(sign(request)).valueOrFailShutdown("Sent async")
           messages <- readForMembers(List(sender), sequencer)
         } yield {
           val details = EventDetails(
@@ -143,7 +167,7 @@ abstract class SequencerApiTest
         for {
           messages <- loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.INFO))(
             sequencer
-              .sendAsync(request)
+              .sendAsyncSigned(sign(request))
               .valueOrFailShutdown("Sent async")
               .flatMap(_ =>
                 readForMembers(
@@ -157,7 +181,8 @@ abstract class SequencerApiTest
                 include(ExceededMaxSequencingTime.id) or include("Observed Send")
               }) or include("Detected new members without sequencer counter") or
                 include regex "Creating .* at block height None" or
-                include("Subscribing to block source from"))
+                include("Subscribing to block source from") or
+                include("Advancing sim clock"))
             },
           )
         } yield {
@@ -185,10 +210,10 @@ abstract class SequencerApiTest
         )
 
         for {
-          _ <- sequencer.sendAsync(request1).valueOrFailShutdown("Sent async #1")
+          _ <- sequencer.sendAsyncSigned(sign(request1)).valueOrFailShutdown("Sent async #1")
           messages <- loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.INFO))(
             sequencer
-              .sendAsync(request2)
+              .sendAsyncSigned(sign(request2))
               .valueOrFailShutdown("Sent async #2")
               .flatMap(_ => readForMembers(List(sender), sequencer)),
             forAll(_) { entry =>
@@ -235,7 +260,7 @@ abstract class SequencerApiTest
         }
 
         for {
-          _ <- sequencer.sendAsync(request).valueOrFailShutdown("Sent async")
+          _ <- sequencer.sendAsyncSigned(sign(request)).valueOrFailShutdown("Sent async")
           reads <- readForMembers(readFor, sequencer)
         } yield {
           checkMessages(expectedDetailsForMembers, reads)
@@ -262,9 +287,13 @@ abstract class SequencerApiTest
         val request2 = request1.copy(sender = p9, messageId = MessageId.fromUuid(new UUID(1, 2)))
 
         for {
-          _ <- sequencer.sendAsync(request1).valueOrFailShutdown("Sent async for participant1")
+          _ <- sequencer
+            .sendAsyncSigned(sign(request1))
+            .valueOrFailShutdown("Sent async for participant1")
           reads1 <- readForMembers(Seq(p6), sequencer)
-          _ <- sequencer.sendAsync(request2).valueOrFailShutdown("Sent async for participant2")
+          _ <- sequencer
+            .sendAsyncSigned(sign(request2))
+            .valueOrFailShutdown("Sent async for participant2")
           reads2 <- readForMembers(Seq(p9), sequencer)
           reads3 <- readForMembers(Seq(p10), sequencer)
         } yield {
@@ -317,12 +346,12 @@ abstract class SequencerApiTest
 
           for {
             tooFarInTheFuture <- sequencer
-              .sendAsync(request1)
+              .sendAsyncSigned(sign(request1))
               .leftOrFailShutdown(
                 "A sendAsync of submission with maxSequencingTime too far in the future"
               )
             inThePast <- sequencer
-              .sendAsync(request2)
+              .sendAsyncSigned(sign(request2))
               .leftOrFailShutdown(
                 "A sendAsync of submission with maxSequencingTime in the past"
               )
@@ -367,7 +396,9 @@ abstract class SequencerApiTest
           )
 
           for {
-            _ <- sequencer.sendAsync(request1).valueOrFailShutdown("Sent async for participant1")
+            _ <- sequencer
+              .sendAsyncSigned(sign(request1))
+              .valueOrFailShutdown("Sent async for participant1")
             _ = {
               simClockOrFail(clock).reset()
             }
@@ -439,9 +470,13 @@ abstract class SequencerApiTest
           request1 = mkRequest(p11, messageId1, envs1)
           envs2 <- envelopes.parTraverse(signEnvelope(p12Crypto, _))
           request2 = mkRequest(p12, messageId2, envs2)
-          _ <- sequencer.sendAsync(request1).valueOrFailShutdown("Sent async for participant11")
+          _ <- sequencer
+            .sendAsyncSigned(sign(request1))
+            .valueOrFailShutdown("Sent async for participant11")
           reads11 <- readForMembers(Seq(p11), sequencer)
-          _ <- sequencer.sendAsync(request2).valueOrFailShutdown("Sent async for participant13")
+          _ <- sequencer
+            .sendAsyncSigned(sign(request2))
+            .valueOrFailShutdown("Sent async for participant13")
           reads12 <- readForMembers(Seq(p12, p13), sequencer)
           reads12a <- readForMembers(
             Seq(p11),
@@ -452,7 +487,9 @@ abstract class SequencerApiTest
           // participant13 is late to the party and its request is refused
           envs3 <- envelopes.parTraverse(signEnvelope(p13Crypto, _))
           request3 = mkRequest(p13, messageId3, envs3)
-          _ <- sequencer.sendAsync(request3).valueOrFailShutdown("Sent async for participant13")
+          _ <- sequencer
+            .sendAsyncSigned(sign(request3))
+            .valueOrFailShutdown("Sent async for participant13")
           reads13 <- readForMembers(
             Seq(p13),
             sequencer,
@@ -546,10 +583,12 @@ abstract class SequencerApiTest
           request2 = mkRequest(p14, messageId2, env2)
           env3 <- signEnvelope(p15Crypto, envelope)
           request3 = mkRequest(p15, messageId3, env3)
-          _ <- sequencer.sendAsync(request1).valueOrFailShutdown("Sent async for participant14")
+          _ <- sequencer
+            .sendAsyncSigned(sign(request1))
+            .valueOrFailShutdown("Sent async for participant14")
           reads14 <- readForMembers(Seq(p14), sequencer)
           _ <- sequencer
-            .sendAsync(request2)
+            .sendAsyncSigned(sign(request2))
             .valueOrFailShutdown("Sent async stuffing for participant14")
           reads14a <- readForMembers(
             Seq(p14),
@@ -557,7 +596,9 @@ abstract class SequencerApiTest
             firstSequencerCounter = SequencerCounter.Genesis + 1,
           )
           // p15 can still continue and finish the aggregation
-          _ <- sequencer.sendAsync(request3).valueOrFailShutdown("Sent async for participant15")
+          _ <- sequencer
+            .sendAsyncSigned(sign(request3))
+            .valueOrFailShutdown("Sent async for participant15")
           reads14b <- readForMembers(
             Seq(p14),
             sequencer,
@@ -620,7 +661,7 @@ abstract class SequencerApiTest
         )
 
         for {
-          error <- sequencer.sendAsync(request).leftOrFailShutdown("Sent async")
+          error <- sequencer.sendAsyncSigned(sign(request)).leftOrFailShutdown("Sent async")
         } yield {
           error shouldBe a[SendAsyncError.SenderUnknown]
           error.message should (
@@ -650,7 +691,7 @@ abstract class SequencerApiTest
         )
 
         for {
-          _ <- sequencer.sendAsync(request).valueOrFailShutdown("Sent async")
+          _ <- sequencer.sendAsyncSigned(sign(request)).valueOrFailShutdown("Sent async")
           reads <- readForMembers(Seq(p17), sequencer)
         } yield {
           checkRejection(reads, p17, messageId) {
@@ -680,7 +721,7 @@ abstract class SequencerApiTest
         )
 
         for {
-          _ <- sequencer.sendAsync(request).valueOrFailShutdown("Sent async")
+          _ <- sequencer.sendAsyncSigned(sign(request)).valueOrFailShutdown("Sent async")
           reads <- readForMembers(Seq(p18), sequencer)
         } yield {
           checkRejection(reads, p18, messageId) {
@@ -690,41 +731,37 @@ abstract class SequencerApiTest
         }
       }
 
-      "require all eligible senders be authenticated" onlyRunWhen testAggregation in { env =>
+      "require the member to be enabled to send/read" in { env =>
         import env.*
 
-        val unauthenticatedMember =
-          UnauthenticatedMemberId(UniqueIdentifier.tryCreate("unauthenticated", "member"))
-        // TODO(i10412): See above
-        val aggregationRule = AggregationRule(
-          NonEmpty(Seq, p19, unauthenticatedMember),
-          PositiveInt.tryCreate(1),
-          testedProtocolVersion,
-        )
+        val messageContent = "message-from-disabled-member"
+        val sender = p7.member
+        val recipients = Recipients.cc(sender)
 
-        val messageId = MessageId.tryCreate("unreachable-threshold")
-        val request = SubmissionRequest.tryCreate(
-          p19,
-          messageId,
-          Batch.empty(testedProtocolVersion),
-          maxSequencingTime = CantonTimestamp.Epoch.add(Duration.ofSeconds(60)),
-          topologyTimestamp = None,
-          aggregationRule = Some(aggregationRule),
-          Option.empty[SequencingSubmissionCost],
-          testedProtocolVersion,
-        )
+        val request: SubmissionRequest = createSendRequest(sender, messageContent, recipients)
 
         for {
-          _ <- sequencer.sendAsync(request).valueOrFailShutdown("Sent async")
-          reads <- readForMembers(Seq(p19), sequencer)
+          // Need to send first request and wait for it to be processed to get the member registered in BS
+          _ <- sequencer.sendAsyncSigned(sign(request)).valueOrFailShutdown("Send async failed")
+          _ <- readForMembers(Seq(p7), sequencer)
+          _ <- sequencer.disableMember(sender).valueOrFail("Disabling member failed")
+          sendError <- sequencer
+            .sendAsyncSigned(sign(request))
+            .leftOrFailShutdown("Send successful, expected error")
+          subscribeError <- sequencer
+            .read(sender, SequencerCounter.Genesis)
+            .leftOrFail("Read successful, expected error")
         } yield {
-          checkRejection(reads, p19, messageId) {
-            case SequencerErrors.SubmissionRequestMalformed(reason) =>
-              reason should include(
-                "Eligible senders in aggregation rule must be authenticated, but found unauthenticated members"
-              )
+          sendError shouldBe a[SendAsyncError.RequestRefused]
+          sendError.message should (
+            include("is disabled at the sequencer") and
+              include(p7.toString)
+          )
+          subscribeError should matchPattern {
+            case CreateSubscriptionError.MemberDisabled(member) if member == sender =>
           }
         }
+
       }
     }
   }
@@ -887,5 +924,29 @@ trait SequencerApiTestUtils
     }
 
     override def pretty: Pretty[TestingEnvelope] = adHocPrettyInstance
+  }
+
+  /** Registers all the members present in the topology snapshot with the sequencer.
+    * Used for unit testing sequencers. During the normal sequencer operation members are registered
+    * via topology subscription or sequencer startup in SequencerRuntime.
+    */
+  def registerAllTopologyMembers(headSnapshot: TopologySnapshot, sequencer: Sequencer): Unit = {
+    (for {
+      allMembers <- EitherT.right[Sequencer.RegisterError](headSnapshot.allMembers())
+      _ <- allMembers.toSeq
+        .parTraverse_ { member =>
+          for {
+            firstKnownAtO <- EitherT.right(headSnapshot.memberFirstKnownAt(member))
+            res <- firstKnownAtO match {
+              case Some(firstKnownAt) =>
+                sequencer.registerMemberInternal(member, firstKnownAt)
+              case None =>
+                ErrorUtil.invalidState(
+                  s"Member $member has no first known at time, despite being in the topology"
+                )
+            }
+          } yield res
+        }
+    } yield ()).futureValue
   }
 }
