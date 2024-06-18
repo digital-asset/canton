@@ -9,10 +9,8 @@ import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer as CantonSequencer
-import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.resource.MemoryStorage
-import com.digitalasset.canton.sequencing.protocol.RecipientsTest.{p11, p12, p13, p14, p15}
 import com.digitalasset.canton.sequencing.protocol.{Recipients, SubmissionRequest}
 import com.digitalasset.canton.topology.{MediatorId, TestingIdentityFactory, TestingTopology}
 import org.apache.pekko.stream.Materializer
@@ -55,19 +53,6 @@ class DatabaseSequencerSnapshottingTest extends SequencerApiTest {
     )(executorService, tracer, materializer)
   }
 
-  final class SingleDbEnv extends Env {
-
-    override protected val loggerFactory: NamedLoggerFactory =
-      DatabaseSequencerSnapshottingTest.this.loggerFactory
-
-    override lazy val topologyFactory =
-      TestingTopology(domainParameters = List.empty)
-        .withSimpleParticipants(p11, p12, p13, p14, p15)
-        .build(loggerFactory)
-  }
-
-  override protected final type FixtureParam = SingleDbEnv
-  override protected final def createEnv(): FixtureParam = new SingleDbEnv
   override protected def supportAggregation: Boolean = false
 
   "Database snapshotting" should {
@@ -105,6 +90,7 @@ class DatabaseSequencerSnapshottingTest extends SequencerApiTest {
             SequencerCounter(0),
             sender,
             Some(request.messageId),
+            None,
             EnvelopeDetails(messageContent, recipients),
           )
           checkMessages(List(details), messages)
@@ -144,6 +130,7 @@ class DatabaseSequencerSnapshottingTest extends SequencerApiTest {
           SequencerCounter(1),
           sender,
           Some(request2.messageId),
+          None,
           EnvelopeDetails(messageContent2, recipients),
         )
         checkMessages(List(details2), messages2)

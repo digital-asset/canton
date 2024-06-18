@@ -10,6 +10,7 @@ import cats.syntax.alternative.*
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
+import cats.syntax.traverse.*
 import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
@@ -60,12 +61,13 @@ import com.digitalasset.canton.sequencing.handlers.{
   ThrottlingApplicationEventHandler,
 }
 import com.digitalasset.canton.sequencing.protocol.*
-import com.digitalasset.canton.sequencing.traffic.TrafficStateController
+import com.digitalasset.canton.sequencing.traffic.{TrafficReceipt, TrafficStateController}
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
 import com.digitalasset.canton.store.SequencedEventStore.PossiblyIgnoredSequencedEvent
 import com.digitalasset.canton.store.*
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.store.StoredTopologyTransactions.GenericStoredTopologyTransactions
 import com.digitalasset.canton.tracing.{HasTraceContext, Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.FutureUtil.defaultStackTraceFilter
@@ -98,7 +100,7 @@ trait SequencerClient extends SequencerClientSend with FlagCloseable {
     * and update the traffic state when receiving confirmation that the event has been sequenced.
     * This is done via the traffic state controller.
     */
-  def trafficStateController: TrafficStateController
+  def trafficStateController: Option[TrafficStateController]
 
   /** Create a subscription for sequenced events for this member,
     * starting after the prehead in the `sequencerCounterTrackerStore`.
@@ -150,6 +152,11 @@ trait SequencerClient extends SequencerClientSend with FlagCloseable {
   def acknowledgeSigned(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Boolean]
+
+  /** Download the topology state for initializing the member */
+  def downloadTopologyStateForInit()(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, GenericStoredTopologyTransactions]
 
   /** The sequencer counter at which the first subscription starts */
   protected def initialCounterLowerBound: SequencerCounter
@@ -324,7 +331,9 @@ abstract class SequencerClientImpl(
         val syncCryptoApi = syncCryptoClient.headSnapshot
         for {
           costO <- EitherT
-            .liftF(trafficStateController.computeCost(batch, syncCryptoApi.ipsSnapshot))
+            .liftF(
+              trafficStateController.flatTraverse(_.computeCost(batch, syncCryptoApi.ipsSnapshot))
+            )
           requestE = mkRequestE(costO)
           request <- EitherT.fromEither[FutureUnlessShutdown](requestE)
           domainParams <- domainParamsF
@@ -344,6 +353,7 @@ abstract class SequencerClientImpl(
                 Batch(List.empty, protocolVersion),
                 topologyTimestampO = None,
                 protocolVersion,
+                Option.empty[TrafficReceipt],
               )
             )
           callback(UnlessShutdown.Outcome(dummySendResult))
@@ -358,21 +368,12 @@ abstract class SequencerClientImpl(
           callback(result)
         }
 
-        def trackSend(
-            costO: Option[SequencingSubmissionCost]
-        ): EitherT[FutureUnlessShutdown, SendAsyncClientError, Unit] = {
-          def callbackWithTrafficAccounting(cost: SequencingSubmissionCost): SendCallback = {
-            case res @ UnlessShutdown.Outcome(SendResult.Success(d)) =>
-              trafficStateController.consume(cost, d.timestamp)
-              wrappedCallback(res)
-            case res => wrappedCallback(res)
-          }
-
+        def trackSend: EitherT[FutureUnlessShutdown, SendAsyncClientError, Unit] = {
           sendTracker
             .track(
               messageId,
               maxSequencingTime,
-              costO.map(callbackWithTrafficAccounting).getOrElse(wrappedCallback),
+              wrappedCallback,
             )
             .leftMap[SendAsyncClientError] { case SavePendingSendError.MessageIdAlreadyTracked =>
               // we're already tracking this message id
@@ -394,14 +395,16 @@ abstract class SequencerClientImpl(
         val syncCryptoApi = syncCryptoClient.headSnapshot
         for {
           cost <- EitherT
-            .liftF(trafficStateController.computeCost(batch, syncCryptoApi.ipsSnapshot))
+            .liftF(
+              trafficStateController.flatTraverse(_.computeCost(batch, syncCryptoApi.ipsSnapshot))
+            )
           requestE = mkRequestE(cost)
           request <- EitherT.fromEither[FutureUnlessShutdown](requestE)
           domainParams <- domainParamsF
           _ <- EitherT.fromEither[FutureUnlessShutdown](
             checkRequestSize(request, domainParams.maxRequestSize)
           )
-          _ <- trackSend(cost)
+          _ <- trackSend
           _ = recorderO.foreach(_.recordSubmission(request))
           _ <- performSend(
             messageId,
@@ -696,9 +699,17 @@ abstract class SequencerClientImpl(
         HashPurpose.AcknowledgementSignature,
         Some(syncCryptoClient.currentSnapshotApproximation),
       )
-      result <- sequencersTransportState.transport
-        .acknowledgeSigned(signedRequest)
+      result <- sequencersTransportState.transport.acknowledgeSigned(signedRequest)
     } yield result
+  }
+
+  override def downloadTopologyStateForInit()(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, GenericStoredTopologyTransactions] = {
+    // TODO(i12076): Download topology state from one of the sequencers based on the health
+    sequencersTransportState.transport
+      .downloadTopologyStateForInit(TopologyStateForInitRequest(member, protocolVersion))
+      .map(_.topologyTransactions.value)
   }
 
   protected val periodicAcknowledgementsRef =
@@ -737,7 +748,7 @@ class RichSequencerClientImpl(
     replayEnabled: Boolean,
     syncCryptoClient: SyncCryptoClient[SyncCryptoApi],
     loggingConfig: LoggingConfig,
-    override val trafficStateController: TrafficStateController,
+    override val trafficStateController: Option[TrafficStateController],
     loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
     initialCounterLowerBound: SequencerCounter,
@@ -1408,7 +1419,7 @@ class SequencerClientImplPekko[E: Pretty](
     replayEnabled: Boolean,
     syncCryptoClient: SyncCryptoClient[SyncCryptoApi],
     loggingConfig: LoggingConfig,
-    override val trafficStateController: TrafficStateController,
+    override val trafficStateController: Option[TrafficStateController],
     loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
     initialCounterLowerBound: SequencerCounter,

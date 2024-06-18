@@ -78,6 +78,7 @@ object Dependencies {
   // if you update the slick version, please also update our forked code in common/slick.util.*
   lazy val slick_version = "3.3.3"
   lazy val sttp_version = "3.8.16"
+  lazy val tapir_version = "1.8.5"
   lazy val testcontainers_version = "1.19.7"
   lazy val tink_version = "1.12.0"
   lazy val toxiproxy_java_version = "2.1.7"
@@ -266,6 +267,11 @@ object Dependencies {
   lazy val munit = "org.scalameta" % "munit_2.13" % munit_version
 
   lazy val protoc_gen_doc = "io.github.pseudomuto" % "protoc-gen-doc" % protoc_gen_doc_version
+
+  lazy val tapir_json_circe = "com.softwaremill.sttp.tapir" %% "tapir-json-circe" % tapir_version
+
+  lazy val tapir_pekko_http_server =
+    "com.softwaremill.sttp.tapir" %% "tapir-pekko-http-server" % tapir_version
 
   object resolveDependency {
     import io.circe.*, io.circe.parser.*, io.circe.generic.auto.*, io.circe.syntax.*

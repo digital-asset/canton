@@ -60,6 +60,7 @@ class ParticipantRepairAdministration(
       |stakeholders are no longer available to agree to their archival. The participant needs to be disconnected from
       |the domain on which the contracts with "contractIds" reside at the time of the call, and as of now the domain
       |cannot have had any inflight requests.
+      |The effects of the command will take affect upon reconnecting to the sync domain.
       |The "ignoreAlreadyPurged" flag makes it possible to invoke the command multiple times with the same
       |parameters in case an earlier command invocation has failed.
       |As repair commands are powerful tools to recover from unforeseen data corruption, but dangerous under normal
@@ -84,23 +85,32 @@ class ParticipantRepairAdministration(
 
   @Help.Summary("Migrate contracts from one domain to another one.")
   @Help.Description(
-    """This method can be used to migrate all the contracts associated with a domain to a new domain connection.
-         This method will register the new domain, connect to it and then re-associate all contracts on the source
-         domain to the target domain. Please note that this migration needs to be done by all participants
-         at the same time. The domain should only be used once all participants have finished their migration.
-
-         The arguments are:
-         source: the domain alias of the source domain
-         target: the configuration for the target domain
-         """
+    """Migrates all contracts associated with a domain to a new domain.
+        |This method will register the new domain, connect to it and then re-associate all contracts from the source
+        |domain to the target domain. Please note that this migration needs to be done by all participants
+        |at the same time. The target domain should only be used once all participants have finished their migration.
+        |
+        |WARNING: The migration does not start in case of in-flight transactions on the source domain. Forcing the
+        |migration may lead to a ledger fork! Instead of forcing the migration, ensure the source domain has no
+        |in-flight transactions by reconnecting all participants to the source domain, halting activity on these
+        |participants and waiting for the in-flight transactions to complete or time out.
+        |Forcing a migration is intended for disaster recovery when a source domain cannot be recovered anymore.
+        |
+        |The arguments are:
+        |source: the domain alias of the source domain
+        |target: the configuration for the target domain
+        |force: if true, migration is forced ignoring in-flight transactions. Defaults to false.
+        """
   )
   def migrate_domain(
       source: DomainAlias,
       target: DomainConnectionConfig,
+      force: Boolean = false,
   ): Unit = {
     consoleEnvironment.run {
       runner.adminCommand(
-        ParticipantAdminCommands.ParticipantRepairManagement.MigrateDomain(source, target)
+        ParticipantAdminCommands.ParticipantRepairManagement
+          .MigrateDomain(source, target, force = force)
       )
     }
   }
@@ -253,6 +263,7 @@ class ParticipantRepairAdministration(
         |contracts have somehow gotten out of sync and need to be manually created. The participant needs to be
         |disconnected from the specified "domain" at the time of the call, and as of now the domain cannot have had
         |any inflight requests.
+        |The effects of the command will take affect upon reconnecting to the sync domain.
         |As repair commands are powerful tools to recover from unforeseen data corruption, but dangerous under normal
         |operation, use of this command requires (temporarily) enabling the "features.enable-repair-commands"
         |configuration. In addition repair commands can run for an unbounded time depending on the number of

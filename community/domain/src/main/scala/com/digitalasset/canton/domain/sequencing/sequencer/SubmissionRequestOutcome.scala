@@ -3,8 +3,17 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer
 
-import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.sequencing.protocol.{
+  AggregationId,
+  ClosedEnvelope,
+  Deliver,
+  DeliverError,
+  SequencedEvent,
+  SubmissionRequest,
+}
+import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.tracing.TraceContext
 
 /** Describes the outcome of processing a submission request:
   * @param eventsByMember      The sequenced events for each member that is recipient of the submission request.
@@ -18,7 +27,27 @@ final case class SubmissionRequestOutcome(
     eventsByMember: Map[Member, SequencedEvent[ClosedEnvelope]],
     inFlightAggregation: Option[(AggregationId, InFlightAggregationUpdate)],
     outcome: SubmissionOutcome,
-)
+) {
+  def updateTrafficReceipt(
+      sender: Member,
+      trafficReceipt: Option[TrafficReceipt],
+  ): SubmissionRequestOutcome = {
+    // Find the event addressed to the sender in the map, that's the receipt
+    val receipt = eventsByMember.get(sender)
+    // Update it with the traffic consumed
+    val updated: Option[SequencedEvent[ClosedEnvelope]] = receipt.map {
+      case deliverError: DeliverError => deliverError.updateTrafficReceipt(trafficReceipt)
+      case deliver: Deliver[ClosedEnvelope] => deliver.copy(trafficReceipt = trafficReceipt)
+    }
+    // Put it back to the map
+    val updatedMap = updated
+      .map(sender -> _)
+      .map(updatedReceipt => eventsByMember + updatedReceipt)
+      .getOrElse(eventsByMember)
+
+    this.copy(eventsByMember = updatedMap)
+  }
+}
 
 object SubmissionRequestOutcome {
   val discardSubmissionRequest: SubmissionRequestOutcome =
@@ -32,6 +61,7 @@ object SubmissionRequestOutcome {
       submission: SubmissionRequest,
       sender: Member,
       rejection: DeliverError,
+      submissionTraceContext: TraceContext,
   ): SubmissionRequestOutcome =
     SubmissionRequestOutcome(
       Map(sender -> rejection),
@@ -40,6 +70,7 @@ object SubmissionRequestOutcome {
         submission,
         rejection.timestamp,
         rejection.reason,
+        submissionTraceContext,
       ),
     )
 }
