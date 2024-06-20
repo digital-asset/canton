@@ -36,7 +36,6 @@ import io.grpc.Channel
 import io.grpc.health.v1.health.{HealthCheckRequest, HealthGrpc}
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.http.scaladsl.Http.ServerBinding
-import org.apache.pekko.http.scaladsl.model.{HttpRequest, HttpResponse}
 import org.apache.pekko.http.scaladsl.server.Route
 import org.apache.pekko.http.scaladsl.settings.ServerSettings
 import org.apache.pekko.http.scaladsl.{ConnectionContext, Http, HttpsConnectionContext}
@@ -48,6 +47,8 @@ import java.nio.file.{Files, Path}
 import java.security.{Key, KeyStore}
 import javax.net.ssl.SSLContext
 import com.daml.tls.TlsConfiguration
+import com.digitalasset.canton.http.json2.V2Routes
+
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Using
 
@@ -155,6 +156,13 @@ class HttpService(
 
       (encoder, decoder) = HttpService.buildJsonCodecs(packageService)
 
+      v2Routes = V2Routes(
+        ledgerClient,
+        mat.executionContext,
+        mat,
+        loggerFactory,
+      )
+
       jsonEndpoints = new Endpoints(
         startSettings.httpsConfiguration.isEmpty,
         HttpService.decodeJwt,
@@ -164,6 +172,7 @@ class HttpService(
         packageManagementService,
         meteringReportService,
         healthService,
+        v2Routes,
         encoder,
         decoder,
         debugLoggingOfHttpBodies,

@@ -15,11 +15,12 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscrip
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.SequencerError.ExceededMaxSequencingTime
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer as CantonSequencer
 import com.digitalasset.canton.lifecycle.Lifecycle
+import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.logging.{NamedLogging, SuppressionRule}
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.sequencing.protocol.SendAsyncError.RequestInvalid
 import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
 import com.digitalasset.canton.time.{Clock, SimClock}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -45,7 +46,7 @@ abstract class SequencerApiTest
 
   import RecipientsTest.*
 
-  protected trait Env extends AutoCloseable with NamedLogging {
+  protected class Env extends AutoCloseable {
 
     implicit lazy val actorSystem: ActorSystem =
       PekkoUtil.createActorSystem(loggerFactory.threadName)(parallelExecutionContext)
@@ -58,7 +59,29 @@ abstract class SequencerApiTest
       sequencer
     }
 
-    def topologyFactory: TestingIdentityFactory
+    val topologyFactory: TestingIdentityFactory =
+      TestingTopology(domainParameters = List.empty)
+        .withSimpleParticipants(
+          p1,
+          p2,
+          p3,
+          p4,
+          p5,
+          p6,
+          p7,
+          p8,
+          p9,
+          p10,
+          p11,
+          p12,
+          p13,
+          p14,
+          p15,
+          p17,
+          p18,
+          p19,
+        )
+        .build(loggerFactory)
 
     def sign(
         request: SubmissionRequest
@@ -84,12 +107,10 @@ abstract class SequencerApiTest
     }
   }
 
-  override protected type FixtureParam <: Env
-
-  protected def createEnv(): FixtureParam
+  override protected type FixtureParam = Env
 
   override def withFixture(test: OneArgAsyncTest): FutureOutcome = {
-    val env = createEnv()
+    val env = new Env
     complete {
       super.withFixture(test.toNoArgAsyncTest(env))
     } lastly {
@@ -113,7 +134,7 @@ abstract class SequencerApiTest
   }
   def domainId: DomainId = DefaultTestIdentities.domainId
   def mediatorId: MediatorId = DefaultTestIdentities.mediatorId
-  def sequencerId: SequencerId = DefaultTestIdentities.daSequencerId
+  def sequencerId: SequencerId = DefaultTestIdentities.sequencerId
 
   def createSequencer(crypto: DomainSyncCryptoClient)(implicit
       materializer: Materializer
@@ -139,6 +160,7 @@ abstract class SequencerApiTest
             SequencerCounter(0),
             sender,
             Some(request.messageId),
+            None,
             EnvelopeDetails(messageContent, recipients),
           )
           checkMessages(List(details), messages)
@@ -231,6 +253,7 @@ abstract class SequencerApiTest
             SequencerCounter.Genesis,
             sender,
             Some(request1.messageId),
+            None,
             EnvelopeDetails(normalMessageContent, recipients),
           )
           checkMessages(List(details), messages)
@@ -255,6 +278,7 @@ abstract class SequencerApiTest
             SequencerCounter.Genesis,
             member,
             Option.when(member == sender)(request.messageId),
+            None,
             EnvelopeDetails(messageContent, recipients.forMember(member, Set.empty).value),
           )
         }
@@ -299,12 +323,12 @@ abstract class SequencerApiTest
         } yield {
           // p6 gets the receipt immediately
           checkMessages(
-            Seq(EventDetails(SequencerCounter.Genesis, p6, Some(request1.messageId))),
+            Seq(EventDetails(SequencerCounter.Genesis, p6, Some(request1.messageId), None)),
             reads1,
           )
           // p9 gets the receipt only
           checkMessages(
-            Seq(EventDetails(SequencerCounter.Genesis, p9, Some(request2.messageId))),
+            Seq(EventDetails(SequencerCounter.Genesis, p9, Some(request2.messageId), None)),
             reads2,
           )
           // p10 gets the message
@@ -313,6 +337,7 @@ abstract class SequencerApiTest
               EventDetails(
                 SequencerCounter.Genesis,
                 p10,
+                None,
                 None,
                 EnvelopeDetails(messageContent, Recipients.cc(p10)),
               )
@@ -497,7 +522,7 @@ abstract class SequencerApiTest
           )
         } yield {
           checkMessages(
-            Seq(EventDetails(SequencerCounter.Genesis, p11, Some(request1.messageId))),
+            Seq(EventDetails(SequencerCounter.Genesis, p11, Some(request1.messageId), None)),
             reads11,
           )
           checkMessages(
@@ -506,11 +531,13 @@ abstract class SequencerApiTest
                 SequencerCounter.Genesis,
                 p12,
                 Some(request1.messageId),
+                None,
                 EnvelopeDetails(content2, recipients2, envs1(1).signatures ++ envs2(1).signatures),
               ),
               EventDetails(
                 SequencerCounter.Genesis,
                 p13,
+                None,
                 None,
                 EnvelopeDetails(content1, recipients1, envs1(0).signatures ++ envs2(0).signatures),
                 EnvelopeDetails(content2, recipients2, envs1(1).signatures ++ envs2(1).signatures),
@@ -523,6 +550,7 @@ abstract class SequencerApiTest
               EventDetails(
                 SequencerCounter.Genesis + 1,
                 p11,
+                None,
                 None,
                 EnvelopeDetails(content1, recipients1, envs1(0).signatures ++ envs2(0).signatures),
               )
@@ -607,7 +635,7 @@ abstract class SequencerApiTest
           reads15 <- readForMembers(Seq(p15), sequencer)
         } yield {
           checkMessages(
-            Seq(EventDetails(SequencerCounter.Genesis, p14, Some(request1.messageId))),
+            Seq(EventDetails(SequencerCounter.Genesis, p14, Some(request1.messageId), None)),
             reads14,
           )
           checkRejection(reads14a, p14, messageId2) {
@@ -624,7 +652,9 @@ abstract class SequencerApiTest
           )
 
           checkMessages(
-            Seq(EventDetails(SequencerCounter.Genesis + 2, p14, None, deliveredEnvelopeDetails)),
+            Seq(
+              EventDetails(SequencerCounter.Genesis + 2, p14, None, None, deliveredEnvelopeDetails)
+            ),
             reads14b,
           )
           checkMessages(
@@ -633,6 +663,7 @@ abstract class SequencerApiTest
                 SequencerCounter.Genesis,
                 p15,
                 Some(messageId3),
+                None,
                 deliveredEnvelopeDetails,
               )
             ),
@@ -811,6 +842,7 @@ trait SequencerApiTestUtils
       counter: SequencerCounter,
       to: Member,
       messageId: Option[MessageId],
+      trafficReceipt: Option[TrafficReceipt],
       envs: EnvelopeDetails*
   )
 
@@ -821,6 +853,8 @@ trait SequencerApiTestUtils
       maxSequencingTime: CantonTimestamp = CantonTimestamp.MaxValue,
       aggregationRule: Option[AggregationRule] = None,
       topologyTimestamp: Option[CantonTimestamp] = None,
+      sequencingSubmissionCost: Batch[ClosedEnvelope] => Option[SequencingSubmissionCost] = _ =>
+        None,
   ): SubmissionRequest = {
     val envelope1 = TestingEnvelope(messageContent, recipients)
     val batch = Batch(List(envelope1.closeEnvelope), testedProtocolVersion)
@@ -832,7 +866,7 @@ trait SequencerApiTestUtils
       maxSequencingTime,
       topologyTimestamp,
       aggregationRule,
-      Option.empty[SequencingSubmissionCost],
+      sequencingSubmissionCost(batch),
       testedProtocolVersion,
     )
   }
@@ -857,9 +891,19 @@ trait SequencerApiTestUtils
       val event = message.signedEvent.content
 
       event match {
-        case Deliver(_, _, _, _, batch, _) =>
+        case Deliver(_, _, _, messageIdO, batch, _, trafficReceipt) =>
           withClue(s"Received the wrong number of envelopes for recipient $member") {
             batch.envelopes.length shouldBe expectedMessage.envs.length
+          }
+
+          if (messageIdO.isDefined) {
+            withClue(s"Received incorrect traffic receipt $member") {
+              trafficReceipt shouldBe expectedMessage.trafficReceipt
+            }
+          } else {
+            withClue(s"Received a traffic receipt for $member in an event without messageId") {
+              trafficReceipt shouldBe empty
+            }
           }
 
           forAll(batch.envelopes.zip(expectedMessage.envs)) { case (got, wanted) =>
@@ -877,13 +921,22 @@ trait SequencerApiTestUtils
       got: Seq[(Member, OrdinarySerializedEvent)],
       sender: Member,
       expectedMessageId: MessageId,
+      expectedTrafficReceipt: Option[TrafficReceipt] = None,
   )(assertReason: PartialFunction[Status, Assertion]): Assertion = {
     got match {
       case Seq((`sender`, event)) =>
         event.signedEvent.content match {
-          case DeliverError(_counter, _timestamp, _domainId, messageId, reason) =>
+          case DeliverError(
+                _counter,
+                _timestamp,
+                _domainId,
+                messageId,
+                reason,
+                trafficReceipt,
+              ) =>
             messageId shouldBe expectedMessageId
             assertReason(reason)
+            trafficReceipt shouldBe expectedTrafficReceipt
 
           case _ => fail(s"Expected a deliver error, but got $event")
         }

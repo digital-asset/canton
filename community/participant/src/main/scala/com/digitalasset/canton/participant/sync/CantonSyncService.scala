@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.sync
 
 import cats.Eval
 import cats.data.EitherT
+import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
@@ -37,7 +38,13 @@ import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.ReadService.ConnectedDomainResponse
 import com.digitalasset.canton.ledger.participant.state.*
-import com.digitalasset.canton.lifecycle.*
+import com.digitalasset.canton.lifecycle.{
+  FlagCloseable,
+  FutureUnlessShutdown,
+  HasCloseContext,
+  Lifecycle,
+  UnlessShutdown,
+}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
 import com.digitalasset.canton.participant.Pruning.*
@@ -82,7 +89,6 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.{
 }
 import com.digitalasset.canton.participant.topology.*
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
-import com.digitalasset.canton.participant.traffic.TrafficStateController
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
 import com.digitalasset.canton.platform.store.packagemeta.PackageMetadata
@@ -386,6 +392,8 @@ class CantonSyncService(
       stateInspection,
       repairService,
       prepareDomainConnectionForMigration,
+      sequencerInfoLoader,
+      connectedDomainsLookup,
       parameters.processingTimeouts,
       loggerFactory,
     )
@@ -577,7 +585,7 @@ class CantonSyncService(
           case Success(Right(sequencedF)) =>
             // Reply with ACK as soon as the submission has been registered as in-flight,
             // and asynchronously send it to the sequencer.
-            logger.debug(s"Command ${submitterInfo.commandId} is now in flight.")
+            logger.debug(s"Command ${submitterInfo.commandId} is now in-flight.")
             val loggedF = sequencedF.transformIntoSuccess { result =>
               result match {
                 case Success(UnlessShutdown.Outcome(_)) =>
@@ -849,59 +857,36 @@ class CantonSyncService(
         .leftMap(e => SyncServiceError.SyncServiceUnknownDomain.Error(e.alias): SyncServiceError)
     } yield ()
 
+  /** Migrates contracts from a source domain to target domain by re-associating them in the participant's persistent store.
+    * Prune some of the domain stores after the migration.
+    *
+    * The migration only starts when certain preconditions are fulfilled:
+    * - the participant is disconnected from the source and target domain
+    * - there are neither in-flight submissions nor dirty requests
+    *
+    * You can force the migration in case of in-flight transactions but it may lead to a ledger fork.
+    * Consider:
+    *  - Transaction involving participants P1 and P2 that create a contract c
+    *  - P1 migrates (D1 -> D2) when processing is done, P2 when it is in-flight
+    *  - Final state:
+    *    - P1 has the contract on D2 (it was created and migrated)
+    *    - P2 does have the contract because it will not process the mediator verdict
+    *
+    *  Instead of forcing a migration when there are in-flight transactions reconnect all participants to the source domain,
+    *  halt activity and let the in-flight transactions complete or time out.
+    *
+    *  Using the force flag should be a last resort, that is for disaster recovery when the source domain is unrecoverable.
+    */
   def migrateDomain(
       source: DomainAlias,
       target: DomainConnectionConfig,
+      force: Boolean,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] = {
-    def mustBeOffline(alias: DomainAlias, domainId: DomainId) = EitherT.cond[FutureUnlessShutdown](
-      !connectedDomainsMap.contains(domainId),
-      (),
-      SyncServiceError.SyncServiceDomainMustBeOffline.Error(alias): SyncServiceError,
-    )
-
+  ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
     for {
-      targetDomainInfo <- performUnlessClosingEitherU(functionFullName)(
-        sequencerInfoLoader
-          .loadAndAggregateSequencerEndpoints(
-            target.domain,
-            target.domainId,
-            target.sequencerConnections,
-            SequencerConnectionValidation.Active,
-          )(
-            traceContext,
-            CloseContext(this),
-          )
-          .leftMap(DomainRegistryError.fromSequencerInfoLoaderError)
-          .leftMap[SyncServiceError](err =>
-            SyncServiceError.SyncServiceFailedDomainConnection(
-              target.domain,
-              DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(err.cause),
-            )
-          )
-      )
-      _ <- performUnlessClosingEitherU(functionFullName)(
-        aliasManager
-          .processHandshake(target.domain, targetDomainInfo.domainId)
-          .leftMap(DomainRegistryHelpers.fromDomainAliasManagerError)
-          .leftMap[SyncServiceError](err =>
-            SyncServiceError.SyncServiceFailedDomainConnection(
-              target.domain,
-              err,
-            )
-          )
-      )
+      targetDomainInfo <- migrationService.isDomainMigrationPossible(source, target, force = force)
 
-      sourceDomainId <- EitherT.fromEither[FutureUnlessShutdown](
-        aliasManager
-          .domainIdForAlias(source)
-          .toRight(
-            SyncServiceError.SyncServiceUnknownDomain.Error(source): SyncServiceError
-          )
-      )
-      _ <- mustBeOffline(source, sourceDomainId)
-      _ <- mustBeOffline(target.domain, targetDomainInfo.domainId)
       _ <-
         connectQueue.executeEUS(
           migrationService
@@ -911,8 +896,24 @@ class CantonSyncService(
             ),
           "migrate domain",
         )
+
+      sourceDomainId <- EitherT.fromEither[FutureUnlessShutdown](
+        aliasManager
+          .domainIdForAlias(source)
+          .toRight(
+            SyncServiceError.SyncServiceUnknownDomain.Error(source): SyncServiceError
+          )
+      )
+
+      _ = logger.info(
+        s"Purging deactivated domain with alias $source with domain id $sourceDomainId"
+      )
+      _ <- migrationService
+        .pruneSelectedDeactivatedDomainStores(sourceDomainId)
+        .leftMap[SyncServiceError](
+          SyncServiceError.SyncServiceMigrationError(source, target.domain, _)
+        )
     } yield ()
-  }
 
   /* Verify that specified domain has inactive status and selectively prune sync domain stores.
    */
@@ -938,9 +939,10 @@ class CantonSyncService(
       _ = logger.info(
         s"Purging deactivated domain with alias $domain with domain id $domainId"
       )
-      _ <- pruningProcessor
+      _ <- migrationService
         .pruneSelectedDeactivatedDomainStores(domainId)
-        .transform(pruningErrorToCantonError)
+        .leftMap(err => PruningServiceError.InternalServerError.Error(err.cause))
+        .leftWiden[CantonError]
     } yield ()
   }
 
@@ -1380,12 +1382,6 @@ class CantonSyncService(
           domainLoggerFactory,
         )
 
-        trafficStateController = new TrafficStateController(
-          participantId,
-          domainLoggerFactory,
-          metrics.domainMetrics(domainAlias),
-        )
-
         syncDomain = syncDomainFactory.create(
           domainId,
           domainHandle,
@@ -1404,7 +1400,6 @@ class CantonSyncService(
               partyNotifier,
               missingKeysAlerter,
               domainHandle.topologyClient,
-              trafficStateController,
               ephemeral.recordOrderPublisher,
             ),
           missingKeysAlerter,
@@ -1412,7 +1407,6 @@ class CantonSyncService(
           inFlightSubmissionTracker,
           clock,
           domainMetrics,
-          trafficStateController,
           futureSupervisor,
           domainLoggerFactory,
           testingConfig,

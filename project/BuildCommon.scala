@@ -1398,6 +1398,8 @@ object BuildCommon {
             .filterNot(_ == "-Xsource:3"),
           scalacOptions += "-Wconf:src=src_managed/.*:silent",
           libraryDependencies ++= Seq(
+            tapir_json_circe,
+            tapir_pekko_http_server,
             daml_lf_api_type_signature,
             daml_lf_transaction_test_lib,
             daml_observability_pekko_http_metrics,
