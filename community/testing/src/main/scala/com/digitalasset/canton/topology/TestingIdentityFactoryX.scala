@@ -362,7 +362,7 @@ class TestingIdentityFactoryX(
         val partyId = PartyId.tryFromLfParty(lfParty)
         val participantsForParty = participants.iterator.filter(_._1.uid != partyId.uid)
         mkAdd(
-          PartyToParticipantX(
+          PartyToParticipantX.tryCreate(
             partyId,
             None,
             threshold = PositiveInt.one,
@@ -589,7 +589,7 @@ class TestingOwnerWithKeysX(
     )
 
     val p1p1 = mkAdd(
-      PartyToParticipantX(
+      PartyToParticipantX.tryCreate(
         PartyId(UniqueIdentifier(Identifier.tryCreate("one"), Namespace(key1.id))),
         None,
         PositiveInt.one,

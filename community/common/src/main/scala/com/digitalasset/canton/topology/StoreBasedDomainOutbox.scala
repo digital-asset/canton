@@ -12,6 +12,7 @@ import com.digitalasset.canton.common.domain.{
   SequencerBasedRegisterTopologyTransactionHandleX,
 }
 import com.digitalasset.canton.concurrent.{FutureSupervisor, HasFutureSupervision}
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{ProcessingTimeout, TopologyConfig}
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
@@ -58,7 +59,7 @@ class StoreBasedDomainOutboxX(
     timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
     crypto: Crypto,
-    batchSize: Int = 100,
+    broadcastBatchSize: PositiveInt,
     maybeObserverCloseable: Option[AutoCloseable] = None,
     futureSupervisor: FutureSupervisor,
 )(implicit ec: ExecutionContext)
@@ -90,7 +91,7 @@ class StoreBasedDomainOutboxX(
     authorizedStore
       .findDispatchingTransactionsAfter(
         timestampExclusive = watermarks.dispatched,
-        limit = Some(batchSize),
+        limit = Some(broadcastBatchSize.value),
       )
       .map(storedTransactions =>
         PendingTransactions(
@@ -123,7 +124,7 @@ abstract class DomainOutboxCommon extends DomainOutboxHandle {
 
   def targetClient: DomainTopologyClientWithInit
 
-  def newTransactionsAddedToAuthorizedStore(
+  def newTransactionsAdded(
       asOf: CantonTimestamp,
       num: Int,
   ): FutureUnlessShutdown[Unit]
@@ -245,7 +246,7 @@ abstract class StoreBasedDomainOutboxCommon(
 
   final def queueSize: Int = watermarks.get().queuedApprox
 
-  final def newTransactionsAddedToAuthorizedStore(
+  final def newTransactionsAdded(
       asOf: CantonTimestamp,
       num: Int,
   ): FutureUnlessShutdown[Unit] = {
@@ -442,7 +443,7 @@ class DomainOutboxXDynamicObserver(val loggerFactory: NamedLoggerFactory)
       transactions: Seq[SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     outboxRef.get.fold(FutureUnlessShutdown.unit)(
-      _.newTransactionsAddedToAuthorizedStore(timestamp, transactions.size)
+      _.newTransactionsAdded(timestamp, transactions.size)
     )
   }
 
@@ -513,6 +514,7 @@ class DomainOutboxXFactory(
       timeouts = timeouts,
       loggerFactory = domainLoggerFactory,
       crypto = crypto,
+      broadcastBatchSize = topologyXConfig.broadcastBatchSize,
       maybeObserverCloseable = new AutoCloseable {
         override def close(): Unit = authorizedObserver.removeObserver()
       }.some,
@@ -543,6 +545,7 @@ class DomainOutboxXFactory(
         timeouts = timeouts,
         loggerFactory = domainLoggerFactory,
         crypto = crypto,
+        broadcastBatchSize = topologyXConfig.broadcastBatchSize,
         maybeObserverCloseable = new AutoCloseable {
           override def close(): Unit = authorizedObserver.removeObserver()
         }.some,

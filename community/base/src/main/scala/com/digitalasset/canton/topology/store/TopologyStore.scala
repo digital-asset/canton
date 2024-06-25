@@ -208,18 +208,6 @@ object TopologyTransactionRejection {
       TopologyManagerError.UnauthorizedTransaction.Failure(asString)
   }
 
-  final case class ThresholdTooHigh(actual: Int, mustBeAtMost: Int)
-      extends TopologyTransactionRejection {
-    override def asString: String =
-      s"Threshold must not be higher than $mustBeAtMost, but was $actual."
-
-    override def pretty: Pretty[ThresholdTooHigh] = prettyOfString(_ => asString)
-
-    override def toTopologyManagerError(implicit elc: ErrorLoggingContext) = {
-      TopologyManagerError.InvalidThreshold.ThresholdTooHigh(actual, mustBeAtMost)
-    }
-  }
-
   final case class OnboardingRestrictionInPlace(
       participant: ParticipantId,
       restriction: OnboardingRestriction,
@@ -233,6 +221,13 @@ object TopologyTransactionRejection {
     override def toTopologyManagerError(implicit elc: ErrorLoggingContext) = {
       TopologyManagerError.ParticipantOnboardingRefused.Reject(participant, restriction)
     }
+  }
+
+  final case class InvalidTopologyMapping(err: String) extends TopologyTransactionRejection {
+    override def asString: String = s"Invalid mapping: $err"
+    override def pretty: Pretty[InvalidTopologyMapping] = prettyOfString(_ => asString)
+    override def toTopologyManagerError(implicit elc: ErrorLoggingContext) =
+      TopologyManagerError.InvalidTopologyMapping.Reject(err)
   }
 
   final case class SignatureCheckFailed(err: SignatureCheckError)
@@ -327,5 +322,34 @@ object TopologyTransactionRejection {
         participantId,
         parties,
       )
+  }
+
+  final case class PartyExceedsHostingLimit(
+      partyId: PartyId,
+      limit: Int,
+      numParticipants: Int,
+  ) extends TopologyTransactionRejection {
+    override def asString: String =
+      s"Party $partyId exceeds hosting limit of $limit with desired number of $numParticipants hosting participants."
+
+    override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
+      TopologyManagerError.PartyExceedsHostingLimit.Reject(partyId, limit, numParticipants)
+
+    override def pretty: Pretty[PartyExceedsHostingLimit.this.type] =
+      prettyOfClass(
+        param("partyId", _.partyId),
+        param("limit", _.limit),
+        param("number of hosting participants", _.numParticipants),
+      )
+  }
+
+  final case class NamespaceAlreadyInUse(namespace: Namespace)
+      extends TopologyTransactionRejection {
+    override def asString: String = s"The namespace $namespace is already used by another entity."
+
+    override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
+      TopologyManagerError.NamespaceAlreadyInUse.Reject(namespace)
+
+    override def pretty: Pretty[NamespaceAlreadyInUse.this.type] = prettyOfString(_ => asString)
   }
 }

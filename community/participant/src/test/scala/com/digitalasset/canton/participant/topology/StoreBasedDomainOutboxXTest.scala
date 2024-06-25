@@ -6,8 +6,8 @@ package com.digitalasset.canton.participant.topology
 import cats.implicits.*
 import com.digitalasset.canton.common.domain.RegisterTopologyTransactionHandle
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.{ProcessingTimeout, TopologyConfig}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.TracedLogger
@@ -40,6 +40,7 @@ import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.annotation.nowarn
+import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration.*
 import scala.concurrent.{Future, Promise}
@@ -130,7 +131,10 @@ class StoreBasedDomainOutboxXTest
   ) extends RegisterTopologyTransactionHandle {
 
     val buffer: ListBuffer[GenericSignedTopologyTransactionX] = ListBuffer()
-    private val promise = new AtomicReference[Promise[Unit]](Promise[Unit]())
+    val batches: mutable.ListBuffer[Seq[GenericSignedTopologyTransactionX]] = ListBuffer()
+    private val promise = new AtomicReference(
+      Promise[Seq[Seq[GenericSignedTopologyTransactionX]]]()
+    )
     private val expect = new AtomicInteger(expectI)
 
     override def submit(
@@ -141,6 +145,7 @@ class StoreBasedDomainOutboxXTest
       FutureUnlessShutdown.outcomeF {
         logger.debug(s"Observed ${transactions.length} transactions")
         buffer ++= transactions
+        batches += transactions
         val finalResult = transactions.map(_ => responses.next())
         for {
           _ <- MonadUtil.sequentialTraverse(transactions)(x => {
@@ -174,7 +179,7 @@ class StoreBasedDomainOutboxXTest
             else Future.unit
           })
           _ = if (buffer.length >= expect.get()) {
-            promise.get().success(())
+            promise.get().success(batches.toSeq)
           }
         } yield {
           logger.debug(s"Done with observed ${transactions.length} transactions")
@@ -190,7 +195,7 @@ class StoreBasedDomainOutboxXTest
       ret
     }
 
-    def allObserved(): Future[Unit] = promise.get().future
+    def allObserved(): Future[Unit] = promise.get().future.void
 
     override protected def timeouts: ProcessingTimeout = ProcessingTimeout()
     override protected def logger: TracedLogger = StoreBasedDomainOutboxXTest.this.logger
@@ -222,6 +227,7 @@ class StoreBasedDomainOutboxXTest
       client: DomainTopologyClientWithInit,
       source: TopologyStoreX[TopologyStoreId.AuthorizedStore],
       target: TopologyStoreX[TopologyStoreId.DomainStore],
+      broadcastBatchSize: PositiveInt = TopologyConfig.defaultBroadcastBatchSize,
   ): Future[StoreBasedDomainOutboxX] = {
     val domainOutbox = new StoreBasedDomainOutboxX(
       domain,
@@ -235,6 +241,7 @@ class StoreBasedDomainOutboxXTest
       timeouts,
       loggerFactory,
       crypto,
+      broadcastBatchSize,
       futureSupervisor = FutureSupervisor.Noop,
     )
     domainOutbox
@@ -250,7 +257,7 @@ class StoreBasedDomainOutboxXTest
                   transactions: Seq[GenericSignedTopologyTransactionX],
               )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
                 val num = transactions.size
-                outbox.newTransactionsAddedToAuthorizedStore(timestamp, num)
+                outbox.newTransactionsAdded(timestamp, num)
               }
             })
           ),
@@ -307,11 +314,18 @@ class StoreBasedDomainOutboxXTest
       }
     }
 
-    "dispatch transactions continuously" in {
+    "dispatch transactions continuously respecting the batch size" in {
       val (source, target, manager, handle, client) = mk(slice1.length)
       for {
         _res <- push(manager, slice1)
-        _ <- outboxConnected(manager, handle, client, source, target)
+        _ <- outboxConnected(
+          manager,
+          handle,
+          client,
+          source,
+          target,
+          broadcastBatchSize = PositiveInt.one,
+        )
         _ <- handle.allObserved()
         observed1 = handle.clear(slice2.length)
         _ <- push(manager, slice2)
@@ -319,6 +333,8 @@ class StoreBasedDomainOutboxXTest
       } yield {
         observed1.map(_.transaction) shouldBe slice1
         handle.buffer.map(_.transaction) shouldBe slice2
+        handle.batches should not be (empty)
+        forAll(handle.batches)(_.size shouldBe 1)
       }
     }
 

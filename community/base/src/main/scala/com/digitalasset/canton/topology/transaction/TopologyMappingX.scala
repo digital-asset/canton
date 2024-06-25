@@ -397,14 +397,14 @@ object NamespaceDelegationX {
       target: SigningPublicKey,
       isRootDelegation: Boolean,
   ): NamespaceDelegationX =
-    create(namespace, target, isRootDelegation).fold(err => sys.error(err), identity)
+    create(namespace, target, isRootDelegation).valueOr(err =>
+      throw new IllegalArgumentException((err))
+    )
 
   def code: TopologyMappingX.Code = Code.NamespaceDelegationX
 
   /** Returns true if the given transaction is a self-signed root certificate */
   def isRootCertificate(sit: GenericSignedTopologyTransactionX): Boolean = {
-    ((sit.operation == TopologyChangeOpX.Replace && sit.serial == PositiveInt.one) ||
-      (sit.operation == TopologyChangeOpX.Remove && sit.serial != PositiveInt.one)) &&
     sit.mapping
       .select[transaction.NamespaceDelegationX]
       .exists(ns =>
@@ -931,8 +931,8 @@ final case class PartyHostingLimitsX(
 
   override def code: Code = Code.PartyHostingLimitsX
 
-  override def namespace: Namespace = domainId.uid.namespace
-  override def maybeUid: Option[UniqueIdentifier] = Some(domainId.uid)
+  override def namespace: Namespace = partyId.uid.namespace
+  override def maybeUid: Option[UniqueIdentifier] = Some(partyId.uid)
 
   override def restrictedToDomain: Option[DomainId] = Some(domainId)
 
@@ -1044,7 +1044,7 @@ object HostingParticipant {
   } yield HostingParticipant(participantId, permission)
 }
 
-final case class PartyToParticipantX(
+final case class PartyToParticipantX private (
     partyId: PartyId,
     domainId: Option[DomainId],
     threshold: PositiveInt,
@@ -1122,6 +1122,51 @@ final case class PartyToParticipantX(
 
 object PartyToParticipantX {
 
+  def create(
+      partyId: PartyId,
+      domainId: Option[DomainId],
+      threshold: PositiveInt,
+      participants: Seq[HostingParticipant],
+      groupAddressing: Boolean,
+  ): Either[String, PartyToParticipantX] = {
+    val noDuplicatePParticipants = {
+      val duplicatePermissions =
+        participants.groupBy(_.participantId).values.filter(_.size > 1).toList
+      Either.cond(
+        duplicatePermissions.isEmpty,
+        (),
+        s"Participants may only be assigned one permission: $duplicatePermissions",
+      )
+    }
+    val thresholdCanBeMet = {
+      val numConfirmingParticipants =
+        participants.count(_.permission >= ParticipantPermission.Confirmation)
+      Either
+        .cond(
+          // we allow to not meet the threshold criteria if there are only observing participants.
+          // but as soon as there is 1 confirming participant, the threshold must theoretically be satisfiable,
+          // otherwise the party can never confirm a transaction.
+          numConfirmingParticipants == 0 || threshold.value <= numConfirmingParticipants,
+          (),
+          s"Party $partyId cannot meet threshold of $threshold confirming participants with participants $participants",
+        )
+        .map(_ => PartyToParticipantX(partyId, domainId, threshold, participants, groupAddressing))
+    }
+
+    noDuplicatePParticipants.flatMap(_ => thresholdCanBeMet)
+  }
+
+  def tryCreate(
+      partyId: PartyId,
+      domainId: Option[DomainId],
+      threshold: PositiveInt,
+      participants: Seq[HostingParticipant],
+      groupAddressing: Boolean,
+  ): PartyToParticipantX =
+    create(partyId, domainId, threshold, participants, groupAddressing).valueOr(err =>
+      throw new IllegalArgumentException(err)
+    )
+
   def uniqueKey(partyId: PartyId, domainId: Option[DomainId]): MappingHash =
     TopologyMappingX.buildUniqueKey(code)(
       _.add(partyId.toProtoPrimitive).add(domainId.fold("")(_.toProtoPrimitive))
@@ -1145,7 +1190,7 @@ object PartyToParticipantX {
 }
 
 // AuthorityOfX
-final case class AuthorityOfX(
+final case class AuthorityOfX private (
     partyId: PartyId,
     domainId: Option[DomainId],
     threshold: PositiveInt,
@@ -1186,6 +1231,21 @@ final case class AuthorityOfX(
 
 object AuthorityOfX {
 
+  def create(
+      partyId: PartyId,
+      domainId: Option[DomainId],
+      threshold: PositiveInt,
+      parties: Seq[PartyId],
+  ): Either[String, AuthorityOfX] = {
+    Either
+      .cond(
+        threshold.value <= parties.size,
+        (),
+        s"Invalid threshold $threshold for $partyId with authorizers $parties",
+      )
+      .map(_ => AuthorityOfX(partyId, domainId, threshold, parties))
+  }
+
   def uniqueKey(partyId: PartyId, domainId: Option[DomainId]): MappingHash =
     TopologyMappingX.buildUniqueKey(code)(
       _.add(partyId.toProtoPrimitive).add(domainId.fold("")(_.toProtoPrimitive))
@@ -1204,7 +1264,9 @@ object AuthorityOfX {
         if (value.domain.nonEmpty)
           DomainId.fromProtoPrimitive(value.domain, "domain").map(_.some)
         else Right(None)
-    } yield AuthorityOfX(partyId, domainId, threshold, parties)
+      authorityOf <- create(partyId, domainId, threshold, parties)
+        .leftMap(ProtoDeserializationError.OtherError)
+    } yield authorityOf
 }
 
 /** Dynamic domain parameter settings for the domain

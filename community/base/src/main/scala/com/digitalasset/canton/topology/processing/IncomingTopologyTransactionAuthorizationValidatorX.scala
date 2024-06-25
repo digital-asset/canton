@@ -5,7 +5,8 @@ package com.digitalasset.canton.topology.processing
 
 import cats.Monoid
 import cats.data.EitherT
-import cats.syntax.parallel.*
+import cats.syntax.bifunctor.*
+import cats.syntax.foldable.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.CantonTimestamp
@@ -19,14 +20,10 @@ import com.digitalasset.canton.topology.processing.AuthorizedTopologyTransaction
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransactionX.GenericValidatedTopologyTransactionX
 import com.digitalasset.canton.topology.store.*
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
-import com.digitalasset.canton.topology.transaction.TopologyMappingX.{
-  MappingHash,
-  RequiredAuthXAuthorizations,
-}
+import com.digitalasset.canton.topology.transaction.TopologyMappingX.RequiredAuthXAuthorizations
 import com.digitalasset.canton.topology.transaction.TopologyTransactionX.GenericTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.FutureInstances.*
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -129,17 +126,14 @@ class IncomingTopologyTransactionAuthorizationValidatorX(
     */
   def validateAndUpdateHeadAuthState(
       timestamp: CantonTimestamp,
-      transactionsToValidate: Seq[GenericSignedTopologyTransactionX],
-      transactionsInStore: Map[MappingHash, GenericSignedTopologyTransactionX],
+      toValidate: GenericSignedTopologyTransactionX,
+      inStore: Option[GenericSignedTopologyTransactionX],
       expectFullAuthorization: Boolean,
   )(implicit
       traceContext: TraceContext
-  ): Future[(UpdateAggregationX, Seq[GenericValidatedTopologyTransactionX])] = {
+  ): Future[(UpdateAggregationX, GenericValidatedTopologyTransactionX)] = {
     for {
-      authCheckResult <- determineRelevantUidsAndNamespaces(
-        transactionsToValidate,
-        transactionsInStore.view.mapValues(_.transaction).toMap,
-      )
+      authCheckResult <- determineRelevantUidsAndNamespaces(toValidate, inStore.map(_.transaction))
       (updateAggregation, targetDomainVerified) = authCheckResult
       loadGraphsF = loadAuthorizationGraphs(timestamp, updateAggregation.authNamespaces)
       loadUidsF = loadIdentifierDelegationsCascading(
@@ -152,11 +146,11 @@ class IncomingTopologyTransactionAuthorizationValidatorX(
     } yield {
 
       logger.debug(s"Update aggregation yielded ${updateAggregation}")
-      val validated = targetDomainVerified.map {
+      val validated = targetDomainVerified match {
         case ValidatedTopologyTransactionX(tx, None, _) =>
           processTransaction(
             tx,
-            transactionsInStore.get(tx.mapping.uniqueKey),
+            inStore,
             expectFullAuthorization,
           )
         case v => v
@@ -172,99 +166,122 @@ class IncomingTopologyTransactionAuthorizationValidatorX(
     }
   }
 
+  /** Validates a topology transaction as follows:
+    * <ol>
+    *   <li>check that the transaction has valid signatures and is sufficiently authorized. if not, reject.</li>
+    *   <li>if there are no missing authorizers, as is the case for proposals, we update internal caches for NSD, IDD, and DND</li>
+    *   <li>if this validation is run to determine a final verdict, as is the case for processing topology transactions coming from the domain,
+    *   automatically clear the proposal flag for transactions with sufficent authorizing signatures.</li>
+    * </ol>
+    */
   private def processTransaction(
       toValidate: GenericSignedTopologyTransactionX,
       inStore: Option[GenericSignedTopologyTransactionX],
       expectFullAuthorization: Boolean,
   )(implicit traceContext: TraceContext): GenericValidatedTopologyTransactionX = {
-    val processedNs = toValidate.selectMapping[NamespaceDelegationX].forall { sigTx =>
-      processNamespaceDelegation(
-        toValidate.operation,
-        AuthorizedTopologyTransactionX(sigTx),
-      )
-    }
+    // See validateRootCertificate why we need to check the removal of a root certificate explicitly here.
+    val signatureCheckResult = validateRootCertificate(toValidate)
+      .getOrElse(validateSignaturesAndDetermineMissingAuthorizers(toValidate, inStore))
 
-    val processedIdent = toValidate.selectMapping[IdentifierDelegationX].forall { sigTx =>
-      processIdentifierDelegation(
-        toValidate.operation,
-        AuthorizedTopologyTransactionX(sigTx),
-      )
-    }
-
-    val resultDns = toValidate.selectMapping[DecentralizedNamespaceDefinitionX].map { sigTx =>
-      processDecentralizedNamespaceDefinition(
-        sigTx.operation,
-        AuthorizedTopologyTransactionX(sigTx),
-      )
-    }
-    val processedDns = resultDns.forall(_._1)
-    val mappingSpecificCheck = processedNs && processedIdent && processedDns
-
-    // the transaction is fully authorized if either
-    // 1. it's a root certificate, or
-    // 2. there is no authorization error and there are no missing authorizers
-    // We need to check explicitly for the root certificate here, because a REMOVE operation
-    // removes itself from the authorization graph, and therefore `isCurrentlyAuthorized` cannot validate it.
-    val authorizationResult =
-      if (NamespaceDelegationX.isRootCertificate(toValidate))
-        Right(
-          (
-            toValidate,
-            RequiredAuthXAuthorizations.empty, // no missing authorizers
-          )
-        )
-      else isCurrentlyAuthorized(toValidate, inStore)
-
-    authorizationResult match {
+    signatureCheckResult match {
       // propagate the rejection reason
       case Left(rejectionReason) => ValidatedTopologyTransactionX(toValidate, Some(rejectionReason))
 
       // if a transaction wasn't outright rejected, run some additional checks
       case Right((validatedTx, missingAuthorizers)) =>
-        // The mappingSpecificCheck is a necessary condition for having sufficient authorizers.
-        val isFullyAuthorized =
-          mappingSpecificCheck && missingAuthorizers.isEmpty
-
-        // If a decentralizedNamespace transaction is fully authorized, reflect so in the decentralizedNamespace cache.
-        // Note: It seems a bit unsafe to update the caches on the assumption that the update will also be eventually
-        // persisted by the caller (a few levels up the call chain in TopologyStateProcessorX.validateAndApplyAuthorization
-        // as the caller performs additional checks such as the numeric value of the serial number).
-        // But at least this is safer than where the check was previously (inside processDecentralizedNamespaceDefinition before even
-        // `isCurrentlyAuthorized` above had finished all checks).
-        if (isFullyAuthorized) {
-          resultDns.foreach { case (_, updateDecentralizedNamespaceCache) =>
-            updateDecentralizedNamespaceCache()
-          }
-        }
-
-        val acceptMissingAuthorizers =
-          validatedTx.isProposal && !expectFullAuthorization
-
-        // if the result of this validation is final (when processing transactions for the authorized store
-        // or sequenced transactions from the domain) we set the proposal flag according to whether the transaction
-        // is fully authorized or not.
-        // This must not be done when preliminarily validating transactions via the DomainTopologyManager, because
-        // the validation outcome might change when validating the transaction again after it has been sequenced.
-        val finalTransaction =
-          if (validationIsFinal) validatedTx.copy(isProposal = !isFullyAuthorized)
-          else validatedTx
-
-        // Either the transaction is fully authorized or the request allows partial authorization
-        if (isFullyAuthorized || acceptMissingAuthorizers) {
-          ValidatedTopologyTransactionX(finalTransaction, None)
-        } else {
-          if (!missingAuthorizers.isEmpty) {
-            logger.debug(s"Missing authorizers: $missingAuthorizers")
-          }
-          if (!mappingSpecificCheck) {
-            logger.debug(s"Mapping specific check failed")
-          }
-          ValidatedTopologyTransactionX(
-            toValidate,
-            Some(TopologyTransactionRejection.NotAuthorized),
-          )
-        }
+        handleSuccessfulSignatureChecks(
+          validatedTx,
+          missingAuthorizers,
+          expectFullAuthorization,
+        )
     }
+  }
+
+  private def handleSuccessfulSignatureChecks(
+      toValidate: GenericSignedTopologyTransactionX,
+      missingAuthorizers: RequiredAuthXAuthorizations,
+      expectFullAuthorization: Boolean,
+  )(implicit
+      traceContext: TraceContext
+  ): ValidatedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX] = {
+    // if there are no missing authorizers, we can update the internal caches
+    val isFullyAuthorized = if (missingAuthorizers.isEmpty) {
+      val processedNSD = toValidate
+        .selectMapping[NamespaceDelegationX]
+        .forall { sigTx => processNamespaceDelegation(AuthorizedTopologyTransactionX(sigTx)) }
+
+      val processedIDD = toValidate.selectMapping[IdentifierDelegationX].forall { sigTx =>
+        processIdentifierDelegation(AuthorizedTopologyTransactionX(sigTx))
+      }
+
+      val processedDND =
+        toValidate.selectMapping[DecentralizedNamespaceDefinitionX].forall { sigTx =>
+          processDecentralizedNamespaceDefinition(AuthorizedTopologyTransactionX(sigTx))
+        }
+      val mappingSpecificCheck = processedNSD && processedIDD && processedDND
+      if (!mappingSpecificCheck) {
+        logger.debug(s"Mapping specific check failed")
+      }
+      mappingSpecificCheck
+    } else { false }
+
+    val acceptMissingAuthorizers =
+      toValidate.isProposal && !expectFullAuthorization
+
+    // if the result of this validation is final (when processing transactions for the authorized store
+    // or sequenced transactions from the domain) we set the proposal flag according to whether the transaction
+    // is fully authorized or not.
+    // This must not be done when preliminarily validating transactions via the DomainTopologyManager, because
+    // the validation outcome might change when validating the transaction again after it has been sequenced.
+    val finalTransaction =
+      if (validationIsFinal) toValidate.copy(isProposal = !isFullyAuthorized)
+      else toValidate
+
+    // Either the transaction is fully authorized or the request allows partial authorization
+    if (isFullyAuthorized || acceptMissingAuthorizers) {
+      ValidatedTopologyTransactionX(finalTransaction, None)
+    } else {
+      if (!missingAuthorizers.isEmpty) {
+        logger.debug(s"Missing authorizers: $missingAuthorizers")
+      }
+      ValidatedTopologyTransactionX(
+        toValidate,
+        Some(TopologyTransactionRejection.NotAuthorized),
+      )
+    }
+  }
+
+  /**  Validates the signature of the removal of a root certificate.
+    *  This check is done separately from the mechanism used for other topology transactions (ie isCurrentlyAuthorized),
+    *  because removing a root certificate removes it from the authorization graph and therefore
+    *  isCurrentlyAuthorized would not find the key to validate it.
+    */
+  private def validateRootCertificate(
+      toValidate: GenericSignedTopologyTransactionX
+  ): Option[Either[
+    TopologyTransactionRejection,
+    (GenericSignedTopologyTransactionX, RequiredAuthXAuthorizations),
+  ]] = {
+    toValidate
+      .selectMapping[NamespaceDelegationX]
+      .filter(NamespaceDelegationX.isRootCertificate)
+      .map { rootCert =>
+        val result = rootCert.signatures.toSeq.forgetNE
+          .traverse_(
+            pureCrypto
+              .verifySignature(
+                rootCert.hash.hash,
+                rootCert.mapping.target,
+                _,
+              )
+          )
+          .bimap(
+            TopologyTransactionRejection.SignatureCheckFailed,
+            _ => (toValidate, RequiredAuthXAuthorizations.empty /* no missing authorizers */ ),
+          )
+        result
+      }
+
   }
 
   /** loads all identifier delegations into the identifier delegation cache
@@ -290,16 +307,15 @@ class IncomingTopologyTransactionAuthorizationValidatorX(
   }
 
   private def processIdentifierDelegation(
-      op: TopologyChangeOpX,
-      tx: AuthorizedIdentifierDelegationX,
+      tx: AuthorizedIdentifierDelegationX
   ): Boolean = {
     // check authorization
     val check = getAuthorizationCheckForNamespace(tx.mapping.identifier.namespace)
-    val keysAreValid = check.areValidAuthorizationKeys(tx.signingKeys, requireRoot = false)
+    val keysAreValid = check.existsAuthorizedKeyIn(tx.signingKeys, requireRoot = false)
     // update identifier delegation cache if necessary
     if (keysAreValid) {
       val updateOp: Set[AuthorizedIdentifierDelegationX] => Set[AuthorizedIdentifierDelegationX] =
-        op match {
+        tx.operation match {
           case TopologyChangeOpX.Replace =>
             x => x + tx
           case TopologyChangeOpX.Remove =>
@@ -312,12 +328,11 @@ class IncomingTopologyTransactionAuthorizationValidatorX(
   }
 
   private def processNamespaceDelegation(
-      op: TopologyChangeOpX,
-      tx: AuthorizedNamespaceDelegationX,
+      tx: AuthorizedNamespaceDelegationX
   )(implicit traceContext: TraceContext): Boolean = {
     val graph = getAuthorizationGraphForNamespace(tx.mapping.namespace)
     // add or remove including authorization check
-    op match {
+    tx.operation match {
       case TopologyChangeOpX.Replace => graph.add(tx)
       case TopologyChangeOpX.Remove => graph.remove(tx)
     }
@@ -329,9 +344,8 @@ class IncomingTopologyTransactionAuthorizationValidatorX(
     * by the caller once the mapping is to be committed.
     */
   private def processDecentralizedNamespaceDefinition(
-      op: TopologyChangeOpX,
-      tx: AuthorizedDecentralizedNamespaceDefinitionX,
-  )(implicit traceContext: TraceContext): (Boolean, () => Unit) = {
+      tx: AuthorizedDecentralizedNamespaceDefinitionX
+  )(implicit traceContext: TraceContext): Boolean = {
     val decentralizedNamespace = tx.mapping.namespace
     val dnsGraph = decentralizedNamespaceCache
       .get(decentralizedNamespace)
@@ -359,26 +373,30 @@ class IncomingTopologyTransactionAuthorizationValidatorX(
         )
         newDecentralizedNamespaceGraph
       }
-    val isAuthorized = dnsGraph.areValidAuthorizationKeys(tx.signingKeys, false)
+    val isAuthorized = dnsGraph.existsAuthorizedKeyIn(tx.signingKeys, requireRoot = false)
 
-    (
-      isAuthorized,
-      () => {
-        val ownerGraphs = tx.mapping.owners.forgetNE.toSeq.map(getAuthorizationGraphForNamespace)
-        decentralizedNamespaceCache
-          .put(
-            decentralizedNamespace,
-            (tx.mapping, dnsGraph.copy(dnd = tx.mapping, ownerGraphs = ownerGraphs)),
-          )
-          .discard
-      },
-    )
+    if (isAuthorized) {
+      tx.operation match {
+        case TopologyChangeOpX.Remove =>
+          decentralizedNamespaceCache.remove(decentralizedNamespace).discard
+
+        case TopologyChangeOpX.Replace =>
+          val ownerGraphs = tx.mapping.owners.forgetNE.toSeq.map(getAuthorizationGraphForNamespace)
+          decentralizedNamespaceCache
+            .put(
+              decentralizedNamespace,
+              (tx.mapping, dnsGraph.copy(dnd = tx.mapping, ownerGraphs = ownerGraphs)),
+            )
+            .discard
+      }
+    }
+    isAuthorized
   }
 
   private def determineRelevantUidsAndNamespaces(
-      transactionsToValidate: Seq[GenericSignedTopologyTransactionX],
-      transactionsInStore: Map[MappingHash, GenericTopologyTransactionX],
-  ): Future[(UpdateAggregationX, Seq[GenericValidatedTopologyTransactionX])] = {
+      toValidate: GenericSignedTopologyTransactionX,
+      inStore: Option[GenericTopologyTransactionX],
+  ): Future[(UpdateAggregationX, GenericValidatedTopologyTransactionX)] = {
     def verifyDomain(
         tx: GenericSignedTopologyTransactionX
     ): Either[TopologyTransactionRejection, Unit] =
@@ -394,22 +412,19 @@ class IncomingTopologyTransactionAuthorizationValidatorX(
 
     // we need to figure out for which namespaces and uids we need to load the validation checks
     // and for which uids and namespaces we'll have to perform a cascading update
-    import UpdateAggregationX.monoid
-    transactionsToValidate.parFoldMapA { toValidate =>
-      EitherT
-        .fromEither[Future](verifyDomain(toValidate))
-        .fold(
-          rejection =>
-            (UpdateAggregationX(), Seq(ValidatedTopologyTransactionX(toValidate, Some(rejection)))),
-          _ =>
-            (
-              UpdateAggregationX().add(
-                toValidate.mapping,
-                transactionsInStore.get(toValidate.mapping.uniqueKey),
-              ),
-              Seq(ValidatedTopologyTransactionX(toValidate, None)),
+    EitherT
+      .fromEither[Future](verifyDomain(toValidate))
+      .fold(
+        rejection =>
+          (UpdateAggregationX(), ValidatedTopologyTransactionX(toValidate, Some(rejection))),
+        _ =>
+          (
+            UpdateAggregationX().add(
+              toValidate.mapping,
+              inStore,
             ),
-        )
-    }
+            ValidatedTopologyTransactionX(toValidate, None),
+          ),
+      )
   }
 }

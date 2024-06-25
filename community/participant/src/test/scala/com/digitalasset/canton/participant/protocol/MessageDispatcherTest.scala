@@ -805,6 +805,45 @@ trait MessageDispatcherTest {
       error.getMessage should include(show"No processor for view type $UnknownTestViewType")
 
     }
+    "ignore protocol messages for foreign domains" in {
+      val sut = mk()
+      val sc = SequencerCounter(1)
+      val ts = CantonTimestamp.ofEpochSecond(1)
+      val txForeignDomain = TopologyTransactionsBroadcastX.create(
+        DomainId.tryFromString("foo::bar"),
+        Seq(
+          Broadcast(
+            String255.tryCreate("some request"),
+            List(factoryX.ns1k1_k1),
+          )
+        ),
+        testedProtocolVersion,
+      )
+      val event =
+        mkDeliver(
+          Batch.of(testedProtocolVersion, txForeignDomain -> Recipients.cc(participantId)),
+          sc,
+          ts,
+        )
+
+      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+        handle(sut, event) {
+          verify(sut.topologyProcessor).apply(
+            isEq(sc),
+            isEq(SequencedTime(ts)),
+            isEq(Traced(List.empty)),
+          )
+
+          checkTicks(sut, sc, ts)
+        }.futureValue,
+        logEntries => {
+          logEntries should not be empty
+          forEvery(logEntries) {
+            _.warningMessage should include("Received messages with wrong domain IDs")
+          }
+        },
+      )
+    }
 
     def request(
         view: EncryptedViewMessage[ViewType],

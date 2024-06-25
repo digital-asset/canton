@@ -43,7 +43,7 @@ trait TransactionAuthorizationValidatorX {
 
   protected def pureCrypto: CryptoPureApi
 
-  def isCurrentlyAuthorized(
+  def validateSignaturesAndDetermineMissingAuthorizers(
       toValidate: GenericSignedTopologyTransactionX,
       inStore: Option[GenericSignedTopologyTransactionX],
   )(implicit
@@ -72,59 +72,58 @@ trait TransactionAuthorizationValidatorX {
     val namespaceWithRootAuthorizations =
       required.namespacesWithRoot.map { ns =>
         val check = getAuthorizationCheckForNamespace(ns)
-        val keysWithDelegation = check.getValidAuthorizationKeys(
+        val keysUsed = check.keysSupportingAuthorization(
           signingKeys,
           requireRoot = true,
         )
         val keysAuthorizeNamespace =
-          check.areValidAuthorizationKeys(signingKeys, requireRoot = true)
-        (ns -> (keysAuthorizeNamespace, keysWithDelegation))
+          check.existsAuthorizedKeyIn(signingKeys, requireRoot = true)
+        (ns -> (keysAuthorizeNamespace, keysUsed))
       }.toMap
 
     // Now let's determine which namespaces and uids actually delegated to any of the keys
     val namespaceAuthorizations = required.namespaces.map { ns =>
       val check = getAuthorizationCheckForNamespace(ns)
-      val keysWithDelegation = check.getValidAuthorizationKeys(
+      val keysUsed = check.keysSupportingAuthorization(
         signingKeys,
         requireRoot = false,
       )
-      val keysAuthorizeNamespace = check.areValidAuthorizationKeys(signingKeys, requireRoot = false)
-      (ns -> (keysAuthorizeNamespace, keysWithDelegation))
+      val keysAuthorizeNamespace = check.existsAuthorizedKeyIn(signingKeys, requireRoot = false)
+      (ns -> (keysAuthorizeNamespace, keysUsed))
     }.toMap
 
     val uidAuthorizations =
       required.uids.map { uid =>
         val check = getAuthorizationCheckForNamespace(uid.namespace)
-        val keysWithDelegation = check.getValidAuthorizationKeys(
+        val keysUsed = check.keysSupportingAuthorization(
           signingKeys,
           requireRoot = false,
         )
         val keysAuthorizeNamespace =
-          check.areValidAuthorizationKeys(signingKeys, requireRoot = false)
+          check.existsAuthorizedKeyIn(signingKeys, requireRoot = false)
 
         val keyForUid =
           getAuthorizedIdentifierDelegation(check, uid, toValidate.signatures.map(_.signedBy))
             .map(_.mapping.target)
 
-        (uid -> (keysAuthorizeNamespace || keyForUid.nonEmpty, keysWithDelegation ++ keyForUid))
+        (uid -> (keysAuthorizeNamespace || keyForUid.nonEmpty, keysUsed ++ keyForUid))
       }.toMap
 
-    val allAuthorizingKeys =
-      namespaceWithRootAuthorizations.values.flatMap { case (_, keys) =>
-        keys.map(k => k.id -> k)
-      }.toMap
-        ++ namespaceAuthorizations.values.flatMap { case (_, keys) =>
+    val allKeysUsedForAuthorization = {
+      (namespaceWithRootAuthorizations.values ++ namespaceAuthorizations.values ++ uidAuthorizations.values).flatMap {
+        case (_, keys) =>
           keys.map(k => k.id -> k)
-        }.toMap
-        ++ uidAuthorizations.values.flatMap { case (_, keys) => keys.map(k => k.id -> k) }.toMap
+      }.toMap
+
+    }
 
     logAuthorizations("Authorizations with root for namespaces", namespaceWithRootAuthorizations)
     logAuthorizations("Authorizations for namespaces", namespaceAuthorizations)
     logAuthorizations("Authorizations for UIDs", uidAuthorizations)
 
-    logger.debug(s"All authorizing keys: ${allAuthorizingKeys.keySet}")
+    logger.debug(s"All keys used for authorization: ${allKeysUsedForAuthorization.keySet}")
 
-    val superfluousKeys = signingKeys -- allAuthorizingKeys.keys
+    val superfluousKeys = signingKeys -- allKeysUsedForAuthorization.keys
     for {
       _ <- Either.cond[TopologyTransactionRejection, Unit](
         // there must be at least 1 key used for the signatures for one of the delegation mechanisms
@@ -137,7 +136,7 @@ trait TransactionAuthorizationValidatorX {
         },
       )
 
-      txWithValidSignatures <- toValidate
+      txWithSignaturesToVerify <- toValidate
         .removeSignatures(superfluousKeys)
         .toRight({
           logger.info(
@@ -146,9 +145,9 @@ trait TransactionAuthorizationValidatorX {
           TopologyTransactionRejection.NoDelegationFoundForKeys(superfluousKeys)
         })
 
-      _ <- txWithValidSignatures.signatures.forgetNE.toList
+      _ <- txWithSignaturesToVerify.signatures.forgetNE.toList
         .traverse_(sig =>
-          allAuthorizingKeys
+          allKeysUsedForAuthorization
             .get(sig.signedBy)
             .toRight({
               val msg =
@@ -159,7 +158,7 @@ trait TransactionAuthorizationValidatorX {
             .flatMap(key =>
               pureCrypto
                 .verifySignature(
-                  txWithValidSignatures.hash.hash,
+                  txWithSignaturesToVerify.hash.hash,
                   key,
                   sig,
                 )
@@ -175,7 +174,7 @@ trait TransactionAuthorizationValidatorX {
         uidAuthorizations.collect { case (uid, (true, _)) => uid }.toSet,
       )
       (
-        txWithValidSignatures,
+        txWithSignaturesToVerify,
         requiredAuth
           .satisfiedByActualAuthorizers(
             namespacesWithRoot = actual.namespacesWithRoot,
@@ -213,7 +212,7 @@ trait TransactionAuthorizationValidatorX {
   ): Option[AuthorizedIdentifierDelegationX] = {
     getIdentifierDelegationsForUid(uid)
       .find(aid =>
-        authKeys(aid.mapping.target.id) && graph.areValidAuthorizationKeys(
+        authKeys(aid.mapping.target.id) && graph.existsAuthorizedKeyIn(
           aid.signingKeys,
           requireRoot = false,
         )
@@ -231,9 +230,7 @@ trait TransactionAuthorizationValidatorX {
       namespace: Namespace
   ): AuthorizationCheckX = {
     val decentralizedNamespaceCheck = decentralizedNamespaceCache.get(namespace).map(_._2)
-    val namespaceCheck = namespaceCache.get(
-      namespace
-    )
+    val namespaceCheck = namespaceCache.get(namespace)
     decentralizedNamespaceCheck
       .orElse(namespaceCheck)
       .getOrElse(AuthorizationCheckX.empty)
