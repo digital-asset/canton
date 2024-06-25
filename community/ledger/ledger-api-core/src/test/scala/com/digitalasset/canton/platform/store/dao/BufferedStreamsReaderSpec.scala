@@ -12,6 +12,7 @@ import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReader.FetchFromPersistence
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReaderSpec.*
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.Traced
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, HasExecutorServiceGeneric}
 import org.apache.pekko.stream.scaladsl.{Sink, Source}
@@ -465,6 +466,8 @@ object BufferedStreamsReaderSpec {
     }
   }
 
+  private val someDomainId = DomainId.tryFromString("some::domain-id")
+
   private def transaction(discriminator: String) =
     TransactionLogUpdate.TransactionAccepted(
       transactionId = discriminator,
@@ -474,7 +477,7 @@ object BufferedStreamsReaderSpec {
       offset = Offset.beforeBegin,
       events = Vector(null),
       completionDetails = None,
-      domainId = None,
+      domainId = someDomainId.toProtoPrimitive,
       recordTime = Timestamp.Epoch,
     )
 

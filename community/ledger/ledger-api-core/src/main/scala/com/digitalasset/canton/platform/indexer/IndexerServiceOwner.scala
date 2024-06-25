@@ -39,6 +39,7 @@ final class IndexerServiceOwner(
     dataSourceProperties: DataSourceProperties,
     highAvailability: HaConfig,
     indexServiceDbDispatcher: Option[DbDispatcher],
+    excludedPackageIds: Set[Ref.PackageId],
 )(implicit materializer: Materializer, traceContext: TraceContext)
     extends ResourceOwner[ReportsHealth]
     with NamedLogging {
@@ -48,11 +49,12 @@ final class IndexerServiceOwner(
       new FlywayMigrations(
         participantDataSourceConfig.jdbcUrl,
         loggerFactory,
-      )
+      )(executionContext, traceContext)
     val indexerFactory = new JdbcIndexer.Factory(
       participantId,
       participantDataSourceConfig,
       config,
+      excludedPackageIds,
       readService,
       metrics,
       inMemoryState,
@@ -104,7 +106,7 @@ object IndexerServiceOwner {
   def migrateOnly(
       jdbcUrl: String,
       loggerFactory: NamedLoggerFactory,
-  )(implicit rc: ResourceContext, traceContext: TraceContext): Future[Unit] = {
+  )(implicit ec: ExecutionContext, traceContext: TraceContext): Future[Unit] = {
     val flywayMigrations =
       new FlywayMigrations(jdbcUrl, loggerFactory)
     flywayMigrations.migrate()

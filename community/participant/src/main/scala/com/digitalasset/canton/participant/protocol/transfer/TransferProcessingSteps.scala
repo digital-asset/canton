@@ -278,7 +278,6 @@ trait TransferProcessingSteps[
       commandId = submitterMetadata.commandId,
       optDeduplicationPeriod = None,
       submissionId = None,
-      statistics = None,
     )
 
     val tse = Option.when(isSubmittingParticipant)(
@@ -308,7 +307,6 @@ trait TransferProcessingSteps[
         commandId = pendingTransfer.submitterMetadata.commandId,
         optDeduplicationPeriod = None,
         submissionId = pendingTransfer.submitterMetadata.submissionId,
-        statistics = None,
       )
     )
 

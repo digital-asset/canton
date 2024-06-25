@@ -79,7 +79,7 @@ class PackageServiceTest
     val packageDependencyResolver =
       new PackageDependencyResolver(packageStore, processingTimeouts, loggerFactory)
     private val engine =
-      DAMLe.newEngine(enableLfDev = false, enableStackTraces = false)
+      DAMLe.newEngine(enableLfDev = false, enableLfBeta = false, enableStackTraces = false)
 
     val sut: PackageService = PackageService
       .createAndInitialize(

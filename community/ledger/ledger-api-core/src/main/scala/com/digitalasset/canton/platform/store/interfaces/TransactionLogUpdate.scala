@@ -44,7 +44,7 @@ object TransactionLogUpdate {
       offset: Offset,
       events: Vector[Event],
       completionDetails: Option[CompletionDetails],
-      domainId: Option[String],
+      domainId: String,
       recordTime: Timestamp,
   ) extends TransactionLogUpdate
 
