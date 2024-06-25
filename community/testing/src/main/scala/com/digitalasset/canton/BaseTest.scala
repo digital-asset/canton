@@ -283,6 +283,9 @@ trait BaseTest
     def valueOrFailShutdown(clue: String)(implicit ec: ExecutionContext, pos: Position): Future[A] =
       self.valueOrFail(eitherT)(clue).onShutdown(fail(s"Shutdown during $clue"))
 
+    def failOnShutdown(implicit ec: ExecutionContext, pos: Position): EitherT[Future, E, A] =
+      eitherT.onShutdown(fail("Unexpected shutdown"))
+
     def leftOrFailShutdown(clue: String)(implicit ec: ExecutionContext, pos: Position): Future[E] =
       self.leftOrFail(eitherT)(clue).onShutdown(fail(s"Shutdown during $clue"))
   }
@@ -389,7 +392,7 @@ object BaseTest {
   )
 
   lazy val testedProtocolVersion: ProtocolVersion =
-    tryGetProtocolVersionFromEnv.getOrElse(ProtocolVersion.latest)
+    tryGetProtocolVersionFromEnv.getOrElse(ProtocolVersion.latestStable)
 
   lazy val testedProtocolVersionValidation: ProtocolVersionValidation =
     ProtocolVersionValidation(testedProtocolVersion)

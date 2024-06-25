@@ -121,7 +121,6 @@ class PackageService(
             case true => EitherT.leftT(new PackageVetted(packageId))
             case false => EitherT.rightT(())
           }
-          .mapK(FutureUnlessShutdown.outcomeK)
 
       for {
         _ <- neededForAdminWorkflow(packageId)
@@ -256,7 +255,6 @@ class PackageService(
   ): EitherT[FutureUnlessShutdown, CantonError, Unit] =
     packageOps
       .isPackageVetted(mainPkg)
-      .mapK(FutureUnlessShutdown.outcomeK)
       .flatMap { isVetted =>
         if (!isVetted)
           EitherT.pure[FutureUnlessShutdown, CantonError](
@@ -344,7 +342,7 @@ class PackageService(
       synchronizeVetting: Boolean,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, DamlError, Unit] =
     for {
-      uploadedPackageIds <- packageUploader.value.validateAndStorePackages(
+      uploadedPackageIds <- packageUploader.value.validateAndStoreDar(
         darPayload = darBytes,
         fileNameO = fileNameO,
         submissionId = submissionId,
@@ -353,6 +351,17 @@ class PackageService(
         vetPackages(uploadedPackageIds, synchronizeVetting)
       )
     } yield ()
+
+  /** Decodes and validates the packages in the provided DAR payload.
+    *
+    * This method serves as the "dry-run" counterpart of the [[upload]] flow and
+    * is meant for checking packages against the current participant-node state
+    * without modifying the uploaded and vetted packages state.
+    */
+  def validateDar(payload: ByteString, darFileNameO: Option[String])(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, DamlError, Hash] =
+    packageUploader.value.validateDar(payload, darFileNameO)
 
   override def onClosed(): Unit = Lifecycle.close(packagesDarsStore)(logger)
 }

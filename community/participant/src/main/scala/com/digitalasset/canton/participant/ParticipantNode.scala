@@ -456,6 +456,7 @@ object ParticipantNodeBootstrap {
       DAMLe.newEngine(
         uniqueContractKeys = arguments.parameterConfig.uniqueContractKeys,
         enableLfDev = arguments.parameterConfig.devVersionSupport,
+        enableLfBeta = arguments.parameterConfig.betaVersionSupport,
         enableStackTraces = arguments.parameterConfig.engine.enableEngineStackTraces,
         iterationsBetweenInterruptions =
           arguments.parameterConfig.engine.iterationsBetweenInterruptions,

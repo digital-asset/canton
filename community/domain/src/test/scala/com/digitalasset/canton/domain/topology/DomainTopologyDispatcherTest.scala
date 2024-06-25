@@ -88,6 +88,7 @@ class DomainTopologyDispatcherTest
     ),
     protocol = CantonNodeParameters.Protocol.Impl(
       devVersionSupport = false,
+      betaVersionSupport = false,
       dontWarnOnDeprecatedPV = false,
       initialProtocolVersion = testedProtocolVersion,
     ),

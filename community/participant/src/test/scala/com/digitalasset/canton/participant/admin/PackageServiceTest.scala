@@ -41,7 +41,7 @@ import java.io.File
 import java.nio.file.{Files, Paths}
 import scala.concurrent.Future
 
-object PackageServiceTest {
+object PackageServiceTest extends BaseTest {
 
   @SuppressWarnings(Array("org.wartremover.warts.TryPartial"))
   def loadExampleDar() =
@@ -63,19 +63,23 @@ object PackageServiceTest {
 class PackageServiceTest extends AsyncWordSpec with BaseTest with HasExecutionContext {
   private val examplePackages: List[Archive] = readCantonExamples()
   private val bytes = PackageServiceTest.readCantonExamplesBytes()
-  val darName = String255.tryCreate("CantonExamples")
+  private val darName = String255.tryCreate("CantonExamples")
   private val eventPublisher = mock[ParticipantEventPublisher]
   when(eventPublisher.publish(any[LedgerSyncEvent])(anyTraceContext))
     .thenAnswer(FutureUnlessShutdown.unit)
-  val participantId = DefaultTestIdentities.participant1
+  private val participantId = DefaultTestIdentities.participant1
 
   private class Env {
     val packageStore = new InMemoryDamlPackageStore(loggerFactory)
     private val processingTimeouts = ProcessingTimeout()
     val packageDependencyResolver =
       new PackageDependencyResolver(packageStore, processingTimeouts, loggerFactory)
-    val engine =
-      DAMLe.newEngine(uniqueContractKeys = false, enableLfDev = true, enableStackTraces = false)
+    val engine = DAMLe.newEngine(
+      uniqueContractKeys = false,
+      enableLfDev = true,
+      enableLfBeta = true,
+      enableStackTraces = false,
+    )
 
     private val packageUploader =
       Eval.now(
@@ -221,7 +225,7 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest with HasExecutionCo
       val dar = PackageServiceTest.loadExampleDar()
       val mainPackageId = DamlPackageStore.readPackageId(dar.main)
       val dependencyIds = com.daml.lf.archive.Decode.assertDecodeArchive(dar.main)._2.directDeps
-      for {
+      (for {
         _ <- sut
           .appendDarFromByteString(
             ByteString.copyFrom(bytes),
@@ -230,8 +234,7 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest with HasExecutionCo
             false,
           )
           .valueOrFail("appending dar")
-          .failOnShutdown
-        deps <- packageDependencyResolver.packageDependencies(List(mainPackageId)).value
+        deps <- packageDependencyResolver.packageDependencies(mainPackageId).value
       } yield {
         // test for explict dependencies
         deps match {
@@ -240,7 +243,7 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest with HasExecutionCo
             // all direct dependencies should be part of this
             (dependencyIds -- loaded) shouldBe empty
         }
-      }
+      }).failOnShutdown
     }
 
     "appendDar validates the package" in withEnv { env =>
@@ -345,6 +348,53 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest with HasExecutionCo
       "reject the request with an error" in withEnv(
         rejectOnMissingDar(_.removeDar(unknownDarHash), unknownDarHash, "DAR archive removal")
       )
+    }
+
+    "validate DAR and packages from bytes" in withEnv { env =>
+      import env.*
+
+      val expectedPackageIdsAndState = examplePackages
+        .map(DamlPackageStore.readPackageId)
+        .map(PackageDescription(_, cantonExamplesDescription, None, None))
+
+      for {
+        hash <- sut
+          .validateDar(
+            ByteString.copyFrom(bytes),
+            Some("some/path/CantonExamples.dar"),
+          )
+          .value
+          .map(_.valueOrFail("couldn't validate a dar file"))
+          .failOnShutdown
+        packages <- packageStore.listPackages()
+        dar <- packageStore.getDar(hash)
+      } yield {
+        expectedPackageIdsAndState.foreach(packages should not contain _)
+        dar shouldBe None
+      }
+    }
+
+    "validateDar validates the package" in withEnv { env =>
+      import env.*
+
+      val badDarPath = PackageServiceTest.badDarPath
+      val payload = BinaryFileUtil
+        .readByteStringFromFile(badDarPath)
+        .valueOrFail(s"could not load bad dar file at $badDarPath")
+      for {
+        error <- leftOrFail(
+          sut.validateDar(
+            payload,
+            Some(badDarPath),
+          )
+        )("append illformed.dar").failOnShutdown
+      } yield {
+        error match {
+          case validation: PackageServiceErrors.Validation.ValidationError.Error =>
+            validation.validationError shouldBe a[com.daml.lf.validation.ETypeMismatch]
+          case _ => fail(s"$error is not a validation error")
+        }
+      }
     }
   }
 
