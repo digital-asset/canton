@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant
 
 import cats.Eval
 import cats.data.EitherT
+import cats.syntax.bifunctor.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.lf.engine.Engine
 import com.daml.nameof.NameOf.functionFullName
@@ -46,6 +47,7 @@ import com.digitalasset.canton.resource.*
 import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig}
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology.TopologyManagerError.InvalidTopologyMapping
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{
   IdentityProvidingServiceClient,
@@ -169,6 +171,7 @@ class ParticipantNodeBootstrapX(
             topologyManager,
             participantId,
             manager,
+            config.topology,
             crypto,
             clock,
             config,
@@ -214,21 +217,30 @@ class ParticipantNodeBootstrapX(
           protocolVersion: ProtocolVersion,
       )(implicit
           traceContext: TraceContext
-      ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] = {
+      ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] = for {
+        ptp <- EitherT.fromEither[FutureUnlessShutdown](
+          PartyToParticipantX
+            .create(
+              partyId,
+              None,
+              threshold = PositiveInt.one,
+              participants =
+                Seq(HostingParticipant(participantId, ParticipantPermission.Submission)),
+              groupAddressing = false,
+            )
+            .leftMap(err =>
+              ParticipantTopologyManagerError.IdentityManagerParentError(
+                InvalidTopologyMapping.Reject(err)
+              )
+            )
+        )
         // TODO(#14069) make this "extend" / not replace
         //    this will also be potentially racy!
-        performUnlessClosingEitherUSF(functionFullName)(
+        _ <- performUnlessClosingEitherUSF(functionFullName)(
           topologyManager
             .proposeAndAuthorize(
               TopologyChangeOpX.Replace,
-              PartyToParticipantX(
-                partyId,
-                None,
-                threshold = PositiveInt.one,
-                participants =
-                  Seq(HostingParticipant(participantId, ParticipantPermission.Submission)),
-                groupAddressing = false,
-              ),
+              ptp,
               serial = None,
               // TODO(#12390) auto-determine signing keys
               signingKeys = Seq(partyId.uid.namespace.fingerprint),
@@ -238,7 +250,7 @@ class ParticipantNodeBootstrapX(
         )
           .leftMap(IdentityManagerParentError(_): ParticipantTopologyManagerError)
           .map(_ => ())
-      }
+      } yield ()
 
     }
 

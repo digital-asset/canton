@@ -9,9 +9,7 @@ import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.commands.TopologyAdminCommandsX
 import com.digitalasset.canton.admin.api.client.data.topologyx.*
-import com.digitalasset.canton.admin.api.client.data.{
-  DynamicDomainParameters as ConsoleDynamicDomainParameters
-}
+import com.digitalasset.canton.admin.api.client.data.DynamicDomainParameters as ConsoleDynamicDomainParameters
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt, PositiveLong}
 import com.digitalasset.canton.config.{NonNegativeDuration, RequireTypes}
 import com.digitalasset.canton.console.CommandErrors.GenericCommandError
@@ -1214,7 +1212,7 @@ class TopologyAdministrationGroup(
       }
 
       val command = TopologyAdminCommandsX.Write.Propose(
-        mapping = PartyToParticipantX(
+        mapping = PartyToParticipantX.create(
           partyId = party,
           domainId = domainId,
           threshold = threshold,
@@ -1226,6 +1224,7 @@ class TopologyAdministrationGroup(
         change = op,
         mustFullyAuthorize = mustFullyAuthorize,
         store = store,
+        forceChange = false,
       )
 
       synchronisation.runAdminCommand(synchronize)(command)
@@ -1888,16 +1887,19 @@ class TopologyAdministrationGroup(
     ): SignedTopologyTransactionX[TopologyChangeOpX, AuthorityOfX] = {
 
       val command = TopologyAdminCommandsX.Write.Propose(
-        AuthorityOfX(
-          partyId,
-          domainId,
-          PositiveInt.tryCreate(threshold),
-          parties,
-        ),
+        AuthorityOfX
+          .create(
+            partyId,
+            domainId,
+            PositiveInt.tryCreate(threshold),
+            parties,
+          ),
         signedBy = signedBy.toList,
         serial = serial,
         store = store,
         mustFullyAuthorize = mustFullyAuthorize,
+        forceChange = false,
+        change = TopologyChangeOpX.Replace,
       )
 
       synchronisation.runAdminCommand(synchronize)(command)

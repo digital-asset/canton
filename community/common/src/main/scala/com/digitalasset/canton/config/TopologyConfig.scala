@@ -3,20 +3,29 @@
 
 package com.digitalasset.canton.config
 
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.TopologyConfig.*
 
 import scala.concurrent.duration.Duration
 
+/** @param topologyTransactionRegistrationTimeout Used to determine the max sequencing time
+  *                                               for topology transaction broadcasts.
+  * @param enableTopologyTransactionValidation Flag to turn on/off topology transaction authorization validation
+  * @param broadcastBatchSize The maximum number of topology transactions sent in a topology transaction broadcast
+  */
 final case class TopologyConfig(
     topologyTransactionRegistrationTimeout: NonNegativeDuration =
       defaultTopologyTransactionRegistrationTimeout,
     // temporary flag to ease migration to topology validation being turned on
     enableTopologyTransactionValidation: Boolean = true,
+    broadcastBatchSize: PositiveInt = defaultBroadcastBatchSize,
 )
 
 object TopologyConfig {
   private[TopologyConfig] val defaultTopologyTransactionRegistrationTimeout =
     NonNegativeDuration.ofSeconds(20)
+
+  val defaultBroadcastBatchSize = PositiveInt.tryCreate(100)
 
   def NotUsed: TopologyConfig = TopologyConfig(topologyTransactionRegistrationTimeout =
     NonNegativeDuration.tryFromDuration(Duration.Inf)

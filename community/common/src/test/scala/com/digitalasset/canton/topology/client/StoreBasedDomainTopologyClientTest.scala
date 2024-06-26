@@ -119,7 +119,7 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
     import factory.TestingTransactions.*
 
     lazy val party1participant1 = mkAdd(
-      PartyToParticipantX(
+      PartyToParticipantX.tryCreate(
         party1,
         None,
         PositiveInt.one,
@@ -128,7 +128,7 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
       )
     )
     lazy val party2participant1_2 = mkAdd(
-      PartyToParticipantX(
+      PartyToParticipantX.tryCreate(
         party2,
         None,
         PositiveInt.one,

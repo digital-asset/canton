@@ -89,7 +89,7 @@ final class LedgerServerPartyNotifierTest extends AsyncWordSpec with BaseTest {
         participantId: ParticipantId,
     ): Future[Unit] =
       simulateTransaction(
-        PartyToParticipantX(
+        PartyToParticipantX.tryCreate(
           partyId,
           None,
           PositiveInt.one,
@@ -144,7 +144,7 @@ final class LedgerServerPartyNotifierTest extends AsyncWordSpec with BaseTest {
     "add admin parties" in Fixture { fixture =>
       for {
         _ <- fixture.simulateTransaction(
-          PartyToParticipantX(
+          PartyToParticipantX.tryCreate(
             participant1.adminParty,
             Some(domainId),
             PositiveInt.one,

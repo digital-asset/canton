@@ -5,8 +5,8 @@ package com.digitalasset.canton.participant.topology
 
 import cats.implicits.*
 import com.digitalasset.canton.common.domain.RegisterTopologyTransactionHandle
-import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.{ProcessingTimeout, TopologyConfig}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.TracedLogger
@@ -125,7 +125,10 @@ class QueueBasedDomainOutboxXTest
       rejections: Iterator[Option[TopologyTransactionRejection]] = Iterator.continually(None),
   ) extends RegisterTopologyTransactionHandle {
     val buffer: mutable.ListBuffer[GenericSignedTopologyTransactionX] = ListBuffer()
-    private val promise = new AtomicReference[Promise[Unit]](Promise[Unit]())
+    val batches: mutable.ListBuffer[Seq[GenericSignedTopologyTransactionX]] = ListBuffer()
+    private val promise = new AtomicReference(
+      Promise[Seq[Seq[GenericSignedTopologyTransactionX]]]()
+    )
     private val expect = new AtomicInteger(expectI)
 
     override def submit(
@@ -136,6 +139,7 @@ class QueueBasedDomainOutboxXTest
       FutureUnlessShutdown.outcomeF {
         logger.debug(s"Observed ${transactions.length} transactions")
         buffer ++= transactions
+        batches += transactions
         val finalResult = transactions.map(_ => responses.next())
         for {
           _ <- MonadUtil.sequentialTraverse(transactions)(x => {
@@ -169,7 +173,7 @@ class QueueBasedDomainOutboxXTest
             else Future.unit
           })
           _ = if (buffer.length >= expect.get()) {
-            promise.get().success(())
+            promise.get().success(batches.toSeq)
           }
         } yield {
           logger.debug(s"Done with observed ${transactions.length} transactions")
@@ -185,7 +189,7 @@ class QueueBasedDomainOutboxXTest
       ret
     }
 
-    def allObserved(): Future[Unit] = promise.get().future
+    def allObserved(): Future[Unit] = promise.get().future.void
 
     override protected def timeouts: ProcessingTimeout = ProcessingTimeout()
     override protected def logger: TracedLogger = QueueBasedDomainOutboxXTest.this.logger
@@ -216,6 +220,7 @@ class QueueBasedDomainOutboxXTest
       handle: RegisterTopologyTransactionHandle,
       client: DomainTopologyClientWithInit,
       target: TopologyStoreX[TopologyStoreId.DomainStore],
+      broadcastBatchSize: PositiveInt = TopologyConfig.defaultBroadcastBatchSize,
   ): Future[QueueBasedDomainOutboxX] = {
     val domainOutbox = new QueueBasedDomainOutboxX(
       domain,
@@ -229,6 +234,7 @@ class QueueBasedDomainOutboxXTest
       timeouts,
       loggerFactory,
       crypto,
+      broadcastBatchSize,
     )
     domainOutbox
       .startup()
@@ -243,7 +249,7 @@ class QueueBasedDomainOutboxXTest
                   transactions: Seq[GenericSignedTopologyTransactionX],
               )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
                 val num = transactions.size
-                outbox.newTransactionsAddedToAuthorizedStore(timestamp, num)
+                outbox.newTransactionsAdded(timestamp, num)
               }
             })
           ),
@@ -301,11 +307,11 @@ class QueueBasedDomainOutboxXTest
       }
     }
 
-    "dispatch transactions continuously" in {
+    "dispatch transactions continuously respecting the batch size" in {
       val (target, manager, handle, client) = mk(slice1.length)
       for {
         _res <- push(manager, slice1)
-        _ <- outboxConnected(manager, handle, client, target)
+        _ <- outboxConnected(manager, handle, client, target, broadcastBatchSize = PositiveInt.one)
         _ <- handle.allObserved()
         observed1 = handle.clear(slice2.length)
         _ <- push(manager, slice2)
@@ -313,6 +319,8 @@ class QueueBasedDomainOutboxXTest
       } yield {
         observed1.map(_.transaction) shouldBe slice1
         handle.buffer.map(_.transaction) shouldBe slice2
+        handle.batches should not be (empty)
+        forAll(handle.batches)(_.size shouldBe 1)
       }
     }
 

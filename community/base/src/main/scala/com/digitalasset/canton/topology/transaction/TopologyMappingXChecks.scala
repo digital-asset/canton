@@ -5,6 +5,7 @@ package com.digitalasset.canton.topology.transaction
 
 import cats.data.EitherT
 import cats.instances.future.*
+import cats.instances.order.*
 import com.digitalasset.canton.config.RequireTypes.PositiveLong
 import com.digitalasset.canton.crypto.KeyPurpose
 import com.digitalasset.canton.data.CantonTimestamp
@@ -12,6 +13,10 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.OnboardingRestriction
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX.PositiveStoredTopologyTransactionsX
+import com.digitalasset.canton.topology.store.TopologyTransactionRejection.{
+  InvalidTopologyMapping,
+  NamespaceAlreadyInUse,
+}
 import com.digitalasset.canton.topology.store.{
   TopologyStoreId,
   TopologyStoreX,
@@ -19,12 +24,11 @@ import com.digitalasset.canton.topology.store.{
 }
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.TopologyMappingX.Code
-import com.digitalasset.canton.topology.{ParticipantId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{Namespace, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 
 import scala.concurrent.{ExecutionContext, Future}
-import scala.math.Ordered.*
 
 trait TopologyMappingXChecks {
   def checkTransaction(
@@ -77,6 +81,26 @@ class ValidatingTopologyMappingXChecks(
               inStore.flatMap(_.selectMapping[TrafficControlStateX]),
             )
           )
+      case (
+            Code.DecentralizedNamespaceDefinitionX,
+            None | Some(Code.DecentralizedNamespaceDefinitionX),
+          ) =>
+        toValidate
+          .select[TopologyChangeOpX.Replace, DecentralizedNamespaceDefinitionX]
+          .map(
+            checkDecentralizedNamespaceDefinitionReplace(
+              _,
+              inStore.flatMap(_.select[TopologyChangeOpX, DecentralizedNamespaceDefinitionX]),
+            )
+          )
+
+      case (
+            Code.NamespaceDelegationX,
+            None | Some(Code.NamespaceDelegationX),
+          ) =>
+        toValidate
+          .select[TopologyChangeOpX.Replace, NamespaceDelegationX]
+          .map(checkNamespaceDelegationReplace)
 
       case otherwise => None
     }
@@ -86,7 +110,8 @@ class ValidatingTopologyMappingXChecks(
   private def loadFromStore(
       effective: EffectiveTime,
       code: Code,
-      filterUid: Option[Seq[UniqueIdentifier]],
+      filterUid: Option[Seq[UniqueIdentifier]] = None,
+      filterNamespace: Option[Seq[Namespace]] = None,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TopologyTransactionRejection, PositiveStoredTopologyTransactionsX] =
@@ -99,7 +124,7 @@ class ValidatingTopologyMappingXChecks(
             isProposal = false,
             types = Seq(code),
             filterUid = filterUid,
-            filterNamespace = None,
+            filterNamespace = filterNamespace,
           )
       )
 
@@ -228,65 +253,96 @@ class ValidatingTopologyMappingXChecks(
       traceContext: TraceContext
   ): EitherT[Future, TopologyTransactionRejection, Unit] = {
     import toValidate.mapping
-    val numConfirmingParticipants =
-      mapping.participants.count(_.permission >= ParticipantPermission.Confirmation)
+    def checkParticipants() = {
+      val newParticipants = mapping.participants.map(_.participantId).toSet --
+        inStore.toList.flatMap(_.mapping.participants.map(_.participantId))
+      for {
+        participantTransactions <- EitherT.right[TopologyTransactionRejection](
+          store
+            .findPositiveTransactions(
+              CantonTimestamp.MaxValue,
+              asOfInclusive = false,
+              isProposal = false,
+              types = Seq(DomainTrustCertificateX.code, OwnerToKeyMappingX.code),
+              filterUid = Some(newParticipants.toSeq.map(_.uid)),
+              filterNamespace = None,
+            )
+        )
+
+        // check that all participants are known on the domain
+        missingParticipantCertificates = newParticipants -- participantTransactions
+          .collectOfMapping[DomainTrustCertificateX]
+          .result
+          .map(_.mapping.participantId)
+
+        _ <- EitherTUtil.condUnitET[Future][TopologyTransactionRejection](
+          missingParticipantCertificates.isEmpty,
+          TopologyTransactionRejection.UnknownMembers(missingParticipantCertificates.toSeq),
+        )
+
+        // check that all known participants have keys registered
+        participantsWithInsufficientKeys =
+          newParticipants -- participantTransactions
+            .collectOfMapping[OwnerToKeyMappingX]
+            .result
+            .view
+            .filter { tx =>
+              val keyPurposes = tx.mapping.keys.map(_.purpose).toSet
+              requiredKeyPurposes.forall(keyPurposes)
+            }
+            .map(_.mapping.member)
+            .collect { case pid: ParticipantId => pid }
+            .toSeq
+
+        _ <- EitherTUtil.condUnitET[Future][TopologyTransactionRejection](
+          participantsWithInsufficientKeys.isEmpty,
+          TopologyTransactionRejection.InsufficientKeys(participantsWithInsufficientKeys.toSeq),
+        )
+      } yield {
+        ()
+      }
+    }
+
+    def checkHostingLimits(effective: EffectiveTime) = for {
+      hostingLimitsCandidates <- loadFromStore(
+        effective,
+        code = PartyHostingLimitsX.code,
+        filterUid = Some(Seq(toValidate.mapping.partyId.uid)),
+      )
+      hostingLimits = hostingLimitsCandidates.result.view
+        .flatMap(_.selectMapping[PartyHostingLimitsX])
+        .map(_.mapping.quota)
+        .toList
+      partyHostingLimit = hostingLimits match {
+        case Nil => // No hosting limits found. This is expected if no restrictions are in place
+          None
+        case quota :: Nil => Some(quota)
+        case multiple @ (quota :: _) =>
+          logger.error(
+            s"Multiple PartyHostingLimits at ${effective} ${multiple.size}. Using first one with quota $quota."
+          )
+          Some(quota)
+      }
+      // TODO(#14050) load default party hosting limits from dynamic domain parameters in case the party
+      //              doesn't have a specific PartyHostingLimits mapping issued by the domain.
+      _ <- partyHostingLimit match {
+        case Some(limit) =>
+          EitherTUtil.condUnitET[Future][TopologyTransactionRejection](
+            toValidate.mapping.participants.size <= limit,
+            TopologyTransactionRejection.PartyExceedsHostingLimit(
+              toValidate.mapping.partyId,
+              limit,
+              toValidate.mapping.participants.size,
+            ),
+          )
+        case None => EitherTUtil.unit[TopologyTransactionRejection]
+      }
+    } yield ()
 
     for {
-      // check the threshold
-      _ <- EitherTUtil.condUnitET[Future][TopologyTransactionRejection](
-        mapping.threshold.value <= numConfirmingParticipants,
-        TopologyTransactionRejection.ThresholdTooHigh(
-          mapping.threshold.value,
-          numConfirmingParticipants,
-        ),
-      )
-
-      newParticipants = mapping.participants.map(_.participantId).toSet --
-        inStore.toList.flatMap(_.mapping.participants.map(_.participantId))
-      participantTransactions <- EitherT.right[TopologyTransactionRejection](
-        store
-          .findPositiveTransactions(
-            CantonTimestamp.MaxValue,
-            asOfInclusive = false,
-            isProposal = false,
-            types = Seq(DomainTrustCertificateX.code, OwnerToKeyMappingX.code),
-            filterUid = Some(newParticipants.toSeq.map(_.uid)),
-            filterNamespace = None,
-          )
-      )
-
-      // check that all participants are known on the domain
-      missingParticipantCertificates = newParticipants -- participantTransactions
-        .collectOfMapping[DomainTrustCertificateX]
-        .result
-        .map(_.mapping.participantId)
-
-      _ <- EitherTUtil.condUnitET[Future][TopologyTransactionRejection](
-        missingParticipantCertificates.isEmpty,
-        TopologyTransactionRejection.UnknownMembers(missingParticipantCertificates.toSeq),
-      )
-
-      // check that all known participants have keys registered
-      participantsWithInsufficientKeys =
-        newParticipants -- participantTransactions
-          .collectOfMapping[OwnerToKeyMappingX]
-          .result
-          .view
-          .filter { tx =>
-            val keyPurposes = tx.mapping.keys.map(_.purpose).toSet
-            requiredKeyPurposes.forall(keyPurposes)
-          }
-          .map(_.mapping.member)
-          .collect { case pid: ParticipantId => pid }
-          .toSeq
-
-      _ <- EitherTUtil.condUnitET[Future][TopologyTransactionRejection](
-        participantsWithInsufficientKeys.isEmpty,
-        TopologyTransactionRejection.InsufficientKeys(participantsWithInsufficientKeys.toSeq),
-      )
-    } yield {
-      ()
-    }
+      _ <- checkParticipants()
+      _ <- checkHostingLimits(EffectiveTime.MaxValue)
+    } yield ()
   }
 
   /** Checks that the extraTrafficLimit is monotonically increasing */
@@ -311,5 +367,84 @@ class ValidatingTopologyMappingXChecks(
       ),
     )
 
+  }
+
+  private def checkDecentralizedNamespaceDefinitionReplace(
+      toValidate: SignedTopologyTransactionX[
+        TopologyChangeOpX.Replace,
+        DecentralizedNamespaceDefinitionX,
+      ],
+      inStore: Option[SignedTopologyTransactionX[
+        TopologyChangeOpX,
+        DecentralizedNamespaceDefinitionX,
+      ]],
+  )(implicit traceContext: TraceContext): EitherT[Future, TopologyTransactionRejection, Unit] = {
+
+    def checkDecentralizedNamespaceDerivedFromOwners()
+        : EitherT[Future, TopologyTransactionRejection, Unit] =
+      if (inStore.isEmpty) {
+        // The very first decentralized namespace definition must have namespace computed from the owners
+        EitherTUtil.condUnitET(
+          toValidate.mapping.namespace == DecentralizedNamespaceDefinitionX
+            .computeNamespace(toValidate.mapping.owners),
+          InvalidTopologyMapping(
+            s"The decentralized namespace ${toValidate.mapping.namespace} is not derived from the owners ${toValidate.mapping.owners.toSeq.sorted}"
+          ),
+        )
+      } else {
+        EitherTUtil.unit
+      }
+
+    def checkNoClashWithRootCertificates()(implicit
+        traceContext: TraceContext
+    ): EitherT[Future, TopologyTransactionRejection, Unit] = {
+      loadFromStore(
+        EffectiveTime.MaxValue,
+        Code.NamespaceDelegationX,
+        filterUid = None,
+        filterNamespace = Some(Seq(toValidate.mapping.namespace)),
+      ).flatMap { namespaceDelegations =>
+        val foundRootCertWithSameNamespace = namespaceDelegations.result.exists(stored =>
+          NamespaceDelegationX.isRootCertificate(stored.transaction)
+        )
+        EitherTUtil.condUnitET(
+          !foundRootCertWithSameNamespace,
+          NamespaceAlreadyInUse(toValidate.mapping.namespace),
+        )
+      }
+    }
+
+    for {
+      _ <- checkDecentralizedNamespaceDerivedFromOwners()
+      _ <- checkNoClashWithRootCertificates()
+    } yield ()
+  }
+
+  private def checkNamespaceDelegationReplace(
+      toValidate: SignedTopologyTransactionX[
+        TopologyChangeOpX.Replace,
+        NamespaceDelegationX,
+      ]
+  )(implicit traceContext: TraceContext): EitherT[Future, TopologyTransactionRejection, Unit] = {
+    def checkNoClashWithDecentralizedNamespaces()(implicit
+        traceContext: TraceContext
+    ): EitherT[Future, TopologyTransactionRejection, Unit] = {
+      EitherTUtil.ifThenET(NamespaceDelegationX.isRootCertificate(toValidate)) {
+        loadFromStore(
+          EffectiveTime.MaxValue,
+          Code.DecentralizedNamespaceDefinitionX,
+          filterUid = None,
+          filterNamespace = Some(Seq(toValidate.mapping.namespace)),
+        ).flatMap { dns =>
+          val foundDecentralizedNamespaceWithSameNamespace = dns.result.nonEmpty
+          EitherTUtil.condUnitET(
+            !foundDecentralizedNamespaceWithSameNamespace,
+            NamespaceAlreadyInUse(toValidate.mapping.namespace),
+          )
+        }
+      }
+    }
+
+    checkNoClashWithDecentralizedNamespaces()
   }
 }

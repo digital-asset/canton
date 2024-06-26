@@ -91,7 +91,7 @@ class TopologyTransactionTest extends AnyWordSpec with BaseTest with HasCryptogr
     "party to participant" should {
       val p1 =
         mk(
-          PartyToParticipantX(
+          PartyToParticipantX.tryCreate(
             PartyId(uid),
             None,
             PositiveInt.one,
@@ -102,12 +102,12 @@ class TopologyTransactionTest extends AnyWordSpec with BaseTest with HasCryptogr
 
       val p2 =
         mk(
-          PartyToParticipantX(
+          PartyToParticipantX.tryCreate(
             PartyId(uid),
             Some(domainId),
             PositiveInt.two,
             Seq(
-              HostingParticipant(ParticipantId(uid2), ParticipantPermission.Observation),
+              HostingParticipant(ParticipantId(uid2), ParticipantPermission.Confirmation),
               HostingParticipant(ParticipantId(uid), ParticipantPermission.Submission),
             ),
             groupAddressing = true,
