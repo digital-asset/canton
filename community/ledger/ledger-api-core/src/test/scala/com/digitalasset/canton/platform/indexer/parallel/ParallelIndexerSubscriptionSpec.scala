@@ -250,7 +250,6 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers with Nam
       commandId = Ref.CommandId.assertFromString("c0"),
       optDeduplicationPeriod = None,
       submissionId = None,
-      statistics = Some(statistics),
     )
     val someTransactionMeta = state.TransactionMeta(
       ledgerEffectiveTime = Time.Timestamp.assertFromLong(2),

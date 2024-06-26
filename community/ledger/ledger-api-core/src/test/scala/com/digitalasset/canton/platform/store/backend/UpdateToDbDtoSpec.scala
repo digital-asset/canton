@@ -1663,7 +1663,6 @@ object UpdateToDbDtoSpec {
     commandId = someCommandId,
     optDeduplicationPeriod = None,
     submissionId = Some(someSubmissionId),
-    statistics = None,
   )
   private val someDomainId1 = DomainId.tryFromString("x::domain1")
   private val someTransactionMeta = state.TransactionMeta(

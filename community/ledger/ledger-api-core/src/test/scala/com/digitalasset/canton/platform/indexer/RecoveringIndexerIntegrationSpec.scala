@@ -24,6 +24,7 @@ import com.digitalasset.canton.logging.{
 }
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.LedgerApiServer
+import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.platform.config.{
   CommandServiceConfig,
   IndexServiceConfig,
@@ -254,6 +255,7 @@ class RecoveringIndexerIntegrationSpec
       (inMemoryState, inMemoryStateUpdaterFlow) <-
         LedgerApiServer
           .createInMemoryStateAndUpdater(
+            commandProgressTracker = CommandProgressTracker.NoOp,
             IndexServiceConfig(),
             CommandServiceConfig.DefaultMaxCommandsInFlight,
             metrics,
@@ -291,6 +293,7 @@ class RecoveringIndexerIntegrationSpec
         ),
         highAvailability = HaConfig(),
         indexServiceDbDispatcher = Some(dbSupport.dbDispatcher),
+        excludedPackageIds = Set.empty,
       )(materializer, traceContext)
     } yield (participantState._2, dbSupport)
   }

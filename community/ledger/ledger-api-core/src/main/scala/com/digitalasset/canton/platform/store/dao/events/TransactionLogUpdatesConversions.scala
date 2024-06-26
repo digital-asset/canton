@@ -183,7 +183,7 @@ private[events] object TransactionLogUpdatesConversions {
               effectiveAt = Some(TimestampConversion.fromLf(transactionAccepted.effectiveAt)),
               events = flatEvents,
               offset = ApiOffset.toApiString(transactionAccepted.offset),
-              domainId = transactionAccepted.domainId.getOrElse(""),
+              domainId = transactionAccepted.domainId,
               traceContext = SerializableTraceContext(traceContext).toDamlProtoOpt,
               recordTime = Some(TimestampConversion.fromLf(transactionAccepted.recordTime)),
             )
@@ -388,7 +388,7 @@ private[events] object TransactionLogUpdatesConversions {
               offset = ApiOffset.toApiString(transactionAccepted.offset),
               eventsById = eventsById,
               rootEventIds = rootEventIds,
-              domainId = transactionAccepted.domainId.getOrElse(""),
+              domainId = transactionAccepted.domainId,
               traceContext = SerializableTraceContext(traceContext).toDamlProtoOpt,
               recordTime = Some(TimestampConversion.fromLf(transactionAccepted.recordTime)),
             )

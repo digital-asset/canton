@@ -43,7 +43,6 @@ object DefaultParticipantStateValues {
       commandId: CommandId = DefaultDamlValues.commandId(),
       optDeduplicationPeriod: Option[DeduplicationPeriod] = Some(deduplicationDuration),
       submissionId: Option[Ref.SubmissionId] = DefaultDamlValues.submissionId().some,
-      statistics: Option[LedgerTransactionNodeStatistics] = None,
   ): CompletionInfo =
     CompletionInfo(
       actAs,
@@ -51,7 +50,6 @@ object DefaultParticipantStateValues {
       commandId.unwrap,
       optDeduplicationPeriod,
       submissionId,
-      statistics,
     )
 
   def transactionMeta(

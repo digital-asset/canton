@@ -28,6 +28,7 @@ import com.digitalasset.canton.ledger.participant.state.{
 }
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.pekkostreams.dispatcher.Dispatcher
+import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater.PrepareResult
 import com.digitalasset.canton.platform.index.InMemoryStateUpdaterSpec.*
@@ -208,7 +209,7 @@ object InMemoryStateUpdaterSpec {
         offset = offset(1L),
         events = Vector(),
         completionDetails = None,
-        domainId = Some(domainId1.toProtoPrimitive),
+        domainId = domainId1.toProtoPrimitive,
         recordTime = Timestamp.Epoch,
       )
     )(emptyTraceContext)
@@ -295,6 +296,7 @@ object InMemoryStateUpdaterSpec {
     val dispatcherState: DispatcherState = mock[DispatcherState]
     val submissionTracker: SubmissionTracker = mock[SubmissionTracker]
     val dispatcher: Dispatcher[Offset] = mock[Dispatcher[Offset]]
+    val commandProgressTracker = CommandProgressTracker.NoOp
 
     val inOrder: InOrder = inOrder(
       ledgerEndCache,
@@ -315,6 +317,7 @@ object InMemoryStateUpdaterSpec {
       stringInterningView = stringInterningView,
       dispatcherState = dispatcherState,
       submissionTracker = submissionTracker,
+      commandProgressTracker = commandProgressTracker,
       loggerFactory = loggerFactory,
     )(executorService)
 
@@ -367,7 +370,7 @@ object InMemoryStateUpdaterSpec {
           offset = tx_accepted_withCompletionDetails_offset,
           events = (1 to 3).map(_ => mock[TransactionLogUpdate.Event]).toVector,
           completionDetails = Some(tx_accepted_completionDetails),
-          domainId = None,
+          domainId = domainId1.toProtoPrimitive,
           recordTime = Timestamp(1),
         )
       )(emptyTraceContext)
@@ -509,7 +512,6 @@ object InMemoryStateUpdaterSpec {
         commandId = Ref.CommandId.assertFromString("cmdId"),
         optDeduplicationPeriod = None,
         submissionId = None,
-        statistics = None,
       ),
       reasonTemplate = FinalReason(new Status()),
       domainId = DomainId.tryFromString("da::default"),

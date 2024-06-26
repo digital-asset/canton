@@ -11,7 +11,8 @@ import com.daml.lf.data.{ImmArray, Ref, Time}
 import com.daml.lf.engine.*
 import com.daml.lf.interpretation.Error as LfInterpretationError
 import com.daml.lf.language.Ast.Package
-import com.daml.lf.language.{LanguageMajorVersion, LanguageVersion}
+import com.daml.lf.language.LanguageVersion
+import com.daml.lf.language.LanguageVersion.v2_dev
 import com.daml.lf.transaction.{ContractKeyUniquenessMode, TransactionVersion, Versioned}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -41,6 +42,7 @@ import scala.util.{Failure, Success}
 object DAMLe {
   def newEngine(
       enableLfDev: Boolean,
+      enableLfBeta: Boolean,
       enableStackTraces: Boolean,
       profileDir: Option[Path] = None,
       iterationsBetweenInterruptions: Long =
@@ -48,14 +50,10 @@ object DAMLe {
   ): Engine =
     new Engine(
       EngineConfig(
-        allowedLanguageVersions =
-          if (enableLfDev)
-            LanguageVersion.AllVersions(LanguageMajorVersion.V2)
-          else
-            VersionRange(
-              LanguageVersion.v2_1,
-              LanguageVersion.StableVersions(LanguageMajorVersion.V2).max,
-            ),
+        allowedLanguageVersions = VersionRange(
+          LanguageVersion.v2_1,
+          maxVersion(enableLfDev, enableLfBeta),
+        ),
         // The package store contains only validated packages, so we can skip validation upon loading
         packageValidation = false,
         stackTraceMode = enableStackTraces,
@@ -65,6 +63,11 @@ object DAMLe {
         iterationsBetweenInterruptions = iterationsBetweenInterruptions,
       )
     )
+
+  private def maxVersion(enableLfDev: Boolean, enableLfBeta: Boolean) =
+    if (enableLfDev) v2_dev
+    else if (enableLfBeta) LanguageVersion.EarlyAccessVersions(LanguageVersion.Major.V2).max
+    else LanguageVersion.StableVersions(LanguageVersion.Major.V2).max
 
   /** Resolves packages by [[com.daml.lf.data.Ref.PackageId]].
     * The returned packages must have been validated

@@ -610,13 +610,8 @@ final case class SerializableCompletionInfo(completionInfo: CompletionInfo) {
       commandId,
       deduplicateUntil,
       submissionId,
-      statistics,
     ) =
       completionInfo
-    require(
-      statistics.isEmpty,
-      "Statistics are only set before emitting CompletionInfo in CantonSyncService",
-    )
     v30.CompletionInfo(
       actAs,
       applicationId,
@@ -645,7 +640,6 @@ object SerializableCompletionInfo {
       commandId,
       deduplicateUntil,
       submissionId,
-      statistics = None,
     )
   }
 }
