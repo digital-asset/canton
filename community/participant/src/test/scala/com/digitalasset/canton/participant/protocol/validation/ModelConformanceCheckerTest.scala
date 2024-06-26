@@ -8,8 +8,7 @@ import cats.syntax.parallel.*
 import com.daml.lf.data.ImmArray
 import com.daml.lf.data.Ref.{PackageId, PackageName}
 import com.daml.lf.engine.Error as LfError
-import com.daml.lf.language.Ast.{Expr, GenPackage}
-import com.daml.lf.language.LanguageVersion
+import com.daml.lf.language.{Ast, LanguageVersion}
 import com.daml.lf.value.Value
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.crypto.{HashAlgorithm, HashPurpose}
@@ -20,6 +19,7 @@ import com.digitalasset.canton.data.{
   SerializableKeyResolution,
   TransactionView,
 }
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggingContext
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactoryImpl
@@ -33,6 +33,7 @@ import com.digitalasset.canton.participant.util.DAMLe.{HasReinterpret, PackageRe
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.store.PackageDependencyResolverUS
 import com.digitalasset.canton.topology.transaction.VettedPackages
 import com.digitalasset.canton.topology.{TestingIdentityFactory, TestingTopology}
 import com.digitalasset.canton.tracing.TraceContext
@@ -54,7 +55,6 @@ import pprint.Tree
 import java.time.Duration
 import scala.annotation.unused
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.Left
 
 class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
 
@@ -162,11 +162,19 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
     val rootViewTrees = views.map(_._1)
     val commonData = TransactionProcessingSteps.tryCommonData(rootViewTrees)
     val keyResolvers = views.forgetNE.flatMap { case (_, resolvers) => resolvers }.toMap
-    mcc.check(rootViewTrees, keyResolvers, RequestCounter(0), ips, commonData)
+    mcc
+      .check(rootViewTrees, keyResolvers, RequestCounter(0), ips, commonData)
+      .failOnShutdown
   }
 
-  private val genPackage = GenPackage[Expr](Map.empty, Set.empty, LanguageVersion.default, None)
-  private val packageResolver: PackageResolver = _ => _ => Future.successful(Some(genPackage))
+  private val pkg = Ast.GenPackage[Ast.Expr](
+    modules = Map.empty,
+    directDeps = Set.empty,
+    languageVersion = LanguageVersion.default,
+    metadata = None,
+    isUtilityPackage = true,
+  )
+  private val packageResolver: PackageResolver = _ => _ => Future.successful(Some(pkg))
 
   val preReinterpretationPackageIds: PackageIdsOfView =
     if (testedProtocolVersion >= ProtocolVersion.v6)
@@ -183,7 +191,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
       dummyAuthenticator,
       packageResolver,
       preReinterpretationPackageIds,
-      checkUsedPackages = (testedProtocolVersion >= ProtocolVersion.v6),
+      checkUsedPackages = testedProtocolVersion >= ProtocolVersion.v6,
       loggerFactory,
     )
 
@@ -388,7 +396,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
           NonEmpty.from(factory.SingleCreate(lfHash(0)).rootTransactionViewTrees).value,
           // The package is not vetted for signatoryParticipant
           vettings = Seq(VettedPackages(submitterParticipant, Seq(packageId))),
-          packageDependenciesLookup = _ => EitherT.rightT(Set()),
+          packageDependenciesLookup = new TestPackageResolver(Right(Set.empty)),
           expectedError = UnvettedPackages(Map(signatoryParticipant -> Set(packageId))),
         )
       }
@@ -415,7 +423,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
           NonEmpty(Seq, viewTree),
           // The package is not vetted for submitterParticipant
           vettings = Seq.empty,
-          packageDependenciesLookup = _ => EitherT.rightT(Set()),
+          packageDependenciesLookup = new TestPackageResolver(Right(Set.empty)),
           expectedError = UnvettedPackages(
             Map(
               submitterParticipant -> Set(exercise.contractInstance.unversioned.template.packageId)
@@ -428,7 +436,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
     def testVettingError(
         rootViewTrees: NonEmpty[Seq[FullTransactionViewTree]],
         vettings: Seq[VettedPackages],
-        packageDependenciesLookup: PackageId => EitherT[Future, PackageId, Set[PackageId]],
+        packageDependenciesLookup: PackageDependencyResolverUS,
         expectedError: UnvettedPackages,
     ): Future[Assertion] = {
       import ExampleTransactionFactory.*
@@ -466,7 +474,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
           // Submitter participant is unable to lookup dependencies.
           // Therefore, the validation concludes that the package is not in the store
           // and thus that the package is not vetted.
-          packageDependenciesLookup = EitherT.leftT(_),
+          packageDependenciesLookup = new TestPackageResolver(Left(packageId)),
           expectedError = UnvettedPackages(Map(submitterParticipant -> Set(packageId))),
         )
       }
@@ -615,4 +623,15 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
       }
     }
   }
+
+  class TestPackageResolver(result: Either[PackageId, Set[PackageId]])
+      extends PackageDependencyResolverUS {
+    import cats.syntax.either.*
+    override def packageDependencies(packages: List[PackageId])(implicit
+        traceContext: TraceContext
+    ): EitherT[FutureUnlessShutdown, PackageId, Set[PackageId]] = {
+      result.toEitherT
+    }
+  }
+
 }

@@ -11,12 +11,13 @@ import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.ledger.api.v1.admin.package_management_service.{
   PackageManagementServiceGrpc,
   UploadDarFileRequest,
+  ValidateDarFileRequest,
+  ValidateDarFileResponse,
 }
 import com.daml.lf.archive.testing.Encode
 import com.daml.lf.archive.{Dar, GenDarReader}
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Time.Timestamp
-import com.daml.lf.language.Ast.Expr
 import com.daml.lf.language.{Ast, LanguageVersion}
 import com.daml.tracing.TelemetrySpecBase.*
 import com.daml.tracing.{DefaultOpenTelemetry, NoOpTelemetry}
@@ -26,7 +27,7 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
   IndexPackagesService,
   IndexTransactionsService,
 }
-import com.digitalasset.canton.ledger.participant.state.v2.SubmissionResult
+import com.digitalasset.canton.ledger.participant.state.v2.{ReadService, SubmissionResult}
 import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, SuppressionRule}
 import com.digitalasset.canton.tracing.{TestTelemetrySetup, TraceContext}
@@ -139,6 +140,7 @@ class ApiPackageManagementServiceSpec
         mockIndexPackagesService,
         mockIndexTransactionsService,
         writeService,
+        mock[ReadService],
         Duration.Zero,
         _ => Ref.SubmissionId.assertFromString("aSubmission"),
         telemetry = NoOpTelemetry,
@@ -179,6 +181,17 @@ class ApiPackageManagementServiceSpec
         }
     }
 
+    "validate a dar" in {
+      val darPayload = ByteString.copyFrom("SomeDar".getBytes)
+      val mockReadService = mock[ReadService]
+      when(mockReadService.validateDar(eqTo(darPayload))(anyTraceContext))
+        .thenReturn(Future.successful(SubmissionResult.Acknowledged))
+      val apiService = createApiService(mockReadService)
+      apiService
+        .validateDarFile(ValidateDarFileRequest(darPayload, aSubmissionId))
+        .map { case ValidateDarFileResponse() => succeed }
+    }
+
   }
 
   private def mockedServices(): (
@@ -209,7 +222,9 @@ class ApiPackageManagementServiceSpec
     )
   }
 
-  private def createApiService(): PackageManagementServiceGrpc.PackageManagementService = {
+  private def createApiService(
+      readService: ReadService = mock[ReadService]
+  ): PackageManagementServiceGrpc.PackageManagementService = {
     val (
       mockIndexTransactionsService,
       mockIndexPackagesService,
@@ -220,6 +235,7 @@ class ApiPackageManagementServiceSpec
       mockIndexPackagesService,
       mockIndexTransactionsService,
       TestWritePackagesService(testTelemetrySetup.tracer),
+      readService,
       Duration.Zero,
       _ => Ref.SubmissionId.assertFromString("aSubmission"),
       telemetry = new DefaultOpenTelemetry(OpenTelemetrySdk.builder().build()),
@@ -232,17 +248,18 @@ object ApiPackageManagementServiceSpec {
   private val aSubmissionId = "aSubmission"
 
   private val anArchive: Archive = {
-    val pkg = Ast.GenPackage[Expr](
-      Map.empty,
-      Set.empty,
-      LanguageVersion.default,
-      Some(
+    val pkg = Ast.GenPackage[Ast.Expr](
+      modules = Map.empty,
+      directDeps = Set.empty,
+      languageVersion = LanguageVersion.default,
+      metadata = Some(
         Ast.PackageMetadata(
           Ref.PackageName.assertFromString("aPackage"),
           Ref.PackageVersion.assertFromString("0.0.0"),
           None,
         )
       ),
+      isUtilityPackage = true,
     )
     Encode.encodeArchive(
       Ref.PackageId.assertFromString("-pkgId-") -> pkg,

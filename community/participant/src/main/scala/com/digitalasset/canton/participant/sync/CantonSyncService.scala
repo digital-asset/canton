@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.sync
 
 import cats.Eval
 import cats.data.EitherT
+import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
@@ -39,7 +40,6 @@ import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.v2.ReadService.ConnectedDomainResponse
 import com.digitalasset.canton.ledger.participant.state.v2.*
 import com.digitalasset.canton.lifecycle.{
-  CloseContext,
   FlagCloseable,
   FutureUnlessShutdown,
   HasCloseContext,
@@ -85,12 +85,14 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.{
   SyncServiceDomainDisabledUs,
   SyncServiceDomainDisconnect,
   SyncServiceFailedDomainConnection,
-  SyncServiceUnknownDomain,
 }
 import com.digitalasset.canton.participant.topology.*
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
 import com.digitalasset.canton.participant.util.DAMLe
-import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
+import com.digitalasset.canton.platform.apiserver.execution.{
+  AuthorityResolver,
+  CommandProgressTracker,
+}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.resource.Storage
@@ -282,6 +284,10 @@ class CantonSyncService(
       syncDomainPersistentStateManager.get(domainId.unwrap).map(_.transferStore),
     protocolVersionFor = protocolVersionGetter,
   )
+  val commandProgressTracker: CommandProgressTracker =
+    if (parameters.commandProgressTracking.enabled)
+      new CommandProgressTrackerImpl(parameters.commandProgressTracking, clock, loggerFactory)
+    else CommandProgressTracker.NoOp
 
   private val commandDeduplicator = new CommandDeduplicatorImpl(
     participantNodePersistentState.map(_.commandDeduplicationStore),
@@ -366,6 +372,8 @@ class CantonSyncService(
       stateInspection,
       repairService,
       prepareDomainConnectionForMigration,
+      sequencerInfoLoader,
+      connectedDomainsLookup,
       parameters.processingTimeouts,
       loggerFactory,
     )
@@ -377,6 +385,19 @@ class CantonSyncService(
       aliasManager,
       loggerFactory,
     )
+
+  private def trackSubmission(
+      submitterInfo: SubmitterInfo,
+      transaction: LfSubmittedTransaction,
+  ): Unit =
+    commandProgressTracker
+      .findHandle(
+        submitterInfo.commandId,
+        submitterInfo.applicationId,
+        submitterInfo.actAs,
+        submitterInfo.submissionId,
+      )
+      .recordTransactionImpact(transaction)
 
   // Submit a transaction (write service implementation)
   override def submitTransaction(
@@ -393,6 +414,7 @@ class CantonSyncService(
     withSpan("CantonSyncService.submitTransaction") { implicit traceContext => span =>
       span.setAttribute("command_id", submitterInfo.commandId)
       logger.debug(s"Received submit-transaction ${submitterInfo.commandId} from ledger-api server")
+      trackSubmission(submitterInfo, transaction)
       submitTransactionF(
         submitterInfo,
         transactionMeta,
@@ -661,6 +683,22 @@ class CantonSyncService(
     }
   }.asJava
 
+  override def validateDar(dar: ByteString)(implicit
+      traceContext: TraceContext
+  ): Future[SubmissionResult] =
+    withSpan("CantonSyncService.validateDar") { implicit traceContext => span =>
+      if (!isActive()) {
+        logger.debug("Rejecting DAR validation request on passive replica.")
+        Future.successful(TransactionError.PassiveNode)
+      } else {
+        packageService
+          .validateDar(payload = dar, darFileNameO = None)
+          .map(_ => SubmissionResult.Acknowledged)
+          .onShutdown(Left(CommonErrors.ServerIsShuttingDown.Reject()))
+          .valueOr(err => SubmissionResult.SynchronousError(err.rpcStatus()))
+      }
+    }
+
   /** Executes ordered sequence of steps to recover any state that might have been lost if the participant previously
     * crashed. Needs to be invoked after the input stores have been created, but before they are made available to
     * dependent components.
@@ -782,6 +820,7 @@ class CantonSyncService(
       .leftMap(e => SyncServiceError.SyncServiceUnknownDomain.Error(e.alias))
 
   /** Migrates contracts from a source domain to target domain by re-associating them in the participant's persistent store.
+    * Prune some of the domain stores after the migration.
     *
     * The migration only starts when certain preconditions are fulfilled:
     * - the participant is disconnected from the source and target domain
@@ -806,77 +845,9 @@ class CantonSyncService(
       force: Boolean,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] = {
-    def mustBeOffline(alias: DomainAlias, domainId: DomainId) = EitherT.cond[FutureUnlessShutdown](
-      !connectedDomainsMap.contains(domainId),
-      (),
-      SyncServiceError.SyncServiceDomainMustBeOffline.Error(alias): SyncServiceError,
-    )
-
+  ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
     for {
-      targetDomainInfo <- performUnlessClosingEitherU(functionFullName)(
-        sequencerInfoLoader
-          .loadSequencerEndpoints(target.domain, target.sequencerConnections)(
-            traceContext,
-            CloseContext(this),
-          )
-          .leftMap(DomainRegistryError.fromSequencerInfoLoaderError)
-          .leftMap[SyncServiceError](err =>
-            SyncServiceError.SyncServiceFailedDomainConnection(
-              target.domain,
-              DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(err.cause),
-            )
-          )
-      )
-      _ <- performUnlessClosingEitherU(functionFullName)(
-        aliasManager
-          .processHandshake(target.domain, targetDomainInfo.domainId)
-          .leftMap(DomainRegistryHelpers.fromDomainAliasManagerError)
-          .leftMap[SyncServiceError](err =>
-            SyncServiceError.SyncServiceFailedDomainConnection(
-              target.domain,
-              err,
-            )
-          )
-      )
-
-      sourceDomainId <- EitherT.fromEither[FutureUnlessShutdown](
-        aliasManager
-          .domainIdForAlias(source)
-          .toRight(
-            SyncServiceError.SyncServiceUnknownDomain.Error(source): SyncServiceError
-          )
-      )
-
-      // Perform all checks whether we can do the migration
-      _ <- mustBeOffline(source, sourceDomainId)
-      _ <- mustBeOffline(target.domain, targetDomainInfo.domainId)
-
-      hasInFlightSubmissions <- performUnlessClosingEitherU(functionFullName)(
-        stateInspection
-          .hasInFlightSubmissions(source)
-          .leftMap(_ => SyncServiceUnknownDomain.Error(source))
-      )
-      hasDirtyRequests <- performUnlessClosingEitherU(functionFullName)(
-        stateInspection
-          .hasDirtyRequests(source)
-          .leftMap(_ => SyncServiceUnknownDomain.Error(source))
-      )
-
-      _ <-
-        if (force) {
-          if (hasInFlightSubmissions || hasDirtyRequests) {
-            logger.info(
-              s"Ignoring existing in-flight transactions on domain with alias ${source.unwrap} because of forced migration. This may lead to a ledger fork."
-            )
-          }
-          EitherT.rightT[FutureUnlessShutdown, SyncServiceError](())
-        } else
-          EitherT.cond[FutureUnlessShutdown](
-            !hasInFlightSubmissions,
-            (),
-            SyncServiceError.SyncServiceDomainMustNotHaveInFlightTransactions.Error(source),
-          )
+      targetDomainInfo <- migrationService.isDomainMigrationPossible(source, target, force = force)
 
       _ <-
         connectQueue.executeEUS(
@@ -887,8 +858,24 @@ class CantonSyncService(
             ),
           "migrate domain",
         )
+
+      sourceDomainId <- EitherT.fromEither[FutureUnlessShutdown](
+        aliasManager
+          .domainIdForAlias(source)
+          .toRight(
+            SyncServiceError.SyncServiceUnknownDomain.Error(source): SyncServiceError
+          )
+      )
+
+      _ = logger.info(
+        s"Purging deactivated domain with alias $source with domain id $sourceDomainId"
+      )
+      _ <- migrationService
+        .pruneSelectedDeactivatedDomainStores(sourceDomainId)
+        .leftMap[SyncServiceError](
+          SyncServiceError.SyncServiceMigrationError(source, target.domain, _)
+        )
     } yield ()
-  }
 
   /* Verify that specified domain has inactive status and selectively prune sync domain stores.
    */
@@ -914,9 +901,10 @@ class CantonSyncService(
       _ = logger.info(
         s"Purging deactivated domain with alias $domain with domain id $domainId"
       )
-      _ <- pruningProcessor
+      _ <- migrationService
         .pruneSelectedDeactivatedDomainStores(domainId)
-        .transform(pruningErrorToCantonError)
+        .leftMap(err => PruningServiceError.InternalServerError.Error(err.cause))
+        .leftWiden[CantonError]
     } yield ()
   }
 
@@ -1287,6 +1275,7 @@ class CantonSyncService(
           missingKeysAlerter,
           transferCoordination,
           inFlightSubmissionTracker,
+          commandProgressTracker,
           clock,
           metrics.pruning,
           domainMetrics,
@@ -1888,8 +1877,6 @@ object SyncServiceError extends SyncServiceErrorGroup {
   abstract class MigrationErrors extends ErrorGroup()
 
   abstract class DomainRegistryErrorGroup extends ErrorGroup()
-
-  abstract class TrafficControlErrorGroup extends ErrorGroup()
 
   final case class SyncServiceFailedDomainConnection(
       domain: DomainAlias,

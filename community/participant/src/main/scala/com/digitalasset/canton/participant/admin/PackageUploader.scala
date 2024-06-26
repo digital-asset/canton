@@ -16,7 +16,7 @@ import com.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.{String255, String256M}
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto.{HashOps, HashPurpose}
+import com.digitalasset.canton.crypto.{Hash, HashOps, HashPurpose}
 import com.digitalasset.canton.ledger.error.PackageServiceErrors
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
@@ -88,7 +88,27 @@ class PackageUploader(
     loggerFactory = loggerFactory,
   )
 
-  def validateAndStorePackages(
+  def validateDar(
+      payload: ByteString,
+      darFileNameO: Option[String],
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, DamlError, Hash] = {
+    logger.info(s"Validating DAR file${darFileNameO.map(fn => s" $fn").getOrElse("")}.")
+    performUnlessClosingEitherUSF("validate DAR") {
+      val hash = hashOps.digest(HashPurpose.DarIdentifier, payload)
+      val stream = new ZipInputStream(payload.newInput())
+      for {
+        dar <- catchUpstreamErrors(DarParser.readArchive("dar-validate", stream))
+          .thereafter { _ => stream.close() }
+        mainPackage <- catchUpstreamErrors(Decode.decodeArchive(dar.main))
+        dependencies <- dar.dependencies.parTraverse(archive =>
+          catchUpstreamErrors(Decode.decodeArchive(archive))
+        )
+        _ <- validatePackages(mainPackage :: dependencies)
+      } yield hash
+    }
+  }
+
+  def validateAndStoreDar(
       darPayload: ByteString,
       fileNameO: Option[String],
       submissionId: LedgerSubmissionId,
@@ -117,7 +137,7 @@ class PackageUploader(
         )
       )
       dar <- catchUpstreamErrors(
-        DarParser.readArchive(darNameO.getOrElse("package-upload"), stream)
+        DarParser.readArchive(darNameO.getOrElse("dar-upload"), stream)
       ).thereafter(_ => stream.close())
       _ = logger.debug(
         s"Processing package upload of ${dar.all.length} packages${lengthValidatedNameO.map(src => s" from source $src").getOrElse("")}"
@@ -152,8 +172,11 @@ class PackageUploader(
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Either[DamlError, Unit]] = {
     def persist(allPackages: List[(DamlLf.Archive, (LfPackageId, Ast.Package))]) = {
       val packagesToStore = allPackages.map { case (archive, (pkgId, astPackage)) =>
-        val upgradingPkg = astPackage.languageVersion >= LanguageVersion.Features.packageUpgrades
-        // Package-name and package versions are only relevant for LF versions supporting smart contract upgrading
+        val upgradingPkg =
+          astPackage.languageVersion >= LanguageVersion.Features.packageUpgrades && !astPackage.isUtilityPackage
+        // Package-name and package versions are only relevant for packages that support smart contract upgrading
+        // This is defined as LF >= 1.16 and not a "utility package" - which is a package that does not define any serializable types/templates/interfaces
+        //   and as such, does not interact with upgrades at runtime.
         val pkgNameO = astPackage.metadata.filter(_ => upgradingPkg).map(_.name)
         val pkgVersionO = astPackage.metadata.filter(_ => upgradingPkg).map(_.version)
         pkgId -> (archive, pkgNameO, pkgVersionO)
@@ -182,7 +205,9 @@ class PackageUploader(
             updateWithPackage(pkgId, pkgName, pkgVersion)
           case _other =>
             // Do nothing as package-name and package-version were filtered before to only be present
-            // for packages with language version >= 1.16 (supporting smart contract upgrading)
+            // for packages that support smart contract upgrading.
+            // This is defined as LF >= 1.16 and not a "utility package" - which is a package that does not define any serializable types/templates/interfaces
+            //   and as such, does not interact with upgrades at runtime.
             ()
         }
       } yield ()

@@ -55,7 +55,8 @@ class PackageUpgradeValidator(
       case Nil => EitherT.pure[Future, DamlError](packageMap)
       case pkgId :: rest =>
         val pkg = upgradingPackagesMap(pkgId)
-        val supportsUpgrades = pkg.languageVersion >= LanguageVersion.Features.packageUpgrades
+        val supportsUpgrades =
+          pkg.languageVersion >= LanguageVersion.Features.packageUpgrades && !pkg.isUtilityPackage
         pkg.metadata match {
           case Some(pkgMetadata) =>
             for {
@@ -113,6 +114,7 @@ class PackageUpgradeValidator(
           )
           _ <- typecheckUpgrades(
             TypecheckUpgrades.MaximalDarCheck,
+            packageMap,
             optUpgradingDar,
             optMaximalDar,
           )
@@ -121,6 +123,7 @@ class PackageUpgradeValidator(
           )
           r <- typecheckUpgrades(
             TypecheckUpgrades.MinimalDarCheck,
+            packageMap,
             optMinimalDar,
             optUpgradingDar,
           )
@@ -188,6 +191,7 @@ class PackageUpgradeValidator(
 
   private def strictTypecheckUpgrades(
       phase: TypecheckUpgrades.UploadPhaseCheck,
+      packageMap: PackageMap,
       optNewDar1: Option[(Ref.PackageId, Ast.Package)],
       oldPkgId2: Ref.PackageId,
       optOldPkg2: Option[Ast.Package],
@@ -205,7 +209,7 @@ class PackageUpgradeValidator(
           EitherT(
             Future(
               TypecheckUpgrades
-                .typecheckUpgrades((newPkgId1, newPkg1), oldPkgId2, optOldPkg2)
+                .typecheckUpgrades(packageMap, (newPkgId1, newPkg1), oldPkgId2, optOldPkg2)
                 .toEither
             )
           ).leftMap[DamlError] {
@@ -222,6 +226,7 @@ class PackageUpgradeValidator(
 
   private def typecheckUpgrades(
       typecheckPhase: TypecheckUpgrades.UploadPhaseCheck,
+      packageMap: PackageMap,
       optNewDar1: Option[(Ref.PackageId, Ast.Package)],
       optOldDar2: Option[(Ref.PackageId, Ast.Package)],
   )(implicit
@@ -233,6 +238,7 @@ class PackageUpgradeValidator(
       case (Some((newPkgId1, newPkg1)), Some((oldPkgId2, oldPkg2))) =>
         strictTypecheckUpgrades(
           typecheckPhase,
+          packageMap,
           Some((newPkgId1, newPkg1)),
           oldPkgId2,
           Some(oldPkg2),

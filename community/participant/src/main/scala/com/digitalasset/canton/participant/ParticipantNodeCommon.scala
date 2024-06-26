@@ -19,7 +19,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.{DbConfig, H2DbConfig}
 import com.digitalasset.canton.crypto.{Crypto, SyncCryptoApiProvider}
 import com.digitalasset.canton.domain.api.v0.DomainTimeServiceGrpc
-import com.digitalasset.canton.environment.{CantonNode, CantonNodeBootstrapCommon}
+import com.digitalasset.canton.environment.{CantonNode, CantonNodeBootstrapBase}
 import com.digitalasset.canton.health.MutableHealthComponent
 import com.digitalasset.canton.http.metrics.HttpApiMetrics
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -146,6 +146,7 @@ class CantonLedgerApiServerFactory(
             cantonParameterConfig = parameters,
             testingTimeService = ledgerTestingTimeService,
             adminToken = adminToken,
+            enableCommandInspection = config.ledgerApi.enableCommandInspection,
             loggerFactory = loggerFactory,
             tracerProvider = tracerProvider,
             metrics = metrics,
@@ -188,7 +189,7 @@ private[this] trait ParticipantComponentBootstrapFactory {
 }
 
 trait ParticipantNodeBootstrapCommon {
-  this: CantonNodeBootstrapCommon[
+  this: CantonNodeBootstrapBase[
     _,
     LocalParticipantConfig,
     ParticipantNodeParameters,
@@ -395,7 +396,7 @@ trait ParticipantNodeBootstrapCommon {
         arguments.testingConfig,
         recordSequencerInteractions,
         replaySequencerConfig,
-        packageId => packageDependencyResolver.packageDependencies(List(packageId)),
+        packageDependencyResolver,
         arguments.metrics.domainMetrics,
         sequencerInfoLoader,
         futureSupervisor,
