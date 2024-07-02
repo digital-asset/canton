@@ -55,6 +55,11 @@ trait SequencerWriterStore extends AutoCloseable {
   ): Future[Unit] =
     store.saveEvents(instanceIndex, events)
 
+  def resetWatermark(ts: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, SaveWatermarkError, Unit] =
+    store.resetWatermark(instanceIndex, ts)
+
   /** Write the watermark that we promise not to write anything earlier than.
     * Does not indicate that there is an event written by this sequencer for this timestamp as there may be no activity
     * at the sequencer, but updating the timestamp allows the sequencer to indicate that it's still alive.
@@ -87,8 +92,11 @@ trait SequencerWriterStore extends AutoCloseable {
   /** Delete all events that are ahead of the watermark of this sequencer.
     * These events will not have been read and should be removed before returning the sequencer online.
     * Should not be called alongside updating the watermark for this sequencer and only while the sequencer is offline.
+    * Returns the watermark that was used for the deletion.
     */
-  def deleteEventsPastWatermark()(implicit traceContext: TraceContext): Future[Unit] =
+  def deleteEventsPastWatermark()(implicit
+      traceContext: TraceContext
+  ): Future[Option[CantonTimestamp]] =
     store.deleteEventsPastWatermark(instanceIndex)
 
 }

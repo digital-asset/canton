@@ -5,8 +5,6 @@ package com.digitalasset.canton.platform.apiserver
 
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.ledger.resources.ResourceOwner
-import com.daml.lf.data.Ref
-import com.daml.lf.engine.Engine
 import com.daml.tls.TlsConfiguration
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.config.RequireTypes.Port
@@ -44,6 +42,8 @@ import com.digitalasset.canton.platform.config.{
   UserManagementServiceConfig,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.daml.lf.engine.Engine
 import io.grpc.{BindableService, ServerInterceptor}
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.actor.ActorSystem

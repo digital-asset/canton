@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant
 import cats.Eval
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.daml.lf.engine.Engine
 import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
   FutureSupervisor,
@@ -27,6 +26,7 @@ import com.digitalasset.canton.platform.indexer.ha.HaConfig
 import com.digitalasset.canton.time.*
 import com.digitalasset.canton.tracing.{TraceContext, TracerProvider}
 import com.digitalasset.canton.{LedgerParticipantId, LfPackageId}
+import com.digitalasset.daml.lf.engine.Engine
 import org.apache.pekko.actor.ActorSystem
 
 class CantonLedgerApiServerFactory(
@@ -130,6 +130,7 @@ class CantonLedgerApiServerFactory(
           futureSupervisor = futureSupervisor,
           parameters = parameters,
           excludedPackageIds = excludedPackageIds,
+          ledgerApiStore = participantNodePersistentState.map(_.ledgerApiStore),
         )(executionContext, actorSystem)
         .leftMap { err =>
           // The MigrateOnEmptySchema exception is private, thus match on the expected message

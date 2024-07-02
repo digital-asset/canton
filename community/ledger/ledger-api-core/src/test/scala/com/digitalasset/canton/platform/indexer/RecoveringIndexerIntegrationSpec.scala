@@ -4,8 +4,6 @@
 package com.digitalasset.canton.platform.indexer
 
 import com.daml.ledger.resources.ResourceOwner
-import com.daml.lf.data.Ref.{Party, SubmissionId}
-import com.daml.lf.data.{Ref, Time}
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.health.HealthStatus
 import com.digitalasset.canton.ledger.participant.state.{
@@ -40,9 +38,12 @@ import com.digitalasset.canton.platform.store.DbSupport.{
   ParticipantDataSourceConfig,
 }
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
+import com.digitalasset.canton.platform.store.interning.StringInterningView
 import com.digitalasset.canton.tracing.TraceContext.{withNewTraceContext, wrapWithNewTraceContext}
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, Traced}
 import com.digitalasset.canton.{HasExecutionContext, config}
+import com.digitalasset.daml.lf.data.Ref.{Party, SubmissionId}
+import com.digitalasset.daml.lf.data.{Ref, Time}
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.ActorSystem
@@ -252,6 +253,8 @@ class RecoveringIndexerIntegrationSpec
       servicesExecutionContext <- ResourceOwner
         .forExecutorService(() => Executors.newWorkStealingPool())
         .map(ExecutionContext.fromExecutorService)
+      mutableLedgerEndCache = MutableLedgerEndCache()
+      stringInterningView = new StringInterningView(loggerFactory)
       (inMemoryState, inMemoryStateUpdaterFlow) <-
         LedgerApiServer
           .createInMemoryStateAndUpdater(
@@ -262,7 +265,7 @@ class RecoveringIndexerIntegrationSpec
             parallelExecutionContext,
             tracer,
             loggerFactory,
-          )
+          )(mutableLedgerEndCache, stringInterningView)
       dbSupport <- DbSupport
         .owner(
           serverRole = ServerRole.Testing(getClass),

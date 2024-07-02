@@ -355,6 +355,12 @@ object Dependencies {
     "com.daml" %% "daml-lf-parser" % daml_libraries_version
   lazy val daml_lf_archive_encoder =
     "com.daml" %% "daml-lf-archive-encoder" % daml_libraries_version
+  lazy val daml_ledger_api_value =
+    "com.daml" % "ledger-api-value-proto" % daml_libraries_version
+  lazy val daml_ledger_api_value_java =
+    "com.daml" % "ledger-api-value-java-proto" % daml_libraries_version
+  lazy val daml_ledger_api_value_scala =
+    "com.daml" %% "ledger-api-value-scalapb" % daml_libraries_version
 
   // daml repo dependencies
   lazy val fasterjackson_core = resolveDependency("com.fasterxml.jackson.core", "jackson-core")

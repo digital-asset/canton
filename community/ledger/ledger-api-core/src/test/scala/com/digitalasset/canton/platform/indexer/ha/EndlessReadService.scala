@@ -4,12 +4,6 @@
 package com.digitalasset.canton.platform.indexer.ha
 
 import cats.syntax.bifunctor.toBifunctorOps
-import com.daml.lf.crypto
-import com.daml.lf.data.Ref
-import com.daml.lf.data.Time.Timestamp
-import com.daml.lf.transaction.CommittedTransaction
-import com.daml.lf.transaction.test.{TestNodeBuilder, TreeTransactionBuilder}
-import com.daml.lf.value.Value
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.health.HealthStatus
 import com.digitalasset.canton.ledger.participant.state.{
@@ -23,6 +17,12 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext.wrapWithNewTraceContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.daml.lf.crypto
+import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.daml.lf.data.Time.Timestamp
+import com.digitalasset.daml.lf.transaction.CommittedTransaction
+import com.digitalasset.daml.lf.transaction.test.{TestNodeBuilder, TreeTransactionBuilder}
+import com.digitalasset.daml.lf.value.Value
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.KillSwitches
 import org.apache.pekko.stream.scaladsl.Source

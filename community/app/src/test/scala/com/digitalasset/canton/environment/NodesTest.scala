@@ -129,7 +129,6 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
         OpenTelemetrySdk.builder().build(),
         SdkTracerProvider.builder(),
         OnDemandMetricsReader.NoOpOnDemandMetricsReader$,
-        metricsEnabled = false,
       ),
     )
 

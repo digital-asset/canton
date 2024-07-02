@@ -3,18 +3,6 @@
 
 package com.digitalasset.canton.platform.store.backend
 
-import com.daml.lf.crypto.Hash
-import com.daml.lf.data.{ImmArray, Ref, Time}
-import com.daml.lf.transaction.TransactionNodeStatistics.EmptyActions
-import com.daml.lf.transaction.test.{TestNodeBuilder, TransactionBuilder}
-import com.daml.lf.transaction.{
-  CommittedTransaction,
-  NodeId,
-  TransactionNodeStatistics,
-  TransactionVersion,
-  VersionedTransaction,
-}
-import com.daml.lf.value.Value
 import com.daml.metrics.api.testing.{InMemoryMetricsFactory, MetricValues}
 import com.daml.metrics.api.{MetricName, MetricsContext}
 import com.digitalasset.canton.data.Offset
@@ -23,6 +11,18 @@ import com.digitalasset.canton.ledger.participant.state.Update
 import com.digitalasset.canton.metrics.IndexedUpdatesMetrics
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.daml.lf.crypto.Hash
+import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.transaction.TransactionNodeStatistics.EmptyActions
+import com.digitalasset.daml.lf.transaction.test.{TestNodeBuilder, TransactionBuilder}
+import com.digitalasset.daml.lf.transaction.{
+  CommittedTransaction,
+  NodeId,
+  TransactionNodeStatistics,
+  TransactionVersion,
+  VersionedTransaction,
+}
+import com.digitalasset.daml.lf.value.Value
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.time.Instant

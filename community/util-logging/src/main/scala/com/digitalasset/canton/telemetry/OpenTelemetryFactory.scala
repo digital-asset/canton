@@ -128,7 +128,6 @@ object OpenTelemetryFactory {
       tracerProviderBuilder = tracerProviderBuilder,
       onDemandMetricsReader =
         if (metricsEnabled) onDemandMetricReader else NoOpOnDemandMetricsReader$,
-      metricsEnabled = metricsEnabled,
     )
 
   }

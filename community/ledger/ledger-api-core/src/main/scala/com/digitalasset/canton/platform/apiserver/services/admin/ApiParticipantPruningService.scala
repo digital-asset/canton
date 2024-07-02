@@ -9,7 +9,6 @@ import com.daml.ledger.api.v2.admin.participant_pruning_service.{
   PruneRequest,
   PruneResponse,
 }
-import com.daml.lf.data.Ref
 import com.daml.metrics.Tracked
 import com.daml.metrics.api.MetricsContext
 import com.daml.scalautil.future.FutureConversion.CompletionStageConversionOps
@@ -42,6 +41,7 @@ import com.digitalasset.canton.platform.ApiOffset.ApiOffsetConverter
 import com.digitalasset.canton.platform.apiserver.ApiException
 import com.digitalasset.canton.platform.apiserver.services.logging
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.daml.lf.data.Ref
 import io.grpc.protobuf.StatusProto
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 

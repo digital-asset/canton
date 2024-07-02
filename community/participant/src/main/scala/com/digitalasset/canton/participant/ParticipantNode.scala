@@ -8,7 +8,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.option.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.lf.engine.Engine
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.admin.participant.v30.*
@@ -94,6 +93,7 @@ import com.digitalasset.canton.version.{
   ProtocolVersionCompatibility,
   ReleaseProtocolVersion,
 }
+import com.digitalasset.daml.lf.engine.Engine
 import io.grpc.ServerServiceDefinition
 import org.apache.pekko.actor.ActorSystem
 
@@ -543,11 +543,14 @@ class ParticipantNodeBootstrap(
         persistentStateFactory.create(
           syncDomainPersistentStateManager,
           storage,
+          config.storage,
           clock,
           config.init.ledgerApi.maxDeduplicationDuration.toInternal.some,
           parameterConfig.batchingConfig,
           ReleaseProtocolVersion.latest,
           arguments.metrics,
+          participantId.toLf,
+          config.ledgerApi,
           indexedStringStore,
           parameterConfig.processingTimeouts,
           futureSupervisor,

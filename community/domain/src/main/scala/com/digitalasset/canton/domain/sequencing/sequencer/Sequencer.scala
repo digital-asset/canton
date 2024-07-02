@@ -258,11 +258,12 @@ object Sequencer extends HasLoggerName {
     */
   type SenderSigned[A <: HasCryptographicEvidence] = SignedContent[A]
 
-  /** Type alias for content that has been signed but the sequencer. The purpose of this is to identify which sequencer has processed a submission request,
+  /** Type alias for content that has been signed by the sequencer. The purpose of this is to identify which sequencer has processed a submission request,
     * such that after the request is ordered and processed by all sequencers, each sequencer knows which sequencer received the submission request.
     * The signature here will always be one of a sequencer.
     */
-  type SequencerSigned[A <: HasCryptographicEvidence] = SignedContent[SenderSigned[A]]
+  type SequencerSigned[A <: HasCryptographicEvidence] =
+    SignedContent[OrderingRequest[SenderSigned[A]]]
 
   /** Ordering request signed by the sequencer.
     * Outer signature is the signature of the sequencer that received the submission request.
@@ -290,9 +291,8 @@ object Sequencer extends HasLoggerName {
 
   implicit class SignedOrderingRequestOps(val value: SignedOrderingRequest) extends AnyVal {
     def signedSubmissionRequest: SignedContent[SubmissionRequest] =
-      value.content
+      value.content.content
     def submissionRequest: SubmissionRequest = signedSubmissionRequest.content
-    def toByteString = value.toByteString
   }
 
   type RegisterError = SequencerWriteError[RegisterMemberError]

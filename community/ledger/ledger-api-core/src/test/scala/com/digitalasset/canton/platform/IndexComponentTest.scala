@@ -5,10 +5,6 @@ package com.digitalasset.canton.platform
 
 import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.ledger.resources.{Resource, ResourceContext}
-import com.daml.lf.data.Ref
-import com.daml.lf.engine.{Engine, EngineConfig}
-import com.daml.lf.language.{LanguageMajorVersion, LanguageVersion}
-import com.daml.lf.transaction.test.{NodeIdTransactionBuilder, TestNodeBuilder}
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.health.HealthStatus
@@ -36,9 +32,15 @@ import com.digitalasset.canton.platform.store.DbSupport.{
   DbConfig,
   ParticipantDataSourceConfig,
 }
+import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.platform.store.dao.events.{ContractLoader, LfValueTranslation}
+import com.digitalasset.canton.platform.store.interning.StringInterningView
 import com.digitalasset.canton.platform.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, Traced}
+import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.daml.lf.engine.{Engine, EngineConfig}
+import com.digitalasset.daml.lf.language.{LanguageMajorVersion, LanguageVersion}
+import com.digitalasset.daml.lf.transaction.test.{NodeIdTransactionBuilder, TestNodeBuilder}
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
 import org.apache.pekko.stream.{BoundedSourceQueue, Materializer, QueueOfferResult}
@@ -93,6 +95,8 @@ trait IndexComponentTest extends PekkoBeforeAndAfterAll with BaseTest {
     val engine = new Engine(
       EngineConfig(LanguageVersion.StableVersions(LanguageMajorVersion.V2))
     )
+    val mutableLedgerEndCache = MutableLedgerEndCache()
+    val stringInterningView = new StringInterningView(loggerFactory)
 
     val indexResourceOwner =
       for {
@@ -104,7 +108,7 @@ trait IndexComponentTest extends PekkoBeforeAndAfterAll with BaseTest {
           executionContext = ec,
           tracer = NoReportingTracerProvider.tracer,
           loggerFactory = loggerFactory,
-        )
+        )(mutableLedgerEndCache, stringInterningView)
         dbSupport <- DbSupport
           .owner(
             serverRole = ServerRole.ApiServer,

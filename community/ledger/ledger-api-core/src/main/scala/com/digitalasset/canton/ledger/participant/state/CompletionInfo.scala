@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.ledger.participant.state
 
-import com.daml.lf.data.Ref
 import com.daml.logging.entries.{LoggingValue, ToLoggingValue}
 import com.digitalasset.canton.data.DeduplicationPeriod
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.daml.lf.data.Ref
 
 /** Information about a completion for a submission.
   *

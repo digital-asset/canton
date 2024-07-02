@@ -15,6 +15,7 @@ import com.digitalasset.canton.lifecycle.{
   AsyncCloseable,
   AsyncOrSyncCloseable,
   FlagCloseableAsync,
+  FutureUnlessShutdown,
   SyncCloseable,
 }
 import com.digitalasset.canton.logging.TracedLogger
@@ -72,7 +73,11 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
       Some(parallelExecutionContext),
     )
     private val materializer = implicitly[Materializer]
-    val store = new InMemorySequencerStore(testedProtocolVersion, loggerFactory)
+    val store = new InMemorySequencerStore(
+      protocolVersion = testedProtocolVersion,
+      unifiedSequencer = testedUseUnifiedSequencer,
+      loggerFactory = loggerFactory,
+    )
     val clock = new WallClock(timeouts, loggerFactory = loggerFactory)
     val crypto: DomainSyncCryptoClient = valueOrFail(
       TestingTopology(sequencerGroup =
@@ -103,6 +108,7 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
         metrics,
         loggerFactory,
         unifiedSequencer = testedUseUnifiedSequencer,
+        runtimeReady = FutureUnlessShutdown.unit,
       )(parallelExecutionContext, tracer, materializer)
 
     def readAsSeq(

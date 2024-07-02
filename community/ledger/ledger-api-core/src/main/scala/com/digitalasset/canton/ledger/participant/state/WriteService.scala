@@ -5,10 +5,6 @@ package com.digitalasset.canton.ledger.participant.state
 
 import com.daml.daml_lf_dev.DamlLf.Archive
 import com.daml.error.ContextualizedErrorLogger
-import com.daml.lf.data.Ref.PackageId
-import com.daml.lf.data.{ImmArray, Ref}
-import com.daml.lf.transaction.{GlobalKey, SubmittedTransaction}
-import com.daml.lf.value.Value
 import com.digitalasset.canton.data.{Offset, ProcessedDisclosedContract}
 import com.digitalasset.canton.ledger.api.health.ReportsHealth
 import com.digitalasset.canton.ledger.participant.state.WriteService.{
@@ -21,6 +17,10 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{DomainAlias, LfPartyId}
+import com.digitalasset.daml.lf.data.Ref.PackageId
+import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import com.digitalasset.daml.lf.transaction.{GlobalKey, SubmittedTransaction}
+import com.digitalasset.daml.lf.value.Value
 import com.google.protobuf.ByteString
 
 import java.util.concurrent.CompletionStage

@@ -4,12 +4,12 @@
 package com.digitalasset.canton.platform.store.dao
 
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
-import com.daml.lf.data.Ref
-import com.daml.lf.data.Time.Timestamp
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.platform.ApiOffset
 import com.digitalasset.canton.platform.store.dao.JdbcLedgerDaoCompletionsSpec.*
+import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.google.rpc.status.Status as RpcStatus
 import io.grpc.Status
 import org.apache.pekko.stream.scaladsl.Sink

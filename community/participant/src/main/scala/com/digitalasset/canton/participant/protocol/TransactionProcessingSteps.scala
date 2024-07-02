@@ -11,7 +11,6 @@ import cats.syntax.option.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.error.utils.DecodedCantonError
-import com.daml.lf.data.ImmArray
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
@@ -96,6 +95,7 @@ import com.digitalasset.canton.{
   WorkflowId,
   checked,
 }
+import com.digitalasset.daml.lf.data.ImmArray
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import monocle.PLens

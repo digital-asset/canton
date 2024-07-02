@@ -74,6 +74,7 @@ final case class TrafficState(
     param("lastConsumedCost", _.lastConsumedCost),
     param("timestamp", _.timestamp),
     paramIfDefined("serial", _.serial),
+    param("availableTraffic", _.availableTraffic),
   )
 }
 

@@ -506,8 +506,8 @@ private[update] final class BlockChunkProcessor(
         {
           case LedgerBlockEvent.Send(_, signedSubmissionRequest, payloadSize) =>
             val mc = SequencerMetrics.submissionTypeMetricsContext(
-              signedSubmissionRequest.content.content.batch.allRecipients,
-              signedSubmissionRequest.content.content.sender,
+              signedSubmissionRequest.submissionRequest.batch.allRecipients,
+              signedSubmissionRequest.submissionRequest.sender,
               logger,
             )
             metrics.block.blockEvents.mark()(mc)

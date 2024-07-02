@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.data
 
-import com.daml.lf.data.{Bytes, Ref}
 import com.daml.logging.entries.{LoggingValue, ToLoggingValue}
 import com.digitalasset.canton.data.Offset.beforeBegin
+import com.digitalasset.daml.lf.data.{Bytes, Ref}
 import com.google.protobuf.ByteString
 
 import java.io.InputStream
@@ -56,7 +56,7 @@ object Offset {
     if (l == 0L) beforeBegin
     else
       Offset(
-        com.daml.lf.data.Bytes.fromByteString(
+        com.digitalasset.daml.lf.data.Bytes.fromByteString(
           ByteString.copyFrom(
             ByteBuffer
               .allocate(longBasedByteLength)

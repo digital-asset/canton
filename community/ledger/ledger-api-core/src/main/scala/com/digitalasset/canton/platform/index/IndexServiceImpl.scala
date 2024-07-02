@@ -13,11 +13,6 @@ import com.daml.ledger.api.v2.update_service.{
   GetUpdateTreesResponse,
   GetUpdatesResponse,
 }
-import com.daml.lf.data.Ref
-import com.daml.lf.data.Ref.{ApplicationId, Identifier, PackageRef, TypeConRef}
-import com.daml.lf.data.Time.Timestamp
-import com.daml.lf.transaction.GlobalKey
-import com.daml.lf.value.Value.{ContractId, VersionedContractInstance}
 import com.daml.metrics.InstrumentedGraph.*
 import com.daml.tracing.{Event, SpanAttribute, Spans}
 import com.digitalasset.canton.concurrent.DirectExecutionContext
@@ -58,6 +53,11 @@ import com.digitalasset.canton.platform.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.platform.store.packagemeta.PackageMetadata.PackageResolution
 import com.digitalasset.canton.platform.{ApiOffset, Party, PruneBuffers, TemplatePartiesFilter}
 import com.digitalasset.canton.util.EitherUtil
+import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.daml.lf.data.Ref.{ApplicationId, Identifier, PackageRef, TypeConRef}
+import com.digitalasset.daml.lf.data.Time.Timestamp
+import com.digitalasset.daml.lf.transaction.GlobalKey
+import com.digitalasset.daml.lf.value.Value.{ContractId, VersionedContractInstance}
 import io.grpc.StatusRuntimeException
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
@@ -321,7 +321,7 @@ private[index] class IndexServiceImpl(
 
   // TODO(i16065): Re-enable getEventsByContractKey tests
 //  override def getEventsByContractKey(
-//      contractKey: com.daml.lf.value.Value,
+//      contractKey: com.digitalasset.daml.lf.value.Value,
 //      templateId: Ref.Identifier,
 //      requestingParties: Set[Ref.Party],
 //      endExclusiveSeqId: Option[Long],

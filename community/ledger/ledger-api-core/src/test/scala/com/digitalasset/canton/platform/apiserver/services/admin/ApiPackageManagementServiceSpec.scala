@@ -11,10 +11,6 @@ import com.daml.ledger.api.v2.admin.package_management_service.{
   ValidateDarFileRequest,
   ValidateDarFileResponse,
 }
-import com.daml.lf.data.Ref.{ApplicationId, CommandId, Party, SubmissionId, WorkflowId}
-import com.daml.lf.data.{ImmArray, Ref}
-import com.daml.lf.transaction.{GlobalKey, SubmittedTransaction}
-import com.daml.lf.value.Value
 import com.daml.tracing.DefaultOpenTelemetry
 import com.daml.tracing.TelemetrySpecBase.*
 import com.digitalasset.canton.BaseTest
@@ -32,6 +28,10 @@ import com.digitalasset.canton.ledger.participant.state.{
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TestTelemetrySetup, TraceContext}
+import com.digitalasset.daml.lf.data.Ref.{ApplicationId, CommandId, Party, SubmissionId, WorkflowId}
+import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import com.digitalasset.daml.lf.transaction.{GlobalKey, SubmittedTransaction}
+import com.digitalasset.daml.lf.value.Value
 import com.google.protobuf.ByteString
 import io.opentelemetry.api.trace.Tracer
 import io.opentelemetry.sdk.OpenTelemetrySdk

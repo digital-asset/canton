@@ -20,10 +20,6 @@ import com.daml.ledger.api.v2.update_service.{
   GetUpdatesResponse,
 }
 import com.daml.ledger.api.v2.event as apiEvent
-import com.daml.lf.data.Ref
-import com.daml.lf.data.Ref.{Identifier, Party}
-import com.daml.lf.transaction.{FatContractInstance, GlobalKeyWithMaintainers, Node}
-import com.daml.lf.value.Value.ContractId
 import com.digitalasset.canton.ledger.api.util.{LfEngineToApi, TimestampConversion}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.store.ScalaPbStreamingOptimizations.*
@@ -36,6 +32,10 @@ import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.{
 import com.digitalasset.canton.platform.store.utils.EventOps.TreeEventOps
 import com.digitalasset.canton.platform.{ApiOffset, TemplatePartiesFilter, Value}
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, Traced}
+import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.daml.lf.data.Ref.{Identifier, Party}
+import com.digitalasset.daml.lf.transaction.{FatContractInstance, GlobalKeyWithMaintainers, Node}
+import com.digitalasset.daml.lf.value.Value.ContractId
 import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}
