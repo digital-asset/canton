@@ -3,12 +3,14 @@
 
 package com.digitalasset.canton.platform.index
 
+import cats.data.OptionT
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.error.{ContextualizedErrorLogger, DamlErrorWithDefiniteAnswer}
 import com.daml.ledger.api.v1.event_query_service.GetEventsByContractKeyResponse
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdResponse
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
+import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.update_service.{
   GetTransactionResponse,
   GetTransactionTreeResponse,
@@ -45,6 +47,7 @@ import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.ReportData
 import com.digitalasset.canton.ledger.participant.state.index.v2.*
+import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
   LoggingContextWithTrace,
@@ -57,6 +60,7 @@ import com.digitalasset.canton.platform.index.IndexServiceImpl.*
 import com.digitalasset.canton.platform.pekkostreams.dispatcher.Dispatcher
 import com.digitalasset.canton.platform.pekkostreams.dispatcher.DispatcherImpl.DispatcherIsClosedException
 import com.digitalasset.canton.platform.pekkostreams.dispatcher.SubSource.RangeSource
+import com.digitalasset.canton.platform.store.cache.PruningOffsetCache
 import com.digitalasset.canton.platform.store.dao.*
 import com.digitalasset.canton.platform.store.entries.PartyLedgerEntry
 import com.digitalasset.canton.platform.store.packagemeta.PackageMetadata.PackageResolution
@@ -69,6 +73,7 @@ import org.apache.pekko.stream.scaladsl.Source
 import scalaz.syntax.tag.ToTagOps
 
 import scala.concurrent.Future
+import scala.concurrent.duration.DurationInt
 import scala.util.Success
 
 private[index] class IndexServiceImpl(
@@ -82,6 +87,7 @@ private[index] class IndexServiceImpl(
     pruneBuffers: PruneBuffers,
     dispatcher: () => Dispatcher[Offset],
     packageMetadataView: PackageMetadataView,
+    pruningOffsetCache: PruningOffsetCache,
     metrics: Metrics,
     override protected val loggerFactory: NamedLoggerFactory,
 ) extends IndexService
@@ -113,47 +119,52 @@ private[index] class IndexServiceImpl(
       startExclusive: domain.LedgerOffset,
       endInclusive: Option[domain.LedgerOffset],
       transactionFilter: domain.TransactionFilter,
+      sendPrunedOffsets: Boolean,
       verbose: Boolean,
       multiDomainEnabled: Boolean,
   )(implicit loggingContext: LoggingContextWithTrace): Source[GetUpdatesResponse, NotUsed] =
     withValidatedFilter(transactionFilter, packageMetadataView.current()) {
-      between(startExclusive, endInclusive) { (from, to) =>
-        from.foreach(offset =>
-          Spans.setCurrentSpanAttribute(SpanAttribute.OffsetFrom, offset.toHexString)
-        )
-        to.foreach(offset =>
-          Spans.setCurrentSpanAttribute(SpanAttribute.OffsetTo, offset.toHexString)
-        )
-        dispatcher()
-          .startingAt(
-            from.getOrElse(Offset.beforeBegin),
-            RangeSource {
-              val memoFilter =
-                memoizedTransactionFilterProjection(
-                  packageMetadataView,
-                  transactionFilter,
-                  verbose,
-                  alwaysPopulateArguments = false,
-                )
-              (startExclusive, endInclusive) =>
-                Source(memoFilter().toList)
-                  .flatMapConcat { case (templateFilter, eventProjectionProperties) =>
-                    transactionsReader
-                      .getFlatTransactions(
-                        startExclusive,
-                        endInclusive,
-                        templateFilter,
-                        eventProjectionProperties,
-                        multiDomainEnabled,
-                      )
-                  }
-            },
-            to,
+      enhanceWithPrunedOffsets(
+        sendPrunedOffsets,
+        o => new GetUpdatesResponse(prunedOffset = o.toApiString),
+        between(startExclusive, endInclusive) { (from, to) =>
+          from.foreach(offset =>
+            Spans.setCurrentSpanAttribute(SpanAttribute.OffsetFrom, offset.toHexString)
           )
-          .mapError(shutdownError)
-          .map(_._2)
-          .buffered(metrics.daml.index.flatTransactionsBufferSize, LedgerApiStreamsBufferSize)
-      }.wireTap(
+          to.foreach(offset =>
+            Spans.setCurrentSpanAttribute(SpanAttribute.OffsetTo, offset.toHexString)
+          )
+          dispatcher()
+            .startingAt(
+              from.getOrElse(Offset.beforeBegin),
+              RangeSource {
+                val memoFilter =
+                  memoizedTransactionFilterProjection(
+                    packageMetadataView,
+                    transactionFilter,
+                    verbose,
+                    alwaysPopulateArguments = false,
+                  )
+                (startExclusive, endInclusive) =>
+                  Source(memoFilter().toList)
+                    .flatMapConcat { case (templateFilter, eventProjectionProperties) =>
+                      transactionsReader
+                        .getFlatTransactions(
+                          startExclusive,
+                          endInclusive,
+                          templateFilter,
+                          eventProjectionProperties,
+                          multiDomainEnabled,
+                        )
+                    }
+              },
+              to,
+            )
+            .mapError(shutdownError)
+            .map(_._2)
+            .buffered(metrics.daml.index.flatTransactionsBufferSize, LedgerApiStreamsBufferSize)
+        },
+      ).wireTap(
         _.update match {
           case GetUpdatesResponse.Update.Transaction(transaction) =>
             Spans.addEventToCurrentSpan(
@@ -168,48 +179,53 @@ private[index] class IndexServiceImpl(
       startExclusive: LedgerOffset,
       endInclusive: Option[LedgerOffset],
       transactionFilter: domain.TransactionFilter,
+      sendPrunedOffsets: Boolean,
       verbose: Boolean,
       multiDomainEnabled: Boolean,
   )(implicit loggingContext: LoggingContextWithTrace): Source[GetUpdateTreesResponse, NotUsed] =
     withValidatedFilter(transactionFilter, packageMetadataView.current()) {
       val parties = transactionFilter.filtersByParty.keySet
-      between(startExclusive, endInclusive) { (from, to) =>
-        from.foreach(offset =>
-          Spans.setCurrentSpanAttribute(SpanAttribute.OffsetFrom, offset.toHexString)
-        )
-        to.foreach(offset =>
-          Spans.setCurrentSpanAttribute(SpanAttribute.OffsetTo, offset.toHexString)
-        )
-        dispatcher()
-          .startingAt(
-            from.getOrElse(Offset.beforeBegin),
-            RangeSource {
-              val memoFilter =
-                memoizedTransactionFilterProjection(
-                  packageMetadataView,
-                  transactionFilter,
-                  verbose,
-                  alwaysPopulateArguments = true,
-                )
-              (startExclusive, endInclusive) =>
-                Source(memoFilter().toList)
-                  .flatMapConcat { case (_, eventProjectionProperties) =>
-                    transactionsReader
-                      .getTransactionTrees(
-                        startExclusive,
-                        endInclusive,
-                        parties, // on the query filter side we treat every party as wildcard party
-                        eventProjectionProperties,
-                        multiDomainEnabled,
-                      )
-                  }
-            },
-            to,
+      enhanceWithPrunedOffsets(
+        sendPrunedOffsets,
+        o => new GetUpdateTreesResponse(prunedOffset = o.toApiString),
+        between(startExclusive, endInclusive) { (from, to) =>
+          from.foreach(offset =>
+            Spans.setCurrentSpanAttribute(SpanAttribute.OffsetFrom, offset.toHexString)
           )
-          .mapError(shutdownError)
-          .map(_._2)
-          .buffered(metrics.daml.index.transactionTreesBufferSize, LedgerApiStreamsBufferSize)
-      }.wireTap(
+          to.foreach(offset =>
+            Spans.setCurrentSpanAttribute(SpanAttribute.OffsetTo, offset.toHexString)
+          )
+          dispatcher()
+            .startingAt(
+              from.getOrElse(Offset.beforeBegin),
+              RangeSource {
+                val memoFilter =
+                  memoizedTransactionFilterProjection(
+                    packageMetadataView,
+                    transactionFilter,
+                    verbose,
+                    alwaysPopulateArguments = true,
+                  )
+                (startExclusive, endInclusive) =>
+                  Source(memoFilter().toList)
+                    .flatMapConcat { case (_, eventProjectionProperties) =>
+                      transactionsReader
+                        .getTransactionTrees(
+                          startExclusive,
+                          endInclusive,
+                          parties, // on the query filter side we treat every party as wildcard party
+                          eventProjectionProperties,
+                          multiDomainEnabled,
+                        )
+                    }
+              },
+              to,
+            )
+            .mapError(shutdownError)
+            .map(_._2)
+            .buffered(metrics.daml.index.transactionTreesBufferSize, LedgerApiStreamsBufferSize)
+        },
+      ).wireTap(
         _.update match {
           case GetUpdateTreesResponse.Update.TransactionTree(transactionTree) =>
             Spans.addEventToCurrentSpan(
@@ -222,6 +238,18 @@ private[index] class IndexServiceImpl(
         }
       )
     }(ErrorLoggingContext(logger, loggingContext))
+
+  private def enhanceWithPrunedOffsets[Response](
+      sendPrunedOffsets: Boolean,
+      createResponse: Offset => Response,
+      original: Source[Response, NotUsed],
+  ): Source[Response, NotUsed] =
+    if (sendPrunedOffsets) {
+      Enhancer(() => pruningOffsetCache.get, Source.tick[Int](1.second, 1.second, 1))(
+        createResponse,
+        original,
+      )
+    } else original
 
   override def getCompletions(
       startExclusive: LedgerOffset,
@@ -318,9 +346,43 @@ private[index] class IndexServiceImpl(
   override def getTransactionById(
       transactionId: TransactionId,
       requestingParties: Set[Ref.Party],
-  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[GetTransactionResponse]] =
-    transactionsReader
-      .lookupFlatTransactionById(transactionId.unwrap, requestingParties)
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[GetTransactionResponse]] = {
+    implicit val ec = directEc
+    OptionT(
+      transactionsReader.lookupFlatTransactionById(transactionId.unwrap, requestingParties)
+    )
+      .orElse(
+        OptionT(
+          transactionsReader
+            .lookupTransactionTreeById(transactionId.unwrap, requestingParties)
+        ).map { tree =>
+          logger.debug(
+            s"Transaction not found in flat transaction lookup for transactionId $transactionId and requestingParties $requestingParties, falling back to transaction tree lookup."
+          )
+          // When a command submission completes successfully,
+          // the submitters can end up getting a TRANSACTION_NOT_FOUND when querying its corresponding flat transaction that either:
+          // * has only non-consuming events
+          // * has only events of contracts which have stakeholders that are not amongst the requestingParties
+          // In these situations, we fallback to a transaction tree lookup and populate the flat transaction response
+          // with its details but no events.
+          GetTransactionResponse(
+            tree.transaction.map(transaction =>
+              Transaction(
+                updateId = transaction.updateId,
+                commandId = transaction.commandId,
+                workflowId = transaction.workflowId,
+                effectiveAt = transaction.effectiveAt,
+                events = Seq.empty,
+                offset = transaction.offset,
+                domainId = transaction.domainId,
+                traceContext = transaction.traceContext,
+              )
+            )
+          )
+        }
+      )
+      .value
+  }
 
   override def getTransactionTreeById(
       transactionId: TransactionId,
@@ -803,5 +865,34 @@ object IndexServiceImpl {
           if templateIds.isEmpty && interfaceFilters.isEmpty =>
         party
     }.toSet
+  }
+
+  private[index] final case class Enhancer[Response](
+      offsetGetter: () => Option[Offset],
+      ticker: Source[Int, ?],
+  ) {
+    def apply(
+        createResponse: Offset => Response,
+        original: Source[Response, NotUsed],
+    ): Source[Response, NotUsed] = {
+      val initial = offsetGetter()
+      val ticking = ticker
+        .map(_ => offsetGetter())
+        .statefulMap[Option[Offset], Option[Offset]](() => initial)(
+          {
+            case (None, Some(current)) =>
+              (Some(current), Some(current))
+            case (Some(previous), Some(current)) if previous != current =>
+              (Some(current), Some(current))
+            case (optPrev, _) => (optPrev, None)
+          },
+          _ => None,
+        )
+        .collect { case Some(s) =>
+          createResponse(s)
+        }
+      original.mergePreferred(ticking, preferred = true, eagerComplete = true)
+    }
+
   }
 }

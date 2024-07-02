@@ -1446,6 +1446,7 @@ object BuildCommon {
       )
       .settings(
         scalacOptions --= removeCompileFlagsForDaml,
+        scalacOptions += "-Wconf:src=src_managed/.*:silent",
         sharedSettings,
         Compile / PB.targets := Seq(
           // build java codegen too
