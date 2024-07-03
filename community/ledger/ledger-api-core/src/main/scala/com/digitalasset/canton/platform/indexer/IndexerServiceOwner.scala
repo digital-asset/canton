@@ -4,7 +4,6 @@
 package com.digitalasset.canton.platform.indexer
 
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
-import com.daml.lf.data.Ref
 import com.digitalasset.canton.ledger.api.health.ReportsHealth
 import com.digitalasset.canton.ledger.participant.state.ReadService
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -19,6 +18,7 @@ import com.digitalasset.canton.platform.store.DbSupport.{
 import com.digitalasset.canton.platform.store.FlywayMigrations
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.daml.lf.data.Ref
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 

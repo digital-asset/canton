@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.data
 
-import com.daml.lf.data.Time.Timestamp
 import com.daml.logging.entries.{LoggingValue, ToLoggingValue}
+import com.digitalasset.daml.lf.data.Time.Timestamp
 
 import java.time.Duration
 import scala.util.{Failure, Success, Try}
@@ -19,9 +19,9 @@ sealed trait DeduplicationPeriod extends Product with Serializable
 
 object DeduplicationPeriod {
 
-  /** Transforms the `period` into a [[com.daml.lf.data.Time.Timestamp]] to be used for deduplication into the future(deduplicateUntil).
+  /** Transforms the `period` into a [[com.digitalasset.daml.lf.data.Time.Timestamp]] to be used for deduplication into the future(deduplicateUntil).
     * Only used for backwards compatibility
-    * @param time The time to use for calculating the [[com.daml.lf.data.Time.Timestamp]]. It can either be submission time or current time, based on usage
+    * @param time The time to use for calculating the [[com.digitalasset.daml.lf.data.Time.Timestamp]]. It can either be submission time or current time, based on usage
     * @param period The deduplication period
     */
   def deduplicateUntil(

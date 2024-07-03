@@ -38,7 +38,9 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.client.SequencedEventValidator
+import com.digitalasset.canton.sequencing.client.SequencedEventValidator.TopologyTimestampAfterSequencingTime
 import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.sequencing.traffic.EventCostCalculator.EventCostDetails
 import com.digitalasset.canton.sequencing.traffic.TrafficConsumedManager.NotEnoughTraffic
 import com.digitalasset.canton.sequencing.traffic.*
 import com.digitalasset.canton.sequencing.{GroupAddressResolver, TrafficControlParameters}
@@ -185,26 +187,37 @@ class EnterpriseSequencerRateLimitManager(
       topology: TopologySnapshot,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, CostValidationError, Option[ValidCost]] = EitherT {
+  ): EitherT[FutureUnlessShutdown, CostValidationError, Option[ValidCostWithDetails]] = EitherT {
     (
       FutureUnlessShutdown.pure(request.submissionCost.map(_.cost)),
       computeEventCost(request.batch, topology),
     ).parMapN {
       // Submission cost is present and matches the correct cost, we're golden
-      case (Some(submissionCost), Some(validCost @ ValidCost(correctCost, _, _)))
-          if submissionCost == correctCost =>
+      case (Some(submissionCost), Some(validCost @ ValidCostWithDetails(_, _, correctCostDetails)))
+          if submissionCost == correctCostDetails.eventCost =>
         Right(Some(validCost))
       // Submission contains a cost but it does not match the cost at the topology snapshot
-      case (Some(submissionCost), Some(ValidCost(correctCost, parameters, _))) =>
-        Left(IncorrectCost(submissionCost, correctCost, topology.timestamp, parameters))
+      case (
+            Some(submissionCost),
+            Some(ValidCostWithDetails(parameters, _, correctCostDetails)),
+          ) =>
+        Left(
+          IncorrectCost(
+            submissionCost,
+            topology.timestamp,
+            parameters,
+            correctCostDetails,
+          )
+        )
       // Submission contains a cost but traffic control is disabled in the topology snapshot
       case (Some(submissionCost), None) =>
         Left(TrafficControlDisabled(submissionCost, topology.timestamp))
       // Submission does not contain a cost but traffic control is enabled in the topology snapshot
-      case (None, Some(ValidCost(correctCost, parameters, _))) =>
-        Left(NoCostProvided(correctCost, topology.timestamp, parameters))
-      // No cost was provided but traffic control is disabled, all good
-      case (None, None) => Right(None)
+      case (None, Some(ValidCostWithDetails(parameters, _, correctCostDetails)))
+          if correctCostDetails.eventCost != NonNegativeLong.zero =>
+        Left(NoCostProvided(correctCostDetails, topology.timestamp, parameters))
+      // No cost was provided but traffic control is disabled or correct cost is 0, all good
+      case (None, _) => Right(None)
     }
   }
 
@@ -261,6 +274,7 @@ class EnterpriseSequencerRateLimitManager(
       request: SubmissionRequest,
       submissionTimestampO: Option[CantonTimestamp],
       lastSequencedTimestamp: CantonTimestamp,
+      lastSequencerEventTimestamp: Option[CantonTimestamp],
   )(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
@@ -271,8 +285,10 @@ class EnterpriseSequencerRateLimitManager(
     // Obviously the request has not been sequenced yet so that's the best we can do.
     // The optional submissionTimestamp provided in the request will only be used if the first validation fails
     // It will allow us to differentiate between a benign submission with an outdated submission cost and
-    // a malicious submission with a truly incorrect cost. Either way, we will only let the request through
-    // if the first validation (using the current snapshot approximation) passes.
+    // a malicious submission with a truly incorrect cost.
+    // If the submitted cost diverges from the one computed using this snapshot, but is valid using the snapshot
+    // the sender claims to have used, and is within the tolerance window, we'll accept the submission.
+    // If not we'll reject it.
     val topology = domainSyncCryptoApi.currentSnapshotApproximation
     val currentTopologySnapshot = topology.ipsSnapshot
 
@@ -281,9 +297,11 @@ class EnterpriseSequencerRateLimitManager(
       submissionTimestampO,
       currentTopologySnapshot,
       processingSequencerSignature = None,
-      latestSequencerEventTimestamp = None,
-      warnIfApproximate = false,
+      latestSequencerEventTimestamp = lastSequencerEventTimestamp,
+      warnIfApproximate = true,
       lastSequencedTimestamp,
+      // At submission time we allow submission timestamps slightly ahead of our current topology
+      allowSubmissionTimestampInFuture = true,
     )
       .flatMap {
         // If there's a cost to validate against the current available traffic, do that
@@ -305,7 +323,7 @@ class EnterpriseSequencerRateLimitManager(
       snapshot: TopologySnapshot,
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[ValidCost]] = {
+  ): FutureUnlessShutdown[Option[ValidCostWithDetails]] = {
     val groups =
       batch.envelopes.flatMap(_.recipients.allRecipients).collect { case g: GroupRecipient => g }
     val result = for {
@@ -313,16 +331,16 @@ class EnterpriseSequencerRateLimitManager(
       groupToMembers <- OptionT
         .liftF(GroupAddressResolver.resolveGroupsToMembers(groups.toSet, snapshot))
         .mapK(FutureUnlessShutdown.outcomeK)
-      eventCost = eventCostCalculator.computeEventCost(
+      eventCostDetails = eventCostCalculator.computeEventCost(
         batch,
         parameters.readVsWriteScalingFactor,
         groupToMembers,
         protocolVersion,
       )
-    } yield ValidCost(
-      eventCost,
+    } yield ValidCostWithDetails(
       parameters,
       snapshot.timestamp,
+      eventCostDetails,
     )
 
     result.value
@@ -336,7 +354,7 @@ class EnterpriseSequencerRateLimitManager(
     * @param submissionTimestampO submission timestamp the sender claims to have used to compute the traffic cost
     * @param validationSnapshot validation snapshot to be used
     * @param processingSequencerSignature Optionally, signature of the sequencer that processed the request. This only is set at sequencing time.
-    * @param latestSequencerEventTimestamp Timestamp of the latest sequencer event timestamp. Only at sequencing time.
+    * @param latestSequencerEventTimestamp Timestamp of the latest sequencer event timestamp.
     * @param warnIfApproximate Whether to warn if getting approximate topology.
     * @param mostRecentKnownDomainTimestamp Most recent sequenced timestamp this sequencer has knowledge of.
     *                                       At submission time, this is the last observed sequenced timestamp.
@@ -353,6 +371,7 @@ class EnterpriseSequencerRateLimitManager(
       latestSequencerEventTimestamp: Option[CantonTimestamp],
       warnIfApproximate: Boolean,
       mostRecentKnownDomainTimestamp: CantonTimestamp,
+      allowSubmissionTimestampInFuture: Boolean,
   )(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
@@ -360,103 +379,136 @@ class EnterpriseSequencerRateLimitManager(
     val sender = request.sender
     val submittedCost = request.submissionCost.map(_.cost)
 
-    def handleIncorrectCostButValidAtSubmissionTime(
-        submissionTimestamp: CantonTimestamp,
-        correctCost: NonNegativeLong,
-        validCost: Option[ValidCost],
-    ): EitherT[FutureUnlessShutdown, SequencingCostValidationError, Option[ValidCost]] = {
-      SequencedEventValidator
-        .validateTopologyTimestampUS(
-          domainSyncCryptoApi,
-          submissionTimestamp,
-          mostRecentKnownDomainTimestamp,
-          latestSequencerEventTimestamp,
-          protocolVersion,
-          warnIfApproximate = true,
-          _.submissionCostTimestampTopologyTolerance,
-        )
-        .biflatMap(
-          err => {
-            logger.debug(
-              s"Submitted cost $validCost from $sender was incorrect at sequencing time but correct according to the submission topology." +
-                s"However the submission timestamp $submissionTimestamp used to compute the cost is outside the" +
-                s" tolerance window using $mostRecentKnownDomainTimestamp as the most recent domain timestamp: $err"
-            )
-            EitherT.leftT(
-              SequencerRateLimitError.OutdatedEventCost(
-                sender,
-                submittedCost,
-                submissionTimestamp,
-                correctCost,
-                validationSnapshot.timestamp,
-                // this will be filled in at the end of the processing when we update the traffic consumed, even in case of failure
-                Option.empty[TrafficReceipt],
-              )
-            )
-          },
-          _ => {
-            // Cost is correct using the submission timestamp, so likely traffic parameters changed in the topology
-            // which is not necessarily a sign of malicious activity. Because it is within the tolerance window
-            // we accept the cost and consume it.
-            logger.debug(
-              s"Sender $sender submitted an outdated cost ($submittedCost, correct cost at validation time was $correctCost) but correct according" +
-                s" to the submission timestamp ($submissionTimestamp) and within the tolerance window" +
-                s" from topology at $mostRecentKnownDomainTimestamp," +
-                s" given the most recent known sequenced event is at $mostRecentKnownDomainTimestamp"
-            )
-            EitherT.pure(validCost)
-          },
-        )
-    }
-
     def handleIncorrectCostWithSubmissionTimestamp(
         submissionTimestamp: CantonTimestamp,
-        correctCost: NonNegativeLong,
-    ) = for {
-      // If the submission time is lower than the sequencing timestamp, retrieve topology for it
-      topologyAtSubmissionTime <- EitherT
-        .liftF[FutureUnlessShutdown, SequencingCostValidationError, TopologySnapshot](
-          SyncCryptoClient
-            .getSnapshotForTimestampUS(
-              domainSyncCryptoApi,
-              submissionTimestamp,
-              latestSequencerEventTimestamp,
-              protocolVersion,
-              warnIfApproximate,
-            )
-            .map(_.ipsSnapshot)
-        )
-      costValidation <-
-        validateCostIsCorrect(request, topologyAtSubmissionTime)
-          .leftMap { _ =>
-            // Cost is incorrect, missing, or wrongly provided, even according to the submission timestamp.
-            // At submission time this is a sign of malicious behavior by the sender.
-            // At sequencing time this is a sign of malicious behavior by the sender and sequencer: The sender sent a submission with an
-            // incorrect cost that failed to be filtered out by the sequencer processing it.
-            SequencerRateLimitError.IncorrectEventCost.Error(
-              sender,
-              Some(submissionTimestamp),
-              submittedCost,
-              correctCost,
-              validationSnapshot.timestamp,
-              processingSequencerSignature.map(_.signedBy),
-              // this will be filled in at the end of the processing when we update the traffic consumed, even in case of failure
-              Option.empty[TrafficReceipt],
-            )
-          }
-      result <- handleIncorrectCostButValidAtSubmissionTime(
-        submissionTimestamp,
-        correctCost,
-        costValidation,
+        correctCostDetails: EventCostDetails,
+    ) = {
+      logger.debug(
+        s"Submitted cost was not correct for the validation topology at ${validationSnapshot.timestamp} (correct cost: $correctCostDetails). Now checking if the submitted cost is valid for the submission topology at $submissionTimestamp."
       )
-    } yield result
+
+      /* Before we keep going, we want to ensure that the submissionTimestamp even makes sense to validate at this point.
+       * There are 4 cases:
+       *
+       *       T1                  T2                     T3                T4
+       *        │                   │                      │                 │
+       *   ─────┴───────┬───────────┴──────────┬───────────┴─────────┬───────┴────
+       *                │                      │                     │
+       *          tolerance                validation          tolerance
+       *         window start              timestamp           window end
+       *
+       * validation timestamp = mostRecentKnownDomainTimestamp =
+       *    - timestamp of current snapshot approximation at submission time (when receiving the submission request from the sender)
+       *    - sequencing timestamp at sequencing time (after ordering)
+       * tolerance window start = validation timestamp - submissionCostTimestampTopologyTolerance
+       * tolerance window end = validation timestamp + submissionTimestampInFutureTolerance
+       *
+       * T1 and T4 are outside of the tolerance window (in the past and future respectively):
+       *    We reject the submission without even verifying if the cost was correctly computed
+       * T2 is before the validation timestamp but within the window: We grab the corresponding topology snapshot
+       *    (which we have already because we have topology at least until "validation timestamp"), and check
+       *    the cost computation was correct for that snapshot
+       * T3 is after the validation timestamp but within the window: We will wait to observe that topology timestamp
+       *    and then check the cost computation against it like for T2.
+       *    Note that we only allow T3 when receiving the submission request on the submission side, NOT after sequencing.
+       *    That's because while it's possible for a sender to be slightly ahead of the receiving sequencer's topology due to lag,
+       *    it can't possibly be ahead of the topology at sequencing time.
+       */
+
+      for {
+        // We call validateTopologyTimestampUS which will accept T2 timestamps only
+        topologyAtSubmissionTime <- SequencedEventValidator
+          .validateTopologyTimestampUS(
+            domainSyncCryptoApi,
+            submissionTimestamp,
+            mostRecentKnownDomainTimestamp,
+            latestSequencerEventTimestamp,
+            protocolVersion,
+            warnIfApproximate = true,
+            _.submissionCostTimestampTopologyTolerance,
+          )
+          .biflatMap[SequencingCostValidationError, SyncCryptoApi](
+            {
+              // If it fails because the submission timestamp is after mostRecentKnownDomainTimestamp, we check to see if it could still be a T3
+              case TopologyTimestampAfterSequencingTime
+                  if allowSubmissionTimestampInFuture && submissionTimestamp < mostRecentKnownDomainTimestamp
+                    .plus(trafficConfig.submissionTimestampInFutureTolerance.asJava) =>
+                // If so we wait to observe that topology
+                EitherT
+                  .liftF[FutureUnlessShutdown, SequencingCostValidationError, SyncCryptoApi](
+                    SyncCryptoClient
+                      .getSnapshotForTimestampUS(
+                        domainSyncCryptoApi,
+                        submissionTimestamp,
+                        latestSequencerEventTimestamp,
+                        protocolVersion,
+                        warnIfApproximate,
+                      )
+                  )
+              // If not we've got a T1 or T4, we fail with OutdatedEventCost
+              case err =>
+                logger.debug(
+                  s"Submitted cost from $sender was incorrect at validation time and the submission timestamp" +
+                    s" $submissionTimestamp is outside the allowed tolerance window around the validation timestamp" +
+                    s" used by this sequencer $mostRecentKnownDomainTimestamp: $err"
+                )
+                EitherT.leftT(
+                  SequencerRateLimitError.OutdatedEventCost(
+                    sender,
+                    submittedCost,
+                    submissionTimestamp,
+                    correctCostDetails.eventCost,
+                    mostRecentKnownDomainTimestamp,
+                    // this will be filled in at the end of the processing when we update the traffic consumed, even in case of failure
+                    Option.empty[TrafficReceipt],
+                  )
+                )
+            },
+            // If timestamp validation passes it's a T2, so we can use that snapshot to validate the cost
+            topologySnapshot => EitherT.pure(topologySnapshot),
+          )
+          .map(_.ipsSnapshot)
+          .leftWiden[SequencingCostValidationError]
+        costValidAtSubmissionTime <-
+          validateCostIsCorrect(request, topologyAtSubmissionTime)
+            .leftMap { _ =>
+              // Cost is incorrect, missing, or wrongly provided, even according to the submission timestamp.
+              // At submission time this is a sign of malicious behavior by the sender.
+              // At sequencing time this is a sign of malicious behavior by the sender and sequencer: The sender sent a submission with an
+              // incorrect cost that failed to be filtered out by the sequencer processing it.
+              SequencerRateLimitError.IncorrectEventCost.Error(
+                sender,
+                Some(submissionTimestamp),
+                submittedCost,
+                validationSnapshot.timestamp,
+                processingSequencerSignature.map(_.signedBy),
+                // this will be filled in at the end of the processing when we update the traffic consumed, even in case of failure
+                Option.empty[TrafficReceipt],
+                correctCostDetails,
+              )
+            }
+            .leftWiden[SequencingCostValidationError]
+      } yield {
+        // Cost is correct using the submission timestamp, so likely traffic parameters changed in the topology
+        // which is not necessarily a sign of malicious activity. Because it is within the tolerance window
+        // we accept the cost and consume it.
+        logger.debug(
+          s"Sender $sender submitted an outdated cost ($submittedCost). The correct cost at validation time was ${correctCostDetails.eventCost})." +
+            s" However the submitted cost is correct according" +
+            s" to the submission timestamp ($submissionTimestamp) and within the tolerance window" +
+            s" from the validation topology at $mostRecentKnownDomainTimestamp," +
+            s" given the most recent known sequenced event is at $mostRecentKnownDomainTimestamp"
+        )
+        costValidAtSubmissionTime.map(_.toValidCost)
+      }
+    }
 
     def handleIncorrectCost(
-        correctCost: NonNegativeLong
+        correctCostDetails: EventCostDetails
     ): EitherT[FutureUnlessShutdown, SequencingCostValidationError, Option[ValidCost]] = {
       submissionTimestampO match {
         case Some(submissionTimestamp) =>
-          handleIncorrectCostWithSubmissionTimestamp(submissionTimestamp, correctCost)
+          handleIncorrectCostWithSubmissionTimestamp(submissionTimestamp, correctCostDetails)
 
         // The cost was either not provided or incorrect, but we can't verify the honesty of the sender
         // because they did not specify the timestamp of the topology they used.
@@ -465,11 +517,11 @@ class EnterpriseSequencerRateLimitManager(
             sender,
             None,
             submittedCost,
-            correctCost,
             validationSnapshot.timestamp,
             processingSequencerSignature.map(_.signedBy),
             // this will be filled in at the end of the processing when we update the traffic consumed, even in case of failure
             Option.empty[TrafficReceipt],
+            correctCostDetails,
           )
           EitherT.leftT(error)
       }
@@ -493,10 +545,10 @@ class EnterpriseSequencerRateLimitManager(
           // Cost is incorrect relative to the validation snapshot
           // Let's see if it at least makes sense according to the topology the sender claims to have used
           case incorrect: IncorrectCost =>
-            handleIncorrectCost(incorrect.correctCost)
+            handleIncorrectCost(incorrect.correctCostDetails)
           // If the cost is not provided, handle it the same as an incorrect cost
           case notProvided: NoCostProvided =>
-            handleIncorrectCost(notProvided.correctCost)
+            handleIncorrectCost(notProvided.correctCostDetails)
           // A cost was provided by the sender even though traffic control is now disabled on the current topology
           // Could be that this sequencer is behind and hasn't caught up yet with a topology update that enabled traffic control.
           // Even if that's the case since we think here that traffic control is disabled we can let the request through,
@@ -508,7 +560,7 @@ class EnterpriseSequencerRateLimitManager(
             )
             EitherT.rightT(None)
         },
-        EitherT.pure(_),
+        validCostWithDetails => EitherT.pure(validCostWithDetails.map(_.toValidCost)),
       )
   }
 
@@ -576,7 +628,7 @@ class EnterpriseSequencerRateLimitManager(
               }
               .leftWiden[SequencerRateLimitError]
           } else {
-            // If not, we will NOT consume, because we assume the even already has been consumed
+            // If not, we will NOT consume, because we assume the event has already been consumed
             EitherT
               .fromOptionF[Future, SequencerRateLimitError, TrafficConsumed](
                 trafficConsumedStore
@@ -612,6 +664,9 @@ class EnterpriseSequencerRateLimitManager(
           latestSequencerEventTimestamp,
           warnIfApproximate,
           sequencingTime,
+          // It is not possible for the submitted to have picked a timestamp more recent than the sequencing timestamp
+          // right as the event is being processed. So here we don't allow future-dated submission timestamps.
+          allowSubmissionTimestampInFuture = false,
         )
           .leftWiden[SequencerRateLimitError]
         // If the validation is successful, consume the cost
@@ -788,16 +843,28 @@ object EnterpriseSequencerRateLimitManager {
       timestamp: CantonTimestamp,
   )
 
+  /** Like ValidCost but with details of the cost computation.
+    */
+  private final case class ValidCostWithDetails(
+      parameters: TrafficControlParameters,
+      timestamp: CantonTimestamp,
+      details: EventCostDetails,
+  ) {
+    def toValidCost: ValidCost = ValidCost(details.eventCost, parameters, timestamp)
+  }
+
   private sealed trait CostValidationError
 
   /** The submitted cost did not match the cost computed using the topology at validationTimestamp.
     */
   private final case class IncorrectCost(
       submittedCost: NonNegativeLong,
-      correctCost: NonNegativeLong,
       validationTimestamp: CantonTimestamp,
       parameters: TrafficControlParameters,
-  ) extends CostValidationError
+      correctCostDetails: EventCostDetails,
+  ) extends CostValidationError {
+    val correctCost = correctCostDetails.eventCost
+  }
 
   /** Traffic control is disabled in the topology at validationTimestamp but a cost was provided in the request.
     */
@@ -809,7 +876,7 @@ object EnterpriseSequencerRateLimitManager {
   /** Traffic control is enabled in the topology at validationTimestamp but not cost was provided in the request.
     */
   private final case class NoCostProvided(
-      correctCost: NonNegativeLong,
+      correctCostDetails: EventCostDetails,
       validationTimestamp: CantonTimestamp,
       parameters: TrafficControlParameters,
   ) extends CostValidationError

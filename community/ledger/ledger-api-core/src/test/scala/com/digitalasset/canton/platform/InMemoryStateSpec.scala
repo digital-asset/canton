@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.platform
 
-import com.daml.lf.data.Ref
 import com.digitalasset.canton.TestEssentials
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
@@ -19,6 +18,7 @@ import com.digitalasset.canton.platform.store.interning.{
   StringInterningView,
   UpdatingStringInterningView,
 }
+import com.digitalasset.daml.lf.data.Ref
 import org.mockito.{InOrder, Mockito, MockitoSugar}
 import org.scalatest.Assertion
 import org.scalatest.flatspec.AsyncFlatSpec

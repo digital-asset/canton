@@ -5,15 +5,6 @@ package com.digitalasset.canton.participant.util
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.daml.lf.VersionRange
-import com.daml.lf.data.Ref.{PackageId, PackageName}
-import com.daml.lf.data.{ImmArray, Ref, Time}
-import com.daml.lf.engine.*
-import com.daml.lf.interpretation.Error as LfInterpretationError
-import com.daml.lf.language.Ast.Package
-import com.daml.lf.language.LanguageVersion
-import com.daml.lf.language.LanguageVersion.v2_dev
-import com.daml.lf.transaction.{ContractKeyUniquenessMode, TransactionVersion, Versioned}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{LoggingContextUtil, NamedLoggerFactory, NamedLogging}
@@ -33,6 +24,19 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{LfCommand, LfCreateCommand, LfKeyResolver, LfPartyId, LfVersioned}
+import com.digitalasset.daml.lf.VersionRange
+import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName}
+import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.engine.*
+import com.digitalasset.daml.lf.interpretation.Error as LfInterpretationError
+import com.digitalasset.daml.lf.language.Ast.Package
+import com.digitalasset.daml.lf.language.LanguageVersion
+import com.digitalasset.daml.lf.language.LanguageVersion.v2_dev
+import com.digitalasset.daml.lf.transaction.{
+  ContractKeyUniquenessMode,
+  TransactionVersion,
+  Versioned,
+}
 
 import java.nio.file.Path
 import scala.annotation.tailrec
@@ -69,9 +73,9 @@ object DAMLe {
     else if (enableLfBeta) LanguageVersion.EarlyAccessVersions(LanguageVersion.Major.V2).max
     else LanguageVersion.StableVersions(LanguageVersion.Major.V2).max
 
-  /** Resolves packages by [[com.daml.lf.data.Ref.PackageId]].
+  /** Resolves packages by [[com.digitalasset.daml.lf.data.Ref.PackageId]].
     * The returned packages must have been validated
-    * so that [[com.daml.lf.engine.Engine]] can skip validation.
+    * so that [[com.digitalasset.daml.lf.engine.Engine]] can skip validation.
     */
   type PackageResolver = PackageId => TraceContext => Future[Option[Package]]
 

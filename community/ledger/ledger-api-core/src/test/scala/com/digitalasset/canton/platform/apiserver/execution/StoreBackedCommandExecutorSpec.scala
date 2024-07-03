@@ -3,21 +3,6 @@
 
 package com.digitalasset.canton.platform.apiserver.execution
 
-import com.daml.lf.command.{ApiCommands as LfCommands, DisclosedContract as LfDisclosedContract}
-import com.daml.lf.crypto.Hash
-import com.daml.lf.data.Ref.{Identifier, ParticipantId, Party}
-import com.daml.lf.data.Time.Timestamp
-import com.daml.lf.data.{Bytes, ImmArray, Ref, Time}
-import com.daml.lf.engine.*
-import com.daml.lf.transaction.test.TransactionBuilder
-import com.daml.lf.transaction.{
-  GlobalKeyWithMaintainers,
-  SubmittedTransaction,
-  Transaction,
-  Versioned,
-}
-import com.daml.lf.value.Value
-import com.daml.lf.value.Value.{ContractInstance, ValueTrue}
 import com.daml.logging.LoggingContext
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -37,6 +22,24 @@ import com.digitalasset.canton.protocol.{DriverContractMetadata, LfContractId, L
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, LfValue}
+import com.digitalasset.daml.lf.command.{
+  ApiCommands as LfCommands,
+  DisclosedContract as LfDisclosedContract,
+}
+import com.digitalasset.daml.lf.crypto.Hash
+import com.digitalasset.daml.lf.data.Ref.{Identifier, ParticipantId, Party}
+import com.digitalasset.daml.lf.data.Time.Timestamp
+import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.engine.*
+import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
+import com.digitalasset.daml.lf.transaction.{
+  GlobalKeyWithMaintainers,
+  SubmittedTransaction,
+  Transaction,
+  Versioned,
+}
+import com.digitalasset.daml.lf.value.Value
+import com.digitalasset.daml.lf.value.Value.{ContractInstance, ValueTrue}
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -83,7 +86,7 @@ class StoreBackedCommandExecutorSpec
         packagePreference = any[Set[Ref.PackageId]],
         submitters = any[Set[Ref.Party]],
         readAs = any[Set[Ref.Party]],
-        cmds = any[com.daml.lf.command.ApiCommands],
+        cmds = any[com.digitalasset.daml.lf.command.ApiCommands],
         disclosures = any[ImmArray[LfDisclosedContract]],
         participantId = any[ParticipantId],
         submissionSeed = any[Hash],
@@ -280,7 +283,7 @@ class StoreBackedCommandExecutorSpec
           packagePreference = any[Set[Ref.PackageId]],
           submitters = any[Set[Ref.Party]],
           readAs = any[Set[Ref.Party]],
-          cmds = any[com.daml.lf.command.ApiCommands],
+          cmds = any[com.digitalasset.daml.lf.command.ApiCommands],
           disclosures = any[ImmArray[LfDisclosedContract]],
           participantId = any[ParticipantId],
           submissionSeed = any[Hash],

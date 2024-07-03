@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import cats.{Eval, Monad}
-import com.daml.lf.engine.Engine
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -91,6 +90,7 @@ import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, MonadUtil}
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
+import com.digitalasset.daml.lf.engine.Engine
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 

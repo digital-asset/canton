@@ -3,9 +3,6 @@
 
 package com.digitalasset.canton.platform.store.backend
 
-import com.daml.lf.data.Ref
-import com.daml.lf.data.Time.Timestamp
-import com.daml.lf.transaction.TransactionNodeStatistics
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.MetricsContext.withExtraMetricLabels
 import com.digitalasset.canton.data.Offset
@@ -13,6 +10,9 @@ import com.digitalasset.canton.ledger.participant.state.Update
 import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted
 import com.digitalasset.canton.metrics.IndexedUpdatesMetrics
 import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.daml.lf.data.Time.Timestamp
+import com.digitalasset.daml.lf.transaction.TransactionNodeStatistics
 
 object UpdateToMeteringDbDto {
 

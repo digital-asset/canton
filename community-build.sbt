@@ -26,6 +26,7 @@ lazy val `sequencer-driver-lib` = CommunityProjects.`sequencer-driver-lib`
 lazy val `community-reference-driver` = CommunityProjects.`community-reference-driver`
 lazy val `wartremover-extension` = CommunityProjects.`wartremover-extension`
 lazy val `google-common-protos-scala` = DamlProjects.`google-common-protos-scala`
+lazy val `ledger-api-value` = DamlProjects.`ledger-api-value`
 lazy val `ledger-api` = DamlProjects.`ledger-api`
 lazy val `bindings-java` = DamlProjects.`bindings-java`
 lazy val `ledger-common` = CommunityProjects.`ledger-common`

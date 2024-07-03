@@ -4,7 +4,6 @@
 package com.digitalasset.canton.platform.store.backend.common
 
 import anorm.RowParser
-import com.daml.lf.data.Ref
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.platform.Party
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
@@ -13,6 +12,7 @@ import com.digitalasset.canton.platform.store.backend.common.SimpleSqlExtensions
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.dao.events.Raw
 import com.digitalasset.canton.platform.store.interning.StringInterning
+import com.digitalasset.daml.lf.data.Ref
 
 import java.sql.Connection
 

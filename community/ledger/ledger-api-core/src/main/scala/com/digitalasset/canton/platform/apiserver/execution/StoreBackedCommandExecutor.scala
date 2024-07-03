@@ -5,12 +5,6 @@ package com.digitalasset.canton.platform.apiserver.execution
 
 import cats.data.*
 import cats.syntax.all.*
-import com.daml.lf.crypto
-import com.daml.lf.data.{ImmArray, Ref, Time}
-import com.daml.lf.engine.*
-import com.daml.lf.transaction.*
-import com.daml.lf.value.Value
-import com.daml.lf.value.Value.{ContractId, ContractInstance}
 import com.daml.metrics.{Timed, Tracked}
 import com.digitalasset.canton.data.{CantonTimestamp, ProcessedDisclosedContract}
 import com.digitalasset.canton.ledger.api.domain.{Commands as ApiCommands, DisclosedContract}
@@ -33,6 +27,12 @@ import com.digitalasset.canton.protocol.{
 }
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.util.Checked
+import com.digitalasset.daml.lf.crypto
+import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.engine.*
+import com.digitalasset.daml.lf.transaction.*
+import com.digitalasset.daml.lf.value.Value
+import com.digitalasset.daml.lf.value.Value.{ContractId, ContractInstance}
 import scalaz.syntax.tag.*
 
 import java.util.concurrent.TimeUnit
@@ -40,7 +40,7 @@ import java.util.concurrent.atomic.AtomicLong
 import scala.concurrent.{ExecutionContext, Future}
 
 /** @param ec [[scala.concurrent.ExecutionContext]] that will be used for scheduling CPU-intensive computations
-  *           performed by an [[com.daml.lf.engine.Engine]].
+  *           performed by an [[com.digitalasset.daml.lf.engine.Engine]].
   */
 private[apiserver] final class StoreBackedCommandExecutor(
     engine: Engine,
@@ -71,7 +71,7 @@ private[apiserver] final class StoreBackedCommandExecutor(
     val interpretationTimeNanos = new AtomicLong(0L)
     val start = System.nanoTime()
     val coids = commands.commands.commands.toSeq.foldLeft(Set.empty[Value.ContractId]) {
-      case (acc, com.daml.lf.command.ApiCommand.Exercise(_, coid, _, argument)) =>
+      case (acc, com.digitalasset.daml.lf.command.ApiCommand.Exercise(_, coid, _, argument)) =>
         argument.collectCids(acc) + coid
       case (acc, _) => acc
     }

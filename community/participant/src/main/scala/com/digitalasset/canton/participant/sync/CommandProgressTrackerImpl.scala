@@ -3,17 +3,14 @@
 
 package com.digitalasset.canton.participant.sync
 
-import com.daml.ledger.api.v2.admin.command_inspection_service.CommandState
-import com.daml.ledger.api.v2.admin.command_inspection_service.GetCommandStatusResponse.CommandStatus.{
+import com.daml.ledger.api.v2.admin.command_inspection_service.{
+  CommandState,
   CommandUpdates,
+  Contract,
   RequestStatistics,
 }
 import com.daml.ledger.api.v2.commands.Command
 import com.daml.ledger.api.v2.value.Identifier
-import com.daml.lf.data.Ref.TypeConName
-import com.daml.lf.transaction.Node.LeafOnlyAction
-import com.daml.lf.transaction.Transaction.ChildrenRecursion
-import com.daml.lf.transaction.{GlobalKeyWithMaintainers, Node}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.api.util.LfEngineToApi
@@ -33,6 +30,10 @@ import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.protocol.LfSubmittedTransaction
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.daml.lf.data.Ref.TypeConName
+import com.digitalasset.daml.lf.transaction.Node.LeafOnlyAction
+import com.digitalasset.daml.lf.transaction.Transaction.ChildrenRecursion
+import com.digitalasset.daml.lf.transaction.{GlobalKeyWithMaintainers, Node}
 import io.grpc.StatusRuntimeException
 import monocle.macros.syntax.lens.*
 
@@ -129,8 +130,8 @@ class CommandProgressTrackerImpl(
     def recordTransactionImpact(
         transaction: LfSubmittedTransaction
     ): Unit = {
-      val creates = mutable.ListBuffer.empty[CommandUpdates.Contract]
-      val archives = mutable.ListBuffer.empty[CommandUpdates.Contract]
+      val creates = mutable.ListBuffer.empty[Contract]
+      val archives = mutable.ListBuffer.empty[Contract]
       final case class Stats(
           exercised: Int = 0,
           fetched: Int = 0,
@@ -140,8 +141,8 @@ class CommandProgressTrackerImpl(
           templateId: TypeConName,
           coid: String,
           keyOpt: Option[GlobalKeyWithMaintainers],
-      ): CommandUpdates.Contract = {
-        CommandUpdates.Contract(
+      ): Contract = {
+        Contract(
           templateId = Some(
             Identifier(
               templateId.packageId,

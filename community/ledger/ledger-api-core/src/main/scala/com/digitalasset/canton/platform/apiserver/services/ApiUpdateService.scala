@@ -7,8 +7,6 @@ import cats.data.OptionT
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.update_service.*
-import com.daml.lf.data.Ref.Party
-import com.daml.lf.ledger.EventId
 import com.daml.logging.entries.LoggingEntries
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.ValidationLogger
@@ -29,6 +27,8 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
 }
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.daml.lf.data.Ref.Party
+import com.digitalasset.daml.lf.ledger.EventId
 import io.grpc.stub.StreamObserver
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Source

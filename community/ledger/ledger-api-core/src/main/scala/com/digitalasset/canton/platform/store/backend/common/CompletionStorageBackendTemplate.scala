@@ -6,7 +6,6 @@ package com.digitalasset.canton.platform.store.backend.common
 import anorm.SqlParser.*
 import anorm.{Row, RowParser, SimpleSql, ~}
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
-import com.daml.lf.data.Time.Timestamp
 import com.daml.platform.v1.index.StatusDetails
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -21,6 +20,7 @@ import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.Sql
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.platform.{ApplicationId, Party}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.google.protobuf.any
 import com.google.rpc.status.Status as StatusProto
 

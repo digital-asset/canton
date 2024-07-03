@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.platform.indexer.parallel
 
-import com.daml.lf.data.Ref
 import com.daml.metrics.InstrumentedGraph.*
 import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricsContext
@@ -28,6 +27,7 @@ import com.digitalasset.canton.platform.store.interning.{
   StringInterning,
 }
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
+import com.digitalasset.daml.lf.data.Ref
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.{Keep, Sink}

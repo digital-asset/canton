@@ -6,7 +6,6 @@ package com.digitalasset.canton.platform.apiserver.services.admin
 import com.daml.error.DamlError
 import com.daml.ledger.api.v2.admin.package_management_service.PackageManagementServiceGrpc.PackageManagementService
 import com.daml.ledger.api.v2.admin.package_management_service.*
-import com.daml.lf.data.Ref
 import com.daml.logging.LoggingContext
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
@@ -17,6 +16,7 @@ import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTr
 import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.services.logging
+import com.digitalasset.daml.lf.data.Ref
 import io.grpc.ServerServiceDefinition
 
 import scala.concurrent.{ExecutionContext, Future}

@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.platform.store.interning
 
-import com.daml.lf.data.Ref
-import com.daml.lf.data.Ref.Party
 import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.daml.lf.data.Ref.Party
 
 import scala.concurrent.blocking
 

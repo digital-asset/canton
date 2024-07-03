@@ -13,9 +13,6 @@ import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.error.*
-import com.daml.lf.data.Ref.{PackageId, Party, SubmissionId}
-import com.daml.lf.data.{ImmArray, Ref}
-import com.daml.lf.engine.Engine
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
@@ -111,6 +108,9 @@ import com.digitalasset.canton.util.OptionUtils.OptionExtension
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
+import com.digitalasset.daml.lf.data.Ref.{PackageId, Party, SubmissionId}
+import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import com.digitalasset.daml.lf.engine.Engine
 import com.google.protobuf.ByteString
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.NotUsed

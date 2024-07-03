@@ -17,7 +17,6 @@ import com.daml.ledger.api.v2.package_service.{
   PackageServiceGrpc,
   PackageStatus,
 }
-import com.daml.lf.data.Ref
 import com.daml.logging.LoggingContext
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.ValidationLogger
@@ -38,6 +37,7 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
 }
+import com.digitalasset.daml.lf.data.Ref
 import io.grpc.ServerServiceDefinition
 
 import scala.concurrent.{ExecutionContext, Future}

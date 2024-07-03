@@ -5,13 +5,6 @@ package com.digitalasset.canton.platform.store.backend
 
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.ledger.api.v2.event.{CreatedEvent, ExercisedEvent}
-import com.daml.lf.crypto
-import com.daml.lf.data.{Bytes, Ref, Time}
-import com.daml.lf.ledger.EventId
-import com.daml.lf.transaction.GlobalKey
-import com.daml.lf.transaction.test.TestNodeBuilder.CreateKey
-import com.daml.lf.transaction.test.{NodeIdTransactionBuilder, TestNodeBuilder, TransactionBuilder}
-import com.daml.lf.value.Value
 import com.daml.metrics.api.MetricsContext
 import com.daml.platform.v1.index.StatusDetails
 import com.digitalasset.canton.data.DeduplicationPeriod.{DeduplicationDuration, DeduplicationOffset}
@@ -33,6 +26,17 @@ import com.digitalasset.canton.protocol.{SourceDomainId, TargetDomainId}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty.emptyTraceContext
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, Traced}
+import com.digitalasset.daml.lf.crypto
+import com.digitalasset.daml.lf.data.{Bytes, Ref, Time}
+import com.digitalasset.daml.lf.ledger.EventId
+import com.digitalasset.daml.lf.transaction.GlobalKey
+import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.CreateKey
+import com.digitalasset.daml.lf.transaction.test.{
+  NodeIdTransactionBuilder,
+  TestNodeBuilder,
+  TransactionBuilder,
+}
+import com.digitalasset.daml.lf.value.Value
 import com.google.protobuf.ByteString
 import com.google.rpc.status.Status as StatusProto
 import io.grpc.Status

@@ -4,16 +4,6 @@
 package com.digitalasset.canton.platform.indexer.parallel
 
 import com.daml.executors.executors.{NamedExecutor, QueueAwareExecutor}
-import com.daml.lf.crypto.Hash
-import com.daml.lf.data.Time.Timestamp
-import com.daml.lf.data.{ImmArray, Ref, Time}
-import com.daml.lf.transaction.TransactionNodeStatistics.EmptyActions
-import com.daml.lf.transaction.{
-  CommittedTransaction,
-  TransactionNodeStatistics,
-  TransactionVersion,
-  VersionedTransaction,
-}
 import com.daml.metrics.DatabaseMetrics
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.participant.state
@@ -27,6 +17,16 @@ import com.digitalasset.canton.platform.store.backend.{DbDto, ParameterStorageBa
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, Traced}
+import com.digitalasset.daml.lf.crypto.Hash
+import com.digitalasset.daml.lf.data.Time.Timestamp
+import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.transaction.TransactionNodeStatistics.EmptyActions
+import com.digitalasset.daml.lf.transaction.{
+  CommittedTransaction,
+  TransactionNodeStatistics,
+  TransactionVersion,
+  VersionedTransaction,
+}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.SpanSugar.convertIntToGrainOfTime

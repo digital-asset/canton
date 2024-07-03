@@ -5,8 +5,6 @@ package com.digitalasset.canton.platform.apiserver
 
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
-import com.daml.lf.data.Ref
-import com.daml.lf.engine.*
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.config
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
@@ -46,6 +44,8 @@ import com.digitalasset.canton.platform.config.{
   UserManagementServiceConfig,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.daml.lf.engine.*
 import io.grpc.BindableService
 import io.grpc.protobuf.services.ProtoReflectionService
 import io.opentelemetry.api.trace.Tracer

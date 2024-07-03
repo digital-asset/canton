@@ -3,9 +3,6 @@
 
 package com.digitalasset.canton.platform.store.dao
 
-import com.daml.lf.data.Ref
-import com.daml.lf.data.Ref.Party
-import com.daml.lf.data.Time.Timestamp
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.logging.LoggingContextWithTrace
@@ -17,6 +14,9 @@ import com.digitalasset.canton.platform.store.dao.BufferedTransactionByIdReader.
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.daml.lf.data.Ref.Party
+import com.digitalasset.daml.lf.data.Time.Timestamp
 import org.mockito.MockitoSugar
 import org.scalatest.flatspec.AsyncFlatSpec
 

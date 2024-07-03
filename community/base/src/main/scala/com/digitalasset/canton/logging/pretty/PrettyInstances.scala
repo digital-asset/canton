@@ -5,12 +5,6 @@ package com.digitalasset.canton.logging.pretty
 
 import cats.Show.Shown
 import com.daml.error.utils.DecodedCantonError
-import com.daml.lf.data.Ref
-import com.daml.lf.data.Ref.{DottedName, PackageId, QualifiedName}
-import com.daml.lf.transaction.ContractStateMachine.ActiveLedgerState
-import com.daml.lf.transaction.TransactionErrors.*
-import com.daml.lf.transaction.Versioned
-import com.daml.lf.value.Value
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.RequireTypes.{Port, RefinedNumeric}
 import com.digitalasset.canton.data.DeduplicationPeriod
@@ -26,6 +20,12 @@ import com.digitalasset.canton.{
   LfVersioned,
   Uninhabited,
 }
+import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.daml.lf.data.Ref.{DottedName, PackageId, QualifiedName}
+import com.digitalasset.daml.lf.transaction.ContractStateMachine.ActiveLedgerState
+import com.digitalasset.daml.lf.transaction.TransactionErrors.*
+import com.digitalasset.daml.lf.transaction.Versioned
+import com.digitalasset.daml.lf.value.Value
 import com.google.protobuf.ByteString
 import io.grpc.Status
 import io.grpc.health.v1.HealthCheckResponse.ServingStatus
@@ -62,6 +62,8 @@ trait PrettyInstances {
   implicit def prettyInt: Pretty[Int] = prettyOfString(_.toString)
 
   implicit def prettyLong: Pretty[Long] = prettyOfString(_.toString)
+
+  implicit def prettyBigDecimal: Pretty[BigDecimal] = prettyOfString(_.toString)
 
   implicit def prettyJLong: Pretty[JLong] = prettyOfString(_.toString)
 
@@ -189,10 +191,10 @@ trait PrettyInstances {
   implicit def prettyLfQualifiedName: Pretty[QualifiedName] =
     prettyOfString(qname => show"${qname.module}:${qname.name}")
 
-  implicit def prettyLfIdentifier: Pretty[com.daml.lf.data.Ref.Identifier] =
+  implicit def prettyLfIdentifier: Pretty[com.digitalasset.daml.lf.data.Ref.Identifier] =
     prettyOfString(id => show"${id.packageId}:${id.qualifiedName}")
 
-  implicit def prettyLfPackageName: Pretty[com.daml.lf.data.Ref.PackageName] =
+  implicit def prettyLfPackageName: Pretty[com.digitalasset.daml.lf.data.Ref.PackageName] =
     prettyOfString(packageName => show"${packageName.toString}")
 
   implicit def prettyLfContractId: Pretty[LfContractId] = prettyOfString {

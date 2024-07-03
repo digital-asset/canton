@@ -14,6 +14,7 @@ import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer.RegisterError
+import com.digitalasset.canton.domain.sequencing.sequencer.SequencerWriter.ResetWatermark
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.*
 import com.digitalasset.canton.domain.sequencing.sequencer.store.SequencerStore.SequencerPruningResult
 import com.digitalasset.canton.domain.sequencing.sequencer.store.*
@@ -59,7 +60,7 @@ object DatabaseSequencer {
   /** Creates a single instance of a database sequencer. */
   def single(
       config: DatabaseSequencerConfig,
-      initialSnapshot: Option[SequencerSnapshot],
+      initialState: Option[SequencerInitialState],
       timeouts: ProcessingTimeout,
       storage: Storage,
       clock: Clock,
@@ -70,6 +71,7 @@ object DatabaseSequencer {
       metrics: SequencerMetrics,
       loggerFactory: NamedLoggerFactory,
       unifiedSequencer: Boolean,
+      runtimeReady: FutureUnlessShutdown[Unit],
   )(implicit
       ec: ExecutionContext,
       tracer: Tracer,
@@ -86,7 +88,7 @@ object DatabaseSequencer {
     new DatabaseSequencer(
       SequencerWriterStoreFactory.singleInstance,
       config,
-      initialSnapshot,
+      initialState,
       TotalNodeCountValues.SingleSequencerTotalNodeCount,
       new LocalSequencerStateEventSignaller(
         timeouts,
@@ -108,6 +110,7 @@ object DatabaseSequencer {
       metrics,
       loggerFactory,
       unifiedSequencer,
+      runtimeReady,
     )
   }
 }
@@ -115,7 +118,7 @@ object DatabaseSequencer {
 class DatabaseSequencer(
     writerStorageFactory: SequencerWriterStoreFactory,
     config: DatabaseSequencerConfig,
-    initialSnapshot: Option[SequencerSnapshot],
+    initialState: Option[SequencerInitialState],
     totalNodeCount: PositiveInt,
     eventSignaller: EventSignaller,
     keepAliveInterval: Option[NonNegativeFiniteDuration],
@@ -133,6 +136,7 @@ class DatabaseSequencer(
     metrics: SequencerMetrics,
     loggerFactory: NamedLoggerFactory,
     unifiedSequencer: Boolean,
+    runtimeReady: FutureUnlessShutdown[Unit],
 )(implicit ec: ExecutionContext, tracer: Tracer, materializer: Materializer)
     extends BaseSequencer(
       loggerFactory,
@@ -171,10 +175,12 @@ class DatabaseSequencer(
 
   protected val memberValidator: SequencerMemberValidator = store
 
+  protected def resetWatermarkTo: ResetWatermark = SequencerWriter.ResetWatermarkToClockNow
+
   // Only start pruning scheduler after `store` variable above has been initialized to avoid racy NPE
   withNewTraceContext { implicit traceContext =>
     timeouts.unbounded.await(s"Waiting for sequencer writer to fully start")(
-      writer.startOrLogError(initialSnapshot)
+      writer.startOrLogError(initialState, resetWatermarkTo)
     )
 
     pruningScheduler.foreach(ps =>

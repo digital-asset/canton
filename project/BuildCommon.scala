@@ -374,7 +374,8 @@ object BuildCommon {
     case "reflect.properties" => MergeStrategy.first
     case PathList("org", "checkerframework", _ @_*) => MergeStrategy.first
     case PathList("google", _*) => MergeStrategy.first
-    case PathList("grpc", _*) => MergeStrategy.first
+    case PathList("com", "google", _*) => MergeStrategy.first
+    case PathList("io", "grpc", _*) => MergeStrategy.first
     case PathList("org", "apache", "logging", _*) => MergeStrategy.first
     case PathList("ch", "qos", "logback", _*) => MergeStrategy.first
     case PathList("com", "daml", "ledger", "api", "v1", "package.proto") => MergeStrategy.first
@@ -1244,6 +1245,7 @@ object BuildCommon {
           daml_lf_transaction,
           daml_rs_grpc_bridge,
           daml_rs_grpc_pekko,
+          daml_ledger_api_value_java,
           slf4j_api,
           grpc_api,
           grpc_netty,
@@ -1456,6 +1458,7 @@ object BuildCommon {
 
     lazy val allProjects = Set(
       `google-common-protos-scala`,
+      `ledger-api-value`,
       `ledger-api`,
       `bindings-java`,
     )
@@ -1513,9 +1516,36 @@ object BuildCommon {
         ),
       )
 
+    // this project exists solely for the purpose of extracting value.proto
+    // from the jar file built in the daml repository
+    lazy val `ledger-api-value` = project
+      .in(file("community/lib/ledger-api-value"))
+      .disablePlugins(
+        BufPlugin
+      )
+      .settings(
+        sharedSettings,
+        // we restrict the compilation to a few files that we actually need, skipping the large majority ...
+        excludeFilter := HiddenFileFilter || "scalapb.proto",
+        PB.generate / includeFilter := "value.proto",
+        dependencyOverrides ++= Seq(),
+        // compile proto files that we've extracted here
+        Compile / PB.protoSources ++= Seq(target.value / "protobuf_external"),
+        coverageEnabled := false,
+        // skip header check
+        headerSources / excludeFilter := HiddenFileFilter || "*",
+        headerResources / excludeFilter := HiddenFileFilter || "*",
+        libraryDependencies ++= Seq(
+          daml_ledger_api_value % "protobuf"
+        ),
+      )
+
     lazy val `ledger-api` = project
       .in(file("community/ledger-api"))
-      .dependsOn(`google-common-protos-scala`)
+      .dependsOn(
+        `google-common-protos-scala`,
+        `ledger-api-value`,
+      )
       .disablePlugins(
         ScalafixPlugin,
         ScalafmtPlugin,
@@ -1544,6 +1574,7 @@ object BuildCommon {
         headerSources / excludeFilter := HiddenFileFilter || "*",
         headerResources / excludeFilter := HiddenFileFilter || "*",
         libraryDependencies ++= Seq(
+          daml_ledger_api_value_scala,
           scalapb_runtime,
           scalapb_runtime_grpc,
           protoc_gen_doc asProtocPlugin (),
@@ -1560,6 +1591,7 @@ object BuildCommon {
         compileOrder := CompileOrder.JavaThenScala,
         libraryDependencies ++= Seq(
           fasterjackson_core,
+          daml_ledger_api_value_java,
           junit_interface % Test,
           jupiter_interface % Test,
           scalatest % Test,
