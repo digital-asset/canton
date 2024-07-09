@@ -699,44 +699,64 @@ class StoreBasedTopologySnapshotX(
     )
   }
 
-  override def isMemberKnown(
-      member: Member
-  )(implicit traceContext: TraceContext): Future[Boolean] = {
-    member match {
-      case ParticipantId(pid) =>
-        findTransactions(
-          asOfInclusive = false,
-          types = Seq(DomainTrustCertificateX.code),
-          filterUid = Some(Seq(pid)),
-          filterNamespace = None,
-        ).map(_.result.nonEmpty)
-      case mediatorId @ MediatorId(_) =>
-        findTransactions(
-          asOfInclusive = false,
-          types = Seq(MediatorDomainStateX.code),
-          filterUid = None,
-          filterNamespace = None,
-        ).map(
-          _.collectOfMapping[MediatorDomainStateX].result
-            .exists(_.mapping.allMediatorsInGroup.contains(mediatorId))
-        )
-      case sequencerId @ SequencerId(_) =>
-        findTransactions(
-          asOfInclusive = false,
-          types = Seq(SequencerDomainStateX.code),
-          filterUid = None,
-          filterNamespace = None,
-        ).map(
-          _.collectOfMapping[SequencerDomainStateX].result
-            .exists(_.mapping.allSequencers.contains(sequencerId))
-        )
-      case _ =>
-        Future.failed(
-          new IllegalArgumentException(
-            s"Checking whether member is known for an unexpected member type: $member"
-          )
-        )
-    }
+  override def isMemberKnown(member: Member)(implicit traceContext: TraceContext): Future[Boolean] =
+    areMembersKnown(Set(member)).map(_.nonEmpty)
+
+  override def areMembersKnown(
+      members: Set[Member]
+  )(implicit traceContext: TraceContext): Future[Set[Member]] = {
+    val participants = members.collect { case ParticipantId(uid) => uid }
+    val mediators = members.collect { case MediatorId(uid) => uid }.toSet
+    val sequencers = members.collect { case SequencerId(uid) => uid }.toSet
+
+    val knownParticipantsF = if (participants.nonEmpty) {
+      findTransactions(
+        asOfInclusive = false,
+        types = Seq(DomainTrustCertificateX.code),
+        filterUid = Some(participants.toSeq),
+        filterNamespace = None,
+      ).map(
+        _.collectOfMapping[DomainTrustCertificateX].result
+          .map(_.mapping.participantId: Member)
+          .toSet
+      )
+    } else Future.successful(Set.empty[Member])
+
+    val knownMediatorsF = if (mediators.nonEmpty) {
+      findTransactions(
+        asOfInclusive = false,
+        types = Seq(MediatorDomainStateX.code),
+        filterUid = None,
+        filterNamespace = None,
+      ).map(
+        _.collectOfMapping[MediatorDomainStateX].result
+          .flatMap(_.mapping.allMediatorsInGroup.collect {
+            case med if mediators.contains(med.uid) => med: Member
+          })
+          .toSet
+      )
+    } else Future.successful(Set.empty[Member])
+
+    val knownSequencersF = if (sequencers.nonEmpty) {
+      findTransactions(
+        asOfInclusive = false,
+        types = Seq(SequencerDomainStateX.code),
+        filterUid = None,
+        filterNamespace = None,
+      ).map(
+        _.collectOfMapping[SequencerDomainStateX].result
+          .flatMap(_.mapping.allSequencers.collect {
+            case seq if sequencers.contains(seq.uid) => seq: Member
+          })
+          .toSet
+      )
+    } else Future.successful(Set.empty[Member])
+
+    for {
+      knownParticipants <- knownParticipantsF
+      knownMediators <- knownMediatorsF
+      knownSequencers <- knownSequencersF
+    } yield knownParticipants ++ knownMediators ++ knownSequencers
   }
 
   private def collectLatestMapping[T <: TopologyMappingX](

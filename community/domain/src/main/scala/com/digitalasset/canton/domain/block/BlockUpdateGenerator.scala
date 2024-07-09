@@ -467,14 +467,6 @@ class BlockUpdateGeneratorImpl(
         val SequencedSubmission(sequencingTimestamp, event, sequencingSnapshot, topologySnapshotO) =
           sequencedSubmission
 
-        def recipientIsKnown(member: Member): Future[Option[Member]] = {
-          if (!member.isAuthenticated) Future.successful(None)
-          else
-            sequencingSnapshot.ipsSnapshot
-              .isMemberKnown(member)
-              .map(Option.when(_)(member))
-        }
-
         val topologySnapshot = topologySnapshotO.getOrElse(sequencingSnapshot).ipsSnapshot
         import event.content.sender
         for {
@@ -493,8 +485,9 @@ class BlockUpdateGeneratorImpl(
             _.eligibleSenders
           )
           knownMemberRecipientsOrSender <- FutureUnlessShutdown.outcomeF(
-            (eligibleSenders ++ memberRecipients.toSeq :+ sender)
-              .parTraverseFilter(recipientIsKnown)
+            sequencingSnapshot.ipsSnapshot.areMembersKnown(
+              (eligibleSenders ++ memberRecipients.toSeq :+ sender).filter(_.isAuthenticated).toSet
+            )
           )
         } yield {
           val knownGroupMembers = groupToMembers.values.flatten

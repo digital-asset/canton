@@ -927,9 +927,8 @@ object BuildCommon {
         Compile / damlBuildOrder := Seq(
           "daml/daml.yaml"
         ),
-        // TODO(#16168) Before creating the first stable release with backwards compatibility guarantees,
-        //  make "AdminWorkflows.dar" stable again
-        damlFixedDars := Seq(),
+        Compile / damlEnableJavaCodegen := true,
+        damlFixedDars := Seq("AdminWorkflows.dar"),
         addProtobufFilesToHeaderCheck(Compile),
         addFilesToHeaderCheck("*.daml", "daml", Compile),
         JvmRulesPlugin.damlRepoHeaderSettings,

@@ -34,7 +34,7 @@ class PackageUpgradeValidator(
 
   // TODO(##17635): Package upgrade validation is racy and can lead to actually allowing
   //                upgrade-conflicting packages to be uploaded when DARs are uploaded concurrently.
-  def validateUpgrade(upgradingPackage: (Ref.PackageId, Ast.Package))(implicit
+  def validateUpgrade(uploadedPackage: (Ref.PackageId, Ast.Package))(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Unit] =
     for {
@@ -42,22 +42,26 @@ class PackageUpgradeValidator(
         err => Future.failed(err.asGrpcError),
         Future.successful,
       )
-      (upgradingPackageId, upgradingPackageAst) = upgradingPackage
-      optUpgradingDar = Some((upgradingPackageId, upgradingPackageAst))
+      (uploadedPackageId, uploadedPackageAst) = uploadedPackage
+      optUpgradingDar = Some((uploadedPackageId, uploadedPackageAst))
       _ = logger.info(
-        s"Uploading DAR file for $upgradingPackageId in submission ID ${loggingContext.serializeFiltered("submissionId")}."
+        s"Uploading DAR file for $uploadedPackageId in submission ID ${loggingContext.serializeFiltered("submissionId")}."
       )
-      result <- existingVersionedPackageId(upgradingPackageAst, packageMap) match {
-        case Some(uploadedPackageId) =>
-          if (uploadedPackageId == upgradingPackageId) {
+      result <- existingVersionedPackageId(uploadedPackageAst, packageMap) match {
+        case Some(existingPackageId) =>
+          if (existingPackageId == uploadedPackageId) {
             logger.info(
-              s"Ignoring upload of package $upgradingPackageId as it has been previously uploaded"
+              s"Ignoring upload of package $uploadedPackageId as it has been previously uploaded"
             )
             Future.unit
           } else {
             Future.failed(
               Validation.UpgradeVersion
-                .Error(uploadedPackageId, upgradingPackageId, upgradingPackageAst.metadata.version)
+                .Error(
+                  uploadedPackage = uploadedPackageId,
+                  existingPackage = existingPackageId,
+                  packageVersion = uploadedPackageAst.metadata.version,
+                )
                 .asGrpcError
             )
           }
@@ -65,7 +69,7 @@ class PackageUpgradeValidator(
         case None =>
           for {
             optMaximalDar <- maximalVersionedDar(
-              upgradingPackageAst,
+              uploadedPackageAst,
               packageMap,
             )
             _ <- typecheckUpgrades(
@@ -73,13 +77,13 @@ class PackageUpgradeValidator(
               optUpgradingDar,
               optMaximalDar,
             )
-            optMinimalDar <- minimalVersionedDar(upgradingPackageAst, packageMap)
+            optMinimalDar <- minimalVersionedDar(uploadedPackageAst, packageMap)
             _ <- typecheckUpgrades(
               TypecheckUpgrades.MinimalDarCheck,
               optMinimalDar,
               optUpgradingDar,
             )
-            _ = logger.info(s"Typechecking upgrades for $upgradingPackageId succeeded.")
+            _ = logger.info(s"Typechecking upgrades for $uploadedPackageId succeeded.")
           } yield ()
       }
     } yield result
@@ -166,7 +170,11 @@ class PackageUpgradeValidator(
               case err: UpgradeError =>
                 Future.failed(
                   Validation.Upgradeability
-                    .Error(newPkgId1, oldPkgId2, err)
+                    .Error(
+                      upgradingPackage = newPkgId1,
+                      upgradedPackage = oldPkgId2,
+                      upgradeError = err,
+                    )
                     .asGrpcError
                 )
               case NonFatal(err) =>

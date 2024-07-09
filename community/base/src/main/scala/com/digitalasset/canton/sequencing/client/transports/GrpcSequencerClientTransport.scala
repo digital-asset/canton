@@ -10,8 +10,6 @@ import com.daml.grpc.adapter.client.pekko.ClientAdapter
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.api.v30
-import com.digitalasset.canton.domain.api.v30.SequencerConnect
-import com.digitalasset.canton.domain.api.v30.SequencerConnectServiceGrpc.SequencerConnectServiceStub
 import com.digitalasset.canton.domain.api.v30.SequencerServiceGrpc.SequencerServiceStub
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.lifecycle.Lifecycle.CloseableChannel
@@ -30,7 +28,6 @@ import com.digitalasset.canton.sequencing.client.{
   SequencerSubscription,
   SubscriptionErrorRetryPolicy,
 }
-import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.store.StoredTopologyTransactionX.GenericStoredTopologyTransactionX
@@ -54,7 +51,6 @@ private[transports] abstract class GrpcSequencerClientTransportCommon(
     clientAuth: GrpcSequencerClientAuth,
     val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
-    protocolVersion: ProtocolVersion,
 )(implicit
     executionContext: ExecutionContext,
     esf: ExecutionSequencerFactory,
@@ -62,7 +58,6 @@ private[transports] abstract class GrpcSequencerClientTransportCommon(
 ) extends SequencerClientTransportCommon
     with NamedLogging {
 
-  private val sequencerConnectServiceClient = new SequencerConnectServiceStub(channel)
   protected val sequencerServiceClient: SequencerServiceStub = clientAuth(
     new SequencerServiceStub(channel, options = callOptions)
   )
@@ -78,36 +73,6 @@ private[transports] abstract class GrpcSequencerClientTransportCommon(
               ).discard
             case _ => err.log(logger)(traceContext)
           }
-
-  /** Attempt to obtain a handshake response from the sequencer.
-    * Transports can indicate in the error if the error is transient and could be retried.
-    */
-  override def handshake(request: HandshakeRequest)(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, HandshakeRequestError, HandshakeResponse] =
-    for {
-      responseP <- CantonGrpcUtil
-        .sendGrpcRequest(sequencerConnectServiceClient, "sequencer")(
-          _.handshake(SequencerConnect.HandshakeRequest(Some(request.toProtoV30))),
-          requestDescription = "handshake",
-          logger = logger,
-          retryPolicy =
-            _ => false, // we'll let the sequencer client decide whether to retry based on the error we return
-          timeout = timeouts.network.duration,
-          logPolicy = err =>
-            logger =>
-              traceContext =>
-                logger.debug(s"Failed to handshake with sequencer: $err")(traceContext),
-        )
-        .leftMap(err => HandshakeRequestError(err.toString, err.retry))
-      response <- HandshakeResponse
-        .fromProtoV30(responseP.getHandshakeResponse)
-        // if deserialization failed it likely means we have a version conflict on the handshake itself
-        .leftMap(err =>
-          HandshakeRequestError(s"Deserialization of response failed: $err", retryable = false)
-        )
-        .toEitherT[Future]
-    } yield response
 
   override def sendAsyncSigned(
       request: SignedContent[SubmissionRequest],
@@ -335,7 +300,6 @@ class GrpcSequencerClientTransport(
       clientAuth,
       timeouts,
       loggerFactory,
-      protocolVersion,
     )
     with SequencerClientTransport {
 

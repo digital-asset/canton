@@ -560,19 +560,18 @@ class MediatorNodeBootstrapX(
           // TODO(i12076): Request topology information from all sequencers and reconcile
           isMediatorActive <- EitherT.right[String](headSnapshot.isMediatorActive(mediatorId))
           _ <- Monad[EitherT[Future, String, *]].whenA(!isMediatorActive)(
-            sequencerClientFactory
-              .makeTransport(
-                info.sequencerConnections.default,
-                mediatorId,
-                requestSigner,
-                allowReplay = false,
-              )
-              .flatMap(
-                ResourceUtil.withResourceEitherT(_)(
-                  domainTopologyStateInit
-                    .callback(topologyClient, _, domainConfig.domainParameters.protocolVersion)
+            ResourceUtil.withResourceEitherT(
+              sequencerClientFactory
+                .makeTransport(
+                  info.sequencerConnections.default,
+                  mediatorId,
+                  requestSigner,
+                  allowReplay = false,
                 )
-              )
+            )(
+              domainTopologyStateInit
+                .callback(topologyClient, _, domainConfig.domainParameters.protocolVersion)
+            )
           )
         } yield {}
       }

@@ -46,7 +46,6 @@ import com.digitalasset.canton.sequencing.client.transports.{
   SequencerClientTransport,
   SequencerClientTransportPekko,
 }
-import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
@@ -1049,10 +1048,6 @@ class SequencerClientTest
 
     override def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy =
       SubscriptionErrorRetryPolicy.never
-
-    override def handshake(request: HandshakeRequest)(implicit
-        traceContext: TraceContext
-    ): EitherT[Future, HandshakeRequestError, HandshakeResponse] = ???
 
     override protected def loggerFactory: NamedLoggerFactory =
       SequencerClientTest.this.loggerFactory
