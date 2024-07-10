@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.environment
 
+import better.files.File
 import cats.Applicative
 import cats.data.EitherT
 import com.daml.metrics.HealthMetrics
@@ -77,7 +78,7 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
       override def batching: BatchingConfig = BatchingConfig()
       override def caching: CachingConfigs = CachingConfigs()
       override def useUnifiedSequencer: Boolean = false
-      override def devVersionSupport: Boolean = false
+      override def alphaVersionSupport: Boolean = false
       override def watchdog: Option[WatchdogConfig] = None
     }
   }
@@ -96,7 +97,7 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
       nonStandardConfig: Boolean = false,
       dbMigrateAndStart: Boolean = false,
       disableUpgradeValidation: Boolean = false,
-      devVersionSupport: Boolean = false,
+      alphaVersionSupport: Boolean = false,
       betaVersionSupport: Boolean = false,
       dontWarnOnDeprecatedPV: Boolean = false,
       initialProtocolVersion: ProtocolVersion = testedProtocolVersion,
@@ -124,7 +125,8 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
       testingConfig = TestingConfigInternal(),
       futureSupervisor = FutureSupervisor.Noop,
       loggerFactory = loggerFactory,
-      writeHealthDumpToFile = () => Future.failed(new RuntimeException("Not implemented")),
+      writeHealthDumpToFile =
+        (file: File) => Future.failed(new RuntimeException("Not implemented")),
       configuredOpenTelemetry = ConfiguredOpenTelemetry(
         OpenTelemetrySdk.builder().build(),
         SdkTracerProvider.builder(),

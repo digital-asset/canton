@@ -465,7 +465,7 @@ class TopologyTransactionProcessor(
       )
 
       validTransactions = validated.collect {
-        case tx if tx.rejectionReason.isEmpty => tx.transaction
+        case tx if tx.rejectionReason.isEmpty && !tx.transaction.isProposal => tx.transaction
       }
       _ <- performUnlessClosingUSF("notify-topology-transaction-observers")(
         MonadUtil.sequentialTraverse_(listeners.get())(listenerGroup => {

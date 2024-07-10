@@ -28,7 +28,7 @@ import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.retry
+import com.digitalasset.canton.util.{ErrorUtil, retry}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{ProtoDeserializationError, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
@@ -652,7 +652,8 @@ trait SequencerStore extends SequencerMemberValidator with NamedLogging with Aut
       status: SequencerPruningStatus,
       payloadToEventMargin: NonNegativeFiniteDuration,
   )(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): EitherT[Future, PruningError, SequencerPruningResult] = {
     val disabledClients = status.disabledClients
 
@@ -660,6 +661,23 @@ trait SequencerStore extends SequencerMemberValidator with NamedLogging with Aut
 
     val safeTimestamp = status.safePruningTimestamp
     logger.debug(s"Safe pruning timestamp is [$safeTimestamp]")
+
+    // as counter checkpoints may lag behind acknowledgements, we make sure to save checkpoints right before the
+    // requestedTimestamp so that when we compute the adjusted timestamp, it is not so far away in the past
+    def saveRecentCheckpoints(): Future[Unit] = for {
+      checkpoints <- checkpointsAtTimestamp(requestedTimestamp.immediatePredecessor)
+      _ <- checkpoints.toList.parTraverse { case (member, checkpoint) =>
+        for {
+          memberId <- lookupMember(member).map(
+            _.fold(ErrorUtil.invalidState(s"Member $member should be registered"))(_.memberId)
+          )
+          _ <- saveCounterCheckpoint(
+            memberId,
+            checkpoint,
+          ).value
+        } yield ()
+      }
+    } yield ()
 
     // as counter checkpoints may slightly lag behind acknowledgements adjust the pruning timestamp backwards to the
     // earliest counter checkpoint before the pruning timestamp
@@ -706,13 +724,16 @@ trait SequencerStore extends SequencerMemberValidator with NamedLogging with Aut
         // (if the event was dropped due to a crash or validation issue).
         payloadsRemoved <- prunePayloads(adjustedTimestamp.minus(payloadToEventMargin.duration))
         checkpointsRemoved <- pruneCheckpoints(adjustedTimestamp)
-      } yield s"Removed: at least $eventsRemoved events, at least $payloadsRemoved payloads, at least $checkpointsRemoved counter checkpoints"
+      } yield s"Removed at least $eventsRemoved events, at least $payloadsRemoved payloads, at least $checkpointsRemoved counter checkpoints"
 
     for {
       _ <- condUnitET[Future](
         requestedTimestamp <= safeTimestamp,
         UnsafePruningPoint(requestedTimestamp, safeTimestamp),
       )
+
+      _ <- EitherT.right(saveRecentCheckpoints())
+
       adjustedTimestamp <- EitherT.right(adjustTimestamp())
       additionalCheckpointInfo =
         if (adjustedTimestamp < requestedTimestamp && logger.underlying.isInfoEnabled()) {
@@ -790,6 +811,10 @@ trait SequencerStore extends SequencerMemberValidator with NamedLogging with Aut
       traceContext: TraceContext
   ): Future[SequencerSnapshot]
 
+  def checkpointsAtTimestamp(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): Future[Map[Member, CounterCheckpoint]]
+
   def initializeFromSnapshot(initialState: SequencerInitialState)(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
@@ -828,6 +853,7 @@ object SequencerStore {
       maxInClauseSize: PositiveNumeric[Int],
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
+      sequencerMember: Member,
       unifiedSequencer: Boolean,
       overrideCloseContext: Option[CloseContext] = None,
   )(implicit executionContext: ExecutionContext): SequencerStore =
@@ -835,6 +861,7 @@ object SequencerStore {
       case _: MemoryStorage =>
         new InMemorySequencerStore(
           protocolVersion,
+          sequencerMember,
           unifiedSequencer = unifiedSequencer,
           loggerFactory,
         )
@@ -845,6 +872,7 @@ object SequencerStore {
           maxInClauseSize,
           timeouts,
           loggerFactory,
+          sequencerMember,
           unifiedSequencer = unifiedSequencer,
           overrideCloseContext,
         )

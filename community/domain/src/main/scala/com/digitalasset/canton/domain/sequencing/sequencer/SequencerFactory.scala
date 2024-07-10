@@ -85,6 +85,7 @@ abstract class DatabaseSequencerFactory(
         DefaultMaxSqlInListSize,
         timeouts,
         loggerFactory,
+        sequencerId,
         unifiedSequencer =
           true, // // TODO(#18401): does not affect the usage below, but should be correctly set
         // At the moment this store instance is only used for the sequencer initialization,
@@ -160,6 +161,7 @@ trait MkSequencerFactory {
       storage: Storage,
       sequencerId: SequencerId,
       nodeParameters: CantonNodeParameters,
+      futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
   )(
       sequencerConfig: SequencerConfig
@@ -177,6 +179,7 @@ object CommunitySequencerFactory extends MkSequencerFactory {
       storage: Storage,
       sequencerId: SequencerId,
       nodeParameters: CantonNodeParameters,
+      futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
   )(sequencerConfig: SequencerConfig)(implicit
       executionContext: ExecutionContext

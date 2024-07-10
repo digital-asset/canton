@@ -23,7 +23,10 @@ import com.digitalasset.canton.domain.sequencing.config.{
   RemoteSequencerConfig,
   SequencerNodeConfigCommon,
 }
-import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.admin.EnterpriseSequencerBftAdminData.PeerNetworkStatus
+import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.admin.EnterpriseSequencerBftAdminData.{
+  OrderingTopology,
+  PeerNetworkStatus,
+}
 import com.digitalasset.canton.domain.sequencing.sequencer.{
   SequencerClients,
   SequencerPruningStatus,
@@ -777,10 +780,10 @@ abstract class SequencerReference(
   )
   override def maybeId: Option[SequencerId] = topology.maybeIdHelper(SequencerId(_))
 
-  private lazy val setup_ = new SequencerSetupGroup(this)
+  private lazy val setup_ = new SequencerAdministration(this)
 
   @Help.Summary("Methods used for node initialization")
-  def setup: SequencerSetupGroup = setup_
+  def setup: SequencerAdministration = setup_
 
   @Help.Summary("Health and diagnostic related commands")
   @Help.Group("Health")
@@ -1161,6 +1164,12 @@ abstract class SequencerReference(
     def get_peer_network_status(endpoints: Option[Iterable[Endpoint]]): PeerNetworkStatus =
       consoleEnvironment.run {
         runner.adminCommand(EnterpriseSequencerBftAdminCommands.GetPeerNetworkStatus(endpoints))
+      }
+
+    @Help.Summary("Get the currently active ordering topology")
+    def get_ordering_topology(): OrderingTopology =
+      consoleEnvironment.run {
+        runner.adminCommand(EnterpriseSequencerBftAdminCommands.GetOrderingTopology())
       }
   }
 }

@@ -639,6 +639,7 @@ class ParticipantNodeBootstrap(
         parameterConfig.processingTimeouts,
         loggerFactory,
         futureSupervisor,
+        clock,
       )
 
       // Initialize the SyncDomain persistent states before participant recovery so that pruning recovery can re-invoke
@@ -882,7 +883,7 @@ object ParticipantNodeBootstrap {
 
     override protected def createEngine(arguments: Arguments): Engine =
       DAMLe.newEngine(
-        enableLfDev = arguments.parameterConfig.devVersionSupport,
+        enableLfDev = arguments.parameterConfig.alphaVersionSupport,
         enableLfBeta = arguments.parameterConfig.betaVersionSupport,
         enableStackTraces = arguments.parameterConfig.engine.enableEngineStackTraces,
         iterationsBetweenInterruptions =
@@ -987,7 +988,7 @@ class ParticipantNode(
     val id: ParticipantId,
     val metrics: ParticipantMetrics,
     val config: LocalParticipantConfig,
-    storage: Storage,
+    val storage: Storage,
     override protected val clock: Clock,
     val cryptoPureApi: CryptoPureApi,
     identityPusher: ParticipantTopologyDispatcher,

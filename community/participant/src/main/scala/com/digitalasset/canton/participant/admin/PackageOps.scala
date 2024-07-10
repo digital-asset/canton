@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.admin
 
 import cats.data.EitherT
 import cats.implicits.toBifunctorOps
+import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.LfPackageId
@@ -28,6 +29,7 @@ import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Ref.PackageId
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
 
 trait PackageOps extends NamedLogging {
@@ -41,7 +43,7 @@ trait PackageOps extends NamedLogging {
 
   def vetPackages(
       packages: Seq[PackageId],
-      synchronize: Boolean,
+      synchronizeVetting: PackageVettingSynchronization,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit]
@@ -106,15 +108,26 @@ class PackageOpsImpl(
     packageIsVettedOn.bimap(PackageMissingDependencies.Reject(packageId, _), _.contains(true))
   }
 
-  override def vetPackages(packages: Seq[PackageId], synchronize: Boolean)(implicit
+  override def vetPackages(
+      packages: Seq[PackageId],
+      synchronizeVetting: PackageVettingSynchronization,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] = {
-    modifyVettedPackages { existingPackages =>
-      // Keep deterministic order for testing and keep optimal O(n)
-      val existingPackagesSet = existingPackages.toSet
-      val packagesToBeAdded = packages.filterNot(existingPackagesSet)
-      existingPackages ++ packagesToBeAdded
-    }
+    val packagesToBeAdded = new AtomicReference[Seq[PackageId]](List.empty)
+    for {
+      newVettedPackagesCreated <- modifyVettedPackages { existingPackages =>
+        // Keep deterministic order for testing and keep optimal O(n)
+        val existingPackagesSet = existingPackages.toSet
+        packagesToBeAdded.set(packages.filterNot(existingPackagesSet))
+        existingPackages ++ packagesToBeAdded.get
+      }
+      // only synchronize with the connected domains if a new VettedPackages transaction was actually issued
+      _ <- EitherTUtil.ifThenET(newVettedPackagesCreated) {
+        synchronizeVetting.sync(packagesToBeAdded.get.toSet)
+      }
+    } yield ()
+
   }
 
   override def revokeVettingForPackages(
@@ -124,14 +137,15 @@ class PackageOpsImpl(
   )(implicit tc: TraceContext): EitherT[FutureUnlessShutdown, CantonError, Unit] = {
     val packagesToUnvet = packages.toSet
 
-    modifyVettedPackages(_.filterNot(packagesToUnvet)).leftWiden
+    modifyVettedPackages(_.filterNot(packagesToUnvet)).leftWiden[CantonError].void
   }
 
+  /** Returns true if a new VettedPackages transaction was authorized. */
   def modifyVettedPackages(
       action: Seq[LfPackageId] => Seq[LfPackageId]
   )(implicit
       tc: TraceContext
-  ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] = {
+  ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Boolean] = {
     // TODO(#14069) this vetting extension might fail on concurrent requests
 
     for {
@@ -179,6 +193,6 @@ class PackageOpsImpl(
             .map(_ => ())
         )
       }
-    } yield ()
+    } yield newVettedPackagesState != currentPackages
   }
 }
