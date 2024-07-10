@@ -21,6 +21,7 @@ import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.{
   AuthorityOfResponse,
   PartyInfo,
 }
+import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.*
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.*
@@ -646,56 +647,82 @@ class StoreBasedTopologySnapshot(
     )
   }
 
-  override def isMemberKnown(
-      member: Member
-  )(implicit traceContext: TraceContext): Future[Boolean] = {
-    member match {
-      case ParticipantId(pid) =>
-        findTransactions(
-          asOfInclusive = false,
-          types = Seq(DomainTrustCertificate.code),
-          filterUid = Some(Seq(pid)),
-          filterNamespace = None,
-        ).map(_.result.nonEmpty)
-      case mediatorId @ MediatorId(_) =>
-        findTransactions(
-          asOfInclusive = false,
-          types = Seq(MediatorDomainState.code),
-          filterUid = None,
-          filterNamespace = None,
-        ).map(
-          _.collectOfMapping[MediatorDomainState].result
-            .exists(_.mapping.allMediatorsInGroup.contains(mediatorId))
-        )
-      case sequencerId @ SequencerId(_) =>
-        findTransactions(
-          asOfInclusive = false,
-          types = Seq(SequencerDomainState.code),
-          filterUid = None,
-          filterNamespace = None,
-        ).map(
-          _.collectOfMapping[SequencerDomainState].result
-            .exists(_.mapping.allSequencers.contains(sequencerId))
-        )
-      case _ =>
-        Future.failed(
-          new IllegalArgumentException(
-            s"Checking whether member is known for an unexpected member type: $member"
-          )
-        )
-    }
+  override def isMemberKnown(member: Member)(implicit traceContext: TraceContext): Future[Boolean] =
+    areMembersKnown(Set(member)).map(_.nonEmpty)
+
+  override def areMembersKnown(
+      members: Set[Member]
+  )(implicit traceContext: TraceContext): Future[Set[Member]] = {
+    val participants = members.collect { case ParticipantId(uid) => uid }
+    val mediators = members.collect { case MediatorId(uid) => uid }.toSet
+    val sequencers = members.collect { case SequencerId(uid) => uid }.toSet
+
+    val knownParticipantsF = if (participants.nonEmpty) {
+      findTransactions(
+        asOfInclusive = false,
+        types = Seq(DomainTrustCertificate.code),
+        filterUid = Some(participants.toSeq),
+        filterNamespace = None,
+      ).map(
+        _.collectOfMapping[DomainTrustCertificate].result
+          .map(_.mapping.participantId: Member)
+          .toSet
+      )
+    } else Future.successful(Set.empty[Member])
+
+    val knownMediatorsF = if (mediators.nonEmpty) {
+      findTransactions(
+        asOfInclusive = false,
+        types = Seq(MediatorDomainState.code),
+        filterUid = None,
+        filterNamespace = None,
+      ).map(
+        _.collectOfMapping[MediatorDomainState].result
+          .flatMap(_.mapping.allMediatorsInGroup.collect {
+            case med if mediators.contains(med.uid) => med: Member
+          })
+          .toSet
+      )
+    } else Future.successful(Set.empty[Member])
+
+    val knownSequencersF = if (sequencers.nonEmpty) {
+      findTransactions(
+        asOfInclusive = false,
+        types = Seq(SequencerDomainState.code),
+        filterUid = None,
+        filterNamespace = None,
+      ).map(
+        _.collectOfMapping[SequencerDomainState].result
+          .flatMap(_.mapping.allSequencers.collect {
+            case seq if sequencers.contains(seq.uid) => seq: Member
+          })
+          .toSet
+      )
+    } else Future.successful(Set.empty[Member])
+
+    for {
+      knownParticipants <- knownParticipantsF
+      knownMediators <- knownMediatorsF
+      knownSequencers <- knownSequencersF
+    } yield knownParticipants ++ knownMediators ++ knownSequencers
   }
 
   override def memberFirstKnownAt(
       member: Member
-  )(implicit traceContext: TraceContext): Future[Option[CantonTimestamp]] = {
+  )(implicit traceContext: TraceContext): Future[Option[(SequencedTime, EffectiveTime)]] = {
     member match {
       case participantId: ParticipantId =>
-        store.findFirstTrustCertificateForParticipant(participantId).map(_.map(_.validFrom.value))
+        store
+          .findFirstTrustCertificateForParticipant(participantId)
+          .map(_.map(tx => (tx.sequenced, tx.validFrom)))
       case mediatorId: MediatorId =>
-        store.findFirstMediatorStateForMediator(mediatorId).map(_.map(_.validFrom.value))
+        store
+          .findFirstMediatorStateForMediator(mediatorId)
+          .map(_.map(tx => (tx.sequenced, tx.validFrom)))
       case sequencerId: SequencerId =>
-        store.findFirstSequencerStateForSequencer(sequencerId).map(_.map(_.validFrom.value))
+        store
+          .findFirstSequencerStateForSequencer(sequencerId)
+          .map(_.map(tx => (tx.sequenced, tx.validFrom)))
       case _ =>
         Future.failed(
           new IllegalArgumentException(

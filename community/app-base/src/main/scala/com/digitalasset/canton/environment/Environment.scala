@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.environment
 
+import better.files.File
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
@@ -51,7 +52,7 @@ import scala.util.control.NonFatal
   */
 trait Environment extends NamedLogging with AutoCloseable with NoTracing {
 
-  type Config <: CantonConfig
+  type Config <: CantonConfig & ConfigDefaults[DefaultPorts, Config]
   type Console <: ConsoleEnvironment
 
   val config: Config
@@ -132,7 +133,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
   private val healthDumpGenerator = new SingleUseCell[HealthDumpGenerator[_]]
 
   // Function passed down to the node boostrap used to generate a health dump file
-  val writeHealthDumpToFile: HealthDumpFunction = () =>
+  val writeHealthDumpToFile: HealthDumpFunction = (file: File) =>
     Future {
       healthDumpGenerator
         .getOrElse {
@@ -158,11 +159,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
               newGenerator
           }
         }
-        .generateHealthDump(
-          better.files.File.newTemporaryFile(
-            prefix = "canton-remote-health-dump"
-          )
-        )
+        .generateHealthDump(file)
     }
 
   installJavaUtilLoggingBridge()

@@ -1077,9 +1077,9 @@ class ParticipantReplicationAdministrationGroup(
 
   @Help.Summary("Set the participant replica to passive")
   @Help.Description(
-    "Trigger a graceful fail-over from this active replica to another passive replica."
+    "Trigger a graceful fail-over from this active replica to another passive replica. Returns true if another replica became active."
   )
-  def set_passive(): Unit = {
+  def set_passive(): Boolean = {
     consoleEnvironment.run {
       runner.adminCommand(
         ParticipantAdminCommands.Replication.SetPassiveCommand()
@@ -1201,6 +1201,20 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       }
       res
     }
+
+    @Help.Summary("Validate DARs against the current participants' state")
+    @Help.Description(
+      """Performs the same DAR and Daml package validation checks that the upload call performs,
+         but with no effects on the target participants: the DAR is not persisted or vetted."""
+    )
+    def validate(path: String): String =
+      consoleEnvironment.runE {
+        for {
+          hash <- ParticipantCommands.dars
+            .validate(runner, path, logger)
+            .toEither
+        } yield hash
+      }
 
     @Help.Summary("Downloads the DAR file with the given hash to the given directory")
     def download(darHash: String, directory: String): Unit = {

@@ -292,9 +292,13 @@ private class ForwardingTopologySnapshotClient(
   override def isMemberKnown(member: Member)(implicit traceContext: TraceContext): Future[Boolean] =
     parent.isMemberKnown(member)
 
+  override def areMembersKnown(members: Set[Member])(implicit
+      traceContext: TraceContext
+  ): Future[Set[Member]] = parent.areMembersKnown(members)
+
   override def memberFirstKnownAt(member: Member)(implicit
       traceContext: TraceContext
-  ): Future[Option[CantonTimestamp]] =
+  ): Future[Option[(SequencedTime, EffectiveTime)]] =
     parent.memberFirstKnownAt(member)
 
   override def findDynamicDomainParameters()(implicit
@@ -407,7 +411,13 @@ class CachingTopologySnapshot(
     TracedScaffeine
       .buildTracedAsyncFuture[Member, Boolean](
         cache = cachingConfigs.memberCache.buildScaffeine(),
-        traceContext => member => parent.isMemberKnown(member)(traceContext),
+        loader = traceContext => member => parent.isMemberKnown(member)(traceContext),
+        allLoader = Some(traceContext =>
+          members =>
+            parent
+              .areMembersKnown(members.toSet)(traceContext)
+              .map(knownMembers => members.map(m => m -> knownMembers.contains(m)).toMap)
+        ),
       )(logger)
 
   private val domainParametersCache =
@@ -509,9 +519,14 @@ class CachingTopologySnapshot(
   override def isMemberKnown(member: Member)(implicit traceContext: TraceContext): Future[Boolean] =
     memberCache.get(member)
 
+  override def areMembersKnown(members: Set[Member])(implicit
+      traceContext: TraceContext
+  ): Future[Set[Member]] =
+    memberCache.getAll(members).map(_.collect { case (member, _isKnown @ true) => member }.toSet)
+
   override def memberFirstKnownAt(
       member: Member
-  )(implicit traceContext: TraceContext): Future[Option[CantonTimestamp]] = {
+  )(implicit traceContext: TraceContext): Future[Option[(SequencedTime, EffectiveTime)]] = {
     isMemberKnown(member).flatMap {
       // TODO(#18394): Consider caching this call as well,
       //  should only happen during topology transactions with potential new members: DTC/SDS/MDS
