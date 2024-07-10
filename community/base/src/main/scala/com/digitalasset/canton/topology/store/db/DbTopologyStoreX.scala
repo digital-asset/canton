@@ -681,7 +681,14 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
     if (hasUidFilter && filterUid.forall(_.isEmpty) && filterNamespace.forall(_.isEmpty)) {
       Future.successful(StoredTopologyTransactionsX.empty)
     } else {
-      logger.debug(s"Querying transactions as of $asOf for types $types")
+      val filterUidStr = filterUid.map(f => s"uids ${f.mkString(", ")}")
+      val filterNamespaceStr = filterNamespace.map(f => s"namespaces ${f.mkString(", ")}")
+      val filterOpStr = filterOp.map(f => s"op $f")
+      val filters = filterUidStr.toList ++ filterNamespaceStr ++ filterOpStr
+      val filterStr = if (filters.nonEmpty) s" with filters for ${filters.mkString("; ")}" else ""
+      logger.debug(
+        s"Querying transactions as of $asOf for types ${types}${filterStr}"
+      )
 
       val timeRangeFilter = asOfQuery(asOf, asOfInclusive)
       val isProposalFilter = sql" AND is_proposal = $isProposal"

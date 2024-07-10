@@ -527,6 +527,10 @@ trait MembersTopologySnapshotClient {
   def allMembers()(implicit traceContext: TraceContext): Future[Set[Member]]
 
   def isMemberKnown(member: Member)(implicit traceContext: TraceContext): Future[Boolean]
+
+  def areMembersKnown(members: Set[Member])(implicit
+      traceContext: TraceContext
+  ): Future[Set[Member]]
 }
 
 trait TopologySnapshot

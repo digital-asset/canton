@@ -1520,7 +1520,7 @@ abstract class ProtocolProcessor[
       _ <- ifThenET(!cleanReplay) {
         for {
           _unit <- {
-            logger.debug(
+            logger.info(
               show"Finalizing ${steps.requestKind.unquoted} request=${requestId.unwrap} with event $eventO."
             )
 
@@ -1548,6 +1548,7 @@ abstract class ProtocolProcessor[
             requestCounter,
             commitSet,
           )
+          _ = logger.info(show"About to wrap up request ${requestId}")
           requestTimestamp = requestId.unwrap
           _unit <- EitherT.right[steps.ResultError](
             FutureUnlessShutdown.outcomeF(
@@ -1561,7 +1562,7 @@ abstract class ProtocolProcessor[
           )
         } yield pendingSubmissionDataO.foreach(steps.postProcessResult(verdict, _))
       }
-    } yield ()
+    } yield logger.info(show"Finished async result processing of request ${requestId}")
   }
 
   private def checkContradictoryMediatorApprove(

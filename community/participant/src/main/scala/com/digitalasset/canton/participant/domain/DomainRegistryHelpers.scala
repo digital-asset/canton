@@ -302,16 +302,20 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       case None =>
         EitherT.right[DomainRegistryError](FutureUnlessShutdown.unit)
       case Some(topologyInitializationCallback) =>
-        performUnlessClosingEitherU(
-          name = "sequencer-transport-for-downloading-essential-state"
-        )(
-          sequencerClientFactory
-            .makeTransport(
-              sequencerConnection,
-              participantId,
-              requestSigner,
-            )
-        )
+        EitherT
+          .right {
+            FutureUnlessShutdown.lift {
+              performUnlessClosing(
+                name = "sequencer-transport-for-downloading-essential-state"
+              ) {
+                sequencerClientFactory.makeTransport(
+                  sequencerConnection,
+                  participantId,
+                  requestSigner,
+                )
+              }
+            }
+          }
           .flatMap(transport =>
             performUnlessClosingEitherU(
               "downloading-essential-topology-state"

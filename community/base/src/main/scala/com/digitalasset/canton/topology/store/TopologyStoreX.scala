@@ -356,8 +356,6 @@ object TopologyStoreX {
     TopologyMappingX.Code.OwnerToKeyMappingX,
     // TODO(#14060) - potentially revisit this once we implement TopologyStoreX.filterInitialParticipantDispatchingTransactions
     TopologyMappingX.Code.NamespaceDelegationX,
-    TopologyMappingX.Code.IdentifierDelegationX,
-    TopologyMappingX.Code.DecentralizedNamespaceDefinitionX,
   )
 
   def filterInitialParticipantDispatchingTransactions(
@@ -385,18 +383,6 @@ object TopologyStoreX {
             _,
             _,
           ) if ns == participantId.uid.namespace =>
-        tx
-      case tx @ SignedTopologyTransactionX(
-            TopologyTransactionX(_, _, IdentifierDelegationX(uid, _)),
-            _,
-            _,
-          ) if uid == participantId.uid =>
-        tx
-      case tx @ SignedTopologyTransactionX(
-            TopologyTransactionX(_, _, _: DecentralizedNamespaceDefinitionX),
-            _,
-            _,
-          ) =>
         tx
     }
   }
