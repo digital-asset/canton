@@ -129,7 +129,8 @@ private[dao] trait JdbcLedgerDaoBackend extends PekkoBeforeAndAfterAll with Base
           ledgerEndCache = ledgerEndCache,
           stringInterningView = stringInterningView,
           ingestionStorageBackend = storageBackendFactory.createIngestionStorageBackend,
-          parameterStorageBackend = storageBackendFactory.createParameterStorageBackend,
+          parameterStorageBackend =
+            storageBackendFactory.createParameterStorageBackend(stringInterningView),
           loggerFactory = loggerFactory,
         ),
         servicesExecutionContext = ec,

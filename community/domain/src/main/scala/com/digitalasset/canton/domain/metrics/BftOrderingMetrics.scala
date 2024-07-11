@@ -361,20 +361,20 @@ class BftOrderingMetrics(
         }
       }
 
-      val sentBytes: Meter = openTelemetryMetricsFactory.meter(
+      val receivedBytes: Meter = openTelemetryMetricsFactory.meter(
         MetricInfo(
-          prefix :+ "sent-bytes",
-          summary = "Bytes sent",
-          description = "Total P2P bytes sent.",
+          prefix :+ "received-bytes",
+          summary = "Bytes received",
+          description = "Total P2P bytes received.",
           qualification = MetricQualification.Traffic,
         )
       )
 
-      val sentMessages: Meter = openTelemetryMetricsFactory.meter(
+      val receivedMessages: Meter = openTelemetryMetricsFactory.meter(
         MetricInfo(
-          prefix :+ "sent-messages",
-          summary = "Messages sent",
-          description = "Total P2P messages sent.",
+          prefix :+ "received-messages",
+          summary = "Messages received",
+          description = "Total P2P messages received.",
           qualification = MetricQualification.Traffic,
         )
       )
