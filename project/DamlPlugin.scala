@@ -409,6 +409,8 @@ object DamlPlugin extends AutoPlugin {
 
     val result = Process(
       command = damlc.getAbsolutePath :: "build" ::
+        // TODO(#16362): Consider removing the flag and split the definitions accordingly
+        "--warn-bad-interface-instances=yes" ::
         "--project-root" :: projectBuildDirectory.toString ::
         "--output" :: outputDar.getAbsolutePath :: Nil,
       cwd = projectBuildDirectory,
