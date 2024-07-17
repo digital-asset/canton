@@ -410,6 +410,8 @@ object DamlPlugin extends AutoPlugin {
     val processLogger = new BufferedLogger
 
     val damlcCommand = damlc.getAbsolutePath :: "build" :: "--ghc-option" :: "-Werror" ::
+      // TODO(#16362): Consider removing the flag and split the definitions accordingly
+      "--warn-bad-interface-instances=yes" ::
       "--project-root" :: projectBuildDirectory.toString ::
       "--output" :: outputDar.getAbsolutePath :: Nil
     val command =

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.platform.store.dao
 
-import com.daml.daml_lf_dev.DamlLf.Archive
 import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.metrics.api.noop.NoOpMetricsFactory
@@ -32,6 +31,7 @@ import com.digitalasset.canton.platform.store.dao.events.{
 import com.digitalasset.canton.platform.store.interning.StringInterningView
 import com.digitalasset.canton.platform.store.{DbSupport, DbType, FlywayMigrations}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.daml.lf.archive.DamlLf.Archive
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.engine.{Engine, EngineConfig}
 import com.digitalasset.daml.lf.language.{LanguageMajorVersion, LanguageVersion}
@@ -190,7 +190,13 @@ private[dao] trait JdbcLedgerDaoBackend extends PekkoBeforeAndAfterAll with Base
         ).acquire()
         _ <- Resource.fromFuture(dao.initialize(TestParticipantId))
         initialLedgerEnd <- Resource.fromFuture(dao.lookupLedgerEnd())
-        _ = ledgerEndCache.set(initialLedgerEnd.lastOffset -> initialLedgerEnd.lastEventSeqId)
+        _ = ledgerEndCache.set(
+          (
+            initialLedgerEnd.lastOffset,
+            initialLedgerEnd.lastEventSeqId,
+            initialLedgerEnd.lastPublicationTime,
+          )
+        )
       } yield dao
     }(TraceContext.empty)
     ledgerDao = Await.result(resource.asFuture, 180.seconds)
