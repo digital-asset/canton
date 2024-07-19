@@ -14,6 +14,7 @@ import com.digitalasset.canton.ledger.participant.state.index.MeteringStore.{
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.*
+import com.digitalasset.canton.platform.indexer.parallel.PostPublishData
 import com.digitalasset.canton.platform.store.EventSequentialId
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
   DomainOffset,
@@ -125,6 +126,14 @@ trait ParameterStorageBackend {
       connection: Connection
   ): Option[Offset]
 
+  def updatePostProcessingEnd(
+      postProcessingEnd: Offset
+  )(connection: Connection): Unit
+
+  def postProcessingEnd(
+      connection: Connection
+  ): Option[Offset]
+
   /** Initializes the parameters table and verifies or updates ledger identity parameters.
     * This method is idempotent:
     *  - If no identity parameters are stored, then they are set to the given value.
@@ -214,6 +223,11 @@ trait CompletionStorageBackend {
       parties: Set[Party],
       limit: Int,
   )(connection: Connection): Vector[CompletionStreamResponse]
+
+  def commandCompletionsForRecovery(
+      startExclusive: Offset,
+      endInclusive: Offset,
+  )(connection: Connection): Vector[PostPublishData]
 
   /** Part of pruning process, this needs to be in the same transaction as the other pruning related database operations
     */
@@ -497,7 +511,11 @@ trait IntegrityStorageBackend {
     * This operation is allowed to take some time to finish.
     * It is not expected that it is used during regular index/indexer operation.
     */
-  def verifyIntegrity()(connection: Connection): Unit
+  def onlyForTestingVerifyIntegrity(failForEmptyDB: Boolean = true)(connection: Connection): Unit
+
+  def onlyForTestingNumberOfAcceptedTransactionsFor(domainId: DomainId)(connection: Connection): Int
+
+  def onlyForTestingMoveLedgerEndBackToScratch()(connection: Connection): Unit
 }
 
 trait StringInterningStorageBackend {

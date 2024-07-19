@@ -8,7 +8,6 @@ import cats.instances.future.*
 import cats.instances.order.*
 import cats.syntax.semigroup.*
 import com.digitalasset.canton.crypto.KeyPurpose
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, OnboardingRestriction}
 import com.digitalasset.canton.topology.*
@@ -327,7 +326,28 @@ class ValidatingTopologyMappingChecks(
       }
     }
 
+    def checkPartyIdDoesntExist() = for {
+      ptps <- loadFromStore(
+        effective,
+        PartyToParticipant.code,
+        filterUid = Some(Seq(participantId.uid)),
+      )
+      conflictingPartyIdO = ptps.collectLatestByUniqueKey
+        .collectOfMapping[PartyToParticipant]
+        .result
+        .headOption
+        .map(_.mapping.partyId)
+      _ <- conflictingPartyIdO match {
+        case Some(partyId) =>
+          EitherT.leftT[Future, Unit][TopologyTransactionRejection](
+            TopologyTransactionRejection.ParticipantIdClashesWithPartyId(participantId, partyId)
+          )
+        case None => EitherTUtil.unit[TopologyTransactionRejection]
+      }
+    } yield ()
+
     for {
+      _ <- checkPartyIdDoesntExist()
       restriction <- loadOnboardingRestriction()
       _ <- checkDomainIsNotLocked(restriction)
       _ <- checkParticipantIsNotRestricted(restriction)
@@ -355,13 +375,23 @@ class ValidatingTopologyMappingChecks(
         participantTransactions <- EitherT.right[TopologyTransactionRejection](
           store
             .findPositiveTransactions(
-              CantonTimestamp.MaxValue,
+              effective.value,
               asOfInclusive = false,
               isProposal = false,
               types = Seq(DomainTrustCertificate.code, OwnerToKeyMapping.code),
-              filterUid = Some(newParticipants.toSeq.map(_.uid)),
+              filterUid = Some(newParticipants.toSeq.map(_.uid) :+ mapping.partyId.uid),
               filterNamespace = None,
             )
+        )
+
+        // check that the PTP doesn't try to allocate a party that is the same as an already existing admin party
+        foundAdminPartyWithSameUID = participantTransactions
+          .collectOfMapping[DomainTrustCertificate]
+          .result
+          .find(_.mapping.participantId.uid == mapping.partyId.uid)
+        _ <- EitherTUtil.condUnitET[Future](
+          foundAdminPartyWithSameUID.isEmpty,
+          TopologyTransactionRejection.PartyIdIsAdminParty(mapping.partyId),
         )
 
         // check that all participants are known on the domain
