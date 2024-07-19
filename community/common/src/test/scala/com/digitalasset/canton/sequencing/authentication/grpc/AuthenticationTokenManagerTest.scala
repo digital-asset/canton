@@ -25,17 +25,17 @@ import org.scalatest.wordspec.AnyWordSpec
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 
 object AuthenticationTokenManagerTest extends org.mockito.MockitoSugar with ArgumentMatchersSugar {
-  val mockClock = mock[Clock]
+  val mockClock: Clock = mock[Clock]
   when(mockClock.scheduleAt(any[CantonTimestamp => Unit], any[CantonTimestamp]))
     .thenReturn(FutureUnlessShutdown.unit)
 }
 
 class AuthenticationTokenManagerTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
-  val crypto = new SymbolicPureCrypto
-  val token1: AuthenticationToken = AuthenticationToken.generate(crypto)
-  val token2: AuthenticationToken = AuthenticationToken.generate(crypto)
-  val now = CantonTimestamp.Epoch
+  private val crypto = new SymbolicPureCrypto
+  private val token1 = AuthenticationToken.generate(crypto)
+  private val token2 = AuthenticationToken.generate(crypto)
+  private val now = CantonTimestamp.Epoch
 
   "first call to getToken will obtain it" in {
     val (tokenManager, mock, _) = setup()
@@ -45,7 +45,7 @@ class AuthenticationTokenManagerTest extends AnyWordSpec with BaseTest with HasE
     for {
       _ <- tokenManager.getToken
     } yield mock.callCount shouldBe 1
-  }
+  }.failOnShutdown.futureValue
 
   "multiple calls to getToken before obtain has completed will return pending" in {
     val (tokenManager, mock, _) = setup()
@@ -62,7 +62,7 @@ class AuthenticationTokenManagerTest extends AnyWordSpec with BaseTest with HasE
       mock.callCount shouldBe 1
       result1 shouldEqual result2
     }
-  }
+  }.failOnShutdown.futureValue
 
   "getToken after error will cause refresh" in {
     val (tokenManager, mock, _) = setup()
@@ -81,7 +81,7 @@ class AuthenticationTokenManagerTest extends AnyWordSpec with BaseTest with HasE
     } yield {
       result2 shouldBe token1
     }
-  }
+  }.failOnShutdown.futureValue
 
   "invalidateToken will cause obtain to be called on next call" in {
     val (tokenManager, mock, _) = setup()
@@ -101,7 +101,7 @@ class AuthenticationTokenManagerTest extends AnyWordSpec with BaseTest with HasE
       result2 shouldBe token2
       mock.callCount shouldBe 2
     }
-  }
+  }.failOnShutdown.futureValue
 
   "invalidateToken with a different token wont cause a refresh" in {
     val (tokenManager, mock, _) = setup()
@@ -118,7 +118,7 @@ class AuthenticationTokenManagerTest extends AnyWordSpec with BaseTest with HasE
       result1 shouldBe result2
       mock.callCount shouldBe 1 // despite invalidation
     }
-  }
+  }.failOnShutdown.futureValue
 
   "automatically renew token in due time" in {
     val clockMock = mock[Clock]
@@ -153,8 +153,7 @@ class AuthenticationTokenManagerTest extends AnyWordSpec with BaseTest with HasE
       t2 shouldBe token2
       t3 shouldBe token2
     }
-
-  }
+  }.failOnShutdown.futureValue
 
   "getToken after failure will cause refresh" in {
     val (tokenManager, mock, _) = setup()
@@ -172,8 +171,7 @@ class AuthenticationTokenManagerTest extends AnyWordSpec with BaseTest with HasE
       _ = mock.succeed(token1)
       result2 <- call2.value.map(_.value)
     } yield result2 shouldBe token1
-
-  }
+  }.failOnShutdown.futureValue
 
   private def setup(
       clockO: Option[Clock] = None
