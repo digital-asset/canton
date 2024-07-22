@@ -89,6 +89,7 @@ class BlockSequencer(
     metrics: SequencerMetrics,
     loggerFactory: NamedLoggerFactory,
     unifiedSequencer: Boolean,
+    exitOnFatalFailures: Boolean,
     runtimeReady: FutureUnlessShutdown[Unit],
 )(implicit executionContext: ExecutionContext, materializer: Materializer, tracer: Tracer)
     extends DatabaseSequencer(
@@ -128,6 +129,7 @@ class BlockSequencer(
     futureSupervisor,
     timeouts,
     loggerFactory,
+    crashOnFailure = exitOnFatalFailures,
   )
 
   override lazy val rateLimitManager: Option[SequencerRateLimitManager] = Some(

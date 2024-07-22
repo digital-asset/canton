@@ -12,7 +12,11 @@ import com.digitalasset.canton.config.{
   DefaultProcessingTimeouts,
   LoggingConfig,
 }
-import com.digitalasset.canton.environment.{CantonNodeParameters, HasGeneralCantonNodeParameters}
+import com.digitalasset.canton.environment.{
+  CantonNodeParameters,
+  DefaultNodeParameters,
+  HasGeneralCantonNodeParameters,
+}
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
 import com.digitalasset.canton.participant.config.{
   CantonEngineConfig,
@@ -59,8 +63,7 @@ object ParticipantNodeParameters {
       logQueryCost = None,
       processingTimeouts = DefaultProcessingTimeouts.testing,
       enablePreviewFeatures = false,
-      // TODO(i15561): Revert back to `false` once there is a stable Daml 3 protocol version
-      nonStandardConfig = true,
+      nonStandardConfig = false,
       cachingConfigs = CachingConfigs(),
       batchingConfig = BatchingConfig(
         maxPruningBatchSize = PositiveNumeric.tryCreate(10),
@@ -69,7 +72,7 @@ object ParticipantNodeParameters {
       sequencerClient = SequencerClientConfig(),
       dbMigrateAndStart = false,
       exitOnFatalFailures = true,
-      useUnifiedSequencer = false,
+      useUnifiedSequencer = DefaultNodeParameters.UseUnifiedSequencer,
       watchdog = None,
     ),
     partyChangeNotification = PartyNotificationConfig.Eager,
@@ -81,8 +84,7 @@ object ParticipantNodeParameters {
     transferTimeProofFreshnessProportion = NonNegativeInt.tryCreate(3),
     protocolConfig = ParticipantProtocolConfig(
       Some(testedProtocolVersion),
-      // TODO(i15561): Revert back to `false` once there is a stable Daml 3 protocol version
-      alphaVersionSupport = true,
+      alphaVersionSupport = false,
       betaVersionSupport = true,
       dontWarnOnDeprecatedPV = false,
     ),
