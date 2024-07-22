@@ -4,7 +4,7 @@
 package com.digitalasset.canton.version
 
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -220,9 +220,8 @@ object ProtocolVersion {
   final case class InvalidProtocolVersion(override val description: String) extends FailureReason
 
   // All stable protocol versions supported by this release
-  // TODO(#15561) Switch to non-empty again
-  val stable: List[ProtocolVersion] =
-    parseFromBuildInfo(BuildInfo.stableProtocolVersions.toSeq)
+  val stable: NonEmpty[List[ProtocolVersion]] =
+    NonEmptyUtil.fromUnsafe(parseFromBuildInfo(BuildInfo.stableProtocolVersions.toSeq))
 
   private val deprecated: Seq[ProtocolVersion] = Seq()
 
@@ -238,7 +237,7 @@ object ProtocolVersion {
     )
 
   val alpha: NonEmpty[List[ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha]]] =
-    NonEmpty.mk(List, ProtocolVersion.v31, ProtocolVersion.dev)
+    NonEmpty.mk(List, ProtocolVersion.dev)
 
   val beta: List[ProtocolVersionWithStatus[ProtocolVersionAnnotation.Beta]] =
     parseFromBuildInfo(BuildInfo.betaProtocolVersions.toSeq)
@@ -254,14 +253,13 @@ object ProtocolVersion {
       s"Found: ${Map("deprecated" -> deprecated, "deleted" -> deleted, "alpha" -> alpha, "stable" -> stable)}",
   )
 
-  // TODO(i15561): change back to `stableAndSupported.max1` once there is a stable Daml 3 protocol version
-  val latest: ProtocolVersion = stable.lastOption.getOrElse(alpha.head1)
+  val latest: ProtocolVersion = stable.last1
 
   lazy val dev: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
     ProtocolVersion.createAlpha(Int.MaxValue)
 
-  lazy val v31: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
-    ProtocolVersion.createAlpha(31)
+  lazy val v31: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Stable] =
+    ProtocolVersion.createStable(31)
 
   // Minimum stable protocol version introduced
   lazy val minimum: ProtocolVersion = v31
