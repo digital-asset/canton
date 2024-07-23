@@ -77,7 +77,7 @@ import com.digitalasset.canton.topology.store.{DomainTopologyStore, TopologyStor
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
+import com.digitalasset.canton.util.ErrorUtil
 import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.actor.ActorSystem
 
@@ -567,11 +567,8 @@ class DomainNodeBootstrap(
           loggerFactory,
         )
 
-        maxRequestSize <- EitherTUtil
-          .fromFuture(
-            domainParamsLookup.getApproximate(),
-            error => s"Unable to retrieve the domain parameters: ${error.getMessage}",
-          )
+        maxRequestSize <- EitherT
+          .right[String](domainParamsLookup.getApproximate())
           .map(paramsO =>
             paramsO.map(_.maxRequestSize).getOrElse(MaxRequestSize(NonNegativeInt.maxValue))
           )
@@ -742,30 +739,29 @@ class Domain(
 
   override def isActive: Boolean = true
 
-  override def status: Future[DomainStatus] =
-    for {
-      activeMembers <- sequencerRuntime.fetchActiveMembers()
-      sequencer <- sequencerRuntime.health
-    } yield {
-      val ports = Map("admin" -> config.adminApi.port, "public" -> config.publicApi.port)
-      val participants = activeMembers.collect { case x: ParticipantId =>
-        x
-      }
-      val topologyQueues = TopologyQueueStatus(
-        manager = domainTopologyManager.queueSize,
-        dispatcher = topologyManagementArtefacts.dispatcher.queueSize,
-        clients = topologyManagementArtefacts.client.numPendingChanges,
-      )
-      DomainStatus(
-        domainTopologyManager.id.uid,
-        uptime(),
-        ports,
-        participants,
-        sequencer,
-        topologyQueues,
-        healthData,
-      )
+  override def status: DomainStatus = {
+    val activeMembers = sequencerRuntime.fetchActiveMembers()
+    val sequencerHealth = sequencerRuntime.health
+
+    val ports = Map("admin" -> config.adminApi.port, "public" -> config.publicApi.port)
+    val participants = activeMembers.collect { case x: ParticipantId =>
+      x
     }
+    val topologyQueues = TopologyQueueStatus(
+      manager = domainTopologyManager.queueSize,
+      dispatcher = topologyManagementArtefacts.dispatcher.queueSize,
+      clients = topologyManagementArtefacts.client.numPendingChanges,
+    )
+    DomainStatus(
+      domainTopologyManager.id.uid,
+      uptime(),
+      ports,
+      participants,
+      sequencerHealth,
+      topologyQueues,
+      healthData,
+    )
+  }
 
   override def close(): Unit = {
     logger.debug("Stopping domain runner")
