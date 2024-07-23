@@ -50,6 +50,7 @@ class DomainTopologyManager(
     override val store: TopologyStore[DomainStore],
     val outboxQueue: DomainOutboxQueue,
     protocolVersion: ProtocolVersion,
+    exitOnFatalFailures: Boolean,
     timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
     loggerFactory: NamedLoggerFactory,
@@ -60,6 +61,7 @@ class DomainTopologyManager(
       crypto,
       store,
       TopologyManager.PV(protocolVersion),
+      exitOnFatalFailures = exitOnFatalFailures,
       timeouts,
       futureSupervisor,
       loggerFactory,
@@ -84,6 +86,7 @@ class AuthorizedTopologyManager(
     clock: Clock,
     crypto: Crypto,
     store: TopologyStore[AuthorizedStore],
+    exitOnFatalFailures: Boolean,
     timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
     loggerFactory: NamedLoggerFactory,
@@ -94,6 +97,7 @@ class AuthorizedTopologyManager(
       crypto,
       store,
       TopologyManager.NoPV,
+      exitOnFatalFailures = exitOnFatalFailures,
       timeouts,
       futureSupervisor,
       loggerFactory,
@@ -118,6 +122,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId](
     val crypto: Crypto,
     val store: TopologyStore[StoreID],
     val managerVersion: TopologyManager.Version,
+    exitOnFatalFailures: Boolean,
     val timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
@@ -134,6 +139,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId](
     futureSupervisor,
     timeouts,
     loggerFactory,
+    crashOnFailure = exitOnFatalFailures,
   )
 
   protected val processor: TopologyStateProcessor

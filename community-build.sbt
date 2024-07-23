@@ -1,4 +1,3 @@
-import BuildCommon.CommunityProjects.`daml-tls`
 import BuildCommon.{CommunityProjects, DamlProjects}
 
 BuildCommon.sbtSettings
@@ -33,6 +32,7 @@ lazy val `ledger-common` = CommunityProjects.`ledger-common`
 lazy val `ledger-common-dars-lf-v2-dev` = CommunityProjects.`ledger-common-dars-lf-v2-dev`
 lazy val `ledger-common-dars-lf-v2-1` = CommunityProjects.`ledger-common-dars-lf-v2-1`
 lazy val `daml-errors` = CommunityProjects.`daml-errors`
+lazy val `damml-jwt` = DamlProjects.`daml-jwt`
 lazy val `daml-tls` = CommunityProjects.`daml-tls`
 lazy val `dam-grpc-utils` = CommunityProjects.`daml-grpc-utils`
 lazy val `daml-adjustable-clock` = CommunityProjects.`daml-adjustable-clock`
