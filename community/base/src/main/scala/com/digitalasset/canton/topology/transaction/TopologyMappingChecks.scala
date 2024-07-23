@@ -385,14 +385,16 @@ class ValidatingTopologyMappingChecks(
         )
 
         // check that the PTP doesn't try to allocate a party that is the same as an already existing admin party
-        foundAdminPartyWithSameUID = participantTransactions
-          .collectOfMapping[DomainTrustCertificate]
-          .result
-          .find(_.mapping.participantId.uid == mapping.partyId.uid)
-        _ <- EitherTUtil.condUnitET[Future](
-          foundAdminPartyWithSameUID.isEmpty,
-          TopologyTransactionRejection.PartyIdIsAdminParty(mapping.partyId),
-        )
+        // TODO(#20379): bring back once we know how to resolve the conflict between SV party and
+        //               DA participant name having the same UID
+        // foundAdminPartyWithSameUID = participantTransactions
+        //   .collectOfMapping[DomainTrustCertificate]
+        //   .result
+        //   .find(_.mapping.participantId.uid == mapping.partyId.uid)
+        // _ <- EitherTUtil.condUnitET[Future](
+        //   foundAdminPartyWithSameUID.isEmpty,
+        //   TopologyTransactionRejection.PartyIdIsAdminParty(mapping.partyId),
+        // )
 
         // check that all participants are known on the domain
         missingParticipantCertificates = newParticipants -- participantTransactions
@@ -635,7 +637,7 @@ class ValidatingTopologyMappingChecks(
         EitherTUtil.unit
       }
 
-    def checkNoClashWithRootCertificates(effective: EffectiveTime)(implicit
+    def checkNoClashWithNamespaceDelegations(effective: EffectiveTime)(implicit
         traceContext: TraceContext
     ): EitherT[Future, TopologyTransactionRejection, Unit] = {
       loadFromStore(
@@ -644,11 +646,8 @@ class ValidatingTopologyMappingChecks(
         filterUid = None,
         filterNamespace = Some(Seq(toValidate.mapping.namespace)),
       ).flatMap { namespaceDelegations =>
-        val foundRootCertWithSameNamespace = namespaceDelegations.result.exists(stored =>
-          NamespaceDelegation.isRootCertificate(stored.transaction)
-        )
         EitherTUtil.condUnitET(
-          !foundRootCertWithSameNamespace,
+          namespaceDelegations.result.isEmpty,
           NamespaceAlreadyInUse(toValidate.mapping.namespace),
         )
       }
@@ -656,7 +655,7 @@ class ValidatingTopologyMappingChecks(
 
     for {
       _ <- checkDecentralizedNamespaceDerivedFromOwners()
-      _ <- checkNoClashWithRootCertificates(effective)
+      _ <- checkNoClashWithNamespaceDelegations(effective)
     } yield ()
   }
 
@@ -670,19 +669,17 @@ class ValidatingTopologyMappingChecks(
     def checkNoClashWithDecentralizedNamespaces()(implicit
         traceContext: TraceContext
     ): EitherT[Future, TopologyTransactionRejection, Unit] = {
-      EitherTUtil.ifThenET(NamespaceDelegation.isRootCertificate(toValidate)) {
-        loadFromStore(
-          effective,
-          Code.DecentralizedNamespaceDefinition,
-          filterUid = None,
-          filterNamespace = Some(Seq(toValidate.mapping.namespace)),
-        ).flatMap { dns =>
-          val foundDecentralizedNamespaceWithSameNamespace = dns.result.nonEmpty
-          EitherTUtil.condUnitET(
-            !foundDecentralizedNamespaceWithSameNamespace,
-            NamespaceAlreadyInUse(toValidate.mapping.namespace),
-          )
-        }
+      loadFromStore(
+        effective,
+        Code.DecentralizedNamespaceDefinition,
+        filterUid = None,
+        filterNamespace = Some(Seq(toValidate.mapping.namespace)),
+      ).flatMap { dns =>
+        val foundDecentralizedNamespaceWithSameNamespace = dns.result.nonEmpty
+        EitherTUtil.condUnitET(
+          !foundDecentralizedNamespaceWithSameNamespace,
+          NamespaceAlreadyInUse(toValidate.mapping.namespace),
+        )
       }
     }
 

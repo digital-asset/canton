@@ -54,6 +54,7 @@ abstract class TopologyTransactionProcessorTest
       _ => (),
       TerminateProcessing.NoOpTerminateTopologyProcessing,
       futureSupervisor,
+      exitOnFatalFailures = true,
       DefaultProcessingTimeouts.testing,
       loggerFactory,
     )
