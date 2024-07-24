@@ -5,7 +5,7 @@ package com.digitalasset.canton.http
 
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
-import com.daml.jwt.domain.Jwt
+import com.daml.jwt.Jwt
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.ledger.api.v2.admin.metering_report_service.{
   GetMeteringReportRequest,
@@ -111,7 +111,7 @@ final case class LedgerClientJwt(loggerFactory: NamedLoggerFactory) extends Name
           log(GetUpdatesLog) {
             client.v2.updateService
               .getUpdatesSource(
-                begin = offset,
+                begin = offset.getAbsolute,
                 filter = filter,
                 verbose = true,
                 end = end,
@@ -355,12 +355,18 @@ object LedgerClientJwt {
 
   type ListKnownParties =
     (
-      Jwt,
-      String,
-      Int,
-    ) => LoggingContextOf[InstanceUUID with RequestID] => EFuture[PermissionDenied, (List[
-      domainPartyDetails
-    ], String)]
+        Jwt,
+        String,
+        Int,
+    ) => LoggingContextOf[InstanceUUID with RequestID] => EFuture[
+      PermissionDenied,
+      (
+          List[
+            domainPartyDetails
+          ],
+          String,
+      ),
+    ]
 
   type GetParties =
     (

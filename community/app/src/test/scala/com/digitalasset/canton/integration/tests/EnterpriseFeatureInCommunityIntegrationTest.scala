@@ -26,9 +26,8 @@ sealed trait EnterpriseFeatureInCommunityIntegrationTest
 
   override def environmentDefinition: CommunityEnvironmentDefinition =
     CommunityEnvironmentDefinition.simpleTopology
-      .addConfigTransforms(
-        CommunityConfigTransforms.uniquePorts
-      )
+      .addConfigTransforms(CommunityConfigTransforms.uniquePorts)
+      .addConfigTransforms(CommunityConfigTransforms.setProtocolVersion(testedProtocolVersion)*)
       .withManualStart
       .withSetup { implicit env =>
         import env.*
@@ -101,7 +100,8 @@ sealed trait EnterpriseFeatureInCommunityIntegrationTest
       alias = DomainAlias.tryCreate(domainAlias),
     )
 
-    val startOffset = participant1.ledger_api.state.end()
+    val startOffset =
+      participant1.ledger_api.state.endOffset()
     // Generate some data after the pruning point
     participant1.health.ping(participant1)
 

@@ -635,7 +635,7 @@ class ValidatingTopologyMappingChecks(
         EitherTUtil.unit
       }
 
-    def checkNoClashWithRootCertificates(effective: EffectiveTime)(implicit
+    def checkNoClashWithNamespaceDelegations(effective: EffectiveTime)(implicit
         traceContext: TraceContext
     ): EitherT[Future, TopologyTransactionRejection, Unit] = {
       loadFromStore(
@@ -644,11 +644,8 @@ class ValidatingTopologyMappingChecks(
         filterUid = None,
         filterNamespace = Some(Seq(toValidate.mapping.namespace)),
       ).flatMap { namespaceDelegations =>
-        val foundRootCertWithSameNamespace = namespaceDelegations.result.exists(stored =>
-          NamespaceDelegation.isRootCertificate(stored.transaction)
-        )
         EitherTUtil.condUnitET(
-          !foundRootCertWithSameNamespace,
+          namespaceDelegations.result.isEmpty,
           NamespaceAlreadyInUse(toValidate.mapping.namespace),
         )
       }
@@ -656,7 +653,7 @@ class ValidatingTopologyMappingChecks(
 
     for {
       _ <- checkDecentralizedNamespaceDerivedFromOwners()
-      _ <- checkNoClashWithRootCertificates(effective)
+      _ <- checkNoClashWithNamespaceDelegations(effective)
     } yield ()
   }
 
@@ -670,19 +667,17 @@ class ValidatingTopologyMappingChecks(
     def checkNoClashWithDecentralizedNamespaces()(implicit
         traceContext: TraceContext
     ): EitherT[Future, TopologyTransactionRejection, Unit] = {
-      EitherTUtil.ifThenET(NamespaceDelegation.isRootCertificate(toValidate)) {
-        loadFromStore(
-          effective,
-          Code.DecentralizedNamespaceDefinition,
-          filterUid = None,
-          filterNamespace = Some(Seq(toValidate.mapping.namespace)),
-        ).flatMap { dns =>
-          val foundDecentralizedNamespaceWithSameNamespace = dns.result.nonEmpty
-          EitherTUtil.condUnitET(
-            !foundDecentralizedNamespaceWithSameNamespace,
-            NamespaceAlreadyInUse(toValidate.mapping.namespace),
-          )
-        }
+      loadFromStore(
+        effective,
+        Code.DecentralizedNamespaceDefinition,
+        filterUid = None,
+        filterNamespace = Some(Seq(toValidate.mapping.namespace)),
+      ).flatMap { dns =>
+        val foundDecentralizedNamespaceWithSameNamespace = dns.result.nonEmpty
+        EitherTUtil.condUnitET(
+          !foundDecentralizedNamespaceWithSameNamespace,
+          NamespaceAlreadyInUse(toValidate.mapping.namespace),
+        )
       }
     }
 

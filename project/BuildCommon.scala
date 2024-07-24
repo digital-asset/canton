@@ -847,6 +847,7 @@ object BuildCommon {
       .dependsOn(
         `community-common` % "test->test",
         `ledger-json-api`,
+        DamlProjects.`daml-jwt`,
       )
       .enablePlugins(DamlPlugin)
       .settings(
@@ -854,7 +855,6 @@ object BuildCommon {
         libraryDependencies ++= Seq(
           cats,
           chimney,
-          daml_libs_scala_jwt,
           daml_lf_encoder % Test,
           daml_lf_parser % Test,
           daml_lf_archive_encoder % Test,
@@ -1348,6 +1348,7 @@ object BuildCommon {
         `ledger-common` % "compile->compile;test->test",
         `community-common` % "compile->compile;test->test",
         `daml-adjustable-clock` % "test->test",
+        DamlProjects.`daml-jwt`,
       )
       .settings(
         sharedCantonSettings,
@@ -1355,7 +1356,6 @@ object BuildCommon {
           scalapb.gen(flatPackage = false) -> (Compile / sourceManaged).value / "protobuf"
         ),
         libraryDependencies ++= Seq(
-          daml_libs_scala_jwt,
           daml_libs_scala_ports,
           daml_libs_struct_spray_json,
           daml_timer_utils,
@@ -1432,12 +1432,10 @@ object BuildCommon {
       .dependsOn(
         `community-testing`,
         `ledger-api-core`,
+        DamlProjects.`daml-jwt`,
       )
       .settings(
         sharedCantonSettings,
-        libraryDependencies ++= Seq(
-          daml_libs_scala_jwt
-        ),
         coverageEnabled := false,
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
@@ -1457,6 +1455,7 @@ object BuildCommon {
   object DamlProjects {
 
     lazy val allProjects = Set(
+      `daml-jwt`,
       `google-common-protos-scala`,
       `ledger-api-value`,
       `ledger-api`,
@@ -1465,6 +1464,25 @@ object BuildCommon {
 
     lazy val removeCompileFlagsForDaml =
       Seq("-Xsource:3", "-deprecation", "-Xfatal-warnings", "-Ywarn-unused", "-Ywarn-value-discard")
+
+    lazy val `daml-jwt` = project
+      .in(file("daml-common-staging/daml-jwt"))
+      .disablePlugins(WartRemover)
+      .settings(
+        sharedSettings,
+        scalacOptions += "-Wconf:src=src_managed/.*:silent",
+        libraryDependencies ++= Seq(
+          auth0_java,
+          auth0_jwks,
+          daml_http_test_utils % Test,
+          daml_test_evidence_generator_scalatest % Test,
+          scalatest % Test,
+          scalaz_core,
+          slf4j_api,
+        ),
+        coverageEnabled := false,
+        JvmRulesPlugin.damlRepoHeaderSettings,
+      )
 
     // this project builds scala protobuf versions that include
     // java conversions of a few google standard items
