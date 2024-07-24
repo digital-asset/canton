@@ -385,14 +385,16 @@ class ValidatingTopologyMappingChecks(
         )
 
         // check that the PTP doesn't try to allocate a party that is the same as an already existing admin party
-        foundAdminPartyWithSameUID = participantTransactions
-          .collectOfMapping[DomainTrustCertificate]
-          .result
-          .find(_.mapping.participantId.uid == mapping.partyId.uid)
-        _ <- EitherTUtil.condUnitET[Future](
-          foundAdminPartyWithSameUID.isEmpty,
-          TopologyTransactionRejection.PartyIdIsAdminParty(mapping.partyId),
-        )
+        // TODO(#20379): bring back once we know how to resolve the conflict between SV party and
+        //               DA participant name having the same UID
+        // foundAdminPartyWithSameUID = participantTransactions
+        //   .collectOfMapping[DomainTrustCertificate]
+        //   .result
+        //   .find(_.mapping.participantId.uid == mapping.partyId.uid)
+        // _ <- EitherTUtil.condUnitET[Future](
+        //   foundAdminPartyWithSameUID.isEmpty,
+        //   TopologyTransactionRejection.PartyIdIsAdminParty(mapping.partyId),
+        // )
 
         // check that all participants are known on the domain
         missingParticipantCertificates = newParticipants -- participantTransactions
