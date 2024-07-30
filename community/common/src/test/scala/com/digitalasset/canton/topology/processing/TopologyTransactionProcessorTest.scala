@@ -41,17 +41,14 @@ abstract class TopologyTransactionProcessorTest
 
   private val crypto = new SymbolicPureCrypto()
 
-  protected def mkStore(
-      domainId: DomainId = Factory.domainId1a
-  ): TopologyStore[TopologyStoreId.DomainStore]
+  protected def mkStore: TopologyStore[TopologyStoreId.DomainStore]
 
   private def mk(
-      store: TopologyStore[TopologyStoreId.DomainStore] = mkStore(Factory.domainId1a),
-      domainId: DomainId = Factory.domainId1a,
+      store: TopologyStore[TopologyStoreId.DomainStore] = mkStore
   ): (TopologyTransactionProcessor, TopologyStore[TopologyStoreId.DomainStore]) = {
 
     val proc = new TopologyTransactionProcessor(
-      domainId,
+      DefaultTestIdentities.domainId,
       crypto,
       store,
       _ => (),
@@ -325,7 +322,7 @@ abstract class TopologyTransactionProcessorTest
     "fetch previous authorizations" in {
       // after a restart, we need to fetch pre-existing authorizations from our store
       // simulate this one by one
-      val store = mkStore()
+      val store = mkStore
       val block1 = List(ns1k1_k1, ns1k2_k1, id1ak4_k2, okm1bk5k1E_k4)
       block1.zipWithIndex.foreach { case (elem, idx) =>
         val proc = mk(store)._1
@@ -362,7 +359,7 @@ abstract class TopologyTransactionProcessorTest
         NonEmpty(Set, key1, key7, key8),
       )
 
-      val (proc, store) = mk(mkStore(domainId), domainId)
+      val (proc, store) = mk()
 
       def checkDop(
           ts: CantonTimestamp,
@@ -564,7 +561,7 @@ abstract class TopologyTransactionProcessorTest
       val dop2_k7_proposal =
         mkAdd(dopMapping2, signingKey = key7, serial = PositiveInt.two, isProposal = true)
 
-      val (proc, store) = mk(mkStore(domainId), domainId)
+      val (proc, store) = mk()
 
       def checkDop(
           ts: CantonTimestamp,
@@ -759,10 +756,10 @@ abstract class TopologyTransactionProcessorTest
       // in block3 we should see the new topology change delay being used to compute the effective time
       val block3 = mkEnvelope(ns3k3_k3)
 
-      val store = mkStore(domainId)
+      val store = mkStore
       store.bootstrap(initialTopologyState).futureValue
 
-      val (proc, _) = mk(store, domainId)
+      val (proc, _) = mk(store)
 
       val domainTimeTrackerMock = mock[DomainTimeTracker]
       when(domainTimeTrackerMock.awaitTick(any[CantonTimestamp])(anyTraceContext)).thenAnswer(None)
@@ -824,11 +821,9 @@ abstract class TopologyTransactionProcessorTest
 }
 
 class TopologyTransactionProcessorTestInMemory extends TopologyTransactionProcessorTest {
-  protected def mkStore(
-      domainId: DomainId = DomainId(Factory.uid1a)
-  ): TopologyStore[TopologyStoreId.DomainStore] =
+  protected def mkStore: TopologyStore[TopologyStoreId.DomainStore] =
     new InMemoryTopologyStore(
-      TopologyStoreId.DomainStore(domainId),
+      TopologyStoreId.DomainStore(DefaultTestIdentities.domainId),
       loggerFactory,
       timeouts,
     )
@@ -839,6 +834,6 @@ class TopologyTransactionProcessorTestPostgres
     with DbTest
     with DbTopologyStoreHelper
     with PostgresTest {
-  override protected def mkStore(domainId: DomainId): TopologyStore[TopologyStoreId.DomainStore] =
-    createTopologyStore(domainId)
+  override protected def mkStore: TopologyStore[TopologyStoreId.DomainStore] =
+    createTopologyStore()
 }

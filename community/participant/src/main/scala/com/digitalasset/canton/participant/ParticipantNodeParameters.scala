@@ -63,8 +63,7 @@ object ParticipantNodeParameters {
       logQueryCost = None,
       processingTimeouts = DefaultProcessingTimeouts.testing,
       enablePreviewFeatures = false,
-      // TODO(i15561): Revert back to `false` once there is a stable Daml 3 protocol version
-      nonStandardConfig = true,
+      nonStandardConfig = false,
       cachingConfigs = CachingConfigs(),
       batchingConfig = BatchingConfig(
         maxPruningBatchSize = PositiveNumeric.tryCreate(10),
@@ -85,8 +84,7 @@ object ParticipantNodeParameters {
     transferTimeProofFreshnessProportion = NonNegativeInt.tryCreate(3),
     protocolConfig = ParticipantProtocolConfig(
       Some(testedProtocolVersion),
-      // TODO(i15561): Revert back to `false` once there is a stable Daml 3 protocol version
-      alphaVersionSupport = true,
+      alphaVersionSupport = false,
       betaVersionSupport = true,
       dontWarnOnDeprecatedPV = false,
     ),

@@ -72,7 +72,6 @@ object Dependencies {
   lazy val scalafx_version = "17.0.1-R26"
   lazy val scalafx_all_version = "17-ea+8"
   lazy val scalatest_version = "3.2.11"
-  lazy val scalaz_version = "7.2.33"
   lazy val scopt_version = "4.1.0"
   lazy val shapeless_version = "2.3.6"
   lazy val slf4j_version = "2.0.6"
@@ -154,7 +153,6 @@ object Dependencies {
     "com.typesafe.scala-logging" %% "scala-logging" % scala_logging_version excludeAll (incompatibleLogging: _*)
   lazy val scalacheck = "org.scalacheck" %% "scalacheck" % scalacheck_version
   lazy val scalatest = "org.scalatest" %% "scalatest" % scalatest_version
-  lazy val scalaz_core = "org.scalaz" %% "scalaz-core" % scalaz_version
   lazy val scalatestScalacheck =
     "org.scalatestplus" %% "scalacheck-1-15" % (scalatest_version + ".0")
   lazy val mockito_scala = "org.mockito" %% "mockito-scala" % mockito_scala_version
@@ -329,6 +327,7 @@ object Dependencies {
     "com.daml" %% "pekko-http-metrics" % daml_libraries_version
   lazy val daml_executors = "com.daml" %% "executors" % daml_libraries_version
   lazy val daml_timer_utils = "com.daml" %% "timer-utils" % daml_libraries_version
+  lazy val daml_libs_scala_jwt = "com.daml" %% "jwt" % daml_libraries_version
   lazy val daml_libs_struct_spray_json = "com.daml" %% "struct-spray-json" % daml_libraries_version
   lazy val daml_libs_scala_scalatest_utils =
     "com.daml" %% "scalatest-utils" % daml_libraries_version

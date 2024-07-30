@@ -14,6 +14,7 @@ import com.digitalasset.canton.config
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{PositiveInt, PositiveNumeric}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.SequencerWriter.ResetWatermark
 import com.digitalasset.canton.domain.sequencing.sequencer.WriterStartupError.FailedToInitializeFromSnapshot
 import com.digitalasset.canton.domain.sequencing.sequencer.store.*
@@ -338,19 +339,14 @@ class SequencerWriter(
 
   def blockSequencerWrite(
       outcome: DeliverableSubmissionOutcome
-  )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncError, Unit] = {
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SendAsyncError, Unit] = {
     lazy val sendET = sequencerQueues
       .fold(
         EitherT
           .leftT[Future, Unit](SendAsyncError.Unavailable("Unavailable: sequencer is not running"))
           .leftWiden[SendAsyncError]
       )(_.blockSequencerWrite(outcome))
-
-    val sendUnlessShutdown = performUnlessClosingF(functionFullName)(sendET.value)
-    EitherT(
-      // TODO(#18404): Propagate FUS upwards till the very source of the calls
-      sendUnlessShutdown.onShutdown(Left[SendAsyncError, Unit](SendAsyncError.ShuttingDown()))
-    )
+    EitherT(performUnlessClosingF(functionFullName)(sendET.value))
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
@@ -503,6 +499,7 @@ object SequencerWriter {
       loggerFactory: NamedLoggerFactory,
       sequencerMember: Member,
       unifiedSequencer: Boolean,
+      metrics: SequencerMetrics,
   )(implicit materializer: Materializer, executionContext: ExecutionContext): SequencerWriter = {
     val logger = TracedLogger(SequencerWriter.getClass, loggerFactory)
 
@@ -520,6 +517,7 @@ object SequencerWriter {
           eventSignaller,
           loggerFactory,
           protocolVersion,
+          metrics,
         )
           .toMat(Sink.ignore)(Keep.both)
           .mapMaterializedValue(m => new RunningSequencerWriterFlow(m._1, m._2.void)),

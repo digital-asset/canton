@@ -470,11 +470,12 @@ private[index] class IndexServiceImpl(
 
   override def latestPrunedOffsets()(implicit
       loggingContext: LoggingContextWithTrace
-  ): Future[(String, String)] =
+  ): Future[(ParticipantOffset.Absolute, ParticipantOffset.Absolute)] =
     ledgerDao.pruningOffsets
       .map { case (prunedUpToInclusiveO, divulgencePrunedUpToO) =>
-        prunedUpToInclusiveO.getOrElse(Offset.beforeBegin).toApiString ->
-          divulgencePrunedUpToO.getOrElse(Offset.beforeBegin).toApiString
+        toApiOffset(prunedUpToInclusiveO.getOrElse(Offset.beforeBegin)) -> toApiOffset(
+          divulgencePrunedUpToO.getOrElse(Offset.beforeBegin)
+        )
       }(directEc)
 }
 

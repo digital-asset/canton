@@ -7,6 +7,7 @@ import cats.syntax.flatMap.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
+import com.digitalasset.canton.config
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -30,7 +31,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.{SequencerAlias, config}
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
@@ -56,12 +56,7 @@ trait SequencerTransportLookup {
   // TODO(#12377) Be more intelligent about choosing a sequencer
   def nextAmplifiedTransport(previous: Seq[SequencerId])(implicit
       traceContext: TraceContext
-  ): (
-      SequencerAlias,
-      SequencerId,
-      SequencerClientTransportCommon,
-      Option[config.NonNegativeFiniteDuration],
-  )
+  ): (SequencerId, SequencerClientTransportCommon, Option[config.NonNegativeFiniteDuration])
 
   /** Returns the transport for the given [[com.digitalasset.canton.topology.SequencerId]].
     *
@@ -143,26 +138,17 @@ class SequencersTransportState(
 
   override def transport(implicit traceContext: TraceContext): SequencerClientTransportCommon =
     blocking(lock.synchronized {
-      transportInternal(Set.empty)
-    }).clientTransport
+      val (_, transport) = transportInternal(Set.empty)
+      transport
+    })
 
   override def nextAmplifiedTransport(previous: Seq[SequencerId])(implicit
       traceContext: TraceContext
-  ): (
-      SequencerAlias,
-      SequencerId,
-      SequencerClientTransportCommon,
-      Option[config.NonNegativeFiniteDuration],
-  ) =
+  ): (SequencerId, SequencerClientTransportCommon, Option[config.NonNegativeFiniteDuration]) =
     blocking(lock.synchronized {
       val SubmissionRequestAmplification(factor, patience) = submissionRequestAmplification.get()
-      val transportContainer = transportInternal(previous.toSet)
-      (
-        transportContainer.sequencerAlias,
-        transportContainer.sequencerId,
-        transportContainer.clientTransport,
-        Option.when(previous.sizeIs < factor.value - 1)(patience),
-      )
+      val (sequencerId, transport) = transportInternal(previous.toSet)
+      (sequencerId, transport, Option.when(previous.sizeIs < factor.value - 1)(patience))
     })
 
   /** Pick a random healthy sequencer connection, avoiding those in `avoid` if possible.
@@ -171,7 +157,7 @@ class SequencersTransportState(
     */
   private[this] def transportInternal(avoid: Set[SequencerId])(implicit
       traceContext: TraceContext
-  ): SequencerTransportContainer[_] = {
+  ): (SequencerId, SequencerClientTransportCommon) = {
     // We can use a plain Random instance across all threads calling this method,
     // because this method anyway uses locking on its own.
     // (In general, ThreadLocalRandom would void contention on the random number generation, but
@@ -187,20 +173,22 @@ class SequencersTransportState(
       val sequencersToPickFrom =
         if (freshHealthySequencers.isEmpty) healthySequencers else freshHealthySequencers
       val randomIndex = random.nextInt(sequencersToPickFrom.size)
-      sequencersToPickFrom(randomIndex)
+      val transportContainer = sequencersToPickFrom(randomIndex)
+      transportContainer.sequencerId -> transportContainer.clientTransport
     }
   }
 
   private[this] def pickUnhealthySequencer(implicit
       traceContext: TraceContext
-  ): SequencerTransportContainer[_] = {
+  ): (SequencerId, SequencerClientTransportCommon) = {
     // TODO(i12377): Can we fallback to first sequencer transport here or should we
     //               introduce EitherT and propagate error handling?
-    val (_, transportState) = state.headOption.getOrElse(
-      // TODO(i12377): Error handling
-      ErrorUtil.invalidState("No sequencer subscription at the moment. Try again later.")
-    )
-    transportState.transport
+    state.headOption
+      .getOrElse(
+        // TODO(i12377): Error handling
+        ErrorUtil.invalidState("No sequencer subscription at the moment. Try again later.")
+      )
+      .fmap(_.transport.clientTransport)
   }
 
   override def transport(sequencerId: SequencerId)(implicit

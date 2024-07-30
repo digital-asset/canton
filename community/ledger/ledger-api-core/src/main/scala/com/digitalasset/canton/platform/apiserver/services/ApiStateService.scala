@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.apiserver.services
 
 import com.daml.grpc.adapter.ExecutionSequencerFactory
+import com.daml.ledger.api.v2.participant_offset.ParticipantOffset
 import com.daml.ledger.api.v2.state_service.*
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.ValidationLogger
@@ -140,7 +141,15 @@ final class ApiStateService(
       TraceContext.fromDamlTelemetryContext(telemetry.contextFromGrpcThreadLocalContext())
     txService
       .currentLedgerEnd()
-      .map(offset => GetLedgerEndResponse(offset.value))
+      .map(offset =>
+        GetLedgerEndResponse(
+          Some(
+            ParticipantOffset(
+              ParticipantOffset.Value.Absolute(offset.value)
+            )
+          )
+        )
+      )
       .andThen(logger.logErrorsOnCall[GetLedgerEndResponse])
   }
 
@@ -153,8 +162,11 @@ final class ApiStateService(
       .latestPrunedOffsets()
       .map { case (prunedUptoInclusive, divulgencePrunedUptoInclusive) =>
         GetLatestPrunedOffsetsResponse(
-          participantPrunedUpToInclusive = prunedUptoInclusive,
-          allDivulgedContractsPrunedUpToInclusive = divulgencePrunedUptoInclusive,
+          participantPrunedUpToInclusive =
+            Some(ParticipantOffset(ParticipantOffset.Value.Absolute(prunedUptoInclusive.value))),
+          allDivulgedContractsPrunedUpToInclusive = Some(
+            ParticipantOffset(ParticipantOffset.Value.Absolute(divulgencePrunedUptoInclusive.value))
+          ),
         )
       }
       .andThen(logger.logErrorsOnCall[GetLatestPrunedOffsetsResponse])

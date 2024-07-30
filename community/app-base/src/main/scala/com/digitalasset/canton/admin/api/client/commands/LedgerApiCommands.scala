@@ -1405,7 +1405,7 @@ object LedgerApiCommands {
     }
 
     final case class LedgerEnd()
-        extends BaseCommand[GetLedgerEndRequest, GetLedgerEndResponse, String] {
+        extends BaseCommand[GetLedgerEndRequest, GetLedgerEndResponse, ParticipantOffset] {
 
       override def createRequest(): Either[String, GetLedgerEndRequest] =
         Right(GetLedgerEndRequest())
@@ -1418,9 +1418,8 @@ object LedgerApiCommands {
 
       override def handleResponse(
           response: GetLedgerEndResponse
-      ): Either[String, String] =
-        if (response.offset.nonEmpty) Right(response.offset)
-        else Left("Empty LedgerEndResponse received without offset")
+      ): Either[String, ParticipantOffset] =
+        response.offset.toRight("Empty LedgerEndResponse received without offset")
     }
 
     final case class GetConnectedDomains(partyId: LfPartyId)

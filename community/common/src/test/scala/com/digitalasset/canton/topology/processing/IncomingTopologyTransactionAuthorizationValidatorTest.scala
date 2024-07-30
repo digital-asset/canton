@@ -49,6 +49,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
         new IncomingTopologyTransactionAuthorizationValidator(
           Factory.cryptoApi.crypto.pureCrypto,
           store,
+          Some(Factory.domainId1),
           validationIsFinal = validationIsFinal,
           loggerFactory,
         )
@@ -186,7 +187,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
             Seq(
               None,
               Some({
-                case TopologyTransactionRejection.InvalidDomain(_) => true
+                case TopologyTransactionRejection.WrongDomain(_) => true
                 case _ => false
               }),
             ),

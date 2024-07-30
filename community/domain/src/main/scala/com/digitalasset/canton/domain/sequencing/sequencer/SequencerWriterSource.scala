@@ -13,6 +13,7 @@ import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.SequencerError.{
   ExceededMaxSequencingTime,
   PayloadToEventTimeBoundExceeded,
@@ -186,6 +187,7 @@ object SequencerWriterSource {
       eventSignaller: EventSignaller,
       loggerFactory: NamedLoggerFactory,
       protocolVersion: ProtocolVersion,
+      metrics: SequencerMetrics,
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
@@ -270,6 +272,7 @@ object SequencerWriterSource {
         }
       }
       .via(UpdateWatermarkFlow(store, logger))
+      .via(RecordWatermarkDelayMetricFlow(clock, metrics))
       .via(NotifyEventSignallerFlow(eventSignaller))
   }
 }
@@ -718,4 +721,16 @@ object NotifyEventSignallerFlow {
           Traced(batchWritten)
         }
       })
+}
+
+object RecordWatermarkDelayMetricFlow {
+  def apply(
+      clock: Clock,
+      metrics: SequencerMetrics,
+  ): Flow[Traced[BatchWritten], Traced[BatchWritten], NotUsed] =
+    Flow[Traced[BatchWritten]].wireTap { batchWritten =>
+      metrics.dbSequencer.watermarkDelay.updateValue(
+        (clock.now - batchWritten.value.latestTimestamp).toMillis
+      )
+    }
 }

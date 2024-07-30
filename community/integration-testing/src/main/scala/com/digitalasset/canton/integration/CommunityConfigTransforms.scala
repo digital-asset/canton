@@ -129,17 +129,16 @@ object CommunityConfigTransforms {
     ),
   )
 
-  def setBetaVersionSupport(enable: Boolean): Seq[CommunityConfigTransform] =
+  def setBetaSupport(enable: Boolean): Seq[CommunityConfigTransform] =
     Seq(
       setGlobalBetaVersionSupport(enable),
       updateAllParticipantConfigs_(
-        _.focus(_.parameters.betaVersionSupport)
+        _.focus(_.parameters.BetaVersionSupport)
           .replace(enable)
       ),
     )
 
   lazy val enableAlphaVersionSupport: Seq[CommunityConfigTransform] = setAlphaVersionSupport(true)
-  lazy val enableBetaVersionSupport: Seq[CommunityConfigTransform] = setBetaVersionSupport(true)
 
   lazy val dontWarnOnDeprecatedPV = Seq(
     updateAllSequencerConfigs_(
@@ -156,7 +155,10 @@ object CommunityConfigTransforms {
   def updateAllInitialProtocolVersion(pv: ProtocolVersion): Seq[CommunityConfigTransform] = Seq(
     updateAllParticipantConfigs_(
       _.focus(_.parameters.initialProtocolVersion).replace(ParticipantProtocolVersion(pv))
-    )
+    ),
+    updateAllParticipantConfigs_(
+      _.focus(_.parameters.initialProtocolVersion).replace(ParticipantProtocolVersion(pv))
+    ),
   )
 
   def setProtocolVersion(pv: ProtocolVersion): Seq[CommunityConfigTransform] = {
@@ -164,9 +166,9 @@ object CommunityConfigTransforms {
       if (predicate) transforms else Seq()
 
     val enableAlpha = configTransformsWhen(pv.isAlpha)(enableAlphaVersionSupport)
-    val enableBeta = configTransformsWhen(pv.isBeta)(enableBetaVersionSupport)
+    val enableBeta = configTransformsWhen(pv.isBeta)(setBetaSupport(true))
 
-    val deprecatedPVWarning = configTransformsWhen(pv.isDeprecated)(dontWarnOnDeprecatedPV)
+    val deprecatedPVWarning = if (pv.isDeprecated) dontWarnOnDeprecatedPV else Seq()
 
     val updateParticipants = Seq(
       updateAllParticipantConfigs_(

@@ -21,11 +21,6 @@ private[config] trait ConfigValidations[C <: CantonConfig] {
     validations.traverse_(_(config))
 
   protected val validations: List[C => Validated[NonEmpty[Seq[String]], Unit]]
-
-  protected def toValidated(errors: Seq[String]): Validated[NonEmpty[Seq[String]], Unit] = NonEmpty
-    .from(errors)
-    .map(Validated.invalid[NonEmpty[Seq[String]], Unit])
-    .getOrElse(Validated.Valid(()))
 }
 
 object CommunityConfigValidations
@@ -140,13 +135,14 @@ object CommunityConfigValidations
         config.mediatorsByString,
       )
 
-    val errors = dbAccessToNodes.toSeq
-      .mapFilter {
+    dbAccessToNodes.toSeq
+      .traverse_ {
         case (dbAccess, nodes) if nodes.lengthCompare(1) > 0 =>
-          Option(s"Nodes ${formatNodeList(nodes)} share same DB access: $dbAccess")
-        case _ => None
+          Validated.invalid(
+            NonEmpty(Seq, s"Nodes ${formatNodeList(nodes)} share same DB access: $dbAccess")
+          )
+        case _ => Validated.valid(())
       }
-    toValidated(errors)
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
@@ -184,16 +180,31 @@ object CommunityConfigValidations
   private def developmentProtocolSafetyCheck(
       config: CantonConfig
   ): Validated[NonEmpty[Seq[String]], Unit] = {
-
-    val errors = config.allNodes.toSeq.mapFilter { case (name, nodeConfig) =>
-      val nonStandardConfig = config.parameters.nonStandardConfig
-      val alphaVersionSupport = nodeConfig.parameters.alphaVersionSupport
-      Option.when(!nonStandardConfig && alphaVersionSupport)(
-        s"Enabling alpha-version-support for ${nodeConfig.nodeTypeName} ${name.unwrap} requires you to explicitly set canton.parameters.non-standard-config = yes"
+    def toNe(
+        name: String,
+        nodeTypeName: String,
+        nonStandardConfig: Boolean,
+        alphaVersionSupport: Boolean,
+    ): Validated[NonEmpty[Seq[String]], Unit] = {
+      Validated.cond(
+        nonStandardConfig || !alphaVersionSupport,
+        (),
+        NonEmpty(
+          Seq,
+          s"Enabling alpha-version-support for $nodeTypeName $name requires you to explicitly set canton.parameters.non-standard-config = yes",
+        ),
       )
     }
 
-    toValidated(errors)
+    config.allNodes.toList.traverse_ { case (name, nodeConfig) =>
+      toNe(
+        name = name.unwrap,
+        nodeTypeName = nodeConfig.nodeTypeName,
+        nonStandardConfig = config.parameters.nonStandardConfig,
+        alphaVersionSupport = nodeConfig.parameters.alphaVersionSupport,
+      )
+    }
+
   }
 
   private def warnIfUnsafeMinProtocolVersion(
@@ -208,19 +219,34 @@ object CommunityConfigValidations
       )
     }
 
-    toValidated(errors)
+    NonEmpty.from(errors).map(Validated.invalid).getOrElse(Validated.valid(()))
   }
 
   private def adminTokenSafetyCheckParticipants(
       config: CantonConfig
   ): Validated[NonEmpty[Seq[String]], Unit] = {
-    val errors = config.participants.toSeq.mapFilter { case (name, participantConfig) =>
-      Option.when(
-        !config.parameters.nonStandardConfig && participantConfig.ledgerApi.adminToken.nonEmpty
-      )(
-        s"Setting ledger-api.admin-token for participant ${name.unwrap} requires you to explicitly set canton.parameters.non-standard-config = yes"
+    def toNe(
+        name: String,
+        nonStandardConfig: Boolean,
+        adminToken: Option[String],
+    ): Validated[NonEmpty[Seq[String]], Unit] = {
+      Validated.cond(
+        nonStandardConfig || adminToken.isEmpty,
+        (),
+        NonEmpty(
+          Seq,
+          s"Setting ledger-api.admin-token for participant $name requires you to explicitly set canton.parameters.non-standard-config = yes",
+        ),
       )
     }
-    toValidated(errors)
+
+    config.participants.toList.traverse_ { case (name, participantConfig) =>
+      toNe(
+        name.unwrap,
+        config.parameters.nonStandardConfig,
+        participantConfig.ledgerApi.adminToken,
+      )
+    }
   }
+
 }

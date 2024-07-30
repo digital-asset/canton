@@ -8,7 +8,6 @@ import cats.data.EitherT
 import cats.instances.future.*
 import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
@@ -89,8 +88,7 @@ abstract class MediatorNodeConfigCommon(
   * @param dontWarnOnDeprecatedPV if true, then this mediator will not emit a warning when connecting to a sequencer using a deprecated protocol version.
   */
 final case class MediatorNodeParameterConfig(
-    // TODO(i15561): Revert back to `false` once there is a stable Daml 3 protocol version
-    override val alphaVersionSupport: Boolean = true,
+    override val alphaVersionSupport: Boolean = false,
     override val betaVersionSupport: Boolean = false,
     override val dontWarnOnDeprecatedPV: Boolean = false,
     override val batching: BatchingConfig = BatchingConfig(),
@@ -485,16 +483,15 @@ class MediatorNodeBootstrap(
   }
 
   private def createSequencerInfoLoader() = {
+    val clientProtocolVersions =
+      if (parameterConfig.alphaVersionSupport) ProtocolVersion.supported
+      else
+        ProtocolVersion.stable
+
     new SequencerInfoLoader(
       timeouts = timeouts,
       traceContextPropagation = parameters.tracing.propagation,
-      clientProtocolVersions =
-        if (parameterConfig.alphaVersionSupport) ProtocolVersion.supported
-        else
-          // TODO(#15561) Remove NonEmpty construct once stableAndSupported is NonEmpty again
-          NonEmpty
-            .from(ProtocolVersion.stable)
-            .getOrElse(sys.error("no protocol version is considered stable in this release")),
+      clientProtocolVersions = clientProtocolVersions,
       minimumProtocolVersion = Some(ProtocolVersion.minimum),
       dontWarnOnDeprecatedPV = parameterConfig.dontWarnOnDeprecatedPV,
       loggerFactory = loggerFactory,

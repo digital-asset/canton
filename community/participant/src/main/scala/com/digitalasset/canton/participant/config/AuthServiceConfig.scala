@@ -39,7 +39,6 @@ object AuthServiceConfig {
       secret: NonEmptyString,
       targetAudience: Option[String],
       targetScope: Option[String],
-      privileged: Boolean = false,
   ) extends AuthServiceConfig {
     private def verifier(jwtTimestampLeeway: Option[JwtTimestampLeeway]): JwtVerifier =
       HMAC256Verifier(secret.unwrap, jwtTimestampLeeway).valueOr(err =>
@@ -51,13 +50,7 @@ object AuthServiceConfig {
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
     ): AuthService =
-      AuthServiceJWT(
-        verifier(jwtTimestampLeeway),
-        targetAudience,
-        targetScope,
-        privileged,
-        loggerFactory,
-      )
+      AuthServiceJWT(verifier(jwtTimestampLeeway), targetAudience, targetScope, loggerFactory)
 
   }
 
@@ -66,7 +59,6 @@ object AuthServiceConfig {
       certificate: String,
       targetAudience: Option[String],
       targetScope: Option[String],
-      privileged: Boolean = false,
   ) extends AuthServiceConfig {
     private def verifier(jwtTimestampLeeway: Option[JwtTimestampLeeway]) = RSA256Verifier
       .fromCrtFile(certificate, jwtTimestampLeeway)
@@ -75,13 +67,7 @@ object AuthServiceConfig {
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
     ): AuthService =
-      AuthServiceJWT(
-        verifier(jwtTimestampLeeway),
-        targetAudience,
-        targetScope,
-        privileged,
-        loggerFactory,
-      )
+      AuthServiceJWT(verifier(jwtTimestampLeeway), targetAudience, targetScope, loggerFactory)
 
   }
 
@@ -90,7 +76,6 @@ object AuthServiceConfig {
       certificate: String,
       targetAudience: Option[String],
       targetScope: Option[String],
-      privileged: Boolean = false,
   ) extends AuthServiceConfig {
     @SuppressWarnings(Array("org.wartremover.warts.Null"))
     private def verifier(jwtTimestampLeeway: Option[JwtTimestampLeeway]) = ECDSAVerifier
@@ -102,13 +87,7 @@ object AuthServiceConfig {
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
     ): AuthService =
-      AuthServiceJWT(
-        verifier(jwtTimestampLeeway),
-        targetAudience,
-        targetScope,
-        privileged,
-        loggerFactory,
-      )
+      AuthServiceJWT(verifier(jwtTimestampLeeway), targetAudience, targetScope, loggerFactory)
 
   }
 
@@ -117,7 +96,6 @@ object AuthServiceConfig {
       certificate: String,
       targetAudience: Option[String],
       targetScope: Option[String],
-      privileged: Boolean = false,
   ) extends AuthServiceConfig {
     @SuppressWarnings(Array("org.wartremover.warts.Null"))
     private def verifier(jwtTimestampLeeway: Option[JwtTimestampLeeway]) = ECDSAVerifier
@@ -129,13 +107,7 @@ object AuthServiceConfig {
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
     ): AuthService =
-      AuthServiceJWT(
-        verifier(jwtTimestampLeeway),
-        targetAudience,
-        targetScope,
-        privileged,
-        loggerFactory,
-      )
+      AuthServiceJWT(verifier(jwtTimestampLeeway), targetAudience, targetScope, loggerFactory)
 
   }
 
@@ -144,7 +116,6 @@ object AuthServiceConfig {
       url: NonEmptyString,
       targetAudience: Option[String],
       targetScope: Option[String],
-      privileged: Boolean = false,
   ) extends AuthServiceConfig {
     private def verifier(jwtTimestampLeeway: Option[JwtTimestampLeeway]) =
       JwksVerifier(url.unwrap, jwtTimestampLeeway)
@@ -152,13 +123,7 @@ object AuthServiceConfig {
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
     ): AuthService =
-      AuthServiceJWT(
-        verifier(jwtTimestampLeeway),
-        targetAudience,
-        targetScope,
-        privileged,
-        loggerFactory,
-      )
+      AuthServiceJWT(verifier(jwtTimestampLeeway), targetAudience, targetScope, loggerFactory)
 
   }
 

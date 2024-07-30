@@ -431,8 +431,7 @@ class ReferenceDemoScript(
             participant5.ledger_api.state.acs.of_party(registry).isEmpty
           }
           // now, remember the offset to prune at
-          val participantOffset =
-            participant5.ledger_api.state.endOffset()
+          val participantOffset = participant5.ledger_api.state.end()
           // Trigger advancement of the clean head, so the previous contracts become safe to prune
           if (editionSupportsPruning) {
             participant5.health

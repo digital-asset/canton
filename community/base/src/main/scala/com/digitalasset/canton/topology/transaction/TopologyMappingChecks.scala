@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.instances.future.*
 import cats.instances.order.*
 import cats.syntax.semigroup.*
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.KeyPurpose
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, OnboardingRestriction}
@@ -336,11 +337,15 @@ class ValidatingTopologyMappingChecks(
         .collectOfMapping[PartyToParticipant]
         .result
         .headOption
-        .map(_.mapping.partyId)
+        .map(_.mapping)
       _ <- conflictingPartyIdO match {
-        case Some(partyId) =>
-          EitherT.leftT[Future, Unit][TopologyTransactionRejection](
-            TopologyTransactionRejection.ParticipantIdClashesWithPartyId(participantId, partyId)
+        case Some(ptp) =>
+          isExplicitAdminPartyAllocation(
+            ptp,
+            TopologyTransactionRejection.ParticipantIdConflictWithPartyId(
+              participantId,
+              ptp.partyId,
+            ),
           )
         case None => EitherTUtil.unit[TopologyTransactionRejection]
       }
@@ -384,14 +389,17 @@ class ValidatingTopologyMappingChecks(
             )
         )
 
-        // check that the PTP doesn't try to allocate a party that is the same as an already existing admin party
+        // if we found a DTC with the same uid as the partyId,
+        // check that the PTP is an explicit admin party allocation, otherwise reject the PTP
         foundAdminPartyWithSameUID = participantTransactions
           .collectOfMapping[DomainTrustCertificate]
           .result
-          .find(_.mapping.participantId.uid == mapping.partyId.uid)
-        _ <- EitherTUtil.condUnitET[Future](
-          foundAdminPartyWithSameUID.isEmpty,
-          TopologyTransactionRejection.PartyIdIsAdminParty(mapping.partyId),
+          .exists(_.mapping.participantId.uid == mapping.partyId.uid)
+        _ <- EitherTUtil.ifThenET(foundAdminPartyWithSameUID)(
+          isExplicitAdminPartyAllocation(
+            mapping,
+            TopologyTransactionRejection.PartyIdConflictWithAdminParty(mapping.partyId),
+          )
         )
 
         // check that all participants are known on the domain
@@ -683,4 +691,44 @@ class ValidatingTopologyMappingChecks(
 
     checkNoClashWithDecentralizedNamespaces()
   }
+
+  /** Checks whether the given PTP is considered an explicit admin party allocation. This is true if all following conditions are met:
+    * <ul>
+    *   <li>threshold == 1</li>
+    *   <li>groupAddressing == false</li>
+    *   <li>there is only a single hosting participant<li>
+    *     <ul>
+    *       <li>with Submission permission</li>
+    *       <li>participantId.adminParty == partyId</li>
+    *     </ul>
+    *   </li>
+    * </ul
+    */
+  private def isExplicitAdminPartyAllocation(
+      ptp: PartyToParticipant,
+      rejection: => TopologyTransactionRejection,
+  ): EitherT[Future, TopologyTransactionRejection, Unit] = {
+    // check that the PTP doesn't try to allocate a party that is the same as an already existing admin party.
+    // we allow an explicit allocation of an admin like party though on the same participant
+    val singleHostingParticipant =
+      ptp.participants.sizeCompare(1) == 0
+
+    val partyIsAdminParty =
+      ptp.participants.forall(participant =>
+        participant.participantId.adminParty == ptp.partyId &&
+          participant.permission == ParticipantPermission.Submission
+      )
+
+    val noGroupAddressing = !ptp.groupAddressing
+
+    // technically we don't need to check for threshold == 1, because we already require that there is only a single participant
+    // and the threshold may not exceed the number of participants. this is checked in PartyToParticipant.create
+    val threshold1 = ptp.threshold == PositiveInt.one
+
+    EitherTUtil.condUnitET[Future](
+      singleHostingParticipant && partyIsAdminParty && noGroupAddressing && threshold1,
+      rejection,
+    )
+  }
+
 }

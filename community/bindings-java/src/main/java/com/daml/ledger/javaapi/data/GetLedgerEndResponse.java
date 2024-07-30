@@ -10,24 +10,26 @@ import java.util.Objects;
 
 public final class GetLedgerEndResponse {
 
-  @NonNull private final String offset;
+  @NonNull private final ParticipantOffset offset;
 
-  public GetLedgerEndResponse(@NonNull String offset) {
+  public GetLedgerEndResponse(@NonNull ParticipantOffset offset) {
     this.offset = offset;
   }
 
   @NonNull
-  public String getOffset() {
+  public ParticipantOffset getOffset() {
     return offset;
   }
 
   public static GetLedgerEndResponse fromProto(
       StateServiceOuterClass.GetLedgerEndResponse response) {
-    return new GetLedgerEndResponse(response.getOffset());
+    return new GetLedgerEndResponse(ParticipantOffset.fromProto(response.getOffset()));
   }
 
   public StateServiceOuterClass.GetLedgerEndResponse toProto() {
-    return StateServiceOuterClass.GetLedgerEndResponse.newBuilder().setOffset(this.offset).build();
+    return StateServiceOuterClass.GetLedgerEndResponse.newBuilder()
+        .setOffset(this.offset.toProto())
+        .build();
   }
 
   @Override

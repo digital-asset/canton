@@ -10,37 +10,38 @@ import java.util.Objects;
 
 public final class GetLatestPrunedOffsetsResponse {
 
-  @NonNull private final String participantPrunedUpToInclusive;
-  @NonNull private final String allDivulgedContractsPrunedUpToInclusive;
+  @NonNull private final ParticipantOffset participantPrunedUpToInclusive;
+  @NonNull private final ParticipantOffset allDivulgedContractsPrunedUpToInclusive;
 
   public GetLatestPrunedOffsetsResponse(
-      @NonNull String participantPrunedUpToInclusive,
-      @NonNull String allDivulgedContractsPrunedUpToInclusive) {
+      @NonNull ParticipantOffset participantPrunedUpToInclusive,
+      @NonNull ParticipantOffset allDivulgedContractsPrunedUpToInclusive) {
     this.participantPrunedUpToInclusive = participantPrunedUpToInclusive;
     this.allDivulgedContractsPrunedUpToInclusive = allDivulgedContractsPrunedUpToInclusive;
   }
 
   @NonNull
-  public String getParticipantPrunedUpToInclusive() {
+  public ParticipantOffset getParticipantPrunedUpToInclusive() {
     return participantPrunedUpToInclusive;
   }
 
   @NonNull
-  public String getAllDivulgedContractsPrunedUpToInclusive() {
+  public ParticipantOffset getAllDivulgedContractsPrunedUpToInclusive() {
     return allDivulgedContractsPrunedUpToInclusive;
   }
 
   public static GetLatestPrunedOffsetsResponse fromProto(
       StateServiceOuterClass.GetLatestPrunedOffsetsResponse response) {
     return new GetLatestPrunedOffsetsResponse(
-        response.getParticipantPrunedUpToInclusive(),
-        response.getAllDivulgedContractsPrunedUpToInclusive());
+        ParticipantOffset.fromProto(response.getParticipantPrunedUpToInclusive()),
+        ParticipantOffset.fromProto(response.getAllDivulgedContractsPrunedUpToInclusive()));
   }
 
   public StateServiceOuterClass.GetLatestPrunedOffsetsResponse toProto() {
     return StateServiceOuterClass.GetLatestPrunedOffsetsResponse.newBuilder()
-        .setParticipantPrunedUpToInclusive(participantPrunedUpToInclusive)
-        .setAllDivulgedContractsPrunedUpToInclusive(allDivulgedContractsPrunedUpToInclusive)
+        .setParticipantPrunedUpToInclusive(participantPrunedUpToInclusive.toProto())
+        .setAllDivulgedContractsPrunedUpToInclusive(
+            allDivulgedContractsPrunedUpToInclusive.toProto())
         .build();
   }
 

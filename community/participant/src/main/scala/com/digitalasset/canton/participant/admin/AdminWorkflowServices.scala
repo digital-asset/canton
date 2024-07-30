@@ -231,12 +231,12 @@ class AdminWorkflowServices(
 
     val startupF =
       client.v2.stateService.getActiveContracts(service.filters).map { case (acs, offset) =>
-        logger.debug(s"Loading $acs $service")
+        logger.debug(s"Loading ${acs} $service")
         service.processAcs(acs)
         new ResilientLedgerSubscription(
-          makeSource = subscribeOffset =>
+          subscribeOffset =>
             client.v2.updateService.getUpdatesSource(subscribeOffset, service.filters),
-          consumingFlow = Flow[GetUpdatesResponse]
+          Flow[GetUpdatesResponse]
             .map(_.update)
             .map {
               case GetUpdatesResponse.Update.Transaction(tx) =>
@@ -247,10 +247,10 @@ class AdminWorkflowServices(
               case GetUpdatesResponse.Update.Empty => ()
             },
           subscriptionName = service.getClass.getSimpleName,
-          startOffset = offset,
-          extractOffset = ResilientLedgerSubscription.extractOffsetFromGetUpdateResponse,
-          timeouts = timeouts,
-          loggerFactory = loggerFactory,
+          offset,
+          ResilientLedgerSubscription.extractOffsetFromGetUpdateResponse,
+          timeouts,
+          loggerFactory,
           resubscribeIfPruned = resubscribeIfPruned,
         )
       }
@@ -263,7 +263,8 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
   class AbortedDueToShutdownException
       extends RuntimeException("The request was aborted due to the node shutting down.")
 
-  private val AdminWorkflowDarResourceName: String = "AdminWorkflows.dar"
+  // There are two adminWorkflows dars in the classpath, and we want the fixed one
+  private val AdminWorkflowDarResourceName: String = "dar/AdminWorkflows.dar"
   private def adminWorkflowDarInputStream(): InputStream = getDarInputStream(
     AdminWorkflowDarResourceName
   )

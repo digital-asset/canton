@@ -585,7 +585,7 @@ object Generators {
 
   def getLedgerEndResponseGen: Gen[v2.StateServiceOuterClass.GetLedgerEndResponse] = {
     for {
-      offset <- Arbitrary.arbString.arbitrary
+      offset <- participantOffsetGen
     } yield v2.StateServiceOuterClass.GetLedgerEndResponse
       .newBuilder()
       .setOffset(offset)
@@ -595,8 +595,8 @@ object Generators {
   def getLatestPrunedOffsetsResponseGen
       : Gen[v2.StateServiceOuterClass.GetLatestPrunedOffsetsResponse] = {
     for {
-      participantPruned <- Arbitrary.arbString.arbitrary
-      allDivulgedPruned <- Arbitrary.arbString.arbitrary
+      participantPruned <- participantOffsetGen
+      allDivulgedPruned <- participantOffsetGen
     } yield v2.StateServiceOuterClass.GetLatestPrunedOffsetsResponse
       .newBuilder()
       .setParticipantPrunedUpToInclusive(participantPruned)

@@ -5,7 +5,6 @@ package com.digitalasset.canton.topology.store
 
 import cats.syntax.option.*
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions.GenericStoredTopologyTransactions
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
@@ -18,7 +17,7 @@ trait DownloadTopologyStateForInitializationServiceTest
     extends AsyncWordSpec
     with TopologyStoreTestBase {
 
-  protected def createTopologyStore(domainId: DomainId): TopologyStore[DomainStore]
+  protected def createTopologyStore(): TopologyStore[DomainStore]
 
   val testData = new TopologyStoreTestData(loggerFactory, executionContext)
   import testData.*
@@ -66,7 +65,7 @@ trait DownloadTopologyStateForInitializationServiceTest
   private def initializeStore(
       storedTransactions: GenericStoredTopologyTransactions
   ): Future[TopologyStore[DomainStore]] = {
-    val store = createTopologyStore(domainId1)
+    val store = createTopologyStore()
     store.bootstrap(storedTransactions).map(_ => store)
   }
 

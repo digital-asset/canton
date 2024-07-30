@@ -249,10 +249,8 @@ final case class CantonParameters(
     enableAdditionalConsistencyChecks: Boolean = false,
     manualStart: Boolean = false,
     startupParallelism: Option[PositiveInt] = None,
-    // TODO(i15561): Revert back to `false` once there is a stable Daml 3 protocol version
-    nonStandardConfig: Boolean = true,
-    // TODO(i15561): Revert back to `false` once there is a stable Daml 3 protocol version
-    alphaVersionSupport: Boolean = true,
+    nonStandardConfig: Boolean = false,
+    alphaVersionSupport: Boolean = false,
     betaVersionSupport: Boolean = false,
     portsFile: Option[String] = None,
     timeouts: TimeoutSettings = TimeoutSettings(),
@@ -381,7 +379,7 @@ trait CantonConfig {
         protocolConfig = ParticipantProtocolConfig(
           minimumProtocolVersion = participantParameters.minimumProtocolVersion.map(_.unwrap),
           alphaVersionSupport = participantParameters.alphaVersionSupport,
-          betaVersionSupport = participantParameters.betaVersionSupport,
+          betaVersionSupport = participantParameters.BetaVersionSupport,
           dontWarnOnDeprecatedPV = participantParameters.dontWarnOnDeprecatedPV,
         ),
         ledgerApiServerParameters = participantParameters.ledgerApiServer,

@@ -82,12 +82,12 @@ object TopologyTransactionRejection {
     override def toTopologyManagerError(implicit elc: ErrorLoggingContext) =
       TopologyManagerError.InvalidSignatureError.Failure(err)
   }
-  final case class InvalidDomain(domain: DomainId) extends TopologyTransactionRejection {
-    override def asString: String = show"Invalid domain $domain"
-    override def pretty: Pretty[InvalidDomain] = prettyOfClass(param("domain", _.domain))
+  final case class WrongDomain(wrong: DomainId) extends TopologyTransactionRejection {
+    override def asString: String = show"Wrong domain $wrong"
+    override def pretty: Pretty[WrongDomain] = prettyOfClass(param("wrong", _.wrong))
 
     override def toTopologyManagerError(implicit elc: ErrorLoggingContext) =
-      TopologyManagerError.InvalidDomain.Failure(domain)
+      TopologyManagerError.WrongDomain.Failure(wrong)
   }
   final case class Duplicate(old: CantonTimestamp) extends TopologyTransactionRejection {
     override def asString: String = show"Duplicate transaction from ${old}"
@@ -221,26 +221,28 @@ object TopologyTransactionRejection {
     )
   }
 
-  final case class PartyIdIsAdminParty(partyId: PartyId) extends TopologyTransactionRejection {
+  final case class PartyIdConflictWithAdminParty(partyId: PartyId)
+      extends TopologyTransactionRejection {
     override def asString: String =
       s"The partyId $partyId is the same as an already existing admin party."
 
     override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
-      TopologyManagerError.PartyIdIsAdminParty.Reject(partyId)
+      TopologyManagerError.PartyIdConflictWithAdminParty.Reject(partyId)
 
-    override def pretty: Pretty[PartyIdIsAdminParty.this.type] = prettyOfClass(
+    override def pretty: Pretty[PartyIdConflictWithAdminParty.this.type] = prettyOfClass(
       param("partyId", _.partyId)
     )
   }
 
-  final case class ParticipantIdClashesWithPartyId(participantId: ParticipantId, partyId: PartyId)
+  final case class ParticipantIdConflictWithPartyId(participantId: ParticipantId, partyId: PartyId)
       extends TopologyTransactionRejection {
-    override def asString: String = ???
+    override def asString: String =
+      s"Tried to onboard participant $participantId while party $partyId with the same UID already exists."
 
     override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
-      TopologyManagerError.ParticipantIdClashesWithPartyId.Reject(participantId, partyId)
+      TopologyManagerError.ParticipantIdConflictWithPartyId.Reject(participantId, partyId)
 
-    override def pretty: Pretty[ParticipantIdClashesWithPartyId.this.type] =
+    override def pretty: Pretty[ParticipantIdConflictWithPartyId.this.type] =
       prettyOfClass(
         param("participantId", _.participantId),
         param("partyId", _.partyId),

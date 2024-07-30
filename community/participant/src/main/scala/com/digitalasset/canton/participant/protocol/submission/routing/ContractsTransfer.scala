@@ -9,6 +9,7 @@ import com.digitalasset.canton.data.TransferSubmitterMetadata
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.protocol.submission.routing.ContractsTransfer.TransferArgs
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.AutomaticTransferForTransactionFailure
 import com.digitalasset.canton.participant.sync.{ConnectedDomainsLookup, TransactionRoutingError}
 import com.digitalasset.canton.protocol.*
@@ -35,17 +36,20 @@ private[routing] class ContractsTransfer(
       )
       domainRankTarget.transfers.toSeq.parTraverse_ { case (cid, (lfParty, sourceDomainId)) =>
         perform(
-          SourceDomainId(sourceDomainId),
-          TargetDomainId(domainRankTarget.domainId),
-          TransferSubmitterMetadata(
-            lfParty,
-            submittingParticipant,
-            submitterInfo.commandId,
-            submitterInfo.submissionId,
-            submitterInfo.applicationId,
-            workflowId = None,
-          ),
-          cid,
+          TransferArgs(
+            SourceDomainId(sourceDomainId),
+            TargetDomainId(domainRankTarget.domainId),
+            TransferSubmitterMetadata(
+              lfParty,
+              submittingParticipant,
+              submitterInfo.commandId,
+              submitterInfo.submissionId,
+              submitterInfo.applicationId,
+              workflowId = None,
+            ),
+            cid,
+            traceContext,
+          )
         )
       }
     } else {
@@ -54,11 +58,16 @@ private[routing] class ContractsTransfer(
   }
 
   private def perform(
-      sourceDomain: SourceDomainId,
-      targetDomain: TargetDomainId,
-      submitterMetadata: TransferSubmitterMetadata,
-      contractId: LfContractId,
-  )(implicit traceContext: TraceContext): EitherT[Future, TransactionRoutingError, Unit] = {
+      args: TransferArgs
+  ): EitherT[Future, TransactionRoutingError, Unit] = {
+    val TransferArgs(
+      sourceDomain,
+      targetDomain,
+      submitterMetadata,
+      contractId,
+      _traceContext,
+    ) = args
+    implicit val traceContext = _traceContext
 
     val transfer = for {
       sourceSyncDomain <- EitherT.fromEither[Future](
@@ -116,4 +125,14 @@ private[routing] class ContractsTransfer(
       AutomaticTransferForTransactionFailure.Failed(str)
     )
   }
+}
+
+private[routing] object ContractsTransfer {
+  final case class TransferArgs(
+      sourceDomain: SourceDomainId,
+      targetDomain: TargetDomainId,
+      submitterMetadata: TransferSubmitterMetadata,
+      contract: LfContractId,
+      traceContext: TraceContext,
+  )
 }

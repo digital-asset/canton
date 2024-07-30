@@ -6,11 +6,10 @@
 package com.digitalasset.canton.topology.store.db
 
 import com.digitalasset.canton.TestEssentials
-import com.digitalasset.canton.config.CantonRequireTypes.String68
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.DbTest
-import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 
@@ -20,25 +19,29 @@ trait DbTopologyStoreHelper {
 
   this: DbTest & TestEssentials =>
 
-  // Using test name as discriminator to avoid db-unit-test clashes such as non-X DbTopologyStoreTest.
-  // We reuse the `topology_dispatching` table from non-X topology management.
-  private val discriminator = String68(getClass.getSimpleName.takeRight(40))()
+  private val storeId = TopologyStoreId.DomainStore(
+    DefaultTestIdentities.domainId,
+    // Using test name as discriminator to avoid db-unit-test clashes such as non-X DbTopologyStoreTest.
+    // We reuse the `topology_dispatching` table from non-X topology management.
+    getClass.getSimpleName.takeRight(40),
+  )
   override def cleanDb(storage: DbStorage): Future[Unit] = {
     import storage.api.*
     storage.update(
       DBIO.seq(
-        sqlu"delete from common_topology_transactions where store_id like ${discriminator} || '%'"
+        sqlu"delete from common_topology_transactions where store_id=${storeId.dbString}"
       ),
-      operationName = s"${this.getClass}: Delete common_topology_transactions for $discriminator",
+      operationName =
+        s"${this.getClass}: Delete common_topology_transactions for ${storeId.dbString}",
     )
   }
 
   protected val maxItemsInSqlQuery: PositiveInt = PositiveInt.tryCreate(20)
 
-  protected def createTopologyStore(domainId: DomainId): TopologyStore[DomainStore] =
+  protected def createTopologyStore(): TopologyStore[DomainStore] =
     new DbTopologyStore(
       storage,
-      TopologyStoreId.DomainStore(domainId, discriminator.str),
+      storeId,
       timeouts,
       loggerFactory,
       maxItemsInSqlQuery = maxItemsInSqlQuery,

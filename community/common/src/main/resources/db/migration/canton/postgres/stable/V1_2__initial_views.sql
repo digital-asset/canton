@@ -707,10 +707,9 @@ create or replace view debug.ord_pbft_messages as
 
 create or replace view debug.ord_metadata_output_blocks as
   select
-    epoch_number,
     block_number,
-    debug.canton_timestamp(bft_ts) as bft_ts,
-    debug.canton_timestamp(last_topology_ts) as last_topology_ts
+    bft_ts,
+    last_topology_ts
   from ord_metadata_output_blocks;
 
 create or replace view debug.common_static_strings as
