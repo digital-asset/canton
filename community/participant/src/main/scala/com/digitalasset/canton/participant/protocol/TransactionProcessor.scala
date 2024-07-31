@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol
 
 import cats.data.EitherT
 import com.daml.error.*
+import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
@@ -118,6 +119,15 @@ class TransactionProcessor(
       loggerFactory,
       futureSupervisor,
     ) {
+
+  override protected def metricsContextForSubmissionParam(
+      submissionParam: TransactionProcessingSteps.SubmissionParam
+  ): MetricsContext = {
+    MetricsContext(
+      "application-id" -> submissionParam.submitterInfo.applicationId,
+      "type" -> "send-confirmation-request",
+    )
+  }
 
   def submit(
       submitterInfo: SubmitterInfo,
@@ -236,6 +246,22 @@ object TransactionProcessor {
           ConsistencyErrors.SubmissionAlreadyInFlight.code
         )
         with TransactionSubmissionError
+
+    @Explanation(
+      """This error occurs when the sequencer refuses to accept a command due to backpressure."""
+    )
+    @Resolution("Wait a bit and retry, preferably with some backoff factor.")
+    object DomainBackpressure
+        extends ErrorCode(id = "DOMAIN_BACKPRESSURE", ErrorCategory.ContentionOnSharedResources) {
+      override def logLevel: Level = Level.INFO
+
+      final case class Rejection(reason: String)
+          extends TransactionErrorImpl(
+            cause = "The domain is overloaded.",
+            // Only reported asynchronously, so covered by submission rank guarantee
+            definiteAnswer = true,
+          )
+    }
 
     @Explanation(
       """The participant has rejected all incoming commands during a configurable grace period."""

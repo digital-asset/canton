@@ -4,6 +4,7 @@
 package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
+import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
@@ -38,14 +39,6 @@ trait SequencerClientSend {
     *  - If replay is enabled, the callback will be called immediately with a fake `SendResult`.
     *  For more robust send result tracking callers should persist metadata about the send they will make and
     *  monitor the sequenced events when read, so actions can be taken even if in-memory state is lost.
-    *
-    *  @param amplify Amplification sends the submission request to multiple sequencers according to the
-    *                 [[com.digitalasset.canton.sequencing.SubmissionRequestAmplification]] configured in the
-    *                 [[com.digitalasset.canton.sequencing.SequencerConnections]]. If the sequencer client plans to send
-    *                 the submission request to multiple sequencers, it adds a suitable
-    *                 [[com.digitalasset.canton.sequencing.protocol.AggregationRule]] to the request for deduplication,
-    *                 unless one is already present.
-    *                 False disables amplificaton for this request independent of the configuration.
     */
   def sendAsync(
       batch: Batch[DefaultOpenEnvelope],
@@ -55,7 +48,10 @@ trait SequencerClientSend {
       aggregationRule: Option[AggregationRule] = None,
       callback: SendCallback = SendCallback.empty,
       amplify: Boolean = false,
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SendAsyncClientError, Unit]
+  )(implicit
+      traceContext: TraceContext,
+      metricsContext: MetricsContext,
+  ): EitherT[FutureUnlessShutdown, SendAsyncClientError, Unit]
 
   /** Provides a value for max-sequencing-time to use for `sendAsync` if no better application provided timeout is available.
     * Is currently a configurable offset from our clock.

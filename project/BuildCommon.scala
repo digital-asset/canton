@@ -792,10 +792,12 @@ object BuildCommon {
         Compile / damlCodeGeneration := Seq(
           (
             (Compile / sourceDirectory).value / "daml" / "CantonExamples",
-            (Compile / damlDarOutput).value / "CantonExamples.dar",
+            (Compile / resourceDirectory).value / "dar" / "CantonExamples.dar",
             "com.digitalasset.canton.examples",
           )
         ),
+        // we add this dar to the fixed one because we use it in data continuity tests which require the same dar.
+        damlFixedDars := Seq("CantonExamples.dar"),
         addFilesToHeaderCheck("*.daml", "daml", Compile),
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
@@ -891,16 +893,14 @@ object BuildCommon {
         Compile / damlCodeGeneration := Seq(
           (
             (Compile / sourceDirectory).value / "daml",
-            (Compile / damlDarOutput).value / "AdminWorkflows.dar",
+            (Compile / resourceDirectory).value / "dar" / "AdminWorkflows.dar",
             "com.digitalasset.canton.participant.admin.workflows",
           )
         ),
         Compile / damlBuildOrder := Seq(
           "daml/daml.yaml"
         ),
-        // TODO(#16168) Before creating the first stable release with backwards compatibility guarantees,
-        //  make "AdminWorkflows.dar" stable again
-        damlFixedDars := Seq(),
+        damlFixedDars := Seq("AdminWorkflows.dar"),
         addProtobufFilesToHeaderCheck(Compile),
         addFilesToHeaderCheck("*.daml", "daml", Compile),
         JvmRulesPlugin.damlRepoHeaderSettings,

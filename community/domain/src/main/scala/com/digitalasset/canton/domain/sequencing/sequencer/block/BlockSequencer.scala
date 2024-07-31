@@ -44,7 +44,7 @@ import com.digitalasset.canton.logging.pretty.CantonPrettyPrinter
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.PruningScheduler
-import com.digitalasset.canton.sequencing.client.SequencerClientSend
+import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficControlError
 import com.digitalasset.canton.sequencing.traffic.{
@@ -52,7 +52,7 @@ import com.digitalasset.canton.sequencing.traffic.{
   TrafficPurchasedSubmissionHandler,
 }
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
-import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
@@ -115,7 +115,7 @@ class BlockSequencer(
       Some(blockRateLimitManager.trafficConsumedStore),
       protocolVersion,
       cryptoApi,
-      SequencerMetrics.noop("TODO"), // TODO(#18406)
+      metrics,
       loggerFactory,
       unifiedSequencer,
       runtimeReady,
@@ -189,8 +189,8 @@ class BlockSequencer(
     }
     val combinedSourceWithBlockHandling = combinedSource.async
       .via(stateManager.applyBlockUpdate(sequencerIntegration))
-      .map { case Traced(lastTs) =>
-        metrics.sequencerClient.handler.delay.updateValue((clock.now - lastTs).toMillis)
+      .wireTap { lastTs =>
+        metrics.block.delay.updateValue((clock.now - lastTs.value).toMillis)
       }
     val ((killSwitchF, localEventsQueue), done) = PekkoUtil.runSupervised(
       ex => logger.error("Fatally failed to handle state changes", ex)(TraceContext.empty), {
@@ -673,7 +673,11 @@ class BlockSequencer(
         timestamp,
         stateManager.getHeadState.block.latestSequencerEventTimestamp,
         // Warn on approximate topology or traffic purchased when getting exact traffic states only (so when selector is not LatestApproximate)
-        warnIfApproximate = selector != LatestApproximate,
+        warnIfApproximate = selector != LatestApproximate &&
+          // Also don't warn until the sequencer has at least received one event
+          stateManager.getHeadState.chunk.ephemeral
+            .headCounter(sequencerId)
+            .exists(_ > SequencerCounter.Genesis),
       )
     }
   }
@@ -682,8 +686,7 @@ class BlockSequencer(
       member: Member,
       serial: PositiveInt,
       totalTrafficPurchased: NonNegativeLong,
-      sequencerClient: SequencerClientSend,
-      domainTimeTracker: DomainTimeTracker,
+      sequencerClient: SequencerClient,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TrafficControlError, CantonTimestamp] = {
@@ -703,7 +706,6 @@ class BlockSequencer(
         serial,
         totalTrafficPurchased,
         sequencerClient,
-        domainTimeTracker,
         cryptoApi,
       )
     } yield timestamp

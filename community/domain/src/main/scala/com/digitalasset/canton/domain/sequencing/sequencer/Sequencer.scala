@@ -28,11 +28,10 @@ import com.digitalasset.canton.logging.{HasLoggerName, NamedLogging}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.PruningScheduler
 import com.digitalasset.canton.sequencing.*
-import com.digitalasset.canton.sequencing.client.SequencerClientSend
+import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficControlError
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
-import com.digitalasset.canton.time.DomainTimeTracker
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.ServerServiceDefinition
@@ -156,8 +155,7 @@ trait Sequencer
       member: Member,
       serial: PositiveInt,
       totalTrafficPurchased: NonNegativeLong,
-      sequencerClient: SequencerClientSend,
-      domainTimeTracker: DomainTimeTracker,
+      sequencerClient: SequencerClient,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TrafficControlError, CantonTimestamp]

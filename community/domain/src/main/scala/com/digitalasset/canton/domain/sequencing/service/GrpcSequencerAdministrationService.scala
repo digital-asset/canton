@@ -25,7 +25,7 @@ import com.digitalasset.canton.sequencer.admin.v30.{
   SetTrafficPurchasedRequest,
   SetTrafficPurchasedResponse,
 }
-import com.digitalasset.canton.sequencing.client.SequencerClientSend
+import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.time.DomainTimeTracker
 import com.digitalasset.canton.topology.client.DomainTopologyClient
@@ -48,7 +48,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class GrpcSequencerAdministrationService(
     sequencer: Sequencer,
-    sequencerClient: SequencerClientSend,
+    sequencerClient: SequencerClient,
     topologyStore: TopologyStore[DomainStore],
     topologyClient: DomainTopologyClient,
     domainTimeTracker: DomainTimeTracker,
@@ -262,13 +262,7 @@ class GrpcSequencerAdministrationService(
           )
         )
         highestMaxSequencingTimestamp <- sequencer
-          .setTrafficPurchased(
-            member,
-            serial,
-            totalTrafficPurchased,
-            sequencerClient,
-            domainTimeTracker,
-          )
+          .setTrafficPurchased(member, serial, totalTrafficPurchased, sequencerClient)
           .leftWiden[CantonError]
       } yield SetTrafficPurchasedResponse(
         maxSequencingTimestamp = Some(highestMaxSequencingTimestamp.toProtoTimestamp)

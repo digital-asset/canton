@@ -263,7 +263,8 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
   class AbortedDueToShutdownException
       extends RuntimeException("The request was aborted due to the node shutting down.")
 
-  private val AdminWorkflowDarResourceName: String = "AdminWorkflows.dar"
+  // There are two adminWorkflows dars in the classpath, and we want the fixed one
+  private val AdminWorkflowDarResourceName: String = "dar/AdminWorkflows.dar"
   private def adminWorkflowDarInputStream(): InputStream = getDarInputStream(
     AdminWorkflowDarResourceName
   )
