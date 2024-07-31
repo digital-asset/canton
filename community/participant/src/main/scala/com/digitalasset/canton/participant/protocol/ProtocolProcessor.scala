@@ -8,6 +8,7 @@ import cats.implicits.catsStdInstancesForFuture
 import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
+import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -429,6 +430,8 @@ abstract class ProtocolProcessor[
     registeredF.mapK(FutureUnlessShutdown.outcomeK).map(afterRegistration)
   }
 
+  protected def metricsContextForSubmissionParam(submissionParam: SubmissionParam): MetricsContext
+
   /** Submit the batch to the sequencer.
     * Also registers `submissionParam` as pending submission.
     */
@@ -446,6 +449,8 @@ abstract class ProtocolProcessor[
     steps.SubmissionSendError,
     (SendResult, steps.SubmissionResultArgs),
   ] = {
+    implicit val metricsContext: MetricsContext = metricsContextForSubmissionParam(submissionParam)
+
     def removePendingSubmission(): Unit = {
       steps
         .removePendingSubmission(steps.pendingSubmissions(ephemeral), submissionId)
@@ -472,6 +477,7 @@ abstract class ProtocolProcessor[
         "sequenced-event-send-result",
         futureSupervisor,
       )
+
       _ <- sequencerClient
         .sendAsync(
           batch,
@@ -484,9 +490,6 @@ abstract class ProtocolProcessor[
           removePendingSubmission()
           embedSubmissionError(SequencerRequestError(err))
         }
-
-      // Ensure that we will observe a timeout if there is no other activity
-      _ = ephemeral.timeTracker.requestTick(maxSequencingTime)
 
       // If we're shutting down, the sendResult below won't complete successfully (because it's wrapped in a `FutureUnlessShutdown`)
       // We still want to clean up pending submissions in that case though so make sure we do that by adding a callback on

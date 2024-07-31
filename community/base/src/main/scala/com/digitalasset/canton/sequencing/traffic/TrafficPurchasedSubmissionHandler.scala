@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.implicits.catsSyntaxAlternativeSeparate
 import cats.syntax.bifunctor.*
 import cats.syntax.parallel.*
+import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, DomainSyncCryptoClient}
@@ -22,7 +23,7 @@ import com.digitalasset.canton.sequencing.TrafficControlParameters
 import com.digitalasset.canton.sequencing.client.{SendCallback, SendResult, SequencerClientSend}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficControlError
-import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
@@ -55,7 +56,6 @@ class TrafficPurchasedSubmissionHandler(
       serial: PositiveInt,
       totalTrafficPurchased: NonNegativeLong,
       sequencerClient: SequencerClientSend,
-      domainTimeTracker: DomainTimeTracker,
       cryptoApi: DomainSyncCryptoClient,
   )(implicit
       ec: ExecutionContext,
@@ -77,13 +77,7 @@ class TrafficPurchasedSubmissionHandler(
           logger.debug(
             s"Submitting traffic purchased entry request for $member with balance ${totalTrafficPurchased.value}, serial ${serial.value} and max sequencing time $maxSequencingTime"
           )
-          sendRequest(
-            sequencerClient,
-            domainTimeTracker,
-            batch,
-            aggregationRule,
-            maxSequencingTime,
-          ).value
+          sendRequest(sequencerClient, batch, aggregationRule, maxSequencingTime).value
         }
         (errors, successes) = resultsE.separate
       } yield (NonEmpty.from(errors), NonEmpty.from(successes)) match {
@@ -171,7 +165,6 @@ class TrafficPurchasedSubmissionHandler(
 
   private def sendRequest(
       sequencerClient: SequencerClientSend,
-      domainTimeTracker: DomainTimeTracker,
       batch: Batch[DefaultOpenEnvelope],
       aggregationRule: AggregationRule,
       maxSequencingTime: CantonTimestamp,
@@ -180,8 +173,7 @@ class TrafficPurchasedSubmissionHandler(
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, TrafficControlError, CantonTimestamp] = {
     val callback = SendCallback.future
-    // Make sure that the sequencer will ask for a time proof if it doesn't observe the sequencing in time
-    domainTimeTracker.requestTick(maxSequencingTime)
+    implicit val metricsContext: MetricsContext = MetricsContext("type" -> "traffic-purchase")
     for {
       _ <- sequencerClient
         .sendAsync(
@@ -239,7 +231,10 @@ class TrafficPurchasedSubmissionHandler(
     )
     // If we're close to the upper bound, we'll submit the top up to both time windows to ensure low latency
     // We use 25% of the window size as the threshold
-    if (windowUpperBound - now <= timeWindowSize.duration.dividedBy(100 / 25)) {
+    if (
+      windowUpperBound - now <= trafficParams.setBalanceRequestSubmissionWindowSize.duration
+        .dividedBy(100 / 25)
+    ) {
       NonEmpty.mk(Seq, windowUpperBound, windowUpperBound.plus(timeWindowSize.duration))
     } else
       NonEmpty.mk(Seq, windowUpperBound)

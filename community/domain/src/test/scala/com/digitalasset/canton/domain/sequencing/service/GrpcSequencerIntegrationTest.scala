@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.sequencing.service
 
 import cats.data.EitherT
 import com.daml.grpc.adapter.ExecutionSequencerFactory
+import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -111,14 +112,22 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
     .thenReturn(mockTopologySnapshot)
   when(topologyClient.headSnapshot(any[TraceContext]))
     .thenReturn(mockTopologySnapshot)
-  when(mockTopologySnapshot.timestamp).thenReturn(CantonTimestamp.Epoch)
+  when(
+    mockTopologySnapshot.timestamp
+  ).thenReturn(
+    CantonTimestamp.Epoch
+  )
   when(
     mockTopologySnapshot.trafficControlParameters(
       any[ProtocolVersion],
       anyBoolean,
     )(any[TraceContext])
   )
-    .thenReturn(FutureUnlessShutdown.pure(None))
+    .thenReturn(
+      FutureUnlessShutdown.pure(
+        None
+      )
+    )
   when(
     mockTopologySnapshot.findDynamicDomainParametersOrDefault(
       any[ProtocolVersion],
@@ -298,9 +307,9 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
 
   override def close(): Unit =
     Lifecycle.close(
-      client,
       service,
       Lifecycle.toCloseableServer(server, logger, "test"),
+      client,
       executionSequencerFactory,
       Lifecycle.toCloseableActorSystem(actorSystem, logger, timeouts),
     )(logger)
@@ -391,7 +400,7 @@ class GrpcSequencerIntegrationTest
         .thenReturn(EitherT.pure[FutureUnlessShutdown, SendAsyncError](()))
       when(env.sequencer.sendAsyncSigned(any[SignedContent[SubmissionRequest]])(anyTraceContext))
         .thenReturn(EitherT.pure[FutureUnlessShutdown, SendAsyncError](()))
-
+      implicit val metricsContext: MetricsContext = MetricsContext.Empty
       val result = for {
         response <- env.client
           .sendAsync(

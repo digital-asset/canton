@@ -151,7 +151,7 @@ class SuppressingLogger private[logging] (
   )(implicit c: ClassTag[T], pos: source.Position): Assertion =
     inside(within) {
       case _: T => succeed
-      case t: Throwable => fail(s"The throwable has an incorrect type ${t.getClass}.", t)
+      case t: Throwable => fail(s"The throwable has an incorrect type ${t.getClass}.")
     }
 
   def assertThrowsAndLogsUnorderedOptional[T <: Throwable](
