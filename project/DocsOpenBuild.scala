@@ -59,21 +59,19 @@ object DocsOpenBuild {
         docsOpenDir: File,
         cantonVersion: String,
         log: ManagedLogger,
-    ): File = {
+    ): File =
       docsVersionDirectory(docsOpenDir, cantonVersion, log) / "docs" / "canton"
-    }
 
     def snippetDirectiveScriptDirectory(
         docsOpenDir: File,
         cantonVersion: String,
         log: ManagedLogger,
-    ): File = {
+    ): File =
       docsVersionDirectory(docsOpenDir, cantonVersion, log) / "bin" / "canton"
-    }
 
   }
 
-  def updateManifest(): Def.Initialize[Task[String]] = {
+  def updateManifest(): Def.Initialize[Task[String]] =
     Def
       .task {
         val log: ManagedLogger = streams.value.log
@@ -86,12 +84,11 @@ object DocsOpenBuild {
         val manifest = sourceDirectory.value / "assembly" / "canton_sources_manifest"
         runCommand(s"python $scriptPath $source $manifest", log)
       }
-  }
 
   def updateDocs(
       sourceDirectory: SettingKey[File],
       targetDirectory: SettingKey[File],
-  ): Def.Initialize[Task[String]] = {
+  ): Def.Initialize[Task[String]] =
     Def
       .task {
         val log: ManagedLogger = streams.value.log
@@ -121,9 +118,8 @@ object DocsOpenBuild {
 
         updateManifest.value
       }
-  }
 
-  def generateSphinxSnippets(`enterprise-app`: Project): Def.Initialize[Task[Unit]] = {
+  def generateSphinxSnippets(`enterprise-app`: Project): Def.Initialize[Task[Unit]] =
     Def.taskDyn {
       val log = streams.value.log
       log.info(
@@ -137,12 +133,11 @@ object DocsOpenBuild {
         verbose = true,
       )
     }
-  }
 
   def generateRstInitialize(
       sourceDirectory: SettingKey[File],
       targetDirectory: SettingKey[File],
-  ): Def.Initialize[Task[Unit]] = {
+  ): Def.Initialize[Task[Unit]] =
     Def.task {
       val log: ManagedLogger = streams.value.log
 
@@ -176,9 +171,8 @@ object DocsOpenBuild {
       IO.copyDirectory(snippetJsonSource, snippetJsonTarget)
       IO.createDirectory(assemblyTarget)
     }
-  }
 
-  def generateRstResolveSnippet(sourceDirectory: SettingKey[File]) = {
+  def generateRstResolveSnippet(sourceDirectory: SettingKey[File]) =
     Def.task {
       val log: ManagedLogger = streams.value.log
 
@@ -196,13 +190,12 @@ object DocsOpenBuild {
       ) / "snippet_directive.py"
       runCommand(s"python $snippetScriptPath $snippetJsonTarget $target", log)
     }
-  }
 
   def generateRst(
       sourceDirectory: SettingKey[File],
       resourceDirectory: SettingKey[File],
       generateReferenceJson: TaskKey[File],
-  ): Def.Initialize[Task[Unit]] = {
+  ): Def.Initialize[Task[Unit]] =
     Def
       .task {
         val log: ManagedLogger = streams.value.log
@@ -223,7 +216,6 @@ object DocsOpenBuild {
           log,
         )
       }
-  }
 
   def generateReferenceJson(
       embed_reference_json: SettingKey[File],
@@ -234,7 +226,7 @@ object DocsOpenBuild {
       resourceDirectory: SettingKey[File],
       sourceDirectory: SettingKey[File],
       target: SettingKey[File],
-  ): Def.Initialize[Task[File]] = {
+  ): Def.Initialize[Task[File]] =
     Def.task {
       val log = streams.value.log
       log.info(
@@ -285,7 +277,6 @@ object DocsOpenBuild {
       }
       outFile
     }
-  }
 
   def runCanton(packPath: File, args: Seq[String], cwd: Option[File], log: Logger): String = {
     import scala.sys.process.{Process, ProcessLogger}

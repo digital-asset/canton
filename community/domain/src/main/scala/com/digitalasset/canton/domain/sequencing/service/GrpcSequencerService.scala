@@ -30,7 +30,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, TraceContextGrpc}
-import com.digitalasset.canton.util.{EitherTUtil, RateLimiter}
+import com.digitalasset.canton.util.RateLimiter
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{ProtoDeserializationError, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
@@ -203,7 +203,7 @@ object GrpcSequencerService {
         requestP: v0.SendAsyncVersionedRequest,
         maxRequestSize: MaxRequestSize,
         protocolVersion: ProtocolVersion,
-    ): ParsingResult[SignedContent[SubmissionRequest]] = {
+    ): ParsingResult[SignedContent[SubmissionRequest]] =
       for {
         signedContent <- SignedContent.fromByteString(protocolVersion)(
           requestP.signedSubmissionRequest
@@ -215,7 +215,6 @@ object GrpcSequencerService {
             )
         )
       } yield signedSubmissionRequest
-    }
 
     override def unwrap(request: SignedContent[SubmissionRequest]): SubmissionRequest =
       request.content
@@ -370,7 +369,7 @@ class GrpcSequencerService(
 
     performUnlessClosingF(functionFullName)(sendET.value.map { res =>
       res.left.foreach { err =>
-        logger.info(s"Rejecting submission request by $senderFromMetadata with ${err}")
+        logger.info(s"Rejecting submission request by $senderFromMetadata with $err")
       }
       toSendAsyncResponse(res)
     })
@@ -594,11 +593,8 @@ class GrpcSequencerService(
     sender match {
       case participantId: ParticipantId if request.isRequest =>
         for {
-          maxRatePerParticipant <- EitherTUtil
-            .fromFuture(
-              domainParamsLookup.getApproximateOrDefaultValue(),
-              e => SendAsyncError.Internal(s"Unable to retrieve domain parameters: ${e.getMessage}"),
-            )
+          maxRatePerParticipant <- EitherT
+            .right(domainParamsLookup.getApproximateOrDefaultValue())
             .map(_.maxRatePerParticipant)
           _ <- EitherT.fromEither[Future](checkRate(participantId, maxRatePerParticipant))
         } yield ()
@@ -869,8 +865,7 @@ class GrpcSequencerService(
     case _ => false
   }
 
-  override def onClosed(): Unit = {
+  override def onClosed(): Unit =
     subscriptionPool.close()
-  }
 
 }

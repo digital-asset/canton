@@ -334,12 +334,11 @@ object Dependencies {
     }.toMap
   }
 
-  def damlDependency(org: String, artifact: String): ModuleID = {
+  def damlDependency(org: String, artifact: String): ModuleID =
     damlDependencyMap
       .get((org, artifact))
       .orElse(damlDependencyMap.get((org, s"${artifact}_2.13")))
       .getOrElse(throw new RuntimeException(s"Unknown daml dependency: $org, $artifact"))
-  }
 
   // TODO(i10677): Pull in dependencies from daml submodule
   lazy val daml_script_runner = "com.daml" %% "daml-script-runner" % daml_libraries_version
