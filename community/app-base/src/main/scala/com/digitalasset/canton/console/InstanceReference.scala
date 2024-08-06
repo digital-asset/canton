@@ -6,6 +6,11 @@ package com.digitalasset.canton.console
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.*
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand
+import com.digitalasset.canton.admin.api.client.data.{
+  DomainNodeStatus,
+  NodeStatus,
+  ParticipantStatus,
+}
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.console.CommandErrors.NodeNotStarted
@@ -14,7 +19,6 @@ import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.domain.config.RemoteDomainConfig
 import com.digitalasset.canton.domain.{Domain, DomainNodeBootstrap}
 import com.digitalasset.canton.environment.*
-import com.digitalasset.canton.health.admin.data.{DomainStatus, NodeStatus, ParticipantStatus}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.participant.config.{
@@ -93,7 +97,7 @@ trait LocalInstanceReferenceCommon extends InstanceReferenceCommon with NoTracin
 
   val name: String
   val consoleEnvironment: ConsoleEnvironment
-  private[console] val nodes: Nodes[CantonNode, CantonNodeBootstrap[CantonNode]]
+  private[console] val nodes: Nodes.GenericNodes
 
   @Help.Summary("Database related operations")
   @Help.Group("Database")
@@ -235,15 +239,15 @@ trait DomainReference
 
   override protected val instanceType: String = DomainReference.InstanceType
 
-  override type Status = DomainStatus
+  override type Status = DomainNodeStatus
 
   @Help.Summary("Health and diagnostic related commands")
   @Help.Group("Health")
   override def health =
-    new HealthAdministration[DomainStatus](
+    new DomainHealthAdministration(
       this,
       consoleEnvironment,
-      DomainStatus.fromProtoV0,
+      loggerFactory,
     )
 
   @Help.Summary(
