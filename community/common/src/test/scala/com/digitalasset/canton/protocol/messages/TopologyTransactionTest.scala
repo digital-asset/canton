@@ -5,7 +5,7 @@ package com.digitalasset.canton.protocol.messages
 
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.serialization.HasCryptographicEvidenceTest
@@ -38,9 +38,8 @@ class TopologyTransactionTest extends AnyWordSpec with BaseTest with HasCryptogr
 
   private def mk[T <: TopologyMapping](
       mapping: T
-  ): TopologyTransaction[TopologyChangeOp.Replace, T] = {
+  ): TopologyTransaction[TopologyChangeOp.Replace, T] =
     TopologyTransaction(TopologyChangeOp.Replace, PositiveInt.one, mapping, testedProtocolVersion)
-  }
 
   private val deserialize: ByteString => TopologyTransaction[TopologyChangeOp, TopologyMapping] =
     bytes =>
@@ -132,7 +131,7 @@ class TopologyTransactionTest extends AnyWordSpec with BaseTest with HasCryptogr
           domainId,
           ParticipantId(uid),
           ParticipantPermission.Observation,
-          limits = Some(ParticipantDomainLimits(13, 37, 42)),
+          limits = Some(ParticipantDomainLimits(NonNegativeInt.tryCreate(13))),
           loginAfter = Some(CantonTimestamp.MinValue.plusSeconds(17)),
         )
       )

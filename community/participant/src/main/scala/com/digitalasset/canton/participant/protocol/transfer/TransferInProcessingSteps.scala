@@ -90,9 +90,8 @@ private[transfer] class TransferInProcessingSteps(
   override type RequestType = ProcessingSteps.RequestType.TransferIn
   override val requestType = ProcessingSteps.RequestType.TransferIn
 
-  override def pendingSubmissions(state: SyncDomainEphemeralState): PendingSubmissions = {
+  override def pendingSubmissions(state: SyncDomainEphemeralState): PendingSubmissions =
     state.pendingTransferInSubmissions
-  }
 
   private val transferInValidation = new TransferInValidation(
     domainId,
@@ -118,7 +117,6 @@ private[transfer] class TransferInProcessingSteps(
     val SubmissionParam(
       submitterMetadata,
       transferId,
-      sourceProtocolVersion,
     ) = submissionParam
     val topologySnapshot = recentSnapshot.ipsSnapshot
     val pureCrypto = recentSnapshot.pureCrypto
@@ -183,7 +181,7 @@ private[transfer] class TransferInProcessingSteps(
           mediator,
           transferOutResult,
           transferInUuid,
-          sourceProtocolVersion,
+          transferData.sourceProtocolVersion,
           targetProtocolVersion,
         )
       )
@@ -243,14 +241,13 @@ private[transfer] class TransferInProcessingSteps(
       pendingSubmissionMap: PendingSubmissions,
       submissionParam: SubmissionParam,
       submissionId: PendingSubmissionId,
-  ): EitherT[Future, TransferProcessorError, SubmissionResultArgs] = {
+  ): EitherT[Future, TransferProcessorError, SubmissionResultArgs] =
     performPendingSubmissionMapUpdate(
       pendingSubmissionMap,
       Some(submissionParam.transferId),
       submissionParam.submitterLf,
       submissionId,
     )
-  }
 
   override def createSubmissionResult(
       deliver: Deliver[Envelope[_]],
@@ -685,7 +682,6 @@ object TransferInProcessingSteps {
   final case class SubmissionParam(
       submitterMetadata: TransferSubmitterMetadata,
       transferId: TransferId,
-      sourceProtocolVersion: SourceProtocolVersion,
   ) {
     val submitterLf: LfPartyId = submitterMetadata.submitter
   }

@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol
 
 import cats.Eval
 import cats.data.EitherT
+import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
 import com.daml.test.evidence.scalatest.ScalaTestSupport.TagContainer
 import com.daml.test.evidence.tag.EvidenceTag
@@ -148,9 +149,9 @@ class ProtocolProcessorTest
       any[Option[AggregationRule]],
       any[SendCallback],
       any[Boolean],
-    )(anyTraceContext)
+    )(anyTraceContext, any[MetricsContext])
   )
-    .thenAnswer(
+    .thenAnswer {
       (
           batch: Batch[DefaultOpenEnvelope],
           _: Option[CantonTimestamp],
@@ -158,7 +159,7 @@ class ProtocolProcessorTest
           messageId: MessageId,
           _: Option[AggregationRule],
           callback: SendCallback,
-      ) => {
+      ) =>
         callback(
           UnlessShutdown.Outcome(
             Success(
@@ -176,8 +177,7 @@ class ProtocolProcessorTest
           )
         )
         EitherTUtil.unitUS
-      }
-    )
+    }
 
   private val mockInFlightSubmissionTracker = mock[InFlightSubmissionTracker]
   when(
@@ -384,6 +384,10 @@ class ProtocolProcessorTest
         override def participantId: ParticipantId = participant
 
         override def timeouts: ProcessingTimeout = ProtocolProcessorTest.this.timeouts
+
+        override protected def metricsContextForSubmissionParam(
+            submissionParam: Int
+        ): MetricsContext = MetricsContext.Empty
       }
 
     ephemeralState.get().recordOrderPublisher.scheduleRecoveries(List.empty)
@@ -478,7 +482,7 @@ class ProtocolProcessorTest
           any[Option[AggregationRule]],
           any[SendCallback],
           any[Boolean],
-        )(anyTraceContext)
+        )(anyTraceContext, any[MetricsContext])
       )
         .thenReturn(EitherT.leftT[FutureUnlessShutdown, Unit](sendError))
       val (sut, _persistent, _ephemeral, _) =
@@ -690,7 +694,7 @@ class ProtocolProcessorTest
             .processRequest(requestId.unwrap, rc, requestSc, requestBatchWrongRH)
             .onShutdown(fail()),
           _.warningMessage should include(
-            s"Request ${rc}: Found malformed payload: WrongRootHash"
+            s"Request $rc: Found malformed payload: WrongRootHash"
           ),
         )
         .futureValue
@@ -726,7 +730,7 @@ class ProtocolProcessorTest
             .processRequest(requestId.unwrap, rc, requestSc, requestBatchDecryptError)
             .onShutdown(fail()),
           _.warningMessage should include(
-            s"Request ${rc}: Decryption error: SyncCryptoDecryptError("
+            s"Request $rc: Decryption error: SyncCryptoDecryptError("
           ),
         )
         .futureValue
@@ -1050,7 +1054,7 @@ class ProtocolProcessorTest
       val processF = performResultProcessing(CantonTimestamp.Epoch.plusSeconds(10), sut)
 
       // Processing should not complete as the request processing has not finished
-      always() { processF.value.isCompleted shouldEqual false }
+      always()(processF.value.isCompleted shouldEqual false)
 
       // Check the result processing has not modified the request state
       taskScheduler.readSequencerCounterQueue(resultSc) shouldBe NotInserted(None, None)

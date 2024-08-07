@@ -18,9 +18,8 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
-import com.digitalasset.canton.version.Transfer.SourceProtocolVersion
 import org.slf4j.event.Level
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -42,7 +41,7 @@ private[participant] object AutomaticTransferIn {
     val logger = elc.logger
     implicit val traceContext: TraceContext = elc.traceContext
 
-    def hostedStakeholders(snapshot: TopologySnapshot): Future[Set[LfPartyId]] = {
+    def hostedStakeholders(snapshot: TopologySnapshot): Future[Set[LfPartyId]] =
       snapshot
         .hostedOn(stakeholders, participantId)
         .map(partiesWithAttributes =>
@@ -53,9 +52,7 @@ private[participant] object AutomaticTransferIn {
           }.toSet
         )
 
-    }
-
-    def performAutoInOnce: EitherT[Future, TransferProcessorError, com.google.rpc.status.Status] = {
+    def performAutoInOnce: EitherT[Future, TransferProcessorError, com.google.rpc.status.Status] =
       for {
         targetIps <- transferCoordination
           .getTimeProofAndSnapshot(targetDomain, staticDomainParameters)
@@ -66,17 +63,6 @@ private[participant] object AutomaticTransferIn {
           possibleSubmittingParties.headOption,
           AutomaticTransferInError("No possible submitting party for automatic transfer-in"),
         )
-        sourceProtocolVersion <- EitherT
-          .fromEither[Future](
-            transferCoordination
-              .protocolVersionFor(Traced(id.sourceDomain.unwrap))
-              .toRight(
-                AutomaticTransferInError(
-                  s"Unable to get protocol version of source domain ${id.sourceDomain}"
-                )
-              )
-          )
-          .map(SourceProtocolVersion(_))
         submissionResult <- transferCoordination
           .transferIn(
             targetDomain,
@@ -89,14 +75,12 @@ private[participant] object AutomaticTransferIn {
               workflowId = None,
             ),
             id,
-            sourceProtocolVersion,
           )(
             TraceContext.empty
           )
         TransferInProcessingSteps.SubmissionResult(completionF) = submissionResult
         status <- EitherT.right(completionF)
       } yield status
-    }
 
     def performAutoInRepeatedly: EitherT[Future, TransferProcessorError, Unit] = {
       final case class StopRetry(
@@ -106,11 +90,10 @@ private[participant] object AutomaticTransferIn {
 
       def tryAgain(
           previous: com.google.rpc.status.Status
-      ): EitherT[Future, StopRetry, com.google.rpc.status.Status] = {
+      ): EitherT[Future, StopRetry, com.google.rpc.status.Status] =
         if (BaseCantonError.isStatusErrorCode(MediatorError.Timeout, previous))
           performAutoInOnce.leftMap(error => StopRetry(Left(error)))
         else EitherT.leftT[Future, com.google.rpc.status.Status](StopRetry(Right(previous)))
-      }
 
       val initial = performAutoInOnce.leftMap(error => StopRetry(Left(error)))
       val result = MonadUtil.repeatFlatmap(initial, tryAgain, retryCount)

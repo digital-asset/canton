@@ -7,9 +7,9 @@ import com.daml.ledger.resources.{Resource, ResourceContext}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.api.health.{HealthStatus, Healthy, ReportsHealth, Unhealthy}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.resource.DbExceptionRetryPolicy
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.retry.RetryUtil
-import com.digitalasset.canton.util.retry.RetryUtil.DbExceptionRetryable
+import com.digitalasset.canton.util.retry.ErrorKind.*
 import org.apache.pekko.actor.Scheduler
 import org.apache.pekko.pattern.after
 
@@ -52,11 +52,11 @@ private[indexer] final class RecoveringIndexer(
 
     val firstSubscription = indexer
       .acquire()
-      .map(handle => {
+      .map { handle =>
         logger.info("Started Indexer Server")
         updateHealthStatus(Healthy)
         handle
-      })
+      }
     subscription.set(firstSubscription)
     resubscribeOnFailure(firstSubscription) {}
 
@@ -144,30 +144,32 @@ private[indexer] final class RecoveringIndexer(
         .get()
         .asFuture
         .transform(_ => Success(healthReporter -> complete.future))
-    )(_ => {
+    ) { _ =>
       logger.info("Stopping Indexer Server")
       subscription
         .getAndSet(null)
         .release()
         .flatMap(_ => complete.future)
-        .map(_ => {
+        .map { _ =>
           updateHealthStatus(Unhealthy)
           logger.info("Stopped Indexer Server")
-        })
-    })
+        }
+    }
   }
 
   private def reportErrorState(errorMessage: String, exception: Throwable): Unit = {
     updateHealthStatus(Unhealthy)
     // determine if the exception indicates a transient error kind which we expect
     // to be able to recover from by retrying
-    DbExceptionRetryable.determineErrorKind(exception, logger)(TraceContext.empty) match {
-      case RetryUtil.TransientErrorKind =>
+    // TODO(i20367): Actually decide to recover based on error kind and not just change the log level
+    DbExceptionRetryPolicy.determineExceptionErrorKind(exception, logger)(
+      TraceContext.empty
+    ) match {
+      case TransientErrorKind(_) =>
         def collect(e: Throwable): List[Throwable] =
           e :: Option(e.getCause).map(collect).getOrElse(Nil)
         logger.warn(errorMessage + ": " + (collect(exception).mkString(",")))
-      case RetryUtil.NoErrorKind | RetryUtil.FatalErrorKind |
-          RetryUtil.SpuriousTransientErrorKind =>
+      case UnknownErrorKind | FatalErrorKind | NoSuccessErrorKind =>
         logger.error(errorMessage, exception)
     }
 

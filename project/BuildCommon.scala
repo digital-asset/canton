@@ -129,7 +129,7 @@ object BuildCommon {
         val res = filter(x)
         if (verbose) {
           if (res) {
-            log.info(s"RUNNING ${x}")
+            log.info(s"RUNNING $x")
           } else {
             //          log.info(s"IGNORING ${x}")
           }
@@ -168,7 +168,7 @@ object BuildCommon {
   def runCommand(command: String, log: ManagedLogger, optError: Option[String] = None): String = {
     import scala.sys.process.Process
     val processLogger = new DamlPlugin.BufferedLogger
-    log.debug(s"Running ${command}")
+    log.debug(s"Running $command")
     val exitCode = Process(command) ! processLogger
     val output = processLogger.output()
     if (exitCode != 0) {
@@ -355,15 +355,14 @@ object BuildCommon {
     }
 
   class RenameMergeStrategy(target: String) extends MergeStrategy {
-    override def name: String = s"Rename to ${target}"
+    override def name: String = s"Rename to $target"
 
     override def apply(
         tempDir: File,
         path: String,
         files: Seq[File],
-    ): Either[String, Seq[(File, String)]] = {
+    ): Either[String, Seq[(File, String)]] =
       Right(files.map(_ -> target))
-    }
   }
 
   def mergeStrategy(oldStrategy: String => MergeStrategy): String => MergeStrategy = {
@@ -685,6 +684,7 @@ object BuildCommon {
       .in(file("community/base"))
       .enablePlugins(BuildInfoPlugin)
       .dependsOn(
+        DamlProjects.`daml-jwt`,
         DamlProjects.`ledger-api`, // trace-context
         `daml-tls`,
         `util-logging`,
@@ -697,8 +697,8 @@ object BuildCommon {
         JvmRulesPlugin.damlRepoHeaderSettings,
         libraryDependencies ++= Seq(
           daml_executors,
-          daml_nonempty_cats,
           daml_lf_transaction,
+          daml_nonempty_cats,
           daml_rs_grpc_bridge,
           daml_rs_grpc_pekko,
           better_files,
@@ -1357,7 +1357,6 @@ object BuildCommon {
         ),
         libraryDependencies ++= Seq(
           daml_libs_scala_ports,
-          daml_libs_struct_spray_json,
           daml_timer_utils,
           auth0_java,
           auth0_jwks,
@@ -1475,6 +1474,7 @@ object BuildCommon {
           auth0_java,
           auth0_jwks,
           daml_http_test_utils % Test,
+          daml_libs_struct_spray_json,
           daml_test_evidence_generator_scalatest % Test,
           scalatest % Test,
           scalaz_core,

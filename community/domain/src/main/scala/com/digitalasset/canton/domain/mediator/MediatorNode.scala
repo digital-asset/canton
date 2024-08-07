@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.mediator
 
 import cats.Monad
-import cats.data.EitherT
+import cats.data.{EitherT, OptionT}
 import cats.instances.future.*
 import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
@@ -143,11 +143,10 @@ final case class CommunityMediatorNodeConfig(
 
   override def replicationEnabled: Boolean = false
 
-  override def withDefaults(ports: DefaultPorts): CommunityMediatorNodeConfig = {
+  override def withDefaults(ports: DefaultPorts): CommunityMediatorNodeConfig =
     this
       .focus(_.adminApi.internalPort)
       .modify(ports.mediatorAdminApiPort.setDefaultPort)
-  }
 }
 
 class MediatorNodeBootstrap(
@@ -253,13 +252,10 @@ class MediatorNodeBootstrap(
     override protected def stageCompleted(implicit
         traceContext: TraceContext
     ): Future[Option[(StaticDomainParameters, DomainId)]] =
-      domainConfigurationStore.fetchConfiguration.toOption
-        .mapFilter {
-          case Some(mediatorDomainConfiguration) =>
-            Some(
-              (mediatorDomainConfiguration.domainParameters, mediatorDomainConfiguration.domainId)
-            )
-          case None => None
+      OptionT(domainConfigurationStore.fetchConfiguration)
+        .map { mediatorDomainConfiguration =>
+          (mediatorDomainConfiguration.domainParameters, mediatorDomainConfiguration.domainId)
+
         }
         .value
         .onShutdown(None)
@@ -300,7 +296,7 @@ class MediatorNodeBootstrap(
 
     override def initialize(request: InitializeMediatorRequest)(implicit
         traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, String, InitializeMediatorResponse] = {
+    ): EitherT[FutureUnlessShutdown, String, InitializeMediatorResponse] =
       if (isInitialized) {
         logger.info(
           "Received a request to initialize an already initialized mediator. Skipping initialization!"
@@ -333,14 +329,10 @@ class MediatorNodeBootstrap(
               sequencerAggregatedInfo.staticDomainParameters,
               request.sequencerConnections,
             )
-            _ <-
-              domainConfigurationStore
-                .saveConfiguration(configToStore)
-                .leftMap(_.toString)
+            _ <- EitherT.right(domainConfigurationStore.saveConfiguration(configToStore))
           } yield (sequencerAggregatedInfo.staticDomainParameters, request.domainId)
         }.map(_ => InitializeMediatorResponse())
       }
-    }
 
   }
 
@@ -404,21 +396,19 @@ class MediatorNodeBootstrap(
 
       }
 
-      val fetchConfig: () => EitherT[Future, String, Option[MediatorDomainConfiguration]] = () =>
+      val fetchConfig: () => Future[Option[MediatorDomainConfiguration]] = () =>
         domainConfigurationStore.fetchConfiguration
-          .leftMap(_.toString)
           .onShutdown(throw new RuntimeException("Aborted due to shutdown during startup"))
 
-      val saveConfig: MediatorDomainConfiguration => EitherT[Future, String, Unit] =
+      val saveConfig: MediatorDomainConfiguration => Future[Unit] =
         domainConfigurationStore
           .saveConfiguration(_)
-          .leftMap(_.toString)
           .onShutdown(throw new RuntimeException("Aborted due to shutdown during startup"))
 
       performUnlessClosingEitherUSF("starting up mediator node") {
         for {
-          domainConfig <- fetchConfig()
-            .leftMap(err => s"Failed to fetch domain configuration: $err")
+          domainConfig <- EitherT
+            .right(fetchConfig())
             .flatMap { mediatorDomainConfigurationO =>
               EitherT.fromEither(
                 mediatorDomainConfigurationO.toRight(
@@ -484,7 +474,7 @@ class MediatorNodeBootstrap(
     }
   }
 
-  private def createSequencerInfoLoader() = {
+  private def createSequencerInfoLoader() =
     new SequencerInfoLoader(
       timeouts = timeouts,
       traceContextPropagation = parameters.tracing.propagation,
@@ -499,14 +489,13 @@ class MediatorNodeBootstrap(
       dontWarnOnDeprecatedPV = parameterConfig.dontWarnOnDeprecatedPV,
       loggerFactory = loggerFactory,
     )
-  }
 
   private def mkMediatorRuntime(
       mediatorId: MediatorId,
       domainConfig: MediatorDomainConfiguration,
       indexedStringStore: IndexedStringStore,
-      fetchConfig: () => EitherT[Future, String, Option[MediatorDomainConfiguration]],
-      saveConfig: MediatorDomainConfiguration => EitherT[Future, String, Unit],
+      fetchConfig: () => Future[Option[MediatorDomainConfiguration]],
+      saveConfig: MediatorDomainConfiguration => Future[Unit],
       storage: Storage,
       crypto: Crypto,
       staticDomainParameters: StaticDomainParameters,
@@ -701,7 +690,7 @@ class MediatorNodeBootstrap(
       authorizedTopologyManager: AuthorizedTopologyManager,
       healthServer: GrpcHealthReporter,
       healthService: DependenciesHealthService,
-  ): BootstrapStageOrLeaf[MediatorNode] = {
+  ): BootstrapStageOrLeaf[MediatorNode] =
     new WaitForMediatorToDomainInit(
       storage,
       crypto,
@@ -709,11 +698,9 @@ class MediatorNodeBootstrap(
       authorizedTopologyManager,
       healthService,
     )
-  }
 
-  override protected def onClosed(): Unit = {
+  override protected def onClosed(): Unit =
     super.onClosed()
-  }
 
 }
 

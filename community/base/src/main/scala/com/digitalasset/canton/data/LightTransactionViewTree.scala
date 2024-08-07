@@ -43,7 +43,7 @@ sealed abstract case class LightTransactionViewTree private[data] (
   private[data] override def findTheView(
       viewsWithIndex: Seq[(TransactionView, MerklePathElement)],
       viewPosition: ViewPosition = ViewPosition.root,
-  ): Either[String, (TransactionView, ViewPosition)] = {
+  ): Either[String, (TransactionView, ViewPosition)] =
     viewsWithIndex match {
       case Seq() =>
         Left("A light transaction view tree must contain an unblinded view.")
@@ -60,7 +60,6 @@ sealed abstract case class LightTransactionViewTree private[data] (
             s"${multipleViews.map(_._1)}"
         )
     }
-  }
 
   override def validated: Either[String, this.type] = for {
 
@@ -95,7 +94,7 @@ object LightTransactionViewTree
   override val name: String = "LightTransactionViewTree"
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v31)(v30.LightTransactionViewTree)(
+    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v32)(v30.LightTransactionViewTree)(
       supportedProtoVersion(_)((context, proto) => fromProtoV30(context)(proto)),
       _.toProtoV30.toByteString,
     )
@@ -186,7 +185,7 @@ object LightTransactionViewTree
       if (missingSubviews.isEmpty) {
         val fullSubviewsSeq = lightViewTree.subviewHashes.map(fullViewByHash)
         val fullSubviews = TransactionSubviews(fullSubviewsSeq)(protocolVersion, hashOps)
-        val fullView = lightViewTree.view.copy(subviews = fullSubviews)
+        val fullView = lightViewTree.view.tryCopy(subviews = fullSubviews)
         val fullViewTree = FullTransactionViewTree.tryCreate(
           lightViewTree.tree.mapUnblindedRootViews(_.replace(fullView.viewHash, fullView))
         )
@@ -228,7 +227,7 @@ object LightTransactionViewTree
       tvt: FullTransactionViewTree,
       protocolVersion: ProtocolVersion,
   ): LightTransactionViewTree = {
-    val withBlindedSubviews = tvt.view.copy(subviews = tvt.view.subviews.blindFully)
+    val withBlindedSubviews = tvt.view.tryCopy(subviews = tvt.view.subviews.blindFully)
     val genTransactionTree =
       tvt.tree.mapUnblindedRootViews(_.replace(tvt.viewHash, withBlindedSubviews))
     // By definition, the view in a TransactionViewTree has all subviews unblinded

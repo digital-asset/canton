@@ -8,7 +8,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{BatchingConfig, CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.crypto.SigningPublicKey
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{
   DynamicDomainParametersWithValidity,
@@ -153,9 +153,8 @@ final class CachingDomainTopologyClient(
   override private[topology] def scheduleAwait(condition: => Future[Boolean], timeout: Duration) =
     delegate.scheduleAwait(condition, timeout)
 
-  override def close(): Unit = {
-    delegate.close()
-  }
+  override def close(): Unit =
+    Lifecycle.close(delegate)(logger)
 
   override def numPendingChanges: Int = delegate.numPendingChanges
 
@@ -457,7 +456,7 @@ class CachingTopologySnapshot(
   override private[client] def loadBatchActiveParticipantsOf(
       parties: Seq[PartyId],
       loadParticipantStates: Seq[ParticipantId] => Future[Map[ParticipantId, ParticipantAttributes]],
-  )(implicit traceContext: TraceContext) = {
+  )(implicit traceContext: TraceContext) =
     // split up the request into separate chunks so that we don't block the cache for too long
     // when loading very large batches
     MonadUtil
@@ -465,7 +464,6 @@ class CachingTopologySnapshot(
         parties
       )(parties => partyCache.getAll(parties)(traceContext).map(_.toSeq))
       .map(_.toMap)
-  }
 
   override def loadParticipantStates(
       participants: Seq[ParticipantId]
@@ -526,14 +524,13 @@ class CachingTopologySnapshot(
 
   override def memberFirstKnownAt(
       member: Member
-  )(implicit traceContext: TraceContext): Future[Option[(SequencedTime, EffectiveTime)]] = {
+  )(implicit traceContext: TraceContext): Future[Option[(SequencedTime, EffectiveTime)]] =
     isMemberKnown(member).flatMap {
       // TODO(#18394): Consider caching this call as well,
       //  should only happen during topology transactions with potential new members: DTC/SDS/MDS
       case true => parent.memberFirstKnownAt(member)
       case false => Future.successful(None)
     }
-  }
 
   /** Returns the value if it is present in the cache. Otherwise, use the
     * `getter` to fetch it and cache the result.

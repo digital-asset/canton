@@ -20,6 +20,9 @@ import com.digitalasset.canton.logging.pretty.PrettyNameOnlyCase
 import com.digitalasset.canton.metrics.{DbStorageHistograms, DbStorageMetrics}
 import com.digitalasset.canton.topology.SequencerId
 
+import scala.collection.mutable
+import scala.concurrent.blocking
+
 class BftOrderingHistograms(val parent: MetricName)(implicit
     inventory: HistogramInventory
 ) {
@@ -65,15 +68,66 @@ class BftOrderingHistograms(val parent: MetricName)(implicit
     )
   }
 
+  object output {
+    private[metrics] val prefix = BftOrderingHistograms.this.prefix :+ "output"
+
+    private[metrics] val blockSizeBytes: Item = Item(
+      prefix :+ "block-size-bytes",
+      summary = "Block size (bytes)",
+      description = "Records the size (in bytes) of blocks ordered.",
+      qualification = MetricQualification.Traffic,
+    )
+
+    private[metrics] val blockSizeRequests: Item = Item(
+      prefix :+ "block-size-requests",
+      summary = "Block size (requests)",
+      description = "Records the size (in requests) of blocks ordered.",
+      qualification = MetricQualification.Traffic,
+    )
+
+    private[metrics] val blockSizeBatches: Item = Item(
+      prefix :+ "block-size-batches",
+      summary = "Block size (batches)",
+      description = "Records the size (in batches) of blocks ordered.",
+      qualification = MetricQualification.Traffic,
+    )
+  }
+
   object topology {
     private[metrics] val prefix = BftOrderingHistograms.this.prefix :+ "topology"
 
     private[metrics] val queryLatency: Item = Item(
       prefix :+ "query-latency",
       summary = "Topology query latency",
-      description = "Records the rate and latency it takes to query the topology client.",
+      description = "Records the rate and latency when querying the topology client.",
       qualification = MetricQualification.Latency,
     )
+  }
+
+  object p2p {
+    val prefix: MetricName = BftOrderingHistograms.this.prefix :+ "p2p"
+
+    object send {
+      val prefix: MetricName = p2p.prefix :+ "send"
+
+      private[metrics] val networkWriteLatency: Item = Item(
+        prefix :+ "network-write-latency",
+        summary = "Message network write latency",
+        description = "Records the rate and latency when writing P2P messages to the network.",
+        qualification = MetricQualification.Latency,
+      )
+    }
+
+    object receive {
+      val prefix: MetricName = p2p.prefix :+ "receive"
+
+      private[metrics] val processingLatency: Item = Item(
+        prefix :+ "processing-latency",
+        summary = "Message receive processing latency",
+        description = "Records the rate and latency when processing incoming P2P network messages.",
+        qualification = MetricQualification.Latency,
+      )
+    }
   }
 
   // Force the registration of all histograms, else it would happen too late
@@ -83,6 +137,11 @@ class BftOrderingHistograms(val parent: MetricName)(implicit
     ingress.requestsSize.discard
     consensus.consensusCommitLatency.discard
     topology.queryLatency.discard
+    output.blockSizeBytes.discard
+    output.blockSizeRequests.discard
+    output.blockSizeBatches.discard
+    p2p.send.networkWriteLatency.discard
+    p2p.receive.processingLatency.discard
   }
 }
 
@@ -103,34 +162,11 @@ class BftOrderingMetrics(
 
   object global {
 
+    object labels {
+      val ReportingSequencer: String = "reporting-sequencer"
+    }
+
     private val prefix = histograms.global.prefix
-
-    val bytesOrdered: Meter = openTelemetryMetricsFactory.meter(
-      MetricInfo(
-        prefix :+ "ordered-bytes",
-        summary = "Bytes ordered",
-        description = "Measures the total bytes ordered.",
-        qualification = MetricQualification.Traffic,
-      )
-    )
-
-    val requestsOrdered: Meter = openTelemetryMetricsFactory.meter(
-      MetricInfo(
-        prefix :+ "ordered-requests",
-        summary = "Requests ordered",
-        description = "Measures the total requests ordered.",
-        qualification = MetricQualification.Traffic,
-      )
-    )
-
-    val batchesOrdered: Meter = openTelemetryMetricsFactory.meter(
-      MetricInfo(
-        prefix :+ "ordered-batches",
-        summary = "Batches ordered",
-        description = "Measures the total batches ordered.",
-        qualification = MetricQualification.Traffic,
-      )
-    )
 
     val blocksOrdered: Meter = openTelemetryMetricsFactory.meter(
       MetricInfo(
@@ -143,7 +179,7 @@ class BftOrderingMetrics(
 
     object requestsOrderingLatency {
       object labels {
-        val ReceivingSequencer: String = "receivingSequencer"
+        val ReceivingSequencer: String = "receiving-sequencer"
       }
 
       val timer: Timer =
@@ -157,7 +193,7 @@ class BftOrderingMetrics(
     object labels {
       val Tag: String = "tag"
       val Sender: String = "sender"
-      val ForSequencer: String = "forSequencer"
+      val ForSequencer: String = "for-sequencer"
 
       object outcome {
         val Key: String = "outcome"
@@ -180,6 +216,26 @@ class BftOrderingMetrics(
       )
     )
 
+    val requestsQueued: Gauge[Int] = openTelemetryMetricsFactory.gauge(
+      MetricInfo(
+        prefix :+ "requests-queued",
+        summary = "Requests queued",
+        description = "Measures the size of the mempool in requests.",
+        qualification = MetricQualification.Saturation,
+      ),
+      0,
+    )
+
+    val bytesQueued: Gauge[Int] = openTelemetryMetricsFactory.gauge(
+      MetricInfo(
+        prefix :+ "bytes-queued",
+        summary = "Bytes queued",
+        description = "Measures the size of the mempool in bytes.",
+        qualification = MetricQualification.Saturation,
+      ),
+      0,
+    )
+
     val bytesReceived: Meter = openTelemetryMetricsFactory.meter(
       MetricInfo(
         prefix :+ "received-bytes",
@@ -191,6 +247,78 @@ class BftOrderingMetrics(
 
     val requestsSize: Histogram =
       openTelemetryMetricsFactory.histogram(histograms.ingress.requestsSize.info)
+  }
+
+  object mempool {
+    private val prefix = BftOrderingMetrics.this.prefix :+ "mempool"
+
+    val requestedBatches: Gauge[Int] = openTelemetryMetricsFactory.gauge(
+      MetricInfo(
+        prefix :+ "requested-batches",
+        summary = "Requested batches",
+        description = "Number of batches requested from the mempool by the availability module.",
+        qualification = MetricQualification.Saturation,
+      ),
+      0,
+    )
+  }
+
+  object availability {
+    private val prefix = BftOrderingMetrics.this.prefix :+ "availability"
+
+    val requestedProposals: Gauge[Int] = openTelemetryMetricsFactory.gauge(
+      MetricInfo(
+        prefix :+ "requested-proposals",
+        summary = "Requested proposals",
+        description = "Number of proposals requested from availability by the consensus module.",
+        qualification = MetricQualification.Saturation,
+      ),
+      0,
+    )
+
+    val requestedBatches: Gauge[Int] = openTelemetryMetricsFactory.gauge(
+      MetricInfo(
+        prefix :+ "requested-batches",
+        summary = "Requested batches",
+        description =
+          "Maximum number of batches requested from availability by the consensus module.",
+        qualification = MetricQualification.Saturation,
+      ),
+      0,
+    )
+
+    val readyBytes: Gauge[Int] = openTelemetryMetricsFactory.gauge(
+      MetricInfo(
+        prefix :+ "ready-bytes",
+        summary = "Bytes ready for consensus",
+        description =
+          "Number of bytes disseminated, provably highly available and ready for consensus.",
+        qualification = MetricQualification.Saturation,
+      ),
+      0,
+    )
+
+    val readyRequests: Gauge[Int] = openTelemetryMetricsFactory.gauge(
+      MetricInfo(
+        prefix :+ "ready-requests",
+        summary = "Requests ready for consensus",
+        description =
+          "Number of requests disseminated, provably highly available and ready for consensus.",
+        qualification = MetricQualification.Saturation,
+      ),
+      0,
+    )
+
+    val readyBatches: Gauge[Int] = openTelemetryMetricsFactory.gauge(
+      MetricInfo(
+        prefix :+ "ready-batches",
+        summary = "Batches ready for consensus",
+        description =
+          "Number of batches disseminated, provably highly available and ready for consensus.",
+        qualification = MetricQualification.Saturation,
+      ),
+      0,
+    )
   }
 
   object security {
@@ -245,30 +373,103 @@ class BftOrderingMetrics(
       0,
     )
 
+    val epochLength: Gauge[Int] = openTelemetryMetricsFactory.gauge(
+      MetricInfo(
+        prefix :+ "epoch-length",
+        summary = "Epoch length",
+        description = "Length of the current epoch in number of blocks.",
+        qualification = MetricQualification.Traffic,
+      ),
+      0,
+    )
+
     val commitLatency: Timer =
       openTelemetryMetricsFactory.timer(histograms.consensus.consensusCommitLatency.info)
 
-    val prepareVotesPercent: Gauge[Double] = openTelemetryMetricsFactory.gauge(
-      MetricInfo(
-        prefix :+ "prepare-votes-percent",
-        summary = "Block vote % during prepare",
-        description =
-          "Percentage of BFT sequencers that voted for a block in the PBFT prepare stage.",
-        qualification = MetricQualification.Traffic,
-      ),
-      0.0d,
-    )
+    object votes {
 
-    val commitVotesPercent: Gauge[Double] = openTelemetryMetricsFactory.gauge(
-      MetricInfo(
-        prefix :+ "commit-votes-percent",
-        summary = "Block vote % during commit",
-        description =
+      object labels {
+        val VotingSequencer: String = "voting-sequencer"
+      }
+
+      private val prepareGauges = mutable.Map[SequencerId, Gauge[Double]]()
+      private val commitGauges = mutable.Map[SequencerId, Gauge[Double]]()
+
+      def prepareVotesPercent(sequencerId: SequencerId): Gauge[Double] =
+        getOrElseUpdateGauge(
+          prepareGauges,
+          sequencerId,
+          "prepare-votes-percent",
+          "Block vote % during prepare",
+          "Percentage of BFT sequencers that voted for a block in the PBFT prepare stage.",
+        )
+
+      def commitVotesPercent(sequencerId: SequencerId): Gauge[Double] =
+        getOrElseUpdateGauge(
+          commitGauges,
+          sequencerId,
+          "commit-votes-percent",
+          "Block vote % during commit",
           "Percentage of BFT sequencers that voted for a block in the PBFT commit stage.",
-        qualification = MetricQualification.Traffic,
-      ),
-      0.0d,
-    )
+        )
+
+      def cleanupVoteGauges(keepOnly: Set[SequencerId]): Unit =
+        blocking {
+          synchronized {
+            keepOnlyGaugesFor(prepareGauges, keepOnly)
+            keepOnlyGaugesFor(commitGauges, keepOnly)
+          }
+        }
+
+      private def getOrElseUpdateGauge(
+          gauges: mutable.Map[SequencerId, Gauge[Double]],
+          sequencerId: SequencerId,
+          name: String,
+          summary: String,
+          description: String,
+      ): Gauge[Double] = {
+        val mc1 = mc.withExtraLabels(labels.VotingSequencer -> sequencerId.toProtoPrimitive)
+        blocking {
+          synchronized {
+            locally {
+              implicit val mc: MetricsContext = mc1
+              gauges.getOrElseUpdate(
+                sequencerId,
+                openTelemetryMetricsFactory.gauge(
+                  MetricInfo(
+                    prefix :+ name,
+                    summary,
+                    MetricQualification.Traffic,
+                    description,
+                  ),
+                  0.0d,
+                ),
+              )
+            }
+          }
+        }
+      }
+
+      private def keepOnlyGaugesFor[T](
+          gaugesMap: mutable.Map[SequencerId, Gauge[T]],
+          keepOnly: Set[SequencerId],
+      ): Unit =
+        gaugesMap.view.filterKeys(!keepOnly.contains(_)).foreach { case (id, gauge) =>
+          gauge.close()
+          gaugesMap.remove(id).discard
+        }
+    }
+  }
+
+  object output {
+    val blockSizeBytes: Histogram =
+      openTelemetryMetricsFactory.histogram(histograms.output.blockSizeBytes.info)
+
+    val blockSizeRequests: Histogram =
+      openTelemetryMetricsFactory.histogram(histograms.output.blockSizeRequests.info)
+
+    val blockSizeBatches: Histogram =
+      openTelemetryMetricsFactory.histogram(histograms.output.blockSizeBatches.info)
   }
 
   object topology {
@@ -289,7 +490,7 @@ class BftOrderingMetrics(
   }
 
   object p2p {
-    private val prefix = BftOrderingMetrics.this.prefix :+ "p2p"
+    private val prefix = histograms.p2p.prefix
 
     object connections {
       private val prefix = p2p.prefix :+ "connections"
@@ -316,11 +517,11 @@ class BftOrderingMetrics(
     }
 
     object send {
-      private val prefix = p2p.prefix :+ "send"
+      private val prefix = histograms.p2p.send.prefix
 
       object labels {
-        val TargetSequencer: String = "targetSequencer"
-        val DroppedAsUnauthenticated: String = "droppedAsUnauthenticated"
+        val TargetSequencer: String = "target-sequencer"
+        val DroppedAsUnauthenticated: String = "dropped-as-unauthenticated"
 
         object targetModule {
           val Key: String = "targetModule"
@@ -350,13 +551,16 @@ class BftOrderingMetrics(
           qualification = MetricQualification.Traffic,
         )
       )
+
+      val networkWriteLatency: Timer =
+        openTelemetryMetricsFactory.timer(histograms.p2p.send.networkWriteLatency.info)
     }
 
     object receive {
-      private val prefix = p2p.prefix :+ "receive"
+      private val prefix = histograms.p2p.receive.prefix
 
       object labels {
-        val SourceSequencer: String = "sourceSequencer"
+        val SourceSequencer: String = "source-sequencer"
 
         object source {
           val Key: String = "targetModule"
@@ -388,6 +592,9 @@ class BftOrderingMetrics(
           qualification = MetricQualification.Traffic,
         )
       )
+
+      val processingLatency: Timer =
+        openTelemetryMetricsFactory.timer(histograms.p2p.receive.processingLatency.info)
     }
   }
 }

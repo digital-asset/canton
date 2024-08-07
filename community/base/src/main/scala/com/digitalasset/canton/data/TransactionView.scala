@@ -6,7 +6,14 @@ package com.digitalasset.canton.data
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.data.TransactionView.InvalidView
+import com.digitalasset.canton.data.ActionDescription.ExerciseActionDescription
+import com.digitalasset.canton.data.TransactionView.{
+  InvalidView,
+  WithPath,
+  validateViewCommonData,
+  validateViewParticipantData,
+}
+import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.canton.protocol.{v30, *}
@@ -37,19 +44,8 @@ final case class TransactionView private (
 
   @transient override protected lazy val companionObj: TransactionView.type = TransactionView
 
-  if (viewCommonData.unwrap.isRight) {
-    subviews.unblindedElementsWithIndex
-      .find { case (view, _path) => view.viewCommonData == viewCommonData }
-      .foreach { case (_view, path) =>
-        throw InvalidView(
-          s"The subview with index $path has an equal viewCommonData."
-        )
-      }
-  }
-
-  def subviewHashesConsistentWith(subviewHashes: Seq[ViewHash]): Boolean = {
+  def subviewHashesConsistentWith(subviewHashes: Seq[ViewHash]): Boolean =
     subviews.hashesConsistentWith(hashOps)(subviewHashes)
-  }
 
   override def subtrees: Seq[MerkleTree[?]] =
     Seq[MerkleTree[?]](viewCommonData, viewParticipantData) ++ subviews.trees
@@ -117,11 +113,10 @@ final case class TransactionView private (
     def helper(
         view: TransactionView,
         viewPos: ViewPosition,
-    ): Seq[(TransactionView, ViewPosition)] = {
+    ): Seq[(TransactionView, ViewPosition)] =
       (view, viewPos) +: view.subviews.unblindedElementsWithIndex.flatMap {
         case (view, viewIndex) => helper(view, viewIndex +: viewPos)
       }
-    }
 
     helper(this, rootPos)
   }
@@ -133,6 +128,7 @@ final case class TransactionView private (
     param("subviews", _.subviews),
   )
 
+  // This constructor is intended for monocle GenLens/test use where the intention is to bypass the validation
   @VisibleForTesting
   private[data] def copy(
       viewCommonData: MerkleTree[ViewCommonData] = this.viewCommonData,
@@ -144,13 +140,20 @@ final case class TransactionView private (
       representativeProtocolVersion,
     )
 
+  private[data] def tryCopy(
+      viewCommonData: MerkleTree[ViewCommonData] = this.viewCommonData,
+      viewParticipantData: MerkleTree[ViewParticipantData] = this.viewParticipantData,
+      subviews: TransactionSubviews = this.subviews,
+  ): TransactionView =
+    copy(viewCommonData, viewParticipantData, subviews).tryValidated()
+
   /** If the view with the given hash appears either as this view or one of its unblinded descendants,
     * replace it by the given view.
     * TODO(i12900): not stack safe unless we have limits on the depths of views.
     */
   def replace(h: ViewHash, v: TransactionView): TransactionView =
     if (viewHash == h) v
-    else this.copy(subviews = subviews.mapUnblinded(_.replace(h, v)))
+    else this.tryCopy(subviews = subviews.mapUnblinded(_.replace(h, v)))
 
   protected def toProtoV30: v30.ViewNode = v30.ViewNode(
     viewCommonData = Some(MerkleTree.toBlindableNodeV30(viewCommonData)),
@@ -182,7 +185,7 @@ final case class TransactionView private (
         subviews.unblindedElements.foldLeft(viewParticipantData.resolvedKeysWithMaintainers) {
           (acc, subview) =>
             val subviewGki = subview.globalKeyInputs
-            MapsUtil.mergeWith(acc, subviewGki) { (accRes, _subviewRes) => accRes }
+            MapsUtil.mergeWith(acc, subviewGki)((accRes, _subviewRes) => accRes)
         }
     }
 
@@ -216,7 +219,7 @@ final case class TransactionView private (
     )
     val currentRollbackScope = vpd.rollbackContext.rollbackScope
     subviews.assertAllUnblinded(hash =>
-      s"Inputs and created contracts of view $viewHash can be computed only if all subviews are unblinded, but ${hash} is blinded"
+      s"Inputs and created contracts of view $viewHash can be computed only if all subviews are unblinded, but $hash is blinded"
     )
     val subviewInputsAndCreated = subviews.unblindedElements.map { subview =>
       val subviewVpd =
@@ -291,6 +294,30 @@ final case class TransactionView private (
     }
     consumedInputs ++ consumedCreates
   }
+
+  def tryValidated(): TransactionView = validated.valueOr(e => throw InvalidView(e))
+
+  def validated: Either[String, TransactionView] = {
+
+    lazy val childParticipantData = subviews.unblindedElementsWithIndex.flatMap(t =>
+      t._1.viewParticipantData.unwrap.toOption.toList.map(WithPath(t._2, _))
+    )
+    lazy val childCommonData = subviews.unblindedElementsWithIndex.flatMap(t =>
+      t._1.viewCommonData.unwrap.toOption.toList.map(WithPath(t._2, _))
+    )
+
+    for {
+      _ <- viewParticipantData.unwrap match {
+        case Left(_) => Right(())
+        case Right(d) => validateViewParticipantData(d, childParticipantData)
+      }
+      _ <- viewCommonData.unwrap match {
+        case Left(_) => Right(())
+        case Right(d) => validateViewCommonData(d, childCommonData)
+      }
+    } yield this
+  }
+
 }
 
 object TransactionView
@@ -301,7 +328,7 @@ object TransactionView
   override def name: String = "TransactionView"
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
-      ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v31)(v30.ViewNode)(
+      ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v32)(v30.ViewNode)(
         supportedProtoVersion(_)(fromProtoV30),
         _.toProtoV30.toByteString,
       )
@@ -316,7 +343,7 @@ object TransactionView
     new TransactionView(viewCommonData, viewParticipantData, subviews)(
       hashOps,
       representativeProtocolVersion,
-    )
+    ).tryValidated()
 
   /** Creates a view.
     *
@@ -409,6 +436,51 @@ object TransactionView
       )
     } yield view
   }
+
+  final case class WithPath[X](path: MerklePathElement, value: X) {
+    def map[Y](f: X => Y): WithPath[Y] = WithPath(path, f(value))
+  }
+
+  def validateViewParticipantData(
+      parentData: ViewParticipantData,
+      childData: Seq[WithPath[ViewParticipantData]],
+  ): Either[String, Unit] = {
+    def validateExercise(
+        parentExercise: ExerciseActionDescription,
+        childExercises: Seq[WithPath[ExerciseActionDescription]],
+    ): Either[String, Unit] = {
+      val parentPackages = parentExercise.packagePreference
+      childExercises
+        .map(_.map(_.packagePreference.removedAll(parentPackages).headOption))
+        .collectFirst { case WithPath(p, Some(k)) =>
+          s"Detected unexpected exercise package preference: $k at $p"
+        }
+        .toLeft(())
+    }
+
+    parentData.actionDescription match {
+      case ead: ExerciseActionDescription =>
+        validateExercise(
+          ead,
+          childData.map(_.map(_.actionDescription)).collect {
+            case WithPath(p, e: ExerciseActionDescription) => WithPath(p, e)
+          },
+        )
+      case _ => Right(())
+    }
+
+  }
+
+  def validateViewCommonData(
+      parentData: ViewCommonData,
+      childData: Seq[WithPath[ViewCommonData]],
+  ): Either[String, Unit] =
+    childData
+      .collectFirst {
+        case d if d.value == parentData =>
+          s"The subview with index ${d.path} has equal viewCommonData to a parent."
+      }
+      .toLeft(())
 
   /** Indicates an attempt to create an invalid view. */
   final case class InvalidView(message: String) extends RuntimeException(message)

@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.config
 
-import com.daml.metrics.api.MetricHandle.LabeledMetricsFactory
-import com.daml.metrics.api.MetricName
 import com.daml.metrics.grpc.GrpcServerMetrics
 import com.daml.tls.TlsVersion
 import com.digitalasset.canton.config.AdminServerConfig.defaultAddress
@@ -76,8 +74,6 @@ trait ServerConfig extends Product with Serializable {
   def instantiateServerInterceptors(
       tracingConfig: TracingConfig,
       apiLoggingConfig: ApiLoggingConfig,
-      metricsPrefix: MetricName,
-      metrics: LabeledMetricsFactory,
       loggerFactory: NamedLoggerFactory,
       grpcMetrics: GrpcServerMetrics,
   ): CantonServerInterceptors
@@ -88,8 +84,6 @@ trait CommunityServerConfig extends ServerConfig {
   override def instantiateServerInterceptors(
       tracingConfig: TracingConfig,
       apiLoggingConfig: ApiLoggingConfig,
-      metricsPrefix: MetricName,
-      metrics: LabeledMetricsFactory,
       loggerFactory: NamedLoggerFactory,
       grpcMetrics: GrpcServerMetrics,
   ) = new CantonCommunityServerInterceptors(
@@ -199,7 +193,7 @@ sealed trait BaseTlsArguments {
       knownTlsVersions
         .find(_ == minVersion)
         .fold[Seq[String]](
-          throw new IllegalArgumentException(s"Unknown TLS protocol version ${minVersion}")
+          throw new IllegalArgumentException(s"Unknown TLS protocol version $minVersion")
         )(versionFound => knownTlsVersions.filter(_ >= versionFound))
     }
 }
@@ -273,10 +267,10 @@ object TlsServerConfig {
       "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256",
     )
     val logger = LoggerFactory.getLogger(TlsServerConfig.getClass)
-    val filtered = candidates.filter(x => {
+    val filtered = candidates.filter { x =>
       io.netty.handler.ssl.OpenSsl.availableOpenSslCipherSuites().contains(x) ||
       io.netty.handler.ssl.OpenSsl.availableJavaCipherSuites().contains(x)
-    })
+    }
     if (filtered.isEmpty) {
       val len = io.netty.handler.ssl.OpenSsl
         .availableOpenSslCipherSuites()

@@ -5,8 +5,6 @@ package com.digitalasset.canton.participant.sync
 
 import cats.Eval
 import cats.data.EitherT
-import cats.syntax.bifunctor.*
-import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
@@ -106,7 +104,7 @@ import com.digitalasset.canton.util.FutureInstances.parallelFuture
 import com.digitalasset.canton.util.OptionUtils.OptionExtension
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
+import com.digitalasset.canton.version.Transfer.TargetProtocolVersion
 import com.digitalasset.daml.lf.archive.DamlLf
 import com.digitalasset.daml.lf.data.Ref.{PackageId, Party, SubmissionId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
@@ -228,7 +226,7 @@ class CantonSyncService(
     new PackageVettingSynchronization {
       override def sync(packages: Set[PackageId])(implicit
           traceContext: TraceContext
-      ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] = {
+      ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] =
         // wait for packages to be vetted on the currently connected domains
         EitherT
           .right[ParticipantTopologyManagerError](
@@ -257,7 +255,6 @@ class CantonSyncService(
             result
           }
           .void
-      }
     }
 
   private case class AttemptReconnect(
@@ -310,13 +307,6 @@ class CantonSyncService(
     (tracedDomainId: Traced[DomainId]) =>
       syncDomainPersistentStateManager.protocolVersionFor(tracedDomainId.value)
 
-  val transferService: TransferService = new TransferService(
-    domainIdOfAlias = aliasManager.domainIdForAlias,
-    submissionHandles = readySyncDomainById,
-    transferLookups = domainId =>
-      syncDomainPersistentStateManager.get(domainId.unwrap).map(_.transferStore),
-    protocolVersionFor = protocolVersionGetter,
-  )
   val commandProgressTracker: CommandProgressTracker =
     if (parameters.commandProgressTracking.enabled)
       new CommandProgressTrackerImpl(parameters.commandProgressTracking, clock, loggerFactory)
@@ -461,11 +451,10 @@ class CantonSyncService(
           .get(domainId)
           .map(_.addJournalGarageCollectionLock())
           .getOrElse(Future.unit)
-      override def enable(domainId: DomainId)(implicit traceContext: TraceContext): Unit = {
+      override def enable(domainId: DomainId)(implicit traceContext: TraceContext): Unit =
         connectedDomainsMap
           .get(domainId)
           .foreach(_.removeJournalGarageCollectionLock())
-      }
     },
     connectedDomainsLookup,
     participantId,
@@ -497,7 +486,7 @@ class CantonSyncService(
         .fromEither[FutureUnlessShutdown](UpstreamOffsetConvert.toGlobalOffset(pruneUpToInclusive))
         .leftMap { message =>
           LedgerPruningOffsetNonCantonFormat(
-            s"Specified offset does not convert to a canton multi domain event log global offset: ${message}"
+            s"Specified offset does not convert to a canton multi domain event log global offset: $message"
           )
         }
       _pruned <- pruningProcessor.pruneLedgerEvents(pruneUpToMultiDomainGlobalOffset)
@@ -933,18 +922,16 @@ class CantonSyncService(
       _ = logger.info(
         s"Purging deactivated domain with alias $source with domain id $sourceDomainId"
       )
-      _ <- migrationService
-        .pruneSelectedDeactivatedDomainStores(sourceDomainId)
-        .leftMap[SyncServiceError](
-          SyncServiceError.SyncServiceMigrationError(source, target.domain, _)
-        )
+      _ <- EitherT.right(
+        migrationService.pruneSelectedDeactivatedDomainStores(sourceDomainId)
+      )
     } yield ()
 
   /* Verify that specified domain has inactive status and selectively prune sync domain stores.
    */
   def purgeDeactivatedDomain(domain: DomainAlias)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, CantonError, Unit] = {
+  ): EitherT[FutureUnlessShutdown, CantonError, Unit] =
     for {
       domainId <- EitherT.fromEither[FutureUnlessShutdown](
         aliasManager
@@ -964,23 +951,27 @@ class CantonSyncService(
       _ = logger.info(
         s"Purging deactivated domain with alias $domain with domain id $domainId"
       )
-      _ <- migrationService
-        .pruneSelectedDeactivatedDomainStores(domainId)
-        .leftMap(err => PruningServiceError.InternalServerError.Error(err.cause))
-        .leftWiden[CantonError]
+      _ <- EitherT.right(
+        migrationService.pruneSelectedDeactivatedDomainStores(domainId)
+      )
     } yield ()
-  }
 
   /** Reconnect to all configured domains that have autoStart = true */
   def reconnectDomains(
-      ignoreFailures: Boolean
+      ignoreFailures: Boolean,
+      mustBeActive: Boolean = true,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Seq[DomainAlias]] =
-    connectQueue.executeEUS(
-      performReconnectDomains(ignoreFailures),
-      "reconnect domains",
-    )
+    if (isActive() || !mustBeActive)
+      connectQueue.executeEUS(
+        performReconnectDomains(ignoreFailures),
+        "reconnect domains",
+      )
+    else {
+      logger.info("Not reconnecting to domains as instance is passive")
+      EitherT.leftT(SyncServiceError.SyncServicePassiveReplica.Error())
+    }
 
   private def performReconnectDomains(ignoreFailures: Boolean)(implicit
       traceContext: TraceContext
@@ -1033,7 +1024,7 @@ class CantonSyncService(
                 // disconnect from pending connections on failure
                 val failures = connected.mapFilter(performDomainDisconnect(_).left.toOption)
                 if (failures.nonEmpty) {
-                  logger.error(s"Failed to disconnect from domains: ${failures}")
+                  logger.error(s"Failed to disconnect from domains: $failures")
                 }
                 Left(err)
               case Right(_) => Right(true)
@@ -1068,11 +1059,10 @@ class CantonSyncService(
     val connectedDomains =
       connectedDomainsMap.keys.to(LazyList).mapFilter(aliasManager.aliasForDomainId).toSet
 
-    def shouldConnectTo(config: StoredDomainConnectionConfig): Boolean = {
+    def shouldConnectTo(config: StoredDomainConnectionConfig): Boolean =
       config.status.isActive && !config.config.manualConnect && !connectedDomains.contains(
         config.config.domain
       )
-    }
 
     for {
       configs <- EitherT.pure[FutureUnlessShutdown, SyncServiceError](
@@ -1110,14 +1100,8 @@ class CantonSyncService(
   private def startDomain(alias: DomainAlias, syncDomain: SyncDomain)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SyncServiceError, Unit] =
-    EitherTUtil
-      .fromFuture(
-        syncDomain.startFUS(),
-        t => SyncServiceError.SyncServiceInternalError.Failure(alias, t),
-      )
-      .subflatMap[SyncServiceError, Unit](
-        _.leftMap(error => SyncServiceError.SyncServiceStartupError.InitError(alias, error))
-      )
+    EitherT(syncDomain.startFUS())
+      .leftMap(error => SyncServiceError.SyncServiceStartupError.InitError(alias, error))
       .onShutdown(
         Left(
           SyncServiceError.SyncServiceStartupError
@@ -1134,7 +1118,7 @@ class CantonSyncService(
       connectDomain: ConnectDomain,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SyncServiceError, Boolean] = {
+  ): EitherT[FutureUnlessShutdown, SyncServiceError, Boolean] =
     domainConnectionConfigByAlias(domainAlias)
       .mapK(FutureUnlessShutdown.outcomeK)
       .leftMap(_ => SyncServiceError.SyncServiceUnknownDomain.Error(domainAlias))
@@ -1160,7 +1144,6 @@ class CantonSyncService(
           connectDomain = connectDomain,
         )
       }
-  }
 
   private def attemptDomainConnection(
       domainAlias: DomainAlias,
@@ -1169,7 +1152,7 @@ class CantonSyncService(
       connectDomain: ConnectDomain,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SyncServiceError, Boolean] = {
+  ): EitherT[FutureUnlessShutdown, SyncServiceError, Boolean] =
     connectQueue.executeEUS(
       if (keepRetrying && !attemptReconnect.isDefinedAt(domainAlias)) {
         EitherT.rightT[FutureUnlessShutdown, SyncServiceError](false)
@@ -1181,11 +1164,11 @@ class CantonSyncService(
           case Left(SyncServiceError.SyncServiceFailedDomainConnection(_, err))
               if keepRetrying && err.retryable.nonEmpty =>
             if (initial)
-              logger.warn(s"Initial connection attempt to ${domainAlias} failed with ${err.code
+              logger.warn(s"Initial connection attempt to $domainAlias failed with ${err.code
                   .toMsg(err.cause, traceContext.traceId, limit = None)}. Will keep on trying.")
             else
               logger.info(
-                s"Initial connection attempt to ${domainAlias} failed. Will keep on trying."
+                s"Initial connection attempt to $domainAlias failed. Will keep on trying."
               )
             scheduleReconnectAttempt(
               clock.now.plus(parameters.sequencerClient.startupConnectionRetryDelay.asJava),
@@ -1202,7 +1185,6 @@ class CantonSyncService(
       },
       s"connect to $domainAlias",
     )
-  }
 
   private def scheduleReconnectAttempt(
       timestamp: CantonTimestamp,
@@ -1215,7 +1197,7 @@ class CantonSyncService(
       }
 
     def reconnectAttempt(ts: CantonTimestamp): Unit = {
-      val (reconnect, nextO) = {
+      val (reconnect, nextO) =
         attemptReconnect.toList.foldLeft(
           (Seq.empty[AttemptReconnect], None: Option[CantonTimestamp])
         ) { case ((reconnect, next), (alias, item)) =>
@@ -1233,7 +1215,6 @@ class CantonSyncService(
             (reconnect :+ item, mergeLarger(next, ts.plusMillis(nextRetryCapped.toMillis)))
           }
         }
-      }
       reconnect.foreach { item =>
         implicit val traceContext: TraceContext = item.trace
         val domainAlias = item.alias
@@ -1265,7 +1246,7 @@ class CantonSyncService(
       skipStatusCheck: Boolean = false,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] = {
+  ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
     connectDomain match {
       case ConnectDomain.HandshakeOnly =>
         performDomainHandshake(domainAlias, skipStatusCheck = skipStatusCheck)
@@ -1276,7 +1257,6 @@ class CantonSyncService(
           skipStatusCheck = skipStatusCheck,
         )
     }
-  }
 
   /** Perform handshake with the given domain. */
   private def performDomainHandshake(
@@ -1284,7 +1264,7 @@ class CantonSyncService(
       skipStatusCheck: Boolean = false,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] = {
+  ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
     if (aliasManager.domainIdForAlias(domainAlias).exists(connectedDomainsMap.contains)) {
       logger.debug(s"Domain ${domainAlias.unwrap} already registered")
       EitherT.rightT(())
@@ -1312,7 +1292,6 @@ class CantonSyncService(
         _ = domainHandle.close()
       } yield ()
     }
-  }
 
   /** Connect the sync service to the given domain. */
   private def performDomainConnection(
@@ -1329,7 +1308,7 @@ class CantonSyncService(
         SyncServiceError.SyncServiceFailedDomainConnection(domainAlias, err)
       )
 
-    def handleCloseDegradation(syncDomain: SyncDomain, fatal: Boolean)(err: CantonError) = {
+    def handleCloseDegradation(syncDomain: SyncDomain, fatal: Boolean)(err: CantonError) =
       if (fatal && parameters.exitOnFatalFailures) {
         FatalError.exitOnFatalError(err, logger)
       } else {
@@ -1337,7 +1316,6 @@ class CantonSyncService(
         syncDomain.failureOccurred(err)
         disconnectDomain(domainAlias)
       }
-    }
 
     if (aliasManager.domainIdForAlias(domainAlias).exists(connectedDomainsMap.contains)) {
       logger.debug(s"Already connected to domain: ${domainAlias.unwrap}")
@@ -1486,13 +1464,12 @@ class CantonSyncService(
         this.resolveReconnectAttempts(domainAlias)
       }
 
-      def disconnectOn(): Unit = {
+      def disconnectOn(): Unit =
         // only invoke domain disconnect if we actually got so far that the domain-id has been read from the remote node
         if (aliasManager.domainIdForAlias(domainAlias).nonEmpty)
           performDomainDisconnect(
             domainAlias
           ).discard // Ignore Lefts because we don't know to what extent the connection succeeded.
-      }
 
       def handleOutcome(
           outcome: UnlessShutdown[Either[SyncServiceError, Unit]]
@@ -1697,7 +1674,7 @@ class CantonSyncService(
     import scala.jdk.FutureConverters.*
     withSpan("CantonSyncService.submitReassignment") { implicit traceContext => span =>
       span.setAttribute("command_id", commandId)
-      logger.debug(s"Received submit-reassignment ${commandId} from ledger-api server")
+      logger.debug(s"Received submit-reassignment $commandId from ledger-api server")
 
       /* @param domain For transfer-out this should be the source domain, for transfer-in this is the target domain
        * @param remoteDomain For transfer-out this should be the target domain, for transfer-in this is the source domain
@@ -1706,7 +1683,7 @@ class CantonSyncService(
           domain: DomainId,
           remoteDomain: DomainId,
       )(
-          transfer: ProtocolVersion => SyncDomain => EitherT[Future, E, FutureUnlessShutdown[T]]
+          transfer: SyncDomain => EitherT[Future, E, FutureUnlessShutdown[T]]
       )(implicit traceContext: TraceContext): Future[SubmissionResult] = {
         for {
           syncDomain <- EitherT.fromOption[Future](
@@ -1714,12 +1691,7 @@ class CantonSyncService(
             ifNone = RequestValidationErrors.InvalidArgument
               .Reject(s"Domain ID not found: $domain"): DamlError,
           )
-          remoteProtocolVersion <- EitherT.fromOption[Future](
-            protocolVersionGetter(Traced(remoteDomain)),
-            ifNone = RequestValidationErrors.InvalidArgument
-              .Reject(s"Domain ID's protocol version not found: $remoteDomain"): DamlError,
-          )
-          _ <- transfer(remoteProtocolVersion)(syncDomain)
+          _ <- transfer(syncDomain)
             .leftMap(error =>
               RequestValidationErrors.InvalidArgument
                 .Reject(
@@ -1734,32 +1706,49 @@ class CantonSyncService(
         .leftMap(error => SubmissionResult.SynchronousError(error.rpcStatus()))
         .merge
 
+      def getProtocolVersion(domainId: DomainId): Future[ProtocolVersion] =
+        protocolVersionGetter(Traced(domainId)) match {
+          case Some(protocolVersion) => Future.successful(protocolVersion)
+          case None =>
+            Future.failed(
+              RequestValidationErrors.InvalidArgument
+                .Reject(s"Domain ID's protocol version not found: $domainId")
+                .asGrpcError
+            )
+        }
+
       reassignmentCommand match {
         case unassign: ReassignmentCommand.Unassign =>
-          doTransfer(
-            domain = unassign.sourceDomain.unwrap,
-            remoteDomain = unassign.targetDomain.unwrap,
-          )(protocolVersion =>
-            _.submitTransferOut(
-              submitterMetadata = TransferSubmitterMetadata(
-                submitter = submitter,
-                applicationId = applicationId,
-                submittingParticipant = participantId,
-                commandId = commandId,
-                submissionId = submissionId,
-                workflowId = workflowId,
-              ),
-              contractId = unassign.contractId,
-              targetDomain = unassign.targetDomain,
-              targetProtocolVersion = TargetProtocolVersion(protocolVersion),
+          for {
+            targetProtocolVersion <- getProtocolVersion(unassign.targetDomain.unwrap).map(
+              TargetProtocolVersion(_)
             )
-          )
+
+            submissionResult <- doTransfer(
+              domain = unassign.sourceDomain.unwrap,
+              remoteDomain = unassign.targetDomain.unwrap,
+            )(
+              _.submitTransferOut(
+                submitterMetadata = TransferSubmitterMetadata(
+                  submitter = submitter,
+                  applicationId = applicationId,
+                  submittingParticipant = participantId,
+                  commandId = commandId,
+                  submissionId = submissionId,
+                  workflowId = workflowId,
+                ),
+                contractId = unassign.contractId,
+                targetDomain = unassign.targetDomain,
+                targetProtocolVersion = targetProtocolVersion,
+              )
+            )
+          } yield submissionResult
 
         case assign: ReassignmentCommand.Assign =>
           doTransfer(
             domain = assign.targetDomain.unwrap,
             remoteDomain = assign.sourceDomain.unwrap,
-          )(protocolVersion =>
+          )(
             _.submitTransferIn(
               submitterMetadata = TransferSubmitterMetadata(
                 submitter = submitter,
@@ -1770,7 +1759,6 @@ class CantonSyncService(
                 workflowId = workflowId,
               ),
               transferId = TransferId(assign.sourceDomain, assign.unassignId),
-              sourceProtocolVersion = SourceProtocolVersion(protocolVersion),
             )
           )
       }

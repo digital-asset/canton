@@ -42,6 +42,8 @@ object DamlPlugin extends AutoPlugin {
       settingKey[String]("The Daml version to use for DAR and code generation")
     val damlLanguageVersions =
       settingKey[Seq[String]]("The Daml-lf language versions supported by canton")
+    val useCustomDamlVersion =
+      settingKey[Boolean]("Use a custom daml sdk version built via daml-sdk-head in the daml repo")
     val damlFixedDars = settingKey[Seq[String]](
       "Which DARs do we check in to avoid problems with package id versioning across daml updates"
     )
@@ -104,6 +106,7 @@ object DamlPlugin extends AutoPlugin {
                   codegen,
                   outputDirectory,
                   damlCompilerVersion.value,
+                  useCustomDamlVersion.value,
                 )
               }
           }.toSet
@@ -160,6 +163,7 @@ object DamlPlugin extends AutoPlugin {
                 sourceDirectory.toPath.relativize(projectFile.toPath).toFile,
                 damlCompilerVersion.value,
                 damlLanguageVersions.value,
+                useCustomDamlVersion.value,
               )
             }.toSet
           }
@@ -237,6 +241,7 @@ object DamlPlugin extends AutoPlugin {
   override lazy val globalSettings: Seq[Def.Setting[_]] = Seq(
     damlCompilerVersion := Dependencies.daml_compiler_version,
     damlLanguageVersions := Dependencies.daml_language_versions,
+    useCustomDamlVersion := Dependencies.use_custom_daml_version,
     damlCodeGeneration := Seq(),
     damlFixedDars := Seq(),
     damlProjectVersionOverride := None,
@@ -340,6 +345,7 @@ object DamlPlugin extends AutoPlugin {
       relativeDamlProjectFile: File,
       damlVersion: String,
       damlLanguageVersions: Seq[String],
+      useCustomDamlVersion: Boolean,
   ): Seq[File] = {
 
     val originalDamlProjectFile =
@@ -349,7 +355,7 @@ object DamlPlugin extends AutoPlugin {
       s"supplied daml.yaml must exist [${originalDamlProjectFile.absolutePath}]",
     )
     val url =
-      s"https://storage.googleapis.com/daml-binaries/split-releases/${damlVersion}/"
+      s"https://storage.googleapis.com/daml-binaries/split-releases/$damlVersion/"
 
     def platform = {
       val osName = System.getProperty("os.name").toLowerCase
@@ -367,6 +373,8 @@ object DamlPlugin extends AutoPlugin {
       artifactFilename = s"damlc-$damlVersion-$platform.tar.gz",
       damlVersion = damlVersion,
       tarballPath = Seq("damlc", "damlc"),
+      damlHeadPath = Seq(".daml", "sdk", damlVersion, "damlc", "damlc"),
+      useCustomDamlVersion = useCustomDamlVersion,
     )
 
     val damlScriptDars = for {
@@ -383,6 +391,8 @@ object DamlPlugin extends AutoPlugin {
         artifactFilename = s"$artifactName.dar",
         damlVersion = damlVersion,
         localSubdir = Some("daml-libs"),
+        damlHeadPath = Seq(".daml", "sdk", damlVersion, "daml-libs", s"$artifactName.dar"),
+        useCustomDamlVersion = useCustomDamlVersion,
       )
     }).headOption.map("DAML_SDK" -> _.getParentFile.getParentFile.getAbsolutePath).toSeq
 
@@ -390,7 +400,7 @@ object DamlPlugin extends AutoPlugin {
       buildDirectory.toPath.resolve(relativeDamlProjectFile.toPath).toAbsolutePath.getParent.toFile
 
     log.debug(
-      s"building ${originalDamlProjectFile.getAbsoluteFile.getParentFile} in ${projectBuildDirectory}"
+      s"building ${originalDamlProjectFile.getAbsoluteFile.getParentFile} in $projectBuildDirectory"
     )
 
     // copy project directory into target tree
@@ -446,6 +456,30 @@ object DamlPlugin extends AutoPlugin {
       url: String,
       artifactFilename: String,
       damlVersion: String,
+      damlHeadPath: Seq[String], // alternate artifact path in local daml-sdk-head based builds
+      useCustomDamlVersion: Boolean,
+      tarballPath: Seq[String] = Seq.empty,
+      localSubdir: Option[String] = None,
+  ): File = {
+    import better.files.File
+
+    // Custom daml versions are already expected to exist locally in the specified daml head path
+    if (useCustomDamlVersion) {
+      damlHeadPath.foldLeft(File(System.getProperty("user.home")))(_ / _).toJava
+    } else
+      ensureArtifactAvailableOrDownload(
+        url,
+        artifactFilename,
+        damlVersion,
+        tarballPath,
+        localSubdir,
+      )
+  }
+
+  private def ensureArtifactAvailableOrDownload(
+      url: String,
+      artifactFilename: String,
+      damlVersion: String,
       tarballPath: Seq[String] = Seq.empty,
       localSubdir: Option[String] = None,
   ): File = {
@@ -462,7 +496,7 @@ object DamlPlugin extends AutoPlugin {
     this.synchronized {
       if (!artifact.exists) {
         val logger = new BufferedLogger()
-        logger.out(s"Downloading missing ${artifactFilename} to ${root.path}")
+        logger.out(s"Downloading missing $artifactFilename to ${root.path}")
         root.createDirectoryIfNotExists(createParents = true)
 
         Try {
@@ -498,7 +532,7 @@ object DamlPlugin extends AutoPlugin {
             tarball.delete(swallowIOExceptions = true)
           } else {
             throw new MessageOnlyException(s"""
-                                              |tar xzf ${tarball.pathAsString} has failed with exit code ${result}:
+                                              |tar xzf ${tarball.pathAsString} has failed with exit code $result:
                                               |${logger.output("  ")}""".stripMargin.trim)
           }
         }
@@ -518,6 +552,7 @@ object DamlPlugin extends AutoPlugin {
       language: Codegen,
       managedSourceDir: File,
       damlVersion: String,
+      useCustomDamlVersion: Boolean,
   ): Seq[File] = {
     require(
       damlProjectDirectory.exists,
@@ -532,8 +567,8 @@ object DamlPlugin extends AutoPlugin {
     val (url, artifact, packageName, suffix, extraArgs) = language match {
       case Codegen.Java =>
         (
-          s"https://repo.maven.apache.org/maven2/com/daml/codegen-jvm-main/${damlVersion}/",
-          s"codegen-jvm-main-${damlVersion}.jar",
+          s"https://repo.maven.apache.org/maven2/com/daml/codegen-jvm-main/$damlVersion/",
+          s"codegen-jvm-main-$damlVersion.jar",
           basePackageName + (if (!basePackageName.contains("java")) ".java" else ""),
           "java",
           Seq("java"),
@@ -544,9 +579,19 @@ object DamlPlugin extends AutoPlugin {
       url = url,
       artifactFilename = artifact,
       damlVersion = damlVersion,
+      damlHeadPath = Seq(
+        ".m2",
+        "repository",
+        "com",
+        "daml",
+        "codegen-jvm-main",
+        damlVersion,
+        s"codegen-jvm-main-$damlVersion.jar",
+      ),
+      useCustomDamlVersion = useCustomDamlVersion,
     ).getAbsolutePath
 
-    log.debug(s"Running $language-codegen for ${darFile} into ${managedSourceDir}")
+    log.debug(s"Running $language-codegen for $darFile into $managedSourceDir")
 
     val processLogger = new BufferedLogger
 
@@ -561,13 +606,13 @@ object DamlPlugin extends AutoPlugin {
 
     if (result != 0) {
       throw new MessageOnlyException(s"""
-           |java -jar ${codegenJarPath} failed [${darFile.getName}]:
+           |java -jar $codegenJarPath failed [${darFile.getName}]:
            |${processLogger.output("  ")}
       """.stripMargin.trim)
     }
 
     // return all generated scala files
-    (managedSourceDir ** s"*.${suffix}").get
+    (managedSourceDir ** s"*.$suffix").get
   }
 
   sealed trait ProjectVersionOverride extends Product with Serializable {

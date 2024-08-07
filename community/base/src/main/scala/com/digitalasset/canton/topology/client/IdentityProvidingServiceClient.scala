@@ -312,10 +312,7 @@ trait PartyTopologySnapshotClient {
       filterParty: String,
       filterParticipant: String,
       limit: Int,
-  )(implicit traceContext: TraceContext): Future[
-    Set[PartyId]
-  ] // TODO(#14048): Decide on whether to standarize APIs on LfPartyId or PartyId and unify interfaces
-
+  )(implicit traceContext: TraceContext): Future[Set[PartyId]]
 }
 
 object PartyTopologySnapshotClient {
@@ -455,9 +452,8 @@ trait MediatorDomainStateClient {
 
   def mediatorGroup(
       index: MediatorGroupIndex
-  )(implicit traceContext: TraceContext): Future[Option[MediatorGroup]] = {
+  )(implicit traceContext: TraceContext): Future[Option[MediatorGroup]] =
     mediatorGroups().map(_.find(_.index == index))
-  }
 }
 
 /** The subset of the topology client providing sequencer state information */
@@ -505,7 +501,7 @@ trait DomainGovernanceSnapshotClient {
       case Right(value) => value.parameters
       case Left(_) =>
         if (warnOnUsingDefault) {
-          logger.warn(s"Unexpectedly using default domain parameters at ${timestamp}")
+          logger.warn(s"Unexpectedly using default domain parameters at $timestamp")
         }
 
         DynamicDomainParameters.initialValues(
@@ -589,22 +585,20 @@ trait DomainTopologyClientWithInit
   /** Overloaded snapshot returning derived type */
   override def snapshot(
       timestamp: CantonTimestamp
-  )(implicit traceContext: TraceContext): Future[TopologySnapshotLoader] = {
+  )(implicit traceContext: TraceContext): Future[TopologySnapshotLoader] =
     snapshotInternal(timestamp)((timestamp, waitForEffectiveTime) =>
       this.awaitTimestamp(timestamp, waitForEffectiveTime)
     )
-  }
 
   /** Overloaded snapshot returning derived type */
   override def snapshotUS(
       timestamp: CantonTimestamp
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[TopologySnapshotLoader] = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[TopologySnapshotLoader] =
     snapshotInternal[FutureUnlessShutdown](timestamp)(
       (timestamp, waitForEffectiveTime) => this.awaitTimestampUS(timestamp, waitForEffectiveTime),
       // Do not log a warning if we get a shutdown future
       logWarning = f => f != FutureUnlessShutdown.abortedDueToShutdown,
     )
-  }
 
   private def snapshotInternal[F[_]](
       timestamp: CantonTimestamp

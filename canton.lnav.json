@@ -1,5 +1,4 @@
 {
-  "$schema": "https://lnav.org/schemas/format-v1.schema.json",
   "canton_log" : {
     "title" : "Canton Log",
     "description" : "A custom format for the lnav log file viewer for Canton logs. Register this format with `lnav -i canton.lnav.json`. See https://docs.daml.com/canton/usermanual/monitoring.html#lnav for more information",

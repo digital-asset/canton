@@ -214,16 +214,19 @@ final case class DynamicDomainParameters(
     ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration,
     mediatorDeduplicationTimeout: NonNegativeFiniteDuration,
     reconciliationInterval: PositiveDurationSeconds,
-    confirmationRequestsMaxRate: NonNegativeInt,
     maxRequestSize: NonNegativeInt,
     sequencerAggregateSubmissionTimeout: NonNegativeFiniteDuration,
     trafficControlParameters: Option[TrafficControlParameters],
     onboardingRestriction: OnboardingRestriction,
     acsCommitmentsCatchUpConfig: Option[AcsCommitmentsCatchUpConfig],
+    participantDomainLimits: ParticipantDomainLimits,
 ) {
 
   def decisionTimeout: config.NonNegativeFiniteDuration =
     confirmationResponseTimeout + mediatorReactionTimeout
+
+  @inline def confirmationRequestsMaxRate: NonNegativeInt =
+    participantDomainLimits.confirmationRequestsMaxRate
 
   if (ledgerTimeRecordTimeTolerance * 2 > mediatorDeduplicationTimeout)
     throw new InvalidDynamicDomainParameters(
@@ -234,13 +237,12 @@ final case class DynamicDomainParameters(
   // https://docs.google.com/document/d/1tpPbzv2s6bjbekVGBn6X5VZuw0oOTHek5c30CBo4UkI/edit#bookmark=id.1dzc6dxxlpca
   private[canton] def compatibleWithNewLedgerTimeRecordTimeTolerance(
       newLedgerTimeRecordTimeTolerance: NonNegativeFiniteDuration
-  ): Boolean = {
+  ): Boolean =
     // If false, a new request may receive the same ledger time as a previous request and the previous
     // request may be evicted too early from the mediator's deduplication store.
     // Thus, an attacker may assign the same UUID to both requests.
     // See i9028 for a detailed design. (This is the second clause of item 2 of Lemma 2).
     ledgerTimeRecordTimeTolerance + newLedgerTimeRecordTimeTolerance <= mediatorDeduplicationTimeout
-  }
 
   def update(
       confirmationResponseTimeout: NonNegativeFiniteDuration = confirmationResponseTimeout,
@@ -265,12 +267,12 @@ final case class DynamicDomainParameters(
     ledgerTimeRecordTimeTolerance = ledgerTimeRecordTimeTolerance,
     mediatorDeduplicationTimeout = mediatorDeduplicationTimeout,
     reconciliationInterval = reconciliationInterval,
-    confirmationRequestsMaxRate = confirmationRequestsMaxRate,
     maxRequestSize = maxRequestSize,
     sequencerAggregateSubmissionTimeout = sequencerAggregateSubmissionTimeout,
     trafficControlParameters = trafficControlParameters,
     onboardingRestriction = onboardingRestriction,
     acsCommitmentsCatchUpConfig = acsCommitmentsCatchUpConfig,
+    participantDomainLimits = ParticipantDomainLimits(confirmationRequestsMaxRate),
   )
 
   private[canton] def toInternal: Either[String, DynamicDomainParametersInternal] =
@@ -291,13 +293,13 @@ final case class DynamicDomainParameters(
           mediatorDeduplicationTimeout =
             InternalNonNegativeFiniteDuration.fromConfig(mediatorDeduplicationTimeout),
           reconciliationInterval = PositiveSeconds.fromConfig(reconciliationInterval),
-          confirmationRequestsMaxRate = confirmationRequestsMaxRate,
           maxRequestSize = MaxRequestSize(maxRequestSize),
           sequencerAggregateSubmissionTimeout =
             InternalNonNegativeFiniteDuration.fromConfig(sequencerAggregateSubmissionTimeout),
           trafficControlParameters = trafficControlParameters.map(_.toInternal),
           onboardingRestriction = onboardingRestriction,
           acsCommitmentsCatchUpConfigParameter = acsCommitmentsCatchUpConfig,
+          participantDomainLimits = participantDomainLimits.toInternal,
         )(rpv)
       }
 }

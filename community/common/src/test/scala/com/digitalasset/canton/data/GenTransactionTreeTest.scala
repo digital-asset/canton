@@ -248,9 +248,9 @@ class GenTransactionTreeTest
       "prevent creation" in {
         val childViewCommonData =
           singleCreateView.viewCommonData.tryUnwrap.copy(salt = factory.commonDataSalt(1))
-        val childView = singleCreateView.copy(viewCommonData = childViewCommonData)
+        val childView = singleCreateView.tryCopy(viewCommonData = childViewCommonData)
         val subviews = TransactionSubviews(Seq(childView))(testedProtocolVersion, factory.cryptoOps)
-        val parentView = singleCreateView.copy(subviews = subviews)
+        val parentView = singleCreateView.tryCopy(subviews = subviews)
 
         GenTransactionTree.create(factory.cryptoOps)(
           factory.submitterMetadata,
@@ -385,7 +385,7 @@ class GenTransactionTreeTest
     val example = factory.ViewInterleavings
 
     forEvery(example.transactionViewTrees.zipWithIndex) { case (tvt, index) =>
-      val viewWithBlindedSubviews = tvt.view.copy(subviews = tvt.view.subviews.blindFully)
+      val viewWithBlindedSubviews = tvt.view.tryCopy(subviews = tvt.view.subviews.blindFully)
       val genTransactionTree =
         tvt.tree.mapUnblindedRootViews(_.replace(tvt.viewHash, viewWithBlindedSubviews))
 
@@ -458,7 +458,7 @@ class GenTransactionTreeTest
         val Seq(_, view1) = informeeTree.rootViews.unblindedElements
 
         val view1WithParticipantDataUnblinded =
-          view1.copy(viewParticipantData = view1Unblinded.viewParticipantData)
+          view1.tryCopy(viewParticipantData = view1Unblinded.viewParticipantData)
         val rootViews = MerkleSeq.fromSeq(factory.cryptoOps, testedProtocolVersion)(
           Seq(view1WithParticipantDataUnblinded)
         )
@@ -488,17 +488,15 @@ class GenTransactionTreeTest
 
         val partiallyBlindedTree =
           example.fullInformeeTree.tree.blind {
-            {
-              case _: GenTransactionTree => RevealIfNeedBe
-              case _: CommonMetadata => RevealSubtree
-              case _: SubmitterMetadata => RevealSubtree
+            case _: GenTransactionTree => RevealIfNeedBe
+            case _: CommonMetadata => RevealSubtree
+            case _: SubmitterMetadata => RevealSubtree
 
-              case v: TransactionView =>
-                if (hashesOfUnblindedViews.contains(v.viewHash))
-                  RevealIfNeedBe // Necessary to reveal view0 and view1
-                else BlindSubtree // This will blind every other view
-              case _: ViewCommonData => RevealSubtree // Necessary to reveal view0 and view1
-            }
+            case v: TransactionView =>
+              if (hashesOfUnblindedViews.contains(v.viewHash))
+                RevealIfNeedBe // Necessary to reveal view0 and view1
+              else BlindSubtree // This will blind every other view
+            case _: ViewCommonData => RevealSubtree // Necessary to reveal view0 and view1
           }.tryUnwrap
 
         FullInformeeTree
@@ -515,7 +513,7 @@ class GenTransactionTreeTest
 
         val rootViewsWithCommonDataBlinded =
           rootViews.map(view =>
-            view.copy(viewCommonData = ExampleTransactionFactory.blinded(view.viewCommonData))
+            view.tryCopy(viewCommonData = ExampleTransactionFactory.blinded(view.viewCommonData))
           )
 
         val viewCommonDataBlinded =

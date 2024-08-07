@@ -29,7 +29,7 @@ import com.digitalasset.canton.sequencing.{
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
+import com.digitalasset.canton.util.retry.NoExceptionRetryPolicy
 import com.digitalasset.canton.util.{EitherTUtil, retry}
 import io.grpc.{Status, StatusException}
 import monocle.Lens
@@ -39,9 +39,7 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 
 class GrpcSequencerConnectionService(
-    fetchConnection: () => EitherT[Future, String, Option[
-      SequencerConnections
-    ]],
+    fetchConnection: () => Future[Option[SequencerConnections]],
     setConnection: (SequencerConnectionValidation, SequencerConnections) => EitherT[
       Future,
       String,
@@ -50,20 +48,17 @@ class GrpcSequencerConnectionService(
 )(implicit ec: ExecutionContext)
     extends v30.SequencerConnectionServiceGrpc.SequencerConnectionService {
   override def getConnection(request: v30.GetConnectionRequest): Future[v30.GetConnectionResponse] =
-    EitherTUtil.toFuture(
-      fetchConnection()
-        .leftMap(error => Status.FAILED_PRECONDITION.withDescription(error).asException())
-        .map {
-          case Some(sequencerConnections) =>
-            v30.GetConnectionResponse(Some(sequencerConnections.toProtoV30))
+    fetchConnection()
+      .map {
+        case Some(sequencerConnections) =>
+          v30.GetConnectionResponse(Some(sequencerConnections.toProtoV30))
 
-          case None => v30.GetConnectionResponse(None)
-        }
-    )
+        case None => v30.GetConnectionResponse(None)
+      }
 
   override def setConnection(request: v30.SetConnectionRequest): Future[v30.SetConnectionResponse] =
     EitherTUtil.toFuture(for {
-      existing <- getConnection
+      existing <- EitherT.right(getConnection)
       requestedReplacement <- parseConnection(request)
       _ <- validateReplacement(
         existing,
@@ -78,21 +73,19 @@ class GrpcSequencerConnectionService(
         .leftMap(error => Status.FAILED_PRECONDITION.withDescription(error).asException())
     } yield v30.SetConnectionResponse())
 
-  private def getConnection: EitherT[Future, StatusException, SequencerConnections] =
-    fetchConnection()
-      .leftMap(error => Status.INTERNAL.withDescription(error).asException())
-      .flatMap[StatusException, SequencerConnections] {
-        case None =>
-          EitherT.leftT(
-            Status.FAILED_PRECONDITION
-              .withDescription(
-                "Initialize node before attempting to change sequencer connection"
-              )
-              .asException()
-          )
-        case Some(conn) =>
-          EitherT.rightT(conn)
-      }
+  private def getConnection: Future[SequencerConnections] =
+    fetchConnection().flatMap {
+      case None =>
+        Future.failed(
+          Status.FAILED_PRECONDITION
+            .withDescription(
+              "Initialize node before attempting to change sequencer connection"
+            )
+            .asException()
+        )
+      case Some(conn) =>
+        Future.successful(conn)
+    }
 
   private def parseConnection(
       request: v30.SetConnectionRequest
@@ -132,8 +125,8 @@ object GrpcSequencerConnectionService {
 
   def setup[C](member: Member)(
       registry: CantonMutableHandlerRegistry,
-      fetchConfig: () => EitherT[Future, String, Option[C]],
-      saveConfig: C => EitherT[Future, String, Unit],
+      fetchConfig: () => Future[Option[C]],
+      saveConfig: C => Future[Unit],
       sequencerConnectionLens: Lens[C, SequencerConnections],
       requestSigner: RequestSigner,
       transportFactory: SequencerClientTransportFactory,
@@ -154,7 +147,7 @@ object GrpcSequencerConnectionService {
           fetchConnection = () => fetchConfig().map(_.map(sequencerConnectionLens.get)),
           setConnection = (sequencerConnectionValidation, newSequencerConnection) =>
             for {
-              currentConfig <- fetchConfig()
+              currentConfig <- EitherT.right(fetchConfig())
               newConfig <- currentConfig.fold(
                 EitherT.leftT[Future, C](
                   "Can't update config when none has yet been set. Please initialize node."
@@ -190,7 +183,7 @@ object GrpcSequencerConnectionService {
               )
 
               // important to only save the config and change the transport after the `makeTransport` has run and done the handshake
-              _ <- saveConfig(newConfig)
+              _ <- EitherT.right(saveConfig(newConfig))
               _ <- EitherT.right(
                 clientO
                   .get()
@@ -214,9 +207,7 @@ object GrpcSequencerConnectionService {
       sequencerInfoLoader: SequencerInfoLoader,
       flagCloseable: FlagCloseable,
       futureSupervisor: FutureSupervisor,
-      loadConfig: => EitherT[Future, String, Option[
-        SequencerConnections
-      ]],
+      loadConfig: => Future[Option[SequencerConnections]],
   )(implicit
       errorLoggingContext: ErrorLoggingContext,
       traceContext: TraceContext,
@@ -231,8 +222,9 @@ object GrpcSequencerConnectionService {
     implicit val closeContext = CloseContext(flagCloseable)
     val alias = DomainAlias.tryCreate("domain")
 
-    def tryNewConfig: EitherT[Future, String, SequencerAggregatedInfo] = {
-      loadConfig
+    def tryNewConfig: EitherT[Future, String, SequencerAggregatedInfo] =
+      EitherT
+        .right(loadConfig)
         .flatMap {
           case Some(settings) =>
             sequencerInfoLoader
@@ -243,12 +235,11 @@ object GrpcSequencerConnectionService {
                 sequencerConnectionValidation = SequencerConnectionValidation.Active,
               )
               .leftMap { e =>
-                errorLoggingContext.logger.warn(s"Waiting for valid sequencer connection ${e}")
+                errorLoggingContext.logger.warn(s"Waiting for valid sequencer connection $e")
                 e.toString
               }
           case None => EitherT.leftT("No sequencer connection config")
         }
-    }
     import scala.concurrent.duration.*
     EitherT(
       retry
@@ -261,7 +252,7 @@ object GrpcSequencerConnectionService {
         )
         .apply(
           tryNewConfig.value,
-          NoExnRetryable,
+          NoExceptionRetryPolicy,
         )
     )
   }

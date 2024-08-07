@@ -13,6 +13,7 @@ import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.SequencerError.{
   ExceededMaxSequencingTime,
   PayloadToEventTimeBoundExceeded,
@@ -25,6 +26,7 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
   TracedLogger,
 }
+import com.digitalasset.canton.resource.DbExceptionRetryPolicy
 import com.digitalasset.canton.sequencing.protocol.{
   Batch,
   ClosedEnvelope,
@@ -38,7 +40,6 @@ import com.digitalasset.canton.tracing.BatchTracing.withTracedBatch
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.util.retry.RetryUtil.DbExceptionRetryable
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.NotUsed
@@ -48,6 +49,7 @@ import org.apache.pekko.stream.scaladsl.{Flow, GraphDSL, Keep, Merge, Source}
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.Failure
 
 /** A write we want to make to the db */
 sealed trait Write
@@ -146,7 +148,7 @@ class SequencerWriterQueues private[sequencer] (
     */
   private def writeInternal(
       submissionOrOutcome: Either[SubmissionRequest, DeliverableSubmissionOutcome]
-  )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncError, Unit] = {
+  )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncError, Unit] =
     for {
       event <- eventGenerator.generate(submissionOrOutcome)
       enqueueResult = deliverEventQueue.offer(event)
@@ -160,7 +162,6 @@ class SequencerWriterQueues private[sequencer] (
           Right(())
       })
     } yield ()
-  }
 
   def complete(): Unit = {
     implicit val tc: TraceContext = TraceContext.empty
@@ -186,6 +187,7 @@ object SequencerWriterSource {
       eventSignaller: EventSignaller,
       loggerFactory: NamedLoggerFactory,
       protocolVersion: ProtocolVersion,
+      metrics: SequencerMetrics,
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
@@ -270,6 +272,7 @@ object SequencerWriterSource {
         }
       }
       .via(UpdateWatermarkFlow(store, logger))
+      .via(RecordWatermarkDelayMetricFlow(clock, metrics))
       .via(NotifyEventSignallerFlow(eventSignaller))
   }
 }
@@ -430,7 +433,7 @@ object AssertMonotonicBlockSequencerTimestampsFlow {
                 if (lastTimestamp.exists(_ > blockSequencerTimestamp)) {
                   logger.warn(
                     s"Block sequencer timestamp is not monotonically increasing: " +
-                      s"lastTimestamp=${lastTimestamp}, blockSequencerTimestamp=$blockSequencerTimestamp"
+                      s"lastTimestamp=$lastTimestamp, blockSequencerTimestamp=$blockSequencerTimestamp"
                   )
                 }
                 lastTimestamp = Some(blockSequencerTimestamp)
@@ -623,7 +626,7 @@ object WritePayloadsFlow {
 
     def writePayloads(
         events: Seq[Presequenced[StoreEvent[Payload]]]
-    ): Future[Seq[Presequenced[StoreEvent[PayloadId]]]] = {
+    ): Future[Seq[Presequenced[StoreEvent[PayloadId]]]] =
       if (events.isEmpty) Future.successful(Seq.empty[Presequenced[StoreEvent[PayloadId]]])
       else {
         implicit val traceContext: TraceContext = TraceContext.ofBatch(events)(logger)
@@ -647,7 +650,6 @@ object WritePayloadsFlow {
             .map((_: Unit) => eventsWithPayloadId)
         }
       }
-    }
 
     def extractPayload(event: StoreEvent[Payload]): Option[Payload] = event match {
       case DeliverStoreEvent(_, _, _, payload, _, _) => payload.some
@@ -675,9 +677,17 @@ object WritePayloadsFlow {
 }
 
 object UpdateWatermarkFlow {
+
+  private def retryDbException(error: Throwable, logger: TracedLogger)(implicit
+      tc: TraceContext
+  ): Boolean =
+    DbExceptionRetryPolicy
+      .logAndDetermineErrorKind(Failure(error), logger, None)
+      .maxRetries == Int.MaxValue
+
   def apply(store: SequencerWriterStore, logger: TracedLogger)(implicit
       executionContext: ExecutionContext
-  ): Flow[Traced[BatchWritten], Traced[BatchWritten], NotUsed] = {
+  ): Flow[Traced[BatchWritten], Traced[BatchWritten], NotUsed] =
     Flow[Traced[BatchWritten]]
       .mapAsync(1)(_.withTraceContext { implicit traceContext => written =>
         for {
@@ -694,8 +704,8 @@ object UpdateWatermarkFlow {
             // This is a workaround to avoid failing during shutdown that can be removed once saveWatermark returns
             // a FutureUnlessShutdown
             .recover {
-              case exception if DbExceptionRetryable.retryOKForever(exception, logger) =>
-                // The exception itself is already being logged above by retryOKForever. Only logging here additional
+              case exception if retryDbException(exception, logger) =>
+                // The exception itself is already being logged above by retryDbException. Only logging here additional
                 // context
                 logger.info(
                   "Saving watermark failed with a retryable error. This can happen during shutdown." +
@@ -705,7 +715,6 @@ object UpdateWatermarkFlow {
         } yield Traced(written)
       })
       .named("updateWatermark")
-  }
 }
 
 object NotifyEventSignallerFlow {
@@ -718,4 +727,16 @@ object NotifyEventSignallerFlow {
           Traced(batchWritten)
         }
       })
+}
+
+object RecordWatermarkDelayMetricFlow {
+  def apply(
+      clock: Clock,
+      metrics: SequencerMetrics,
+  ): Flow[Traced[BatchWritten], Traced[BatchWritten], NotUsed] =
+    Flow[Traced[BatchWritten]].wireTap { batchWritten =>
+      metrics.dbSequencer.watermarkDelay.updateValue(
+        (clock.now - batchWritten.value.latestTimestamp).toMillis
+      )
+    }
 }

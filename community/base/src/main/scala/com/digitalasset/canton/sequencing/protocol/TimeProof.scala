@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing.protocol
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.option.*
+import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.CantonRequireTypes.String73
 import com.digitalasset.canton.crypto.HashOps
@@ -96,7 +97,7 @@ object TimeProof {
       emptyDeliver = deliver.asInstanceOf[Deliver[Nothing]]
     } yield new TimeProof(event, emptyDeliver)
 
-  private def validateDeliver(deliver: Deliver[Envelope[?]]): Either[String, Unit] = {
+  private def validateDeliver(deliver: Deliver[Envelope[?]]): Either[String, Unit] =
     for {
       _ <- Either.cond(
         isTimeEventBatch(deliver.batch),
@@ -109,7 +110,6 @@ object TimeProof {
         "Time Proof event should have an expected message id",
       )
     } yield ()
-  }
 
   /** Return a wrapped [[TimeProof]] if the given `event` has the correct properties. */
   def fromEventO(event: OrdinarySequencedEvent[Envelope[?]]): Option[TimeProof] =
@@ -129,7 +129,8 @@ object TimeProof {
       protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SendAsyncClientError, Unit] =
+  ): EitherT[FutureUnlessShutdown, SendAsyncClientError, Unit] = {
+    implicit val metricsContext: MetricsContext = MetricsContext("type" -> "time-proof")
     client.sendAsync(
       // we intentionally ask for an empty event to be sequenced to observe the time.
       // this means we can safely share this event without mentioning other recipients.
@@ -144,6 +145,7 @@ object TimeProof {
       // Do not amplify because max sequencing time is set to MaxValue and therefore will exceed the aggregation time bound
       amplify = false,
     )
+  }
 
   /** Use a constant prefix for a message which would permit the sequencer to track how many
     * time request events it is receiving.

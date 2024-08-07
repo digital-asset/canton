@@ -132,7 +132,7 @@ final case class TestingTopology(
   def withDynamicDomainParameters(
       dynamicDomainParameters: DynamicDomainParameters,
       validFrom: CantonTimestamp = CantonTimestamp.Epoch,
-  ) = {
+  ) =
     copy(
       domainParameters = List(
         DomainParameters.WithValidity(
@@ -142,7 +142,6 @@ final case class TestingTopology(
         )
       )
     )
-  }
 
   /** Overwrites the `sequencerGroup` field.
     */
@@ -171,10 +170,9 @@ final case class TestingTopology(
   ): TestingTopology =
     this.copy(participants = participants.toMap)
 
-  def allParticipants(): Set[ParticipantId] = {
+  def allParticipants(): Set[ParticipantId] =
     (topology.values
       .flatMap(x => x.keys) ++ participants.keys).toSet
-  }
 
   def withKeyPurposes(keyPurposes: Set[KeyPurpose]): TestingTopology =
     this.copy(keyPurposes = keyPurposes)
@@ -218,7 +216,7 @@ final case class TestingTopology(
 
   def build(
       loggerFactory: NamedLoggerFactory = NamedLoggerFactory("test-area", "crypto")
-  ): TestingIdentityFactory = {
+  ): TestingIdentityFactory =
     build(
       SymbolicCrypto.create(
         testedReleaseProtocolVersion,
@@ -227,7 +225,6 @@ final case class TestingTopology(
       ),
       loggerFactory,
     )
-  }
 
   def build(
       crypto: SymbolicCrypto,
@@ -249,7 +246,7 @@ class TestingIdentityFactory(
       owner: Member,
       availableUpToInclusive: CantonTimestamp = CantonTimestamp.MaxValue,
       currentSnapshotApproximationTimestamp: CantonTimestamp = CantonTimestamp.Epoch,
-  ): SyncCryptoApiProvider = {
+  ): SyncCryptoApiProvider =
     new SyncCryptoApiProvider(
       owner,
       ips(availableUpToInclusive, currentSnapshotApproximationTimestamp),
@@ -259,7 +256,6 @@ class TestingIdentityFactory(
       FutureSupervisor.Noop,
       loggerFactory,
     )
-  }
 
   def forOwnerAndDomain(
       owner: Member,
@@ -560,8 +556,6 @@ class TestingIdentityFactory(
         DomainTrustCertificate(
           participantId,
           domainId,
-          transferOnlyToGivenTargetDomains = false,
-          targetDomains = Seq.empty,
         )
       ) :+ mkAdd(
         ParticipantDomainPermission(
@@ -641,8 +635,6 @@ class TestingOwnerWithKeys(
       DomainTrustCertificate(
         participant1,
         domainId,
-        transferOnlyToGivenTargetDomains = false,
-        targetDomains = Seq.empty,
       )
 
     private val defaultDomainParameters = TestDomainParameters.defaultDynamic
@@ -685,9 +677,9 @@ class TestingOwnerWithKeys(
       )
     )
 
-    val p1_dtc = mkAdd(DomainTrustCertificate(participant1, domainId, false, Seq.empty))
-    val p2_dtc = mkAdd(DomainTrustCertificate(participant2, domainId, false, Seq.empty))
-    val p3_dtc = mkAdd(DomainTrustCertificate(participant3, domainId, false, Seq.empty))
+    val p1_dtc = mkAdd(DomainTrustCertificate(participant1, domainId))
+    val p2_dtc = mkAdd(DomainTrustCertificate(participant2, domainId))
+    val p3_dtc = mkAdd(DomainTrustCertificate(participant3, domainId))
     val p1_otk = mkAddMultiKey(
       OwnerToKeyMapping(participant1, None, NonEmpty(Seq, EncryptionKeys.key1, SigningKeys.key1)),
       NonEmpty(Set, key1),

@@ -14,6 +14,7 @@ import com.digitalasset.canton.config
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{PositiveInt, PositiveNumeric}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.SequencerWriter.ResetWatermark
 import com.digitalasset.canton.domain.sequencing.sequencer.WriterStartupError.FailedToInitializeFromSnapshot
 import com.digitalasset.canton.domain.sequencing.sequencer.store.*
@@ -28,8 +29,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.util.retry.Pause
-import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
+import com.digitalasset.canton.util.retry.{AllExceptionRetryPolicy, Pause}
 import com.digitalasset.canton.util.{EitherTUtil, FutureUtil, PekkoUtil, retry}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
@@ -160,7 +160,7 @@ class SequencerWriter(
 
   private case class RunningWriter(flow: RunningSequencerWriterFlow, store: SequencerWriterStore) {
 
-    def healthStatus(implicit traceContext: TraceContext): Future[SequencerHealthStatus] = {
+    def healthStatus(implicit traceContext: TraceContext): Future[SequencerHealthStatus] =
       for {
         watermark <- EitherTUtil
           .fromFuture(
@@ -185,7 +185,6 @@ class SequencerWriter(
           Some(s"writer: $watermarkStatus"),
         )
       }
-    }
 
     /** Ensures that all resources for the writer flow are halted and cleaned up.
       * The store should not be used after calling this operation (the HA implementation will close its exclusive storage instance).
@@ -220,7 +219,7 @@ class SequencerWriter(
 
   private[sequencer] def healthStatus(implicit
       traceContext: TraceContext
-  ): Future[SequencerHealthStatus] = {
+  ): Future[SequencerHealthStatus] =
     runningWriterRef.get() match {
       case Some(runningWriter) => runningWriter.healthStatus
       case None =>
@@ -228,7 +227,6 @@ class SequencerWriter(
           SequencerHealthStatus(isActive = false, Some("sequencer writer not running"))
         )
     }
-  }
 
   private def sequencerQueues: Option[SequencerWriterQueues] =
     runningWriterRef.get().map(_.flow.queues)
@@ -310,7 +308,7 @@ class SequencerWriter(
                   .mapK(FutureUnlessShutdown.outcomeK)
               } yield writerStore
             }.value,
-            AllExnRetryable,
+            AllExceptionRetryPolicy,
           )
         }
       }
@@ -338,19 +336,14 @@ class SequencerWriter(
 
   def blockSequencerWrite(
       outcome: DeliverableSubmissionOutcome
-  )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncError, Unit] = {
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SendAsyncError, Unit] = {
     lazy val sendET = sequencerQueues
       .fold(
         EitherT
           .leftT[Future, Unit](SendAsyncError.Unavailable("Unavailable: sequencer is not running"))
           .leftWiden[SendAsyncError]
       )(_.blockSequencerWrite(outcome))
-
-    val sendUnlessShutdown = performUnlessClosingF(functionFullName)(sendET.value)
-    EitherT(
-      // TODO(#18404): Propagate FUS upwards till the very source of the calls
-      sendUnlessShutdown.onShutdown(Left[SendAsyncError, Unit](SendAsyncError.ShuttingDown()))
-    )
+    EitherT(performUnlessClosingF(functionFullName)(sendET.value))
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
@@ -407,7 +400,7 @@ class SequencerWriter(
 
   private def startWriter(
       store: SequencerWriterStore
-  )(implicit traceContext: TraceContext): Unit = {
+  )(implicit traceContext: TraceContext): Unit =
     // if these actions fail we want to ensure that the store is closed
     try {
       val writerFlow = createWriterFlow(store, traceContext)
@@ -420,7 +413,6 @@ class SequencerWriter(
         store.close()
         throw ex
     }
-  }
 
   private def setupWriterRecovery(doneF: Future[Unit]): Unit =
     doneF.onComplete { result =>
@@ -503,6 +495,7 @@ object SequencerWriter {
       loggerFactory: NamedLoggerFactory,
       sequencerMember: Member,
       unifiedSequencer: Boolean,
+      metrics: SequencerMetrics,
   )(implicit materializer: Materializer, executionContext: ExecutionContext): SequencerWriter = {
     val logger = TracedLogger(SequencerWriter.getClass, loggerFactory)
 
@@ -520,6 +513,7 @@ object SequencerWriter {
           eventSignaller,
           loggerFactory,
           protocolVersion,
+          metrics,
         )
           .toMat(Sink.ignore)(Keep.both)
           .mapMaterializedValue(m => new RunningSequencerWriterFlow(m._1, m._2.void)),
