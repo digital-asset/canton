@@ -22,7 +22,13 @@ import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerEr
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError.IdentityManagerParentError
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.*
-import com.digitalasset.canton.topology.{AuthorizedTopologyManager, ParticipantId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{
+  AuthorizedTopologyManager,
+  ForceFlag,
+  ForceFlags,
+  ParticipantId,
+  UniqueIdentifier,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.FutureInstances.*
@@ -145,7 +151,7 @@ class PackageOpsImpl(
       action: Seq[LfPackageId] => Seq[LfPackageId]
   )(implicit
       tc: TraceContext
-  ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Boolean] = {
+  ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Boolean] =
     // TODO(#14069) this vetting extension might fail on concurrent requests
 
     for {
@@ -188,11 +194,11 @@ class PackageOpsImpl(
               signingKeys = Seq(participantId.fingerprint),
               protocolVersion = initialProtocolVersion,
               expectFullAuthorization = true,
+              forceChanges = ForceFlags(ForceFlag.PackageVettingRevocation),
             )
             .leftMap(IdentityManagerParentError(_): ParticipantTopologyManagerError)
             .map(_ => ())
         )
       }
     } yield newVettedPackagesState != currentPackages
-  }
 }

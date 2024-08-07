@@ -19,7 +19,9 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{RootHash, v30}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.*
+import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import monocle.Lens
 
 import scala.annotation.tailrec
 
@@ -49,10 +51,9 @@ final case class MerkleSeq[+M <: VersionedMerkleTree[?]](
     * WARNING: /!\ This will blow up if (when?) the versioning of the two structures diverges. /!\
     */
   private[data] lazy val tryMerkleSeqElementRepresentativeProtocolVersion
-      : RepresentativeProtocolVersion[MerkleSeqElement.type] = {
+      : RepresentativeProtocolVersion[MerkleSeqElement.type] =
     castRepresentativeProtocolVersion[MerkleSeqElement.type](MerkleSeqElement)
       .valueOr(e => throw new IllegalArgumentException(e))
-  }
 
   lazy val unblindedElementsWithIndex: Seq[(M, MerklePathElement)] = rootOrEmpty match {
     case Some(root) =>
@@ -120,7 +121,7 @@ final case class MerkleSeq[+M <: VersionedMerkleTree[?]](
       // Ideally, we would have `actionOnLeaf: M => M`, as there is no need to change the type of the
       // leaf when blinding. Unfortunately, this becomes harder in practice: since M is covariant,
       // the type checker does not know the actual type at runtime and could still mishandle it.
-  ): MerkleSeq[A] = {
+  ): MerkleSeq[A] =
     rootOrEmpty match {
       case Some(root) =>
         MerkleSeq(Some(root.tryUnwrap.tryBlindAllButLeaf(path, actionOnLeaf)))(
@@ -129,7 +130,6 @@ final case class MerkleSeq[+M <: VersionedMerkleTree[?]](
         )
       case None => throw new UnsupportedOperationException("Empty MerkleSeq")
     }
-  }
 
   def toProtoV30: v30.MerkleSeq =
     v30.MerkleSeq(rootOrEmpty = rootOrEmpty.map(MerkleTree.toBlindableNodeV30))
@@ -139,12 +139,11 @@ final case class MerkleSeq[+M <: VersionedMerkleTree[?]](
     unnamedParamIfDefined(_.rootOrEmpty),
   )
 
-  def mapM[A <: VersionedMerkleTree[A]](f: M => A): MerkleSeq[A] = {
+  def mapM[A <: VersionedMerkleTree[A]](f: M => A): MerkleSeq[A] =
     this.copy(rootOrEmpty = rootOrEmpty.map(_.unwrap.fold(BlindedNode(_), seq => seq.mapM(f))))(
       representativeProtocolVersion,
       hashOps,
     )
-  }
 
   @transient override protected lazy val companionObj: MerkleSeq.type = MerkleSeq
 }
@@ -163,7 +162,7 @@ object MerkleSeq
 
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
-      ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v31)(v30.MerkleSeq)(
+      ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v32)(v30.MerkleSeq)(
         supportedProtoVersion(_)(fromProtoV30),
         _.toProtoV30.toByteString,
       )
@@ -223,13 +222,12 @@ object MerkleSeq
         protocolVersion: ProtocolVersion,
     )(
         hashOps: HashOps
-    ): Branch[M] = {
+    ): Branch[M] =
       new Branch[M](
         first,
         second,
         MerkleSeqElement.protocolVersionRepresentativeFor(protocolVersion),
       )(hashOps)
-    }
   }
 
   private[data] final case class Branch[+M <: VersionedMerkleTree[_]](
@@ -262,7 +260,7 @@ object MerkleSeq
     override def tryBlindAllButLeaf[A <: VersionedMerkleTree[A]](
         path: MerkleSeqIndexFromRoot,
         actionOnLeaf: M => A,
-    ): MerkleSeqElement[A] = {
+    ): MerkleSeqElement[A] =
       path.index match {
         case Direction.Left :: tailIndex =>
           Branch[A](
@@ -283,7 +281,6 @@ object MerkleSeq
             "The path is invalid: path exhausted but leaf not reached"
           )
       }
-    }
 
     override private[MerkleSeq] def foreachUnblindedElement(
         path: Path
@@ -325,9 +322,8 @@ object MerkleSeq
         protocolVersion: ProtocolVersion,
     )(
         hashOps: HashOps
-    ): Singleton[M] = {
+    ): Singleton[M] =
       Singleton(data, MerkleSeqElement.protocolVersionRepresentativeFor(protocolVersion))(hashOps)
-    }
   }
 
   private[data] final case class Singleton[+M <: VersionedMerkleTree[?]](
@@ -357,7 +353,7 @@ object MerkleSeq
     override def tryBlindAllButLeaf[A <: VersionedMerkleTree[A]](
         path: MerkleSeqIndexFromRoot,
         actionOnLeaf: M => A,
-    ): MerkleSeqElement[A] = {
+    ): MerkleSeqElement[A] =
       path.index match {
         case List() =>
           Singleton(
@@ -369,7 +365,6 @@ object MerkleSeq
             s"The path is invalid: reached a leaf but the path contains more steps ($other)"
           )
       }
-    }
 
     override private[MerkleSeq] def foreachUnblindedElement(path: Path)(
         body: (M, Path) => Unit
@@ -413,7 +408,7 @@ object MerkleSeq
 
     override def supportedProtoVersions: SupportedProtoVersions =
       SupportedProtoVersions(
-        ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v31)(v30.MerkleSeqElement)(
+        ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v32)(v30.MerkleSeqElement)(
           supportedProtoVersion(_)(fromProtoV30),
           _.toProtoV30.toByteString,
         )
@@ -426,10 +421,9 @@ object MerkleSeq
             ByteString => ParsingResult[MerkleTree[M]],
         ),
         expectedProtocolVersion: ProtocolVersion,
-    )(bytes: ByteString): ParsingResult[MerkleSeqElement[M]] = {
+    )(bytes: ByteString): ParsingResult[MerkleSeqElement[M]] =
       fromByteString(context, expectedProtocolVersion)(bytes)
         .asInstanceOf[ParsingResult[MerkleSeqElement[M]]]
-    }
 
     private[MerkleSeq] def fromProtoV30[M <: VersionedMerkleTree[?]](
         context: (
@@ -534,7 +528,7 @@ object MerkleSeq
       hashOps: HashOps,
       representativeProtocolVersion: RepresentativeProtocolVersion[MerkleSeq.type],
       elemRepresentativeProtocolVersion: RepresentativeProtocolVersion[MerkleSeqElement.type],
-  )(elements: Seq[MerkleTree[M]]): MerkleSeq[M] = {
+  )(elements: Seq[MerkleTree[M]]): MerkleSeq[M] =
     if (elements.isEmpty) {
       MerkleSeq.empty(representativeProtocolVersion, hashOps)
     } else {
@@ -558,14 +552,12 @@ object MerkleSeq
 
       MerkleSeq(Some(root))(representativeProtocolVersion, hashOps)
     }
-  }
 
   def apply[M <: VersionedMerkleTree[?]](
       rootOrEmpty: Option[MerkleTree[MerkleSeqElement[M]]],
       protocolVersion: ProtocolVersion,
-  )(hashOps: HashOps): MerkleSeq[M] = {
+  )(hashOps: HashOps): MerkleSeq[M] =
     MerkleSeq(rootOrEmpty)(protocolVersionRepresentativeFor(protocolVersion), hashOps)
-  }
 
   /** Create an empty MerkleSeq */
   def empty[M <: VersionedMerkleTree[?]](
@@ -648,4 +640,14 @@ object MerkleSeq
         right.addTo(Direction.Right :: pathFromRoot, subsequentPaths),
       )
   }
+
+  @VisibleForTesting
+  def unblindedElementsUnsafe[V <: VersionedMerkleTree[V]](
+      hashOps: HashOps,
+      protocolVersion: ProtocolVersion,
+  ): Lens[MerkleSeq[V], Seq[V]] =
+    Lens[MerkleSeq[V], Seq[V]](
+      _.unblindedElements
+    )((newSeq: Seq[V]) => _ => MerkleSeq.fromSeq(hashOps, protocolVersion)(newSeq))
+
 }

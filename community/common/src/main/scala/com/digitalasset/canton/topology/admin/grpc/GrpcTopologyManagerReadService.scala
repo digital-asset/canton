@@ -27,6 +27,8 @@ import com.digitalasset.canton.topology.admin.v30.{
   GenesisStateResponse,
   ListPartyHostingLimitsRequest,
   ListPartyHostingLimitsResponse,
+  ListPartyToKeyMappingRequest,
+  ListPartyToKeyMappingResponse,
   ListPurgeTopologyTransactionRequest,
   ListPurgeTopologyTransactionResponse,
   Store,
@@ -53,6 +55,7 @@ import com.digitalasset.canton.topology.transaction.{
   OwnerToKeyMapping,
   ParticipantDomainPermission,
   PartyHostingLimits,
+  PartyToKeyMapping,
   PartyToParticipant,
   PurgeTopologyTransaction,
   SequencerDomainState,
@@ -152,14 +155,13 @@ object TopologyStore {
   def fromProto(
       store: adminProto.Store,
       fieldName: String,
-  ): Either[ProtoDeserializationError, TopologyStore] = {
+  ): Either[ProtoDeserializationError, TopologyStore] =
     store.store match {
       case adminProto.Store.Store.Empty => Left(ProtoDeserializationError.FieldNotSet(fieldName))
       case adminProto.Store.Store.Authorized(_) => Right(TopologyStore.Authorized)
       case adminProto.Store.Store.Domain(domain) =>
         DomainId.fromProtoPrimitive(domain.id, fieldName).map(TopologyStore.Domain)
     }
-  }
 
   final case class Domain(id: DomainId) extends TopologyStore {
     override def toProto: adminProto.Store =
@@ -269,6 +271,24 @@ class GrpcTopologyManagerReadService(
   // otherwise, we might read stuff from the database that isn't yet known to the node
   private def getApproximateTimestamp(storeId: TopologyStoreId): Option[CantonTimestamp] =
     topologyClientLookup(storeId).map(_.approximateTimestamp)
+
+  private def collectFromStoresByFilterString(
+      baseQueryProto: Option[adminProto.BaseQuery],
+      typ: TopologyMapping.Code,
+      filterString: String,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, CantonError, Seq[
+    (TransactionSearchResult, TopologyMapping)
+  ]] = {
+    val (idFilter, namespaceFilter) = UniqueIdentifier.splitFilter(filterString)
+    collectFromStores(
+      baseQueryProto,
+      typ,
+      idFilter = Some(idFilter),
+      namespaceFilter = Some(namespaceFilter),
+    )
+  }
 
   /** Collects mappings of specified type from stores specified in baseQueryProto satisfying the
     * filters specified in baseQueryProto as well as separately specified filter either by
@@ -415,13 +435,11 @@ class GrpcTopologyManagerReadService(
       request: adminProto.ListIdentifierDelegationRequest
   ): Future[adminProto.ListIdentifierDelegationResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val (idFilter, namespaceFilter) = UniqueIdentifier.splitFilter(request.filterUid)
     val ret = for {
-      res <- collectFromStores(
+      res <- collectFromStoresByFilterString(
         request.baseQuery,
         IdentifierDelegation.code,
-        idFilter = Some(idFilter),
-        namespaceFilter = Some(namespaceFilter),
+        request.filterUid,
       )
     } yield {
       val results = res
@@ -446,17 +464,16 @@ class GrpcTopologyManagerReadService(
       request: adminProto.ListOwnerToKeyMappingRequest
   ): Future[adminProto.ListOwnerToKeyMappingResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val (idFilter, namespaceFilter) = UniqueIdentifier.splitFilter(request.filterKeyOwnerUid)
     val ret = for {
-      res <- collectFromStores(
+      res <- collectFromStoresByFilterString(
         request.baseQuery,
         OwnerToKeyMapping.code,
-        idFilter = Some(idFilter),
-        namespaceFilter = Some(namespaceFilter),
+        request.filterKeyOwnerUid,
       )
     } yield {
       val results = res
         .collect {
+          // topology store indexes by uid, so need to filter out the members of the wrong type
           case (result, x: OwnerToKeyMapping)
               if x.member.filterString.startsWith(request.filterKeyOwnerUid) &&
                 (request.filterKeyOwnerType.isEmpty || request.filterKeyOwnerType == x.member.code.threeLetterId.unwrap) =>
@@ -473,17 +490,39 @@ class GrpcTopologyManagerReadService(
     CantonGrpcUtil.mapErrNewEUS(ret)
   }
 
+  override def listPartyToKeyMapping(
+      request: ListPartyToKeyMappingRequest
+  ): Future[ListPartyToKeyMappingResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val ret = for {
+      res <- collectFromStoresByFilterString(
+        request.baseQuery,
+        PartyToKeyMapping.code,
+        request.filterParty,
+      )
+    } yield {
+      val results = res
+        .collect { case (result, x: PartyToKeyMapping) => (result, x) }
+        .map { case (context, elem) =>
+          new adminProto.ListPartyToKeyMappingResponse.Result(
+            context = Some(createBaseResult(context)),
+            item = Some(elem.toProto),
+          )
+        }
+      adminProto.ListPartyToKeyMappingResponse(results = results)
+    }
+    CantonGrpcUtil.mapErrNewEUS(ret)
+  }
+
   override def listDomainTrustCertificate(
       request: adminProto.ListDomainTrustCertificateRequest
   ): Future[adminProto.ListDomainTrustCertificateResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val (idFilter, namespaceFilter) = UniqueIdentifier.splitFilter(request.filterUid)
     val ret = for {
-      res <- collectFromStores(
+      res <- collectFromStoresByFilterString(
         request.baseQuery,
         DomainTrustCertificate.code,
-        idFilter = Some(idFilter),
-        namespaceFilter = Some(namespaceFilter),
+        request.filterUid,
       )
     } yield {
       val results = res
@@ -504,13 +543,11 @@ class GrpcTopologyManagerReadService(
       request: ListPartyHostingLimitsRequest
   ): Future[ListPartyHostingLimitsResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val (idFilter, namespaceFilter) = UniqueIdentifier.splitFilter(request.filterUid)
     val ret = for {
-      res <- collectFromStores(
+      res <- collectFromStoresByFilterString(
         request.baseQuery,
         PartyHostingLimits.code,
-        idFilter = Some(idFilter),
-        namespaceFilter = Some(namespaceFilter),
+        request.filterUid,
       )
     } yield {
       val results = res
@@ -531,13 +568,11 @@ class GrpcTopologyManagerReadService(
       request: adminProto.ListParticipantDomainPermissionRequest
   ): Future[adminProto.ListParticipantDomainPermissionResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val (idFilter, namespaceFilter) = UniqueIdentifier.splitFilter(request.filterUid)
     val ret = for {
-      res <- collectFromStores(
+      res <- collectFromStoresByFilterString(
         request.baseQuery,
         ParticipantDomainPermission.code,
-        idFilter = Some(idFilter),
-        namespaceFilter = Some(namespaceFilter),
+        request.filterUid,
       )
     } yield {
       val results = res
@@ -558,13 +593,11 @@ class GrpcTopologyManagerReadService(
       request: adminProto.ListVettedPackagesRequest
   ): Future[adminProto.ListVettedPackagesResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val (idFilter, namespaceFilter) = UniqueIdentifier.splitFilter(request.filterParticipant)
     val ret = for {
-      res <- collectFromStores(
+      res <- collectFromStoresByFilterString(
         request.baseQuery,
         VettedPackages.code,
-        idFilter = Some(idFilter),
-        namespaceFilter = Some(namespaceFilter),
+        request.filterParticipant,
       )
     } yield {
       val results = res
@@ -585,23 +618,23 @@ class GrpcTopologyManagerReadService(
       request: adminProto.ListPartyToParticipantRequest
   ): Future[adminProto.ListPartyToParticipantResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val (idFilter, namespaceFilter) = UniqueIdentifier.splitFilter(request.filterParty)
     val ret = for {
-      res <- collectFromStores(
+      res <- collectFromStoresByFilterString(
         request.baseQuery,
         PartyToParticipant.code,
-        idFilter = Some(idFilter),
-        namespaceFilter = Some(namespaceFilter),
+        request.filterParty,
       )
     } yield {
+      def partyPredicate(x: PartyToParticipant) =
+        x.partyId.toProtoPrimitive.startsWith(request.filterParty)
+      def participantPredicate(x: PartyToParticipant) =
+        request.filterParticipant.isEmpty || x.participantIds.exists(
+          _.toProtoPrimitive.contains(request.filterParticipant)
+        )
+
       val results = res
         .collect {
-          case (result, x: PartyToParticipant)
-              if x.partyId.toProtoPrimitive.startsWith(
-                request.filterParty
-              ) && (request.filterParticipant.isEmpty || x.participantIds.exists(
-                _.toProtoPrimitive.contains(request.filterParticipant)
-              )) =>
+          case (result, x: PartyToParticipant) if partyPredicate(x) && participantPredicate(x) =>
             (result, x)
         }
         .map { case (context, elem) =>
@@ -620,13 +653,11 @@ class GrpcTopologyManagerReadService(
       request: adminProto.ListAuthorityOfRequest
   ): Future[adminProto.ListAuthorityOfResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val (idFilter, namespaceFilter) = UniqueIdentifier.splitFilter(request.filterParty)
     val ret = for {
-      res <- collectFromStores(
+      res <- collectFromStoresByFilterString(
         request.baseQuery,
         AuthorityOf.code,
-        idFilter = Some(idFilter),
-        namespaceFilter = Some(namespaceFilter),
+        request.filterParty,
       )
     } yield {
       val results = res
@@ -647,13 +678,11 @@ class GrpcTopologyManagerReadService(
       request: adminProto.ListDomainParametersStateRequest
   ): Future[adminProto.ListDomainParametersStateResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val (idFilter, namespaceFilter) = UniqueIdentifier.splitFilter(request.filterDomain)
     val ret = for {
-      res <- collectFromStores(
+      res <- collectFromStoresByFilterString(
         request.baseQuery,
         DomainParametersState.code,
-        idFilter = Some(idFilter),
-        namespaceFilter = Some(namespaceFilter),
+        request.filterDomain,
       )
     } yield {
       val results = res
@@ -674,13 +703,11 @@ class GrpcTopologyManagerReadService(
       request: adminProto.ListMediatorDomainStateRequest
   ): Future[adminProto.ListMediatorDomainStateResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val (idFilter, namespaceFilter) = UniqueIdentifier.splitFilter(request.filterDomain)
     val ret = for {
-      res <- collectFromStores(
+      res <- collectFromStoresByFilterString(
         request.baseQuery,
         MediatorDomainState.code,
-        idFilter = Some(idFilter),
-        namespaceFilter = Some(namespaceFilter),
+        request.filterDomain,
       )
     } yield {
       val results = res
@@ -701,13 +728,11 @@ class GrpcTopologyManagerReadService(
       request: adminProto.ListSequencerDomainStateRequest
   ): Future[adminProto.ListSequencerDomainStateResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val (idFilter, namespaceFilter) = UniqueIdentifier.splitFilter(request.filterDomain)
     val ret = for {
-      res <- collectFromStores(
+      res <- collectFromStoresByFilterString(
         request.baseQuery,
         SequencerDomainState.code,
-        idFilter = Some(idFilter),
-        namespaceFilter = Some(namespaceFilter),
+        request.filterDomain,
       )
     } yield {
       val results = res
@@ -816,14 +841,13 @@ class GrpcTopologyManagerReadService(
   override def genesisState(
       request: GenesisStateRequest,
       responseObserver: StreamObserver[GenesisStateResponse],
-  ): Unit = {
+  ): Unit =
     GrpcStreamingUtils.streamToClient(
       (out: OutputStream) => getGenesisState(request.filterDomainStore, request.timestamp, out),
       responseObserver,
       byteString => GenesisStateResponse(byteString),
       processingTimeout.unbounded.duration,
     )
-  }
 
   private def getGenesisState(
       filterDomainStore: Option[Store],
@@ -900,13 +924,11 @@ class GrpcTopologyManagerReadService(
       request: ListPurgeTopologyTransactionRequest
   ): Future[ListPurgeTopologyTransactionResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val (idFilter, namespaceFilter) = UniqueIdentifier.splitFilter(request.filterDomain)
     val ret = for {
-      res <- collectFromStores(
+      res <- collectFromStoresByFilterString(
         request.baseQuery,
         PurgeTopologyTransaction.code,
-        idFilter = Some(idFilter),
-        namespaceFilter = Some(namespaceFilter),
+        request.filterDomain,
       )
     } yield {
       val results = res
@@ -922,4 +944,5 @@ class GrpcTopologyManagerReadService(
     }
     CantonGrpcUtil.mapErrNewEUS(ret)
   }
+
 }

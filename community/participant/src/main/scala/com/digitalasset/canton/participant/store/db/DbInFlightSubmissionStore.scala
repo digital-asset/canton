@@ -33,7 +33,7 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.TryUtil.ForFailedOps
-import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
+import com.digitalasset.canton.util.retry.NoExceptionRetryPolicy
 import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil, OptionUtil, SingleUseCell, retry}
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import slick.jdbc.{PositionedParameters, SetParameter}
@@ -318,7 +318,7 @@ class DbInFlightSubmissionStore(
               case Some(unsequenced) =>
                 if (unsequenced.timeout < newSequencingInfo.timeout) {
                   logger.warn(
-                    show"Sequencing timeout for submission (change ID hash $changeIdHash, message Id $messageId on $submissionDomain) is at ${unsequenced.timeout} before ${newSequencingInfo.timeout}. Current data: ${unsequenced}"
+                    show"Sequencing timeout for submission (change ID hash $changeIdHash, message Id $messageId on $submissionDomain) is at ${unsequenced.timeout} before ${newSequencingInfo.timeout}. Current data: $unsequenced"
                   )
                 } else {
                   // This should happen only if there are concurrent updates of unsequenced submissions.
@@ -427,7 +427,7 @@ object DbInFlightSubmissionStore {
       implicit val stopRetry: retry.Success[Boolean] = retry.Success[Boolean](Predef.identity)
       retry
         .Directly(logger, storage, retry.Forever, "register submission retry")
-        .unlessShutdown(oneRound, NoExnRetryable)
+        .unlessShutdown(oneRound, NoExceptionRetryPolicy)
         .onShutdown {
           fillEmptyCells(Success(AbortedDueToShutdown))
           true
@@ -527,7 +527,7 @@ object DbInFlightSubmissionStore {
     /** A list of queries for the items that we want to check for */
     override protected def checkQuery(submissionsToCheck: NonEmpty[Seq[ChangeIdHash]])(implicit
         batchTraceContext: TraceContext
-    ): immutable.Iterable[ReadOnly[immutable.Iterable[CheckData]]] = {
+    ): immutable.Iterable[ReadOnly[immutable.Iterable[CheckData]]] =
       DbStorage.toInClauses_("change_id_hash", submissionsToCheck, maxItemsInSqlInClause).map {
         inClause =>
           import DbStorage.Implicits.BuilderChain.*
@@ -536,7 +536,6 @@ object DbInFlightSubmissionStore {
               from par_in_flight_submission where """ ++ inClause
           query.as[InFlightSubmission[SubmissionSequencingInfo]]
       }
-    }
 
     override protected def analyzeFoundData(
         submission: InFlightSubmission[UnsequencedSubmission],

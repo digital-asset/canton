@@ -93,9 +93,8 @@ trait InstanceReference
   @Help.Description(
     "Some commands cache values on the client side. Use this command to explicitly clear the caches of these values."
   )
-  def clear_cache(): Unit = {
+  def clear_cache(): Unit =
     topology.clearCache()
-  }
 
   type Status <: NodeStatus.Status
 
@@ -199,11 +198,10 @@ trait LocalInstanceReference extends InstanceReference with NoTracing {
 
     private def filterByNodeAndAttribute(
         attributes: Map[String, String]
-    )(value: MetricValue): Boolean = {
+    )(value: MetricValue): Boolean =
       value.attributes.get("node").contains(name) && attributes.forall { case (k, v) =>
         value.attributes.get(k).contains(v)
       }
-    }
 
     private def getOne(
         metricName: String,
@@ -221,7 +219,7 @@ trait LocalInstanceReference extends InstanceReference with NoTracing {
       res match {
         case one :: Nil => Right(one)
         case Nil =>
-          Left(s"No metric of name ${metricName} with instance name ${name} found.")
+          Left(s"No metric of name $metricName with instance name $name found.")
         case other => Left(s"Found ${other.length} matching metrics")
       }
     }
@@ -314,11 +312,11 @@ trait LocalInstanceReference extends InstanceReference with NoTracing {
 
   private[console] def startCommand(): ConsoleCommandResult[Unit] =
     startInstance()
-      .toResult({
+      .toResult {
         case m: PendingDatabaseMigration =>
           s"${m.message} Please run `${m.name}.db.migrate` to apply pending migrations"
         case m => m.message
-      })
+      }
 
   private[console] def stopCommand(): ConsoleCommandResult[Unit] =
     try {
@@ -328,11 +326,10 @@ trait LocalInstanceReference extends InstanceReference with NoTracing {
     }
 
   protected def migrateInstanceDb(): Either[StartupError, ?] = nodes.migrateDatabase(name)
-  protected def repairMigrationOfInstance(force: Boolean): Either[StartupError, Unit] = {
+  protected def repairMigrationOfInstance(force: Boolean): Either[StartupError, Unit] =
     Either
       .cond(force, (), DidntUseForceOnRepairMigration(name))
       .flatMap(_ => nodes.repairDatabaseMigration(name))
-  }
 
   protected def startInstance(): Either[StartupError, Unit] =
     nodes.startAndWait(name)
@@ -349,12 +346,11 @@ trait LocalInstanceReference extends InstanceReference with NoTracing {
 
   override protected[console] def adminCommand[Result](
       grpcCommand: GrpcAdminCommand[?, ?, Result]
-  ): ConsoleCommandResult[Result] = {
+  ): ConsoleCommandResult[Result] =
     runCommandIfRunning(
       consoleEnvironment.grpcAdminCommandRunner
         .runCommand(name, grpcCommand, config.clientAdminApi, None)
     )
-  }
 
 }
 
@@ -508,7 +504,12 @@ abstract class ParticipantReference(
   override def health: ParticipantHealthAdministration =
     new ParticipantHealthAdministration(this, consoleEnvironment, loggerFactory)
 
-  override def parties: ParticipantPartiesAdministrationGroup
+  @Help.Summary("Inspect and manage parties")
+  @Help.Group("Parties")
+  def parties: ParticipantPartiesAdministrationGroup = partiesGroup
+  // above command needs to be def such that `Help` works.
+  lazy private val partiesGroup =
+    new ParticipantPartiesAdministrationGroup(id, this, consoleEnvironment, loggerFactory)
 
   private lazy val topology_ =
     new TopologyAdministrationGroup(
@@ -604,14 +605,6 @@ class RemoteParticipantReference(environment: ConsoleEnvironment, override val n
     extends ParticipantReference(environment, name)
     with RemoteInstanceReference {
 
-  @Help.Summary("Inspect and manage parties")
-  @Help.Group("Parties")
-  override def parties: ParticipantPartiesAdministrationGroup = partiesGroup
-
-  // above command needs to be def such that `Help` works.
-  lazy private val partiesGroup =
-    new ParticipantPartiesAdministrationGroup(id, this, consoleEnvironment)
-
   @Help.Summary("Return remote participant config")
   def config: RemoteParticipantConfig =
     consoleEnvironment.environment.config.remoteParticipantsByString(name)
@@ -641,13 +634,12 @@ class RemoteParticipantReference(environment: ConsoleEnvironment, override val n
   @Help.Group("Repair")
   def repair: ParticipantRepairAdministration = repair_
 
-  override def equals(obj: Any): Boolean = {
+  override def equals(obj: Any): Boolean =
     obj match {
       case x: RemoteParticipantReference =>
         x.consoleEnvironment == consoleEnvironment && x.name == name
       case _ => false
     }
-  }
 
 }
 
@@ -672,15 +664,6 @@ class LocalParticipantReference(
 
   /** secret, not publicly documented way to get the admin token */
   def adminToken: Option[String] = underlying.map(_.adminToken.secret)
-
-  // TODO(#14048) these are "remote" groups. the normal participant node has "local" versions.
-  //   but rather than keeping this, we should make local == remote and add local methods separately
-  @Help.Summary("Inspect and manage parties")
-  @Help.Group("Parties")
-  def parties: LocalParticipantPartiesAdministrationGroup = partiesGroup
-  // above command needs to be def such that `Help` works.
-  lazy private val partiesGroup =
-    new LocalParticipantPartiesAdministrationGroup(this, this, consoleEnvironment, loggerFactory)
 
   private lazy val testing_ =
     new LocalParticipantTestingGroup(this, consoleEnvironment, loggerFactory)
@@ -732,13 +715,12 @@ abstract class SequencerReference(
   private def disable_member(member: Member): Unit =
     repair.disable_member(member)
 
-  override def equals(obj: Any): Boolean = {
+  override def equals(obj: Any): Boolean =
     obj match {
       case x: SequencerReference =>
         x.consoleEnvironment == consoleEnvironment && x.name == name
       case _ => false
     }
-  }
 
   override protected val instanceType: String = SequencerReference.InstanceType
   override protected val loggerFactory: NamedLoggerFactory =
@@ -806,7 +788,7 @@ abstract class SequencerReference(
     sequencerTrafficControl
 
   @Help.Summary("Return domain id of the domain")
-  def domain_id: DomainId = {
+  def domain_id: DomainId =
     domainId.get() match {
       case Some(id) => id
       case None =>
@@ -817,7 +799,6 @@ abstract class SequencerReference(
 
         id
     }
-  }
 
   object mediators {
     object groups {
@@ -923,7 +904,7 @@ abstract class SequencerReference(
   object domain_parameters {
     object static {
       @Help.Summary("Return static domain parameters of the domain")
-      def get(): ConsoleStaticDomainParameters = {
+      def get(): ConsoleStaticDomainParameters =
         staticDomainParameters.get() match {
           case Some(parameters) => parameters
           case None =>
@@ -934,7 +915,6 @@ abstract class SequencerReference(
             staticDomainParameters.set(Some(parameters))
             parameters
         }
-      }
     }
   }
 
@@ -1045,11 +1025,10 @@ abstract class SequencerReference(
       """Similar to the above `prune` command but allows specifying the exact time at which to prune.
         |The command will fail if a client has not yet read and acknowledged some data up to the specified time."""
     )
-    def prune_at(timestamp: CantonTimestamp): String = {
+    def prune_at(timestamp: CantonTimestamp): String =
       this.consoleEnvironment.run {
         runner.adminCommand(EnterpriseSequencerAdminCommands.Prune(timestamp))
       }
-    }
 
     @Help.Summary(
       "Force removing data from the Sequencer including data that may have not been read by offline clients up until the specified time"

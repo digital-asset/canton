@@ -39,7 +39,8 @@ final class ConcurrencyLimiterSpec extends AsyncFlatSpec {
   it should "limit the parallelism to the level of the execution context" in {
     ConcurrencyLimiterSpec.runTest(
       createLimiter = ec => new QueueBasedConcurrencyLimiter(8, ec),
-      waitTimeMillis = 1,
+      // Ensure the futures don't complete too fast, so that the target parallelism can be reached
+      waitTimeMillis = 10,
       threads = 4,
       items = 100,
       parallelism = 8,
@@ -115,7 +116,7 @@ object ConcurrencyLimiterSpec extends Assertions {
 
     Future
       .sequence(results)
-      .map(xs => {
+      .map { xs =>
         val actualParallelism = xs.max + 1
         expectedParallelism.foreach(expected =>
           assert(
@@ -124,6 +125,6 @@ object ConcurrencyLimiterSpec extends Assertions {
           )
         )
         succeed
-      })
+      }
   }
 }

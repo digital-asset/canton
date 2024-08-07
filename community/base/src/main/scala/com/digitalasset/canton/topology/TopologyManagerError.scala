@@ -22,6 +22,7 @@ import com.digitalasset.canton.topology.transaction.TopologyTransaction.{
   TxHash,
 }
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.daml.lf.data.Ref.PackageId
 
 sealed trait TopologyManagerError extends CantonError
 
@@ -47,7 +48,7 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
     final case class Other(s: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          cause = s"TODO(#14048) other failure: ${s}"
+          cause = s"TODO(#14048) other failure: $s"
         )
         with TopologyManagerError
 
@@ -83,7 +84,7 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause =
-            s"Topology transaction with hash ${txHash} does not exist or is not active or is not an active proposal at $effective"
+            s"Topology transaction with hash $txHash does not exist or is not active or is not an active proposal at $effective"
         )
         with TopologyManagerError
   }
@@ -112,6 +113,7 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         )
         with TopologyManagerError
   }
+
   @Explanation(
     """This error indicates that the secret key with the respective fingerprint can not be found."""
   )
@@ -224,10 +226,11 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
           cause = "The given topology transaction already exists."
         )
         with TopologyManagerError
+
     final case class ExistsAt(ts: CantonTimestamp)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          cause = s"The given topology transaction already exists at ${ts}."
+          cause = s"The given topology transaction already exists at $ts."
         )
         with TopologyManagerError
   }
@@ -458,20 +461,6 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         with TopologyManagerError
   }
 
-  object PartyExceedsHostingLimit
-      extends ErrorCode(
-        id = "PARTY_EXCEEDS_HOSTING_LIMIT",
-        ErrorCategory.InvalidIndependentOfSystemState,
-      ) {
-    final case class Reject(party: PartyId, limit: Int, numParticipants: Int)(implicit
-        override val loggingContext: ErrorLoggingContext
-    ) extends CantonError.Impl(
-          cause =
-            s"Party $party exceeds hosting limit of $limit with desired number of $numParticipants hosting participant."
-        )
-        with TopologyManagerError
-  }
-
   @Explanation(
     "This error indicates that the topology transaction references members that are currently unknown."
   )
@@ -584,6 +573,26 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
   }
 
   @Explanation(
+    """This error indicates that the removal of a topology mapping also changed the content compared
+      |to the mapping with the previous serial."""
+  )
+  @Resolution(
+    "Submit the transaction with the same topology mapping as the previous serial, but with the operation REMOVE."
+  )
+  object RemoveMustNotChangeMapping
+      extends ErrorCode(
+        id = "TOPOLOGY_REMOVE_MUST_NOT_CHANGE_MAPPING",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    final case class Reject(actual: TopologyMapping, expected: TopologyMapping)(implicit
+        override val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(cause = s"""REMOVE must not change the topology mapping:
+         |actual: $actual
+         |expected: $expected""".stripMargin)
+        with TopologyManagerError {}
+  }
+
+  @Explanation(
     "This error indicates that the submitted topology snapshot was internally inconsistent."
   )
   @Resolution(
@@ -659,9 +668,9 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
     "This error indicates that the partyId to allocate is the same as an already existing admin party."
   )
   @Resolution("Submit the topology transaction with a changed partyId.")
-  object PartyIdIsAdminParty
+  object PartyIdConflictWithAdminParty
       extends ErrorCode(
-        id = "TOPOLOGY_PARTY_ID_IS_ADMIN_PARTY",
+        id = "TOPOLOGY_PARTY_ID_CONFLICT_WITH_ADMIN_PARTY",
         ErrorCategory.InvalidGivenCurrentSystemStateResourceExists,
       ) {
     final case class Reject(partyId: PartyId)(implicit
@@ -679,9 +688,9 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
   @Resolution(
     "Change the identity of the participant by either changing the namespace or the participant's UID and try to onboard to the domain again."
   )
-  object ParticipantIdClashesWithPartyId
+  object ParticipantIdConflictWithPartyId
       extends ErrorCode(
-        id = "TOPOLOGY_PARTICIPANT_ID_CLASH_WITH_PARTY",
+        id = "TOPOLOGY_PARTICIPANT_ID_CONFLICT_WITH_PARTY",
         ErrorCategory.InvalidGivenCurrentSystemStateResourceExists,
       ) {
     final case class Reject(participantId: ParticipantId, partyId: PartyId)(implicit
@@ -694,6 +703,69 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
   }
 
   abstract class DomainErrorGroup extends ErrorGroup()
+
   abstract class ParticipantErrorGroup extends ErrorGroup()
 
+  object ParticipantTopologyManagerError extends ParticipantErrorGroup {
+    @Explanation(
+      """This error indicates that a dangerous package vetting command was rejected.
+        |This is the case when a command is revoking the vetting of a package.
+        |Use the force flag to revoke the vetting of a package."""
+    )
+    @Resolution("Set the ForceFlag.PackageVettingRevocation if you really know what you are doing.")
+    object DangerousVettingCommandsRequireForce
+        extends ErrorCode(
+          id = "DANGEROUS_VETTING_COMMAND_REQUIRES_FORCE_FLAG",
+          ErrorCategory.InvalidGivenCurrentSystemStateOther,
+        ) {
+      final case class Reject()(implicit val loggingContext: ErrorLoggingContext)
+          extends CantonError.Impl(
+            cause = "Revoking a vetted package requires ForceFlag.PackageVettingRevocation"
+          )
+          with TopologyManagerError
+    }
+
+    @Explanation(
+      """This error indicates a vetting request failed due to dependencies not being vetted.
+        |On every vetting request, the set supplied packages is analysed for dependencies. The
+        |system requires that not only the main packages are vetted explicitly but also all dependencies.
+        |This is necessary as not all participants are required to have the same packages installed and therefore
+        |not every participant can resolve the dependencies implicitly."""
+    )
+    @Resolution("Vet the dependencies first and then repeat your attempt.")
+    object DependenciesNotVetted
+        extends ErrorCode(
+          id = "DEPENDENCIES_NOT_VETTED",
+          ErrorCategory.InvalidGivenCurrentSystemStateOther,
+        ) {
+      final case class Reject(unvetted: Set[PackageId])(implicit
+          val loggingContext: ErrorLoggingContext
+      ) extends CantonError.Impl(
+            cause = "Package vetting failed due to dependencies not being vetted"
+          )
+          with TopologyManagerError
+    }
+
+    @Explanation(
+      """This error indicates that a package vetting command failed due to packages not existing locally.
+        |This can be due to either the packages not being present or their dependencies being missing.
+        |When vetting a package, the package must exist on the participant, as otherwise the participant
+        |will not be able to process a transaction relying on a particular package."""
+    )
+    @Resolution(
+      "Ensure that the package exists locally before issuing such a transaction."
+    )
+    object CannotVetDueToMissingPackages
+        extends ErrorCode(
+          id = "CANNOT_VET_DUE_TO_MISSING_PACKAGES",
+          ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
+        ) {
+      final case class Missing(packages: PackageId)(implicit
+          val loggingContext: ErrorLoggingContext
+      ) extends CantonError.Impl(
+            cause = "Package vetting failed due to packages not existing on the local node"
+          )
+          with TopologyManagerError
+    }
+  }
 }

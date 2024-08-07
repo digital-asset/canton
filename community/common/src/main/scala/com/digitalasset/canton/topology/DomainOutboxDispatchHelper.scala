@@ -23,7 +23,7 @@ import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
+import com.digitalasset.canton.util.retry.AllExceptionRetryPolicy
 import com.digitalasset.canton.util.{FutureUtil, retry}
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -58,22 +58,10 @@ trait DomainOutboxDispatchHelper extends NamedLogging {
 
   protected def onlyApplicable(
       transactions: Seq[GenericSignedTopologyTransaction]
-  ): Future[Seq[GenericSignedTopologyTransaction]] = {
-    def notAlien(tx: GenericSignedTopologyTransaction): Boolean = {
-      val mapping = tx.mapping
-      mapping match {
-        // TODO(#14048) add filter criteria here
-        case _ => true
-      }
-    }
-
-    def domainRestriction(tx: GenericSignedTopologyTransaction): Boolean =
-      tx.mapping.restrictedToDomain.forall(_ == domainId)
-
+  ): Future[Seq[GenericSignedTopologyTransaction]] =
     Future.successful(
-      transactions.filter(x => notAlien(x) && domainRestriction(x))
+      transactions.filter(x => x.mapping.restrictedToDomain.forall(_ == domainId))
     )
-  }
 
   protected def isFailedState(response: TopologyTransactionsBroadcast.State): Boolean =
     response == TopologyTransactionsBroadcast.State.Failed
@@ -94,7 +82,7 @@ trait StoreBasedDomainOutboxDispatchHelper extends DomainOutboxDispatchHelper {
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, /*DomainRegistryError*/ String, Seq[
     GenericSignedTopologyTransaction
-  ]] = {
+  ]] =
     transactions
       .parTraverse { tx =>
         if (tx.transaction.isEquivalentTo(protocolVersion)) {
@@ -118,7 +106,6 @@ trait StoreBasedDomainOutboxDispatchHelper extends DomainOutboxDispatchHelper {
             }
         }
       }
-  }
 
 }
 
@@ -130,7 +117,7 @@ trait QueueBasedDomainOutboxDispatchHelper extends DomainOutboxDispatchHelper {
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, /*DomainRegistryError*/ String, Seq[
     GenericSignedTopologyTransaction
-  ]] = {
+  ]] =
     transactions
       .parTraverse { tx =>
         if (tx.transaction.isEquivalentTo(protocolVersion)) {
@@ -141,7 +128,6 @@ trait QueueBasedDomainOutboxDispatchHelper extends DomainOutboxDispatchHelper {
             .asVersion(tx, protocolVersion)(crypto)
         }
       }
-  }
 }
 
 trait DomainOutboxDispatch extends NamedLogging with FlagCloseable {
@@ -198,7 +184,7 @@ trait DomainOutboxDispatch extends NamedLogging with FlagCloseable {
               s"Pushing topology transactions to $domain",
             )
           },
-          AllExnRetryable,
+          AllExceptionRetryPolicy,
         )
         .map { responses =>
           if (responses.length != transactions.length) {

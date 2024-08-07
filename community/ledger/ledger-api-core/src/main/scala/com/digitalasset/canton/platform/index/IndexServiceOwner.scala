@@ -111,9 +111,11 @@ final class IndexServiceOwner(
         contractStore = contractStore,
         pruneBuffers = inMemoryState.inMemoryFanoutBuffer.prune,
         dispatcher = () => inMemoryState.dispatcherState.getDispatcher,
+        fetchOffsetCheckpoint = () => inMemoryState.offsetCheckpointCache.getOffsetCheckpoint,
         getPackageMetadataSnapshot = getPackageMetadataSnapshot,
         metrics = metrics,
         loggerFactory = loggerFactory,
+        idleStreamOffsetCheckpointTimeout = config.idleStreamOffsetCheckpointTimeout,
       )
     } yield new TimedIndexService(indexService, metrics)
   }

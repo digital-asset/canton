@@ -49,8 +49,7 @@ private[mediator] class MediatorEventsProcessor(
 
     val envelopesByEvent = envelopesGroupedByEvent(events)
     for {
-      deduplicatorResult <-
-        deduplicator.rejectDuplicates(envelopesByEvent)
+      deduplicatorResult <- deduplicator.rejectDuplicates(envelopesByEvent)
       (uniqueEnvelopesByEvent, storeF) = deduplicatorResult
       lastEvent = events.last1
 
@@ -170,7 +169,7 @@ private[mediator] object MediatorEventsProcessor {
       mediatorEventDeduplicator: MediatorEventDeduplicator,
       metrics: MediatorMetrics,
       loggerFactory: NamedLoggerFactory,
-  )(implicit executionContext: ExecutionContext): MediatorEventsProcessor = {
+  )(implicit executionContext: ExecutionContext): MediatorEventsProcessor =
     new MediatorEventsProcessor(
       identityClientEventHandler,
       processor.handleRequestEvents,
@@ -178,5 +177,4 @@ private[mediator] object MediatorEventsProcessor {
       metrics,
       loggerFactory,
     )
-  }
 }

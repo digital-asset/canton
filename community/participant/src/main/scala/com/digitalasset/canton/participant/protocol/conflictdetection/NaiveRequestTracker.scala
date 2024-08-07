@@ -91,9 +91,8 @@ private[participant] class NaiveRequestTracker(
 
   override def tick(sc: SequencerCounter, timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Unit = {
+  ): Unit =
     taskScheduler.addTick(sc, timestamp)
-  }
 
   override def addRequest(
       rc: RequestCounter,
@@ -252,7 +251,7 @@ private[participant] class NaiveRequestTracker(
         ],
     ): Either[CommitSetError, EitherT[FutureUnlessShutdown, NonEmptyChain[
       RequestTrackerStoreError
-    ], Unit]] = {
+    ], Unit]] =
       // Complete the promise only if we're not shutting down.
       performUnlessClosing(functionFullName) {
         commitSetPromise.tryComplete(commitSet.map(UnlessShutdown.Outcome(_)))
@@ -288,7 +287,6 @@ private[participant] class NaiveRequestTracker(
             Left(CommitSetAlreadyExists(rc))
           }
       }
-    }
 
     for {
       data <- requests.get(rc).toRight(RequestNotFound(rc))
@@ -316,10 +314,10 @@ private[participant] class NaiveRequestTracker(
     val _ = requests.remove(rc)
   }
 
-  override def awaitTimestamp(timestamp: CantonTimestamp)(implicit
+  override def awaitTimestampUS(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Option[Future[Unit]] =
-    taskScheduler.scheduleBarrier(timestamp)
+  ): Option[FutureUnlessShutdown[Unit]] =
+    taskScheduler.scheduleBarrierUS(timestamp)
 
   /** Releases all locks that are held by the given request */
   private[this] def releaseAllLocks(rc: RequestCounter, requestTimestamp: CantonTimestamp)(implicit

@@ -33,14 +33,14 @@ class TopologyStoreTestData(
         op,
         serial,
         mapping,
-        ProtocolVersion.v31,
+        ProtocolVersion.v32,
       ),
       signatures = NonEmpty(Set, Signature.noSignature),
       isProposal = isProposal,
     )(
       SignedTopologyTransaction.supportedProtoVersions
         .protocolVersionRepresentativeFor(
-          ProtocolVersion.v31
+          ProtocolVersion.v32
         )
     )
 
@@ -128,16 +128,12 @@ class TopologyStoreTestData(
     DomainTrustCertificate(
       participantId2,
       domainId1,
-      transferOnlyToGivenTargetDomains = false,
-      targetDomains = Seq.empty,
     )
   )
   val tx6_DTC_Update = makeSignedTx(
     DomainTrustCertificate(
       participantId2,
       domainId1,
-      transferOnlyToGivenTargetDomains = true,
-      targetDomains = Seq(domainId1),
     ),
     serial = PositiveInt.tryCreate(2),
   )

@@ -62,6 +62,12 @@ class SequencerMetrics(
       new HealthMetrics(openTelemetryMetricsFactory),
     )
 
+  lazy val dbSequencer: DatabaseSequencerMetrics =
+    new DatabaseSequencerMetrics(
+      prefix,
+      openTelemetryMetricsFactory,
+    )
+
   override def storageMetrics: DbStorageMetrics = dbStorage
 
   object block extends BlockMetrics(prefix, openTelemetryMetricsFactory)
@@ -161,6 +167,16 @@ class SequencerMetrics(
         )
       )
 
+    val wastedSequencingCounter: Counter = openTelemetryMetricsFactory.counter(
+      MetricInfo(
+        prefix :+ "wasted-sequencing-counter",
+        summary =
+          "Number of events that failed traffic validation and were not delivered because of it.",
+        description = """Counter for wasted-sequencing.""",
+        qualification = MetricQualification.Traffic,
+      )
+    )
+
     val wastedTraffic: Meter = openTelemetryMetricsFactory.meter(
       MetricInfo(
         prefix :+ "wasted-traffic",
@@ -172,11 +188,11 @@ class SequencerMetrics(
       )
     )
 
-    val eventDelivered: Meter = openTelemetryMetricsFactory.meter(
+    val wastedTrafficCounter: Counter = openTelemetryMetricsFactory.counter(
       MetricInfo(
-        prefix :+ "event-delivered-cost",
-        summary = "Cost of delivered event.",
-        description = """Cost of an event that was delivered.""",
+        prefix :+ "wasted-traffic-counter",
+        summary = "Number of events that cost traffic but were not delivered.",
+        description = """Counter for wasted-traffic.""",
         qualification = MetricQualification.Traffic,
       )
     )
@@ -227,7 +243,7 @@ object SequencerMetrics {
         logger: TracedLogger,
         warnOnUnexpected: Boolean = true,
     )(implicit traceContext: TraceContext): MetricsContext = {
-      val messageType = {
+      val messageType =
         // by looking at the recipient lists and the sender, we'll figure out what type of message we've been getting
         (sender, participants, mediators, sequencers, broadcast) match {
           case (ParticipantId(_), false, true, false, false) =>
@@ -257,7 +273,6 @@ object SequencerMetrics {
               logger.warn(s"Unexpected message from $sender to " + recipients.mkString(","))
             "send-unexpected"
         }
-      }
       MetricsContext(
         "sender" -> sender.toString,
         "type" -> messageType,
@@ -270,7 +285,7 @@ object SequencerMetrics {
       sender: Member,
       logger: TracedLogger,
       warnOnUnexpected: Boolean = true,
-  )(implicit traceContext: TraceContext): MetricsContext = {
+  )(implicit traceContext: TraceContext): MetricsContext =
     allRecipients
       .foldLeft(RecipientStats()) {
         case (acc, MemberRecipient(ParticipantId(_)) | ParticipantsOfParty(_)) =>
@@ -282,7 +297,6 @@ object SequencerMetrics {
         case (acc, AllMembersOfDomain) => acc.copy(broadcast = true)
       }
       .metricsContext(sender, logger, warnOnUnexpected)
-  }
 }
 
 class MediatorHistograms(val parent: MetricName)(implicit
@@ -348,18 +362,4 @@ class MediatorMetrics(
     )(
       MetricsContext.Empty
     )
-
-  // TODO(i14580): add testing
-  object trafficControl {
-    val eventRejected: Meter = openTelemetryMetricsFactory.meter(
-      MetricInfo(
-        prefix :+ "event-rejected",
-        summary = "Event rejected because of traffic limit exceeded",
-        description =
-          """This metric is being incremented every time a sequencer rejects an event because
-           the sender does not have enough credit.""",
-        qualification = MetricQualification.Traffic,
-      )
-    )
-  }
 }

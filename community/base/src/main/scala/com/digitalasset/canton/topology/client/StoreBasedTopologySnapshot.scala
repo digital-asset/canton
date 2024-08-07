@@ -12,6 +12,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{
+  DynamicDomainParameters,
   DynamicDomainParametersWithValidity,
   DynamicSequencingParametersWithValidity,
 }
@@ -226,7 +227,7 @@ class StoreBasedTopologySnapshot(
           TopologyMapping,
         ],
         code: TopologyMapping.Code,
-    ): Seq[M] = {
+    ): Seq[M] =
       storedTransactions
         .collectOfMapping[M]
         .result
@@ -242,7 +243,6 @@ class StoreBasedTopologySnapshot(
           )
         }
         .toSeq
-    }
 
     for {
       // get all party to participant mappings and also participant states for this uid (latter to mix in admin parties)
@@ -310,12 +310,11 @@ class StoreBasedTopologySnapshot(
                   .get(participantId)
                   .map { participantAttributes =>
                     // Use the lower permission between party and the permission granted to the participant by the domain
-                    val reducedPermission = {
+                    val reducedPermission =
                       ParticipantPermission.lowerOf(
                         partyPermission,
                         participantAttributes.permission,
                       )
-                    }
                     participantId -> ParticipantAttributes(
                       reducedPermission,
                       None,
@@ -487,7 +486,7 @@ class StoreBasedTopologySnapshot(
   private def getParticipantsWithCertAndKeys(
       storedTxs: StoredTopologyTransactions[Replace, TopologyMapping],
       participantsWithCertificates: Set[ParticipantId],
-  )(implicit traceContext: TraceContext): Set[ParticipantId] = {
+  )(implicit traceContext: TraceContext): Set[ParticipantId] =
     storedTxs
       .collectOfMapping[OwnerToKeyMapping]
       .result
@@ -503,12 +502,11 @@ class StoreBasedTopologySnapshot(
           pid
       }
       .toSet
-  }
 
   private def getParticipantDomainPermissions(
       storedTxs: StoredTopologyTransactions[Replace, TopologyMapping],
       participantsWithCertAndKeys: Set[ParticipantId],
-  )(implicit traceContext: TraceContext): Map[ParticipantId, ParticipantDomainPermission] = {
+  )(implicit traceContext: TraceContext): Map[ParticipantId, ParticipantDomainPermission] =
     storedTxs
       .collectOfMapping[ParticipantDomainPermission]
       .result
@@ -526,12 +524,11 @@ class StoreBasedTopologySnapshot(
           pid -> mapping
       }
 
-  }
   private def loadParticipantStatesHelper(
       participantsFilter: Seq[ParticipantId]
   )(implicit
       traceContext: TraceContext
-  ): Future[Map[ParticipantId, ParticipantDomainPermission]] = {
+  ): Future[Map[ParticipantId, ParticipantDomainPermission]] =
     for {
       // Looks up domain parameters for default rate limits.
       domainParametersState <- findTransactions(
@@ -567,7 +564,7 @@ class StoreBasedTopologySnapshot(
       // Warn about participants with cert but no keys
       (participantsWithCertificates -- participantsWithCertAndKeys).foreach { pid =>
         logger.warn(
-          s"Participant ${pid} has a domain trust certificate, but no keys on domain ${domainParametersState.domain}"
+          s"Participant $pid has a domain trust certificate, but no keys on domain ${domainParametersState.domain}"
         )
       }
       // 3. Attempt to look up permissions/trust from participant domain permission
@@ -581,11 +578,10 @@ class StoreBasedTopologySnapshot(
             pid,
             ParticipantDomainPermission.default(domainParametersState.domain, pid),
           )
-          .setDefaultLimitIfNotSet(domainParametersState.parameters.v2DefaultParticipantLimits)
+          .setDefaultLimitIfNotSet(DynamicDomainParameters.defaultParticipantDomainLimits)
       }.toMap
       participantIdDomainPermissionsMap
     }
-  }
 
   /** abstract loading function used to load the participant state for the given set of participant-ids */
   override def loadParticipantStates(
@@ -624,7 +620,7 @@ class StoreBasedTopologySnapshot(
         }
     }
 
-  override def allMembers()(implicit traceContext: TraceContext): Future[Set[Member]] = {
+  override def allMembers()(implicit traceContext: TraceContext): Future[Set[Member]] =
     findTransactions(
       asOfInclusive = false,
       types = Seq(
@@ -645,7 +641,6 @@ class StoreBasedTopologySnapshot(
         }
         .toSet
     )
-  }
 
   override def isMemberKnown(member: Member)(implicit traceContext: TraceContext): Future[Boolean] =
     areMembersKnown(Set(member)).map(_.nonEmpty)
@@ -709,7 +704,7 @@ class StoreBasedTopologySnapshot(
 
   override def memberFirstKnownAt(
       member: Member
-  )(implicit traceContext: TraceContext): Future[Option[(SequencedTime, EffectiveTime)]] = {
+  )(implicit traceContext: TraceContext): Future[Option[(SequencedTime, EffectiveTime)]] =
     member match {
       case participantId: ParticipantId =>
         store
@@ -730,7 +725,6 @@ class StoreBasedTopologySnapshot(
           )
         )
     }
-  }
 
   private def collectLatestMapping[T <: TopologyMapping](
       typ: TopologyMapping.Code,

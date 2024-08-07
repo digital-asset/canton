@@ -249,7 +249,7 @@ private[mediator] class Mediator(
     new ApplicationHandler[Lambda[
       `+X <: Envelope[_]` => Traced[Seq[OrdinarySequencedEvent[X]]]
     ], ClosedEnvelope] {
-      override def name: String = s"mediator-${mediatorId}"
+      override def name: String = s"mediator-$mediatorId"
 
       override def subscriptionStartsAt(
           start: SubscriptionStart,
@@ -272,9 +272,7 @@ private[mediator] class Mediator(
               .flatMap(_.toFuture(new RuntimeException(_)))
           )
 
-          decisionTime <- FutureUnlessShutdown.outcomeF(
-            domainParameters.decisionTimeForF(timestamp)
-          )
+          decisionTime <- domainParameters.decisionTimeForF(timestamp)
           _ <- verdictSender.sendReject(
             requestId,
             None,
@@ -287,7 +285,7 @@ private[mediator] class Mediator(
 
       override def apply(
           tracedEvents: Traced[Seq[BoxedEnvelope[OrdinarySequencedEvent, ClosedEnvelope]]]
-      ): HandlerResult = {
+      ): HandlerResult =
         tracedEvents.withTraceContext { implicit traceContext => events =>
           val tracedOpenEventsWithRejectionsF = events.map { closedSignedEvent =>
             val closedEvent = closedSignedEvent.signedEvent.content
@@ -299,7 +297,7 @@ private[mediator] class Mediator(
 
             val rejectionsF = openingErrors.parTraverse_ { error =>
               val cause =
-                s"Received an envelope at ${closedEvent.timestamp} that cannot be opened. Discarding envelope... Reason: ${error}"
+                s"Received an envelope at ${closedEvent.timestamp} that cannot be opened. Discarding envelope... Reason: $error"
               val alarm = MediatorError.MalformedMessage.Reject(cause)
               alarm.report()
 
@@ -338,7 +336,6 @@ private[mediator] class Mediator(
 
           rejectionsF.sequence_.flatMap { case () => result }
         }
-      }
     }
 
   override def closeAsync() =

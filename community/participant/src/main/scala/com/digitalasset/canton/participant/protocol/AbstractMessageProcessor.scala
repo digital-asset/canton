@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol
 
 import cats.syntax.either.*
 import cats.syntax.functor.*
+import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, DomainSyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -86,6 +87,9 @@ abstract class AbstractMessageProcessor(
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
+    implicit val metricsContext: MetricsContext = MetricsContext(
+      "type" -> "send-confirmation-response"
+    )
     if (messages.isEmpty) FutureUnlessShutdown.unit
     else {
       logger.trace(s"Request $requestId: ProtocolProcessor scheduling the sending of responses")
@@ -128,7 +132,7 @@ abstract class AbstractMessageProcessor(
       requestCounter: RequestCounter,
       sequencerCounter: SequencerCounter,
       timestamp: CantonTimestamp,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     crypto.ips
       .awaitSnapshotUS(timestamp)
       .flatMap(snapshot => FutureUnlessShutdown.outcomeF(snapshot.findDynamicDomainParameters()))
@@ -160,7 +164,6 @@ abstract class AbstractMessageProcessor(
           onTimeout,
         )
       }
-  }
 
   private def registerRequestWithTimeout(
       requestCounter: RequestCounter,

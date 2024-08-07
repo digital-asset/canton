@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.instances.future.*
 import cats.instances.order.*
 import cats.syntax.semigroup.*
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.KeyPurpose
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, OnboardingRestriction}
@@ -64,6 +65,16 @@ class ValidatingTopologyMappingChecks(
         !(toValidate.operation == TopologyChangeOp.Remove && inStore.isEmpty),
         TopologyTransactionRejection.NoCorrespondingActiveTxToRevoke(toValidate.mapping),
       )
+    val checkRemoveDoesNotChangeMapping = EitherT.fromEither[Future](
+      inStore
+        .collect {
+          case expected
+              if toValidate.operation == TopologyChangeOp.Remove && toValidate.mapping != expected.mapping =>
+            TopologyTransactionRejection
+              .RemoveMustNotChangeMapping(toValidate.mapping, expected.mapping)
+        }
+        .toLeft(())
+    )
 
     lazy val checkOpt = (toValidate.mapping.code, inStore.map(_.mapping.code)) match {
       case (Code.DomainTrustCertificate, None | Some(Code.DomainTrustCertificate)) =>
@@ -156,8 +167,12 @@ class ValidatingTopologyMappingChecks(
       case _otherwise => None
     }
 
-    checkFirstIsNotRemove
-      .flatMap(_ => checkOpt.getOrElse(EitherTUtil.unit))
+    for {
+      _ <- checkFirstIsNotRemove
+      _ <- checkRemoveDoesNotChangeMapping
+      _ <- checkOpt.getOrElse(EitherTUtil.unit)
+    } yield ()
+
   }
 
   private def loadFromStore(
@@ -184,7 +199,7 @@ class ValidatingTopologyMappingChecks(
   private def ensureParticipantDoesNotHostParties(
       effective: EffectiveTime,
       participantId: ParticipantId,
-  )(implicit traceContext: TraceContext) = {
+  )(implicit traceContext: TraceContext) =
     for {
       storedPartyToParticipantMappings <- loadFromStore(effective, PartyToParticipant.code, None)
       participantHostsParties = storedPartyToParticipantMappings.result.view
@@ -203,24 +218,21 @@ class ValidatingTopologyMappingChecks(
       )
     } yield ()
 
-  }
-
   private def checkDomainTrustCertificateRemove(
       effective: EffectiveTime,
       toValidate: SignedTopologyTransaction[TopologyChangeOp, DomainTrustCertificate],
-  )(implicit traceContext: TraceContext): EitherT[Future, TopologyTransactionRejection, Unit] = {
+  )(implicit traceContext: TraceContext): EitherT[Future, TopologyTransactionRejection, Unit] =
     /* Checks that the DTC is not being removed if the participant still hosts a party.
      * This check is potentially quite expensive: we have to fetch all party to participant mappings, because
      * we cannot index by the hosting participants.
      */
     ensureParticipantDoesNotHostParties(effective, toValidate.mapping.participantId)
-  }
 
   private def loadDomainParameters(
       effective: EffectiveTime
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TopologyTransactionRejection, DynamicDomainParameters] = {
+  ): EitherT[Future, TopologyTransactionRejection, DynamicDomainParameters] =
     loadFromStore(effective, DomainParametersState.code).subflatMap { domainParamCandidates =>
       val params = domainParamCandidates.result.view
         .flatMap(_.selectMapping[DomainParametersState])
@@ -241,8 +253,6 @@ class ValidatingTopologyMappingChecks(
       }
     }
 
-  }
-
   private def checkDomainTrustCertificateReplace(
       effective: EffectiveTime,
       toValidate: SignedTopologyTransaction[TopologyChangeOp, DomainTrustCertificate],
@@ -251,11 +261,10 @@ class ValidatingTopologyMappingChecks(
     val participantId = toValidate.mapping.participantId
 
     def loadOnboardingRestriction()
-        : EitherT[Future, TopologyTransactionRejection, OnboardingRestriction] = {
+        : EitherT[Future, TopologyTransactionRejection, OnboardingRestriction] =
       loadDomainParameters(effective).map(_.onboardingRestriction)
-    }
 
-    def checkDomainIsNotLocked(restriction: OnboardingRestriction) = {
+    def checkDomainIsNotLocked(restriction: OnboardingRestriction) =
       EitherTUtil.condUnitET(
         restriction.isOpen, {
           logger.info(
@@ -269,11 +278,10 @@ class ValidatingTopologyMappingChecks(
             )
         },
       )
-    }
 
     def checkParticipantIsNotRestricted(
         restrictions: OnboardingRestriction
-    ): EitherT[Future, TopologyTransactionRejection, Unit] = {
+    ): EitherT[Future, TopologyTransactionRejection, Unit] =
       // using the flags to check for restrictions instead of == UnrestrictedOpen to be more
       // future proof in case we will add additional restrictions in the future and would miss a case,
       // because there is no exhaustiveness check without full pattern matching
@@ -324,7 +332,6 @@ class ValidatingTopologyMappingChecks(
             .OnboardingRestrictionInPlace(participantId, restrictions, None)
         )
       }
-    }
 
     def checkPartyIdDoesntExist() = for {
       ptps <- loadFromStore(
@@ -336,11 +343,15 @@ class ValidatingTopologyMappingChecks(
         .collectOfMapping[PartyToParticipant]
         .result
         .headOption
-        .map(_.mapping.partyId)
+        .map(_.mapping)
       _ <- conflictingPartyIdO match {
-        case Some(partyId) =>
-          EitherT.leftT[Future, Unit][TopologyTransactionRejection](
-            TopologyTransactionRejection.ParticipantIdClashesWithPartyId(participantId, partyId)
+        case Some(ptp) =>
+          isExplicitAdminPartyAllocation(
+            ptp,
+            TopologyTransactionRejection.ParticipantIdConflictWithPartyId(
+              participantId,
+              ptp.partyId,
+            ),
           )
         case None => EitherTUtil.unit[TopologyTransactionRejection]
       }
@@ -384,14 +395,17 @@ class ValidatingTopologyMappingChecks(
             )
         )
 
-        // check that the PTP doesn't try to allocate a party that is the same as an already existing admin party
+        // if we found a DTC with the same uid as the partyId,
+        // check that the PTP is an explicit admin party allocation, otherwise reject the PTP
         foundAdminPartyWithSameUID = participantTransactions
           .collectOfMapping[DomainTrustCertificate]
           .result
-          .find(_.mapping.participantId.uid == mapping.partyId.uid)
-        _ <- EitherTUtil.condUnitET[Future](
-          foundAdminPartyWithSameUID.isEmpty,
-          TopologyTransactionRejection.PartyIdIsAdminParty(mapping.partyId),
+          .exists(_.mapping.participantId.uid == mapping.partyId.uid)
+        _ <- EitherTUtil.ifThenET(foundAdminPartyWithSameUID)(
+          isExplicitAdminPartyAllocation(
+            mapping,
+            TopologyTransactionRejection.PartyIdConflictWithAdminParty(mapping.partyId),
+          )
         )
 
         // check that all participants are known on the domain
@@ -428,45 +442,8 @@ class ValidatingTopologyMappingChecks(
       }
     }
 
-    def checkHostingLimits(effective: EffectiveTime) = for {
-      hostingLimitsCandidates <- loadFromStore(
-        effective,
-        code = PartyHostingLimits.code,
-        filterUid = Some(Seq(toValidate.mapping.partyId.uid)),
-      )
-      hostingLimits = hostingLimitsCandidates.result.view
-        .flatMap(_.selectMapping[PartyHostingLimits])
-        .map(_.mapping.quota)
-        .toList
-      partyHostingLimit = hostingLimits match {
-        case Nil => // No hosting limits found. This is expected if no restrictions are in place
-          None
-        case quota :: Nil => Some(quota)
-        case multiple @ quota :: _ =>
-          logger.error(
-            s"Multiple PartyHostingLimits at $effective ${multiple.size}. Using first one with quota $quota."
-          )
-          Some(quota)
-      }
-      // TODO(#14050) load default party hosting limits from dynamic domain parameters in case the party
-      //              doesn't have a specific PartyHostingLimits mapping issued by the domain.
-      _ <- partyHostingLimit match {
-        case Some(limit) =>
-          EitherTUtil.condUnitET[Future][TopologyTransactionRejection](
-            toValidate.mapping.participants.size <= limit,
-            TopologyTransactionRejection.PartyExceedsHostingLimit(
-              toValidate.mapping.partyId,
-              limit,
-              toValidate.mapping.participants.size,
-            ),
-          )
-        case None => EitherTUtil.unit[TopologyTransactionRejection]
-      }
-    } yield ()
-
     for {
       _ <- checkParticipants()
-      _ <- checkHostingLimits(effective)
     } yield ()
 
   }
@@ -505,13 +482,12 @@ class ValidatingTopologyMappingChecks(
   private def checkOwnerToKeyMappingRemove(
       effective: EffectiveTime,
       toValidate: SignedTopologyTransaction[TopologyChangeOp.Remove, OwnerToKeyMapping],
-  )(implicit traceContext: TraceContext): EitherT[Future, TopologyTransactionRejection, Unit] = {
+  )(implicit traceContext: TraceContext): EitherT[Future, TopologyTransactionRejection, Unit] =
     toValidate.mapping.member match {
       case participantId: ParticipantId =>
         ensureParticipantDoesNotHostParties(effective, participantId)
       case _ => EitherTUtil.unit
     }
-  }
 
   private def checkMissingNsdAndOtkMappings(
       effectiveTime: EffectiveTime,
@@ -637,7 +613,7 @@ class ValidatingTopologyMappingChecks(
 
     def checkNoClashWithNamespaceDelegations(effective: EffectiveTime)(implicit
         traceContext: TraceContext
-    ): EitherT[Future, TopologyTransactionRejection, Unit] = {
+    ): EitherT[Future, TopologyTransactionRejection, Unit] =
       loadFromStore(
         effective,
         Code.NamespaceDelegation,
@@ -649,7 +625,6 @@ class ValidatingTopologyMappingChecks(
           NamespaceAlreadyInUse(toValidate.mapping.namespace),
         )
       }
-    }
 
     for {
       _ <- checkDecentralizedNamespaceDerivedFromOwners()
@@ -666,7 +641,7 @@ class ValidatingTopologyMappingChecks(
   )(implicit traceContext: TraceContext): EitherT[Future, TopologyTransactionRejection, Unit] = {
     def checkNoClashWithDecentralizedNamespaces()(implicit
         traceContext: TraceContext
-    ): EitherT[Future, TopologyTransactionRejection, Unit] = {
+    ): EitherT[Future, TopologyTransactionRejection, Unit] =
       loadFromStore(
         effective,
         Code.DecentralizedNamespaceDefinition,
@@ -679,8 +654,47 @@ class ValidatingTopologyMappingChecks(
           NamespaceAlreadyInUse(toValidate.mapping.namespace),
         )
       }
-    }
 
     checkNoClashWithDecentralizedNamespaces()
   }
+
+  /** Checks whether the given PTP is considered an explicit admin party allocation. This is true if all following conditions are met:
+    * <ul>
+    *   <li>threshold == 1</li>
+    *   <li>groupAddressing == false</li>
+    *   <li>there is only a single hosting participant<li>
+    *     <ul>
+    *       <li>with Submission permission</li>
+    *       <li>participantId.adminParty == partyId</li>
+    *     </ul>
+    *   </li>
+    * </ul
+    */
+  private def isExplicitAdminPartyAllocation(
+      ptp: PartyToParticipant,
+      rejection: => TopologyTransactionRejection,
+  ): EitherT[Future, TopologyTransactionRejection, Unit] = {
+    // check that the PTP doesn't try to allocate a party that is the same as an already existing admin party.
+    // we allow an explicit allocation of an admin like party though on the same participant
+    val singleHostingParticipant =
+      ptp.participants.sizeCompare(1) == 0
+
+    val partyIsAdminParty =
+      ptp.participants.forall(participant =>
+        participant.participantId.adminParty == ptp.partyId &&
+          participant.permission == ParticipantPermission.Submission
+      )
+
+    val noGroupAddressing = !ptp.groupAddressing
+
+    // technically we don't need to check for threshold == 1, because we already require that there is only a single participant
+    // and the threshold may not exceed the number of participants. this is checked in PartyToParticipant.create
+    val threshold1 = ptp.threshold == PositiveInt.one
+
+    EitherTUtil.condUnitET[Future](
+      singleHostingParticipant && partyIsAdminParty && noGroupAddressing && threshold1,
+      rejection,
+    )
+  }
+
 }

@@ -10,6 +10,7 @@ import cats.syntax.parallel.*
 import com.daml.error.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v2.update_service.GetUpdatesResponse
+import com.digitalasset.canton.auth.CantonAdminToken
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -23,7 +24,6 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory,
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.AdminWorkflowServices.AbortedDueToShutdownException
 import com.digitalasset.canton.participant.config.LocalParticipantConfig
-import com.digitalasset.canton.participant.ledger.api.CantonAdminToken
 import com.digitalasset.canton.participant.ledger.api.client.LedgerConnection
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
@@ -130,7 +130,7 @@ class AdminWorkflowServices(
       lc: LedgerClient,
   ): Future[Boolean] =
     for {
-      pkgRes <- pkgs.keys.toList.parTraverse(lc.v2.packageService.getPackageStatus(_))
+      pkgRes <- pkgs.keys.toList.parTraverse(lc.packageService.getPackageStatus(_))
     } yield pkgRes.forall(pkgResponse => pkgResponse.packageStatus.isPackageStatusRegistered)
 
   private def handleDamlErrorDuringPackageLoading(
@@ -230,12 +230,12 @@ class AdminWorkflowServices(
     val service = createService(client)
 
     val startupF =
-      client.v2.stateService.getActiveContracts(service.filters).map { case (acs, offset) =>
+      client.stateService.getActiveContracts(service.filters).map { case (acs, offset) =>
         logger.debug(s"Loading $acs $service")
         service.processAcs(acs)
         new ResilientLedgerSubscription(
           makeSource = subscribeOffset =>
-            client.v2.updateService.getUpdatesSource(subscribeOffset, service.filters),
+            client.updateService.getUpdatesSource(subscribeOffset, service.filters),
           consumingFlow = Flow[GetUpdatesResponse]
             .map(_.update)
             .map {

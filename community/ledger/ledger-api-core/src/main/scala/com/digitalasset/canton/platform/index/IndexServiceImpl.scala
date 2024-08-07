@@ -16,6 +16,8 @@ import com.daml.ledger.api.v2.update_service.{
 import com.daml.metrics.InstrumentedGraph.*
 import com.daml.tracing.{Event, SpanAttribute, Spans}
 import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.config
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.domain.{
   CumulativeFilter,
@@ -42,6 +44,7 @@ import com.digitalasset.canton.pekkostreams.dispatcher.DispatcherImpl.Dispatcher
 import com.digitalasset.canton.pekkostreams.dispatcher.SubSource.RangeSource
 import com.digitalasset.canton.platform.ApiOffset.ApiOffsetConverter
 import com.digitalasset.canton.platform.index.IndexServiceImpl.*
+import com.digitalasset.canton.platform.store.cache.OffsetCheckpoint
 import com.digitalasset.canton.platform.store.dao.{
   EventProjectionProperties,
   LedgerDaoCommandCompletionsReader,
@@ -60,7 +63,7 @@ import com.digitalasset.daml.lf.transaction.GlobalKey
 import com.digitalasset.daml.lf.value.Value.{ContractId, VersionedContractInstance}
 import io.grpc.StatusRuntimeException
 import org.apache.pekko.NotUsed
-import org.apache.pekko.stream.scaladsl.Source
+import org.apache.pekko.stream.scaladsl.{Flow, Source}
 import scalaz.syntax.tag.ToTagOps
 
 import scala.concurrent.Future
@@ -74,8 +77,10 @@ private[index] class IndexServiceImpl(
     contractStore: ContractStore,
     pruneBuffers: PruneBuffers,
     dispatcher: () => Dispatcher[Offset],
+    fetchOffsetCheckpoint: () => Option[OffsetCheckpoint],
     getPackageMetadataSnapshot: ContextualizedErrorLogger => PackageMetadata,
     metrics: LedgerApiServerMetrics,
+    idleStreamOffsetCheckpointTimeout: config.NonNegativeFiniteDuration,
     override protected val loggerFactory: NamedLoggerFactory,
 ) extends IndexService
     with NamedLogging {
@@ -109,6 +114,7 @@ private[index] class IndexServiceImpl(
       verbose: Boolean,
   )(implicit loggingContext: LoggingContextWithTrace): Source[GetUpdatesResponse, NotUsed] = {
     val contextualizedErrorLogger = ErrorLoggingContext(logger, loggingContext)
+    val isTailingStream = endInclusive.isEmpty
 
     withValidatedFilter(transactionFilter, getPackageMetadataSnapshot(contextualizedErrorLogger)) {
       between(startExclusive, endInclusive) { (from, to) =>
@@ -140,8 +146,17 @@ private[index] class IndexServiceImpl(
                         eventProjectionProperties,
                       )
                   }
+                  .via(rangeDecorator(startExclusive, endInclusive))
             },
             to,
+          )
+          // when a tailing stream is requested add checkpoint messages
+          .via(
+            checkpointFlow(
+              cond = isTailingStream,
+              fetchOffsetCheckpoint = fetchOffsetCheckpoint,
+              responseFromCheckpoint = updatesResponse,
+            )
           )
           .mapError(shutdownError)
           .map(_._2)
@@ -158,6 +173,35 @@ private[index] class IndexServiceImpl(
     }(contextualizedErrorLogger)
   }
 
+  //  this flow adds checkpoint messages if the condition is met in the following way:
+  //  a checkpoint message is fetched in the beginning of each batch (RangeBegin decorator)
+  //  and applied exactly after an element that has the same or greater offset
+  // if the condition is not true the original elements are streamed and the range decorators are ignored
+  private def checkpointFlow[T](
+      cond: Boolean,
+      fetchOffsetCheckpoint: () => Option[OffsetCheckpoint],
+      responseFromCheckpoint: OffsetCheckpoint => T,
+      idleStreamOffsetCheckpointTimeout: NonNegativeFiniteDuration =
+        idleStreamOffsetCheckpointTimeout,
+  ): Flow[(Offset, Carrier[T]), (Offset, T), NotUsed] =
+    if (cond) {
+      // tick source so that we create a checkpoint for empty streams
+      val tick = Source
+        .tick(
+          idleStreamOffsetCheckpointTimeout.underlying,
+          idleStreamOffsetCheckpointTimeout.underlying,
+          Timeout: Carrier[T],
+        )
+        .map((Offset.beforeBegin, _))
+
+      Flow[(Offset, Carrier[T])]
+        .mergePreferred(tick, preferred = false, eagerComplete = true)
+        .via(injectCheckpoints(fetchOffsetCheckpoint, responseFromCheckpoint))
+    } else
+      Flow[(Offset, Carrier[T])].collect { case (off, Element(elem)) =>
+        (off, elem)
+      }
+
   override def transactionTrees(
       startExclusive: ParticipantOffset,
       endInclusive: Option[ParticipantOffset],
@@ -169,6 +213,7 @@ private[index] class IndexServiceImpl(
       transactionFilter,
       getPackageMetadataSnapshot(contextualizedErrorLogger),
     ) {
+      val isTailingStream = endInclusive.isEmpty
       val parties =
         if (transactionFilter.filtersForAnyParty.isEmpty)
           Some(transactionFilter.filtersByParty.keySet)
@@ -203,9 +248,18 @@ private[index] class IndexServiceImpl(
                         parties,
                         eventProjectionProperties,
                       )
+                      .via(rangeDecorator(startExclusive, endInclusive))
                   }
             },
             to,
+          )
+          // when a tailing stream is requested add checkpoint messages
+          .via(
+            checkpointFlow(
+              cond = isTailingStream,
+              fetchOffsetCheckpoint = fetchOffsetCheckpoint,
+              responseFromCheckpoint = updateTreesResponse,
+            )
           )
           .mapError(shutdownError)
           .map(_._2)
@@ -235,10 +289,19 @@ private[index] class IndexServiceImpl(
         dispatcher()
           .startingAt(
             beginOpt,
-            RangeSource(
-              commandCompletionsReader.getCommandCompletions(_, _, applicationId, parties)
+            RangeSource((startExclusive, endInclusive) =>
+              commandCompletionsReader
+                .getCommandCompletions(startExclusive, endInclusive, applicationId, parties)
+                .via(rangeDecorator(startExclusive, endInclusive))
             ),
             None,
+          )
+          .via(
+            checkpointFlow(
+              cond = true,
+              fetchOffsetCheckpoint = fetchOffsetCheckpoint,
+              responseFromCheckpoint = completionsResponse,
+            )
           )
           .mapError(shutdownError)
           .map(_._2)
@@ -350,7 +413,7 @@ private[index] class IndexServiceImpl(
 
   override def partyEntries(
       startExclusive: Option[ParticipantOffset.Absolute]
-  )(implicit loggingContext: LoggingContextWithTrace): Source[PartyEntry, NotUsed] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Source[PartyEntry, NotUsed] =
     Source
       .future(concreteOffset(startExclusive))
       .flatMapConcat(dispatcher().startingAt(_, RangeSource(ledgerDao.getPartyEntries)))
@@ -361,7 +424,6 @@ private[index] class IndexServiceImpl(
         case (_, PartyLedgerEntry.AllocationAccepted(subId, _, details)) =>
           PartyEntry.AllocationAccepted(subId, details)
       }
-  }
 
   override def prune(
       pruneUpToInclusive: Offset,
@@ -568,7 +630,7 @@ object IndexServiceImpl {
   private[index] def validatedAcsActiveAtOffset[T](
       activeAt: Offset,
       ledgerEnd: Offset,
-  )(implicit errorLogger: ContextualizedErrorLogger): Either[StatusRuntimeException, Unit] = {
+  )(implicit errorLogger: ContextualizedErrorLogger): Either[StatusRuntimeException, Unit] =
     if (activeAt > ledgerEnd) {
       Left(
         RequestValidationErrors.OffsetAfterLedgerEnd
@@ -582,7 +644,6 @@ object IndexServiceImpl {
     } else {
       Right(())
     }
-  }
 
   @SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.Var"))
   private[index] def memoizedTransactionFilterProjection(
@@ -750,5 +811,129 @@ object IndexServiceImpl {
         }.toSet)
     }
   }
+
+  // adds a RangeBegin message exactly before the original elements
+  // and adds a End message exactly after the original elements
+  private[index] def rangeDecorator[T](
+      startExclusive: Offset,
+      endInclusive: Offset,
+  ): Flow[(Offset, T), (Offset, Carrier[T]), NotUsed] =
+    Flow[(Offset, T)]
+      .map[(Offset, Carrier[T])] { case (off, elem) =>
+        (off, Element(elem))
+      }
+      .prepend(Source.single((startExclusive, RangeBegin)))
+      .concat(Source.single((endInclusive, RangeEnd)))
+
+  def injectCheckpoints[T](
+      fetchOffsetCheckpoint: () => Option[OffsetCheckpoint],
+      responseFromCheckpoint: OffsetCheckpoint => T,
+  ): Flow[(Offset, Carrier[T]), (Offset, T), NotUsed] =
+    Flow[(Offset, Carrier[T])]
+      .statefulMap[
+        (Option[OffsetCheckpoint], Option[OffsetCheckpoint], Option[(Offset, Carrier[T])]),
+        Seq[
+          (Offset, T)
+        ],
+      ](create = () => (None, None, None))(
+        f = { case ((lastFetchedCheckpointO, lastStreamedCheckpointO, processedElemO), elem) =>
+          elem match {
+            // range begin received
+            case (startExclusive, RangeBegin) =>
+              val fetchedCheckpointO = fetchOffsetCheckpoint()
+              // we allow checkpoints that predate the current range only for RangeBegin to allow checkpoints
+              // that arrived delayed
+              val response =
+                if (fetchedCheckpointO != lastStreamedCheckpointO)
+                  fetchedCheckpointO.collect {
+                    case c: OffsetCheckpoint
+                        if c.offset == startExclusive
+                          && c.offset >= processedElemO.map(_._1).getOrElse(Offset.beforeBegin) =>
+                      (c.offset, responseFromCheckpoint(c))
+                  }.toList
+                else Seq.empty
+              val streamedCheckpointO =
+                if (response.nonEmpty) fetchedCheckpointO else lastStreamedCheckpointO
+              val relevantCheckpointO = fetchedCheckpointO.collect {
+                case c: OffsetCheckpoint if c.offset > startExclusive => c
+              }
+              ((relevantCheckpointO, streamedCheckpointO, Some(elem)), response)
+            // regular element received
+            case (currentOffset, Element(currElem)) =>
+              val prepend = lastFetchedCheckpointO.collect {
+                case c: OffsetCheckpoint if c.offset < currentOffset =>
+                  (c.offset, responseFromCheckpoint(c))
+              }
+              val responses = prepend.toList :+ (currentOffset, currElem)
+              val newCheckpointO =
+                lastFetchedCheckpointO.collect { case c: OffsetCheckpoint if prepend.isEmpty => c }
+              val streamedCheckpointO =
+                if (prepend.nonEmpty) lastFetchedCheckpointO else lastStreamedCheckpointO
+              ((newCheckpointO, streamedCheckpointO, Some(elem)), responses)
+            // range end indicator received
+            case (endInclusive, RangeEnd) =>
+              val responses = lastFetchedCheckpointO.collect {
+                case c: OffsetCheckpoint if c.offset <= endInclusive =>
+                  (c.offset, responseFromCheckpoint(c))
+              }.toList
+              val newCheckpointO =
+                lastFetchedCheckpointO.collect {
+                  case c: OffsetCheckpoint if responses.isEmpty => c
+                }
+              val streamedCheckpointO =
+                if (responses.nonEmpty) lastFetchedCheckpointO else lastStreamedCheckpointO
+              ((newCheckpointO, streamedCheckpointO, Some(elem)), responses)
+            case (_, Timeout) =>
+              val relevantCheckpointO = fetchOffsetCheckpoint().collect {
+                case c: OffsetCheckpoint
+                    if lastStreamedCheckpointO.fold(true)(_.offset < c.offset) &&
+                      // check that we are not in the middle of a range
+                      processedElemO.fold(true)(_._2.isRangeEnd) =>
+                  c
+              }
+              val response =
+                relevantCheckpointO.map(c => (c.offset, responseFromCheckpoint(c))).toList
+              (
+                (
+                  relevantCheckpointO.orElse(lastFetchedCheckpointO),
+                  relevantCheckpointO.orElse(lastStreamedCheckpointO),
+                  processedElemO,
+                ),
+                response,
+              )
+          }
+        },
+        onComplete = _ => None,
+      )
+      .mapConcat(identity)
+
+  sealed abstract class Carrier[+T] {
+    def isRangeEnd: Boolean = false
+    def isTimeout: Boolean = false
+  }
+
+  final case object RangeBegin extends Carrier[Nothing]
+  final case object RangeEnd extends Carrier[Nothing] {
+    override def isRangeEnd: Boolean = true
+  }
+  final case class Element[T](element: T) extends Carrier[T]
+  final case object Timeout extends Carrier[Nothing] {
+    override def isTimeout: Boolean = true
+  }
+
+  private def updatesResponse(
+      offsetCheckpoint: OffsetCheckpoint
+  ): GetUpdatesResponse =
+    GetUpdatesResponse.defaultInstance.withOffsetCheckpoint(offsetCheckpoint.toApi)
+
+  private def updateTreesResponse(
+      offsetCheckpoint: OffsetCheckpoint
+  ): GetUpdateTreesResponse =
+    GetUpdateTreesResponse.defaultInstance.withOffsetCheckpoint(offsetCheckpoint.toApi)
+
+  private def completionsResponse(
+      offsetCheckpoint: OffsetCheckpoint
+  ): CompletionStreamResponse =
+    CompletionStreamResponse.defaultInstance.withOffsetCheckpoint(offsetCheckpoint.toApi)
 
 }
