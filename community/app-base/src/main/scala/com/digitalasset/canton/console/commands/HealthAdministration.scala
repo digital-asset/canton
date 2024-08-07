@@ -5,10 +5,12 @@ package com.digitalasset.canton.console.commands
 
 import better.files.File
 import ch.qos.logback.classic.Level
+import com.digitalasset.canton.admin.api.client.commands.StatusAdminCommands.NodeStatusCommand
 import com.digitalasset.canton.admin.api.client.commands.{
   StatusAdminCommands,
   TopologyAdminCommands,
 }
+import com.digitalasset.canton.admin.api.client.data.NodeStatus
 import com.digitalasset.canton.config.{ConsoleCommandTimeout, NonNegativeDuration}
 import com.digitalasset.canton.console.CommandErrors.{CommandError, GenericCommandError}
 import com.digitalasset.canton.console.ConsoleMacros.utils
@@ -22,9 +24,8 @@ import com.digitalasset.canton.console.{
   Help,
   Helpful,
 }
-import com.digitalasset.canton.health.admin.data.NodeStatus
+import com.digitalasset.canton.health.admin.v0
 import com.digitalasset.canton.health.admin.v0.HealthDumpChunk
-import com.digitalasset.canton.health.admin.{data, v0}
 import com.digitalasset.canton.networking.grpc.GrpcError
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.ResourceUtil
@@ -33,7 +34,7 @@ import io.grpc.StatusRuntimeException
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{Await, Promise, TimeoutException}
 
-abstract class HealthAdministrationCommon[S <: data.NodeStatus.Status](
+abstract class HealthAdministrationCommon[S <: NodeStatus.Status](
     runner: AdminCommandRunner,
     consoleEnvironment: ConsoleEnvironment,
     deserialize: v0.NodeStatus.Status => ParsingResult[S],
@@ -44,10 +45,10 @@ abstract class HealthAdministrationCommon[S <: data.NodeStatus.Status](
   import runner.*
 
   @Help.Summary("Get human (and machine) readable status info")
-  def status: data.NodeStatus[S] = consoleEnvironment.run {
+  def status: NodeStatus[S] = consoleEnvironment.run {
     CommandSuccessful(adminCommand(new StatusAdminCommands.GetStatus[S](deserialize)) match {
       case CommandSuccessful(success) => success
-      case err: CommandError => data.NodeStatus.Failure(err.cause)
+      case err: CommandError => NodeStatus.Failure(err.cause)
     })
   }
 
@@ -178,7 +179,7 @@ abstract class HealthAdministrationCommon[S <: data.NodeStatus.Status](
 
 }
 
-class HealthAdministration[S <: data.NodeStatus.Status](
+abstract class HealthAdministration[S <: NodeStatus.Status](
     runner: AdminCommandRunner,
     consoleEnvironment: ConsoleEnvironment,
     deserialize: v0.NodeStatus.Status => ParsingResult[S],
@@ -191,4 +192,21 @@ class HealthAdministration[S <: data.NodeStatus.Status](
     .toEither
     .isRight
 
+  protected def nodeStatusCommand: NodeStatusCommand[S, _, _]
+
+  @Help.Summary("Get human (and machine) readable participant status information")
+  override def status: NodeStatus[S] = consoleEnvironment.run {
+    val commandResult = runner.adminCommand(nodeStatusCommand)
+
+    commandResult.toEither match {
+      case Left(errorMessage) => CommandSuccessful(NodeStatus.Failure(errorMessage))
+      /* For backward compatibility:
+      Assumes getting a left of gRPC code means that the node specific status endpoint
+      is not available (because that Canton version does not include it), and thus we
+      want to fall back to the original status command.
+       */
+      case Right(Left(_code)) => CommandSuccessful(super.status)
+      case Right(Right(nodeStatus)) => CommandSuccessful(nodeStatus)
+    }
+  }
 }

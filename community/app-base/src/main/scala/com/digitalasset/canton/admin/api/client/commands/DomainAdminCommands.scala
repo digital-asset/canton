@@ -5,7 +5,18 @@ package com.digitalasset.canton.admin.api.client.commands
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.admin.api.client.data.StaticDomainParameters as StaticDomainParametersConfig
+import com.digitalasset.canton.admin.api.client.commands.StatusAdminCommands.NodeStatusCommand
+import com.digitalasset.canton.admin.api.client.data.{
+  DomainNodeStatus,
+  NodeStatus,
+  StaticDomainParameters as StaticDomainParametersConfig,
+}
+import com.digitalasset.canton.domain.admin.v0.DomainStatusServiceGrpc.DomainStatusServiceStub
+import com.digitalasset.canton.domain.admin.v0.{
+  DomainStatusRequest,
+  DomainStatusResponse,
+  DomainStatusServiceGrpc,
+}
 import com.digitalasset.canton.domain.admin.v0 as adminproto
 import com.digitalasset.canton.domain.service.ServiceAgreementAcceptance
 import com.digitalasset.canton.protocol.StaticDomainParameters as StaticDomainParametersInternal
@@ -105,6 +116,46 @@ object DomainAdminCommands {
             )
           } yield staticDomainParametersConfig).leftMap(_.toString)
       }
+    }
+  }
+
+  object Health {
+    /*
+      Response and Result types are an Either of the gRPC Status Code to enable backward compatibility.
+      Implicitly, the Left only represents the unavailability of the participant specific status command
+      endpoint because it is an older version that has not yet implemented it.
+     */
+    final case class DomainStatusCommand()(implicit ec: ExecutionContext)
+        extends NodeStatusCommand[
+          DomainNodeStatus,
+          DomainStatusRequest,
+          DomainStatusResponse,
+        ] {
+
+      override type Svc = DomainStatusServiceStub
+
+      override def createService(channel: ManagedChannel): DomainStatusServiceStub =
+        DomainStatusServiceGrpc.stub(channel)
+
+      override def getStatus(
+          service: DomainStatusServiceStub,
+          request: DomainStatusRequest,
+      ): Future[DomainStatusResponse] = service.domainStatus(request)
+
+      override def submitRequest(
+          service: DomainStatusServiceStub,
+          request: DomainStatusRequest,
+      ): Future[Either[Status.Code.UNIMPLEMENTED.type, DomainStatusResponse]] =
+        submitReq(service, request)
+
+      override def createRequest(): Either[String, DomainStatusRequest] = Right(
+        DomainStatusRequest()
+      )
+
+      override def handleResponse(
+          response: Either[Status.Code.UNIMPLEMENTED.type, DomainStatusResponse]
+      ): Either[String, Either[Status.Code.UNIMPLEMENTED.type, NodeStatus[DomainNodeStatus]]] =
+        response.traverse(DomainNodeStatus.fromProtoV1).leftMap(_.message)
     }
   }
 }

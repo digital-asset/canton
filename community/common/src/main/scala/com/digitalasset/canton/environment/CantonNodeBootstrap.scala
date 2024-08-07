@@ -20,7 +20,6 @@ import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.admin.v0.VaultServiceGrpc
 import com.digitalasset.canton.error.CantonError
-import com.digitalasset.canton.health.admin.data.NodeStatus
 import com.digitalasset.canton.health.admin.grpc.GrpcStatusService
 import com.digitalasset.canton.health.admin.v0.StatusServiceGrpc
 import com.digitalasset.canton.health.{
@@ -29,6 +28,7 @@ import com.digitalasset.canton.health.{
   GrpcHealthServer,
   HealthService,
   LivenessHealthService,
+  NodeStatus,
   ServiceHealthStatusManager,
 }
 import com.digitalasset.canton.lifecycle.{
@@ -181,7 +181,7 @@ abstract class CantonNodeBootstrapBase[
 
   protected val ips = new IdentityProvidingServiceClient()
 
-  private def status: NodeStatus[NodeStatus.Status] =
+  protected def getNodeStatus: NodeStatus[T#Status] =
     getNode
       .map(_.status)
       .map(NodeStatus.Success(_))
@@ -216,7 +216,7 @@ abstract class CantonNodeBootstrapBase[
       .addService(
         StatusServiceGrpc.bindService(
           new GrpcStatusService(
-            status,
+            getNodeStatus,
             arguments.writeHealthDumpToFile,
             parameterConfig.processingTimeouts,
             loggerFactory,
