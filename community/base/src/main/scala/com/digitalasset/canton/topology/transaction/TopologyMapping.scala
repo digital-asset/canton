@@ -114,32 +114,34 @@ object TopologyMapping {
 
   final case class MappingHash(hash: Hash) extends AnyVal
 
-  sealed case class Code private (dbInt: Int, code: String)
+  sealed abstract class Code private (val dbInt: Int, val code: String)
+      extends Product
+      with Serializable
   object Code {
 
-    object NamespaceDelegation extends Code(1, "nsd")
-    object IdentifierDelegation extends Code(2, "idd")
-    object DecentralizedNamespaceDefinition extends Code(3, "dnd")
+    case object NamespaceDelegation extends Code(1, "nsd")
+    case object IdentifierDelegation extends Code(2, "idd")
+    case object DecentralizedNamespaceDefinition extends Code(3, "dnd")
 
-    object OwnerToKeyMapping extends Code(4, "otk")
+    case object OwnerToKeyMapping extends Code(4, "otk")
 
-    object DomainTrustCertificate extends Code(5, "dtc")
-    object ParticipantDomainPermission extends Code(6, "pdp")
-    object PartyHostingLimits extends Code(7, "phl")
-    object VettedPackages extends Code(8, "vtp")
+    case object DomainTrustCertificate extends Code(5, "dtc")
+    case object ParticipantDomainPermission extends Code(6, "pdp")
+    case object PartyHostingLimits extends Code(7, "phl")
+    case object VettedPackages extends Code(8, "vtp")
 
-    object PartyToParticipant extends Code(9, "ptp")
-    object AuthorityOf extends Code(10, "auo")
+    case object PartyToParticipant extends Code(9, "ptp")
+    case object AuthorityOf extends Code(10, "auo")
 
-    object DomainParametersState extends Code(11, "dop")
-    object MediatorDomainState extends Code(12, "mds")
-    object SequencerDomainState extends Code(13, "sds")
-    object OffboardParticipant extends Code(14, "ofp")
+    case object DomainParametersState extends Code(11, "dop")
+    case object MediatorDomainState extends Code(12, "mds")
+    case object SequencerDomainState extends Code(13, "sds")
+    case object OffboardParticipant extends Code(14, "ofp")
 
-    object PurgeTopologyTransaction extends Code(15, "ptt")
+    case object PurgeTopologyTransaction extends Code(15, "ptt")
     // Don't reuse 16, It was the TrafficControlState code mapping
-    object SequencingDynamicParametersState extends Code(17, "sep")
-    object PartyToKeyMapping extends Code(18, "ptk")
+    case object SequencingDynamicParametersState extends Code(17, "sep")
+    case object PartyToKeyMapping extends Code(18, "ptk")
 
     lazy val all: Seq[Code] = Seq(
       NamespaceDelegation,

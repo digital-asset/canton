@@ -326,12 +326,9 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
   }
 
   @Explanation(
-    """This error indicates that a dangerous owner to key mapping authorization was rejected.
-      |This is the case if a command is run that could break a node.
-      |If the command was run to assign a key for the given node, then the command
-      |was rejected because the key is not in the node's private store.
-      |If the command is run on a node to issue transactions for another node,
-      |then such commands must be run with force, as they are very dangerous and could easily break
+    """This error indicates that a dangerous command that could break a node was rejected.
+      |This is the case if a dangerous command is run on a node to issue transactions for another node.
+      |Such commands must be run with force, as they are very dangerous and could easily break
       |the node.
       |As an example, if we assign an encryption key to a participant that the participant does not
       |have, then the participant will be unable to process an incoming transaction. Therefore we must
@@ -339,15 +336,15 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
       | """
   )
   @Resolution("Set the ForceFlag.AlienMember if you really know what you are doing.")
-  object DangerousKeyUseCommandRequiresForce
+  object DangerousCommandRequiresForce
       extends ErrorCode(
-        id = "DANGEROUS_KEY_USE_COMMAND_REQUIRES_FORCE_ALIEN_MEMBER",
+        id = "DANGEROUS_COMMAND_REQUIRES_FORCE_ALIEN_MEMBER",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    final case class AlienMember(member: Member)(implicit
+    final case class AlienMember(member: Member, topologyMapping: TopologyMapping.Code)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          cause = "Issuing owner to key mappings for alien members requires ForceFlag.AlienMember"
+          cause = s"Issuing $topologyMapping for alien members requires ForceFlag.AlienMember"
         )
         with TopologyManagerError
   }
@@ -611,6 +608,7 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
           cause =
             s"The topology snapshot was rejected because it contained multiple effective transactions with the same unique key"
         )
+        with TopologyManagerError
   }
 
   object MissingTopologyMapping

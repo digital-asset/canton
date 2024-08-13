@@ -21,6 +21,7 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.participant.sync.SyncDomainPersistentStateManager
 import com.digitalasset.canton.participant.topology.TopologyComponentFactory
 import com.digitalasset.canton.store.IndexedDomain
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
@@ -30,14 +31,6 @@ import com.digitalasset.canton.topology.store.{
   TopologyStore,
 }
 import com.digitalasset.canton.topology.transaction.*
-import com.digitalasset.canton.topology.{
-  AuthorizedTopologyManager,
-  DomainId,
-  ForceFlag,
-  ForceFlags,
-  ParticipantId,
-  UniqueIdentifier,
-}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, LfPackageId}
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
@@ -306,6 +299,8 @@ class PackageOpsTest extends PackageOpsTestBase {
       initialProtocolVersion = testedProtocolVersion,
       loggerFactory = loggerFactory,
       timeouts = ProcessingTimeout(),
+      futureSupervisor = futureSupervisor,
+      exitOnFatalFailures = false,
     )
 
     val topologyStore = mock[TopologyStore[AuthorizedStore]]
