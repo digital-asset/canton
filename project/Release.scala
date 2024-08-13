@@ -17,26 +17,24 @@ object Release {
       extends Ordered[ParsedVersion] {
     def majorMinor: (String, String) = (major, minor)
 
-    override def compare(that: ParsedVersion): Int = {
+    override def compare(that: ParsedVersion): Int =
       if (this.major != that.major) this.major compare that.major
       else if (this.minor != that.minor) this.minor compare that.minor
       else if (this.patch != that.patch) this.patch compare that.patch
       else suffixComparison(this.suffix, that.suffix)
-    }
 
     // Simplified version of CantonVersion suffix comparison, we just need to know if suffixes are equal or not for the
     // purpose of this code
     private def suffixComparison(
         maybeSuffix1: Option[String],
         maybeSuffix2: Option[String],
-    ): Int = {
+    ): Int =
       (maybeSuffix1, maybeSuffix2) match {
         case (None, None) => 0
         case (None, Some(_)) => 1
         case (Some(_), None) => -1
         case (Some(suffix1), Some(suffix2)) => suffix1 compare suffix2
       }
-    }
   }
 
   private case class SplitFile(
@@ -145,7 +143,7 @@ object Release {
     */
   def fixReleaseToProtocolVersion(releaseArgs: ParsedVersion)(implicit log: ManagedLogger): Unit = {
     val semVerRegex =
-      s"""${SemVerDigitsRegex}_${SemVerDigitsRegex}_${SemVerDigitsRegex}(?:_(.*))?"""
+      s"""${SemVerDigitsRegex}_${SemVerDigitsRegex}_$SemVerDigitsRegex(?:_(.*))?"""
     val versionRegexString = s""".*ReleaseVersions\\.v$semVerRegex -> (List\\(.*\\)).*"""
     val versionRegex = versionRegexString.r
 

@@ -386,10 +386,9 @@ final case class NamespaceDelegation private (
 
   override def requiredAuth(
       previous: Option[TopologyTransaction[TopologyChangeOp, TopologyMapping]]
-  ): RequiredAuth = {
+  ): RequiredAuth =
     // All namespace delegation creations require the root delegation privilege.
     RequiredNamespaces(Set(namespace), requireRootDelegation = true)
-  }
 
   override lazy val uniqueKey: MappingHash =
     NamespaceDelegation.uniqueKey(namespace, target.fingerprint)
@@ -424,7 +423,7 @@ object NamespaceDelegation {
   def code: TopologyMapping.Code = Code.NamespaceDelegation
 
   /** Returns true if the given transaction is a self-signed root certificate */
-  def isRootCertificate(sit: GenericSignedTopologyTransaction): Boolean = {
+  def isRootCertificate(sit: GenericSignedTopologyTransaction): Boolean =
     sit.mapping
       .select[transaction.NamespaceDelegation]
       .exists(ns =>
@@ -433,17 +432,15 @@ object NamespaceDelegation {
           ns.isRootDelegation &&
           ns.target.fingerprint == ns.namespace.fingerprint
       )
-  }
 
   /** Returns true if the given transaction is a root delegation */
-  def isRootDelegation(sit: GenericSignedTopologyTransaction): Boolean = {
+  def isRootDelegation(sit: GenericSignedTopologyTransaction): Boolean =
     isRootCertificate(sit) || (
       sit.operation == TopologyChangeOp.Replace &&
         sit.mapping
           .select[transaction.NamespaceDelegation]
           .exists(ns => ns.isRootDelegation)
     )
-  }
 
   def fromProtoV30(
       value: v30.NamespaceDelegation
@@ -492,7 +489,7 @@ final case class DecentralizedNamespaceDefinition private (
 
   override def requiredAuth(
       previous: Option[TopologyTransaction[TopologyChangeOp, TopologyMapping]]
-  ): RequiredAuth = {
+  ): RequiredAuth =
     previous match {
       case None =>
         RequiredNamespaces(owners.forgetNE)
@@ -510,7 +507,6 @@ final case class DecentralizedNamespaceDefinition private (
         // TODO(#14048): proper error or ignore
         sys.error(s"unexpected transaction data: $previous")
     }
-  }
 
   override def uniqueKey: MappingHash = DecentralizedNamespaceDefinition.uniqueKey(namespace)
 }
@@ -531,7 +527,7 @@ object DecentralizedNamespaceDefinition {
       _ <- Either.cond(
         owners.size >= threshold.value,
         (),
-        s"Invalid threshold (${threshold}) for ${decentralizedNamespace} with ${owners.size} owners",
+        s"Invalid threshold ($threshold) for $decentralizedNamespace with ${owners.size} owners",
       )
     } yield DecentralizedNamespaceDefinition(decentralizedNamespace, threshold, owners)
 
@@ -1121,7 +1117,7 @@ final case class PartyToParticipant private (
 
   override def requiredAuth(
       previous: Option[TopologyTransaction[TopologyChangeOp, TopologyMapping]]
-  ): RequiredAuth = {
+  ): RequiredAuth =
     previous
       .collect {
         case TopologyTransaction(
@@ -1157,7 +1153,6 @@ final case class PartyToParticipant private (
       .getOrElse(
         RequiredUids(Set(partyId.uid) ++ participants.map(_.participantId.uid))
       )
-  }
 
   override def uniqueKey: MappingHash = PartyToParticipant.uniqueKey(partyId, domainId)
 }
@@ -1263,10 +1258,9 @@ final case class AuthorityOf private (
 
   override def requiredAuth(
       previous: Option[TopologyTransaction[TopologyChangeOp, TopologyMapping]]
-  ): RequiredAuth = {
+  ): RequiredAuth =
     // TODO(#12390): take the previous transaction into account
     RequiredUids(Set(partyId.uid) ++ parties.map(_.uid))
-  }
 
   override def uniqueKey: MappingHash = AuthorityOf.uniqueKey(partyId, domainId)
 }
@@ -1278,7 +1272,7 @@ object AuthorityOf {
       domainId: Option[DomainId],
       threshold: PositiveInt,
       parties: Seq[PartyId],
-  ): Either[String, AuthorityOf] = {
+  ): Either[String, AuthorityOf] =
     Either
       .cond(
         threshold.value <= parties.size,
@@ -1286,7 +1280,6 @@ object AuthorityOf {
         s"Invalid threshold $threshold for $partyId with authorizers $parties",
       )
       .map(_ => AuthorityOf(partyId, domainId, threshold, parties))
-  }
 
   def uniqueKey(partyId: PartyId, domainId: Option[DomainId]): MappingHash =
     TopologyMapping.buildUniqueKey(code)(

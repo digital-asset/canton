@@ -185,7 +185,7 @@ class ValidatingTopologyMappingChecks(
   private def ensureParticipantDoesNotHostParties(
       effective: EffectiveTime,
       participantId: ParticipantId,
-  )(implicit traceContext: TraceContext) = {
+  )(implicit traceContext: TraceContext) =
     for {
       storedPartyToParticipantMappings <- loadFromStore(effective, PartyToParticipant.code, None)
       participantHostsParties = storedPartyToParticipantMappings.result.view
@@ -204,24 +204,21 @@ class ValidatingTopologyMappingChecks(
       )
     } yield ()
 
-  }
-
   private def checkDomainTrustCertificateRemove(
       effective: EffectiveTime,
       toValidate: SignedTopologyTransaction[TopologyChangeOp, DomainTrustCertificate],
-  )(implicit traceContext: TraceContext): EitherT[Future, TopologyTransactionRejection, Unit] = {
+  )(implicit traceContext: TraceContext): EitherT[Future, TopologyTransactionRejection, Unit] =
     /* Checks that the DTC is not being removed if the participant still hosts a party.
      * This check is potentially quite expensive: we have to fetch all party to participant mappings, because
      * we cannot index by the hosting participants.
      */
     ensureParticipantDoesNotHostParties(effective, toValidate.mapping.participantId)
-  }
 
   private def loadDomainParameters(
       effective: EffectiveTime
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TopologyTransactionRejection, DynamicDomainParameters] = {
+  ): EitherT[Future, TopologyTransactionRejection, DynamicDomainParameters] =
     loadFromStore(effective, DomainParametersState.code).subflatMap { domainParamCandidates =>
       val params = domainParamCandidates.result.view
         .flatMap(_.selectMapping[DomainParametersState])
@@ -242,8 +239,6 @@ class ValidatingTopologyMappingChecks(
       }
     }
 
-  }
-
   private def checkDomainTrustCertificateReplace(
       effective: EffectiveTime,
       toValidate: SignedTopologyTransaction[TopologyChangeOp, DomainTrustCertificate],
@@ -252,11 +247,10 @@ class ValidatingTopologyMappingChecks(
     val participantId = toValidate.mapping.participantId
 
     def loadOnboardingRestriction()
-        : EitherT[Future, TopologyTransactionRejection, OnboardingRestriction] = {
+        : EitherT[Future, TopologyTransactionRejection, OnboardingRestriction] =
       loadDomainParameters(effective).map(_.onboardingRestriction)
-    }
 
-    def checkDomainIsNotLocked(restriction: OnboardingRestriction) = {
+    def checkDomainIsNotLocked(restriction: OnboardingRestriction) =
       EitherTUtil.condUnitET(
         restriction.isOpen, {
           logger.info(
@@ -270,11 +264,10 @@ class ValidatingTopologyMappingChecks(
             )
         },
       )
-    }
 
     def checkParticipantIsNotRestricted(
         restrictions: OnboardingRestriction
-    ): EitherT[Future, TopologyTransactionRejection, Unit] = {
+    ): EitherT[Future, TopologyTransactionRejection, Unit] =
       // using the flags to check for restrictions instead of == UnrestrictedOpen to be more
       // future proof in case we will add additional restrictions in the future and would miss a case,
       // because there is no exhaustiveness check without full pattern matching
@@ -325,7 +318,6 @@ class ValidatingTopologyMappingChecks(
             .OnboardingRestrictionInPlace(participantId, restrictions, None)
         )
       }
-    }
 
     def checkPartyIdDoesntExist() = for {
       ptps <- loadFromStore(
@@ -513,13 +505,12 @@ class ValidatingTopologyMappingChecks(
   private def checkOwnerToKeyMappingRemove(
       effective: EffectiveTime,
       toValidate: SignedTopologyTransaction[TopologyChangeOp.Remove, OwnerToKeyMapping],
-  )(implicit traceContext: TraceContext): EitherT[Future, TopologyTransactionRejection, Unit] = {
+  )(implicit traceContext: TraceContext): EitherT[Future, TopologyTransactionRejection, Unit] =
     toValidate.mapping.member match {
       case participantId: ParticipantId =>
         ensureParticipantDoesNotHostParties(effective, participantId)
       case _ => EitherTUtil.unit
     }
-  }
 
   private def checkMissingNsdAndOtkMappings(
       effectiveTime: EffectiveTime,
@@ -645,7 +636,7 @@ class ValidatingTopologyMappingChecks(
 
     def checkNoClashWithNamespaceDelegations(effective: EffectiveTime)(implicit
         traceContext: TraceContext
-    ): EitherT[Future, TopologyTransactionRejection, Unit] = {
+    ): EitherT[Future, TopologyTransactionRejection, Unit] =
       loadFromStore(
         effective,
         Code.NamespaceDelegation,
@@ -657,7 +648,6 @@ class ValidatingTopologyMappingChecks(
           NamespaceAlreadyInUse(toValidate.mapping.namespace),
         )
       }
-    }
 
     for {
       _ <- checkDecentralizedNamespaceDerivedFromOwners()
@@ -674,7 +664,7 @@ class ValidatingTopologyMappingChecks(
   )(implicit traceContext: TraceContext): EitherT[Future, TopologyTransactionRejection, Unit] = {
     def checkNoClashWithDecentralizedNamespaces()(implicit
         traceContext: TraceContext
-    ): EitherT[Future, TopologyTransactionRejection, Unit] = {
+    ): EitherT[Future, TopologyTransactionRejection, Unit] =
       loadFromStore(
         effective,
         Code.DecentralizedNamespaceDefinition,
@@ -687,7 +677,6 @@ class ValidatingTopologyMappingChecks(
           NamespaceAlreadyInUse(toValidate.mapping.namespace),
         )
       }
-    }
 
     checkNoClashWithDecentralizedNamespaces()
   }

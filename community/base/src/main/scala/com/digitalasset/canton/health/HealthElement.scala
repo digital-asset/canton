@@ -130,7 +130,9 @@ trait HealthElement {
     // When we're closing, force the value to `closingState`.
     // This ensures that `closingState` is sticky.
     val newStateValue = if (associatedOnShutdownRunner.isClosing) closingState else newState.value
-    logger.debug(s"Refreshing state of $name from $oldState to $newStateValue")
+
+    if (oldState != newStateValue)
+      logger.debug(s"Refreshing state of $name from $oldState to $newStateValue")
 
     val previous = internalState.getAndUpdate {
       case InternalState(_, Idle) => errorOnIdle
@@ -165,7 +167,7 @@ trait HealthElement {
     if (dur > 1.second) logger.warn(s"Listener ${listener.name} took $durationStr to run")
   }
 
-  private def notifyListeners(implicit traceContext: TraceContext): Unit = {
+  private def notifyListeners(implicit traceContext: TraceContext): Unit =
     listeners.foreachEntry { (listener, _) =>
       logger.debug(s"Notifying listener ${listener.name} of health state change from $name")
       val start = System.nanoTime()
@@ -174,7 +176,6 @@ trait HealthElement {
       }
       logIfLongPokeTime(listener, start)
     }
-  }
 
   private def logStateChange(
       oldState: State,

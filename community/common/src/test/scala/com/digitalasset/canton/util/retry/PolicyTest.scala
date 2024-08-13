@@ -111,11 +111,9 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
       implicit val success: Success[Any] = Success.always
       val counter = new AtomicInteger()
       val future = Directly(logger, flagCloseable, 1, "op")(
-        {
-          counter.getAndIncrement() match {
-            case 1 => Future.successful("yay!")
-            case _ => Future.failed(new RuntimeException("failed"))
-          }
+        counter.getAndIncrement() match {
+          case 1 => Future.successful("yay!")
+          case _ => Future.failed(new RuntimeException("failed"))
         },
         AllExnRetryable,
       )
@@ -343,11 +341,9 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
         val counter = new AtomicInteger()
         val policy = Backoff(logger, flagCloseable, 1, 1.milli, Duration.Inf, "op")
         val future = policy(
-          {
-            counter.getAndIncrement() match {
-              case 1 => Future.successful("yay!")
-              case _ => Future.failed(new RuntimeException("failed"))
-            }
+          counter.getAndIncrement() match {
+            case 1 => Future.successful("yay!")
+            case _ => Future.failed(new RuntimeException("failed"))
           },
           AllExnRetryable,
         )
@@ -631,7 +627,7 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
     )
   }
 
-  def testUnexpectedException(policy: Policy): Unit = {
+  def testUnexpectedException(policy: Policy): Unit =
     it("should not retry after an exception that isn't retryable") {
       implicit val success: Success[Any] = Success.always
       val counter = new AtomicInteger()
@@ -644,9 +640,8 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
       )
       future.failed.map(t => assert(counter.get() === 1 && t.getMessage === "unexpected problem"))
     }
-  }
 
-  def testSynchronousException(policy: Policy, maxRetries: Int): Unit = {
+  def testSynchronousException(policy: Policy, maxRetries: Int): Unit =
     it("should convert a synchronous exception into an asynchronous one") {
       implicit val success: Success[Any] = Success.always
       val counter = new AtomicInteger(0)
@@ -662,7 +657,6 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
         assert(counter.get() === maxRetries + 1 && t.getMessage === "always failing")
       }
     }
-  }
 
   def testStopOnClosing(policy: PerformUnlessClosing => Policy, retriedUntilClose: Int): Unit = {
     it("should repeat until closed from within") {
@@ -732,7 +726,7 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
     }
   }
 
-  def testClosedExecutionContext(policy: PerformUnlessClosing => Policy): Unit = {
+  def testClosedExecutionContext(policy: PerformUnlessClosing => Policy): Unit =
     it("should handle a closed execution context after closing") {
       val closeable = FlagCloseable(logger, DefaultProcessingTimeouts.testing)
 
@@ -763,12 +757,11 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
       }
       succeed
     }
-  }
 
   def testStopOnShutdown(
       policy: PerformUnlessClosing => Policy,
       retriedUntilShutdown: Int,
-  ): Unit = {
+  ): Unit =
     it("should stop on shutdown") {
       implicit val success: Success[Boolean] = Success(identity)
       val retried = new AtomicInteger()
@@ -789,9 +782,8 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
         retried.get() shouldBe retriedUntilShutdown
       }
     }
-  }
 
-  def testSuspend(mkPolicy: Int => Eval[FiniteDuration] => RetryWithDelay): Unit = {
+  def testSuspend(mkPolicy: Int => Eval[FiniteDuration] => RetryWithDelay): Unit =
     it("does not retry while suspended") {
       implicit val success: Success[Unit] = Success(_ => false)
       val maxRetries = 10
@@ -818,9 +810,8 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
         retried.get() shouldBe maxRetries + 3
       }
     }
-  }
 
-  def testExceptionLogging(policy: => Policy): Unit = {
+  def testExceptionLogging(policy: => Policy): Unit =
     it("should log an exception with the configured retry log level") {
       // We don't care about the success criteria as we always throw an exception
       implicit val success: Success[Any] = Success.always
@@ -843,13 +834,12 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
       loggerFactory
         .assertLogsSeq(SuppressionRule.Level(Level.WARN))(
           policy(Future.failed(TestException()), retryable),
-          { entries =>
+          entries =>
             forEvery(entries) { e =>
               e.warningMessage should (include(
                 "The operation 'op' has failed with an exception"
               ) or include("Now retrying operation 'op'"))
-            }
-          },
+            },
         )
         .transform {
           case Failure(TestException()) =>
@@ -859,5 +849,4 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
         }
     }
 
-  }
 }

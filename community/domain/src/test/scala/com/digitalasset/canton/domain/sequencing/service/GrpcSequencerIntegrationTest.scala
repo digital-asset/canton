@@ -317,7 +317,7 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
   def mockSubscription(
       subscribeCallback: Unit => Unit = _ => (),
       unsubscribeCallback: Unit => Unit = _ => (),
-  ): Unit = {
+  ): Unit =
     // when a subscription is made resolve the subscribe promise
     // return to caller a subscription that will resolve the unsubscribe promise on close
     when(
@@ -346,7 +346,6 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
           }
         }
       }
-  }
 }
 
 class GrpcSequencerIntegrationTest

@@ -122,7 +122,7 @@ class ParticipantTab(
     ] {
       def call(
           tv: javafx.scene.control.TableColumn[TxData, String]
-      ): javafx.scene.control.TableCell[TxData, String] = {
+      ): javafx.scene.control.TableCell[TxData, String] =
         new javafx.scene.control.TableCell[TxData, String] {
           val sfxThis = new TableCell(this)
           override def updateItem(item: String, empty: Boolean): Unit = {
@@ -138,7 +138,6 @@ class ParticipantTab(
             Option[javafx.scene.control.TableRow[_]](getTableRow).foreach(x => x.setStyle(style))
           }
         }
-      }
     }
   }
 
@@ -277,7 +276,7 @@ class ParticipantTab(
     )
     val updatesService = UpdateServiceGrpc.stub(channel)
     val obs = new StreamObserver[GetUpdatesResponse]() {
-      override def onNext(value: GetUpdatesResponse): Unit = {
+      override def onNext(value: GetUpdatesResponse): Unit =
         value.update match {
           case Update.Transaction(transaction) =>
             import com.digitalasset.canton.protocol.LfContractId
@@ -300,7 +299,7 @@ class ParticipantTab(
                     coids.contains(contractId)
                   }
                   .toMap
-            transaction.events.foreach(event => {
+            transaction.events.foreach { event =>
               event.event.created.foreach(ce =>
                 Platform.runLater {
                   txdata.append(
@@ -328,13 +327,12 @@ class ParticipantTab(
                   })
                 }
               )
-            })
+            }
           case _ => ()
         }
-      }
 
       @nowarn("msg=match may not be exhaustive")
-      override def onError(t: Throwable): Unit = {
+      override def onError(t: Throwable): Unit =
         t match {
           case se: io.grpc.StatusRuntimeException
               if se.getStatus.getCode == Status.UNAVAILABLE.getCode =>
@@ -342,12 +340,12 @@ class ParticipantTab(
           case se: io.grpc.StatusRuntimeException
               if se.getStatus.getCode == Status.NOT_FOUND.getCode =>
             val message = se.getStatus.getDescription
-            logger.info(s"Attempt to access pruned participant ledger state: ${message}")
+            logger.info(s"Attempt to access pruned participant ledger state: $message")
             val errorPattern =
               "Transactions request from ([0-9a-fA-F]*) to ([0-9a-fA-F]*) precedes pruned offset ([0-9a-fA-F]+)".r
             Try {
               val errorPattern(_badStartHexOffset, _endHexOffset, hexPrunedOffset) = message
-              logger.info(s"Identified pruning offset position as ${hexPrunedOffset}")
+              logger.info(s"Identified pruning offset position as $hexPrunedOffset")
               new ParticipantOffset().withAbsolute(hexPrunedOffset)
             } match {
               case Success(prunedOffset) =>
@@ -360,7 +358,6 @@ class ParticipantTab(
           case _ =>
             logger.error("stream error", t)
         }
-      }
       override def onCompleted(): Unit = reStart()
     }
 
@@ -420,22 +417,20 @@ class ParticipantTab(
     private val rendered = new AtomicReference[Option[MetaInfo]](None)
 
     private val service = new ScheduledService[MetaInfo](() => { () =>
-      {
-        // append dars
-        if (isClosing) {
-          MetaInfo(Seq(), "", "")
-        } else {
-          val currentDars =
-            participant.dars.list().map(x => DarData(x.name, x.hash.substring(0, 16)))
-          val hosted = participant.parties
-            .hosted()
-            .map(_.party.identifier.unwrap)
-            .toSet
-            .mkString("\n")
-          val connected =
-            participant.domains.list_connected().map(_.domainAlias.unwrap).mkString("\n")
-          MetaInfo(currentDars, hosted, connected)
-        }
+      // append dars
+      if (isClosing) {
+        MetaInfo(Seq(), "", "")
+      } else {
+        val currentDars =
+          participant.dars.list().map(x => DarData(x.name, x.hash.substring(0, 16)))
+        val hosted = participant.parties
+          .hosted()
+          .map(_.party.identifier.unwrap)
+          .toSet
+          .mkString("\n")
+        val connected =
+          participant.domains.list_connected().map(_.domainAlias.unwrap).mkString("\n")
+        MetaInfo(currentDars, hosted, connected)
       }
     }) {
       value.onChange { (obs, _, _) =>
@@ -714,7 +709,7 @@ class DemoUI(script: BaseScript, val loggerFactory: NamedLoggerFactory)
 
   private val participantTabs = mutable.HashMap[String, ParticipantTab]()
 
-  private def addNewTabsIfNecessary(): Unit = {
+  private def addNewTabsIfNecessary(): Unit =
     script.parties().foreach {
       case (party, participant) if !participantTabs.contains(party) =>
         val pt =
@@ -724,7 +719,6 @@ class DemoUI(script: BaseScript, val loggerFactory: NamedLoggerFactory)
         participantTabs.put(party, pt).discard[Option[ParticipantTab]]
       case _ => ()
     }
-  }
 
   private def fitViews(x: ImageView): Unit = {
     x.fitWidth.bind(tabPane.widthProperty().multiply(0.95))
@@ -781,7 +775,7 @@ class DemoUI(script: BaseScript, val loggerFactory: NamedLoggerFactory)
   }
 
   @tailrec
-  private def executeActionUntil(idx: Int): Unit = {
+  private def executeActionUntil(idx: Int): Unit =
     if (actionIndex.get() < idx && actionIndex.get() < script.steps.length) {
       val actionIdx = actionIndex.getAndUpdate(_ + 1)
       script.steps(actionIdx) match {
@@ -808,7 +802,6 @@ class DemoUI(script: BaseScript, val loggerFactory: NamedLoggerFactory)
       }
       executeActionUntil(idx)
     }
-  }
 
   private def showError(cmd: String, ex: Exception): Unit = {
     logger.error(s"Command $cmd failed with an exception.", ex)
@@ -842,7 +835,7 @@ class DemoUI(script: BaseScript, val loggerFactory: NamedLoggerFactory)
       }
     }
     val thread = new Thread(task)
-    thread.setName(s"ui-action-${idx}")
+    thread.setName(s"ui-action-$idx")
     thread.setDaemon(true)
     thread.start()
   }
@@ -890,10 +883,9 @@ class DemoUI(script: BaseScript, val loggerFactory: NamedLoggerFactory)
     val _ = Await.result(actorSystem.terminate(), 2.seconds)
   }
 
-  def advanceTo(idx: Int): Unit = {
+  def advanceTo(idx: Int): Unit =
     if (viewIndex.get() < idx && viewIndex.get() < script.maxImage) {
       nextImage()
       advanceTo(idx)
     }
-  }
 }

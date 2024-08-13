@@ -54,7 +54,7 @@ object Main {
     }
   }
 
-  def main(args: Array[String]): Unit = {
+  def main(args: Array[String]): Unit =
     parseConfig(args) match {
       case Some(Config(Some(GenerateJwks(Some(outputFile), publicKeys)))) =>
         // Load RSA keys. They ID of each key is its file name.
@@ -148,16 +148,14 @@ object Main {
       case None =>
         sys.exit(ErrorCodes.InvalidUsage)
     }
-  }
 
   private def handleGenerateTokensError(message: String)(details: String): Nothing = {
     Console.println(s"$message. Details: $details")
     sys.exit(ErrorCodes.GenerateTokensError)
   }
 
-  private def parseConfig(args: collection.Seq[String]): Option[Config] = {
+  private def parseConfig(args: collection.Seq[String]): Option[Config] =
     configParser.parse(args, Config())
-  }
 
   private val configParser = new scopt.OptionParser[Config]("ledger-api-auth") {
     cmd("generate-jwks")

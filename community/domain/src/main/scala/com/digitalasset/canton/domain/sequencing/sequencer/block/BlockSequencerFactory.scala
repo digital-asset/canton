@@ -150,7 +150,7 @@ abstract class BlockSequencerFactory(
       domainSyncCryptoApi: DomainSyncCryptoClient,
       protocolVersion: ProtocolVersion,
       trafficConfig: SequencerTrafficConfig,
-  ): SequencerRateLimitManager = {
+  ): SequencerRateLimitManager =
     new EnterpriseSequencerRateLimitManager(
       trafficPurchasedManager,
       trafficConsumedStore,
@@ -162,7 +162,6 @@ abstract class BlockSequencerFactory(
       trafficConfig,
       eventCostCalculator = new EventCostCalculator(loggerFactory),
     )
-  }
 
   override final def create(
       domainId: DomainId,
@@ -260,9 +259,8 @@ abstract class BlockSequencerFactory(
     }
   }
 
-  override def onClosed(): Unit = {
+  override def onClosed(): Unit =
     Lifecycle.close(store)(logger)
-  }
 }
 
 object BlockSequencerFactory {

@@ -129,7 +129,7 @@ object BuildCommon {
         val res = filter(x)
         if (verbose) {
           if (res) {
-            log.info(s"RUNNING ${x}")
+            log.info(s"RUNNING $x")
           } else {
             //          log.info(s"IGNORING ${x}")
           }
@@ -168,7 +168,7 @@ object BuildCommon {
   def runCommand(command: String, log: ManagedLogger, optError: Option[String] = None): String = {
     import scala.sys.process.Process
     val processLogger = new DamlPlugin.BufferedLogger
-    log.debug(s"Running ${command}")
+    log.debug(s"Running $command")
     val exitCode = Process(command) ! processLogger
     val output = processLogger.output()
     if (exitCode != 0) {
@@ -355,15 +355,14 @@ object BuildCommon {
     }
 
   class RenameMergeStrategy(target: String) extends MergeStrategy {
-    override def name: String = s"Rename to ${target}"
+    override def name: String = s"Rename to $target"
 
     override def apply(
         tempDir: File,
         path: String,
         files: Seq[File],
-    ): Either[String, Seq[(File, String)]] = {
+    ): Either[String, Seq[(File, String)]] =
       Right(files.map(_ -> target))
-    }
   }
 
   def mergeStrategy(oldStrategy: String => MergeStrategy): String => MergeStrategy = {

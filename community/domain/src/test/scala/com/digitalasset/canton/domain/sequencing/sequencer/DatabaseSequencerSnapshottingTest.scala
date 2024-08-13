@@ -13,7 +13,6 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencing.protocol.{Recipients, SubmissionRequest}
-import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.{MediatorId, TestingIdentityFactory, TestingTopology}
 import org.apache.pekko.stream.Materializer
@@ -58,8 +57,6 @@ class DatabaseSequencerSnapshottingTest extends SequencerApiTest {
   }
 
   override protected def supportAggregation: Boolean = false
-
-  override protected def defaultExpectedTrafficReceipt: Option[TrafficReceipt] = None
 
   "Database snapshotting" should {
 

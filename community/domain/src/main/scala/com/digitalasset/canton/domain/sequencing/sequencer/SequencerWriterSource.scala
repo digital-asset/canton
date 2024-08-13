@@ -147,7 +147,7 @@ class SequencerWriterQueues private[sequencer] (
     */
   private def writeInternal(
       submissionOrOutcome: Either[SubmissionRequest, DeliverableSubmissionOutcome]
-  )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncError, Unit] = {
+  )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncError, Unit] =
     for {
       event <- eventGenerator.generate(submissionOrOutcome)
       enqueueResult = deliverEventQueue.offer(event)
@@ -161,7 +161,6 @@ class SequencerWriterQueues private[sequencer] (
           Right(())
       })
     } yield ()
-  }
 
   def complete(): Unit = {
     implicit val tc: TraceContext = TraceContext.empty
@@ -334,6 +333,7 @@ class SendEventGenerator(
           error.rpcStatusWithoutLoggingContext(),
           protocolVersion,
           traceContext,
+          None, // traffic receipt is read from another table
         )
       }
 
@@ -353,6 +353,7 @@ class SendEventGenerator(
           recipientIds,
           payload,
           submission.topologyTimestamp,
+          None, // traffic receipt is read from another table
         )
       }
 
@@ -380,6 +381,7 @@ class SendEventGenerator(
                 submission.messageId,
                 submission.topologyTimestamp,
                 traceContext,
+                None, // traffic receipt is read from another table
               )
             )
           case Right(reject: SubmissionOutcome.Reject) =>
@@ -390,6 +392,7 @@ class SendEventGenerator(
                 reject.error,
                 protocolVersion,
                 traceContext,
+                None, // traffic receipt is read from another table
               )
             )
         }
@@ -433,7 +436,7 @@ object AssertMonotonicBlockSequencerTimestampsFlow {
                 if (lastTimestamp.exists(_ > blockSequencerTimestamp)) {
                   logger.warn(
                     s"Block sequencer timestamp is not monotonically increasing: " +
-                      s"lastTimestamp=${lastTimestamp}, blockSequencerTimestamp=$blockSequencerTimestamp"
+                      s"lastTimestamp=$lastTimestamp, blockSequencerTimestamp=$blockSequencerTimestamp"
                   )
                 }
                 lastTimestamp = Some(blockSequencerTimestamp)
@@ -527,6 +530,7 @@ object SequenceWritesFlow {
                 _,
                 Some(topologyTimestamp),
                 _,
+                _,
               ) =>
             // We only check that the signing timestamp is at most the assigned timestamp.
             // The lower bound will be checked only when reading the event
@@ -549,6 +553,7 @@ object SequenceWritesFlow {
                 reason.rpcStatusWithoutLoggingContext(),
                 protocolVersion,
                 event.traceContext,
+                None, // traffic receipt is read from another table
               )
             }
           case other => other
@@ -626,7 +631,7 @@ object WritePayloadsFlow {
 
     def writePayloads(
         events: Seq[Presequenced[StoreEvent[Payload]]]
-    ): Future[Seq[Presequenced[StoreEvent[PayloadId]]]] = {
+    ): Future[Seq[Presequenced[StoreEvent[PayloadId]]]] =
       if (events.isEmpty) Future.successful(Seq.empty[Presequenced[StoreEvent[PayloadId]]])
       else {
         implicit val traceContext: TraceContext = TraceContext.ofBatch(events)(logger)
@@ -650,10 +655,9 @@ object WritePayloadsFlow {
             .map((_: Unit) => eventsWithPayloadId)
         }
       }
-    }
 
     def extractPayload(event: StoreEvent[Payload]): Option[Payload] = event match {
-      case DeliverStoreEvent(_, _, _, payload, _, _) => payload.some
+      case deliver: DeliverStoreEvent[_] => deliver.payload.some
       case _other => None
     }
 
@@ -680,7 +684,7 @@ object WritePayloadsFlow {
 object UpdateWatermarkFlow {
   def apply(store: SequencerWriterStore, logger: TracedLogger)(implicit
       executionContext: ExecutionContext
-  ): Flow[Traced[BatchWritten], Traced[BatchWritten], NotUsed] = {
+  ): Flow[Traced[BatchWritten], Traced[BatchWritten], NotUsed] =
     Flow[Traced[BatchWritten]]
       .mapAsync(1)(_.withTraceContext { implicit traceContext => written =>
         for {
@@ -708,7 +712,6 @@ object UpdateWatermarkFlow {
         } yield Traced(written)
       })
       .named("updateWatermark")
-  }
 }
 
 object NotifyEventSignallerFlow {

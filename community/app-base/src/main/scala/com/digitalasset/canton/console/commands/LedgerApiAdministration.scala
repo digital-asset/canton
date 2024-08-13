@@ -110,7 +110,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
   protected val name: String
 
   protected lazy val applicationId: String = token
-    .flatMap { encodedToken => JwtDecoder.decode(Jwt(encodedToken)).toOption }
+    .flatMap(encodedToken => JwtDecoder.decode(Jwt(encodedToken)).toOption)
     .flatMap(decodedToken => AuthServiceJWTCodec.readFromString(decodedToken.payload).toOption)
     .map { case s: StandardJWTPayload =>
       s.userId
@@ -213,7 +213,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           ),
           endOffset: Option[ParticipantOffset] = None,
           verbose: Boolean = true,
-      ): AutoCloseable = {
+      ): AutoCloseable =
         check(FeatureFlag.Testing)(
           consoleEnvironment.run {
             ledgerApiCommand(
@@ -227,7 +227,6 @@ trait BaseLedgerApiAdministration extends NoTracing {
             )
           }
         )
-      }
 
       @Help.Summary("Get flat updates", FeatureFlag.Testing)
       @Help.Description(
@@ -304,7 +303,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           ),
           endOffset: Option[ParticipantOffset] = None,
           verbose: Boolean = true,
-      ): AutoCloseable = {
+      ): AutoCloseable =
         check(FeatureFlag.Testing)(
           consoleEnvironment.run {
             ledgerApiCommand(
@@ -318,7 +317,6 @@ trait BaseLedgerApiAdministration extends NoTracing {
             )
           }
         )
-      }
 
       @Help.Summary("Starts measuring throughput at the update service", FeatureFlag.Testing)
       @Help.Description(
@@ -1222,7 +1220,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
         }
       }
 
-      private def get(party: PartyId, identityProviderId: String = ""): ProtoPartyDetails = {
+      private def get(party: PartyId, identityProviderId: String = ""): ProtoPartyDetails =
         check(FeatureFlag.Testing)(consoleEnvironment.run {
           ledgerApiCommand(
             LedgerApiCommands.PartyManagementService.GetParty(
@@ -1231,7 +1229,6 @@ trait BaseLedgerApiAdministration extends NoTracing {
             )
           )
         })
-      }
 
     }
 
@@ -1344,7 +1341,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           parties: Seq[PartyId],
           beginOffset: String = "",
           applicationId: String = applicationId,
-      ): AutoCloseable = {
+      ): AutoCloseable =
         check(FeatureFlag.Testing)(
           consoleEnvironment.run {
             ledgerApiCommand(
@@ -1357,7 +1354,6 @@ trait BaseLedgerApiAdministration extends NoTracing {
             )
           }
         )
-      }
     }
 
     @Help.Summary("Identity Provider Configuration Management", FeatureFlag.Testing)
@@ -1418,7 +1414,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
 
       @Help.Summary("Delete an identity provider configuration", FeatureFlag.Testing)
       @Help.Description("""Delete an existing identity provider configuration""")
-      def delete(identityProviderId: String): Unit = {
+      def delete(identityProviderId: String): Unit =
         check(FeatureFlag.Testing)(consoleEnvironment.run {
           ledgerApiCommand(
             LedgerApiCommands.IdentityProviderConfigs.Delete(
@@ -1426,7 +1422,6 @@ trait BaseLedgerApiAdministration extends NoTracing {
             )
           )
         })
-      }
 
       @Help.Summary("Get an identity provider configuration", FeatureFlag.Testing)
       @Help.Description("""Get identity provider configuration by id""")
@@ -1633,7 +1628,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
         }
       }
 
-      private def doGet(id: String, identityProviderId: String): LedgerApiUser = {
+      private def doGet(id: String, identityProviderId: String): LedgerApiUser =
         check(FeatureFlag.Testing)(consoleEnvironment.run {
           ledgerApiCommand(
             LedgerApiCommands.Users.Get(
@@ -1642,7 +1637,6 @@ trait BaseLedgerApiAdministration extends NoTracing {
             )
           )
         })
-      }
 
       @Help.Summary("Manage Ledger Api User Rights", FeatureFlag.Testing)
       @Help.Group("Ledger Api User Rights")
@@ -2319,7 +2313,7 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
       at: Map[ParticipantReference, PartyId],
       timeout: config.NonNegativeDuration,
   ): Unit = {
-    def scan() = {
+    def scan() =
       at.map { case (participant, party) =>
         (
           participant,
@@ -2327,7 +2321,6 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
           participant.ledger_api.updates.by_id(Set(party), transactionId).isDefined,
         )
       }
-    }
     ConsoleMacros.utils.retry_until_true(timeout)(
       scan().forall(_._3), {
         val res = scan().map { case (participant, party, res) =>
@@ -2348,12 +2341,11 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
     // There's a race condition here, in the unlikely circumstance that the party->participant mapping on the domain
     // changes during the command's execution. We'll have to live with it for the moment, as there's no convenient
     // way to get the record time of the transaction to pass to the parties.list call.
-    val domainPartiesAndParticipants = {
+    val domainPartiesAndParticipants =
       consoleEnvironment.participants.all.iterator
         .filter(x => x.health.is_running() && x.health.initialized() && x.name == name)
         .flatMap(_.parties.list(filterDomain = txDomain.filterString))
         .toSet
-    }
 
     val domainParties = domainPartiesAndParticipants.map(_.party)
     // WARNING! this logic will become highly problematic if we introduce witness blinding based on topology events
@@ -2408,7 +2400,7 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
       txId: String,
       txDomainId: String,
       optTimeout: Option[config.NonNegativeDuration],
-  ): Tx = {
+  ): Tx =
     optTimeout match {
       case None => tx
       case Some(timeout) =>
@@ -2417,5 +2409,4 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
         awaitTransaction(txId, involved, timeout)
         tx
     }
-  }
 }

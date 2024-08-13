@@ -192,13 +192,12 @@ object LedgerClient {
       ec: ExecutionContext,
       esf: ExecutionSequencerFactory,
       traceContext: TraceContext,
-  ): Future[LedgerClient] = {
+  ): Future[LedgerClient] =
     LedgerClient(
       GrpcChannel.withShutdownHook(builder),
       configuration,
       loggerFactory,
     )
-  }
 
   /** Extract a trace context from a transaction and represent it as our TraceContext */
   def traceContextFromLedgerApi(traceContext: Option[LedgerApiTraceContext]): TraceContext =

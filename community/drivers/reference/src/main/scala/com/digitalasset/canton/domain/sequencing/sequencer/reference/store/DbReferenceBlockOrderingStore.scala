@@ -152,7 +152,7 @@ class DbReferenceBlockOrderingStore(
               lastErrorKind: Option[ErrorKind],
           )(implicit
               tc: TraceContext
-          ): RetryUtil.ErrorKind = {
+          ): RetryUtil.ErrorKind =
             outcome match {
               case util.Success(_) => RetryUtil.NoErrorKind
               case util.Failure(exception) =>
@@ -168,7 +168,6 @@ class DbReferenceBlockOrderingStore(
                   case _ => FatalErrorKind
                 }
             }
-          }
         },
       )
   }

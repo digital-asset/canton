@@ -109,7 +109,7 @@ trait TransactionAuthorizationValidator {
         (uid -> (keysAuthorizeNamespace || keyForUid.nonEmpty, keysUsed ++ keyForUid))
       }.toMap
 
-    val extraKeyAuthorizations = {
+    val extraKeyAuthorizations =
       // assume extra keys are not found
       required.extraKeys.map(k => k -> (false, Set.empty[SigningPublicKey])).toMap ++
         // and replace with those that were actually found
@@ -130,7 +130,6 @@ trait TransactionAuthorizationValidator {
             }
           }
           .toMap
-    }
 
     val allKeysUsedForAuthorization =
       (namespaceWithRootAuthorizations.values ++
@@ -233,7 +232,7 @@ trait TransactionAuthorizationValidator {
       graph: AuthorizationCheck,
       uid: UniqueIdentifier,
       authKeys: Set[Fingerprint],
-  ): Option[AuthorizedIdentifierDelegation] = {
+  ): Option[AuthorizedIdentifierDelegation] =
     getIdentifierDelegationsForUid(uid)
       .find(aid =>
         authKeys(aid.mapping.target.id) && graph.existsAuthorizedKeyIn(
@@ -241,14 +240,12 @@ trait TransactionAuthorizationValidator {
           requireRoot = false,
         )
       )
-  }
 
   protected def getIdentifierDelegationsForUid(
       uid: UniqueIdentifier
-  ): Set[AuthorizedIdentifierDelegation] = {
+  ): Set[AuthorizedIdentifierDelegation] =
     identifierDelegationCache
       .getOrElse(uid, Set())
-  }
 
   protected def getAuthorizationCheckForNamespace(
       namespace: Namespace
@@ -262,12 +259,11 @@ trait TransactionAuthorizationValidator {
 
   protected def getAuthorizationGraphForNamespace(
       namespace: Namespace
-  ): AuthorizationGraph = {
+  ): AuthorizationGraph =
     namespaceCache.getOrElseUpdate(
       namespace,
       new AuthorizationGraph(namespace, extraDebugInfo = false, loggerFactory),
     )
-  }
 
   protected def loadAuthorizationGraphs(
       timestamp: CantonTimestamp,
@@ -327,7 +323,7 @@ trait TransactionAuthorizationValidator {
         .foreach { case (namespace, transactions) =>
           ErrorUtil.requireArgument(
             !namespaceCache.isDefinedAt(namespace),
-            s"graph shouldn't exist before loading ${namespace} vs ${namespaceCache.get(namespace)}",
+            s"graph shouldn't exist before loading $namespace vs ${namespaceCache.get(namespace)}",
           )
           val graph = new AuthorizationGraph(
             namespace,

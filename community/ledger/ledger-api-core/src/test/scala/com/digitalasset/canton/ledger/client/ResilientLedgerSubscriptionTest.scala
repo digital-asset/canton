@@ -55,8 +55,8 @@ class ResilientLedgerSubscriptionTest extends AnyWordSpec with BaseTest with Has
           sut.subscriptionF.failed.futureValue shouldBe exception
         }(
           expectedWarningMessages = Seq(
-            s"Ledger subscription ${subscriptionName} failed with an error",
-            s"wait-for-${subscriptionName}-completed finished with an error",
+            s"Ledger subscription $subscriptionName failed with an error",
+            s"wait-for-$subscriptionName-completed finished with an error",
           )
         )
       }
@@ -77,7 +77,7 @@ class ResilientLedgerSubscriptionTest extends AnyWordSpec with BaseTest with Has
           succeed
         }(
           expectedWarningMessages = Seq(
-            s"Ledger subscription ${subscriptionName} failed with an error"
+            s"Ledger subscription $subscriptionName failed with an error"
           )
         )
       }
@@ -124,7 +124,7 @@ class ResilientLedgerSubscriptionTest extends AnyWordSpec with BaseTest with Has
       None
     )
 
-    def makeSource(offset: ParticipantOffset): Source[Transaction, NotUsed] = {
+    def makeSource(offset: ParticipantOffset): Source[Transaction, NotUsed] =
       Source.fromPublisher[Transaction](new Publisher[Transaction] {
         override def subscribe(s: Subscriber[_ >: Transaction]): Unit = {
           subscriber.updateAndGet { cur =>
@@ -146,16 +146,14 @@ class ResilientLedgerSubscriptionTest extends AnyWordSpec with BaseTest with Has
           })
         }
       })
-    }
     val received = new AtomicReference[Seq[Transaction]](Seq.empty)
 
-    def getSubscriberWhenReady(): SubscriptionState = {
+    def getSubscriberWhenReady(): SubscriptionState =
       eventually() {
         val sub = subscriber.get().valueOrFail("subscriber not set")
         assert(sub.request > 0)
         sub
       }
-    }
 
     def runTest(test: ResilientLedgerSubscription[Transaction, Unit] => Assertion)(
         expectedWarningMessages: Seq[String]

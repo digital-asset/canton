@@ -5,10 +5,8 @@ package com.digitalasset.canton.admin.api.client.data
 
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
-import com.digitalasset.canton.sequencing.{
-  TrafficControlParameters as TrafficControlParametersInternal
-}
-import com.digitalasset.canton.time.{NonNegativeFiniteDuration as InternalNonNegativeFiniteDuration}
+import com.digitalasset.canton.sequencing.TrafficControlParameters as TrafficControlParametersInternal
+import com.digitalasset.canton.time.NonNegativeFiniteDuration as InternalNonNegativeFiniteDuration
 
 // TODO(#15650) Properly expose new BFT parameters and domain limits
 final case class TrafficControlParameters(

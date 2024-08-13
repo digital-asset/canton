@@ -35,7 +35,7 @@ final case class BlockInfo(
 ) {
   require(
     latestSequencerEventTimestamp.forall(lastTs >= _),
-    s"The latest sequencer event timestamp $latestSequencerEventTimestamp must not be after the last known event at ${lastTs}",
+    s"The latest sequencer event timestamp $latestSequencerEventTimestamp must not be after the last known event at $lastTs",
   )
 }
 
@@ -88,7 +88,7 @@ final case class BlockEphemeralState(
     }
     ErrorUtil.requireState(
       expired.isEmpty,
-      s"Expired in-flight aggregations have not been evicted by ${lastTs}: ${expired.toSeq}",
+      s"Expired in-flight aggregations have not been evicted by $lastTs: ${expired.toSeq}",
     )
 
     // All in-flight aggregations satisfy their invariant

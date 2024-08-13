@@ -94,7 +94,7 @@ trait StoreBasedDomainOutboxDispatchHelper extends DomainOutboxDispatchHelper {
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, /*DomainRegistryError*/ String, Seq[
     GenericSignedTopologyTransaction
-  ]] = {
+  ]] =
     transactions
       .parTraverse { tx =>
         if (tx.transaction.isEquivalentTo(protocolVersion)) {
@@ -118,7 +118,6 @@ trait StoreBasedDomainOutboxDispatchHelper extends DomainOutboxDispatchHelper {
             }
         }
       }
-  }
 
 }
 
@@ -130,7 +129,7 @@ trait QueueBasedDomainOutboxDispatchHelper extends DomainOutboxDispatchHelper {
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, /*DomainRegistryError*/ String, Seq[
     GenericSignedTopologyTransaction
-  ]] = {
+  ]] =
     transactions
       .parTraverse { tx =>
         if (tx.transaction.isEquivalentTo(protocolVersion)) {
@@ -141,7 +140,6 @@ trait QueueBasedDomainOutboxDispatchHelper extends DomainOutboxDispatchHelper {
             .asVersion(tx, protocolVersion)(crypto)
         }
       }
-  }
 }
 
 trait DomainOutboxDispatch extends NamedLogging with FlagCloseable {

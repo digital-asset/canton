@@ -119,20 +119,19 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
     // explicitly pass a real execution context so shutdowns don't deadlock while Await'ing completion of the done
     // future while still finishing up running tasks that require an execution context
     val (writer, doneF) = PekkoUtil.runSupervised(
-      logger.error("Writer flow failed", _), {
-        SequencerWriterSource(
-          testWriterConfig,
-          totalNodeCount = PositiveInt.tryCreate(1),
-          keepAliveInterval,
-          writerStore,
-          clock,
-          eventSignaller,
-          loggerFactory,
-          testedProtocolVersion,
-          SequencerMetrics.noop(suiteName),
-        )(executorService, implicitly[TraceContext])
-          .toMat(Sink.ignore)(Keep.both)
-      },
+      logger.error("Writer flow failed", _),
+      SequencerWriterSource(
+        testWriterConfig,
+        totalNodeCount = PositiveInt.tryCreate(1),
+        keepAliveInterval,
+        writerStore,
+        clock,
+        eventSignaller,
+        loggerFactory,
+        testedProtocolVersion,
+        SequencerMetrics.noop(suiteName),
+      )(executorService, implicitly[TraceContext])
+        .toMat(Sink.ignore)(Keep.both),
     )
 
     def completeFlow(): Future[Unit] = {
@@ -201,6 +200,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
           Set.empty,
           payload1,
           None,
+          None,
         )
         _ <- loggerFactory.assertLogs(
           {
@@ -209,7 +209,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
           },
           _.shouldBeCantonErrorCode(PayloadToEventTimeBoundExceeded),
         )
-        events <- store.readEvents(aliceId)
+        events <- store.readEvents(alice, aliceId)
       } yield events.payloads shouldBe empty
     }
   }
@@ -231,12 +231,14 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
           Set.empty,
           payload1,
           None,
+          None,
         )
         deliver2 = DeliverStoreEvent.ensureSenderReceivesEvent(
           aliceId,
           messageId2,
           Set.empty,
           payload2,
+          None,
           None,
         )
         _ <- {
@@ -245,11 +247,11 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
           completeFlow()
         }
 
-        events <- store.readEvents(aliceId)
+        events <- store.readEvents(alice, aliceId)
       } yield {
         events.payloads should have size 1
         events.payloads.headOption.map(_.event).value should matchPattern {
-          case DeliverStoreEvent(_, `messageId2`, _, _, _, _) =>
+          case e: DeliverStoreEvent[_] if e.messageId == messageId2 =>
         }
       }
     }
@@ -275,6 +277,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
           Set.empty,
           payload1,
           Some(validTopologyTimestamp),
+          None,
         )
         deliver2 = DeliverStoreEvent.ensureSenderReceivesEvent(
           aliceId,
@@ -282,11 +285,12 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
           Set.empty,
           payload1,
           Some(invalidTopologyTimestamp),
+          None,
         )
         _ = offerDeliverOrFail(Presequenced.alwaysValid(deliver1))
         _ = offerDeliverOrFail(Presequenced.alwaysValid(deliver2))
         _ <- completeFlow()
-        events <- store.readEvents(aliceId)
+        events <- store.readEvents(alice, aliceId)
       } yield {
         events.payloads should have size 2
         events.payloads.map(_.event)
@@ -319,8 +323,8 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
           event.messageId shouldBe messageId1
         }
 
-        inside(sortedEvents(1)) { case DeliverErrorStoreEvent(_, _, errorO, _) =>
-          getErrorMessage(errorO) should (include("Invalid topology timestamp")
+        inside(sortedEvents(1)) { case err: DeliverErrorStoreEvent =>
+          getErrorMessage(err.error) should (include("Invalid topology timestamp")
             and include("The topology timestamp must be before or at "))
         }
       }
@@ -357,11 +361,11 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
         )("send to unknown recipient")
         _ <- eventuallyF(10.seconds) {
           for {
-            events <- env.store.readEvents(aliceId)
+            events <- env.store.readEvents(alice, aliceId)
             error = events.payloads.collectFirst {
               case Sequenced(
                     _,
-                    deliverError @ DeliverErrorStoreEvent(`aliceId`, _, _, _),
+                    deliverError @ DeliverErrorStoreEvent(`aliceId`, _, _, _, _),
                   ) =>
                 deliverError
             }.value
@@ -382,6 +386,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
             messageId1,
             Set.empty,
             generatePayload(),
+            None,
             None,
           )
         )
