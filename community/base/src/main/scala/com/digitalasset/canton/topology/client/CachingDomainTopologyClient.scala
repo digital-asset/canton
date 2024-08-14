@@ -37,7 +37,7 @@ import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future, Promise}
 
 final class CachingDomainTopologyClient(
-    delegate: DomainTopologyClientWithInit,
+    delegate: StoreBasedDomainTopologyClient,
     cachingConfigs: CachingConfigs,
     batchingConfig: BatchingConfig,
     val timeouts: ProcessingTimeout,

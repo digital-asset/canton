@@ -102,7 +102,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
   )(implicit
       traceContext: TraceContext
   ): Future[Seq[GenericSignedTopologyTransaction]] = {
-    logger.debug(s"Querying proposals for mapping hashes $hashes as of $asOfExclusive")
+    logger.debug(s"Querying transactions for mapping hashes $hashes as of $asOfExclusive")
 
     findAsOfExclusive(
       asOfExclusive,
@@ -340,9 +340,6 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       .map(
         _.result.toSet
           .flatMap[PartyId](_.mapping match {
-            // TODO(#14061): post-filtering for participantId non-columns results in fewer than limit results being returned
-            //  - add indexed secondary uid and/or namespace columns for participant-ids - also to support efficient lookup
-            //    of "what parties a particular participant hosts" (ParticipantId => Set[PartyId])
             case ptp: PartyToParticipant
                 if filterParticipant.isEmpty || ptp.participants
                   .exists(
@@ -452,16 +449,14 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
   }
 
   override def findEssentialStateAtSequencedTime(
-      asOfInclusive: SequencedTime,
-      excludeMappings: Seq[TopologyMapping.Code],
+      asOfInclusive: SequencedTime
   )(implicit
       traceContext: TraceContext
   ): Future[GenericStoredTopologyTransactions] = {
     val timeFilter = sql" AND sequenced <= ${asOfInclusive.value}"
-    val mappingFilter = excludeMapping(excludeMappings.toSet)
     logger.debug(s"Querying essential state as of asOfInclusive")
 
-    queryForTransactions(timeFilter ++ mappingFilter, "essentialState").map(
+    queryForTransactions(timeFilter, "essentialState").map(
       _.asSnapshotAtMaxEffectiveTime.retainAuthorizedHistoryAndEffectiveProposals
     )
   }
@@ -608,8 +603,6 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       }
     }
 
-    // TODO(#14061): Decide whether we want additional indices by mapping_key_hash and tx_hash (e.g. for update/removal and lookups)
-    // TODO(#14061): Come up with columns/indexing for efficient ParticipantId => Seq[PartyId] lookup
     storage.profile match {
       case _: DbStorage.Profile.Postgres | _: DbStorage.Profile.H2 =>
         (sql"""INSERT INTO common_topology_transactions (store_id, sequenced, valid_from, valid_until, transaction_type, namespace,

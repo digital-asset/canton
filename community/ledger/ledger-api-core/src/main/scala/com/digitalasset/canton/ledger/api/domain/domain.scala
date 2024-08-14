@@ -7,16 +7,11 @@ import com.daml.logging.entries.{LoggingValue, ToLoggingValue}
 import com.digitalasset.canton.data.DeduplicationPeriod
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.daml.lf.command.{
-  ApiCommands as LfCommands,
-  DisclosedContract as LfDisclosedContract,
-}
-import com.digitalasset.daml.lf.crypto
+import com.digitalasset.daml.lf.command.ApiCommands as LfCommands
 import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.digitalasset.daml.lf.data.logging.*
-import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref}
-import com.digitalasset.daml.lf.transaction.TransactionVersion
-import com.digitalasset.daml.lf.value.Value as Lf
+import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import com.digitalasset.daml.lf.transaction.FatContractInstance
 import scalaz.@@
 import scalaz.syntax.tag.*
 
@@ -102,7 +97,7 @@ final case class Commands(
     submittedAt: Timestamp,
     deduplicationPeriod: DeduplicationPeriod,
     commands: LfCommands,
-    disclosedContracts: ImmArray[DisclosedContract],
+    disclosedContracts: ImmArray[FatContractInstance],
     domainId: Option[DomainId] = None,
     packagePreferenceSet: Set[Ref.PackageId] = Set.empty,
     // Used to indicate the package map against which package resolution was performed.
@@ -125,30 +120,6 @@ final case class Commands(
       indicateOmittedFields,
     )
   }
-}
-
-final case class DisclosedContract(
-    templateId: Ref.TypeConName,
-    packageName: Ref.PackageName,
-    packageVersion: Option[Ref.PackageVersion],
-    contractId: Lf.ContractId,
-    argument: Value,
-    createdAt: Timestamp,
-    keyHash: Option[crypto.Hash],
-    signatories: Set[Ref.Party],
-    stakeholders: Set[Ref.Party],
-    keyMaintainers: Option[Set[Ref.Party]],
-    keyValue: Option[Value],
-    driverMetadata: Bytes,
-    transactionVersion: TransactionVersion,
-) {
-  def toLf: LfDisclosedContract =
-    LfDisclosedContract(
-      templateId,
-      contractId,
-      argument,
-      keyHash,
-    )
 }
 
 object Commands {

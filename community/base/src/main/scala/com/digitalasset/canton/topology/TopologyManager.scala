@@ -20,7 +20,7 @@ import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.TopologyManagerError.InternalError.TopologySigningError
 import com.digitalasset.canton.topology.TopologyManagerError.{
-  DangerousKeyUseCommandRequiresForce,
+  DangerousCommandRequiresForce,
   IncreaseOfLedgerTimeRecordTimeTolerance,
   ParticipantTopologyManagerError,
 }
@@ -522,19 +522,27 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId](
     case DomainParametersState(domainId, newDomainParameters) =>
       checkLedgerTimeRecordTimeToleranceNotIncreasing(domainId, newDomainParameters, forceChanges)
     case OwnerToKeyMapping(member, _, _) =>
-      checkOwnerToKeyMappingIsForCurrentMember(member, forceChanges)
+      checkTransactionIsForCurrentNode(member, forceChanges, transaction.mapping.code)
     case VettedPackages(participantId, _, newPackageIds) =>
-      checkPackageVettingIsNotDangerous(participantId, newPackageIds.toSet, forceChanges)
-
+      checkPackageVettingIsNotDangerous(
+        participantId,
+        newPackageIds.toSet,
+        forceChanges,
+        transaction.mapping.code,
+      )
     case _ => EitherT.rightT(())
   }
 
-  private def checkOwnerToKeyMappingIsForCurrentMember(member: Member, forceChanges: ForceFlags)(
-      implicit traceContext: TraceContext
+  private def checkTransactionIsForCurrentNode(
+      member: Member,
+      forceChanges: ForceFlags,
+      topologyMappingCode: TopologyMapping.Code,
+  )(implicit
+      traceContext: TraceContext
   ): EitherT[Future, TopologyManagerError, Unit] =
     EitherTUtil.condUnitET(
       member.uid == nodeId || forceChanges.permits(ForceFlag.AlienMember),
-      DangerousKeyUseCommandRequiresForce.AlienMember(member),
+      DangerousCommandRequiresForce.AlienMember(member, topologyMappingCode),
     )
 
   private def checkLedgerTimeRecordTimeToleranceNotIncreasing(
@@ -586,6 +594,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId](
       participantId: Member,
       newPackageIds: Set[LfPackageId],
       forceChanges: ForceFlags,
+      topologyMappingCode: TopologyMapping.Code,
   )(implicit traceContext: TraceContext): EitherT[Future, TopologyManagerError, Unit] =
     for {
       addedAndRemoved <- EitherT.right(
@@ -613,8 +622,9 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId](
             (addedPackages, packagesToUnvet)
           }
       )
-      (_, removed) = (addedAndRemoved._1, addedAndRemoved._2)
+      (added, removed) = (addedAndRemoved._1, addedAndRemoved._2)
       _ <- checkPackageVettingRevocation(removed, forceChanges)
+      _ <- checkTransactionIsForCurrentNode(participantId, forceChanges, topologyMappingCode)
     } yield ()
 
   private def checkPackageVettingRevocation(

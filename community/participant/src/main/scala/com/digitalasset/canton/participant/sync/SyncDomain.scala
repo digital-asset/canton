@@ -29,7 +29,6 @@ import com.digitalasset.canton.participant.domain.{DomainHandle, DomainRegistryE
 import com.digitalasset.canton.participant.event.RecordOrderPublisher.PendingPublish
 import com.digitalasset.canton.participant.event.{
   AcsChange,
-  ContractMetadataAndTransferCounter,
   ContractStakeholdersAndTransferCounter,
   RecordTime,
 }
@@ -409,24 +408,18 @@ class SyncDomain(
         AcsChange(
           activations = storedActivatedContracts
             .map(c =>
-              c.contractId -> WithContractHash.fromContract(
-                c.contract,
-                ContractMetadataAndTransferCounter(
-                  c.contract.metadata,
-                  change.activations(c.contractId).transferCounter,
-                ),
+              c.contractId -> ContractStakeholdersAndTransferCounter(
+                c.contract.metadata.stakeholders,
+                change.activations(c.contractId).transferCounter,
               )
             )
             .toMap,
           deactivations = storedDeactivatedContracts
             .map(c =>
-              c.contractId -> WithContractHash
-                .fromContract(
-                  c.contract,
-                  ContractStakeholdersAndTransferCounter(
-                    c.contract.metadata.stakeholders,
-                    change.deactivations(c.contractId).transferCounter,
-                  ),
+              c.contractId ->
+                ContractStakeholdersAndTransferCounter(
+                  c.contract.metadata.stakeholders,
+                  change.deactivations(c.contractId).transferCounter,
                 )
             )
             .toMap,
@@ -664,7 +657,7 @@ class SyncDomain(
           )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
             Seq(
               topologyProcessor.subscriptionStartsAt(start, domainTimeTracker)(traceContext),
-              trafficProcessor.subscriptionStartsAt(start)(traceContext),
+              trafficProcessor.subscriptionStartsAt(start, domainTimeTracker)(traceContext),
             ).parSequence_
 
           override def apply(
