@@ -445,7 +445,7 @@ final case class DynamicDomainParameters private (
     maxNumPackages = Int.MaxValue,
   )
 
-  override def pretty: Pretty[DynamicDomainParameters] = {
+  override def pretty: Pretty[DynamicDomainParameters] =
     if (
       representativeProtocolVersion >= companionObj.protocolVersionRepresentativeFor(
         ProtocolVersion.v31
@@ -478,7 +478,6 @@ final case class DynamicDomainParameters private (
         param("max request size", _.maxRequestSize.value),
       )
     }
-  }
 }
 
 object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDomainParameters] {
@@ -593,7 +592,7 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
       acsCommitmentsCatchUpConfigParameter: Option[AcsCommitmentsCatchUpConfig],
   )(
       representativeProtocolVersion: RepresentativeProtocolVersion[DynamicDomainParameters.type]
-  ): DynamicDomainParameters = {
+  ): DynamicDomainParameters =
     DynamicDomainParameters(
       confirmationResponseTimeout,
       mediatorReactionTimeout,
@@ -609,7 +608,6 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
       onboardingRestriction,
       acsCommitmentsCatchUpConfigParameter,
     )(representativeProtocolVersion)
-  }
 
   /** Default dynamic domain parameters for non-static clocks */
   def defaultValues(protocolVersion: ProtocolVersion): DynamicDomainParameters =

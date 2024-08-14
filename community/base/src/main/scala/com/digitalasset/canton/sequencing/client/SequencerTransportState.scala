@@ -180,7 +180,7 @@ class SequencersTransportState(
 
   private[this] def pickUnhealthySequencer(implicit
       traceContext: TraceContext
-  ): (SequencerId, SequencerClientTransportCommon) = {
+  ): (SequencerId, SequencerClientTransportCommon) =
     // TODO(i12377): Can we fallback to first sequencer transport here or should we
     //               introduce EitherT and propagate error handling?
     state.headOption
@@ -189,7 +189,6 @@ class SequencersTransportState(
         ErrorUtil.invalidState("No sequencer subscription at the moment. Try again later.")
       )
       .fmap(_.transport.clientTransport)
-  }
 
   override def transport(sequencerId: SequencerId)(implicit
       traceContext: TraceContext
@@ -269,7 +268,7 @@ class SequencersTransportState(
     transportCloseFutures.flatMap(_.parTraverse_(_.parTraverse_ { case (transport, closeFutureO) =>
       closeFutureO
         .getOrElse(Future.unit)
-        .thereafter { _ => transport.clientTransport.close() }
+        .thereafter(_ => transport.clientTransport.close())
     }))
   }
 
@@ -371,9 +370,8 @@ class SequencersTransportState(
     }
   }
 
-  override protected def onClosed(): Unit = {
+  override protected def onClosed(): Unit =
     closeAllSubscriptions()
-  }
 }
 
 final case class SequencerTransportState(

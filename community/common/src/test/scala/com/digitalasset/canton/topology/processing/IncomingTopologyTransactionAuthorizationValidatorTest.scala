@@ -76,7 +76,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
         toValidate: Seq[GenericSignedTopologyTransaction],
         inStore: Map[MappingHash, GenericSignedTopologyTransaction],
         expectFullAuthorization: Boolean,
-    )(implicit traceContext: TraceContext) = {
+    )(implicit traceContext: TraceContext) =
       MonadUtil
         .sequentialTraverse(toValidate)(tx =>
           validator.validateAndUpdateHeadAuthState(
@@ -90,7 +90,6 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
           val (aggregations, transactions) = results.unzip
           (aggregations.combineAll, transactions)
         }
-    }
 
     "receiving transactions with signatures" should {
       "succeed to add if the signature is valid" in {
@@ -125,10 +124,10 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
             validatedTopologyTransactions,
             Seq(
               None,
-              Some({
+              Some {
                 case TopologyTransactionRejection.SignatureCheckFailed(_) => true
                 case _ => false
-              }),
+              },
             ),
           )
         }
@@ -186,10 +185,10 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
             res._2,
             Seq(
               None,
-              Some({
+              Some {
                 case TopologyTransactionRejection.WrongDomain(_) => true
                 case _ => false
-              }),
+              },
             ),
           )
         }
@@ -300,13 +299,13 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
           check(
             res._2,
             Seq(
-              Some({
+              Some {
                 case TopologyTransactionRejection.SignatureCheckFailed(
                       InvalidSignature(`sig_k1_emptySignature`, _, _)
                     ) =>
                   true
                 case _ => false
-              }),
+              },
               Some(_ == NoDelegationFoundForKeys(Set(SigningKeys.key1.fingerprint))),
             ),
           )

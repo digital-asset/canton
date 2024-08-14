@@ -15,7 +15,7 @@ import scala.collection.immutable.SortedSet
 
 object DomainSequencingTestUtils {
 
-  def mockDeliverStoreEvent(
+  def deliverStoreEventWithDefaults(
       sender: SequencerMemberId = SequencerMemberId(0),
       payloadId: PayloadId = PayloadId(CantonTimestamp.Epoch),
       signingTs: Option[CantonTimestamp] = None,
@@ -24,7 +24,7 @@ object DomainSequencingTestUtils {
       recipients: NonEmpty[SortedSet[SequencerMemberId]] = NonEmpty(SortedSet, sender)
   ): DeliverStoreEvent[PayloadId] = {
     val messageId = MessageId.tryCreate("mock-deliver")
-    DeliverStoreEvent(sender, messageId, recipients, payloadId, signingTs, traceContext)
+    DeliverStoreEvent(sender, messageId, recipients, payloadId, signingTs, traceContext, None)
   }
 
   def payloadsForEvents(events: Seq[Sequenced[PayloadId]]): List[Payload] = {

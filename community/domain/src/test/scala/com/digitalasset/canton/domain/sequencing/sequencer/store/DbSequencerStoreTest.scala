@@ -7,7 +7,7 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.domain.sequencing.sequencer.store.DbSequencerStoreTest.MaxInClauseSize
 import com.digitalasset.canton.lifecycle.CloseContext
-import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.resource.{DbStorage, Storage}
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -15,6 +15,10 @@ import scala.concurrent.Future
 
 trait DbSequencerStoreTest extends SequencerStoreTest with MultiTenantedSequencerStoreTest {
   this: DbTest =>
+
+  override lazy val dbStorage: Option[Storage] = Some(storage)
+
+  override protected val trafficReceiptSupport: Boolean = true
 
   override def cleanDb(storage: DbStorage): Future[Unit] =
     DbSequencerStoreTest.cleanSequencerTables(storage)
@@ -57,15 +61,16 @@ object DbSequencerStoreTest {
     storage.update(
       DBIO.seq(
         Seq(
-          "members",
-          "counter_checkpoints",
-          "payloads",
-          "watermarks",
-          "events",
-          "acknowledgements",
-          "lower_bound",
+          "sequencer_members",
+          "sequencer_counter_checkpoints",
+          "sequencer_payloads",
+          "sequencer_watermarks",
+          "sequencer_events",
+          "sequencer_acknowledgements",
+          "sequencer_lower_bound",
+          "seq_traffic_control_consumed_journal",
         )
-          .map(name => sqlu"truncate table sequencer_#$name")*
+          .map(name => sqlu"truncate table #$name")*
       ),
       functionFullName,
     )

@@ -132,7 +132,7 @@ class IncomingTopologyTransactionAuthorizationValidator(
       expectFullAuthorization: Boolean,
   )(implicit
       traceContext: TraceContext
-  ): Future[(UpdateAggregation, GenericValidatedTopologyTransaction)] = {
+  ): Future[(UpdateAggregation, GenericValidatedTopologyTransaction)] =
     for {
       authCheckResult <- determineRelevantUidsAndNamespaces(toValidate, inStore.map(_.transaction))
       (updateAggregation, targetDomainVerified) = authCheckResult
@@ -146,7 +146,7 @@ class IncomingTopologyTransactionAuthorizationValidator(
       cascadingUidsFromNamespace <- loadUidsF
     } yield {
 
-      logger.debug(s"Update aggregation yielded ${updateAggregation}")
+      logger.debug(s"Update aggregation yielded $updateAggregation")
       val validated = targetDomainVerified match {
         case ValidatedTopologyTransaction(tx, None, _) =>
           processTransaction(
@@ -165,7 +165,6 @@ class IncomingTopologyTransactionAuthorizationValidator(
         validated,
       )
     }
-  }
 
   /** Validates a topology transaction as follows:
     * <ol>
@@ -209,7 +208,7 @@ class IncomingTopologyTransactionAuthorizationValidator(
     val isFullyAuthorized = if (missingAuthorizers.isEmpty) {
       val processedNSD = toValidate
         .selectMapping[NamespaceDelegation]
-        .forall { sigTx => processNamespaceDelegation(AuthorizedTopologyTransaction(sigTx)) }
+        .forall(sigTx => processNamespaceDelegation(AuthorizedTopologyTransaction(sigTx)))
 
       val processedIDD = toValidate.selectMapping[IdentifierDelegation].forall { sigTx =>
         processIdentifierDelegation(AuthorizedTopologyTransaction(sigTx))
@@ -262,7 +261,7 @@ class IncomingTopologyTransactionAuthorizationValidator(
   ): Option[Either[
     TopologyTransactionRejection,
     (GenericSignedTopologyTransaction, RequiredAuthAuthorizations),
-  ]] = {
+  ]] =
     toValidate
       .selectMapping[NamespaceDelegation]
       .filter(NamespaceDelegation.isRootCertificate)
@@ -282,8 +281,6 @@ class IncomingTopologyTransactionAuthorizationValidator(
           )
         result
       }
-
-  }
 
   /** loads all identifier delegations into the identifier delegation cache
     *

@@ -840,7 +840,7 @@ class ValidatingTopologyMappingChecksTest
   private def addToStore(
       store: TopologyStore[AuthorizedStore],
       transactions: GenericSignedTopologyTransaction*
-  ): Unit = {
+  ): Unit =
     store
       .bootstrap(
         StoredTopologyTransactions(
@@ -850,7 +850,6 @@ class ValidatingTopologyMappingChecksTest
         )
       )
       .futureValue
-  }
 
   private def setUpRootCerts(keys: SigningPublicKey*): (
       NonEmpty[Set[SigningPublicKey]],

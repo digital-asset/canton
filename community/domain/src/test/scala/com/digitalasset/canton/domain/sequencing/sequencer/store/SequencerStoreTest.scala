@@ -8,13 +8,16 @@ import cats.syntax.functor.*
 import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong}
 import com.digitalasset.canton.data.{CantonTimestamp, Counter}
-import com.digitalasset.canton.domain.sequencing.sequencer.DomainSequencingTestUtils.mockDeliverStoreEvent
+import com.digitalasset.canton.domain.sequencing.sequencer.DomainSequencingTestUtils.deliverStoreEventWithDefaults
 import com.digitalasset.canton.domain.sequencing.sequencer.*
 import com.digitalasset.canton.domain.sequencing.sequencer.store.SaveLowerBoundError.BoundLowerThanExisting
+import com.digitalasset.canton.domain.sequencing.traffic.store.TrafficConsumedStore
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
+import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencing.protocol.{MessageId, SequencerErrors}
+import com.digitalasset.canton.sequencing.traffic.{TrafficConsumed, TrafficReceipt}
 import com.digitalasset.canton.store.db.DbTest
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Member, ParticipantId}
@@ -38,6 +41,10 @@ trait SequencerStoreTest
     with ProtocolVersionChecksAsyncWordSpec {
 
   lazy val sequencerMember: Member = DefaultTestIdentities.sequencerId
+
+  lazy val dbStorage: Option[Storage] = None
+
+  protected val trafficReceiptSupport: Boolean
 
   def sequencerStore(mk: () => SequencerStore): Unit = {
 
@@ -68,6 +75,27 @@ trait SequencerStoreTest
     val instanceDiscriminator2 = UUID.randomUUID()
 
     final case class Env(store: SequencerStore = mk()) {
+      private val trafficStore =
+        dbStorage.map(storage => TrafficConsumedStore(storage, timeouts, loggerFactory))
+      def writeTrafficConsumed(
+          sender: Member,
+          ts: CantonTimestamp,
+          trafficReceiptO: Option[TrafficReceipt],
+      ): Future[Unit] =
+        trafficReceiptO match {
+          case Some(TrafficReceipt(consumedCost, extraTrafficConsumed, baseTrafficRemainder)) =>
+            val trafficConsumed =
+              TrafficConsumed(
+                sender,
+                ts,
+                extraTrafficConsumed = extraTrafficConsumed,
+                baseTrafficRemainder = baseTrafficRemainder,
+                lastConsumedCost = consumedCost,
+              )
+            trafficStore.toList.parTraverse_(_.store(trafficConsumed))
+          case None => Future.unit
+        }
+
       def deliverEventWithDefaults(
           ts: CantonTimestamp,
           sender: SequencerMemberId = SequencerMemberId(0),
@@ -76,7 +104,7 @@ trait SequencerStoreTest
       ): Sequenced[PayloadId] =
         Sequenced(
           ts,
-          mockDeliverStoreEvent(
+          deliverStoreEventWithDefaults(
             sender = sender,
             payloadId = PayloadId(ts),
             traceContext = traceContext,
@@ -91,10 +119,12 @@ trait SequencerStoreTest
           messageId: MessageId,
           payloadId: PayloadId,
           recipients: Set[Member] = Set.empty,
+          trafficReceiptO: Option[TrafficReceipt] = None,
       ): Future[Sequenced[PayloadId]] =
         for {
           senderId <- store.registerMember(sender, ts)
           recipientIds <- recipients.toList.parTraverse(store.registerMember(_, ts)).map(_.toSet)
+          _ <- writeTrafficConsumed(sender, ts, trafficReceiptO)
         } yield Sequenced(
           ts,
           DeliverStoreEvent(
@@ -104,6 +134,7 @@ trait SequencerStoreTest
             payloadId,
             None,
             traceContext,
+            None,
           ),
         )
 
@@ -112,9 +143,11 @@ trait SequencerStoreTest
           sender: Member,
           messageId: MessageId,
           topologyTimestamp: CantonTimestamp,
+          trafficReceiptO: Option[TrafficReceipt] = None,
       ): Future[Sequenced[PayloadId]] =
         for {
           senderId <- store.registerMember(sender, ts)
+          _ <- writeTrafficConsumed(sender, ts, trafficReceiptO)
         } yield Sequenced(
           ts,
           ReceiptStoreEvent(
@@ -122,6 +155,7 @@ trait SequencerStoreTest
             messageId,
             topologyTimestampO = Some(topologyTimestamp),
             traceContext,
+            None,
           ),
         )
 
@@ -138,7 +172,7 @@ trait SequencerStoreTest
       ): Future[Seq[Sequenced[Payload]]] =
         for {
           memberId <- lookupRegisteredMember(member)
-          events <- store.readEvents(memberId, fromTimestampO, limit)
+          events <- store.readEvents(member, memberId, fromTimestampO, limit)
         } yield events.payloads
 
       def assertDeliverEvent(
@@ -149,7 +183,8 @@ trait SequencerStoreTest
           expectedRecipients: Set[Member],
           expectedPayload: Payload,
           expectedTopologyTimestamp: Option[CantonTimestamp] = None,
-      ): Future[Assertion] = {
+          expectedTrafficReceipt: Option[TrafficReceipt] = None,
+      ): Future[Assertion] =
         for {
           senderId <- lookupRegisteredMember(expectedSender)
           recipientIds <- expectedRecipients.toList.parTraverse(lookupRegisteredMember).map(_.toSet)
@@ -163,17 +198,18 @@ trait SequencerStoreTest
                   payload,
                   topologyTimestampO,
                   traceContext,
+                  trafficReceiptO,
                 ) =>
               sender shouldBe senderId
               messageId shouldBe expectedMessageId
               recipients.forgetNE should contain.only(recipientIds.toSeq*)
               payload shouldBe expectedPayload
               topologyTimestampO shouldBe expectedTopologyTimestamp
+              trafficReceiptO shouldBe expectedTrafficReceipt
             case other =>
               fail(s"Expected deliver event but got $other")
           }
         }
-      }
 
       def assertReceiptEvent(
           event: Sequenced[Payload],
@@ -181,7 +217,8 @@ trait SequencerStoreTest
           expectedSender: Member,
           expectedMessageId: MessageId,
           expectedTopologyTimestamp: Option[CantonTimestamp],
-      ): Future[Assertion] = {
+          expectedTrafficReceipt: Option[TrafficReceipt],
+      ): Future[Assertion] =
         for {
           senderId <- lookupRegisteredMember(expectedSender)
         } yield {
@@ -192,17 +229,18 @@ trait SequencerStoreTest
                   messageId,
                   topologyTimestampO,
                   _traceContext,
+                  trafficReceiptO,
                 ) =>
               sender shouldBe senderId
               messageId shouldBe expectedMessageId
               event.event.members shouldBe Set(senderId)
               event.event.payloadO shouldBe None
               topologyTimestampO shouldBe expectedTopologyTimestamp
+              trafficReceiptO shouldBe expectedTrafficReceipt
             case other =>
               fail(s"Expected deliver receipt but got $other")
           }
         }
-      }
 
       /** Save payloads using the default `instanceDiscriminator1` and expecting it to succeed */
       def savePayloads(payloads: NonEmpty[Seq[Payload]]): Future[Unit] =
@@ -354,6 +392,7 @@ trait SequencerStoreTest
             alice,
             messageId4,
             ts3.some,
+            None,
           )
           _ <- env.assertDeliverEvent(
             bobEvents(0),
@@ -364,6 +403,118 @@ trait SequencerStoreTest
             payload2,
           )
           _ <- env.assertDeliverEvent(bobEvents(1), ts3, bob, messageId3, Set(bob), payload3)
+        } yield succeed
+      }
+
+      "events contain traffic receipt when it exists in TrafficConsumed store" onlyRunWhen (trafficReceiptSupport) in {
+        val env = Env()
+
+        val trafficReceipt1 = TrafficReceipt(
+          NonNegativeLong.tryCreate(1),
+          NonNegativeLong.tryCreate(10),
+          NonNegativeLong.tryCreate(100),
+        )
+        val trafficReceipt2 = TrafficReceipt(
+          NonNegativeLong.tryCreate(2),
+          NonNegativeLong.tryCreate(20),
+          NonNegativeLong.tryCreate(200),
+        )
+        val trafficReceipt3 = TrafficReceipt(
+          NonNegativeLong.tryCreate(3),
+          NonNegativeLong.tryCreate(30),
+          NonNegativeLong.tryCreate(300),
+        )
+        val trafficReceipt4 = TrafficReceipt(
+          NonNegativeLong.tryCreate(4),
+          NonNegativeLong.tryCreate(40),
+          NonNegativeLong.tryCreate(400),
+        )
+
+        for {
+          _ <- env.savePayloads(NonEmpty(Seq, payload1, payload2, payload3))
+          // the first event is for alice, and the second for both alice and bob
+          deliverEventAlice <- env.deliverEvent(
+            ts1,
+            alice,
+            messageId1,
+            payload1.id,
+            trafficReceiptO = trafficReceipt1.some,
+          )
+          deliverEventAll <- env.deliverEvent(
+            ts2,
+            alice,
+            messageId2,
+            payload2.id,
+            recipients = Set(alice, bob),
+            trafficReceiptO = trafficReceipt2.some,
+          )
+          deliverEventBob <- env.deliverEvent(
+            ts3,
+            bob,
+            messageId3,
+            payload3.id,
+            trafficReceiptO = trafficReceipt3.some,
+          )
+          receiptAlice <- env.deliverReceipt(
+            ts4,
+            alice,
+            messageId4,
+            ts3,
+            trafficReceiptO = trafficReceipt4.some,
+          )
+          _ <- env.store.saveEvents(
+            instanceIndex,
+            NonEmpty(Seq, deliverEventAlice, deliverEventAll, deliverEventBob, receiptAlice),
+          )
+          _ <- env.saveWatermark(receiptAlice.timestamp).valueOrFail("saveWatermark")
+          aliceEvents <- env.readEvents(alice)
+          bobEvents <- env.readEvents(bob)
+          _ = aliceEvents should have size (3)
+          _ = bobEvents should have size (2)
+          _ <- env.assertDeliverEvent(
+            aliceEvents(0),
+            ts1,
+            alice,
+            messageId1,
+            Set(alice),
+            payload1,
+            expectedTrafficReceipt = trafficReceipt1.some,
+          )
+          _ <- env.assertDeliverEvent(
+            aliceEvents(1),
+            ts2,
+            alice,
+            messageId2,
+            Set(alice, bob),
+            payload2,
+            expectedTrafficReceipt = trafficReceipt2.some,
+          )
+          _ <- env.assertReceiptEvent(
+            aliceEvents(2),
+            ts4,
+            alice,
+            messageId4,
+            ts3.some,
+            expectedTrafficReceipt = trafficReceipt4.some,
+          )
+          _ <- env.assertDeliverEvent(
+            bobEvents(0),
+            ts2,
+            alice,
+            messageId2,
+            Set(alice, bob),
+            payload2,
+            None, // bob is not the sender, only senders receive traffic receipts
+          )
+          _ <- env.assertDeliverEvent(
+            bobEvents(1),
+            ts3,
+            bob,
+            messageId3,
+            Set(bob),
+            payload3,
+            expectedTrafficReceipt = trafficReceipt3.some,
+          )
         } yield succeed
       }
 
@@ -378,6 +529,7 @@ trait SequencerStoreTest
             messageId1,
             None,
             traceContext,
+            None,
           )
           timestampedError: Sequenced[Nothing] = Sequenced(ts1, error)
           _ <- env.store.saveEvents(instanceIndex, NonEmpty(Seq, timestampedError))
@@ -397,11 +549,9 @@ trait SequencerStoreTest
           aliceId <- env.store.registerMember(alice, ts1)
           // lets write 20 deliver events - offsetting the second timestamp that is at epoch second 1
           events = NonEmptyUtil.fromUnsafe(
-            (0L until 20L)
-              .map(n => {
-                env.deliverEventWithDefaults(ts1.plusSeconds(n), sender = aliceId)()
-              })
-              .toSeq
+            (0L until 20L).map { n =>
+              env.deliverEventWithDefaults(ts1.plusSeconds(n), sender = aliceId)()
+            }.toSeq
           )
           payloads = DomainSequencingTestUtils.payloadsForEvents(events)
           _ <- env.store
@@ -430,9 +580,9 @@ trait SequencerStoreTest
         for {
           aliceId <- env.store.registerMember(alice, ts1)
           // lets write 20 events - offsetting the second timestamp that is at epoch second 1
-          events = (0L until 20L).map(n => {
+          events = (0L until 20L).map { n =>
             env.deliverEventWithDefaults(ts2.plusSeconds(n), sender = aliceId)()
-          })
+          }
           payloads = DomainSequencingTestUtils.payloadsForEvents(events)
           _ <- env.store
             .savePayloads(NonEmptyUtil.fromUnsafe(payloads), instanceDiscriminator1)
@@ -740,6 +890,7 @@ trait SequencerStoreTest
                   payload1.id,
                   None,
                   traceContext,
+                  None,
                 ),
               ),
               deliverEventWithDefaults(ts(5))(recipients = NonEmpty(SortedSet, aliceId, bobId)),
@@ -828,6 +979,7 @@ trait SequencerStoreTest
                   payload1.id,
                   None,
                   traceContext,
+                  None,
                 ),
               ),
               deliverEventWithDefaults(ts(5))(recipients = NonEmpty(SortedSet, aliceId, bobId)),
@@ -1059,6 +1211,7 @@ trait SequencerStoreTest
                     payload1.id,
                     None,
                     traceContext,
+                    None,
                   ),
                 ),
               ),

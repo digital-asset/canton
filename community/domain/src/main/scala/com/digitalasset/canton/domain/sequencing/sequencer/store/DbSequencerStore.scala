@@ -13,9 +13,17 @@ import com.daml.nonempty.catsinstances.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
+import com.digitalasset.canton.config.RequireTypes.{
+  NonNegativeInt,
+  NonNegativeLong,
+  PositiveNumeric,
+}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.block.UninitializedBlockHeight
+import com.digitalasset.canton.domain.sequencing.sequencer.store.DbSequencerStore.{
+  DeliverStoreEventRow,
+  EventTypeDiscriminator,
+}
 import com.digitalasset.canton.domain.sequencing.sequencer.{
   CommitMode,
   SequencerMemberStatus,
@@ -30,7 +38,9 @@ import com.digitalasset.canton.resource.DbStorage.Implicits.BuilderChain.*
 import com.digitalasset.canton.resource.DbStorage.Profile.{H2, Oracle, Postgres}
 import com.digitalasset.canton.resource.DbStorage.*
 import com.digitalasset.canton.sequencing.protocol.MessageId
+import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
 import com.digitalasset.canton.store.db.DbDeserializationException
+import com.digitalasset.canton.store.db.RequiredTypesCodec.*
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, retry}
@@ -157,21 +167,6 @@ class DbSequencerStore(
   private implicit val setParameterTraceContext: SetParameter[SerializableTraceContext] =
     SerializableTraceContext.getVersionedSetParameter(protocolVersion)
 
-  /** Single char that is persisted with the event to indicate the type of event */
-  sealed abstract class EventTypeDiscriminator(val value: Char)
-
-  object EventTypeDiscriminator {
-
-    case object Receipt extends EventTypeDiscriminator('R')
-    case object Deliver extends EventTypeDiscriminator('D')
-    case object Error extends EventTypeDiscriminator('E')
-
-    private val all = Seq[EventTypeDiscriminator](Deliver, Error, Receipt)
-
-    def fromChar(value: Char): Either[String, EventTypeDiscriminator] =
-      all.find(_.value == value).toRight(s"Event type discriminator for value [$value] not found")
-  }
-
   @SuppressWarnings(Array("com.digitalasset.canton.SlickString"))
   private implicit val setEventTypeDiscriminatorParameter: SetParameter[EventTypeDiscriminator] =
     (etd, pp) => pp >> etd.value.toString
@@ -189,121 +184,6 @@ class DbSequencerStore(
       resultE.fold(msg => throw new DbDeserializationException(msg), identity)
     }
 
-  case class DeliverStoreEventRow[P](
-      timestamp: CantonTimestamp,
-      instanceIndex: Int,
-      eventType: EventTypeDiscriminator,
-      messageIdO: Option[MessageId] = None,
-      senderO: Option[SequencerMemberId] = None,
-      recipientsO: Option[NonEmpty[SortedSet[SequencerMemberId]]] = None,
-      payloadO: Option[P] = None,
-      topologyTimestampO: Option[CantonTimestamp] = None,
-      traceContext: TraceContext,
-      // TODO(#15628) We should represent this differently, so that DeliverErrorStoreEvent.fromByteString parameter is always defined as well
-      errorO: Option[ByteString],
-  ) {
-    lazy val asStoreEvent: Either[String, Sequenced[P]] =
-      for {
-        event <- eventType match {
-          case EventTypeDiscriminator.Deliver => asDeliverStoreEvent: Either[String, StoreEvent[P]]
-          case EventTypeDiscriminator.Error => asErrorStoreEvent: Either[String, StoreEvent[P]]
-          case EventTypeDiscriminator.Receipt => asReceiptStoreEvent: Either[String, StoreEvent[P]]
-        }
-      } yield Sequenced(timestamp, event)
-
-    private lazy val asDeliverStoreEvent: Either[String, DeliverStoreEvent[P]] =
-      for {
-        messageId <- messageIdO.toRight("message-id not set for deliver event")
-        sender <- senderO.toRight("sender not set for deliver event")
-        recipients <- recipientsO.toRight("recipients not set for deliver event")
-        payload <- payloadO.toRight("payload not set for deliver event")
-      } yield DeliverStoreEvent(
-        sender,
-        messageId,
-        recipients,
-        payload,
-        topologyTimestampO,
-        traceContext,
-      )
-
-    private lazy val asErrorStoreEvent: Either[String, DeliverErrorStoreEvent] =
-      for {
-        messageId <- messageIdO.toRight("message-id not set for deliver error")
-        sender <- senderO.toRight("sender not set for deliver error")
-      } yield DeliverErrorStoreEvent(
-        sender,
-        messageId,
-        errorO,
-        traceContext,
-      )
-
-    private lazy val asReceiptStoreEvent: Either[String, ReceiptStoreEvent] =
-      for {
-        messageId <- messageIdO.toRight("message-id not set for receipt event")
-        sender <- senderO.toRight("sender not set for receipt event")
-      } yield ReceiptStoreEvent(
-        sender,
-        messageId,
-        topologyTimestampO,
-        traceContext,
-      )
-
-  }
-
-  object DeliverStoreEventRow {
-    def apply(
-        instanceIndex: Int,
-        storeEvent: Sequenced[PayloadId],
-    ): DeliverStoreEventRow[PayloadId] =
-      storeEvent.event match {
-        case DeliverStoreEvent(
-              sender,
-              messageId,
-              members,
-              payloadId,
-              topologyTimestampO,
-              traceContext,
-            ) =>
-          DeliverStoreEventRow(
-            storeEvent.timestamp,
-            instanceIndex,
-            EventTypeDiscriminator.Deliver,
-            messageIdO = Some(messageId),
-            senderO = Some(sender),
-            recipientsO = Some(members),
-            payloadO = Some(payloadId),
-            topologyTimestampO = topologyTimestampO,
-            traceContext = traceContext,
-            errorO = None,
-          )
-        case DeliverErrorStoreEvent(sender, messageId, errorO, traceContext) =>
-          DeliverStoreEventRow(
-            timestamp = storeEvent.timestamp,
-            instanceIndex = instanceIndex,
-            eventType = EventTypeDiscriminator.Error,
-            messageIdO = Some(messageId),
-            senderO = Some(sender),
-            recipientsO =
-              Some(NonEmpty(SortedSet, sender)), // must be set for sender to receive value
-            traceContext = traceContext,
-            errorO = errorO,
-          )
-        case ReceiptStoreEvent(sender, messageId, topologyTimestampO, traceContext) =>
-          DeliverStoreEventRow(
-            timestamp = storeEvent.timestamp,
-            instanceIndex = instanceIndex,
-            eventType = EventTypeDiscriminator.Receipt,
-            messageIdO = Some(messageId),
-            senderO = Some(sender),
-            recipientsO =
-              Some(NonEmpty(SortedSet, sender)), // must be set for sender to receive value
-            traceContext = traceContext,
-            errorO = None,
-            topologyTimestampO = topologyTimestampO,
-          )
-      }
-  }
-
   private implicit val getPayloadOResult: GetResult[Option[Payload]] =
     GetResult
       .createGetTuple2[Option[PayloadId], Option[ByteString]]
@@ -318,6 +198,17 @@ class DbSequencerStore(
           )
       }
 
+  private implicit val trafficReceiptOGetResult: GetResult[Option[TrafficReceipt]] =
+    GetResult
+      .createGetTuple3[Option[NonNegativeLong], Option[NonNegativeLong], Option[NonNegativeLong]]
+      .andThen {
+        case (Some(trafficConsumed), Some(baseTraffic), Some(lastConsumedCost)) =>
+          Some(TrafficReceipt(lastConsumedCost, trafficConsumed, baseTraffic))
+        case _ => None
+        // If fields are not populated by the left join (i.e. are NULL) in `readEvents(...)`,
+        // there's `None` for the receipt. This would happen for non-senders,
+      }
+
   private implicit val getDeliverStoreEventRowResult: GetResult[Sequenced[Payload]] = {
     val timestampGetter = implicitly[GetResult[CantonTimestamp]]
     val timestampOGetter = implicitly[GetResult[Option[CantonTimestamp]]]
@@ -328,6 +219,7 @@ class DbSequencerStore(
     val payloadGetter = implicitly[GetResult[Option[Payload]]]
     val traceContextGetter = implicitly[GetResult[SerializableTraceContext]]
     val errorOGetter = implicitly[GetResult[Option[ByteString]]]
+    val trafficReceiptOGetter = implicitly[GetResult[Option[TrafficReceipt]]]
 
     GetResult { r =>
       val row = DeliverStoreEventRow[Payload](
@@ -341,6 +233,7 @@ class DbSequencerStore(
         timestampOGetter(r),
         traceContextGetter(r).unwrap,
         errorOGetter(r),
+        trafficReceiptOGetter(r),
       )
 
       row.asStoreEvent
@@ -625,6 +518,7 @@ class DbSequencerStore(
           topologyTimestampO,
           traceContext,
           errorO,
+          _trafficReceiptO, // stored separately in another table by TrafficConsumedStore
         ) = DeliverStoreEventRow(instanceIndex, event)
 
         pp >> timestamp
@@ -686,7 +580,7 @@ class DbSequencerStore(
       _ = {
         if (updatedWatermark.online || updatedWatermark.timestamp != ts) {
           logger.debug(
-            s"Watermark was not reset to $ts as it is already set to an earlier date, kept ${updatedWatermark}"
+            s"Watermark was not reset to $ts as it is already set to an earlier date, kept $updatedWatermark"
           )
         }
       }
@@ -781,13 +675,11 @@ class DbSequencerStore(
 
   override def goOffline(instanceIndex: Int)(implicit traceContext: TraceContext): Future[Unit] =
     storage.update_(
-      {
-        profile match {
-          case _: H2 | _: Postgres =>
-            sqlu"update sequencer_watermarks set sequencer_online = false where node_index = $instanceIndex"
-          case _: Oracle =>
-            sqlu"update sequencer_watermarks set sequencer_online = 0 where node_index = $instanceIndex"
-        }
+      profile match {
+        case _: H2 | _: Postgres =>
+          sqlu"update sequencer_watermarks set sequencer_online = false where node_index = $instanceIndex"
+        case _: Oracle =>
+          sqlu"update sequencer_watermarks set sequencer_online = 0 where node_index = $instanceIndex"
       },
       functionFullName,
     )
@@ -837,8 +729,9 @@ class DbSequencerStore(
       .map(items => SortedSet(items*))
 
   override def readEvents(
+      member: Member,
       memberId: SequencerMemberId,
-      fromTimestampO: Option[CantonTimestamp],
+      fromExclusiveO: Option[CantonTimestamp],
       limit: Int,
   )(implicit
       traceContext: TraceContext
@@ -847,7 +740,7 @@ class DbSequencerStore(
     // to make inclusive we add a microsecond (the smallest unit)
     // this comparison can then be used for the absolute lower bound if unset
     val inclusiveFromTimestamp =
-      fromTimestampO.map(_.immediateSuccessor).getOrElse(CantonTimestamp.MinValue)
+      fromExclusiveO.map(_.immediateSuccessor).getOrElse(CantonTimestamp.MinValue)
 
     def h2PostgresQueryEvents(
         memberContainsBefore: String,
@@ -856,10 +749,16 @@ class DbSequencerStore(
     ) = sql"""
         select events.ts, events.node_index, events.event_type, events.message_id, events.sender,
           events.recipients, payloads.id, payloads.content, events.topology_timestamp,
-          events.trace_context, events.error
+          events.trace_context, events.error,
+          traffic.extra_traffic_consumed, traffic.base_traffic_remainder, traffic.last_consumed_cost
         from sequencer_events events
         left join sequencer_payloads payloads
           on events.payload_id = payloads.id
+        left join
+            -- seq_traffic_control_consumed_journal traffic
+            -- extra filter on member allows to utilize the primary key index (compared to the above line)
+            (SELECT * FROM seq_traffic_control_consumed_journal WHERE member = $member) traffic
+          on events.ts = traffic.sequencing_timestamp
         inner join sequencer_watermarks watermarks
           on events.node_index = watermarks.node_index
         where (events.recipients is null or (#$memberContainsBefore $memberId #$memberContainsAfter))
@@ -889,10 +788,16 @@ class DbSequencerStore(
           sql"""
           select events.ts, events.node_index, events.event_type, events.message_id, events.sender,
             events.recipients, payloads.id, payloads.content, events.topology_timestamp,
-            events.trace_context, events.error
+            events.trace_context, events.error,
+            traffic.extra_traffic_consumed, traffic.base_traffic_remainder, traffic.last_consumed_cost
           from sequencer_events events
           left join sequencer_payloads payloads
             on events.payload_id = payloads.id
+          left join
+              -- seq_traffic_control_consumed_journal traffic
+              -- extra filter on member allows to utilize the primary key index (compared to the above line)
+              (SELECT * FROM seq_traffic_control_consumed_journal WHERE member = $member) traffic
+            on events.ts = traffic.sequencing_timestamp
           inner join sequencer_watermarks watermarks
             on events.node_index = watermarks.node_index
           where
@@ -973,7 +878,7 @@ class DbSequencerStore(
 
   def checkpointsAtTimestamp(
       timestamp: CantonTimestamp
-  )(implicit traceContext: TraceContext): Future[Map[Member, CounterCheckpoint]] = {
+  )(implicit traceContext: TraceContext): Future[Map[Member, CounterCheckpoint]] =
     for {
       sequencerIdO <- lookupMember(sequencerMember).map(_.map(_.memberId))
       query = for {
@@ -1003,7 +908,6 @@ class DbSequencerStore(
       result <- storage
         .query(query.transactionally, functionFullName)
     } yield result
-  }
 
   private def memberCheckpointsQuery(
       timestamp: CantonTimestamp,
@@ -1052,7 +956,7 @@ class DbSequencerStore(
       timestamp: CantonTimestamp,
       safeWatermark: CantonTimestamp,
       sequencerId: SequencerMemberId,
-  ) = {
+  ) =
     // in order to compute the latest sequencer event for each member at a timestamp, we find the latest event ts
     // for an event addressed both to the sequencer and that member
     sql"""
@@ -1075,7 +979,6 @@ class DbSequencerStore(
           )
         group by (sequencer_members.member, events.ts)
         """.as[(Member, CantonTimestamp)].map(_.toMap)
-  }
 
   override def deleteEventsPastWatermark(
       instanceIndex: Int
@@ -1090,13 +993,11 @@ class DbSequencerStore(
       watermark = watermarkO.getOrElse(CantonTimestamp.MinValue)
       // TODO(#18401): Also cleanup payloads (beyond the payload to event margin)
       eventsRemoved <- storage.update(
-        {
-          sqlu"""
+        sqlu"""
             delete from sequencer_events
             where node_index = $instanceIndex
                 and ts > $watermark
-           """
-        },
+           """,
         functionFullName,
       )
     } yield {
@@ -1112,8 +1013,7 @@ class DbSequencerStore(
   )(implicit
       traceContext: TraceContext,
       externalCloseContext: CloseContext,
-  ): EitherT[Future, SaveCounterCheckpointError, Unit] = {
-
+  ): EitherT[Future, SaveCounterCheckpointError, Unit] =
     EitherT {
       val CounterCheckpoint(counter, ts, latestSequencerEventTimestamp) = checkpoint
       CloseContext.withCombinedContext(closeContext, externalCloseContext, timeouts, logger)(
@@ -1169,7 +1069,6 @@ class DbSequencerStore(
           )
       }
     }
-  }
 
   override def fetchClosestCheckpointBefore(memberId: SequencerMemberId, counter: SequencerCounter)(
       implicit traceContext: TraceContext
@@ -1242,7 +1141,7 @@ class DbSequencerStore(
 
   override def saveLowerBound(
       ts: CantonTimestamp
-  )(implicit traceContext: TraceContext): EitherT[Future, SaveLowerBoundError, Unit] = {
+  )(implicit traceContext: TraceContext): EitherT[Future, SaveLowerBoundError, Unit] =
     EitherT(
       storage.queryAndUpdate(
         (for {
@@ -1263,13 +1162,11 @@ class DbSequencerStore(
         "saveLowerBound",
       )
     )
-  }
 
   override protected[store] def adjustPruningTimestampForCounterCheckpoints(
       timestamp: CantonTimestamp,
       disabledMembers: Seq[SequencerMemberId],
-  )(implicit traceContext: TraceContext): Future[Option[CantonTimestamp]] = {
-
+  )(implicit traceContext: TraceContext): Future[Option[CantonTimestamp]] =
     // query the lowest suitable timestamp for each member.
     // it would probably be better to do the ignore and aggregation in sql
     // however this way we don't have to deal with generating a `not in (..)` for
@@ -1296,7 +1193,6 @@ class DbSequencerStore(
       })
       // just take the lowest
       .map(_.minimumOption)
-  }
 
   override protected[store] def pruneEvents(
       timestamp: CantonTimestamp
@@ -1340,7 +1236,7 @@ class DbSequencerStore(
 
   override def status(
       now: CantonTimestamp
-  )(implicit traceContext: TraceContext): Future[SequencerPruningStatus] = {
+  )(implicit traceContext: TraceContext): Future[SequencerPruningStatus] =
     for {
       lowerBoundO <- fetchLowerBound()
       members <- storage.query(
@@ -1364,7 +1260,6 @@ class DbSequencerStore(
         }.toSet,
       )
     }
-  }
 
   override def markLaggingSequencersOffline(
       cutoffTime: CantonTimestamp
@@ -1409,7 +1304,7 @@ class DbSequencerStore(
       functionFullName,
     )
 
-  override def disableMemberInternal(member: SequencerMemberId)(implicit
+  override protected def disableMemberInternal(member: SequencerMemberId)(implicit
       traceContext: TraceContext
   ): Future[Unit] =
     // we assume here that the member is already registered in order to have looked up the memberId
@@ -1453,5 +1348,154 @@ class DbSequencerStore(
           )
         } yield ()
     }
+  }
+}
+
+private object DbSequencerStore {
+
+  /** Single char that is persisted with the event to indicate the type of event */
+  sealed abstract class EventTypeDiscriminator(val value: Char)
+
+  object EventTypeDiscriminator {
+
+    case object Receipt extends EventTypeDiscriminator('R')
+
+    case object Deliver extends EventTypeDiscriminator('D')
+
+    case object Error extends EventTypeDiscriminator('E')
+
+    private val all = Seq[EventTypeDiscriminator](Deliver, Error, Receipt)
+
+    def fromChar(value: Char): Either[String, EventTypeDiscriminator] =
+      all.find(_.value == value).toRight(s"Event type discriminator for value [$value] not found")
+  }
+
+  final case class DeliverStoreEventRow[P](
+      timestamp: CantonTimestamp,
+      instanceIndex: Int,
+      eventType: EventTypeDiscriminator,
+      messageIdO: Option[MessageId] = None,
+      senderO: Option[SequencerMemberId] = None,
+      recipientsO: Option[NonEmpty[SortedSet[SequencerMemberId]]] = None,
+      payloadO: Option[P] = None,
+      topologyTimestampO: Option[CantonTimestamp] = None,
+      traceContext: TraceContext,
+      // TODO(#15628) We should represent this differently, so that DeliverErrorStoreEvent.fromByteString parameter is always defined as well
+      errorO: Option[ByteString],
+      trafficReceiptO: Option[TrafficReceipt],
+  ) {
+    lazy val asStoreEvent: Either[String, Sequenced[P]] =
+      for {
+        event <- eventType match {
+          case EventTypeDiscriminator.Deliver => asDeliverStoreEvent: Either[String, StoreEvent[P]]
+          case EventTypeDiscriminator.Error => asErrorStoreEvent: Either[String, StoreEvent[P]]
+          case EventTypeDiscriminator.Receipt => asReceiptStoreEvent: Either[String, StoreEvent[P]]
+        }
+      } yield Sequenced(timestamp, event)
+
+    private lazy val asDeliverStoreEvent: Either[String, DeliverStoreEvent[P]] =
+      for {
+        messageId <- messageIdO.toRight("message-id not set for deliver event")
+        sender <- senderO.toRight("sender not set for deliver event")
+        recipients <- recipientsO.toRight("recipients not set for deliver event")
+        payload <- payloadO.toRight("payload not set for deliver event")
+      } yield DeliverStoreEvent(
+        sender,
+        messageId,
+        recipients,
+        payload,
+        topologyTimestampO,
+        traceContext,
+        trafficReceiptO,
+      )
+
+    private lazy val asErrorStoreEvent: Either[String, DeliverErrorStoreEvent] =
+      for {
+        messageId <- messageIdO.toRight("message-id not set for deliver error")
+        sender <- senderO.toRight("sender not set for deliver error")
+      } yield DeliverErrorStoreEvent(
+        sender,
+        messageId,
+        errorO,
+        traceContext,
+        trafficReceiptO,
+      )
+
+    private lazy val asReceiptStoreEvent: Either[String, ReceiptStoreEvent] =
+      for {
+        messageId <- messageIdO.toRight("message-id not set for receipt event")
+        sender <- senderO.toRight("sender not set for receipt event")
+      } yield ReceiptStoreEvent(
+        sender,
+        messageId,
+        topologyTimestampO,
+        traceContext,
+        trafficReceiptO,
+      )
+
+  }
+
+  object DeliverStoreEventRow {
+    def apply(
+        instanceIndex: Int,
+        storeEvent: Sequenced[PayloadId],
+    ): DeliverStoreEventRow[PayloadId] =
+      storeEvent.event match {
+        case DeliverStoreEvent(
+              sender,
+              messageId,
+              members,
+              payloadId,
+              topologyTimestampO,
+              traceContext,
+              trafficReceiptO,
+            ) =>
+          DeliverStoreEventRow(
+            storeEvent.timestamp,
+            instanceIndex,
+            EventTypeDiscriminator.Deliver,
+            messageIdO = Some(messageId),
+            senderO = Some(sender),
+            recipientsO = Some(members),
+            payloadO = Some(payloadId),
+            topologyTimestampO = topologyTimestampO,
+            traceContext = traceContext,
+            errorO = None,
+            trafficReceiptO = trafficReceiptO,
+          )
+        case DeliverErrorStoreEvent(sender, messageId, errorO, traceContext, trafficReceiptO) =>
+          DeliverStoreEventRow(
+            timestamp = storeEvent.timestamp,
+            instanceIndex = instanceIndex,
+            eventType = EventTypeDiscriminator.Error,
+            messageIdO = Some(messageId),
+            senderO = Some(sender),
+            recipientsO =
+              Some(NonEmpty(SortedSet, sender)), // must be set for sender to receive value
+            traceContext = traceContext,
+            errorO = errorO,
+            trafficReceiptO = trafficReceiptO,
+          )
+        case ReceiptStoreEvent(
+              sender,
+              messageId,
+              topologyTimestampO,
+              traceContext,
+              trafficReceiptO,
+            ) =>
+          DeliverStoreEventRow(
+            timestamp = storeEvent.timestamp,
+            instanceIndex = instanceIndex,
+            eventType = EventTypeDiscriminator.Receipt,
+            messageIdO = Some(messageId),
+            senderO = Some(sender),
+            recipientsO =
+              Some(NonEmpty(SortedSet, sender)), // must be set for sender to receive value
+            traceContext = traceContext,
+            errorO = None,
+            topologyTimestampO = topologyTimestampO,
+            trafficReceiptO = trafficReceiptO,
+          )
+      }
   }
 }

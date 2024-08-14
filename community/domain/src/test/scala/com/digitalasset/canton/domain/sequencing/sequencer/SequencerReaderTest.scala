@@ -143,7 +143,6 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
       cryptoD,
       eventSignaller,
       topologyClientMember,
-      trafficConsumedStoreO = None,
       testedProtocolVersion,
       timeouts,
       loggerFactory,
@@ -200,12 +199,11 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
 
     def pullFromQueue(
         queue: SinkQueueWithCancel[OrdinarySerializedEvent]
-    ): Future[Option[OrdinarySerializedEvent]] = {
+    ): Future[Option[OrdinarySerializedEvent]] =
       loggerFactory.assertLogsSeq(SuppressionRule.Level(Level.WARN))(
         queue.pull(),
         ignoreWarningsFromLackOfTopologyUpdates,
       )
-    }
 
     def waitFor(duration: FiniteDuration): Future[Unit] = {
       val promise = Promise[Unit]()
@@ -279,7 +277,12 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
         // generate 20 delivers starting at ts0+1s
         events = (1L to 20L)
           .map(ts0.plusSeconds)
-          .map(Sequenced(_, mockDeliverStoreEvent(sender = aliceId, traceContext = traceContext)()))
+          .map(
+            Sequenced(
+              _,
+              deliverStoreEventWithDefaults(sender = aliceId, traceContext = traceContext)(),
+            )
+          )
         _ <- storeAndWatermark(events)
         events <- readAsSeq(alice, SequencerCounter(0), 20)
       } yield {
@@ -297,7 +300,12 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
         aliceId <- store.registerMember(alice, ts0)
         delivers = (1L to 20L)
           .map(ts0.plusSeconds)
-          .map(Sequenced(_, mockDeliverStoreEvent(sender = aliceId, traceContext = traceContext)()))
+          .map(
+            Sequenced(
+              _,
+              deliverStoreEventWithDefaults(sender = aliceId, traceContext = traceContext)(),
+            )
+          )
           .toList
         _ <- storeAndWatermark(delivers)
         events <- readAsSeq(alice, SequencerCounter(5), 15)
@@ -317,7 +325,12 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
         aliceId <- store.registerMember(alice, ts0)
         delivers = (1L to 5L)
           .map(ts0.plusSeconds)
-          .map(Sequenced(_, mockDeliverStoreEvent(sender = aliceId, traceContext = traceContext)()))
+          .map(
+            Sequenced(
+              _,
+              deliverStoreEventWithDefaults(sender = aliceId, traceContext = traceContext)(),
+            )
+          )
           .toList
         _ <- storeAndWatermark(delivers)
         queue = readWithQueue(alice, SequencerCounter(0))
@@ -334,7 +347,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           Seq(
             Sequenced(
               ts0.plusSeconds(6L),
-              mockDeliverStoreEvent(sender = aliceId, traceContext = traceContext)(),
+              deliverStoreEventWithDefaults(sender = aliceId, traceContext = traceContext)(),
             )
           )
         )
@@ -399,7 +412,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           Seq(
             Sequenced(
               ts0 plusSeconds 1,
-              mockDeliverStoreEvent(sender = aliceId, traceContext = traceContext)(),
+              deliverStoreEventWithDefaults(sender = aliceId, traceContext = traceContext)(),
             )
           )
         )
@@ -424,7 +437,10 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           delivers = (1L to 25L)
             .map(ts0.plusSeconds)
             .map(
-              Sequenced(_, mockDeliverStoreEvent(sender = aliceId, traceContext = traceContext)())
+              Sequenced(
+                _,
+                deliverStoreEventWithDefaults(sender = aliceId, traceContext = traceContext)(),
+              )
             )
           _ <- storeAndWatermark(delivers)
           // store a counter check point at 5s
@@ -462,7 +478,9 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
               else NonEmpty(SortedSet, aliceId)
             Sequenced(
               ts0.plusSeconds(i),
-              mockDeliverStoreEvent(sender = aliceId, traceContext = traceContext)(recipients),
+              deliverStoreEventWithDefaults(sender = aliceId, traceContext = traceContext)(
+                recipients
+              ),
             )
           }
           _ <- storeAndWatermark(delivers)
@@ -513,7 +531,10 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           delivers = (1L to 20L)
             .map(ts0.plusSeconds)
             .map(
-              Sequenced(_, mockDeliverStoreEvent(sender = aliceId, traceContext = traceContext)())
+              Sequenced(
+                _,
+                deliverStoreEventWithDefaults(sender = aliceId, traceContext = traceContext)(),
+              )
             )
           _ <- storeAndWatermark(delivers)
           checkpointTimestamp = ts0.plusSeconds(11)
@@ -527,7 +548,12 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           events <- readAsSeq(alice, SequencerCounter(15), 3)
         } yield {
           // it should have started reading from the closest counter checkpoint timestamp
-          verify(storeSpy).readEvents(eqTo(aliceId), eqTo(Some(checkpointTimestamp)), anyInt)(
+          verify(storeSpy).readEvents(
+            eqTo(alice),
+            eqTo(aliceId),
+            eqTo(Some(checkpointTimestamp)),
+            anyInt,
+          )(
             anyTraceContext
           )
           // but only emitted events starting from 15
@@ -555,7 +581,10 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
             delivers = (1L to 20L)
               .map(ts0.plusSeconds)
               .map(
-                Sequenced(_, mockDeliverStoreEvent(sender = aliceId, traceContext = traceContext)())
+                Sequenced(
+                  _,
+                  deliverStoreEventWithDefaults(sender = aliceId, traceContext = traceContext)(),
+                )
               )
             _ <- storeAndWatermark(delivers)
             _ <- store.saveLowerBound(ts(10)).valueOrFail("saveLowerBound")
@@ -583,7 +612,10 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
             delivers = (1L to 20L)
               .map(ts0.plusSeconds)
               .map(
-                Sequenced(_, mockDeliverStoreEvent(sender = aliceId, traceContext = traceContext)())
+                Sequenced(
+                  _,
+                  deliverStoreEventWithDefaults(sender = aliceId, traceContext = traceContext)(),
+                )
               )
             _ <- storeAndWatermark(delivers)
             _ <- store
@@ -609,7 +641,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           // write a bunch of events
           delivers = (1L to 20L)
             .map(ts0.plusSeconds)
-            .map(Sequenced(_, mockDeliverStoreEvent(sender = aliceId)()))
+            .map(Sequenced(_, deliverStoreEventWithDefaults(sender = aliceId)()))
           _ <- storeAndWatermark(delivers)
           _ <- store
             .saveCounterCheckpoint(aliceId, checkpoint(SequencerCounter(11), ts(10)))
@@ -656,7 +688,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           delivers = testData.map { case (sequenceTs, signingTs) =>
             val storeEvent = TraceContext
               .withNewTraceContext { eventTraceContext =>
-                mockDeliverStoreEvent(
+                deliverStoreEventWithDefaults(
                   sender = aliceId,
                   payloadId = PayloadId(ts0.plusSeconds(sequenceTs)),
                   signingTs = Some(ts0.plusSeconds(signingTs)),
@@ -692,6 +724,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
                     _payload,
                     Some(topologyTimestamp),
                     _traceContext,
+                    _traffocReceiptO,
                   ),
                 ),
               ),
@@ -835,7 +868,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           delivers = testData.map { case (sequenceTs, signingTsO, recipients) =>
             val storeEvent = TraceContext
               .withNewTraceContext { eventTraceContext =>
-                mockDeliverStoreEvent(
+                deliverStoreEventWithDefaults(
                   sender = aliceId,
                   payloadId = PayloadId(ts0.plusSeconds(sequenceTs)),
                   signingTs = signingTsO.map(ts0.plusSeconds),

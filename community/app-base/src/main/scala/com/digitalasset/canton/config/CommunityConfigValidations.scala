@@ -185,7 +185,7 @@ object CommunityConfigValidations
         nodeTypeName: String,
         nonStandardConfig: Boolean,
         alphaVersionSupport: Boolean,
-    ): Validated[NonEmpty[Seq[String]], Unit] = {
+    ): Validated[NonEmpty[Seq[String]], Unit] =
       Validated.cond(
         nonStandardConfig || !alphaVersionSupport,
         (),
@@ -194,7 +194,6 @@ object CommunityConfigValidations
           s"Enabling alpha-version-support for $nodeTypeName $name requires you to explicitly set canton.parameters.non-standard-config = yes",
         ),
       )
-    }
 
     config.allNodes.toList.traverse_ { case (name, nodeConfig) =>
       toNe(
@@ -229,7 +228,7 @@ object CommunityConfigValidations
         name: String,
         nonStandardConfig: Boolean,
         adminToken: Option[String],
-    ): Validated[NonEmpty[Seq[String]], Unit] = {
+    ): Validated[NonEmpty[Seq[String]], Unit] =
       Validated.cond(
         nonStandardConfig || adminToken.isEmpty,
         (),
@@ -238,7 +237,6 @@ object CommunityConfigValidations
           s"Setting ledger-api.admin-token for participant $name requires you to explicitly set canton.parameters.non-standard-config = yes",
         ),
       )
-    }
 
     config.participants.toList.traverse_ { case (name, participantConfig) =>
       toNe(

@@ -123,7 +123,7 @@ abstract class SequencerApiTest
 
   def createClock(): Clock = new SimClock(loggerFactory = loggerFactory)
 
-  def simClockOrFail(clock: Clock): SimClock = {
+  def simClockOrFail(clock: Clock): SimClock =
     clock match {
       case simClock: SimClock => simClock
       case _ =>
@@ -131,7 +131,6 @@ abstract class SequencerApiTest
           "This test case is only compatible with SimClock for `clock` and `driverClock` fields"
         )
     }
-  }
   def domainId: DomainId = DefaultTestIdentities.domainId
   def mediatorId: MediatorId = DefaultTestIdentities.mediatorId
   def sequencerId: SequencerId = DefaultTestIdentities.sequencerId
@@ -141,8 +140,6 @@ abstract class SequencerApiTest
   ): CantonSequencer
 
   protected def supportAggregation: Boolean
-
-  protected def defaultExpectedTrafficReceipt: Option[TrafficReceipt]
 
   protected def runSequencerApiTests(): Unit = {
     "The sequencers" should {
@@ -162,7 +159,7 @@ abstract class SequencerApiTest
             SequencerCounter(0),
             sender,
             Some(request.messageId),
-            defaultExpectedTrafficReceipt,
+            trafficReceipt = None,
             EnvelopeDetails(messageContent, recipients),
           )
           checkMessages(List(details), messages)
@@ -260,7 +257,7 @@ abstract class SequencerApiTest
             SequencerCounter.Genesis,
             sender,
             Some(request1.messageId),
-            defaultExpectedTrafficReceipt,
+            trafficReceipt = None,
             EnvelopeDetails(normalMessageContent, recipients),
           )
           checkMessages(List(details), messages)
@@ -285,7 +282,7 @@ abstract class SequencerApiTest
             SequencerCounter.Genesis,
             member,
             Option.when(member == sender)(request.messageId),
-            if (member == sender) defaultExpectedTrafficReceipt else None,
+            trafficReceipt = None,
             EnvelopeDetails(messageContent, recipients.forMember(member, Set.empty).value),
           )
         }
@@ -335,7 +332,7 @@ abstract class SequencerApiTest
                 SequencerCounter.Genesis,
                 p6,
                 Some(request1.messageId),
-                defaultExpectedTrafficReceipt,
+                trafficReceipt = None,
               )
             ),
             reads1,
@@ -347,7 +344,7 @@ abstract class SequencerApiTest
                 SequencerCounter.Genesis,
                 p9,
                 Some(request2.messageId),
-                defaultExpectedTrafficReceipt,
+                trafficReceipt = None,
               )
             ),
             reads2,
@@ -450,7 +447,7 @@ abstract class SequencerApiTest
             }
             reads3 <- readForMembers(Seq(p6), sequencer)
           } yield {
-            checkRejection(reads3, p6, request1.messageId, defaultExpectedTrafficReceipt) {
+            checkRejection(reads3, p6, request1.messageId, expectedTrafficReceipt = None) {
               case SequencerErrors.MaxSequencingTimeTooFar(reason) =>
                 reason should (
                   include(s"Max sequencing time") and
@@ -548,7 +545,7 @@ abstract class SequencerApiTest
                 SequencerCounter.Genesis,
                 p11,
                 Some(request1.messageId),
-                defaultExpectedTrafficReceipt,
+                trafficReceipt = None,
               )
             ),
             reads11,
@@ -559,7 +556,7 @@ abstract class SequencerApiTest
                 SequencerCounter.Genesis,
                 p12,
                 Some(request1.messageId),
-                defaultExpectedTrafficReceipt,
+                trafficReceipt = None,
                 EnvelopeDetails(content2, recipients2, envs1(1).signatures ++ envs2(1).signatures),
               ),
               EventDetails(
@@ -586,7 +583,7 @@ abstract class SequencerApiTest
             reads12a,
           )
 
-          checkRejection(reads13, p13, messageId3, defaultExpectedTrafficReceipt) {
+          checkRejection(reads13, p13, messageId3, expectedTrafficReceipt = None) {
             case SequencerErrors.AggregateSubmissionAlreadySent(reason) =>
               reason should (
                 include(s"The aggregatable request with aggregation ID") and
@@ -668,15 +665,15 @@ abstract class SequencerApiTest
                 SequencerCounter.Genesis,
                 p14,
                 Some(request1.messageId),
-                defaultExpectedTrafficReceipt,
+                trafficReceipt = None,
               )
             ),
             reads14,
           )
-          checkRejection(reads14a, p14, messageId2, defaultExpectedTrafficReceipt) {
+          checkRejection(reads14a, p14, messageId2, expectedTrafficReceipt = None) {
             case SequencerErrors.AggregateSubmissionStuffing(reason) =>
               reason should include(
-                s"The sender ${p14} previously contributed to the aggregatable submission with ID"
+                s"The sender $p14 previously contributed to the aggregatable submission with ID"
               )
           }
           val deliveredEnvelopeDetails = EnvelopeDetails(
@@ -704,7 +701,7 @@ abstract class SequencerApiTest
                 SequencerCounter.Genesis,
                 p15,
                 Some(messageId3),
-                defaultExpectedTrafficReceipt,
+                trafficReceipt = None,
                 deliveredEnvelopeDetails,
               )
             ),
@@ -897,7 +894,7 @@ abstract class SequencerApiTest
                 SequencerCounter.Genesis,
                 p1,
                 Some(requestFromP1.messageId),
-                defaultExpectedTrafficReceipt,
+                trafficReceipt = None,
               )
             ),
             readsForP1,
@@ -910,7 +907,7 @@ abstract class SequencerApiTest
                 SequencerCounter.Genesis,
                 p2,
                 Some(requestFromP2.messageId),
-                defaultExpectedTrafficReceipt,
+                trafficReceipt = None,
               )
             ),
             readsForP2,
@@ -982,7 +979,7 @@ trait SequencerApiTestUtils
       // up to 60 seconds needed because Besu is very slow on CI
       timeout: FiniteDuration = 60.seconds,
       firstSequencerCounter: SequencerCounter = SequencerCounter.Genesis,
-  )(implicit materializer: Materializer): Future[Seq[(Member, OrdinarySerializedEvent)]] = {
+  )(implicit materializer: Materializer): Future[Seq[(Member, OrdinarySerializedEvent)]] =
     members
       .parTraverseFilter { member =>
         for {
@@ -1003,7 +1000,6 @@ trait SequencerApiTestUtils
             }
         } yield events
       }
-  }
 
   case class EnvelopeDetails(
       content: String,
@@ -1055,7 +1051,7 @@ trait SequencerApiTestUtils
     val sortReceived = receivedMessages.sortBy { case (member, _) => member }
 
     forAll(sortReceived.zip(sortExpected)) { case ((member, message), expectedMessage) =>
-      withClue(s"Member mismatch") { member shouldBe expectedMessage.to }
+      withClue(s"Member mismatch")(member shouldBe expectedMessage.to)
 
       withClue(s"Sequencer counter is wrong") {
         message.counter shouldBe expectedMessage.counter
@@ -1095,7 +1091,7 @@ trait SequencerApiTestUtils
       sender: Member,
       expectedMessageId: MessageId,
       expectedTrafficReceipt: Option[TrafficReceipt],
-  )(assertReason: PartialFunction[Status, Assertion]): Assertion = {
+  )(assertReason: PartialFunction[Status, Assertion]): Assertion =
     got match {
       case Seq((`sender`, event)) =>
         event.signedEvent.content match {
@@ -1115,7 +1111,6 @@ trait SequencerApiTestUtils
         }
       case _ => fail(s"Read wrong events for $sender: $got")
     }
-  }
 
   def signEnvelope(
       crypto: DomainSyncCryptoClient,
@@ -1143,11 +1138,10 @@ trait SequencerApiTestUtils
     override def forRecipient(
         member: Member,
         groupAddresses: Set[GroupRecipient],
-    ): Option[Envelope[String]] = {
+    ): Option[Envelope[String]] =
       recipients
         .forMember(member, groupAddresses)
         .map(recipients => TestingEnvelope(content, recipients))
-    }
 
     override def pretty: Pretty[TestingEnvelope] = adHocPrettyInstance
   }
@@ -1156,7 +1150,7 @@ trait SequencerApiTestUtils
     * Used for unit testing sequencers. During the normal sequencer operation members are registered
     * via topology subscription or sequencer startup in SequencerRuntime.
     */
-  def registerAllTopologyMembers(headSnapshot: TopologySnapshot, sequencer: Sequencer): Unit = {
+  def registerAllTopologyMembers(headSnapshot: TopologySnapshot, sequencer: Sequencer): Unit =
     (for {
       allMembers <- EitherT.right[Sequencer.RegisterError](headSnapshot.allMembers())
       _ <- allMembers.toSeq
@@ -1174,5 +1168,4 @@ trait SequencerApiTestUtils
           } yield res
         }
     } yield ()).futureValue
-  }
 }

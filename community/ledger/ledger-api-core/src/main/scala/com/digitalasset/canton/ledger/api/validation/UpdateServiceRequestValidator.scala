@@ -36,7 +36,7 @@ class UpdateServiceRequestValidator(partyValidator: PartyValidator) {
 
   private def commonValidations(
       req: GetUpdatesRequest
-  )(implicit contextualizedErrorLogger: ContextualizedErrorLogger): Result[PartialValidation] = {
+  )(implicit contextualizedErrorLogger: ContextualizedErrorLogger): Result[PartialValidation] =
     for {
       filter <- requirePresence(req.filter, "filter")
       requiredBegin <- requirePresence(req.beginExclusive, "begin")
@@ -50,15 +50,12 @@ class UpdateServiceRequestValidator(partyValidator: PartyValidator) {
       knownParties,
     )
 
-  }
-
   def validate(
       req: GetUpdatesRequest,
       ledgerEnd: ParticipantOffset.Absolute,
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
-  ): Result[transaction.GetTransactionsRequest] = {
-
+  ): Result[transaction.GetTransactionsRequest] =
     for {
       partial <- commonValidations(req)
       _ <- ParticipantOffsetValidator.offsetIsBeforeEndIfAbsolute(
@@ -80,13 +77,12 @@ class UpdateServiceRequestValidator(partyValidator: PartyValidator) {
         req.verbose,
       )
     }
-  }
 
   def validateTransactionById(
       req: GetTransactionByIdRequest
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
-  ): Result[transaction.GetTransactionByIdRequest] = {
+  ): Result[transaction.GetTransactionByIdRequest] =
     for {
       _ <- requireNonEmptyString(req.updateId, "update_id")
       trId <- requireLedgerString(req.updateId)
@@ -98,13 +94,12 @@ class UpdateServiceRequestValidator(partyValidator: PartyValidator) {
         parties,
       )
     }
-  }
 
   def validateTransactionByEventId(
       req: GetTransactionByEventIdRequest
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
-  ): Result[transaction.GetTransactionByEventIdRequest] = {
+  ): Result[transaction.GetTransactionByEventIdRequest] =
     for {
       eventId <- requireLedgerString(req.eventId, "event_id")
       _ <- requireNonEmpty(req.requestingParties, "requesting_parties")
@@ -115,7 +110,6 @@ class UpdateServiceRequestValidator(partyValidator: PartyValidator) {
         parties,
       )
     }
-  }
 
   // Allow using deprecated Protobuf fields for backwards compatibility
   private def transactionFilterToPartySet(

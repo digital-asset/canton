@@ -109,9 +109,8 @@ class ReferenceDemoScript(
   }
 
   private val partyIdCache = mutable.LinkedHashMap[String, (PartyId, ParticipantReference)]()
-  private def partyId(name: String): PartyId = {
+  private def partyId(name: String): PartyId =
     partyIdCache.getOrElse(name, sys.error(s"Failed to lookup party $name"))._1
-  }
 
   private def darFile(dar: String): String =
     darPath.map(path => s"$path/$dar.dar").getOrElse(s"$rootPath/dars/$dar.dar")
@@ -392,9 +391,8 @@ class ReferenceDemoScript(
           // Force the time proofs to be updated after topology transactions
           // TODO(i13200) The following line can be removed once the ticket is closed
           participant3.testing.fetch_domain_times()
-          val withdraw = {
+          val withdraw =
             insuranceLookup(M.bank.Cash.COMPANION).id.exerciseSplit(15).commands
-          }
           participant3.ledger_api.javaapi.commands
             .submit(Seq(insurance), withdraw, optTimeout = syncTimeout)
             .discard[TransactionTree]
@@ -404,11 +402,10 @@ class ReferenceDemoScript(
               .await(M.bank.Cash.COMPANION)(insurance, _.data.amount.quantity == 15)
 
           // settle claim (will invoke auto-transfer to the banking domain)
-          val settleClaim = {
+          val settleClaim =
             insuranceLookup(M.healthinsurance.Claim.COMPANION).id
               .exerciseAcceptAndSettleClaim(findCashCid.id)
               .commands
-          }
           participant3.ledger_api.javaapi.commands
             .submit(Seq(insurance), settleClaim, optTimeout = syncTimeout)
             .discard[TransactionTree]
@@ -483,7 +480,7 @@ class ReferenceDemoScript(
                 participant5.ledger_api.updates
                   .flat(Set(registry), completeAfter = 5, beginOffset = prunedOffset)
               // ensure we don't see any transactions
-              require(transactions.isEmpty, s"transactions should be empty but was ${transactions}")
+              require(transactions.isEmpty, s"transactions should be empty but was $transactions")
             }
           }
           // ensure registry tab resubscribes after the pruning offset
@@ -509,13 +506,13 @@ class ReferenceDemoScript(
             }
           }
           val filename = darFile("ai-analysis")
-          val allF = Seq(participant5, participant1, participant6).map(participant => {
+          val allF = Seq(participant5, participant1, participant6).map { participant =>
             Future {
               blocking {
                 participant.dars.upload(filename)
               }
             }
-          }) :+ Future {
+          } :+ Future {
             blocking {}
           } :+ registerDomainF
           // once all dars are uploaded and we've connected the domain, register the party (as we can flush everything there ...)
@@ -530,7 +527,7 @@ class ReferenceDemoScript(
                 }
               }
             )
-          execute(Seq(sf.map(_ => {
+          execute(Seq(sf.map { _ =>
             val offer = new ME.aianalysis.OfferAnalysis(
               registry,
               alice,
@@ -539,7 +536,7 @@ class ReferenceDemoScript(
             participant5.ledger_api.javaapi.commands
               .submit(Seq(registry), offer, optTimeout = syncTimeout)
               .discard[TransactionTree]
-          }))).discard
+          })).discard
         },
       ),
       Action(
@@ -606,7 +603,7 @@ object ReferenceDemoScript {
     def getSequencer(str: String): SequencerReference =
       consoleEnvironment.sequencers.all
         .find(_.name == str)
-        .getOrElse(sys.error(s"can not find domain named ${str}"))
+        .getOrElse(sys.error(s"can not find domain named $str"))
 
     val bankingSequencers = consoleEnvironment.sequencers.all.filter(_.name == SequencerBanking)
     val bankingMediators = consoleEnvironment.mediators.all.filter(_.name == "mediatorBanking")

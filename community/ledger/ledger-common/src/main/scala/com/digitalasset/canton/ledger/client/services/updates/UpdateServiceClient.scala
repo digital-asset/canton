@@ -27,7 +27,7 @@ class UpdateServiceClient(service: UpdateServiceStub)(implicit
       verbose: Boolean = false,
       end: Option[ParticipantOffset] = None,
       token: Option[String] = None,
-  )(implicit traceContext: TraceContext): Source[GetUpdatesResponse, NotUsed] = {
+  )(implicit traceContext: TraceContext): Source[GetUpdatesResponse, NotUsed] =
     ClientAdapter
       .serverStreaming(
         GetUpdatesRequest(
@@ -38,7 +38,6 @@ class UpdateServiceClient(service: UpdateServiceStub)(implicit
         ),
         LedgerClient.stubWithTracing(service, token).getUpdates,
       )
-  }
 
   def getUpdateTreesSource(
       begin: ParticipantOffset,
@@ -46,7 +45,7 @@ class UpdateServiceClient(service: UpdateServiceStub)(implicit
       verbose: Boolean = false,
       end: Option[ParticipantOffset] = None,
       token: Option[String] = None,
-  )(implicit traceContext: TraceContext): Source[GetUpdateTreesResponse, NotUsed] = {
+  )(implicit traceContext: TraceContext): Source[GetUpdateTreesResponse, NotUsed] =
     ClientAdapter
       .serverStreaming(
         GetUpdatesRequest(
@@ -57,6 +56,5 @@ class UpdateServiceClient(service: UpdateServiceStub)(implicit
         ),
         LedgerClient.stubWithTracing(service, token).getUpdateTrees,
       )
-  }
 
 }

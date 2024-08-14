@@ -251,7 +251,7 @@ class GrpcSequencerAdministrationService(
   ] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
-    val result = {
+    val result =
       for {
         member <- wrapErrUS(Member.fromProtoPrimitive(requestP.member, "member"))
         serial <- wrapErrUS(ProtoConverter.parsePositiveInt("serial", requestP.serial))
@@ -267,7 +267,6 @@ class GrpcSequencerAdministrationService(
       } yield SetTrafficPurchasedResponse(
         maxSequencingTimestamp = Some(highestMaxSequencingTimestamp.toProtoTimestamp)
       )
-    }
 
     mapErrNewEUS(result)
   }

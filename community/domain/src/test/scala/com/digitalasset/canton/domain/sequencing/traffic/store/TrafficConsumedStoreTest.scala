@@ -7,11 +7,13 @@ import cats.syntax.parallel.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.traffic.TrafficConsumed
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.{BaseTest, ProtocolVersionChecksAsyncWordSpec}
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.wordspec.AsyncWordSpec
+
+import scala.concurrent.Future
 
 trait TrafficConsumedStoreTest
     extends BeforeAndAfterAll
@@ -19,9 +21,18 @@ trait TrafficConsumedStoreTest
     with ProtocolVersionChecksAsyncWordSpec {
   this: AsyncWordSpec =>
 
+  def registerMemberInSequencerStore(member: Member): Future[Unit]
+
+  val alice = ParticipantId("alice")
+  val bob = ParticipantId("bob")
+
+  override def beforeAll(): Unit = {
+    super.beforeAll()
+    registerMemberInSequencerStore(alice).futureValue
+    registerMemberInSequencerStore(bob).futureValue
+  }
+
   def trafficConsumedStore(mk: () => TrafficConsumedStore): Unit = {
-    val alice = ParticipantId("alice")
-    val bob = ParticipantId("bob")
     val t0 = CantonTimestamp.Epoch
     val t1 = t0.plusSeconds(1)
     val t2 = t1.plusSeconds(1)

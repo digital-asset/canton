@@ -231,7 +231,7 @@ class AdminWorkflowServices(
 
     val startupF =
       client.v2.stateService.getActiveContracts(service.filters).map { case (acs, offset) =>
-        logger.debug(s"Loading ${acs} $service")
+        logger.debug(s"Loading $acs $service")
         service.processAcs(acs)
         new ResilientLedgerSubscription(
           subscribeOffset =>

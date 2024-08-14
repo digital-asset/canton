@@ -58,42 +58,49 @@ class DbTrafficConsumedStore(
       sql"""select member, sequencing_timestamp, extra_traffic_consumed, base_traffic_remainder, last_consumed_cost
            from seq_traffic_control_consumed_journal
            where member = $member
-           order by sequencing_timestamp desc"""
+           order by sequencing_timestamp desc
+           limit 1"""
     storage.querySingle(query.as[TrafficConsumed].headOption, functionFullName).value
   }
 
   override def lookupLatestBeforeInclusive(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Future[Seq[TrafficConsumed]] = {
-    // TODO(#18394): Check if performance of this query is good (looks a lot like a group by)
-    val query =
-      sql"""select member, sequencing_timestamp, extra_traffic_consumed, base_traffic_remainder, last_consumed_cost
-            from
-              (select member, sequencing_timestamp, extra_traffic_consumed, base_traffic_remainder, last_consumed_cost,
-                      rank() over (partition by member order by sequencing_timestamp desc) as pos
-               from seq_traffic_control_consumed_journal
-               where sequencing_timestamp <= $timestamp
-              ) as with_pos
-            where pos = 1
-           """
-
+    val query = storage.profile match {
+      case _: DbStorage.Profile.Postgres =>
+        sql"""select m.member, tc.sequencing_timestamp, tc.extra_traffic_consumed, tc.base_traffic_remainder, tc.last_consumed_cost
+            from sequencer_members m
+            inner join lateral (
+              select sequencing_timestamp, extra_traffic_consumed, base_traffic_remainder, last_consumed_cost
+              from seq_traffic_control_consumed_journal
+              where member = m.member and sequencing_timestamp <= $timestamp
+              order by member, sequencing_timestamp desc
+              limit 1) tc
+            on true;"""
+      case _ =>
+        // H2 does't support lateral joins
+        sql"""select member, sequencing_timestamp, extra_traffic_consumed, base_traffic_remainder, last_consumed_cost
+                    from
+                      (select member, sequencing_timestamp, extra_traffic_consumed, base_traffic_remainder, last_consumed_cost,
+                              rank() over (partition by member order by sequencing_timestamp desc) as pos
+                       from seq_traffic_control_consumed_journal
+                       where sequencing_timestamp <= $timestamp
+                      ) as with_pos
+                    where pos = 1
+                   """
+    }
     storage.query(query.as[TrafficConsumed], functionFullName)
   }
 
   def lookupLatestBeforeInclusiveForMember(member: Member, timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Future[Option[TrafficConsumed]] = {
-    // TODO(#18394): Check if performance of this query is good (looks a lot like a group by)
     val query =
       sql"""select member, sequencing_timestamp, extra_traffic_consumed, base_traffic_remainder, last_consumed_cost
-            from
-              (select member, sequencing_timestamp, extra_traffic_consumed, base_traffic_remainder, last_consumed_cost,
-                      rank() over (partition by member order by sequencing_timestamp desc) as pos
-               from seq_traffic_control_consumed_journal
-               where sequencing_timestamp <= $timestamp and member = $member
-              ) as with_pos
-            where pos = 1
-           """.as[TrafficConsumed].headOption
+            from seq_traffic_control_consumed_journal
+            where sequencing_timestamp <= $timestamp and member = $member
+            order by member, sequencing_timestamp desc
+            limit 1""".as[TrafficConsumed].headOption
 
     storage.querySingle(query, functionFullName).value
   }
@@ -104,7 +111,8 @@ class DbTrafficConsumedStore(
     val query =
       sql"""select member, sequencing_timestamp, extra_traffic_consumed, base_traffic_remainder, last_consumed_cost
            from seq_traffic_control_consumed_journal
-           where member = $member and sequencing_timestamp = $timestamp"""
+           where member = $member and sequencing_timestamp = $timestamp
+           limit 1"""
     storage.querySingle(query.as[TrafficConsumed].headOption, functionFullName).value
   }
 

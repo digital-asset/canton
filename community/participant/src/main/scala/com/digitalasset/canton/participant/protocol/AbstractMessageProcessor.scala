@@ -135,7 +135,7 @@ abstract class AbstractMessageProcessor(
       requestCounter: RequestCounter,
       sequencerCounter: SequencerCounter,
       timestamp: CantonTimestamp,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     crypto.ips
       .awaitSnapshotUS(timestamp)
       .flatMap(snapshot => FutureUnlessShutdown.outcomeF(snapshot.findDynamicDomainParameters()))
@@ -167,7 +167,6 @@ abstract class AbstractMessageProcessor(
           onTimeout,
         )
       }
-  }
 
   private def registerRequestWithTimeout(
       requestCounter: RequestCounter,

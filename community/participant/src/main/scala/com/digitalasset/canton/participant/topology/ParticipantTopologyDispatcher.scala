@@ -89,7 +89,7 @@ class ParticipantTopologyDispatcher(
 
   def domainDisconnected(
       domain: DomainAlias
-  )(implicit traceContext: TraceContext): Unit = {
+  )(implicit traceContext: TraceContext): Unit =
     domains.remove(domain) match {
       case Some(outboxes) =>
         state.domainIdForAlias(domain).foreach(disconnectOutboxes)
@@ -97,11 +97,10 @@ class ParticipantTopologyDispatcher(
       case None =>
         logger.debug(s"Topology pusher already disconnected from $domain")
     }
-  }
 
   def awaitIdle(domain: DomainAlias, timeout: Duration)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] = {
+  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] =
     domains
       .get(domain)
       .fold(
@@ -116,7 +115,6 @@ class ParticipantTopologyDispatcher(
           x.forgetNE.parTraverse(_.awaitIdle(timeout)).map(_.forall(identity))
         )
       )
-  }
 
   private def getState(domainId: DomainId)(implicit
       traceContext: TraceContext
@@ -218,7 +216,7 @@ class ParticipantTopologyDispatcher(
   )(implicit
       executionContext: ExecutionContextExecutor,
       traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] = {
+  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] =
     getState(domainId).flatMap { _ =>
       DomainOnboardingOutbox
         .initiateOnboarding(
@@ -235,7 +233,6 @@ class ParticipantTopologyDispatcher(
           crypto,
         )
     }
-  }
 
   def createHandler(
       domain: DomainAlias,
@@ -356,7 +353,7 @@ private class DomainOnboardingOutbox(
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] = (for {
     initialTransactions <- loadInitialTransactionsFromStore()
     _ = logger.debug(
-      s"Sending ${initialTransactions.size} onboarding transactions to ${domain}"
+      s"Sending ${initialTransactions.size} onboarding transactions to $domain"
     )
     _result <- dispatch(initialTransactions)
       .mapK(FutureUnlessShutdown.outcomeK)
@@ -392,13 +389,12 @@ private class DomainOnboardingOutbox(
 
   private def dispatch(
       transactions: Seq[GenericSignedTopologyTransaction]
-  )(implicit traceContext: TraceContext): EitherT[Future, SequencerConnectClient.Error, Unit] = {
+  )(implicit traceContext: TraceContext): EitherT[Future, SequencerConnectClient.Error, Unit] =
     sequencerConnectClient.registerOnboardingTopologyTransactions(
       domain,
       participantId,
       transactions,
     )
-  }
 
   private def initializedWith(
       initial: Seq[GenericSignedTopologyTransaction]

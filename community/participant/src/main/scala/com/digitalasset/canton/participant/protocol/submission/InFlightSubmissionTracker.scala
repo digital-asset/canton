@@ -161,7 +161,7 @@ class InFlightSubmissionTracker(
       domainId: DomainId,
       messageId: MessageId,
       newTrackingData: UnsequencedSubmission,
-  )(implicit traceContext: TraceContext): Future[Unit] = {
+  )(implicit traceContext: TraceContext): Future[Unit] =
     store.value.updateUnsequenced(changeIdHash, domainId, messageId, newTrackingData).map {
       (_: Unit) =>
         // Request a tick for the new timestamp if we're still connected to the domain
@@ -174,7 +174,6 @@ class InFlightSubmissionTracker(
             )
         }
     }
-  }
 
   /** Updates the unsequenced submission corresponding to the [[com.digitalasset.canton.sequencing.protocol.DeliverError]],
     * if any, using [[com.digitalasset.canton.participant.protocol.submission.SubmissionTrackingData.updateOnNotSequenced]].
@@ -257,19 +256,55 @@ class InFlightSubmissionTracker(
           //    a second chance of observing the timestamp when the sequencer counter becomes clean.
           _ <- FutureUnlessShutdown
             .outcomeF(domainState.observedTimestampTracker.increaseWatermark(upToInclusive))
-          timelyRejects <- FutureUnlessShutdown
-            .outcomeF(store.value.lookupUnsequencedUptoUnordered(domainId, upToInclusive))
-          events = timelyRejects.map(timelyRejectionEventFor)
-          skippedE <- participantEventPublisher.publishWithIds(events).value
-        } yield {
-          skippedE.valueOr { skipped =>
-            logger.info(
-              show"Skipping publication of timely rejections with IDs ${skipped
-                  .map(_.eventId.showValueOrNone)} as they are already there at offsets ${skipped
-                  .map(_.localOffset)}"
-            )
-          }
-        }
+          reject <- doTimelyReject(domainId, upToInclusive, participantEventPublisher)
+        } yield reject
+      }
+    }
+
+  /** Same as [[timelyReject]] except that this method may only be called if [[timelyReject]] has already been called
+    * previously with the same or a later timestamp for the same domain.
+    */
+  def timelyRejectAgain(
+      domainId: DomainId,
+      upToInclusive: CantonTimestamp,
+      participantEventPublisher: ParticipantEventPublisher,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = {
+    // No need to bump the watermark like `timelyReject` does because it had been bumped previously.
+    // This method therefore can run even if the domain is not connected.
+    //
+    // Sanity check that the watermark is sufficiently high. If the domain is not available, we skip the sanity check.
+    domainStates(domainId).foreach { state =>
+      val highWaterMark = state.observedTimestampTracker.highWatermark
+      ErrorUtil.requireState(
+        upToInclusive <= highWaterMark,
+        s"Bound $upToInclusive is above high watermark $highWaterMark despite this being a renotification",
+      )
+    }
+
+    doTimelyReject(domainId, upToInclusive, participantEventPublisher)
+  }
+
+  private def doTimelyReject(
+      domainId: DomainId,
+      upToInclusive: CantonTimestamp,
+      participantEventPublisher: ParticipantEventPublisher,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] =
+    for {
+      timelyRejects <- FutureUnlessShutdown
+        .outcomeF(store.value.lookupUnsequencedUptoUnordered(domainId, upToInclusive))
+      events = timelyRejects.map(timelyRejectionEventFor)
+      skippedE <- participantEventPublisher.publishWithIds(events).value
+    } yield {
+      skippedE.valueOr { skipped =>
+        logger.info(
+          show"Skipping publication of timely rejections with IDs ${skipped
+              .map(_.eventId.showValueOrNone)} as they are already there at offsets ${skipped
+              .map(_.localOffset)}"
+        )
       }
     }
 
@@ -359,7 +394,7 @@ class InFlightSubmissionTracker(
     */
   def recoverPublishedTimelyRejections(
       domains: Seq[DomainId]
-  )(implicit traceContext: TraceContext): Future[Unit] = {
+  )(implicit traceContext: TraceContext): Future[Unit] =
     for {
       unsequenceds <- domains.parTraverse { domainId =>
         store.value.lookupUnsequencedUptoUnordered(domainId, CantonTimestamp.MaxValue)
@@ -384,7 +419,6 @@ class InFlightSubmissionTracker(
       _ <- deduplicator.processPublications(publications)
       _ <- store.value.delete(references)
     } yield ()
-  }
 
   /** Deletes the published, sequenced in-flight submissions with sequencing timestamps up to the given bound
     * and informs the [[CommandDeduplicator]] about the published events.
@@ -548,13 +582,12 @@ object InFlightSubmissionTracker {
     def fromSyncDomainState(
         persistent: SyncDomainPersistentState,
         ephemeral: SyncDomainEphemeralState,
-    ): InFlightSubmissionTrackerDomainState = {
+    ): InFlightSubmissionTrackerDomainState =
       InFlightSubmissionTrackerDomainState(
         ephemeral.observedTimestampTracker,
         ephemeral.timeTracker,
         persistent.eventLog,
       )
-    }
   }
 
   sealed trait InFlightSubmissionTrackerError extends Product with Serializable

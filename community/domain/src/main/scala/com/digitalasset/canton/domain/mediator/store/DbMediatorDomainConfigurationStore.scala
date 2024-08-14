@@ -120,7 +120,7 @@ class DbMediatorDomainConfigurationStore(
 
   private def deserialize(
       row: SerializedRow
-  ): ParsingResult[MediatorDomainConfiguration] = {
+  ): ParsingResult[MediatorDomainConfiguration] =
     for {
       domainId <- DomainId.fromProtoPrimitive(row._1.unwrap, "domainId")
       domainParameters <- StaticDomainParameters.fromTrustedByteString(
@@ -132,5 +132,4 @@ class DbMediatorDomainConfigurationStore(
       domainParameters,
       sequencerConnections,
     )
-  }
 }

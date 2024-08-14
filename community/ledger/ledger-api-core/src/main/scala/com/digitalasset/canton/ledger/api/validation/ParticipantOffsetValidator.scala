@@ -37,7 +37,7 @@ object ParticipantOffsetValidator {
       fieldName: String,
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
-  ): Either[StatusRuntimeException, domain.ParticipantOffset] = {
+  ): Either[StatusRuntimeException, domain.ParticipantOffset] =
     ledgerOffset.value match {
       case ParticipantOffset.Value.Absolute(value) =>
         requireLedgerString(value, fieldName).map(domain.ParticipantOffset.Absolute)
@@ -46,7 +46,6 @@ object ParticipantOffsetValidator {
       case ParticipantOffset.Value.Empty =>
         Left(missingField(fieldName + ".(" + boundary + "|value)"))
     }
-  }
 
   def validate(ledgerOffset: String)(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
@@ -105,7 +104,7 @@ object ParticipantOffsetValidator {
       value: ParticipantBoundary,
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
-  ): Either[StatusRuntimeException, domain.ParticipantOffset] = {
+  ): Either[StatusRuntimeException, domain.ParticipantOffset] =
     value match {
       case ParticipantBoundary.Unrecognized(invalid) =>
         Left(
@@ -118,5 +117,4 @@ object ParticipantOffsetValidator {
       case ParticipantBoundary.PARTICIPANT_BOUNDARY_END =>
         Right(domain.ParticipantOffset.ParticipantEnd)
     }
-  }
 }

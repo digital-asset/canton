@@ -176,7 +176,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId](
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TopologyManagerError, GenericSignedTopologyTransaction] = {
-    logger.debug(show"Attempting to build, sign, and ${op} ${mapping} with serial $serial")
+    logger.debug(show"Attempting to build, sign, and $op $mapping with serial $serial")
     for {
       tx <- build(op, mapping, serial, protocolVersion, signingKeys).mapK(
         FutureUnlessShutdown.outcomeK
@@ -247,7 +247,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId](
       newSigningKeys: Seq[Fingerprint],
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TopologyManagerError, TopologyTransaction[Op, M]] = {
+  ): EitherT[Future, TopologyManagerError, TopologyTransaction[Op, M]] =
     for {
       existingTransactions <- EitherT.right(
         store.findTransactionsForMapping(EffectiveTime.MaxValue, NonEmpty(Set, mapping.uniqueKey))
@@ -309,7 +309,6 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId](
           )
       }): EitherT[Future, TopologyManagerError, PositiveInt]
     } yield TopologyTransaction(op, theSerial, mapping, protocolVersion)
-  }
 
   def signTransaction[Op <: TopologyChangeOp, M <: TopologyMapping](
       transaction: TopologyTransaction[Op, M],
@@ -317,7 +316,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId](
       isProposal: Boolean,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, TopologyManagerError, SignedTopologyTransaction[Op, M]] = {
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, SignedTopologyTransaction[Op, M]] =
     for {
       // find signing keys.
       keys <- (signingKeys match {
@@ -348,14 +347,13 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId](
           case err => TopologyManagerError.InternalError.TopologySigningError(err)
         }: EitherT[FutureUnlessShutdown, TopologyManagerError, SignedTopologyTransaction[Op, M]]
     } yield signed
-  }
 
   def extendSignature[Op <: TopologyChangeOp, M <: TopologyMapping](
       transaction: SignedTopologyTransaction[Op, M],
       signingKey: Seq[Fingerprint],
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, TopologyManagerError, SignedTopologyTransaction[Op, M]] = {
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, SignedTopologyTransaction[Op, M]] =
     for {
       // find signing keys
       keys <- (signingKey match {
@@ -378,7 +376,6 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId](
           )
       )
     } yield transaction.addSignatures(signatures)
-  }
 
   // TODO(#18524): Remove this after CN has upgraded to 3.1. It will then be superseded by #12945
   private def addMissingOtkSignaturesForSigningKeys(
@@ -509,18 +506,17 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId](
 
   private def checkOwnerToKeyMappingIsForCurrentMember(member: Member, forceChanges: ForceFlags)(
       implicit traceContext: TraceContext
-  ): EitherT[Future, TopologyManagerError, Unit] = {
+  ): EitherT[Future, TopologyManagerError, Unit] =
     EitherTUtil.condUnitET(
       member.uid == nodeId || forceChanges.permits(ForceFlag.AlienMember),
       DangerousKeyUseCommandRequiresForce.AlienMember(member),
     )
-  }
 
   private def checkLedgerTimeRecordTimeToleranceNotIncreasing(
       domainId: DomainId,
       newDomainParameters: DynamicDomainParameters,
       forceChanges: ForceFlags,
-  )(implicit traceContext: TraceContext): EitherT[Future, TopologyManagerError, Unit] = {
+  )(implicit traceContext: TraceContext): EitherT[Future, TopologyManagerError, Unit] =
     // See i9028 for a detailed design.
 
     EitherT(for {
@@ -557,7 +553,6 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId](
           )
       }
     })
-  }
 
   /** notify observers about new transactions about to be stored */
   protected def notifyObservers(

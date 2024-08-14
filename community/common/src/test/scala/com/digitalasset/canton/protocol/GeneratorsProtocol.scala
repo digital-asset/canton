@@ -32,7 +32,7 @@ final class GeneratorsProtocol(
   import com.digitalasset.canton.topology.GeneratorsTopology.*
   import org.scalatest.EitherValues.*
 
-  implicit val staticDomainParametersArb: Arbitrary[StaticDomainParameters] = {
+  implicit val staticDomainParametersArb: Arbitrary[StaticDomainParameters] =
     Arbitrary(for {
       requiredSigningKeySchemes <- nonEmptySetGen[SigningKeyScheme]
       requiredEncryptionAlgorithmSpecs <- nonEmptySetGen[EncryptionAlgorithmSpec]
@@ -51,7 +51,6 @@ final class GeneratorsProtocol(
       )
 
     } yield parameters)
-  }
 
   implicit val dynamicDomainParametersArb: Arbitrary[DynamicDomainParameters] = Arbitrary(
     for {

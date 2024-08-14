@@ -21,6 +21,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.sequencing.protocol.{MessageId, SequencedEvent}
+import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.Member
@@ -127,6 +128,11 @@ sealed trait StoreEvent[+PayloadReference] extends HasTraceContext {
     * and for checking signatures on envelopes, if absent, sequencing time will be used instead. Absent on errors.
     */
   def topologyTimestampO: Option[CantonTimestamp]
+
+  /** Traffic accounting receipt for the sender of the event.
+    * None if traffic management is disabled
+    */
+  def trafficReceiptO: Option[TrafficReceipt]
 }
 
 final case class ReceiptStoreEvent(
@@ -134,6 +140,7 @@ final case class ReceiptStoreEvent(
     messageId: MessageId,
     override val topologyTimestampO: Option[CantonTimestamp],
     override val traceContext: TraceContext,
+    override val trafficReceiptO: Option[TrafficReceipt],
 ) extends StoreEvent[Nothing] {
   override val notifies: WriteNotification = WriteNotification.Members(SortedSet(sender))
 
@@ -158,6 +165,7 @@ final case class DeliverStoreEvent[P](
     payload: P,
     override val topologyTimestampO: Option[CantonTimestamp],
     override val traceContext: TraceContext,
+    override val trafficReceiptO: Option[TrafficReceipt],
 ) extends StoreEvent[P] {
   override lazy val notifies: WriteNotification = WriteNotification.Members(members)
 
@@ -182,6 +190,7 @@ object DeliverStoreEvent {
       members: Set[SequencerMemberId],
       payload: Payload,
       topologyTimestampO: Option[CantonTimestamp],
+      trafficReceiptO: Option[TrafficReceipt],
   )(implicit traceContext: TraceContext): DeliverStoreEvent[Payload] = {
     // ensure that sender is a recipient
     val recipientsWithSender = NonEmpty(SortedSet, sender, members.toSeq*)
@@ -192,6 +201,7 @@ object DeliverStoreEvent {
       payload,
       topologyTimestampO,
       traceContext,
+      trafficReceiptO,
     )
   }
 }
@@ -201,6 +211,7 @@ final case class DeliverErrorStoreEvent(
     messageId: MessageId,
     error: Option[ByteString],
     override val traceContext: TraceContext,
+    override val trafficReceiptO: Option[TrafficReceipt],
 ) extends StoreEvent[Nothing] {
   override val notifies: WriteNotification = WriteNotification.Members(SortedSet(sender))
   override val description: String = show"deliver-error[message-id:$messageId]"
@@ -226,6 +237,7 @@ object DeliverErrorStoreEvent {
       status: Status,
       protocolVersion: ProtocolVersion,
       traceContext: TraceContext,
+      trafficReceiptO: Option[TrafficReceipt],
   ): DeliverErrorStoreEvent = {
     val serializedError =
       DeliverErrorStoreEvent.serializeError(status, protocolVersion)
@@ -235,6 +247,7 @@ object DeliverErrorStoreEvent {
       messageId,
       Some(serializedError),
       traceContext,
+      trafficReceiptO,
     )
   }
 
@@ -486,14 +499,13 @@ trait SequencerStore extends SequencerMemberValidator with NamedLogging with Aut
 
   override def isMemberRegisteredAt(member: Member, time: CantonTimestamp)(implicit
       tc: TraceContext
-  ): Future[Boolean] = {
+  ): Future[Boolean] =
     lookupMember(member)
       .map { regMemberO =>
         val registered = regMemberO.exists(_.registeredFrom <= time)
         logger.trace(s"Checked if member $member is registered at time $time: $registered")
         registered
       }
-  }
 
   /** Save a series of payloads to the store.
     * Is up to the caller to determine a reasonable batch size and no batching is done within the store.
@@ -560,9 +572,16 @@ trait SequencerStore extends SequencerMemberValidator with NamedLogging with Aut
   /** Fetch the indexes of all sequencers that are currently online */
   def fetchOnlineInstances(implicit traceContext: TraceContext): Future[SortedSet[Int]]
 
-  /** Read all events of which a member is a recipient from the provided timestamp but no greater than the earliest watermark. */
-  def readEvents(memberId: SequencerMemberId, fromTimestampO: Option[CantonTimestamp], limit: Int)(
-      implicit traceContext: TraceContext
+  /** Read all events of which a member is a recipient from the provided timestamp but no greater than the earliest watermark.
+    * Passing both `member` and `memberId` to avoid a database query for the lookup.
+    */
+  def readEvents(
+      member: Member,
+      memberId: SequencerMemberId,
+      fromExclusiveO: Option[CantonTimestamp],
+      limit: Int,
+  )(implicit
+      traceContext: TraceContext
   ): Future[ReadEvents]
 
   /** Delete all events that are ahead of the watermark of this sequencer.
@@ -642,7 +661,9 @@ trait SequencerStore extends SequencerMemberValidator with NamedLogging with Aut
       _ = memberCache.invalidate(member)
     } yield ()
 
-  def disableMemberInternal(member: SequencerMemberId)(implicit
+  /** Specific store implementation for disabling a member, that is used by the public cached `disableMember` above.
+    */
+  protected def disableMemberInternal(member: SequencerMemberId)(implicit
       traceContext: TraceContext
   ): Future[Unit]
 
@@ -750,11 +771,11 @@ trait SequencerStore extends SequencerMemberValidator with NamedLogging with Aut
             .minByOption(_.safePruningTimestamp)
             .map(_.member)
             .fold("No enabled member")(memberMostBehind =>
-              s"The sequencer client member most behind is ${memberMostBehind}"
+              s"The sequencer client member most behind is $memberMostBehind"
             )
         } else ""
       _ = logger.info(
-        s"From safe timestamp [$safeTimestamp] and requested timestamp [$requestedTimestamp] we have picked pruning events at [$adjustedTimestamp] to support recorded counter checkpoints. ${additionalCheckpointInfo}"
+        s"From safe timestamp [$safeTimestamp] and requested timestamp [$requestedTimestamp] we have picked pruning events at [$adjustedTimestamp] to support recorded counter checkpoints. $additionalCheckpointInfo"
       )
       _ <- EitherT.right(updateLowerBound(adjustedTimestamp))
       description <- EitherT.right(performPruning(adjustedTimestamp))
