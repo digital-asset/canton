@@ -76,7 +76,7 @@ class DbTrafficConsumedStore(
               where member = m.member and sequencing_timestamp <= $timestamp
               order by member, sequencing_timestamp desc
               limit 1) tc
-            on true;"""
+            on true"""
       case _ =>
         // H2 does't support lateral joins
         sql"""select member, sequencing_timestamp, extra_traffic_consumed, base_traffic_remainder, last_consumed_cost
@@ -124,24 +124,39 @@ class DbTrafficConsumedStore(
     // upToExclusive, we need to keep it.
     // To do that we first find the latest timestamp for all members before the pruning timestamp.
     // Then we delete all rows below that timestamp for each member.
-    // TODO(#18394): Check performance of the group by query here
-    val deleteQuery =
-      sqlu"""with last_before_pruning_timestamp(member, sequencing_timestamp) as (
-              select member, max(sequencing_timestamp)
+    val lookupQuery = storage.profile match {
+      case _: DbStorage.Profile.Postgres =>
+        sql"""select m.member, tc.sequencing_timestamp
+              from sequencer_members m
+              inner join lateral (
+                select sequencing_timestamp, extra_traffic_consumed, base_traffic_remainder, last_consumed_cost
+                from seq_traffic_control_consumed_journal
+                where member = m.member and sequencing_timestamp <= $upToExclusive
+                order by member, sequencing_timestamp desc
+                limit 1) tc
+              on true"""
+      case _ =>
+        sql"""select member, max(sequencing_timestamp) as sequencing_timestamp
               from seq_traffic_control_consumed_journal
               where sequencing_timestamp <= $upToExclusive
-              group by member
-            )
-            delete from seq_traffic_control_consumed_journal
-            where (member, sequencing_timestamp) in (
-              select consumed.member, consumed.sequencing_timestamp
-              from last_before_pruning_timestamp last
-              join seq_traffic_control_consumed_journal consumed
-              on consumed.member = last.member
-              where consumed.sequencing_timestamp < last.sequencing_timestamp
-            )
-            """
-    storage.update(deleteQuery, functionFullName).map { pruned =>
+              group by member"""
+    }
+
+    val deleteQuery =
+      """DELETE FROM seq_traffic_control_consumed_journal
+        |WHERE member = ? and sequencing_timestamp < ?""".stripMargin
+    val pruningQuery = for {
+      membersTimestamps <- lookupQuery.as[(Member, CantonTimestamp)]
+      deletedTotalCount <- DbStorage
+        .bulkOperation(deleteQuery, membersTimestamps, storage.profile) { pp => memberTimestamp =>
+          val (member, timestamp) = memberTimestamp
+          pp >> member
+          pp >> timestamp
+        }
+        .map(_.sum)
+    } yield deletedTotalCount
+
+    storage.queryAndUpdate(pruningQuery, functionFullName).map { pruned =>
       s"Removed $pruned traffic consumed entries"
     }
   }

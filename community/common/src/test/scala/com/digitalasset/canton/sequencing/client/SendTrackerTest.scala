@@ -139,6 +139,8 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest with MetricsUtils {
 
   implicit private val onDemandMetricsReader: OpenTelemetryOnDemandMetricsReader =
     new OpenTelemetryOnDemandMetricsReader()
+
+  private val initialTrafficState = TrafficState.empty
   def mkSendTracker(timeoutHandler: MessageId => Future[Unit] = _ => Future.unit): Env = {
     val store = new InMemorySendTrackerStore()
     val topologyClient =
@@ -154,7 +156,7 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest with MetricsUtils {
       DefaultTestIdentities.participant1,
       loggerFactory,
       topologyClient,
-      TrafficState.empty,
+      initialTrafficState,
       testedProtocolVersion,
       new EventCostCalculator(loggerFactory),
       futureSupervisor,
@@ -175,7 +177,9 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest with MetricsUtils {
     Env(tracker, store)
   }
 
-  implicit private val metricsContext: MetricsContext = MetricsContext("test" -> "value")
+  implicit private val eventSpecificMetricsContext: MetricsContext = MetricsContext(
+    "test" -> "value"
+  )
 
   "tracking sends" should {
     "error if there's a previously tracked send with the same message id" in {
@@ -210,7 +214,7 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest with MetricsUtils {
           Seq(
             deliver(
               msgId1,
-              CantonTimestamp.MinValue,
+              initialTrafficState.timestamp.immediateSuccessor,
               trafficReceipt = Some(
                 TrafficReceipt(
                   consumedCost = NonNegativeLong.tryCreate(1),
@@ -222,9 +226,79 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest with MetricsUtils {
           )
         )
       } yield {
-        tracker.assertNotCalled
-        assertInContext("test.event-delivered-cost", "test", "value")
         assertLongValue("test.event-delivered-cost", 1L)
+        assertInContext(
+          "test.event-delivered-cost",
+          "sender",
+          DefaultTestIdentities.participant1.toString,
+        )
+        // Event specific metrics should contain the event specific metrics context
+        assertInContext("test.event-delivered-cost", "test", "value")
+        assertLongValue("test.extra-traffic-consumed", 2L)
+        assertInContext(
+          "test.extra-traffic-consumed",
+          "sender",
+          DefaultTestIdentities.participant1.toString,
+        )
+        // But not the event agnostic metrics
+        assertNotInContext("test.extra-traffic-consumed", "test")
+      }
+    }
+
+    "not re-export metrics when replaying events older than current state" in {
+      val Env(tracker, _) = mkSendTracker()
+
+      for {
+        _ <- tracker.track(msgId1, CantonTimestamp.MinValue).valueOrFailShutdown("track first")
+        _ <- tracker.update(
+          Seq(
+            deliver(
+              msgId1,
+              initialTrafficState.timestamp,
+              trafficReceipt = Some(
+                TrafficReceipt(
+                  consumedCost = NonNegativeLong.tryCreate(1),
+                  extraTrafficConsumed = NonNegativeLong.tryCreate(2),
+                  baseTrafficRemainder = NonNegativeLong.tryCreate(3),
+                )
+              ),
+            )
+          )
+        )
+      } yield {
+        assertNoValue("test.event-delivered-cost")
+      }
+    }
+
+    "metrics should contain default labels for unknown sends" in {
+      val Env(tracker, _) = mkSendTracker()
+
+      for {
+        _ <- tracker.update(
+          Seq(
+            deliver(
+              msgId1,
+              initialTrafficState.timestamp.immediateSuccessor,
+              trafficReceipt = Some(
+                TrafficReceipt(
+                  consumedCost = NonNegativeLong.tryCreate(1),
+                  extraTrafficConsumed = NonNegativeLong.tryCreate(2),
+                  baseTrafficRemainder = NonNegativeLong.tryCreate(3),
+                )
+              ),
+            )
+          )
+        )
+      } yield {
+        assertLongValue("test.event-delivered-cost", 1L)
+        assertInContext(
+          "test.event-delivered-cost",
+          "sender",
+          DefaultTestIdentities.participant1.toString,
+        )
+        // Check there are labels for application-id and type
+        assertInContext("test.event-delivered-cost", "application-id", "unknown")
+        assertInContext("test.event-delivered-cost", "type", "unknown")
       }
     }
   }

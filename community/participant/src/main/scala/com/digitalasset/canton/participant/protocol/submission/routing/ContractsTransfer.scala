@@ -40,7 +40,7 @@ private[routing] class ContractsTransfer(
             SourceDomainId(sourceDomainId),
             TargetDomainId(domainRankTarget.domainId),
             TransferSubmitterMetadata(
-              lfParty,
+              submitter = lfParty,
               submittingParticipant,
               submitterInfo.commandId,
               submitterInfo.submissionId,
