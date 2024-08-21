@@ -1,7 +1,7 @@
 import java.io.File
 import BufPlugin.autoImport.bufLintCheck
 import DamlPlugin.autoImport.*
-import Dependencies.*
+import Dependencies.{daml_lf_language, *}
 import better.files.{File as BetterFile, *}
 import com.lightbend.sbt.JavaFormatterPlugin
 import com.typesafe.sbt.SbtLicenseReport.autoImportImpl.*
@@ -72,6 +72,8 @@ object BuildCommon {
         ),
         // scalacOptions += "-Ystatistics", // re-enable if you need to debug compile times
         // scalacOptions in Test += "-Ystatistics",
+        // TODO (i20606) We should find versions of libraries that do not need this workaround
+        libraryDependencySchemes += "io.circe" %% "circe-parser" % VersionScheme.Always,
       )
     )
 
@@ -410,6 +412,7 @@ object BuildCommon {
     oracleUnitTestTask,
     ignoreScalacOptionsWithPathsInIncrementalCompilation,
     ideExcludedDirectories += target.value,
+    scalacOptions += "-Wconf:src=src_managed/.*:silent", // Ignore warnings in generated code
   )
 
   lazy val cantonWarts = Seq(
@@ -434,8 +437,7 @@ object BuildCommon {
         |.*sbt-buildinfo.BuildInfo
         |.*daml-codegen.*
       """
-    ),
-    scalacOptions += "-Wconf:src=src_managed/.*:silent",
+    )
   )
 
   // applies to all Canton-based sub-projects (descendants of util-external)
@@ -526,6 +528,7 @@ object BuildCommon {
       `ledger-json-api`,
       `ledger-api-tools`,
       `ledger-api-string-interning-benchmark`,
+      `transcode`,
     )
 
     // Project for utilities that are also used outside of the Canton repo
@@ -577,7 +580,6 @@ object BuildCommon {
       )
       .settings(
         sharedSettings ++ cantonWarts,
-        scalacOptions += "-Wconf:src=src_managed/.*:silent",
         libraryDependencies ++= Seq(
           daml_lf_data,
           daml_libs_scala_contextualized_logging,
@@ -1175,7 +1177,6 @@ object BuildCommon {
       )
       .settings(
         sharedSettings ++ cantonWarts,
-        scalacOptions += "-Wconf:src=src_managed/.*:silent",
         libraryDependencies ++= Seq(
           slf4j_api,
           grpc_api,
@@ -1196,7 +1197,6 @@ object BuildCommon {
       )
       .settings(
         sharedSettings ++ cantonWarts,
-        scalacOptions += "-Wconf:src=src_managed/.*:silent",
         libraryDependencies ++= Seq(
           commons_io,
           grpc_netty,
@@ -1216,7 +1216,7 @@ object BuildCommon {
     lazy val `daml-adjustable-clock` = project
       .in(file("daml-common-staging/adjustable-clock"))
       .settings(
-        scalacOptions += "-Wconf:src=src_managed/.*:silent",
+        sharedSettings,
         coverageEnabled := false,
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
@@ -1231,7 +1231,6 @@ object BuildCommon {
       )
       .settings(
         sharedSettings, // Upgrade to sharedCantonSettings when com.digitalasset.canton.concurrent.Threading moved out of community-base
-        scalacOptions += "-Wconf:src=src_managed/.*:silent",
         Compile / PB.targets := Seq(
           PB.gens.java -> (Compile / sourceManaged).value / "protobuf",
           scalapb.gen(flatPackage = false) -> (Compile / sourceManaged).value / "protobuf",
@@ -1384,6 +1383,7 @@ object BuildCommon {
         .in(file("community/ledger/ledger-json-api"))
         .dependsOn(
           `ledger-api-core`,
+          `transcode`,
           `ledger-common` % "test->test",
           `community-testing` % "test->test",
         )
@@ -1398,8 +1398,9 @@ object BuildCommon {
           scalacOptions --= DamlProjects.removeCompileFlagsForDaml
             // needed for foo.bar.{this as that} imports
             .filterNot(_ == "-Xsource:3"),
-          scalacOptions += "-Wconf:src=src_managed/.*:silent",
           libraryDependencies ++= Seq(
+            upickle,
+            ujson_circe,
             tapir_json_circe,
             tapir_pekko_http_server,
             daml_lf_api_type_signature,
@@ -1422,6 +1423,16 @@ object BuildCommon {
               (Test / sourceDirectory).value / "daml" / "v2_dev",
               (Test / damlDarOutput).value / "JsonEncodingTestDev.dar",
               "com.digitalasset.canton.http.json.encoding.dev",
+            ),
+            (
+              (Test / sourceDirectory).value / "daml" / "damldefinitionsservice" / "dep",
+              (Test / damlDarOutput).value / "DamlDefinitionsServiceDep.dar",
+              "com.digitalasset.canton.http.json.damldefinitionsservicedep",
+            ),
+            (
+              (Test / sourceDirectory).value / "daml" / "damldefinitionsservice" / "main",
+              (Test / damlDarOutput).value / "DamlDefinitionsServiceMain.dar",
+              "com.digitalasset.canton.http.json.damldefinitionsservicemain",
             ),
           ),
         )
@@ -1449,6 +1460,22 @@ object BuildCommon {
         Test / parallelExecution := true,
         Test / fork := false,
       )
+
+    lazy val `transcode` =
+      project
+        .in(file("community/ledger/transcode/"))
+        .settings(
+          sharedSettings,
+          scalacOptions --= DamlProjects.removeCompileFlagsForDaml
+            // needed for foo.bar.{this as that} imports
+            .filterNot(_ == "-Xsource:3"),
+          libraryDependencies ++= Seq(
+            daml_lf_language,
+            "com.lihaoyi" %% "ujson" % "2.0.0",
+          ),
+          JvmRulesPlugin.damlRepoHeaderSettings,
+        )
+        .dependsOn(DamlProjects.`ledger-api`)
   }
 
   object DamlProjects {
@@ -1497,8 +1524,8 @@ object BuildCommon {
         WartRemover,
       )
       .settings(
-        scalacOptions --= removeCompileFlagsForDaml,
         sharedSettings,
+        scalacOptions --= removeCompileFlagsForDaml,
         // we restrict the compilation to a few files that we actually need, skipping the large majority ...
         excludeFilter := HiddenFileFilter || "scalapb.proto",
         PB.generate / includeFilter := "status.proto" || "code.proto" || "error_details.proto" || "health.proto",
@@ -1570,8 +1597,8 @@ object BuildCommon {
         WartRemover,
       )
       .settings(
-        scalacOptions --= removeCompileFlagsForDaml,
         sharedSettings,
+        scalacOptions --= removeCompileFlagsForDaml,
         Compile / PB.targets := Seq(
           // build java codegen too
           PB.gens.java -> (Compile / sourceManaged).value,

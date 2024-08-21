@@ -4,8 +4,8 @@
 package com.digitalasset.canton.topology
 
 import cats.data.EitherT
+import cats.syntax.either.*
 import cats.syntax.parallel.*
-import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -156,6 +156,20 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId](
     observers.updateAndGet(_.filterNot(_ == observer)).discard
 
   def clearObservers(): Unit = observers.set(Seq.empty)
+
+  /** Allows the participant to override this method to enable additional checks on the VettedPackages transaction.
+    * Only the participant has access to the package store.
+    */
+  def validatePackages(
+      currentlyVettedPackages: Set[LfPackageId],
+      nextPackageIds: Set[LfPackageId],
+      forceFlags: ForceFlags,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] = {
+    val _ = traceContext
+    EitherT.rightT(())
+  }
 
   /** Authorizes a new topology transaction by signing it and adding it to the topology state
     *
@@ -447,7 +461,6 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId](
           transactions <- addMissingOtkSignaturesForSigningKeys(transactionsToAdd)
           _ <- MonadUtil
             .sequentialTraverse_(transactions)(transactionIsNotDangerous(_, forceChanges))
-            .mapK(FutureUnlessShutdown.outcomeK)
 
           transactionsInStore <- EitherT
             .liftF(
@@ -518,15 +531,15 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId](
       forceChanges: ForceFlags,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TopologyManagerError, Unit] = transaction.mapping match {
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] = transaction.mapping match {
     case DomainParametersState(domainId, newDomainParameters) =>
       checkLedgerTimeRecordTimeToleranceNotIncreasing(domainId, newDomainParameters, forceChanges)
     case OwnerToKeyMapping(member, _, _) =>
       checkTransactionIsForCurrentNode(member, forceChanges, transaction.mapping.code)
-    case VettedPackages(participantId, _, newPackageIds) =>
+    case VettedPackages(participantId, _, newPackages) =>
       checkPackageVettingIsNotDangerous(
         participantId,
-        newPackageIds.toSet,
+        newPackages.map(_.packageId).toSet,
         forceChanges,
         transaction.mapping.code,
       )
@@ -539,7 +552,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId](
       topologyMappingCode: TopologyMapping.Code,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TopologyManagerError, Unit] =
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
     EitherTUtil.condUnitET(
       member.uid == nodeId || forceChanges.permits(ForceFlag.AlienMember),
       DangerousCommandRequiresForce.AlienMember(member, topologyMappingCode),
@@ -549,17 +562,21 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId](
       domainId: DomainId,
       newDomainParameters: DynamicDomainParameters,
       forceChanges: ForceFlags,
-  )(implicit traceContext: TraceContext): EitherT[Future, TopologyManagerError, Unit] =
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
     // See i9028 for a detailed design.
 
     EitherT(for {
-      headTransactions <- store.findPositiveTransactions(
-        asOf = CantonTimestamp.MaxValue,
-        asOfInclusive = false,
-        isProposal = false,
-        types = Seq(DomainParametersState.code),
-        filterUid = Some(Seq(domainId.uid)),
-        filterNamespace = None,
+      headTransactions <- FutureUnlessShutdown.outcomeF(
+        store.findPositiveTransactions(
+          asOf = CantonTimestamp.MaxValue,
+          asOfInclusive = false,
+          isProposal = false,
+          types = Seq(DomainParametersState.code),
+          filterUid = Some(Seq(domainId.uid)),
+          filterNamespace = None,
+        )
       )
     } yield {
       headTransactions
@@ -595,43 +612,47 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId](
       newPackageIds: Set[LfPackageId],
       forceChanges: ForceFlags,
       topologyMappingCode: TopologyMapping.Code,
-  )(implicit traceContext: TraceContext): EitherT[Future, TopologyManagerError, Unit] =
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
     for {
-      addedAndRemoved <- EitherT.right(
-        store
-          .findPositiveTransactions(
-            asOf = CantonTimestamp.MaxValue,
-            asOfInclusive = false,
-            isProposal = false,
-            types = Seq(VettedPackages.code),
-            filterUid = Some(Seq(participantId.uid)),
-            filterNamespace = None,
-          )
-          .map { headTransactions =>
-            val headPackages = headTransactions
-              .collectOfMapping[VettedPackages]
-              .collectLatestByUniqueKey
-              .toTopologyState
-              .collectFirst { case VettedPackages(_, _, existingPackageIds) =>
-                existingPackageIds
-              }
-              .getOrElse(Nil)
-              .toSet
-            val packagesToUnvet = headPackages -- newPackageIds
-            val addedPackages = newPackageIds -- headPackages
-            (addedPackages, packagesToUnvet)
-          }
-      )
-      (added, removed) = (addedAndRemoved._1, addedAndRemoved._2)
-      _ <- checkPackageVettingRevocation(removed, forceChanges)
+      headPackageIds <- EitherT
+        .right(
+          store
+            .findPositiveTransactions(
+              asOf = CantonTimestamp.MaxValue,
+              asOfInclusive = false,
+              isProposal = false,
+              types = Seq(VettedPackages.code),
+              filterUid = Some(Seq(participantId.uid)),
+              filterNamespace = None,
+            )
+        )
+        .mapK(
+          FutureUnlessShutdown.outcomeK
+        )
+        .map {
+          _.collectOfMapping[VettedPackages].collectLatestByUniqueKey.toTopologyState
+            .collectFirst { case VettedPackages(_, _, existingPackageIds) =>
+              existingPackageIds.map(_.packageId)
+            }
+            .getOrElse(Nil)
+            .toSet
+        }
+      _ <- checkPackageVettingRevocation(headPackageIds, newPackageIds, forceChanges)
       _ <- checkTransactionIsForCurrentNode(participantId, forceChanges, topologyMappingCode)
+      _ <- validatePackages(headPackageIds, newPackageIds, forceChanges)
     } yield ()
 
   private def checkPackageVettingRevocation(
-      removed: Set[LfPackageId],
+      headPackageIds: Set[LfPackageId],
+      nextPackageIds: Set[LfPackageId],
       forceChanges: ForceFlags,
-  )(implicit traceContext: TraceContext): EitherT[Future, TopologyManagerError, Unit] = {
-    val force = forceChanges.permits(ForceFlag.PackageVettingRevocation)
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] = {
+    val removed = headPackageIds -- nextPackageIds
+    val force = forceChanges.permits(ForceFlag.AllowUnvetPackage)
     val changeIdDangerous = removed.nonEmpty
     EitherT.cond(
       !changeIdDangerous || force,

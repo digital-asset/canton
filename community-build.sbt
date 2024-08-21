@@ -41,6 +41,7 @@ lazy val `ledger-json-api` = CommunityProjects.`ledger-json-api`
 lazy val `ledger-api-tools` = CommunityProjects.`ledger-api-tools`
 lazy val `ledger-api-string-interning-benchmark` =
   CommunityProjects.`ledger-api-string-interning-benchmark`
+lazy val `transcode` = CommunityProjects.`transcode`
 
 lazy val root = (project in file("."))
   .disablePlugins(WartRemover)

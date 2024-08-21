@@ -9,7 +9,10 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.commands.TopologyAdminCommands.Write.GenerateTransactions
 import com.digitalasset.canton.admin.api.client.commands.{GrpcAdminCommand, TopologyAdminCommands}
 import com.digitalasset.canton.admin.api.client.data.topology.*
-import com.digitalasset.canton.admin.api.client.data.DynamicDomainParameters as ConsoleDynamicDomainParameters
+import com.digitalasset.canton.admin.api.client.data.{
+  DynamicDomainParameters as ConsoleDynamicDomainParameters,
+  TopologyQueueStatus,
+}
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{ConsoleCommandTimeout, NonNegativeDuration, RequireTypes}
@@ -33,7 +36,6 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.grpc.ByteStringStreamObserver
-import com.digitalasset.canton.health.admin.data.TopologyQueueStatus
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.topology.*
@@ -1631,7 +1633,11 @@ class TopologyAdministrationGroup(
 
     // TODO(#14057) document console command
     def active(domainId: DomainId, participantId: ParticipantId): Boolean =
-      list(filterStore = domainId.filterString).exists { x =>
+      list(
+        filterStore = domainId.filterString,
+        filterUid = participantId.filterString,
+        operation = Some(TopologyChangeOp.Replace),
+      ).exists { x =>
         x.item.domainId == domainId && x.item.participantId == participantId
       }
 
@@ -1821,6 +1827,16 @@ class TopologyAdministrationGroup(
         )
       )
     }
+
+    @Help.Summary("Looks up the participant permission for a participant on a domain")
+    @Help.Description("""Returns the optional participant domain permission.""")
+    def find(
+        domainId: DomainId,
+        participantId: ParticipantId,
+    ): Option[ListParticipantDomainPermissionResult] =
+      expectAtMostOneResult(
+        list(filterStore = domainId.filterString, filterUid = participantId.filterString)
+      ).filter(p => p.item.participantId == participantId && p.item.domainId == domainId)
   }
 
   @Help.Summary("Inspect participant domain states")
@@ -1921,11 +1937,10 @@ class TopologyAdministrationGroup(
     )
     def propose_delta(
         participant: ParticipantId,
-        adds: Seq[PackageId] = Nil,
+        adds: Seq[VettedPackage] = Nil,
         removes: Seq[PackageId] = Nil,
         domainId: Option[DomainId] = None,
         store: String = AuthorizedStore.filterName,
-        filterParticipant: String = "",
         mustFullyAuthorize: Boolean = false,
         synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
@@ -1934,39 +1949,66 @@ class TopologyAdministrationGroup(
           instance.id.fingerprint
         ), // TODO(#12945) don't use the instance's root namespace key by default.
         force: ForceFlags = ForceFlags.none,
-    ): SignedTopologyTransaction[TopologyChangeOp, VettedPackages] = {
+    ): Unit = {
 
+      val duplicatePackageIds = adds.map(_.packageId).intersect(removes)
+      if (duplicatePackageIds.nonEmpty) {
+        throw new IllegalArgumentException(
+          s"Cannot both add and remove a packageId: $duplicatePackageIds"
+        ) with NoStackTrace
+      }
       // compute the diff and then call the propose method
       val current0 = expectAtMostOneResult(
-        list(filterStore = store, filterParticipant = filterParticipant)
+        list(filterStore = store, filterParticipant = participant.filterString, operation = None)
       )
 
       (adds, removes) match {
         case (Nil, Nil) =>
           throw new IllegalArgumentException(
             "Ensure that at least one of the two parameters (adds or removes) is not empty."
-          )
+          ) with NoStackTrace
         case (_, _) =>
+          val allChangedPackageIds = (adds.map(_.packageId) ++ removes).toSet
+
           val (newSerial, newDiffPackageIds) = current0 match {
-            case Some(value) =>
+            case Some(
+                  ListVettedPackagesResult(
+                    BaseResult(_, _, _, _, TopologyChangeOp.Replace, _, serial, _),
+                    item,
+                  )
+                ) =>
               (
-                value.context.serial.increment,
-                ((value.item.packageIds ++ adds).diff(removes)).distinct,
+                serial.increment,
+                // first filter out all existing packages that either get re-added (i.e. modified) or removed
+                item.packages.filter(vp => !allChangedPackageIds.contains(vp.packageId))
+                // now we can add all the adds the also haven't been in the remove set
+                  ++ adds,
               )
-            case None => (PositiveInt.one, (adds.diff(removes)).distinct)
+            case Some(
+                  ListVettedPackagesResult(
+                    BaseResult(_, _, _, _, TopologyChangeOp.Remove, _, serial, _),
+                    _,
+                  )
+                ) =>
+              (serial.increment, adds)
+            case None =>
+              (PositiveInt.one, adds)
           }
 
-          propose(
-            participant = participant,
-            packageIds = newDiffPackageIds,
-            domainId,
-            store,
-            mustFullyAuthorize,
-            synchronize,
-            Some(newSerial),
-            signedBy,
-            force,
-          )
+          if (current0.exists(_.item.packages.toSet == newDiffPackageIds.toSet))
+            () // means no change
+          else
+            propose(
+              participant = participant,
+              packages = newDiffPackageIds,
+              domainId,
+              store,
+              mustFullyAuthorize,
+              synchronize,
+              Some(newSerial),
+              signedBy,
+              force,
+            )
       }
     }
     @Help.Summary("Replace package vettings")
@@ -1977,7 +2019,7 @@ class TopologyAdministrationGroup(
         |Note that all referenced and dependent packages must exist in the package store.
 
         participantId: the identifier of the participant vetting the packages
-        packageIds: The lf-package ids to be vetted that will replace the previous vetted packages.
+        packages: The lf-package ids with validity boundaries to be vetted that will replace the previous vetted packages.
         domainId: The domain id if the package vetting is specific to a domain.
         store: - "Authorized": the topology transaction will be stored in the node's authorized store and automatically
                               propagated to connected domains, if applicable.
@@ -1995,7 +2037,7 @@ class TopologyAdministrationGroup(
         force: must be set when revoking the vetting of packagesIds""")
     def propose(
         participant: ParticipantId,
-        packageIds: Seq[PackageId],
+        packages: Seq[VettedPackage],
         domainId: Option[DomainId] = None,
         store: String = AuthorizedStore.filterName,
         mustFullyAuthorize: Boolean = false,
@@ -2007,16 +2049,16 @@ class TopologyAdministrationGroup(
           instance.id.fingerprint
         ), // TODO(#12945) don't use the instance's root namespace key by default.
         force: ForceFlags = ForceFlags.none,
-    ): SignedTopologyTransaction[TopologyChangeOp, VettedPackages] = {
+    ): Unit = {
 
       val topologyChangeOp =
-        if (packageIds.isEmpty) TopologyChangeOp.Remove else TopologyChangeOp.Replace
+        if (packages.isEmpty) TopologyChangeOp.Remove else TopologyChangeOp.Replace
 
       val command = TopologyAdminCommands.Write.Propose(
-        mapping = VettedPackages(
+        mapping = VettedPackages.create(
           participantId = participant,
           domainId = domainId,
-          packageIds = packageIds,
+          packages = packages,
         ),
         signedBy = signedBy.toList,
         serial = serial,
@@ -2026,7 +2068,7 @@ class TopologyAdministrationGroup(
         forceChanges = force,
       )
 
-      synchronisation.runAdminCommand(synchronize)(command)
+      synchronisation.runAdminCommand(synchronize)(command).discard
     }
 
     def list(
@@ -2625,7 +2667,6 @@ class TopologyAdministrationGroup(
       val newParameters = update(ConsoleDynamicDomainParameters(previousParameters.item))
 
       // Avoid topology manager ALREADY_EXISTS error by not submitting a no-op proposal.
-      // TODO(#15817): Move such ux-resilience avoiding error to write_service
       if (ConsoleDynamicDomainParameters(previousParameters.item) != newParameters) {
         propose(
           domainId,

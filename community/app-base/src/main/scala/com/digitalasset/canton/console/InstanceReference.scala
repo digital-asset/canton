@@ -5,7 +5,14 @@ package com.digitalasset.canton.console
 
 import com.digitalasset.canton.admin.api.client.commands.EnterpriseSequencerAdminCommands.LocatePruningTimestampCommand
 import com.digitalasset.canton.admin.api.client.commands.*
-import com.digitalasset.canton.admin.api.client.data.StaticDomainParameters as ConsoleStaticDomainParameters
+import com.digitalasset.canton.admin.api.client.data.topology.ListParticipantDomainPermissionResult
+import com.digitalasset.canton.admin.api.client.data.{
+  MediatorStatus,
+  NodeStatus,
+  ParticipantStatus,
+  SequencerStatus,
+  StaticDomainParameters as ConsoleStaticDomainParameters,
+}
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, NonNegativeInt, Port, PositiveInt}
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.console.CommandErrors.NodeNotStarted
@@ -33,7 +40,6 @@ import com.digitalasset.canton.domain.sequencing.sequencer.{
 }
 import com.digitalasset.canton.domain.sequencing.{SequencerNode, SequencerNodeBootstrap}
 import com.digitalasset.canton.environment.*
-import com.digitalasset.canton.health.admin.data.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.metrics.MetricValue
@@ -569,14 +575,14 @@ abstract class ParticipantReference(
                     filterParticipant = id.filterString,
                     timeQuery = TimeQuery.HeadState,
                   )
-                  .flatMap(_.item.packageIds)
+                  .flatMap(_.item.packages)
                   .toSet
 
                 // Vetted packages from the participant's authorized store
                 val onParticipantAuthorizedStore = topology.vetted_packages
                   .list(filterStore = "Authorized", filterParticipant = id.filterString)
                   .filter(_.item.domainId.forall(_ == item.domainId))
-                  .flatMap(_.item.packageIds)
+                  .flatMap(_.item.packages)
                   .toSet
 
                 val ret = onParticipantAuthorizedStore == onDomain
@@ -596,8 +602,35 @@ abstract class ParticipantReference(
   override protected def participantIsActiveOnDomain(
       domainId: DomainId,
       participantId: ParticipantId,
-  ): Boolean = topology.domain_trust_certificates.active(domainId, participantId)
+  ): Boolean = {
+    val hasDomainTrustCertificate =
+      topology.domain_trust_certificates.active(domainId, participantId)
+    val isDomainRestricted = topology.domain_parameters
+      .get_dynamic_domain_parameters(domainId)
+      .onboardingRestriction
+      .isRestricted
+    val domainPermission = topology.participant_domain_permissions.find(domainId, participantId)
 
+    // notice the `exists`, expressing the requirement of a permission to exist
+    val hasRequiredDomainPermission = domainPermission.exists(noLoginRestriction)
+    // notice the forall, expressing optionality for the permission to exist
+    val hasOptionalDomainPermission = domainPermission.forall(noLoginRestriction)
+
+    // for a participant to be considered active, it must have a domain trust certificate
+    hasDomainTrustCertificate &&
+    (
+      // if the domain is restricted, the participant MUST have the permission
+      (isDomainRestricted && hasRequiredDomainPermission) ||
+        // if the domain is UNrestricted, the participant may still be restricted by the domain
+        (!isDomainRestricted && hasOptionalDomainPermission)
+    )
+  }
+
+  private def noLoginRestriction(result: ListParticipantDomainPermissionResult): Boolean =
+    result.item.loginAfter
+      .forall(
+        _ <= consoleEnvironment.environment.clock.now
+      )
 }
 object ParticipantReference {
   val InstanceType = "Participant"
@@ -665,7 +698,7 @@ class LocalParticipantReference(
     consoleEnvironment.environment.participants.getStarting(name)
 
   /** secret, not publicly documented way to get the admin token */
-  override def adminToken: Option[String] = underlying.map(_.adminToken.secret)
+  override def adminToken: Option[String] = runningNode.flatMap(_.getAdminToken)
 
   private lazy val testing_ =
     new LocalParticipantTestingGroup(this, consoleEnvironment, loggerFactory)
@@ -710,7 +743,7 @@ abstract class SequencerReference(
 ) extends InstanceReference
     with ConsoleCommandGroup {
 
-  override type Status = SequencerNodeStatus
+  override type Status = SequencerStatus
 
   override protected def runner: AdminCommandRunner = this
 
@@ -772,10 +805,10 @@ abstract class SequencerReference(
   @Help.Summary("Health and diagnostic related commands")
   @Help.Group("Health")
   override def health =
-    new HealthAdministration[SequencerNodeStatus](
+    new SequencerHealthAdministration(
       this,
       consoleEnvironment,
-      SequencerNodeStatus.fromProtoV30,
+      loggerFactory,
     )
 
   private lazy val sequencerTrafficControl = new TrafficControlSequencerAdministrationGroup(
@@ -1165,9 +1198,9 @@ class LocalSequencerReference(
   override protected[canton] def executionContext: ExecutionContext =
     consoleEnvironment.environment.executionContext
 
-  override def adminToken: Option[String] = underlying.map(_.adminToken.secret)
+  override def adminToken: Option[String] = runningNode.flatMap(_.getAdminToken)
 
-  @Help.Summary("Returns the sequencerx configuration")
+  @Help.Summary("Returns the sequencer configuration")
   override def config: SequencerNodeConfigCommon =
     consoleEnvironment.environment.config.sequencersByString(name)
 
@@ -1218,7 +1251,7 @@ object MediatorReference {
 abstract class MediatorReference(val consoleEnvironment: ConsoleEnvironment, name: String)
     extends InstanceReference
     with ConsoleCommandGroup {
-  override type Status = MediatorNodeStatus
+  override type Status = MediatorStatus
 
   override protected def runner: AdminCommandRunner = this
 
@@ -1242,10 +1275,10 @@ abstract class MediatorReference(val consoleEnvironment: ConsoleEnvironment, nam
   @Help.Summary("Health and diagnostic related commands")
   @Help.Group("Health")
   override def health =
-    new HealthAdministration[MediatorNodeStatus](
+    new MediatorHealthAdministration(
       this,
       consoleEnvironment,
-      MediatorNodeStatus.fromProtoV30,
+      loggerFactory,
     )
 
   private lazy val topology_ =
@@ -1296,7 +1329,7 @@ class LocalMediatorReference(consoleEnvironment: ConsoleEnvironment, val name: S
   override protected[canton] def executionContext: ExecutionContext =
     consoleEnvironment.environment.executionContext
 
-  override def adminToken: Option[String] = underlying.map(_.adminToken.secret)
+  override def adminToken: Option[String] = runningNode.flatMap(_.getAdminToken)
 
   @Help.Summary("Returns the mediator configuration")
   override def config: MediatorNodeConfigCommon =

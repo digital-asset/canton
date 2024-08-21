@@ -4,6 +4,7 @@
 package com.digitalasset.canton.topology.transaction
 
 import cats.Monoid
+import cats.syntax.apply.*
 import cats.syntax.either.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
@@ -22,6 +23,7 @@ import com.digitalasset.canton.protocol.v30.TopologyMapping.Mapping
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, DynamicSequencingParameters, v30}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.TopologyMapping.RequiredAuth.*
@@ -36,6 +38,7 @@ import com.digitalasset.canton.{LfPackageId, ProtoDeserializationError}
 import com.google.common.annotations.VisibleForTesting
 import slick.jdbc.SetParameter
 
+import scala.annotation.nowarn
 import scala.math.Ordering.Implicits.*
 import scala.reflect.ClassTag
 
@@ -722,7 +725,7 @@ final case class PartyToKeyMapping private (
       )
     )
 
-  def code: TopologyMapping.Code = Code.OwnerToKeyMapping
+  def code: TopologyMapping.Code = Code.PartyToKeyMapping
 
   override def namespace: Namespace = party.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(party.uid)
@@ -731,8 +734,15 @@ final case class PartyToKeyMapping private (
 
   override def requiredAuth(
       previous: Option[TopologyTransaction[TopologyChangeOp, TopologyMapping]]
-  ): RequiredAuth =
-    RequiredUids(Set(party.uid), signingKeys.map(_.fingerprint).toSet)
+  ): RequiredAuth = {
+    val previouslyRegisteredKeys = previous
+      .flatMap(_.select[TopologyChangeOp.Replace, PartyToKeyMapping])
+      .toList
+      .flatMap(_.mapping.signingKeys.forgetNE)
+      .toSet
+    val newKeys = signingKeys.toSet -- previouslyRegisteredKeys
+    RequiredUids(Set(party.uid), newKeys.map(_.fingerprint))
+  }
 
   override def uniqueKey: MappingHash = PartyToKeyMapping.uniqueKey(party, domain)
 }
@@ -1091,17 +1101,61 @@ object PartyHostingLimits {
     } yield PartyHostingLimits(domainId, partyId)
 }
 
+/** Represents a package with an optional validity period. No start or end means that the validity
+  * of the package is unbounded. The validity period is expected to be compared to the
+  * ledger effective time of Daml transactions.
+  * @param packageId the hash of the package
+  * @param validFrom optional exclusive start of the validity period
+  * @param validUntil optional inclusive end of the validity period
+  */
+final case class VettedPackage(
+    packageId: LfPackageId,
+    validFrom: Option[CantonTimestamp],
+    validUntil: Option[CantonTimestamp],
+) extends PrettyPrinting {
+
+  def validAt(ts: CantonTimestamp): Boolean = validFrom.forall(_ < ts) && validUntil.forall(_ >= ts)
+
+  def toProtoV30: v30.VettedPackages.VettedPackage = v30.VettedPackages.VettedPackage(
+    packageId,
+    validFrom = validFrom.map(_.toProtoTimestamp),
+    validUntil = validUntil.map(_.toProtoTimestamp),
+  )
+  override def pretty: Pretty[VettedPackage.this.type] = prettyOfClass(
+    param("packageId", _.packageId),
+    paramIfDefined("validFrom", _.validFrom),
+    paramIfDefined("validUntil", _.validUntil),
+    paramIfTrue("unbounded", vp => vp.validFrom.isEmpty && vp.validUntil.isEmpty),
+  )
+}
+
+object VettedPackage {
+  def unbounded(packageIds: Seq[LfPackageId]): Seq[VettedPackage] =
+    packageIds.map(VettedPackage(_, None, None))
+
+  def fromProtoV30(
+      value: v30.VettedPackages.VettedPackage
+  ): ParsingResult[VettedPackage] = for {
+    pkgId <- LfPackageId
+      .fromString(value.packageId)
+      .leftMap(ProtoDeserializationError.ValueConversionError("package_id", _))
+    validFrom <- value.validFrom.traverse(CantonTimestamp.fromProtoTimestamp)
+    validUntil <- value.validUntil.traverse(CantonTimestamp.fromProtoTimestamp)
+  } yield VettedPackage(pkgId, validFrom, validUntil)
+}
+
 // Package vetting
-final case class VettedPackages(
+final case class VettedPackages private (
     participantId: ParticipantId,
     domainId: Option[DomainId],
-    packageIds: Seq[LfPackageId],
+    packages: Seq[VettedPackage],
 ) extends TopologyMapping {
 
   def toProto: v30.VettedPackages =
     v30.VettedPackages(
       participantUid = participantId.uid.toProtoPrimitive,
-      packageIds = packageIds,
+      packageIds = Seq.empty,
+      packages = packages.map(_.toProtoV30),
       domain = domainId.fold("")(_.toProtoPrimitive),
     )
 
@@ -1136,6 +1190,47 @@ object VettedPackages {
 
   def code: Code = Code.VettedPackages
 
+  def create(
+      participantId: ParticipantId,
+      domainId: Option[DomainId],
+      packages: Seq[VettedPackage],
+  ): Either[String, VettedPackages] = {
+    val multipleValidityPeriods = packages
+      .groupBy(_.packageId)
+      .view
+      .collect { case (_, pkgs) if pkgs.sizeIs > 1 => pkgs }
+      .flatten
+      .toList
+
+    val emptyValidity = packages.filter(vp =>
+      (vp.validFrom, vp.validUntil).tupled.exists { case (from, until) => from >= until }
+    )
+
+    for {
+      _ <- Either.cond(
+        multipleValidityPeriods.isEmpty,
+        (),
+        s"a package may only have one validty period: ${multipleValidityPeriods.mkString(", ")}",
+      )
+      _ <- Either.cond(
+        emptyValidity.isEmpty,
+        (),
+        s"packages with empty validity period: ${emptyValidity.mkString(", ")}",
+      )
+    } yield {
+      VettedPackages(participantId, domainId, packages)
+    }
+  }
+
+  def tryCreate(
+      participantId: ParticipantId,
+      domainId: Option[DomainId],
+      packages: Seq[VettedPackage],
+  ): VettedPackages = create(participantId, domainId, packages).valueOr(err =>
+    throw new IllegalArgumentException(err)
+  )
+
+  @nowarn("cat=deprecation")
   def fromProtoV30(
       value: v30.VettedPackages
   ): ParsingResult[VettedPackages] =
@@ -1144,14 +1239,33 @@ object VettedPackages {
         value.participantUid,
         "participant_uid",
       )
-      packageIds <- value.packageIds
-        .traverse(LfPackageId.fromString)
-        .leftMap(ProtoDeserializationError.ValueConversionError("package_ids", _))
+      packageIdsUnbounded <- value.packageIds
+        .traverse(
+          LfPackageId
+            .fromString(_)
+            .leftMap(ProtoDeserializationError.ValueConversionError("package_ids", _))
+        )
+        .map(VettedPackage.unbounded)
+      packages <- value.packages.traverse(VettedPackage.fromProtoV30)
+
+      duplicatePackages = packageIdsUnbounded
+        .map(_.packageId)
+        .intersect(packages.map(_.packageId))
+        .toSet
+      _ <- Either.cond(
+        duplicatePackages.isEmpty,
+        (),
+        ProtoDeserializationError.InvariantViolation(
+          None,
+          s"packages $duplicatePackages are listed in both fields 'package_ids' and 'packages' but may only be set in one.",
+        ),
+      )
+
       domainId <-
         if (value.domain.nonEmpty)
           DomainId.fromProtoPrimitive(value.domain, "domain").map(_.some)
         else Right(None)
-    } yield VettedPackages(participantId, domainId, packageIds)
+    } yield VettedPackages(participantId, domainId, packageIdsUnbounded ++ packages)
 }
 
 // Party to participant mappings
@@ -1516,12 +1630,12 @@ object DynamicSequencingParametersState {
 /** Mediator definition for a domain
   *
   * Each domain needs at least one mediator (group), but can have multiple.
-  * Mediators can be temporarily be turned off by making them observers. This way,
+  * Mediators can be temporarily turned off by making them observers. This way,
   * they get informed but they don't have to reply.
   */
 final case class MediatorDomainState private (
     domain: DomainId,
-    group: NonNegativeInt,
+    group: MediatorGroupIndex,
     threshold: PositiveInt,
     active: NonEmpty[Seq[MediatorId]],
     observers: Seq[MediatorId],
@@ -1561,14 +1675,14 @@ final case class MediatorDomainState private (
 
 object MediatorDomainState {
 
-  def uniqueKey(domainId: DomainId, group: NonNegativeInt): MappingHash =
+  def uniqueKey(domainId: DomainId, group: MediatorGroupIndex): MappingHash =
     TopologyMapping.buildUniqueKey(code)(_.add(domainId.toProtoPrimitive).add(group.unwrap))
 
   def code: TopologyMapping.Code = Code.MediatorDomainState
 
   def create(
       domain: DomainId,
-      group: NonNegativeInt,
+      group: MediatorGroupIndex,
       threshold: PositiveInt,
       active: Seq[MediatorId],
       observers: Seq[MediatorId],
@@ -1578,10 +1692,17 @@ object MediatorDomainState {
       (),
       s"threshold ($threshold) of mediator domain state higher than number of mediators ${active.length}",
     )
+    mediatorsBothActiveAndObserver = active.intersect(observers)
+    _ <- Either.cond(
+      mediatorsBothActiveAndObserver.isEmpty,
+      (),
+      s"the following mediators were defined both as active and observer: ${mediatorsBothActiveAndObserver
+          .mkString(", ")}",
+    )
     activeNE <- NonEmpty
-      .from(active)
+      .from(active.distinct)
       .toRight("mediator domain state requires at least one active mediator")
-  } yield MediatorDomainState(domain, group, threshold, activeNE, observers)
+  } yield MediatorDomainState(domain, group, threshold, activeNE, observers.distinct)
 
   def fromProtoV30(
       value: v30.MediatorDomainState
@@ -1671,10 +1792,17 @@ object SequencerDomainState {
       (),
       s"threshold ($threshold) of sequencer domain state higher than number of active sequencers ${active.length}",
     )
+    sequencersBothActiveAndObserver = active.intersect(observers)
+    _ <- Either.cond(
+      sequencersBothActiveAndObserver.isEmpty,
+      (),
+      s"the following sequencers were defined both as active and observer: ${sequencersBothActiveAndObserver
+          .mkString(", ")}",
+    )
     activeNE <- NonEmpty
-      .from(active)
+      .from(active.distinct)
       .toRight("sequencer domain state requires at least one active sequencer")
-  } yield SequencerDomainState(domain, threshold, activeNE, observers)
+  } yield SequencerDomainState(domain, threshold, activeNE, observers.distinct)
 
   def fromProtoV30(
       value: v30.SequencerDomainState
