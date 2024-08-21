@@ -55,7 +55,6 @@ class SendTracker(
     with FlagCloseableAsync
     with AutoCloseable {
 
-  private implicit val metricsContext: MetricsContext = MetricsContext("sender" -> member.toString)
   private implicit val directExecutionContext: DirectExecutionContext = DirectExecutionContext(
     noTracingLogger
   )
@@ -245,25 +244,40 @@ class SendTracker(
         None
     }
 
-    val specificMetricsContext =
-      current.map(_.metricsContext).fold(metricsContext)(metricsContext.merge)
+    // Metrics context extracted from the pending send
+    // This allows to get labels such as the request type and application ID back and use them to update
+    // event specific metrics
+    val eventSpecificMetricsContext = current
+      .map(_.metricsContext)
+      .getOrElse(
+        // If we there's no pending send, set the application id and type labels to unknown to get consistent
+        // labelling even during crash recovery (when we may not have corresponding pending sends for the receipts)
+        MetricsContext(
+          "application-id" -> "unknown",
+          "type" -> "unknown",
+        )
+      )
     // Update the traffic controller with the traffic consumed in the receipt
     (trafficStateController, resultO) match {
       case (Some(tsc), Some(UnlessShutdown.Outcome(Success(deliver)))) =>
         deliver.trafficReceipt.foreach(
-          tsc.updateWithReceipt(_, deliver.timestamp, None)(specificMetricsContext)
+          tsc.updateWithReceipt(_, deliver.timestamp, None, eventSpecificMetricsContext)
         )
       case (Some(tsc), Some(UnlessShutdown.Outcome(Error(deliverError)))) =>
         deliverError.trafficReceipt.foreach(
           tsc.updateWithReceipt(
             _,
             deliverError.timestamp,
-            BaseCantonError.statusErrorCodes(deliverError.reason).headOption.orElse(Some("unknown")),
-          )(specificMetricsContext)
+            BaseCantonError
+              .statusErrorCodes(deliverError.reason)
+              .headOption
+              .orElse(Some("unknown")),
+            eventSpecificMetricsContext,
+          )
         )
       case (Some(tsc), Some(UnlessShutdown.Outcome(Timeout(timestamp)))) =>
         // Event was not sequenced but we can still advance the base rate at the timestamp
-        tsc.tickStateAt(timestamp)(directExecutionContext, traceContext, specificMetricsContext)
+        tsc.tickStateAt(timestamp)
       case _ =>
     }
 
