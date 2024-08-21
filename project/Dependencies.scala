@@ -83,6 +83,7 @@ object Dependencies {
   lazy val testcontainers_version = "1.19.7"
   lazy val tink_version = "1.12.0"
   lazy val toxiproxy_java_version = "2.1.7"
+  lazy val upickle_version = "2.0.0"
 
   lazy val reflections = "org.reflections" % "reflections" % reflections_version
   lazy val pureconfig_core =
@@ -275,6 +276,13 @@ object Dependencies {
   lazy val tapir_pekko_http_server =
     "com.softwaremill.sttp.tapir" %% "tapir-pekko-http-server" % tapir_version
 
+  // Transcode dependencies
+  lazy val upickle = "com.lihaoyi" %% "upickle" % upickle_version
+
+  // We have to exclude conflicting parser version
+  lazy val ujson_circe =
+    "com.lihaoyi" %% "ujson-circe" % upickle_version exclude ("io.circe", "circe-parser_2.13")
+
   object resolveDependency {
     import io.circe.*, io.circe.parser.*, io.circe.generic.auto.*, io.circe.syntax.*
     import better.files.*
@@ -311,6 +319,7 @@ object Dependencies {
 
   lazy val daml_script_runner = "com.daml" %% "daml-script-runner" % daml_libraries_version
   lazy val daml_lf_data = "com.daml" %% "daml-lf-data" % daml_libraries_version
+  lazy val daml_lf_language = "com.daml" %% "daml-lf-language" % daml_libraries_version
   lazy val daml_libs_scala_contextualized_logging =
     "com.daml" %% "contextualized-logging" % daml_libraries_version
   lazy val daml_test_evidence_tag =

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.topology.store
 
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.processing.SequencedTime
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions.GenericStoredTopologyTransactions
@@ -31,8 +32,8 @@ final class StoreBasedTopologyStateForInitializationService(
     * 1. Determine the first MediatorDomainState or DomainTrustCertificate that mentions the member to onboard.
     * 2. Take its effective time (here t0')
     * 3. Find all transactions with sequence time <= t0'
-    * 4. Find the maximum effective time of the transactions returned in 3. (here ts1')
-    * 5. Set all validUntil > ts1' to None
+    * 4. Find the maximum effective time of the transactions returned in 3. (here t1')
+    * 5. Set all validUntil > t1' to None
     *
     * {{{
     *
@@ -82,13 +83,17 @@ final class StoreBasedTopologyStateForInitializationService(
           domainTopologyStore.findEssentialStateAtSequencedTime(referenceSequencedTime)
         }
         .getOrElse(
-          domainTopologyStore.maxTimestamp().flatMap { maxTimestamp =>
-            Future.failed(
-              Status.FAILED_PRECONDITION
-                .withDescription(s"No onboarding transaction found for $member as of $maxTimestamp")
-                .asException()
-            )
-          }
+          domainTopologyStore
+            .maxTimestamp(CantonTimestamp.MaxValue, includeRejected = false)
+            .flatMap { maxTimestamp =>
+              Future.failed(
+                Status.FAILED_PRECONDITION
+                  .withDescription(
+                    s"No onboarding transaction found for $member as of $maxTimestamp"
+                  )
+                  .asException()
+              )
+            }
         )
     }
   }

@@ -10,6 +10,7 @@ import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.admin.domain.v30.MediatorStatusServiceGrpc.MediatorStatusService
 import com.digitalasset.canton.auth.CantonAdminToken
 import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
@@ -18,11 +19,15 @@ import com.digitalasset.canton.connection.GrpcApiInfoService
 import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
 import com.digitalasset.canton.crypto.{Crypto, CryptoHandshakeValidator, DomainSyncCryptoClient}
 import com.digitalasset.canton.domain.Domain
+import com.digitalasset.canton.domain.mediator.admin.data.MediatorNodeStatus
 import com.digitalasset.canton.domain.mediator.admin.gprc.{
   InitializeMediatorRequest,
   InitializeMediatorResponse,
 }
-import com.digitalasset.canton.domain.mediator.service.GrpcMediatorInitializationService
+import com.digitalasset.canton.domain.mediator.service.{
+  GrpcMediatorInitializationService,
+  GrpcMediatorStatusService,
+}
 import com.digitalasset.canton.domain.mediator.store.{
   MediatorDomainConfiguration,
   MediatorDomainConfigurationStore,
@@ -31,11 +36,7 @@ import com.digitalasset.canton.domain.metrics.MediatorMetrics
 import com.digitalasset.canton.domain.service.GrpcSequencerConnectionService
 import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.health.*
-import com.digitalasset.canton.health.admin.data.{
-  MediatorNodeStatus,
-  WaitingForExternalInput,
-  WaitingForInitialization,
-}
+import com.digitalasset.canton.health.admin.data.{WaitingForExternalInput, WaitingForInitialization}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.mediator.admin.v30.MediatorInitializationServiceGrpc
@@ -58,7 +59,12 @@ import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.SingleUseCell
-import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionCompatibility}
+import com.digitalasset.canton.version.{
+  ProtocolVersion,
+  ProtocolVersionCompatibility,
+  ReleaseVersion,
+}
+import io.grpc.ServerServiceDefinition
 import monocle.Lens
 import monocle.macros.syntax.lens.*
 import org.apache.pekko.actor.ActorSystem
@@ -172,6 +178,8 @@ class MediatorNodeBootstrap(
 
   override protected def member(uid: UniqueIdentifier): Member = MediatorId(uid)
 
+  override protected def adminTokenConfig: Option[String] = config.adminApi.adminToken
+
   private val domainTopologyManager = new SingleUseCell[DomainTopologyManager]()
 
   override protected def sequencedTopologyStores: Seq[TopologyStore[DomainStore]] =
@@ -212,10 +220,17 @@ class MediatorNodeBootstrap(
     (readiness, liveness)
   }
 
+  override protected def bindNodeStatusService(): ServerServiceDefinition =
+    MediatorStatusService.bindService(
+      new GrpcMediatorStatusService(getNodeStatus, loggerFactory),
+      executionContext,
+    )
+
   private class WaitForMediatorToDomainInit(
       storage: Storage,
       crypto: Crypto,
       adminServerRegistry: CantonMutableHandlerRegistry,
+      adminToken: CantonAdminToken,
       mediatorId: MediatorId,
       authorizedTopologyManager: AuthorizedTopologyManager,
       healthService: DependenciesHealthService,
@@ -230,6 +245,8 @@ class MediatorNodeBootstrap(
         config.init.autoInit,
       )
       with GrpcMediatorInitializationService.Callback {
+
+    override def getAdminToken: Option[String] = Some(adminToken.secret)
 
     adminServerRegistry
       .addServiceU(
@@ -278,6 +295,7 @@ class MediatorNodeBootstrap(
           storage,
           crypto,
           adminServerRegistry,
+          adminToken,
           mediatorId,
           staticDomainParameters,
           authorizedTopologyManager,
@@ -343,6 +361,7 @@ class MediatorNodeBootstrap(
       storage: Storage,
       crypto: Crypto,
       adminServerRegistry: CantonMutableHandlerRegistry,
+      adminToken: CantonAdminToken,
       mediatorId: MediatorId,
       staticDomainParameters: StaticDomainParameters,
       authorizedTopologyManager: AuthorizedTopologyManager,
@@ -357,11 +376,6 @@ class MediatorNodeBootstrap(
       with HasCloseContext {
 
     private val domainLoggerFactory = loggerFactory.append("domainId", domainId.toString)
-
-    // admin token is taken from the config or created per session
-    val adminToken: CantonAdminToken = config.adminApi.adminToken.fold(
-      CantonAdminToken.create(crypto.pureCrypto)
-    )(token => CantonAdminToken(secret = token))
 
     override protected def attempt()(implicit
         traceContext: TraceContext
@@ -453,6 +467,7 @@ class MediatorNodeBootstrap(
                   storage,
                   crypto,
                   adminServerRegistry,
+                  adminToken,
                   staticDomainParameters,
                   domainTopologyStore,
                   topologyManagerStatus = TopologyManagerStatus
@@ -477,6 +492,7 @@ class MediatorNodeBootstrap(
             adminToken,
             domainLoggerFactory,
             healthData = healthService.dependencies.map(_.toComponentStatus),
+            staticDomainParameters.protocolVersion,
           )
           addCloseable(node)
           Some(new RunningNode(bootstrapStageCallback, node))
@@ -510,6 +526,7 @@ class MediatorNodeBootstrap(
       storage: Storage,
       crypto: Crypto,
       adminServerRegistry: CantonMutableHandlerRegistry,
+      adminToken: CantonAdminToken,
       staticDomainParameters: StaticDomainParameters,
       domainTopologyStore: TopologyStore[DomainStore],
       topologyManagerStatus: TopologyManagerStatus,
@@ -591,27 +608,10 @@ class MediatorNodeBootstrap(
         arguments.metrics.sequencerClient,
         parameters.loggingConfig,
         domainLoggerFactory,
-        ProtocolVersionCompatibility.trySupportedProtocolsDomain(parameters),
+        ProtocolVersionCompatibility.supportedProtocols(parameters),
         None,
       )
-      sequencerClientRef =
-        GrpcSequencerConnectionService.setup[MediatorDomainConfiguration](mediatorId)(
-          adminServerRegistry,
-          fetchConfig,
-          saveConfig,
-          Lens[MediatorDomainConfiguration, SequencerConnections](_.sequencerConnections)(
-            connection => conf => conf.copy(sequencerConnections = connection)
-          ),
-          RequestSigner(
-            syncCryptoApi,
-            domainConfig.domainParameters.protocolVersion,
-            loggerFactory,
-          ),
-          sequencerClientFactory,
-          sequencerInfoLoader,
-          domainAlias,
-          domainId,
-        )
+
       // we wait here until the sequencer becomes active. this allows to reconfigure the
       // sequencer client address
       info <- GrpcSequencerConnectionService
@@ -637,6 +637,27 @@ class MediatorNodeBootstrap(
           info.expectedSequencers,
         )
         .mapK(FutureUnlessShutdown.outcomeK)
+
+      sequencerClientRef =
+        GrpcSequencerConnectionService.setup[MediatorDomainConfiguration](mediatorId)(
+          adminServerRegistry,
+          fetchConfig,
+          saveConfig,
+          Lens[MediatorDomainConfiguration, SequencerConnections](_.sequencerConnections)(
+            connection => conf => conf.copy(sequencerConnections = connection)
+          ),
+          RequestSigner(
+            syncCryptoApi,
+            domainConfig.domainParameters.protocolVersion,
+            loggerFactory,
+          ),
+          sequencerClientFactory,
+          sequencerInfoLoader,
+          domainAlias,
+          domainId,
+          sequencerClient,
+          loggerFactory,
+        )
 
       _ <- {
         val headSnapshot = topologyClient.headSnapshot
@@ -699,6 +720,7 @@ class MediatorNodeBootstrap(
       storage: Storage,
       crypto: Crypto,
       adminServerRegistry: CantonMutableHandlerRegistry,
+      adminToken: CantonAdminToken,
       nodeId: UniqueIdentifier,
       authorizedTopologyManager: AuthorizedTopologyManager,
       healthServer: GrpcHealthReporter,
@@ -708,6 +730,7 @@ class MediatorNodeBootstrap(
       storage,
       crypto,
       adminServerRegistry,
+      adminToken,
       MediatorId(nodeId),
       authorizedTopologyManager,
       healthService,
@@ -729,27 +752,31 @@ class MediatorNode(
     protected[canton] val replicaManager: MediatorReplicaManager,
     storage: Storage,
     override val clock: Clock,
-    val adminToken: CantonAdminToken,
+    override val adminToken: CantonAdminToken,
     override val loggerFactory: NamedLoggerFactory,
     healthData: => Seq[ComponentStatus],
+    protocolVersion: ProtocolVersion,
 ) extends CantonNode
     with NamedLogging
     with HasUptime {
 
+  override type Status = MediatorNodeStatus
+
   def isActive: Boolean = replicaManager.isActive
 
-  def status: Future[MediatorNodeStatus] = {
+  def status: MediatorNodeStatus = {
     val ports = Map("admin" -> config.adminApi.port)
-    Future.successful(
-      MediatorNodeStatus(
-        mediatorId.uid,
-        domainId,
-        uptime(),
-        ports,
-        replicaManager.isActive,
-        replicaManager.getTopologyQueueStatus,
-        healthData,
-      )
+
+    MediatorNodeStatus(
+      mediatorId.uid,
+      domainId,
+      uptime(),
+      ports,
+      replicaManager.isActive,
+      replicaManager.getTopologyQueueStatus,
+      healthData,
+      ReleaseVersion.current,
+      protocolVersion,
     )
   }
 

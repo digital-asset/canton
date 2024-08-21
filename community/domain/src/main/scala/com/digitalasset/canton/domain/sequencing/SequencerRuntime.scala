@@ -4,7 +4,6 @@
 package com.digitalasset.canton.domain.sequencing
 
 import cats.data.EitherT
-import cats.syntax.foldable.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -15,6 +14,10 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.domain.api.v30
 import com.digitalasset.canton.domain.config.PublicServerConfig
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
+import com.digitalasset.canton.domain.sequencing.admin.data.{
+  SequencerAdminStatus,
+  SequencerHealthStatus,
+}
 import com.digitalasset.canton.domain.sequencing.authentication.grpc.{
   SequencerAuthenticationServerInterceptor,
   SequencerConnectServerInterceptor,
@@ -28,11 +31,7 @@ import com.digitalasset.canton.domain.sequencing.config.SequencerNodeParameters
 import com.digitalasset.canton.domain.sequencing.sequencer.*
 import com.digitalasset.canton.domain.sequencing.service.*
 import com.digitalasset.canton.health.HealthListener
-import com.digitalasset.canton.health.admin.data.{
-  SequencerAdminStatus,
-  SequencerHealthStatus,
-  TopologyQueueStatus,
-}
+import com.digitalasset.canton.health.admin.data.TopologyQueueStatus
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
@@ -185,7 +184,7 @@ class SequencerRuntime(
     } yield ()
   }
 
-  protected val sequencerDomainParamsLookup
+  private val sequencerDomainParamsLookup
       : DynamicDomainParametersLookup[SequencerDomainParameters] =
     DomainParametersLookup.forSequencerDomainParameters(
       staticDomainParameters,
@@ -203,7 +202,6 @@ class SequencerRuntime(
     sequencerDomainParamsLookup,
     localNodeParameters,
     staticDomainParameters.protocolVersion,
-    domainTopologyManager,
     topologyStateForInitializationService,
     loggerFactory,
   )
@@ -239,7 +237,7 @@ class SequencerRuntime(
   private val authenticationServices = {
     val authenticationService = memberAuthenticationServiceFactory.createAndSubscribe(
       syncCrypto,
-      MemberAuthenticationStore(storage, timeouts, loggerFactory, closeContext),
+      new MemberAuthenticationStore(),
       // closing the subscription when the token expires will force the client to try to reconnect
       // immediately and notice it is unauthenticated, which will cause it to also start reauthenticating
       // it's important to disconnect the member AFTER we expired the token, as otherwise, the member
@@ -267,8 +265,7 @@ class SequencerRuntime(
     )
   }
 
-  def health: Future[SequencerHealthStatus] =
-    Future.successful(sequencer.getState)
+  def health: SequencerHealthStatus = sequencer.getState
 
   def topologyQueue: TopologyQueueStatus = TopologyQueueStatus(
     manager = topologyManagerStatusO.map(_.queueSize).getOrElse(0),
@@ -276,11 +273,10 @@ class SequencerRuntime(
     clients = topologyClient.numPendingChanges,
   )
 
-  def adminStatus: SequencerAdminStatus =
-    sequencer.adminStatus
+  def adminStatus: SequencerAdminStatus = sequencer.adminStatus
 
-  def fetchActiveMembers(): Future[Seq[Member]] =
-    Future.successful(sequencerService.membersWithActiveSubscriptions)
+  def fetchActiveMembers(): Seq[Member] =
+    sequencerService.membersWithActiveSubscriptions
 
   def registerAdminGrpcServices(
       register: ServerServiceDefinition => Unit
@@ -312,7 +308,7 @@ class SequencerRuntime(
     )
   }
 
-  def domainServices(implicit ec: ExecutionContext): Seq[ServerServiceDefinition] = Seq(
+  def sequencerServices(implicit ec: ExecutionContext): Seq[ServerServiceDefinition] = Seq(
     ServerInterceptors.intercept(
       v30.SequencerConnectServiceGrpc.bindService(
         new GrpcSequencerConnectService(

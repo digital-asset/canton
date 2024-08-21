@@ -12,6 +12,7 @@ import com.daml.metrics.api.MetricName
 import com.daml.metrics.api.testing.InMemoryMetricsFactory
 import com.daml.metrics.grpc.GrpcServerMetrics
 import com.digitalasset.canton.*
+import com.digitalasset.canton.auth.CantonAdminToken
 import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
   FutureSupervisor,
@@ -49,6 +50,7 @@ import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.PekkoUtil
 import com.digitalasset.canton.version.ProtocolVersion
+import io.grpc.ServerServiceDefinition
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import io.opentelemetry.sdk.trace.SdkTracerProvider
 import org.scalatest.Outcome
@@ -160,10 +162,13 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
       executionContext
     )
 
+    override protected val adminTokenConfig: Option[String] = None
+
     override protected def customNodeStages(
         storage: Storage,
         crypto: Crypto,
         adminServerRegistry: CantonMutableHandlerRegistry,
+        adminToken: CantonAdminToken,
         nodeId: UniqueIdentifier,
         manager: AuthorizedTopologyManager,
         healthReporter: GrpcHealthReporter,
@@ -176,6 +181,9 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
         storage: Storage
     ): (DependenciesHealthService, LivenessHealthService) =
       ???
+
+    override protected def bindNodeStatusService(): ServerServiceDefinition = ???
+
     override def start(): EitherT[Future, String, Unit] =
       EitherT.pure[Future, String](())
     override protected def lookupTopologyClient(

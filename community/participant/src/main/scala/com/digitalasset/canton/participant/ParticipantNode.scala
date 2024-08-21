@@ -29,7 +29,6 @@ import com.digitalasset.canton.crypto.{
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.health.*
-import com.digitalasset.canton.health.admin.data.ParticipantStatus
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.{
@@ -37,12 +36,13 @@ import com.digitalasset.canton.networking.grpc.{
   CantonMutableHandlerRegistry,
   StaticGrpcServices,
 }
-import com.digitalasset.canton.participant.admin.*
 import com.digitalasset.canton.participant.admin.grpc.*
 import com.digitalasset.canton.participant.admin.workflows.java.canton
+import com.digitalasset.canton.participant.admin.{PackageDependencyResolver, *}
 import com.digitalasset.canton.participant.config.*
 import com.digitalasset.canton.participant.domain.grpc.GrpcDomainRegistry
 import com.digitalasset.canton.participant.domain.{DomainAliasManager, DomainAliasResolution}
+import com.digitalasset.canton.participant.health.admin.ParticipantStatus
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.{
   IndexerLockIds,
   LedgerApiServerState,
@@ -62,10 +62,12 @@ import com.digitalasset.canton.participant.scheduler.{
   SchedulersWithParticipantPruning,
 }
 import com.digitalasset.canton.participant.store.*
+import com.digitalasset.canton.participant.sync.SyncDomain.SubmissionReady
 import com.digitalasset.canton.participant.sync.*
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError.IdentityManagerParentError
 import com.digitalasset.canton.participant.topology.{
   LedgerServerPartyNotifier,
+  ParticipantPackageVettingValidation,
   ParticipantTopologyDispatcher,
   ParticipantTopologyManagerError,
   ParticipantTopologyManagerOps,
@@ -89,7 +91,7 @@ import com.digitalasset.canton.topology.client.{
   StoreBasedDomainTopologyClient,
   StoreBasedTopologySnapshot,
 }
-import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
+import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, DomainStore}
 import com.digitalasset.canton.topology.store.{PartyMetadataStore, TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.{
   HostingParticipant,
@@ -103,6 +105,7 @@ import com.digitalasset.canton.version.{
   ProtocolVersion,
   ProtocolVersionCompatibility,
   ReleaseProtocolVersion,
+  ReleaseVersion,
 }
 import com.digitalasset.daml.lf.engine.Engine
 import io.grpc.ServerServiceDefinition
@@ -144,9 +147,16 @@ class ParticipantNodeBootstrap(
       ParticipantMetrics,
     ](arguments) {
 
-  // TODO(#12946) clean up to remove SingleUseCell
   private val cantonSyncService = new SingleUseCell[CantonSyncService]
+  private val packageDependencyResolver = new SingleUseCell[PackageDependencyResolver]
 
+  override protected val adminTokenConfig: Option[String] =
+    config.ledgerApi.adminToken.orElse(config.adminApi.adminToken)
+
+  private def tryGetPackageDependencyResolver(): PackageDependencyResolver =
+    packageDependencyResolver.getOrElse(
+      sys.error("packageDependencyResolver should be defined")
+    )
   override protected def sequencedTopologyStores: Seq[TopologyStore[DomainStore]] =
     cantonSyncService.get.toList.flatMap(_.syncDomainPersistentStateManager.getAll.values).collect {
       case s: SyncDomainPersistentState => s.topologyStore
@@ -170,29 +180,29 @@ class ParticipantNodeBootstrap(
       storage: Storage,
       crypto: Crypto,
       adminServerRegistry: CantonMutableHandlerRegistry,
+      adminToken: CantonAdminToken,
       nodeId: UniqueIdentifier,
       manager: AuthorizedTopologyManager,
       healthReporter: GrpcHealthReporter,
       healthService: DependenciesHealthService,
   ): BootstrapStageOrLeaf[ParticipantNode] =
-    new StartupNode(storage, crypto, adminServerRegistry, nodeId, manager, healthService)
+    new StartupNode(
+      storage,
+      crypto,
+      adminServerRegistry,
+      adminToken,
+      nodeId,
+      manager,
+      healthService,
+    )
 
-  private class StartupNode(
-      storage: Storage,
-      crypto: Crypto,
-      adminServerRegistry: CantonMutableHandlerRegistry,
+  override protected def createAuthorizedTopologyManager(
       nodeId: UniqueIdentifier,
-      topologyManager: AuthorizedTopologyManager,
-      healthService: DependenciesHealthService,
-  ) extends BootstrapStage[ParticipantNode, RunningNode[ParticipantNode]](
-        description = "Startup participant node",
-        bootstrapStageCallback,
-      )
-      with HasCloseContext {
-
-    private val participantId = ParticipantId(nodeId)
-
-    private val packageDependencyResolver = new PackageDependencyResolver(
+      crypto: Crypto,
+      authorizedStore: TopologyStore[AuthorizedStore],
+      storage: Storage,
+  ): AuthorizedTopologyManager = {
+    val resolver = new PackageDependencyResolver(
       DamlPackageStore(
         storage,
         arguments.futureSupervisor,
@@ -203,6 +213,52 @@ class ParticipantNodeBootstrap(
       arguments.parameterConfig.processingTimeouts,
       loggerFactory,
     )
+    val _ = packageDependencyResolver.putIfAbsent(resolver)
+
+    val topologyManager = new AuthorizedTopologyManager(
+      nodeId,
+      clock,
+      crypto,
+      authorizedStore,
+      exitOnFatalFailures = parameters.exitOnFatalFailures,
+      bootstrapStageCallback.timeouts,
+      futureSupervisor,
+      bootstrapStageCallback.loggerFactory,
+    ) with ParticipantPackageVettingValidation {
+
+      override def validatePackages(
+          currentlyVettedPackages: Set[LfPackageId],
+          nextPackageIds: Set[LfPackageId],
+          forceFlags: ForceFlags,
+      )(implicit
+          traceContext: TraceContext
+      ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
+        checkPackageDependencies(
+          currentlyVettedPackages,
+          nextPackageIds,
+          resolver,
+          forceFlags,
+        )
+    }
+    topologyManager
+  }
+
+  private class StartupNode(
+      storage: Storage,
+      crypto: Crypto,
+      adminServerRegistry: CantonMutableHandlerRegistry,
+      adminToken: CantonAdminToken,
+      nodeId: UniqueIdentifier,
+      topologyManager: AuthorizedTopologyManager,
+      healthService: DependenciesHealthService,
+  ) extends BootstrapStage[ParticipantNode, RunningNode[ParticipantNode]](
+        description = "Startup participant node",
+        bootstrapStageCallback,
+      )
+      with HasCloseContext {
+
+    override def getAdminToken: Option[String] = Some(adminToken.secret)
+    private val participantId = ParticipantId(nodeId)
 
     private def createSyncDomainAndTopologyDispatcher(
         aliasResolution: DomainAliasResolution,
@@ -214,9 +270,9 @@ class ParticipantNodeBootstrap(
         storage,
         indexedStringStore,
         parameters,
-        config.topology,
         crypto,
         clock,
+        tryGetPackageDependencyResolver(),
         futureSupervisor,
         loggerFactory,
       )
@@ -387,11 +443,6 @@ class ParticipantNodeBootstrap(
         PartyMetadataStore(storage, parameterConfig.processingTimeouts, loggerFactory)
       addCloseable(partyMetadataStore)
 
-      // admin token is taken from the config or created per session
-      val adminToken: CantonAdminToken = config.ledgerApi.adminToken
-        .orElse(config.adminApi.adminToken)
-        .fold(CantonAdminToken.create(crypto.pureCrypto))(token => CantonAdminToken(secret = token))
-
       // upstream party information update generator
       val partyNotifierFactory = (eventPublisher: ParticipantEventPublisher) => {
         val partyNotifier = new LedgerServerPartyNotifier(
@@ -416,6 +467,7 @@ class ParticipantNodeBootstrap(
         participantId,
         crypto,
         adminServerRegistry,
+        adminToken,
         storage,
         persistentStateFactory,
         packageServiceFactory,
@@ -428,9 +480,8 @@ class ParticipantNodeBootstrap(
         replicationServiceFactory,
         createSchedulers,
         partyNotifierFactory,
-        adminToken,
         participantOps,
-        packageDependencyResolver,
+        tryGetPackageDependencyResolver(),
         createSyncDomainAndTopologyDispatcher,
         createPackageOps,
       ).map {
@@ -453,11 +504,12 @@ class ParticipantNodeBootstrap(
           addCloseable(sync)
           addCloseable(ledgerApiServer)
           addCloseable(ledgerApiDependentServices)
-          addCloseable(packageDependencyResolver)
+          addCloseable(tryGetPackageDependencyResolver())
           val node = new ParticipantNode(
             participantId,
             arguments.metrics,
             config,
+            parameters,
             storage,
             clock,
             crypto.pureCrypto,
@@ -501,6 +553,12 @@ class ParticipantNodeBootstrap(
     val liveness = LivenessHealthService.alwaysAlive(logger, timeouts)
     (readiness, liveness)
   }
+
+  override protected def bindNodeStatusService(): ServerServiceDefinition =
+    ParticipantStatusServiceGrpc.bindService(
+      new GrpcParticipantStatusService(getNodeStatus, loggerFactory),
+      executionContext,
+    )
 
   private def setPostInitCallbacks(
       sync: CantonSyncService
@@ -548,6 +606,7 @@ class ParticipantNodeBootstrap(
       participantId: ParticipantId,
       crypto: Crypto,
       adminServerRegistry: CantonMutableHandlerRegistry,
+      adminToken: CantonAdminToken,
       storage: Storage,
       persistentStateFactory: ParticipantNodePersistentStateFactory,
       packageServiceFactory: PackageServiceFactory,
@@ -563,7 +622,6 @@ class ParticipantNodeBootstrap(
       replicationServiceFactory: Storage => ServerServiceDefinition,
       createSchedulers: ParticipantSchedulersParameters => Future[SchedulersWithParticipantPruning],
       createPartyNotifierAndSubscribe: ParticipantEventPublisher => LedgerServerPartyNotifier,
-      adminToken: CantonAdminToken,
       topologyManager: ParticipantTopologyManagerOps,
       packageDependencyResolver: PackageDependencyResolver,
       createSyncDomainAndTopologyDispatcher: (
@@ -704,7 +762,7 @@ class ParticipantNodeBootstrap(
       sequencerInfoLoader = new SequencerInfoLoader(
         parameterConfig.processingTimeouts,
         parameterConfig.tracing.propagation,
-        ProtocolVersionCompatibility.supportedProtocolsParticipant(parameterConfig),
+        ProtocolVersionCompatibility.supportedProtocols(parameterConfig),
         parameterConfig.protocolConfig.minimumProtocolVersion,
         parameterConfig.protocolConfig.dontWarnOnDeprecatedPV,
         loggerFactory,
@@ -1085,13 +1143,14 @@ class ParticipantNode(
     val id: ParticipantId,
     val metrics: ParticipantMetrics,
     val config: LocalParticipantConfig,
+    nodeParameters: ParticipantNodeParameters,
     val storage: Storage,
     override protected val clock: Clock,
     val cryptoPureApi: CryptoPureApi,
     identityPusher: ParticipantTopologyDispatcher,
     private[canton] val ips: IdentityProvidingServiceClient,
     private[canton] val sync: CantonSyncService,
-    val adminToken: CantonAdminToken,
+    override val adminToken: CantonAdminToken,
     val recordSequencerInteractions: AtomicReference[Option[RecordingConfig]],
     val replaySequencerConfig: AtomicReference[Option[ReplayConfig]],
     val loggerFactory: NamedLoggerFactory,
@@ -1100,26 +1159,38 @@ class ParticipantNode(
     with NamedLogging
     with HasUptime {
 
+  override type Status = ParticipantStatus
+
   override def close(): Unit = () // closing is done in the bootstrap class
 
-  def readyDomains: Map[DomainId, Boolean] =
+  def readyDomains: Map[DomainId, SubmissionReady] =
     sync.readyDomains.values.toMap
 
-  override def status: Future[ParticipantStatus] = {
+  private def supportedProtocolVersions: Seq[ProtocolVersion] = {
+    val supportedPvs = ProtocolVersionCompatibility.supportedProtocols(nodeParameters)
+    nodeParameters.protocolConfig.minimumProtocolVersion match {
+      case Some(pv) => supportedPvs.filter(p => p >= pv)
+      case None => supportedPvs
+    }
+  }
+
+  override def status: ParticipantStatus = {
     val ports = Map("ledger" -> config.ledgerApi.port, "admin" -> config.adminApi.port)
     val domains = readyDomains
     val topologyQueues = identityPusher.queueStatus
-    Future.successful(
-      ParticipantStatus(
-        id.uid,
-        uptime(),
-        ports,
-        domains,
-        sync.isActive(),
-        topologyQueues,
-        healthData,
-      )
+
+    ParticipantStatus(
+      id.uid,
+      uptime(),
+      ports,
+      domains,
+      sync.isActive(),
+      topologyQueues,
+      healthData,
+      version = ReleaseVersion.current,
+      supportedProtocolVersions = supportedProtocolVersions,
     )
+
   }
 
   override def isActive: Boolean = storage.isActive

@@ -3,13 +3,16 @@
 
 package com.digitalasset.canton.environment
 
+import com.digitalasset.canton.auth.CantonAdminToken
 import com.digitalasset.canton.health.admin.data.NodeStatus
-
-import scala.concurrent.Future
 
 /** A running instance of a canton node */
 trait CantonNode extends AutoCloseable {
-  def status: Future[NodeStatus.Status]
+  type Status <: NodeStatus.Status
+
+  def status: Status
   def isActive: Boolean
+
+  def adminToken: CantonAdminToken
 
 }

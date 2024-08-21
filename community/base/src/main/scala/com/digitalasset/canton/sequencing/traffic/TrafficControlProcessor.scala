@@ -111,7 +111,7 @@ class TrafficControlProcessor(
             },
           )
 
-          HandlerResult.asynchronous(
+          HandlerResult.synchronous(
             processSetTrafficPurchasedEnvelopes(ts, topologyTimestampO, domainEnvelopes)
           )
 

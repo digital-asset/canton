@@ -74,6 +74,7 @@ import com.digitalasset.canton.participant.store.DomainConnectionConfigStore.Mis
 import com.digitalasset.canton.participant.store.MultiDomainEventLog.PublicationData
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.CantonSyncService.ConnectDomain
+import com.digitalasset.canton.participant.sync.SyncDomain.SubmissionReady
 import com.digitalasset.canton.participant.sync.SyncServiceError.{
   SyncServiceDomainBecamePassive,
   SyncServiceDomainDisabledUs,
@@ -110,6 +111,7 @@ import com.digitalasset.daml.lf.data.Ref.{PackageId, Party, SubmissionId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.engine.Engine
 import com.google.protobuf.ByteString
+import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Materializer
@@ -233,12 +235,8 @@ class CantonSyncService(
             connectedDomainsLookup.snapshot.toSeq.parTraverse { case (domainId, syncDomain) =>
               syncDomain.topologyClient
                 .await(
-                  _.findUnvettedPackagesOrDependencies(participantId, packages)
-                    .bimap(
-                      _missingPackage => false,
-                      unvettedPackages => unvettedPackages.isEmpty,
-                    )
-                    .merge
+                  _.determinePackagesWithNoVettingEntry(participantId, packages)
+                    .map(_.isEmpty)
                     .onShutdown(false),
                   timeouts.network.duration,
                 )
@@ -798,7 +796,7 @@ class CantonSyncService(
   }
 
   /** Returns the ready domains this sync service is connected to. */
-  def readyDomains: Map[DomainAlias, (DomainId, Boolean)] =
+  def readyDomains: Map[DomainAlias, (DomainId, SubmissionReady)] =
     connectedDomainsMap
       .to(LazyList)
       .mapFilter {
@@ -1518,6 +1516,24 @@ class CantonSyncService(
     )
   }
 
+  def logout(domainAlias: DomainAlias)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, Status, Unit] =
+    for {
+      domainId <- EitherT.fromOption[FutureUnlessShutdown](
+        aliasManager.domainIdForAlias(domainAlias),
+        Status.INVALID_ARGUMENT.withDescription(
+          s"The domain with alias ${domainAlias.unwrap} is unknown."
+        ),
+      )
+      _ <- connectedDomainsMap
+        .get(domainId)
+        .fold(EitherT.pure[FutureUnlessShutdown, Status] {
+          logger.info(show"Nothing to do, as we are not connected to $domainAlias")
+          ()
+        })(syncDomain => syncDomain.logout())
+    } yield ()
+
   private def performDomainDisconnect(
       domain: DomainAlias
   )(implicit traceContext: TraceContext): Either[SyncServiceError, Unit] = {
@@ -1780,22 +1796,23 @@ class CantonSyncService(
 
     val result = readyDomains
       // keep only healthy domains
-      .collect { case (domainAlias, (domainId, true)) =>
-        for {
-          topology <- getSnapshot(domainAlias, domainId)
-          partyWithAttributes <- topology.hostedOn(
-            Set(request.party),
-            participantId = participantId,
-          )
-        } yield partyWithAttributes
-          .get(request.party)
-          .map(attributes =>
-            ConnectedDomainResponse.ConnectedDomain(
-              domainAlias,
-              domainId,
-              attributes.permission,
+      .collect {
+        case (domainAlias, (domainId, submissionReady)) if submissionReady.unwrap =>
+          for {
+            topology <- getSnapshot(domainAlias, domainId)
+            partyWithAttributes <- topology.hostedOn(
+              Set(request.party),
+              participantId = participantId,
             )
-          )
+          } yield partyWithAttributes
+            .get(request.party)
+            .map(attributes =>
+              ConnectedDomainResponse.ConnectedDomain(
+                domainAlias,
+                domainId,
+                attributes.permission,
+              )
+            )
       }.toSeq
 
     Future.sequence(result).map(_.flatten).map(ConnectedDomainResponse.apply)

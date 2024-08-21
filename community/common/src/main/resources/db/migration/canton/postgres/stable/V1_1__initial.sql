@@ -706,25 +706,6 @@ CREATE TABLE par_pruning_schedules (
   prune_internally_only boolean NOT NULL DEFAULT false -- whether to prune only canton-internal stores not visible to ledger api
 );
 
--- store nonces that have been requested for authentication challenges
-create table sequencer_authentication_nonces (
-  nonce varchar(300) collate "C" primary key,
-  member varchar(300) collate "C" not null,
-  generated_at_ts bigint not null,
-  expire_at_ts bigint not null
-);
-
-create index idx_nonces_for_member on sequencer_authentication_nonces (member, nonce);
-
--- store tokens that have been generated for successful authentication requests
-create table sequencer_authentication_tokens (
-  token varchar(300) collate "C" primary key,
-  member varchar(300) collate "C" not null,
-  expire_at_ts bigint not null
-);
-
-create index idx_tokens_for_member on sequencer_authentication_tokens (member);
-
 -- store in-flight submissions
 create table par_in_flight_submission (
   -- hash of the change ID as a hex string
@@ -950,9 +931,9 @@ create table seq_traffic_control_consumed_journal (
 -- Individual blocks/transactions exist in separate table
 create table ord_completed_epochs (
   -- strictly-increasing, contiguous epoch number
-  epoch_number bigint not null primary key ,
+  epoch_number bigint not null primary key,
   -- first block sequence number (globally) of the epoch
-  start_block_number bigint not null ,
+  start_block_number bigint not null,
   -- number of total blocks in the epoch
   epoch_length integer not null,
   -- enable idempotent writes: "on conflict, do nothing"
