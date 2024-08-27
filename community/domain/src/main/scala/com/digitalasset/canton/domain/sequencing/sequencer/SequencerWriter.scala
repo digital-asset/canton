@@ -515,6 +515,8 @@ object SequencerWriter {
           loggerFactory,
           protocolVersion,
           metrics,
+          processingTimeout,
+          unifiedSequencer = unifiedSequencer,
         )
           .toMat(Sink.ignore)(Keep.both)
           .mapMaterializedValue(m => new RunningSequencerWriterFlow(m._1, m._2.void)),

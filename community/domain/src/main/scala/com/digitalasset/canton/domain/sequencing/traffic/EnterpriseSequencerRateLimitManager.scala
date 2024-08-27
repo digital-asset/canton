@@ -572,7 +572,7 @@ class EnterpriseSequencerRateLimitManager(
     Option[TrafficReceipt],
   ] = if (isRateLimited(request.sender)) {
     val sender = request.sender
-    implicit val senderMetricsContext: MetricsContext = MetricsContext("sender" -> sender.toString)
+    implicit val memberMetricsContext: MetricsContext = MetricsContext("member" -> sender.toString)
 
     def consumeEvent(
         validCost: ValidCost
