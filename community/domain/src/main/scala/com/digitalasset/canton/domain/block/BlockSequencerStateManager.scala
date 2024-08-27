@@ -33,7 +33,13 @@ import com.digitalasset.canton.domain.block.update.{
 import com.digitalasset.canton.domain.sequencing.integrations.state.statemanager.MemberCounters
 import com.digitalasset.canton.domain.sequencing.sequencer.block.BlockSequencer
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
-import com.digitalasset.canton.domain.sequencing.sequencer.{Sequencer, SequencerIntegration}
+import com.digitalasset.canton.domain.sequencing.sequencer.{
+  DeliverableSubmissionOutcome,
+  Sequencer,
+  SequencerIntegration,
+  SubmissionRequestOutcome,
+}
+import com.digitalasset.canton.domain.sequencing.traffic.store.TrafficConsumedStore
 import com.digitalasset.canton.error.BaseAlarm
 import com.digitalasset.canton.lifecycle.{
   AsyncCloseable,
@@ -122,6 +128,7 @@ class BlockSequencerStateManager(
     domainId: DomainId,
     sequencerId: SequencerId,
     val store: SequencerBlockStore,
+    val trafficConsumedStore: TrafficConsumedStore,
     enableInvariantCheck: Boolean,
     private val initialMemberCounters: MemberCounters,
     override val maybeLowerTopologyTimestampBound: Option[CantonTimestamp],
@@ -501,8 +508,25 @@ class BlockSequencerStateManager(
       update.lastSequencerEventTimestamp.orElse(priorState.latestSequencerEventTimestamp),
     )
 
+    val trafficConsumedUpdates = update.submissionsOutcomes.flatMap {
+      case SubmissionRequestOutcome(_, _, outcome: DeliverableSubmissionOutcome) =>
+        outcome.trafficReceiptO match {
+          case Some(trafficReceipt) =>
+            Some(
+              trafficReceipt.toTrafficConsumed(outcome.submission.sender, outcome.sequencingTime)
+            )
+          case None => None
+        }
+      case _ => None
+    }
+
     if (unifiedSequencer) {
       (for {
+        _ <- EitherT.right[String](
+          performUnlessClosingF("trafficConsumedStore.store")(
+            trafficConsumedStore.store(trafficConsumedUpdates)
+          )
+        )
         _ <- dbSequencerIntegration.blockSequencerWrites(update.submissionsOutcomes.map(_.outcome))
         _ <- EitherT.right[String](
           dbSequencerIntegration.blockSequencerAcknowledge(update.acknowledgements)
@@ -538,6 +562,7 @@ class BlockSequencerStateManager(
     } else {
       // Block sequencer flow
       for {
+        _ <- trafficConsumedStore.store(trafficConsumedUpdates)
         _ <- store.partialBlockUpdate(
           newMembers = update.newMembers,
           events = update.events.map(_.events),
@@ -766,6 +791,7 @@ object BlockSequencerStateManager {
       domainId: DomainId,
       sequencerId: SequencerId,
       store: SequencerBlockStore,
+      trafficConsumedStore: TrafficConsumedStore,
       enableInvariantCheck: Boolean,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
@@ -784,6 +810,7 @@ object BlockSequencerStateManager {
         domainId = domainId,
         sequencerId = sequencerId,
         store = store,
+        trafficConsumedStore = trafficConsumedStore,
         enableInvariantCheck = enableInvariantCheck,
         initialMemberCounters = counters,
         maybeLowerTopologyTimestampBound = maybeLowerTopologyTimestampBound,
