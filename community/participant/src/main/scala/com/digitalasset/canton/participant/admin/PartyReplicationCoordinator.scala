@@ -85,7 +85,7 @@ class PartyReplicationCoordinator(
         //  in the sequencer client, but even that information is not directly available.
         //  Revisit this once the sequencer client health state exposes the connected sequencers.
         sequencerId <- EitherT.fromOptionF(
-          topologySnapshot.sequencerGroup().map(_.map(_.active.head1)),
+          topologySnapshot.sequencerGroup().map(_.flatMap(_.active.headOption)),
           s"No sequencer group for domain $domainId",
         )
         _ <- ensurePartyIsAuthorizedOnParticipants(

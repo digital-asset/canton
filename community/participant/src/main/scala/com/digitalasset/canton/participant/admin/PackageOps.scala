@@ -199,7 +199,6 @@ class PackageOpsImpl(
         .fromEither[FutureUnlessShutdown](
           VettedPackages.create(
             participantId = participantId,
-            domainId = None,
             newVettedPackagesState,
           )
         )

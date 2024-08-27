@@ -570,7 +570,6 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
         val participants_1_2_6_HostParty1 = mkAddMultiKey(
           PartyToParticipant.tryCreate(
             party1b, // lives in the namespace of p1, corresponding to `SigningKeys.key1`
-            None,
             threshold = PositiveInt.two,
             Seq(
               HostingParticipant(participant1, ParticipantPermission.Submission),
@@ -586,7 +585,6 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
 
         val unhostingMapping = PartyToParticipant.tryCreate(
           party1b,
-          None,
           threshold = PositiveInt.two,
           Seq(
             HostingParticipant(participant1, ParticipantPermission.Submission),
@@ -596,7 +594,6 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
         )
         val unhostingMappingAndThresholdChange = PartyToParticipant.tryCreate(
           party1b,
-          None,
           threshold = PositiveInt.one,
           Seq(
             HostingParticipant(participant1, ParticipantPermission.Submission),
@@ -872,7 +869,6 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
           serial = PositiveInt.one,
           VettedPackages.tryCreate(
             ParticipantId(UniqueIdentifier.tryCreate("consortium-participiant", dns_id)),
-            None,
             Seq.empty,
           ),
           BaseTest.testedProtocolVersion,
@@ -941,7 +937,6 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
           serial = PositiveInt.one,
           VettedPackages.tryCreate(
             ParticipantId(UniqueIdentifier.tryCreate("consortium-participiant", dns_id)),
-            None,
             Seq.empty,
           ),
           BaseTest.testedProtocolVersion,
@@ -1005,7 +1000,6 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
 
       val pkgMapping = VettedPackages.tryCreate(
         ParticipantId(UniqueIdentifier.tryCreate("consortium-participiant", dns_id)),
-        None,
         Seq.empty,
       )
       val pkgTx = TopologyTransaction(
