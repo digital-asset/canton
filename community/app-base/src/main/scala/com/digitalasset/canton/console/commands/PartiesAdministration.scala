@@ -295,7 +295,6 @@ class ParticipantPartiesAdministrationGroup(
     // determine the next serial
     val nextSerial = reference.topology.party_to_participant_mappings
       .list_from_authorized(filterParty = partyId.filterString)
-      .filter(_.item.domainId.isEmpty)
       .maxByOption(_.context.serial)
       .map(_.context.serial.increment)
 
@@ -304,7 +303,6 @@ class ParticipantPartiesAdministrationGroup(
         TopologyAdminCommands.Write.Propose(
           mapping = PartyToParticipant.create(
             partyId,
-            None,
             threshold,
             participants.map(pid =>
               HostingParticipant(

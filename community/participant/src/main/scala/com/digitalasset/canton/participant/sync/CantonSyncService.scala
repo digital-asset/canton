@@ -1802,7 +1802,7 @@ class CantonSyncService(
             topology <- getSnapshot(domainAlias, domainId)
             partyWithAttributes <- topology.hostedOn(
               Set(request.party),
-              participantId = participantId,
+              participantId = request.participantId.getOrElse(participantId),
             )
           } yield partyWithAttributes
             .get(request.party)

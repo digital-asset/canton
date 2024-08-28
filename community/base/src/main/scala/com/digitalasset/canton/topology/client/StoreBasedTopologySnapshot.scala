@@ -5,7 +5,7 @@ package com.digitalasset.canton.topology.client
 
 import cats.syntax.functorFilter.*
 import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.crypto.{KeyPurpose, SigningPublicKey}
+import com.digitalasset.canton.crypto.KeyPurpose
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -26,6 +26,7 @@ import com.digitalasset.canton.topology.store.*
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.daml.lf.data.Ref.PackageId
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -47,7 +48,6 @@ class StoreBasedTopologySnapshot(
     with NamedLogging {
 
   private def findTransactions(
-      asOfInclusive: Boolean,
       types: Seq[TopologyMapping.Code],
       filterUid: Option[Seq[UniqueIdentifier]],
       filterNamespace: Option[Seq[Namespace]],
@@ -57,7 +57,7 @@ class StoreBasedTopologySnapshot(
     store
       .findPositiveTransactions(
         timestamp,
-        asOfInclusive,
+        asOfInclusive = false,
         isProposal = false,
         types,
         filterUid,
@@ -69,7 +69,6 @@ class StoreBasedTopologySnapshot(
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Map[PackageId, VettedPackage]] =
     FutureUnlessShutdown.outcomeF(
       findTransactions(
-        asOfInclusive = false,
         types = Seq(TopologyMapping.Code.VettedPackages),
         filterUid = Some(Seq(participant.uid)),
         filterNamespace = None,
@@ -112,7 +111,6 @@ class StoreBasedTopologySnapshot(
       traceContext: TraceContext
   ): Future[Either[String, DynamicDomainParametersWithValidity]] =
     findTransactions(
-      asOfInclusive = false,
       types = Seq(TopologyMapping.Code.DomainParametersState),
       filterUid = None,
       filterNamespace = None,
@@ -141,7 +139,6 @@ class StoreBasedTopologySnapshot(
       traceContext: TraceContext
   ): Future[Either[String, DynamicSequencingParametersWithValidity]] =
     findTransactions(
-      asOfInclusive = false,
       types = Seq(TopologyMapping.Code.SequencingDynamicParametersState),
       filterUid = None,
       filterNamespace = None,
@@ -170,7 +167,7 @@ class StoreBasedTopologySnapshot(
     .inspect(
       proposals = false,
       timeQuery = TimeQuery.Range(None, Some(timestamp)),
-      recentTimestampO = None,
+      asOfExclusiveO = None,
       op = Some(TopologyChangeOp.Replace),
       types = Seq(TopologyMapping.Code.DomainParametersState),
       idFilter = None,
@@ -228,7 +225,6 @@ class StoreBasedTopologySnapshot(
     for {
       // get all party to participant mappings and also participant states for this uid (latter to mix in admin parties)
       partyData <- findTransactions(
-        asOfInclusive = false,
         types = Seq(
           TopologyMapping.Code.PartyToParticipant,
           TopologyMapping.Code.DomainTrustCertificate,
@@ -298,19 +294,16 @@ class StoreBasedTopologySnapshot(
                       )
                     participantId -> ParticipantAttributes(
                       reducedPermission,
-                      None,
+                      participantAttributes.loginAfter,
                     )
                   }
             }.toMap
             if (participantIdToAttribs.isEmpty) None
             else Some(partyId -> PartyInfo(groupAddressing, threshold, participantIdToAttribs))
         }.toMap
-        p2pMappings ++
-          adminPartiesMap.collect {
-            // TODO(#12390) - Remove this extra caution not to add admin parties if somehow they already exist as p2p
-            //  mappings once corresponding validation is in place.
-            case x @ (adminPartyId, _) if !p2pMappings.contains(adminPartyId) => x
-          }
+        // In case of conflicting mappings, the admin party takes higher precedence
+        // Note that conflicts are prevented in TopologyMappingChecks.
+        p2pMappings ++ adminPartiesMap
       }
       // For each party we must return a result to satisfy the expectations of the
       // calling CachingTopologySnapshot's caffeine partyCache per findings in #11598.
@@ -322,15 +315,27 @@ class StoreBasedTopologySnapshot(
     } yield fullySpecifiedPartyMap
   }
 
+  private def findMembersWithoutSigningKeys[T <: Member](members: Seq[T])(implicit
+      traceContext: TraceContext
+  ): Future[Set[T]] =
+    signingKeys(members).map(keys => members.filter(keys.get(_).forall(_.isEmpty)).toSet)
+
   /** returns the list of currently known mediator groups */
-  override def mediatorGroups()(implicit traceContext: TraceContext): Future[Seq[MediatorGroup]] =
-    findTransactions(
-      asOfInclusive = false,
-      types = Seq(TopologyMapping.Code.MediatorDomainState),
-      filterUid = None,
-      filterNamespace = None,
-    ).map(
-      _.collectOfMapping[MediatorDomainState].result
+  override def mediatorGroups()(implicit traceContext: TraceContext): Future[Seq[MediatorGroup]] = {
+    def fetchMediatorDomainStates()
+        : Future[Seq[StoredTopologyTransaction[Replace, MediatorDomainState]]] =
+      findTransactions(
+        types = Seq(TopologyMapping.Code.MediatorDomainState),
+        filterUid = None,
+        filterNamespace = None,
+      ).map(_.collectOfMapping[MediatorDomainState].result)
+
+    for {
+      transactions <- fetchMediatorDomainStates()
+      mediatorsInAllGroups = transactions.flatMap(_.mapping.allMediatorsInGroup)
+      mediatorsWithoutSigningKeys <- findMembersWithoutSigningKeys(mediatorsInAllGroups)
+    } yield {
+      transactions
         .groupBy(_.mapping.group)
         .map { case (groupId, seq) =>
           val mds = collectLatestMapping(
@@ -340,41 +345,56 @@ class StoreBasedTopologySnapshot(
             .getOrElse(
               throw new IllegalStateException("Group-by would not have produced empty seq")
             )
-          MediatorGroup(groupId, mds.active, mds.observers, mds.threshold)
+          MediatorGroup(
+            groupId,
+            mds.active.filterNot(mediatorsWithoutSigningKeys),
+            mds.observers.filterNot(mediatorsWithoutSigningKeys),
+            mds.threshold,
+          )
         }
         .toSeq
         .sortBy(_.index)
-    )
-
-  override def sequencerGroup()(implicit
-      traceContext: TraceContext
-  ): Future[Option[SequencerGroup]] = findTransactions(
-    asOfInclusive = false,
-    types = Seq(TopologyMapping.Code.SequencerDomainState),
-    filterUid = None,
-    filterNamespace = None,
-  ).map { transactions =>
-    collectLatestMapping(
-      TopologyMapping.Code.SequencerDomainState,
-      transactions.collectOfMapping[SequencerDomainState].result,
-    ).map { (sds: SequencerDomainState) =>
-      SequencerGroup(sds.active, sds.observers, sds.threshold)
     }
   }
 
-  /** Returns a list of all known parties on this domain */
+  override def sequencerGroup()(implicit
+      traceContext: TraceContext
+  ): Future[Option[SequencerGroup]] = {
+    def fetchSequencerDomainState() = findTransactions(
+      types = Seq(TopologyMapping.Code.SequencerDomainState),
+      filterUid = None,
+      filterNamespace = None,
+    ).map { transactions =>
+      collectLatestMapping(
+        TopologyMapping.Code.SequencerDomainState,
+        transactions.collectOfMapping[SequencerDomainState].result,
+      )
+    }
+    for {
+      sds <- fetchSequencerDomainState()
+      allSequencers = sds.toList.flatMap(_.allSequencers)
+      sequencersWithoutSigningKeys <- findMembersWithoutSigningKeys(allSequencers)
+    } yield {
+      sds.map { (sds: SequencerDomainState) =>
+        SequencerGroup(
+          sds.active.filterNot(sequencersWithoutSigningKeys),
+          sds.observers.filterNot(sequencersWithoutSigningKeys),
+          sds.threshold,
+        )
+      }
+    }
+  }
+
   override def inspectKnownParties(
       filterParty: String,
       filterParticipant: String,
-      limit: Int,
   )(implicit traceContext: TraceContext): Future[Set[PartyId]] =
-    store.inspectKnownParties(timestamp, filterParty, filterParticipant, limit)
+    store.inspectKnownParties(timestamp, filterParty, filterParticipant)
 
   /** Returns authority-of delegations for consortium parties or self/1 for non consortium parties */
   override def authorityOf(
       parties: Set[LfPartyId]
   )(implicit traceContext: TraceContext): Future[AuthorityOfResponse] = findTransactions(
-    asOfInclusive = false,
     types = Seq(TopologyMapping.Code.AuthorityOf),
     filterUid = None,
     filterNamespace = None,
@@ -417,7 +437,7 @@ class StoreBasedTopologySnapshot(
       .inspect(
         proposals = false,
         timeQuery = TimeQuery.Snapshot(timestamp),
-        recentTimestampO = None,
+        asOfExclusiveO = None,
         op = Some(TopologyChangeOp.Replace),
         types = Seq(TopologyMapping.Code.OwnerToKeyMapping),
         idFilter = Some(idFilter),
@@ -513,7 +533,6 @@ class StoreBasedTopologySnapshot(
     for {
       // Looks up domain parameters for default rate limits.
       domainParametersState <- findTransactions(
-        asOfInclusive = false,
         types = Seq(
           TopologyMapping.Code.DomainParametersState
         ),
@@ -526,7 +545,6 @@ class StoreBasedTopologySnapshot(
         ).getOrElse(throw new IllegalStateException("Unable to locate domain parameters state"))
       )
       storedTxs <- findTransactions(
-        asOfInclusive = false,
         types = Seq(
           TopologyMapping.Code.DomainTrustCertificate,
           TopologyMapping.Code.OwnerToKeyMapping,
@@ -580,7 +598,6 @@ class StoreBasedTopologySnapshot(
       participantIdDomainPermissionsMap
     }
 
-  /** abstract loading function used to load the participant state for the given set of participant-ids */
   override def loadParticipantStates(
       participants: Seq[ParticipantId]
   )(implicit traceContext: TraceContext): Future[Map[ParticipantId, ParticipantAttributes]] =
@@ -599,7 +616,6 @@ class StoreBasedTopologySnapshot(
       members: Seq[Member]
   )(implicit traceContext: TraceContext): Future[Map[Member, KeyCollection]] =
     findTransactions(
-      asOfInclusive = false,
       types = Seq(TopologyMapping.Code.OwnerToKeyMapping),
       filterUid = Some(members.map(_.uid)),
       filterNamespace = None,
@@ -619,7 +635,6 @@ class StoreBasedTopologySnapshot(
 
   override def allMembers()(implicit traceContext: TraceContext): Future[Set[Member]] =
     findTransactions(
-      asOfInclusive = false,
       types = Seq(
         DomainTrustCertificate.code,
         MediatorDomainState.code,
@@ -651,7 +666,6 @@ class StoreBasedTopologySnapshot(
 
     val knownParticipantsF = if (participants.nonEmpty) {
       findTransactions(
-        asOfInclusive = false,
         types = Seq(DomainTrustCertificate.code),
         filterUid = Some(participants.toSeq),
         filterNamespace = None,
@@ -664,7 +678,6 @@ class StoreBasedTopologySnapshot(
 
     val knownMediatorsF = if (mediators.nonEmpty) {
       findTransactions(
-        asOfInclusive = false,
         types = Seq(MediatorDomainState.code),
         filterUid = None,
         filterNamespace = None,
@@ -679,7 +692,6 @@ class StoreBasedTopologySnapshot(
 
     val knownSequencersF = if (sequencers.nonEmpty) {
       findTransactions(
-        asOfInclusive = false,
         types = Seq(SequencerDomainState.code),
         filterUid = None,
         filterNamespace = None,
@@ -735,26 +747,13 @@ class StoreBasedTopologySnapshot(
   )(implicit
       traceContext: TraceContext
   ): Option[StoredTopologyTransaction[TopologyChangeOp.Replace, T]] = {
+    val result = transactions.sortBy(_.validFrom).lastOption
     if (transactions.sizeCompare(1) > 0) {
-      logger.warn(
-        s"Expected unique \"${typ.code}\" at $referenceTime, but found multiple instances"
+      logger.error(
+        show"Expected unique \"${typ.code}\" at $referenceTime, but found multiple instances. Using last one with serial ${result
+            .map(_.serial)}"
       )
-      transactions
-        .foldLeft(CantonTimestamp.Epoch) { case (previous, tx) =>
-          val validFrom = tx.validFrom.value
-          if (previous >= validFrom) {
-            logger.warn(
-              s"Instance of \"${typ.code}\" with hash \"${tx.hash.hash.toHexString}\" with non-monotonically growing valid-from effective time: previous $previous, new: $validFrom"
-            )
-          }
-          validFrom
-        }
-        .discard
     }
-    transactions.lastOption
+    result
   }
-
-  override def signingKeysUS(owner: Member)(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Seq[SigningPublicKey]] = FutureUnlessShutdown.outcomeF(signingKeys(owner))
 }

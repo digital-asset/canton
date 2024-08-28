@@ -300,7 +300,6 @@ class PackageOpsTest extends PackageOpsTestBase {
           eqTo(
             VettedPackages.tryCreate(
               participantId,
-              None,
               VettedPackage.unbounded(newVettedPackagesState),
             )
           ),
@@ -330,7 +329,7 @@ class PackageOpsTest extends PackageOpsTestBase {
           op = TopologyChangeOp.Replace,
           serial = txSerial,
           mapping =
-            VettedPackages.tryCreate(participantId, None, VettedPackage.unbounded(vettedPackages)),
+            VettedPackages.tryCreate(participantId, VettedPackage.unbounded(vettedPackages)),
           protocolVersion = testedProtocolVersion,
         ),
         signatures = NonEmpty(Set, Signature.noSignature),

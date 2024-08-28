@@ -123,17 +123,15 @@ final class GeneratorsTransaction(
   implicit val authorityOfTopologyTransactionArb: Arbitrary[AuthorityOf] = Arbitrary(
     for {
       partyId <- Arbitrary.arbitrary[PartyId]
-      domain <- Arbitrary.arbitrary[Option[DomainId]]
       authorizers <- Arbitrary.arbitrary[NonEmpty[Seq[PartyId]]]
       // Not using Arbitrary.arbitrary[PositiveInt] for threshold to honor constraint
       threshold <- Gen.choose(1, authorizers.size).map(PositiveInt.tryCreate)
-    } yield AuthorityOf.create(partyId, domain, threshold, authorizers).value
+    } yield AuthorityOf.create(partyId, threshold, authorizers).value
   )
 
   implicit val partyToParticipantTopologyTransactionArb: Arbitrary[PartyToParticipant] = Arbitrary(
     for {
       partyId <- Arbitrary.arbitrary[PartyId]
-      domain <- Arbitrary.arbitrary[Option[DomainId]]
       participants <- Arbitrary.arbitrary[NonEmpty[Seq[HostingParticipant]]]
       // Not using Arbitrary.arbitrary[PositiveInt] for threshold to honor constraint
       threshold <- Gen
@@ -141,16 +139,15 @@ final class GeneratorsTransaction(
         .map(PositiveInt.tryCreate)
       groupAddressing <- Arbitrary.arbitrary[Boolean]
     } yield PartyToParticipant
-      .create(partyId, domain, threshold, participants, groupAddressing)
+      .create(partyId, threshold, participants, groupAddressing)
       .value
   )
 
   implicit val vettedPackagesTopologyTransactionArb: Arbitrary[VettedPackages] = Arbitrary(
     for {
       participantId <- Arbitrary.arbitrary[ParticipantId]
-      domain <- Arbitrary.arbitrary[Option[DomainId]]
       vettedPackages <- Gen.listOf(Arbitrary.arbitrary[VettedPackage])
-    } yield VettedPackages.create(participantId, domain, vettedPackages).value
+    } yield VettedPackages.create(participantId, vettedPackages).value
   )
 
   implicit val partyToKeyTopologyTransactionArb: Arbitrary[PartyToKeyMapping] = Arbitrary(

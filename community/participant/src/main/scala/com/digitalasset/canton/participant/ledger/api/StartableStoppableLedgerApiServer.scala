@@ -204,7 +204,7 @@ class StartableStoppableLedgerApiServer(
       Some(config.adminToken),
       parent = config.serverConfig.authServices.map(
         _.create(
-          config.cantonParameterConfig.ledgerApiServerParameters.jwtTimestampLeeway,
+          config.serverConfig.jwtTimestampLeeway,
           loggerFactory,
         )
       ),
@@ -367,8 +367,7 @@ class StartableStoppableLedgerApiServer(
         maxDeduplicationDuration = config.maxDeduplicationDuration,
         authService = authService,
         jwtVerifierLoader = jwtVerifierLoader,
-        jwtTimestampLeeway =
-          config.cantonParameterConfig.ledgerApiServerParameters.jwtTimestampLeeway,
+        jwtTimestampLeeway = config.serverConfig.jwtTimestampLeeway,
         tokenExpiryGracePeriodForStreams =
           config.cantonParameterConfig.ledgerApiServerParameters.tokenExpiryGracePeriodForStreams,
         meteringReportKey = config.meteringReportKey,
