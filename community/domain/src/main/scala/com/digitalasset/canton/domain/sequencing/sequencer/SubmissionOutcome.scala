@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.protocol.{Batch, ClosedEnvelope, SubmissionRequest}
+import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.rpc.status.Status
@@ -18,6 +19,10 @@ sealed trait DeliverableSubmissionOutcome extends SubmissionOutcome {
   def deliverToMembers: Set[Member]
 
   def submissionTraceContext: TraceContext
+
+  def trafficReceiptO: Option[TrafficReceipt]
+
+  def updateTrafficReceipt(trafficReceiptO: Option[TrafficReceipt]): DeliverableSubmissionOutcome
 }
 
 object SubmissionOutcome {
@@ -36,7 +41,12 @@ object SubmissionOutcome {
       override val deliverToMembers: Set[Member],
       batch: Batch[ClosedEnvelope],
       override val submissionTraceContext: TraceContext,
-  ) extends DeliverableSubmissionOutcome
+      override val trafficReceiptO: Option[TrafficReceipt],
+  ) extends DeliverableSubmissionOutcome {
+    override def updateTrafficReceipt(
+        trafficReceiptO: Option[TrafficReceipt]
+    ): DeliverableSubmissionOutcome = copy(trafficReceiptO = trafficReceiptO)
+  }
 
   /** Receipt, is sent to the sender of an aggregate submission still awaiting more votes.
     * No messages are sent to the recipients.
@@ -47,8 +57,13 @@ object SubmissionOutcome {
       override val submission: SubmissionRequest,
       override val sequencingTime: CantonTimestamp,
       override val submissionTraceContext: TraceContext,
+      override val trafficReceiptO: Option[TrafficReceipt],
   ) extends DeliverableSubmissionOutcome {
     override def deliverToMembers: Set[Member] = Set(submission.sender)
+
+    override def updateTrafficReceipt(
+        trafficReceiptO: Option[TrafficReceipt]
+    ): DeliverableSubmissionOutcome = copy(trafficReceiptO = trafficReceiptO)
   }
 
   /** The submission was fully discarded, no error is delivered to sender, no messages are sent to the members.
@@ -65,8 +80,13 @@ object SubmissionOutcome {
       override val sequencingTime: CantonTimestamp,
       error: Status,
       override val submissionTraceContext: TraceContext,
+      override val trafficReceiptO: Option[TrafficReceipt],
   ) extends DeliverableSubmissionOutcome {
     override def deliverToMembers: Set[Member] = Set(submission.sender)
+
+    override def updateTrafficReceipt(
+        trafficReceiptO: Option[TrafficReceipt]
+    ): DeliverableSubmissionOutcome = copy(trafficReceiptO = trafficReceiptO)
   }
 
 }

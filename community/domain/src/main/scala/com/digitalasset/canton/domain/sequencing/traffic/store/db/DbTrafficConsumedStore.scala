@@ -30,14 +30,32 @@ class DbTrafficConsumedStore(
   import storage.api.*
 
   override def store(
-      trafficConsumed: TrafficConsumed
+      trafficUpdates: Seq[TrafficConsumed]
   )(implicit traceContext: TraceContext): Future[Unit] = {
     val insertSql =
-      sqlu"""insert into seq_traffic_control_consumed_journal (member, sequencing_timestamp, extra_traffic_consumed, base_traffic_remainder, last_consumed_cost)
-             values (${trafficConsumed.member}, ${trafficConsumed.sequencingTimestamp}, ${trafficConsumed.extraTrafficConsumed}, ${trafficConsumed.baseTrafficRemainder}, ${trafficConsumed.lastConsumedCost})
+      """insert into seq_traffic_control_consumed_journal (member, sequencing_timestamp, extra_traffic_consumed, base_traffic_remainder, last_consumed_cost)
+             values (?, ?, ?, ?, ?)
              on conflict do nothing"""
 
-    storage.update_(insertSql, functionFullName)
+    val bulkInsert = DbStorage
+      .bulkOperation(insertSql, trafficUpdates, storage.profile) { pp => trafficConsumed =>
+        val TrafficConsumed(
+          member,
+          sequencingTimestamp,
+          extraTrafficConsumed,
+          baseTrafficRemainder,
+          lastConsumedCost,
+        ) = trafficConsumed
+        pp >> member
+        pp >> sequencingTimestamp
+        pp >> extraTrafficConsumed
+        pp >> baseTrafficRemainder
+        pp >> lastConsumedCost
+      }
+      .map(_.sum)
+    storage
+      .queryAndUpdate(bulkInsert, functionFullName)
+      .map(updateCount => logger.debug(s"Stored $updateCount traffic consumed entries"))
   }
 
   override def lookup(

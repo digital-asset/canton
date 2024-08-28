@@ -92,7 +92,7 @@ trait SequencerStoreTest
                 baseTrafficRemainder = baseTrafficRemainder,
                 lastConsumedCost = consumedCost,
               )
-            trafficStore.toList.parTraverse_(_.store(trafficConsumed))
+            trafficStore.toList.parTraverse_(_.store(Seq(trafficConsumed)))
           case None => Future.unit
         }
 
