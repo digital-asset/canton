@@ -49,7 +49,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
-import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
+import com.digitalasset.canton.util.retry.AllExceptionRetryPolicy
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, SequencerAlias, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
@@ -1273,7 +1273,7 @@ object SequencerClient {
     }
     retry
       .Pause(loggingContext.logger, performUnlessClosing, maxRetries, delay, sendDescription)
-      .unlessShutdown(doSend(), AllExnRetryable)(
+      .unlessShutdown(doSend(), AllExceptionRetryPolicy)(
         retry.Success.always,
         ec,
         loggingContext.traceContext,
