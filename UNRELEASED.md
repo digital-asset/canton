@@ -14,6 +14,9 @@ writer {
 }
 ```
 
+### Traffic purchase handler returns early
+SetTrafficPurchased requests return immediately and no longer return the max sequencing time.
+
 ## Until 2024-07-31 (Exclusive)
 
 - Renamed metric `daml_sequencer_client_handler_delay` => `daml_block_delay` (sequencer block processing delay relative to sequencers local wall clock)

@@ -7,7 +7,6 @@ import cats.syntax.apply.*
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.SequencerPruningStatus
 import com.digitalasset.canton.domain.sequencing.sequencer.traffic.TimestampSelector.TimestampSelector
 import com.digitalasset.canton.domain.sequencing.sequencer.traffic.{
@@ -92,7 +91,7 @@ object SequencerAdminCommands {
   ) extends BaseSequencerAdministrationCommands[
         admin.v30.SetTrafficPurchasedRequest,
         admin.v30.SetTrafficPurchasedResponse,
-        Option[CantonTimestamp],
+        Unit,
       ] {
     override def createRequest(): Either[String, admin.v30.SetTrafficPurchasedRequest] = Right(
       admin.v30.SetTrafficPurchasedRequest(member.toProtoPrimitive, serial.value, balance.value)
@@ -104,9 +103,6 @@ object SequencerAdminCommands {
       service.setTrafficPurchased(request)
     override def handleResponse(
         response: admin.v30.SetTrafficPurchasedResponse
-    ): Either[String, Option[CantonTimestamp]] =
-      response.maxSequencingTimestamp
-        .traverse(CantonTimestamp.fromProtoTimestamp)
-        .leftMap(_.message)
+    ): Either[String, Unit] = Right(())
   }
 }

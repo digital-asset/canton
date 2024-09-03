@@ -9,6 +9,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.UnlessShutdown
+import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
   SetTrafficPurchasedMessage,
@@ -41,6 +42,7 @@ import com.google.rpc.status.Status
 import org.mockito.ArgumentCaptor
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.wordspec.AnyWordSpec
+import org.slf4j.event.Level
 
 import java.time.{LocalDateTime, ZoneOffset}
 import scala.jdk.CollectionConverters.CollectionHasAsScala
@@ -119,9 +121,7 @@ class TrafficPurchasedSubmissionHandlerTest
       trafficParams.setBalanceRequestSubmissionWindowSize.duration.toSeconds
     )
 
-    resultF.failOnShutdown.futureValue shouldBe Right(
-      clock.now.plusSeconds(trafficParams.setBalanceRequestSubmissionWindowSize.duration.toSeconds)
-    )
+    resultF.failOnShutdown.futureValue shouldBe Right(())
 
     val batch = batchCapture.getValue
     batch.envelopes.head.recipients shouldBe Recipients(
@@ -218,7 +218,7 @@ class TrafficPurchasedSubmissionHandlerTest
       ),
     )
 
-    resultF.failOnShutdown.futureValue shouldBe Right(mkTimeBucketUpperBound(36))
+    resultF.failOnShutdown.futureValue shouldBe Right(())
   }
 
   "catch sequencer client failures" in {
@@ -254,7 +254,7 @@ class TrafficPurchasedSubmissionHandlerTest
     )
   }
 
-  "catch sequencing failures" in {
+  "log sequencing failures" in {
     val callbackCapture: ArgumentCaptor[SendCallback] =
       ArgumentCaptor.forClass(classOf[SendCallback])
     when(
@@ -270,21 +270,6 @@ class TrafficPurchasedSubmissionHandlerTest
     )
       .thenReturn(EitherT.pure(()))
 
-    val resultF = handler
-      .sendTrafficPurchasedRequest(
-        recipient1,
-        domainId,
-        testedProtocolVersion,
-        PositiveInt.tryCreate(5),
-        NonNegativeLong.tryCreate(1000),
-        sequencerClient,
-        crypto,
-      )
-      .value
-
-    eventually() {
-      Try(callbackCapture.getValue).isSuccess shouldBe true
-    }
     val messageId = MessageId.randomMessageId()
     val deliverError = DeliverError.create(
       SequencerCounter.Genesis,
@@ -295,18 +280,43 @@ class TrafficPurchasedSubmissionHandlerTest
       testedProtocolVersion,
       Option.empty[TrafficReceipt],
     )
-    callbackCapture.getValue.asInstanceOf[SendCallback.CallbackFuture](
-      UnlessShutdown.Outcome(SendResult.Error(deliverError))
-    )
 
-    resultF.failOnShutdown.futureValue shouldBe Left(
-      TrafficControlErrors.TrafficPurchasedRequestAsyncSendFailed.Error(
-        s"DeliverError(counter = 0, timestamp = 1970-01-01T00:00:00Z, domain id = da::default, message id = $messageId, reason = Status(OK, BOOM))"
-      )
+    loggerFactory.assertEventuallyLogsSeq(SuppressionRule.Level(Level.INFO))(
+      {
+        val resultF = handler.sendTrafficPurchasedRequest(
+          recipient1,
+          domainId,
+          testedProtocolVersion,
+          PositiveInt.tryCreate(5),
+          NonNegativeLong.tryCreate(1000),
+          sequencerClient,
+          crypto,
+        )
+
+        eventually() {
+          Try(callbackCapture.getValue).isSuccess shouldBe true
+        }
+        callbackCapture.getValue.asInstanceOf[SendCallback.CallbackFuture](
+          UnlessShutdown.Outcome(SendResult.Error(deliverError))
+        )
+
+        resultF.failOnShutdown.value.futureValue shouldBe Right(())
+      },
+      LogEntry.assertLogSeq(
+        Seq(
+          (
+            _.message should include(
+              s"The traffic balance request submission failed: DeliverError(counter = 0, timestamp = 1970-01-01T00:00:00Z, domain id = da::default, message id = $messageId, reason = Status(OK, BOOM))"
+            ),
+            "sequencing failure",
+          )
+        ),
+        Seq(_ => succeed),
+      ),
     )
   }
 
-  "catch sequencing timeouts" in {
+  "log sequencing timeouts" in {
     val callbackCapture: ArgumentCaptor[SendCallback] =
       ArgumentCaptor.forClass(classOf[SendCallback])
     when(
@@ -322,29 +332,38 @@ class TrafficPurchasedSubmissionHandlerTest
     )
       .thenReturn(EitherT.pure(()))
 
-    val resultF = handler
-      .sendTrafficPurchasedRequest(
-        recipient1,
-        domainId,
-        testedProtocolVersion,
-        PositiveInt.tryCreate(5),
-        NonNegativeLong.tryCreate(1000),
-        sequencerClient,
-        crypto,
-      )
-      .value
+    loggerFactory.assertEventuallyLogsSeq(SuppressionRule.Level(Level.WARN))(
+      {
+        val resultF = handler.sendTrafficPurchasedRequest(
+          recipient1,
+          domainId,
+          testedProtocolVersion,
+          PositiveInt.tryCreate(5),
+          NonNegativeLong.tryCreate(1000),
+          sequencerClient,
+          crypto,
+        )
 
-    eventually() {
-      Try(callbackCapture.getValue).isSuccess shouldBe true
-    }
-    callbackCapture.getValue.asInstanceOf[SendCallback.CallbackFuture](
-      UnlessShutdown.Outcome(SendResult.Timeout(CantonTimestamp.Epoch))
-    )
+        eventually() {
+          Try(callbackCapture.getValue).isSuccess shouldBe true
+        }
+        callbackCapture.getValue.asInstanceOf[SendCallback.CallbackFuture](
+          UnlessShutdown.Outcome(SendResult.Timeout(CantonTimestamp.Epoch))
+        )
 
-    resultF.failOnShutdown.futureValue shouldBe Left(
-      TrafficControlErrors.TrafficPurchasedRequestAsyncSendFailed.Error(
-        s"Submission timed out after sequencing time ${CantonTimestamp.Epoch} has elapsed"
-      )
+        resultF.value.failOnShutdown.futureValue shouldBe Right(())
+      },
+      LogEntry.assertLogSeq(
+        Seq(
+          (
+            _.warningMessage should include(
+              s"The traffic balance request submission timed out after sequencing time 1970-01-01T00:00:00Z has elapsed"
+            ),
+            "timeout",
+          )
+        ),
+        Seq.empty,
+      ),
     )
   }
 }
