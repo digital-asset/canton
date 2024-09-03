@@ -277,17 +277,21 @@ class TopologyAdministrationGroup(
 
     def sign(
         transactions: Seq[GenericSignedTopologyTransaction],
-        signedBy: Seq[Fingerprint] = Seq(instance.id.fingerprint),
+        store: String,
+        signedBy: Seq[Fingerprint] = Seq.empty,
+        forceFlags: ForceFlags = ForceFlags.none,
     ): Seq[GenericSignedTopologyTransaction] =
       consoleEnvironment.run {
-        adminCommand(TopologyAdminCommands.Write.SignTransactions(transactions, signedBy))
+        adminCommand(
+          TopologyAdminCommands.Write.SignTransactions(transactions, store, signedBy, forceFlags)
+        )
       }
 
     def authorize[M <: TopologyMapping: ClassTag](
         txHash: TxHash,
         mustBeFullyAuthorized: Boolean,
         store: String,
-        signedBy: Seq[Fingerprint] = Seq(instance.id.fingerprint),
+        signedBy: Seq[Fingerprint] = Seq.empty,
     ): SignedTopologyTransaction[TopologyChangeOp, M] =
       consoleEnvironment.run {
         adminCommand(
@@ -494,8 +498,6 @@ class TopologyAdministrationGroup(
       val isDomainOwner = domainOwners.contains(instance.id)
       require(isDomainOwner, s"Only domain owners should call $functionFullName.")
 
-      val thisNodeRootKey = Some(instance.id.fingerprint)
-
       def latest[M <: TopologyMapping: ClassTag](hash: MappingHash) =
         instance.topology.transactions
           .findLatestByMappingHash[M](
@@ -516,7 +518,7 @@ class TopologyAdministrationGroup(
                   consoleEnvironment.environment.clock,
                   ProtocolVersion.latest,
                 ),
-              signedBy = thisNodeRootKey,
+              signedBy = None,
               store = Some(AuthorizedStore.filterName),
               synchronize = None,
             )
@@ -530,7 +532,7 @@ class TopologyAdministrationGroup(
               threshold = PositiveInt.one,
               group = NonNegativeInt.zero,
               active = mediators,
-              signedBy = thisNodeRootKey,
+              signedBy = None,
               store = Some(AuthorizedStore.filterName),
             )
           )
@@ -542,7 +544,7 @@ class TopologyAdministrationGroup(
               domainId,
               threshold = PositiveInt.one,
               active = sequencers,
-              signedBy = thisNodeRootKey,
+              signedBy = None,
               store = Some(AuthorizedStore.filterName),
             )
           )
@@ -603,9 +605,7 @@ class TopologyAdministrationGroup(
         threshold: PositiveInt,
         store: String,
         mustFullyAuthorize: Boolean = false,
-        // TODO(#14056) don't use the instance's root namespace key by default.
-        //  let the grpc service figure out the right key to use, once that's implemented
-        signedBy: Option[Fingerprint] = Some(instance.id.fingerprint),
+        signedBy: Option[Fingerprint] = None,
         serial: Option[PositiveInt] = None,
         synchronize: Option[config.NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
@@ -658,7 +658,7 @@ class TopologyAdministrationGroup(
         decentralizedNamespace: DecentralizedNamespaceDefinition,
         store: String,
         mustFullyAuthorize: Boolean = false,
-        signedBy: Seq[Fingerprint],
+        signedBy: Seq[Fingerprint] = Seq.empty,
         serial: Option[PositiveInt] = None,
         synchronize: Option[config.NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
@@ -715,10 +715,11 @@ class TopologyAdministrationGroup(
         store: String = AuthorizedStore.filterName,
         mustFullyAuthorize: Boolean = true,
         serial: Option[PositiveInt] = None,
-        signedBy: Seq[Fingerprint] = Seq(instance.id.fingerprint),
+        signedBy: Seq[Fingerprint] = Seq.empty,
         synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
+        forceFlags: ForceFlags = ForceFlags.none,
     ): SignedTopologyTransaction[TopologyChangeOp, NamespaceDelegation] =
       synchronisation.runAdminCommand(synchronize)(
         TopologyAdminCommands.Write.Propose(
@@ -728,7 +729,7 @@ class TopologyAdministrationGroup(
           serial = serial,
           change = TopologyChangeOp.Replace,
           mustFullyAuthorize = mustFullyAuthorize,
-          forceChanges = ForceFlags.none,
+          forceChanges = forceFlags,
         )
       )
 
@@ -762,7 +763,7 @@ class TopologyAdministrationGroup(
         store: String = AuthorizedStore.filterName,
         mustFullyAuthorize: Boolean = true,
         serial: Option[PositiveInt] = None,
-        signedBy: Seq[Fingerprint] = Seq(instance.id.fingerprint),
+        signedBy: Seq[Fingerprint] = Seq.empty,
         force: Boolean = false,
         synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
@@ -867,7 +868,7 @@ class TopologyAdministrationGroup(
           identifier = uid,
           target = targetKey,
         ),
-        signedBy = Seq(instance.id.fingerprint),
+        signedBy = Seq.empty,
         serial = serial,
         mustFullyAuthorize = mustFullyAuthorize,
         store = store,
@@ -955,7 +956,7 @@ class TopologyAdministrationGroup(
         key: Fingerprint,
         purpose: KeyPurpose,
         keyOwner: Member = instance.id.member,
-        signedBy: Option[Fingerprint] = None,
+        signedBy: Seq[Fingerprint] = Seq.empty,
         synchronize: Option[config.NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
@@ -993,7 +994,7 @@ class TopologyAdministrationGroup(
         key: Fingerprint,
         purpose: KeyPurpose,
         keyOwner: Member = instance.id.member,
-        signedBy: Option[Fingerprint] = None,
+        signedBy: Seq[Fingerprint] = Seq.empty,
         synchronize: Option[config.NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
@@ -1041,10 +1042,6 @@ class TopologyAdministrationGroup(
       require(keysInStore.contains(newKey), "The new key must exist and pertain to this node")
       require(currentKey.purpose == newKey.purpose, "The rotated keys must have the same purpose")
 
-      // TODO(#12945): Remove this workaround once the TopologyManager is able to determine the signing key
-      //  among its IDDs and NSDs.
-      val signingKeyForNow = Some(nodeInstance.id.fingerprint)
-
       // Authorize the new key
       // The owner will now have two keys, but by convention the first one added is always
       // used by everybody.
@@ -1052,7 +1049,7 @@ class TopologyAdministrationGroup(
         newKey.fingerprint,
         newKey.purpose,
         member,
-        signedBy = signingKeyForNow,
+        signedBy = Seq.empty,
         add = true,
         nodeInstance = nodeInstance,
         synchronize = synchronize,
@@ -1073,7 +1070,7 @@ class TopologyAdministrationGroup(
         currentKey.fingerprint,
         currentKey.purpose,
         member,
-        signedBy = signingKeyForNow,
+        signedBy = Seq.empty,
         add = false,
         nodeInstance = nodeInstance,
         synchronize = synchronize,
@@ -1084,7 +1081,7 @@ class TopologyAdministrationGroup(
         key: Fingerprint,
         purpose: KeyPurpose,
         keyOwner: Member,
-        signedBy: Option[Fingerprint] = None,
+        signedBy: Seq[Fingerprint],
         synchronize: Option[config.NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
@@ -1179,7 +1176,7 @@ class TopologyAdministrationGroup(
         proposedMapping: OwnerToKeyMapping,
         serial: RequireTypes.PositiveNumeric[Int],
         ops: TopologyChangeOp = TopologyChangeOp.Replace,
-        signedBy: Option[Fingerprint] = None,
+        signedBy: Seq[Fingerprint] = Seq.empty,
         store: String = AuthorizedStore.filterName,
         synchronize: Option[config.NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
@@ -1191,7 +1188,7 @@ class TopologyAdministrationGroup(
       synchronisation.runAdminCommand(synchronize)(
         TopologyAdminCommands.Write.Propose(
           mapping = proposedMapping,
-          signedBy = signedBy.toList,
+          signedBy = signedBy,
           store = store,
           change = ops,
           serial = Some(serial),
@@ -1302,19 +1299,19 @@ class TopologyAdministrationGroup(
              - "<domain-id>": The topology transaction will be directly submitted to the specified domain without
                               storing it locally first. This also means it will _not_ be synchronized to other domains
                               automatically.
+      force: must be set when disabling a party with active contracts
       """)
     def propose_delta(
         party: PartyId,
         adds: List[(ParticipantId, ParticipantPermission)] = Nil,
         removes: List[ParticipantId] = Nil,
-        signedBy: Option[Fingerprint] = Some(
-          instance.id.fingerprint
-        ), // TODO(#12945) don't use the instance's root namespace key by default.
+        signedBy: Option[Fingerprint] = None,
         synchronize: Option[config.NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
         mustFullyAuthorize: Boolean = false,
         store: String = AuthorizedStore.filterName,
+        force: ForceFlags = ForceFlags.none,
     ): SignedTopologyTransaction[TopologyChangeOp, PartyToParticipant] = {
 
       val currentO = findCurrent(party, store)
@@ -1364,6 +1361,7 @@ class TopologyAdministrationGroup(
           groupAddressing = groupAddressing,
           mustFullyAuthorize = mustFullyAuthorize,
           store = store,
+          forceFlags = force,
         )
       } else {
         // we would remove the last participant, therefore we issue a REMOVE
@@ -1379,6 +1377,7 @@ class TopologyAdministrationGroup(
           groupAddressing = groupAddressing,
           mustFullyAuthorize = mustFullyAuthorize,
           store = store,
+          forceFlags = force,
         )
 
       }
@@ -1416,9 +1415,7 @@ class TopologyAdministrationGroup(
         party: PartyId,
         newParticipants: Seq[(ParticipantId, ParticipantPermission)],
         threshold: PositiveInt = PositiveInt.one,
-        signedBy: Option[Fingerprint] = Some(
-          instance.id.fingerprint
-        ), // TODO(#12945) don't use the instance's root namespace key by default.
+        signedBy: Option[Fingerprint] = None,
         serial: Option[PositiveInt] = None,
         operation: TopologyChangeOp = TopologyChangeOp.Replace,
         synchronize: Option[config.NonNegativeDuration] = Some(
@@ -1427,6 +1424,7 @@ class TopologyAdministrationGroup(
         groupAddressing: Boolean = false,
         mustFullyAuthorize: Boolean = false,
         store: String = AuthorizedStore.filterName,
+        forceFlags: ForceFlags = ForceFlags.none,
     ): SignedTopologyTransaction[TopologyChangeOp, PartyToParticipant] = {
       val command = TopologyAdminCommands.Write.Propose(
         mapping = PartyToParticipant.create(
@@ -1440,7 +1438,7 @@ class TopologyAdministrationGroup(
         change = operation,
         mustFullyAuthorize = mustFullyAuthorize,
         store = store,
-        forceChanges = ForceFlags.none,
+        forceChanges = forceFlags,
       )
 
       synchronisation.runAdminCommand(synchronize)(command)
@@ -1654,7 +1652,7 @@ class TopologyAdministrationGroup(
           participantId,
           domainId,
         ),
-        signedBy = Seq(instance.id.fingerprint),
+        signedBy = Seq.empty,
         store = store.getOrElse(domainId.filterString),
         serial = serial,
         mustFullyAuthorize = mustFullyAuthorize,
@@ -1714,7 +1712,7 @@ class TopologyAdministrationGroup(
           limits = limits,
           loginAfter = loginAfter,
         ),
-        signedBy = Seq(instance.id.fingerprint),
+        signedBy = Seq.empty,
         serial = serial,
         store = store.getOrElse(domainId.filterString),
         mustFullyAuthorize = mustFullyAuthorize,
@@ -1861,7 +1859,7 @@ class TopologyAdministrationGroup(
         partyId: PartyId,
         store: Option[String] = None,
         mustFullyAuthorize: Boolean = false,
-        signedBy: Seq[Fingerprint] = Seq(instance.id.fingerprint),
+        signedBy: Seq[Fingerprint] = Seq.empty,
         serial: Option[PositiveInt] = None,
         synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
@@ -1917,9 +1915,7 @@ class TopologyAdministrationGroup(
         synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
-        signedBy: Option[Fingerprint] = Some(
-          instance.id.fingerprint
-        ), // TODO(#12945) don't use the instance's root namespace key by default.
+        signedBy: Option[Fingerprint] = None,
         force: ForceFlags = ForceFlags.none,
     ): Unit = {
 
@@ -2014,9 +2010,7 @@ class TopologyAdministrationGroup(
           consoleEnvironment.commandTimeouts.bounded
         ),
         serial: Option[PositiveInt] = None,
-        signedBy: Option[Fingerprint] = Some(
-          instance.id.fingerprint
-        ), // TODO(#12945) don't use the instance's root namespace key by default.
+        signedBy: Option[Fingerprint] = None,
         force: ForceFlags = ForceFlags.none,
     ): Unit = {
 
@@ -2059,87 +2053,6 @@ class TopologyAdministrationGroup(
             protocolVersion.map(ProtocolVersion.tryCreate),
           ),
           filterParticipant,
-        )
-      )
-    }
-  }
-
-  @Help.Summary("Manage authority-of mappings")
-  @Help.Group("Authority-of mappings")
-  object authority_of extends Helpful {
-    @Help.Summary("Propose a new AuthorityOf mapping.")
-    @Help.Description("""
-        partyId: the party for which the authority delegation is granted
-        threshold: the minimum number of parties that need to authorize a daml (sub-)transaction for the authority of `partyId` to be granted.
-        parties: the parties that need to provide authorization for the authority of `partyId` to be granted.
-
-        store: - "Authorized": the topology transaction will be stored in the node's authorized store and automatically
-                               propagated to connected domains, if applicable.
-               - "<domain-id>": the topology transaction will be directly submitted to the specified domain without
-                                storing it locally first. This also means it will _not_ be synchronized to other domains
-                                automatically.
-        mustFullyAuthorize: when set to true, the proposal's previously received signatures and the signature of this node must be
-                            sufficient to fully authorize the topology transaction. if this is not the case, the request fails.
-                            when set to false, the proposal retains the proposal status until enough signatures are accumulated to
-                            satisfy the mapping's authorization requirements.
-        signedBy: the fingerprint of the key to be used to sign this proposal
-        serial: the expected serial this topology transaction should have. Serials must be contiguous and start at 1.
-                This transaction will be rejected if another fully authorized transaction with the same serial already
-                exists, or if there is a gap between this serial and the most recently used serial.
-                If None, the serial will be automatically selected by the node.""")
-    def propose(
-        partyId: PartyId,
-        threshold: Int,
-        parties: Seq[PartyId],
-        store: String = AuthorizedStore.filterName,
-        mustFullyAuthorize: Boolean = false,
-        // TODO(#14056) don't use the instance's root namespace key by default.
-        //  let the grpc service figure out the right key to use, once that's implemented
-        signedBy: Option[Fingerprint] = Some(instance.id.fingerprint),
-        serial: Option[PositiveInt] = None,
-        synchronize: Option[config.NonNegativeDuration] = Some(
-          consoleEnvironment.commandTimeouts.bounded
-        ),
-    ): SignedTopologyTransaction[TopologyChangeOp, AuthorityOf] = {
-
-      val authorityOf = AuthorityOf
-        .create(
-          partyId,
-          PositiveInt.tryCreate(threshold),
-          parties,
-        )
-        .valueOr(error => consoleEnvironment.run(GenericCommandError(error)))
-      val command = TopologyAdminCommands.Write.Propose(
-        authorityOf,
-        signedBy = signedBy.toList,
-        serial = serial,
-        store = store,
-        mustFullyAuthorize = mustFullyAuthorize,
-      )
-
-      synchronisation.runAdminCommand(synchronize)(command)
-    }
-
-    def list(
-        filterStore: String = "",
-        proposals: Boolean = false,
-        timeQuery: TimeQuery = TimeQuery.HeadState,
-        operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
-        filterParty: String = "",
-        filterSigningKey: String = "",
-        protocolVersion: Option[String] = None,
-    ): Seq[ListAuthorityOfResult] = consoleEnvironment.run {
-      adminCommand(
-        TopologyAdminCommands.Read.ListAuthorityOf(
-          BaseQuery(
-            filterStore,
-            proposals,
-            timeQuery,
-            operation,
-            filterSigningKey,
-            protocolVersion.map(ProtocolVersion.tryCreate),
-          ),
-          filterParty,
         )
       )
     }
@@ -2212,9 +2125,7 @@ class TopologyAdministrationGroup(
           consoleEnvironment.commandTimeouts.bounded
         ),
         mustFullyAuthorize: Boolean = false,
-        // TODO(#14056) don't use the instance's root namespace key by default.
-        //  let the grpc service figure out the right key to use, once that's implemented
-        signedBy: Option[Fingerprint] = Some(instance.id.fingerprint),
+        signedBy: Option[Fingerprint] = None,
     ): Unit = {
 
       MediatorGroupDeltaComputations
@@ -2324,9 +2235,7 @@ class TopologyAdministrationGroup(
           consoleEnvironment.commandTimeouts.bounded
         ),
         mustFullyAuthorize: Boolean = false,
-        // TODO(#14056) don't use the instance's root namespace key by default.
-        //  let the grpc service figure out the right key to use, once that's implemented
-        signedBy: Option[Fingerprint] = Some(instance.id.fingerprint),
+        signedBy: Option[Fingerprint] = None,
         serial: Option[PositiveInt] = None,
     ): SignedTopologyTransaction[TopologyChangeOp, MediatorDomainState] = {
       val command = TopologyAdminCommands.Write.Propose(
@@ -2373,7 +2282,7 @@ class TopologyAdministrationGroup(
 
       val command = TopologyAdminCommands.Write.Propose(
         mapping = mediatorStateResult.item,
-        signedBy = mediatorStateResult.context.signedBy,
+        signedBy = Seq.empty,
         serial = Some(mediatorStateResult.context.serial.increment),
         change = TopologyChangeOp.Remove,
         mustFullyAuthorize = mustFullyAuthorize,
@@ -2441,9 +2350,7 @@ class TopologyAdministrationGroup(
         passive: Seq[SequencerId] = Seq.empty,
         store: Option[String] = None,
         mustFullyAuthorize: Boolean = false,
-        // TODO(#14056) don't use the instance's root namespace key by default.
-        //  let the grpc service figure out the right key to use, once that's implemented
-        signedBy: Option[Fingerprint] = Some(instance.id.fingerprint),
+        signedBy: Option[Fingerprint] = None,
         serial: Option[PositiveInt] = None,
     ): SignedTopologyTransaction[TopologyChangeOp, SequencerDomainState] =
       consoleEnvironment.run {
@@ -2533,9 +2440,7 @@ class TopologyAdministrationGroup(
         parameters: ConsoleDynamicDomainParameters,
         store: Option[String] = None,
         mustFullyAuthorize: Boolean = false,
-        // TODO(#14056) don't use the instance's root namespace key by default.
-        //  let the grpc service figure out the right key to use, once that's implemented
-        signedBy: Option[Fingerprint] = Some(instance.id.fingerprint),
+        signedBy: Option[Fingerprint] = None,
         serial: Option[PositiveInt] = None,
         synchronize: Option[config.NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
@@ -2612,8 +2517,7 @@ class TopologyAdministrationGroup(
         domainId: DomainId,
         update: ConsoleDynamicDomainParameters => ConsoleDynamicDomainParameters,
         mustFullyAuthorize: Boolean = false,
-        // TODO(#14056) don't use the instance's root namespace key by default.
-        signedBy: Option[Fingerprint] = Some(instance.id.fingerprint),
+        signedBy: Option[Fingerprint] = None,
         synchronize: Option[config.NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),

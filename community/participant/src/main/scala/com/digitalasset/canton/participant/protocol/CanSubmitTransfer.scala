@@ -11,7 +11,7 @@ import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingS
   NoTransferSubmissionPermission,
   TransferProcessorError,
 }
-import com.digitalasset.canton.protocol.{LfContractId, TransferId}
+import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
@@ -21,7 +21,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 private[protocol] object CanSubmitTransfer {
 
-  def transferOut(
+  def unassignment(
       contractId: LfContractId,
       topologySnapshot: TopologySnapshot,
       submitter: LfPartyId,
@@ -30,11 +30,11 @@ private[protocol] object CanSubmitTransfer {
       ec: ExecutionContext,
       tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, TransferProcessorError, Unit] =
-    check(s"transfer-out of $contractId", topologySnapshot, submitter, participantId)
+    check(s"Unassignment of $contractId", topologySnapshot, submitter, participantId)
       .mapK(FutureUnlessShutdown.outcomeK)
 
-  def transferIn(
-      transferId: TransferId,
+  def assignment(
+      reassignmentId: ReassignmentId,
       topologySnapshot: TopologySnapshot,
       submitter: LfPartyId,
       participantId: ParticipantId,
@@ -42,7 +42,7 @@ private[protocol] object CanSubmitTransfer {
       ec: ExecutionContext,
       tc: TraceContext,
   ): EitherT[Future, TransferProcessorError, Unit] =
-    check(s"transfer-in `$transferId`", topologySnapshot, submitter, participantId)
+    check(s"assignment `$reassignmentId`", topologySnapshot, submitter, participantId)
 
   private def check(
       kind: => String,

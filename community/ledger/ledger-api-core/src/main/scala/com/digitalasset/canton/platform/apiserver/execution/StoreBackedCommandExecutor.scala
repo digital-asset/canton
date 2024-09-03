@@ -47,7 +47,6 @@ private[apiserver] final class StoreBackedCommandExecutor(
     participant: Ref.ParticipantId,
     writeService: WriteService,
     contractStore: ContractStore,
-    authorityResolver: AuthorityResolver,
     authenticateContract: AuthenticateContract,
     metrics: LedgerApiServerMetrics,
     config: EngineLoggingConfig,
@@ -310,30 +309,6 @@ private[apiserver] final class StoreBackedCommandExecutor(
                 Future.successful(Left(error))
               } else resume()
           }
-
-        case ResultNeedAuthority(holding @ _, requesting @ _, resume) =>
-          authorityResolver
-            // TODO(i12742) DomainId is required to be passed here
-            .resolve(AuthorityResolver.AuthorityRequest(holding, requesting, domainId = None))
-            .flatMap { response =>
-              val resumed = response match {
-                case AuthorityResolver.AuthorityResponse.MissingAuthorisation(parties) =>
-                  val receivedAuthorityFor = (parties -- requesting).mkString(",")
-                  val missingAuthority = parties.mkString(",")
-                  logger.debug(
-                    s"Authorisation failed. Missing authority: [$missingAuthority]. Received authority for: [$receivedAuthorityFor]"
-                  )
-                  false
-                case AuthorityResolver.AuthorityResponse.Authorized =>
-                  true
-              }
-              resolveStep(
-                Tracked.value(
-                  metrics.execution.engineRunning,
-                  trackSyncExecution(interpretationTimeNanos)(resume(resumed)),
-                )
-              )
-            }
 
         case ResultNeedUpgradeVerification(coid, signatories, observers, keyOpt, resume) =>
           checkContractUpgradable(coid, signatories, observers, keyOpt, disclosedContracts)

@@ -21,11 +21,11 @@ import scala.concurrent.{Await, ExecutionContext}
 
 object TransferResultHelpers {
 
-  def transferOutResult(
+  def unassignmentResult(
       sourceDomain: SourceDomainId,
       cryptoSnapshot: SyncCryptoApi,
       participantId: ParticipantId,
-  )(implicit traceContext: TraceContext): DeliveredTransferOutResult = {
+  )(implicit traceContext: TraceContext): DeliveredUnassignmentResult = {
     val protocolVersion = BaseTest.testedProtocolVersion
 
     implicit val ec: ExecutionContext = DirectExecutionContext(
@@ -35,7 +35,7 @@ object TransferResultHelpers {
     val result =
       ConfirmationResultMessage.create(
         sourceDomain.id,
-        ViewType.TransferOutViewType,
+        ViewType.UnassignmentViewType,
         RequestId(CantonTimestamp.Epoch),
         TestHash.dummyRootHash,
         Verdict.Approve(protocolVersion),
@@ -74,14 +74,13 @@ object TransferResultHelpers {
       BaseTest.testedProtocolVersion,
     )
 
-    val transferOutResult = DeliveredTransferOutResult(signedContent)
-    transferOutResult
+    DeliveredUnassignmentResult(signedContent)
   }
 
-  def transferInResult(targetDomain: TargetDomainId): ConfirmationResultMessage =
+  def assignmentResult(targetDomain: TargetDomainId): ConfirmationResultMessage =
     ConfirmationResultMessage.create(
       targetDomain.id,
-      ViewType.TransferInViewType,
+      ViewType.AssignmentViewType,
       RequestId(CantonTimestamp.Epoch),
       TestHash.dummyRootHash,
       Verdict.Approve(BaseTest.testedProtocolVersion),

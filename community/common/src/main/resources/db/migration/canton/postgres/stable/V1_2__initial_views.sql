@@ -30,7 +30,7 @@ select
     when $1 = 7 then 'PartyHostingLimits'
     when $1 = 8 then 'VettedPackages'
     when $1 = 9 then 'PartyToParticipant'
-    when $1 = 10 then 'AuthorityOf'
+    -- 10 was AuthorityOf
     when $1 = 11 then 'DomainParameters'
     when $1 = 12 then 'MediatorDomainState'
     when $1 = 13 then 'SequencerDomainState'
@@ -696,8 +696,7 @@ create or replace view debug.ord_metadata_output_blocks as
     epoch_number,
     block_number,
     debug.canton_timestamp(bft_ts) as bft_ts,
-    debug.canton_timestamp(last_topology_ts) as last_topology_ts,
-    num_txs
+    debug.canton_timestamp(last_topology_ts) as last_topology_ts
   from ord_metadata_output_blocks;
 
 create or replace view debug.common_static_strings as

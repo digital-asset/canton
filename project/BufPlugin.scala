@@ -13,6 +13,8 @@ object BufPlugin extends AutoPlugin {
     val bufFormat = taskKey[Unit]("Re-formats the Protobuf files in place")
     val bufFormatCheck = taskKey[Unit]("Checks whether the Protobuf files are already formatted")
     val bufLintCheck = taskKey[Unit]("Checks whether the Protobuf files pass linting")
+    val bufWrapperValueCheck =
+      taskKey[Unit]("Checks that google.protobuf.*Value wrappers are not used")
   }
   import autoImport.*
 
@@ -28,6 +30,7 @@ object BufPlugin extends AutoPlugin {
     val FormatOverwrite: Command = Command("buf format --diff --write")
     val FormatCheck: Command = Command("buf format --diff --exit-code")
     val LintCheck: Command = Command("buf lint")
+    val WrapperValueCheck: Command = Command("bash ./scripts/ci/check-protobuf-wrappers.sh")
   }
 
   private def run(command: Command): Def.Initialize[Task[Unit]] =
@@ -54,6 +57,9 @@ object BufPlugin extends AutoPlugin {
     },
     bufLintCheck := {
       run(Command.LintCheck).value
+    },
+    bufWrapperValueCheck := {
+      run(Command.WrapperValueCheck).value
     },
   )
 

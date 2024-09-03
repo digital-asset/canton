@@ -14,7 +14,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.CryptoPureApi
-import com.digitalasset.canton.data.{CantonTimestamp, FullTransferOutTree}
+import com.digitalasset.canton.data.{CantonTimestamp, FullUnassignmentTree}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.GlobalOffset
@@ -22,16 +22,16 @@ import com.digitalasset.canton.participant.protocol.transfer.TransferData.Transf
 import com.digitalasset.canton.participant.protocol.transfer.{IncompleteTransferData, TransferData}
 import com.digitalasset.canton.participant.store.TransferStore
 import com.digitalasset.canton.participant.store.TransferStore.*
-import com.digitalasset.canton.participant.store.db.DbTransferStore.RawDeliveredTransferOutResult
+import com.digitalasset.canton.participant.store.db.DbTransferStore.RawDeliveredUnassignmentResult
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{
+  ReassignmentId,
   SerializableContract,
   SourceDomainId,
   TargetDomainId,
   TransactionId,
   TransferDomainId,
-  TransferId,
 }
 import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
@@ -69,15 +69,15 @@ class DbTransferStore(
   import storage.api.*
   import storage.converters.*
 
-  private def getResultFullTransferOutTree(
+  private def getResultFullUnassignmentTree(
       sourceDomainProtocolVersion: SourceProtocolVersion
-  ): GetResult[FullTransferOutTree] =
+  ): GetResult[FullUnassignmentTree] =
     GetResult(r =>
-      FullTransferOutTree
+      FullUnassignmentTree
         .fromByteString(cryptoApi, sourceDomainProtocolVersion)(
           ByteString.copyFrom(r.<<[Array[Byte]])
         )
-        .fold[FullTransferOutTree](
+        .fold[FullUnassignmentTree](
           error =>
             throw new DbDeserializationException(
               s"Error deserializing transfer out request $error"
@@ -86,35 +86,36 @@ class DbTransferStore(
         )
     )
 
-  private implicit val setResultFullTransferOutTree: SetParameter[FullTransferOutTree] =
-    (r: FullTransferOutTree, pp: PositionedParameters) => pp >> r.toByteString.toByteArray
+  private implicit val setResultFullUnassignmentTree: SetParameter[FullUnassignmentTree] =
+    (r: FullUnassignmentTree, pp: PositionedParameters) => pp >> r.toByteString.toByteArray
 
   private implicit val setParameterSerializableContract: SetParameter[SerializableContract] =
     SerializableContract.getVersionedSetParameter(targetDomainProtocolVersion.v)
 
-  private implicit val getResultOptionRawDeliveredTransferOutResult
-      : GetResult[Option[RawDeliveredTransferOutResult]] = GetResult { r =>
+  private implicit val getResultOptionRawDeliveredUnassignmentResult
+      : GetResult[Option[RawDeliveredUnassignmentResult]] = GetResult { r =>
     r.nextBytesOption().map { bytes =>
-      RawDeliveredTransferOutResult(bytes, GetResult[ProtocolVersion].apply(r))
+      RawDeliveredUnassignmentResult(bytes, GetResult[ProtocolVersion].apply(r))
     }
   }
 
-  private def getResultDeliveredTransferOutResult(
+  private def getResultDeliveredUnassignmentResult(
       sourceProtocolVersion: SourceProtocolVersion
-  ): GetResult[Option[DeliveredTransferOutResult]] =
+  ): GetResult[Option[DeliveredUnassignmentResult]] =
     GetResult(r =>
       r.nextBytesOption().map { bytes =>
-        DbTransferStore.tryCreateDeliveredTransferOutResult(cryptoApi)(bytes, sourceProtocolVersion)
+        DbTransferStore
+          .tryCreateDeliveredUnassignmentResult(cryptoApi)(bytes, sourceProtocolVersion)
       }
     )
 
-  private implicit val setParameterDeliveredTransferOutResult
-      : SetParameter[DeliveredTransferOutResult] =
-    (r: DeliveredTransferOutResult, pp: PositionedParameters) => pp >> r.result.toByteArray
+  private implicit val setParameterDeliveredUnassignmentResult
+      : SetParameter[DeliveredUnassignmentResult] =
+    (r: DeliveredUnassignmentResult, pp: PositionedParameters) => pp >> r.result.toByteArray
 
-  private implicit val setParameterOptionDeliveredTransferOutResult
-      : SetParameter[Option[DeliveredTransferOutResult]] =
-    (r: Option[DeliveredTransferOutResult], pp: PositionedParameters) =>
+  private implicit val setParameterOptionDeliveredUnassignmentResult
+      : SetParameter[Option[DeliveredUnassignmentResult]] =
+    (r: Option[DeliveredUnassignmentResult], pp: PositionedParameters) =>
       pp >> r.map(_.result.toByteArray)
 
   private implicit val getResultTransferData: GetResult[TransferData] = GetResult { r =>
@@ -122,13 +123,13 @@ class DbTransferStore(
 
     TransferData(
       sourceProtocolVersion = sourceProtocolVersion,
-      transferOutTimestamp = GetResult[CantonTimestamp].apply(r),
-      transferOutRequestCounter = GetResult[RequestCounter].apply(r),
-      transferOutRequest = getResultFullTransferOutTree(sourceProtocolVersion).apply(r),
-      transferOutDecisionTime = GetResult[CantonTimestamp].apply(r),
+      unassignmentTs = GetResult[CantonTimestamp].apply(r),
+      unassignmentRequestCounter = GetResult[RequestCounter].apply(r),
+      unassignmentRequest = getResultFullUnassignmentTree(sourceProtocolVersion).apply(r),
+      unassignmentDecisionTime = GetResult[CantonTimestamp].apply(r),
       contract = GetResult[SerializableContract].apply(r),
       creatingTransactionId = GetResult[TransactionId].apply(r),
-      transferOutResult = getResultDeliveredTransferOutResult(sourceProtocolVersion).apply(r),
+      unassignmentResult = getResultDeliveredUnassignmentResult(sourceProtocolVersion).apply(r),
       transferGlobalOffset = TransferGlobalOffset
         .create(
           r.nextLongOption().map(GlobalOffset.tryFromLong),
@@ -146,7 +147,7 @@ class DbTransferStore(
   )
 
   /*
-   Used to ensure updates of the transfer-out/in global offsets are sequential
+   Used to ensure updates of the unassignment/in global offsets are sequential
    Note: this safety could be removed as the callers of `addTransfersOffsets` are the multi-domain event log and the
    `InFlightSubmissionTracker` which both call this sequentially.
    */
@@ -169,7 +170,7 @@ class DbTransferStore(
       s"Domain ${domain.unwrap}: Transfer store cannot store transfer for domain ${transferData.targetDomain.unwrap}",
     )
 
-    val transferId: TransferId = transferData.transferId
+    val reassignmentId: ReassignmentId = transferData.reassignmentId
     val newEntry = TransferEntry(transferData, None)
 
     import DbStorage.Implicits.*
@@ -179,18 +180,18 @@ class DbTransferStore(
         submitter_lf, source_protocol_version, transfer_out_global_offset, transfer_in_global_offset)
         values (
           $domain,
-          ${transferId.sourceDomain},
-          ${transferId.transferOutTimestamp},
-          ${transferData.transferOutRequestCounter},
-          ${transferData.transferOutRequest},
-          ${transferData.transferOutDecisionTime},
+          ${reassignmentId.sourceDomain},
+          ${reassignmentId.unassignmentTs},
+          ${transferData.unassignmentRequestCounter},
+          ${transferData.unassignmentRequest},
+          ${transferData.unassignmentDecisionTime},
           ${transferData.contract},
           ${transferData.creatingTransactionId},
-          ${transferData.transferOutResult},
-          ${transferData.transferOutRequest.submitter},
+          ${transferData.unassignmentResult},
+          ${transferData.unassignmentRequest.submitter},
           ${transferData.sourceProtocolVersion},
-          ${transferData.transferOutGlobalOffset},
-          ${transferData.transferInGlobalOffset}
+          ${transferData.unassignmentGlobalOffset},
+          ${transferData.assignmentGlobalOffset}
         )
       """
 
@@ -198,25 +199,25 @@ class DbTransferStore(
         existingEntry: TransferEntry
     ): Checked[TransferStoreError, TransferAlreadyCompleted, Option[DBIO[Int]]] = {
       def update(entry: TransferEntry): DBIO[Int] = {
-        val id = entry.transferData.transferId
+        val id = entry.transferData.reassignmentId
         val data = entry.transferData
         sqlu"""
           update par_transfers
-          set transfer_out_request_counter=${data.transferOutRequestCounter},
-            transfer_out_request=${data.transferOutRequest}, transfer_out_decision_time=${data.transferOutDecisionTime},
+          set transfer_out_request_counter=${data.unassignmentRequestCounter},
+            transfer_out_request=${data.unassignmentRequest}, transfer_out_decision_time=${data.unassignmentDecisionTime},
             contract=${data.contract}, creating_transaction_id=${data.creatingTransactionId},
-            transfer_out_result=${data.transferOutResult}, submitter_lf=${data.transferOutRequest.submitter},
+            transfer_out_result=${data.unassignmentResult}, submitter_lf=${data.unassignmentRequest.submitter},
             source_protocol_version=${data.sourceProtocolVersion},
-            transfer_out_global_offset=${data.transferOutGlobalOffset}, transfer_in_global_offset=${data.transferInGlobalOffset}
+            transfer_out_global_offset=${data.unassignmentGlobalOffset}, transfer_in_global_offset=${data.assignmentGlobalOffset}
            where
-              target_domain=$domain and origin_domain=${id.sourceDomain} and transfer_out_timestamp=${data.transferOutTimestamp}
+              target_domain=$domain and origin_domain=${id.sourceDomain} and transfer_out_timestamp=${data.unassignmentTs}
           """
       }
       existingEntry.mergeWith(newEntry).map(entry => Some(update(entry)))
     }
 
     insertDependentDeprecated(
-      entryExists(transferId),
+      entryExists(reassignmentId),
       insertExisting,
       insert,
       dbError => throw dbError,
@@ -225,62 +226,64 @@ class DbTransferStore(
       .toEitherT
   }
 
-  override def lookup(transferId: TransferId)(implicit
+  override def lookup(reassignmentId: ReassignmentId)(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferStore.TransferLookupError, TransferData] =
-    EitherT(storage.query(entryExists(transferId), functionFullName).map {
-      case None => Left(UnknownTransferId(transferId))
+    EitherT(storage.query(entryExists(reassignmentId), functionFullName).map {
+      case None => Left(UnknownReassignmentId(reassignmentId))
       case Some(TransferEntry(_, Some(timeOfCompletion))) =>
-        Left(TransferCompleted(transferId, timeOfCompletion))
+        Left(TransferCompleted(reassignmentId, timeOfCompletion))
       case Some(transferEntry) => Right(transferEntry.transferData)
     })
 
-  private def entryExists(id: TransferId): DbAction.ReadOnly[Option[TransferEntry]] = sql"""
+  private def entryExists(id: ReassignmentId): DbAction.ReadOnly[Option[TransferEntry]] = sql"""
      select source_protocol_version, transfer_out_timestamp, transfer_out_request_counter, transfer_out_request, transfer_out_decision_time,
      contract, creating_transaction_id, transfer_out_result, transfer_out_global_offset, transfer_in_global_offset,
      time_of_completion_request_counter, time_of_completion_timestamp
-     from par_transfers where target_domain=$domain and origin_domain=${id.sourceDomain} and transfer_out_timestamp=${id.transferOutTimestamp}
+     from par_transfers where target_domain=$domain and origin_domain=${id.sourceDomain} and transfer_out_timestamp=${id.unassignmentTs}
     """.as[TransferEntry].headOption
 
-  override def addTransferOutResult(
-      transferOutResult: DeliveredTransferOutResult
+  override def addUnassignmentResult(
+      unassignmentResult: DeliveredUnassignmentResult
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransferStoreError, Unit] = {
-    val transferId = transferOutResult.transferId
+    val reassignmentId = unassignmentResult.reassignmentId
 
-    val existsRaw: DbAction.ReadOnly[Option[Option[RawDeliveredTransferOutResult]]] = sql"""
+    val existsRaw: DbAction.ReadOnly[Option[Option[RawDeliveredUnassignmentResult]]] = sql"""
        select transfer_out_result, source_protocol_version
        from par_transfers
        where
-          target_domain=$domain and origin_domain=${transferId.sourceDomain} and transfer_out_timestamp=${transferId.transferOutTimestamp}
-        """.as[Option[RawDeliveredTransferOutResult]].headOption
+          target_domain=$domain and origin_domain=${reassignmentId.sourceDomain} and transfer_out_timestamp=${reassignmentId.unassignmentTs}
+        """.as[Option[RawDeliveredUnassignmentResult]].headOption
 
-    val exists = existsRaw.map(_.map(_.map(_.tryCreateDeliveredTransferOutResul(cryptoApi))))
+    val exists = existsRaw.map(_.map(_.map(_.tryCreateDeliveredUnassignmentResul(cryptoApi))))
 
-    def update(previousResult: Option[DeliveredTransferOutResult]) =
+    def update(previousResult: Option[DeliveredUnassignmentResult]) =
       previousResult
         .fold[Checked[TransferStoreError, Nothing, Option[DBIO[Int]]]](Checked.result(Some(sqlu"""
               update par_transfers
-              set transfer_out_result=$transferOutResult
-              where target_domain=$domain and origin_domain=${transferId.sourceDomain} and transfer_out_timestamp=${transferId.transferOutTimestamp}
+              set transfer_out_result=$unassignmentResult
+              where target_domain=$domain and origin_domain=${reassignmentId.sourceDomain} and transfer_out_timestamp=${reassignmentId.unassignmentTs}
               """)))(previous =>
-          if (previous == transferOutResult) Checked.result(None)
+          if (previous == unassignmentResult) Checked.result(None)
           else
-            Checked.abort(TransferOutResultAlreadyExists(transferId, previous, transferOutResult))
+            Checked.abort(
+              UnassignmentResultAlreadyExists(reassignmentId, previous, unassignmentResult)
+            )
         )
 
     updateDependentDeprecated(
       exists,
       update,
-      Checked.abort(UnknownTransferId(transferId)),
+      Checked.abort(UnknownReassignmentId(reassignmentId)),
       dbError => throw dbError,
     )
       .map(_ => ())
       .toEitherT
   }
 
-  def addTransfersOffsets(offsets: Map[TransferId, TransferGlobalOffset])(implicit
+  def addTransfersOffsets(offsets: Map[ReassignmentId, TransferGlobalOffset])(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransferStoreError, Unit] =
     if (offsets.isEmpty) EitherT.pure[FutureUnlessShutdown, TransferStoreError](())
@@ -291,19 +294,19 @@ class DbTransferStore(
 
   /*
     Requires:
-      - transfer id to be all distinct
+      - reassignment id to be all distinct
       - size of the list be within bounds that allow for single DB queries (use `batchSize`)
    */
   private def addTransfersOffsetsInternal(
-      offsets: NonEmpty[List[(TransferId, TransferGlobalOffset)]]
+      offsets: NonEmpty[List[(ReassignmentId, TransferGlobalOffset)]]
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransferStoreError, Unit] = {
     import DbStorage.Implicits.BuilderChain.*
 
-    val transferIdsFilter = offsets
-      .map { case (transferId, _) =>
-        sql"(origin_domain=${transferId.sourceDomain} and transfer_out_timestamp=${transferId.transferOutTimestamp})"
+    val reassignmentIdsFilter = offsets
+      .map { case (reassignmentId, _) =>
+        sql"(origin_domain=${reassignmentId.sourceDomain} and transfer_out_timestamp=${reassignmentId.unassignmentTs})"
       }
       .forgetNE
       .intercalate(sql" or ")
@@ -313,7 +316,7 @@ class DbTransferStore(
       sql"""select origin_domain, transfer_out_timestamp, transfer_out_global_offset, transfer_in_global_offset
            from par_transfers
            where
-              target_domain=$domain and (""" ++ transferIdsFilter ++ sql")"
+              target_domain=$domain and (""" ++ reassignmentIdsFilter ++ sql")"
 
     val updateQuery =
       """update par_transfers
@@ -324,17 +327,19 @@ class DbTransferStore(
     lazy val task = for {
       res <- EitherT.right(
         storage.query(
-          select.as[(TransferId, Option[GlobalOffset], Option[GlobalOffset])],
+          select.as[(ReassignmentId, Option[GlobalOffset], Option[GlobalOffset])],
           functionFullName,
         )
       )
-      retrievedItems = res.map { case (transferId, out, in) => transferId -> (out, in) }.toMap
+      retrievedItems = res.map { case (reassignmentId, out, in) =>
+        reassignmentId -> (out, in)
+      }.toMap
 
       mergedGlobalOffsets <- EitherT.fromEither[Future](offsets.forgetNE.traverse {
-        case (transferId, newOffsets) =>
+        case (reassignmentId, newOffsets) =>
           retrievedItems
-            .get(transferId)
-            .toRight(UnknownTransferId(transferId))
+            .get(reassignmentId)
+            .toRight(UnknownReassignmentId(reassignmentId))
             .map { case (offsetOutO, offsetInO) =>
               TransferGlobalOffset
                 .create(offsetOutO, offsetInO)
@@ -342,20 +347,20 @@ class DbTransferStore(
             }
             .flatMap(
               _.fold[Either[String, TransferGlobalOffset]](Right(newOffsets))(_.merge(newOffsets))
-                .leftMap(TransferGlobalOffsetsMerge(transferId, _))
-                .map((transferId, _))
+                .leftMap(TransferGlobalOffsetsMerge(reassignmentId, _))
+                .map((reassignmentId, _))
             )
       })
 
       batchUpdate = DbStorage.bulkOperation_(updateQuery, mergedGlobalOffsets, storage.profile) {
         pp => mergedGlobalOffsetWithId =>
-          val (transferId, mergedGlobalOffset) = mergedGlobalOffsetWithId
+          val (reassignmentId, mergedGlobalOffset) = mergedGlobalOffsetWithId
 
           pp >> mergedGlobalOffset.out
           pp >> mergedGlobalOffset.in
           pp >> domain.unwrap
-          pp >> transferId.sourceDomain.unwrap
-          pp >> transferId.transferOutTimestamp
+          pp >> reassignmentId.sourceDomain.unwrap
+          pp >> reassignmentId.unassignmentTs
       }
 
       _ <- EitherT.right[TransferStoreError](
@@ -366,15 +371,15 @@ class DbTransferStore(
     sequentialQueue.executeE(task, "addTransfersOffsets")
   }
 
-  override def completeTransfer(transferId: TransferId, timeOfCompletion: TimeOfChange)(implicit
-      traceContext: TraceContext
+  override def completeTransfer(reassignmentId: ReassignmentId, timeOfCompletion: TimeOfChange)(
+      implicit traceContext: TraceContext
   ): CheckedT[Future, Nothing, TransferStoreError, Unit] = {
 
     val updateSameOrUnset = sqlu"""
         update par_transfers
           set time_of_completion_request_counter=${timeOfCompletion.rc}, time_of_completion_timestamp=${timeOfCompletion.timestamp}
         where
-          target_domain=$domain and origin_domain=${transferId.sourceDomain} and transfer_out_timestamp=${transferId.transferOutTimestamp}
+          target_domain=$domain and origin_domain=${reassignmentId.sourceDomain} and transfer_out_timestamp=${reassignmentId.unassignmentTs}
           and (time_of_completion_request_counter is NULL
             or (time_of_completion_request_counter = ${timeOfCompletion.rc} and time_of_completion_timestamp = ${timeOfCompletion.timestamp}))
       """
@@ -392,7 +397,7 @@ class DbTransferStore(
             logger.error(
               s"Transfer completion query changed $changed lines -- this should not be negative."
             )
-          Left(TransferAlreadyCompleted(transferId, timeOfCompletion))
+          Left(TransferAlreadyCompleted(reassignmentId, timeOfCompletion))
         }
       })
 
@@ -400,11 +405,11 @@ class DbTransferStore(
   }
 
   override def deleteTransfer(
-      transferId: TransferId
+      reassignmentId: ReassignmentId
   )(implicit traceContext: TraceContext): Future[Unit] =
     storage.update_(
       sqlu"""delete from par_transfers
-                where target_domain=$domain and origin_domain=${transferId.sourceDomain} and transfer_out_timestamp=${transferId.transferOutTimestamp}""",
+                where target_domain=$domain and origin_domain=${reassignmentId.sourceDomain} and transfer_out_timestamp=${reassignmentId.unassignmentTs}""",
       functionFullName,
     )
 
@@ -581,7 +586,7 @@ class DbTransferStore(
 
   override def findEarliestIncomplete()(implicit
       traceContext: TraceContext
-  ): Future[Option[(GlobalOffset, TransferId, TargetDomainId)]] = {
+  ): Future[Option[(GlobalOffset, ReassignmentId, TargetDomainId)]] = {
     val result = storage
       .query(
         {
@@ -604,21 +609,21 @@ class DbTransferStore(
       .map(
         _.toList
           .map { case (in, out, source, ts) =>
-            ((in.toList ++ out.toList).minOption, TransferId(SourceDomainId(source), ts))
+            ((in.toList ++ out.toList).minOption, ReassignmentId(SourceDomainId(source), ts))
           }
           .foldLeft(
             (
               GlobalOffset.MaxValue,
-              TransferId(SourceDomainId(domain.unwrap), CantonTimestamp.MaxValue),
+              ReassignmentId(SourceDomainId(domain.unwrap), CantonTimestamp.MaxValue),
             )
-          )((acc: (GlobalOffset, TransferId), n) =>
+          )((acc: (GlobalOffset, ReassignmentId), n) =>
             n match {
               case (Some(o), tid) => if (acc._1 > o) (o, tid) else acc
               case (None, _) => acc
             }
           ) match {
-          case (offset, transferId) =>
-            if (offset == GlobalOffset.MaxValue) None else Some((offset, transferId, domain))
+          case (offset, reassignmentId) =>
+            if (offset == GlobalOffset.MaxValue) None else Some((offset, reassignmentId, domain))
         }
       )
   }
@@ -671,25 +676,27 @@ object DbTransferStore {
   private val dbQueryLimit = 1000
 
   /*
-    This class is a helper to deserialize DeliveredTransferOutResult because its deserialization
+    This class is a helper to deserialize DeliveredUnassignmentResult because its deserialization
     depends on the ProtocolVersion of the source domain.
    */
-  final case class RawDeliveredTransferOutResult(
+  final case class RawDeliveredUnassignmentResult(
       result: Array[Byte],
       sourceProtocolVersion: ProtocolVersion,
   ) {
-    def tryCreateDeliveredTransferOutResul(cryptoApi: CryptoPureApi): DeliveredTransferOutResult =
-      tryCreateDeliveredTransferOutResult(cryptoApi)(
+    def tryCreateDeliveredUnassignmentResul(
+        cryptoApi: CryptoPureApi
+    ): DeliveredUnassignmentResult =
+      tryCreateDeliveredUnassignmentResult(cryptoApi)(
         bytes = result,
         sourceProtocolVersion = SourceProtocolVersion(sourceProtocolVersion),
       )
   }
 
-  private def tryCreateDeliveredTransferOutResult(cryptoApi: CryptoPureApi)(
+  private def tryCreateDeliveredUnassignmentResult(cryptoApi: CryptoPureApi)(
       bytes: Array[Byte],
       sourceProtocolVersion: SourceProtocolVersion,
   ) = {
-    val res: ParsingResult[DeliveredTransferOutResult] = for {
+    val res: ParsingResult[DeliveredUnassignmentResult] = for {
       signedContent <- SignedContent
         .fromTrustedByteArray(bytes)
         .flatMap(
@@ -697,7 +704,7 @@ object DbTransferStore {
             SequencedEvent.fromByteStringOpen(cryptoApi, sourceProtocolVersion.v)
           )
         )
-      result <- DeliveredTransferOutResult
+      result <- DeliveredUnassignmentResult
         .create(NoOpeningErrors(signedContent))
         .leftMap(err => OtherError(err.toString))
     } yield result

@@ -41,15 +41,16 @@ object BuildCommon {
         addCommandAlias("createLicenseHeaders", alsoTest("headerCreate")) ++
         addCommandAlias(
           "lint",
-          "; bufFormatCheck ; bufLintCheck ; scalafmtCheck ; Test / scalafmtCheck ; scalafmtSbtCheck; checkLicenseHeaders; javafmtCheck; damlCheckProjectVersions",
+          "; bufFormatCheck ; bufLintCheck ; bufWrapperValueCheck ; scalafmtCheck ; Test / scalafmtCheck ; scalafmtSbtCheck; checkLicenseHeaders; javafmtCheck; damlCheckProjectVersions",
         ) ++
         addCommandAlias(
           "scalafixCheck",
           s"${alsoTest("scalafix --check")}",
         ) ++
-        addCommandAlias( // `bufLintCheck` violations cannot be fixed automatically -- they're here to make sure violations are caught before pushing to CI
+        addCommandAlias(
           "format",
-          "; bufFormat ; bufLintCheck ; scalafixAll ; scalafmtAll ; scalafmtSbt; createLicenseHeaders ; javafmtAll",
+          // `bufLintCheck` and `bufWrapperValueCheck` violations cannot be fixed automatically -- they're here to make sure violations are caught before pushing to CI
+          "; bufFormat ; bufLintCheck ; bufWrapperValueCheck ; scalafixAll ; scalafmtAll ; scalafmtSbt; createLicenseHeaders ; javafmtAll",
         ) ++
         // To be used by CI:
         // enable coverage and compile

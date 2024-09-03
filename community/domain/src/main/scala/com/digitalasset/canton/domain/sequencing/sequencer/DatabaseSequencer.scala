@@ -249,6 +249,7 @@ class DatabaseSequencer(
       protocolVersion,
       timeouts,
       loggerFactory,
+      unifiedSequencer = unifiedSequencer,
     )
 
   override def isRegistered(member: Member)(implicit traceContext: TraceContext): Future[Boolean] =
@@ -455,7 +456,7 @@ class DatabaseSequencer(
   ): EitherT[
     FutureUnlessShutdown,
     TrafficControlErrors.TrafficControlError,
-    CantonTimestamp,
+    Unit,
   ] =
     throw new UnsupportedOperationException(
       "Traffic control is not supported by the database sequencer"

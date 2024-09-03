@@ -7,6 +7,7 @@ import com.daml.error.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt, PositiveLong}
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.crypto.store.CryptoPrivateStoreError
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.TopologyManagementErrorGroup.TopologyManagerErrorGroup
 import com.digitalasset.canton.error.{Alarm, AlarmErrorCode, CantonError}
@@ -162,6 +163,13 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
     final case class Failure(error: SignatureCheckError)(implicit
         override val loggingContext: ErrorLoggingContext
     ) extends Alarm(cause = "Transaction signature verification failed")
+        with TopologyManagerError
+
+    final case class KeyStoreFailure(error: CryptoPrivateStoreError)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause = s"Creating a signed transaction failed due to a key store error: $error"
+        )
         with TopologyManagerError
   }
 
@@ -805,6 +813,29 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
             cause =
               s"Cannot unvet package $used as it is still in use by $contract on domain $domain. " +
                 s"It may also be used by contracts on other domains."
+          )
+          with TopologyManagerError
+    }
+
+    @Explanation(
+      """This error indicates that a dangerous PartyToParticipant mapping deletion was rejected.
+        |If the command is run and there are active contracts where the party is a stakeholder, these contracts
+        |will become will never get pruned, resulting in storage that cannot be reclaimed.
+        | """
+    )
+    @Resolution("Set the ForceFlag.PackageVettingRevocation if you really know what you are doing.")
+    object DisablePartyWithActiveContractsRequiresForce
+        extends ErrorCode(
+          id = "TOPOLOGY_DISABLE_PARTY_WITH_ACTIVE_CONTRACTS",
+          ErrorCategory.InvalidGivenCurrentSystemStateOther,
+        ) {
+      final case class Reject(partyId: PartyId, domainId: DomainId)(implicit
+          val loggingContext: ErrorLoggingContext
+      ) extends CantonError.Impl(
+            cause =
+              s"Disable party $partyId failed because there are active contracts on domain $domainId, on which the party is a stakeholder. " +
+                s"It may also have other contracts on other domains. " +
+                s"Set the ForceFlag.DisablePartyWithActiveContracts if you really know what you are doing."
           )
           with TopologyManagerError
     }

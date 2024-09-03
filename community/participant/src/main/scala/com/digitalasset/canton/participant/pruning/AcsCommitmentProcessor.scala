@@ -25,6 +25,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.AcsCommitmentErrorGroup
 import com.digitalasset.canton.error.{Alarm, AlarmErrorCode, CantonError}
 import com.digitalasset.canton.health.{AtomicHealthComponent, ComponentHealthState}
+import com.digitalasset.canton.ledger.participant.state.DomainIndex
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
@@ -36,7 +37,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.event.{
   AcsChange,
   AcsChangeListener,
-  ContractStakeholdersAndTransferCounter,
+  ContractStakeholdersAndReassignmentCounter,
   RecordTime,
 }
 import com.digitalasset.canton.participant.metrics.CommitmentMetrics
@@ -55,10 +56,6 @@ import com.digitalasset.canton.sequencing.client.SendAsyncClientError.RequestRef
 import com.digitalasset.canton.sequencing.client.SequencerClientSend
 import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, Recipients, SendAsyncError}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.store.CursorPrehead.{
-  RequestCounterCursorPrehead,
-  SequencerCounterCursorPrehead,
-}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
@@ -69,7 +66,7 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.retry.Policy
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError, TransferCounter}
+import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError, ReassignmentCounter}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicReference
@@ -422,14 +419,14 @@ class AcsCommitmentProcessor(
       else cur
     }.discard
 
-  override def publish(toc: RecordTime, acsChange: AcsChange)(implicit
+  override def publish(toc: RecordTime, acsChange: AcsChange, waitFor: Future[Unit])(implicit
       traceContext: TraceContext
   ): Unit = {
     @tailrec
     def go(): Unit =
       timestampsWithPotentialTopologyChanges.get().headOption match {
         // no upcoming topology change queued
-        case None => publishTick(toc, acsChange)
+        case None => publishTick(toc, acsChange, waitFor)
         // pre-insert topology change queued
         case Some(traced @ Traced(effectiveTime)) if effectiveTime.value <= toc.timestamp =>
           // remove the tick from our update
@@ -443,12 +440,13 @@ class AcsCommitmentProcessor(
             publishTick(
               RecordTime(timestamp = effectiveTime, tieBreaker = 0),
               AcsChange.empty,
+              waitFor,
             )(traced.traceContext)
           }
           // now, iterate (there might have been several effective time updates)
           go()
         case Some(_) =>
-          publishTick(toc, acsChange)
+          publishTick(toc, acsChange, waitFor)
       }
     go()
   }
@@ -497,7 +495,7 @@ class AcsCommitmentProcessor(
     *        (b) *** default *** whose catch-up interval boundary commitments do not match or who haven't sent a
     *        catch-up interval boundary commitment yet
     */
-  private def publishTick(toc: RecordTime, acsChange: AcsChange)(implicit
+  private def publishTick(toc: RecordTime, acsChange: AcsChange, waitFor: Future[Unit])(implicit
       traceContext: TraceContext
   ): Unit = {
     if (!lastPublished.forall(_ < toc))
@@ -729,6 +727,11 @@ class AcsCommitmentProcessor(
     val fut = publishQueue
       .executeUS(
         for {
+          // Shutdown should not wait for all waitFor Futures to finish, so we are not using the performUnlessClosingF, which tracks these futures.
+          _ <- FutureUnlessShutdown.outcomeF(
+            // Shutdown should not be blocked by waiting for waitFor.
+            if (isClosing) Future.unit else waitFor
+          )
           acsSnapshot <- performUnlessClosingF(functionFullName)(runningCommitments)
           reconciliationIntervals <- getReconciliationIntervals(toc.timestamp)
           periodEndO = reconciliationIntervals
@@ -1617,45 +1620,45 @@ object AcsCommitmentProcessor extends HasLoggerName {
     ): Unit = {
       /*
       The concatenate function is guaranteed to be safe when contract IDs always have the same length.
-      Otherwise, a longer contract ID without a transfer counter might collide with a
-      shorter contract ID with a transfer counter.
+      Otherwise, a longer contract ID without a reassignment counter might collide with a
+      shorter contract ID with a reassignment counter.
       In the current implementation collisions cannot happen, because either all contracts in a commitment
-      have a transfer counter or none, depending on the protocol version.
+      have a reassignment counter or none, depending on the protocol version.
        */
       def concatenate(
           contractId: LfContractId,
-          transferCounter: TransferCounter,
+          reassignmentCounter: ReassignmentCounter,
       ): Array[Byte] =
         (
           contractId.encodeDeterministically
-            concat TransferCounter.encodeDeterministically(transferCounter)
+            concat ReassignmentCounter.encodeDeterministically(reassignmentCounter)
         ).toByteArray
       import com.digitalasset.canton.lfPartyOrdering
       blocking {
         lock.synchronized {
           this.rt = rt
-          change.activations.foreach { case (cid, stakeholdersAndTransferCounter) =>
+          change.activations.foreach { case (cid, stakeholdersAndReassignmentCounter) =>
             val sortedStakeholders =
-              SortedSet(stakeholdersAndTransferCounter.stakeholders.toSeq*)
+              SortedSet(stakeholdersAndReassignmentCounter.stakeholders.toSeq*)
             val h = commitments.getOrElseUpdate(sortedStakeholders, LtHash16())
-            h.add(concatenate(cid, stakeholdersAndTransferCounter.transferCounter))
+            h.add(concatenate(cid, stakeholdersAndReassignmentCounter.reassignmentCounter))
             loggingContext.debug(
-              s"Adding to commitment activation cid $cid transferCounter ${stakeholdersAndTransferCounter.transferCounter}"
+              s"Adding to commitment activation cid $cid reassignmentCounter ${stakeholdersAndReassignmentCounter.reassignmentCounter}"
             )
             deltaB += sortedStakeholders -> h
           }
-          change.deactivations.foreach { case (cid, stakeholdersAndTransferCounter) =>
+          change.deactivations.foreach { case (cid, stakeholdersAndReassignmentCounter) =>
             val sortedStakeholders =
-              SortedSet(stakeholdersAndTransferCounter.stakeholders.toSeq*)
+              SortedSet(stakeholdersAndReassignmentCounter.stakeholders.toSeq*)
             val h = commitments.getOrElseUpdate(sortedStakeholders, LtHash16())
             h.remove(
               concatenate(
                 cid,
-                stakeholdersAndTransferCounter.transferCounter,
+                stakeholdersAndReassignmentCounter.reassignmentCounter,
               )
             )
             loggingContext.debug(
-              s"Removing from commitment deactivation cid $cid transferCounter ${stakeholdersAndTransferCounter.transferCounter}"
+              s"Removing from commitment deactivation cid $cid reassignmentCounter ${stakeholdersAndReassignmentCounter.reassignmentCounter}"
             )
             deltaB += sortedStakeholders -> h
           }
@@ -2007,8 +2010,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
   /** The latest commitment tick before or at the given time at which it is safe to prune. */
   def safeToPrune(
       requestJournalStore: RequestJournalStore,
-      requestCounterCursorPrehead: Option[RequestCounterCursorPrehead],
-      sequencerCounterCursorPrehead: Option[SequencerCounterCursorPrehead],
+      domainIndex: DomainIndex,
       sortedReconciliationIntervalsProvider: SortedReconciliationIntervalsProvider,
       acsCommitmentStore: AcsCommitmentStore,
       inFlightSubmissionStore: InFlightSubmissionStore,
@@ -2020,11 +2022,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
   ): Future[Option[CantonTimestampSecond]] = {
     implicit val traceContext: TraceContext = loggingContext.traceContext
     val cleanReplayF = SyncDomainEphemeralStateFactory
-      .crashRecoveryPruningBoundInclusive(
-        requestCounterCursorPrehead,
-        sequencerCounterCursorPrehead,
-        requestJournalStore,
-      )
+      .crashRecoveryPruningBoundInclusive(requestJournalStore, domainIndex)
 
     val commitmentsPruningBound =
       if (checkForOutstandingCommitments)
@@ -2068,7 +2066,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
         }
 
     def lookupChangeMetadata(
-        activations: Map[LfContractId, TransferCounter]
+        activations: Map[LfContractId, ReassignmentCounter]
     ): Future[AcsChange] =
       for {
         // TODO(i9270) extract magic numbers
@@ -2081,7 +2079,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
           activations = storedActivatedContracts
             .map(c =>
               c.contractId ->
-                ContractStakeholdersAndTransferCounter(
+                ContractStakeholdersAndReassignmentCounter(
                   c.contract.metadata.stakeholders,
                   activations(c.contractId),
                 )
@@ -2096,10 +2094,10 @@ object AcsCommitmentProcessor extends HasLoggerName {
         activeContracts <- activeContractStore.snapshot(toInclusive)(
           namedLoggingContext.traceContext
         )
-        activations = activeContracts.map { case (cid, (_toc, transferCounter)) =>
+        activations = activeContracts.map { case (cid, (_toc, reassignmentCounter)) =>
           (
             cid,
-            transferCounter,
+            reassignmentCounter,
           )
         }
         change <- lookupChangeMetadata(activations)

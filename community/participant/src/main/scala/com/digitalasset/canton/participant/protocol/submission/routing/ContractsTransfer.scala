@@ -31,7 +31,7 @@ private[routing] class ContractsTransfer(
   )(implicit traceContext: TraceContext): EitherT[Future, TransactionRoutingError, Unit] =
     if (domainRankTarget.transfers.nonEmpty) {
       logger.info(
-        s"Automatic transaction transfer into domain ${domainRankTarget.domainId}"
+        s"Automatic transaction reassignment to domain ${domainRankTarget.domainId}"
       )
       domainRankTarget.transfers.toSeq.parTraverse_ { case (cid, (lfParty, sourceDomainId)) =>
         perform(
@@ -71,7 +71,7 @@ private[routing] class ContractsTransfer(
         .cond[Future](sourceSyncDomain.ready, (), "The source domain is not ready for submissions")
 
       outResult <- sourceSyncDomain
-        .submitTransferOut(
+        .submitUnassignment(
           submitterMetadata,
           contractId,
           targetDomain,
@@ -81,31 +81,31 @@ private[routing] class ContractsTransfer(
         .semiflatMap(Predef.identity)
         .leftMap(_.toString)
         .onShutdown(Left("Application is shutting down"))
-      outStatus <- EitherT.right[String](outResult.transferOutCompletionF)
-      _outApprove <- EitherT.cond[Future](
-        outStatus.code == com.google.rpc.Code.OK_VALUE,
+      unassignmentStatus <- EitherT.right[String](outResult.unassignmentCompletionF)
+      _unassignmentApprove <- EitherT.cond[Future](
+        unassignmentStatus.code == com.google.rpc.Code.OK_VALUE,
         (),
-        s"The transfer out for ${outResult.transferId} failed with status $outStatus",
+        s"The transfer out for ${outResult.reassignmentId} failed with status $unassignmentStatus",
       )
 
       _unit <- EitherT
         .cond[Future](targetSyncDomain.ready, (), "The target domain is not ready for submission")
 
       inResult <- targetSyncDomain
-        .submitTransferIn(
+        .submitAssignment(
           submitterMetadata,
-          outResult.transferId,
+          outResult.reassignmentId,
         )
-        .leftMap[String](err => s"Transfer in failed with error $err")
+        .leftMap[String](err => s"Assignment failed with error $err")
         .flatMap { s =>
           EitherT(s.map(Right(_)).onShutdown(Left("Application is shutting down")))
         }
 
-      inStatus <- EitherT.right[String](inResult.transferInCompletionF)
+      inStatus <- EitherT.right[String](inResult.assignmentCompletionF)
       _inApprove <- EitherT.cond[Future](
         inStatus.code == com.google.rpc.Code.OK_VALUE,
         (),
-        s"The transfer in for ${outResult.transferId} failed with verdict $inStatus",
+        s"The assignment for ${outResult.reassignmentId} failed with verdict $inStatus",
       )
     } yield ()
 
