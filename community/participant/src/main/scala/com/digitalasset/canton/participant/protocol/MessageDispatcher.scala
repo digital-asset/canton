@@ -9,9 +9,9 @@ import cats.syntax.functorFilter.*
 import cats.{Foldable, Monoid}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.ViewType.{
+  AssignmentViewType,
   TransactionViewType,
-  TransferInViewType,
-  TransferOutViewType,
+  UnassignmentViewType,
 }
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -26,8 +26,8 @@ import com.digitalasset.canton.participant.protocol.submission.{
   SequencedSubmission,
 }
 import com.digitalasset.canton.participant.protocol.transfer.{
-  TransferInProcessor,
-  TransferOutProcessor,
+  AssignmentProcessor,
+  UnassignmentProcessor,
 }
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
@@ -291,7 +291,10 @@ trait MessageDispatcher { this: NamedLogging =>
           case (viewType, messages) => alarmIfNonEmptySigned(ResultKind(viewType), messages)
         }
 
-        val containsTopologyTransactions = DefaultOpenEnvelopesFilter.containsTopology(envelopes)
+        val containsTopologyTransactions = DefaultOpenEnvelopesFilter.containsTopology(
+          envelopes = envelopes,
+          withExplicitTopologyTimestamp = event.event.content.topologyTimestampO.isDefined,
+        )
 
         val isReceipt = event.event.content.messageIdO.isDefined
         processEncryptedViewsAndRootHashMessages(
@@ -580,7 +583,6 @@ trait MessageDispatcher { this: NamedLogging =>
     val receipts = events.mapFilter {
       case Deliver(counter, timestamp, _domainId, messageIdO, batch, _, _) =>
         // The event was submitted by the current participant iff the message ID is set.
-        messageIdO.foreach(_ => recordEventDelivered())
         messageIdO.map(_ -> SequencedSubmission(counter, timestamp))
       case DeliverError(
             _counter,
@@ -617,14 +619,11 @@ trait MessageDispatcher { this: NamedLogging =>
       FutureUnlessShutdown.outcomeF(inFlightSubmissionTracker.observeDeliverError(error)),
     )
 
-  private def recordEventDelivered(): Unit =
-    metrics.trafficControl.eventDelivered.mark()
-
   private def tickRecordOrderPublisher(sc: SequencerCounter, ts: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[ProcessingResult] = {
-    lazy val future = FutureUnlessShutdown.pure {
-      recordOrderPublisher.tick(sc, ts)
+    lazy val future = FutureUnlessShutdown.outcomeF {
+      recordOrderPublisher.tick(sc, ts, eventO = None)
     }
     doProcess(UnspecifiedMessageKind, future)
   }
@@ -796,8 +795,8 @@ private[participant] object MessageDispatcher {
         participantId: ParticipantId,
         requestTracker: RequestTracker,
         transactionProcessor: TransactionProcessor,
-        transferOutProcessor: TransferOutProcessor,
-        transferInProcessor: TransferInProcessor,
+        unassignmentProcessor: UnassignmentProcessor,
+        assignmentProcessor: AssignmentProcessor,
         topologyProcessor: TopologyTransactionProcessor,
         trafficProcessor: TrafficControlProcessor,
         acsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType,
@@ -812,8 +811,8 @@ private[participant] object MessageDispatcher {
       val requestProcessors = new RequestProcessors {
         override def getInternal[P](viewType: ViewType { type Processor = P }): Option[P] =
           viewType match {
-            case TransferInViewType => Some(transferInProcessor)
-            case TransferOutViewType => Some(transferOutProcessor)
+            case AssignmentViewType => Some(assignmentProcessor)
+            case UnassignmentViewType => Some(unassignmentProcessor)
             case TransactionViewType => Some(transactionProcessor)
             case _ => None
           }

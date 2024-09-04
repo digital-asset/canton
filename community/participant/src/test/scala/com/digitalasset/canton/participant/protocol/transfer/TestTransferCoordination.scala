@@ -49,20 +49,20 @@ private[transfer] object TestTransferCoordination {
 
     val transferStores =
       domains.map(domain => domain -> new InMemoryTransferStore(domain, loggerFactory)).toMap
-    val transferInBySubmission = { (_: DomainId) => None }
+    val assignmentBySubmission = { (_: DomainId) => None }
     val protocolVersionGetter = (_: Traced[DomainId]) => Some(BaseTest.testedProtocolVersion)
 
     new TransferCoordination(
       transferStoreFor = id =>
         transferStores.get(id).toRight(UnknownDomain(id.unwrap, "not found")),
       recentTimeProofFor = recentTimeProofProvider,
-      inSubmissionById = transferInBySubmission,
+      inSubmissionById = assignmentBySubmission,
       protocolVersionFor = protocolVersionGetter,
       syncCryptoApi = defaultSyncCryptoApi(domains.toSeq.map(_.unwrap), packages, loggerFactory),
       loggerFactory,
     ) {
 
-      override def awaitTransferOutTimestamp(
+      override def awaitUnassignmentTimestamp(
           sourceDomain: SourceDomainId,
           staticDomainParameters: StaticDomainParameters,
           timestamp: CantonTimestamp,
@@ -71,7 +71,7 @@ private[transfer] object TestTransferCoordination {
       ): Either[TransferProcessingSteps.UnknownDomain, Future[Unit]] =
         awaitTimestampOverride match {
           case None =>
-            super.awaitTransferOutTimestamp(sourceDomain, staticDomainParameters, timestamp)
+            super.awaitUnassignmentTimestamp(sourceDomain, staticDomainParameters, timestamp)
           case Some(overridden) => Right(overridden.getOrElse(Future.unit))
         }
 

@@ -363,37 +363,6 @@ object TopologyAdminCommands {
           .leftMap(_.toString)
     }
 
-    final case class ListAuthorityOf(
-        query: BaseQuery,
-        filterParty: String,
-    ) extends BaseCommand[
-          v30.ListAuthorityOfRequest,
-          v30.ListAuthorityOfResponse,
-          Seq[ListAuthorityOfResult],
-        ] {
-
-      override def createRequest(): Either[String, v30.ListAuthorityOfRequest] =
-        Right(
-          new v30.ListAuthorityOfRequest(
-            baseQuery = Some(query.toProtoV1),
-            filterParty = filterParty,
-          )
-        )
-
-      override def submitRequest(
-          service: TopologyManagerReadServiceStub,
-          request: v30.ListAuthorityOfRequest,
-      ): Future[v30.ListAuthorityOfResponse] =
-        service.listAuthorityOf(request)
-
-      override def handleResponse(
-          response: v30.ListAuthorityOfResponse
-      ): Either[String, Seq[ListAuthorityOfResult]] =
-        response.results
-          .traverse(ListAuthorityOfResult.fromProtoV30)
-          .leftMap(_.toString)
-    }
-
     final case class DomainParametersState(
         query: BaseQuery,
         filterDomain: String,
@@ -780,13 +749,20 @@ object TopologyAdminCommands {
 
     final case class SignTransactions(
         transactions: Seq[GenericSignedTopologyTransaction],
+        store: String,
         signedBy: Seq[Fingerprint],
+        forceFlags: ForceFlags,
     ) extends BaseWriteCommand[SignTransactionsRequest, SignTransactionsResponse, Seq[
           GenericSignedTopologyTransaction
         ]] {
       override def createRequest(): Either[String, SignTransactionsRequest] =
         Right(
-          SignTransactionsRequest(transactions.map(_.toProtoV30), signedBy.map(_.toProtoPrimitive))
+          SignTransactionsRequest(
+            transactions.map(_.toProtoV30),
+            signedBy.map(_.toProtoPrimitive),
+            store,
+            forceFlags.toProtoV30,
+          )
         )
 
       override def submitRequest(

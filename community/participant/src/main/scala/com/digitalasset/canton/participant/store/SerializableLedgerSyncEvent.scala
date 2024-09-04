@@ -22,7 +22,7 @@ import com.digitalasset.canton.{
   LfPackageId,
   LfTimestamp,
   ProtoDeserializationError,
-  TransferCounter,
+  ReassignmentCounter,
 }
 import com.digitalasset.daml.lf.crypto.Hash as LfHash
 import com.digitalasset.daml.lf.data.Time.Timestamp
@@ -32,6 +32,7 @@ import com.digitalasset.daml.lf.value.ValueCoder.DecodeError
 import com.google.protobuf.ByteString
 import com.google.rpc.status.Status as RpcStatus
 
+// TODO(i18695): Remove
 /** Wrapper for converting a [[com.digitalasset.canton.participant.sync.LedgerSyncEvent]] to its protobuf companion.
   * Currently only Intended only for storage due to the unusual exceptions which are thrown that are only permitted in a storage context.
   *
@@ -79,11 +80,11 @@ private[store] final case class SerializableLedgerSyncEvent(event: LedgerSyncEve
         case commandRejected: LedgerSyncEvent.CommandRejected =>
           SyncEventP.CommandRejected(SerializableCommandRejected(commandRejected).toProtoV30)
 
-        case transferOut: LedgerSyncEvent.TransferredOut =>
-          SyncEventP.TransferredOut(SerializableTransferredOut(transferOut).toProtoV30)
+        case unassigned: LedgerSyncEvent.Unassigned =>
+          SyncEventP.TransferredOut(SerializableTransferredOut(unassigned).toProtoV30)
 
-        case transferIn: LedgerSyncEvent.TransferredIn =>
-          SyncEventP.TransferredIn(SerializableTransferredIn(transferIn).toProtoV30)
+        case assigned: LedgerSyncEvent.Assigned =>
+          SyncEventP.TransferredIn(SerializableAssigned(assigned).toProtoV30)
 
         case partiesAdded: LedgerSyncEvent.PartiesAddedToParticipant =>
           SyncEventP.PartiesAdded(SerializablePartiesAddedToParticipant(partiesAdded).toProtoV30)
@@ -162,10 +163,10 @@ private[store] object SerializableLedgerSyncEvent
         SerializableTransactionAccepted.fromProtoV30(transactionAccepted)
       case SyncEventP.CommandRejected(commandRejected) =>
         SerializableCommandRejected.fromProtoV30(commandRejected)
-      case SyncEventP.TransferredOut(transferOut) =>
-        SerializableTransferredOut.fromProtoV30(transferOut)
-      case SyncEventP.TransferredIn(transferIn) =>
-        SerializableTransferredIn.fromProtoV30(transferIn)
+      case SyncEventP.TransferredOut(unassignment) =>
+        SerializableTransferredOut.fromProtoV30(unassignment)
+      case SyncEventP.TransferredIn(assignment) =>
+        SerializableAssigned.fromProtoV30(assignment)
       case SyncEventP.ContractsAdded(contractsAdded) =>
         SerializableContractsAdded.fromProtoV30(contractsAdded)
       case SyncEventP.ContractsPurged(contractsPurged) =>
@@ -541,10 +542,10 @@ private[store] final case class SerializableCommandRejected(
     val commandKindP = commandKind match {
       case ProcessingSteps.RequestType.Transaction =>
         v30.CommandKind.COMMAND_KIND_TRANSACTION_UNSPECIFIED
-      case ProcessingSteps.RequestType.TransferOut =>
-        v30.CommandKind.COMMAND_KIND_TRANSFER_OUT
-      case ProcessingSteps.RequestType.TransferIn =>
-        v30.CommandKind.COMMAND_KIND_TRANSFER_IN
+      case ProcessingSteps.RequestType.Unassignment =>
+        v30.CommandKind.COMMAND_KIND_UNASSIGN
+      case ProcessingSteps.RequestType.Assignment =>
+        v30.CommandKind.COMMAND_KIND_ASSIGN
     }
 
     v30.CommandRejected(
@@ -573,10 +574,10 @@ private[store] object SerializableCommandRejected {
     val commandTypeE: ParsingResult[ProcessingSteps.RequestType.Values] = commandTypeP match {
       case v30.CommandKind.COMMAND_KIND_TRANSACTION_UNSPECIFIED =>
         Right(ProcessingSteps.RequestType.Transaction)
-      case v30.CommandKind.COMMAND_KIND_TRANSFER_OUT =>
-        Right(ProcessingSteps.RequestType.TransferOut)
-      case v30.CommandKind.COMMAND_KIND_TRANSFER_IN =>
-        Right(ProcessingSteps.RequestType.TransferIn)
+      case v30.CommandKind.COMMAND_KIND_UNASSIGN =>
+        Right(ProcessingSteps.RequestType.Unassignment)
+      case v30.CommandKind.COMMAND_KIND_ASSIGN =>
+        Right(ProcessingSteps.RequestType.Assignment)
       case v30.CommandKind.Unrecognized(unrecognizedValue) =>
         Left(ProtoDeserializationError.UnrecognizedEnum("command kind", unrecognizedValue))
     }
@@ -801,10 +802,10 @@ object SerializableRejectionReasonTemplate {
 }
 
 private[store] final case class SerializableTransferredOut(
-    transferOut: LedgerSyncEvent.TransferredOut
+    unassigned: LedgerSyncEvent.Unassigned
 ) {
-  def toProtoV30: v30.TransferredOut = {
-    val LedgerSyncEvent.TransferredOut(
+  def toProtoV30: v30.Unassigned = {
+    val LedgerSyncEvent.Unassigned(
       updateId,
       optCompletionInfo,
       submitter,
@@ -812,39 +813,39 @@ private[store] final case class SerializableTransferredOut(
       templateId,
       packageName,
       contractStakeholders,
-      transferId,
+      reassignmentId,
       target,
-      transferInExclusivity,
+      assignmentExclusivity,
       workflowId,
-      isTransferringParticipant,
+      isReassigningParticipant,
       hostedStakeholders,
-      transferCounter,
-    ) = transferOut
-    v30.TransferredOut(
+      reassignmentCounter,
+    ) = unassigned
+    v30.Unassigned(
       updateId = updateId,
       completionInfo = optCompletionInfo.map(SerializableCompletionInfo(_).toProtoV30),
       submitter = submitter.getOrElse(""),
-      recordTime = SerializableLfTimestamp(transferId.transferOutTimestamp.underlying).toProtoV30,
+      recordTime = SerializableLfTimestamp(reassignmentId.unassignmentTs.underlying).toProtoV30,
       contractId = contractId.toProtoPrimitive,
       templateId = templateId.map(_.toString).getOrElse(""),
       packageName = packageName,
       contractStakeholders = contractStakeholders.toSeq,
-      sourceDomain = transferId.sourceDomain.toProtoPrimitive,
+      sourceDomain = reassignmentId.sourceDomain.toProtoPrimitive,
       targetDomain = target.toProtoPrimitive,
-      transferInExclusivity = transferInExclusivity.map(SerializableLfTimestamp(_).toProtoV30),
+      assignmentExclusivity = assignmentExclusivity.map(SerializableLfTimestamp(_).toProtoV30),
       workflowId = workflowId.getOrElse(""),
-      isTransferringParticipant = isTransferringParticipant,
+      isReassigningParticipant = isReassigningParticipant,
       hostedStakeholders = hostedStakeholders,
-      transferCounter = transferCounter.toProtoPrimitive,
+      reassignmentCounter = reassignmentCounter.toProtoPrimitive,
     )
   }
 }
 
 private[store] object SerializableTransferredOut {
   def fromProtoV30(
-      transferOutP: v30.TransferredOut
-  ): ParsingResult[LedgerSyncEvent.TransferredOut] = {
-    val v30.TransferredOut(
+      unassignedP: v30.Unassigned
+  ): ParsingResult[LedgerSyncEvent.Unassigned] = {
+    val v30.Unassigned(
       updateIdP,
       optCompletionInfoP,
       submitterP,
@@ -853,14 +854,14 @@ private[store] object SerializableTransferredOut {
       contractStakeholdersP,
       sourceDomainIdP,
       targetDomainIdP,
-      transferInExclusivityP,
+      assignmentExclusivityP,
       workflowIdP,
       templateIdP,
-      isTransferringParticipant,
+      isReassigningParticipant,
       hostedStakeholdersP,
-      transferCounterP,
+      reassignmentCounterP,
       packageNameP,
-    ) = transferOutP
+    ) = unassignedP
 
     for {
       updateId <- ProtoConverter.parseLedgerTransactionId(updateIdP)
@@ -872,14 +873,14 @@ private[store] object SerializableTransferredOut {
       rawSourceDomainId <- DomainId.fromProtoPrimitive(sourceDomainIdP, "source_domain")
       rawTargetDomainId <- DomainId.fromProtoPrimitive(targetDomainIdP, "target_domain")
 
-      transferInExclusivity <- transferInExclusivityP.traverse(
+      assignmentExclusivity <- assignmentExclusivityP.traverse(
         SerializableLfTimestamp.fromProtoPrimitive
       )
       workflowId <- ProtoConverter.parseLFWorkflowIdO(workflowIdP)
       templateId <- ProtoConverter.parseTemplateIdO(templateIdP)
       packageName <- ProtoConverter.parseLfPackageName(packageNameP)
       hostedStakeholders <- hostedStakeholdersP.traverse(ProtoConverter.parseLfPartyId)
-    } yield LedgerSyncEvent.TransferredOut(
+    } yield LedgerSyncEvent.Unassigned(
       updateId = updateId,
       optCompletionInfo = optCompletionInfo,
       submitter = submitter,
@@ -887,20 +888,21 @@ private[store] object SerializableTransferredOut {
       templateId = templateId,
       packageName = packageName,
       contractStakeholders = contractStakeholders.toSet,
-      transferId = TransferId(SourceDomainId(rawSourceDomainId), CantonTimestamp(recordTime)),
+      reassignmentId =
+        ReassignmentId(SourceDomainId(rawSourceDomainId), CantonTimestamp(recordTime)),
       targetDomain = TargetDomainId(rawTargetDomainId),
-      transferInExclusivity = transferInExclusivity,
+      assignmentExclusivity = assignmentExclusivity,
       workflowId = workflowId,
-      isTransferringParticipant = isTransferringParticipant,
+      isReassigningParticipant = isReassigningParticipant,
       hostedStakeholders = hostedStakeholders.toList,
-      transferCounter = TransferCounter(transferCounterP),
+      reassignmentCounter = ReassignmentCounter(reassignmentCounterP),
     )
   }
 }
 
-final case class SerializableTransferredIn(transferIn: LedgerSyncEvent.TransferredIn) {
-  def toProtoV30: v30.TransferredIn = {
-    val LedgerSyncEvent.TransferredIn(
+final case class SerializableAssigned(assignment: LedgerSyncEvent.Assigned) {
+  def toProtoV30: v30.Assigned = {
+    val LedgerSyncEvent.Assigned(
       updateId,
       optCompletionInfo,
       submitter,
@@ -909,16 +911,16 @@ final case class SerializableTransferredIn(transferIn: LedgerSyncEvent.Transferr
       createNode,
       creatingTransactionId,
       contractMetadata,
-      transferOutId,
+      unassignmentId,
       targetDomain,
       workflowId,
-      isTransferringParticipant,
+      isReassigningParticipant,
       hostedStakeholders,
-      transferCounter,
-    ) = transferIn
+      reassignmentCounter,
+    ) = assignment
     val contractMetadataP = contractMetadata.toByteString
     val createNodeByteString = SerializableLedgerSyncEvent.trySerializeNode(createNode)
-    v30.TransferredIn(
+    v30.Assigned(
       updateId = updateId,
       completionInfo = optCompletionInfo.map(SerializableCompletionInfo(_).toProtoV30),
       submitter = submitter.getOrElse(""),
@@ -927,20 +929,20 @@ final case class SerializableTransferredIn(transferIn: LedgerSyncEvent.Transferr
       contractMetadata = contractMetadataP,
       createNode = createNodeByteString,
       creatingTransactionId = creatingTransactionId,
-      transferOutId = Some(transferOutId.toProtoV30),
+      reassignmentId = Some(unassignmentId.toProtoV30),
       targetDomain = targetDomain.toProtoPrimitive,
       workflowId = workflowId.getOrElse(""),
-      isTransferringParticipant = isTransferringParticipant,
+      isReassigningParticipant = isReassigningParticipant,
       hostedStakeholders = hostedStakeholders,
-      transferCounter = transferCounter.toProtoPrimitive,
+      reassignmentCounter = reassignmentCounter.toProtoPrimitive,
     )
 
   }
 }
 
-private[store] object SerializableTransferredIn {
-  def fromProtoV30(transferInP: v30.TransferredIn): ParsingResult[LedgerSyncEvent.TransferredIn] = {
-    val v30.TransferredIn(
+private[store] object SerializableAssigned {
+  def fromProtoV30(assignedP: v30.Assigned): ParsingResult[LedgerSyncEvent.Assigned] = {
+    val v30.Assigned(
       updateIdP,
       optCompletionInfoP,
       submitterP,
@@ -949,13 +951,13 @@ private[store] object SerializableTransferredIn {
       createNodeP,
       creatingTransactionIdP,
       contractMetadataP,
-      transferOutIdP,
+      unassignmentIdP,
       targetDomainIdP,
       workflowIdP,
-      isTransferringParticipant,
+      isReassigningParticipant,
       hostedStakeholdersP,
-      transferCounterP,
-    ) = transferInP
+      reassignmentCounterP,
+    ) = assignedP
 
     for {
       updateId <- ProtoConverter.parseLedgerTransactionId(updateIdP)
@@ -964,17 +966,17 @@ private[store] object SerializableTransferredIn {
       recordTime <- SerializableLfTimestamp.fromProtoPrimitive(recordTimeP)
       ledgerCreateTime <- SerializableLfTimestamp.fromProtoPrimitive(ledgerCreateTimeP)
       contractMetadata = LfBytes.fromByteString(contractMetadataP)
-      transferId <- ProtoConverter.parseRequired(
-        TransferId.fromProtoV30,
-        "transfer_id",
-        transferOutIdP,
+      reassignmentId <- ProtoConverter.parseRequired(
+        ReassignmentId.fromProtoV30,
+        "reassignment_id",
+        unassignmentIdP,
       )
       createNode <- SerializableLedgerSyncEvent.deserializeCreateNode("create_node", createNodeP)
       creatingTransactionId <- ProtoConverter.parseLedgerTransactionId(creatingTransactionIdP)
       rawTargetDomainId <- DomainId.fromProtoPrimitive(targetDomainIdP, "target_domain")
       workflowId <- ProtoConverter.parseLFWorkflowIdO(workflowIdP)
       hostedStakeholders <- hostedStakeholdersP.traverse(ProtoConverter.parseLfPartyId)
-    } yield LedgerSyncEvent.TransferredIn(
+    } yield LedgerSyncEvent.Assigned(
       updateId = updateId,
       optCompletionInfo = optCompletionInfo,
       submitter = submitter,
@@ -983,12 +985,12 @@ private[store] object SerializableTransferredIn {
       createNode = createNode,
       creatingTransactionId = creatingTransactionId,
       contractMetadata = contractMetadata,
-      transferId = transferId,
+      reassignmentId = reassignmentId,
       targetDomain = TargetDomainId(rawTargetDomainId),
       workflowId = workflowId,
-      isTransferringParticipant = isTransferringParticipant,
+      isReassigningParticipant = isReassigningParticipant,
       hostedStakeholders = hostedStakeholders.toList,
-      transferCounter = TransferCounter(transferCounterP),
+      reassignmentCounter = ReassignmentCounter(reassignmentCounterP),
     )
   }
 }

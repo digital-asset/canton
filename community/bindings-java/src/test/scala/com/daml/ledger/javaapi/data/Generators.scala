@@ -552,26 +552,6 @@ object Generators {
       .addAllConnectedDomains(domains.asJava)
       .build()
 
-  def participantOffsetGen: Gen[v2.ParticipantOffsetOuterClass.ParticipantOffset] = {
-    import v2.ParticipantOffsetOuterClass.ParticipantOffset as OffsetProto
-    for {
-      modifier <- Gen.oneOf(
-        Arbitrary.arbString.arbitrary.map(absolute =>
-          (b: OffsetProto.Builder) => b.setAbsolute(absolute)
-        ),
-        Gen.const((b: OffsetProto.Builder) =>
-          b.setBoundary(OffsetProto.ParticipantBoundary.PARTICIPANT_BOUNDARY_BEGIN)
-        ),
-        Gen.const((b: OffsetProto.Builder) =>
-          b.setBoundary(OffsetProto.ParticipantBoundary.PARTICIPANT_BOUNDARY_END)
-        ),
-      )
-    } yield OffsetProto
-      .newBuilder()
-      .pipe(modifier)
-      .build()
-  }
-
   def getLedgerEndResponseGen: Gen[v2.StateServiceOuterClass.GetLedgerEndResponse] =
     for {
       offset <- Arbitrary.arbString.arbitrary
@@ -1094,11 +1074,9 @@ object Generators {
     import v2.CommandServiceOuterClass.SubmitAndWaitForTransactionResponse as Response
     for {
       transaction <- transactionGen
-      completionOffset <- Arbitrary.arbString.arbitrary
     } yield Response
       .newBuilder()
       .setTransaction(transaction)
-      .setCompletionOffset(completionOffset)
       .build()
   }
   def submitAndWaitForTransactionTreeResponseGen
@@ -1106,11 +1084,9 @@ object Generators {
     import v2.CommandServiceOuterClass.SubmitAndWaitForTransactionTreeResponse as Response
     for {
       transaction <- transactionTreeGen
-      completionOffset <- Arbitrary.arbString.arbitrary
     } yield Response
       .newBuilder()
       .setTransaction(transaction)
-      .setCompletionOffset(completionOffset)
       .build()
   }
 }

@@ -26,10 +26,9 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.PackageService
 import com.digitalasset.canton.participant.domain.{DomainHandle, DomainRegistryError}
-import com.digitalasset.canton.participant.event.RecordOrderPublisher.PendingPublish
 import com.digitalasset.canton.participant.event.{
   AcsChange,
-  ContractStakeholdersAndTransferCounter,
+  ContractStakeholdersAndReassignmentCounter,
   RecordTime,
 }
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
@@ -63,22 +62,17 @@ import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
 import com.digitalasset.canton.participant.traffic.ParticipantTrafficControlSubscriber
 import com.digitalasset.canton.participant.util.DAMLe.PackageResolver
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
-import com.digitalasset.canton.platform.apiserver.execution.{
-  AuthorityResolver,
-  CommandProgressTracker,
-}
+import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.sequencing.*
-import com.digitalasset.canton.sequencing.client.{PeriodicAcknowledgements, RichSequencerClient}
-import com.digitalasset.canton.sequencing.handlers.CleanSequencerCounterTracker
+import com.digitalasset.canton.sequencing.client.RichSequencerClient
 import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, Envelope, TrafficState}
 import com.digitalasset.canton.sequencing.traffic.TrafficControlProcessor
 import com.digitalasset.canton.store.SequencedEventStore
 import com.digitalasset.canton.store.SequencedEventStore.PossiblyIgnoredSequencedEvent
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
-import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.AuthorityOfResponse
 import com.digitalasset.canton.topology.processing.{
   ApproximateTime,
   EffectiveTime,
@@ -109,10 +103,9 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 class SyncDomain(
     val domainId: DomainId,
-    domainHandle: DomainHandle,
+    val domainHandle: DomainHandle,
     participantId: ParticipantId,
     engine: Engine,
-    authorityResolver: AuthorityResolver,
     parameters: ParticipantNodeParameters,
     participantNodePersistentState: Eval[ParticipantNodePersistentState],
     private[sync] val persistent: SyncDomainPersistentState,
@@ -173,7 +166,6 @@ class SyncDomain(
   private val damle =
     new DAMLe(
       pkgId => traceContext => packageService.value.getPackage(pkgId)(traceContext),
-      authorityResolver,
       Some(domainId),
       engine,
       parameters.engine.validationPhaseLogging,
@@ -200,7 +192,7 @@ class SyncDomain(
     testingConfig = testingConfig,
   )
 
-  private val transferOutProcessor: TransferOutProcessor = new TransferOutProcessor(
+  private val unassignmentProcessor: UnassignmentProcessor = new UnassignmentProcessor(
     SourceDomainId(domainId),
     participantId,
     damle,
@@ -218,7 +210,7 @@ class SyncDomain(
     testingConfig = testingConfig,
   )
 
-  private val transferInProcessor: TransferInProcessor = new TransferInProcessor(
+  private val assignmentProcessor: AssignmentProcessor = new AssignmentProcessor(
     TargetDomainId(domainId),
     participantId,
     damle,
@@ -244,7 +236,7 @@ class SyncDomain(
 
   private val journalGarbageCollector = new JournalGarbageCollector(
     persistent.requestJournalStore,
-    persistent.sequencerCounterTrackerStore,
+    tc => ephemeral.ledgerApiIndexer.ledgerApiStore.value.domainIndex(domainId)(tc),
     sortedReconciliationIntervalsProvider,
     persistent.acsCommitmentStore,
     persistent.activeContractStore,
@@ -336,8 +328,8 @@ class SyncDomain(
       participantId,
       ephemeral.requestTracker,
       transactionProcessor,
-      transferOutProcessor,
-      transferInProcessor,
+      unassignmentProcessor,
+      assignmentProcessor,
       topologyProcessor,
       trafficProcessor,
       acsCommitmentProcessor.processBatch,
@@ -368,11 +360,6 @@ class SyncDomain(
           "Participant's sequencer client should have a traffic state controller"
         )
       }
-
-  def authorityOfInSnapshotApproximation(requestingAuthority: Set[LfPartyId])(implicit
-      traceContext: TraceContext
-  ): Future[AuthorityOfResponse] =
-    topologyClient.currentSnapshotApproximation.authorityOf(requestingAuthority)
 
   private def initialize(implicit
       traceContext: TraceContext
@@ -410,18 +397,18 @@ class SyncDomain(
         AcsChange(
           activations = storedActivatedContracts
             .map(c =>
-              c.contractId -> ContractStakeholdersAndTransferCounter(
+              c.contractId -> ContractStakeholdersAndReassignmentCounter(
                 c.contract.metadata.stakeholders,
-                change.activations(c.contractId).transferCounter,
+                change.activations(c.contractId).reassignmentCounter,
               )
             )
             .toMap,
           deactivations = storedDeactivatedContracts
             .map(c =>
               c.contractId ->
-                ContractStakeholdersAndTransferCounter(
+                ContractStakeholdersAndReassignmentCounter(
                   c.contract.metadata.stakeholders,
-                  change.deactivations(c.contractId).transferCounter,
+                  change.deactivations(c.contractId).reassignmentCounter,
                 )
             )
             .toMap,
@@ -455,15 +442,15 @@ class SyncDomain(
         contractIdChanges <- persistent.activeContractStore
           .changesBetween(fromExclusive, toInclusive)
         changes <- contractIdChanges.parTraverse { case (toc, change) =>
-          val changeWithAdjustedTransferCountersForUnassignments = ActiveContractIdsChange(
+          val changeWithAdjustedReassignmentCountersForUnassignments = ActiveContractIdsChange(
             change.activations,
             change.deactivations.fmap {
-              case StateChangeType(ContractChange.TransferredOut, transferCounter) =>
-                StateChangeType(ContractChange.TransferredOut, transferCounter - 1)
+              case StateChangeType(ContractChange.Unassigned, reassignmentCounter) =>
+                StateChangeType(ContractChange.Unassigned, reassignmentCounter - 1)
               case change => change
             },
           )
-          lookupChangeMetadata(changeWithAdjustedTransferCountersForUnassignments).map(ch =>
+          lookupChangeMetadata(changeWithAdjustedReassignmentCountersForUnassignments).map(ch =>
             (RecordTime.fromTimeOfChange(toc), ch)
           )
         }
@@ -489,10 +476,7 @@ class SyncDomain(
       // once the first event is dispatched.
       // however, this is bad for transfer processing as we need to be able to access the topology state
       // across domains and this requires that the clients are separately initialised on the participants
-      val resubscriptionTs =
-        ephemeral.startingPoints.rewoundSequencerCounterPrehead.fold(CantonTimestamp.MinValue)(
-          _.timestamp
-        )
+      val resubscriptionTs = ephemeral.startingPoints.processing.prenextTimestamp
       logger.debug(s"Initialising topology client at clean head=$resubscriptionTs")
       // startup with the resubscription-ts
       topologyClient.updateHead(
@@ -522,7 +506,6 @@ class SyncDomain(
 
     val startingPoints = ephemeral.startingPoints
     val cleanHeadRc = startingPoints.processing.nextRequestCounter
-    val cleanPreHeadO = startingPoints.processing.cleanRequestPrehead
     val cleanHeadPrets = startingPoints.processing.prenextTimestamp
 
     for {
@@ -543,23 +526,7 @@ class SyncDomain(
         )
       )
 
-      // Phase 2: recover events that have been published to the single-dimension event log, but were not published at
-      // the multi-domain event log before the crash
-      pending <- cleanPreHeadO.fold(
-        EitherT.pure[Future, SyncDomainInitializationError](Seq[PendingPublish]())
-      ) { lastProcessedOffset =>
-        EitherT.right(
-          participantNodePersistentState.value.multiDomainEventLog
-            .fetchUnpublished(
-              id = persistent.eventLog.id,
-              upToInclusiveO = Some(lastProcessedOffset),
-            )
-        )
-      }
-
-      _unit = ephemeral.recordOrderPublisher.scheduleRecoveries(pending)
-
-      // Phase 3: Initialize the repair processor
+      // Phase 2: Initialize the repair processor
       repairs <- EitherT.right[SyncDomainInitializationError](
         persistent.requestJournalStore.repairRequests(
           ephemeral.startingPoints.cleanReplay.nextRequestCounter
@@ -570,7 +537,7 @@ class SyncDomain(
       )
       _ = repairProcessor.setRemainingRepairRequests(repairs)
 
-      // Phase 4: publish ACS changes from some suitable point up to clean head timestamp to the commitment processor.
+      // Phase 3: publish ACS changes from some suitable point up to clean head timestamp to the commitment processor.
       // The "suitable point" must ensure that the [[com.digitalasset.canton.participant.store.AcsSnapshotStore]]
       // receives any partially-applied changes; choosing the timestamp returned by the store is sufficient and optimal
       // in terms of performance, but any earlier timestamp is also correct
@@ -589,7 +556,11 @@ class SyncDomain(
           )
         } else EitherT.pure[Future, SyncDomainInitializationError](Seq.empty)
       _ = acsChangesToReplay.foreach { case (toc, change) =>
-        acsCommitmentProcessor.publish(toc, change)
+        acsCommitmentProcessor.publish(
+          toc,
+          change,
+          Future.unit, // corresponding publications already happened
+        )
       }
     } yield ()
   }
@@ -610,11 +581,14 @@ class SyncDomain(
         .find(SequencedEventStore.LatestUpto(CantonTimestamp.MaxValue))(initializationTraceContext)
         .fold(_ => SequencerCounter.Genesis, _.counter + 1)
 
-    val sequencerCounterPreheadTsO =
-      ephemeral.startingPoints.rewoundSequencerCounterPrehead.map(_.timestamp)
+    val sequencerCounterPreheadTs =
+      ephemeral.startingPoints.processing.prenextTimestamp
+    // note: we need the optional prehead here, since it changes the behavior inside (subscribing from Some(CantonTimestamp.MinValue) would result in timeouts at requesting topology snapshot ... has not completed after...)
+    val sequencerCounterPreheadTsO = Option.when(
+      sequencerCounterPreheadTs != CantonTimestamp.MinValue
+    )(sequencerCounterPreheadTs)
     val subscriptionPriorTs = {
       val cleanReplayTs = ephemeral.startingPoints.cleanReplay.prenextTimestamp
-      val sequencerCounterPreheadTs = sequencerCounterPreheadTsO.getOrElse(CantonTimestamp.MinValue)
       Ordering[CantonTimestamp].min(cleanReplayTs, sequencerCounterPreheadTs)
     }
 
@@ -689,24 +663,19 @@ class SyncDomain(
               messageDispatcher.handleAll(Traced(openEvents)(traceContext))
             }
         }
-      eventHandler = monitor(messageHandler)
-
-      cleanSequencerCounterTracker = new CleanSequencerCounterTracker(
-        persistent.sequencerCounterTrackerStore,
-        ephemeral.timelyRejectNotifier.notifyAsync,
-        loggerFactory,
-      )
-      trackingHandler = cleanSequencerCounterTracker(eventHandler)
       _ <- EitherT
         .right[SyncDomainInitializationError](
           sequencerClient.subscribeAfter(
             subscriptionPriorTs,
             sequencerCounterPreheadTsO,
-            trackingHandler,
+            monitor(messageHandler),
             ephemeral.timeTracker,
-            PeriodicAcknowledgements.fetchCleanCounterFromStore(
-              persistent.sequencerCounterTrackerStore
-            ),
+            tc =>
+              FutureUnlessShutdown.outcomeF(
+                participantNodePersistentState.value.ledgerApiStore
+                  .domainIndex(domainId)(tc)
+                  .map(_.sequencerIndex.map(_.timestamp))
+              ),
           )(initializationTraceContext)
         )
         .mapK(FutureUnlessShutdown.outcomeK)
@@ -723,15 +692,15 @@ class SyncDomain(
       ephemeral.markAsRecovered()
       logger.debug("Sync domain is ready.")(initializationTraceContext)
       FutureUtil.doNotAwaitUnlessShutdown(
-        completeTransferIn,
-        "Failed to complete outstanding transfer-ins on startup. " +
-          "You may have to complete the transfer-ins manually.",
+        completeAssignment,
+        "Failed to complete outstanding assignments on startup. " +
+          "You may have to complete the assignments manually.",
       )
       ()
     }).value
   }
 
-  private def completeTransferIn(implicit tc: TraceContext): FutureUnlessShutdown[Unit] = {
+  private def completeAssignment(implicit tc: TraceContext): FutureUnlessShutdown[Unit] = {
 
     val fetchLimit = 1000
 
@@ -746,36 +715,38 @@ class SyncDomain(
             limit = fetchLimit,
           )
         )
-        // TODO(i9500): Here, transfer-ins are completed sequentially. Consider running several in parallel to speed
+        // TODO(i9500): Here, assignments are completed sequentially. Consider running several in parallel to speed
         // this up. It may be helpful to use the `RateLimiter`
         eithers <- MonadUtil
           .sequentialTraverse(pendingTransfers) { data =>
-            logger.debug(s"Complete ${data.transferId} after startup")
+            logger.debug(s"Complete ${data.reassignmentId} after startup")
             val eitherF =
               performUnlessClosingEitherU[TransferProcessorError, Unit](functionFullName)(
-                AutomaticTransferIn.perform(
-                  data.transferId,
+                AutomaticAssignment.perform(
+                  data.reassignmentId,
                   TargetDomainId(domainId),
                   staticDomainParameters,
                   transferCoordination,
                   data.contract.metadata.stakeholders,
-                  data.transferOutRequest.submitterMetadata,
+                  data.unassignmentRequest.submitterMetadata,
                   participantId,
-                  data.transferOutRequest.targetTimeProof.timestamp,
+                  data.unassignmentRequest.targetTimeProof.timestamp,
                 )
               )
-            eitherF.value.map(_.left.map(err => data.transferId -> err))
+            eitherF.value.map(_.left.map(err => data.reassignmentId -> err))
           }
 
       } yield {
         // Log any errors, then discard the errors and continue to complete pending transfers
         eithers.foreach {
-          case Left((transferId, error)) =>
-            logger.debug(s"Failed to complete pending transfer $transferId. The error was $error.")
+          case Left((reassignmentId, error)) =>
+            logger.debug(
+              s"Failed to complete pending transfer $reassignmentId. The error was $error."
+            )
           case Right(()) => ()
         }
 
-        pendingTransfers.lastOption.map(t => t.transferId.transferOutTimestamp -> t.sourceDomain)
+        pendingTransfers.lastOption.map(t => t.reassignmentId.unassignmentTs -> t.sourceDomain)
       }
 
       resF.map {
@@ -789,7 +760,7 @@ class SyncDomain(
     logger.debug(s"Wait for replay to complete")
     for {
       // Wait to see a timestamp >= now from the domain -- when we see such a timestamp, it means that the participant
-      // has "caught up" on messages from the domain (and so should have seen all the transfer-ins)
+      // has "caught up" on messages from the domain (and so should have seen all the assignments)
       // TODO(i9009): This assumes the participant and domain clocks are synchronized, which may not be the case
       waitForReplay <- FutureUnlessShutdown.outcomeF(
         timeTracker
@@ -808,7 +779,7 @@ class SyncDomain(
         None: Option[(CantonTimestamp, SourceDomainId)]
       )(ts => completeTransfers(ts))
     } yield {
-      logger.debug(s"Transfer in completion has finished")
+      logger.debug(s"Assignment completion has finished")
     }
 
   }
@@ -843,7 +814,7 @@ class SyncDomain(
         .onShutdown(Left(SubmissionDuringShutdown.Rejection()))
     }
 
-  override def submitTransferOut(
+  override def submitUnassignment(
       submitterMetadata: TransferSubmitterMetadata,
       contractId: LfContractId,
       targetDomain: TargetDomainId,
@@ -851,19 +822,19 @@ class SyncDomain(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, FutureUnlessShutdown[
-    TransferOutProcessingSteps.SubmissionResult
+    UnassignmentProcessingSteps.SubmissionResult
   ]] =
     performUnlessClosingEitherT[
       TransferProcessorError,
-      FutureUnlessShutdown[TransferOutProcessingSteps.SubmissionResult],
+      FutureUnlessShutdown[UnassignmentProcessingSteps.SubmissionResult],
     ](functionFullName, DomainNotReady(domainId, "The domain is shutting down.")) {
-      logger.debug(s"Submitting transfer-out of `$contractId` from `$domainId` to `$targetDomain`")
+      logger.debug(s"Submitting unassignment of `$contractId` from `$domainId` to `$targetDomain`")
 
       if (!ready)
-        DomainNotReady(domainId, "Cannot submit transfer-out before recovery").discard
-      transferOutProcessor
+        DomainNotReady(domainId, "Cannot submit unassignment before recovery").discard
+      unassignmentProcessor
         .submit(
-          TransferOutProcessingSteps
+          UnassignmentProcessingSteps
             .SubmissionParam(
               submitterMetadata,
               contractId,
@@ -874,29 +845,29 @@ class SyncDomain(
         .onShutdown(Left(DomainNotReady(domainId, "The domain is shutting down")))
     }
 
-  override def submitTransferIn(
+  override def submitAssignment(
       submitterMetadata: TransferSubmitterMetadata,
-      transferId: TransferId,
+      reassignmentId: ReassignmentId,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, FutureUnlessShutdown[
-    TransferInProcessingSteps.SubmissionResult
+    AssignmentProcessingSteps.SubmissionResult
   ]] =
     performUnlessClosingEitherT[TransferProcessorError, FutureUnlessShutdown[
-      TransferInProcessingSteps.SubmissionResult
+      AssignmentProcessingSteps.SubmissionResult
     ]](
       functionFullName,
       DomainNotReady(domainId, "The domain is shutting down."),
     ) {
-      logger.debug(s"Submitting transfer-in of `$transferId` to `$domainId`")
+      logger.debug(s"Submitting assignment of `$reassignmentId` to `$domainId`")
 
       if (!ready)
-        DomainNotReady(domainId, "Cannot submit transfer-out before recovery").discard
+        DomainNotReady(domainId, "Cannot submit unassignment before recovery").discard
 
-      transferInProcessor
+      assignmentProcessor
         .submit(
-          TransferInProcessingSteps
-            .SubmissionParam(submitterMetadata, transferId)
+          AssignmentProcessingSteps
+            .SubmissionParam(submitterMetadata, reassignmentId)
         )
         .onShutdown(Left(DomainNotReady(domainId, "The domain is shutting down")))
     }
@@ -922,8 +893,8 @@ class SyncDomain(
           journalGarbageCollector,
           acsCommitmentProcessor,
           transactionProcessor,
-          transferOutProcessor,
-          transferInProcessor,
+          unassignmentProcessor,
+          assignmentProcessor,
           badRootHashMessagesRequestProcessor,
           topologyProcessor,
           ephemeral.timeTracker, // need to close time tracker before domain handle, as it might otherwise send messages
@@ -989,7 +960,6 @@ object SyncDomain {
         domainHandle: DomainHandle,
         participantId: ParticipantId,
         engine: Engine,
-        authorityResolver: AuthorityResolver,
         parameters: ParticipantNodeParameters,
         participantNodePersistentState: Eval[ParticipantNodePersistentState],
         persistentState: SyncDomainPersistentState,
@@ -1016,7 +986,6 @@ object SyncDomain {
         domainHandle: DomainHandle,
         participantId: ParticipantId,
         engine: Engine,
-        authorityResolver: AuthorityResolver,
         parameters: ParticipantNodeParameters,
         participantNodePersistentState: Eval[ParticipantNodePersistentState],
         persistentState: SyncDomainPersistentState,
@@ -1040,7 +1009,6 @@ object SyncDomain {
         domainHandle,
         participantId,
         engine,
-        authorityResolver,
         parameters,
         participantNodePersistentState,
         persistentState,

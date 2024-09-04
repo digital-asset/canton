@@ -10,6 +10,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps, Signature}
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod, ViewType}
 import com.digitalasset.canton.error.TransactionError
+import com.digitalasset.canton.ledger.participant.state.Update
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
@@ -29,21 +30,20 @@ import com.digitalasset.canton.participant.protocol.submission.{
   ChangeIdHash,
   SubmissionTrackingData,
 }
-import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps.PendingTransferIn
-import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessingSteps.PendingTransferOut
+import com.digitalasset.canton.participant.protocol.transfer.AssignmentProcessingSteps.PendingAssignment
+import com.digitalasset.canton.participant.protocol.transfer.UnassignmentProcessingSteps.PendingUnassignment
 import com.digitalasset.canton.participant.protocol.validation.PendingTransaction
 import com.digitalasset.canton.participant.store.{
   SyncDomainEphemeralState,
   SyncDomainEphemeralStateLookup,
   TransferLookup,
 }
-import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.SessionKeyStore
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.{LedgerSubmissionId, RequestCounter, SequencerCounter}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -109,7 +109,7 @@ trait ProcessingSteps[
   /** The type of errors that can occur during result processing */
   type ResultError <: WrapsProcessorError
 
-  /** The type of the request (transaction, transfer-out, transfer-in) */
+  /** The type of the request (transaction, unassignment, assignment) */
   type RequestType <: ProcessingSteps.RequestType
   val requestType: RequestType
 
@@ -410,7 +410,7 @@ trait ProcessingSteps[
       error: TransactionError,
   )(implicit
       traceContext: TraceContext
-  ): (Option[TimestampedEvent], Option[PendingSubmissionId])
+  ): (Option[Traced[Update]], Option[PendingSubmissionId])
 
   /** Phase 3, step 2 (rejected submission, e.g. chosen mediator is inactive, invalid recipients)
     *
@@ -479,7 +479,7 @@ trait ProcessingSteps[
     */
   def createRejectionEvent(rejectionArgs: RejectionArgs)(implicit
       traceContext: TraceContext
-  ): Either[ResultError, Option[TimestampedEvent]]
+  ): Either[ResultError, Option[Traced[Update]]]
 
   // Phase 7: Result processing
 
@@ -514,7 +514,7 @@ trait ProcessingSteps[
   case class CommitAndStoreContractsAndPublishEvent(
       commitSet: Option[Future[CommitSet]],
       contractsToBeStored: Seq[WithTransactionId[SerializableContract]],
-      maybeEvent: Option[TimestampedEvent],
+      maybeEvent: Option[Traced[Update]],
   )
 
   /** Phase 7, step 4:
@@ -532,7 +532,7 @@ trait ProcessingSteps[
 }
 
 object ProcessingSteps {
-  def getTransferInExclusivity(
+  def getAssignmentExclusivity(
       topologySnapshot: TopologySnapshot,
       ts: CantonTimestamp,
   )(implicit
@@ -542,9 +542,9 @@ object ProcessingSteps {
     for {
       domainParameters <- EitherT(topologySnapshot.findDynamicDomainParameters())
 
-      transferInExclusivity <- EitherT
-        .fromEither[Future](domainParameters.transferExclusivityLimitFor(ts))
-    } yield transferInExclusivity
+      assignmentExclusivity <- EitherT
+        .fromEither[Future](domainParameters.assignmentExclusivityLimitFor(ts))
+    } yield assignmentExclusivity
 
   def getDecisionTime(
       topologySnapshot: TopologySnapshot,
@@ -575,21 +575,21 @@ object ProcessingSteps {
 
     sealed trait Transfer extends Values
 
-    case object TransferOut extends Transfer {
-      override type PendingRequestData = PendingTransferOut
+    case object Unassignment extends Transfer {
+      override type PendingRequestData = PendingUnassignment
 
-      override def pretty: Pretty[TransferOut] = prettyOfObject[TransferOut]
+      override def pretty: Pretty[Unassignment] = prettyOfObject[Unassignment]
     }
 
-    type TransferOut = TransferOut.type
+    type Unassignment = Unassignment.type
 
-    case object TransferIn extends Transfer {
-      override type PendingRequestData = PendingTransferIn
+    case object Assignment extends Transfer {
+      override type PendingRequestData = PendingAssignment
 
-      override def pretty: Pretty[TransferIn] = prettyOfObject[TransferIn]
+      override def pretty: Pretty[Assignment] = prettyOfObject[Assignment]
 
     }
-    type TransferIn = TransferIn.type
+    type Assignment = Assignment.type
   }
 
   trait WrapsProcessorError {

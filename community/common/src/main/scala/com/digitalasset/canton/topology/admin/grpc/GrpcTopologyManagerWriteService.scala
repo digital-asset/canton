@@ -141,8 +141,6 @@ class GrpcTopologyManagerWriteService(
         SequencerDomainState.fromProtoV30(mapping)
       case Mapping.PartyToParticipant(mapping) =>
         PartyToParticipant.fromProtoV30(mapping)
-      case Mapping.AuthorityOf(mapping) =>
-        AuthorityOf.fromProtoV30(mapping)
       case Mapping.DomainTrustCertificate(mapping) =>
         DomainTrustCertificate.fromProtoV30(mapping)
       case Mapping.OwnerToKeyMapping(mapping) =>
@@ -160,29 +158,30 @@ class GrpcTopologyManagerWriteService(
     }
 
   override def signTransactions(
-      request: v30.SignTransactionsRequest
+      requestP: v30.SignTransactionsRequest
   ): Future[v30.SignTransactionsResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val res = for {
-      signedTxs <- EitherT.fromEither[FutureUnlessShutdown](
-        request.transactions
+    val requestE = for {
+      signedTxs <-
+        requestP.transactions
           .traverse(tx =>
             SignedTopologyTransaction.fromProtoV30(ProtocolVersionValidation.NoValidation, tx)
           )
-          .leftMap(ProtoDeserializationFailure.Wrap(_): CantonError)
-      )
       signingKeys <-
-        EitherT
-          .fromEither[FutureUnlessShutdown](
-            request.signedBy.traverse(Fingerprint.fromProtoPrimitive)
-          )
-          .leftMap(ProtoDeserializationFailure.Wrap(_): CantonError)
+        requestP.signedBy.traverse(Fingerprint.fromProtoPrimitive)
+      forceFlags <- ForceFlags.fromProtoV30(requestP.forceFlags)
+    } yield (signedTxs, signingKeys, forceFlags)
+
+    val res = for {
+      request <- EitherT
+        .fromEither[FutureUnlessShutdown](requestE)
+        .leftMap(ProtoDeserializationFailure.Wrap(_))
+      (signedTxs, signingKeys, forceFlags) = request
+
+      targetManager <- targetManagerET(requestP.store)
 
       extendedTransactions <- signedTxs.parTraverse(tx =>
-        signingKeys
-          .parTraverse(key => crypto.privateCrypto.sign(tx.hash.hash, key))
-          .leftMap(TopologyManagerError.InternalError.TopologySigningError(_): CantonError)
-          .map(tx.addSignatures)
+        targetManager.extendSignature(tx, signingKeys, forceFlags).leftWiden[CantonError]
       )
     } yield extendedTransactions
 

@@ -39,12 +39,12 @@ trait ViewTree extends PrettyPrinting {
   override def pretty: Pretty[this.type]
 }
 
-/** Supertype of [[FullTransferOutTree]] and [[FullTransferInTree]]
+/** Supertype of [[FullUnassignmentTree]] and [[FullAssignmentTree]]
   */
 trait TransferViewTree extends ViewTree {
   def submitterMetadata: TransferSubmitterMetadata
 
-  def isTransferringParticipant(participantId: ParticipantId): Boolean
+  def isReassigningParticipant(participantId: ParticipantId): Boolean
 
   val viewPosition: ViewPosition =
     ViewPosition.root // Use a dummy value, as there is only one view.

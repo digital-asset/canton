@@ -194,13 +194,13 @@ create table common_topology_dispatching (
   watermark_ts bigint not null
 );
 
--- change type: activation [create, transfer-in], deactivation [archive, transfer-out]
+-- change type: activation [create, assign], deactivation [archive, unassign]
 -- `deactivation` comes before `activation` so that comparisons `(timestamp, change) <= (bound, 'deactivation')`
 -- select only deactivations if the timestamp matches the bound.
 create type change_type as enum ('deactivation', 'activation');
 
 -- The specific operation type that introduced a contract change.
-create type operation_type as enum ('create', 'add', 'transfer-in', 'archive', 'purge', 'transfer-out');
+create type operation_type as enum ('create', 'add', 'assign', 'archive', 'purge', 'unassign');
 
 -- Maintains the status of contracts
 create table par_active_contracts (
@@ -352,7 +352,7 @@ create index idx_par_linearized_event_log_publication_time on par_linearized_eve
 create index idx_par_event_log_associated_domain on par_event_log (log_id, associated_domain, ts);
 
 create table par_transfers (
-    -- transfer id
+    -- reassignment id
     target_domain varchar(300) not null,
     origin_domain varchar(300) not null,
 
@@ -634,6 +634,9 @@ create table sequencer_counter_checkpoints (
    latest_sequencer_event_ts bigint,
    primary key (member, counter)
 );
+
+-- This index helps fetching the latest checkpoint for a member
+create index idx_sequencer_counter_checkpoints_by_member_ts on sequencer_counter_checkpoints(member, ts);
 
 -- record the latest acknowledgement sent by a sequencer client of a member for the latest event they have successfully
 -- processed and will not re-read.
@@ -963,6 +966,5 @@ create table ord_metadata_output_blocks (
     block_number bigint not null,
     bft_ts bigint not null,
     last_topology_ts bigint not null,
-    num_txs integer not null,
     primary key (block_number)
 );

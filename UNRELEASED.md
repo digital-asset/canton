@@ -3,12 +3,37 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2024-09-04 (Exclusive)
+
+- google.protobuf.XValue wrapper messages are replaced by `optional X` in the protobuf definitions. Incompatibility for manually crafted Protobuf messages and wire formats. Protobuf bindings must be regenerated, but should remain compatible.
+- Started the renaming transfer -> reassignment
+  - transferExclusivityTimeout -> assignmentExclusivityTimeout
+- Added periodic generation of sequencer counter checkpoints to the sequencer and reworked SQL queries.
+  - This should improve performance for sequencer snapshotting and pruning and reduce database load.
+  - The checkpoint interval is configurable under `canton.sequencers.<sequencer>.writer.checkpoint-interval` (default: 30s):
+```hocon
+writer {
+  checkpoint-interval = "30s"
+}
+```
+
+## Until 2024-08-30 (Exclusive)
+- The `ParticipantOffset` message was removed since it was already replaced by a simpler string representation and
+  was not used anymore.
+
 ## Until 2024-08-28 (Exclusive)
 - the DomainId field has been removed from the following topology mapping: `OwnerToKeyMapping`, `VettedPackages`, `PartyToParticipant` and `AuthorityOf`.
   Those fields were not handled properly, so we decide to remove them.
-- two new endpoints added to `GrpcInspectionService` to inspect the state of sent and received ACS commitments on participants. 
+- two new endpoints added to `GrpcInspectionService` to inspect the state of sent and received ACS commitments on participants.
   - `lookupSentAcsCommitments` to retrieve sent ACS Commitments and their states
   - `lookupReceivedAcsCommitments` to retrieve received ACS commitments and their states
+- When not specifying `AuthorizeRequest.signed_by` or `SignTransactionsRequest.signed_by`, suitable signing keys available to the node are selected automatically.
+
+## Until 2024-08-26 (Exclusive)
+
+### Changes in `VersionService.GetLedgerApiVersion`
+- The `GetLedgerApiVersion` method of the `VersionService` contains new `features.offset_checkpoint` field within the returned `GetLedgerApiVersionResponse` message.
+  It exposes the `max_offset_checkpoint_emission_delay` which is the maximum time needed to emit a new OffsetCheckpoint.
 
 ## Until 2024-08-21 (Exclusive)
 - Error INVALID_SUBMITTER is changed to INVALID_READER
@@ -32,6 +57,9 @@ We have introduced additional package vetting validations that may result in pac
 
 ### Mediators may not be in two mediator groups at the same time
 Add mediators to multiple groups results in a rejection with error `MEDIATORS_ALREADY_IN_OTHER_GROUPS`.
+
+### Traffic purchase handler returns early
+SetTrafficPurchased requests return immediately and no longer return the max sequencing time.
 
 ## Until 2024-07-31 (Exclusive)
 

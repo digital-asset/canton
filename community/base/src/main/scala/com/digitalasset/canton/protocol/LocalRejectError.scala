@@ -288,7 +288,7 @@ object LocalRejectError extends LocalRejectionGroup {
     }
   }
 
-  object TransferOutRejects extends ErrorGroup() {
+  object UnassignmentRejects extends ErrorGroup() {
 
     @Explanation(
       """Activeness check failed for transfer out submission. This rejection occurs if the contract to be
@@ -310,7 +310,7 @@ object LocalRejectError extends LocalRejectionGroup {
 
   }
 
-  object TransferInRejects extends ErrorGroup() {
+  object AssignmentRejects extends ErrorGroup() {
     @Explanation(
       """This rejection is emitted by a participant if a transfer would be invoked on an already archived contract."""
     )
@@ -327,7 +327,7 @@ object LocalRejectError extends LocalRejectionGroup {
     }
 
     @Explanation(
-      """This rejection is emitted by a participant if a transfer-in has already been made by another entity."""
+      """This rejection is emitted by a participant if an assignment has already been made by another entity."""
     )
     object ContractAlreadyActive
         extends LocalRejectErrorCode(
@@ -343,7 +343,7 @@ object LocalRejectError extends LocalRejectionGroup {
     }
 
     @Explanation(
-      """This rejection is emitted by a participant if a transfer-in is referring to an already locked contract."""
+      """This rejection is emitted by a participant if a assignment is referring to an already locked contract."""
     )
     object ContractIsLocked
         extends LocalRejectErrorCode(
@@ -358,7 +358,7 @@ object LocalRejectError extends LocalRejectionGroup {
     }
 
     @Explanation(
-      """This rejection is emitted by a participant if a transfer-in has already been completed."""
+      """This rejection is emitted by a participant if an assignment has already been completed."""
     )
     object AlreadyCompleted
         extends LocalRejectErrorCode(
