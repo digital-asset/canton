@@ -580,7 +580,6 @@ trait MessageDispatcher { this: NamedLogging =>
     val receipts = events.mapFilter {
       case Deliver(counter, timestamp, _domainId, messageIdO, batch, _, _) =>
         // The event was submitted by the current participant iff the message ID is set.
-        messageIdO.foreach(_ => recordEventDelivered())
         messageIdO.map(_ -> SequencedSubmission(counter, timestamp))
       case DeliverError(
             _counter,
@@ -616,9 +615,6 @@ trait MessageDispatcher { this: NamedLogging =>
       DeliveryMessageKind,
       FutureUnlessShutdown.outcomeF(inFlightSubmissionTracker.observeDeliverError(error)),
     )
-
-  private def recordEventDelivered(): Unit =
-    metrics.trafficControl.eventDelivered.mark()
 
   private def tickRecordOrderPublisher(sc: SequencerCounter, ts: CantonTimestamp)(implicit
       traceContext: TraceContext

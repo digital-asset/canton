@@ -243,6 +243,7 @@ abstract class SequencerClientImpl(
       aggregationRule,
       callback,
       amplify,
+      metricsContext,
     )
 
   private def checkRequestSize(
@@ -270,10 +271,12 @@ abstract class SequencerClientImpl(
       aggregationRule: Option[AggregationRule],
       callback: SendCallback,
       amplify: Boolean,
-  )(implicit
-      traceContext: TraceContext,
       metricsContext: MetricsContext,
-  ): EitherT[FutureUnlessShutdown, SendAsyncClientError, Unit] =
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SendAsyncClientError, Unit] = {
+    implicit val metricsContextImplicit =
+      metricsContext.withExtraLabels("domain" -> domainId.toString)
     withSpan("SequencerClient.sendAsync") { implicit traceContext => span =>
       def mkRequestE(
           cost: Option[SequencingSubmissionCost]
@@ -414,6 +417,7 @@ abstract class SequencerClientImpl(
         } yield ()
       }
     }
+  }
 
   /** Perform the send, without any check.
     */
