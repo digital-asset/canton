@@ -24,6 +24,7 @@ class TopologyTransactionTestFactory(loggerFactory: NamedLoggerFactory, initEc: 
     NamespaceDelegation.tryCreate(ns, key, isRootDelegation)
 
   val ns1 = Namespace(key1.fingerprint)
+  val ns1_unsupportedScheme = Namespace(key1_unsupportedScheme.fingerprint)
   val ns2 = Namespace(key2.fingerprint)
   val ns3 = Namespace(key3.fingerprint)
   val ns4 = Namespace(key4.fingerprint)
@@ -41,6 +42,11 @@ class TopologyTransactionTestFactory(loggerFactory: NamedLoggerFactory, initEc: 
   val participant1 = ParticipantId(uid1a)
   val participant6 = ParticipantId(uid6)
   val ns1k1_k1 = mkAdd(createNs(ns1, key1, isRootDelegation = true), key1)
+  val ns1k1_k1_unsupportedScheme =
+    mkAdd(
+      createNs(ns1_unsupportedScheme, key1_unsupportedScheme, isRootDelegation = true),
+      key1_unsupportedScheme,
+    )
   val ns1k2_k1 = mkAdd(createNs(ns1, key2, isRootDelegation = true), key1)
   val ns1k2_k1p = mkAdd(createNs(ns1, key2, isRootDelegation = true), key1)
   val ns1k3_k2 = mkAdd(createNs(ns1, key3, isRootDelegation = false), key2)
@@ -49,9 +55,9 @@ class TopologyTransactionTestFactory(loggerFactory: NamedLoggerFactory, initEc: 
   val ns3k3_k3 = mkAdd(createNs(ns3, key3, isRootDelegation = true), key3)
   val ns6k3_k6 = mkAdd(createNs(ns6, key3, isRootDelegation = false), key6)
   val ns6k6_k6 = mkAdd(createNs(ns6, key6, isRootDelegation = true), key6)
-  val id1ak4_k2 = mkAdd(IdentifierDelegation(uid1a, key4), key2)
-  val id1ak4_k2p = mkAdd(IdentifierDelegation(uid1a, key4), key2)
   val id1ak4_k1 = mkAdd(IdentifierDelegation(uid1a, key4), key1)
+  val id1ak4_k2 = mkAdd(IdentifierDelegation(uid1a, key4), key2)
+  val id1ak6_k4 = mkAdd(IdentifierDelegation(uid1a, key6), key4)
 
   val id6k4_k1 = mkAdd(IdentifierDelegation(uid6, key4), key1)
 

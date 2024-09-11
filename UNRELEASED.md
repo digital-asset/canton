@@ -3,6 +3,10 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2024-09-06 (Exclusive)
+
+- Console.bootstrap.domain has new parameter domainThreshold, the minimum number of domain owners that need to authorize on behalf of the domain's namespace.
+
 ## Until 2024-09-04 (Exclusive)
 
 - google.protobuf.XValue wrapper messages are replaced by `optional X` in the protobuf definitions. Incompatibility for manually crafted Protobuf messages and wire formats. Protobuf bindings must be regenerated, but should remain compatible.
