@@ -11,6 +11,7 @@ val iouId = bootstrap.domain(
   sequencers = Seq(iou_sequencer),
   mediators = Seq(iou_mediator),
   domainOwners = Seq(iouDomainOwner),
+  domainThreshold = PositiveInt.one,
   staticDomainParameters = StaticDomainParameters.defaultsWithoutKMS(ProtocolVersion.latest),
 )
 
@@ -20,6 +21,7 @@ val paintId = bootstrap.domain(
   sequencers = Seq(paint_sequencer),
   mediators = Seq(paint_mediator),
   domainOwners = Seq(paintDomainOwner),
+  domainThreshold = PositiveInt.one,
   staticDomainParameters = StaticDomainParameters.defaultsWithoutKMS(ProtocolVersion.latest),
 )
 
@@ -119,10 +121,10 @@ val Seq(paintOffer) = decodeAllCreated(OfferToPaintHouseByOwner.COMPANION)(
 // Wait until the painter sees the paint offer in the active contract store
 participant3.ledger_api.state.acs.await_active_contract(Painter, paintOffer.id.toLf)
 
-// Painter transfers the paint offer to the IOU domain
+// Painter reasigns the paint offer to the IOU domain
 val paintOfferReassignmentId = participant3.ledger_api.commands.submit_unassign(
-  Painter,                      // Initiator of the transfer
-  paintOffer.id.toLf,           // Contract to be transferred
+  Painter,                      // Initiator of the reassignment
+  paintOffer.id.toLf,           // Contract to be reassigned
   paintId,                      // Source domain
   iouId                         // Target domain
 ).unassignedEvent.unassignId
@@ -161,7 +163,7 @@ participant2.ledger_api.commands.submit_unassign(
   paintId
 )
 // After the exclusivity period, which is set to 2 seconds,
-// the contract is automatically transferred into the target domain
+// the contract is automatically reassigned into the target domain
 utils.retry_until_true(10.seconds) {
   // in the absence of other activity, force the participants to update their view of the latest domain time
   participant2.testing.fetch_domain_times()

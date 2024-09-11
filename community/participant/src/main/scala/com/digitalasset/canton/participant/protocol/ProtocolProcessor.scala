@@ -68,7 +68,7 @@ import scala.concurrent.{ExecutionContext, Future, blocking}
 import scala.util.{Failure, Success}
 
 /** The [[ProtocolProcessor]] orchestrates Phase 3, 4, and 7 of the synchronization protocol.
-  * For this, it combines [[ProcessingSteps]] specific to a particular kind of request (transaction / transfer)
+  * For this, it combines [[ProcessingSteps]] specific to a particular kind of request (transaction / reassignment)
   * with the common processing steps.
   *
   * @param steps The specific processing steps
@@ -1084,7 +1084,7 @@ abstract class ProtocolProcessor[
 
             pendingDataAndResponses <- steps.constructPendingDataAndResponse(
               parsedRequest,
-              ephemeral.transferCache,
+              ephemeral.reassignmentCache,
               requestFuturesF.flatMap(_.activenessResult),
               engineController,
             )
@@ -1288,7 +1288,7 @@ abstract class ProtocolProcessor[
 
     for {
       _ <- EitherT.right(
-        ephemeral.recordOrderPublisher.tick(sc, resultTs, eventO = None)
+        ephemeral.recordOrderPublisher.tick(sc, resultTs, eventO = None, requestCounterO = None)
       )
 
       snapshot <- EitherT.right(

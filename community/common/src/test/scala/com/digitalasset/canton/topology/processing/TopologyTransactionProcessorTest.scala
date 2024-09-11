@@ -7,8 +7,8 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.crypto.SigningPublicKey
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
+import com.digitalasset.canton.crypto.{DomainCryptoPureApi, SigningPublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.DynamicDomainParameters
@@ -52,7 +52,7 @@ abstract class TopologyTransactionProcessorTest
 
     val proc = new TopologyTransactionProcessor(
       domainId,
-      crypto,
+      new DomainCryptoPureApi(defaultStaticDomainParameters, crypto),
       store,
       _ => (),
       TerminateProcessing.NoOpTerminateTopologyProcessing,
@@ -197,7 +197,7 @@ abstract class TopologyTransactionProcessorTest
         .valueOrFail("Couldn't find DND")
 
       // check that we indeed stored 2 proposals
-      storeAfterProcessing.result.filter(_.validFrom == EffectiveTime(ts(4))) should have size (2)
+      storeAfterProcessing.result.filter(_.validFrom == EffectiveTime(ts(4))) should have size 2
 
       val proc2 = mk(store)._1
       process(proc2, ts(0), 0, block1)
@@ -285,13 +285,13 @@ abstract class TopologyTransactionProcessorTest
       val st3 = fetch(store, ts(2).immediateSuccessor)
       process(proc, ts(3), 3, List(Factory.mkRemoveTx(id1ak4_k2)))
       val st4 = fetch(store, ts(3).immediateSuccessor)
-      process(proc, ts(4), 4, List(setSerial(id1ak4_k2p, PositiveInt.three)))
+      process(proc, ts(4), 4, List(setSerial(id1ak4_k2, PositiveInt.three)))
       val st5 = fetch(store, ts(4).immediateSuccessor)
       validate(st1, block1)
       validate(st2, List(ns1k1_k1))
       validate(st3, List(ns1k1_k1, ns1k2_k1p, id1ak4_k2, okm1bk5k1E_k4))
       validate(st4, List(ns1k1_k1, ns1k2_k1p))
-      validate(st5, List(ns1k1_k1, ns1k2_k1p, id1ak4_k2p, okm1bk5k1E_k4))
+      validate(st5, List(ns1k1_k1, ns1k2_k1p, id1ak4_k2, okm1bk5k1E_k4))
     }
 
     "cascading update and domain parameters change" in {
@@ -366,7 +366,7 @@ abstract class TopologyTransactionProcessorTest
           .value
 
         dopInStore.mapping shouldBe dopMapping
-        dopInStore.transaction.signatures.forgetNE.toSeq should have size (expectedSignatures.toLong)
+        dopInStore.transaction.signatures.forgetNE.toSeq should have size expectedSignatures.toLong
         dopInStore.validUntil shouldBe None
         dopInStore.validFrom shouldBe EffectiveTime(expectedValidFrom)
       }
@@ -568,7 +568,7 @@ abstract class TopologyTransactionProcessorTest
           .value
 
         dopInStore.mapping shouldBe transactionToLookUp.mapping
-        dopInStore.transaction.signatures.forgetNE.toSeq should have size (expectedSignatures.toLong)
+        dopInStore.transaction.signatures.forgetNE.toSeq should have size expectedSignatures.toLong
         dopInStore.validUntil shouldBe None
         dopInStore.validFrom shouldBe EffectiveTime(expectedValidFrom)
       }

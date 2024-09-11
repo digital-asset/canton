@@ -21,13 +21,13 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
+import com.digitalasset.canton.participant.protocol.reassignment.{
+  AssignmentProcessor,
+  UnassignmentProcessor,
+}
 import com.digitalasset.canton.participant.protocol.submission.{
   InFlightSubmissionTracker,
   SequencedSubmission,
-}
-import com.digitalasset.canton.participant.protocol.transfer.{
-  AssignmentProcessor,
-  UnassignmentProcessor,
 }
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
@@ -209,7 +209,7 @@ trait MessageDispatcher { this: NamedLogging =>
       // It is safe to not wedge repair requests with the sequenced events they're tagged to
       // because wedging affects only request counter allocation.
       repairProcessorResult <- repairProcessorWedging(ts)
-      transactionTransferResult <- processTransactionAndTransferMessages(
+      transactionReassignmentResult <- processTransactionAndReassignmentMessages(
         eventE,
         sc,
         ts,
@@ -221,7 +221,7 @@ trait MessageDispatcher { this: NamedLogging =>
         trafficResult,
         acsCommitmentResult,
         repairProcessorResult,
-        transactionTransferResult,
+        transactionReassignmentResult,
       )
     )
   }
@@ -249,7 +249,7 @@ trait MessageDispatcher { this: NamedLogging =>
       trafficProcessor.processSetTrafficPurchasedEnvelopes(ts, timestampOfSigningKeyO, envelopes),
     )
 
-  private def processTransactionAndTransferMessages(
+  private def processTransactionAndReassignmentMessages(
       event: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
       sc: SequencerCounter,
       ts: CantonTimestamp,
@@ -623,7 +623,7 @@ trait MessageDispatcher { this: NamedLogging =>
       traceContext: TraceContext
   ): FutureUnlessShutdown[ProcessingResult] = {
     lazy val future = FutureUnlessShutdown.outcomeF {
-      recordOrderPublisher.tick(sc, ts, eventO = None)
+      recordOrderPublisher.tick(sc, ts, eventO = None, requestCounterO = None)
     }
     doProcess(UnspecifiedMessageKind, future)
   }

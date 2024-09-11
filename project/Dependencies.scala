@@ -26,6 +26,7 @@ object Dependencies {
   //  When updating pekko, make sure to update the clone as well, including the tests in community/lib/pekko/src/main/scala/pekko
   lazy val pekko_http_version = "1.0.0"
   lazy val ammonite_version = "2.5.9"
+  lazy val apispec_version = "0.7.2"
   lazy val awaitility_version = "4.2.0"
   lazy val aws_version = "2.22.3"
   lazy val better_files_version = "3.9.1"
@@ -36,6 +37,7 @@ object Dependencies {
   lazy val checkerFramework_version = "3.28.0"
   lazy val chimney_version = "0.6.1"
   lazy val circe_version = "0.14.2"
+  lazy val circe_yaml_version = "1.15.0" // added to override snakeYaml vulnerability
   lazy val dropwizard_version = "4.1.33"
   lazy val flyway_version = "10.15.0"
   lazy val gcp_kms_version = "2.36.0"
@@ -200,7 +202,7 @@ object Dependencies {
   lazy val circe_generic =
     "io.circe" %% "circe-generic" % circe_version exclude ("com.chuusai", s"shapeless_$scala_version_short")
   lazy val circe_parser = "io.circe" %% "circe-parser" % circe_version
-  lazy val circe_yaml = "io.circe" %% "circe-yaml" % circe_version
+  lazy val circe_yaml = "io.circe" %% "circe-yaml" % circe_yaml_version
 
   lazy val tink = "com.google.crypto.tink" % "tink" % tink_version excludeAll (
     ExclusionRule(
@@ -232,6 +234,8 @@ object Dependencies {
     resolveDependency("io.opentelemetry.instrumentation", "opentelemetry-grpc-1.6")
   lazy val opentelemetry_instrumentation_runtime_metrics =
     resolveDependency("io.opentelemetry.instrumentation", "opentelemetry-runtime-telemetry-java8")
+  lazy val opentelemetry_instrumentation_hikari =
+    "io.opentelemetry.instrumentation" % "opentelemetry-hikaricp-3.0" % opentelemetry_instrumentation_runtime_metrics.revision
 
   lazy val better_files = "com.github.pathikrit" %% "better-files" % better_files_version
 
@@ -275,6 +279,18 @@ object Dependencies {
 
   lazy val tapir_pekko_http_server =
     "com.softwaremill.sttp.tapir" %% "tapir-pekko-http-server" % tapir_version
+
+  lazy val tapir_openapi_docs =
+    "com.softwaremill.sttp.tapir" %% "tapir-openapi-docs" % tapir_version
+
+  lazy val tapir_asyncapi_docs =
+    "com.softwaremill.sttp.tapir" %% "tapir-asyncapi-docs" % tapir_version
+
+  lazy val sttp_apiscpec_openapi_circe_yaml =
+    "com.softwaremill.sttp.apispec" %% "openapi-circe-yaml" % apispec_version
+
+  lazy val sttp_apiscpec_asyncapi_circe_yaml =
+    "com.softwaremill.sttp.apispec" %% "asyncapi-circe-yaml" % apispec_version
 
   // Transcode dependencies
   lazy val upickle = "com.lihaoyi" %% "upickle" % upickle_version

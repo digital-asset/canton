@@ -24,19 +24,19 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.{
   ActivenessSet,
   CommitSet,
 }
+import com.digitalasset.canton.participant.protocol.reassignment.AssignmentProcessingSteps.PendingAssignment
+import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentProcessingSteps.PendingUnassignment
 import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicator.DeduplicationFailed
 import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker.InFlightSubmissionTrackerError
 import com.digitalasset.canton.participant.protocol.submission.{
   ChangeIdHash,
   SubmissionTrackingData,
 }
-import com.digitalasset.canton.participant.protocol.transfer.AssignmentProcessingSteps.PendingAssignment
-import com.digitalasset.canton.participant.protocol.transfer.UnassignmentProcessingSteps.PendingUnassignment
 import com.digitalasset.canton.participant.protocol.validation.PendingTransaction
 import com.digitalasset.canton.participant.store.{
+  ReassignmentLookup,
   SyncDomainEphemeralState,
   SyncDomainEphemeralStateLookup,
-  TransferLookup,
 }
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
@@ -48,7 +48,7 @@ import com.digitalasset.canton.{LedgerSubmissionId, RequestCounter, SequencerCou
 
 import scala.concurrent.{ExecutionContext, Future}
 
-/** Interface for processing steps that are specific to request types (transaction / transfer).
+/** Interface for processing steps that are specific to request types (transaction / reassignment).
   * The [[ProtocolProcessor]] wires up these steps with the necessary synchronization and state management,
   * including common processing steps.
   *
@@ -435,13 +435,13 @@ trait ProcessingSteps[
   /** Phase 3, step 3:
     * Yields the pending data and confirmation responses for the case that at least one payload is well-formed.
     *
-    * @param transferLookup             Read-only interface of the [[com.digitalasset.canton.participant.store.memory.TransferCache]]
+    * @param reassignmentLookup             Read-only interface of the [[com.digitalasset.canton.participant.store.memory.ReassignmentCache]]
     * @param activenessResultFuture     Future of the result of the activeness check
     * @return Returns the `requestType.PendingRequestData` to be stored until Phase 7 and the responses to be sent to the mediator.
     */
   def constructPendingDataAndResponse(
       parsedRequest: ParsedRequestType,
-      transferLookup: TransferLookup,
+      reassignmentLookup: ReassignmentLookup,
       activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       engineController: EngineController,
   )(implicit
@@ -573,9 +573,9 @@ object ProcessingSteps {
     }
     type Transaction = Transaction.type
 
-    sealed trait Transfer extends Values
+    sealed trait Reassignment extends Values
 
-    case object Unassignment extends Transfer {
+    case object Unassignment extends Reassignment {
       override type PendingRequestData = PendingUnassignment
 
       override def pretty: Pretty[Unassignment] = prettyOfObject[Unassignment]
@@ -583,7 +583,7 @@ object ProcessingSteps {
 
     type Unassignment = Unassignment.type
 
-    case object Assignment extends Transfer {
+    case object Assignment extends Reassignment {
       override type PendingRequestData = PendingAssignment
 
       override def pretty: Pretty[Assignment] = prettyOfObject[Assignment]

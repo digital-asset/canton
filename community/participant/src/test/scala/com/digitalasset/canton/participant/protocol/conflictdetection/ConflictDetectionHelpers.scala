@@ -14,13 +14,13 @@ import com.digitalasset.canton.participant.store.ActiveContractStore.{
 }
 import com.digitalasset.canton.participant.store.memory.{
   InMemoryActiveContractStore,
-  InMemoryTransferStore,
-  TransferCache,
+  InMemoryReassignmentStore,
+  ReassignmentCache,
 }
 import com.digitalasset.canton.participant.store.{
   ActiveContractStore,
-  TransferStore,
-  TransferStoreTest,
+  ReassignmentStore,
+  ReassignmentStoreTest,
 }
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.*
@@ -60,28 +60,28 @@ private[protocol] trait ConflictDetectionHelpers {
     insertEntriesAcs(acs, entries).map(_ => acs)
   }
 
-  def mkTransferCache(
+  def mkReassignmentCache(
       loggerFactory: NamedLoggerFactory,
-      store: TransferStore =
-        new InMemoryTransferStore(TransferStoreTest.targetDomain, loggerFactory),
+      store: ReassignmentStore =
+        new InMemoryReassignmentStore(ReassignmentStoreTest.targetDomain, loggerFactory),
   )(
       entries: (ReassignmentId, MediatorGroupRecipient)*
-  )(implicit traceContext: TraceContext): Future[TransferCache] =
+  )(implicit traceContext: TraceContext): Future[ReassignmentCache] =
     Future
       .traverse(entries) { case (reassignmentId, sourceMediator) =>
         for {
-          transfer <- TransferStoreTest.mkTransferDataForDomain(
+          reassignmentData <- ReassignmentStoreTest.mkReassignmentDataForDomain(
             reassignmentId,
             sourceMediator,
-            targetDomainId = TransferStoreTest.targetDomain,
+            targetDomainId = ReassignmentStoreTest.targetDomain,
           )
           result <- store
-            .addTransfer(transfer)
+            .addReassignment(reassignmentData)
             .value
             .failOnShutdown
         } yield result
       }
-      .map(_ => new TransferCache(store, loggerFactory)(parallelExecutionContext))
+      .map(_ => new ReassignmentCache(store, loggerFactory)(parallelExecutionContext))
 }
 
 private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatience {
@@ -124,15 +124,15 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
       deact: Set[LfContractId] = Set.empty,
       useOnly: Set[LfContractId] = Set.empty,
       create: Set[LfContractId] = Set.empty,
-      tfIn: Set[LfContractId] = Set.empty,
+      assign: Set[LfContractId] = Set.empty,
       prior: Set[LfContractId] = Set.empty,
       reassignmentIds: Set[ReassignmentId] = Set.empty,
   ): ActivenessSet = {
     val contracts = ActivenessCheck.tryCreate(
       checkFresh = create,
-      checkFree = tfIn,
+      checkFree = assign,
       checkActive = deact ++ useOnly,
-      lock = create ++ tfIn ++ deact,
+      lock = create ++ assign ++ deact,
       needPriorState = prior,
     )
     ActivenessSet(
@@ -165,7 +165,7 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
       notFree: Map[LfContractId, ActiveContractStore.Status] = Map.empty,
       notActive: Map[LfContractId, ActiveContractStore.Status] = Map.empty,
       prior: Map[LfContractId, Option[ActiveContractStore.Status]] = Map.empty,
-      inactiveTransfers: Set[ReassignmentId] = Set.empty,
+      inactiveReassignments: Set[ReassignmentId] = Set.empty,
   ): ActivenessResult = {
     val contracts = ActivenessCheckResult(
       alreadyLocked = locked,
@@ -177,15 +177,15 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
     )
     ActivenessResult(
       contracts = contracts,
-      inactiveTransfers = inactiveTransfers,
+      inactiveReassignments = inactiveReassignments,
     )
   }
 
   def mkCommitSet(
       arch: Set[LfContractId] = Set.empty,
       create: Set[LfContractId] = Set.empty,
-      tfOut: Map[LfContractId, (DomainId, ReassignmentCounter)] = Map.empty,
-      tfIn: Map[LfContractId, ReassignmentId] = Map.empty,
+      unassign: Map[LfContractId, (DomainId, ReassignmentCounter)] = Map.empty,
+      assign: Map[LfContractId, ReassignmentId] = Map.empty,
   ): CommitSet =
     CommitSet(
       archivals = arch
@@ -201,14 +201,14 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
           )
         )
         .toMap,
-      unassignments = tfOut.fmap { case (id, reassignmentCounter) =>
+      unassignments = unassign.fmap { case (id, reassignmentCounter) =>
         CommitSet.UnassignmentCommit(
           TargetDomainId(id),
           Set.empty,
           reassignmentCounter,
         )
       },
-      assignments = tfIn.fmap(id =>
+      assignments = assign.fmap(id =>
         CommitSet.AssignmentCommit(
           id,
           ContractMetadata.empty,

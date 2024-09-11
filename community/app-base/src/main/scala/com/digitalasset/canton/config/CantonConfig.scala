@@ -376,8 +376,8 @@ trait CantonConfig {
         adminWorkflow = participantParameters.adminWorkflow,
         maxUnzippedDarSize = participantParameters.maxUnzippedDarSize,
         stores = participantParameters.stores,
-        transferTimeProofFreshnessProportion =
-          participantParameters.transferTimeProofFreshnessProportion,
+        reassignmentTimeProofFreshnessProportion =
+          participantParameters.reassignmentTimeProofFreshnessProportion,
         protocolConfig = ParticipantProtocolConfig(
           minimumProtocolVersion = participantParameters.minimumProtocolVersion.map(_.unwrap),
           alphaVersionSupport = participantParameters.alphaVersionSupport,
@@ -518,7 +518,6 @@ private[canton] object CantonNodeParameterConverter {
       nonStandardConfig = parent.parameters.nonStandardConfig,
       dbMigrateAndStart = node.storage.parameters.migrateAndStart,
       exitOnFatalFailures = parent.parameters.exitOnFatalFailures,
-      useUnifiedSequencer = node.parameters.useUnifiedSequencer,
       watchdog = node.parameters.watchdog,
     )
 

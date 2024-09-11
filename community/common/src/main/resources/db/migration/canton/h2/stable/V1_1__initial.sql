@@ -213,9 +213,9 @@ create table par_active_contracts (
     ts bigint not null,
     -- Request counter of the time of change
     request_counter bigint not null,
-    -- optional remote domain index in case of transfers
+    -- optional remote domain index in case of reassignments
     remote_domain_idx int,
-    transfer_counter bigint default null,
+    reassignment_counter bigint default null,
     primary key (domain_id, contract_id, ts, request_counter, change)
 );
 
@@ -351,31 +351,32 @@ create index idx_par_linearized_event_log_publication_time on par_linearized_eve
 -- H2 does not (yet) support partial indices, so we index everything
 create index idx_par_event_log_associated_domain on par_event_log (log_id, associated_domain, ts);
 
-create table par_transfers (
+create table par_reassignments (
     -- reassignment id
     target_domain varchar(300) not null,
     origin_domain varchar(300) not null,
 
-    -- transfer data
+    -- reassignment data
     source_protocol_version integer not null,
     -- UTC timestamp in microseconds relative to EPOCH
-    transfer_out_timestamp bigint not null,
-    transfer_out_request_counter bigint not null,
-    transfer_out_request binary large object not null,
-    transfer_out_global_offset bigint,
-    transfer_in_global_offset bigint,
+    unassignment_timestamp bigint not null,
+    unassignment_request_counter bigint not null,
+    unassignment_request binary large object not null,
+    unassignment_global_offset bigint,
+    assignment_global_offset bigint,
+
     -- UTC timestamp in microseconds relative to EPOCH
-    transfer_out_decision_time bigint not null,
+    unassignment_decision_time bigint not null,
     contract binary large object not null,
     creating_transaction_id binary large object not null,
-    transfer_out_result binary large object,
+    unassignment_result binary large object,
     submitter_lf varchar(300) not null,
 
-    -- defined if transfer was completed
+    -- defined if reassignment was completed
     time_of_completion_request_counter bigint,
     -- UTC timestamp in microseconds relative to EPOCH
     time_of_completion_timestamp bigint,
-    primary key (target_domain, origin_domain, transfer_out_timestamp)
+    primary key (target_domain, origin_domain, unassignment_timestamp)
 );
 
 -- stores all requests for the request journal
@@ -941,14 +942,39 @@ create table ord_availability_batch(
     primary key (id)
 );
 
-create table ord_pbft_messages(
+-- messages stored during the progress of a block possibly across different pbft views
+create table ord_pbft_messages_in_progress(
+    -- global sequence number of the ordered block
+    block_number bigint not null,
+
+    -- view number
+    view_number smallint not null,
+
+    -- pbft message for the block
+    message binary large object not null,
+
+    -- pbft message discriminator (0 = pre-prepare, 1 = prepare, 2 = commit)
+    discriminator smallint not null,
+
+    -- sender of the message
+    from_sequencer_id varchar(300) not null,
+
+    -- for each block number, we only expect one message of each kind for the same sender and view number.
+    -- in the case of pre-prepare, we only expect one message for the whole block, but for simplicity
+    -- we won't differentiate that at the database level.
+    primary key (block_number, view_number, from_sequencer_id, discriminator)
+);
+
+-- final pbft messages stored only once for each block when it completes
+-- currently only commit messages and the pre-prepare used for that block
+create table ord_pbft_messages_completed(
     -- global sequence number of the ordered block
     block_number bigint not null,
 
     -- pbft message for the block
     message binary large object not null,
 
-    -- pbft message discriminator (0 = pre-prepare, 1 = prepare, 2 = commit)
+    -- pbft message discriminator (0 = pre-prepare, 2 = commit)
     discriminator smallint not null,
 
     -- sender of the message

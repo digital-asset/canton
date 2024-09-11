@@ -10,7 +10,6 @@ import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.*
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.environment.DefaultNodeParameters
 import com.digitalasset.canton.http.HttpApiConfig
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
@@ -329,7 +328,7 @@ object TestingTimeServiceConfig {
   * @param ledgerApiServer ledger api server parameters
   *
   * The following specialized participant node performance tuning parameters may be grouped once a more final set of configs emerges.
-  * @param transferTimeProofFreshnessProportion Proportion of the target domain exclusivity timeout that is used as a freshness bound when
+  * @param reassignmentTimeProofFreshnessProportion Proportion of the target domain exclusivity timeout that is used as a freshness bound when
   *                                             requesting a time proof. Setting to 3 means we'll take a 1/3 of the target domain exclusivity timeout
   *                                             and potentially we reuse a recent timeout if one exists within that bound, otherwise a new time proof
   *                                             will be requested.
@@ -354,7 +353,7 @@ final case class ParticipantNodeParameterConfig(
     batching: BatchingConfig = BatchingConfig(),
     caching: CachingConfigs = CachingConfigs(),
     stores: ParticipantStoreConfig = ParticipantStoreConfig(),
-    transferTimeProofFreshnessProportion: NonNegativeInt = NonNegativeInt.tryCreate(3),
+    reassignmentTimeProofFreshnessProportion: NonNegativeInt = NonNegativeInt.tryCreate(3),
     minimumProtocolVersion: Option[ParticipantProtocolVersion] = Some(
       ParticipantProtocolVersion(ProtocolVersion.v32)
     ),
@@ -374,7 +373,6 @@ final case class ParticipantNodeParameterConfig(
     journalGarbageCollectionDelay: config.NonNegativeFiniteDuration =
       config.NonNegativeFiniteDuration.ofSeconds(0),
     disableUpgradeValidation: Boolean = false,
-    override val useUnifiedSequencer: Boolean = DefaultNodeParameters.UseUnifiedSequencer,
     allowForUnauthenticatedContractIds: Boolean = false,
     watchdog: Option[WatchdogConfig] = None,
     packageMetadataView: PackageMetadataViewConfig = PackageMetadataViewConfig(),
