@@ -709,6 +709,7 @@ object BuildCommon {
           circe_generic,
           flyway.excludeAll(ExclusionRule("org.apache.logging.log4j")),
           flyway_postgres,
+          opentelemetry_instrumentation_hikari,
           postgres,
           pprint,
           scaffeine,

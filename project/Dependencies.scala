@@ -229,6 +229,8 @@ object Dependencies {
     resolveDependency("io.opentelemetry.instrumentation", "opentelemetry-grpc-1.6")
   lazy val opentelemetry_instrumentation_runtime_metrics =
     resolveDependency("io.opentelemetry.instrumentation", "opentelemetry-runtime-telemetry-java8")
+  lazy val opentelemetry_instrumentation_hikari =
+    "io.opentelemetry.instrumentation" % "opentelemetry-hikaricp-3.0" % opentelemetry_instrumentation_runtime_metrics.revision
 
   lazy val better_files = "com.github.pathikrit" %% "better-files" % better_files_version
 
