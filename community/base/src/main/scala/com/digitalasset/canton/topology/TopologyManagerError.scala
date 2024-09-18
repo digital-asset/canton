@@ -17,7 +17,6 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
-import com.digitalasset.canton.topology.transaction.TopologyMapping.MappingHash
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.{
   GenericTopologyTransaction,
   TxHash,
@@ -610,12 +609,11 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         ErrorCategory.InvalidIndependentOfSystemState,
       ) {
     final case class MultipleEffectiveMappingsPerUniqueKey(
-        transactions: Map[MappingHash, Seq[GenericStoredTopologyTransaction]]
+        transactions: Seq[(String, Seq[GenericStoredTopologyTransaction])]
     )(implicit
         override val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          cause =
-            s"The topology snapshot was rejected because it contained multiple effective transactions with the same unique key"
+          cause = s"The topology snapshot was rejected because it was inconsistent."
         )
         with TopologyManagerError
   }
@@ -670,6 +668,20 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
             s"Tried to add mediators to group $group, but they are already assigned to other groups: ${mediators.toSeq
                 .sortBy(_._1.toProtoPrimitive)
                 .mkString(", ")}"
+        )
+        with TopologyManagerError
+  }
+
+  object MemberCannotRejoinDomain
+      extends ErrorCode(
+        id = "MEMBER_CANNOT_REJOIN_DOMAIN",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    final case class Reject(members: Seq[Member])(implicit
+        override val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause =
+            s"Members ${members.sorted} tried to rejoin a domain which they had previously left."
         )
         with TopologyManagerError
   }

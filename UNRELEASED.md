@@ -3,6 +3,17 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2024-09-17 (Exclusive)
+
+### Integer Offset in ledger api
+In the ledger api protobufs we used strings to represent the offset of a participant.
+The integer approach replaces string representation in:
+- OffsetCheckpoint message: with int64
+
+## Until 2024-09-16 (Exclusive)
+
+- Re-onboarding members results in a rejection of the `DomainTrustCertificate`, `SequencerDomainState`, or `MediatorDomainState` with the error `MEMBER_CANNOT_REJOIN_DOMAIN`.
+
 ## Until 2024-09-06 (Exclusive)
 
 - Console.bootstrap.domain has new parameter domainThreshold, the minimum number of domain owners that need to authorize on behalf of the domain's namespace.
