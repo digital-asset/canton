@@ -77,7 +77,10 @@ import com.digitalasset.canton.platform.apiserver.configuration.{
   EngineLoggingConfig,
   RateLimitingConfig,
 }
-import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfig
+import com.digitalasset.canton.platform.config.{
+  ActiveContractsServiceStreamsConfig,
+  InteractiveSubmissionServiceConfig,
+}
 import com.digitalasset.canton.protocol.AcsCommitmentsCatchUpConfig
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.pureconfigutils.HttpServerConfig
@@ -416,6 +419,8 @@ trait CantonConfig {
         protocol = CantonNodeParameterConverter.protocol(this, sequencerNodeConfig.parameters),
         maxConfirmationRequestsBurstFactor =
           sequencerNodeConfig.parameters.maxConfirmationRequestsBurstFactor,
+        unsafeEnableOnlinePartyReplication =
+          sequencerNodeConfig.parameters.unsafeEnableOnlinePartyReplication,
       )
     }
 
@@ -790,6 +795,9 @@ object CantonConfig {
       deriveReader[AuthServiceConfig]
     lazy implicit val rateLimitConfigReader: ConfigReader[RateLimitingConfig] =
       deriveReader[RateLimitingConfig]
+    lazy implicit val ledgerApiInteractiveSubmissionServiceConfigReader
+        : ConfigReader[InteractiveSubmissionServiceConfig] =
+      deriveReader[InteractiveSubmissionServiceConfig]
     lazy implicit val ledgerApiServerConfigReader: ConfigReader[LedgerApiServerConfig] =
       deriveReader[LedgerApiServerConfig]
 
@@ -840,6 +848,8 @@ object CantonConfig {
     lazy implicit val communitySequencerConfigDatabaseReader
         : ConfigReader[CommunitySequencerConfig.Database] =
       deriveReader[CommunitySequencerConfig.Database]
+    lazy implicit val blockSequencerConfigReader: ConfigReader[BlockSequencerConfig] =
+      deriveReader[BlockSequencerConfig]
     lazy implicit val communityDatabaseSequencerReaderConfigReader
         : ConfigReader[CommunitySequencerReaderConfig] =
       deriveReader[CommunitySequencerReaderConfig]
@@ -872,7 +882,17 @@ object CantonConfig {
             case "database" =>
               communitySequencerConfigDatabaseReader.from(objCur.withoutKey("type"))
             case other =>
-              objCur.atKey("config").map(CommunitySequencerConfig.External(other, _, None))
+              for {
+                config <- objCur.atKey("config")
+                // since the `database` subsection is optional, we try to get the
+                // config value, and if it doesn't exist parse the default
+                // Database sequencer config with an empty object
+                database = objCur
+                  .atKeyOrUndefined("block")
+                  .valueOpt
+                  .getOrElse(ConfigValueFactory.fromMap(new java.util.HashMap()))
+                blockSequencerConfig <- blockSequencerConfigReader.from(database)
+              } yield CommunitySequencerConfig.External(other, blockSequencerConfig, config)
           }): ConfigReader.Result[CommunitySequencerConfig]
         } yield config
       }
@@ -1215,6 +1235,9 @@ object CantonConfig {
       deriveWriter[AuthServiceConfig]
     lazy implicit val rateLimitConfigWriter: ConfigWriter[RateLimitingConfig] =
       deriveWriter[RateLimitingConfig]
+    lazy implicit val ledgerApiInteractiveSubmissionServiceConfigWriter
+        : ConfigWriter[InteractiveSubmissionServiceConfig] =
+      deriveWriter[InteractiveSubmissionServiceConfig]
     lazy implicit val ledgerApiServerConfigWriter: ConfigWriter[LedgerApiServerConfig] =
       deriveWriter[LedgerApiServerConfig]
     lazy implicit val sequencerTrafficConfigWriter: ConfigWriter[SequencerTrafficConfig] =
@@ -1260,6 +1283,8 @@ object CantonConfig {
     lazy implicit val communitySequencerConfigDatabaseWriter
         : ConfigWriter[CommunitySequencerConfig.Database] =
       deriveWriter[CommunitySequencerConfig.Database]
+    lazy implicit val blockSequencerConfigWriter: ConfigWriter[BlockSequencerConfig] =
+      deriveWriter[BlockSequencerConfig]
     lazy implicit val communityDatabaseSequencerReaderConfigWriter
         : ConfigWriter[CommunitySequencerReaderConfig] =
       deriveWriter[CommunitySequencerReaderConfig]
@@ -1292,6 +1317,8 @@ object CantonConfig {
         } = DriverBlockSequencerFactory
           .getSequencerDriverFactory(sequencerType, SequencerDriver.DriverApiVersion)
 
+        val blockConfigValue = blockSequencerConfigWriter.to(otherSequencerConfig.block)
+
         val configValue = factory.configParser
           .from(otherSequencerConfig.config)
           // in order to make use of the confidential flag, we must first parse the raw sequencer driver config
@@ -1301,7 +1328,11 @@ object CantonConfig {
             sys.error(s"Failed to read $sequencerType sequencer's config. Error: $error")
           )
         ConfigValueFactory.fromMap(
-          Map[String, Object]("type" -> sequencerType, "config" -> configValue).asJava
+          Map[String, Object](
+            "type" -> sequencerType,
+            "block" -> blockConfigValue,
+            "config" -> configValue,
+          ).asJava
         )
     }
 
