@@ -27,11 +27,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   CreateSubscriptionError,
   SequencerError,
 }
-import com.digitalasset.canton.domain.sequencing.sequencer.traffic.TimestampSelector.{
-  ExactTimestamp,
-  TimestampSelector,
-  *,
-}
+import com.digitalasset.canton.domain.sequencing.sequencer.traffic.TimestampSelector.*
 import com.digitalasset.canton.domain.sequencing.sequencer.traffic.{
   SequencerRateLimitError,
   SequencerRateLimitManager,
@@ -75,6 +71,7 @@ class BlockSequencer(
     sequencerId: SequencerId,
     stateManager: BlockSequencerStateManagerBase,
     store: SequencerBlockStore,
+    blockSequencerConfig: BlockSequencerConfig,
     trafficPurchasedStore: TrafficPurchasedStore,
     storage: Storage,
     futureSupervisor: FutureSupervisor,
@@ -94,8 +91,7 @@ class BlockSequencer(
 )(implicit executionContext: ExecutionContext, materializer: Materializer, tracer: Tracer)
     extends DatabaseSequencer(
       SequencerWriterStoreFactory.singleInstance,
-      // TODO(#18407): Allow partial configuration of DBS as a part of unified sequencer
-      DatabaseSequencerConfig.ForBlockSequencer(),
+      blockSequencerConfig.toDatabaseSequencerConfig,
       None,
       TotalNodeCountValues.SingleSequencerTotalNodeCount,
       new LocalSequencerStateEventSignaller(
@@ -307,7 +303,7 @@ class BlockSequencer(
           )
           SendAsyncError.TrafficControlError(
             TrafficControlErrorReason.Error(
-              TrafficControlErrorReason.Error.Reason.InsufficientTraffic(
+              TrafficControlErrorReason.Error.Reason.OutdatedTrafficCost(
                 s"Submission was refused because traffic cost was outdated. Re-submit after the having observed the validation timestamp and processed its topology state: $outdated"
               )
             )

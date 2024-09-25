@@ -40,9 +40,12 @@ object CommitMode {
   * @param payloadWriteMaxConcurrency limit how many payload batches can be written concurrently.
   * @param eventWriteBatchMaxSize max event batch size to flush to the database.
   * @param eventWriteBatchMaxDuration max duration to collect events for a batch before triggering a write.
-  * @param commitMode optional commit mode that if set will be validated to ensure that the connection/db settings have been configured. Defaults to [[CommitMode.Synchronous]].
+  * @param commitModeValidation optional commit mode that if set will be validated to ensure that the connection/db settings have been configured. Defaults to [[CommitMode.Synchronous]].
   * @param maxSqlInListSize will limit the number of items in a SQL in clause. useful for databases where this may have a low limit (e.g. Oracle).
   * @param checkpointInterval an interval at which to generate sequencer counter checkpoints for all members.
+  * @param checkpointBackfillParallelism controls how many checkpoints will be written in parallel during the checkpoint backfill
+  *                                      process at startup. Higher parallelism likely means more IO load on the database, but
+  *                                      likely overall faster progression through the missing checkpoints.
   */
 sealed trait SequencerWriterConfig {
   this: {
@@ -57,6 +60,7 @@ sealed trait SequencerWriterConfig {
         commitModeValidation: Option[CommitMode],
         maxSqlInListSize: PositiveNumeric[Int],
         checkpointInterval: NonNegativeFiniteDuration,
+        checkpointBackfillParallelism: Int,
     ): SequencerWriterConfig
   } =>
 
@@ -72,6 +76,7 @@ sealed trait SequencerWriterConfig {
 
   /** how frequently to generate counter checkpoints for all members */
   val checkpointInterval: NonNegativeFiniteDuration
+  val checkpointBackfillParallelism: Int
 
   def modify(
       payloadQueueSize: Int = this.payloadQueueSize,
@@ -84,6 +89,7 @@ sealed trait SequencerWriterConfig {
       commitModeValidation: Option[CommitMode] = this.commitModeValidation,
       maxSqlInListSize: PositiveNumeric[Int] = this.maxSqlInListSize,
       checkpointInterval: NonNegativeFiniteDuration = this.checkpointInterval,
+      checkpointBackfillParallelism: Int = this.checkpointBackfillParallelism,
   ): SequencerWriterConfig =
     copy(
       payloadQueueSize,
@@ -96,6 +102,7 @@ sealed trait SequencerWriterConfig {
       commitModeValidation,
       maxSqlInListSize,
       checkpointInterval,
+      checkpointBackfillParallelism,
     )
 }
 
@@ -113,6 +120,8 @@ object SequencerWriterConfig {
   val DefaultCheckpointInterval: config.NonNegativeFiniteDuration =
     config.NonNegativeFiniteDuration.ofSeconds(30)
 
+  val DefaultCheckpointBackfillParallelism: Int = 2
+
   /** Use to have events immediately flushed to the database. Useful for decreasing latency however at a high throughput
     * a large number of writes will be detrimental for performance.
     */
@@ -129,6 +138,7 @@ object SequencerWriterConfig {
       override val commitModeValidation: Option[CommitMode] = CommitMode.Default.some,
       override val maxSqlInListSize: PositiveNumeric[Int] = DefaultMaxSqlInListSize,
       override val checkpointInterval: NonNegativeFiniteDuration = DefaultCheckpointInterval,
+      override val checkpointBackfillParallelism: Int = DefaultCheckpointBackfillParallelism,
   ) extends SequencerWriterConfig
 
   /** Creates batches of incoming events to minimize the number of writes to the database. Useful for a high throughput
@@ -148,5 +158,6 @@ object SequencerWriterConfig {
       override val commitModeValidation: Option[CommitMode] = CommitMode.Default.some,
       override val maxSqlInListSize: PositiveNumeric[Int] = DefaultMaxSqlInListSize,
       override val checkpointInterval: NonNegativeFiniteDuration = DefaultCheckpointInterval,
+      override val checkpointBackfillParallelism: Int = DefaultCheckpointBackfillParallelism,
   ) extends SequencerWriterConfig
 }

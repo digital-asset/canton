@@ -425,7 +425,7 @@ case object MemberDisabledError
 
 /** Used for verifying what pruning is doing in tests */
 @VisibleForTesting
-private[store] final case class SequencerStoreRecordCounts(
+private[canton] final case class SequencerStoreRecordCounts(
     events: Long,
     payloads: Long,
     counterCheckpoints: Long,
@@ -616,6 +616,10 @@ trait SequencerStore extends SequencerMemberValidator with NamedLogging with Aut
       traceContext: TraceContext
   ): Future[Option[CounterCheckpoint]]
 
+  def fetchLatestCheckpoint()(implicit
+      traceContext: TraceContext
+  ): Future[Option[CantonTimestamp]]
+
   /** Write an acknowledgement that member has processed earlier timestamps.
     * Only the latest timestamp needs to be stored. Earlier timestamps can be overwritten.
     * Acknowledgements of earlier timestamps should be ignored.
@@ -638,7 +642,7 @@ trait SequencerStore extends SequencerMemberValidator with NamedLogging with Aut
 
   /** Count records currently stored by the sequencer. Used for pruning tests. */
   @VisibleForTesting
-  protected[store] def countRecords(implicit
+  protected[canton] def countRecords(implicit
       traceContext: TraceContext
   ): Future[SequencerStoreRecordCounts]
 
@@ -806,7 +810,8 @@ trait SequencerStore extends SequencerMemberValidator with NamedLogging with Aut
   /** Compute a counter checkpoint for every member at the requested `timestamp` and save it to the store.
     */
   def recordCounterCheckpointsAtTimestamp(timestamp: CantonTimestamp)(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      externalCloseContext: CloseContext,
   ): Future[Unit]
 
   def initializeFromSnapshot(initialState: SequencerInitialState)(implicit

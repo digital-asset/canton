@@ -14,6 +14,7 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.block.BlockSequencerStateManager.ChunkState
+import com.digitalasset.canton.domain.block.*
 import com.digitalasset.canton.domain.block.data.memory.InMemorySequencerBlockStore
 import com.digitalasset.canton.domain.block.data.{BlockEphemeralState, BlockInfo, EphemeralState}
 import com.digitalasset.canton.domain.block.update.{
@@ -22,17 +23,13 @@ import com.digitalasset.canton.domain.block.update.{
   OrderedBlockUpdate,
   SignedChunkEvents,
 }
-import com.digitalasset.canton.domain.block.{
-  BlockEvents,
-  BlockSequencerStateManager,
-  BlockSequencerStateManagerBase,
-  RawLedgerBlock,
-  SequencerDriverHealthStatus,
-}
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer.SignedOrderingRequest
-import com.digitalasset.canton.domain.sequencing.sequencer.SequencerIntegration
 import com.digitalasset.canton.domain.sequencing.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
+import com.digitalasset.canton.domain.sequencing.sequencer.{
+  BlockSequencerConfig,
+  SequencerIntegration,
+}
 import com.digitalasset.canton.domain.sequencing.traffic.RateLimitManagerTesting
 import com.digitalasset.canton.domain.sequencing.traffic.store.memory.InMemoryTrafficPurchasedStore
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FutureUnlessShutdown}
@@ -160,6 +157,7 @@ class BlockSequencerTest
         sequencerId = sequencer1,
         fakeBlockSequencerStateManager,
         store,
+        BlockSequencerConfig(),
         balanceStore,
         storage,
         FutureSupervisor.Noop,
