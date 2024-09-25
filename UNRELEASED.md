@@ -3,6 +3,20 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2024-09-24 (Exclusive)
+- Fixed a crash recovery bug in unified sequencer, when it can miss events in the recovery process. Now it will start from
+the correct earlier block height in these situations.
+
+## Until 2024-09-20 (Exclusive)
+- Improved logging in case of sequencer connectivity problems as requested by Canton Network.
+- The block sequencer is now configurable under `canton.sequencers.<sequencer>.block`, including new checkpoint settings:
+```hocon
+// how often checkpoints should be written
+block.writer.checkpoint-interval = "30s"
+
+// how many checkpoints should be written when backfilling checkpoints at startup
+block.writer.checkpoint-backfill-parallelism = 2
+```
 
 ## Until 2024-08-28 (Exclusive)
 - Added periodic generation of sequencer counter checkpoints to the sequencer and reworked SQL queries.

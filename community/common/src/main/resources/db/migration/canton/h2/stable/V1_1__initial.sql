@@ -631,7 +631,7 @@ create table sequencer_counter_checkpoints (
    counter bigint not null,
    ts bigint not null,
    latest_sequencer_event_ts bigint,
-   primary key (member, counter)
+   primary key (member, counter, ts)
 );
 
 -- record the latest acknowledgement sent by a sequencer client of a member for the latest event they have successfully

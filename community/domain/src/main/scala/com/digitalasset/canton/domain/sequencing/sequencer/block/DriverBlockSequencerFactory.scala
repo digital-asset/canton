@@ -9,9 +9,12 @@ import com.digitalasset.canton.domain.block.data.SequencerBlockStore
 import com.digitalasset.canton.domain.block.{BlockSequencerStateManager, SequencerDriverFactory}
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.DatabaseSequencerConfig.TestingInterceptor
-import com.digitalasset.canton.domain.sequencing.sequencer.SequencerHealthConfig
 import com.digitalasset.canton.domain.sequencing.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
 import com.digitalasset.canton.domain.sequencing.sequencer.traffic.SequencerRateLimitManager
+import com.digitalasset.canton.domain.sequencing.sequencer.{
+  BlockSequencerConfig,
+  SequencerHealthConfig,
+}
 import com.digitalasset.canton.domain.sequencing.traffic.store.TrafficPurchasedStore
 import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -32,6 +35,7 @@ import scala.jdk.CollectionConverters.*
 class DriverBlockSequencerFactory[C](
     sequencerDriverFactory: SequencerDriverFactory { type ConfigType = C },
     config: C,
+    blockSequencerConfig: BlockSequencerConfig,
     health: Option[SequencerHealthConfig],
     storage: Storage,
     protocolVersion: ProtocolVersion,
@@ -98,6 +102,7 @@ class DriverBlockSequencerFactory[C](
       sequencerId,
       stateManager,
       store,
+      blockSequencerConfig,
       balanceStore,
       storage,
       futureSupervisor,
@@ -123,6 +128,7 @@ object DriverBlockSequencerFactory extends LazyLogging {
       driverName: String,
       driverVersion: Int,
       rawConfig: ConfigCursor,
+      blockSequencerConfig: BlockSequencerConfig,
       health: Option[SequencerHealthConfig],
       storage: Storage,
       protocolVersion: ProtocolVersion,
@@ -146,6 +152,7 @@ object DriverBlockSequencerFactory extends LazyLogging {
     new DriverBlockSequencerFactory[C](
       driverFactory,
       config,
+      blockSequencerConfig,
       health,
       storage,
       protocolVersion,
@@ -162,6 +169,7 @@ object DriverBlockSequencerFactory extends LazyLogging {
       driverName: String,
       driverVersion: Int,
       config: C,
+      blockSequencerConfig: BlockSequencerConfig,
       health: Option[SequencerHealthConfig],
       storage: Storage,
       protocolVersion: ProtocolVersion,
@@ -173,6 +181,7 @@ object DriverBlockSequencerFactory extends LazyLogging {
     new DriverBlockSequencerFactory[C](
       getSequencerDriverFactory(driverName, driverVersion),
       config,
+      blockSequencerConfig,
       health,
       storage,
       protocolVersion,

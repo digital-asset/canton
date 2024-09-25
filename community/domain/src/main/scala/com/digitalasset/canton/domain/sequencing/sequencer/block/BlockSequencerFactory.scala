@@ -12,16 +12,11 @@ import com.digitalasset.canton.domain.block.data.{BlockEphemeralState, Sequencer
 import com.digitalasset.canton.domain.block.{BlockSequencerStateManager, UninitializedBlockHeight}
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.DatabaseSequencerConfig.TestingInterceptor
+import com.digitalasset.canton.domain.sequencing.sequencer.*
 import com.digitalasset.canton.domain.sequencing.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
 import com.digitalasset.canton.domain.sequencing.sequencer.traffic.{
   SequencerRateLimitManager,
   SequencerTrafficConfig,
-}
-import com.digitalasset.canton.domain.sequencing.sequencer.{
-  DatabaseSequencerFactory,
-  Sequencer,
-  SequencerHealthConfig,
-  SequencerInitialState,
 }
 import com.digitalasset.canton.domain.sequencing.traffic.store.{
   TrafficConsumedStore,

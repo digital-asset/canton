@@ -966,7 +966,7 @@ class RichSequencerClientImpl(
       traceContext: TraceContext
   ): ResilientSequencerSubscription[SequencerClientSubscriptionError] = {
     val loggerFactoryWithSequencerAlias =
-      SequencerClient.loggerFactoryWithSequencerConnection(loggerFactory, sequencerAlias)
+      SequencerClient.loggerFactoryWithSequencerAlias(loggerFactory, sequencerAlias)
     // previously seen counter takes precedence over the lower bound
     val nextCounter = preSubscriptionEvent.fold(initialCounterLowerBound)(_.counter)
     val eventValidator = eventValidatorFactory.create(loggerFactoryWithSequencerAlias)
@@ -1948,15 +1948,15 @@ object SequencerClient {
       )
   }
 
-  def loggerFactoryWithSequencerConnection(
+  def loggerFactoryWithSequencerAlias(
       loggerFactory: NamedLoggerFactory,
       sequencerAlias: SequencerAlias,
   ): NamedLoggerFactory =
-    loggerFactory.append("sequencerConnection", sequencerAlias.unwrap)
+    loggerFactory.append("sequencerAlias", sequencerAlias.unwrap)
 
-  def loggerFactoryWithSequencerConnection(
+  def loggerFactoryWithSequencerId(
       loggerFactory: NamedLoggerFactory,
       sequencerId: SequencerId,
   ): NamedLoggerFactory =
-    loggerFactory.append("sequencerConnection", sequencerId.uid.toString)
+    loggerFactory.append("sequencerId", sequencerId.uid.toString)
 }

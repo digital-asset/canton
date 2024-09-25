@@ -4,6 +4,8 @@
 package com.digitalasset.canton.domain.sequencing.sequencer
 
 import cats.data.EitherT
+import cats.instances.option.*
+import cats.syntax.apply.*
 import cats.syntax.either.*
 import cats.syntax.option.*
 import com.daml.nameof.NameOf.functionFullName
@@ -32,28 +34,24 @@ import com.digitalasset.canton.metrics.MetricsHelper
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.PruningScheduler
 import com.digitalasset.canton.sequencing.client.SequencerClient
-import com.digitalasset.canton.sequencing.protocol.{
-  AcknowledgeRequest,
-  MemberRecipient,
-  SendAsyncError,
-  SignedContent,
-  SubmissionRequest,
-  TrafficState,
-}
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors
 import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.{DomainId, Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.FutureUtil.doNotAwait
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, LoggerUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 import org.slf4j.event.Level
 
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 
 object DatabaseSequencer {
@@ -174,7 +172,8 @@ class DatabaseSequencer(
     storageForAdminChanges.isActive
   )
 
-  private[sequencer] val store = writer.generalStore
+  @VisibleForTesting
+  private[canton] val store = writer.generalStore
 
   protected val memberValidator: SequencerMemberValidator = store
 
@@ -183,7 +182,7 @@ class DatabaseSequencer(
   // Only start pruning scheduler after `store` variable above has been initialized to avoid racy NPE
   withNewTraceContext { implicit traceContext =>
     timeouts.unbounded.await(s"Waiting for sequencer writer to fully start")(
-      writer.startOrLogError(initialState, resetWatermarkTo)
+      writer.startOrLogError(initialState, resetWatermarkTo).flatMap(_ => backfillCheckpoints())
     )
 
     pruningScheduler.foreach(ps =>
@@ -196,6 +195,39 @@ class DatabaseSequencer(
       )
     )
   }
+
+  private def backfillCheckpoints()(implicit traceContext: TraceContext): Future[Unit] =
+    for {
+      latestCheckpoint <- store.fetchLatestCheckpoint()
+      watermark <- store.safeWatermark
+      _ <- (latestCheckpoint, watermark)
+        .traverseN { (oldest, watermark) =>
+          val interval = config.writer.checkpointInterval
+          val checkpointsToWrite = LazyList
+            .iterate(oldest.plus(interval.asJava))(ts => ts.plus(interval.asJava))
+            .takeWhile(_ <= watermark)
+
+          if (checkpointsToWrite.nonEmpty) {
+            val start = System.nanoTime()
+            logger.info(
+              s"Starting to backfill checkpoints from $oldest to $watermark in intervals of $interval"
+            )
+            MonadUtil
+              .parTraverseWithLimit(config.writer.checkpointBackfillParallelism)(
+                checkpointsToWrite
+              )(cp => store.recordCounterCheckpointsAtTimestamp(cp))
+              .map { _ =>
+                val elapsed = (System.nanoTime() - start).nanos
+                logger.info(
+                  s"Finished backfilling checkpoints from $oldest to $watermark in intervals of $interval in ${LoggerUtil
+                      .roundDurationForHumans(elapsed)}"
+                )
+              }
+          } else {
+            Future.successful(())
+          }
+        }
+    } yield ()
 
   // periodically run the call to mark lagging sequencers as offline
   private def periodicallyMarkLaggingSequencersOffline(

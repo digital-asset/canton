@@ -195,11 +195,16 @@ object CommunitySequencerFactory extends MkSequencerFactory {
         loggerFactory,
       )
 
-    case CommunitySequencerConfig.External(sequencerType, config, testingInterceptor) =>
+    case CommunitySequencerConfig.External(
+          sequencerType,
+          blockSequencerConfig,
+          config,
+        ) =>
       DriverBlockSequencerFactory(
         sequencerType,
         SequencerDriver.DriverApiVersion,
         config,
+        blockSequencerConfig,
         health,
         storage,
         protocolVersion,
@@ -207,7 +212,7 @@ object CommunitySequencerFactory extends MkSequencerFactory {
         nodeParameters,
         metrics,
         loggerFactory,
-        testingInterceptor,
+        blockSequencerConfig.testingInterceptor,
       )
 
     case config: SequencerConfig =>

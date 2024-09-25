@@ -201,7 +201,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
             s"Participant is not yet active on domain $domainId. Initialising topology"
           )
           for {
-            sequencerConnectClient <- sequencerConnectClient(sequencerAggregatedInfo)
+            sequencerConnectClient <- sequencerConnectClient(config.domain, sequencerAggregatedInfo)
             success <- topologyDispatcher.onboardToDomain(
               domainId,
               config.domain,
@@ -323,14 +323,15 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
     }
 
   private def sequencerConnectClient(
-      sequencerAggregatedInfo: SequencerAggregatedInfo
+      domainAlias: DomainAlias,
+      sequencerAggregatedInfo: SequencerAggregatedInfo,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, SequencerConnectClient] = {
     // TODO(i12076): Currently it takes the first available connection
     //  here which is already checked for healthiness, but it should maybe check all of them - if they're healthy
     val sequencerConnection = sequencerAggregatedInfo.sequencerConnections.default
-    sequencerConnectClientBuilder(sequencerConnection)
+    sequencerConnectClientBuilder(domainAlias, sequencerConnection)
       .leftMap(err =>
         DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(err.message)
       )
@@ -343,7 +344,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
   private def isActive(domainAlias: DomainAlias, sequencerAggregatedInfo: SequencerAggregatedInfo)(
       implicit traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] =
-    sequencerConnectClient(sequencerAggregatedInfo)
+    sequencerConnectClient(domainAlias, sequencerAggregatedInfo)
       .flatMap(client =>
         isActive(domainAlias, client, false)
           .thereafter { _ =>
@@ -357,7 +358,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, Unit] =
-    sequencerConnectClient(sequencerAggregatedInfo)
+    sequencerConnectClient(domainAlias, sequencerAggregatedInfo)
       .flatMap(client =>
         isActive(domainAlias, client, true)
           .flatMap { isActive =>
@@ -384,13 +385,14 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] =
     client
-      .isActive(participantId, waitForActive = waitForActive)
+      .isActive(participantId, domainAlias, waitForActive = waitForActive)
       .leftMap(DomainRegistryHelpers.toDomainRegistryError(domainAlias))
       .mapK(FutureUnlessShutdown.outcomeK)
 
   private def sequencerConnectClientBuilder: SequencerConnectClient.Builder = {
-    (config: SequencerConnection) =>
+    (domainAlias: DomainAlias, config: SequencerConnection) =>
       SequencerConnectClient(
+        domainAlias,
         config,
         participantNodeParameters.processingTimeouts,
         participantNodeParameters.tracing.propagation,
