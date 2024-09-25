@@ -166,30 +166,6 @@ create or replace view debug.par_contracts as
     contract_salt
   from par_contracts;
 
-create or replace view debug.seq_state_manager_members as
-  select
-    member,
-    debug.canton_timestamp(added_at) as added_at,
-    enabled,
-    debug.canton_timestamp(latest_acknowledgement) as latest_acknowledgement
-  from seq_state_manager_members;
-
-create or replace view debug.seq_state_manager_events as
-  select
-    member,
-    counter,
-    debug.canton_timestamp(ts) as ts,
-    content,
-    trace_context
-  from seq_state_manager_events;
-
-create or replace view debug.seq_state_manager_lower_bound as
-  select
-    single_row_lock,
-    debug.canton_timestamp(ts) as ts,
-    debug.canton_timestamp(ts_initial_topology) as ts_initial_topology
-  from seq_state_manager_lower_bound;
-
 create or replace view debug.common_node_id as
   select
     identifier,
@@ -388,12 +364,6 @@ create or replace view debug.seq_block_height as
     debug.canton_timestamp(latest_event_ts) as latest_event_ts,
     debug.canton_timestamp(latest_sequencer_event_ts) as latest_sequencer_event_ts
   from seq_block_height;
-
-create or replace view debug.seq_initial_state as
-  select
-    member,
-    counter
-  from seq_initial_state;
 
 create or replace view debug.par_active_contract_pruning as
   select

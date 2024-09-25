@@ -36,6 +36,7 @@ import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommand
 import com.digitalasset.canton.admin.api.client.commands.*
 import com.digitalasset.canton.admin.api.client.data.{
   DarMetadata,
+  InFlightCount,
   ListConnectedDomainsResult,
   ParticipantPruningSchedule,
   ParticipantStatus,
@@ -1478,7 +1479,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         The arguments are:
           domain - A local domain or sequencer reference
           alias - The name you will be using to refer to this domain. Can not be changed anymore.
-          handshake only - If yes, only the handshake will be perfomed (no domain connection)
+          handshake only - If yes, only the handshake will be performed (no domain connection)
           maxRetryDelayMillis - Maximal amount of time (in milliseconds) between two connection attempts.
           priority - The priority of the domain. The higher the more likely a domain will be used.
           synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.
@@ -1511,7 +1512,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     @Help.Description("""
         The arguments are:
           config - Config for the domain connection
-          handshake only - If yes, only the handshake will be perfomed (no domain connection)
+          handshake only - If yes, only the handshake will be performed (no domain connection)
           validation - Whether to validate the connectivity and ids of the given sequencers (default All)
           synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.
         """)
@@ -1996,4 +1997,27 @@ class ParticipantHealthAdministration(
   override protected def nodeStatusCommand
       : StatusAdminCommands.NodeStatusCommand[ParticipantStatus, _, _] =
     ParticipantAdminCommands.Health.ParticipantStatusCommand()
+
+  @Help.Summary("Counts pending command submissions and transactions on a domain.")
+  @Help.Description(
+    """This command finds the current number of pending command submissions and transactions on a selected domain.
+      |
+      |There is no synchronization between pending command submissions and transactions. And the respective
+      |counts are an indication only!
+      |
+      |This command is in particular useful to re-assure oneself that there are currently no in-flight submissions
+      |or transactions present for the selected domain. Such re-assurance is then helpful to proceed with repair
+      |operations, for example."""
+  )
+  def count_in_flight(domainAlias: DomainAlias): InFlightCount = {
+    val domainId = consoleEnvironment.run {
+      runner.adminCommand(ParticipantAdminCommands.DomainConnectivity.GetDomainId(domainAlias))
+    }
+
+    consoleEnvironment.run {
+      runner.adminCommand(
+        ParticipantAdminCommands.Inspection.CountInFlight(domainId)
+      )
+    }
+  }
 }

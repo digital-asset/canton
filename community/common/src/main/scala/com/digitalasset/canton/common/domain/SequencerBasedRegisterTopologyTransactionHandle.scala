@@ -20,6 +20,7 @@ import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.version.ProtocolVersion
+import org.slf4j.event.Level
 
 import java.util.UUID
 import scala.concurrent.ExecutionContext
@@ -98,30 +99,29 @@ class DomainTopologyService(
   ): FutureUnlessShutdown[Seq[TopologyTransactionsBroadcast.State]] = {
     val sendCallback = SendCallback.future
 
-    performUnlessClosingEitherUSF(
-      functionFullName
-    )(
-      sendRequest(request, sendCallback)
-        .biSemiflatMap(
-          sendAsyncClientError => {
-            logger.error(s"Failed broadcasting topology transactions: $sendAsyncClientError")
-            FutureUnlessShutdown.pure[TopologyTransactionsBroadcast.State](
-              TopologyTransactionsBroadcast.State.Failed
-            )
-          },
-          _result =>
-            sendCallback.future
-              .map {
-                case SendResult.Success(_) =>
-                  TopologyTransactionsBroadcast.State.Accepted
-                case notSequenced @ (_: SendResult.Timeout | _: SendResult.Error) =>
-                  logger.info(
-                    s"The submitted topology transactions were not sequenced. Error=[$notSequenced]. Transactions=${request.broadcasts}"
-                  )
-                  TopologyTransactionsBroadcast.State.Failed
-              },
-        )
-    ).merge
+    performUnlessClosingEitherUSF(functionFullName)(sendRequest(request, sendCallback))
+      .biSemiflatMap(
+        sendAsyncClientError => {
+          logger.warn(
+            s"Failed broadcasting topology transactions: $sendAsyncClientError. This will be retried automatically."
+          )
+          FutureUnlessShutdown.pure[TopologyTransactionsBroadcast.State](
+            TopologyTransactionsBroadcast.State.Failed
+          )
+        },
+        _result =>
+          sendCallback.future
+            .map {
+              case SendResult.Success(_) =>
+                TopologyTransactionsBroadcast.State.Accepted
+              case notSequenced @ (_: SendResult.Timeout | _: SendResult.Error) =>
+                logger.info(
+                  s"The submitted topology transactions were not sequenced. Error=[$notSequenced]. Transactions=${request.broadcasts}"
+                )
+                TopologyTransactionsBroadcast.State.Failed
+            },
+      )
+      .merge
       .map(Seq.fill(request.broadcasts.flatMap(_.transactions).size)(_))
   }
 
@@ -144,7 +144,8 @@ class DomainTopologyService(
         // Do not amplify because we are running our own retry loop here anyway
         amplify = false,
       ),
-      s"Failed sending topology transaction broadcast: $request",
+      s"Failed sending topology transaction broadcast: $request. This will be retried automatically.",
+      level = Level.WARN,
     )
   }
 }

@@ -26,7 +26,7 @@ import com.digitalasset.canton.data.DeduplicationPeriod.DeduplicationDuration
 import com.digitalasset.canton.data.PeanoQueue.{BeforeHead, NotInserted}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.{CompletionInfo, Update}
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.participant.DefaultParticipantStateValues
 import com.digitalasset.canton.participant.admin.PackageDependencyResolver
@@ -204,8 +204,6 @@ class ProtocolProcessorTest
     domain,
   )
 
-  private val encryptedRandomnessTest =
-    Encrypted.fromByteString[SecureRandomness](ByteString.EMPTY)
   private val sessionKeyMapTest = NonEmpty(
     Seq,
     new AsymmetricEncrypted[SecureRandomness](
@@ -364,9 +362,8 @@ class ProtocolProcessorTest
         testedProtocolVersion,
         loggerFactory,
         FutureSupervisor.Noop,
-      )(
-        directExecutionContext: ExecutionContext
-      ) {
+        FlagCloseable.withCloseContext(logger, timeouts),
+      )(directExecutionContext: ExecutionContext) {
         override def testingConfig: TestingConfigInternal = TestingConfigInternal()
 
         override def participantId: ParticipantId = participant
@@ -389,8 +386,7 @@ class ProtocolProcessorTest
   private lazy val viewMessage: EncryptedViewMessage[TestViewType] = EncryptedViewMessage(
     submittingParticipantSignature = None,
     viewHash = viewHash,
-    randomness = encryptedRandomnessTest,
-    sessionKey = sessionKeyMapTest,
+    sessionKeys = sessionKeyMapTest,
     encryptedView = encryptedView,
     domainId = DefaultTestIdentities.domainId,
     SymmetricKeyScheme.Aes128Gcm,
@@ -452,7 +448,7 @@ class ProtocolProcessorTest
         .valueOrFailShutdown("submission")
         .futureValue
         .failOnShutdown("shutting down while test is running")
-        .futureValue shouldBe (())
+        .futureValue shouldBe ()
       submissionMap.get(0) shouldBe Some(()) // store the pending submission
     }
 
@@ -497,7 +493,7 @@ class ProtocolProcessorTest
         .valueOrFailShutdown("submission")
         .futureValue
         .failOnShutdown("shutting down while test is running")
-        .futureValue shouldBe (())
+        .futureValue shouldBe ()
       submissionMap.get(1) shouldBe Some(())
       val afterDecisionTime = parameters.decisionTimeFor(CantonTimestamp.Epoch).value.plusMillis(1)
       val asyncRes = sut
@@ -653,8 +649,7 @@ class ProtocolProcessorTest
       val viewMessageWrongRH = EncryptedViewMessage(
         submittingParticipantSignature = None,
         viewHash = viewHash1,
-        randomness = encryptedRandomnessTest,
-        sessionKey = sessionKeyMapTest,
+        sessionKeys = sessionKeyMapTest,
         encryptedView = encryptedViewWrongRH,
         domainId = DefaultTestIdentities.domainId,
         SymmetricKeyScheme.Aes128Gcm,
@@ -689,8 +684,7 @@ class ProtocolProcessorTest
       val viewMessageDecryptError: EncryptedViewMessage[TestViewType] = EncryptedViewMessage(
         submittingParticipantSignature = None,
         viewHash = viewHash,
-        randomness = encryptedRandomnessTest,
-        sessionKey = sessionKeyMapTest,
+        sessionKeys = sessionKeyMapTest,
         encryptedView = EncryptedView(TestViewType)(Encrypted.fromByteString(ByteString.EMPTY)),
         domainId = DefaultTestIdentities.domainId,
         viewEncryptionScheme = SymmetricKeyScheme.Aes128Gcm,

@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.participant.protocol.reassignment
 
-import cats.data.NonEmptyChain
-import cats.implicits.catsSyntaxFoldableOps0
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.ReassignmentProcessorError
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.PackageUnknownTo
@@ -12,18 +10,13 @@ import com.digitalasset.canton.participant.store.ActiveContractStore.Status
 import com.digitalasset.canton.protocol.messages.DeliveredUnassignmentResult
 import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId}
 import com.digitalasset.canton.sequencing.protocol.Recipients
-import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 
 trait UnassignmentProcessorError extends ReassignmentProcessorError
 
 object UnassignmentProcessorError {
 
-  def fromChain(constructor: String => UnassignmentProcessorError)(
-      errors: NonEmptyChain[String]
-  ): UnassignmentProcessorError =
-    constructor(errors.mkString_(", "))
-
-  final case class SubmittingPartyMustBeStakeholderOut(
+  final case class UnassignmentSubmitterMustBeStakeholder(
       contractId: LfContractId,
       submittingParty: LfPartyId,
       stakeholders: Set[LfPartyId],
@@ -70,17 +63,15 @@ object UnassignmentProcessorError {
 
   final case class PermissionErrors(message: String) extends UnassignmentProcessorError
 
-  final case class AdminPartyPermissionErrors(message: String) extends UnassignmentProcessorError
-
   final case class StakeholderHostingErrors(message: String) extends UnassignmentProcessorError
 
-  final case class AdminPartiesMismatch(
+  final case class ReassigningParticipantsMismatch(
       contractId: LfContractId,
-      expected: Set[LfPartyId],
-      declared: Set[LfPartyId],
+      expected: Set[ParticipantId],
+      declared: Set[ParticipantId],
   ) extends UnassignmentProcessorError {
     override def message: String =
-      s"Cannot unassign contract `$contractId`: admin parties mismatch"
+      s"Cannot unassign contract `$contractId`: reassigning participants mismatch"
   }
 
   final case class RecipientsMismatch(

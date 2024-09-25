@@ -81,6 +81,12 @@ import com.daml.ledger.api.v2.event_query_service.{
   GetEventsByContractIdRequest,
   GetEventsByContractIdResponse,
 }
+import com.daml.ledger.api.v2.interactive_submission_service.InteractiveSubmissionServiceGrpc.InteractiveSubmissionServiceStub
+import com.daml.ledger.api.v2.interactive_submission_service.{
+  InteractiveSubmissionServiceGrpc,
+  PrepareSubmissionRequest,
+  PrepareSubmissionResponse,
+}
 import com.daml.ledger.api.v2.reassignment.{AssignedEvent, Reassignment, UnassignedEvent}
 import com.daml.ledger.api.v2.reassignment_command.{
   AssignCommand,
@@ -141,6 +147,7 @@ import com.digitalasset.canton.ledger.client.services.admin.IdentityProviderConf
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.networking.grpc.ForwardingStreamObserver
+import com.digitalasset.canton.platform.ApiOffset
 import com.digitalasset.canton.platform.apiserver.execution.CommandStatus
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -971,6 +978,7 @@ object LedgerApiCommands {
     }
     sealed trait UpdateWrapper {
       def updateId: String
+      def isUnassignment: Boolean
       def createEvent: Option[CreatedEvent] =
         this match {
           case UpdateService.TransactionWrapper(t) => t.events.headOption.map(_.getCreated)
@@ -979,7 +987,7 @@ object LedgerApiCommands {
         }
     }
     object UpdateWrapper {
-      def isUnassigedWrapper(wrapper: UpdateWrapper): Boolean = wrapper match {
+      def isUnassignedWrapper(wrapper: UpdateWrapper): Boolean = wrapper match {
         case UnassignedWrapper(_, _) => true
         case _ => false
       }
@@ -990,6 +998,8 @@ object LedgerApiCommands {
     }
     final case class TransactionWrapper(transaction: Transaction) extends UpdateWrapper {
       override def updateId: String = transaction.updateId
+      override def isUnassignment: Boolean = false
+
     }
     sealed trait ReassignmentWrapper extends UpdateTreeWrapper with UpdateWrapper {
       def reassignment: Reassignment
@@ -1014,10 +1024,12 @@ object LedgerApiCommands {
     final case class AssignedWrapper(reassignment: Reassignment, assignedEvent: AssignedEvent)
         extends ReassignmentWrapper {
       override def updateId: String = reassignment.updateId
+      override def isUnassignment: Boolean = false
     }
     final case class UnassignedWrapper(reassignment: Reassignment, unassignedEvent: UnassignedEvent)
         extends ReassignmentWrapper {
       override def updateId: String = reassignment.updateId
+      override def isUnassignment: Boolean = true
     }
 
     trait BaseCommand[Req, Resp, Res] extends GrpcAdminCommand[Req, Resp, Res] {
@@ -1303,6 +1315,57 @@ object LedgerApiCommands {
     }
   }
 
+  object InteractiveSubmissionService {
+    trait BaseCommand[Req, Resp, Res] extends GrpcAdminCommand[Req, Resp, Res] {
+      override type Svc = InteractiveSubmissionServiceStub
+      override def createService(channel: ManagedChannel): InteractiveSubmissionServiceStub =
+        InteractiveSubmissionServiceGrpc.stub(channel)
+    }
+
+    final case class PrepareCommand(
+        override val actAs: Seq[LfPartyId],
+        override val readAs: Seq[LfPartyId],
+        override val commands: Seq[Command],
+        override val workflowId: String,
+        override val commandId: String,
+        override val deduplicationPeriod: Option[DeduplicationPeriod],
+        override val submissionId: String,
+        override val minLedgerTimeAbs: Option[Instant],
+        override val disclosedContracts: Seq[DisclosedContract],
+        override val domainId: Option[DomainId],
+        override val applicationId: String,
+        override val packageIdSelectionPreference: Seq[LfPackageId],
+    ) extends SubmitCommand
+        with BaseCommand[
+          PrepareSubmissionRequest,
+          PrepareSubmissionResponse,
+          PrepareSubmissionResponse,
+        ] {
+
+      override def createRequest(): Either[String, PrepareSubmissionRequest] =
+        Right(
+          PrepareSubmissionRequest(
+            commands = Some(mkCommand)
+          )
+        )
+
+      override def submitRequest(
+          service: InteractiveSubmissionServiceStub,
+          request: PrepareSubmissionRequest,
+      ): Future[PrepareSubmissionResponse] =
+        service.prepareSubmission(request)
+
+      override def handleResponse(
+          response: PrepareSubmissionResponse
+      ): Either[String, PrepareSubmissionResponse] =
+        Right(response)
+
+      override def timeoutType: TimeoutType = DefaultUnboundedTimeout
+
+    }
+
+  }
+
   object CommandService {
     trait BaseCommand[Req, Resp, Res] extends GrpcAdminCommand[Req, Resp, Res] {
       override type Svc = CommandServiceStub
@@ -1406,8 +1469,7 @@ object LedgerApiCommands {
       override def handleResponse(
           response: GetLedgerEndResponse
       ): Either[String, String] =
-        if (response.offset.nonEmpty) Right(response.offset)
-        else Left("Empty LedgerEndResponse received without offset")
+        Right(ApiOffset.fromLongO(response.offset))
     }
 
     final case class GetConnectedDomains(partyId: LfPartyId)
@@ -1513,7 +1575,7 @@ object LedgerApiCommands {
           CompletionStreamRequest(
             applicationId = applicationId,
             parties = Seq(partyId),
-            beginExclusive = beginOffsetExclusive,
+            beginExclusive = ApiOffset.assertFromStringToLongO(beginOffsetExclusive),
           )
         )
 
@@ -1555,7 +1617,7 @@ object LedgerApiCommands {
         CompletionStreamRequest(
           applicationId = applicationId,
           parties = parties,
-          beginExclusive = offset,
+          beginExclusive = ApiOffset.assertFromStringToLongO(offset),
         )
       }
 

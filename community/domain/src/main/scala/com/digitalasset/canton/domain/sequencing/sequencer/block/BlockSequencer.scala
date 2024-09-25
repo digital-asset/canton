@@ -5,7 +5,6 @@ package com.digitalasset.canton.domain.sequencing.sequencer.block
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
@@ -14,7 +13,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v30.TrafficControlErrorReason
 import com.digitalasset.canton.domain.block.BlockSequencerStateManagerBase
 import com.digitalasset.canton.domain.block.data.SequencerBlockStore
-import com.digitalasset.canton.domain.block.update.{BlockUpdateGeneratorImpl, LocalBlockUpdate}
+import com.digitalasset.canton.domain.block.update.BlockUpdateGeneratorImpl
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.domain.sequencing.sequencer.PruningError.UnsafePruningPoint
@@ -22,6 +21,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer.SignedOrder
 import com.digitalasset.canton.domain.sequencing.sequencer.*
 import com.digitalasset.canton.domain.sequencing.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.SequencerError
+import com.digitalasset.canton.domain.sequencing.sequencer.store.SequencerStore
 import com.digitalasset.canton.domain.sequencing.sequencer.traffic.TimestampSelector.*
 import com.digitalasset.canton.domain.sequencing.sequencer.traffic.{
   SequencerRateLimitError,
@@ -43,17 +43,17 @@ import com.digitalasset.canton.sequencing.traffic.{
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.{EitherTUtil, PekkoUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.ServerServiceDefinition
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.*
-import org.apache.pekko.stream.scaladsl.{Keep, Merge, Sink, Source}
+import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
 
-import scala.concurrent.{ExecutionContext, Future}
-import scala.util.chaining.*
+import scala.collection.concurrent.TrieMap
+import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
 
 class BlockSequencer(
@@ -64,6 +64,8 @@ class BlockSequencer(
     sequencerId: SequencerId,
     stateManager: BlockSequencerStateManagerBase,
     store: SequencerBlockStore,
+    dbSequencerStore: SequencerStore,
+    blockSequencerConfig: BlockSequencerConfig,
     trafficPurchasedStore: TrafficPurchasedStore,
     storage: Storage,
     futureSupervisor: FutureSupervisor,
@@ -82,8 +84,8 @@ class BlockSequencer(
 )(implicit executionContext: ExecutionContext, materializer: Materializer, tracer: Tracer)
     extends DatabaseSequencer(
       SequencerWriterStoreFactory.singleInstance,
-      // TODO(#18407): Allow partial configuration of DBS as a part of unified sequencer
-      DatabaseSequencerConfig.ForBlockSequencer(),
+      dbSequencerStore,
+      blockSequencerConfig.toDatabaseSequencerConfig,
       None,
       TotalNodeCountValues.SingleSequencerTotalNodeCount,
       new LocalSequencerStateEventSignaller(
@@ -119,6 +121,7 @@ class BlockSequencer(
     loggerFactory,
     crashOnFailure = exitOnFatalFailures,
   )
+  private val sequencerPruningPromises = TrieMap[CantonTimestamp, Promise[Unit]]()
 
   override lazy val rateLimitManager: Option[SequencerRateLimitManager] = Some(
     blockRateLimitManager
@@ -126,13 +129,11 @@ class BlockSequencer(
 
   private val trafficPurchasedSubmissionHandler =
     new TrafficPurchasedSubmissionHandler(clock, loggerFactory)
-  override private[sequencing] def firstSequencerCounterServeableForSequencer: SequencerCounter =
-    stateManager.firstSequencerCounterServableForSequencer
 
   override protected def resetWatermarkTo: SequencerWriter.ResetWatermark =
     SequencerWriter.ResetWatermarkToTimestamp(stateManager.getHeadState.block.lastTs)
 
-  private val (killSwitchF, localEventsQueue, done) = {
+  private val (killSwitchF, done) = {
     val headState = stateManager.getHeadState
     noTracingLogger.info(s"Subscribing to block source from ${headState.block.height}")
 
@@ -141,7 +142,6 @@ class BlockSequencer(
       protocolVersion,
       cryptoApi,
       sequencerId,
-      stateManager.maybeLowerTopologyTimestampBound,
       blockRateLimitManager,
       orderingTimeFixMode,
       metrics,
@@ -164,21 +164,15 @@ class BlockSequencer(
       .async
       .map(updateGenerator.extractBlockEvents)
       .via(stateManager.processBlock(updateGenerator))
-
-    val localSource = Source
-      .queue[Traced[BlockSequencer.LocalEvent]](bufferSize = 1000, OverflowStrategy.backpressure)
-      .map(_.map(event => LocalBlockUpdate(event)))
-    val combinedSource = Source.combineMat(driverSource, localSource)(Merge(_))(Keep.both)
-    val combinedSourceWithBlockHandling = combinedSource.async
+      .async
       .via(stateManager.applyBlockUpdate(this))
       .wireTap { lastTs =>
         metrics.block.delay.updateValue((clock.now - lastTs.value).toMillis)
       }
-    val ((killSwitchF, localEventsQueue), done) = PekkoUtil.runSupervised(
+    PekkoUtil.runSupervised(
       ex => logger.error("Fatally failed to handle state changes", ex)(TraceContext.empty),
-      combinedSourceWithBlockHandling.toMat(Sink.ignore)(Keep.both),
+      driverSource.toMat(Sink.ignore)(Keep.both),
     )
-    (killSwitchF, localEventsQueue, done)
   }
 
   done onComplete {
@@ -264,8 +258,10 @@ class BlockSequencer(
       .validateRequestAtSubmissionTime(
         request.content,
         request.timestampOfSigningKey,
-        stateManager.getHeadState.block.lastTs,
-        stateManager.getHeadState.block.latestSequencerEventTimestamp,
+        // Use the timestamp of the latest chunk here, such that top ups that happened in an earlier chunk of the
+        // current block can be reflected in the traffic state used to validate the request
+        stateManager.getHeadState.chunk.lastTs,
+        stateManager.getHeadState.chunk.latestSequencerEventTimestamp,
       )
       .leftMap {
         // If the cost is outdated, we bounce the request with a specific SendAsyncError so the
@@ -289,7 +285,7 @@ class BlockSequencer(
           )
           SendAsyncError.TrafficControlError(
             TrafficControlErrorReason.Error(
-              TrafficControlErrorReason.Error.Reason.InsufficientTraffic(
+              TrafficControlErrorReason.Error.Reason.OutdatedTrafficCost(
                 s"Submission was refused because traffic cost was outdated. Re-submit after the having observed the validation timestamp and processed its topology state: $outdated"
               )
             )
@@ -310,8 +306,8 @@ class BlockSequencer(
       batch,
       maxSequencingTime,
       _,
-      _aggregationRule,
-      _submissionCost,
+      _,
+      _,
     ) = submission
     logger.debug(
       s"Request to send submission with id ${submission.messageId} with max sequencing time $maxSequencingTime from $sender to ${batch.allRecipients}"
@@ -384,44 +380,37 @@ class BlockSequencer(
           info.toByteString,
         )
       )
-      bsSnapshot <- store
-        .readStateForBlockContainingTimestamp(timestamp)
-        .flatMap { blockEphemeralState =>
-          for {
-            // Look up traffic info at the latest timestamp from the block,
-            // because that's where the onboarded sequencer will start reading
-            trafficPurchased <- EitherT.right[SequencerError](
-              trafficPurchasedStore
-                .lookupLatestBeforeInclusive(blockEphemeralState.latestBlock.lastTs)
-            )
-            trafficConsumed <- EitherT.right[SequencerError](
-              blockRateLimitManager.trafficConsumedStore
-                .lookupLatestBeforeInclusive(blockEphemeralState.latestBlock.lastTs)
-            )
-          } yield blockEphemeralState
-            .toSequencerSnapshot(
-              protocolVersion,
-              trafficPurchased,
-              trafficConsumed,
-              implementationSpecificInfo,
-            )
-            .tap(_ =>
-              if (logger.underlying.isDebugEnabled()) {
-                logger.trace(
-                  s"Snapshot for timestamp $timestamp generated from ephemeral state:\n$blockEphemeralState"
-                )
-              }
-            )
-        }
+      blockState <- store.readStateForBlockContainingTimestamp(timestamp)
+      // Look up traffic info at the latest timestamp from the block,
+      // because that's where the onboarded sequencer will start reading
+      trafficPurchased <- EitherT.right[SequencerError](
+        trafficPurchasedStore
+          .lookupLatestBeforeInclusive(blockState.latestBlock.lastTs)
+      )
+      trafficConsumed <- EitherT.right[SequencerError](
+        blockRateLimitManager.trafficConsumedStore
+          .lookupLatestBeforeInclusive(blockState.latestBlock.lastTs)
+      )
+
+      _ = if (logger.underlying.isDebugEnabled()) {
+        logger.debug(
+          s"""BlockSequencer data for snapshot for timestamp $timestamp:
+             |blockState: $blockState
+             |trafficPurchased: $trafficPurchased
+             |trafficConsumed: $trafficConsumed
+             |implementationSpecificInfo: $implementationSpecificInfo""".stripMargin
+        )
+      }
       finalSnapshot <- {
-        super.snapshot(bsSnapshot.lastTs).map { dbsSnapshot =>
-          dbsSnapshot.copy(
-            latestBlockHeight = bsSnapshot.latestBlockHeight,
-            inFlightAggregations = bsSnapshot.inFlightAggregations,
-            additional = bsSnapshot.additional,
-            trafficPurchased = bsSnapshot.trafficPurchased,
-            trafficConsumed = bsSnapshot.trafficConsumed,
+        super.snapshot(blockState.latestBlock.lastTs).map { dbsSnapshot =>
+          val finalSnapshot = dbsSnapshot.copy(
+            latestBlockHeight = blockState.latestBlock.height,
+            inFlightAggregations = blockState.inFlightAggregations,
+            additional = implementationSpecificInfo,
+            trafficPurchased = trafficPurchased,
+            trafficConsumed = trafficConsumed,
           )(dbsSnapshot.representativeProtocolVersion)
+          finalSnapshot
         }
       }
     } yield {
@@ -431,6 +420,17 @@ class BlockSequencer(
       finalSnapshot
     }
 
+  private def waitForPruningToComplete(timestamp: CantonTimestamp): (Boolean, Future[Unit]) = {
+    val newPromise = Promise[Unit]()
+    val (isNew, promise) = sequencerPruningPromises
+      .putIfAbsent(timestamp, newPromise)
+      .fold((true, newPromise))(oldPromise => (false, oldPromise))
+    (isNew, promise.future)
+  }
+
+  private def resolveSequencerPruning(timestamp: CantonTimestamp): Unit =
+    sequencerPruningPromises.remove(timestamp) foreach { promise => promise.success(()) }
+
   /** Important: currently both the disable member and the prune functionality on the block sequencer are
     * purely local operations that do not affect other block sequencers that share the same source of
     * events.
@@ -439,7 +439,7 @@ class BlockSequencer(
       traceContext: TraceContext
   ): EitherT[Future, PruningError, String] = {
 
-    val (isNewRequest, pruningF) = stateManager.waitForPruningToComplete(requestedTimestamp)
+    val (isNewRequest, pruningF) = waitForPruningToComplete(requestedTimestamp)
     val supervisedPruningF = futureSupervisor.supervised(
       s"Waiting for local pruning operation at $requestedTimestamp to complete"
     )(pruningF)
@@ -474,9 +474,7 @@ class BlockSequencer(
               )
             )
         )
-        _ <- EitherT.right(
-          placeLocalEvent(BlockSequencer.UpdateInitialMemberCounters(requestedTimestamp))
-        )
+        _ = resolveSequencerPruning(requestedTimestamp)
         _ <- EitherT.right(supervisedPruningF)
       } yield msg
     else
@@ -485,18 +483,6 @@ class BlockSequencer(
           s"Pruning at $requestedTimestamp is already happening due to an earlier request"
         )
       )
-  }
-
-  private def placeLocalEvent(event: BlockSequencer.LocalEvent)(implicit
-      traceContext: TraceContext
-  ): Future[Unit] = localEventsQueue.offer(Traced(event)).flatMap {
-    case QueueOfferResult.Enqueued => Future.unit
-    case QueueOfferResult.Dropped => // this should never happen
-      Future.failed[Unit](new RuntimeException(s"Request queue is full. cannot take local $event"))
-    case QueueOfferResult.Failure(cause) => Future.failed(cause)
-    case QueueOfferResult.QueueClosed =>
-      logger.info(s"Tried to place a local $event request after the sequencer has been shut down.")
-      Future.unit
   }
 
   override def locatePruningTimestamp(index: PositiveInt)(implicit
@@ -530,12 +516,6 @@ class BlockSequencer(
     Seq[AsyncOrSyncCloseable](
       SyncCloseable("pruningQueue", pruningQueue.close()),
       SyncCloseable("stateManager.close()", stateManager.close()),
-      SyncCloseable("localEventsQueue.complete", localEventsQueue.complete()),
-      AsyncCloseable(
-        "localEventsQueue.watchCompletion",
-        localEventsQueue.watchCompletion(),
-        timeouts.shutdownProcessing,
-      ),
       // The kill switch ensures that we don't process the remaining contents of the queue buffer
       AsyncCloseable(
         "killSwitchF(_.shutdown())",
@@ -582,12 +562,16 @@ class BlockSequencer(
         requestedMembers,
         timestamp,
         stateManager.getHeadState.block.latestSequencerEventTimestamp,
+        // TODO(#18401) set warnIfApproximate to true and check that we don't get warnings
         // Warn on approximate topology or traffic purchased when getting exact traffic states only (so when selector is not LatestApproximate)
-        warnIfApproximate = selector != LatestApproximate &&
-          // Also don't warn until the sequencer has at least received one event
-          stateManager.getHeadState.chunk.ephemeral
-            .headCounter(sequencerId)
-            .exists(_ > SequencerCounter.Genesis),
+        // selector != LatestApproximate
+
+        // Also don't warn until the sequencer has at least received one event
+        // This used to check the ephemeral state for headCounter(sequencerId).exists(_ > Genesis),
+        // but because the ephemeral state for the block sequencer didn't actually contain
+        // any sequencer counter data anymore, this condition was always false, which made the overall expression
+        // for warnIfApproximate false
+        warnIfApproximate = false,
       )
     }
 
@@ -656,10 +640,4 @@ class BlockSequencer(
       timestamp,
       stateManager.getHeadState.block.latestSequencerEventTimestamp,
     )
-}
-
-object BlockSequencer {
-  sealed trait LocalEvent extends Product with Serializable
-  final case class DisableMember(member: Member) extends LocalEvent
-  final case class UpdateInitialMemberCounters(timestamp: CantonTimestamp) extends LocalEvent
 }

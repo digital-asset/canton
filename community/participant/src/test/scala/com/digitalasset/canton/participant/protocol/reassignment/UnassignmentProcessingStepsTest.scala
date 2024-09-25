@@ -32,6 +32,10 @@ import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentPro
 }
 import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentProcessingSteps.PendingUnassignment
 import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentProcessorError.*
+import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.{
+  ViewHashAndRecipients,
+  ViewKeyData,
+}
 import com.digitalasset.canton.participant.protocol.submission.{
   EncryptedViewMessageFactory,
   SeedGenerator,
@@ -235,7 +239,7 @@ final class UnassignmentProcessingStepsTest
   private lazy val coordination: ReassignmentCoordination =
     createReassignmentCoordination()
 
-  private def createOutProcessingSteps(
+  private def createUnassignmentProcessingSteps(
       reassignmentCoordination: ReassignmentCoordination = coordination
   ) =
     new UnassignmentProcessingSteps(
@@ -249,7 +253,8 @@ final class UnassignmentProcessingStepsTest
       loggerFactory,
     )(executorService)
 
-  private lazy val outProcessingSteps: UnassignmentProcessingSteps = createOutProcessingSteps()
+  private lazy val unassignmentProcessingSteps: UnassignmentProcessingSteps =
+    createUnassignmentProcessingSteps()
 
   private lazy val Seq(
     (participant1, admin1),
@@ -333,7 +338,6 @@ final class UnassignmentProcessingStepsTest
           sourceTopologySnapshot,
           targetTopologySnapshot,
           initialReassignmentCounter,
-          logger,
         )
         .value
         .failOnShutdown
@@ -342,7 +346,7 @@ final class UnassignmentProcessingStepsTest
     "fail if submitter is not a stakeholder" in {
       val stakeholders = Set(party1, party2)
       val result = mkUnassignmentResult(stakeholders, testingTopology, testingTopology)
-      result.left.value shouldBe a[SubmittingPartyMustBeStakeholderOut]
+      result.left.value shouldBe a[UnassignmentSubmitterMustBeStakeholder]
     }
 
     "fail if submitting participant does not have submission permission" in {
@@ -384,7 +388,12 @@ final class UnassignmentProcessingStepsTest
       val stakeholders = Set(submitter, party1)
       val result =
         mkUnassignmentResult(stakeholders, ipsConfirmationOnSource, ipsNoConfirmationOnTarget)
-      result.left.value shouldBe a[PermissionErrors]
+
+      val expectedError = StakeholderHostingErrors(
+        s"The following stakeholders are not hosted with confirmation rights on target domain: Set($party1)"
+      )
+
+      result.left.value shouldBe expectedError
     }
 
     "fail if a stakeholder is not hosted on the same participant on both domains" in {
@@ -398,20 +407,6 @@ final class UnassignmentProcessingStepsTest
 
       val stakeholders = Set(submitter, party1)
       val result = mkUnassignmentResult(stakeholders, testingTopology, ipsDifferentParticipant)
-      result.left.value shouldBe a[PermissionErrors]
-    }
-
-    "fail if participant cannot confirm for admin party" in {
-      val ipsAdminNoConfirmation = createTestingTopologySnapshot(
-        Map(
-          submittingParticipant -> Map(adminSubmitter -> Submission, submitter -> Submission),
-          participant1 -> Map(party1 -> Observation),
-        )
-      )
-      val result =
-        loggerFactory.suppressWarningsAndErrors(
-          mkUnassignmentResult(Set(submitter, party1), ipsAdminNoConfirmation, testingTopology)
-        )
       result.left.value shouldBe a[PermissionErrors]
     }
 
@@ -487,19 +482,18 @@ final class UnassignmentProcessingStepsTest
         Map(
           submittingParticipant -> Map(adminSubmitter -> Submission, submitter -> Submission),
           participant1 -> Map(party1 -> Confirmation),
-          participant2 -> Map(party1 -> Observation),
+          participant2 -> Map(party1 -> Observation), // Not reassigning (cannot confirm)
         )
       )
       val result =
-        loggerFactory.suppressWarningsAndErrors(
-          mkUnassignmentResult(Set(submitter, party1), ipsAdminNoConfirmation, testingTopology)
-        )
+        mkUnassignmentResult(Set(submitter, party1), ipsAdminNoConfirmation, testingTopology)
+
       result.value shouldEqual
         UnassignmentRequestValidated(
           UnassignmentRequest(
             submitterMetadata = submitterMetadata(submitter),
             stakeholders = Set(submitter, party1),
-            adminParties = Set(adminSubmitter, admin1),
+            reassigningParticipants = Set(submittingParticipant, participant1),
             creatingTransactionId = creatingTransactionId,
             contract = contract,
             sourceDomain = sourceDomain,
@@ -552,7 +546,7 @@ final class UnassignmentProcessingStepsTest
           UnassignmentRequest(
             submitterMetadata = submitterMetadata(submitter),
             stakeholders = stakeholders,
-            adminParties = Set(adminSubmitter, admin3, admin4),
+            reassigningParticipants = Set(submittingParticipant, participant3, participant4),
             creatingTransactionId = creatingTransactionId,
             contract = contract,
             sourceDomain = sourceDomain,
@@ -569,12 +563,14 @@ final class UnassignmentProcessingStepsTest
 
     "allow admin parties as stakeholders" in {
       val stakeholders = Set(submitter, adminSubmitter, admin1)
+
       mkUnassignmentResult(stakeholders, testingTopology, testingTopology) shouldBe Right(
         UnassignmentRequestValidated(
           UnassignmentRequest(
             submitterMetadata = submitterMetadata(submitter),
             stakeholders = stakeholders,
-            adminParties = Set(adminSubmitter, admin1),
+            // Because admin1 is a stakeholder, participant1 is reassigning
+            reassigningParticipants = Set(submittingParticipant, participant1),
             creatingTransactionId = creatingTransactionId,
             contract = contract,
             sourceDomain = sourceDomain,
@@ -625,7 +621,7 @@ final class UnassignmentProcessingStepsTest
           )
           .value
         _ <-
-          outProcessingSteps
+          unassignmentProcessingSteps
             .createSubmission(
               submissionParam,
               sourceMediator,
@@ -657,7 +653,7 @@ final class UnassignmentProcessingStepsTest
           contract,
         )
         submissionResult <- leftOrFailShutdown(
-          outProcessingSteps.createSubmission(
+          unassignmentProcessingSteps.createSubmission(
             submissionParam,
             sourceMediator,
             state,
@@ -674,7 +670,7 @@ final class UnassignmentProcessingStepsTest
     val outRequest = UnassignmentRequest(
       submitterMetadata = submitterMetadata(party1),
       Set(party1),
-      Set(party1),
+      reassigningParticipants = Set(submittingParticipant),
       creatingTransactionId,
       contract,
       sourceDomain,
@@ -690,20 +686,24 @@ final class UnassignmentProcessingStepsTest
     "succeed without errors" in {
       val sessionKeyStore = SessionKeyStore(CachingConfigs.defaultSessionKeyCacheConfig)
       for {
-        encryptedOutRequest <- encryptUnassignmentTree(outTree, sessionKeyStore)
+        encryptedOutRequest <- encryptUnassignmentTree(
+          outTree,
+          RecipientsTest.testInstance,
+          sessionKeyStore,
+        )
         envelopes =
           NonEmpty(
             Seq,
             OpenEnvelope(encryptedOutRequest, RecipientsTest.testInstance)(testedProtocolVersion),
           )
         decrypted <-
-          outProcessingSteps
+          unassignmentProcessingSteps
             .decryptViews(envelopes, cryptoSnapshot, sessionKeyStore)
             .valueOrFailShutdown(
               "decrypt request failed"
             )
         activenessSet =
-          outProcessingSteps
+          unassignmentProcessingSteps
             .computeActivenessSet(
               mkParsedRequest(outTree, RecipientsTest.testInstance, None)
             )
@@ -731,7 +731,7 @@ final class UnassignmentProcessingStepsTest
       val outRequest = UnassignmentRequest(
         submitterMetadata = submitterMetadata(party1),
         Set(party1),
-        Set(submittingParticipant.adminParty.toLf),
+        reassigningParticipants = Set(submittingParticipant),
         creatingTransactionId,
         contract,
         sourceDomain,
@@ -766,22 +766,22 @@ final class UnassignmentProcessingStepsTest
     }
 
     "succeed without errors" in {
-      constructPendingDataAndResponseWith(outProcessingSteps).valueOrFail(
+      constructPendingDataAndResponseWith(unassignmentProcessingSteps).valueOrFail(
         "construction of pending data and response failed"
       )
       succeed
     }
 
     // TODO(i13201) This should ideally be covered in integration tests as well
-    "prevent the contract being reassigned is not vetted on the target domain since version 5" in {
-      val outProcessingStepsWithoutPackages = {
+    "prevent the contract being reassigned is not vetted on the target domain" in {
+      val unassignmentProcessingStepsWithoutPackages = {
         val f = createCryptoFactory(packages = Seq.empty)
         val s = createCryptoSnapshot(f)
         val c = createReassignmentCoordination(s)
-        createOutProcessingSteps(c)
+        createUnassignmentProcessingSteps(c)
       }
 
-      constructPendingDataAndResponseWith(outProcessingStepsWithoutPackages).leftOrFail(
+      constructPendingDataAndResponseWith(unassignmentProcessingStepsWithoutPackages).leftOrFail(
         "construction of pending data and response succeeded unexpectedly"
       ) shouldBe a[PackageIdUnknownOrUnvetted]
     }
@@ -864,7 +864,7 @@ final class UnassignmentProcessingStepsTest
           engineAbortStatusF = FutureUnlessShutdown.pure(EngineAbortStatus.notAborted),
         )
         _ <- valueOrFail(
-          outProcessingSteps
+          unassignmentProcessingSteps
             .getCommitSetAndContractsToBeStoredAndEvent(
               NoOpeningErrors(signedContent),
               reassignmentResult.verdict,
@@ -888,14 +888,33 @@ final class UnassignmentProcessingStepsTest
 
   def encryptUnassignmentTree(
       tree: FullUnassignmentTree,
+      recipients: Recipients,
       sessionKeyStore: SessionKeyStore,
   ): Future[EncryptedViewMessage[UnassignmentViewType]] =
-    EncryptedViewMessageFactory
-      .create(UnassignmentViewType)(tree, cryptoSnapshot, sessionKeyStore, testedProtocolVersion)(
-        implicitly[TraceContext],
-        executorService,
-      )
-      .valueOrFailShutdown("failed to encrypt unassignment request")
+    for {
+      viewsToKeyMap <- EncryptedViewMessageFactory
+        .generateKeysFromRecipients(
+          Seq((ViewHashAndRecipients(tree.viewHash, recipients), tree.informees.toList)),
+          parallel = true,
+          crypto.pureCrypto,
+          cryptoSnapshot,
+          sessionKeyStore,
+          testedProtocolVersion,
+        )
+        .valueOrFailShutdown("cannot generate encryption key for transfer-out request")
+      ViewKeyData(_, viewKey, viewKeyMap) = viewsToKeyMap(tree.viewHash)
+      encryptedTree <- EncryptedViewMessageFactory
+        .create(UnassignmentViewType)(
+          tree,
+          (viewKey, viewKeyMap),
+          cryptoSnapshot,
+          testedProtocolVersion,
+        )(
+          implicitly[TraceContext],
+          executorService,
+        )
+        .valueOrFailShutdown("failed to encrypt unassignment request")
+    } yield encryptedTree
 
   def makeRootHashMessage(
       request: FullUnassignmentTree

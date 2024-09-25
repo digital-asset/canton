@@ -8,21 +8,15 @@ import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
-import com.digitalasset.canton.domain.block.data.{BlockEphemeralState, SequencerBlockStore}
+import com.digitalasset.canton.domain.block.data.SequencerBlockStore
 import com.digitalasset.canton.domain.block.{BlockSequencerStateManager, UninitializedBlockHeight}
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.DatabaseSequencerConfig.TestingInterceptor
+import com.digitalasset.canton.domain.sequencing.sequencer.*
 import com.digitalasset.canton.domain.sequencing.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
 import com.digitalasset.canton.domain.sequencing.sequencer.traffic.{
   SequencerRateLimitManager,
   SequencerTrafficConfig,
-}
-import com.digitalasset.canton.domain.sequencing.sequencer.{
-  DatabaseSequencerFactory,
-  Sequencer,
-  SequencerHealthConfig,
-  SequencerInitialState,
-  SequencerSnapshot,
 }
 import com.digitalasset.canton.domain.sequencing.traffic.store.{
   TrafficConsumedStore,
@@ -51,21 +45,30 @@ import scala.concurrent.{ExecutionContext, Future}
 
 abstract class BlockSequencerFactory(
     health: Option[SequencerHealthConfig],
+    blockSequencerConfig: BlockSequencerConfig,
     storage: Storage,
     protocolVersion: ProtocolVersion,
+    sequencerId: SequencerId,
     nodeParameters: CantonNodeParameters,
     override val loggerFactory: NamedLoggerFactory,
     testingInterceptor: Option[TestingInterceptor],
     metrics: SequencerMetrics,
 )(implicit ec: ExecutionContext)
-    extends DatabaseSequencerFactory(storage, nodeParameters.processingTimeouts, protocolVersion)
+    extends DatabaseSequencerFactory(
+      blockSequencerConfig.toDatabaseSequencerConfig,
+      storage,
+      nodeParameters.processingTimeouts,
+      protocolVersion,
+      sequencerId,
+      blockSequencerMode = true,
+    )
     with NamedLogging {
 
   private val store = SequencerBlockStore(
     storage,
     protocolVersion,
+    sequencerStore,
     nodeParameters.processingTimeouts,
-    nodeParameters.enableAdditionalConsistencyChecks,
     loggerFactory,
   )
 
@@ -115,15 +118,14 @@ abstract class BlockSequencerFactory(
       snapshot: SequencerInitialState,
       sequencerId: SequencerId,
   )(implicit ec: ExecutionContext, traceContext: TraceContext): EitherT[Future, String, Unit] = {
-    val initialBlockState = BlockEphemeralState.fromSequencerInitialState(snapshot)
-    logger.debug(s"Storing sequencers initial state: $initialBlockState")
+    logger.debug(s"Storing sequencers initial state: $snapshot")
     for {
       _ <- super[DatabaseSequencerFactory].initialize(
         snapshot,
         sequencerId,
       ) // Members are stored in the DBS
       _ <- EitherT.right(
-        store.setInitialState(initialBlockState, snapshot.initialTopologyEffectiveTimestamp)
+        store.setInitialState(snapshot, snapshot.initialTopologyEffectiveTimestamp)
       )
       _ <- EitherT.right(
         snapshot.snapshot.trafficPurchased.parTraverse_(trafficPurchasedStore.store)
@@ -170,7 +172,6 @@ abstract class BlockSequencerFactory(
       runtimeReady: FutureUnlessShutdown[Unit],
       sequencerSnapshot: Option[SequencerSnapshot] = None,
   )(implicit
-      ec: ExecutionContext,
       traceContext: TraceContext,
       tracer: trace.Tracer,
       actorMaterializer: Materializer,
@@ -213,7 +214,7 @@ abstract class BlockSequencerFactory(
 
     val domainLoggerFactory = loggerFactory.append("domainId", domainId.toString)
 
-    val stateManagerF = BlockSequencerStateManager(
+    val stateManager = BlockSequencerStateManager(
       protocolVersion,
       domainId,
       sequencerId,
@@ -223,10 +224,7 @@ abstract class BlockSequencerFactory(
       domainLoggerFactory,
     )
 
-    for {
-      _ <- balanceManager.initialize
-      stateManager <- stateManagerF
-    } yield {
+    balanceManager.initialize.map { _ =>
       val sequencer = createBlockSequencer(
         name,
         domainId,
