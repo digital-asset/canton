@@ -581,7 +581,7 @@ trait MessageDispatcher { this: NamedLogging =>
       events: Seq[RawProtocolEvent]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[ProcessingResult] = {
     val receipts = events.mapFilter {
-      case Deliver(counter, timestamp, _domainId, messageIdO, batch, _, _) =>
+      case Deliver(counter, timestamp, _domainId, messageIdO, _batch, _, _) =>
         // The event was submitted by the current participant iff the message ID is set.
         messageIdO.map(_ -> SequencedSubmission(counter, timestamp))
       case DeliverError(
@@ -739,16 +739,17 @@ private[participant] object MessageDispatcher {
   /** @tparam A The type returned by processors for the given kind
     */
   sealed trait MessageKind[A] extends Product with Serializable with PrettyPrinting {
-    override def pretty: Pretty[MessageKind.this.type] = prettyOfObject[MessageKind.this.type]
+    override protected def pretty: Pretty[MessageKind.this.type] =
+      prettyOfObject[MessageKind.this.type]
   }
 
   case object TopologyTransaction extends MessageKind[AsyncResult]
   case object TrafficControlTransaction extends MessageKind[Unit]
   final case class RequestKind(viewType: ViewType) extends MessageKind[AsyncResult] {
-    override def pretty: Pretty[RequestKind] = prettyOfParam(_.viewType)
+    override protected def pretty: Pretty[RequestKind] = prettyOfParam(_.viewType)
   }
   final case class ResultKind(viewType: ViewType) extends MessageKind[AsyncResult] {
-    override def pretty: Pretty[ResultKind] = prettyOfParam(_.viewType)
+    override protected def pretty: Pretty[ResultKind] = prettyOfParam(_.viewType)
   }
   case object AcsCommitment extends MessageKind[Unit]
   case object MalformedMessage extends MessageKind[Unit]

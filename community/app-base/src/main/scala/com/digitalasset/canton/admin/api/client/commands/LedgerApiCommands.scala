@@ -83,9 +83,13 @@ import com.daml.ledger.api.v2.event_query_service.{
 }
 import com.daml.ledger.api.v2.interactive_submission_service.InteractiveSubmissionServiceGrpc.InteractiveSubmissionServiceStub
 import com.daml.ledger.api.v2.interactive_submission_service.{
+  ExecuteSubmissionRequest,
+  ExecuteSubmissionResponse,
   InteractiveSubmissionServiceGrpc,
+  PartySignatures,
   PrepareSubmissionRequest,
   PrepareSubmissionResponse,
+  SinglePartySignatures,
 }
 import com.daml.ledger.api.v2.reassignment.{AssignedEvent, Reassignment, UnassignedEvent}
 import com.daml.ledger.api.v2.reassignment_command.{
@@ -140,6 +144,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   UserRights,
 }
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod}
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, JwksUrl}
@@ -154,6 +159,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.{DomainId, PartyId}
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.{LfPackageId, LfPartyId}
+import com.google.protobuf.ByteString
 import com.google.protobuf.empty.Empty
 import com.google.protobuf.field_mask.FieldMask
 import io.grpc.*
@@ -459,12 +465,16 @@ object LedgerApiCommands {
       def actAs: Set[LfPartyId]
       def readAs: Set[LfPartyId]
       def participantAdmin: Boolean
+      def identityProviderAdmin: Boolean
       def readAsAnyParty: Boolean
 
       protected def getRights: Seq[UserRight] =
         actAs.toSeq.map(x => UserRight().withCanActAs(UserRight.CanActAs(x))) ++
           readAs.toSeq.map(x => UserRight().withCanReadAs(UserRight.CanReadAs(x))) ++
           (if (participantAdmin) Seq(UserRight().withParticipantAdmin(UserRight.ParticipantAdmin()))
+           else Seq()) ++
+          (if (identityProviderAdmin)
+             Seq(UserRight().withIdentityProviderAdmin(UserRight.IdentityProviderAdmin()))
            else Seq()) ++
           (if (readAsAnyParty) Seq(UserRight().withCanReadAsAnyParty(UserRight.CanReadAsAnyParty()))
            else Seq())
@@ -476,6 +486,7 @@ object LedgerApiCommands {
         primaryParty: Option[LfPartyId],
         readAs: Set[LfPartyId],
         participantAdmin: Boolean,
+        identityProviderAdmin: Boolean,
         isDeactivated: Boolean,
         annotations: Map[String, String],
         identityProviderId: String,
@@ -670,6 +681,7 @@ object LedgerApiCommands {
           actAs: Set[LfPartyId],
           readAs: Set[LfPartyId],
           participantAdmin: Boolean,
+          identityProviderAdmin: Boolean,
           identityProviderId: String,
           readAsAnyParty: Boolean,
       ) extends BaseCommand[GrantUserRightsRequest, GrantUserRightsResponse, UserRights]
@@ -699,6 +711,7 @@ object LedgerApiCommands {
           actAs: Set[LfPartyId],
           readAs: Set[LfPartyId],
           participantAdmin: Boolean,
+          identityProviderAdmin: Boolean,
           identityProviderId: String,
           readAsAnyParty: Boolean,
       ) extends BaseCommand[RevokeUserRightsRequest, RevokeUserRightsResponse, UserRights]
@@ -1135,7 +1148,7 @@ object LedgerApiCommands {
       ): Either[String, Option[TransactionTree]] =
         Right(response.transaction)
 
-      override def pretty: Pretty[GetTransactionById] =
+      override protected def pretty: Pretty[GetTransactionById] =
         prettyOfClass(
           param("id", _.id.unquoted),
           param("parties", _.parties),
@@ -1184,7 +1197,7 @@ object LedgerApiCommands {
       packageIdSelectionPreference = packageIdSelectionPreference.map(_.toString),
     )
 
-    override def pretty: Pretty[this.type] =
+    override protected def pretty: Pretty[this.type] =
       prettyOfClass(
         param("actAs", _.actAs),
         param("readAs", _.readAs),
@@ -1323,20 +1336,16 @@ object LedgerApiCommands {
     }
 
     final case class PrepareCommand(
-        override val actAs: Seq[LfPartyId],
-        override val readAs: Seq[LfPartyId],
-        override val commands: Seq[Command],
-        override val workflowId: String,
-        override val commandId: String,
-        override val deduplicationPeriod: Option[DeduplicationPeriod],
-        override val submissionId: String,
-        override val minLedgerTimeAbs: Option[Instant],
-        override val disclosedContracts: Seq[DisclosedContract],
-        override val domainId: Option[DomainId],
-        override val applicationId: String,
-        override val packageIdSelectionPreference: Seq[LfPackageId],
-    ) extends SubmitCommand
-        with BaseCommand[
+        actAs: Seq[LfPartyId],
+        readAs: Seq[LfPartyId],
+        commands: Seq[Command],
+        commandId: String,
+        minLedgerTimeAbs: Option[Instant],
+        disclosedContracts: Seq[DisclosedContract],
+        domainId: Option[DomainId],
+        applicationId: String,
+        packageIdSelectionPreference: Seq[LfPackageId],
+    ) extends BaseCommand[
           PrepareSubmissionRequest,
           PrepareSubmissionResponse,
           PrepareSubmissionResponse,
@@ -1345,7 +1354,16 @@ object LedgerApiCommands {
       override def createRequest(): Either[String, PrepareSubmissionRequest] =
         Right(
           PrepareSubmissionRequest(
-            commands = Some(mkCommand)
+            applicationId = applicationId,
+            commandId = commandId,
+            commands = commands,
+            minLedgerTimeAbs =
+              minLedgerTimeAbs.map(ProtoConverter.InstantConverter.toProtoPrimitive),
+            actAs = actAs,
+            readAs = readAs,
+            disclosedContracts = disclosedContracts,
+            domainId = domainId.map(_.toProtoPrimitive).getOrElse(""),
+            packageIdSelectionPreference = packageIdSelectionPreference,
           )
         )
 
@@ -1362,6 +1380,73 @@ object LedgerApiCommands {
 
       override def timeoutType: TimeoutType = DefaultUnboundedTimeout
 
+    }
+
+    final case class ExecuteCommand(
+        interpretedTransaction: ByteString,
+        transactionSignatures: Map[PartyId, Seq[Signature]],
+        submissionId: String,
+        applicationId: String,
+        workflowId: String,
+        deduplicationPeriod: Option[DeduplicationPeriod],
+    ) extends BaseCommand[
+          ExecuteSubmissionRequest,
+          ExecuteSubmissionResponse,
+          ExecuteSubmissionResponse,
+        ] {
+
+      import com.digitalasset.canton.crypto.LedgerApiCryptoConversions.*
+      import io.scalaland.chimney.dsl.*
+      import com.daml.ledger.api.v2.interactive_submission_service as iss
+
+      private def makePartySignatures: PartySignatures = PartySignatures(
+        transactionSignatures.map { case (party, signatures) =>
+          SinglePartySignatures(
+            party = party.toProtoPrimitive,
+            signatures = signatures.map(_.toProtoV30.transformInto[iss.Signature]),
+          )
+        }.toSeq
+      )
+
+      private[commands] def serializeDeduplicationPeriod(
+          deduplicationPeriod: Option[DeduplicationPeriod]
+      ) = deduplicationPeriod.fold(
+        ExecuteSubmissionRequest.DeduplicationPeriod.Empty: ExecuteSubmissionRequest.DeduplicationPeriod
+      ) {
+        case DeduplicationPeriod.DeduplicationDuration(duration) =>
+          ExecuteSubmissionRequest.DeduplicationPeriod.DeduplicationDuration(
+            ProtoConverter.DurationConverter.toProtoPrimitive(duration)
+          )
+        case DeduplicationPeriod.DeduplicationOffset(offset) =>
+          ExecuteSubmissionRequest.DeduplicationPeriod.DeduplicationOffset(
+            offset.toHexString
+          )
+      }
+
+      override def createRequest(): Either[String, ExecuteSubmissionRequest] =
+        Right(
+          ExecuteSubmissionRequest(
+            preparedTransaction = interpretedTransaction,
+            submissionId = submissionId,
+            partiesSignatures = Some(makePartySignatures),
+            applicationId = applicationId,
+            workflowId = workflowId,
+            deduplicationPeriod = serializeDeduplicationPeriod(deduplicationPeriod),
+          )
+        )
+
+      override def submitRequest(
+          service: InteractiveSubmissionServiceStub,
+          request: ExecuteSubmissionRequest,
+      ): Future[ExecuteSubmissionResponse] =
+        service.executeSubmission(request)
+
+      override def handleResponse(
+          response: ExecuteSubmissionResponse
+      ): Either[String, ExecuteSubmissionResponse] =
+        Right(response)
+
+      override def timeoutType: TimeoutType = DefaultUnboundedTimeout
     }
 
   }

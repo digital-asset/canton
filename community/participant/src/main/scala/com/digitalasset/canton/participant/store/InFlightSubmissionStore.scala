@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.{EitherT, OptionT}
-import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -187,7 +186,6 @@ trait InFlightSubmissionStore extends AutoCloseable {
 object InFlightSubmissionStore {
   def apply(
       storage: Storage,
-      maxItemsInSqlInClause: PositiveNumeric[Int],
       registerBatchAggregatorConfig: BatchAggregatorConfig,
       releaseProtocolVersion: ReleaseProtocolVersion,
       timeouts: ProcessingTimeout,
@@ -199,7 +197,6 @@ object InFlightSubmissionStore {
     case jdbc: DbStorage =>
       new DbInFlightSubmissionStore(
         jdbc,
-        maxItemsInSqlInClause,
         registerBatchAggregatorConfig,
         releaseProtocolVersion,
         timeouts,
@@ -218,7 +215,7 @@ object InFlightSubmissionStore {
       extends InFlightReference {
     override def toEither: Either[InFlightByMessageId, InFlightBySequencingInfo] = Left(this)
 
-    override def pretty: Pretty[InFlightByMessageId] = prettyOfClass(
+    override protected def pretty: Pretty[InFlightByMessageId] = prettyOfClass(
       param("domain id", _.domainId),
       param("message id", _.messageId),
     )
@@ -233,7 +230,7 @@ object InFlightSubmissionStore {
   ) extends InFlightReference {
     override def toEither: Either[InFlightByMessageId, InFlightBySequencingInfo] = Right(this)
 
-    override def pretty: Pretty[InFlightBySequencingInfo] = prettyOfClass(
+    override protected def pretty: Pretty[InFlightBySequencingInfo] = prettyOfClass(
       param("domain id", _.domainId),
       param("sequenced", _.sequenced),
     )

@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
 import com.digitalasset.canton.config.CantonRequireTypes.{String255, String3, String300}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
@@ -28,7 +29,7 @@ sealed trait Identity
   /** returns the string representation used in console filters (maps to the uid) */
   def filterString: String = uid.toProtoPrimitive
 
-  override def pretty: Pretty[this.type] = prettyOfParam(_.uid)
+  override protected def pretty: Pretty[this.type] = prettyOfParam(_.uid)
 }
 
 sealed trait NodeIdentity extends Identity {
@@ -79,7 +80,7 @@ sealed trait Member extends Identity with Product with Serializable {
       s"${code.threeLetterId.unwrap}${UniqueIdentifier.delimiter}${uid.toProtoPrimitive}"
     )
 
-  override def pretty: Pretty[Member] =
+  override protected def pretty: Pretty[Member] =
     prettyOfString(inst =>
       inst.code.threeLetterId.unwrap + UniqueIdentifier.delimiter + inst.uid.show
     )
@@ -253,6 +254,8 @@ object PartyId {
 
   def tryCreate(identifier: String, namespace: Namespace): PartyId =
     PartyId(UniqueIdentifier.tryCreate(identifier, namespace))
+  def tryCreate(identifier: String, fingerprint: Fingerprint): PartyId =
+    PartyId(UniqueIdentifier.tryCreate(identifier, fingerprint))
 
   def fromLfParty(lfParty: LfPartyId): Either[String, PartyId] =
     UniqueIdentifier.fromProtoPrimitive_(lfParty).map(PartyId(_)).leftMap(_.message)

@@ -128,8 +128,7 @@ object DocsOpenBuild {
         "[generateSphinxSnippets] Running custom `.. snippet::` directives through tests to collect their output as JSON ..."
       )
       mkTestJob(
-        n =>
-          n.startsWith("com.digitalasset.canton.integration.tests.docs") && !n.endsWith("Oracle"),
+        n => n.startsWith("com.digitalasset.canton.integration.tests.docs"),
         `enterprise-app` / Test / definedTests,
         `enterprise-app` / Test / testOnly,
         verbose = true,

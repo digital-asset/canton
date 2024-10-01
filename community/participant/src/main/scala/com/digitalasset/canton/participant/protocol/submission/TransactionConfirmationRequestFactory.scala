@@ -47,6 +47,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submis
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
+import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -98,6 +99,7 @@ class TransactionConfirmationRequestFactory(
       _ <- assertSubmittersNodeAuthorization(submitterInfo.actAs, cryptoSnapshot.ipsSnapshot).mapK(
         FutureUnlessShutdown.outcomeK
       )
+      _ <- assertNonLocalPartyAuthorization(submitterInfo, cryptoSnapshot)
 
       // Starting with Daml 1.6.0, the daml engine performs authorization validation.
 
@@ -173,6 +175,46 @@ class TransactionConfirmationRequestFactory(
         protocolVersion,
       )
     }
+
+  private def validatePartySignatures(
+      submitterInfo: SubmitterInfo,
+      cryptoSnapshot: DomainSnapshotSyncCryptoApi,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, ParticipantAuthorizationError, Set[LfPartyId]] =
+    submitterInfo.partySignatures match {
+      case None => EitherT.rightT[FutureUnlessShutdown, ParticipantAuthorizationError](Set.empty)
+      case Some(partySignatures) =>
+        for {
+          hash <- EitherT.pure[FutureUnlessShutdown, ParticipantAuthorizationError](
+            Hash
+              .digest(
+                HashPurpose.PreparedSubmission,
+                ByteString.copyFromUtf8(submitterInfo.commandId),
+                HashAlgorithm.Sha256,
+              )
+          )
+          parties <- partySignatures
+            .verifySignatures(hash, cryptoSnapshot)
+            .leftMap(ParticipantAuthorizationError)
+        } yield parties
+    }
+
+  private def assertNonLocalPartyAuthorization(
+      submitterInfo: SubmitterInfo,
+      cryptoSnapshot: DomainSnapshotSyncCryptoApi,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, ParticipantAuthorizationError, Unit] =
+    // TODO(i20746): This is the absolute minimum level of validation
+    // We only check that provided signatures (if any) are valid
+    // As we thread authorization checks through for external signing, we'll need to make sure that all "actAs" parties
+    // are either hosted on this participant, or have provided a valid external signature.
+    // _For now_, we still require all submitting parties to be hosted on this participant anyway (via assertSubmittersNodeAuthorization below),
+    // so the external signatures are checked here ONLY, and are not used validated in phase 3.
+    // We'll also need to check that parties with external signatures are hosted with confirmation rights somewhere, although
+    // this may belong in the logic in AdmissibleDomains instead.
+    validatePartySignatures(submitterInfo, cryptoSnapshot).void
 
   private def assertSubmittersNodeAuthorization(
       submitters: List[LfPartyId],
@@ -261,7 +303,7 @@ class TransactionConfirmationRequestFactory(
           parallel,
           pureCrypto,
           cryptoSnapshot,
-          sessionKeyStore,
+          sessionKeyStore.convertStore,
           protocolVersion,
         )
         .leftMap[TransactionConfirmationRequestCreationError](e =>
@@ -324,7 +366,7 @@ object TransactionConfirmationRequestFactory {
     */
   final case class ParticipantAuthorizationError(message: String)
       extends TransactionConfirmationRequestCreationError {
-    override def pretty: Pretty[ParticipantAuthorizationError] = prettyOfClass(
+    override protected def pretty: Pretty[ParticipantAuthorizationError] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
   }
@@ -333,7 +375,7 @@ object TransactionConfirmationRequestFactory {
     */
   final case class MalformedLfTransaction(message: String)
       extends TransactionConfirmationRequestCreationError {
-    override def pretty: Pretty[MalformedLfTransaction] = prettyOfClass(
+    override protected def pretty: Pretty[MalformedLfTransaction] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
   }
@@ -342,7 +384,7 @@ object TransactionConfirmationRequestFactory {
     */
   final case class MalformedSubmitter(message: String)
       extends TransactionConfirmationRequestCreationError {
-    override def pretty: Pretty[MalformedSubmitter] = prettyOfClass(
+    override protected def pretty: Pretty[MalformedSubmitter] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
   }
@@ -351,14 +393,18 @@ object TransactionConfirmationRequestFactory {
     */
   final case class ContractConsistencyError(errors: Seq[ReferenceToFutureContractError])
       extends TransactionConfirmationRequestCreationError {
-    override def pretty: Pretty[ContractConsistencyError] = prettyOfClass(unnamedParam(_.errors))
+    override protected def pretty: Pretty[ContractConsistencyError] = prettyOfClass(
+      unnamedParam(_.errors)
+    )
   }
 
   /** Indicates that the encrypted view message could not be created. */
   final case class EncryptedViewMessageCreationError(
       error: EncryptedViewMessageFactory.EncryptedViewMessageCreationError
   ) extends TransactionConfirmationRequestCreationError {
-    override def pretty: Pretty[EncryptedViewMessageCreationError] = prettyOfParam(_.error)
+    override protected def pretty: Pretty[EncryptedViewMessageCreationError] = prettyOfParam(
+      _.error
+    )
   }
 
   /** Indicates that the transaction could not be converted to a transaction tree.
@@ -366,25 +412,27 @@ object TransactionConfirmationRequestFactory {
     */
   final case class TransactionTreeFactoryError(cause: TransactionTreeConversionError)
       extends TransactionConfirmationRequestCreationError {
-    override def pretty: Pretty[TransactionTreeFactoryError] = prettyOfParam(_.cause)
+    override protected def pretty: Pretty[TransactionTreeFactoryError] = prettyOfParam(_.cause)
   }
 
   final case class RecipientsCreationError(message: String)
       extends TransactionConfirmationRequestCreationError {
-    override def pretty: Pretty[RecipientsCreationError] = prettyOfClass(
+    override protected def pretty: Pretty[RecipientsCreationError] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
   }
 
   final case class LightTransactionViewTreeCreationError(message: String)
       extends TransactionConfirmationRequestCreationError {
-    override def pretty: Pretty[LightTransactionViewTreeCreationError] = prettyOfClass(
+    override protected def pretty: Pretty[LightTransactionViewTreeCreationError] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
   }
 
   final case class TransactionSigningError(cause: SyncCryptoError)
       extends TransactionConfirmationRequestCreationError {
-    override def pretty: Pretty[TransactionSigningError] = prettyOfClass(unnamedParam(_.cause))
+    override protected def pretty: Pretty[TransactionSigningError] = prettyOfClass(
+      unnamedParam(_.cause)
+    )
   }
 }

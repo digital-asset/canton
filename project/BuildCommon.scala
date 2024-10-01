@@ -105,18 +105,7 @@ object BuildCommon {
       Global / excludeLintKeys += Test / ideExcludedDirectories,
     )
 
-    // Inspired by https://www.viget.com/articles/two-ways-to-share-git-hooks-with-your-team/
-    val initDev =
-      taskKey[Unit]("initialize your local repo with common development settings")
-
-    val initDevSettings = Seq(
-      initDev := {
-        import scala.sys.process._
-        "git config core.hooksPath .hooks" !
-      }
-    )
-
-    buildSettings ++ globalSettings ++ initDevSettings ++ commandAliases
+    buildSettings ++ globalSettings ++ commandAliases
   }
 
   def mkTestJob(
@@ -155,17 +144,8 @@ object BuildCommon {
   }
 
   lazy val unitTestTask = {
-    val unitTest = taskKey[Unit]("Run all unit tests (excluding Oracle based tests)")
-    unitTest := mkTestJob(n =>
-      !n.startsWith("com.digitalasset.canton.integration.tests") && !n.endsWith("Oracle")
-    ).value
-  }
-
-  lazy val oracleUnitTestTask = {
-    val oracleUnitTest = taskKey[Unit]("Run all Oracle based unit tests")
-    oracleUnitTest := mkTestJob(n =>
-      !n.startsWith("com.digitalasset.canton.integration.tests") && n.endsWith("Oracle")
-    ).value
+    val unitTest = taskKey[Unit]("Run all unit tests.")
+    unitTest := mkTestJob(n => !n.startsWith("com.digitalasset.canton.integration.tests")).value
   }
 
   def runCommand(command: String, log: ManagedLogger, optError: Option[String] = None): String = {
@@ -410,7 +390,6 @@ object BuildCommon {
   lazy val sharedSettings = Seq(
     printTestTask,
     unitTestTask,
-    oracleUnitTestTask,
     ignoreScalacOptionsWithPathsInIncrementalCompilation,
     ideExcludedDirectories += target.value,
     scalacOptions += "-Wconf:src=src_managed/.*:silent", // Ignore warnings in generated code
@@ -423,7 +402,6 @@ object BuildCommon {
     // NonUnitForEach is too aggressive for integration tests where we often ignore the result of console commands
     Compile / compile / wartremoverErrors += Wart.custom("com.digitalasset.canton.NonUnitForEach"),
     wartremoverErrors += Wart.custom("com.digitalasset.canton.RequireBlocking"),
-    wartremoverErrors += Wart.custom("com.digitalasset.canton.SlickString"),
     wartremoverErrors += Wart.custom("com.digitalasset.canton.SynchronizedFuture"),
     wartremoverErrors += Wart.custom("com.digitalasset.canton.TryFailed"),
     wartremover.WartRemover.dependsOnLocalProjectWarts(CommunityProjects.`wartremover-extension`),
@@ -823,7 +801,6 @@ object BuildCommon {
           logback_core % Runtime,
           scalapb_runtime, // not sufficient to include only through the `common` dependency - race conditions ensue
           scaffeine,
-          oracle,
         ),
         Compile / PB.targets := Seq(
           scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
@@ -1366,7 +1343,6 @@ object BuildCommon {
           h2,
           flyway,
           flyway_postgres,
-          oracle,
           anorm,
           daml_lf_encoder % Test,
           daml_libs_scala_grpc_test_utils % Test,

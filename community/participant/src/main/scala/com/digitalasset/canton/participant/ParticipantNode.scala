@@ -54,11 +54,12 @@ import com.digitalasset.canton.participant.protocol.submission.{
   CommandDeduplicatorImpl,
   InFlightSubmissionTracker,
 }
-import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
-import com.digitalasset.canton.participant.scheduler.{
-  ParticipantSchedulersParameters,
-  SchedulersWithParticipantPruning,
+import com.digitalasset.canton.participant.pruning.{
+  AcsCommitmentProcessor,
+  PruningProcessor,
+  SortedReconciliationIntervalsProviderFactory,
 }
+import com.digitalasset.canton.participant.scheduler.ParticipantPruningScheduler
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.SyncDomain.SubmissionReady
 import com.digitalasset.canton.participant.sync.{CantonSyncService, *}
@@ -74,7 +75,7 @@ import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportKey.CommunityKey
 import com.digitalasset.canton.resource.*
-import com.digitalasset.canton.scheduler.Schedulers
+import com.digitalasset.canton.scheduler.{Schedulers, SchedulersImpl}
 import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig, SequencerClient}
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.EnrichedDurations.*
@@ -114,8 +115,6 @@ class ParticipantNodeBootstrap(
     cantonSyncServiceFactory: CantonSyncService.Factory[CantonSyncService],
     resourceManagementServiceFactory: Eval[ParticipantSettingsStore] => ResourceManagementService,
     replicationServiceFactory: Storage => ServerServiceDefinition,
-    createSchedulers: ParticipantSchedulersParameters => Future[SchedulersWithParticipantPruning] =
-      _ => Future.successful(SchedulersWithParticipantPruning.noop),
     ledgerApiServerFactory: CantonLedgerApiServerFactory,
     setInitialized: ParticipantServices => Unit,
 )(implicit
@@ -568,7 +567,6 @@ class ParticipantNodeBootstrap(
         domainRegistry = new GrpcDomainRegistry(
           participantId,
           syncDomainPersistentStateManager,
-          persistentState.map(_.settingsStore),
           topologyDispatcher,
           syncCrypto,
           config.crypto,
@@ -606,19 +604,56 @@ class ParticipantNodeBootstrap(
           persistentState.map(_.settingsStore)
         )
 
+        pruningProcessor = new PruningProcessor(
+          persistentState,
+          syncDomainPersistentStateManager,
+          new SortedReconciliationIntervalsProviderFactory(
+            syncDomainPersistentStateManager,
+            futureSupervisor,
+            loggerFactory,
+          ),
+          parameterConfig.batchingConfig.maxPruningBatchSize,
+          arguments.metrics.pruning,
+          exitOnFatalFailures = arguments.parameterConfig.exitOnFatalFailures,
+          domainId =>
+            domainAliasManager
+              .aliasForDomainId(domainId)
+              .flatMap(domainAlias =>
+                domainConnectionConfigStore.get(domainAlias).toOption.map(_.status)
+              ),
+          parameterConfig.processingTimeouts,
+          futureSupervisor,
+          loggerFactory,
+        )
+        pruningScheduler = new ParticipantPruningScheduler(
+          pruningProcessor,
+          arguments.clock,
+          arguments.metrics,
+          arguments.config.ledgerApi.clientConfig,
+          persistentState,
+          storage,
+          adminToken,
+          parameterConfig.stores,
+          parameterConfig.batchingConfig,
+          arguments.parameterConfig.processingTimeouts,
+          arguments.loggerFactory,
+        )
+
         schedulers <-
           EitherT
             .liftF(
-              createSchedulers(
-                ParticipantSchedulersParameters(
-                  isActive,
-                  persistentState,
-                  storage,
-                  adminToken,
-                  parameterConfig.stores,
-                  parameterConfig.batchingConfig,
-                )
-              )
+              {
+                val schedulers =
+                  new SchedulersImpl(
+                    Map("pruning" -> pruningScheduler),
+                    arguments.loggerFactory,
+                  )
+                if (isActive) {
+                  schedulers.start().map(_ => schedulers)
+                } else {
+                  Future.successful(schedulers)
+                }
+              }
             )
             .mapK(FutureUnlessShutdown.outcomeK)
 
@@ -644,6 +679,7 @@ class ParticipantNodeBootstrap(
           resourceManagementService,
           parameterConfig,
           indexedStringStore,
+          pruningProcessor,
           schedulers,
           arguments.metrics,
           exitOnFatalFailures = arguments.parameterConfig.exitOnFatalFailures,
@@ -655,7 +691,6 @@ class ParticipantNodeBootstrap(
         )
 
         _ = {
-          schedulers.setPruningProcessor(sync.pruningProcessor)
           setPostInitCallbacks(sync)
           syncDomainHealth.set(sync.syncDomainHealth)
           syncDomainEphemeralHealth.set(sync.ephemeralHealth)
@@ -727,8 +762,10 @@ class ParticipantNodeBootstrap(
             InspectionServiceGrpc.bindService(
               new GrpcInspectionService(
                 sync.stateInspection,
+                ips,
                 indexedStringStore,
                 domainAliasManager,
+                futureSupervisor,
                 loggerFactory,
               ),
               executionContext,
@@ -752,11 +789,7 @@ class ParticipantNodeBootstrap(
         adminServerRegistry
           .addServiceU(
             PruningServiceGrpc.bindService(
-              new GrpcPruningService(
-                sync,
-                () => schedulers.getPruningScheduler(loggerFactory),
-                loggerFactory,
-              ),
+              new GrpcPruningService(sync, pruningScheduler, loggerFactory),
               executionContext,
             )
           )
@@ -952,7 +985,7 @@ object ParticipantNodeBootstrap {
 
     private def createReplicationServiceFactory(
         arguments: Arguments
-    )(storage: Storage): ServerServiceDefinition =
+    ): ServerServiceDefinition =
       StaticGrpcServices
         .notSupportedByCommunity(
           EnterpriseParticipantReplicationServiceGrpc.SERVICE,
@@ -1023,7 +1056,7 @@ object ParticipantNodeBootstrap {
         createEngine(arguments),
         CantonSyncService.DefaultFactory,
         createResourceService(arguments),
-        createReplicationServiceFactory(arguments),
+        _ => createReplicationServiceFactory(arguments),
         ledgerApiServerFactory = ledgerApiServerFactory,
         setInitialized = _ => (),
       )

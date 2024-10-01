@@ -625,7 +625,7 @@ class SequencerReader(
                           protocolVersion,
                         )
                         .map(_.ipsSnapshot)
-                    )(x => Future.successful(x))
+                    )(Future.successful)
                     resolvedGroupAddresses <- GroupAddressResolver.resolveGroupsToMembers(
                       groupRecipients,
                       topologySnapshot,
@@ -751,7 +751,7 @@ object SequencerReader {
         latestTopologyClientRecipientTimestamp = checkpoint.latestTopologyClientTimestamp,
       )
 
-    override def pretty: Pretty[ReadState] = prettyOfClass(
+    override protected def pretty: Pretty[ReadState] = prettyOfClass(
       param("member", _.member),
       param("memberId", _.memberId),
       param("nextReadTimestamp", _.nextReadTimestamp),

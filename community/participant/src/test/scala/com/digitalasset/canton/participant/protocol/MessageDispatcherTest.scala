@@ -564,7 +564,7 @@ trait MessageDispatcherTest {
           sut.recordOrderPublisher.scheduleEmptyAcsChangePublication(
             any[SequencerCounter],
             any[CantonTimestamp],
-          )
+          )(any[TraceContext])
         )
           .thenAnswer {
             checkTickTopologyProcessor(sut, sc, ts).discard
@@ -575,7 +575,9 @@ trait MessageDispatcherTest {
           }
 
         handle(sut, deliver) {
-          verify(sut.recordOrderPublisher).scheduleEmptyAcsChangePublication(isEq(sc), isEq(ts))
+          verify(sut.recordOrderPublisher).scheduleEmptyAcsChangePublication(isEq(sc), isEq(ts))(
+            any[TraceContext]
+          )
           checkTicks(sut, sc, ts)
         }.futureValue
       }
@@ -1081,32 +1083,13 @@ trait MessageDispatcherTest {
             SerializedRootHashMessagePayload.empty,
           )
 
-        def mkRootHashMessageRecipients(recipients: NonEmpty[Seq[Recipient]]): Recipients =
-          Recipients.recipientGroups(
-            recipients.map(recipient => NonEmpty(Set, recipient, mediatorGroup))
-          )
-
         val goodBatches = List(
           Batch.of[ProtocolMessage](
             testedProtocolVersion,
             view -> Recipients.cc(participantId),
             rootHashMessage -> Recipients.cc(MemberRecipient(participantId), mediatorGroup),
             commitment -> Recipients.cc(participantId),
-          ) -> Seq(),
-          Batch.of[ProtocolMessage](
-            testedProtocolVersion,
-            view -> Recipients.cc(participantId),
-            rootHashMessage -> Recipients.cc(ParticipantsOfParty(partyId), mediatorGroup),
-            commitment -> Recipients.cc(participantId),
-          ) -> Seq(),
-          Batch.of[ProtocolMessage](
-            testedProtocolVersion,
-            view -> Recipients.cc(participantId),
-            rootHashMessage -> mkRootHashMessageRecipients(
-              NonEmpty(Seq, ParticipantsOfParty(partyId), ParticipantsOfParty(otherPartyId))
-            ),
-            commitment -> Recipients.cc(participantId),
-          ) -> Seq(),
+          ) -> Seq()
         )
 
         val badBatches = List(
@@ -1116,21 +1099,6 @@ trait MessageDispatcherTest {
             rootHashMessage -> Recipients.cc(participantId),
             rootHashMessage -> Recipients.cc(MemberRecipient(participantId), mediatorGroup),
           ) -> Seq("Received root hash messages that were not sent to a mediator"),
-          Batch.of[ProtocolMessage](
-            testedProtocolVersion,
-            view -> Recipients.cc(participantId),
-            rootHashMessage -> mkRootHashMessageRecipients(
-              NonEmpty(
-                Seq,
-                MemberRecipient(participantId),
-                ParticipantsOfParty(partyId),
-                ParticipantsOfParty(otherPartyId),
-              )
-            ),
-            commitment -> Recipients.cc(participantId),
-          ) -> Seq(
-            "The root hash message has more than one recipient group, not all using group addressing."
-          ),
           Batch.of[ProtocolMessage](
             testedProtocolVersion,
             view -> Recipients.cc(participantId),

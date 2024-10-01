@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.store
 
 import cats.syntax.foldable.*
 import cats.syntax.parallel.*
-import com.digitalasset.canton.config.CantonRequireTypes.{LengthLimitedString, String100, String36}
+import com.digitalasset.canton.config.CantonRequireTypes.{LengthLimitedString, String36}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -330,25 +330,13 @@ object ActiveContractStore {
   type ContractState = StateChange[Status]
   val ContractState: StateChange.type = StateChange
 
-  sealed trait ChangeType {
-    def name: String
-
-    // lazy val so that `kind` is initialized first in the subclasses
-    final lazy val toDbPrimitive: String100 =
-      // The Oracle DB schema allows up to 100 chars; Postgres, H2 map this to an enum
-      String100.tryCreate(name)
-  }
+  sealed abstract class ChangeType(val name: String)
 
   object ChangeType {
-    case object Activation extends ChangeType {
-      override val name = "activation"
-    }
+    case object Activation extends ChangeType("activation")
+    case object Deactivation extends ChangeType("deactivation")
 
-    case object Deactivation extends ChangeType {
-      override val name = "deactivation"
-    }
-
-    implicit val setParameterChangeType: SetParameter[ChangeType] = (v, pp) => pp >> v.toDbPrimitive
+    implicit val setParameterChangeType: SetParameter[ChangeType] = (v, pp) => pp >> v.name
     implicit val getResultChangeType: GetResult[ChangeType] = GetResult(r =>
       r.nextString() match {
         case ChangeType.Activation.name => ChangeType.Activation
@@ -631,7 +619,7 @@ object ActiveContractStore {
   final case class Active(reassignmentCounter: ReassignmentCounter) extends Status {
     override def prunable: Boolean = false
 
-    override def pretty: Pretty[Active] = prettyOfClass(
+    override protected def pretty: Pretty[Active] = prettyOfClass(
       param("reassignment counter", _.reassignmentCounter)
     )
   }
@@ -639,13 +627,13 @@ object ActiveContractStore {
   /** The contract has been archived and it is not active. */
   case object Archived extends Status {
     override def prunable: Boolean = true
-    override def pretty: Pretty[Archived.type] = prettyOfObject[Archived.type]
+    override protected def pretty: Pretty[Archived.type] = prettyOfObject[Archived.type]
     // reassignment counter remains None, because we do not write it back to the ACS
   }
 
   case object Purged extends Status {
     override def prunable: Boolean = true
-    override def pretty: Pretty[Purged.type] = prettyOfObject[Purged.type]
+    override protected def pretty: Pretty[Purged.type] = prettyOfObject[Purged.type]
   }
 
   /** The contract has been unassigned to the given `targetDomain` after it had resided on this domain.
@@ -665,7 +653,9 @@ object ActiveContractStore {
       reassignmentCounter: ReassignmentCounter,
   ) extends Status {
     override def prunable: Boolean = true
-    override def pretty: Pretty[ReassignedAway] = prettyOfClass(unnamedParam(_.targetDomain))
+    override protected def pretty: Pretty[ReassignedAway] = prettyOfClass(
+      unnamedParam(_.targetDomain)
+    )
   }
 
   private[store] sealed trait ReassignmentType extends Product with Serializable {
@@ -870,7 +860,7 @@ object ActiveContractSnapshot {
 }
 
 sealed trait ContractChange extends Product with Serializable with PrettyPrinting {
-  override def pretty: Pretty[ContractChange.this.type] = prettyOfObject[this.type]
+  override protected def pretty: Pretty[ContractChange.this.type] = prettyOfObject[this.type]
 }
 object ContractChange {
   case object Created extends ContractChange
@@ -885,7 +875,7 @@ object ContractChange {
   */
 final case class StateChangeType(change: ContractChange, reassignmentCounter: ReassignmentCounter)
     extends PrettyPrinting {
-  override def pretty: Pretty[StateChangeType] =
+  override protected def pretty: Pretty[StateChangeType] =
     prettyOfClass(
       param("operation", _.change),
       param("reassignment counter", _.reassignmentCounter),

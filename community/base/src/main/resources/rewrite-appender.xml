@@ -107,28 +107,6 @@
             <testing>true</testing>
         </rewrite>
 
-        <!-- # TODO(#13519): Suppress error in JSON API integration tests and remove these two exceptions -->
-        <rewrite class="com.digitalasset.canton.logging.Rewrite">
-            <logger>com.digitalasset.canton.http.StaticContentRouter</logger>
-            <maxLevel>INFO</maxLevel>
-            <contains>StaticContentRouter configured: StaticContentConfig</contains>
-            <testing>true</testing>
-        </rewrite>
-        <rewrite class="com.digitalasset.canton.logging.Rewrite">
-            <logger>com.digitalasset.canton.http.StaticContentRouter</logger>
-            <maxLevel>INFO</maxLevel>
-            <contains>DO NOT USE StaticContentRouter IN PRODUCTION, CONSIDER SETTING UP REVERSE PROXY!!!</contains>
-            <testing>true</testing>
-        </rewrite>
-
-        <!-- # TODO(#13519): Suppress error in JSON API integration tests and remove this exception -->
-        <rewrite class="com.digitalasset.canton.logging.Rewrite">
-            <logger>com.digitalasset.canton.auth.AuthorizationInterceptor</logger>
-            <maxLevel>INFO</maxLevel>
-            <contains>Could not resolve is_deactivated status for user </contains>
-            <testing>true</testing>
-        </rewrite>
-
         <rewrite class="com.digitalasset.canton.logging.Rewrite">
             <logger>com.digitalasset.canton.ledger.api.auth.interceptor.UserBasedAuthorizationInterceptor</logger>
             <maxLevel>INFO</maxLevel>
@@ -141,14 +119,6 @@
             <logger>software.amazon.awssdk.http.nio.netty.internal.SslContextProvider</logger>
             <maxLevel>INFO</maxLevel>
             <contains>SSL Certificate verification is disabled</contains>
-            <testing>true</testing>
-        </rewrite>
-
-        <!-- Emitted when trying to connect to the database and Oracle is not ready yet -->
-        <rewrite class="com.digitalasset.canton.logging.Rewrite">
-            <logger>com.zaxxer.hikari.pool.HikariPool</logger>
-            <maxLevel>INFO</maxLevel>
-            <contains>Exception during pool initialization</contains>
             <testing>true</testing>
         </rewrite>
 
@@ -189,27 +159,6 @@
             <testing>true</testing>
         </rewrite>
 
-        <!-- Parallel indexer on Oracle-based conformance tests runs into Oracle-upsert race.
-             The problem should only occur when storing packages.
-             However, we can't restrict the rule to the packages table, because the error message does not mention the affected table.
-
-             Since the rules are rather broad, it is applied during testing only.
-
-             The rules should be removed once https://digitalasset.atlassian.net/browse/DPP-562 is done.
-        -->
-        <rewrite class="com.digitalasset.canton.logging.Rewrite">
-            <logger>com.digitalasset.canton.platform.indexer.RecoveringIndexer</logger>
-            <contains>Error while running indexer, restart scheduled</contains>
-            <maxLevel>INFO</maxLevel>
-            <testing>true</testing>
-        </rewrite>
-        <rewrite class="com.digitalasset.canton.logging.Rewrite"> <!-- version for Oracle -->
-            <logger>com.digitalasset.canton.platform.store.appendonlydao.DbDispatcher</logger>
-            <contains>Processing the request failed due to a non-transient database error: ORA-00001: unique constraint</contains>
-            <exceptionMessage>ORA-00001: unique constraint</exceptionMessage>
-            <maxLevel>INFO</maxLevel>
-            <testing>true</testing>
-        </rewrite>
         <rewrite class="com.digitalasset.canton.logging.Rewrite"> <!-- version for H2 -->
             <logger>com.digitalasset.canton.platform.store.appendonlydao.DbDispatcher</logger>
             <contains>Processing the request failed due to a non-transient database error: Unique index or primary key violation</contains>
@@ -250,14 +199,6 @@
             <logger>daml.warnings</logger>
             <contains>Use of divulged contracts is deprecated and incompatible with pruning.</contains>
             <maxLevel>INFO</maxLevel>
-            <testing>true</testing>
-        </rewrite>
-
-        <!-- TODO(i10394) upstream sequencing actor does throw on shutdown -->
-        <rewrite class="com.digitalasset.canton.logging.Rewrite">
-            <logger>com.daml.grpc.adapter.RunnableSequencingActor</logger>
-            <maxLevel>INFO</maxLevel>
-            <contains>Unexpected exception while executing</contains>
             <testing>true</testing>
         </rewrite>
 

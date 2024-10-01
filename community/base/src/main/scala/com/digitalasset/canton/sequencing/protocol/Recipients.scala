@@ -38,7 +38,7 @@ final case class Recipients(trees: NonEmpty[Seq[RecipientsTree]]) extends Pretty
     new v30.Recipients(protoTrees.toList)
   }
 
-  override def pretty: Pretty[Recipients.this.type] =
+  override protected def pretty: Pretty[Recipients.this.type] =
     prettyOfClass(param("Recipient trees", _.trees.toList))
 
   def asSingleGroup: Option[NonEmpty[Set[Recipient]]] =
@@ -58,13 +58,10 @@ final case class Recipients(trees: NonEmpty[Seq[RecipientsTree]]) extends Pretty
 object Recipients {
 
   def fromProtoV30(
-      proto: v30.Recipients,
-      supportGroupAddressing: Boolean,
+      proto: v30.Recipients
   ): ParsingResult[Recipients] =
     for {
-      trees <- proto.recipientsTree.traverse(t =>
-        RecipientsTree.fromProtoV30(t, supportGroupAddressing)
-      )
+      trees <- proto.recipientsTree.traverse(RecipientsTree.fromProtoV30)
       recipients <- NonEmpty
         .from(trees)
         .toRight(

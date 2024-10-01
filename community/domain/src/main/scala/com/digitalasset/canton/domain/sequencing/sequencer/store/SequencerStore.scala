@@ -11,7 +11,7 @@ import cats.syntax.parallel.*
 import cats.{Functor, Show}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.PruningError.UnsafePruningPoint
 import com.digitalasset.canton.domain.sequencing.sequencer.*
@@ -46,7 +46,7 @@ import scala.concurrent.{ExecutionContext, Future}
 final case class SequencerMemberId(private val id: Int) extends PrettyPrinting {
   def unwrap: Int = id
 
-  override def pretty: Pretty[SequencerMemberId] = prettyOfParam(_.id)
+  override protected def pretty: Pretty[SequencerMemberId] = prettyOfParam(_.id)
 }
 
 object SequencerMemberId {
@@ -74,7 +74,7 @@ object SequencerMemberId {
 final case class PayloadId(private val id: CantonTimestamp) extends PrettyPrinting {
   def unwrap: CantonTimestamp = id
 
-  override def pretty: Pretty[PayloadId] = prettyOfClass(
+  override protected def pretty: Pretty[PayloadId] = prettyOfClass(
     unnamedParam(_.id)
   )
 }
@@ -306,7 +306,7 @@ final case class CounterCheckpoint(
     latestTopologyClientTimestamp: Option[CantonTimestamp],
 ) extends PrettyPrinting {
 
-  override def pretty: Pretty[CounterCheckpoint] = prettyOfClass(
+  override protected def pretty: Pretty[CounterCheckpoint] = prettyOfClass(
     param("counter", _.counter),
     param("timestamp", _.timestamp),
     paramIfDefined("latest topology client timestamp", _.latestTopologyClientTimestamp),
@@ -814,7 +814,6 @@ object SequencerStore {
   def apply(
       storage: Storage,
       protocolVersion: ProtocolVersion,
-      maxInClauseSize: PositiveNumeric[Int],
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
       sequencerMember: Member,
@@ -833,7 +832,6 @@ object SequencerStore {
         new DbSequencerStore(
           dbStorage,
           protocolVersion,
-          maxInClauseSize,
           timeouts,
           loggerFactory,
           sequencerMember,

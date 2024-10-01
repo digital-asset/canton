@@ -59,7 +59,6 @@ object Dependencies {
   lazy val netty_boring_ssl_version = "2.0.61.Final"
   lazy val netty_version = "4.1.108.Final"
 
-  lazy val oracle_version = "19.18.0.0"
   lazy val postgres_version = "42.7.3"
   lazy val pprint_version = "0.8.1"
   lazy val prometheus_version = "0.16.0"
@@ -110,7 +109,6 @@ object Dependencies {
   lazy val postgres = "org.postgresql" % "postgresql" % postgres_version
   lazy val flyway = "org.flywaydb" % "flyway-core" % flyway_version
   lazy val flyway_postgres = "org.flywaydb" % "flyway-database-postgresql" % flyway_version
-  lazy val oracle = "com.oracle.database.jdbc" % "ojdbc8" % oracle_version
 
   // Picked up automatically by the scalapb compiler. Contains common dependencies such as protocol buffers like google/protobuf/timestamp.proto
   lazy val scalapb_runtime =
