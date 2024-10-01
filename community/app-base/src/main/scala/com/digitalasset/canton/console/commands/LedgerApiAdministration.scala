@@ -1461,6 +1461,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           primaryParty: the optional party that should be linked to this user by default
           readAs: the set of parties this user is allowed to read as
           participantAdmin: flag (default false) indicating if the user is allowed to use the admin commands of the Ledger Api
+          identityProviderAdmin: flag (default false) indicating if the user is allowed to manage users and parties assigned to the same identity provider
           isActive: flag (default true) indicating if the user is active
           annotations: the set of key-value pairs linked to this user
           identityProviderId: identity provider id
@@ -1473,6 +1474,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           primaryParty: Option[PartyId] = None,
           readAs: Set[PartyId] = Set(),
           participantAdmin: Boolean = false,
+          identityProviderAdmin: Boolean = false,
           isActive: Boolean = true,
           annotations: Map[String, String] = Map.empty,
           identityProviderId: String = "",
@@ -1486,6 +1488,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
               primaryParty = primaryParty.map(_.toLf),
               readAs = readAs.map(_.toLf),
               participantAdmin = participantAdmin,
+              identityProviderAdmin = identityProviderAdmin,
               isDeactivated = !isActive,
               annotations = annotations,
               identityProviderId = identityProviderId,
@@ -1649,6 +1652,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           actAs: the set of parties this user is allowed to act as
           readAs: the set of parties this user is allowed to read as
           participantAdmin: flag (default false) indicating if the user is allowed to use the admin commands of the Ledger Api
+          identityProviderAdmin: flag (default false) indicating if the user is allowed to manage users and parties assigned to the same identity provider
           identityProviderId: identity provider id
           readAsAnyParty: flag (default false) indicating if the user is allowed to read as any party
           """)
@@ -1657,6 +1661,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
             actAs: Set[PartyId],
             readAs: Set[PartyId] = Set(),
             participantAdmin: Boolean = false,
+            identityProviderAdmin: Boolean = false,
             identityProviderId: String = "",
             readAsAnyParty: Boolean = false,
         ): UserRights =
@@ -1667,6 +1672,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
                 actAs = actAs.map(_.toLf),
                 readAs = readAs.map(_.toLf),
                 participantAdmin = participantAdmin,
+                identityProviderAdmin = identityProviderAdmin,
                 identityProviderId = identityProviderId,
                 readAsAnyParty = readAsAnyParty,
               )
@@ -1679,6 +1685,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           actAs: the set of parties this user should not be allowed to act as
           readAs: the set of parties this user should not be allowed to read as
           participantAdmin: if set to true, the participant admin rights will be removed
+          identityProviderAdmin: if set to true, the identity provider admin rights will be removed
           identityProviderId: identity provider id
           readAsAnyParty: flag (default false) indicating if the user is allowed to read as any party
           """)
@@ -1687,6 +1694,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
             actAs: Set[PartyId],
             readAs: Set[PartyId] = Set(),
             participantAdmin: Boolean = false,
+            identityProviderAdmin: Boolean = false,
             identityProviderId: String = "",
             readAsAnyParty: Boolean = false,
         ): UserRights =
@@ -1697,6 +1705,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
                 actAs = actAs.map(_.toLf),
                 readAs = readAs.map(_.toLf),
                 participantAdmin = participantAdmin,
+                identityProviderAdmin = identityProviderAdmin,
                 identityProviderId = identityProviderId,
                 readAsAnyParty = readAsAnyParty,
               )

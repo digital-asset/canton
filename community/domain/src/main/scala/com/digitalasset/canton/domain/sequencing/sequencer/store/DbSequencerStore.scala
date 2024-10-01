@@ -994,30 +994,46 @@ class DbSequencerStore(
             -- the max counter for each member will be either the number of events -1 (because the index is 0 based)
             -- or the checkpoint counter + number of events after that checkpoint
             -- the timestamp for a member will be the maximum between the highest event timestamp and the checkpoint timestamp (if it exists)
-            select sequencer_members.member, count(events.ts)
-            from sequencer_members
-            left join sequencer_events as events
-              on ((sequencer_members.id = any(events.recipients))
-                      -- we just want the events between the checkpoint and the requested timestamp
-                      -- and within the safe watermark
-                      and events.ts <= $beforeInclusive and events.ts <= $safeWatermark
-                      -- start from closest checkpoint the checkpoint is defined, we only want events past it
-                      and events.ts > $previousCheckpointTimestamp
-                      -- start from member's registration date
-                      and events.ts >= sequencer_members.registered_ts)
+            with
+              enabled_members as (
+                select
+                  member,
+                  id
+                from sequencer_members
+                where
+                  -- consider the given timestamp
+                  registered_ts <= $beforeInclusive
+                  -- no need to consider disabled members since they can't be served events anymore
+                  and enabled = true
+              ),
+              events_per_member as (
+                select
+                  unnest(events.recipients) member,
+                  events.ts,
+                  events.node_index
+                from sequencer_events events
+                where
+                  -- we just want the events between the checkpoint and the requested timestamp
+                  -- and within the safe watermark
+                  events.ts <= $beforeInclusive and events.ts <= $safeWatermark
+                  -- start from closest checkpoint the checkpoint is defined, we only want events past it
+                  and events.ts > $previousCheckpointTimestamp
+              )
+            select
+              members.member,
+              count(events.ts)
+            from
+              enabled_members members
+            left join events_per_member as events
+              on  events.member = members.id
             left join sequencer_watermarks watermarks
               on (events.node_index is not null) and events.node_index = watermarks.node_index
-            where (
-                -- no need to consider disabled members since they can't be served events anymore
-                sequencer_members.enabled = true
-                -- consider the given timestamp
-                and sequencer_members.registered_ts <= $beforeInclusive
-                and ((events.ts is null) or (
-                    -- if the sequencer that produced the event is offline, only consider up until its offline watermark
-                     watermarks.watermark_ts is not null and (watermarks.sequencer_online = true or events.ts <= watermarks.watermark_ts)
-                    ))
-              )
-            group by sequencer_members.member
+            where
+              ((events.ts is null) or (
+                -- if the sequencer that produced the event is offline, only consider up until its offline watermark
+                watermarks.watermark_ts is not null and (watermarks.sequencer_online = true or events.ts <= watermarks.watermark_ts)
+              ))
+            group by members.member
              """
       case _ =>
         sql"""
