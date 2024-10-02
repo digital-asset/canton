@@ -34,7 +34,7 @@ private[conflictdetection] trait LockableState[Status <: PrettyPrinting] extends
 
   def hasPendingWrites: Boolean = !PendingWriteCounter.isEmpty(pendingWrites)
 
-  override def pretty: Pretty[LockableState.this.type] = prettyOfClass(
+  override protected def pretty: Pretty[LockableState.this.type] = prettyOfClass(
     unnamedParamIfDefined(_.versionedState),
     param("pending activeness checks", _.pendingActivenessChecks.toString.unquoted),
     param("locks", _.lock.toString.unquoted),
@@ -116,8 +116,6 @@ private[conflictdetection] object LockableState {
 
   type PendingWriteCounter = counters.PendingWriteCounter
   val PendingWriteCounter: counters.PendingWriteCounter.type = counters.PendingWriteCounter
-
-  private[this] def uintToString(i: Int): String = (i.toLong & 0xffffffffL).toString
 }
 
 private[conflictdetection] final case class ImmutableLockableState[Status <: PrettyPrinting](

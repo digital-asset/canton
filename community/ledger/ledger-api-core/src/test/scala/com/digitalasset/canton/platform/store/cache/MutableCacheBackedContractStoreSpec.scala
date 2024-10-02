@@ -54,9 +54,8 @@ class MutableCacheBackedContractStoreSpec
         globalKey = None,
         stakeholders = Set.empty,
         eventOffset = Offset.beforeBegin,
-        eventSequentialId = 1L,
       )
-      val event2 = event1.copy(eventSequentialId = 2L)
+      val event2 = event1
       val updateBatch = NonEmptyVector.of(event1, event2)
 
       contractStore.contractStateCaches.push(updateBatch)
@@ -282,7 +281,7 @@ object MutableCacheBackedContractStoreSpec {
   private val Seq(alice, bob, charlie) = Seq("alice", "bob", "charlie").map(party)
   private val (
     Seq(cId_1, cId_2, cId_3, cId_4, cId_5, cId_6, cId_7),
-    Seq(contract1, contract2, contract3, contract4, _, contract6, contract7),
+    Seq(contract1, contract2, contract3, contract4, _, contract6, _),
     Seq(t1, t2, t3, t4, _, t6, _),
   ) =
     (1 to 7).map { id =>

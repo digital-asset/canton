@@ -19,6 +19,7 @@ import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.{
   CantonTimestamp,
+  Offset,
   ProcessedDisclosedContract,
   ReassignmentSubmitterMetadata,
 }
@@ -58,11 +59,7 @@ import com.digitalasset.canton.participant.protocol.reassignment.{
   ReassignmentCoordination,
 }
 import com.digitalasset.canton.participant.protocol.submission.routing.DomainRouter
-import com.digitalasset.canton.participant.pruning.{
-  AcsCommitmentProcessor,
-  NoOpPruningProcessor,
-  PruningProcessor,
-}
+import com.digitalasset.canton.participant.pruning.{AcsCommitmentProcessor, PruningProcessor}
 import com.digitalasset.canton.participant.store.DomainConnectionConfigStore.MissingConfigForAlias
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.CantonSyncService.ConnectDomain
@@ -430,7 +427,7 @@ class CantonSyncService(
   )
 
   override def prune(
-      pruneUpToInclusive: LedgerSyncOffset,
+      pruneUpToInclusive: Offset,
       submissionId: LedgerSubmissionId,
       _pruneAllDivulgedContracts: Boolean, // Canton always prunes divulged contracts ignoring this flag
   ): CompletionStage[PruningResult] =
@@ -447,7 +444,7 @@ class CantonSyncService(
     }).asJava
 
   def pruneInternally(
-      pruneUpToInclusive: LedgerSyncOffset
+      pruneUpToInclusive: Offset
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, CantonError, Unit] =
     (for {
       pruneUpToMultiDomainGlobalOffset <- EitherT
@@ -468,11 +465,6 @@ class CantonSyncService(
         s"Could not locate pruning point: ${err.message}. Considering success for idempotency"
       )
       Right(())
-    case Left(err @ LedgerPruningOnlySupportedInEnterpriseEdition) =>
-      logger.warn(
-        s"Canton participant pruning not supported in canton-open-source edition: ${err.message}"
-      )
-      Left(PruningServiceError.PruningNotSupportedInCommunityEdition.Error())
     case Left(err: LedgerPruningOffsetNonCantonFormat) =>
       logger.info(err.message)
       Left(PruningServiceError.NonCantonOffset.Error(err.message))
@@ -635,7 +627,7 @@ class CantonSyncService(
   override def validateDar(dar: ByteString, darName: String)(implicit
       traceContext: TraceContext
   ): Future[SubmissionResult] =
-    withSpan("CantonSyncService.validateDar") { implicit traceContext => span =>
+    withSpan("CantonSyncService.validateDar") { implicit traceContext => _span =>
       if (!isActive()) {
         logger.debug(s"Rejecting DAR validation request on passive replica.")
         Future.successful(SyncServiceError.Synchronous.PassiveNode)
@@ -1327,7 +1319,8 @@ class CantonSyncService(
         _ = syncDomainHealth.set(syncDomain)
         _ = ephemeralHealth.set(syncDomain.ephemeral)
         _ = sequencerClientHealth.set(syncDomain.sequencerClient.healthComponent)
-        _ = acsCommitmentProcessorHealth.set(syncDomain.acsCommitmentProcessor.healthComponent)
+        acp <- EitherT.right[SyncServiceError](syncDomain.acsCommitmentProcessor)
+        _ = acsCommitmentProcessorHealth.set(acp.healthComponent)
         _ = syncDomain.resolveUnhealthy()
 
         _ = connectedDomainsMap += (domainId -> syncDomain)
@@ -1748,9 +1741,9 @@ class CantonSyncService(
       .map(_.flatten)
 
   override def incompleteReassignmentOffsets(
-      validAt: LedgerSyncOffset,
+      validAt: Offset,
       stakeholders: Set[LfPartyId],
-  )(implicit traceContext: TraceContext): Future[Vector[LedgerSyncOffset]] =
+  )(implicit traceContext: TraceContext): Future[Vector[Offset]] =
     UpstreamOffsetConvert
       .toGlobalOffset(validAt)
       .fold(
@@ -1835,6 +1828,7 @@ object CantonSyncService {
         resourceManagementService: ResourceManagementService,
         cantonParameterConfig: ParticipantNodeParameters,
         indexedStringStore: IndexedStringStore,
+        pruningProcessor: PruningProcessor,
         schedulers: Schedulers,
         metrics: ParticipantMetrics,
         exitOnFatalFailures: Boolean,
@@ -1868,6 +1862,7 @@ object CantonSyncService {
         resourceManagementService: ResourceManagementService,
         cantonParameterConfig: ParticipantNodeParameters,
         indexedStringStore: IndexedStringStore,
+        pruningProcessor: PruningProcessor,
         schedulers: Schedulers,
         metrics: ParticipantMetrics,
         exitOnFatalFailures: Boolean,
@@ -1894,7 +1889,7 @@ object CantonSyncService {
         identityPusher,
         partyNotifier,
         syncCrypto,
-        NoOpPruningProcessor,
+        pruningProcessor,
         engine,
         commandProgressTracker,
         syncDomainStateFactory,

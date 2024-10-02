@@ -45,7 +45,7 @@ sealed trait TopologyMapping extends Product with Serializable with PrettyPrinti
 
   require(maybeUid.forall(_.namespace == namespace), "namespace is inconsistent")
 
-  override def pretty: Pretty[this.type] = adHocPrettyInstance
+  override protected def pretty: Pretty[this.type] = adHocPrettyInstance
 
   /** Returns the code used to store & index this mapping */
   def code: Code
@@ -184,7 +184,7 @@ object TopologyMapping {
     def isEmpty: Boolean =
       namespacesWithRoot.isEmpty && namespaces.isEmpty && uids.isEmpty && extraKeys.isEmpty
 
-    override def pretty: Pretty[ReferencedAuthorizations.this.type] = prettyOfClass(
+    override protected def pretty: Pretty[ReferencedAuthorizations.this.type] = prettyOfClass(
       paramIfNonEmpty("namespacesWithRoot", _.namespacesWithRoot),
       paramIfNonEmpty("namespaces", _.namespaces),
       paramIfNonEmpty("uids", _.uids),
@@ -239,7 +239,7 @@ object TopologyMapping {
 
       override def referenced: ReferencedAuthorizations = ReferencedAuthorizations()
 
-      override def pretty: Pretty[EmptyAuthorization.this.type] = adHocPrettyInstance
+      override protected def pretty: Pretty[EmptyAuthorization.this.type] = adHocPrettyInstance
     }
 
     final case class RequiredNamespaces(
@@ -266,7 +266,7 @@ object TopologyMapping {
         namespaces = if (requireRootDelegation) Set.empty else namespaces,
       )
 
-      override def pretty: Pretty[RequiredNamespaces.this.type] = prettyOfClass(
+      override protected def pretty: Pretty[RequiredNamespaces.this.type] = prettyOfClass(
         unnamedParam(_.namespaces),
         paramIfTrue("requireRootDelegation", _.requireRootDelegation),
       )
@@ -296,7 +296,7 @@ object TopologyMapping {
         extraKeys = extraKeys,
       )
 
-      override def pretty: Pretty[RequiredUids.this.type] = prettyOfClass(
+      override protected def pretty: Pretty[RequiredUids.this.type] = prettyOfClass(
         paramIfNonEmpty("uids", _.uids),
         paramIfNonEmpty("extraKeys", _.extraKeys),
       )
@@ -316,7 +316,7 @@ object TopologyMapping {
       override def referenced: ReferencedAuthorizations =
         ReferencedAuthorizations.monoid.combine(first.referenced, second.referenced)
 
-      override def pretty: Pretty[Or.this.type] =
+      override protected def pretty: Pretty[Or.this.type] =
         prettyOfClass(unnamedParam(_.first), unnamedParam(_.second))
     }
   }
@@ -927,7 +927,7 @@ final case class ParticipantDomainLimits(
     confirmationRequestsMaxRate: NonNegativeInt
 ) extends PrettyPrinting {
 
-  override def pretty: Pretty[ParticipantDomainLimits] =
+  override protected def pretty: Pretty[ParticipantDomainLimits] =
     prettyOfClass(
       param("confirmation requests max rate", _.confirmationRequestsMaxRate)
     )
@@ -1114,7 +1114,7 @@ final case class VettedPackage(
     validFrom = validFrom.map(_.toProtoTimestamp),
     validUntil = validUntil.map(_.toProtoTimestamp),
   )
-  override def pretty: Pretty[VettedPackage.this.type] = prettyOfClass(
+  override protected def pretty: Pretty[VettedPackage.this.type] = prettyOfClass(
     param("packageId", _.packageId),
     paramIfDefined("validFrom", _.validFrom),
     paramIfDefined("validUntil", _.validUntil),
@@ -1277,7 +1277,6 @@ final case class PartyToParticipant private (
     partyId: PartyId,
     threshold: PositiveInt,
     participants: Seq[HostingParticipant],
-    groupAddressing: Boolean,
 ) extends TopologyMapping {
 
   def toProto: v30.PartyToParticipant =
@@ -1285,7 +1284,6 @@ final case class PartyToParticipant private (
       party = partyId.toProtoPrimitive,
       threshold = threshold.value,
       participants = participants.map(_.toProto),
-      groupAddressing = groupAddressing,
     )
 
   override def toProtoV30: v30.TopologyMapping =
@@ -1312,7 +1310,7 @@ final case class PartyToParticipant private (
         case TopologyTransaction(
               TopologyChangeOp.Replace,
               _,
-              PartyToParticipant(_, prevThreshold, prevParticipants, prevGroupAddressing),
+              PartyToParticipant(_, prevThreshold, prevParticipants),
             ) =>
           val current = this
           val currentParticipantIds = participants.map(_.participantId.uid).toSet
@@ -1320,12 +1318,11 @@ final case class PartyToParticipant private (
           val removedParticipants = prevParticipantIds -- currentParticipantIds
           val addedParticipants = currentParticipantIds -- prevParticipantIds
 
-          val contentHasChanged =
-            prevGroupAddressing != current.groupAddressing || prevThreshold != current.threshold
+          val contentHasChanged = prevThreshold != current.threshold
 
           // check whether a participant can unilaterally unhost a party
           if (
-            // no change in group addressing or threshold
+            // no change in threshold
             !contentHasChanged
             // no participant added
             && addedParticipants.isEmpty
@@ -1352,7 +1349,6 @@ object PartyToParticipant {
       partyId: PartyId,
       threshold: PositiveInt,
       participants: Seq[HostingParticipant],
-      groupAddressing: Boolean,
   ): Either[String, PartyToParticipant] = {
     val noDuplicatePParticipants = {
       val duplicatePermissions =
@@ -1375,7 +1371,7 @@ object PartyToParticipant {
           (),
           s"Party $partyId cannot meet threshold of $threshold confirming participants with participants $participants",
         )
-        .map(_ => PartyToParticipant(partyId, threshold, participants, groupAddressing))
+        .map(_ => PartyToParticipant(partyId, threshold, participants))
     }
 
     noDuplicatePParticipants.flatMap(_ => thresholdCanBeMet)
@@ -1385,11 +1381,8 @@ object PartyToParticipant {
       partyId: PartyId,
       threshold: PositiveInt,
       participants: Seq[HostingParticipant],
-      groupAddressing: Boolean,
   ): PartyToParticipant =
-    create(partyId, threshold, participants, groupAddressing).valueOr(err =>
-      throw new IllegalArgumentException(err)
-    )
+    create(partyId, threshold, participants).valueOr(err => throw new IllegalArgumentException(err))
 
   def uniqueKey(partyId: PartyId): MappingHash =
     TopologyMapping.buildUniqueKey(code)(_.add(partyId.toProtoPrimitive))
@@ -1403,8 +1396,7 @@ object PartyToParticipant {
       partyId <- PartyId.fromProtoPrimitive(value.party, "party")
       threshold <- ProtoConverter.parsePositiveInt("threshold", value.threshold)
       participants <- value.participants.traverse(HostingParticipant.fromProtoV30)
-      groupAddressing = value.groupAddressing
-    } yield PartyToParticipant(partyId, threshold, participants, groupAddressing)
+    } yield PartyToParticipant(partyId, threshold, participants)
 }
 
 /** Dynamic domain parameter settings for the domain

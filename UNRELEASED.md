@@ -3,6 +3,19 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2024-10-02 (Exclusive)
+
+- Removed party-level group addressing.
+- `parallel_indexer` metrics have been renamed to simply `indexer`, i.e.
+```daml_participant_api_parallel_indexer_inputmapping_batch_size_bucket```
+becomes
+```daml_participant_api_indexer_inputmapping_batch_size_bucket```
+- Completely removed leftovers in the code of Oracle support. 
+
+## Until 2024-09-26 (Exclusive)
+
+- Pruning and scheduled pruning along with pruning configuration have moved from enterprise to community. One slight caveat is scheduled sequencer pruning which is currently only wired up in the enterprise database sequencer.
+
 ## Until 2024-09-20 (Exclusive)
 
 - Sequencer types `type = external` and `type = BFT` can now configure the underlying block sequencer in the config section `canton.sequencers.<sequencer>.block` and uses the same `reader` and `writer` configuration as the `type = database` sequencer.

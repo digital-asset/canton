@@ -14,13 +14,13 @@ import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import slick.jdbc.{GetResult, SetParameter}
 
 final case class DomainSearchCommitmentPeriod(
-    domain: IndexedDomain,
+    indexedDomain: IndexedDomain,
     fromExclusive: CantonTimestamp,
     toInclusive: CantonTimestamp,
 ) extends PrettyPrinting {
-  override def pretty: Pretty[DomainSearchCommitmentPeriod] =
+  override protected def pretty: Pretty[DomainSearchCommitmentPeriod] =
     prettyOfClass(
-      param("domainId", _.domain.domainId),
+      param("domainId", _.indexedDomain.domainId),
       param("fromExclusive", _.fromExclusive),
       param("toInclusive", _.toInclusive),
     )
@@ -43,7 +43,7 @@ sealed trait CommitmentPeriodState extends Product with Serializable with Pretty
         v30.ReceivedCommitmentState.RECEIVED_COMMITMENT_STATE_UNSPECIFIED
     }
 
-  override def pretty: Pretty[CommitmentPeriodState] =
+  override protected def pretty: Pretty[CommitmentPeriodState] =
     prettyOfClass(
       param("state", _.toInt)
     )

@@ -10,7 +10,7 @@ import com.digitalasset.canton.store.db.DbDeserializationException
 import slick.jdbc.{GetResult, SetParameter}
 
 final case class ChangeIdHash(hash: LfHash) extends PrettyPrinting {
-  override def pretty: Pretty[ChangeIdHash] = prettyOfClass(
+  override protected def pretty: Pretty[ChangeIdHash] = prettyOfClass(
     unnamedParam(_.hash)
   )
 }
@@ -28,7 +28,6 @@ object ChangeIdHash {
     )
   }
 
-  @SuppressWarnings(Array("com.digitalasset.canton.SlickString")) // LfHash is at most 64 chars
   implicit val setParameterChangeId: SetParameter[ChangeIdHash] = (changeIdHash, pp) =>
     pp.setString(changeIdHash.hash.toHexString)
 }

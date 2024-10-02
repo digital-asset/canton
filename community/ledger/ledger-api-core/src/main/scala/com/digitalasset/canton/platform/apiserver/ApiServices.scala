@@ -339,14 +339,12 @@ object ApiServices {
       val commandSubmissionService =
         CommandSubmissionServiceImpl.createApiService(
           writeService,
-          commandsValidator,
           timeProvider,
           timeProviderType,
           seedService,
           commandExecutor,
           checkOverloaded,
           metrics,
-          telemetry,
           loggerFactory,
         )
 
@@ -411,9 +409,13 @@ object ApiServices {
           Option.when(interactiveSubmissionServiceConfig.enabled) {
             val interactiveSubmissionService =
               InteractiveSubmissionServiceImpl.createApiService(
+                writeService,
+                timeProvider,
+                timeProviderType,
                 seedService,
                 commandExecutor,
                 metrics,
+                checkOverloaded,
                 interactiveSubmissionServiceConfig,
                 loggerFactory,
               )

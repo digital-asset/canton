@@ -333,6 +333,11 @@ private class ForwardingTopologySnapshotClient(
       loadParticipantStates: Seq[ParticipantId] => Future[Map[ParticipantId, ParticipantAttributes]],
   )(implicit traceContext: TraceContext) =
     parent.loadBatchActiveParticipantsOf(parties, loadParticipantStates)
+
+  override def partyAuthorization(party: PartyId)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[PartyKeyTopologySnapshotClient.PartyAuthorizationInfo]] =
+    parent.partyAuthorization(party)
 }
 
 class CachingTopologySnapshot(
@@ -431,6 +436,15 @@ class CachingTopologySnapshot(
       Option[Future[Seq[DynamicDomainParametersWithValidity]]]
     ](None)
 
+  private val partyAuthorizationsCache =
+    TracedScaffeine
+      .buildTracedAsyncFutureUS[PartyId, Option[
+        PartyKeyTopologySnapshotClient.PartyAuthorizationInfo
+      ]](
+        cache = cachingConfigs.partyCache.buildScaffeine(),
+        loader = traceContext => party => parent.partyAuthorization(party)(traceContext),
+      )(logger)
+
   override def allKeys(owner: Member)(implicit traceContext: TraceContext): Future[KeyCollection] =
     keyCache.get(owner)
 
@@ -452,7 +466,7 @@ class CachingTopologySnapshot(
     // split up the request into separate chunks so that we don't block the cache for too long
     // when loading very large batches
     MonadUtil
-      .batchedSequentialTraverse(batchingConfig.parallelism, batchingConfig.maxItemsInSqlClause)(
+      .batchedSequentialTraverse(batchingConfig.parallelism, batchingConfig.maxItemsInBatch)(
         parties
       )(parties => partyCache.getAll(parties)(traceContext).map(_.toSeq))
       .map(_.toMap)
@@ -554,4 +568,9 @@ class CachingTopologySnapshot(
       traceContext: TraceContext
   ): Future[Seq[DynamicDomainParametersWithValidity]] =
     getAndCache(domainParametersChangesCache, parent.listDynamicDomainParametersChanges())
+
+  override def partyAuthorization(party: PartyId)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[PartyKeyTopologySnapshotClient.PartyAuthorizationInfo]] =
+    partyAuthorizationsCache.getUS(party)
 }

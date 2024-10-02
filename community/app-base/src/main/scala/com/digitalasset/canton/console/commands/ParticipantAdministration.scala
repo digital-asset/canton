@@ -516,7 +516,7 @@ class ParticipantPruningAdministrationGroup(
       |Note that upon successful pruning, subsequent attempts to read transactions via ``ledger_api.transactions.flat`` or
       |``ledger_api.transactions.trees`` or command completions via ``ledger_api.completions.list`` by specifying a begin offset
       |lower than the returned pruning offset will result in a ``NOT_FOUND`` error.
-      |In the Enterprise Edition, ``prune`` performs a "full prune" freeing up significantly more space and also
+      |The ``prune`` operation performs a "full prune" freeing up significantly more space and also
       |performs additional safety checks returning a ``NOT_FOUND`` error if ``pruneUpTo`` is higher than the
       |offset returned by ``find_safe_offset`` on any domain with events preceding the pruning offset."""
   )
@@ -548,7 +548,7 @@ class ParticipantPruningAdministrationGroup(
     FeatureFlag.Preview,
   )
   @Help.Description(
-    """Special-purpose variant of the ``prune`` command only available in the Enterprise Edition that prunes only partial,
+    """Special-purpose variant of the ``prune`` command that prunes only partial,
       |internal participant ledger state freeing up space not needed for serving ``ledger_api.transactions``
       |and ``ledger_api.completions`` requests. In conjunction with ``prune``, ``prune_internally`` enables pruning
       |internal ledger state more aggressively than externally observable data via the ledger api. In most use cases
@@ -557,7 +557,6 @@ class ParticipantPruningAdministrationGroup(
       |performs additional safety checks returning a ``NOT_FOUND`` error if ``pruneUpTo`` is higher than the
       |offset returned by ``find_safe_offset`` on any domain with events preceding the pruning offset."""
   )
-  // Consider adding an "Enterprise" annotation if we end up having more enterprise-only commands than this lone enterprise command.
   def prune_internally(pruneUpTo: String): Unit =
     check(FeatureFlag.Preview) {
       consoleEnvironment.run(
@@ -796,7 +795,7 @@ class CommitmentsAdministrationGroup(
     """ Returns the contract ids and the mismatch reason.
       | Returns an error if the participant cannot anymore retrieve the data for the given contracts.
       | The arguments are:
-      | - contracts: The contract ids and reassignment counters that we check against our ACS
+      | - counterParticipantContracts: The contract ids and reassignment counters that we check against our ACS
       | - expectedDomain: The domain that the counterParticipant believes the given contracts reside on
       | - timestamp: The timestamp when the given contracts are active on the counter-participant
       | - counterParticipant: The counter participant with whom the contracts should be shared
@@ -804,13 +803,15 @@ class CommitmentsAdministrationGroup(
       """.stripMargin
   )
   def active_contracts_mismatches(
-      contracts: Seq[CommitmentContractMetadata],
+      counterParticipantContracts: Seq[CommitmentContractMetadata],
       expectedDomain: DomainId,
       timestamp: CantonTimestamp,
       counterParticipant: ParticipantId,
       timeout: NonNegativeDuration = timeouts.unbounded,
   ): Map[LfContractId, MismatchReason] =
-    check(FeatureFlag.Preview)(Map.empty[LfContractId, MismatchReason])
+    check(FeatureFlag.Preview) {
+      Map.empty[LfContractId, MismatchReason]
+    }
 
   @Help.Summary(
     "Download the contract payloads from the counter participant necessary for reconciliation",
@@ -853,7 +854,6 @@ class CommitmentsAdministrationGroup(
     }
   }
 
-  // TODO(#18451) R5
   @Help.Summary(
     "List the counter-participants of a participant and the ACS commitments received from them together with" +
       "the commitment state."
@@ -897,7 +897,6 @@ class CommitmentsAdministrationGroup(
       )
     )
 
-  // TODO(#18451) R5
   @Help.Summary(
     "List the counter-participants of a participant and the ACS commitments that the participant computed and sent to" +
       "them, together with the commitment state."
