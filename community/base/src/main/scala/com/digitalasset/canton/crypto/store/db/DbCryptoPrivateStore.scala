@@ -241,4 +241,5 @@ class DbCryptoPrivateStore(
         else
           Right(wrapperKeys.flatten.headOption)
       }
+
 }
