@@ -17,7 +17,8 @@ import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
-import com.digitalasset.canton.version.Reassignment.SourceProtocolVersion
+import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
@@ -25,9 +26,9 @@ import scala.concurrent.ExecutionContext
 private[reassignment] sealed abstract case class UnassignmentValidationReassigningParticipant(
     request: FullUnassignmentTree,
     expectedStakeholders: Set[LfPartyId],
-    sourceProtocolVersion: SourceProtocolVersion,
-    sourceTopology: TopologySnapshot,
-    targetTopology: TopologySnapshot,
+    sourceProtocolVersion: Source[ProtocolVersion],
+    sourceTopology: Source[TopologySnapshot],
+    targetTopology: Target[TopologySnapshot],
     recipients: Recipients,
 ) {
   private def checkReassigningParticipants(
@@ -67,9 +68,9 @@ private[reassignment] sealed abstract case class UnassignmentValidationReassigni
     UsableDomain
       .checkPackagesVetted(
         request.targetDomain.unwrap,
-        targetTopology,
+        targetTopology.unwrap,
         stakeholders.view.map(_ -> Set(templateId.packageId)).toMap,
-        targetTopology.referenceTime,
+        targetTopology.unwrap.referenceTime,
       )
       .leftMap(unknownPackage =>
         UnassignmentProcessorError
@@ -84,9 +85,9 @@ private[reassignment] object UnassignmentValidationReassigningParticipant {
       request: FullUnassignmentTree,
       expectedStakeholders: Set[LfPartyId],
       expectedTemplateId: LfTemplateId,
-      sourceProtocolVersion: SourceProtocolVersion,
-      sourceTopology: TopologySnapshot,
-      targetTopology: TopologySnapshot,
+      sourceProtocolVersion: Source[ProtocolVersion],
+      sourceTopology: Source[TopologySnapshot],
+      targetTopology: Target[TopologySnapshot],
       recipients: Recipients,
   )(implicit
       ec: ExecutionContext,
@@ -102,7 +103,7 @@ private[reassignment] object UnassignmentValidationReassigningParticipant {
     ) {}
 
     for {
-      unassignmentRequestRecipients <- sourceTopology
+      unassignmentRequestRecipients <- sourceTopology.unwrap
         .activeParticipantsOfAll(expectedStakeholders.toList)
         .mapK(FutureUnlessShutdown.outcomeK)
         .leftMap(inactiveParties =>

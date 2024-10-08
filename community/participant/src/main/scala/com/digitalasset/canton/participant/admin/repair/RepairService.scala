@@ -40,14 +40,14 @@ import com.digitalasset.canton.logging.{
 }
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.PackageDependencyResolver
-import com.digitalasset.canton.participant.admin.repair.RepairService.ContractToAdd
+import com.digitalasset.canton.participant.admin.repair.RepairService.{ContractToAdd, DomainLookup}
 import com.digitalasset.canton.participant.domain.DomainAliasManager
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
 import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState
 import com.digitalasset.canton.participant.store.*
-import com.digitalasset.canton.participant.sync.SyncDomainPersistentStateManager
+import com.digitalasset.canton.participant.topology.TopologyComponentFactory
 import com.digitalasset.canton.participant.util.DAMLe.ContractWithMetadata
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
 import com.digitalasset.canton.protocol.SerializableContract.LedgerCreateTime
@@ -57,6 +57,7 @@ import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.PekkoUtil.FutureQueue
+import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.retry.AllExceptionRetryPolicy
@@ -96,13 +97,10 @@ final class RepairService(
     packageDependencyResolver: PackageDependencyResolver,
     damle: DAMLe,
     ledgerApiIndexer: Eval[LedgerApiIndexer],
-    val syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
     aliasManager: DomainAliasManager,
     parameters: ParticipantNodeParameters,
     threadsAvailableForWriting: PositiveInt,
-    // TODO(i18695): attempt to unify these two for simplicity
-    isConnected: DomainId => Boolean,
-    isConnectedToAnyDomain: () => Boolean,
+    val domainLookup: DomainLookup,
     @VisibleForTesting
     private[canton] val executionQueue: SimpleExecutionQueue,
     protected val loggerFactory: NamedLoggerFactory,
@@ -112,7 +110,8 @@ final class RepairService(
     with HasCloseContext {
 
   private type MissingContract = (WithTransactionId[SerializableContract], RequestCounter)
-  private type MissingAssignment = (LfContractId, SourceDomainId, ReassignmentCounter, TimeOfChange)
+  private type MissingAssignment =
+    (LfContractId, Source[DomainId], ReassignmentCounter, TimeOfChange)
   private type MissingAdd = (LfContractId, ReassignmentCounter, TimeOfChange)
   private type MissingPurge = (LfContractId, TimeOfChange)
 
@@ -124,7 +123,7 @@ final class RepairService(
     )
 
   private def domainNotConnected(domainId: DomainId): EitherT[Future, String, Unit] = EitherT.cond(
-    !isConnected(domainId),
+    !domainLookup.isConnected(domainId),
     (),
     s"Participant is still connected to domain $domainId",
   )
@@ -138,7 +137,7 @@ final class RepairService(
     val contractId = repairContract.contract.contractId
 
     def addContract(
-        reassigningFrom: Option[SourceDomainId]
+        reassigningFrom: Option[Source[DomainId]]
     ): EitherT[Future, String, Option[ContractToAdd]] = Right(
       Option(
         ContractToAdd(
@@ -192,7 +191,7 @@ final class RepairService(
           repairContract.reassignmentCounter > reassignmentCounter
 
         if (isReassignmentCounterIncreasing) {
-          addContract(reassigningFrom = Option(SourceDomainId(targetDomain.unwrap)))
+          addContract(reassigningFrom = Option(Source(targetDomain.unwrap)))
         } else {
           EitherT.leftT(
             log(
@@ -278,7 +277,7 @@ final class RepairService(
         )
       )
 
-      topologyFactory <- syncDomainPersistentStateManager
+      topologyFactory <- domainLookup
         .topologyFactoryFor(domainId)
         .toRight(s"No topology factory for domain $domainAlias")
         .toEitherT[Future]
@@ -327,7 +326,7 @@ final class RepairService(
     if (contracts.isEmpty) {
       Either.right(logger.info("No contracts to add specified"))
     } else {
-      lockAndAwaitDomainAlias(
+      runConsecutiveAndAwaitDomainAlias(
         "repair.add",
         domainId =>
           withRepairIndexer { repairIndexer =>
@@ -456,7 +455,7 @@ final class RepairService(
     logger.info(
       s"Purging ${contractIds.length} contracts from $domain with ignoreAlreadyPurged=$ignoreAlreadyPurged"
     )
-    lockAndAwaitDomainAlias(
+    runConsecutiveAndAwaitDomainAlias(
       "repair.purge",
       domainId =>
         withRepairIndexer { repairIndexer =>
@@ -538,7 +537,7 @@ final class RepairService(
     logger.info(
       s"Change assignation request for ${contractIds.length} contracts from $sourceDomain to $targetDomain with skipInactive=$skipInactive"
     )
-    lockAndAwaitDomainPair(
+    runConsecutiveAndAwaitDomainPair(
       "repair.change_assignation",
       (sourceDomainId, targetDomainId) => {
         for {
@@ -630,7 +629,7 @@ final class RepairService(
       traceContext: TraceContext
   ): EitherT[Future, String, Unit] = {
     logger.info(s"Ignoring sequenced events from $fromInclusive to $toInclusive (force = $force).")
-    lock(
+    runConsecutive(
       "repair.skip_messages",
       for {
         _ <- domainNotConnected(domain)
@@ -647,14 +646,14 @@ final class RepairService(
     */
   def rollbackUnassignment(
       reassignmentId: ReassignmentId,
-      target: TargetDomainId,
+      target: Target[DomainId],
   )(implicit context: TraceContext): EitherT[Future, String, Unit] =
     withRepairIndexer { repairIndexer =>
       for {
         sourceRepairRequest <- initRepairRequestAndVerifyPreconditions(
-          reassignmentId.sourceDomain.id
+          reassignmentId.sourceDomain.unwrap
         )
-        targetRepairRequest <- initRepairRequestAndVerifyPreconditions(target.id)
+        targetRepairRequest <- initRepairRequestAndVerifyPreconditions(target.unwrap)
         reassignmentData <-
           targetRepairRequest.domain.persistentState.reassignmentStore
             .lookup(reassignmentId)
@@ -731,7 +730,7 @@ final class RepairService(
     logger.info(
       s"Unignoring sequenced events from $fromInclusive to $toInclusive (force = $force)."
     )
-    lock(
+    runConsecutive(
       "repair.unskip_messages",
       for {
         _ <- domainNotConnected(domain)
@@ -981,7 +980,7 @@ final class RepairService(
             Seq[MissingAssignment](
               (
                 cid,
-                SourceDomainId(targetDomain.unwrap),
+                Source(targetDomain.unwrap),
                 newReassignmentCounter,
                 toc,
               )
@@ -1324,8 +1323,8 @@ final class RepairService(
       traceContext: TraceContext
   ): Either[String, SyncDomainPersistentState] =
     for {
-      dp <- syncDomainPersistentStateManager
-        .get(domainId)
+      dp <- domainLookup
+        .persistentStateFor(domainId)
         .toRight(log(s"Could not find $domainDescription"))
       _ <- Either.cond(
         !dp.isMemory,
@@ -1336,7 +1335,7 @@ final class RepairService(
       )
     } yield dp
 
-  private def lockAndAwait[B](
+  private def runConsecutiveAndAwait[B](
       description: String,
       code: => EitherT[Future, String, B],
   )(implicit
@@ -1346,12 +1345,11 @@ final class RepairService(
 
     // repair commands can take an unbounded amount of time
     parameters.processingTimeouts.unbounded.await(description)(
-      lock(description, code).value
+      runConsecutive(description, code).value
     )
   }
 
-  // TODO(i18695): attempt to rename lock to something more suitable
-  private def lock[B](
+  private def runConsecutive[B](
       description: String,
       code: => EitherT[Future, String, B],
   )(implicit
@@ -1366,7 +1364,7 @@ final class RepairService(
     )
   }
 
-  private def lockAndAwaitDomainAlias[B](
+  private def runConsecutiveAndAwaitDomainAlias[B](
       description: String,
       code: DomainId => EitherT[Future, String, B],
       domainAlias: DomainAlias,
@@ -1377,13 +1375,13 @@ final class RepairService(
       aliasManager.domainIdForAlias(domainAlias).toRight(s"Could not find $domainAlias")
     )
 
-    lockAndAwait(
+    runConsecutiveAndAwait(
       description,
       domainId.flatMap(code),
     )
   }
 
-  private def lockAndAwaitDomainPair[B](
+  private def runConsecutiveAndAwaitDomainPair[B](
       description: String,
       code: (DomainId, DomainId) => EitherT[Future, String, B],
       domainAliases: (DomainAlias, DomainAlias),
@@ -1394,7 +1392,7 @@ final class RepairService(
       aliasToDomainId(domainAliases._1),
       aliasToDomainId(domainAliases._2),
     ).tupled
-    lockAndAwait[B](
+    runConsecutiveAndAwait[B](
       description,
       domainIds.flatMap(Function.tupled(code)),
     )
@@ -1411,7 +1409,7 @@ final class RepairService(
   private def withRepairIndexer(code: FutureQueue[Traced[Update]] => EitherT[Future, String, Unit])(
       implicit traceContext: TraceContext
   ): EitherT[Future, String, Unit] =
-    if (isConnectedToAnyDomain()) {
+    if (domainLookup.isConnectedToAnyDomain) {
       EitherT.leftT[Future, Unit](
         "There are still domains connected. Please disconnect all domains."
       )
@@ -1519,7 +1517,7 @@ object RepairService {
       contract: SerializableContract,
       witnesses: Set[LfPartyId],
       reassignmentCounter: ReassignmentCounter,
-      reassigningFrom: Option[SourceDomainId],
+      reassigningFrom: Option[Source[DomainId]],
   ) {
     def cid: LfContractId = contract.contractId
 
@@ -1527,5 +1525,15 @@ object RepairService {
       contract.contractSalt
         .map(DriverContractMetadata(_).toLfBytes(protocolVersion))
         .getOrElse(Bytes.Empty)
+  }
+
+  trait DomainLookup {
+    def isConnected(domainId: DomainId): Boolean
+
+    def isConnectedToAnyDomain: Boolean
+
+    def persistentStateFor(domainId: DomainId): Option[SyncDomainPersistentState]
+
+    def topologyFactoryFor(domainId: DomainId): Option[TopologyComponentFactory]
   }
 }

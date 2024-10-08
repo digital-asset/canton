@@ -25,8 +25,8 @@ import com.digitalasset.canton.time.TimeProofTestUtil
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
+import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.version.Reassignment.{SourceProtocolVersion, TargetProtocolVersion}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
@@ -38,11 +38,11 @@ class AssignmentValidationTest
     with ProtocolVersionChecksAsyncWordSpec
     with HasActorSystem
     with HasExecutionContext {
-  private val sourceDomain = SourceDomainId(
+  private val sourceDomain = Source(
     DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::source"))
   )
   private val sourceMediator = MediatorGroupRecipient(MediatorGroupIndex.tryCreate(100))
-  private val targetDomain = TargetDomainId(
+  private val targetDomain = Target(
     DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::target"))
   )
   private val targetMediator = MediatorGroupRecipient(MediatorGroupIndex.tryCreate(200))
@@ -120,7 +120,7 @@ class AssignmentValidationTest
           CantonTimestamp.Epoch,
           assignmentRequest,
           None,
-          cryptoSnapshot,
+          Target(cryptoSnapshot),
           isReassigningParticipant = false,
         )
         .futureValue shouldBe None
@@ -134,10 +134,10 @@ class AssignmentValidationTest
       ExampleTransactionFactory.transactionId(0),
       contract,
       reassignmentId.sourceDomain,
-      SourceProtocolVersion(testedProtocolVersion),
+      Source(testedProtocolVersion),
       sourceMediator,
       targetDomain,
-      TargetProtocolVersion(testedProtocolVersion),
+      Target(testedProtocolVersion),
       TimeProofTestUtil.mkTimeProof(timestamp = CantonTimestamp.Epoch, targetDomain = targetDomain),
       initialReassignmentCounter,
     )
@@ -152,7 +152,7 @@ class AssignmentValidationTest
       )
     val reassignmentData =
       ReassignmentData(
-        SourceProtocolVersion(testedProtocolVersion),
+        Source(testedProtocolVersion),
         CantonTimestamp.Epoch,
         RequestCounter(1),
         fullUnassignmentTree,
@@ -169,7 +169,7 @@ class AssignmentValidationTest
           CantonTimestamp.Epoch,
           assignmentRequest,
           Some(reassignmentData),
-          cryptoSnapshot,
+          Target(cryptoSnapshot),
           isReassigningParticipant = false,
         )
         .futureValue
@@ -193,7 +193,7 @@ class AssignmentValidationTest
           CantonTimestamp.Epoch,
           assignmentRequest,
           Some(reassignmentData),
-          cryptoSnapshot,
+          Target(cryptoSnapshot),
           isReassigningParticipant = false,
         )
         .value
@@ -220,7 +220,7 @@ class AssignmentValidationTest
           CantonTimestamp.Epoch,
           inRequestWithWrongCounter,
           Some(reassignmentData),
-          cryptoSnapshot,
+          Target(cryptoSnapshot),
           isReassigningParticipant = true,
         )
         .value
@@ -246,7 +246,7 @@ class AssignmentValidationTest
             CantonTimestamp.Epoch,
             assignmentRequest,
             Some(reassignmentData),
-            cryptoSnapshot,
+            Target(cryptoSnapshot),
             isReassigningParticipant = false,
           )
           .value
@@ -282,7 +282,7 @@ class AssignmentValidationTest
             CantonTimestamp.Epoch,
             assignmentRequest,
             Some(reassignmentData),
-            cryptoSnapshot,
+            Target(cryptoSnapshot),
             isReassigningParticipant = false,
           )
           .value
@@ -301,7 +301,7 @@ class AssignmentValidationTest
 
     "disallow reassignments from source domain supporting reassignment counter to destination domain not supporting them" in {
       val reassignmentDataSourceDomainPVCNTestNet =
-        reassignmentData.copy(sourceProtocolVersion = SourceProtocolVersion(ProtocolVersion.v32))
+        reassignmentData.copy(sourceProtocolVersion = Source(ProtocolVersion.v32))
       for {
         result <-
           assignmentValidation
@@ -309,12 +309,12 @@ class AssignmentValidationTest
               CantonTimestamp.Epoch,
               assignmentRequest,
               Some(reassignmentDataSourceDomainPVCNTestNet),
-              cryptoSnapshot,
+              Target(cryptoSnapshot),
               isReassigningParticipant = true,
             )
             .value
       } yield {
-        if (unassignmentRequest.targetProtocolVersion.v >= ProtocolVersion.v32) {
+        if (unassignmentRequest.targetProtocolVersion.unwrap >= ProtocolVersion.v32) {
           result shouldBe Right(Some(AssignmentValidationResult(Set(party1))))
         } else {
           result shouldBe Left(
@@ -330,7 +330,7 @@ class AssignmentValidationTest
   }
 
   private def testInstance(
-      domainId: TargetDomainId,
+      domainId: Target[DomainId],
       signatories: Set[LfPartyId],
       stakeholders: Set[LfPartyId],
       snapshotOverride: DomainSnapshotSyncCryptoApi,
@@ -340,7 +340,7 @@ class AssignmentValidationTest
 
     new AssignmentValidation(
       domainId,
-      defaultStaticDomainParameters,
+      Target(defaultStaticDomainParameters),
       submittingParticipant,
       damle,
       TestReassignmentCoordination.apply(
@@ -361,7 +361,7 @@ class AssignmentValidationTest
       stakeholders: Set[LfPartyId] = Set(party1),
       creatingTransactionId: TransactionId = transactionId1,
       uuid: UUID = new UUID(4L, 5L),
-      targetDomain: TargetDomainId = targetDomain,
+      targetDomain: Target[DomainId] = targetDomain,
       targetMediator: MediatorGroupRecipient = targetMediator,
       reassignmentCounter: ReassignmentCounter = initialReassignmentCounter,
       reassigningParticipants: Set[ParticipantId] = Set(submittingParticipant),
@@ -380,8 +380,8 @@ class AssignmentValidationTest
         targetMediator,
         unassignmentResult,
         uuid,
-        SourceProtocolVersion(testedProtocolVersion),
-        TargetProtocolVersion(testedProtocolVersion),
+        Source(testedProtocolVersion),
+        Target(testedProtocolVersion),
         reassigningParticipants = reassigningParticipants,
       )
     )("Failed to create FullAssignmentTree")

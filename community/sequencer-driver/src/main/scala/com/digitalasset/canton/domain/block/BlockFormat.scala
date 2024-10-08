@@ -11,9 +11,12 @@ object BlockFormat {
 
   val DefaultFirstBlockHeight: Long = 0
 
+  /** @param tickTopologyAtMicrosFromEpoch See [[RawLedgerBlock.tickTopologyAtMicrosFromEpoch]].
+    */
   final case class Block(
       blockHeight: Long,
       requests: Seq[Traced[OrderedRequest]],
+      tickTopologyAtMicrosFromEpoch: Option[Long] = None,
   )
 
   final case class OrderedRequest(
@@ -26,7 +29,7 @@ object BlockFormat {
       logger: TracedLogger
   )(block: Block): RawLedgerBlock =
     block match {
-      case Block(blockHeight, requests) =>
+      case Block(blockHeight, requests, tickTopologyAtMicrosFromEpoch) =>
         RawLedgerBlock(
           blockHeight,
           requests.map { case event @ Traced(OrderedRequest(orderingTime, tag, body)) =>
@@ -43,6 +46,7 @@ object BlockFormat {
                 sys.exit(1)
             }
           },
+          tickTopologyAtMicrosFromEpoch,
         )
     }
 

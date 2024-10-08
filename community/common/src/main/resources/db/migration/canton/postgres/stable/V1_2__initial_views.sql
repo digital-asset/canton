@@ -259,8 +259,8 @@ create or replace view debug.par_domains as
 
 create or replace view debug.par_reassignments as
   select
-    target_domain,
-    origin_domain,
+    debug.resolve_common_static_string(target_domain_idx) as target_domain_idx,
+    debug.resolve_common_static_string(source_domain_idx) as source_domain_idx,
     unassignment_global_offset,
     assignment_global_offset,
     debug.canton_timestamp(unassignment_timestamp) as unassignment_timestamp,
@@ -644,7 +644,7 @@ create or replace view debug.ord_metadata_output_blocks as
     epoch_number,
     block_number,
     debug.canton_timestamp(bft_ts) as bft_ts,
-    debug.canton_timestamp(last_topology_ts) as last_topology_ts
+    epoch_could_alter_sequencing_topology
   from ord_metadata_output_blocks;
 
 create or replace view debug.common_static_strings as

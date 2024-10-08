@@ -579,7 +579,7 @@ final class SyncStateInspection(
     getPersistentState(domain)
       .map(state =>
         participantNodePersistentState.value.ledgerApiStore
-          .domainIndex(state.domainId.domainId)
+          .domainIndex(state.indexedDomain.domainId)
       )
       .toRight(s"Not connected to $domain")
 
@@ -625,7 +625,7 @@ final class SyncStateInspection(
         getPersistentState(domain)
           .toRight(s"Unknown domain $domain")
       )
-      domainId = state.domainId.domainId
+      domainId = state.indexedDomain.domainId
       unsequencedSubmissions <- EitherT.right[String](
         participantNodePersistentState.value.inFlightSubmissionStore
           .lookupUnsequencedUptoUnordered(domainId, CantonTimestamp.now())
@@ -647,7 +647,7 @@ final class SyncStateInspection(
         timeouts.inspection.await(functionFullName)(
           participantNodePersistentState.value.ledgerApiStore
             .onlyForTestingNumberOfAcceptedTransactionsFor(
-              domainPersistentState.domainId.domainId
+              domainPersistentState.indexedDomain.domainId
             )
         )
       )

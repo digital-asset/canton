@@ -16,7 +16,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.util.EitherUtil
-import com.digitalasset.canton.version.Reassignment.{SourceProtocolVersion, TargetProtocolVersion}
+import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{LfPartyId, LfWorkflowId, ReassignmentCounter}
 import com.google.protobuf.ByteString
@@ -94,15 +94,15 @@ object UnassignmentViewTree
   def apply(
       commonData: MerkleTreeLeaf[UnassignmentCommonData],
       view: MerkleTree[UnassignmentView],
-      sourceProtocolVersion: SourceProtocolVersion,
+      sourceProtocolVersion: Source[ProtocolVersion],
       hashOps: HashOps,
   ): UnassignmentViewTree =
     UnassignmentViewTree(commonData, view)(
-      UnassignmentViewTree.protocolVersionRepresentativeFor(sourceProtocolVersion.v),
+      UnassignmentViewTree.protocolVersionRepresentativeFor(sourceProtocolVersion.unwrap),
       hashOps,
     )
 
-  def fromProtoV30(context: (HashOps, SourceProtocolVersion))(
+  def fromProtoV30(context: (HashOps, Source[ProtocolVersion]))(
       unassignmentViewTreeP: v30.ReassignmentViewTree
   ): ParsingResult[UnassignmentViewTree] = {
     val (hashOps, expectedProtocolVersion) = context
@@ -110,10 +110,10 @@ object UnassignmentViewTree
     for {
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
       res <- GenReassignmentViewTree.fromProtoV30(
-        UnassignmentCommonData.fromByteString(expectedProtocolVersion.v)(
+        UnassignmentCommonData.fromByteString(expectedProtocolVersion.unwrap)(
           (hashOps, expectedProtocolVersion)
         ),
-        UnassignmentView.fromByteString(expectedProtocolVersion.v)(hashOps),
+        UnassignmentView.fromByteString(expectedProtocolVersion.unwrap)(hashOps),
       )((commonData, view) =>
         UnassignmentViewTree(commonData, view)(
           rpv,
@@ -137,7 +137,7 @@ object UnassignmentViewTree
   */
 final case class UnassignmentCommonData private (
     override val salt: Salt,
-    sourceDomain: SourceDomainId,
+    sourceDomain: Source[DomainId],
     sourceMediatorGroup: MediatorGroupRecipient,
     stakeholders: Set[LfPartyId],
     reassigningParticipants: Set[ParticipantId],
@@ -145,7 +145,7 @@ final case class UnassignmentCommonData private (
     submitterMetadata: ReassignmentSubmitterMetadata,
 )(
     hashOps: HashOps,
-    val sourceProtocolVersion: SourceProtocolVersion,
+    val sourceProtocolVersion: Source[ProtocolVersion],
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[UnassignmentCommonData](hashOps)
     with HasProtocolVersionedWrapper[UnassignmentCommonData]
@@ -156,12 +156,12 @@ final case class UnassignmentCommonData private (
 
   override val representativeProtocolVersion
       : RepresentativeProtocolVersion[UnassignmentCommonData.type] =
-    UnassignmentCommonData.protocolVersionRepresentativeFor(sourceProtocolVersion.v)
+    UnassignmentCommonData.protocolVersionRepresentativeFor(sourceProtocolVersion.unwrap)
 
   protected def toProtoV30: v30.UnassignmentCommonData =
     v30.UnassignmentCommonData(
       salt = Some(salt.toProtoV30),
-      sourceDomain = sourceDomain.toProtoPrimitive,
+      sourceDomain = sourceDomain.unwrap.toProtoPrimitive,
       sourceMediatorGroup = sourceMediatorGroup.group.value,
       stakeholders = stakeholders.toSeq,
       uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
@@ -191,7 +191,7 @@ final case class UnassignmentCommonData private (
 object UnassignmentCommonData
     extends HasMemoizedProtocolVersionedWithContextCompanion[
       UnassignmentCommonData,
-      (HashOps, SourceProtocolVersion),
+      (HashOps, Source[ProtocolVersion]),
     ] {
   override val name: String = "UnassignmentCommonData"
 
@@ -204,13 +204,13 @@ object UnassignmentCommonData
 
   def create(hashOps: HashOps)(
       salt: Salt,
-      sourceDomain: SourceDomainId,
+      sourceDomain: Source[DomainId],
       sourceMediator: MediatorGroupRecipient,
       stakeholders: Set[LfPartyId],
       reassigningParticipants: Set[ParticipantId],
       uuid: UUID,
       submitterMetadata: ReassignmentSubmitterMetadata,
-      sourceProtocolVersion: SourceProtocolVersion,
+      sourceProtocolVersion: Source[ProtocolVersion],
   ): UnassignmentCommonData = UnassignmentCommonData(
     salt,
     sourceDomain,
@@ -222,7 +222,7 @@ object UnassignmentCommonData
   )(hashOps, sourceProtocolVersion, None)
 
   private[this] def fromProtoV30(
-      context: (HashOps, SourceProtocolVersion),
+      context: (HashOps, Source[ProtocolVersion]),
       unassignmentCommonDataP: v30.UnassignmentCommonData,
   )(
       bytes: ByteString
@@ -240,7 +240,7 @@ object UnassignmentCommonData
 
     for {
       salt <- ProtoConverter.parseRequired(Salt.fromProtoV30, "salt", saltP)
-      sourceDomain <- SourceDomainId.fromProtoPrimitive(sourceDomainP, "source_domain")
+      sourceDomain <- DomainId.fromProtoPrimitive(sourceDomainP, "source_domain").map(Source(_))
       sourceMediatorGroup <- ProtoConverter.parseNonNegativeInt(
         "source_mediator_group",
         sourceMediatorGroupP,
@@ -282,9 +282,9 @@ final case class UnassignmentView private (
     override val salt: Salt,
     contract: SerializableContract,
     creatingTransactionId: TransactionId,
-    targetDomain: TargetDomainId,
+    targetDomain: Target[DomainId],
     targetTimeProof: TimeProof,
-    targetProtocolVersion: TargetProtocolVersion,
+    targetProtocolVersion: Target[ProtocolVersion],
     reassignmentCounter: ReassignmentCounter,
 )(
     hashOps: HashOps,
@@ -309,9 +309,9 @@ final case class UnassignmentView private (
   protected def toProtoV30: v30.UnassignmentView =
     v30.UnassignmentView(
       salt = Some(salt.toProtoV30),
-      targetDomain = targetDomain.toProtoPrimitive,
+      targetDomain = targetDomain.unwrap.toProtoPrimitive,
       targetTimeProof = Some(targetTimeProof.toProtoV30),
-      targetProtocolVersion = targetProtocolVersion.v.toProtoPrimitive,
+      targetProtocolVersion = targetProtocolVersion.unwrap.toProtoPrimitive,
       reassignmentCounter = reassignmentCounter.toProtoPrimitive,
       creatingTransactionId = creatingTransactionId.toProtoPrimitive,
       contract = Some(contract.toProtoV30),
@@ -322,7 +322,7 @@ final case class UnassignmentView private (
     param("template id", _.templateId),
     param("target domain", _.targetDomain),
     param("target time proof", _.targetTimeProof),
-    param("target protocol version", _.targetProtocolVersion.v),
+    param("target protocol version", _.targetProtocolVersion),
     param("reassignment counter", _.reassignmentCounter),
     param(
       "contract id",
@@ -347,10 +347,10 @@ object UnassignmentView
       salt: Salt,
       contract: SerializableContract,
       creatingTransactionId: TransactionId,
-      targetDomain: TargetDomainId,
+      targetDomain: Target[DomainId],
       targetTimeProof: TimeProof,
-      sourceProtocolVersion: SourceProtocolVersion,
-      targetProtocolVersion: TargetProtocolVersion,
+      sourceProtocolVersion: Source[ProtocolVersion],
+      targetProtocolVersion: Target[ProtocolVersion],
       reassignmentCounter: ReassignmentCounter,
   ): UnassignmentView =
     UnassignmentView(
@@ -361,7 +361,7 @@ object UnassignmentView
       targetTimeProof,
       targetProtocolVersion,
       reassignmentCounter,
-    )(hashOps, protocolVersionRepresentativeFor(sourceProtocolVersion.v), None)
+    )(hashOps, protocolVersionRepresentativeFor(sourceProtocolVersion.unwrap), None)
 
   private[this] def fromProtoV30(hashOps: HashOps, unassignmentViewP: v30.UnassignmentView)(
       bytes: ByteString
@@ -392,9 +392,9 @@ object UnassignmentView
       salt,
       contract,
       creatingTransactionId,
-      TargetDomainId(targetDomain),
+      Target(targetDomain),
       targetTimeProof,
-      TargetProtocolVersion(targetProtocolVersion),
+      Target(targetProtocolVersion),
       ReassignmentCounter(reassignmentCounterP),
     )(
       hashOps,
@@ -434,9 +434,9 @@ final case class FullUnassignmentTree(tree: UnassignmentViewTree)
 
   def reassignmentCounter: ReassignmentCounter = view.reassignmentCounter
 
-  def sourceDomain: SourceDomainId = commonData.sourceDomain
+  def sourceDomain: Source[DomainId] = commonData.sourceDomain
 
-  def targetDomain: TargetDomainId = view.targetDomain
+  def targetDomain: Target[DomainId] = view.targetDomain
 
   def targetTimeProof: TimeProof = view.targetTimeProof
 
@@ -464,7 +464,7 @@ final case class FullUnassignmentTree(tree: UnassignmentViewTree)
 object FullUnassignmentTree {
   def fromByteString(
       crypto: CryptoPureApi,
-      sourceProtocolVersion: SourceProtocolVersion,
+      sourceProtocolVersion: Source[ProtocolVersion],
   )(bytes: ByteString): ParsingResult[FullUnassignmentTree] =
     for {
       tree <- UnassignmentViewTree.fromByteString(crypto, sourceProtocolVersion)(bytes)

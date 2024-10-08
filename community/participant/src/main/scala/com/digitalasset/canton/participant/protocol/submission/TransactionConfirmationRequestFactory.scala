@@ -47,7 +47,6 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submis
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
-import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -119,7 +118,7 @@ class TransactionConfirmationRequestFactory(
           maxSequencingTime,
           validatePackageVettings = true,
         )
-        .leftMap(TransactionTreeFactoryError)
+        .leftMap(TransactionTreeFactoryError.apply)
 
       rootViews = transactionTree.rootViews.unblindedElements.toList
       inputContracts = ExtractUsedContractsFromRootViews(rootViews)
@@ -159,7 +158,7 @@ class TransactionConfirmationRequestFactory(
       )
       submittingParticipantSignature <- cryptoSnapshot
         .sign(transactionTree.rootHash.unwrap)
-        .leftMap[TransactionConfirmationRequestCreationError](TransactionSigningError)
+        .leftMap[TransactionConfirmationRequestCreationError](TransactionSigningError.apply)
     } yield {
       if (loggingConfig.eventDetails) {
         logger.debug(
@@ -182,18 +181,10 @@ class TransactionConfirmationRequestFactory(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ParticipantAuthorizationError, Set[LfPartyId]] =
-    submitterInfo.partySignatures match {
+    submitterInfo.externallySignedTransaction match {
       case None => EitherT.rightT[FutureUnlessShutdown, ParticipantAuthorizationError](Set.empty)
-      case Some(partySignatures) =>
+      case Some(ExternallySignedTransaction(hash, partySignatures)) =>
         for {
-          hash <- EitherT.pure[FutureUnlessShutdown, ParticipantAuthorizationError](
-            Hash
-              .digest(
-                HashPurpose.PreparedSubmission,
-                ByteString.copyFromUtf8(submitterInfo.commandId),
-                HashAlgorithm.Sha256,
-              )
-          )
           parties <- partySignatures
             .verifySignatures(hash, cryptoSnapshot)
             .leftMap(ParticipantAuthorizationError)
@@ -284,7 +275,9 @@ class TransactionConfirmationRequestFactory(
             cryptoSnapshot,
             protocolVersion,
           )
-          .leftMap[TransactionConfirmationRequestCreationError](EncryptedViewMessageCreationError)
+          .leftMap[TransactionConfirmationRequestCreationError](
+            EncryptedViewMessageCreationError.apply
+          )
           .map(viewMessage => OpenEnvelope(viewMessage, recipients)(protocolVersion))
       } yield envelope
     }
@@ -297,8 +290,13 @@ class TransactionConfirmationRequestFactory(
         )
       viewsToKeyMap <- EncryptedViewMessageFactory
         .generateKeysFromRecipients(
-          lightTreesWithMetadata.map { case ViewWithWitnessesAndRecipients(tvt, _, recipients) =>
-            (ViewHashAndRecipients(tvt.viewHash, recipients), tvt.informees.toList)
+          lightTreesWithMetadata.map {
+            case ViewWithWitnessesAndRecipients(tvt, _, recipients, parentRecipients) =>
+              (
+                ViewHashAndRecipients(tvt.viewHash, recipients),
+                parentRecipients,
+                tvt.informees.toList,
+              )
           },
           parallel,
           pureCrypto,
@@ -312,7 +310,7 @@ class TransactionConfirmationRequestFactory(
       res <-
         if (parallel) {
           lightTreesWithMetadata.toList.parTraverse {
-            case ViewWithWitnessesAndRecipients(tvt, _, recipients) =>
+            case ViewWithWitnessesAndRecipients(tvt, _, recipients, _) =>
               createOpenEnvelopeWithTransaction(
                 tvt,
                 viewsToKeyMap,
@@ -321,7 +319,7 @@ class TransactionConfirmationRequestFactory(
           }
         } else
           MonadUtil.sequentialTraverse(lightTreesWithMetadata) {
-            case ViewWithWitnessesAndRecipients(tvt, _, recipients) =>
+            case ViewWithWitnessesAndRecipients(tvt, _, recipients, _) =>
               createOpenEnvelopeWithTransaction(
                 tvt,
                 viewsToKeyMap,

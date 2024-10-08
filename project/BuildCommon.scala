@@ -687,6 +687,7 @@ object BuildCommon {
           bouncycastle_bcprov_jdk15on,
           cats,
           chimney,
+          chimneyJavaConversion,
           circe_core,
           circe_generic,
           flyway.excludeAll(ExclusionRule("org.apache.logging.log4j")),
@@ -1455,7 +1456,7 @@ object BuildCommon {
             .filterNot(_ == "-Xsource:3"),
           libraryDependencies ++= Seq(
             daml_lf_language,
-            "com.lihaoyi" %% "ujson" % "2.0.0",
+            "com.lihaoyi" %% "ujson" % "4.0.2",
           ),
           JvmRulesPlugin.damlRepoHeaderSettings,
         )
@@ -1618,6 +1619,7 @@ object BuildCommon {
       .settings(
         sharedSettings,
         compileOrder := CompileOrder.JavaThenScala,
+        crossPaths := false, // Without this, the Java tests are not executed
         libraryDependencies ++= Seq(
           fasterjackson_core,
           daml_ledger_api_value_java,

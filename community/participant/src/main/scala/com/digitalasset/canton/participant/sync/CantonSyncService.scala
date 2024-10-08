@@ -44,6 +44,7 @@ import com.digitalasset.canton.participant.admin.inspection.{
   SyncStateInspection,
 }
 import com.digitalasset.canton.participant.admin.repair.RepairService
+import com.digitalasset.canton.participant.admin.repair.RepairService.DomainLookup
 import com.digitalasset.canton.participant.domain.*
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
@@ -89,9 +90,9 @@ import com.digitalasset.canton.topology.client.{DomainTopologyClientWithInit, To
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.parallelFuture
 import com.digitalasset.canton.util.OptionUtils.OptionExtension
+import com.digitalasset.canton.util.ReassignmentTag.Target
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.version.Reassignment.TargetProtocolVersion
 import com.digitalasset.daml.lf.archive.DamlLf
 import com.digitalasset.daml.lf.data.Ref.{PackageId, Party, SubmissionId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
@@ -225,14 +226,19 @@ class CantonSyncService(
                     .onShutdown(false),
                   timeouts.network.duration,
                 )
+                // turn AbortedDuToShutdown into a verdict, as we don't want to turn
+                // the overall result into AbortedDueToShutdown, just because one of
+                // the domains disconnected in the meantime.
+                .onShutdown(false)
                 .map(domainId -> _)
             }
           )
+          .mapK(FutureUnlessShutdown.outcomeK)
           .map { result =>
             result.foreach { case (domainId, successful) =>
               if (!successful)
-                logger.warn(
-                  s"Waiting for vetting of packages $packages on domain $domainId timed out."
+                logger.info(
+                  s"Waiting for vetting of packages $packages on domain $domainId either timed out or the domain got disconnected."
                 )
             }
             result
@@ -327,12 +333,22 @@ class CantonSyncService(
     packageService.value.packageDependencyResolver,
     repairServiceDAMLe,
     ledgerApiIndexer.asEval(TraceContext.empty),
-    syncDomainPersistentStateManager,
     aliasManager,
     parameters,
     Storage.threadsAvailableForWriting(storage),
-    connectedDomainsLookup.isConnected,
-    () => connectedDomainsMap.nonEmpty,
+    new DomainLookup {
+      override def isConnected(domainId: DomainId): Boolean =
+        connectedDomainsLookup.isConnected(domainId)
+
+      override def isConnectedToAnyDomain: Boolean =
+        connectedDomainsMap.nonEmpty
+
+      override def persistentStateFor(domainId: DomainId): Option[SyncDomainPersistentState] =
+        syncDomainPersistentStateManager.get(domainId)
+
+      override def topologyFactoryFor(domainId: DomainId): Option[TopologyComponentFactory] =
+        syncDomainPersistentStateManager.topologyFactoryFor(domainId)
+    },
     // Share the sync service queue with the repair service, so that repair operations cannot run concurrently with
     // domain connections.
     connectQueue,
@@ -1643,10 +1659,7 @@ class CantonSyncService(
       reassignmentCommand match {
         case unassign: ReassignmentCommand.Unassign =>
           for {
-            targetProtocolVersion <- getProtocolVersion(unassign.targetDomain.unwrap).map(
-              TargetProtocolVersion(_)
-            )
-
+            targetProtocolVersion <- getProtocolVersion(unassign.targetDomain.unwrap).map(Target(_))
             submissionResult <- doReassignment(
               domain = unassign.sourceDomain.unwrap,
               remoteDomain = unassign.targetDomain.unwrap,

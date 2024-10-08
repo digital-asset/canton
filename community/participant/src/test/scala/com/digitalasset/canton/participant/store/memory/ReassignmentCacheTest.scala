@@ -18,9 +18,11 @@ import com.digitalasset.canton.participant.store.ReassignmentStore.*
 import com.digitalasset.canton.participant.store.memory.ReassignmentCacheTest.HookReassignmentStore
 import com.digitalasset.canton.participant.store.{ReassignmentStore, ReassignmentStoreTest}
 import com.digitalasset.canton.participant.util.TimeOfChange
+import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.protocol.messages.DeliveredUnassignmentResult
-import com.digitalasset.canton.protocol.{ReassignmentId, SourceDomainId, TargetDomainId}
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{Checked, CheckedT}
 import com.digitalasset.canton.{BaseTest, HasExecutorService, LfPartyId, RequestCounter}
 import org.scalatest.Assertion
@@ -37,12 +39,15 @@ class ReassignmentCacheTest extends AsyncWordSpec with BaseTest with HasExecutor
     mkReassignmentDataForDomain(
       reassignment10,
       mediator1,
-      targetDomainId = ReassignmentStoreTest.targetDomain,
+      targetDomainId = targetDomainId,
     )
   val toc = TimeOfChange(RequestCounter(0), CantonTimestamp.Epoch)
 
+  def createStore: InMemoryReassignmentStore =
+    new InMemoryReassignmentStore(targetDomainId, loggerFactory)
+
   "find reassignments in the backing store" in {
-    val store = new InMemoryReassignmentStore(targetDomain, loggerFactory)
+    val store = createStore
     val cache = new ReassignmentCache(store, loggerFactory)
 
     for {
@@ -60,7 +65,7 @@ class ReassignmentCacheTest extends AsyncWordSpec with BaseTest with HasExecutor
 
   "completeReassignment" should {
     "immediately report the reassignment as completed" in {
-      val backingStore = new InMemoryReassignmentStore(targetDomain, loggerFactory)
+      val backingStore = createStore
       val store = new HookReassignmentStore(backingStore)
       val cache = new ReassignmentCache(store, loggerFactory)
       for {
@@ -84,7 +89,7 @@ class ReassignmentCacheTest extends AsyncWordSpec with BaseTest with HasExecutor
     }
 
     "report missing reassignments" in {
-      val store = new InMemoryReassignmentStore(targetDomain, loggerFactory)
+      val store = createStore
       val cache = new ReassignmentCache(store, loggerFactory)
 
       for {
@@ -95,7 +100,7 @@ class ReassignmentCacheTest extends AsyncWordSpec with BaseTest with HasExecutor
     }
 
     "report mismatches" in {
-      val backingStore = new InMemoryReassignmentStore(targetDomain, loggerFactory)
+      val backingStore = createStore
       val store = new HookReassignmentStore(backingStore)
       val cache = new ReassignmentCache(store, loggerFactory)
       val toc2 = TimeOfChange(RequestCounter(0), CantonTimestamp.ofEpochSecond(1))
@@ -127,7 +132,7 @@ class ReassignmentCacheTest extends AsyncWordSpec with BaseTest with HasExecutor
     }
 
     "report mismatches coming from the store" in {
-      val backingStore = new InMemoryReassignmentStore(targetDomain, loggerFactory)
+      val backingStore = createStore
       val store = new HookReassignmentStore(backingStore)
       val cache = new ReassignmentCache(store, loggerFactory)
       val toc2 = TimeOfChange(RequestCounter(0), CantonTimestamp.ofEpochSecond(1))
@@ -137,7 +142,9 @@ class ReassignmentCacheTest extends AsyncWordSpec with BaseTest with HasExecutor
       for {
         reassignmentData <- reassignmentDataF
         _ <- valueOrFail(store.addReassignment(reassignmentData).failOnShutdown)("add failed")
-        _ <- valueOrFail(store.completeReasignment(reassignment10, toc2))("first completion failed")
+        _ <- valueOrFail(store.completeReassignment(reassignment10, toc2))(
+          "first completion failed"
+        )
         _ = store.preComplete { (reassignmentId, _) =>
           assert(reassignmentId == reassignment10)
           promise.completeWith(cache.completeReassignment(reassignment10, toc).value)
@@ -154,7 +161,7 @@ class ReassignmentCacheTest extends AsyncWordSpec with BaseTest with HasExecutor
     }
 
     "complete only after having persisted the completion" in {
-      val backingStore = new InMemoryReassignmentStore(targetDomain, loggerFactory)
+      val backingStore = createStore
       val store = new HookReassignmentStore(backingStore)
       val cache = new ReassignmentCache(store, loggerFactory)
 
@@ -186,7 +193,7 @@ class ReassignmentCacheTest extends AsyncWordSpec with BaseTest with HasExecutor
       TimeOfChange(RequestCounter(2), CantonTimestamp.ofEpochSecond(2))
 
     "store the first completing request" in {
-      val store = new InMemoryReassignmentStore(targetDomain, loggerFactory)
+      val store = createStore
       val cache = new ReassignmentCache(store, loggerFactory)
 
       for {
@@ -209,7 +216,7 @@ class ReassignmentCacheTest extends AsyncWordSpec with BaseTest with HasExecutor
       import cats.implicits.*
       implicit val ec: ExecutionContextIdlenessExecutorService = executorService
 
-      val store = new InMemoryReassignmentStore(targetDomain, loggerFactory)
+      val store = createStore
       val cache = new ReassignmentCache(store, loggerFactory)(executorService)
 
       val timestamps = (1L to 100L).toList.map { ts =>
@@ -287,7 +294,7 @@ object ReassignmentCacheTest {
     ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] =
       baseStore.addReassignmentsOffsets(offsets)
 
-    override def completeReasignment(
+    override def completeReassignment(
         reassignmentId: ReassignmentId,
         timeOfCompletion: TimeOfChange,
     )(implicit
@@ -295,7 +302,7 @@ object ReassignmentCacheTest {
     ): CheckedT[Future, Nothing, ReassignmentStoreError, Unit] = {
       val hook = preCompleteHook.getAndSet(HookReassignmentStore.preCompleteNoHook)
       hook(reassignmentId, timeOfCompletion).flatMap[Nothing, ReassignmentStoreError, Unit](_ =>
-        baseStore.completeReasignment(reassignmentId, timeOfCompletion)
+        baseStore.completeReassignment(reassignmentId, timeOfCompletion)
       )
     }
 
@@ -310,19 +317,19 @@ object ReassignmentCacheTest {
       baseStore.deleteCompletionsSince(criterionInclusive)
 
     override def find(
-        filterSource: Option[SourceDomainId],
+        filterSource: Option[Source[DomainId]],
         filterTimestamp: Option[CantonTimestamp],
         filterSubmitter: Option[LfPartyId],
         limit: Int,
     )(implicit traceContext: TraceContext): Future[Seq[ReassignmentData]] =
       baseStore.find(filterSource, filterTimestamp, filterSubmitter, limit)
 
-    override def findAfter(requestAfter: Option[(CantonTimestamp, SourceDomainId)], limit: Int)(
+    override def findAfter(requestAfter: Option[(CantonTimestamp, Source[DomainId])], limit: Int)(
         implicit traceContext: TraceContext
     ): Future[Seq[ReassignmentData]] = baseStore.findAfter(requestAfter, limit)
 
     override def findIncomplete(
-        sourceDomain: Option[SourceDomainId],
+        sourceDomain: Option[Source[DomainId]],
         validAt: GlobalOffset,
         stakeholders: Option[NonEmpty[Set[LfPartyId]]],
         limit: NonNegativeInt,
@@ -331,7 +338,7 @@ object ReassignmentCacheTest {
 
     override def findEarliestIncomplete()(implicit
         traceContext: TraceContext
-    ): Future[Option[(GlobalOffset, ReassignmentId, TargetDomainId)]] =
+    ): Future[Option[(GlobalOffset, ReassignmentId, Target[DomainId])]] =
       baseStore.findEarliestIncomplete()
 
     override def lookup(reassignmentId: ReassignmentId)(implicit

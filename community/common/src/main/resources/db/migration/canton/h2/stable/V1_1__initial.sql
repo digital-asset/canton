@@ -242,8 +242,8 @@ create table par_domains(
 
 create table par_reassignments (
     -- reassignment id
-    target_domain varchar(300) not null,
-    origin_domain varchar(300) not null,
+    target_domain_idx integer not null,
+    source_domain_idx integer not null,
 
     -- reassignment data
     source_protocol_version integer not null,
@@ -265,7 +265,7 @@ create table par_reassignments (
     time_of_completion_request_counter bigint,
     -- UTC timestamp in microseconds relative to EPOCH
     time_of_completion_timestamp bigint,
-    primary key (target_domain, origin_domain, unassignment_timestamp)
+    primary key (target_domain_idx, source_domain_idx, unassignment_timestamp)
 );
 
 -- stores all requests for the request journal
@@ -869,7 +869,7 @@ create table ord_metadata_output_blocks (
     epoch_number bigint not null,
     block_number bigint not null,
     bft_ts bigint not null,
-    last_topology_ts bigint not null,
+    epoch_could_alter_sequencing_topology bool not null, -- Cumulative over all blocks in the epoch (restart support)
     primary key (block_number)
 );
 

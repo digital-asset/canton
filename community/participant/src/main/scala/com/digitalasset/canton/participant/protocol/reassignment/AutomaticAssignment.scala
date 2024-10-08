@@ -5,6 +5,8 @@ package com.digitalasset.canton.participant.protocol.reassignment
 
 import cats.data.*
 import cats.syntax.bifunctor.*
+import cats.syntax.functor.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.{CantonTimestamp, ReassignmentSubmitterMetadata}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -19,16 +21,19 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ReassignmentTag.Target
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import org.slf4j.event.Level
 
 import scala.concurrent.{ExecutionContext, Future}
 
 private[participant] object AutomaticAssignment {
+  // TODO(i21680): remove this supresswarnings
+  @SuppressWarnings(Array("com.digitalasset.canton.FutureTraverse"))
   def perform(
       id: ReassignmentId,
-      targetDomain: TargetDomainId,
-      staticDomainParameters: StaticDomainParameters,
+      targetDomain: Target[DomainId],
+      targetStaticDomainParameters: Target[StaticDomainParameters],
       reassignmentCoordination: ReassignmentCoordination,
       stakeholders: Set[LfPartyId],
       unassignmentSubmitterMetadata: ReassignmentSubmitterMetadata,
@@ -41,8 +46,8 @@ private[participant] object AutomaticAssignment {
     val logger = elc.logger
     implicit val traceContext: TraceContext = elc.traceContext
 
-    def hostedStakeholders(snapshot: TopologySnapshot): Future[Set[LfPartyId]] =
-      snapshot
+    def hostedStakeholders(snapshot: Target[TopologySnapshot]): Future[Set[LfPartyId]] =
+      snapshot.unwrap
         .hostedOn(stakeholders, participantId)
         .map(partiesWithAttributes =>
           partiesWithAttributes.collect {
@@ -56,10 +61,10 @@ private[participant] object AutomaticAssignment {
         : EitherT[Future, ReassignmentProcessorError, com.google.rpc.status.Status] =
       for {
         targetIps <- reassignmentCoordination
-          .getTimeProofAndSnapshot(targetDomain, staticDomainParameters)
+          .getTimeProofAndSnapshot(targetDomain, targetStaticDomainParameters)
           .map(_._2)
           .onShutdown(Left(DomainNotReady(targetDomain.unwrap, "Shutdown of time tracker")))
-        possibleSubmittingParties <- EitherT.right(hostedStakeholders(targetIps.ipsSnapshot))
+        possibleSubmittingParties <- EitherT.right(hostedStakeholders(targetIps.map(_.ipsSnapshot)))
         inParty <- EitherT.fromOption[Future](
           possibleSubmittingParties.headOption,
           AutomaticAssignmentError("No possible submitting party for automatic assignment"),
@@ -104,14 +109,14 @@ private[participant] object AutomaticAssignment {
     }
 
     def triggerAutoIn(
-        targetSnapshot: TopologySnapshot,
-        targetDomainParameters: DynamicDomainParametersWithValidity,
+        targetSnapshot: Target[TopologySnapshot],
+        targetDomainParameters: Target[DynamicDomainParametersWithValidity],
     ): Unit = {
 
       val autoIn = for {
         exclusivityLimit <- EitherT
           .fromEither[Future](
-            targetDomainParameters
+            targetDomainParameters.unwrap
               .assignmentExclusivityLimitFor(t0)
               .leftMap(ReassignmentParametersError(targetDomain.unwrap, _))
           )
@@ -124,10 +129,10 @@ private[participant] object AutomaticAssignment {
               s"Registering automatic submission of assignment with ID $id at time $exclusivityLimit, where base timestamp is $t0"
             )
             for {
-              _ <- reassignmentCoordination.awaitDomainTime(targetDomain.unwrap, exclusivityLimit)
+              _ <- reassignmentCoordination.awaitDomainTime(targetDomain, exclusivityLimit)
               _ <- reassignmentCoordination.awaitTimestamp(
-                targetDomain.unwrap,
-                staticDomainParameters,
+                targetDomain,
+                targetStaticDomainParameters,
                 exclusivityLimit,
                 Future.successful(logger.debug(s"Automatic assignment triggered immediately")),
               )
@@ -153,20 +158,23 @@ private[participant] object AutomaticAssignment {
 
     for {
       targetIps <- reassignmentCoordination.cryptoSnapshot(
-        targetDomain.unwrap,
-        staticDomainParameters,
+        targetDomain,
+        targetStaticDomainParameters,
         t0,
       )
-      targetSnapshot = targetIps.ipsSnapshot
+      targetSnapshot = targetIps.map(_.ipsSnapshot)
 
       targetDomainParameters <- EitherT(
         targetSnapshot
-          .findDynamicDomainParameters()
-          .map(_.leftMap(DomainNotReady(targetDomain.unwrap, _)))
+          .traverse(
+            _.findDynamicDomainParameters()
+              .map(_.leftMap(DomainNotReady(targetDomain.unwrap, _)))
+          )
+          .map(_.sequence)
       ).leftWiden[ReassignmentProcessorError]
     } yield {
 
-      if (targetDomainParameters.automaticAssignmentEnabled)
+      if (targetDomainParameters.unwrap.automaticAssignmentEnabled)
         triggerAutoIn(targetSnapshot, targetDomainParameters)
       else ()
     }
