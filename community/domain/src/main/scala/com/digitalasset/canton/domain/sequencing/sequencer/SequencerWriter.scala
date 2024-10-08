@@ -11,8 +11,8 @@ import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{PositiveInt, PositiveNumeric}
+import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.SequencerWriter.ResetWatermark
@@ -140,6 +140,7 @@ class SequencerWriter(
     maxSqlInListSize: PositiveNumeric[Int],
     sequencerMember: Member,
     unifiedSequencer: Boolean,
+    cachingConfigs: CachingConfigs,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging
     with FlagCloseableAsync
@@ -154,6 +155,7 @@ class SequencerWriter(
       loggerFactory,
       sequencerMember,
       unifiedSequencer = unifiedSequencer,
+      cachingConfigs,
       // Overriding the store's close context with the writers, so that when the writer gets closed, the store
       // stops retrying forever
       overrideCloseContext = Some(this.closeContext),
@@ -496,6 +498,7 @@ object SequencerWriter {
       loggerFactory: NamedLoggerFactory,
       sequencerMember: Member,
       unifiedSequencer: Boolean,
+      cachingConfigs: CachingConfigs,
       metrics: SequencerMetrics,
   )(implicit materializer: Materializer, executionContext: ExecutionContext): SequencerWriter = {
     val logger = TracedLogger(SequencerWriter.getClass, loggerFactory)
@@ -534,6 +537,7 @@ object SequencerWriter {
       writerConfig.maxSqlInListSize,
       sequencerMember,
       unifiedSequencer = unifiedSequencer,
+      cachingConfigs,
     )
   }
 

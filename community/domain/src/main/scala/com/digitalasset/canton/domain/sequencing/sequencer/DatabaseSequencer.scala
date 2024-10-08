@@ -10,8 +10,8 @@ import cats.syntax.either.*
 import cats.syntax.option.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.SequencerCounter
-import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
+import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
@@ -67,6 +67,7 @@ object DatabaseSequencer {
       topologyClientMember: Member,
       protocolVersion: ProtocolVersion,
       cryptoApi: DomainSyncCryptoClient,
+      cachingConfigs: CachingConfigs,
       metrics: SequencerMetrics,
       loggerFactory: NamedLoggerFactory,
       unifiedSequencer: Boolean,
@@ -106,6 +107,7 @@ object DatabaseSequencer {
       trafficConsumedStore = None,
       protocolVersion,
       cryptoApi,
+      cachingConfigs,
       metrics,
       loggerFactory,
       unifiedSequencer,
@@ -132,6 +134,7 @@ class DatabaseSequencer(
     trafficConsumedStore: Option[TrafficConsumedStore],
     protocolVersion: ProtocolVersion,
     cryptoApi: DomainSyncCryptoClient,
+    cachingConfigs: CachingConfigs,
     metrics: SequencerMetrics,
     loggerFactory: NamedLoggerFactory,
     unifiedSequencer: Boolean,
@@ -158,6 +161,7 @@ class DatabaseSequencer(
     loggerFactory,
     topologyClientMember,
     unifiedSequencer = unifiedSequencer,
+    cachingConfigs,
     metrics = metrics,
   )
 
