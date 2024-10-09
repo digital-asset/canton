@@ -147,7 +147,7 @@ object JvmRulesPlugin extends AutoPlugin {
       scalacOptions ++= Seq("-encoding", "UTF-8", "-language:postfixOps"),
       scalacOptions ++= scalaOptionsForCompileScope ++ unusedSymbolsChecks,
       Test / scalacOptions --= scalacOptionsToDisableForTests,
-      addCompilerPlugin("org.typelevel" % "kind-projector" % "0.13.2" cross CrossVersion.full),
+      addCompilerPlugin("org.typelevel" % "kind-projector" % "0.13.3" cross CrossVersion.full),
       Compile / compile / wartremoverErrors ++= wartremoverErrorsForCompileScope,
       Test / compile / wartremoverErrors := wartremoverErrorsForTestScope,
       // Disable wart checks on generated code

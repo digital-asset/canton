@@ -10,7 +10,9 @@ import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.protocol.reassignment.IncompleteReassignmentData.ReassignmentEventGlobalOffset
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.DeliveredUnassignmentResult
-import com.digitalasset.canton.version.Reassignment.SourceProtocolVersion
+import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.version.ProtocolVersion
 import io.scalaland.chimney.dsl.*
 
 /** Stores the data for a reassignment that is incomplete, i.e., for which only the assignment or the unassignment was
@@ -22,7 +24,7 @@ import io.scalaland.chimney.dsl.*
   * The same holds symmetrically for a [[IncompleteReassignmentData.AssignmentEventGlobalOffset]].
   */
 final case class IncompleteReassignmentData private (
-    sourceProtocolVersion: SourceProtocolVersion,
+    sourceProtocolVersion: Source[ProtocolVersion],
     unassignmentTs: CantonTimestamp,
     unassignmentRequestCounter: RequestCounter,
     unassignmentRequest: FullUnassignmentTree,
@@ -34,8 +36,8 @@ final case class IncompleteReassignmentData private (
     queryOffset: GlobalOffset,
 ) {
 
-  def sourceDomain: SourceDomainId = unassignmentRequest.sourceDomain
-  def targetDomain: TargetDomainId = unassignmentRequest.targetDomain
+  def sourceDomain: Source[DomainId] = unassignmentRequest.sourceDomain
+  def targetDomain: Target[DomainId] = unassignmentRequest.targetDomain
 
   def unassignmentGlobalOffset: Option[GlobalOffset] =
     reassignmentEventGlobalOffset.unassignmentGlobalOffset
@@ -79,6 +81,7 @@ object IncompleteReassignmentData {
         .into[IncompleteReassignmentData]
         .withFieldConst(_.queryOffset, queryOffset)
         .withFieldConst(_.reassignmentEventGlobalOffset, reassignmentEventGlobalOffset)
+        .withConstructor(IncompleteReassignmentData.apply _)
         .transform
     }
   }

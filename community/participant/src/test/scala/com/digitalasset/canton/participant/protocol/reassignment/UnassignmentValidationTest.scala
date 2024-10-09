@@ -24,17 +24,16 @@ import com.digitalasset.canton.time.TimeProofTestUtil
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
-import com.digitalasset.canton.version.Reassignment.{SourceProtocolVersion, TargetProtocolVersion}
+import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.UUID
 
 class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecutionContext {
-  private val sourceDomain = SourceDomainId(
-    DomainId.tryFromString("domain::source")
-  )
+  private val sourceDomain = Source(DomainId.tryFromString("domain::source"))
   private val sourceMediator = MediatorGroupRecipient(MediatorGroupIndex.tryCreate(100))
-  private val targetDomain = TargetDomainId(
+  private val targetDomain = Target(
     DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::target"))
   )
 
@@ -101,8 +100,8 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
     .build(loggerFactory)
 
   private val stakeholders = Set(submitterParty1)
-  private val sourcePV = SourceProtocolVersion(testedProtocolVersion)
-  private val targetPV = TargetProtocolVersion(testedProtocolVersion)
+  private val sourcePV = Source(testedProtocolVersion)
+  private val targetPV = Target(testedProtocolVersion)
 
   "unassignment validation" should {
     "succeed without errors" in {
@@ -206,7 +205,7 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
 
   private def mkUnassignmentValidation(
       newStakeholders: Set[LfPartyId],
-      sourceProtocolVersion: SourceProtocolVersion,
+      sourceProtocolVersion: Source[ProtocolVersion],
       expectedTemplateId: LfTemplateId,
       reassignmentCounter: ReassignmentCounter,
       reassigningParticipants: Set[ParticipantId] = Set(participant),
@@ -240,8 +239,8 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
       stakeholders,
       expectedTemplateId,
       sourceProtocolVersion,
-      identityFactory.topologySnapshot(),
-      Some(identityFactory.topologySnapshot()),
+      Source(identityFactory.topologySnapshot()),
+      Some(Target(identityFactory.topologySnapshot())),
       Recipients.cc(participant),
     )
   }

@@ -67,8 +67,8 @@ import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Confirmation
+import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.version.HasTestCloseContext
-import com.digitalasset.canton.version.Reassignment.{SourceProtocolVersion, TargetProtocolVersion}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
@@ -79,11 +79,11 @@ class AssignmentProcessingStepsTest
     with BaseTest
     with HasTestCloseContext
     with HasExecutionContext {
-  private lazy val sourceDomain = SourceDomainId(
+  private lazy val sourceDomain = Source(
     DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::source"))
   )
   private lazy val sourceMediator = MediatorGroupRecipient(MediatorGroupIndex.tryCreate(100))
-  private lazy val targetDomain = TargetDomainId(
+  private lazy val targetDomain = Target(
     DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::target"))
   )
   private lazy val targetMediator = MediatorGroupRecipient(MediatorGroupIndex.tryCreate(200))
@@ -269,10 +269,10 @@ class AssignmentProcessingStepsTest
         ReassignmentStoreTest.transactionId1,
         ReassignmentStoreTest.contract,
         reassignmentId.sourceDomain,
-        SourceProtocolVersion(testedProtocolVersion),
+        Source(testedProtocolVersion),
         sourceMediator,
         targetDomain,
-        TargetProtocolVersion(testedProtocolVersion),
+        Target(testedProtocolVersion),
         TimeProofTestUtil.mkTimeProof(
           timestamp = CantonTimestamp.Epoch,
           targetDomain = targetDomain,
@@ -290,7 +290,7 @@ class AssignmentProcessingStepsTest
             uuid,
           )
         ReassignmentData(
-          SourceProtocolVersion(testedProtocolVersion),
+          Source(testedProtocolVersion),
           reassignmentId.unassignmentTs,
           RequestCounter(0),
           fullUnassignmentTree,
@@ -490,7 +490,7 @@ class AssignmentProcessingStepsTest
         Set(party1),
         contract,
         transactionId1,
-        TargetDomainId(anotherDomain),
+        Target(anotherDomain),
         anotherMediator,
         unassignmentResult,
       )
@@ -685,7 +685,7 @@ class AssignmentProcessingStepsTest
   }
 
   private def testInstance(
-      targetDomain: TargetDomainId,
+      targetDomain: Target[DomainId],
       signatories: Set[LfPartyId],
       stakeholders: Set[LfPartyId],
       snapshotOverride: DomainSnapshotSyncCryptoApi,
@@ -708,8 +708,8 @@ class AssignmentProcessingStepsTest
         loggerFactory,
       ),
       seedGenerator,
-      defaultStaticDomainParameters,
-      TargetProtocolVersion(testedProtocolVersion),
+      Target(defaultStaticDomainParameters),
+      Target(testedProtocolVersion),
       loggerFactory = loggerFactory,
     )
   }
@@ -719,7 +719,7 @@ class AssignmentProcessingStepsTest
       stakeholders: Set[LfPartyId],
       contract: SerializableContract,
       creatingTransactionId: TransactionId,
-      targetDomain: TargetDomainId,
+      targetDomain: Target[DomainId],
       targetMediator: MediatorGroupRecipient,
       unassignmentResult: DeliveredUnassignmentResult,
       uuid: UUID = new UUID(4L, 5L),
@@ -739,8 +739,8 @@ class AssignmentProcessingStepsTest
         targetMediator,
         unassignmentResult,
         uuid,
-        SourceProtocolVersion(testedProtocolVersion),
-        TargetProtocolVersion(testedProtocolVersion),
+        Source(testedProtocolVersion),
+        Target(testedProtocolVersion),
         reassigningParticipants = Set.empty,
       )
     )("Failed to create FullAssignmentTree")
@@ -754,7 +754,7 @@ class AssignmentProcessingStepsTest
     for {
       viewsToKeyMap <- EncryptedViewMessageFactory
         .generateKeysFromRecipients(
-          Seq((ViewHashAndRecipients(tree.viewHash, recipients), tree.informees.toList)),
+          Seq((ViewHashAndRecipients(tree.viewHash, recipients), None, tree.informees.toList)),
           parallel = true,
           crypto.pureCrypto,
           cryptoSnapshot,

@@ -12,10 +12,10 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.AutomaticReassignmentForTransactionFailure
 import com.digitalasset.canton.participant.sync.{ConnectedDomainsLookup, TransactionRoutingError}
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.version.Reassignment.TargetProtocolVersion
+import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -35,8 +35,8 @@ private[routing] class ContractsReassigner(
       )
       domainRankTarget.reassignments.toSeq.parTraverse_ { case (cid, (lfParty, sourceDomainId)) =>
         perform(
-          SourceDomainId(sourceDomainId),
-          TargetDomainId(domainRankTarget.domainId),
+          Source(sourceDomainId),
+          Target(domainRankTarget.domainId),
           ReassignmentSubmitterMetadata(
             submitter = lfParty,
             submittingParticipant,
@@ -53,8 +53,8 @@ private[routing] class ContractsReassigner(
     }
 
   private def perform(
-      sourceDomain: SourceDomainId,
-      targetDomain: TargetDomainId,
+      sourceDomain: Source[DomainId],
+      targetDomain: Target[DomainId],
       submitterMetadata: ReassignmentSubmitterMetadata,
       contractId: LfContractId,
   )(implicit traceContext: TraceContext): EitherT[Future, TransactionRoutingError, Unit] = {
@@ -75,7 +75,7 @@ private[routing] class ContractsReassigner(
           submitterMetadata,
           contractId,
           targetDomain,
-          TargetProtocolVersion(targetSyncDomain.staticDomainParameters.protocolVersion),
+          Target(targetSyncDomain.staticDomainParameters.protocolVersion),
         )
         .mapK(FutureUnlessShutdown.outcomeK)
         .semiflatMap(Predef.identity)

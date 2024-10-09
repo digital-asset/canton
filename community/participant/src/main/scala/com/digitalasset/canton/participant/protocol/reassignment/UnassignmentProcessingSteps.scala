@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol.reassignment
 
 import cats.data.*
 import cats.syntax.either.*
+import cats.syntax.functor.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps}
@@ -61,7 +62,8 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.EitherTUtil.{condUnitET, ifThenET}
-import com.digitalasset.canton.version.Reassignment.{SourceProtocolVersion, TargetProtocolVersion}
+import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   LfPackageName,
   LfPartyId,
@@ -74,13 +76,13 @@ import com.digitalasset.canton.{
 import scala.concurrent.{ExecutionContext, Future}
 
 class UnassignmentProcessingSteps(
-    val domainId: SourceDomainId,
+    val domainId: Source[DomainId],
     val participantId: ParticipantId,
     val engine: DAMLe,
     reassignmentCoordination: ReassignmentCoordination,
     seedGenerator: SeedGenerator,
-    staticDomainParameters: StaticDomainParameters,
-    val sourceDomainProtocolVersion: SourceProtocolVersion,
+    staticDomainParameters: Source[StaticDomainParameters],
+    val sourceDomainProtocolVersion: Source[ProtocolVersion],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends ReassignmentProcessingSteps[
@@ -107,7 +109,7 @@ class UnassignmentProcessingSteps(
   override def submissionIdOfPendingRequest(pendingData: PendingUnassignment): RootHash =
     pendingData.rootHash
 
-  private def targetIsNotSource(contractId: LfContractId, target: TargetDomainId)(implicit
+  private def targetIsNotSource(contractId: LfContractId, target: Target[DomainId])(implicit
       ec: ExecutionContext
   ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Unit] =
     condUnitET[FutureUnlessShutdown](
@@ -137,11 +139,13 @@ class UnassignmentProcessingSteps(
       _ <- targetIsNotSource(contractId, targetDomain)
       storedContract <- getStoredContract(ephemeralState.contractLookup, contractId)
       stakeholders = storedContract.contract.metadata.stakeholders
+      targetStaticDomainParameters <- reassignmentCoordination
+        .getStaticDomainParameter(targetDomain)
+        .mapK(FutureUnlessShutdown.outcomeK)
 
-      // TODO(#21325) This should be the static domain parameters of the target domain
       timeProofAndSnapshot <- reassignmentCoordination.getTimeProofAndSnapshot(
         targetDomain,
-        staticDomainParameters,
+        targetStaticDomainParameters,
       )
       (timeProof, targetCrypto) = timeProofAndSnapshot
       _ = logger.debug(withDetails(s"Picked time proof ${timeProof.timestamp}"))
@@ -184,8 +188,8 @@ class UnassignmentProcessingSteps(
         mediator,
         targetDomain,
         targetProtocolVersion,
-        sourceRecentSnapshot.ipsSnapshot,
-        targetCrypto.ipsSnapshot,
+        Source(sourceRecentSnapshot.ipsSnapshot),
+        targetCrypto.map(_.ipsSnapshot),
         newReassignmentCounter,
       )
 
@@ -201,7 +205,7 @@ class UnassignmentProcessingSteps(
       rootHash = fullTree.rootHash
       submittingParticipantSignature <- sourceRecentSnapshot
         .sign(rootHash.unwrap)
-        .leftMap(ReassignmentSigningError)
+        .leftMap(ReassignmentSigningError.apply)
       mediatorMessage = fullTree.mediatorMessage(submittingParticipantSignature)
       maybeRecipients = Recipients.ofSet(validated.recipients)
       recipientsT <- EitherT
@@ -211,12 +215,14 @@ class UnassignmentProcessingSteps(
         )
       viewsToKeyMap <- EncryptedViewMessageFactory
         .generateKeysFromRecipients(
-          Seq((ViewHashAndRecipients(fullTree.viewHash, recipientsT), fullTree.informees.toList)),
+          Seq(
+            (ViewHashAndRecipients(fullTree.viewHash, recipientsT), None, fullTree.informees.toList)
+          ),
           parallel = true,
           pureCrypto,
           sourceRecentSnapshot,
           ephemeralState.sessionKeyStoreLookup.convertStore,
-          targetProtocolVersion.v,
+          targetProtocolVersion.unwrap,
         )
         .leftMap[ReassignmentProcessorError](EncryptionError(contractId, _))
       ViewKeyData(_, viewKey, viewKeyMap) = viewsToKeyMap(fullTree.viewHash)
@@ -225,7 +231,7 @@ class UnassignmentProcessingSteps(
           fullTree,
           (viewKey, viewKeyMap),
           sourceRecentSnapshot,
-          sourceDomainProtocolVersion.v,
+          sourceDomainProtocolVersion.unwrap,
         )
         .leftMap[ReassignmentProcessorError](EncryptionError(contractId, _))
     } yield {
@@ -233,7 +239,7 @@ class UnassignmentProcessingSteps(
         RootHashMessage(
           rootHash,
           domainId.unwrap,
-          sourceDomainProtocolVersion.v,
+          sourceDomainProtocolVersion.unwrap,
           ViewType.UnassignmentViewType,
           sourceRecentSnapshot.ipsSnapshot.timestamp,
           EmptyRootHashMessagePayload,
@@ -254,7 +260,7 @@ class UnassignmentProcessingSteps(
         viewMessage -> recipientsT,
         rootHashMessage -> rootHashRecipients,
       )
-      ReassignmentsSubmission(Batch.of(sourceDomainProtocolVersion.v, messages*), rootHash)
+      ReassignmentsSubmission(Batch.of(sourceDomainProtocolVersion.unwrap, messages*), rootHash)
     }
   }
 
@@ -302,7 +308,7 @@ class UnassignmentProcessingSteps(
   ]] =
     EncryptedViewMessage
       .decryptFor(
-        staticDomainParameters,
+        staticDomainParameters.unwrap,
         sourceSnapshot,
         sessionKeyStore,
         envelope.protocolMessage,
@@ -367,19 +373,23 @@ class UnassignmentProcessingSteps(
     */
   // TODO(i12926): Prevent deadlocks. Detect non-sensible timestamps. Verify sequencer signature on time proof.
   private def getTopologySnapshotAtTimestamp(
-      domainId: TargetDomainId,
+      domainId: Target[DomainId],
       timestamp: CantonTimestamp,
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, TopologySnapshot] =
-    reassignmentCoordination
-      .awaitTimestampAndGetCryptoSnapshot(
-        domainId.unwrap,
-        staticDomainParameters,
-        timestamp,
-      )
-      .map(_.ipsSnapshot)
+  ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Target[TopologySnapshot]] =
+    for {
+      targetStaticDomainParameters <- reassignmentCoordination
+        .getStaticDomainParameter(domainId)
+        .mapK(FutureUnlessShutdown.outcomeK)
+      snapshot <- reassignmentCoordination
+        .awaitTimestampAndGetTaggedCryptoSnapshot(
+          domainId,
+          targetStaticDomainParameters,
+          timestamp,
+        )
+    } yield snapshot.map(_.ipsSnapshot)
 
   override def constructPendingDataAndResponse(
       parsedRequestType: ParsedReassignmentRequest[FullUnassignmentTree],
@@ -438,7 +448,7 @@ class UnassignmentProcessingSteps(
         contract.metadata.stakeholders,
         contract.rawContractInstance.contractInstance.unversioned.template,
         sourceDomainProtocolVersion,
-        sourceSnapshot.ipsSnapshot,
+        Source(sourceSnapshot.ipsSnapshot),
         targetTopology,
         recipients,
       )
@@ -532,25 +542,25 @@ class UnassignmentProcessingSteps(
           entry,
           LocalRejectError.TimeRejects.LocalTimeout
             .Reject()
-            .toLocalReject(sourceDomainProtocolVersion.v),
+            .toLocalReject(sourceDomainProtocolVersion.unwrap),
         ),
       )
     }
   }
 
   private[this] def getAssignmentExclusivity(
-      targetTopology: Option[TopologySnapshot],
+      targetTopology: Option[Target[TopologySnapshot]],
       timestamp: CantonTimestamp,
-      domainId: TargetDomainId,
+      domainId: Target[DomainId],
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Option[CantonTimestamp]] =
-    targetTopology.traverse(
+  ): EitherT[FutureUnlessShutdown, ReassignmentParametersError, Option[Target[CantonTimestamp]]] =
+    targetTopology.traverse { targetTopology =>
       ProcessingSteps
-        .getAssignmentExclusivity(_, timestamp)
+        .getAssignmentExclusivity(targetTopology, timestamp)
         .mapK(FutureUnlessShutdown.outcomeK)
         .leftMap(ReassignmentParametersError(domainId.unwrap, _))
-    )
+    }
 
   override def getCommitSetAndContractsToBeStoredAndEvent(
       event: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
@@ -664,9 +674,9 @@ class UnassignmentProcessingSteps(
       contractStakeholders: Set[LfPartyId],
       submitterMetadata: ReassignmentSubmitterMetadata,
       reassignmentId: ReassignmentId,
-      targetDomain: TargetDomainId,
+      targetDomain: Target[DomainId],
       rootHash: RootHash,
-      assignmentExclusivity: Option[CantonTimestamp],
+      assignmentExclusivity: Option[Target[CantonTimestamp]],
       isReassigningParticipant: Boolean,
       reassignmentCounter: ReassignmentCounter,
       hostedStakeholders: List[LfPartyId],
@@ -710,7 +720,7 @@ class UnassignmentProcessingSteps(
         templateId = templateId,
         packageName = packageName,
         stakeholders = contractStakeholders.toList,
-        assignmentExclusivity = assignmentExclusivity.map(_.toLf),
+        assignmentExclusivity = assignmentExclusivity.map(_.unwrap.toLf),
       ),
       domainIndex = Some(
         DomainIndex.of(
@@ -732,20 +742,27 @@ class UnassignmentProcessingSteps(
     val targetDomain = pendingRequestData.targetDomain
     val t0 = pendingRequestData.targetTimeProof.timestamp
 
-    AutomaticAssignment.perform(
-      pendingRequestData.reassignmentId,
-      targetDomain,
-      staticDomainParameters,
-      reassignmentCoordination,
-      pendingRequestData.stakeholders,
-      pendingRequestData.submitterMetadata,
-      participantId,
-      t0,
-    )
-  }.mapK(FutureUnlessShutdown.outcomeK)
+    (for {
+      targetStaticDomainParameters <- reassignmentCoordination
+        .getStaticDomainParameter(targetDomain)
+
+      automaticAssignment <- AutomaticAssignment
+        .perform(
+          pendingRequestData.reassignmentId,
+          targetDomain,
+          targetStaticDomainParameters,
+          reassignmentCoordination,
+          pendingRequestData.stakeholders,
+          pendingRequestData.submitterMetadata,
+          participantId,
+          t0,
+        )
+
+    } yield automaticAssignment).mapK(FutureUnlessShutdown.outcomeK)
+  }
 
   private[this] def deleteReassignment(
-      targetDomain: TargetDomainId,
+      targetDomain: Target[DomainId],
       unassignmentRequestId: RequestId,
   )(implicit
       traceContext: TraceContext
@@ -775,11 +792,11 @@ class UnassignmentProcessingSteps(
     // send a response only if the participant is a reassigning participant or the activeness check has failed
     if (isReassigningParticipant || !successful) {
       val localVerdict =
-        if (successful) LocalApprove(sourceDomainProtocolVersion.v)
+        if (successful) LocalApprove(sourceDomainProtocolVersion.unwrap)
         else
           LocalRejectError.UnassignmentRejects.ActivenessCheckFailed
             .Reject(s"$activenessResult")
-            .toLocalReject(sourceDomainProtocolVersion.v)
+            .toLocalReject(sourceDomainProtocolVersion.unwrap)
       val response = checked(
         ConfirmationResponse.tryCreate(
           requestId,
@@ -789,7 +806,7 @@ class UnassignmentProcessingSteps(
           rootHash,
           confirmingStakeholders,
           domainId.unwrap,
-          sourceDomainProtocolVersion.v,
+          sourceDomainProtocolVersion.unwrap,
         )
       )
       Some(response)
@@ -802,8 +819,8 @@ object UnassignmentProcessingSteps {
   final case class SubmissionParam(
       submitterMetadata: ReassignmentSubmitterMetadata,
       contractId: LfContractId,
-      targetDomain: TargetDomainId,
-      targetProtocolVersion: TargetProtocolVersion,
+      targetDomain: Target[DomainId],
+      targetProtocolVersion: Target[ProtocolVersion],
   ) {
     val submittingParty: LfPartyId = submitterMetadata.submitter
   }
@@ -825,11 +842,11 @@ object UnassignmentProcessingSteps {
       isReassigningParticipant: Boolean,
       submitterMetadata: ReassignmentSubmitterMetadata,
       reassignmentId: ReassignmentId,
-      targetDomain: TargetDomainId,
+      targetDomain: Target[DomainId],
       stakeholders: Set[LfPartyId],
       hostedStakeholders: Set[LfPartyId],
       targetTimeProof: TimeProof,
-      assignmentExclusivity: Option[CantonTimestamp],
+      assignmentExclusivity: Option[Target[CantonTimestamp]],
       mediator: MediatorGroupRecipient,
       override val locallyRejectedF: FutureUnlessShutdown[Boolean],
       override val abortEngine: String => Unit,

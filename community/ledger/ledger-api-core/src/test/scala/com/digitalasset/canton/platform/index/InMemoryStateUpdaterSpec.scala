@@ -38,9 +38,9 @@ import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.CreatedEvent
 import com.digitalasset.canton.platform.store.interning.StringInterningView
 import com.digitalasset.canton.platform.{DispatcherState, InMemoryState}
-import com.digitalasset.canton.protocol.{SourceDomainId, TargetDomainId}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.ReassignmentTag
 import com.digitalasset.canton.{
   BaseTest,
   HasExecutorServiceGeneric,
@@ -170,30 +170,29 @@ class InMemoryStateUpdaterSpec
     inOrder
       .verify(inMemoryFanoutBuffer)
       .push(
-        tx_accepted_withCompletionDetails_offset,
-        tx_accepted_withCompletionDetails,
+        tx_accepted_withCompletionStreamResponse_offset,
+        tx_accepted_withCompletionStreamResponse,
       )
     inOrder
       .verify(contractStateCaches)
       .push(any[NonEmptyVector[ContractStateEvent]])(any[TraceContext])
     inOrder
       .verify(inMemoryFanoutBuffer)
-      .push(tx_accepted_withoutCompletionDetails_offset, tx_accepted_withoutCompletionDetails)
+      .push(
+        tx_accepted_withoutCompletionStreamResponse_offset,
+        tx_accepted_withoutCompletionStreamResponse,
+      )
     inOrder.verify(inMemoryFanoutBuffer).push(tx_rejected_offset, tx_rejected)
 
     inOrder.verify(ledgerEndCache).set((lastOffset, lastEventSeqId, lastPublicationTime))
     inOrder.verify(dispatcher).signalNewHead(lastOffset)
     inOrder
       .verify(submissionTracker)
-      .onCompletion(
-        tx_accepted_completionDetails.completionStreamResponse -> tx_accepted_submitters
-      )
+      .onCompletion(tx_accepted_completionStreamResponse)
 
     inOrder
       .verify(submissionTracker)
-      .onCompletion(
-        tx_rejected_completionDetails.completionStreamResponse -> tx_rejected_submitters
-      )
+      .onCompletion(tx_rejected_completionStreamResponse)
 
     inOrder.verifyNoMoreInteractions()
   }
@@ -204,28 +203,27 @@ class InMemoryStateUpdaterSpec
     inOrder
       .verify(inMemoryFanoutBuffer)
       .push(
-        tx_accepted_withCompletionDetails_offset,
-        tx_accepted_withCompletionDetails,
+        tx_accepted_withCompletionStreamResponse_offset,
+        tx_accepted_withCompletionStreamResponse,
       )
     inOrder
       .verify(contractStateCaches)
       .push(any[NonEmptyVector[ContractStateEvent]])(any[TraceContext])
     inOrder
       .verify(inMemoryFanoutBuffer)
-      .push(tx_accepted_withoutCompletionDetails_offset, tx_accepted_withoutCompletionDetails)
+      .push(
+        tx_accepted_withoutCompletionStreamResponse_offset,
+        tx_accepted_withoutCompletionStreamResponse,
+      )
     inOrder.verify(inMemoryFanoutBuffer).push(tx_rejected_offset, tx_rejected)
 
     inOrder
       .verify(submissionTracker)
-      .onCompletion(
-        tx_accepted_completionDetails.completionStreamResponse -> tx_accepted_submitters
-      )
+      .onCompletion(tx_accepted_completionStreamResponse)
 
     inOrder
       .verify(submissionTracker)
-      .onCompletion(
-        tx_rejected_completionDetails.completionStreamResponse -> tx_rejected_submitters
-      )
+      .onCompletion(tx_rejected_completionStreamResponse)
 
     inOrder.verifyNoMoreInteractions()
   }
@@ -386,7 +384,7 @@ object InMemoryStateUpdaterSpec {
         effectiveAt = Timestamp.Epoch,
         offset = offset(1L),
         events = Vector(),
-        completionDetails = None,
+        completionStreamResponse = None,
         domainId = domainId1.toProtoPrimitive,
         recordTime = Timestamp.Epoch,
       )
@@ -399,10 +397,10 @@ object InMemoryStateUpdaterSpec {
         workflowId = workflowId,
         offset = offset(7L),
         recordTime = Timestamp.Epoch,
-        completionDetails = None,
+        completionStreamResponse = None,
         reassignmentInfo = ReassignmentInfo(
-          sourceDomain = SourceDomainId(domainId1),
-          targetDomain = TargetDomainId(domainId2),
+          sourceDomain = ReassignmentTag.Source(domainId1),
+          targetDomain = ReassignmentTag.Target(domainId2),
           submitter = Option(party1),
           reassignmentCounter = 15L,
           hostedStakeholders = party2 :: Nil,
@@ -447,10 +445,10 @@ object InMemoryStateUpdaterSpec {
         workflowId = workflowId,
         offset = offset(8L),
         recordTime = Timestamp.Epoch,
-        completionDetails = None,
+        completionStreamResponse = None,
         reassignmentInfo = ReassignmentInfo(
-          sourceDomain = SourceDomainId(domainId2),
-          targetDomain = TargetDomainId(domainId1),
+          sourceDomain = ReassignmentTag.Source(domainId2),
+          targetDomain = ReassignmentTag.Target(domainId1),
           submitter = Option(party2),
           reassignmentCounter = 15L,
           hostedStakeholders = party1 :: Nil,
@@ -515,64 +513,66 @@ object InMemoryStateUpdaterSpec {
       applicationId = "appId",
       updateId = tx_accepted_transactionId,
       submissionId = "submissionId",
-      actAs = Seq.empty,
+      actAs = tx_accepted_submitters.toSeq,
     )
     val tx_rejected_completion: Completion =
-      tx_accepted_completion.copy(updateId = tx_rejected_transactionId)
-    val tx_accepted_completionDetails: TransactionLogUpdate.CompletionDetails =
-      TransactionLogUpdate.CompletionDetails(
-        completionStreamResponse = CompletionStreamResponse(completionResponse =
-          CompletionStreamResponse.CompletionResponse.Completion(tx_accepted_completion)
-        ),
-        submitters = tx_accepted_submitters,
+      tx_accepted_completion.copy(
+        updateId = tx_rejected_transactionId,
+        actAs = tx_rejected_submitters.toSeq,
+      )
+    val tx_accepted_completionStreamResponse: CompletionStreamResponse =
+      CompletionStreamResponse(
+        CompletionStreamResponse.CompletionResponse.Completion(
+          tx_accepted_completion
+        )
       )
 
-    val tx_rejected_completionDetails: TransactionLogUpdate.CompletionDetails =
-      TransactionLogUpdate.CompletionDetails(
-        completionStreamResponse = CompletionStreamResponse(completionResponse =
-          CompletionStreamResponse.CompletionResponse.Completion(tx_rejected_completion)
-        ),
-        submitters = tx_rejected_submitters,
+    val tx_rejected_completionStreamResponse =
+      CompletionStreamResponse(
+        CompletionStreamResponse.CompletionResponse.Completion(
+          tx_rejected_completion
+        )
       )
 
-    val tx_accepted_withCompletionDetails_offset: Offset =
+    val tx_accepted_withCompletionStreamResponse_offset: Offset =
       Offset.fromHexString(Ref.HexString.assertFromString("aaaa"))
 
-    val tx_accepted_withoutCompletionDetails_offset: Offset =
+    val tx_accepted_withoutCompletionStreamResponse_offset: Offset =
       Offset.fromHexString(Ref.HexString.assertFromString("bbbb"))
 
     val tx_rejected_offset: Offset =
       Offset.fromHexString(Ref.HexString.assertFromString("cccc"))
 
-    val tx_accepted_withCompletionDetails: Traced[TransactionLogUpdate.TransactionAccepted] =
+    val tx_accepted_withCompletionStreamResponse: Traced[TransactionLogUpdate.TransactionAccepted] =
       Traced(
         TransactionLogUpdate.TransactionAccepted(
           transactionId = tx_accepted_transactionId,
           commandId = tx_accepted_commandId,
           workflowId = "wAccepted",
           effectiveAt = Timestamp.assertFromLong(1L),
-          offset = tx_accepted_withCompletionDetails_offset,
+          offset = tx_accepted_withCompletionStreamResponse_offset,
           events = (1 to 3)
             .map(i =>
               toCreatedEvent(
                 genCreateNode,
-                tx_accepted_withCompletionDetails_offset,
+                tx_accepted_withCompletionStreamResponse_offset,
                 Ref.TransactionId.assertFromString(tx_accepted_transactionId),
                 NodeId(i),
               )
             )
             .toVector,
-          completionDetails = Some(tx_accepted_completionDetails),
+          completionStreamResponse = Some(tx_accepted_completionStreamResponse),
           domainId = domainId1.toProtoPrimitive,
           recordTime = Timestamp(1),
         )
       )(emptyTraceContext)
 
-    val tx_accepted_withoutCompletionDetails: Traced[TransactionLogUpdate.TransactionAccepted] =
+    val tx_accepted_withoutCompletionStreamResponse
+        : Traced[TransactionLogUpdate.TransactionAccepted] =
       Traced(
-        tx_accepted_withCompletionDetails.value.copy(
-          completionDetails = None,
-          offset = tx_accepted_withoutCompletionDetails_offset,
+        tx_accepted_withCompletionStreamResponse.value.copy(
+          completionStreamResponse = None,
+          offset = tx_accepted_withoutCompletionStreamResponse_offset,
         )
       )(emptyTraceContext)
 
@@ -580,7 +580,7 @@ object InMemoryStateUpdaterSpec {
       Traced(
         TransactionLogUpdate.TransactionRejected(
           offset = tx_rejected_offset,
-          completionDetails = tx_rejected_completionDetails,
+          completionStreamResponse = tx_rejected_completionStreamResponse,
         )
       )(emptyTraceContext)
 
@@ -589,8 +589,8 @@ object InMemoryStateUpdaterSpec {
     val lastPublicationTime = CantonTimestamp.MinValue.plusSeconds(1000)
     val updates: Vector[Traced[TransactionLogUpdate]] =
       Vector(
-        tx_accepted_withCompletionDetails,
-        tx_accepted_withoutCompletionDetails,
+        tx_accepted_withCompletionStreamResponse,
+        tx_accepted_withoutCompletionStreamResponse,
         tx_rejected,
       )
     val prepareResult: PrepareResult = PrepareResult(
@@ -738,9 +738,11 @@ object InMemoryStateUpdaterSpec {
       ),
     )
   )
+
   private val update4 = offset(4L) -> Traced[Update](
     commandRejected(t = 1337L, domainId = DomainId.tryFromString("da::default"))
   )
+
   private val update7 = offset(7L) -> Traced[Update](
     assignmentAccepted(t = 0, source = domainId1, target = domainId2)
   )
@@ -748,7 +750,6 @@ object InMemoryStateUpdaterSpec {
   private val update8 = offset(8L) -> Traced[Update](
     unassignmentAccepted(t = 0, source = domainId2, target = domainId1)
   )
-
   private val anotherMetadataChangedUpdate =
     rawMetadataChangedUpdate
       .bimap(
@@ -912,8 +913,8 @@ object InMemoryStateUpdaterSpec {
       updateId = txId3,
       recordTime = Timestamp(t),
       reassignmentInfo = ReassignmentInfo(
-        sourceDomain = SourceDomainId(source),
-        targetDomain = TargetDomainId(target),
+        sourceDomain = ReassignmentTag.Source(source),
+        targetDomain = ReassignmentTag.Target(target),
         submitter = Option(party1),
         reassignmentCounter = 15L,
         hostedStakeholders = party2 :: Nil,
@@ -943,8 +944,8 @@ object InMemoryStateUpdaterSpec {
       updateId = txId4,
       recordTime = Timestamp(t),
       reassignmentInfo = ReassignmentInfo(
-        sourceDomain = SourceDomainId(source),
-        targetDomain = TargetDomainId(target),
+        sourceDomain = ReassignmentTag.Source(source),
+        targetDomain = ReassignmentTag.Target(target),
         submitter = Option(party2),
         reassignmentCounter = 15L,
         hostedStakeholders = party1 :: Nil,

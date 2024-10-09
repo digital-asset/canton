@@ -28,6 +28,7 @@ import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ReassignmentTag.Target
 import com.digitalasset.canton.{
   BaseTest,
   HasExecutorService,
@@ -49,7 +50,7 @@ private[protocol] trait ConflictDetectionHelpers {
   private lazy val indexedStringStore = new InMemoryIndexedStringStore(minIndex = 1, maxIndex = 2)
 
   def mkEmptyAcs(): ActiveContractStore =
-    new InMemoryActiveContractStore(indexedStringStore, testedProtocolVersion, loggerFactory)(
+    new InMemoryActiveContractStore(indexedStringStore, loggerFactory)(
       parallelExecutionContext
     )
 
@@ -62,8 +63,10 @@ private[protocol] trait ConflictDetectionHelpers {
 
   def mkReassignmentCache(
       loggerFactory: NamedLoggerFactory,
-      store: ReassignmentStore =
-        new InMemoryReassignmentStore(ReassignmentStoreTest.targetDomain, loggerFactory),
+      store: ReassignmentStore = new InMemoryReassignmentStore(
+        ReassignmentStoreTest.targetDomainId,
+        loggerFactory,
+      ),
   )(
       entries: (ReassignmentId, MediatorGroupRecipient)*
   )(implicit traceContext: TraceContext): Future[ReassignmentCache] =
@@ -73,7 +76,7 @@ private[protocol] trait ConflictDetectionHelpers {
           reassignmentData <- ReassignmentStoreTest.mkReassignmentDataForDomain(
             reassignmentId,
             sourceMediator,
-            targetDomainId = ReassignmentStoreTest.targetDomain,
+            targetDomainId = ReassignmentStoreTest.targetDomainId,
           )
           result <- store
             .addReassignment(reassignmentData)
@@ -203,7 +206,7 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
         .toMap,
       unassignments = unassign.fmap { case (id, reassignmentCounter) =>
         CommitSet.UnassignmentCommit(
-          TargetDomainId(id),
+          Target(id),
           Set.empty,
           reassignmentCounter,
         )

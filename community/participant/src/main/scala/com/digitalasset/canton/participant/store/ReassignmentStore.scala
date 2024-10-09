@@ -21,10 +21,12 @@ import com.digitalasset.canton.participant.protocol.reassignment.{
 import com.digitalasset.canton.participant.sync.SyncDomainPersistentStateLookup
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.platform.indexer.parallel.ReassignmentOffsetPersistence
+import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.protocol.messages.DeliveredUnassignmentResult
-import com.digitalasset.canton.protocol.{ReassignmentId, SourceDomainId, TargetDomainId}
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{Checked, CheckedT, EitherTUtil, MonadUtil, OptionUtil}
 import com.digitalasset.canton.{LfPartyId, RequestCounter}
 import monocle.macros.syntax.lens.*
@@ -93,7 +95,7 @@ trait ReassignmentStore extends ReassignmentLookup {
     *
     * @param timeOfCompletion Provides the request counter and activeness time of the committed assignment request.
     */
-  def completeReasignment(reassignmentId: ReassignmentId, timeOfCompletion: TimeOfChange)(implicit
+  def completeReassignment(reassignmentId: ReassignmentId, timeOfCompletion: TimeOfChange)(implicit
       traceContext: TraceContext
   ): CheckedT[Future, Nothing, ReassignmentStoreError, Unit]
 
@@ -105,10 +107,10 @@ trait ReassignmentStore extends ReassignmentLookup {
   ): Future[Unit]
 
   /** Removes all completions of reassignments that have been triggered by requests with at least the given counter.
-    * This method must not be called concurrently with [[completeReasignment]], but may be called concurrently with
+    * This method must not be called concurrently with [[completeReassignment]], but may be called concurrently with
     * [[addReassignment]] and [[addUnassignmentResult]].
     *
-    * Therefore, this method need not be linearizable w.r.t. [[completeReasignment]].
+    * Therefore, this method need not be linearizable w.r.t. [[completeReassignment]].
     * For example, if two requests `rc1` complete two reassignments while [[deleteCompletionsSince]] is running for
     * some `rc <= rc1, rc2`, then there are no guarantees which of the completions of `rc1` and `rc2` remain.
     */
@@ -120,7 +122,7 @@ trait ReassignmentStore extends ReassignmentLookup {
 object ReassignmentStore {
   def reassignmentStoreFor(
       syncDomainPersistentStates: SyncDomainPersistentStateLookup
-  ): TargetDomainId => Either[String, ReassignmentStore] = (domainId: TargetDomainId) =>
+  ): Target[DomainId] => Either[String, ReassignmentStore] = (domainId: Target[DomainId]) =>
     syncDomainPersistentStates.getAll
       .get(domainId.unwrap)
       .toRight(s"Unknown domain `${domainId.unwrap}`")
@@ -365,7 +367,7 @@ trait ReassignmentLookup {
     * Results need not be consistent with [[lookup]].
     */
   def find(
-      filterSource: Option[SourceDomainId],
+      filterSource: Option[Source[DomainId]],
       filterRequestTimestamp: Option[CantonTimestamp],
       filterSubmitter: Option[LfPartyId],
       limit: Int,
@@ -382,7 +384,7 @@ trait ReassignmentLookup {
     *                     (request timestamp, source domain ID) ordering
     * @param limit limit the number of results
     */
-  def findAfter(requestAfter: Option[(CantonTimestamp, SourceDomainId)], limit: Int)(implicit
+  def findAfter(requestAfter: Option[(CantonTimestamp, Source[DomainId])], limit: Int)(implicit
       traceContext: TraceContext
   ): Future[Seq[ReassignmentData]]
 
@@ -408,7 +410,7 @@ trait ReassignmentLookup {
     * @param limit limit the number of results
     */
   def findIncomplete(
-      sourceDomain: Option[SourceDomainId],
+      sourceDomain: Option[Source[DomainId]],
       validAt: GlobalOffset,
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],
       limit: NonNegativeInt,
@@ -422,5 +424,5 @@ trait ReassignmentLookup {
     */
   def findEarliestIncomplete()(implicit
       traceContext: TraceContext
-  ): Future[Option[(GlobalOffset, ReassignmentId, TargetDomainId)]]
+  ): Future[Option[(GlobalOffset, ReassignmentId, Target[DomainId])]]
 }

@@ -7,21 +7,17 @@ import com.digitalasset.canton.data.{CantonTimestamp, FullUnassignmentTree}
 import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentData.ReassignmentGlobalOffset
 import com.digitalasset.canton.protocol.messages.DeliveredUnassignmentResult
-import com.digitalasset.canton.protocol.{
-  ReassignmentId,
-  SerializableContract,
-  SourceDomainId,
-  TargetDomainId,
-  TransactionId,
-}
+import com.digitalasset.canton.protocol.{ReassignmentId, SerializableContract, TransactionId}
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.OptionUtil
-import com.digitalasset.canton.version.Reassignment.SourceProtocolVersion
+import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{ReassignmentCounter, RequestCounter}
 
 /** Stores the data for a reassignment that needs to be passed from the source domain to the target domain. */
 final case class ReassignmentData(
-    sourceProtocolVersion: SourceProtocolVersion,
+    sourceProtocolVersion: Source[ProtocolVersion],
     unassignmentTs: CantonTimestamp,
     unassignmentRequestCounter: RequestCounter,
     unassignmentRequest: FullUnassignmentTree,
@@ -41,9 +37,9 @@ final case class ReassignmentData(
     reassignmentGlobalOffset.flatMap(_.unassignment)
   def assignmentGlobalOffset: Option[GlobalOffset] = reassignmentGlobalOffset.flatMap(_.assignment)
 
-  def targetDomain: TargetDomainId = unassignmentRequest.targetDomain
+  def targetDomain: Target[DomainId] = unassignmentRequest.targetDomain
 
-  def sourceDomain: SourceDomainId = unassignmentRequest.sourceDomain
+  def sourceDomain: Source[DomainId] = unassignmentRequest.sourceDomain
 
   def reassignmentId: ReassignmentId =
     ReassignmentId(unassignmentRequest.sourceDomain, unassignmentTs)

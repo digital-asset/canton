@@ -10,7 +10,7 @@ Please also consult the [full documentation of this release](https://docs.daml.c
 ```daml_participant_api_parallel_indexer_inputmapping_batch_size_bucket```
 becomes
 ```daml_participant_api_indexer_inputmapping_batch_size_bucket```
-- Completely removed leftovers in the code of Oracle support. 
+- Completely removed leftovers in the code of Oracle support.
 
 ## Until 2024-09-26 (Exclusive)
 
@@ -64,6 +64,13 @@ The integer approach replaces string representation in:
 ## Until 2024-09-06 (Exclusive)
 
 - Console.bootstrap.domain has new parameter domainThreshold, the minimum number of domain owners that need to authorize on behalf of the domain's namespace.
+- [Breaking change]: added a new mandatory `usage: SigningKeyUsage` parameter for the `register_kms_signing_key()` and the `generate_signing_key()` commands. This new parameter is used to specify the type of usage the new key will have.
+  It can take the following usage types:
+    - `Namespace`: the root namespace key that defines a node's identity and signs topology requests;
+    - `IdentityDelegation`: a signing key that acts as a delegation key for the root namespace and that can also be used to sign topology requests;
+    - `SequencerAuthentication`: a signing key that authenticates members of the network towards a sequencer;
+    - `Protocol`: a signing key that deals with all the signing that happens as part of the protocol.
+  This separation makes our system more robust in case of a compromised key.
 
 ## Until 2024-09-04 (Exclusive)
 

@@ -5,6 +5,7 @@ package com.digitalasset.canton.crypto.provider.jce
 
 import cats.data.EitherT
 import cats.syntax.either.*
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtended
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -63,7 +64,7 @@ class JcePrivateCrypto(
     for {
       javaKeyPair <- Either
         .catchOnly[GeneralSecurityException](EllipticCurves.generateKeyPair(curveType))
-        .leftMap[SigningKeyGenerationError](SigningKeyGenerationError.GeneralError)
+        .leftMap[SigningKeyGenerationError](SigningKeyGenerationError.GeneralError.apply)
     } yield fromJavaSigningKeyPair(javaKeyPair, scheme)
 
   override protected[crypto] def generateEncryptionKeypair(keySpec: EncryptionKeySpec)(implicit
@@ -93,7 +94,7 @@ class JcePrivateCrypto(
                 kpGen.generateKeyPair()
               }
             )
-            .leftMap[EncryptionKeyGenerationError](EncryptionKeyGenerationError.GeneralError)
+            .leftMap[EncryptionKeyGenerationError](EncryptionKeyGenerationError.GeneralError.apply)
         case EncryptionKeySpec.Rsa2048 =>
           Either
             .catchOnly[GeneralSecurityException](
@@ -103,19 +104,22 @@ class JcePrivateCrypto(
                 kpGen.generateKeyPair()
               }
             )
-            .leftMap[EncryptionKeyGenerationError](EncryptionKeyGenerationError.GeneralError)
+            .leftMap[EncryptionKeyGenerationError](EncryptionKeyGenerationError.GeneralError.apply)
       }).map(convertJavaKeyPair)
     }
   }
 
-  override protected[crypto] def generateSigningKeypair(scheme: SigningKeyScheme)(implicit
+  override protected[crypto] def generateSigningKeypair(
+      scheme: SigningKeyScheme,
+      usage: NonEmpty[Set[SigningKeyUsage]],
+  )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SigningKeyGenerationError, SigningKeyPair] = scheme match {
     case SigningKeyScheme.Ed25519 =>
       for {
         rawKeyPair <- Either
           .catchOnly[GeneralSecurityException](Ed25519Sign.KeyPair.newKeyPair())
-          .leftMap[SigningKeyGenerationError](SigningKeyGenerationError.GeneralError)
+          .leftMap[SigningKeyGenerationError](SigningKeyGenerationError.GeneralError.apply)
           .toEitherT[FutureUnlessShutdown]
         publicKey = ByteString.copyFrom(rawKeyPair.getPublicKey)
         privateKey = ByteString.copyFrom(rawKeyPair.getPrivateKey)

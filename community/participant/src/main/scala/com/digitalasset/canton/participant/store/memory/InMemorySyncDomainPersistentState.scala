@@ -15,7 +15,7 @@ import com.digitalasset.canton.participant.admin.PackageDependencyResolver
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.store.{AcsInspection, SyncDomainPersistentState}
 import com.digitalasset.canton.participant.topology.ParticipantTopologyValidation
-import com.digitalasset.canton.protocol.{StaticDomainParameters, TargetDomainId}
+import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.time.Clock
@@ -30,6 +30,7 @@ import com.digitalasset.canton.topology.{
   TopologyManagerError,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ReassignmentTag.Target
 
 import scala.concurrent.ExecutionContext
 
@@ -37,7 +38,7 @@ class InMemorySyncDomainPersistentState(
     participantId: ParticipantId,
     clock: Clock,
     crypto: Crypto,
-    override val domainId: IndexedDomain,
+    override val indexedDomain: IndexedDomain,
     val staticDomainParameters: StaticDomainParameters,
     override val enableAdditionalConsistencyChecks: Boolean,
     indexedStringStore: IndexedStringStore,
@@ -56,11 +57,10 @@ class InMemorySyncDomainPersistentState(
   val activeContractStore =
     new InMemoryActiveContractStore(
       indexedStringStore,
-      staticDomainParameters.protocolVersion,
       loggerFactory,
     )
   val reassignmentStore =
-    new InMemoryReassignmentStore(TargetDomainId(domainId.item), loggerFactory)
+    new InMemoryReassignmentStore(Target(indexedDomain.item), loggerFactory)
   val sequencedEventStore = new InMemorySequencedEventStore(loggerFactory)
   val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
   val acsCommitmentStore =
@@ -71,7 +71,7 @@ class InMemorySyncDomainPersistentState(
 
   override val topologyStore =
     new InMemoryTopologyStore(
-      DomainStore(domainId.item),
+      DomainStore(indexedDomain.domainId),
       loggerFactory,
       timeouts,
     )
@@ -101,7 +101,7 @@ class InMemorySyncDomainPersistentState(
         currentlyVettedPackages,
         nextPackageIds,
         packageDependencyResolver,
-        acsInspections = () => Map(domainId.domainId -> acsInspection),
+        acsInspections = () => Map(indexedDomain.domainId -> acsInspection),
         forceFlags,
       )
     override def checkCannotDisablePartyWithActiveContracts(
@@ -113,7 +113,7 @@ class InMemorySyncDomainPersistentState(
       checkCannotDisablePartyWithActiveContracts(
         partyId,
         forceFlags,
-        acsInspections = () => Map(domainId.domainId -> acsInspection),
+        acsInspections = () => Map(indexedDomain.domainId -> acsInspection),
       )
   }
 
@@ -122,5 +122,5 @@ class InMemorySyncDomainPersistentState(
   override def close(): Unit = ()
 
   override def acsInspection: AcsInspection =
-    new AcsInspection(domainId.domainId, activeContractStore, contractStore, ledgerApiStore)
+    new AcsInspection(indexedDomain.domainId, activeContractStore, contractStore, ledgerApiStore)
 }
