@@ -6,6 +6,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 import cats.data.EitherT
 import cats.syntax.option.*
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.config.CachingConfigs
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store.{
@@ -91,6 +92,7 @@ class SequencerWriterTest extends FixtureAsyncWordSpec with BaseTest {
         PositiveInt.tryCreate(5),
         sequencerMember,
         unifiedSequencer = testedUseUnifiedSequencer,
+        CachingConfigs(),
       ) {
         override val generalStore: SequencerStore = store
       }

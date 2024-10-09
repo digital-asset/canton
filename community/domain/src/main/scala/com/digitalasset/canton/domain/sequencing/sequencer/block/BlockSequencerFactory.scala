@@ -53,7 +53,12 @@ abstract class BlockSequencerFactory(
     testingInterceptor: Option[TestingInterceptor],
     metrics: SequencerMetrics,
 )(implicit ec: ExecutionContext)
-    extends DatabaseSequencerFactory(storage, nodeParameters.processingTimeouts, protocolVersion)
+    extends DatabaseSequencerFactory(
+      storage,
+      nodeParameters.cachingConfigs,
+      nodeParameters.processingTimeouts,
+      protocolVersion,
+    )
     with NamedLogging {
 
   private val store = SequencerBlockStore(

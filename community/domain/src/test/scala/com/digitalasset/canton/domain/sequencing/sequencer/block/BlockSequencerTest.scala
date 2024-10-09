@@ -166,6 +166,7 @@ class BlockSequencerTest
         testedProtocolVersion,
         blockRateLimitManager = defaultRateLimiter,
         OrderingTimeFixMode.MakeStrictlyIncreasing,
+        CachingConfigs(),
         processingTimeouts = BlockSequencerTest.this.timeouts,
         logEventDetails = true,
         prettyPrinter = new CantonPrettyPrinter(

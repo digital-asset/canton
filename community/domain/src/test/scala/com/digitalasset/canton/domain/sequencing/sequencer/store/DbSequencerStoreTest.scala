@@ -4,6 +4,7 @@
 package com.digitalasset.canton.domain.sequencing.sequencer.store
 
 import com.daml.nameof.NameOf.functionFullName
+import com.digitalasset.canton.config.CachingConfigs
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.domain.sequencing.sequencer.store.DbSequencerStoreTest.MaxInClauseSize
 import com.digitalasset.canton.lifecycle.CloseContext
@@ -33,6 +34,7 @@ trait DbSequencerStoreTest extends SequencerStoreTest with MultiTenantedSequence
         loggerFactory,
         sequencerMember,
         unifiedSequencer = testedUseUnifiedSequencer,
+        CachingConfigs(),
       )
     )
     behave like multiTenantedSequencerStore(() =>
@@ -44,6 +46,7 @@ trait DbSequencerStoreTest extends SequencerStoreTest with MultiTenantedSequence
         loggerFactory,
         sequencerMember,
         unifiedSequencer = testedUseUnifiedSequencer,
+        CachingConfigs(),
       )
     )
   }

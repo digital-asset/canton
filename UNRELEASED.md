@@ -3,6 +3,31 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2024-10-02 (Exclusive)
+- Don't fetch payloads for events with `eventCounter < subscriptionStartCounter`.
+- Payloads are fetched behind a Caffeine cache.
+```hocon
+canton.sequencers.<sequencer>.parameters.caching {
+  sequencer-payload-cache {
+    expire-after-access="1 minute" // default value
+    maximum-size="1000" // default value
+  }
+}
+```
+- Payload fetching can be configured with the following config settings:
+```hocon
+canton.sequencers.<sequencer>.sequencer.block.reader {
+  // max number of payloads to fetch from the datastore in one page
+  payload-batch-size = 10 // default value
+  // max time window to wait for more payloads before fetching the current batch from the datastore
+  payload-batch-window = "5ms" // default value
+  // how many batches of payloads will be fetched in parallel
+  payload-fetch-parallelism = 2 // default value
+  // how many events will be generated from the fetched payloads in parallel
+  event-generation-parallelism = 4 // default value
+}
+```
+
 ## Until 2024-09-24 (Exclusive)
 - Fixed a crash recovery bug in unified sequencer, when it can miss events in the recovery process. Now it will start from
 the correct earlier block height in these situations.

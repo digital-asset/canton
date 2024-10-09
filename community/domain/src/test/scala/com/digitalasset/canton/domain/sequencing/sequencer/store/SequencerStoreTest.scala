@@ -173,7 +173,8 @@ trait SequencerStoreTest
         for {
           memberId <- lookupRegisteredMember(member)
           events <- store.readEvents(member, memberId, fromTimestampO, limit)
-        } yield events.payloads
+          payloads <- store.readPayloads(events.payloads.flatMap(_.event.payloadO).toList)
+        } yield events.payloads.map(_.map(payloads))
 
       def assertDeliverEvent(
           event: Sequenced[Payload],

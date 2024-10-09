@@ -10,8 +10,8 @@ import cats.syntax.either.*
 import cats.syntax.parallel.*
 import cats.{Functor, Show}
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
+import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.PruningError.UnsafePruningPoint
 import com.digitalasset.canton.domain.sequencing.sequencer.*
@@ -439,16 +439,16 @@ private[canton] final case class SequencerStoreRecordCounts(
 
 trait ReadEvents {
   def nextTimestamp: Option[CantonTimestamp]
-  def payloads: Seq[Sequenced[Payload]]
+  def payloads: Seq[Sequenced[PayloadId]]
 }
 
-final case class ReadEventPayloads(payloads: Seq[Sequenced[Payload]]) extends ReadEvents {
+final case class ReadEventPayloads(payloads: Seq[Sequenced[PayloadId]]) extends ReadEvents {
   def nextTimestamp: Option[CantonTimestamp] = payloads.lastOption.map(_.timestamp)
 }
 
 /** No events found but may return the safe watermark across online sequencers to read from the next time */
 final case class SafeWatermark(nextTimestamp: Option[CantonTimestamp]) extends ReadEvents {
-  def payloads: Seq[Sequenced[Payload]] = Seq.empty
+  def payloads: Seq[Sequenced[PayloadId]] = Seq.empty
 }
 
 /** An interface for validating members of a sequencer, i.e. that member is registered at a certain time.
@@ -583,6 +583,12 @@ trait SequencerStore extends SequencerMemberValidator with NamedLogging with Aut
   )(implicit
       traceContext: TraceContext
   ): Future[ReadEvents]
+
+  def readPayloads(
+      payloadIds: Seq[PayloadId]
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Map[PayloadId, Payload]]
 
   /** Delete all events that are ahead of the watermark of this sequencer.
     * These events will not have been read and should be removed before returning the sequencer online.
@@ -852,6 +858,7 @@ object SequencerStore {
       loggerFactory: NamedLoggerFactory,
       sequencerMember: Member,
       unifiedSequencer: Boolean,
+      cachingConfigs: CachingConfigs,
       overrideCloseContext: Option[CloseContext] = None,
   )(implicit executionContext: ExecutionContext): SequencerStore =
     storage match {
@@ -871,6 +878,7 @@ object SequencerStore {
           loggerFactory,
           sequencerMember,
           unifiedSequencer = unifiedSequencer,
+          cachingConfigs,
           overrideCloseContext,
         )
     }

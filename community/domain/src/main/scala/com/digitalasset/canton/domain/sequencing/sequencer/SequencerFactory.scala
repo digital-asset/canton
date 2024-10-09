@@ -5,7 +5,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 
 import cats.data.EitherT
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.block.SequencerDriver
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
@@ -54,6 +54,7 @@ trait SequencerFactory extends FlagCloseable with HasCloseContext {
 
 abstract class DatabaseSequencerFactory(
     storage: Storage,
+    cachingConfigs: CachingConfigs,
     override val timeouts: ProcessingTimeout,
     protocolVersion: ProtocolVersion,
 ) extends SequencerFactory
@@ -88,6 +89,7 @@ abstract class DatabaseSequencerFactory(
         sequencerId,
         unifiedSequencer =
           true, // // TODO(#18401): does not affect the usage below, but should be correctly set
+        cachingConfigs,
         // At the moment this store instance is only used for the sequencer initialization,
         // if it is retrying a db operation and the factory is closed, the store will be closed as well;
         // if request succeeds, the store will no be retrying and doesn't need to be closed
@@ -108,6 +110,7 @@ class CommunityDatabaseSequencerFactory(
     override val loggerFactory: NamedLoggerFactory,
 ) extends DatabaseSequencerFactory(
       storage,
+      nodeParameters.cachingConfigs,
       nodeParameters.processingTimeouts,
       sequencerProtocolVersion,
     ) {
@@ -137,6 +140,7 @@ class CommunityDatabaseSequencerFactory(
       topologyClientMember,
       sequencerProtocolVersion,
       domainSyncCryptoApi,
+      nodeParameters.cachingConfigs,
       metrics,
       loggerFactory,
       nodeParameters.useUnifiedSequencer,
