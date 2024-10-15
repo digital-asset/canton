@@ -127,6 +127,9 @@ class InMemorySequencerStore(
       }
     )
 
+  // Disable the buffer for in-memory store
+  override val maxBufferedEvents: Int = 0
+
   override def resetWatermark(instanceIndex: Int, ts: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SaveWatermarkError, Unit] =
@@ -172,6 +175,15 @@ class InMemorySequencerStore(
       limit: Int = 100,
   )(implicit
       traceContext: TraceContext
+  ): Future[ReadEvents] = readEventsInternal(member, memberId, fromExclusiveO, limit)
+
+  override protected def readEventsInternal(
+      member: Member,
+      memberId: SequencerMemberId,
+      fromExclusiveO: Option[CantonTimestamp] = None,
+      limit: Int = 100,
+  )(implicit
+      traceContext: TraceContext
   ): Future[ReadEvents] = Future.successful {
     import scala.jdk.CollectionConverters.*
 
@@ -198,17 +210,17 @@ class InMemorySequencerStore(
     }
   }
 
-  override def readPayloads(payloadIds: Seq[PayloadId])(implicit
+  override def readPayloads(payloadIds: Seq[IdOrPayload])(implicit
       traceContext: TraceContext
   ): Future[Map[PayloadId, Payload]] =
     Future.successful(
-      payloadIds
-        .flatMap(id =>
+      payloadIds.flatMap {
+        case id: PayloadId =>
           Option(payloads.get(id.unwrap))
             .map(storedPayload => id -> Payload(id, storedPayload.content))
             .toList
-        )
-        .toMap
+        case payload: Payload => List(payload.id -> payload)
+      }.toMap
     )
 
   private def isMemberRecipient(member: SequencerMemberId)(event: StoreEvent[_]): Boolean =
@@ -542,6 +554,9 @@ class InMemorySequencerStore(
       saveCounterCheckpoints(memberIdCheckpoints)(traceContext, closeContext)
     }
   }
+
+  // Buffer is disabled for in-memory store
+  override def prePopulateBuffer(implicit traceContext: TraceContext): Future[Unit] = Future.unit
 }
 
 object InMemorySequencerStore {

@@ -7,7 +7,7 @@ import cats.syntax.option.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
-import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
 
 sealed trait CommitMode {
   private[sequencer] val postgresSettings: NonEmpty[Seq[String]]
@@ -61,6 +61,7 @@ sealed trait SequencerWriterConfig {
         maxSqlInListSize: PositiveNumeric[Int],
         checkpointInterval: NonNegativeFiniteDuration,
         checkpointBackfillParallelism: Int,
+        maxBufferedEventsSize: NonNegativeInt,
     ): SequencerWriterConfig
   } =>
 
@@ -73,6 +74,7 @@ sealed trait SequencerWriterConfig {
   val eventWriteBatchMaxDuration: NonNegativeFiniteDuration
   val commitModeValidation: Option[CommitMode]
   val maxSqlInListSize: PositiveNumeric[Int]
+  val maxBufferedEventsSize: NonNegativeInt
 
   /** how frequently to generate counter checkpoints for all members */
   val checkpointInterval: NonNegativeFiniteDuration
@@ -90,6 +92,7 @@ sealed trait SequencerWriterConfig {
       maxSqlInListSize: PositiveNumeric[Int] = this.maxSqlInListSize,
       checkpointInterval: NonNegativeFiniteDuration = this.checkpointInterval,
       checkpointBackfillParallelism: Int = this.checkpointBackfillParallelism,
+      maxBufferedEventsSize: NonNegativeInt = this.maxBufferedEventsSize,
   ): SequencerWriterConfig =
     copy(
       payloadQueueSize,
@@ -103,6 +106,7 @@ sealed trait SequencerWriterConfig {
       maxSqlInListSize,
       checkpointInterval,
       checkpointBackfillParallelism,
+      maxBufferedEventsSize,
     )
 }
 
@@ -122,6 +126,8 @@ object SequencerWriterConfig {
 
   val DefaultCheckpointBackfillParallelism: Int = 2
 
+  val DefaultMaxBufferedEventsSize: NonNegativeInt = NonNegativeInt.tryCreate(2000)
+
   /** Use to have events immediately flushed to the database. Useful for decreasing latency however at a high throughput
     * a large number of writes will be detrimental for performance.
     */
@@ -139,6 +145,7 @@ object SequencerWriterConfig {
       override val maxSqlInListSize: PositiveNumeric[Int] = DefaultMaxSqlInListSize,
       override val checkpointInterval: NonNegativeFiniteDuration = DefaultCheckpointInterval,
       override val checkpointBackfillParallelism: Int = DefaultCheckpointBackfillParallelism,
+      override val maxBufferedEventsSize: NonNegativeInt = DefaultMaxBufferedEventsSize,
   ) extends SequencerWriterConfig
 
   /** Creates batches of incoming events to minimize the number of writes to the database. Useful for a high throughput
@@ -159,5 +166,6 @@ object SequencerWriterConfig {
       override val maxSqlInListSize: PositiveNumeric[Int] = DefaultMaxSqlInListSize,
       override val checkpointInterval: NonNegativeFiniteDuration = DefaultCheckpointInterval,
       override val checkpointBackfillParallelism: Int = DefaultCheckpointBackfillParallelism,
+      override val maxBufferedEventsSize: NonNegativeInt = DefaultMaxBufferedEventsSize,
   ) extends SequencerWriterConfig
 }

@@ -7,7 +7,7 @@ import cats.data.EitherT
 import cats.syntax.option.*
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.CachingConfigs
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store.{
   InMemorySequencerStore,
@@ -89,7 +89,8 @@ class SequencerWriterTest extends FixtureAsyncWordSpec with BaseTest {
         loggerFactory,
         // Unused because the store is overridden below
         testedProtocolVersion,
-        PositiveInt.tryCreate(5),
+        maxSqlInListSize = PositiveInt.tryCreate(5),
+        maxBufferedEventsSize = NonNegativeInt.zero, // This env uses in-memory store
         sequencerMember,
         unifiedSequencer = testedUseUnifiedSequencer,
         CachingConfigs(),

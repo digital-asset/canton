@@ -10,17 +10,19 @@ import cats.syntax.parallel.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong}
 import com.digitalasset.canton.data.{CantonTimestamp, Counter}
-import com.digitalasset.canton.domain.sequencing.sequencer.DomainSequencingTestUtils.deliverStoreEventWithDefaults
+import com.digitalasset.canton.domain.sequencing.sequencer.DomainSequencingTestUtils.deliverStoreEventWithPayloadWithDefaults
 import com.digitalasset.canton.domain.sequencing.sequencer.*
 import com.digitalasset.canton.domain.sequencing.sequencer.store.SaveLowerBoundError.BoundLowerThanExisting
 import com.digitalasset.canton.domain.sequencing.traffic.store.TrafficConsumedStore
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
+import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.resource.Storage
-import com.digitalasset.canton.sequencing.protocol.{MessageId, SequencerErrors}
+import com.digitalasset.canton.sequencing.protocol.{Batch, MessageId, SequencerErrors}
 import com.digitalasset.canton.sequencing.traffic.{TrafficConsumed, TrafficReceipt}
 import com.digitalasset.canton.store.db.DbTest
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Member, ParticipantId}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.{BaseTest, ProtocolVersionChecksAsyncWordSpec, SequencerCounter}
 import com.google.protobuf.ByteString
@@ -101,26 +103,26 @@ trait SequencerStoreTest
           sender: SequencerMemberId = SequencerMemberId(0),
       )(
           recipients: NonEmpty[SortedSet[SequencerMemberId]] = NonEmpty(SortedSet, sender)
-      ): Sequenced[PayloadId] =
+      ): Sequenced[Payload] =
         Sequenced(
           ts,
-          deliverStoreEventWithDefaults(
+          deliverStoreEventWithPayloadWithDefaults(
             sender = sender,
-            payloadId = PayloadId(ts),
+            payload = Payload(PayloadId(ts), Batch.empty(testedProtocolVersion).toByteString),
             traceContext = traceContext,
           )(
             recipients
           ),
         )
 
-      def deliverEvent(
+      def deliverEvent[P](
           ts: CantonTimestamp,
           sender: Member,
           messageId: MessageId,
-          payloadId: PayloadId,
+          payload: P,
           recipients: Set[Member] = Set.empty,
           trafficReceiptO: Option[TrafficReceipt] = None,
-      ): Future[Sequenced[PayloadId]] =
+      ): Future[Sequenced[P]] =
         for {
           senderId <- store.registerMember(sender, ts)
           recipientIds <- recipients.toList.parTraverse(store.registerMember(_, ts)).map(_.toSet)
@@ -131,7 +133,7 @@ trait SequencerStoreTest
             senderId,
             messageId,
             NonEmpty(SortedSet, senderId, recipientIds.toSeq*),
-            payloadId,
+            payload,
             None,
             traceContext,
             None,
@@ -144,7 +146,7 @@ trait SequencerStoreTest
           messageId: MessageId,
           topologyTimestamp: CantonTimestamp,
           trafficReceiptO: Option[TrafficReceipt] = None,
-      ): Future[Sequenced[PayloadId]] =
+      ): Future[Sequenced[Payload]] =
         for {
           senderId <- store.registerMember(sender, ts)
           _ <- writeTrafficConsumed(sender, ts, trafficReceiptO)
@@ -165,16 +167,35 @@ trait SequencerStoreTest
           memberId = registeredMemberO.map(_.memberId).getOrElse(fail(s"$member is not registered"))
         } yield memberId
 
+      def saveEventsAndBuffer(instanceIndex: Int, events: NonEmpty[Seq[Sequenced[Payload]]])(
+          implicit traceContext: TraceContext
+      ): Future[Unit] = {
+        val savePayloadsF = NonEmpty.from(events.forgetNE.flatMap(_.event.payloadO.toList)) match {
+          case Some(payloads) => savePayloads(payloads)
+          case _ => Future.unit
+        }
+        savePayloadsF.flatMap(_ =>
+          store
+            .saveEvents(instanceIndex, events.map(_.map(_.id)))
+            .map(_ => store.bufferEvents(events))
+        )
+      }
+
       def readEvents(
           member: Member,
-          fromTimestampO: Option[CantonTimestamp] = None,
+          fromTimestampO: Option[CantonTimestamp] = Some(CantonTimestamp.Epoch),
           limit: Int = 1000,
       ): Future[Seq[Sequenced[Payload]]] =
         for {
           memberId <- lookupRegisteredMember(member)
           events <- store.readEvents(member, memberId, fromTimestampO, limit)
-          payloads <- store.readPayloads(events.payloads.flatMap(_.event.payloadO).toList)
-        } yield events.payloads.map(_.map(payloads))
+          payloads <- store.readPayloads(events.events.flatMap(_.event.payloadO).toList)
+        } yield events.events.map {
+          _.map {
+            case id: PayloadId => payloads(id)
+            case payload: Payload => payload
+          }
+        }
 
       def assertDeliverEvent(
           event: Sequenced[Payload],
@@ -307,10 +328,9 @@ trait SequencerStoreTest
         val env = Env()
 
         for {
-          _ <- env.savePayloads(NonEmpty(Seq, payload1, payload2))
-          deliverEvent1 <- env.deliverEvent(ts1, alice, messageId1, payload1.id)
-          deliverEvent2 <- env.deliverEvent(ts2, alice, messageId2, payload2.id)
-          _ <- env.store.saveEvents(instanceIndex, NonEmpty(Seq, deliverEvent1, deliverEvent2))
+          deliverEvent1 <- env.deliverEvent(ts1, alice, messageId1, payload1)
+          deliverEvent2 <- env.deliverEvent(ts2, alice, messageId2, payload2)
+          _ <- env.saveEventsAndBuffer(instanceIndex, NonEmpty(Seq, deliverEvent1, deliverEvent2))
           _ <- env.saveWatermark(deliverEvent2.timestamp).valueOrFail("saveWatermark")
           events <- env.readEvents(alice)
           _ = events should have size 2
@@ -324,11 +344,10 @@ trait SequencerStoreTest
         val env = Env()
 
         for {
-          _ <- env.savePayloads(NonEmpty(Seq, payload1, payload2))
           // the first event is for alice, and the second for bob
-          deliverEvent1 <- env.deliverEvent(ts1, alice, messageId1, payload1.id)
-          deliverEvent2 <- env.deliverEvent(ts2, bob, messageId2, payload2.id)
-          _ <- env.store.saveEvents(instanceIndex, NonEmpty(Seq, deliverEvent1, deliverEvent2))
+          deliverEvent1 <- env.deliverEvent(ts1, alice, messageId1, payload1)
+          deliverEvent2 <- env.deliverEvent(ts2, bob, messageId2, payload2)
+          _ <- env.saveEventsAndBuffer(instanceIndex, NonEmpty(Seq, deliverEvent1, deliverEvent2))
           _ <- env.saveWatermark(deliverEvent2.timestamp).valueOrFail("saveWatermark")
           aliceEvents <- env.readEvents(alice)
           bobEvents <- env.readEvents(bob)
@@ -357,19 +376,18 @@ trait SequencerStoreTest
         val env = Env()
 
         for {
-          _ <- env.savePayloads(NonEmpty(Seq, payload1, payload2, payload3))
           // the first event is for alice, and the second for bob
-          deliverEventAlice <- env.deliverEvent(ts1, alice, messageId1, payload1.id)
+          deliverEventAlice <- env.deliverEvent(ts1, alice, messageId1, payload1)
           deliverEventAll <- env.deliverEvent(
             ts2,
             alice,
             messageId2,
-            payload2.id,
+            payload2,
             recipients = Set(alice, bob),
           )
           receiptAlice <- env.deliverReceipt(ts4, alice, messageId4, ts3)
-          deliverEventBob <- env.deliverEvent(ts3, bob, messageId3, payload3.id)
-          _ <- env.store.saveEvents(
+          deliverEventBob <- env.deliverEvent(ts3, bob, messageId3, payload3)
+          _ <- env.saveEventsAndBuffer(
             instanceIndex,
             NonEmpty(Seq, deliverEventAlice, deliverEventAll, deliverEventBob, receiptAlice),
           )
@@ -432,20 +450,19 @@ trait SequencerStoreTest
         )
 
         for {
-          _ <- env.savePayloads(NonEmpty(Seq, payload1, payload2, payload3))
           // the first event is for alice, and the second for both alice and bob
           deliverEventAlice <- env.deliverEvent(
             ts1,
             alice,
             messageId1,
-            payload1.id,
+            payload1,
             trafficReceiptO = trafficReceipt1.some,
           )
           deliverEventAll <- env.deliverEvent(
             ts2,
             alice,
             messageId2,
-            payload2.id,
+            payload2,
             recipients = Set(alice, bob),
             trafficReceiptO = trafficReceipt2.some,
           )
@@ -453,7 +470,7 @@ trait SequencerStoreTest
             ts3,
             bob,
             messageId3,
-            payload3.id,
+            payload3,
             trafficReceiptO = trafficReceipt3.some,
           )
           receiptAlice <- env.deliverReceipt(
@@ -463,7 +480,7 @@ trait SequencerStoreTest
             ts3,
             trafficReceiptO = trafficReceipt4.some,
           )
-          _ <- env.store.saveEvents(
+          _ <- env.saveEventsAndBuffer(
             instanceIndex,
             NonEmpty(Seq, deliverEventAlice, deliverEventAll, deliverEventBob, receiptAlice),
           )
@@ -533,7 +550,7 @@ trait SequencerStoreTest
             None,
           )
           timestampedError: Sequenced[Nothing] = Sequenced(ts1, error)
-          _ <- env.store.saveEvents(instanceIndex, NonEmpty(Seq, timestampedError))
+          _ <- env.saveEventsAndBuffer(instanceIndex, NonEmpty(Seq, timestampedError))
           _ <- env.saveWatermark(timestampedError.timestamp).valueOrFail("saveWatermark")
           aliceEvents <- env.readEvents(alice)
           bobEvents <- env.readEvents(bob)
@@ -554,11 +571,7 @@ trait SequencerStoreTest
               env.deliverEventWithDefaults(ts1.plusSeconds(n), sender = aliceId)()
             }.toSeq
           )
-          payloads = DomainSequencingTestUtils.payloadsForEvents(events)
-          _ <- env.store
-            .savePayloads(NonEmptyUtil.fromUnsafe(payloads), instanceDiscriminator1)
-            .valueOrFail(s"Save payloads")
-          _ <- env.store.saveEvents(instanceIndex, events)
+          _ <- env.saveEventsAndBuffer(instanceIndex, events)
           _ <- env.saveWatermark(events.last1.timestamp).valueOrFail("saveWatermark")
           // read from the beginning (None)
           firstPage <- env.readEvents(alice, None, 10)
@@ -584,11 +597,7 @@ trait SequencerStoreTest
           events = (0L until 20L).map { n =>
             env.deliverEventWithDefaults(ts2.plusSeconds(n), sender = aliceId)()
           }
-          payloads = DomainSequencingTestUtils.payloadsForEvents(events)
-          _ <- env.store
-            .savePayloads(NonEmptyUtil.fromUnsafe(payloads), instanceDiscriminator1)
-            .valueOrFail(s"Save payloads")
-          _ <- env.store.saveEvents(instanceIndex, NonEmptyUtil.fromUnsafe(events))
+          _ <- env.saveEventsAndBuffer(instanceIndex, NonEmptyUtil.fromUnsafe(events))
           // put a watermark only a bit into our events
           _ <- env.saveWatermark(ts2.plusSeconds(5)).valueOrFail("saveWatermark")
           firstPage <- env.readEvents(alice, None, 10)
@@ -612,6 +621,36 @@ trait SequencerStoreTest
           _ <- env.store.saveWatermark(0, ts).valueOrFail("saveWatermark")
           updatedWatermarkO <- env.store.fetchWatermark(0)
         } yield updatedWatermarkO.value.timestamp shouldBe ts
+      }
+
+      "read from fan-out buffer if enabled" in {
+        val env = Env()
+        for {
+          deliverEvent1 <- env.deliverEvent(ts1, alice, messageId1, payload1)
+          deliverEvent2 <- env.deliverEvent(ts2, alice, messageId2, payload2)
+          deliverEvent3 <- env.deliverEvent(ts3, alice, messageId3, payload3)
+          _ <- env.saveEventsAndBuffer(
+            instanceIndex,
+            NonEmpty(Seq, deliverEvent1, deliverEvent2, deliverEvent3),
+          )
+          _ <- env.saveWatermark(ts3).valueOrFail("saveWatermark")
+          events <- {
+            loggerFactory.assertLogsSeq(SuppressionRule.FullSuppression)(
+              // Note that this timestamp ts1 is exclusive so we WILL miss the first event
+              env.readEvents(alice, ts(1).some),
+              logs => {
+                val readFromTheBuffer =
+                  logs.exists(_.message.contains("Serving 2 events from the buffer"))
+                val bufferDisabled = env.store.maxBufferedEvents == 0
+                (readFromTheBuffer || bufferDisabled) shouldBe true
+              },
+            )
+          }
+          _ = events should have size 2
+          Seq(event2, event3) = events
+          _ <- env.assertDeliverEvent(event2, ts2, alice, messageId2, Set(alice), payload2)
+          _ <- env.assertDeliverEvent(event3, ts3, alice, messageId3, Set(alice), payload3)
+        } yield succeed
       }
     }
 
@@ -861,15 +900,14 @@ trait SequencerStoreTest
 
         for {
           aliceId <- store.registerMember(alice, ts1)
-          _ <- store.saveEvents(
+          _ <- env.saveEventsAndBuffer(
             instanceIndex,
             NonEmpty(Seq, deliverEventWithDefaults(ts2)(recipients = NonEmpty(SortedSet, aliceId))),
           )
           bobId <- store.registerMember(bob, ts3)
-          _ <- env.savePayloads(NonEmpty(Seq, payload1))
           // store a deliver event at ts4, ts5, and ts6
           // (hopefully resulting in the earlier two deliver events being pruned)
-          _ <- store.saveEvents(
+          _ <- env.saveEventsAndBuffer(
             instanceIndex,
             NonEmpty(
               Seq,
@@ -879,7 +917,7 @@ trait SequencerStoreTest
                   aliceId,
                   messageId1,
                   NonEmpty(SortedSet, aliceId, bobId),
-                  payload1.id,
+                  payload1,
                   None,
                   traceContext,
                   None,
@@ -928,7 +966,7 @@ trait SequencerStoreTest
           val removedCounts = recordCountsBefore - recordCountsAfter
           removedCounts.counterCheckpoints shouldBe 3
           removedCounts.events shouldBe 3 // the earlier deliver events
-          removedCounts.payloads shouldBe 1 // for the deliver event
+          removedCounts.payloads shouldBe 2 // for payload1 from ts1 + payload from deliverEventWithDefaults(ts2)
           statusBefore.lowerBound shouldBe <(statusAfter.lowerBound)
           lowerBound.value shouldBe ts(
             6
@@ -955,12 +993,11 @@ trait SequencerStoreTest
             .locatePruningTimestamp(NonNegativeInt.tryCreate(0))
             .map(_.isEmpty)
           aliceId <- store.registerMember(alice, ts1)
-          _ <- store.saveEvents(0, NonEmpty(Seq, deliverEventWithDefaults(ts2)()))
+          _ <- env.saveEventsAndBuffer(0, NonEmpty(Seq, deliverEventWithDefaults(ts2)()))
           bobId <- store.registerMember(bob, ts3)
-          _ <- env.savePayloads(NonEmpty(Seq, payload1))
           // store a deliver event at ts4, ts5, ts6, and ts7
           // resulting in only the first deliver event being pruned honoring the pruning timestamp of earlier than ts5
-          _ <- store.saveEvents(
+          _ <- env.saveEventsAndBuffer(
             instanceIndex,
             NonEmpty(
               Seq,
@@ -970,7 +1007,7 @@ trait SequencerStoreTest
                   aliceId,
                   messageId1,
                   NonEmpty(SortedSet, aliceId, bobId),
-                  payload1.id,
+                  payload1,
                   None,
                   traceContext,
                   None,
@@ -1020,7 +1057,7 @@ trait SequencerStoreTest
           val removedCounts = recordCountsBefore - recordCountsAfter
           removedCounts.counterCheckpoints shouldBe 1 // -3 checkpoints +2 checkpoints from pruning itself (at ts5)
           removedCounts.events shouldBe 2 // the two deliver event earlier than ts5 from ts2 and ts4
-          removedCounts.payloads shouldBe 1 // for payload1 from ts1
+          removedCounts.payloads shouldBe 2 // for payload1 from ts1 + payload from deliverEventWithDefaults(ts2)
         }
       }
 
@@ -1133,7 +1170,7 @@ trait SequencerStoreTest
             }
           }
 
-          _ <- store.saveEvents(
+          _ <- env.saveEventsAndBuffer(
             instanceIndex,
             NonEmpty(
               Seq,
@@ -1244,7 +1281,7 @@ trait SequencerStoreTest
             aliceId <- store.registerMember(alice, ts1)
             sequencerId <- store.registerMember(sequencerMember, ts1)
 
-            _ <- store.saveEvents(
+            _ <- env.saveEventsAndBuffer(
               instanceIndex,
               NonEmpty(
                 Seq,
@@ -1252,8 +1289,7 @@ trait SequencerStoreTest
               ),
             )
             bobId <- store.registerMember(bob, ts3)
-            _ <- savePayloads(NonEmpty(Seq, payload1))
-            _ <- store.saveEvents(
+            _ <- env.saveEventsAndBuffer(
               instanceIndex,
               NonEmpty(
                 Seq,
@@ -1263,7 +1299,7 @@ trait SequencerStoreTest
                     aliceId,
                     messageId1,
                     NonEmpty(SortedSet, aliceId, bobId, sequencerId),
-                    payload1.id,
+                    payload1,
                     None,
                     traceContext,
                     None,
@@ -1280,7 +1316,7 @@ trait SequencerStoreTest
               deliverEventWithDefaults(ts(5))(recipients = NonEmpty(SortedSet, aliceId, bobId)),
               deliverEventWithDefaults(ts(6))(recipients = NonEmpty(SortedSet, aliceId, bobId)),
             )
-            _ <- store.saveEvents(
+            _ <- env.saveEventsAndBuffer(
               instanceIndex,
               value1,
             )
@@ -1313,7 +1349,7 @@ trait SequencerStoreTest
             newSequencerId <- store.lookupMember(sequencerMember).map(_.getOrElse(fail()).memberId)
             newBobId <- store.lookupMember(bob).map(_.getOrElse(fail()).memberId)
 
-            _ <- store.saveEvents(
+            _ <- env.saveEventsAndBuffer(
               instanceIndex,
               NonEmpty(
                 Seq,

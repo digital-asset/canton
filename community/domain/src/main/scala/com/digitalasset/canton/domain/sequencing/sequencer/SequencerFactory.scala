@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 
 import cats.data.EitherT
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.block.SequencerDriver
@@ -83,7 +84,8 @@ abstract class DatabaseSequencerFactory(
       SequencerStore(
         storage,
         protocolVersion,
-        DefaultMaxSqlInListSize,
+        maxInClauseSize = DefaultMaxSqlInListSize,
+        maxBufferedEventsSize = NonNegativeInt.zero,
         timeouts,
         loggerFactory,
         sequencerId,

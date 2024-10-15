@@ -3,6 +3,23 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2024-10-16 (Exclusive)
+- New config option `parameters.timeouts.processing.sequenced-event-processing-bound` allows to specify a timeout for processing sequenced events. When processing takes longer on a node, the node will log an error or crash (depending on the `exit-on-fatal-failures` parameter).
+- Added sequencer in-memory fan out. Sequencer now holds last configurable number of events it has processed in memory.
+In practice this is 1-5 seconds worth of data with the default max buffer size of 2000 events. If the read request for
+a member subscription is within the fan out range, the sequencer will serve the event directly from memory, not performing
+any database queries. This feature is enabled by default and can be configured with the following settings:
+```hocon
+canton.sequencers.<sequencer>.sequencer.writer {
+  type = high-throughput // NB: this is required for the writer config to be parsed properly
+  max-buffered-events-size = 2000 // Default value
+}
+```
+This feature greatly improves scalability of sequencer in the number of concurrent subscription, under an assumption that
+members are reading events in a timely manner. If the fan out range is exceeded, the sequencer will fall back to reading
+from the database. Longer fan out range can be configured, trading off memory usage for database load reduction.
+
+
 ## Until 2024-10-02 (Exclusive)
 - Don't fetch payloads for events with `eventCounter < subscriptionStartCounter`.
 - Payloads are fetched behind a Caffeine cache.
