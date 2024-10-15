@@ -532,6 +532,7 @@ object BuildCommon {
           scalatest % Test,
           scalatestMockito % Test,
           shapeless,
+          slick,
         ),
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
@@ -670,8 +671,8 @@ object BuildCommon {
         `daml-tls`,
         `util-logging`,
         `community-admin-api`,
-        `magnolify-addon` % "compile->test",
         // No strictly internal dependencies on purpose so that this can be a foundational module and avoid circular dependencies
+        `slick-fork`,
       )
       .settings(
         sharedCantonSettings,
@@ -912,7 +913,8 @@ object BuildCommon {
       .in(file("community/testing"))
       .disablePlugins(WartRemover)
       .dependsOn(
-        `community-base`
+        `community-base`,
+        `magnolify-addon` % "compile->test",
       )
       .settings(
         sharedSettings,
@@ -1051,10 +1053,7 @@ object BuildCommon {
       .disablePlugins(BufPlugin, ScalafmtPlugin, JavaFormatterPlugin, WartRemover)
       .settings(
         sharedSettings,
-        libraryDependencies ++= Seq(
-          scala_reflect,
-          slick,
-        ),
+        libraryDependencies += slick,
         // Exclude to apply our license header to any Scala files
         headerSources / excludeFilter := "*.scala",
         coverageEnabled := false,
@@ -1062,7 +1061,6 @@ object BuildCommon {
 
     lazy val `wartremover-extension` = project
       .in(file("community/lib/wartremover"))
-      .dependsOn(`slick-fork`)
       .settings(
         sharedSettings,
         libraryDependencies ++= Seq(
@@ -1070,7 +1068,6 @@ object BuildCommon {
           mockito_scala % Test,
           scalatestMockito % Test,
           scalatest % Test,
-          slick,
           wartremover_dep,
         ),
       )

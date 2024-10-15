@@ -7,7 +7,6 @@ import com.daml.ledger.api.v2.transaction.TransactionTree
 import com.daml.ledger.api.v2.update_service.GetUpdateTreesResponse
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.util.TimestampConversion
-import com.digitalasset.canton.platform.ApiOffset
 import com.digitalasset.canton.platform.store.entries.LedgerEntry
 import com.digitalasset.canton.platform.store.utils.EventOps.TreeEventOps
 import com.digitalasset.daml.lf.data.Ref
@@ -33,7 +32,7 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
     for {
       (_, tx) <- store(singleCreate)
       result <- ledgerDao.transactionsReader
-        .lookupTransactionTreeById(transactionId = "WRONG", tx.actAs.toSet)
+        .lookupTransactionTreeById(updateId = "WRONG", tx.actAs.toSet)
     } yield {
       result shouldBe None
     }
@@ -43,7 +42,7 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
     for {
       (_, tx) <- store(singleCreate)
       result <- ledgerDao.transactionsReader
-        .lookupTransactionTreeById(tx.transactionId, Set("WRONG"))
+        .lookupTransactionTreeById(tx.updateId, Set("WRONG"))
     } yield {
       result shouldBe None
     }
@@ -53,21 +52,21 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
     for {
       (offset, tx) <- store(singleCreate)
       result <- ledgerDao.transactionsReader
-        .lookupTransactionTreeById(tx.transactionId, tx.actAs.toSet)
+        .lookupTransactionTreeById(tx.updateId, tx.actAs.toSet)
     } yield {
       inside(result.value.transaction) { case Some(transaction) =>
         inside(tx.transaction.nodes.headOption) { case Some((nodeId, createNode: Node.Create)) =>
           transaction.commandId shouldBe tx.commandId.value
-          transaction.offset shouldBe ApiOffset.toApiString(offset)
+          transaction.offset shouldBe offset.toLong
           TimestampConversion.toLf(
             transaction.effectiveAt.value,
             TimestampConversion.ConversionMode.Exact,
           ) shouldBe tx.ledgerEffectiveTime
-          transaction.updateId shouldBe tx.transactionId
+          transaction.updateId shouldBe tx.updateId
           transaction.workflowId shouldBe tx.workflowId.getOrElse("")
           val created = transaction.eventsById.values.loneElement.getCreated
           transaction.rootEventIds.loneElement shouldEqual created.eventId
-          created.eventId shouldBe EventId(tx.transactionId, nodeId).toLedgerString
+          created.eventId shouldBe EventId(tx.updateId, nodeId).toLedgerString
           created.witnessParties should contain only (tx.actAs*)
           created.contractKey shouldBe None
           created.createArguments shouldNot be(None)
@@ -86,18 +85,18 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
       (_, create) <- store(singleCreate)
       (offset, exercise) <- store(singleExercise(nonTransient(create).loneElement))
       result <- ledgerDao.transactionsReader
-        .lookupTransactionTreeById(exercise.transactionId, exercise.actAs.toSet)
+        .lookupTransactionTreeById(exercise.updateId, exercise.actAs.toSet)
     } yield {
       inside(result.value.transaction) { case Some(transaction) =>
         inside(exercise.transaction.nodes.headOption) {
           case Some((nodeId, exerciseNode: Node.Exercise)) =>
             transaction.commandId shouldBe exercise.commandId.value
-            transaction.offset shouldBe ApiOffset.toApiString(offset)
+            transaction.offset shouldBe offset.toLong
             TimestampConversion.toLf(
               transaction.effectiveAt.value,
               TimestampConversion.ConversionMode.Exact,
             ) shouldBe exercise.ledgerEffectiveTime
-            transaction.updateId shouldBe exercise.transactionId
+            transaction.updateId shouldBe exercise.updateId
             transaction.workflowId shouldBe exercise.workflowId.getOrElse("")
             val exercised = transaction.eventsById.values.loneElement.getExercised
             transaction.rootEventIds.loneElement shouldEqual exercised.eventId
@@ -120,7 +119,7 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
     for {
       (offset, tx) <- store(fullyTransient())
       result <- ledgerDao.transactionsReader
-        .lookupTransactionTreeById(tx.transactionId, tx.actAs.toSet)
+        .lookupTransactionTreeById(tx.updateId, tx.actAs.toSet)
     } yield {
       inside(result.value.transaction) { case Some(transaction) =>
         val (createNodeId, createNode) =
@@ -133,8 +132,8 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
           }.value
 
         transaction.commandId shouldBe tx.commandId.value
-        transaction.offset shouldBe ApiOffset.toApiString(offset)
-        transaction.updateId shouldBe tx.transactionId
+        transaction.offset shouldBe offset.toLong
+        transaction.updateId shouldBe tx.updateId
         transaction.workflowId shouldBe tx.workflowId.getOrElse("")
         TimestampConversion.toLf(
           transaction.effectiveAt.value,
@@ -187,7 +186,7 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
       (_, tx) <- store(partiallyVisible)
       result <- ledgerDao.transactionsReader
         .lookupTransactionTreeById(
-          tx.transactionId,
+          tx.updateId,
           Set(alice),
         ) // only two children are visible to Alice
     } yield {
@@ -339,7 +338,7 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
       .sequence(
         transactions.map(tx =>
           ledgerDao.transactionsReader
-            .lookupTransactionTreeById(tx.transactionId, as)
+            .lookupTransactionTreeById(tx.updateId, as)
         )
       )
       .map(_.flatMap(_.toList.flatMap(_.transaction.toList)))

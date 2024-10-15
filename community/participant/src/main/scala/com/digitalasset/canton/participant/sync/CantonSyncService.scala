@@ -5,11 +5,11 @@ package com.digitalasset.canton.participant.sync
 
 import cats.Eval
 import cats.data.EitherT
+import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.daml.error.*
-import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader
@@ -30,13 +30,13 @@ import com.digitalasset.canton.ledger.api.health.HealthStatus
 import com.digitalasset.canton.ledger.error.CommonErrors
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state
-import com.digitalasset.canton.ledger.participant.state.WriteService.ConnectedDomainResponse
 import com.digitalasset.canton.ledger.participant.state.*
+import com.digitalasset.canton.ledger.participant.state.WriteService.ConnectedDomainResponse
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
-import com.digitalasset.canton.participant.Pruning.*
 import com.digitalasset.canton.participant.*
+import com.digitalasset.canton.participant.Pruning.*
 import com.digitalasset.canton.participant.admin.*
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
 import com.digitalasset.canton.participant.admin.inspection.{
@@ -61,8 +61,8 @@ import com.digitalasset.canton.participant.protocol.reassignment.{
 }
 import com.digitalasset.canton.participant.protocol.submission.routing.DomainRouter
 import com.digitalasset.canton.participant.pruning.{AcsCommitmentProcessor, PruningProcessor}
-import com.digitalasset.canton.participant.store.DomainConnectionConfigStore.MissingConfigForAlias
 import com.digitalasset.canton.participant.store.*
+import com.digitalasset.canton.participant.store.DomainConnectionConfigStore.MissingConfigForAlias
 import com.digitalasset.canton.participant.sync.CantonSyncService.ConnectDomain
 import com.digitalasset.canton.participant.sync.SyncDomain.SubmissionReady
 import com.digitalasset.canton.participant.sync.SyncServiceError.{
@@ -70,6 +70,7 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.{
   SyncServiceDomainDisabledUs,
   SyncServiceDomainDisconnect,
   SyncServiceFailedDomainConnection,
+  SyncServicePurgeDomainError,
 }
 import com.digitalasset.canton.participant.topology.*
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
@@ -88,10 +89,10 @@ import com.digitalasset.canton.time.{Clock, DomainTimeTracker, NonNegativeFinite
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{DomainTopologyClientWithInit, TopologySnapshot}
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
+import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.FutureInstances.parallelFuture
 import com.digitalasset.canton.util.OptionUtils.OptionExtension
 import com.digitalasset.canton.util.ReassignmentTag.Target
-import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.archive.DamlLf
 import com.digitalasset.daml.lf.data.Ref.{PackageId, Party, SubmissionId}
@@ -475,7 +476,7 @@ class CantonSyncService(
 
   private def pruningErrorToCantonError(pruningResult: Either[LedgerPruningError, Unit])(implicit
       traceContext: TraceContext
-  ): Either[CantonError, Unit] = pruningResult match {
+  ): Either[PruningServiceError, Unit] = pruningResult match {
     case Left(err @ LedgerPruningNothingToPrune) =>
       logger.info(
         s"Could not locate pruning point: ${err.message}. Considering success for idempotency"
@@ -736,12 +737,13 @@ class CantonSyncService(
   def addDomain(
       config: DomainConnectionConfig,
       sequencerConnectionValidation: SequencerConnectionValidation,
-  )(implicit traceContext: TraceContext): EitherT[Future, SyncServiceError, Unit] =
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
     for {
       _ <- validateSequencerConnection(config, sequencerConnectionValidation)
       _ <- domainConnectionConfigStore
         .put(config, DomainConnectionConfigStore.Active)
         .leftMap(e => SyncServiceError.SyncServiceAlreadyAdded.Error(e.alias): SyncServiceError)
+        .mapK(FutureUnlessShutdown.outcomeK)
     } yield ()
 
   private def validateSequencerConnection(
@@ -749,7 +751,7 @@ class CantonSyncService(
       sequencerConnectionValidation: SequencerConnectionValidation,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, SyncServiceError, Unit] =
+  ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
     sequencerInfoLoader
       .validateSequencerConnection(
         config.domain,
@@ -766,12 +768,13 @@ class CantonSyncService(
   def modifyDomain(
       config: DomainConnectionConfig,
       sequencerConnectionValidation: SequencerConnectionValidation,
-  )(implicit traceContext: TraceContext): EitherT[Future, SyncServiceError, Unit] =
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
     for {
       _ <- validateSequencerConnection(config, sequencerConnectionValidation)
       _ <- domainConnectionConfigStore
         .replace(config)
         .leftMap(e => SyncServiceError.SyncServiceUnknownDomain.Error(e.alias): SyncServiceError)
+        .mapK(FutureUnlessShutdown.outcomeK)
     } yield ()
 
   /** Migrates contracts from a source domain to target domain by re-associating them in the participant's persistent store.
@@ -826,50 +829,32 @@ class CantonSyncService(
           "migrate domain",
         )
 
-      sourceDomainId <- EitherT.fromEither[FutureUnlessShutdown](
-        aliasManager
-          .domainIdForAlias(source)
-          .toRight(
-            SyncServiceError.SyncServiceUnknownDomain.Error(source): SyncServiceError
-          )
-      )
-
-      _ = logger.info(
-        s"Purging deactivated domain with alias $source with domain id $sourceDomainId"
-      )
-      _ <- EitherT.right(
-        migrationService.pruneSelectedDeactivatedDomainStores(sourceDomainId)
-      )
+      _ <- purgeDeactivatedDomain(source)
     } yield ()
   }
 
-  /* Verify that specified domain has inactive status and selectively prune sync domain stores.
+  /* Verify that specified domain has inactive status and prune sync domain stores.
    */
   def purgeDeactivatedDomain(domain: DomainAlias)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, CantonError, Unit] =
+  ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
     for {
       domainId <- EitherT.fromEither[FutureUnlessShutdown](
         aliasManager
           .domainIdForAlias(domain)
           .toRight(SyncServiceError.SyncServiceUnknownDomain.Error(domain))
       )
-      domainConfig <- performUnlessClosingEitherU(functionFullName)(
-        domainConnectionConfigByAlias(domain).leftMap(_ =>
-          SyncServiceError.SyncServiceUnknownDomain.Error(domain)
-        )
-      )
-      _ <- EitherT.cond[FutureUnlessShutdown](
-        domainConfig.status == DomainConnectionConfigStore.Inactive,
-        (),
-        SyncServiceError.SyncServiceDomainStatusMustBeInactive.Error(domain, domainConfig.status),
-      )
       _ = logger.info(
         s"Purging deactivated domain with alias $domain with domain id $domainId"
       )
-      _ <- EitherT.right(
-        migrationService.pruneSelectedDeactivatedDomainStores(domainId)
-      )
+      _ <-
+        pruningProcessor
+          .purgeInactiveDomain(domainId)
+          .transform(
+            pruningErrorToCantonError(_).leftMap(
+              SyncServicePurgeDomainError(domain, _): SyncServiceError
+            )
+          )
     } yield ()
 
   /** Reconnect to all configured domains that have autoStart = true */

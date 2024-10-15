@@ -9,10 +9,10 @@ import com.daml.ledger.api.v2.update_service.GetUpdatesResponse
 import com.daml.ledger.resources.ResourceContext
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.util.{LfEngineToApi, TimestampConversion}
+import com.digitalasset.canton.platform.TemplatePartiesFilter
 import com.digitalasset.canton.platform.store.dao.*
 import com.digitalasset.canton.platform.store.entries.{LedgerEntry, PartyLedgerEntry}
 import com.digitalasset.canton.platform.store.utils.EventOps.EventOps
-import com.digitalasset.canton.platform.{ApiOffset, TemplatePartiesFilter}
 import com.digitalasset.daml.lf.data.Ref.Party
 import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.digitalasset.daml.lf.ledger.EventId
@@ -38,7 +38,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
     for {
       (_, tx) <- store(singleCreate)
       result <- ledgerDao.transactionsReader
-        .lookupFlatTransactionById(transactionId = "WRONG", tx.actAs.toSet)
+        .lookupFlatTransactionById(updateId = "WRONG", tx.actAs.toSet)
     } yield {
       result shouldBe None
     }
@@ -48,7 +48,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
     for {
       (_, tx) <- store(singleCreate)
       result <- ledgerDao.transactionsReader
-        .lookupFlatTransactionById(tx.transactionId, Set("WRONG"))
+        .lookupFlatTransactionById(tx.updateId, Set("WRONG"))
     } yield {
       result shouldBe None
     }
@@ -58,20 +58,20 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
     for {
       (offset, tx) <- store(singleCreate)
       result <- ledgerDao.transactionsReader
-        .lookupFlatTransactionById(tx.transactionId, tx.actAs.toSet)
+        .lookupFlatTransactionById(tx.updateId, tx.actAs.toSet)
     } yield {
       inside(result.value.transaction) { case Some(transaction) =>
         transaction.commandId shouldBe tx.commandId.value
-        transaction.offset shouldBe ApiOffset.toApiString(offset)
+        transaction.offset shouldBe offset.toLong
         TimestampConversion.toLf(
           transaction.effectiveAt.value,
           TimestampConversion.ConversionMode.Exact,
         ) shouldBe tx.ledgerEffectiveTime
-        transaction.updateId shouldBe tx.transactionId
+        transaction.updateId shouldBe tx.updateId
         transaction.workflowId shouldBe tx.workflowId.getOrElse("")
         inside(transaction.events.loneElement.event.created) { case Some(created) =>
           inside(tx.transaction.nodes.headOption) { case Some((nodeId, createNode: Node.Create)) =>
-            created.eventId shouldBe EventId(tx.transactionId, nodeId).toLedgerString
+            created.eventId shouldBe EventId(tx.updateId, nodeId).toLedgerString
             created.witnessParties should contain only (tx.actAs*)
             created.contractKey shouldBe None
             created.createArguments shouldNot be(None)
@@ -91,12 +91,12 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       (_, create) <- store(singleCreate)
       (offset, exercise) <- store(singleExercise(nonTransient(create).loneElement))
       result <- ledgerDao.transactionsReader
-        .lookupFlatTransactionById(exercise.transactionId, exercise.actAs.toSet)
+        .lookupFlatTransactionById(exercise.updateId, exercise.actAs.toSet)
     } yield {
       inside(result.value.transaction) { case Some(transaction) =>
         transaction.commandId shouldBe exercise.commandId.value
-        transaction.offset shouldBe ApiOffset.toApiString(offset)
-        transaction.updateId shouldBe exercise.transactionId
+        transaction.offset shouldBe offset.toLong
+        transaction.updateId shouldBe exercise.updateId
         TimestampConversion.toLf(
           transaction.effectiveAt.value,
           TimestampConversion.ConversionMode.Exact,
@@ -123,13 +123,13 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       (_, tx) <- store(singleCreate(createNode(_, signatories, stakeholders), actAs))
       // Response 1: querying as all submitters
       result1 <- ledgerDao.transactionsReader
-        .lookupFlatTransactionById(tx.transactionId, Set(alice, bob, david))
+        .lookupFlatTransactionById(tx.updateId, Set(alice, bob, david))
       // Response 2: querying as a proper subset of all submitters
       result2 <- ledgerDao.transactionsReader
-        .lookupFlatTransactionById(tx.transactionId, Set(alice, david))
+        .lookupFlatTransactionById(tx.updateId, Set(alice, david))
       // Response 3: querying as a proper superset of all submitters
       result3 <- ledgerDao.transactionsReader
-        .lookupFlatTransactionById(tx.transactionId, Set(alice, bob, charlie, david))
+        .lookupFlatTransactionById(tx.updateId, Set(alice, bob, charlie, david))
     } yield {
       result1.value.transaction.value.commandId shouldBe tx.commandId.value
       result2.value.transaction.value.commandId shouldBe tx.commandId.value
@@ -144,7 +144,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
     for {
       (_, tx) <- store(singleCreate(createNode(_, signatories, stakeholders), actAs))
       result <- ledgerDao.transactionsReader
-        .lookupFlatTransactionById(tx.transactionId, Set(charlie))
+        .lookupFlatTransactionById(tx.updateId, Set(charlie))
     } yield {
       result.value.transaction.value.commandId shouldBe ""
     }
@@ -154,12 +154,12 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
     for {
       (offset, tx) <- store(fullyTransient())
       result <- ledgerDao.transactionsReader
-        .lookupFlatTransactionById(tx.transactionId, tx.actAs.toSet)
+        .lookupFlatTransactionById(tx.updateId, tx.actAs.toSet)
     } yield {
       inside(result.value.transaction) { case Some(transaction) =>
         transaction.commandId shouldBe tx.commandId.value
-        transaction.offset shouldBe ApiOffset.toApiString(offset)
-        transaction.updateId shouldBe tx.transactionId
+        transaction.offset shouldBe offset.toLong
+        transaction.updateId shouldBe tx.updateId
         TimestampConversion.toLf(
           transaction.effectiveAt.value,
           TimestampConversion.ConversionMode.Exact,
@@ -480,8 +480,8 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       val txs = extractAllTransactions(result)
 
       inside(txs) { case Vector(tx1, tx2) =>
-        tx1.updateId shouldBe create.transactionId
-        tx2.updateId shouldBe exercise.transactionId
+        tx1.updateId shouldBe create.updateId
+        tx2.updateId shouldBe exercise.updateId
         inside(tx1.events) { case Seq(Event(Created(createdEvent))) =>
           createdEvent.contractId shouldBe firstContractId.coid
         }
@@ -511,7 +511,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       import com.daml.ledger.api.v2.event.Event.Event.Created
 
       inside(extractAllTransactions(result)) { case Vector(tx) =>
-        tx.updateId shouldBe create2.transactionId
+        tx.updateId shouldBe create2.updateId
         inside(tx.events) { case Seq(Event(Created(createdEvent))) =>
           createdEvent.contractId shouldBe nonTransient(create2).loneElement.coid
         }
@@ -593,9 +593,9 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
 
       readTxs = extractAllTransactions(response)
     } yield {
-      val readTxOffsets: Vector[String] = readTxs.map(_.offset)
+      val readTxOffsets: Vector[Long] = readTxs.map(_.offset)
       readTxOffsets shouldBe readTxOffsets.sorted
-      readTxOffsets shouldBe commandsWithOffsetGaps.map(_._1.toHexString)
+      readTxOffsets shouldBe commandsWithOffsetGaps.map(_._1.toLong)
     }
   }
 
@@ -627,7 +627,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
           from <- ledgerDao.lookupLedgerEnd()
           commands <- storeSync(boolSeq map (if (_) cp.makeMatching() else cp.makeNonMatching()))
           matchingOffsets = commands zip boolSeq collect { case ((off, _), true) =>
-            off.toHexString
+            off.toLong
           }
           to <- ledgerDao.lookupLedgerEnd()
           response <- ledgerDao.transactionsReader
@@ -691,7 +691,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       .sequence(
         transactions.map(tx =>
           ledgerDao.transactionsReader
-            .lookupFlatTransactionById(tx.transactionId, as)
+            .lookupFlatTransactionById(tx.updateId, as)
         )
       )
       .map(_.flatMap(_.toList.flatMap(_.transaction.toList)))

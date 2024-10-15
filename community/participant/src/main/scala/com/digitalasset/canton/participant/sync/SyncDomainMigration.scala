@@ -8,6 +8,7 @@ import cats.syntax.bifunctor.*
 import cats.syntax.foldable.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation}
 import com.daml.nameof.NameOf.functionFullName
+import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -32,7 +33,6 @@ import com.digitalasset.canton.sequencing.SequencerConnectionValidation
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.{DomainAlias, SequencerCounter}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -141,24 +141,19 @@ class SyncDomainMigration(
     SequencerInfoLoader.SequencerAggregatedInfo,
   ] =
     for {
-      targetDomainInfo <- performUnlessClosingEitherU(functionFullName)(
+      targetDomainInfo <- performUnlessClosingEitherUSF(functionFullName)(
         sequencerInfoLoader
           .loadAndAggregateSequencerEndpoints(
             target.domain,
             target.domainId,
             target.sequencerConnections,
             SequencerConnectionValidation.Active,
-          )(
-            traceContext,
-            CloseContext(this),
-          )
-          .leftMap(DomainRegistryError.fromSequencerInfoLoaderError)
-          .leftMap[SyncServiceError](err =>
-            SyncServiceError.SyncServiceFailedDomainConnection(
-              target.domain,
-              DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(err.cause),
-            )
-          )
+          )(traceContext, CloseContext(this))
+          .leftMap[SyncServiceError] { err =>
+            val error = DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer
+              .Error(DomainRegistryError.fromSequencerInfoLoaderError(err).cause)
+            SyncServiceError.SyncServiceFailedDomainConnection(target.domain, error)
+          }
       )
       _ <- performUnlessClosingEitherU(functionFullName)(
         aliasManager
@@ -260,27 +255,6 @@ class SyncDomainMigration(
       )
     } yield ()
   }
-
-  /*
-  This method lives here because it should be called only for a deactivated domain,
-  which happens only as part of the hard domain migration.
-  Moreover, we want this to be available in community, so it cannot be implemented in
-  the pruning processor.
-   */
-  def pruneSelectedDeactivatedDomainStores(
-      domainId: DomainId
-  )(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] =
-    performUnlessClosingF("pruneSelectedDeactivatedDomainStores") {
-      logger.info(
-        s"About to prune deactivated sync domain $domainId sequenced event store'"
-      )
-
-      repair.domainLookup
-        .persistentStateFor(domainId)
-        .fold(Future.unit)(_.sequencedEventStore.delete(SequencerCounter.Genesis))
-    }
 
   private def updateDomainStatus(
       alias: DomainAlias,

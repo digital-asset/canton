@@ -12,6 +12,7 @@ import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFact
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
+  Entry,
   RawAssignEvent,
   RawUnassignEvent,
 }
@@ -182,48 +183,48 @@ class ReassignmentStreamReader(
 
     payloadsAssign
       .mergeSorted(payloadsUnassign)(Ordering.by(_.offset))
-      .map(response => ApiOffset.assertFromString(response.offset) -> response)
+      .map(response => Offset.fromLong(response.offset) -> response)
   }
 
-  private def toApiUnassigned(rawUnassignEvent: RawUnassignEvent): Future[Reassignment] =
+  private def toApiUnassigned(rawUnassignEntry: Entry[RawUnassignEvent]): Future[Reassignment] =
     Timed.future(
       future = Future {
         Reassignment(
-          updateId = rawUnassignEvent.updateId,
-          commandId = rawUnassignEvent.commandId.getOrElse(""),
-          workflowId = rawUnassignEvent.workflowId.getOrElse(""),
-          offset = rawUnassignEvent.offset,
+          updateId = rawUnassignEntry.updateId,
+          commandId = rawUnassignEntry.commandId.getOrElse(""),
+          workflowId = rawUnassignEntry.workflowId.getOrElse(""),
+          offset = ApiOffset.assertFromStringToLong(rawUnassignEntry.offset),
           event = Reassignment.Event.UnassignedEvent(
-            TransactionsReader.toUnassignedEvent(rawUnassignEvent)
+            TransactionsReader.toUnassignedEvent(rawUnassignEntry.event)
           ),
-          recordTime = Some(TimestampConversion.fromLf(rawUnassignEvent.recordTime)),
+          recordTime = Some(TimestampConversion.fromLf(rawUnassignEntry.recordTime)),
         )
       },
       timer = dbMetrics.reassignmentStream.translationTimer,
     )
 
   private def toApiAssigned(eventProjectionProperties: EventProjectionProperties)(
-      rawAssignEvent: RawAssignEvent
+      rawAssignEntry: Entry[RawAssignEvent]
   )(implicit lc: LoggingContextWithTrace): Future[Reassignment] =
     Timed.future(
       future = Future.delegate(
-        TransactionsReader
-          .deserializeRawCreatedEvent(lfValueTranslation, eventProjectionProperties)(
-            rawAssignEvent.rawCreatedEvent
+        lfValueTranslation
+          .deserializeRaw(eventProjectionProperties)(
+            rawAssignEntry.event.rawCreatedEvent
           )
           .map(createdEvent =>
             Reassignment(
-              updateId = rawAssignEvent.rawCreatedEvent.updateId,
-              commandId = rawAssignEvent.commandId.getOrElse(""),
-              workflowId = rawAssignEvent.workflowId.getOrElse(""),
-              offset = rawAssignEvent.offset,
+              updateId = rawAssignEntry.updateId,
+              commandId = rawAssignEntry.commandId.getOrElse(""),
+              workflowId = rawAssignEntry.workflowId.getOrElse(""),
+              offset = ApiOffset.assertFromStringToLong(rawAssignEntry.offset),
               event = Reassignment.Event.AssignedEvent(
                 TransactionsReader.toAssignedEvent(
-                  rawAssignEvent,
+                  rawAssignEntry.event,
                   createdEvent,
                 )
               ),
-              recordTime = Some(TimestampConversion.fromLf(rawAssignEvent.recordTime)),
+              recordTime = Some(TimestampConversion.fromLf(rawAssignEntry.recordTime)),
             )
           )
       ),

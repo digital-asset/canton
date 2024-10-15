@@ -28,16 +28,16 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
-import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.*
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.*
-import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
+import scala.concurrent.{ExecutionContext, ExecutionContextExecutor}
 
 trait ParticipantTopologyDispatcherHandle {
 
@@ -353,7 +353,6 @@ private class DomainOnboardingOutbox(
       s"Sending ${initialTransactions.size} onboarding transactions to $domain"
     )
     _result <- dispatch(initialTransactions)
-      .mapK(FutureUnlessShutdown.outcomeK)
       .leftMap(err =>
         DomainRegistryError.InitialOnboardingError.Error(err.toString): DomainRegistryError
       )
@@ -384,9 +383,9 @@ private class DomainOnboardingOutbox(
       }
     } yield convertedTxs
 
-  private def dispatch(
-      transactions: Seq[GenericSignedTopologyTransaction]
-  )(implicit traceContext: TraceContext): EitherT[Future, SequencerConnectClient.Error, Unit] =
+  private def dispatch(transactions: Seq[GenericSignedTopologyTransaction])(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SequencerConnectClient.Error, Unit] =
     sequencerConnectClient.registerOnboardingTopologyTransactions(
       domain,
       participantId,

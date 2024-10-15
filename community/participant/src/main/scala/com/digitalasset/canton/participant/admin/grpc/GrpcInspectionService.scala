@@ -8,8 +8,8 @@ import cats.implicits.{toBifunctorOps, toTraverseOps}
 import cats.syntax.either.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.admin.participant.v30.InspectionServiceGrpc.InspectionService
 import com.digitalasset.canton.admin.participant.v30.*
+import com.digitalasset.canton.admin.participant.v30.InspectionServiceGrpc.InspectionService
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.error.CantonError
@@ -359,16 +359,14 @@ class GrpcInspectionService(
         // given timestamp.
         domainParamsF <- EitherTUtil
           .fromFuture(
-            FutureUnlessShutdown.outcomeF(
-              DomainParametersLookup
-                .forAcsCommitmentDomainParameters(
-                  pv,
-                  topologySnapshot,
-                  futureSupervisor,
-                  loggerFactory,
-                )
-                .get(cantonTickTs, false)
-            ),
+            DomainParametersLookup
+              .forAcsCommitmentDomainParameters(
+                pv,
+                topologySnapshot,
+                futureSupervisor,
+                loggerFactory,
+              )
+              .get(cantonTickTs, false),
             err => InspectionServiceError.InternalServerError.Error(err.toString),
           )
           .leftWiden[CantonError]

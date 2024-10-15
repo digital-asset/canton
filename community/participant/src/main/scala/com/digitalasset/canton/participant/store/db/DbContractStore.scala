@@ -16,8 +16,8 @@ import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.participant.store.*
-import com.digitalasset.canton.protocol.SerializableContract.LedgerCreateTime
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.protocol.SerializableContract.LedgerCreateTime
 import com.digitalasset.canton.resource.DbStorage.{DbAction, SQLActionBuilderChain}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.IndexedDomain
@@ -438,6 +438,16 @@ class DbContractStore(
     storage.update_(query, functionFullName)
   }
     .thereafter(_ => cache.synchronous().invalidateAll())
+
+  override def purge()(implicit
+      traceContext: TraceContext
+  ): Future[Unit] =
+    storage
+      .update_(
+        sqlu"""delete from par_contracts where domain_idx = $indexedDomain""",
+        functionFullName,
+      )
+      .thereafter(_ => cache.synchronous().invalidateAll())
 
   override def lookupStakeholders(ids: Set[LfContractId])(implicit
       traceContext: TraceContext

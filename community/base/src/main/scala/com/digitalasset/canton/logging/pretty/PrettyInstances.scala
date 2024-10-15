@@ -214,8 +214,8 @@ trait PrettyInstances {
       lfContractId.toString
   }
 
-  implicit def prettyLfTransactionVersion: Pretty[LfTransactionVersion] = prettyOfString(
-    _.protoValue
+  implicit def prettyLfLanguageVersion: Pretty[LfLanguageVersion] = prettyOfString(
+    _.pretty
   )
 
   implicit def prettyLfVersioned[A: Pretty]: Pretty[LfVersioned[A]] =

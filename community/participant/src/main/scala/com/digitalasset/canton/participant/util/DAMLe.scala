@@ -17,8 +17,8 @@ import com.digitalasset.canton.participant.util.DAMLe.{
   PackageResolver,
 }
 import com.digitalasset.canton.platform.apiserver.configuration.EngineLoggingConfig
-import com.digitalasset.canton.protocol.SerializableContract.LedgerCreateTime
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.protocol.SerializableContract.LedgerCreateTime
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{LfCommand, LfCreateCommand, LfKeyResolver, LfPartyId, LfVersioned}
@@ -30,11 +30,7 @@ import com.digitalasset.daml.lf.interpretation.Error as LfInterpretationError
 import com.digitalasset.daml.lf.language.Ast.Package
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.language.LanguageVersion.v2_dev
-import com.digitalasset.daml.lf.transaction.{
-  ContractKeyUniquenessMode,
-  TransactionVersion,
-  Versioned,
-}
+import com.digitalasset.daml.lf.transaction.{ContractKeyUniquenessMode, Versioned}
 
 import java.nio.file.Path
 import scala.annotation.tailrec
@@ -399,7 +395,7 @@ class DAMLe(
             case Right(result) => handleResultInternal(contracts, result)
           }
         case ResultNeedUpgradeVerification(coid, signatories, observers, keyOpt, resume) =>
-          val unusedTxVersion = TransactionVersion.StableVersions.max
+          val unusedTxVersion = LfLanguageVersion.StableVersions(LfLanguageVersion.Major.V2).max
           val metadata = ContractMetadata.tryCreate(
             signatories = signatories,
             stakeholders = signatories ++ observers,

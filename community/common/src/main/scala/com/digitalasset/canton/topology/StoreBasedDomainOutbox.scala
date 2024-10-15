@@ -315,6 +315,7 @@ class StoreBasedDomainOutbox(
           dispatched = newWatermark,
         )
       }.discard
+      logger.debug(s"Updating dispatching watermark to $newWatermark")
       performUnlessClosingF(functionFullName)(targetStore.updateDispatchingWatermark(newWatermark))
     } else {
       FutureUnlessShutdown.unit
@@ -350,8 +351,8 @@ class StoreBasedDomainOutbox(
     authorizedStore.maxTimestamp(CantonTimestamp.MaxValue, includeRejected = true)
 
   override protected def onClosed(): Unit = {
-    maybeObserverCloseable.foreach(_.close())
-    Lifecycle.close(handle)(logger)
+    val closeables = maybeObserverCloseable.toList ++ List(handle)
+    Lifecycle.close(closeables*)(logger)
     super.onClosed()
   }
 }

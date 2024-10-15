@@ -14,8 +14,8 @@ import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data.*
+import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.ledger.participant.state.*
@@ -35,6 +35,7 @@ import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
   NoMediatorError,
 }
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps.*
+import com.digitalasset.canton.participant.protocol.TransactionProcessor.*
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors.{
   ContractAuthenticationFailed,
   DomainWithoutMediatorError,
@@ -42,12 +43,12 @@ import com.digitalasset.canton.participant.protocol.TransactionProcessor.Submiss
   SubmissionDuringShutdown,
   SubmissionInternalError,
 }
-import com.digitalasset.canton.participant.protocol.TransactionProcessor.*
 import com.digitalasset.canton.participant.protocol.conflictdetection.{
   ActivenessResult,
   ActivenessSet,
   CommitSet,
 }
+import com.digitalasset.canton.participant.protocol.submission.*
 import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicator.DeduplicationFailed
 import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker.{
   SubmissionAlreadyInFlight,
@@ -60,7 +61,7 @@ import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFa
   SerializableContractOfId,
   UnknownPackageError,
 }
-import com.digitalasset.canton.participant.protocol.submission.*
+import com.digitalasset.canton.participant.protocol.validation.*
 import com.digitalasset.canton.participant.protocol.validation.ContractConsistencyChecker.ReferenceToFutureContractError
 import com.digitalasset.canton.participant.protocol.validation.InternalConsistencyChecker.{
   ErrorWithInternalConsistencyCheck,
@@ -68,18 +69,17 @@ import com.digitalasset.canton.participant.protocol.validation.InternalConsisten
 }
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.ErrorWithSubTransaction
 import com.digitalasset.canton.participant.protocol.validation.TimeValidator.TimeCheckFailure
-import com.digitalasset.canton.participant.protocol.validation.*
 import com.digitalasset.canton.participant.store.*
-import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.sync.*
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.{
   WithSuffixesAndMerged,
   WithoutSuffixes,
 }
-import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessage.computeRandomnessLength
 import com.digitalasset.canton.protocol.messages.*
+import com.digitalasset.canton.protocol.messages.EncryptedViewMessage.computeRandomnessLength
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.*
@@ -89,7 +89,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{ErrorUtil, LfTransactionUtil}
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, LfTransactionUtil}
 import com.digitalasset.canton.{
   LedgerSubmissionId,
   LfKeyResolver,
@@ -1314,7 +1314,7 @@ class TransactionProcessingSteps(
             optByKeyNodes = None, // optByKeyNodes is unused by the indexer
           ),
           transaction = LfCommittedTransaction(lfTx.unwrap),
-          transactionId = lfTxId,
+          updateId = lfTxId,
           recordTime = requestTime.toLf,
           hostedWitnesses = hostedWitnesses.toList,
           contractMetadata = contractMetadata,
@@ -1505,9 +1505,8 @@ class TransactionProcessingSteps(
     for {
       topologySnapshot <- EitherT
         .right[TransactionProcessorError](
-          crypto.ips.awaitSnapshot(pendingRequestData.requestTime)
+          crypto.ips.awaitSnapshotUS(pendingRequestData.requestTime)
         )
-        .mapK(FutureUnlessShutdown.outcomeK)
 
       maxDecisionTime <- ProcessingSteps
         .getDecisionTime(topologySnapshot, pendingRequestData.requestTime)
@@ -1562,6 +1561,10 @@ class TransactionProcessingSteps(
       err: ProtocolProcessor.ResultProcessingError
   ): TransactionProcessorError =
     GenericStepsError(err)
+
+  override def handleTimeout(parsedRequest: ParsedTransactionRequest)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TransactionProcessorError, Unit] = EitherTUtil.unitUS
 }
 
 object TransactionProcessingSteps {

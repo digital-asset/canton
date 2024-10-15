@@ -225,11 +225,11 @@ private[backend] trait StorageBackendTestsInitializeIngestion
           val assignedEvents =
             executeSql(
               backend.event.assignEventBatch(1L to 100L, Some(Set.empty))
-            ).map(_.rawCreatedEvent.contractId)
+            ).map(_.event.rawCreatedEvent.contractId)
           val unassignedEvents =
             executeSql(
               backend.event.unassignEventBatch(1L to 100L, Some(Set.empty))
-            ).map(_.contractId)
+            ).map(_.event.contractId)
           contractsCreated.get(hashCid("#101")) should not be empty
           contractsCreated.get(hashCid("#201")) should not be empty
           contractsArchived.get(hashCid("#101")) shouldBe empty
@@ -243,7 +243,7 @@ private[backend] trait StorageBackendTestsInitializeIngestion
             _.coid
           ) // not constrained by ledger end
           fetchIdsFromTransactionMeta(allDtos.collect { case meta: DbDto.TransactionMeta =>
-            meta.transaction_id
+            meta.update_id
           }) shouldBe Set((1, 1), (2, 4))
           fetchIdsCreateStakeholder() shouldBe List(
             1L,
@@ -275,11 +275,11 @@ private[backend] trait StorageBackendTestsInitializeIngestion
           val assignedEvents =
             executeSql(
               backend.event.assignEventBatch(1L to 100L, Some(Set.empty))
-            ).map(_.rawCreatedEvent.contractId)
+            ).map(_.event.rawCreatedEvent.contractId)
           val unassignedEvents =
             executeSql(
               backend.event.unassignEventBatch(1L to 100L, Some(Set.empty))
-            ).map(_.contractId)
+            ).map(_.event.contractId)
           contractsCreated.get(hashCid("#101")) should not be empty
           contractsCreated.get(hashCid("#201")) shouldBe empty
           contractsArchived.get(hashCid("#101")) shouldBe empty
@@ -291,7 +291,7 @@ private[backend] trait StorageBackendTestsInitializeIngestion
             _.coid
           ) // not constrained by ledger end
           fetchIdsFromTransactionMeta(allDtos.collect { case meta: DbDto.TransactionMeta =>
-            meta.transaction_id
+            meta.update_id
           }) shouldBe Set((1, 1), (2, 4))
           fetchIdsCreateStakeholder() shouldBe List(1L)
           fetchIdsCreateNonStakeholder() shouldBe List(1L)
@@ -323,18 +323,18 @@ private[backend] trait StorageBackendTestsInitializeIngestion
           val assignedEvents =
             executeSql(
               backend.event.assignEventBatch(1L to 100L, Some(Set.empty))
-            ).map(_.rawCreatedEvent.contractId)
+            ).map(_.event.rawCreatedEvent.contractId)
           val unassignedEvents =
             executeSql(
               backend.event.unassignEventBatch(1L to 100L, Some(Set.empty))
-            ).map(_.contractId)
+            ).map(_.event.contractId)
           contractsCreated.get(hashCid("#101")) shouldBe None
           contractsAssigned.get(hashCid("#103")) shouldBe empty
           contractsAssigned.get(hashCid("#203")) shouldBe empty
           assignedEvents shouldBe empty
           unassignedEvents shouldBe empty
           fetchIdsFromTransactionMeta(dtos.collect { case meta: DbDto.TransactionMeta =>
-            meta.transaction_id
+            meta.update_id
           }) shouldBe empty
           fetchIdsCreateStakeholder() shouldBe empty
           fetchIdsCreateNonStakeholder() shouldBe empty
@@ -421,12 +421,12 @@ private[backend] trait StorageBackendTestsInitializeIngestion
       )
     )
 
-  private def fetchIdsFromTransactionMeta(transactionIds: Seq[String]): Set[(Long, Long)] = {
+  private def fetchIdsFromTransactionMeta(udpateIds: Seq[String]): Set[(Long, Long)] = {
     val txPointwiseQueries = backend.event.transactionPointwiseQueries
-    transactionIds
+    udpateIds
       .map(Ref.TransactionId.assertFromString)
-      .map { transactionId =>
-        executeSql(txPointwiseQueries.fetchIdsFromTransactionMeta(transactionId))
+      .map { updateId =>
+        executeSql(txPointwiseQueries.fetchIdsFromTransactionMeta(updateId))
       }
       .flatMap(_.toList)
       .toSet

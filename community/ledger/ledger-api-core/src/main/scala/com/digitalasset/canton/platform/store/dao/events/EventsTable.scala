@@ -45,11 +45,11 @@ object EventsTable {
         if (flatEvents.nonEmpty || first.commandId.nonEmpty)
           Some(
             ApiTransaction(
-              updateId = first.transactionId,
-              commandId = first.commandId,
+              updateId = first.updateId,
+              commandId = first.commandId.getOrElse(""),
               effectiveAt = Some(TimestampConversion.fromLf(first.ledgerEffectiveTime)),
-              workflowId = first.workflowId,
-              offset = ApiOffset.toApiString(first.eventOffset),
+              workflowId = first.workflowId.getOrElse(""),
+              offset = ApiOffset.assertFromStringToLong(first.offset),
               events = flatEvents,
               domainId = first.domainId,
               traceContext = extractTraceContext(events),
@@ -61,7 +61,7 @@ object EventsTable {
 
     def toGetTransactionsResponse(
         events: Vector[Entry[Event]]
-    ): List[(String, GetUpdatesResponse)] =
+    ): List[(Long, GetUpdatesResponse)] =
       flatTransaction(events).toList.map(tx =>
         tx.offset -> GetUpdatesResponse(GetUpdatesResponse.Update.Transaction(tx))
           .withPrecomputedSerializedSize()
@@ -106,11 +106,11 @@ object EventsTable {
       events.headOption.map { first =>
         val (eventsById, rootEventIds, traceContext) = treeOf(events)
         ApiTransactionTree(
-          updateId = first.transactionId,
-          commandId = first.commandId,
-          workflowId = first.workflowId,
+          updateId = first.updateId,
+          commandId = first.commandId.getOrElse(""),
+          workflowId = first.workflowId.getOrElse(""),
           effectiveAt = Some(TimestampConversion.fromLf(first.ledgerEffectiveTime)),
-          offset = ApiOffset.toApiString(first.eventOffset),
+          offset = ApiOffset.assertFromStringToLong(first.offset),
           eventsById = eventsById,
           rootEventIds = rootEventIds,
           domainId = first.domainId,
@@ -121,7 +121,7 @@ object EventsTable {
 
     def toGetTransactionTreesResponse(
         events: Vector[Entry[TreeEvent]]
-    ): List[(String, GetUpdateTreesResponse)] =
+    ): List[(Long, GetUpdateTreesResponse)] =
       transactionTree(events).toList.map(tx =>
         tx.offset -> GetUpdateTreesResponse(GetUpdateTreesResponse.Update.TransactionTree(tx))
           .withPrecomputedSerializedSize()

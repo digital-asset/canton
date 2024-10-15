@@ -11,6 +11,7 @@ import com.digitalasset.canton.admin.participant.v30.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp.fromProtoPrimitive
 import com.digitalasset.canton.data.{CantonTimestamp, RepairContract}
+import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
@@ -95,7 +96,7 @@ final class GrpcParticipantRepairService(
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val gzipOut = new GZIPOutputStream(out)
     val res = for {
-      validRequest <- EitherT.fromEither[Future](
+      validRequest <- EitherT.fromEither[FutureUnlessShutdown](
         ValidExportAcsRequest(request, sync.stateInspection.allProtocolVersions)
       )
       timestampAsString = validRequest.timestamp.fold("head")(ts => s"at $ts")
@@ -103,7 +104,7 @@ final class GrpcParticipantRepairService(
         s"Exporting active contract set ($timestampAsString) for parties ${validRequest.parties}"
       )
       _ <- ResourceUtil
-        .withResourceEitherT(gzipOut)(
+        .withResourceM(gzipOut)(
           sync.stateInspection
             .exportAcsDumpActiveContracts(
               _,
@@ -118,7 +119,7 @@ final class GrpcParticipantRepairService(
         .leftMap(RepairServiceError.fromAcsInspectionError(_, logger))
     } yield ()
 
-    mapErrNew(res)
+    mapErrNewEUS(res)
   }
 
   /** New endpoint to upload contracts for a party which uses the versioned ActiveContract
@@ -295,8 +296,6 @@ final class GrpcParticipantRepairService(
         )
     }
 
-  /* Purge specified deactivated sync-domain and selectively prune domain stores.
-   */
   override def purgeDeactivatedDomain(
       request: PurgeDeactivatedDomainRequest
   ): Future[PurgeDeactivatedDomainResponse] = TraceContext.withNewTraceContext {
@@ -308,8 +307,7 @@ final class GrpcParticipantRepairService(
             .leftMap(_.toString)
             .leftMap(RepairServiceError.InvalidArgument.Error(_))
         )
-        _ <- sync.purgeDeactivatedDomain(domainAlias)
-
+        _ <- sync.purgeDeactivatedDomain(domainAlias).leftWiden[CantonError]
       } yield ()
 
       EitherTUtil

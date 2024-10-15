@@ -7,7 +7,6 @@ import com.digitalasset.canton.http.json.v2.damldefinitionsservice.DamlDefinitio
 import com.digitalasset.canton.http.json.v2.damldefinitionsservice.Schema.{AllTemplatesResponse, TemplateDefinition, TypeSig}
 import com.digitalasset.canton.http.json.v2.damldefinitionsservice.Schema.Codecs.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import sttp.tapir.generic.auto.*
 import sttp.tapir.path
 
 import scala.concurrent.Future
@@ -16,9 +15,9 @@ class JsDamlDefinitionsService(
     damlDefinitionsView: DamlDefinitionsView,
     val loggerFactory: NamedLoggerFactory,
 ) extends Endpoints {
-  private val definitions = v2Endpoint.in("definitions")
-  private val packageDefinitions = definitions.in("packages")
-  private val templateDefinitions = definitions.in("templates")
+  private val definitions = v2Endpoint.in(sttp.tapir.stringToPath("definitions"))
+  private val packageDefinitions = definitions.in(sttp.tapir.stringToPath("packages"))
+  private val templateDefinitions = definitions.in(sttp.tapir.stringToPath("templates"))
   private val packageSignatureSelectorPath = "package-signature"
   private val templateSelectorPath = "template-id"
 

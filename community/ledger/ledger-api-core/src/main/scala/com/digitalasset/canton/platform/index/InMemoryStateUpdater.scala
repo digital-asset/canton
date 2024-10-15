@@ -24,7 +24,6 @@ import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.platform.{Contract, InMemoryState, Key, Party}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.daml.lf.data.Ref.HexString
 import com.digitalasset.daml.lf.ledger.EventId
 import com.digitalasset.daml.lf.transaction.Node.{Create, Exercise}
 import com.digitalasset.daml.lf.transaction.NodeId
@@ -392,10 +391,10 @@ private[platform] object InMemoryStateUpdater {
       case (nodeId, create: Create) =>
         TransactionLogUpdate.CreatedEvent(
           eventOffset = offset,
-          transactionId = txAccepted.transactionId,
+          updateId = txAccepted.updateId,
           nodeIndex = nodeId.index,
           eventSequentialId = 0L,
-          eventId = EventId(txAccepted.transactionId, nodeId),
+          eventId = EventId(txAccepted.updateId, nodeId),
           contractId = create.coid,
           ledgerEffectiveTime = txAccepted.transactionMeta.ledgerEffectiveTime,
           templateId = create.templateId,
@@ -423,10 +422,10 @@ private[platform] object InMemoryStateUpdater {
       case (nodeId, exercise: Exercise) =>
         TransactionLogUpdate.ExercisedEvent(
           eventOffset = offset,
-          transactionId = txAccepted.transactionId,
+          updateId = txAccepted.updateId,
           nodeIndex = nodeId.index,
           eventSequentialId = 0L,
-          eventId = EventId(txAccepted.transactionId, nodeId),
+          eventId = EventId(txAccepted.updateId, nodeId),
           contractId = exercise.targetCoid,
           ledgerEffectiveTime = txAccepted.transactionMeta.ledgerEffectiveTime,
           templateId = exercise.templateId,
@@ -444,7 +443,7 @@ private[platform] object InMemoryStateUpdater {
           choice = exercise.choiceId,
           actingParties = exercise.actingParties,
           children = exercise.children.iterator
-            .map(EventId(txAccepted.transactionId, _).toLedgerString)
+            .map(EventId(txAccepted.updateId, _).toLedgerString)
             .toSeq,
           exerciseArgument = exercise.versionedChosenValue,
           exerciseResult = exercise.versionedExerciseResult,
@@ -463,7 +462,7 @@ private[platform] object InMemoryStateUpdater {
           recordTime = txAccepted.recordTime,
           offset = offset,
           commandId = completionInfo.commandId,
-          transactionId = txAccepted.transactionId,
+          updateId = txAccepted.updateId,
           applicationId = completionInfo.applicationId,
           optSubmissionId = completionInfo.submissionId,
           optDeduplicationOffset = deduplicationOffset,
@@ -475,7 +474,7 @@ private[platform] object InMemoryStateUpdater {
       }
 
     TransactionLogUpdate.TransactionAccepted(
-      transactionId = txAccepted.transactionId,
+      updateId = txAccepted.updateId,
       commandId = txAccepted.completionInfoO.map(_.commandId).getOrElse(""),
       workflowId = txAccepted.transactionMeta.workflowId.getOrElse(""),
       effectiveAt = txAccepted.transactionMeta.ledgerEffectiveTime,
@@ -529,7 +528,7 @@ private[platform] object InMemoryStateUpdater {
           recordTime = u.recordTime,
           offset = offset,
           commandId = completionInfo.commandId,
-          transactionId = u.updateId,
+          updateId = u.updateId,
           applicationId = completionInfo.applicationId,
           optSubmissionId = completionInfo.submissionId,
           optDeduplicationOffset = deduplicationOffset,
@@ -558,7 +557,7 @@ private[platform] object InMemoryStateUpdater {
           TransactionLogUpdate.ReassignmentAccepted.Assigned(
             TransactionLogUpdate.CreatedEvent(
               eventOffset = offset,
-              transactionId = u.updateId,
+              updateId = u.updateId,
               nodeIndex = 0, // set 0 for assign-created
               eventSequentialId = 0L,
               eventId = EventId(u.updateId, NodeId(0)), // set 0 for assign-created
@@ -595,11 +594,11 @@ private[platform] object InMemoryStateUpdater {
 
   private def deduplicationInfo(
       completionInfo: CompletionInfo
-  ): (Option[HexString], Option[Long], Option[Int]) =
+  ): (Option[Long], Option[Long], Option[Int]) =
     completionInfo.optDeduplicationPeriod
       .map {
         case DeduplicationOffset(offset) =>
-          (Some(offset.toHexString), None, None)
+          (Some(offset.toLong), None, None)
         case DeduplicationDuration(duration) =>
           (None, Some(duration.getSeconds), Some(duration.getNano))
       }
