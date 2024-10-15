@@ -19,10 +19,10 @@ object Dependencies {
   lazy val scala_version = "2.13.11"
   lazy val scala_version_short = "2.13"
 
-  lazy val pekko_version = "1.0.1"
+  lazy val pekko_version = "1.0.3"
   // TODO(#10617) We have cloned pekko's BroadcastHub implementation in community/lib/pekko/src/main/scala/pekko/stream/scaladsl/BroadcastHub.scala
   //  When updating pekko, make sure to update the clone as well, including the tests in community/lib/pekko/src/main/scala/pekko
-  lazy val pekko_http_version = "1.0.0"
+  lazy val pekko_http_version = "1.0.1"
   lazy val ammonite_version = "2.5.9"
   lazy val awaitility_version = "4.2.0"
   lazy val aws_version = "2.22.3"
@@ -54,9 +54,9 @@ object Dependencies {
   lazy val monocle_version = "3.2.0"
   // pick the version of boring ssl and netty native from this table: https://github.com/grpc/grpc-java/blob/master/SECURITY.md#netty
   // required for ALPN (which is required for TLS+HTTP/2) when running on Java 8. JSSE will be used on Java 9+.
-  lazy val grpc_version = "1.60.0"
-  lazy val netty_boring_ssl_version = "2.0.61.Final"
-  lazy val netty_version = "4.1.108.Final"
+  lazy val grpc_version = "1.65.1"
+  lazy val netty_boring_ssl_version = "2.0.66.Final"
+  lazy val netty_version = "4.1.100.Final"
   lazy val opentelemetry_instrumentation_grpc_version = s"$opentelemetry_version-alpha"
   lazy val opentelemetry_instrumentation_runtime_metrics_version = s"$opentelemetry_version-alpha"
   lazy val opentelemetry_proto_version = "1.7.1-alpha"
