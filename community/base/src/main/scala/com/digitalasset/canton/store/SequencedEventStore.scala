@@ -24,8 +24,8 @@ import com.digitalasset.canton.sequencing.{
 }
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.store.SequencedEventStore.PossiblyIgnoredSequencedEvent.dbTypeOfEvent
 import com.digitalasset.canton.store.SequencedEventStore.*
+import com.digitalasset.canton.store.SequencedEventStore.PossiblyIgnoredSequencedEvent.dbTypeOfEvent
 import com.digitalasset.canton.store.db.DbSequencedEventStore
 import com.digitalasset.canton.store.db.DbSequencedEventStore.SequencedEventDbType
 import com.digitalasset.canton.store.memory.InMemorySequencedEventStore
@@ -94,9 +94,13 @@ trait SequencedEventStore extends PrunableByTime with NamedLogging with AutoClos
   /** Deletes all events with sequencer counter greater than or equal to `from`.
     */
   @VisibleForTesting
-  private[canton] def delete(from: SequencerCounter)(implicit
+  private[canton] def delete(fromInclusive: SequencerCounter)(implicit
       traceContext: TraceContext
   ): Future[Unit]
+
+  /** Purges all data from the store.
+    */
+  def purge()(implicit traceContext: TraceContext): Future[Unit] = delete(SequencerCounter.Genesis)
 }
 
 object SequencedEventStore {

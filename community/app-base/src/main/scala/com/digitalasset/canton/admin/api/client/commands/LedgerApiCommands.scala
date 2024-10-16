@@ -12,8 +12,8 @@ import com.daml.ledger.api.v2.admin.command_inspection_service.{
   GetCommandStatusRequest,
   GetCommandStatusResponse,
 }
-import com.daml.ledger.api.v2.admin.identity_provider_config_service.IdentityProviderConfigServiceGrpc.IdentityProviderConfigServiceStub
 import com.daml.ledger.api.v2.admin.identity_provider_config_service.*
+import com.daml.ledger.api.v2.admin.identity_provider_config_service.IdentityProviderConfigServiceGrpc.IdentityProviderConfigServiceStub
 import com.daml.ledger.api.v2.admin.metering_report_service.MeteringReportServiceGrpc.MeteringReportServiceStub
 import com.daml.ledger.api.v2.admin.metering_report_service.{
   GetMeteringReportRequest,
@@ -21,12 +21,12 @@ import com.daml.ledger.api.v2.admin.metering_report_service.{
   MeteringReportServiceGrpc,
 }
 import com.daml.ledger.api.v2.admin.object_meta.ObjectMeta
-import com.daml.ledger.api.v2.admin.package_management_service.PackageManagementServiceGrpc.PackageManagementServiceStub
 import com.daml.ledger.api.v2.admin.package_management_service.*
-import com.daml.ledger.api.v2.admin.participant_pruning_service.ParticipantPruningServiceGrpc.ParticipantPruningServiceStub
+import com.daml.ledger.api.v2.admin.package_management_service.PackageManagementServiceGrpc.PackageManagementServiceStub
 import com.daml.ledger.api.v2.admin.participant_pruning_service.*
-import com.daml.ledger.api.v2.admin.party_management_service.PartyManagementServiceGrpc.PartyManagementServiceStub
+import com.daml.ledger.api.v2.admin.participant_pruning_service.ParticipantPruningServiceGrpc.ParticipantPruningServiceStub
 import com.daml.ledger.api.v2.admin.party_management_service.*
+import com.daml.ledger.api.v2.admin.party_management_service.PartyManagementServiceGrpc.PartyManagementServiceStub
 import com.daml.ledger.api.v2.admin.user_management_service.UserManagementServiceGrpc.UserManagementServiceStub
 import com.daml.ledger.api.v2.admin.user_management_service.{
   CreateUserRequest,
@@ -437,7 +437,7 @@ object LedgerApiCommands {
       override def createRequest(): Either[String, PruneRequest] =
         Right(
           PruneRequest(
-            pruneUpTo,
+            ApiOffset.assertFromStringToLong(pruneUpTo),
             // canton always prunes divulged contracts both in the ledger api index-db and in canton stores
             pruneAllDivulgedContracts = true,
           )
@@ -998,6 +998,8 @@ object LedgerApiCommands {
           case u: UpdateService.AssignedWrapper => u.assignedEvent.createdEvent
           case _: UpdateService.UnassignedWrapper => None
         }
+
+      def domainId: String
     }
     object UpdateWrapper {
       def isUnassignedWrapper(wrapper: UpdateWrapper): Boolean = wrapper match {
@@ -1013,11 +1015,12 @@ object LedgerApiCommands {
       override def updateId: String = transaction.updateId
       override def isUnassignment: Boolean = false
 
+      override def domainId: String = transaction.domainId
     }
     sealed trait ReassignmentWrapper extends UpdateTreeWrapper with UpdateWrapper {
       def reassignment: Reassignment
       def unassignId: String = reassignment.getUnassignedEvent.unassignId
-      def offset: String = reassignment.offset
+      def offset: String = ApiOffset.fromLong(reassignment.offset)
     }
     object ReassignmentWrapper {
       def apply(reassignment: Reassignment): ReassignmentWrapper = {
@@ -1038,11 +1041,16 @@ object LedgerApiCommands {
         extends ReassignmentWrapper {
       override def updateId: String = reassignment.updateId
       override def isUnassignment: Boolean = false
+
+      override def domainId: String = assignedEvent.target
     }
     final case class UnassignedWrapper(reassignment: Reassignment, unassignedEvent: UnassignedEvent)
         extends ReassignmentWrapper {
       override def updateId: String = reassignment.updateId
       override def isUnassignment: Boolean = true
+
+      override def domainId: String = unassignedEvent.source
+
     }
 
     trait BaseCommand[Req, Resp, Res] extends GrpcAdminCommand[Req, Resp, Res] {
@@ -1187,7 +1195,7 @@ object LedgerApiCommands {
           )
         case DeduplicationPeriod.DeduplicationOffset(offset) =>
           Commands.DeduplicationPeriod.DeduplicationOffset(
-            offset.toHexString
+            offset.toLong
           )
       },
       minLedgerTimeAbs = minLedgerTimeAbs.map(ProtoConverter.InstantConverter.toProtoPrimitive),
@@ -1232,9 +1240,13 @@ object LedgerApiCommands {
         override val packageIdSelectionPreference: Seq[LfPackageId],
     ) extends SubmitCommand
         with BaseCommand[SubmitRequest, SubmitResponse, Unit] {
-      override def createRequest(): Either[String, SubmitRequest] = Right(
-        SubmitRequest(commands = Some(mkCommand))
-      )
+      override def createRequest(): Either[String, SubmitRequest] =
+        try {
+          Right(SubmitRequest(commands = Some(mkCommand)))
+        } catch {
+          case t: Throwable =>
+            Left(t.getMessage)
+        }
 
       override def submitRequest(
           service: CommandSubmissionServiceStub,
@@ -1419,7 +1431,7 @@ object LedgerApiCommands {
           )
         case DeduplicationPeriod.DeduplicationOffset(offset) =>
           ExecuteSubmissionRequest.DeduplicationPeriod.DeduplicationOffset(
-            offset.toHexString
+            offset.toLong
           )
       }
 
@@ -1479,7 +1491,12 @@ object LedgerApiCommands {
         ] {
 
       override def createRequest(): Either[String, SubmitAndWaitRequest] =
-        Right(SubmitAndWaitRequest(commands = Some(mkCommand)))
+        try {
+          Right(SubmitAndWaitRequest(commands = Some(mkCommand)))
+        } catch {
+          case t: Throwable =>
+            Left(t.getMessage)
+        }
 
       override def submitRequest(
           service: CommandServiceStub,
@@ -1513,7 +1530,12 @@ object LedgerApiCommands {
         with BaseCommand[SubmitAndWaitRequest, SubmitAndWaitForTransactionResponse, Transaction] {
 
       override def createRequest(): Either[String, SubmitAndWaitRequest] =
-        Right(SubmitAndWaitRequest(commands = Some(mkCommand)))
+        try {
+          Right(SubmitAndWaitRequest(commands = Some(mkCommand)))
+        } catch {
+          case t: Throwable =>
+            Left(t.getMessage)
+        }
 
       override def submitRequest(
           service: CommandServiceStub,

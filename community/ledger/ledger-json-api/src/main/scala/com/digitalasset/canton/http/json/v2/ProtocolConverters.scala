@@ -17,6 +17,7 @@ import com.digitalasset.canton.http.json.v2.JsSchema.{
   JsTransactionTree,
   JsTreeEvent,
 }
+import com.digitalasset.canton.platform.ApiOffset
 import com.google.rpc.status.Status
 import ujson.StringRenderer
 import ujson.circe.CirceJson
@@ -360,7 +361,7 @@ class ProtocolConverters(schemaProcessors: SchemaProcessors)(implicit
             workflow_id = v.workflowId,
             effective_at = v.getEffectiveAt,
             events = ev,
-            offset = v.offset,
+            offset = ApiOffset.fromLong(v.offset),
             domain_id = v.domainId,
             trace_context = v.traceContext,
             record_time = v.getRecordTime,
@@ -463,7 +464,7 @@ class ProtocolConverters(schemaProcessors: SchemaProcessors)(implicit
             command_id = lapiTransactionTree.commandId,
             workflow_id = lapiTransactionTree.workflowId,
             effective_at = lapiTransactionTree.effectiveAt,
-            offset = lapiTransactionTree.offset,
+            offset = ApiOffset.fromLong(lapiTransactionTree.offset),
             events_by_id = jsEvents,
             root_event_ids = lapiTransactionTree.rootEventIds,
             domain_id = lapiTransactionTree.domainId,
@@ -574,7 +575,7 @@ class ProtocolConverters(schemaProcessors: SchemaProcessors)(implicit
           lapi.transaction.TransactionTree(
             eventsById = events.toMap,
             rootEventIds = jsTransactionTree.root_event_ids,
-            offset = jsTransactionTree.offset,
+            offset = ApiOffset.assertFromStringToLong(jsTransactionTree.offset),
             updateId = jsTransactionTree.update_id,
             commandId = jsTransactionTree.command_id,
             workflowId = jsTransactionTree.workflow_id,
@@ -650,7 +651,7 @@ class ProtocolConverters(schemaProcessors: SchemaProcessors)(implicit
     ): JsSubmitAndWaitForUpdateIdResponse =
       JsSubmitAndWaitForUpdateIdResponse(
         update_id = response.updateId,
-        completion_offset = response.completionOffset,
+        completion_offset = ApiOffset.fromLong(response.completionOffset),
       )
 
     def fromJson(
@@ -658,7 +659,7 @@ class ProtocolConverters(schemaProcessors: SchemaProcessors)(implicit
     ): lapi.command_service.SubmitAndWaitForUpdateIdResponse =
       lapi.command_service.SubmitAndWaitForUpdateIdResponse(
         updateId = response.update_id,
-        completionOffset = response.completion_offset,
+        completionOffset = ApiOffset.assertFromStringToLong(response.completion_offset),
       )
   }
 
@@ -904,7 +905,7 @@ class ProtocolConverters(schemaProcessors: SchemaProcessors)(implicit
           update_id = v.updateId,
           command_id = v.commandId,
           workflow_id = v.workflowId,
-          offset = v.offset,
+          offset = ApiOffset.fromLong(v.offset),
           event = e,
           trace_context = v.traceContext,
           record_time = v.getRecordTime,
@@ -920,9 +921,9 @@ class ProtocolConverters(schemaProcessors: SchemaProcessors)(implicit
       (obj.update match {
         case lapi.update_service.GetUpdatesResponse.Update.Empty => jsFail("Invalid value")
         case lapi.update_service.GetUpdatesResponse.Update.Transaction(value) =>
-          Transaction.toJson(value).map(JsUpdate.Transaction)
+          Transaction.toJson(value).map(JsUpdate.Transaction.apply)
         case lapi.update_service.GetUpdatesResponse.Update.Reassignment(value) =>
-          Reassignment.toJson(value).map(JsUpdate.Reassignment)
+          Reassignment.toJson(value).map(JsUpdate.Reassignment.apply)
         case lapi.update_service.GetUpdatesResponse.Update.OffsetCheckpoint(value) =>
           Future(JsUpdate.OffsetCheckpoint(value))
       }).map(update => JsGetUpdatesResponse(update))
@@ -943,9 +944,9 @@ class ProtocolConverters(schemaProcessors: SchemaProcessors)(implicit
         case lapi.update_service.GetUpdateTreesResponse.Update.OffsetCheckpoint(value) =>
           Future(JsUpdateTree.OffsetCheckpoint(value))
         case lapi.update_service.GetUpdateTreesResponse.Update.TransactionTree(value) =>
-          TransactionTree.toJson(value).map(JsUpdateTree.TransactionTree)
+          TransactionTree.toJson(value).map(JsUpdateTree.TransactionTree.apply)
         case lapi.update_service.GetUpdateTreesResponse.Update.Reassignment(value) =>
-          Reassignment.toJson(value).map(JsUpdateTree.Reassignment)
+          Reassignment.toJson(value).map(JsUpdateTree.Reassignment.apply)
       }).map(update => JsGetUpdateTreesResponse(update))
   }
 
@@ -959,7 +960,7 @@ class ProtocolConverters(schemaProcessors: SchemaProcessors)(implicit
     )(implicit
         token: Option[String]
     ): Future[JsGetTransactionTreeResponse] =
-      TransactionTree.toJson(obj.getTransaction).map(JsGetTransactionTreeResponse)
+      TransactionTree.toJson(obj.getTransaction).map(JsGetTransactionTreeResponse.apply)
   }
 
   object GetTransactionResponse
@@ -970,7 +971,7 @@ class ProtocolConverters(schemaProcessors: SchemaProcessors)(implicit
     def toJson(obj: lapi.update_service.GetTransactionResponse)(implicit
         token: Option[String]
     ): Future[JsGetTransactionResponse] =
-      Transaction.toJson(obj.getTransaction).map(JsGetTransactionResponse)
+      Transaction.toJson(obj.getTransaction).map(JsGetTransactionResponse.apply)
   }
 }
 

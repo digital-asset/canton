@@ -14,8 +14,10 @@ import com.digitalasset.canton.ledger.api.TraceIdentifiers
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.platform.TemplatePartiesFilter
 import com.digitalasset.canton.platform.config.TransactionFlatStreamsConfig
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{Entry, RawFlatEvent}
 import com.digitalasset.canton.platform.store.backend.common.{
   EventIdSourceForStakeholders,
   EventPayloadSourceForFlatTx,
@@ -33,7 +35,6 @@ import com.digitalasset.canton.platform.store.utils.{
   QueueBasedConcurrencyLimiter,
   Telemetry,
 }
-import com.digitalasset.canton.platform.{ApiOffset, TemplatePartiesFilter}
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.NotUsed
@@ -63,7 +64,7 @@ class TransactionsFlatStreamReader(
   private val dbMetrics = metrics.index.db
 
   private val orderBySequentialEventId =
-    Ordering.by[EventStorageBackend.Entry[Raw.FlatEvent], Long](_.eventSequentialId)
+    Ordering.by[Entry[RawFlatEvent], Long](_.eventSequentialId)
 
   private val paginatingAsyncStream = new PaginatingAsyncStream(loggerFactory)
 
@@ -176,7 +177,7 @@ class TransactionsFlatStreamReader(
         target: EventPayloadSourceForFlatTx,
         maxParallelPayloadQueries: Int,
         dbMetric: DatabaseMetrics,
-    ): Source[EventStorageBackend.Entry[Raw.FlatEvent], NotUsed] = {
+    ): Source[Entry[RawFlatEvent], NotUsed] = {
       // Pekko requires for this buffer's size to be a power of two.
       val inputBufferSize = Utils.largestSmallerOrEqualPowerOfTwo(maxParallelPayloadQueries)
       ids.async
@@ -236,15 +237,15 @@ class TransactionsFlatStreamReader(
       )
     val allSortedPayloads = payloadsConsuming.mergeSorted(payloadsCreate)(orderBySequentialEventId)
     val sourceOfTransactions = TransactionsReader
-      .groupContiguous(allSortedPayloads)(by = _.transactionId)
+      .groupContiguous(allSortedPayloads)(by = _.updateId)
       .mapAsync(transactionsProcessingParallelism)(rawEvents =>
         deserializationQueriesLimiter.execute(
           deserializeLfValues(rawEvents, eventProjectionProperties)
         )
       )
-      .mapConcat { (groupOfPayloads: Vector[EventStorageBackend.Entry[Event]]) =>
+      .mapConcat { (groupOfPayloads: Vector[Entry[Event]]) =>
         val responses = TransactionConversions.toGetTransactionsResponse(groupOfPayloads)
-        responses.map { case (offset, response) => ApiOffset.assertFromString(offset) -> response }
+        responses.map { case (offset, response) => Offset.fromLong(offset) -> response }
       }
 
     reassignmentStreamReader
@@ -277,12 +278,13 @@ class TransactionsFlatStreamReader(
   }
 
   private def deserializeLfValues(
-      rawEvents: Vector[EventStorageBackend.Entry[Raw.FlatEvent]],
+      rawEvents: Vector[Entry[RawFlatEvent]],
       eventProjectionProperties: EventProjectionProperties,
-  )(implicit lc: LoggingContextWithTrace): Future[Vector[EventStorageBackend.Entry[Event]]] =
+  )(implicit lc: LoggingContextWithTrace): Future[Vector[Entry[Event]]] =
     Timed.future(
-      future =
-        Future.traverse(rawEvents)(deserializeEntry(eventProjectionProperties, lfValueTranslation)),
+      future = Future.traverse(rawEvents)(
+        TransactionsReader.deserializeFlatEvent(eventProjectionProperties, lfValueTranslation)
+      ),
       timer = dbMetrics.flatTxStream.translationTimer,
     )
 

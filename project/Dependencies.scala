@@ -18,7 +18,7 @@ object Dependencies {
   lazy val incompatibleLogging: Array[ExclusionRule] =
     Array(ExclusionRule("org.slf4j"), ExclusionRule("ch.qos.logback"))
 
-  lazy val scala_version = "2.13.11"
+  lazy val scala_version = "2.13.14"
   lazy val scala_version_short = "2.13"
 
   lazy val pekko_version = "1.0.1"
@@ -72,7 +72,7 @@ object Dependencies {
   lazy val scalacheck_version = "1.15.4"
   lazy val scalafx_version = "17.0.1-R26"
   lazy val scalafx_all_version = "17-ea+8"
-  lazy val scalatest_version = "3.2.11"
+  lazy val scalatest_version = "3.2.19"
   lazy val scalaz_version = "7.2.33"
   lazy val scopt_version = "4.1.0"
   lazy val shapeless_version = "2.3.6"
@@ -157,7 +157,7 @@ object Dependencies {
   lazy val scalatest = "org.scalatest" %% "scalatest" % scalatest_version
   lazy val scalaz_core = "org.scalaz" %% "scalaz-core" % scalaz_version
   lazy val scalatestScalacheck =
-    "org.scalatestplus" %% "scalacheck-1-15" % (scalatest_version + ".0")
+    "org.scalatestplus" %% "scalacheck-1-18" % (scalatest_version + ".0")
   lazy val mockito_scala = "org.mockito" %% "mockito-scala" % mockito_scala_version
   lazy val scalatestMockito = "org.scalatestplus" %% "mockito-3-4" % ("3.2.10.0")
 

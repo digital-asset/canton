@@ -20,7 +20,7 @@ import com.digitalasset.canton.platform.store.backend.Conversions.{
 }
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.interning.StringInterning
-import com.digitalasset.canton.platform.{ApplicationId, Party}
+import com.digitalasset.canton.platform.{ApiOffset, ApplicationId, Party}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Time.Timestamp
@@ -120,7 +120,7 @@ class CompletionStorageBackendTemplate(
       deduplicationOffsetColumn ~
       deduplicationDurationSecondsColumn ~ deduplicationDurationNanosColumn ~
       deduplicationStartColumn map {
-        case submitters ~ offset ~ recordTime ~ commandId ~ applicationId ~ submissionId ~ internedDomainId ~ traceContext ~ transactionId ~
+        case submitters ~ offset ~ recordTime ~ commandId ~ applicationId ~ submissionId ~ internedDomainId ~ traceContext ~ updateId ~
             deduplicationOffset ~ deduplicationDurationSeconds ~ deduplicationDurationNanos ~ _ =>
           submitters -> CompletionFromTransaction.acceptedCompletion(
             submitters = submitters.iterator
@@ -130,10 +130,10 @@ class CompletionStorageBackendTemplate(
             recordTime = recordTime,
             offset = offset,
             commandId = commandId,
-            transactionId = transactionId,
+            updateId = updateId,
             applicationId = applicationId,
             optSubmissionId = submissionId,
-            optDeduplicationOffset = deduplicationOffset,
+            optDeduplicationOffset = deduplicationOffset.map(ApiOffset.assertFromStringToLong),
             optDeduplicationDurationSeconds = deduplicationDurationSeconds,
             optDeduplicationDurationNanos = deduplicationDurationNanos,
             domainId = stringInterning.domainId.unsafe.externalize(internedDomainId),
@@ -172,7 +172,7 @@ class CompletionStorageBackendTemplate(
             status = status,
             applicationId = applicationId,
             optSubmissionId = submissionId,
-            optDeduplicationOffset = deduplicationOffset,
+            optDeduplicationOffset = deduplicationOffset.map(ApiOffset.assertFromStringToLong),
             optDeduplicationDurationSeconds = deduplicationDurationSeconds,
             optDeduplicationDurationNanos = deduplicationDurationNanos,
             domainId = stringInterning.domainId.unsafe.externalize(internedDomainId),

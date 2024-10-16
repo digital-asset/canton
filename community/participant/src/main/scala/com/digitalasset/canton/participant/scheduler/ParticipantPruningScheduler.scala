@@ -28,10 +28,9 @@ import com.digitalasset.canton.participant.store.{
   ParticipantNodePersistentState,
   ParticipantPruningSchedulerStore,
 }
-import com.digitalasset.canton.participant.sync.UpstreamOffsetConvert
 import com.digitalasset.canton.resource.Storage
-import com.digitalasset.canton.scheduler.JobScheduler.*
 import com.digitalasset.canton.scheduler.*
+import com.digitalasset.canton.scheduler.JobScheduler.*
 import com.digitalasset.canton.time.{Clock, PositiveSeconds}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
@@ -118,6 +117,7 @@ final class ParticipantPruningScheduler(
                 safeOffset.map(offset.min)
               },
             )
+            .onShutdown(Left(Error("Not pruning because of shutdown")))
       }
       offsetByBatch <- pruningProcessor.locatePruningOffsetForOneIteration.leftMap(pruningError =>
         Error(s"Error while locating pruning offset for one iteration: ${pruningError.message}")
@@ -133,7 +133,7 @@ final class ParticipantPruningScheduler(
           )
           EitherT.pure[Future, ScheduledRunResult](Done: ScheduledRunResult)
         } { offsetToPruneUpTo =>
-          val pruneUpTo = UpstreamOffsetConvert.toStringOffset(offsetToPruneUpTo)
+          val pruneUpTo = offsetToPruneUpTo.toLong
           val submissionId = UUID.randomUUID().toString
           val internally = if (pruneInternallyOnly) "internally" else ""
           logger.info(

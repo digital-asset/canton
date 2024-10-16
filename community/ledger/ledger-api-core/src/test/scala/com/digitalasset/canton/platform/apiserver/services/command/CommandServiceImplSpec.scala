@@ -77,7 +77,7 @@ class CommandServiceImplSpec
             any[TraceContext => Future[Any]],
           )(any[ContextualizedErrorLogger], any[TraceContext])
           response.updateId should be("transaction ID")
-          response.completionOffset shouldBe "offset"
+          response.completionOffset shouldBe offset
         }
       }
     }
@@ -303,11 +303,13 @@ object CommandServiceImplSpec {
     )
   )
 
+  val offset: Long = 12345678L
+
   val completion = Completion(
     commandId = "command ID",
     status = Some(OkStatus),
     updateId = "transaction ID",
-    offset = "offset",
+    offset = offset,
   )
 
   val expectedSubmissionKey = SubmissionKey(

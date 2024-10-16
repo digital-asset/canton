@@ -80,15 +80,20 @@ object JvmRulesPlugin extends AutoPlugin {
     "-Xlint:_,-unused",
     "-Xmacro-settings:materialize-derivations",
     "-Xfatal-warnings",
+    "-Wconf:cat=lint-byname-implicit:silent", // https://github.com/scala/bug/issues/12072
     "-Wconf:cat=unused-imports:info", // reports unused-imports without counting them as warnings, and without causing -Werror to fail.
     "-Wnonunit-statement", // Warns about any interesting expression whose value is ignored because it is followed by another expression
     "-Ywarn-numeric-widen",
     "-Vimplicits",
     "-Vtype-diffs",
     "-Xsource:3",
+    "-Wconf:cat=scala3-migration:silent", // Using 3-cross instead of 3 because of https://github.com/scala/scala/pull/10648
+    // https://github.com/scala/bug/issues/12883
+    "-Wconf:msg=access modifiers for `apply` method are copied from the case class constructor:silent",
+    "-Wconf:msg=access modifiers for `copy` method are copied from the case class constructor:silent",
   )
 
-  lazy val unusedSymbolsChecks =
+  lazy val unusedSymbolsChecks: Seq[String] =
     if (enableUnusedSymbolsChecks)
       Seq(
         "-Ywarn-dead-code",
@@ -163,7 +168,8 @@ object JvmRulesPlugin extends AutoPlugin {
       // CHP: Disable output for successful tests
       // G: But after finishing tests for a module, output summary of failed tests for that module, with full stack traces
       // F: Show full stack traces for exceptions in tests (at the time when they occur)
-      Test / testOptions += Tests.Argument("-oCHPGF"),
+      // K: Do not print TestCanceledException at the end (in reminder) - they are still printed once due to F flag above F
+      Test / testOptions += Tests.Argument("-oCHPGFK"),
       //
       // to allow notifications and alerts during test runs (like slowpokes^)
       Test / logBuffered := false,

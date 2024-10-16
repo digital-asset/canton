@@ -4,15 +4,18 @@
 package com.digitalasset.canton.platform.store.backend.common
 
 import anorm.RowParser
+import com.digitalasset.canton.data
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.platform.Party
-import com.digitalasset.canton.platform.store.backend.EventStorageBackend
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
+  Entry,
+  RawFlatEvent,
+  RawTreeEvent,
+}
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.backend.common.SimpleSqlExtensions.*
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
-import com.digitalasset.canton.platform.store.dao.events.Raw
 import com.digitalasset.canton.platform.store.interning.StringInterning
-import com.digitalasset.daml.lf.data.Ref
 
 import java.sql.Connection
 
@@ -25,7 +28,7 @@ class TransactionPointwiseQueries(
   /** Fetches a matching event sequential id range unless it's within the pruning offset.
     */
   def fetchIdsFromTransactionMeta(
-      transactionId: Ref.TransactionId
+      transactionId: data.UpdateId
   )(connection: Connection): Option[(Long, Long)] = {
     import com.digitalasset.canton.platform.store.backend.Conversions.ledgerStringToStatement
     import com.digitalasset.canton.platform.store.backend.Conversions.OffsetToStatement
@@ -51,7 +54,7 @@ class TransactionPointwiseQueries(
       firstEventSequentialId: Long,
       lastEventSequentialId: Long,
       requestingParties: Set[Party],
-  )(connection: Connection): Vector[EventStorageBackend.Entry[Raw.FlatEvent]] =
+  )(connection: Connection): Vector[Entry[RawFlatEvent]] =
     fetchEventsForTransactionPointWiseLookup(
       firstEventSequentialId = firstEventSequentialId,
       lastEventSequentialId = lastEventSequentialId,
@@ -74,7 +77,7 @@ class TransactionPointwiseQueries(
       firstEventSequentialId: Long,
       lastEventSequentialId: Long,
       requestingParties: Set[Party],
-  )(connection: Connection): Vector[EventStorageBackend.Entry[Raw.TreeEvent]] =
+  )(connection: Connection): Vector[Entry[RawTreeEvent]] =
     fetchEventsForTransactionPointWiseLookup(
       firstEventSequentialId = firstEventSequentialId,
       lastEventSequentialId = lastEventSequentialId,
@@ -108,8 +111,8 @@ class TransactionPointwiseQueries(
       witnessesColumn: String,
       tables: List[SelectTable],
       requestingParties: Set[Party],
-      filteringRowParser: Set[Int] => RowParser[EventStorageBackend.Entry[T]],
-  )(connection: Connection): Vector[EventStorageBackend.Entry[T]] = {
+      filteringRowParser: Set[Int] => RowParser[Entry[T]],
+  )(connection: Connection): Vector[Entry[T]] = {
     val allInternedParties: Set[Int] = requestingParties.iterator
       .map(stringInterning.party.tryInternalize)
       .flatMap(_.iterator)
@@ -151,7 +154,7 @@ class TransactionPointwiseQueries(
         )
       )
       .mkComposite("", " UNION ALL", "")
-    val parsedRows: Vector[EventStorageBackend.Entry[T]] = SQL"""
+    val parsedRows: Vector[Entry[T]] = SQL"""
         $unionQuery
         ORDER BY event_sequential_id"""
       .asVectorOf(

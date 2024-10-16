@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
+import com.daml.ledger.api.v2.event as apiEvent
 import com.daml.ledger.api.v2.reassignment.{
   AssignedEvent as ApiAssignedEvent,
   Reassignment as ApiReassignment,
@@ -19,7 +20,6 @@ import com.daml.ledger.api.v2.update_service.{
   GetUpdateTreesResponse,
   GetUpdatesResponse,
 }
-import com.daml.ledger.api.v2.event as apiEvent
 import com.digitalasset.canton.ledger.api.util.{LfEngineToApi, TimestampConversion}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.store.ScalaPbStreamingOptimizations.*
@@ -30,7 +30,7 @@ import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.{
   ExercisedEvent,
 }
 import com.digitalasset.canton.platform.store.utils.EventOps.TreeEventOps
-import com.digitalasset.canton.platform.{ApiOffset, TemplatePartiesFilter, Value}
+import com.digitalasset.canton.platform.{TemplatePartiesFilter, Value}
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, Traced}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{Identifier, Party}
@@ -177,12 +177,12 @@ private[events] object TransactionLogUpdatesConversions {
           )
           .map(flatEvents =>
             FlatTransaction(
-              updateId = transactionAccepted.transactionId,
+              updateId = transactionAccepted.updateId,
               commandId = transactionAccepted.commandId,
               workflowId = transactionAccepted.workflowId,
               effectiveAt = Some(TimestampConversion.fromLf(transactionAccepted.effectiveAt)),
               events = flatEvents,
-              offset = ApiOffset.toApiString(transactionAccepted.offset),
+              offset = transactionAccepted.offset.toLong,
               domainId = transactionAccepted.domainId,
               traceContext = SerializableTraceContext(traceContext).toDamlProtoOpt,
               recordTime = Some(TimestampConversion.fromLf(transactionAccepted.recordTime)),
@@ -381,11 +381,11 @@ private[events] object TransactionLogUpdatesConversions {
             val rootEventIds = visible.filterNot(children)
 
             TransactionTree(
-              updateId = transactionAccepted.transactionId,
+              updateId = transactionAccepted.updateId,
               commandId = getCommandId(transactionAccepted.events, requestingParties),
               workflowId = transactionAccepted.workflowId,
               effectiveAt = Some(TimestampConversion.fromLf(transactionAccepted.effectiveAt)),
-              offset = ApiOffset.toApiString(transactionAccepted.offset),
+              offset = transactionAccepted.offset.toLong,
               eventsById = eventsById,
               rootEventIds = rootEventIds,
               domainId = transactionAccepted.domainId,
@@ -645,7 +645,7 @@ private[events] object TransactionLogUpdatesConversions {
           .map(_.commandId)
           .getOrElse(""),
         workflowId = reassignmentAccepted.workflowId,
-        offset = ApiOffset.toApiString(reassignmentAccepted.offset),
+        offset = reassignmentAccepted.offset.toLong,
         event = event,
         traceContext = SerializableTraceContext(traceContext).toDamlProtoOpt,
         recordTime = Some(TimestampConversion.fromLf(reassignmentAccepted.recordTime)),

@@ -26,15 +26,12 @@ import com.digitalasset.canton.ledger.api.util.{DurationConversion, TimestampCon
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.daml.lf.command.{ApiCommand as LfCommand, ApiCommands as LfCommands}
-import com.digitalasset.daml.lf.data.Ref.TypeConRef
 import com.digitalasset.daml.lf.data.*
-import com.digitalasset.daml.lf.transaction.{
-  FatContractInstance,
-  Node as LfNode,
-  TransactionVersion,
-}
-import com.digitalasset.daml.lf.value.Value.ValueRecord
+import com.digitalasset.daml.lf.data.Ref.TypeConRef
+import com.digitalasset.daml.lf.language.LanguageVersion
+import com.digitalasset.daml.lf.transaction.{FatContractInstance, Node as LfNode}
 import com.digitalasset.daml.lf.value.Value as Lf
+import com.digitalasset.daml.lf.value.Value.ValueRecord
 import com.google.protobuf.duration.Duration
 import com.google.protobuf.empty.Empty
 import io.grpc.Status.Code.INVALID_ARGUMENT
@@ -64,6 +61,7 @@ class SubmitRequestValidatorTest
     val constructor = "constructor"
     val submitter = "party"
     val deduplicationDuration = new Duration().withSeconds(10)
+    val domainId = "x::domainId"
 
     private def commandDef(createPackageId: String, moduleName: String = moduleName) =
       Command.of(
@@ -94,6 +92,7 @@ class SubmitRequestValidatorTest
       minLedgerTimeAbs = None,
       minLedgerTimeRel = None,
       packageIdSelectionPreference = Seq.empty,
+      domainId = domainId,
     )
   }
 
@@ -130,12 +129,12 @@ class SubmitRequestValidatorTest
             signatories = Set(Ref.Party.assertFromString("party")),
             stakeholders = Set(Ref.Party.assertFromString("party")),
             keyOpt = None,
-            version = TransactionVersion.maxVersion,
+            version = LanguageVersion.v2_dev,
           ),
           createTime = Time.Timestamp.now(),
           cantonData = Bytes.Empty,
         ),
-        domainIdO = Some(DomainId.tryFromString("x::domainId")),
+        domainIdO = Some(DomainId.tryFromString(api.domainId)),
       )
     )
 
@@ -170,6 +169,7 @@ class SubmitRequestValidatorTest
       ),
       disclosedContracts,
       packagePreferenceSet = packagePreferenceSet,
+      domainId = Some(DomainId.tryFromString(api.domainId)),
       packageMap = packageMap,
     )
   }
@@ -243,6 +243,17 @@ class SubmitRequestValidatorTest
             workflowId = None,
             commands = internal.emptyCommands.commands.copy(commandsReference = ""),
           )
+        )
+      }
+
+      "tolerate a missing domainId" in {
+        testedCommandValidator.validateCommands(
+          api.commands.withDomainId(""),
+          internal.ledgerTime,
+          internal.submittedAt,
+          internal.maxDeduplicationDuration,
+        ) shouldEqual Right(
+          internal.emptyCommands.copy(domainId = None)
         )
       }
 
@@ -369,10 +380,8 @@ class SubmitRequestValidatorTest
         forAll(
           Table[DeduplicationPeriodProto, DeduplicationPeriod](
             ("input proto deduplication", "valid model deduplication"),
-            DeduplicationPeriodProto.DeduplicationOffset("abcdef") -> DeduplicationPeriod
-              .DeduplicationOffset(
-                Offset(Bytes.fromString("abcdef").getOrElse(Bytes.Empty))
-              ),
+            DeduplicationPeriodProto.DeduplicationOffset(12345678L) -> DeduplicationPeriod
+              .DeduplicationOffset(Offset.fromLong(12345678L)),
             DeduplicationPeriodProto.DeduplicationDuration(
               deduplicationDuration
             ) -> DeduplicationPeriod

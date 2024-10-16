@@ -38,9 +38,9 @@ import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.store.memory.InMemoryPrunableByTime
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
-import com.digitalasset.canton.util.*
 import com.digitalasset.canton.{ReassignmentCounter, RequestCounter}
 import com.digitalasset.daml.lf.data.Ref.PackageId
 
@@ -318,6 +318,11 @@ class InMemoryActiveContractStore(
       }
     }
     Future.successful(counter.get())
+  }
+
+  override def purge()(implicit traceContext: TraceContext): Future[Unit] = {
+    table.clear()
+    Future.unit
   }
 
   override def deleteSince(

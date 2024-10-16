@@ -18,8 +18,8 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.PartyInfo
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.*
-import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil.*
@@ -621,8 +621,8 @@ class StoreBasedTopologySnapshot(
       members: Set[Member]
   )(implicit traceContext: TraceContext): Future[Set[Member]] = {
     val participants = members.collect { case ParticipantId(uid) => uid }
-    val mediators = members.collect { case MediatorId(uid) => uid }.toSet
-    val sequencers = members.collect { case SequencerId(uid) => uid }.toSet
+    val mediators = members.collect { case MediatorId(uid) => uid }
+    val sequencers = members.collect { case SequencerId(uid) => uid }
 
     val knownParticipantsF = if (participants.nonEmpty) {
       findTransactions(

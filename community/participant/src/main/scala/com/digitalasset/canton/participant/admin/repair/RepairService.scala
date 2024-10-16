@@ -55,11 +55,11 @@ import com.digitalasset.canton.protocol.{LfChoiceName, *}
 import com.digitalasset.canton.store.SequencedEventStore
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.PekkoUtil.FutureQueue
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.retry.AllExceptionRetryPolicy
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.CantonOnly
@@ -667,10 +667,7 @@ final class RepairService(
           repairIndexer,
           loggerFactory,
         )
-        unassignmentData = ChangeAssignation.Data.from(
-          (reassignmentData.contract.contractId, reassignmentData.reassignmentCounter),
-          changeAssignation,
-        )
+        unassignmentData = ChangeAssignation.Data.from(reassignmentData, changeAssignation)
         _ <- changeAssignation.completeUnassigned(unassignmentData)
 
         changeAssignationBack = new ChangeAssignation(
@@ -1035,7 +1032,7 @@ final class RepairService(
           roots = ImmArray.from(nodeIds.take(txNodes.size)),
         )
       ),
-      transactionId = repair.transactionId.tryAsLedgerTransactionId,
+      updateId = repair.transactionId.tryAsLedgerTransactionId,
       recordTime = repair.timestamp.toLf,
       hostedWitnesses = hostedWitnesses.toList,
       contractMetadata = Map.empty,
@@ -1085,7 +1082,7 @@ final class RepairService(
             roots = ImmArray.from(nodeIds.take(txNodes.size)),
           )
         ),
-        transactionId = randomTransactionId(syncCrypto).tryAsLedgerTransactionId,
+        updateId = randomTransactionId(syncCrypto).tryAsLedgerTransactionId,
         recordTime = repair.timestamp.toLf,
         hostedWitnesses = contractsAdded.flatMap(_.witnesses.intersect(hostedParties)).toList,
         contractMetadata = contractMetadata,

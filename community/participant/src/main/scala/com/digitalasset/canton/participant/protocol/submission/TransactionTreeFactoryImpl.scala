@@ -12,19 +12,19 @@ import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
+import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.TransactionViewDecomposition.{NewView, SameView}
 import com.digitalasset.canton.data.ViewConfirmationParameters.InvalidViewConfirmationParameters
-import com.digitalasset.canton.data.*
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.*
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactoryImpl.*
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.RollbackContext.RollbackScope
 import com.digitalasset.canton.protocol.SerializableContract.LedgerCreateTime
 import com.digitalasset.canton.protocol.WellFormedTransaction.{WithSuffixes, WithoutSuffixes}
-import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
@@ -378,7 +378,7 @@ class TransactionTreeFactoryImpl(
               }
               nextState <- state.csmState
                 .handleNode((), suffixedNode, resolutionForModeOff)
-                .leftMap(ContractKeyResolutionError)
+                .leftMap(ContractKeyResolutionError.apply)
             } yield {
               state.csmState = nextState
             }
@@ -631,7 +631,7 @@ class TransactionTreeFactoryImpl(
     */
   private def resolvedKeys(
       viewKeyInputs: Map[LfGlobalKey, KeyInput],
-      keyVersionAndMaintainers: collection.Map[LfGlobalKey, (LfTransactionVersion, Set[LfPartyId])],
+      keyVersionAndMaintainers: collection.Map[LfGlobalKey, (LfLanguageVersion, Set[LfPartyId])],
       subviewKeyResolutions: collection.Map[LfGlobalKey, LfVersioned[SerializableKeyResolution]],
   )(implicit
       traceContext: TraceContext
@@ -991,13 +991,13 @@ object TransactionTreeFactoryImpl {
     var createdContractsInView: collection.Set[LfContractId] = Set.empty
 
     /** An [[com.digitalasset.canton.protocol.LfGlobalKey]] stores neither the
-      * [[com.digitalasset.canton.protocol.LfTransactionVersion]] to be used during serialization
+      * [[com.digitalasset.canton.protocol.LfLanguageVersion]] to be used during serialization
       * nor the maintainers, which we need to cache in case no contract is found.
       *
       * Out parameter that stores version and maintainers for all keys
       * that have been referenced by an already-processed node.
       */
-    val keyVersionAndMaintainers: mutable.Map[LfGlobalKey, (LfTransactionVersion, Set[LfPartyId])] =
+    val keyVersionAndMaintainers: mutable.Map[LfGlobalKey, (LfLanguageVersion, Set[LfPartyId])] =
       mutable.Map.empty
 
     /** Out parameter for the [[com.digitalasset.daml.lf.transaction.ContractStateMachine.State]]

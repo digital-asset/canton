@@ -1,17 +1,15 @@
 // Linting plugins
 addSbtPlugin("org.wartremover" % "sbt-wartremover" % "3.1.6")
-addSbtPlugin("org.wartremover" % "sbt-wartremover-contrib" % "2.1.0")
+addSbtPlugin("org.wartremover" % "sbt-wartremover-contrib" % "2.1.1")
 addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.4.6")
-addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.11.1")
+addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.13.0")
 addSbtPlugin("com.lightbend.sbt" % "sbt-java-formatter" % "0.7.0")
 
 // Code coverage
 addSbtPlugin("org.scoverage" % "sbt-scoverage" % "2.0.9")
 
 // documentation site creation
-// TODO(i17068) update to 1.5.0 when it's published to fix the scala-xml conflicts -- also remove the VersionScheme.Always line
-addSbtPlugin("com.typesafe.sbt" % "sbt-site" % "1.4.0")
-ThisBuild / libraryDependencySchemes += "org.scala-lang.modules" %% "scala-xml" % VersionScheme.Always
+addSbtPlugin("com.github.sbt" % "sbt-site-sphinx" % "1.7.0")
 
 // Ensure we have license headers in all relevant source files
 addSbtPlugin("de.heikoseeberger" % "sbt-header" % "5.6.0")

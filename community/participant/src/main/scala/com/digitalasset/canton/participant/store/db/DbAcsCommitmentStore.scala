@@ -13,7 +13,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.String68
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
-import com.digitalasset.canton.lifecycle.Lifecycle
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.pruning.{
@@ -331,12 +331,9 @@ class DbAcsCommitmentStore(
             val leftOverlap = CommitmentPeriod.create(from, period.fromExclusive)
             val rightOverlap = CommitmentPeriod.create(period.toInclusive, to)
             val inbetween = CommitmentPeriod.create(period.fromExclusive, period.toInclusive)
-            leftOverlap.toSeq
-              .map((_, oldState))
-              ++ rightOverlap.toSeq
-                .map((_, oldState))
-              ++ inbetween.toSeq
-                .map((_, matchingState))
+            leftOverlap.toSeq.map((_, oldState)) ++ rightOverlap.toSeq.map(
+              (_, oldState)
+            ) ++ inbetween.toSeq.map((_, matchingState))
           }
           .toList
           .distinct
@@ -355,7 +352,7 @@ class DbAcsCommitmentStore(
     }
 
     markSafeQueue
-      .execute(
+      .executeUS(
         for {
           /*
           That could be wrong if a period is marked as outstanding between the point where we
@@ -364,14 +361,28 @@ class DbAcsCommitmentStore(
           Such a period would be kept as outstanding even if it contains no tick. On the other
           hand, only commitment periods around restarts could be "empty" (not contain any tick).
            */
+          approxInterval <- sortedReconciliationIntervalsProvider.approximateReconciliationIntervals
+
           sortedReconciliationIntervals <-
-            sortedReconciliationIntervalsProvider.approximateReconciliationIntervals
-          _ <- storage.queryAndUpdate(
-            dbQueries(sortedReconciliationIntervals).transactionally.withTransactionIsolation(
-              TransactionIsolation.Serializable
-            ),
-            operationName =
-              s"commitments: mark period safe (${period.fromExclusive}, ${period.toInclusive}]",
+            // the domain parameters at the approximate topology timestamp is recent enough for the period
+            if (approxInterval.validUntil >= period.toInclusive.forgetRefinement)
+              FutureUnlessShutdown.pure(approxInterval)
+            else {
+              // it is safe to wait for the topology timestamp period.toInclusive.forgetRefinement because we validate
+              // that it is before the sequencing timestamp when we process incoming commitments
+              sortedReconciliationIntervalsProvider.reconciliationIntervals(
+                period.toInclusive.forgetRefinement
+              )
+            }
+
+          _ <- FutureUnlessShutdown.outcomeF(
+            storage.queryAndUpdate(
+              dbQueries(sortedReconciliationIntervals).transactionally.withTransactionIsolation(
+                TransactionIsolation.Serializable
+              ),
+              operationName =
+                s"commitments: mark period safe (${period.fromExclusive}, ${period.toInclusive}]",
+            )
           )
         } yield (),
         "Run mark period safe DB query",
@@ -452,8 +463,7 @@ class DbAcsCommitmentStore(
     val query =
       sql"""select from_exclusive, to_inclusive, counter_participant, commitment
             from par_computed_acs_commitments
-            where domain_idx = $indexedDomain and to_inclusive >= $start and from_exclusive < $end"""
-        ++ participantFilter
+            where domain_idx = $indexedDomain and to_inclusive >= $start and from_exclusive < $end""" ++ participantFilter
 
     storage.query(
       query.as[(CommitmentPeriod, ParticipantId, AcsCommitment.CommitmentType)],

@@ -250,7 +250,7 @@ class CommandProgressTrackerImpl(
       completion = CompletionFromTransaction.toApiCompletion(
         submitters = Set.empty,
         commandId = commandId,
-        transactionId = "",
+        updateId = "",
         applicationId = applicationId,
         traceContext = traceContext,
         optStatus = None,
@@ -258,7 +258,7 @@ class CommandProgressTrackerImpl(
         optDeduplicationOffset = None,
         optDeduplicationDurationSeconds = None,
         optDeduplicationDurationNanos = None,
-        offset = "",
+        offset = 0L,
         domainTime = None,
       ),
       state = CommandState.COMMAND_STATE_PENDING,

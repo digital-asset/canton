@@ -32,17 +32,17 @@ import com.digitalasset.canton.participant.event.{
   RecordTime,
 }
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
+import com.digitalasset.canton.participant.protocol.*
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors.SubmissionDuringShutdown
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.{
   TransactionSubmissionError,
   TransactionSubmissionResult,
 }
-import com.digitalasset.canton.participant.protocol.*
+import com.digitalasset.canton.participant.protocol.reassignment.*
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.{
   DomainNotReady,
   ReassignmentProcessorError,
 }
-import com.digitalasset.canton.participant.protocol.reassignment.*
 import com.digitalasset.canton.participant.protocol.submission.{
   InFlightSubmissionTracker,
   SeedGenerator,
@@ -53,8 +53,8 @@ import com.digitalasset.canton.participant.pruning.{
   JournalGarbageCollector,
   SortedReconciliationIntervalsProvider,
 }
-import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.*
+import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.sync.SyncDomain.SubmissionReady
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.topology.ParticipantTopologyDispatcher
@@ -63,8 +63,8 @@ import com.digitalasset.canton.participant.traffic.ParticipantTrafficControlSubs
 import com.digitalasset.canton.participant.util.DAMLe.PackageResolver
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
-import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.RichSequencerClient
 import com.digitalasset.canton.sequencing.client.channel.SequencerChannelClient
@@ -491,7 +491,7 @@ class SyncDomain(
         changes
       })
 
-    def initializeClientAtCleanHead(): Future[Unit] = {
+    def initializeClientAtCleanHead(): FutureUnlessShutdown[Unit] = {
       // generally, the topology client will be initialised by the topology processor. however,
       // if there is nothing to be replayed, then the topology processor will only be initialised
       // once the first event is dispatched.
@@ -507,11 +507,13 @@ class SyncDomain(
       )
       // now, compute epsilon at resubscriptionTs
       topologyClient
-        .awaitSnapshot(resubscriptionTs)
-        .flatMap(
-          _.findDynamicDomainParametersOrDefault(
-            staticDomainParameters.protocolVersion,
-            warnOnUsingDefault = false,
+        .awaitSnapshotUS(resubscriptionTs)
+        .flatMap(snapshot =>
+          FutureUnlessShutdown.outcomeF(
+            snapshot.findDynamicDomainParametersOrDefault(
+              staticDomainParameters.protocolVersion,
+              warnOnUsingDefault = false,
+            )
           )
         )
         .map(_.topologyChangeDelay)
@@ -534,7 +536,7 @@ class SyncDomain(
       _ <- EitherT.right(missingKeysAlerter.init()).mapK(FutureUnlessShutdown.outcomeK)
 
       // Phase 0: Initialise topology client at current clean head
-      _ <- EitherT.right(initializeClientAtCleanHead()).mapK(FutureUnlessShutdown.outcomeK)
+      _ <- EitherT.right(initializeClientAtCleanHead())
 
       // Phase 1: remove in-flight submissions that have been sequenced and published,
       // but not yet removed from the in-flight submission store

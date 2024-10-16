@@ -44,8 +44,8 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.{
   CommitSet,
   RequestTracker,
 }
-import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicator.DeduplicationFailed
 import com.digitalasset.canton.participant.protocol.submission.*
+import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicator.DeduplicationFailed
 import com.digitalasset.canton.participant.protocol.validation.RecipientsValidator
 import com.digitalasset.canton.participant.store
 import com.digitalasset.canton.participant.store.SyncDomainEphemeralState
@@ -58,10 +58,10 @@ import com.digitalasset.canton.sequencing.{AsyncResult, HandlerResult}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, SubmissionTopologyHelper}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.EitherTUtil.{condUnitET, ifThenET}
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
-import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
 import com.google.common.annotations.VisibleForTesting
@@ -98,7 +98,6 @@ abstract class ProtocolProcessor[
     crypto: DomainSyncCryptoClient,
     sequencerClient: SequencerClientSend,
     domainId: DomainId,
-    staticDomainParameters: StaticDomainParameters,
     protocolVersion: ProtocolVersion,
     override protected val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
@@ -109,7 +108,6 @@ abstract class ProtocolProcessor[
       ephemeral,
       crypto,
       sequencerClient,
-      staticDomainParameters,
       protocolVersion,
     )
     with RequestProcessor[RequestViewType] {
@@ -993,8 +991,7 @@ abstract class ProtocolProcessor[
         if (mediatorIsActive)
           for {
             activenessSet <- EitherT.fromEither[FutureUnlessShutdown](
-              steps
-                .computeActivenessSet(parsedRequest)
+              steps.computeActivenessSet(parsedRequest)
             )
             _ <- trackAndSendResponsesWellformed(
               parsedRequest,
@@ -1108,10 +1105,7 @@ abstract class ProtocolProcessor[
               _,
               _locallyRejected,
             ) = pendingData
-            _ = if (
-              pendingRequestCounter != rc
-              || pendingSequencerCounter != sc
-            )
+            _ = if (pendingRequestCounter != rc || pendingSequencerCounter != sc)
               throw new RuntimeException("Pending result data inconsistent with request")
 
           } yield (
@@ -1139,8 +1133,7 @@ abstract class ProtocolProcessor[
         .right(requestFutures.timeoutResult)
         .flatMap(
           handleTimeout(
-            requestId,
-            rc,
+            parsedRequest,
             sc,
             decisionTime,
             timeoutEvent(),
@@ -1390,10 +1383,12 @@ abstract class ProtocolProcessor[
 
     def filterInvalidSignature(
         pendingRequestData: PendingRequestData
-    ): Future[Boolean] =
+    ): FutureUnlessShutdown[Boolean] =
       for {
-        snapshot <- crypto.awaitSnapshot(requestId.unwrap)
-        res <- result.verifyMediatorSignatures(snapshot, pendingRequestData.mediator.group).value
+        snapshot <- crypto.awaitSnapshotUS(requestId.unwrap)
+        res <- FutureUnlessShutdown.outcomeF(
+          result.verifyMediatorSignatures(snapshot, pendingRequestData.mediator.group).value
+        )
       } yield {
         res match {
           case Left(err) =>
@@ -1411,7 +1406,7 @@ abstract class ProtocolProcessor[
 
     def filterInvalidRootHash(
         pendingRequestDataOrReplayData: PendingRequestData
-    ): Future[Boolean] = Future.successful {
+    ): FutureUnlessShutdown[Boolean] = FutureUnlessShutdown.pure {
       pendingRequestDataOrReplayData.rootHashO.forall { txRootHash =>
         val resultRootHash = unsignedResult.rootHash
         val rootHashMatches = resultRootHash == txRootHash
@@ -1431,7 +1426,7 @@ abstract class ProtocolProcessor[
       (prd: PendingRequestData) =>
         MonadUtil
           .foldLeftM(true, Seq(filterInvalidSignature _, filterInvalidRootHash _))((acc, x) =>
-            if (acc) x(prd) else Future.successful(acc)
+            if (acc) x(prd) else FutureUnlessShutdown.pure(acc)
           )
 
     // Wait until we have processed the corresponding request
@@ -1733,8 +1728,7 @@ abstract class ProtocolProcessor[
   }
 
   private def handleTimeout(
-      requestId: RequestId,
-      requestCounter: RequestCounter,
+      parsedRequest: steps.ParsedRequestType,
       sequencerCounter: SequencerCounter,
       decisionTime: CantonTimestamp,
       timeoutEvent: => Either[steps.ResultError, Option[Traced[Update]]],
@@ -1744,6 +1738,9 @@ abstract class ProtocolProcessor[
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, steps.ResultError, Unit] =
     if (result.timedOut) {
+      val requestId = parsedRequest.requestId
+      val requestCounter = parsedRequest.rc
+
       logger.info(
         show"${steps.requestKind.unquoted} request at $requestId timed out without a transaction result message."
       )
@@ -1782,6 +1779,8 @@ abstract class ProtocolProcessor[
 
         // No need to clean up the pending submissions because this is handled (concurrently) by schedulePendingSubmissionRemoval
         cleanReplay = isCleanReplay(requestCounter, pendingRequestDataOrReplayData)
+
+        _ <- steps.handleTimeout(parsedRequest)
 
         _ <- ifThenET(!cleanReplay)(publishEvent()).mapK(FutureUnlessShutdown.outcomeK)
       } yield ()

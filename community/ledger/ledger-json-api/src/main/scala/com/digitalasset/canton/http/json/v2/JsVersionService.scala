@@ -14,14 +14,14 @@ import io.circe.Codec
 import io.circe.generic.semiauto.deriveCodec
 import sttp.tapir.generic.auto.*
 
-import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
 
 class JsVersionService(versionClient: VersionClient, val loggerFactory: NamedLoggerFactory)(implicit
     val executionContext: ExecutionContext
 ) extends Endpoints {
   import JsVersionServiceCodecs.*
-  private val version = v2Endpoint.in("version")
+  private val version =
+    v2Endpoint.in(sttp.tapir.stringToPath("version"))
 
   def endpoints() = List(
     json(
@@ -42,11 +42,11 @@ class JsVersionService(versionClient: VersionClient, val loggerFactory: NamedLog
         .resultToRight
 }
 
-@nowarn("cat=lint-byname-implicit") // https://github.com/scala/bug/issues/12072
 object JsVersionServiceCodecs {
   implicit val est: Codec[experimental_features.ExperimentalStaticTime] = deriveCodec
   implicit val ecis: Codec[experimental_features.ExperimentalCommandInspectionService] = deriveCodec
-  implicit val eiss: Codec[experimental_features.ExperimentalInteractiveSubmissionService] = deriveCodec
+  implicit val eiss: Codec[experimental_features.ExperimentalInteractiveSubmissionService] =
+    deriveCodec
   implicit val ef: Codec[experimental_features.ExperimentalFeatures] = deriveCodec
   implicit val umf: Codec[version_service.UserManagementFeature] = deriveCodec
   implicit val pmf: Codec[version_service.PartyManagementFeature] = deriveCodec

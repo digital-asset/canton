@@ -19,10 +19,10 @@ import com.digitalasset.canton.domain.sequencing.admin.data.{
 }
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer.RegisterError
 import com.digitalasset.canton.domain.sequencing.sequencer.SequencerWriter.ResetWatermark
-import com.digitalasset.canton.domain.sequencing.sequencer.errors.SequencerError.SnapshotNotFound
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.*
-import com.digitalasset.canton.domain.sequencing.sequencer.store.SequencerStore.SequencerPruningResult
+import com.digitalasset.canton.domain.sequencing.sequencer.errors.SequencerError.SnapshotNotFound
 import com.digitalasset.canton.domain.sequencing.sequencer.store.*
+import com.digitalasset.canton.domain.sequencing.sequencer.store.SequencerStore.SequencerPruningResult
 import com.digitalasset.canton.domain.sequencing.sequencer.traffic.TimestampSelector.TimestampSelector
 import com.digitalasset.canton.domain.sequencing.sequencer.traffic.{
   SequencerRateLimitError,
@@ -429,9 +429,9 @@ class DatabaseSequencer(
       Future.successful(SequencerCounter.Genesis)
     }
 
-  override def onClosed(): Unit = {
-    super.onClosed()
+  override def onClosed(): Unit =
     Lifecycle.close(
+      () => super.onClosed(),
       () => pruningScheduler foreach (Lifecycle.close(_)(logger)),
       () => exclusiveStorage foreach (Lifecycle.close(_)(logger)),
       writer,
@@ -439,7 +439,6 @@ class DatabaseSequencer(
       eventSignaller,
       sequencerStore,
     )(logger)
-  }
 
   override def trafficStatus(members: Seq[Member], selector: TimestampSelector)(implicit
       traceContext: TraceContext

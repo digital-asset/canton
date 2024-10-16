@@ -23,8 +23,8 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.processing.*
-import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.FutureUtil
@@ -74,11 +74,18 @@ class MemberAuthenticationService(
       snapshot = cryptoApi.ips.currentSnapshotApproximation
       _ <- isActive(member)
       fingerprints <- EitherT(
-        snapshot.signingKeys(member).map { keys =>
-          NonEmpty
-            .from(keys.map(_.fingerprint))
-            .toRight(NoKeysRegistered(member): AuthenticationError)
-        }
+        snapshot
+          .signingKeys(member, SigningKeyUsage.SequencerAuthenticationOnly)
+          .map { keys =>
+            NonEmpty
+              .from(keys.map(_.fingerprint))
+              .toRight(
+                NoKeysWithCorrectUsageRegistered(
+                  member,
+                  SigningKeyUsage.SequencerAuthenticationOnly,
+                ): AuthenticationError
+              )
+          }
       )
       nonce = Nonce.generate(cryptoApi.pureCrypto)
       storedNonce = StoredNonce(member, nonce, clock.now, nonceExpirationInterval)
@@ -116,10 +123,16 @@ class MemberAuthenticationService(
       hash = authentication.hashDomainNonce(nonce, domain, cryptoApi.pureCrypto)
       snapshot = cryptoApi.currentSnapshotApproximation
 
-      _ <- snapshot.verifySignature(hash, member, signature).leftMap { err =>
-        logger.warn(s"Member $member provided invalid signature: $err")
-        InvalidSignature(member): AuthenticationError
-      }
+      _ <- snapshot
+        .verifySignature(
+          hash,
+          member,
+          signature,
+        )
+        .leftMap { err =>
+          logger.warn(s"Member $member provided invalid signature: $err")
+          InvalidSignature(member): AuthenticationError
+        }
       token = AuthenticationToken.generate(cryptoApi.pureCrypto)
       maybeRandomTokenExpirationTime =
         if (useExponentialRandomTokenExpiration) {

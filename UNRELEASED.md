@@ -3,6 +3,12 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2024-10-16 (Exclusive)
+
+- New config option `parameters.timeouts.processing.sequenced-event-processing-bound` allows to specify a timeout for processing sequenced events. When processing takes longer on a node, the node will log an error or crash (depending on the `exit-on-fatal-failures` parameter).
+- Fixed a crash recovery bug in unified sequencer, when it can miss events in the recovery process. Now it will start from
+  the correct earlier block height in these situations.
+
 ## Until 2024-10-02 (Exclusive)
 
 - Removed party-level group addressing.
@@ -30,6 +36,7 @@ canton {
       }
       block {
         writer.checkpoint-interval = "10s"
+        checkpoint-backfill-parallelism = 2
         reader.read-batch-size = 50
       }
     }
@@ -56,6 +63,10 @@ The integer approach replaces string representation in:
 - GetLatestPrunedOffsetsResponse message: with optional int64
   - If specified, it is a valid absolute offset (positive integer).
   - If not set, no pruning has happened yet.
+- SubmitAndWaitForUpdateIdResponse message: with int64
+- PruneRequest message (prune_up_to): with int64
+- Reassignment, TransactionTree, Transaction and Completion (offset, deduplication_offset) message: with int64
+- Commands message (deduplication_offset): with int64
 
 ## Until 2024-09-16 (Exclusive)
 
