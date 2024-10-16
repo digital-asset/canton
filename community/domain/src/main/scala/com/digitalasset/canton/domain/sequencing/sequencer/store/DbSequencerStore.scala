@@ -76,6 +76,8 @@ class DbSequencerStore(
     @VisibleForTesting private[canton] val storage: DbStorage,
     protocolVersion: ProtocolVersion,
     maxInClauseSize: PositiveNumeric[Int],
+    // TODO(#16089) TODO(#15837): Check that buffer size is 0 if we are in the HA mode
+    maxBufferedEventsSize: NonNegativeInt,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
     sequencerMember: Member,
@@ -246,6 +248,55 @@ class DbSequencerStore(
         )
     }
   }
+
+  private implicit val getPayloadOResult: GetResult[Option[Payload]] =
+    GetResult
+      .createGetTuple2[Option[PayloadId], Option[ByteString]]
+      .andThen {
+        case (Some(id), Some(content)) => Some(Payload(id, content))
+        case (None, None) => None
+        case (Some(id), None) =>
+          throw new DbDeserializationException(s"Event row has payload id set [$id] but no content")
+        case (None, Some(_)) =>
+          throw new DbDeserializationException(
+            "Event row has no payload id but has payload content"
+          )
+      }
+
+  private implicit val getDeliverStoreEventRowResultWithPayload: GetResult[Sequenced[Payload]] = {
+    val timestampGetter = implicitly[GetResult[CantonTimestamp]]
+    val timestampOGetter = implicitly[GetResult[Option[CantonTimestamp]]]
+    val discriminatorGetter = implicitly[GetResult[EventTypeDiscriminator]]
+    val messageIdGetter = implicitly[GetResult[Option[MessageId]]]
+    val memberIdGetter = implicitly[GetResult[Option[SequencerMemberId]]]
+    val memberIdNesGetter = implicitly[GetResult[Option[NonEmpty[SortedSet[SequencerMemberId]]]]]
+    val payloadGetter = implicitly[GetResult[Option[Payload]]]
+    val traceContextGetter = implicitly[GetResult[SerializableTraceContext]]
+    val errorOGetter = implicitly[GetResult[Option[ByteString]]]
+    val trafficReceiptOGetter = implicitly[GetResult[Option[TrafficReceipt]]]
+
+    GetResult { r =>
+      val row = DeliverStoreEventRow[Payload](
+        timestampGetter(r),
+        r.nextInt(),
+        discriminatorGetter(r),
+        messageIdGetter(r),
+        memberIdGetter(r),
+        memberIdNesGetter(r),
+        payloadGetter(r),
+        timestampOGetter(r),
+        traceContextGetter(r).unwrap,
+        errorOGetter(r),
+        trafficReceiptOGetter(r),
+      )
+
+      row.asStoreEvent.valueOr(err =>
+        throw new DbDeserializationException(s"Failed to deserialize event row: $err")
+      )
+    }
+  }
+
+  override val maxBufferedEvents: Int = maxBufferedEventsSize.unwrap
 
   private val profile = storage.profile
 
@@ -740,10 +791,22 @@ class DbSequencerStore(
       )
       .map(items => SortedSet(items*))
 
-  override def readPayloads(payloadIds: Seq[PayloadId])(implicit
+  override def readPayloads(payloadIds: Seq[IdOrPayload])(implicit
       traceContext: TraceContext
-  ): Future[Map[PayloadId, Payload]] =
-    payloadCache.getAll(payloadIds)
+  ): Future[Map[PayloadId, Payload]] = {
+
+    val preloadedPayloads = payloadIds.collect { case payload: Payload =>
+      payload.id -> payload
+    }.toMap
+    val idsToLoad = payloadIds.collect { case id: PayloadId => id }
+
+    logger.debug(
+      s"readPayloads: reusing buffered ${preloadedPayloads.size} payloads and requesting ${idsToLoad.size}"
+    )
+    payloadCache.getAll(idsToLoad).map { accessedPayloads =>
+      accessedPayloads ++ preloadedPayloads
+    }
+  }
 
   private def readPayloadsFromStore(payloadIds: Seq[PayloadId])(implicit
       traceContext: TraceContext
@@ -762,7 +825,7 @@ class DbSequencerStore(
         }
     }
 
-  override def readEvents(
+  override protected def readEventsInternal(
       member: Member,
       memberId: SequencerMemberId,
       fromExclusiveO: Option[CantonTimestamp],
@@ -787,9 +850,7 @@ class DbSequencerStore(
           traffic.extra_traffic_consumed, traffic.base_traffic_remainder, traffic.last_consumed_cost
         from sequencer_events events
         left join
-            -- seq_traffic_control_consumed_journal traffic
-            -- extra filter on member allows to utilize the primary key index (compared to the above line)
-            (SELECT * FROM seq_traffic_control_consumed_journal WHERE member = $member) traffic
+        (SELECT * FROM seq_traffic_control_consumed_journal WHERE member = $member) traffic
           on events.ts = traffic.sequencing_timestamp
         inner join sequencer_watermarks watermarks
           on events.node_index = watermarks.node_index
@@ -825,10 +886,7 @@ class DbSequencerStore(
           from sequencer_events events
           left join sequencer_payloads payloads
             on events.payload_id = payloads.id
-          left join
-              -- seq_traffic_control_consumed_journal traffic
-              -- extra filter on member allows to utilize the primary key index (compared to the above line)
-              (SELECT * FROM seq_traffic_control_consumed_journal WHERE member = $member) traffic
+          left join seq_traffic_control_consumed_journal traffic
             on events.ts = traffic.sequencing_timestamp
           inner join sequencer_watermarks watermarks
             on events.node_index = watermarks.node_index
@@ -861,6 +919,95 @@ class DbSequencerStore(
       case (_, watermark) => SafeWatermark(watermark)
     }
   }
+
+  private def readEventsLatest(
+      limit: Int
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Vector[Sequenced[Payload]]] = {
+
+    def h2PostgresQueryEvents(
+        safeWatermark: CantonTimestamp
+    ) =
+      sql"""
+        select events.ts, events.node_index, events.event_type, events.message_id, events.sender,
+          events.recipients, payloads.id, payloads.content, events.topology_timestamp,
+          events.trace_context, events.error,
+          traffic.extra_traffic_consumed, traffic.base_traffic_remainder, traffic.last_consumed_cost
+        from sequencer_events events
+        left join sequencer_payloads payloads
+          on events.payload_id = payloads.id
+        left join seq_traffic_control_consumed_journal traffic
+          on events.ts = traffic.sequencing_timestamp
+        inner join sequencer_watermarks watermarks
+          on events.node_index = watermarks.node_index
+        where
+          (
+              -- only consider events within the safe watermark
+              events.ts <= $safeWatermark
+              -- if the sequencer that produced the event is offline, only consider up until its offline watermark
+              and (watermarks.sequencer_online = true or events.ts <= watermarks.watermark_ts)
+          )
+        order by events.ts desc
+        limit $limit"""
+
+    def queryEvents(safeWatermarkO: Option[CantonTimestamp]) = {
+      // If we don't have a safe watermark of all online sequencers (if all are offline) we'll fallback on allowing all
+      // and letting the offline condition in the query include the event if suitable
+      val safeWatermark = safeWatermarkO.getOrElse(CantonTimestamp.MaxValue)
+      val query = profile match {
+        case _: Postgres | _: H2 =>
+          h2PostgresQueryEvents(safeWatermark)
+
+        case _: Oracle =>
+          sql"""
+          select events.ts, events.node_index, events.event_type, events.message_id, events.sender,
+            events.recipients, payloads.id, payloads.content, events.topology_timestamp,
+            events.trace_context, events.error,
+            traffic.extra_traffic_consumed, traffic.base_traffic_remainder, traffic.last_consumed_cost
+          from sequencer_events events
+          left join sequencer_payloads payloads
+            on events.payload_id = payloads.id
+          left join seq_traffic_control_consumed_journal traffic
+            on events.ts = traffic.sequencing_timestamp
+          inner join sequencer_watermarks watermarks
+            on events.node_index = watermarks.node_index
+          where
+            (
+                -- only consider events within the safe watermark
+                events.ts <= $safeWatermark
+                -- if the sequencer that produced the event is offline, only consider up until its offline watermark
+                and (watermarks.sequencer_online <> 0 or events.ts <= watermarks.watermark_ts)
+              )
+          order by events.ts desc
+          fetch next $limit rows only""".stripMargin
+      }
+
+      query.as[Sequenced[Payload]]
+    }
+
+    val query = for {
+      safeWatermark <- safeWaterMarkDBIO
+      events <- queryEvents(safeWatermark)
+    } yield events
+
+    storage.query(query.transactionally, functionFullName)
+  }
+
+  override def prePopulateBuffer(implicit traceContext: TraceContext): Future[Unit] =
+    if (maxBufferedEvents == 0) {
+      logger.debug("Buffer pre-population disabled")
+      Future.unit
+    } else {
+      // When buffer is it capacity, we will half it. There's no point in pre-loading full buffer
+      // to half it immediately afterwards.
+      val populateWithCount = maxBufferedEvents / 2
+      logger.debug(s"Pre-populating buffer with at most $populateWithCount events")
+      readEventsLatest(populateWithCount).map { events =>
+        logger.debug(s"Fan out buffer now contains ${events.size} events")
+        setBuffer(events)
+      }
+    }
 
   private def safeWaterMarkDBIO: DBIOAction[Option[CantonTimestamp], NoStream, Effect.Read] = {
     val query = profile match {

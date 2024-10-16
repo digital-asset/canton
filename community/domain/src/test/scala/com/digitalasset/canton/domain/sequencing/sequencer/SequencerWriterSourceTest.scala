@@ -227,7 +227,7 @@ class SequencerWriterSourceTest
           _.shouldBeCantonErrorCode(PayloadToEventTimeBoundExceeded),
         )
         events <- store.readEvents(alice, aliceId)
-      } yield events.payloads shouldBe empty
+      } yield events.events shouldBe empty
     }
   }
 
@@ -266,8 +266,8 @@ class SequencerWriterSourceTest
 
         events <- store.readEvents(alice, aliceId)
       } yield {
-        events.payloads should have size 1
-        events.payloads.headOption.map(_.event).value should matchPattern {
+        events.events should have size 1
+        events.events.headOption.map(_.event).value should matchPattern {
           case e: DeliverStoreEvent[_] if e.messageId == messageId2 =>
         }
       }
@@ -281,7 +281,7 @@ class SequencerWriterSourceTest
         invalidTopologyTimestamp: CantonTimestamp,
     )(implicit
         env: Env
-    ): Future[Seq[StoreEvent[PayloadId]]] = {
+    ): Future[Seq[StoreEvent[?]]] = {
       import env.*
 
       clock.advanceTo(nowish)
@@ -309,8 +309,8 @@ class SequencerWriterSourceTest
         _ <- completeFlow()
         events <- store.readEvents(alice, aliceId)
       } yield {
-        events.payloads should have size 2
-        events.payloads.map(_.event)
+        events.events should have size 2
+        events.events.map(_.event)
       }
     }
 
@@ -379,7 +379,7 @@ class SequencerWriterSourceTest
         _ <- eventuallyF(10.seconds) {
           for {
             events <- env.store.readEvents(alice, aliceId)
-            error = events.payloads.collectFirst {
+            error = events.events.collectFirst {
               case Sequenced(
                     _,
                     deliverError @ DeliverErrorStoreEvent(`aliceId`, _, _, _, _),
@@ -544,8 +544,8 @@ class SequencerWriterSourceTest
         eventTs <- eventuallyF(10.seconds) {
           for {
             events <- env.store.readEvents(alice, aliceId)
-            _ = events.payloads should have size 1
-          } yield events.payloads.headOption.map(_.timestamp).valueOrFail("expected event to exist")
+            _ = events.events should have size 1
+          } yield events.events.headOption.map(_.timestamp).valueOrFail("expected event to exist")
         }
         _ = (0 to 30).foreach { _ =>
           Threading.sleep(100L) // wait for checkpoints to be generated

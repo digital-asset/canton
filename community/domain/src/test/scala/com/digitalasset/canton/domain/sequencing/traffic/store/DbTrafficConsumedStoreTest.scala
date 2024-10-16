@@ -6,6 +6,7 @@ package com.digitalasset.canton.domain.sequencing.traffic.store
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.CachingConfigs
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store.{
   DbSequencerStoreTest,
@@ -25,7 +26,8 @@ trait DbTrafficConsumedStoreTest extends AsyncWordSpec with BaseTest with Traffi
   private lazy val sequencerStore = SequencerStore(
     storage,
     testedProtocolVersion,
-    DbSequencerStoreTest.MaxInClauseSize,
+    maxInClauseSize = DbSequencerStoreTest.MaxInClauseSize,
+    maxBufferedEventsSize = NonNegativeInt.tryCreate(3),
     timeouts,
     loggerFactory,
     DefaultTestIdentities.sequencerId,

@@ -247,6 +247,8 @@ class ParticipantNodeBootstrap(
         initialProtocolVersion = ProtocolVersion.latest,
         loggerFactory = ParticipantNodeBootstrap.this.loggerFactory,
         timeouts = timeouts,
+        futureSupervisor = futureSupervisor,
+        exitOnFatalFailures = parameters.exitOnFatalFailures,
       )
 
       addCloseable(packageOps)

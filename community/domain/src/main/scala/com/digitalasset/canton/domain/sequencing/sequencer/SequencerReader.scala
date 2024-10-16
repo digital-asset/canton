@@ -187,11 +187,11 @@ class SequencerReader(
 
     private def unvalidatedEventsSourceFromCheckpoint(initialReadState: ReadState)(implicit
         traceContext: TraceContext
-    ): Source[(SequencerCounter, Sequenced[PayloadId]), NotUsed] =
+    ): Source[(SequencerCounter, Sequenced[IdOrPayload]), NotUsed] =
       eventSignaller
         .readSignalsForMember(member, registeredMember.memberId)
         .via(
-          FetchLatestEventsFlow[(SequencerCounter, Sequenced[PayloadId]), ReadState](
+          FetchLatestEventsFlow[(SequencerCounter, Sequenced[IdOrPayload]), ReadState](
             initialReadState,
             state => fetchUnvalidatedEventsBatchFromCheckpoint(state)(traceContext),
             (state, _events) => !state.lastBatchWasFull,
@@ -326,15 +326,15 @@ class SequencerReader(
 
     def validateEvent(
         topologyClientTimestampBefore: Option[CantonTimestamp],
-        sequenced: (SequencerCounter, Sequenced[PayloadId]),
-    ): Future[(TopologyClientTimestampAfter, ValidatedSnapshotWithEvent[PayloadId])] = {
+        sequenced: (SequencerCounter, Sequenced[IdOrPayload]),
+    ): Future[(TopologyClientTimestampAfter, ValidatedSnapshotWithEvent[IdOrPayload])] = {
       val (counter, unvalidatedEvent) = sequenced
 
       def validateTopologyTimestamp(
           topologyTimestamp: CantonTimestamp,
           sequencingTimestamp: CantonTimestamp,
           eventTraceContext: TraceContext,
-      ): Future[(TopologyClientTimestampAfter, ValidatedSnapshotWithEvent[PayloadId])] = {
+      ): Future[(TopologyClientTimestampAfter, ValidatedSnapshotWithEvent[IdOrPayload])] = {
         implicit val traceContext: TraceContext = eventTraceContext
         // The topology timestamp will end up as the timestamp of topology on the signed event.
         // So we validate it accordingly.
@@ -506,24 +506,26 @@ class SequencerReader(
       }
     }
 
-    private def fetchPayloadsForEventsBatch[Mat]()(implicit
+    private def fetchPayloadsForEventsBatch()(implicit
         traceContext: TraceContext
-    ): Flow[ValidatedSnapshotWithEvent[PayloadId], UnsignedEventData, NotUsed] =
-      Flow[ValidatedSnapshotWithEvent[PayloadId]]
+    ): Flow[ValidatedSnapshotWithEvent[IdOrPayload], UnsignedEventData, NotUsed] =
+      Flow[ValidatedSnapshotWithEvent[IdOrPayload]]
         .groupedWithin(config.payloadBatchSize, config.payloadBatchWindow.underlying)
         .mapAsync(config.payloadFetchParallelism) { snapshotsWithEvent =>
           // fetch payloads in bulk
-          val payloadIds = snapshotsWithEvent.flatMap(_.unvalidatedEvent.event.payloadO.toList)
-          store.readPayloads(payloadIds).map { payloads =>
+          val idOrPayloads = snapshotsWithEvent.flatMap(_.unvalidatedEvent.event.payloadO.toList)
+          store.readPayloads(idOrPayloads).map { loadedPayloads =>
             snapshotsWithEvent.map(snapshotWithEvent =>
-              snapshotWithEvent.mapEventPayload(id =>
-                payloads.getOrElse(
-                  id,
-                  ErrorUtil.invalidState(
-                    s"Event ${snapshotWithEvent.unvalidatedEvent.event.messageId} specified payloadId $id but no corresponding payload was found."
-                  ),
-                )
-              )
+              snapshotWithEvent.mapEventPayload {
+                case id: PayloadId =>
+                  loadedPayloads.getOrElse(
+                    id,
+                    ErrorUtil.invalidState(
+                      s"Event ${snapshotWithEvent.unvalidatedEvent.event.messageId} specified payloadId $id but no corresponding payload was found."
+                    ),
+                  )
+                case payload: Payload => payload
+              }
             )
           }
         }
@@ -597,7 +599,7 @@ class SequencerReader(
         readState: ReadState
     )(implicit
         traceContext: TraceContext
-    ): Future[(ReadState, Seq[(SequencerCounter, Sequenced[PayloadId])])] =
+    ): Future[(ReadState, Seq[(SequencerCounter, Sequenced[IdOrPayload])])] =
       for {
         readEvents <- store.readEvents(
           member,
@@ -610,7 +612,7 @@ class SequencerReader(
         // in which case don't return events that we don't need to serve
         val nextSequencerCounter = readState.nextCounterAccumulator
         val eventsWithCounter =
-          readEvents.payloads.zipWithIndex.map { case (event, n) =>
+          readEvents.events.zipWithIndex.map { case (event, n) =>
             (nextSequencerCounter + n, event)
           }
         val newReadState = readState.update(readEvents, config.readBatchSize)
@@ -681,10 +683,13 @@ class SequencerReader(
               payload,
               topologyTimestampO,
               _traceContext,
-              trafficReceiptO,
+              trafficReceipt,
             ) =>
           // message id only goes to sender
           val messageIdO = Option.when(registeredMember.memberId == sender)(messageId)
+          // traffic receipt only goes to sender: from the db it is already filtered, from the buffer it is not
+          val trafficReceiptO =
+            Option.when(registeredMember.memberId == sender)(trafficReceipt).flatten
           val batch: Batch[ClosedEnvelope] = Batch
             .fromByteString(protocolVersion)(
               payload.content
@@ -829,12 +834,12 @@ object SequencerReader {
     ): ReadState =
       copy(
         // increment the counter by the number of events we've now processed
-        nextCounterAccumulator = nextCounterAccumulator + readEvents.payloads.size.toLong,
+        nextCounterAccumulator = nextCounterAccumulator + readEvents.events.size.toLong,
         // set the timestamp to next timestamp from the read events or keep the current timestamp if we got no results
         nextReadTimestamp = readEvents.nextTimestamp
           .getOrElse(nextReadTimestamp),
         // did we receive a full batch of events on this update
-        lastBatchWasFull = readEvents.payloads.sizeCompare(batchSize) == 0,
+        lastBatchWasFull = readEvents.events.sizeCompare(batchSize) == 0,
       )
 
     /** Apply a previously recorded counter checkpoint so that we don't have to start from 0 on every subscription */

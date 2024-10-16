@@ -55,8 +55,8 @@ trait MultiTenantedSequencerStoreTest extends FlagCloseable with HasCloseContext
     }
 
     def assertTimestamps(events: ReadEvents)(epochSeconds: Int*): Assertion = {
-      events.payloads.length shouldBe epochSeconds.length
-      events.payloads.map(_.timestamp) should contain theSameElementsInOrderAs epochSeconds.map(ts)
+      events.events.length shouldBe epochSeconds.length
+      events.events.map(_.timestamp) should contain theSameElementsInOrderAs epochSeconds.map(ts)
     }
 
     "checking sequencer liveness" should {

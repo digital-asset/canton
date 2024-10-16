@@ -11,7 +11,7 @@ import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.RequireTypes.{PositiveInt, PositiveNumeric}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt, PositiveNumeric}
 import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
@@ -138,6 +138,7 @@ class SequencerWriter(
     protected val loggerFactory: NamedLoggerFactory,
     protocolVersion: ProtocolVersion,
     maxSqlInListSize: PositiveNumeric[Int],
+    maxBufferedEventsSize: NonNegativeInt,
     sequencerMember: Member,
     unifiedSequencer: Boolean,
     cachingConfigs: CachingConfigs,
@@ -151,6 +152,7 @@ class SequencerWriter(
       storage,
       protocolVersion,
       maxSqlInListSize,
+      maxBufferedEventsSize,
       timeouts,
       loggerFactory,
       sequencerMember,
@@ -305,6 +307,8 @@ class SequencerWriter(
                       onlineTimestamp <- EitherT.right[WriterStartupError](
                         runRecovery(writerStore, resetWatermarkToValue)
                       )
+                      _ = generalStore.invalidateBuffer()
+                      _ <- EitherT.right(generalStore.prePopulateBuffer)
                       _ <- EitherT.right[WriterStartupError](waitForOnline(onlineTimestamp))
                     } yield ()
                   }
@@ -535,6 +539,7 @@ object SequencerWriter {
       loggerFactory,
       protocolVersion,
       writerConfig.maxSqlInListSize,
+      writerConfig.maxBufferedEventsSize,
       sequencerMember,
       unifiedSequencer = unifiedSequencer,
       cachingConfigs,
