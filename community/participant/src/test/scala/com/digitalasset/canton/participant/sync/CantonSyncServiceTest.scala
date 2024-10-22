@@ -164,7 +164,8 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       DAMLe.newEngine(enableLfDev = false, enableLfBeta = false, enableStackTraces = false),
       syncDomainStateFactory,
       clock,
-      new ResourceManagementService.CommunityResourceManagementService(
+      new ResourceManagementService(
+        Eval.now(participantSettingsStore),
         None,
         ParticipantTestMetrics,
       ),

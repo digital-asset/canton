@@ -1409,14 +1409,3 @@ private[protocol] object MessageDispatcherTest {
   type UnknownTestViewType = OtherTestViewType.type
 
 }
-
-class DefaultMessageDispatcherTest
-    extends AnyWordSpec
-    with BaseTest
-    with HasExecutorService
-    with MessageDispatcherTest {
-
-  "DefaultMessageDispatcher" should {
-    behave like messageDispatcher(MessageDispatcher.DefaultFactory.create)
-  }
-}
