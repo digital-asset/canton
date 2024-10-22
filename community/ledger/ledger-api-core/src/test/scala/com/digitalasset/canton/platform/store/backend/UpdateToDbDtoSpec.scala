@@ -8,6 +8,9 @@ import com.daml.platform.v1.index.StatusDetails
 import com.digitalasset.canton.data.DeduplicationPeriod.{DeduplicationDuration, DeduplicationOffset}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel.*
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
 import com.digitalasset.canton.ledger.participant.state.{
   DomainIndex,
   Reassignment,
@@ -176,7 +179,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           application_id = someApplicationId,
           submitters = Set(someParty),
           command_id = someCommandId,
-          transaction_id = None,
+          update_id = None,
           rejection_status_code = Some(status.code),
           rejection_status_message = Some(status.message),
           rejection_status_details = Some(StatusDetails.of(status.details).toByteArray),
@@ -215,7 +218,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           application_id = someApplicationId,
           submitters = Set(someParty),
           command_id = someCommandId,
-          transaction_id = None,
+          update_id = None,
           rejection_status_code = Some(status.code),
           rejection_status_message = Some(status.message),
           rejection_status_details = Some(StatusDetails.of(status.details).toByteArray),
@@ -275,7 +278,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         application_id = Some(completionInfo.applicationId),
         submitters = Some(completionInfo.actAs.toSet),
         node_index = createNodeId.index,
-        event_id = EventId(updateId, createNodeId).toLedgerString,
         contract_id = createNode.coid.coid,
         template_id = createNode.templateId.toString,
         package_name = createNode.packageName.toString,
@@ -299,7 +301,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         create_argument_compression = compressionAlgorithmId,
         create_key_value_compression = compressionAlgorithmId,
         event_sequential_id = 0,
-        driver_metadata = Some(someContractDriverMetadata.toByteArray),
+        driver_metadata = someContractDriverMetadata.toByteArray,
         domain_id = someDomainId1.toProtoPrimitive,
         trace_context = serializedEmptyTraceContext,
         record_time = someRecordTime.micros,
@@ -311,7 +313,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         application_id = completionInfo.applicationId,
         submitters = completionInfo.actAs.toSet,
         command_id = completionInfo.commandId,
-        transaction_id = Some(updateId),
+        update_id = Some(updateId),
         rejection_status_code = None,
         rejection_status_message = None,
         rejection_status_details = None,
@@ -394,14 +396,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         DbDto.EventExercise(
           consuming = true,
           event_offset = someOffset.toHexString,
-          transaction_id = updateId,
+          update_id = updateId,
           ledger_effective_time = transactionMeta.ledgerEffectiveTime.micros,
           command_id = Some(completionInfo.commandId),
           workflow_id = transactionMeta.workflowId,
           application_id = Some(completionInfo.applicationId),
           submitters = Some(completionInfo.actAs.toSet),
           node_index = exerciseNodeId.index,
-          event_id = EventId(updateId, exerciseNodeId).toLedgerString,
           contract_id = exerciseNode.targetCoid.coid,
           template_id = exerciseNode.templateId.toString,
           package_name = exerciseNode.packageName,
@@ -438,7 +439,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           application_id = completionInfo.applicationId,
           submitters = completionInfo.actAs.toSet,
           command_id = completionInfo.commandId,
-          transaction_id = Some(updateId),
+          update_id = Some(updateId),
           rejection_status_code = None,
           rejection_status_message = None,
           rejection_status_details = None,
@@ -507,14 +508,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         DbDto.EventExercise(
           consuming = false,
           event_offset = someOffset.toHexString,
-          transaction_id = updateId,
+          update_id = updateId,
           ledger_effective_time = transactionMeta.ledgerEffectiveTime.micros,
           command_id = Some(completionInfo.commandId),
           workflow_id = transactionMeta.workflowId,
           application_id = Some(completionInfo.applicationId),
           submitters = Some(completionInfo.actAs.toSet),
           node_index = exerciseNodeId.index,
-          event_id = EventId(updateId, exerciseNodeId).toLedgerString,
           contract_id = exerciseNode.targetCoid.coid,
           template_id = exerciseNode.templateId.toString,
           package_name = exerciseNode.packageName,
@@ -545,7 +545,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           application_id = completionInfo.applicationId,
           submitters = completionInfo.actAs.toSet,
           command_id = completionInfo.commandId,
-          transaction_id = Some(updateId),
+          update_id = Some(updateId),
           rejection_status_code = None,
           rejection_status_message = None,
           rejection_status_details = None,
@@ -640,14 +640,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         DbDto.EventExercise(
           consuming = false,
           event_offset = someOffset.toHexString,
-          transaction_id = updateId,
+          update_id = updateId,
           ledger_effective_time = transactionMeta.ledgerEffectiveTime.micros,
           command_id = Some(completionInfo.commandId),
           workflow_id = transactionMeta.workflowId,
           application_id = Some(completionInfo.applicationId),
           submitters = Some(completionInfo.actAs.toSet),
           node_index = exerciseNodeAId.index,
-          event_id = EventId(updateId, exerciseNodeAId).toLedgerString,
           contract_id = exerciseNodeA.targetCoid.coid,
           template_id = exerciseNodeA.templateId.toString,
           package_name = exerciseNodeA.packageName,
@@ -677,14 +676,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         DbDto.EventExercise(
           consuming = false,
           event_offset = someOffset.toHexString,
-          transaction_id = updateId,
+          update_id = updateId,
           ledger_effective_time = transactionMeta.ledgerEffectiveTime.micros,
           command_id = Some(completionInfo.commandId),
           workflow_id = transactionMeta.workflowId,
           application_id = Some(completionInfo.applicationId),
           submitters = Some(completionInfo.actAs.toSet),
           node_index = exerciseNodeBId.index,
-          event_id = EventId(updateId, exerciseNodeBId).toLedgerString,
           contract_id = exerciseNodeB.targetCoid.coid,
           template_id = exerciseNodeB.templateId.toString,
           package_name = exerciseNodeB.packageName,
@@ -711,14 +709,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         DbDto.EventExercise(
           consuming = false,
           event_offset = someOffset.toHexString,
-          transaction_id = updateId,
+          update_id = updateId,
           ledger_effective_time = transactionMeta.ledgerEffectiveTime.micros,
           command_id = Some(completionInfo.commandId),
           workflow_id = transactionMeta.workflowId,
           application_id = Some(completionInfo.applicationId),
           submitters = Some(completionInfo.actAs.toSet),
           node_index = exerciseNodeCId.index,
-          event_id = EventId(updateId, exerciseNodeCId).toLedgerString,
           contract_id = exerciseNodeC.targetCoid.coid,
           template_id = exerciseNodeC.templateId.toString,
           package_name = exerciseNodeC.packageName,
@@ -749,7 +746,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           application_id = completionInfo.applicationId,
           submitters = completionInfo.actAs.toSet,
           command_id = completionInfo.commandId,
-          transaction_id = Some(updateId),
+          update_id = Some(updateId),
           rejection_status_code = None,
           rejection_status_message = None,
           rejection_status_details = None,
@@ -831,7 +828,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           application_id = completionInfo.applicationId,
           submitters = completionInfo.actAs.toSet,
           command_id = completionInfo.commandId,
-          transaction_id = Some(updateId),
+          update_id = Some(updateId),
           rejection_status_code = None,
           rejection_status_message = None,
           rejection_status_details = None,
@@ -902,14 +899,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         DbDto.EventExercise(
           consuming = true,
           event_offset = someOffset.toHexString,
-          transaction_id = updateId,
+          update_id = updateId,
           ledger_effective_time = transactionMeta.ledgerEffectiveTime.micros,
           command_id = Some(completionInfo.commandId),
           workflow_id = transactionMeta.workflowId,
           application_id = Some(completionInfo.applicationId),
           submitters = Some(completionInfo.actAs.toSet),
           node_index = exerciseNodeId.index,
-          event_id = EventId(updateId, exerciseNodeId).toLedgerString,
           contract_id = exerciseNode.targetCoid.coid,
           template_id = exerciseNode.templateId.toString,
           package_name = exerciseNode.packageName,
@@ -950,7 +946,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           application_id = completionInfo.applicationId,
           submitters = completionInfo.actAs.toSet,
           command_id = completionInfo.commandId,
-          transaction_id = Some(updateId),
+          update_id = Some(updateId),
           rejection_status_code = None,
           rejection_status_message = None,
           rejection_status_details = None,
@@ -1027,7 +1023,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         application_id = Some(completionInfo.applicationId),
         submitters = Some(completionInfo.actAs.toSet),
         node_index = createNodeId.index,
-        event_id = EventId(updateId, createNodeId).toLedgerString,
         contract_id = createNode.coid.coid,
         template_id = createNode.templateId.toString,
         package_name = createNode.packageName.toString,
@@ -1043,7 +1038,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         create_argument_compression = compressionAlgorithmId,
         create_key_value_compression = None,
         event_sequential_id = 0,
-        driver_metadata = Some(someContractDriverMetadata.toByteArray),
+        driver_metadata = someContractDriverMetadata.toByteArray,
         domain_id = someDomainId1.toProtoPrimitive,
         trace_context = serializedEmptyTraceContext,
         record_time = someRecordTime.micros,
@@ -1055,14 +1050,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       dtos(3) shouldEqual DbDto.EventExercise(
         consuming = true,
         event_offset = someOffset.toHexString,
-        transaction_id = updateId,
+        update_id = updateId,
         ledger_effective_time = transactionMeta.ledgerEffectiveTime.micros,
         command_id = Some(completionInfo.commandId),
         workflow_id = transactionMeta.workflowId,
         application_id = Some(completionInfo.applicationId),
         submitters = Some(completionInfo.actAs.toSet),
         node_index = exerciseNodeId.index,
-        event_id = EventId(updateId, exerciseNodeId).toLedgerString,
         contract_id = exerciseNode.targetCoid.coid,
         template_id = exerciseNode.templateId.toString,
         package_name = exerciseNode.packageName,
@@ -1103,7 +1097,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         application_id = completionInfo.applicationId,
         submitters = completionInfo.actAs.toSet,
         command_id = completionInfo.commandId,
-        transaction_id = Some(updateId),
+        update_id = Some(updateId),
         rejection_status_code = None,
         rejection_status_message = None,
         rejection_status_details = None,
@@ -1182,7 +1176,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           application_id = completionInfo.applicationId,
           submitters = completionInfo.actAs.toSet,
           command_id = completionInfo.commandId,
-          transaction_id = Some(updateId),
+          update_id = Some(updateId),
           rejection_status_code = None,
           rejection_status_message = None,
           rejection_status_details = None,
@@ -1246,7 +1240,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         application_id = None,
         submitters = None,
         node_index = createNodeId.index,
-        event_id = EventId(updateId, createNodeId).toLedgerString,
         contract_id = createNode.coid.coid,
         template_id = createNode.templateId.toString,
         package_name = createNode.packageName.toString,
@@ -1262,85 +1255,10 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         create_argument_compression = compressionAlgorithmId,
         create_key_value_compression = None,
         event_sequential_id = 0,
-        driver_metadata = Some(someContractDriverMetadata.toByteArray),
+        driver_metadata = someContractDriverMetadata.toByteArray,
         domain_id = someDomainId1.toProtoPrimitive,
         trace_context = serializedEmptyTraceContext,
         record_time = someRecordTime.micros,
-      )
-      Set(dtos(1), dtos(2)) should contain theSameElementsAs Set(
-        DbDto.IdFilterCreateStakeholder(0L, createNode.templateId.toString, "signatory"),
-        DbDto.IdFilterCreateStakeholder(0L, createNode.templateId.toString, "observer"),
-      )
-      dtos.size shouldEqual 4
-    }
-
-    "handle TransactionAccepted (no contract metadata)" in {
-      // Transaction that is missing the contract metadata
-      // This can happen if the submitting participant is running an older version
-      // predating the introduction of the contract driver metadata
-      val transactionMeta = someTransactionMeta
-      val builder = TxBuilder()
-      val contractId = builder.newCid
-      val createNode = builder.create(
-        id = contractId,
-        templateId = "M:T",
-        argument = Value.ValueUnit,
-        signatories = List("signatory"),
-        observers = List("observer"),
-      )
-      val createNodeId = builder.add(createNode)
-      val transaction = builder.buildCommitted()
-      val update = state.Update.TransactionAccepted(
-        completionInfoO = None,
-        transactionMeta = transactionMeta,
-        transaction = transaction,
-        updateId = updateId,
-        recordTime = someRecordTime,
-        hostedWitnesses = Nil,
-        contractMetadata = Map.empty,
-        domainId = someDomainId1,
-        domainIndex = someDomainIndex,
-      )
-      val dtos = updateToDtos(update)
-
-      dtos.head shouldEqual DbDto.EventCreate(
-        event_offset = someOffset.toHexString,
-        update_id = updateId,
-        ledger_effective_time = transactionMeta.ledgerEffectiveTime.micros,
-        command_id = None,
-        workflow_id = transactionMeta.workflowId,
-        application_id = None,
-        submitters = None,
-        node_index = createNodeId.index,
-        event_id = EventId(updateId, createNodeId).toLedgerString,
-        contract_id = createNode.coid.coid,
-        template_id = createNode.templateId.toString,
-        package_name = createNode.packageName.toString,
-        package_version = createNode.packageVersion.map(_.toString()),
-        flat_event_witnesses = Set("signatory", "observer"),
-        tree_event_witnesses = Set("signatory", "observer"),
-        create_argument = emptyArray,
-        create_signatories = Set("signatory"),
-        create_observers = Set("observer"),
-        create_key_value = None,
-        create_key_maintainers = None,
-        create_key_hash = None,
-        create_argument_compression = compressionAlgorithmId,
-        create_key_value_compression = None,
-        event_sequential_id = 0,
-        driver_metadata = None,
-        domain_id = someDomainId1.toProtoPrimitive,
-        trace_context = serializedEmptyTraceContext,
-        record_time = someRecordTime.micros,
-      )
-      dtos(3) shouldEqual DbDto.TransactionMeta(
-        update_id = updateId,
-        event_offset = someOffset.toHexString,
-        publication_time = 0,
-        record_time = someRecordTime.micros,
-        domain_id = someDomainId1.toProtoPrimitive,
-        event_sequential_id_first = 0,
-        event_sequential_id_last = 0,
       )
       Set(dtos(1), dtos(2)) should contain theSameElementsAs Set(
         DbDto.IdFilterCreateStakeholder(0L, createNode.templateId.toString, "signatory"),
@@ -1398,7 +1316,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
               application_id = someApplicationId,
               submitters = Set(someParty),
               command_id = someCommandId,
-              transaction_id = None,
+              update_id = None,
               rejection_status_code = Some(status.code),
               rejection_status_message = Some(status.message),
               rejection_status_details = Some(StatusDetails.of(status.details).toByteArray),
@@ -1461,7 +1379,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             application_id = Some(completionInfo.applicationId),
             submitters = Some(completionInfo.actAs.toSet),
             node_index = createNodeId.index,
-            event_id = EventId(updateId, createNodeId).toLedgerString,
             contract_id = createNode.coid.coid,
             template_id = createNode.templateId.toString,
             package_name = createNode.packageName.toString,
@@ -1477,7 +1394,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             create_argument_compression = compressionAlgorithmId,
             create_key_value_compression = None,
             event_sequential_id = 0,
-            driver_metadata = Some(someContractDriverMetadata.toByteArray),
+            driver_metadata = someContractDriverMetadata.toByteArray,
             domain_id = someDomainId1.toProtoPrimitive,
             trace_context = serializedEmptyTraceContext,
             record_time = someRecordTime.micros,
@@ -1493,7 +1410,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             application_id = completionInfo.applicationId,
             submitters = completionInfo.actAs.toSet,
             command_id = completionInfo.commandId,
-            transaction_id = Some(updateId),
+            update_id = Some(updateId),
             rejection_status_code = None,
             rejection_status_message = None,
             rejection_status_details = None,
@@ -1594,7 +1511,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         application_id = completionInfo.applicationId,
         submitters = completionInfo.actAs.toSet,
         command_id = completionInfo.commandId,
-        transaction_id = Some(updateId),
+        update_id = Some(updateId),
         rejection_status_code = None,
         rejection_status_message = None,
         rejection_status_details = None,
@@ -1700,7 +1617,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         application_id = completionInfo.applicationId,
         submitters = completionInfo.actAs.toSet,
         command_id = completionInfo.commandId,
-        transaction_id = Some(updateId),
+        update_id = Some(updateId),
         rejection_status_code = None,
         rejection_status_message = None,
         rejection_status_details = None,
@@ -1730,6 +1647,64 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         DbDto.IdFilterUnassignStakeholder(0L, createNode.templateId.toString, "asdasdasd"),
       )
       dtos.size shouldEqual 6
+    }
+
+    "handle TopologyTransactionEffective - PartyToParticipantAuthorization" in {
+      val events = Set[TopologyEvent](
+        PartyToParticipantAuthorization(
+          party = someParty,
+          participant = someParticipantId,
+          level = Submission,
+        ),
+        PartyToParticipantAuthorization(
+          party = someParty,
+          participant = otherParticipantId,
+          level = Revoked,
+        ),
+      )
+
+      val update = state.Update.TopologyTransactionEffective(
+        updateId = updateId,
+        events = events,
+        recordTime = someRecordTime,
+        domainId = someDomainId1,
+        domainIndex = domainIndexWithSequencerCounter,
+      )
+
+      val dtos = updateToDtos(update)
+
+      dtos.head shouldEqual DbDto.EventPartyToParticipant(
+        event_sequential_id = 0,
+        event_offset = someOffset.toHexString,
+        update_id = update.updateId,
+        party_id = someParty,
+        participant_id = someParticipantId,
+        participant_permission = UpdateToDbDto.authorizationLevelToInt(Submission),
+        domain_id = someDomainId1.toProtoPrimitive,
+        record_time = someRecordTime.micros,
+        trace_context = serializedEmptyTraceContext,
+      )
+      dtos(1) shouldEqual DbDto.EventPartyToParticipant(
+        event_sequential_id = 0,
+        event_offset = someOffset.toHexString,
+        update_id = update.updateId,
+        party_id = someParty,
+        participant_id = otherParticipantId,
+        participant_permission = UpdateToDbDto.authorizationLevelToInt(Revoked),
+        domain_id = someDomainId1.toProtoPrimitive,
+        record_time = someRecordTime.micros,
+        trace_context = serializedEmptyTraceContext,
+      )
+      dtos(2) shouldEqual DbDto.TransactionMeta(
+        update_id = updateId,
+        event_offset = someOffset.toHexString,
+        publication_time = 0,
+        record_time = someRecordTime.micros,
+        domain_id = "x::domain1",
+        event_sequential_id_first = 0,
+        event_sequential_id_last = 0,
+      )
+      dtos.size shouldEqual 3
     }
 
     "handle SequencerIndexMoved" in {
@@ -1816,16 +1791,16 @@ object UpdateToDbDtoSpec {
         )
       )
     )
-  private val someDomainIndexWithSequencerCounter =
-    Some(
-      DomainIndex.of(
-        RequestIndex(
-          counter = RequestCounter(10),
-          sequencerCounter = Some(SequencerCounter(10)),
-          timestamp = CantonTimestamp(someRecordTime),
-        )
+  private val domainIndexWithSequencerCounter =
+    DomainIndex.of(
+      RequestIndex(
+        counter = RequestCounter(10),
+        sequencerCounter = Some(SequencerCounter(10)),
+        timestamp = CantonTimestamp(someRecordTime),
       )
     )
+  private val someDomainIndexWithSequencerCounter =
+    Some(domainIndexWithSequencerCounter)
   private val someApplicationId =
     Ref.ApplicationId.assertFromString("UpdateToDbDtoSpecApplicationId")
   private val someCommandId = Ref.CommandId.assertFromString("UpdateToDbDtoSpecCommandId")

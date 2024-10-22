@@ -509,7 +509,7 @@ create table sequencer_counter_checkpoints (
    counter bigint not null,
    ts bigint not null,
    latest_sequencer_event_ts bigint,
-   primary key (member, counter)
+   primary key (member, counter, ts)
 );
 
 -- This index helps fetching the latest checkpoint for a member
@@ -790,6 +790,9 @@ create table seq_traffic_control_consumed_journal (
     -- traffic entries have a unique sequencing_timestamp per member
        primary key (member, sequencing_timestamp)
 );
+
+-- This index helps joining traffic receipts without a member reference
+create index on seq_traffic_control_consumed_journal(sequencing_timestamp);
 
 --   BFT Ordering Tables
 

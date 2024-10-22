@@ -34,8 +34,8 @@ import com.digitalasset.canton.platform.store.utils.QueueBasedConcurrencyLimiter
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.{RequestCounter, SequencerCounter}
-import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Time.Timestamp
+import com.digitalasset.daml.lf.data.{Bytes, Ref}
 import com.digitalasset.daml.lf.engine.Engine
 import com.digitalasset.daml.lf.transaction.CommittedTransaction
 import io.opentelemetry.api.trace.Tracer
@@ -281,7 +281,7 @@ private class JdbcLedgerDao(
   override def prune(
       pruneUpToInclusive: Offset,
       pruneAllDivulgedContracts: Boolean,
-      incompletReassignmentOffsets: Vector[Offset],
+      incompleteReassignmentOffsets: Vector[Offset],
   )(implicit loggingContext: LoggingContextWithTrace): Future[Unit] = {
     val allDivulgencePruningParticle =
       if (pruneAllDivulgedContracts) " (including all divulged contracts)" else ""
@@ -294,7 +294,7 @@ private class JdbcLedgerDao(
         readStorageBackend.eventStorageBackend.pruneEvents(
           pruneUpToInclusive,
           pruneAllDivulgedContracts,
-          incompletReassignmentOffsets,
+          incompleteReassignmentOffsets,
         )(
           conn,
           loggingContext.traceContext,
@@ -497,7 +497,18 @@ private class JdbcLedgerDao(
                 updateId = updateId,
                 recordTime = recordTime,
                 hostedWitnesses = hostedWitnesses,
-                contractMetadata = Map.empty,
+                contractMetadata = new Map[ContractId, Bytes] {
+                  override def removed(key: ContractId): Map[ContractId, Bytes] = this
+
+                  override def updated[V1 >: Bytes](
+                      key: ContractId,
+                      value: V1,
+                  ): Map[ContractId, V1] = this
+
+                  override def get(key: ContractId): Option[Bytes] = Some(Bytes.Empty)
+
+                  override def iterator: Iterator[(ContractId, Bytes)] = Iterator.empty
+                }, // only for tests
                 domainId = DomainId.tryFromString("invalid::deadbeef"),
                 domainIndex = Some(
                   DomainIndex.of(

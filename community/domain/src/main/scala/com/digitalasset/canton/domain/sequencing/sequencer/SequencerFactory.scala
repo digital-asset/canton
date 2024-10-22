@@ -5,7 +5,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 
 import cats.data.EitherT
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.block.SequencerDriver
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
@@ -53,6 +53,7 @@ trait SequencerFactory extends FlagCloseable with HasCloseContext {
 abstract class DatabaseSequencerFactory(
     config: DatabaseSequencerConfig,
     storage: Storage,
+    cachingConfigs: CachingConfigs,
     override val timeouts: ProcessingTimeout,
     protocolVersion: ProtocolVersion,
     sequencerId: SequencerId,
@@ -63,12 +64,14 @@ abstract class DatabaseSequencerFactory(
 
   val sequencerStore: SequencerStore =
     SequencerStore(
-      storage,
-      protocolVersion,
-      timeouts,
-      loggerFactory,
-      sequencerId,
+      storage = storage,
+      protocolVersion = protocolVersion,
+      maxBufferedEventsSize = config.writer.maxBufferedEventsSize,
+      timeouts = timeouts,
+      loggerFactory = loggerFactory,
+      sequencerMember = sequencerId,
       blockSequencerMode = blockSequencerMode,
+      cachingConfigs = cachingConfigs,
       // Overriding the store's close context with the writers, so that when the writer gets closed, the store
       // stops retrying forever
       overrideCloseContext = Some(this.closeContext),
@@ -93,6 +96,7 @@ class CommunityDatabaseSequencerFactory(
     extends DatabaseSequencerFactory(
       config,
       storage,
+      nodeParameters.cachingConfigs,
       nodeParameters.processingTimeouts,
       sequencerProtocolVersion,
       sequencerId,
@@ -125,6 +129,7 @@ class CommunityDatabaseSequencerFactory(
       sequencerId,
       sequencerProtocolVersion,
       domainSyncCryptoApi,
+      nodeParameters.cachingConfigs,
       metrics,
       loggerFactory,
       runtimeReady,

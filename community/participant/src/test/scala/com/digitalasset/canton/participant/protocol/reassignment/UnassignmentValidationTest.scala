@@ -84,7 +84,7 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
     )
     .build(loggerFactory)
 
-  private val stakeholders = Set(submitterParty1)
+  private val stakeholders: Stakeholders = Stakeholders.withSignatories(Set(submitterParty1))
   private val sourcePV = Source(testedProtocolVersion)
 
   "unassignment validation" should {
@@ -101,17 +101,22 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
 
   "detect stakeholders mismatch" in {
     // receiverParty2 is not a stakeholder on a contract, but it is listed as stakeholder here
+    val incorrectStakeholders = Stakeholders.tryCreate(
+      stakeholders = stakeholders.all + receiverParty2,
+      signatories = stakeholders.signatories,
+    )
+
     val validation = mkUnassignmentValidation(
-      stakeholders.union(Set(receiverParty2)),
+      incorrectStakeholders,
       sourcePV,
       templateId,
     )
 
     validation.futureValueUS.left.value shouldBe StakeholdersMismatch(
       None,
-      Set(submitterParty1, receiverParty2),
+      incorrectStakeholders,
       None,
-      Right(Set(submitterParty1)),
+      Right(Stakeholders(contract.metadata)),
     )
   }
 
@@ -141,7 +146,7 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
       validation.futureValueUS
     }
 
-    assert(!stakeholders.contains(nonStakeholder))
+    assert(!stakeholders.all.contains(nonStakeholder))
 
     unassignmentValidation(submitterParty1).value shouldBe ()
     unassignmentValidation(
@@ -149,7 +154,7 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
     ).left.value shouldBe UnassignmentSubmitterMustBeStakeholder(
       contractId,
       submittingParty = nonStakeholder,
-      stakeholders = stakeholders,
+      stakeholders = stakeholders.all,
     )
   }
 
@@ -183,20 +188,28 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
   }
 
   private def mkUnassignmentValidation(
-      newStakeholders: Set[LfPartyId],
+      newStakeholders: Stakeholders,
       sourceProtocolVersion: Source[ProtocolVersion],
       expectedTemplateId: LfTemplateId,
       reassigningParticipants: Set[ParticipantId] = Set(participant),
       submitter: LfPartyId = submitterParty1,
   ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Unit] = {
 
+    val updatedContract = contract.copy(metadata =
+      ContractMetadata.tryCreate(
+        signatories = newStakeholders.signatories,
+        stakeholders = newStakeholders.all,
+        maybeKeyWithMaintainersVersioned = None,
+      )
+    )
+
     val unassignmentRequest =
-      new ReassignmentDataHelpers(contract, sourceDomain, targetDomain, identityFactory)
+      new ReassignmentDataHelpers(updatedContract, sourceDomain, targetDomain, identityFactory)
         .unassignmentRequest(
           submitter,
           submittingParticipant = participant,
           sourceMediator = sourceMediator,
-        )(newStakeholders, reassigningParticipants)
+        )(reassigningParticipants)
 
     val fullUnassignmentTree = unassignmentRequest
       .toFullUnassignmentTree(
@@ -207,13 +220,12 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
       )
 
     UnassignmentValidation.perform(
-      fullUnassignmentTree,
-      stakeholders,
-      expectedTemplateId,
+      expectedStakeholders = stakeholders,
+      expectedTemplateId = expectedTemplateId,
       sourceProtocolVersion,
       Source(identityFactory.topologySnapshot()),
       Some(Target(identityFactory.topologySnapshot())),
       Recipients.cc(participant),
-    )
+    )(fullUnassignmentTree)
   }
 }

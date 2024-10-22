@@ -18,7 +18,7 @@ object Dependencies {
   lazy val incompatibleLogging: Array[ExclusionRule] =
     Array(ExclusionRule("org.slf4j"), ExclusionRule("ch.qos.logback"))
 
-  lazy val scala_version = "2.13.14"
+  lazy val scala_version = "2.13.15"
   lazy val scala_version_short = "2.13"
 
   lazy val pekko_version = "1.0.1"
@@ -59,6 +59,8 @@ object Dependencies {
   lazy val netty_boring_ssl_version = "2.0.61.Final"
   lazy val netty_version = "4.1.108.Final"
 
+  lazy val oracle_version = "19.18.0.0"
+  lazy val pekko_http_backend_version = "3.9.0"
   lazy val postgres_version = "42.7.3"
   lazy val pprint_version = "0.8.1"
   lazy val prometheus_version = "0.16.0"
@@ -80,6 +82,7 @@ object Dependencies {
   // if you update the slick version, please also update our forked code in community/lib/slick and community/base/slick/util
   lazy val slick_version = "3.5.2"
   lazy val sttp_version = "3.8.16"
+  lazy val tapir_client_version = "1.9.11"
   lazy val tapir_version = "1.8.5"
   lazy val testcontainers_version = "1.19.7"
   lazy val tink_version = "1.12.0"
@@ -280,6 +283,9 @@ object Dependencies {
   lazy val tapir_pekko_http_server =
     "com.softwaremill.sttp.tapir" %% "tapir-pekko-http-server" % tapir_version
 
+  lazy val tapir_sttp_client =
+    "com.softwaremill.sttp.tapir" %% "tapir-sttp-client" % tapir_client_version
+
   lazy val tapir_openapi_docs =
     "com.softwaremill.sttp.tapir" %% "tapir-openapi-docs" % tapir_version
 
@@ -291,6 +297,9 @@ object Dependencies {
 
   lazy val sttp_apiscpec_asyncapi_circe_yaml =
     "com.softwaremill.sttp.apispec" %% "asyncapi-circe-yaml" % apispec_version
+
+  lazy val sttp_pekko_backend =
+    "com.softwaremill.sttp.client3" %% "pekko-http-backend" % pekko_http_backend_version
 
   // Transcode dependencies
   lazy val upickle = "com.lihaoyi" %% "upickle" % upickle_version

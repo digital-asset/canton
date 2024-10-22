@@ -68,7 +68,10 @@ object ErrorCategory {
 
   /** Service is temporarily unavailable
     */
-  @Description("One of the services required to process the request was not available.")
+  @Description("""One of the services required to process the request was not available.
+    |The request might or might not have been processed, as the server aborted the request while it was being processed.
+    |Note that for requests that change the state of the system, this error may be returned
+    |even if the request has completed successfully.""")
   @RetryStrategy("Retry quickly in load balancer.")
   @Resolution(
     "Expectation: transient failure that should be handled by retrying the request with appropriate backoff."

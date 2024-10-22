@@ -9,6 +9,11 @@ import com.daml.platform.v1.index.StatusDetails
 import com.digitalasset.canton.data
 import com.digitalasset.canton.data.DeduplicationPeriod.{DeduplicationDuration, DeduplicationOffset}
 import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel.*
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.{
+  AuthorizationLevel,
+  TopologyEvent,
+}
 import com.digitalasset.canton.ledger.participant.state.{
   CompletionInfo,
   Reassignment,
@@ -61,6 +66,14 @@ object UpdateToDbDto {
             metrics = metrics,
             offset = offset,
             partyAllocationRejected = u,
+          )
+
+        case u: TopologyTransactionEffective =>
+          topologyTransactionToDbDto(
+            metrics = metrics,
+            offset = offset,
+            serializedTraceContext = serializedTraceContext,
+            topologyTransaction = u,
           )
 
         case u: TransactionAccepted =>
@@ -180,6 +193,57 @@ object UpdateToDbDto {
     )
   }
 
+  private[backend] def authorizationLevelToInt(level: AuthorizationLevel) = level match {
+    case Revoked => 0
+    case Submission => 1
+    case Confirmation => 2
+    case Observation => 3
+  }
+
+  private def topologyTransactionToDbDto(
+      metrics: LedgerApiServerMetrics,
+      offset: Offset,
+      serializedTraceContext: Array[Byte],
+      topologyTransaction: TopologyTransactionEffective,
+  )(implicit mc: MetricsContext): Iterator[DbDto] = {
+    incrementCounterForEvent(
+      metrics.indexer,
+      IndexerMetrics.Labels.eventType.topologyTransaction,
+      IndexerMetrics.Labels.status.accepted,
+    )
+
+    val transactionMeta = DbDto.TransactionMeta(
+      update_id = topologyTransaction.updateId,
+      event_offset = offset.toHexString,
+      publication_time = 0, // this is filled later
+      record_time = topologyTransaction.recordTime.micros,
+      domain_id = topologyTransaction.domainId.toProtoPrimitive,
+      event_sequential_id_first = 0, // this is filled later
+      event_sequential_id_last = 0, // this is filled later
+    )
+
+    val events = topologyTransaction.events.iterator.map {
+      case TopologyEvent.PartyToParticipantAuthorization(party, participant, level) =>
+        DbDto.EventPartyToParticipant(
+          event_sequential_id = 0, // this is filled later
+          event_offset = offset.toHexString,
+          update_id = topologyTransaction.updateId,
+          party_id = party,
+          participant_id = participant,
+          participant_permission = authorizationLevelToInt(level),
+          domain_id = topologyTransaction.domainId.toProtoPrimitive,
+          record_time = topologyTransaction.recordTime.micros,
+          trace_context = serializedTraceContext,
+        )
+    }
+
+    // TransactionMeta DTO must come last in this sequence
+    // because in a later stage the preceding events
+    // will be assigned consecutive event sequential ids
+    // and transaction meta is assigned sequential ids of its first and last event
+    events ++ Seq(transactionMeta)
+  }
+
   private def transactionAcceptedToDbDto(
       translation: LfValueSerialization,
       compressionStrategy: CompressionStrategy,
@@ -272,7 +336,6 @@ object UpdateToDbDto {
       nodeId: NodeId,
       create: Create,
   ): Iterator[DbDto] = {
-    val eventId = EventId(transactionAccepted.updateId, nodeId)
     val templateId = create.templateId.toString
     val stakeholders = create.stakeholders.map(_.toString)
     val (createArgument, createKeyValue) = translation.serialize(create)
@@ -289,7 +352,6 @@ object UpdateToDbDto {
         application_id = transactionAccepted.completionInfoO.map(_.applicationId),
         submitters = transactionAccepted.completionInfoO.map(_.actAs.toSet),
         node_index = nodeId.index,
-        event_id = eventId.toLedgerString,
         contract_id = create.coid.coid,
         template_id = templateId,
         package_name = create.packageName,
@@ -307,10 +369,12 @@ object UpdateToDbDto {
         create_key_value_compression =
           compressionStrategy.createKeyValueCompression.id.filter(_ => createKeyValue.isDefined),
         event_sequential_id = 0, // this is filled later
-        driver_metadata =
-          // Allow None as the original participant might be running
-          // with a version predating the introduction of contract driver metadata
-          transactionAccepted.contractMetadata.get(create.coid).map(_.toByteArray),
+        driver_metadata = transactionAccepted.contractMetadata
+          .get(create.coid)
+          .map(_.toByteArray)
+          .getOrElse(
+            throw new IllegalStateException(s"missing driver metadata for contract ${create.coid}")
+          ),
         domain_id = transactionAccepted.domainId.toProtoPrimitive,
         trace_context = serializedTraceContext,
         record_time = transactionAccepted.recordTime.micros,
@@ -351,14 +415,13 @@ object UpdateToDbDto {
       DbDto.EventExercise(
         consuming = exercise.consuming,
         event_offset = offset.toHexString,
-        transaction_id = transactionAccepted.updateId,
+        update_id = transactionAccepted.updateId,
         ledger_effective_time = transactionAccepted.transactionMeta.ledgerEffectiveTime.micros,
         command_id = transactionAccepted.completionInfoO.map(_.commandId),
         workflow_id = transactionAccepted.transactionMeta.workflowId,
         application_id = transactionAccepted.completionInfoO.map(_.applicationId),
         submitters = transactionAccepted.completionInfoO.map(_.actAs.toSet),
         node_index = nodeId.index,
-        event_id = EventId(transactionAccepted.updateId, nodeId).toLedgerString,
         contract_id = exercise.targetCoid.coid,
         template_id = templateId,
         package_name = exercise.packageName,
@@ -621,7 +684,7 @@ object UpdateToDbDto {
       application_id = completionInfo.applicationId,
       submitters = completionInfo.actAs.toSet,
       command_id = completionInfo.commandId,
-      transaction_id = updateId,
+      update_id = updateId,
       rejection_status_code = None,
       rejection_status_message = None,
       rejection_status_details = None,

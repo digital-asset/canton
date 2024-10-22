@@ -174,7 +174,7 @@ private[reassignment] class AssignmentProcessingSteps(
           topologySnapshot,
           submitter,
           participantId,
-          stakeholders,
+          stakeholders = stakeholders.all,
         )
         .mapK(FutureUnlessShutdown.outcomeK)
 
@@ -186,7 +186,6 @@ private[reassignment] class AssignmentProcessingSteps(
           pureCrypto,
           seed,
           submitterMetadata,
-          stakeholders,
           reassignmentData.contract,
           reassignmentData.reassignmentCounter,
           reassignmentData.creatingTransactionId,
@@ -196,7 +195,7 @@ private[reassignment] class AssignmentProcessingSteps(
           assignmentUuid,
           reassignmentData.sourceProtocolVersion,
           targetProtocolVersion,
-          reassignmentData.unassignmentRequest.reassigningParticipants,
+          reassignmentData.unassignmentRequest.confirmingReassigningParticipants,
         )
       )
 
@@ -205,7 +204,7 @@ private[reassignment] class AssignmentProcessingSteps(
         .sign(rootHash.unwrap)
         .leftMap(ReassignmentSigningError.apply)
       mediatorMessage = fullTree.mediatorMessage(submittingParticipantSignature)
-      recipientsSet <- activeParticipantsOfParty(stakeholders.toSeq).mapK(
+      recipientsSet <- activeParticipantsOfParty(stakeholders.all.toSeq).mapK(
         FutureUnlessShutdown.outcomeK
       )
       recipients <- EitherT.fromEither[FutureUnlessShutdown](
@@ -748,7 +747,6 @@ object AssignmentProcessingSteps {
       pureCrypto: CryptoPureApi,
       seed: SaltSeed,
       submitterMetadata: ReassignmentSubmitterMetadata,
-      stakeholders: Set[LfPartyId],
       contract: SerializableContract,
       reassignmentCounter: ReassignmentCounter,
       creatingTransactionId: TransactionId,
@@ -758,21 +756,22 @@ object AssignmentProcessingSteps {
       assignmentUuid: UUID,
       sourceProtocolVersion: Source[ProtocolVersion],
       targetProtocolVersion: Target[ProtocolVersion],
-      reassigningParticipants: Set[ParticipantId],
+      confirmingReassigningParticipants: Set[ParticipantId],
   ): Either[ReassignmentProcessorError, FullAssignmentTree] = {
     val commonDataSalt = Salt.tryDeriveSalt(seed, 0, pureCrypto)
     val viewSalt = Salt.tryDeriveSalt(seed, 1, pureCrypto)
+    val stakeholders = Stakeholders(contract.metadata)
 
     val commonData = AssignmentCommonData
       .create(pureCrypto)(
         commonDataSalt,
         targetDomain,
         targetMediator,
-        stakeholders,
-        assignmentUuid,
+        stakeholders = stakeholders,
+        uuid = assignmentUuid,
         submitterMetadata,
         targetProtocolVersion,
-        reassigningParticipants,
+        confirmingReassigningParticipants,
       )
 
     for {

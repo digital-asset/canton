@@ -226,7 +226,7 @@ class SequencerWriterSourceTest
           _.shouldBeCantonErrorCode(PayloadToEventTimeBoundExceeded),
         )
         events <- store.readEvents(aliceId)
-      } yield events.payloads shouldBe empty
+      } yield events.events shouldBe empty
     }
   }
 
@@ -263,8 +263,8 @@ class SequencerWriterSourceTest
 
         events <- store.readEvents(aliceId)
       } yield {
-        events.payloads should have size 1
-        events.payloads.headOption.map(_.event).value should matchPattern {
+        events.events should have size 1
+        events.events.headOption.map(_.event).value should matchPattern {
           case DeliverStoreEvent(_, `messageId2`, _, _, _, _) =>
         }
       }
@@ -278,7 +278,7 @@ class SequencerWriterSourceTest
         invalidTopologyTimestamp: CantonTimestamp,
     )(implicit
         env: Env
-    ): Future[Seq[StoreEvent[Payload]]] = {
+    ): Future[Seq[StoreEvent[?]]] = {
       import env.*
 
       clock.advanceTo(nowish)
@@ -304,8 +304,8 @@ class SequencerWriterSourceTest
         _ <- completeFlow()
         events <- store.readEvents(aliceId)
       } yield {
-        events.payloads should have size 2
-        events.payloads.map(_.event)
+        events.events should have size 2
+        events.events.map(_.event)
       }
     }
 
@@ -313,7 +313,7 @@ class SequencerWriterSourceTest
       Since ordering of the events is not guaranteed, we sort them to ease
       the test.
      */
-    def sortByMessageId(events: Seq[StoreEvent[Payload]]): Seq[StoreEvent[Payload]] =
+    def sortByMessageId[P](events: Seq[StoreEvent[P]]): Seq[StoreEvent[P]] =
       events.sortBy(_.messageId.unwrap)
 
     "cause errors if way ahead of valid signing window" in withEnv() { implicit env =>
@@ -331,7 +331,7 @@ class SequencerWriterSourceTest
         )
         sortedEvents = sortByMessageId(events)
       } yield {
-        inside(sortedEvents.head) { case event: DeliverStoreEvent[Payload] =>
+        inside(sortedEvents.head) { case event: DeliverStoreEvent[_] =>
           event.messageId shouldBe messageId1
         }
 
@@ -374,7 +374,7 @@ class SequencerWriterSourceTest
         _ <- eventuallyF(10.seconds) {
           for {
             events <- env.store.readEvents(aliceId)
-            error = events.payloads.collectFirst {
+            error = events.events.collectFirst {
               case Sequenced(
                     _,
                     deliverError @ DeliverErrorStoreEvent(`aliceId`, _, _, _),
@@ -539,8 +539,8 @@ class SequencerWriterSourceTest
         eventTs <- eventuallyF(10.seconds) {
           for {
             events <- env.store.readEvents(aliceId)
-            _ = events.payloads should have size 1
-          } yield events.payloads.headOption.map(_.timestamp).valueOrFail("expected event to exist")
+            _ = events.events should have size 1
+          } yield events.events.headOption.map(_.timestamp).valueOrFail("expected event to exist")
         }
         _ = (0 to 30).foreach { _ =>
           Threading.sleep(100L) // wait for checkpoints to be generated
