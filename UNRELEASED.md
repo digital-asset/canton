@@ -19,6 +19,10 @@ This feature greatly improves scalability of sequencer in the number of concurre
 members are reading events in a timely manner. If the fan out range is exceeded, the sequencer will fall back to reading
 from the database. Longer fan out range can be configured, trading off memory usage for database load reduction.
 
+- Added auto vacuuming defaults for sequencer tables for Postgres (will be set using database schema migrations).
+- Removed support for Postgres 11, 12
+- Made Postgres 14 default in the CI
+
 
 ## Until 2024-10-02 (Exclusive)
 - Don't fetch payloads for events with `eventCounter < subscriptionStartCounter`.

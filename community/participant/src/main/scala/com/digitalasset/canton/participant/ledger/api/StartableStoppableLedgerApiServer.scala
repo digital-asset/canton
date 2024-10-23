@@ -406,6 +406,7 @@ class StartableStoppableLedgerApiServer(
       maxCacheSize = config.serverConfig.userManagementService.maxCacheSize,
       maxRightsPerUser = config.serverConfig.userManagementService.maxRightsPerUser,
       loggerFactory = loggerFactory,
+      flagCloseable = this,
     )(executionContext, traceContext)
 
   private def getInterceptors(

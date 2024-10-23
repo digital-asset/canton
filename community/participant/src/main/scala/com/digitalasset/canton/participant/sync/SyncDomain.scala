@@ -1056,7 +1056,7 @@ object SyncDomain {
         transferCoordination,
         inFlightSubmissionTracker,
         commandProgressTracker,
-        MessageDispatcher.DefaultFactory,
+        ParallelMessageDispatcherFactory,
         clock,
         syncDomainMetrics,
         futureSupervisor,
