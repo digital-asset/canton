@@ -93,7 +93,7 @@ private[backend] object AppendOnlySchema {
     val eventsCreate: Table[DbDto.EventCreate] =
       fieldStrategy.insert("lapi_events_create")(
         "event_offset" -> fieldStrategy.string(_ => _.event_offset),
-        "transaction_id" -> fieldStrategy.string(_ => _.update_id),
+        "update_id" -> fieldStrategy.string(_ => _.update_id),
         "ledger_effective_time" -> fieldStrategy.bigint(_ => _.ledger_effective_time),
         "command_id" -> fieldStrategy.stringOptional(_ => _.command_id),
         "workflow_id" -> fieldStrategy.stringOptional(_ => _.workflow_id),
@@ -102,7 +102,6 @@ private[backend] object AppendOnlySchema {
           _.submitters.map(_.map(stringInterning.party.unsafe.internalize))
         ),
         "node_index" -> fieldStrategy.int(_ => _.node_index),
-        "event_id" -> fieldStrategy.string(_ => _.event_id),
         "contract_id" -> fieldStrategy.string(_ => _.contract_id),
         "template_id" -> fieldStrategy.int(stringInterning =>
           dbDto => stringInterning.templateId.unsafe.internalize(dbDto.template_id)
@@ -138,7 +137,7 @@ private[backend] object AppendOnlySchema {
         "create_key_value_compression" -> fieldStrategy.smallintOptional(_ =>
           _.create_key_value_compression
         ),
-        "driver_metadata" -> fieldStrategy.byteaOptional(_ => _.driver_metadata),
+        "driver_metadata" -> fieldStrategy.bytea(_ => _.driver_metadata),
         "domain_id" -> fieldStrategy.int(stringInterning =>
           dbDto => stringInterning.domainId.unsafe.internalize(dbDto.domain_id)
         ),
@@ -148,10 +147,9 @@ private[backend] object AppendOnlySchema {
 
     val exerciseFields: Vector[(String, Field[DbDto.EventExercise, _, _])] =
       Vector[(String, Field[DbDto.EventExercise, _, _])](
-        "event_id" -> fieldStrategy.string(_ => _.event_id),
         "event_offset" -> fieldStrategy.string(_ => _.event_offset),
         "contract_id" -> fieldStrategy.string(_ => _.contract_id),
-        "transaction_id" -> fieldStrategy.string(_ => _.transaction_id),
+        "update_id" -> fieldStrategy.string(_ => _.update_id),
         "ledger_effective_time" -> fieldStrategy.bigint(_ => _.ledger_effective_time),
         "node_index" -> fieldStrategy.int(_ => _.node_index),
         "command_id" -> fieldStrategy.stringOptional(_ => _.command_id),
@@ -310,6 +308,24 @@ private[backend] object AppendOnlySchema {
         ),
       )
 
+    val partyToParticipant: Table[DbDto.EventPartyToParticipant] =
+      fieldStrategy.insert("lapi_events_party_to_participant")(
+        "event_sequential_id" -> fieldStrategy.bigint(_ => _.event_sequential_id),
+        "event_offset" -> fieldStrategy.string(_ => _.event_offset),
+        "update_id" -> fieldStrategy.string(_ => _.update_id),
+        "party_id" -> fieldStrategy.int(stringInterning =>
+          dto => stringInterning.party.unsafe.internalize(dto.party_id)
+        ),
+        // TODO(i21859) Implement interning for participant ids
+        "participant_id" -> fieldStrategy.string(_ => _.participant_id),
+        "participant_permission" -> fieldStrategy.int(_ => _.participant_permission),
+        "domain_id" -> fieldStrategy.int(stringInterning =>
+          dbDto => stringInterning.domainId.unsafe.internalize(dbDto.domain_id)
+        ),
+        "record_time" -> fieldStrategy.bigint(_ => _.record_time),
+        "trace_context" -> fieldStrategy.bytea(_ => _.trace_context),
+      )
+
     val commandCompletions: Table[DbDto.CommandCompletion] =
       fieldStrategy.insert("lapi_command_completions")(
         "completion_offset" -> fieldStrategy.string(_ => _.completion_offset),
@@ -320,7 +336,7 @@ private[backend] object AppendOnlySchema {
           _.submitters.map(stringInterning.party.unsafe.internalize)
         ),
         "command_id" -> fieldStrategy.string(_ => _.command_id),
-        "transaction_id" -> fieldStrategy.stringOptional(_ => _.transaction_id),
+        "update_id" -> fieldStrategy.stringOptional(_ => _.update_id),
         "rejection_status_code" -> fieldStrategy.intOptional(_ => _.rejection_status_code),
         "rejection_status_message" -> fieldStrategy.stringOptional(_ => _.rejection_status_message),
         "rejection_status_details" -> fieldStrategy.byteaOptional(_ => _.rejection_status_details),
@@ -422,7 +438,7 @@ private[backend] object AppendOnlySchema {
 
     val transactionMeta: Table[DbDto.TransactionMeta] =
       fieldStrategy.insert("lapi_transaction_meta")(
-        "transaction_id" -> fieldStrategy.string(_ => _.update_id),
+        "update_id" -> fieldStrategy.string(_ => _.update_id),
         "event_offset" -> fieldStrategy.string(_ => _.event_offset),
         "publication_time" -> fieldStrategy.bigint(_ => _.publication_time),
         "record_time" -> fieldStrategy.bigint(_ => _.record_time),
@@ -448,6 +464,7 @@ private[backend] object AppendOnlySchema {
       eventsUnassign.executeUpdate,
       eventsAssign.executeUpdate,
       partyEntries.executeUpdate,
+      partyToParticipant.executeUpdate,
       commandCompletions.executeUpdate,
       stringInterningTable.executeUpdate,
       idFilterCreateStakeholderTable.executeUpdate,
@@ -479,6 +496,7 @@ private[backend] object AppendOnlySchema {
           eventsUnassign.prepareData(collect[EventUnassign], stringInterning),
           eventsAssign.prepareData(collect[EventAssign], stringInterning),
           partyEntries.prepareData(collect[PartyEntry], stringInterning),
+          partyToParticipant.prepareData(collect[EventPartyToParticipant], stringInterning),
           commandCompletions.prepareData(collect[CommandCompletion], stringInterning),
           stringInterningTable.prepareData(collect[StringInterningDto], stringInterning),
           idFilterCreateStakeholderTable

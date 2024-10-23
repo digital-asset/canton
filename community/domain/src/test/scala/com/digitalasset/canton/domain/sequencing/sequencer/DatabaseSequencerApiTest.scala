@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer
 
-import com.digitalasset.canton.config.DefaultProcessingTimeouts
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.{CachingConfigs, DefaultProcessingTimeouts}
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer as CantonSequencer
@@ -39,10 +40,12 @@ abstract class DatabaseSequencerApiTest extends SequencerApiTest {
     val sequencerStore = SequencerStore(
       storage,
       testedProtocolVersion,
-      timeouts,
-      loggerFactory,
-      sequencerId,
+      maxBufferedEventsSize = NonNegativeInt.tryCreate(1000),
+      timeouts = timeouts,
+      loggerFactory = loggerFactory,
+      sequencerMember = sequencerId,
       blockSequencerMode = false,
+      cachingConfigs = CachingConfigs(),
     )
     DatabaseSequencer.single(
       dbConfig,
@@ -55,6 +58,7 @@ abstract class DatabaseSequencerApiTest extends SequencerApiTest {
       sequencerId,
       testedProtocolVersion,
       crypto,
+      CachingConfigs(),
       metrics,
       loggerFactory,
       runtimeReady = FutureUnlessShutdown.unit,

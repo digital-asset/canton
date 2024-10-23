@@ -8,7 +8,8 @@ import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
 import com.digitalasset.daml.lf.archive.Error as LfArchiveError
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.engine.Error
-import com.digitalasset.daml.lf.validation.UpgradeError
+import com.digitalasset.daml.lf.language.Util
+import com.digitalasset.daml.lf.validation.{TypecheckUpgrades, UpgradeError}
 import com.digitalasset.daml.lf.{VersionRange, language, validation}
 
 import ParticipantErrorGroup.LedgerApiErrorGroup.PackageServiceErrorGroup
@@ -266,36 +267,41 @@ object PackageServiceErrors extends PackageServiceErrorGroup {
           ErrorCategory.InvalidIndependentOfSystemState,
         ) {
       final case class Error(
-          upgradingPackage: Ref.PackageId,
-          upgradedPackage: Ref.PackageId,
+          oldPackage: Util.PkgIdWithNameAndVersion,
+          newPackage: Util.PkgIdWithNameAndVersion,
           upgradeError: UpgradeError,
+          phase: TypecheckUpgrades.UploadPhaseCheck,
       )(implicit
           val loggingContext: ContextualizedErrorLogger
-      ) extends DamlError(
-            cause =
-              s"The DAR contains a package which claims to upgrade another package, but basic checks indicate the package is not a valid upgrade. Upgrading package: $upgradingPackage; Upgraded package: $upgradedPackage; Reason: ${upgradeError.prettyInternal}"
-          )
+      ) extends DamlError(cause = phase match {
+            case TypecheckUpgrades.MaximalDarCheck =>
+              s"The uploaded DAR contains a package $newPackage, but upgrade checks indicate that new package $newPackage cannot be an upgrade of existing package $oldPackage. Reason: ${upgradeError.prettyInternal}"
+            case TypecheckUpgrades.MinimalDarCheck =>
+              s"The uploaded DAR contains a package $oldPackage, but upgrade checks indicate that existing package $newPackage cannot be an upgrade of new package $oldPackage. Reason: ${upgradeError.prettyInternal}"
+          })
     }
 
     @Explanation(
       """This error indicates that the Dar upload failed upgrade checks because a package with the same version and package name has been previously uploaded."""
     )
     @Resolution("Inspect the error message and contact support.")
+    @SuppressWarnings(Array("org.wartremover.warts.Serializable"))
     object UpgradeVersion
         extends ErrorCode(
           id = "KNOWN_DAR_VERSION",
           ErrorCategory.InvalidIndependentOfSystemState,
         ) {
       final case class Error(
-          uploadedPackageId: Ref.PackageId,
+          uploadedPackage: Util.PkgIdWithNameAndVersion,
           existingPackage: Ref.PackageId,
           packageVersion: Ref.PackageVersion,
       )(implicit
           val loggingContext: ContextualizedErrorLogger
       ) extends DamlError(
-            cause = "A DAR with the same version number has previously been uploaded.",
+            cause =
+              s"Tried to upload package $uploadedPackage, but a different package $existingPackage with the same name and version has previously been uploaded.",
             extraContext = Map(
-              "uploadedPackageId" -> uploadedPackageId,
+              "uploadedPackageId" -> uploadedPackage,
               "existingPackage" -> existingPackage,
               "packageVersion" -> packageVersion.toString,
             ),

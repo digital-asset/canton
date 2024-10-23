@@ -1,4 +1,4 @@
-sdk-version: 3.2.0-snapshot.20241014.13351.0.ve5b28791
+sdk-version: 3.2.0-snapshot.20241018.13363.0.v6c393cb8
 build-options: 
 - --target=2.dev
 - --enable-interfaces=yes

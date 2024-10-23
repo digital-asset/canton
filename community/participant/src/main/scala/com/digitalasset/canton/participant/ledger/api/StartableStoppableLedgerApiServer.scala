@@ -244,7 +244,7 @@ class StartableStoppableLedgerApiServer(
       _ = timedWriteService.registerInternalStateService(new InternalStateService {
         override def activeContracts(
             partyIds: Set[LfPartyId],
-            validAt: Option[Offset],
+            validAt: Offset,
         )(implicit traceContext: TraceContext): Source[GetActiveContractsResponse, NotUsed] =
           indexService.getActiveContracts(
             filter = TransactionFilter(
@@ -253,7 +253,7 @@ class StartableStoppableLedgerApiServer(
               filtersForAnyParty = None,
             ),
             verbose = false,
-            activeAtO = validAt,
+            activeAt = validAt,
           )(new LoggingContextWithTrace(LoggingEntries.empty, traceContext))
       })
       userManagementStore = getUserManagementStore(dbSupport, loggerFactory)
@@ -372,6 +372,7 @@ class StartableStoppableLedgerApiServer(
       maxCacheSize = config.serverConfig.userManagementService.maxCacheSize,
       maxRightsPerUser = config.serverConfig.userManagementService.maxRightsPerUser,
       loggerFactory = loggerFactory,
+      flagCloseable = this,
     )(executionContext, traceContext)
 
   private def createExtraAdminUser(rawUserId: String, userManagementStore: UserManagementStore)(

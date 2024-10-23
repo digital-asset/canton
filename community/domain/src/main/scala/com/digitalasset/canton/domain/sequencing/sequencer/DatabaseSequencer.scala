@@ -4,12 +4,14 @@
 package com.digitalasset.canton.domain.sequencing.sequencer
 
 import cats.data.{EitherT, OptionT}
+import cats.instances.option.*
+import cats.syntax.apply.*
 import cats.syntax.either.*
 import cats.syntax.option.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.SequencerCounter
-import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
+import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
@@ -42,14 +44,17 @@ import com.digitalasset.canton.time.{Clock, DomainTimeTracker, NonNegativeFinite
 import com.digitalasset.canton.topology.{DomainId, Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.FutureUtil.doNotAwait
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, LoggerUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 import org.slf4j.event.Level
 
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 
 object DatabaseSequencer {
@@ -66,6 +71,7 @@ object DatabaseSequencer {
       topologyClientMember: Member,
       protocolVersion: ProtocolVersion,
       cryptoApi: DomainSyncCryptoClient,
+      cachingConfigs: CachingConfigs,
       metrics: SequencerMetrics,
       loggerFactory: NamedLoggerFactory,
       runtimeReady: FutureUnlessShutdown[Unit],
@@ -105,6 +111,7 @@ object DatabaseSequencer {
       trafficConsumedStore = None,
       protocolVersion,
       cryptoApi,
+      cachingConfigs,
       metrics,
       loggerFactory,
       blockSequencerMode = false,
@@ -132,6 +139,7 @@ class DatabaseSequencer(
     trafficConsumedStore: Option[TrafficConsumedStore],
     protocolVersion: ProtocolVersion,
     cryptoApi: DomainSyncCryptoClient,
+    cachingConfigs: CachingConfigs,
     metrics: SequencerMetrics,
     loggerFactory: NamedLoggerFactory,
     blockSequencerMode: Boolean,
@@ -158,6 +166,8 @@ class DatabaseSequencer(
     protocolVersion,
     loggerFactory,
     blockSequencerMode = blockSequencerMode,
+    sequencerMember = topologyClientMember,
+    cachingConfigs = cachingConfigs,
     metrics = metrics,
   )
 
@@ -172,6 +182,9 @@ class DatabaseSequencer(
     storageForAdminChanges.isActive
   )
 
+  @VisibleForTesting
+  private[canton] val store = writer.generalStore
+
   protected val memberValidator: SequencerMemberValidator = sequencerStore
 
   protected def resetWatermarkTo: ResetWatermark = SequencerWriter.ResetWatermarkToClockNow
@@ -179,7 +192,7 @@ class DatabaseSequencer(
   // Only start pruning scheduler after `store` variable above has been initialized to avoid racy NPE
   withNewTraceContext { implicit traceContext =>
     timeouts.unbounded.await(s"Waiting for sequencer writer to fully start")(
-      writer.startOrLogError(initialState, resetWatermarkTo)
+      writer.startOrLogError(initialState, resetWatermarkTo).flatMap(_ => backfillCheckpoints())
     )
 
     pruningScheduler.foreach(ps =>
@@ -192,6 +205,39 @@ class DatabaseSequencer(
       )
     )
   }
+
+  private def backfillCheckpoints()(implicit traceContext: TraceContext): Future[Unit] =
+    for {
+      latestCheckpoint <- sequencerStore.fetchLatestCheckpoint()
+      watermark <- sequencerStore.safeWatermark
+      _ <- (latestCheckpoint, watermark)
+        .traverseN { (oldest, watermark) =>
+          val interval = config.writer.checkpointInterval
+          val checkpointsToWrite = LazyList
+            .iterate(oldest.plus(interval.asJava))(ts => ts.plus(interval.asJava))
+            .takeWhile(_ <= watermark)
+
+          if (checkpointsToWrite.nonEmpty) {
+            val start = System.nanoTime()
+            logger.info(
+              s"Starting to backfill checkpoints from $oldest to $watermark in intervals of $interval"
+            )
+            MonadUtil
+              .parTraverseWithLimit(config.writer.checkpointBackfillParallelism)(
+                checkpointsToWrite
+              )(cp => sequencerStore.recordCounterCheckpointsAtTimestamp(cp))
+              .map { _ =>
+                val elapsed = (System.nanoTime() - start).nanos
+                logger.info(
+                  s"Finished backfilling checkpoints from $oldest to $watermark in intervals of $interval in ${LoggerUtil
+                      .roundDurationForHumans(elapsed)}"
+                )
+              }
+          } else {
+            Future.successful(())
+          }
+        }
+    } yield ()
 
   // periodically run the call to mark lagging sequencers as offline
   private def periodicallyMarkLaggingSequencersOffline(

@@ -753,7 +753,7 @@ object BuildCommon {
           cats_scalacheck % Test,
           daml_lf_transaction_test_lib % Test,
           daml_lf_engine,
-          daml_testing_utils,
+          daml_testing_utils % Test,
           grpc_inprocess % Test,
           h2,
           opentelemetry_instrumentation_grpc,
@@ -793,6 +793,7 @@ object BuildCommon {
       .settings(
         sharedCantonSettings,
         libraryDependencies ++= Seq(
+          pekko_actor_typed,
           scala_logging,
           scalatest % Test,
           scalacheck % Test,
@@ -1359,7 +1360,7 @@ object BuildCommon {
       project
         .in(file("community/ledger/ledger-json-api"))
         .dependsOn(
-          `ledger-api-core`,
+          `ledger-api-core` % "compile->compile;test->test",
           `transcode`,
           `ledger-common` % "test->test",
           `community-testing` % "test->test",

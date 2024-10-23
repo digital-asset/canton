@@ -168,9 +168,9 @@ trait TopologyClientApi[+T] { this: HasFutureSupervision =>
     */
   def trySnapshot(timestamp: CantonTimestamp)(implicit traceContext: TraceContext): T
 
-  /** Returns an optional future which will complete when the timestamp has been observed
+  /** Returns an optional future which will complete when the effective timestamp has been observed
     *
-    * If the timestamp is already observed, we return None.
+    * If the timestamp is already observed, returns None.
     */
   def awaitTimestamp(
       timestamp: CantonTimestamp
@@ -180,9 +180,18 @@ trait TopologyClientApi[+T] { this: HasFutureSupervision =>
       timestamp: CantonTimestamp
   )(implicit traceContext: TraceContext): Option[FutureUnlessShutdown[Unit]]
 
+  /** Finds the topology transaction with maximum effective time whose effects would be visible,
+    * at earliest i.e. if delay is 0, in a topology snapshot at `effectiveTime`, and yields
+    * the sequenced and actual effective time of that topology transaction, if necessary after waiting
+    * to observe a timestamp at or after sequencing time `effectiveTime.immediatePredecessor`
+    * that the topology processor has fully processed.
+    */
+  def awaitMaxTimestampUS(sequencedTime: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[(SequencedTime, EffectiveTime)]]
 }
 
-/** The client that provides the topology information on a per domain basis
+/** The client that provides the topology information on a per-domain basis
   */
 trait DomainTopologyClient extends TopologyClientApi[TopologySnapshot] with AutoCloseable {
   this: HasFutureSupervision =>

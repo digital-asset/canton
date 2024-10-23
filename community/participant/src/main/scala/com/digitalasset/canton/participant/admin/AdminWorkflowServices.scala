@@ -27,6 +27,7 @@ import com.digitalasset.canton.participant.config.LocalParticipantConfig
 import com.digitalasset.canton.participant.ledger.api.client.LedgerConnection
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
+import com.digitalasset.canton.platform.ApiOffset
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.TopologyManagerError.{
   NoAppropriateSigningKeyInStore,
@@ -34,7 +35,7 @@ import com.digitalasset.canton.topology.TopologyManagerError.{
 }
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
-import com.digitalasset.canton.tracing.{NoTracing, Spanning, TraceContext, Traced, TracerProvider}
+import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced, TracerProvider}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ResourceUtil.withResource
 import com.digitalasset.canton.util.{DamlPackageLoader, EitherTUtil}
@@ -69,8 +70,7 @@ class AdminWorkflowServices(
     executionSequencerFactory: ExecutionSequencerFactory,
 ) extends FlagCloseableAsync
     with NamedLogging
-    with Spanning
-    with NoTracing {
+    with Spanning {
 
   override protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
 
@@ -131,6 +131,7 @@ class AdminWorkflowServices(
     )
 
   protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
+    import TraceContext.Implicits.Empty.*
     def adminServiceCloseables(
         name: String,
         subscription: Future[ResilientLedgerSubscription[?, ?]],
@@ -157,14 +158,14 @@ class AdminWorkflowServices(
   private def checkPackagesStatus(
       pkgs: Map[PackageId, Ast.Package],
       lc: LedgerClient,
-  ): Future[Boolean] =
+  )(implicit traceContext: TraceContext): Future[Boolean] =
     for {
       pkgRes <- pkgs.keys.toList.parTraverse(lc.packageService.getPackageStatus(_))
     } yield pkgRes.forall(pkgResponse => pkgResponse.packageStatus.isPackageStatusRegistered)
 
   private def handleDamlErrorDuringPackageLoading(
       res: EitherT[FutureUnlessShutdown, DamlError, Unit]
-  ): EitherT[Future, IllegalStateException, Unit] = EitherT {
+  )(implicit traceContext: TraceContext): EitherT[Future, IllegalStateException, Unit] = EitherT {
     EitherTUtil
       .leftSubflatMap(res) {
         case CantonPackageServiceError.IdentityManagerParentError(
@@ -254,34 +255,42 @@ class AdminWorkflowServices(
       applicationId: String,
       resubscribeIfPruned: Boolean,
   )(createService: LedgerClient => S): (Future[ResilientLedgerSubscription[?, ?]], S) = {
+    import TraceContext.Implicits.Empty.*
 
     val client = createLedgerClient(applicationId)
     val service = createService(client)
 
     val startupF =
-      client.stateService.getActiveContracts(service.filters).map { case (acs, offset) =>
-        logger.debug(s"Loading $acs $service")
-        service.processAcs(acs)
-        new ResilientLedgerSubscription(
-          makeSource = subscribeOffset =>
-            client.updateService.getUpdatesSource(subscribeOffset, service.filters),
-          consumingFlow = Flow[GetUpdatesResponse]
-            .map(_.update)
-            .map {
-              case GetUpdatesResponse.Update.Transaction(tx) =>
-                service.processTransaction(tx)
-              case GetUpdatesResponse.Update.Reassignment(reassignment) =>
-                service.processReassignment(reassignment)
-              case GetUpdatesResponse.Update.OffsetCheckpoint(_) => ()
-              case GetUpdatesResponse.Update.Empty => ()
-            },
-          subscriptionName = service.getClass.getSimpleName,
-          startOffset = offset,
-          extractOffset = ResilientLedgerSubscription.extractOffsetFromGetUpdateResponse,
-          timeouts = timeouts,
-          loggerFactory = loggerFactory,
-          resubscribeIfPruned = resubscribeIfPruned,
-        )
+      client.stateService.getLedgerEndOffset().flatMap { offsetO =>
+        client.stateService
+          .getActiveContracts(filter = service.filters, validAtOffset = offsetO.getOrElse(0L))
+          .map { case (acs, offset) =>
+            logger.debug(s"Loading $acs $service")
+            service.processAcs(acs)
+            new ResilientLedgerSubscription(
+              makeSource = subscribeOffset =>
+                client.updateService.getUpdatesSource(
+                  ApiOffset.assertFromStringToLong(subscribeOffset),
+                  service.filters,
+                ),
+              consumingFlow = Flow[GetUpdatesResponse]
+                .map(_.update)
+                .map {
+                  case GetUpdatesResponse.Update.Transaction(tx) =>
+                    service.processTransaction(tx)
+                  case GetUpdatesResponse.Update.Reassignment(reassignment) =>
+                    service.processReassignment(reassignment)
+                  case GetUpdatesResponse.Update.OffsetCheckpoint(_) => ()
+                  case GetUpdatesResponse.Update.Empty => ()
+                },
+              subscriptionName = service.getClass.getSimpleName,
+              startOffset = ApiOffset.fromLong(offset),
+              extractOffset = ResilientLedgerSubscription.extractOffsetFromGetUpdateResponse,
+              timeouts = timeouts,
+              loggerFactory = loggerFactory,
+              resubscribeIfPruned = resubscribeIfPruned,
+            )
+          }
       }
     (startupF, service)
   }
