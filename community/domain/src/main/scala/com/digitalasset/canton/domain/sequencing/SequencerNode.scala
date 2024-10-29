@@ -91,7 +91,6 @@ import com.digitalasset.canton.topology.transaction.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, SingleUseCell}
 import com.digitalasset.canton.version.ProtocolVersion
-import io.grpc.ServerServiceDefinition
 import org.apache.pekko.actor.ActorSystem
 
 import java.util.concurrent.ScheduledExecutorService
@@ -123,10 +122,6 @@ class SequencerNodeBootstrap(
       SequencerMetrics,
     ],
     mkSequencerFactory: MkSequencerFactory,
-    createEnterpriseAdminService: (
-        Sequencer,
-        NamedLoggerFactory,
-    ) => Option[ServerServiceDefinition],
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     scheduler: ScheduledExecutorService,
@@ -677,7 +672,6 @@ class SequencerNodeBootstrap(
               config.publicApi.nonceExpirationInterval,
               config.publicApi.maxTokenExpirationInterval,
             ),
-            createEnterpriseAdminService(_, domainLoggerFactory),
             Seq(sequencerId) ++ membersToRegister,
             futureSupervisor,
             memberAuthServiceFactory,

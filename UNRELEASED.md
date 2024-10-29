@@ -3,6 +3,10 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2024-10-25 (Exclusive)
+
+- Pruning and scheduled pruning along with pruning configuration have moved from enterprise to community. One slight caveat is scheduled sequencer pruning which is currently only wired up in the enterprise database sequencer.
+
 ## Until 2024-10-16 (Exclusive)
 - New config option `parameters.timeouts.processing.sequenced-event-processing-bound` allows to specify a timeout for processing sequenced events. When processing takes longer on a node, the node will log an error or crash (depending on the `exit-on-fatal-failures` parameter).
 - Added sequencer in-memory fan out. Sequencer now holds last configurable number of events it has processed in memory.

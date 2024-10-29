@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.console
 
-import com.digitalasset.canton.admin.api.client.commands.EnterpriseSequencerAdminCommands.LocatePruningTimestampCommand
+import com.digitalasset.canton.admin.api.client.commands.SequencerAdminCommands.LocatePruningTimestampCommand
 import com.digitalasset.canton.admin.api.client.commands.*
 import com.digitalasset.canton.admin.api.client.data.StaticDomainParameters as ConsoleStaticDomainParameters
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, NonNegativeInt, Port, PositiveInt}
@@ -1039,7 +1039,7 @@ abstract class SequencerReference(
     )
     def prune_at(timestamp: CantonTimestamp): String =
       this.consoleEnvironment.run {
-        runner.adminCommand(EnterpriseSequencerAdminCommands.Prune(timestamp))
+        runner.adminCommand(SequencerAdminCommands.Prune(timestamp))
       }
 
     @Help.Summary(
@@ -1134,7 +1134,7 @@ abstract class SequencerReference(
         |To view members using the sequencer run `sequencer.status()`.""""
     )
     def disable_member(member: Member): Unit = consoleEnvironment.run {
-      runner.adminCommand(EnterpriseSequencerAdminCommands.DisableMember(member))
+      runner.adminCommand(SequencerAdminCommands.DisableMember(member))
     }
   }
 

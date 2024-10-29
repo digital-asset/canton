@@ -73,6 +73,7 @@ abstract class MediatorNodeConfigCommon(
     val sequencerClient: SequencerClientConfig,
     val caching: CachingConfigs,
     val parameters: MediatorNodeParameterConfig,
+    val mediator: MediatorConfig,
     val monitoring: NodeMonitoringConfig,
 ) extends LocalNodeConfig {
 
@@ -122,6 +123,7 @@ final case class CommunityMediatorNodeConfig(
     override val sequencerClient: SequencerClientConfig = SequencerClientConfig(),
     override val caching: CachingConfigs = CachingConfigs(),
     override val parameters: MediatorNodeParameterConfig = MediatorNodeParameterConfig(),
+    override val mediator: MediatorConfig = MediatorConfig(),
     override val monitoring: NodeMonitoringConfig = NodeMonitoringConfig(),
     override val topology: TopologyConfig = TopologyConfig(),
 ) extends MediatorNodeConfigCommon(
@@ -133,6 +135,7 @@ final case class CommunityMediatorNodeConfig(
       sequencerClient,
       caching,
       parameters,
+      mediator,
       monitoring,
     )
     with ConfigDefaults[DefaultPorts, CommunityMediatorNodeConfig] {
@@ -154,7 +157,6 @@ class MediatorNodeBootstrap(
       MediatorMetrics,
     ],
     protected val replicaManager: MediatorReplicaManager,
-    mediatorRuntimeFactory: MediatorRuntimeFactory,
 )(
     implicit executionContext: ExecutionContextIdlenessExecutorService,
     implicit val executionSequencerFactory: ExecutionSequencerFactory,
@@ -665,8 +667,7 @@ class MediatorNodeBootstrap(
       )
       _ = topologyClient.setDomainTimeTracker(timeTracker)
 
-      // can just new up the enterprise mediator factory here as the mediator node is only available in enterprise setups
-      mediatorRuntime <- mediatorRuntimeFactory.create(
+      mediatorRuntime <- MediatorRuntimeFactory.create(
         mediatorId,
         domainId,
         storage,
@@ -683,7 +684,7 @@ class MediatorNodeBootstrap(
         domainConfig.domainParameters.protocolVersion,
         clock,
         arguments.metrics,
-        futureSupervisor,
+        config.mediator,
         domainLoggerFactory,
       )
       _ <- mediatorRuntime.start()

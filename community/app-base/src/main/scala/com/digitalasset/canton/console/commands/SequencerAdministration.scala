@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.console.commands
 
-import com.digitalasset.canton.admin.api.client.commands.EnterpriseSequencerAdminCommands
-import com.digitalasset.canton.admin.api.client.commands.EnterpriseSequencerAdminCommands.{
+import com.digitalasset.canton.admin.api.client.commands.SequencerAdminCommands
+import com.digitalasset.canton.admin.api.client.commands.SequencerAdminCommands.{
   InitializeFromGenesisState,
   InitializeFromOnboardingState,
 }
@@ -31,7 +31,7 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
     // TODO(#14074) add something like "snapshot for sequencer-id", rather than timestamp based
     //      we still need to keep the timestamp based such that we can provide recovery for corrupted sequencers
     consoleEnvironment.run {
-      runner.adminCommand(EnterpriseSequencerAdminCommands.Snapshot(timestamp))
+      runner.adminCommand(SequencerAdminCommands.Snapshot(timestamp))
     }
 
   @Help.Summary(
@@ -47,7 +47,7 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
 
       def call =
         runner.adminCommand(
-          EnterpriseSequencerAdminCommands.OnboardingState(
+          SequencerAdminCommands.OnboardingState(
             observer = responseObserver,
             sequencerOrTimestamp = Right(timestamp),
           )
@@ -69,7 +69,7 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
 
       def call =
         runner.adminCommand(
-          EnterpriseSequencerAdminCommands.OnboardingState(
+          SequencerAdminCommands.OnboardingState(
             observer = responseObserver,
             sequencerOrTimestamp = Left(sequencerId),
           )
