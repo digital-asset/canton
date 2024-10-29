@@ -66,6 +66,7 @@ object Dependencies {
   lazy val postgres_version = "42.7.3"
   lazy val pprint_version = "0.8.1"
   lazy val prometheus_version = "0.14.1"
+  lazy val protoc_gen_doc_version = "1.5.1"
   lazy val pureconfig_version = "0.14.0"
   lazy val reflections_version = "0.10.2"
   lazy val scaffeine_version = "5.2.1"
@@ -310,6 +311,8 @@ object Dependencies {
   lazy val gcp_kms = "com.google.cloud" % "google-cloud-kms" % gcp_kms_version
 
   lazy val awaitility = "org.awaitility" % "awaitility" % awaitility_version
+
+  lazy val protoc_gen_doc = "io.github.pseudomuto" % "protoc-gen-doc" % protoc_gen_doc_version
 
   lazy val damlDependencyMap = {
     import io.circe._, io.circe.parser._, io.circe.generic.auto._, io.circe.syntax._
