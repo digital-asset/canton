@@ -286,7 +286,7 @@ object UpdateToDbDto {
                 val informees = blinding.disclosure.getOrElse(nodeId, Set.empty).map(_.toString)
                 val flatWitnesses = if (exercise.consuming) stakeholders else Set.empty[String]
                 val nonStakeholderInformees = informees.diff(stakeholders)
-                val templateId = exercise.templateId.toString
+                val templateId = templateIdWithCreationPackageId(exercise).toString
                 Iterator(
                   DbDto.EventExercise(
                     consuming = exercise.consuming,
@@ -302,6 +302,7 @@ object UpdateToDbDto {
                     contract_id = exercise.targetCoid.coid,
                     template_id = Some(templateId),
                     package_name = exercise.packageName,
+                    choice_package_id = Some(exercise.templateId.packageId.toString),
                     flat_event_witnesses = flatWitnesses,
                     tree_event_witnesses = informees,
                     create_key_value = createKeyValue

@@ -327,4 +327,20 @@ object DocsOpenBuild {
     LogManager.withLoggers(backed = _ => appender)
   }
 
+  def generateLapiProtoDocsRst(
+      sourceDirectories: SettingKey[Seq[File]],
+      targetDirectory: SettingKey[File],
+  ): Def.Initialize[Task[Unit]] =
+    Def.task {
+      val log: ManagedLogger = streams.value.log
+
+      val filename = "proto-docs.rst"
+      val source = sourceDirectories.value.headOption.get / filename
+      val target = targetDirectory.value / "sphinx" / filename
+      log.info(
+        s"[generateLapiProtoDocsRst][copy] Copying $source to $target"
+      )
+      IO.copyFile(source, target)
+    }
+
 }

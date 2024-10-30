@@ -17,7 +17,7 @@ import sbtassembly.{MergeStrategy, PathList}
 import sbtbuildinfo.BuildInfoPlugin
 import sbtbuildinfo.BuildInfoPlugin.autoImport.*
 import sbtide.Keys.ideExcludedDirectories
-import sbtprotoc.ProtocPlugin.autoImport.PB
+import sbtprotoc.ProtocPlugin.autoImport.{AsProtocPlugin, PB}
 import scalafix.sbt.ScalafixPlugin
 import scoverage.ScoverageKeys.*
 import wartremover.WartRemover
@@ -1455,6 +1455,11 @@ object BuildCommon {
             javaConversions = true,
             flatPackage = false,
           ) -> (Compile / sourceManaged).value,
+          PB.gens.plugin("doc") -> (Compile / sourceManaged).value,
+        ),
+        Compile / PB.protocOptions := Seq(
+          // the generated file can be found in src_managed, if another location is needed this can be specified via the --doc_out flag
+          "--doc_opt=" + (Compile / baseDirectory).value.getAbsolutePath + "/docs/rst_mmd.tmpl," + "proto-docs.rst"
         ),
         Compile / unmanagedResources += (ThisBuild / baseDirectory).value / "community/ledger-api/VERSION",
         coverageEnabled := false,
@@ -1464,6 +1469,7 @@ object BuildCommon {
         libraryDependencies ++= Seq(
           scalapb_runtime,
           scalapb_runtime_grpc,
+          protoc_gen_doc asProtocPlugin (),
         ),
       )
 
