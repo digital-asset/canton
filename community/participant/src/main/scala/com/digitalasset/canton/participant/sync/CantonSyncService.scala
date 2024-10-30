@@ -67,11 +67,7 @@ import com.digitalasset.canton.participant.protocol.transfer.{
   IncompleteTransferData,
   TransferCoordination,
 }
-import com.digitalasset.canton.participant.pruning.{
-  AcsCommitmentProcessor,
-  NoOpPruningProcessor,
-  PruningProcessor,
-}
+import com.digitalasset.canton.participant.pruning.{AcsCommitmentProcessor, PruningProcessor}
 import com.digitalasset.canton.participant.store.DomainConnectionConfigStore.MissingConfigForAlias
 import com.digitalasset.canton.participant.store.MultiDomainEventLog.PublicationData
 import com.digitalasset.canton.participant.store.*
@@ -514,11 +510,6 @@ class CantonSyncService(
         s"Could not locate pruning point: ${err.message}. Considering success for idempotency"
       )
       Right(())
-    case Left(err @ LedgerPruningOnlySupportedInEnterpriseEdition) =>
-      logger.warn(
-        s"Canton participant pruning not supported in canton-open-source edition: ${err.message}"
-      )
-      Left(PruningServiceError.PruningNotSupportedInCommunityEdition.Error())
     case Left(err: LedgerPruningOffsetNonCantonFormat) =>
       logger.info(err.message)
       Left(PruningServiceError.NonCantonOffset.Error(err.message))
@@ -1912,6 +1903,7 @@ object CantonSyncService {
         resourceManagementService: ResourceManagementService,
         cantonParameterConfig: ParticipantNodeParameters,
         indexedStringStore: IndexedStringStore,
+        pruningProcessor: PruningProcessor,
         schedulers: Schedulers,
         metrics: ParticipantMetrics,
         exitOnFatalFailures: Boolean,
@@ -1943,6 +1935,7 @@ object CantonSyncService {
         resourceManagementService: ResourceManagementService,
         cantonParameterConfig: ParticipantNodeParameters,
         indexedStringStore: IndexedStringStore,
+        pruningProcessor: PruningProcessor,
         schedulers: Schedulers,
         metrics: ParticipantMetrics,
         exitOnFatalFailures: Boolean,
@@ -1968,7 +1961,7 @@ object CantonSyncService {
         identityPusher,
         partyNotifier,
         syncCrypto,
-        NoOpPruningProcessor,
+        pruningProcessor,
         engine,
         syncDomainStateFactory,
         clock,

@@ -52,11 +52,12 @@ import com.digitalasset.canton.participant.protocol.submission.{
   CommandDeduplicatorImpl,
   InFlightSubmissionTracker,
 }
-import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
-import com.digitalasset.canton.participant.scheduler.{
-  ParticipantSchedulersParameters,
-  SchedulersWithParticipantPruning,
+import com.digitalasset.canton.participant.pruning.{
+  AcsCommitmentProcessor,
+  PruningProcessor,
+  SortedReconciliationIntervalsProviderFactory,
 }
+import com.digitalasset.canton.participant.scheduler.ParticipantPruningScheduler
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.*
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError.IdentityManagerParentError
@@ -69,6 +70,7 @@ import com.digitalasset.canton.participant.topology.{
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportKey.CommunityKey
 import com.digitalasset.canton.resource.*
+import com.digitalasset.canton.scheduler.SchedulersImpl
 import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig, SequencerClient}
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.EnrichedDurations.*
@@ -119,8 +121,6 @@ class ParticipantNodeBootstrap(
     ) => Unit,
     resourceManagementServiceFactory: Eval[ParticipantSettingsStore] => ResourceManagementService,
     replicationServiceFactory: Storage => ServerServiceDefinition,
-    createSchedulers: ParticipantSchedulersParameters => Future[SchedulersWithParticipantPruning] =
-      _ => Future.successful(SchedulersWithParticipantPruning.noop),
     private[canton] val persistentStateFactory: ParticipantNodePersistentStateFactory,
     packageServiceFactory: PackageServiceFactory,
     ledgerApiServerFactory: CantonLedgerApiServerFactory,
@@ -353,7 +353,6 @@ class ParticipantNodeBootstrap(
         setStartableStoppableLedgerApiAndCantonServices,
         resourceManagementServiceFactory,
         replicationServiceFactory,
-        createSchedulers,
         partyNotifierFactory,
         adminToken,
         participantOps,
@@ -487,7 +486,6 @@ class ParticipantNodeBootstrap(
       ) => Unit,
       resourceManagementServiceFactory: Eval[ParticipantSettingsStore] => ResourceManagementService,
       replicationServiceFactory: Storage => ServerServiceDefinition,
-      createSchedulers: ParticipantSchedulersParameters => Future[SchedulersWithParticipantPruning],
       createPartyNotifierAndSubscribe: ParticipantEventPublisher => LedgerServerPartyNotifier,
       adminToken: CantonAdminToken,
       topologyManager: ParticipantTopologyManagerOps,
@@ -506,7 +504,7 @@ class ParticipantNodeBootstrap(
         ParticipantNodeEphemeralState,
         LedgerApiServerState,
         StartableStoppableLedgerApiDependentServices,
-        SchedulersWithParticipantPruning,
+        SchedulersImpl,
         ParticipantTopologyDispatcher,
     ),
   ] = {
@@ -683,20 +681,55 @@ class ParticipantNodeBootstrap(
         persistentState.map(_.settingsStore)
       )
 
+      pruningProcessor = new PruningProcessor(
+        persistentState,
+        syncDomainPersistentStateManager,
+        new SortedReconciliationIntervalsProviderFactory(
+          syncDomainPersistentStateManager,
+          futureSupervisor,
+          loggerFactory,
+        ),
+        indexedStringStore,
+        parameterConfig.batchingConfig.maxPruningBatchSize,
+        arguments.metrics.pruning,
+        exitOnFatalFailures = arguments.parameterConfig.exitOnFatalFailures,
+        domainId =>
+          domainAliasManager
+            .aliasForDomainId(domainId)
+            .flatMap(domainAlias =>
+              domainConnectionConfigStore.get(domainAlias).toOption.map(_.status)
+            ),
+        parameterConfig.processingTimeouts,
+        futureSupervisor,
+        loggerFactory,
+      )
+      pruningScheduler = new ParticipantPruningScheduler(
+        pruningProcessor,
+        arguments.clock,
+        arguments.config.ledgerApi.clientConfig,
+        persistentState.map(_.multiDomainEventLog),
+        storage,
+        adminToken,
+        parameterConfig.stores,
+        parameterConfig.batchingConfig,
+        arguments.parameterConfig.processingTimeouts,
+        arguments.loggerFactory,
+      )
+
       schedulers <-
         EitherT
-          .liftF(
-            createSchedulers(
-              ParticipantSchedulersParameters(
-                isActive,
-                persistentState.map(_.multiDomainEventLog),
-                storage,
-                adminToken,
-                parameterConfig.stores,
-                parameterConfig.batchingConfig,
+          .liftF({
+            val schedulers =
+              new SchedulersImpl(
+                Map("pruning" -> pruningScheduler),
+                arguments.loggerFactory,
               )
-            )
-          )
+            if (isActive) {
+              schedulers.start().map(_ => schedulers)
+            } else {
+              Future.successful(schedulers)
+            }
+          })
           .mapK(FutureUnlessShutdown.outcomeK)
 
       // Sync Service
@@ -720,6 +753,7 @@ class ParticipantNodeBootstrap(
         resourceManagementService,
         parameterConfig,
         indexedStringStore,
+        pruningProcessor,
         schedulers,
         arguments.metrics,
         exitOnFatalFailures = arguments.parameterConfig.exitOnFatalFailures,
@@ -730,7 +764,6 @@ class ParticipantNodeBootstrap(
       )
 
       _ = {
-        schedulers.setPruningProcessor(sync.pruningProcessor)
         setPostInitCallbacks(sync)
         syncDomainHealth.set(sync.syncDomainHealth)
         syncDomainEphemeralHealth.set(sync.ephemeralHealth)
@@ -835,11 +868,7 @@ class ParticipantNodeBootstrap(
       adminServerRegistry
         .addServiceU(
           PruningServiceGrpc.bindService(
-            new GrpcPruningService(
-              sync,
-              () => schedulers.getPruningScheduler(loggerFactory),
-              loggerFactory,
-            ),
+            new GrpcPruningService(sync, pruningScheduler, loggerFactory),
             executionContext,
           )
         )

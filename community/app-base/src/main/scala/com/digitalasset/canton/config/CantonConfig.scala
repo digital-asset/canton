@@ -38,9 +38,11 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.domain.block.{SequencerDriver, SequencerDriverFactory}
 import com.digitalasset.canton.domain.config.*
 import com.digitalasset.canton.domain.mediator.{
+  MediatorConfig,
   MediatorNodeConfigCommon,
   MediatorNodeParameterConfig,
   MediatorNodeParameters,
+  MediatorPruningConfig,
   RemoteMediatorConfig,
 }
 import com.digitalasset.canton.domain.sequencing.config.{
@@ -848,6 +850,9 @@ object CantonConfig {
     lazy implicit val communityNewDatabaseSequencerWriterConfigLowLatencyReader
         : ConfigReader[SequencerWriterConfig.LowLatency] =
       deriveReader[SequencerWriterConfig.LowLatency]
+    lazy implicit val sequencerPruningConfig
+        : ConfigReader[DatabaseSequencerConfig.SequencerPruningConfig] =
+      deriveReader[DatabaseSequencerConfig.SequencerPruningConfig]
     lazy implicit val sequencerNodeInitConfigReader: ConfigReader[SequencerNodeInitConfig] =
       deriveReader[SequencerNodeInitConfig]
         .enableNestedOpt("auto-init", _.copy(identity = None))
@@ -890,6 +895,10 @@ object CantonConfig {
       deriveReader[RemoteSequencerConfig]
     lazy implicit val mediatorNodeParameterConfigReader: ConfigReader[MediatorNodeParameterConfig] =
       deriveReader[MediatorNodeParameterConfig]
+    implicit val mediatorPruningConfigReader: ConfigReader[MediatorPruningConfig] =
+      deriveReader[MediatorPruningConfig]
+    lazy implicit val mediatorConfigReader: ConfigReader[MediatorConfig] =
+      deriveReader[MediatorConfig]
     lazy implicit val remoteMediatorConfigReader: ConfigReader[RemoteMediatorConfig] =
       deriveReader[RemoteMediatorConfig]
     lazy implicit val domainParametersConfigReader: ConfigReader[DomainParametersConfig] =
@@ -1276,6 +1285,9 @@ object CantonConfig {
     lazy implicit val communityDatabaseSequencerWriterConfigLowLatencyWriter
         : ConfigWriter[SequencerWriterConfig.LowLatency] =
       deriveWriter[SequencerWriterConfig.LowLatency]
+    implicit val sequencerPruningConfigWriter
+        : ConfigWriter[DatabaseSequencerConfig.SequencerPruningConfig] =
+      deriveWriter[DatabaseSequencerConfig.SequencerPruningConfig]
     lazy implicit val sequencerNodeInitConfigWriter: ConfigWriter[SequencerNodeInitConfig] =
       InitConfigBase.writerForSubtype(deriveWriter[SequencerNodeInitConfig])
 
@@ -1320,6 +1332,10 @@ object CantonConfig {
       deriveWriter[SequencerHealthConfig]
     lazy implicit val remoteSequencerConfigWriter: ConfigWriter[RemoteSequencerConfig] =
       deriveWriter[RemoteSequencerConfig]
+    lazy implicit val mediatorPruningConfigWriter: ConfigWriter[MediatorPruningConfig] =
+      deriveWriter[MediatorPruningConfig]
+    lazy implicit val mediatorConfigWriter: ConfigWriter[MediatorConfig] =
+      deriveWriter[MediatorConfig]
     lazy implicit val mediatorNodeParameterConfigWriter: ConfigWriter[MediatorNodeParameterConfig] =
       deriveWriter[MediatorNodeParameterConfig]
     lazy implicit val remoteMediatorConfigWriter: ConfigWriter[RemoteMediatorConfig] =

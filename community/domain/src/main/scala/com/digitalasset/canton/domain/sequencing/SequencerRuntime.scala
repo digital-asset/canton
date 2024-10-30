@@ -53,6 +53,7 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencer.admin.v30.{
   SequencerAdministrationServiceGrpc,
+  SequencerPruningAdministrationServiceGrpc,
   SequencerVersionServiceGrpc,
 }
 import com.digitalasset.canton.sequencing.client.SequencerClient
@@ -137,7 +138,6 @@ class SequencerRuntime(
     storage: Storage,
     clock: Clock,
     authenticationConfig: SequencerAuthenticationConfig,
-    additionalAdminServiceFactory: Sequencer => Option[ServerServiceDefinition],
     staticMembersToRegister: Seq[Member],
     futureSupervisor: FutureSupervisor,
     memberAuthenticationServiceFactory: MemberAuthenticationServiceFactory,
@@ -302,12 +302,16 @@ class SequencerRuntime(
           executionContext,
         )
     )
-    // hook for registering enterprise administration service if in an appropriate environment
-    additionalAdminServiceFactory(sequencer).foreach(register)
     sequencer.adminServices.foreach(register)
     register(
       SequencerAdministrationServiceGrpc.bindService(
         sequencerAdministrationService,
+        executionContext,
+      )
+    )
+    register(
+      SequencerPruningAdministrationServiceGrpc.bindService(
+        new GrpcSequencerPruningAdministrationService(sequencer, loggerFactory),
         executionContext,
       )
     )
