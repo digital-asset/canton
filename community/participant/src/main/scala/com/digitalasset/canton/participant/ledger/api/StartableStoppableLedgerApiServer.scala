@@ -265,8 +265,7 @@ class StartableStoppableLedgerApiServer(
         loggerFactory = loggerFactory,
       )
       serializableContractAuthenticator = SerializableContractAuthenticator(
-        config.syncService.pureCryptoApi,
-        parameters,
+        config.syncService.pureCryptoApi
       )
 
       authenticateContract: AuthenticateContract = c =>

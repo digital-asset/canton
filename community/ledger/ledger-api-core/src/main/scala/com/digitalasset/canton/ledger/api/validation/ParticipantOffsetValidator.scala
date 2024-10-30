@@ -3,26 +3,15 @@
 
 package com.digitalasset.canton.ledger.api.validation
 
+import cats.syntax.either.*
 import com.daml.error.ContextualizedErrorLogger
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.domain.types.ParticipantOffset
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
-import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.canton.platform.ApiOffset
 import io.grpc.StatusRuntimeException
 
 object ParticipantOffsetValidator {
-
-  // TODO(#21363) remove the function as it should no longer be used after converting CompletionStreamRequest to use non-optional int64
-  def validateOptional(
-      offsetO: Option[Long],
-      fieldName: String,
-  )(implicit
-      contextualizedErrorLogger: ContextualizedErrorLogger
-  ): Either[StatusRuntimeException, ParticipantOffset] =
-    offsetO match {
-      case None => Right(Ref.HexString.assertFromString(""))
-      case Some(offset) => validatePositive(offset, fieldName)
-    }
 
   def validateOptionalPositive(ledgerOffsetO: Option[Long], fieldName: String)(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
@@ -82,13 +71,17 @@ object ParticipantOffsetValidator {
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, Unit] =
-    if (ledgerOffset > ledgerEnd)
-      Left(
-        RequestValidationErrors.OffsetAfterLedgerEnd
-          .Reject(offsetType, ledgerOffset, ledgerEnd)
-          .asGrpcError
-      )
-    else Right(())
+    Either.cond(
+      ledgerOffset <= ledgerEnd,
+      (),
+      RequestValidationErrors.OffsetAfterLedgerEnd
+        .Reject(
+          offsetType,
+          ApiOffset.assertFromStringToLong(ledgerOffset),
+          ApiOffset.assertFromStringToLong(ledgerEnd),
+        )
+        .asGrpcError,
+    )
 
   // Same as above, but with an optional offset.
   def offsetIsBeforeEnd(
@@ -98,7 +91,7 @@ object ParticipantOffsetValidator {
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, Unit] =
-    ledgerOffset.fold[Either[StatusRuntimeException, Unit]](Right(()))(
+    ledgerOffset.fold(Either.unit[StatusRuntimeException])(
       offsetIsBeforeEnd(offsetType, _, ledgerEnd)
     )
 }

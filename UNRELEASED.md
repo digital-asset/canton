@@ -3,6 +3,33 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2024-10-28 (Exclusive)
+- [Breaking Change] changed the `name` parameter of `rotate_node_key` from `Option` to `String`.
+- Added a `name: String` parameter to `rotate_kms_node_key`, allowing operators to specify a name for the new key.
+
+## Until 2024-10-23 (Exclusive)
+
+- Console commands use now integer offsets. The affected commands are the following:
+  - ledger_api.updates.{trees, trees_with_tx_filter, subscribe_trees}
+  - ledger_api.updates.{flat, flat_with_tx_filter, subscribe_flat}
+  - ledger_api.state.end
+  - ledger_api.state.acs.{of_party, active_contracts_of_party, incomplete_unassigned_of_party, incomplete_assigned_of_party, of_all}
+  - ledger_api.completions.{list, subscribe}
+  - ledger_api.javaapi.updates.{trees, flat, flat_with_tx_filter}
+  - pruning.{prune, find_safe_offset, get_offset_by_time, prune_internally}
+  - testing.state_inspection.lookupPublicationTime
+- In the canton's pruning and inspection services we used strings to represent the offset of a participant.
+  The integer approach replaces string representation in:
+  - pruning service:
+    - PruneRequest message: with int64
+    - GetSafePruningOffsetRequest message: with int64
+    - GetSafePruningOffsetResponse message: with int64
+  - inspection service:
+    - LookupOffsetByTime.Response: with optional int64.
+        - If specified, it must be a valid absolute offset (positive integer).
+        - If not set, no offset corresponding to the timestamp given exists.
+
+
 ## Until 2024-10-23 (Exclusive)
 
 - Index DB schema changed in a non-backwards compatible fashion.
@@ -59,6 +86,10 @@ block.writer.checkpoint-backfill-parallelism = 2
 ```
 
 - `IdentityInitializationService.CurrentTimeResponse` returns the current time in microseconds since epoch instead of a Google protobuf timestamp.
+- Commands.DisclosedContract is enriched with `domain_id` which specifies the ID of the domain where the contract is currently assigned.
+  This field is currently optional to ensure backwards compatibility. When specified, the domain-id of the disclosed contracts that
+  are used in command interpretation is used to route the command submission to the specified domain-id. In case of domain-id mismatches,
+  the possible errors are reported as command rejections with the either `DISCLOSED_CONTRACTS_DOMAIN_ID_MISMATCH` or `PRESCRIBED_DOMAIN_ID_MISMATCH` self-service error codes.
 
 ## Until 2024-10-16 (Exclusive)
 
@@ -111,15 +142,16 @@ canton {
 In the ledger api protobufs we used strings to represent the offset of a participant.
 The integer approach replaces string representation in:
 - OffsetCheckpoint message: with int64
-- CompletionStreamRequest message of command completion service: with optional int64.
-  - If specified, it must be a valid absolute offset (positive integer).
+- CompletionStreamRequest message of command completion service: with int64.
+  - If specified, it must be a valid absolute offset (positive integer) or zero (ledger begin offset)..
   - If not set, the ledger uses the ledger begin offset instead.
-- GetLedgerEndResponse message: with optional int64
-  - If specified, it is a valid absolute offset (positive integer).
-  - If not set, it denotes the participant begin offset (there are no transactions yet).
-- GetLatestPrunedOffsetsResponse message: with optional int64
-  - If specified, it is a valid absolute offset (positive integer).
-  - If not set, no pruning has happened yet.
+- GetLedgerEndResponse message: with int64
+  - It will always be a non-negative integer.
+  - If zero, the participant view of the ledger is empty.
+  - If positive, the absolute offset of the ledger as viewed by the participant.
+- GetLatestPrunedOffsetsResponse message: with int64
+  - If positive, it is a valid absolute offset (positive integer).
+  - If zero, no pruning has happened yet.
 - SubmitAndWaitForUpdateIdResponse message: with int64
 - PruneRequest message (prune_up_to): with int64
 - Reassignment, TransactionTree, Transaction and Completion (offset, deduplication_offset) message: with int64

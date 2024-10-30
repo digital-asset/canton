@@ -3,15 +3,11 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.unit.modules.availability
 
+import cats.syntax.either.*
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.crypto.{Signature, SignatureCheckError}
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
-import com.digitalasset.canton.domain.sequencing.sequencer.bftordering.v1.{
-  AvailabilityMessage as ProtoAvailabilityMessage,
-  Batch as ProtoBatch,
-  BftOrderingMessageBody as ProtoBftOrderingMessageBody,
-  StoreRequest as ProtoStoreRequest,
-}
+import com.digitalasset.canton.domain.sequencing.sequencer.bftordering.v1.BftOrderingMessageBody as ProtoBftOrderingMessageBody
 import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.core.BftSequencerBaseTest
 import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.core.driver.BftBlockOrderer
 import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.core.modules.availability.*
@@ -92,19 +88,6 @@ class AvailabilityModuleTest extends AnyWordSpec with BftSequencerBaseTest {
   private val AnInProgressBatchMetadata = InProgressBatchMetadata(ABatchId, ABatch.stats)
   private val WrongBatchId = BatchId.createForTesting("Wrong BatchId")
   private val AByteStringRepForStoreRequestMessage = ByteString.copyFromUtf8("StoreRequestMessage")
-  private val ABatchStoreRequestMessage =
-    ProtoAvailabilityMessage(
-      ProtoAvailabilityMessage.Message.StoreRequest(
-        ProtoStoreRequest(
-          ABatchId.hash.getCryptographicEvidence,
-          Some(ProtoBatch.of(ABatch.requests.map { orderingRequest =>
-            orderingRequest.value.toProto(
-              orderingRequest.traceContext.asW3CTraceContext.map(_.parent)
-            )
-          })),
-        )
-      )
-    ).toByteString
   private val ABatchStoreRequestMessageBodyProto: ProtoBftOrderingMessageBody =
     ProtoBftOrderingMessageBody(
       ProtoBftOrderingMessageBody.Message.AvailabilityMessage(
@@ -143,6 +126,7 @@ class AvailabilityModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       CanonicalCommitSet(Set.empty),
     ),
     isLastInEpoch = false, // Irrelevant for availability
+    mode = OrderedBlockForOutput.Mode.FromConsensus,
     from = Node0Peer,
   )
   private val AnotherOrderedBlockForOutput = OrderedBlockForOutput(
@@ -155,6 +139,7 @@ class AvailabilityModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       CanonicalCommitSet(Set.empty),
     ),
     isLastInEpoch = false, // Irrelevant for availability
+    mode = OrderedBlockForOutput.Mode.FromConsensus,
     from = Node0Peer,
   )
   private val ACompleteBlock = CompleteBlockData(
@@ -282,6 +267,7 @@ class AvailabilityModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       ABatchId,
       ProofOfAvailabilityNode1And2AcksNode1And2InTopology,
       remainingPeersToTry = Seq(Node1Peer),
+      mode = OrderedBlockForOutput.Mode.FromConsensus,
     )
   private val AMissingBatchStatusNode1And2AcksWithNode2ToTry =
     AMissingBatchStatusNode1And2AcksWithNode1ToTry
@@ -978,7 +964,8 @@ class AvailabilityModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         )
         availability.receive(
           LocalOutputFetch.FetchBatchDataFromPeers(
-            ProofOfAvailabilityNode1And2AcksNode1And2InTopology
+            ProofOfAvailabilityNode1And2AcksNode1And2InTopology,
+            OrderedBlockForOutput.Mode.FromConsensus,
           )
         )
 
@@ -1016,7 +1003,8 @@ class AvailabilityModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           )
           availability.receive(
             LocalOutputFetch.FetchBatchDataFromPeers(
-              ProofOfAvailabilityNode1And2AcksNode1And2InTopology
+              ProofOfAvailabilityNode1And2AcksNode1And2InTopology,
+              OrderedBlockForOutput.Mode.FromConsensus,
             )
           )
 
@@ -1933,6 +1921,7 @@ class AvailabilityModuleTest extends AnyWordSpec with BftSequencerBaseTest {
               ABatchId,
               ProofOfAvailabilityNode1And2AcksNode1And2InTopology,
               Seq(Node1Peer),
+              mode = OrderedBlockForOutput.Mode.FromConsensus,
             )
           )
           val storage = mutable.Map[BatchId, OrderingRequestBatch]()
@@ -2006,6 +1995,7 @@ class AvailabilityModuleTest extends AnyWordSpec with BftSequencerBaseTest {
               ABatchId,
               ProofOfAvailabilityNode1And2AcksNode1And2InTopology,
               Seq(Node1Peer),
+              mode = OrderedBlockForOutput.Mode.FromConsensus,
             )
           )
           implicit val context
@@ -2054,6 +2044,7 @@ class AvailabilityModuleTest extends AnyWordSpec with BftSequencerBaseTest {
               ABatchId,
               ProofOfAvailabilityNode1And2AcksNode1And2InTopology,
               Seq(Node1Peer),
+              mode = OrderedBlockForOutput.Mode.FromConsensus,
             )
           )
           implicit val context
@@ -2139,6 +2130,7 @@ class AvailabilityModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           ),
           isLastInEpoch = false, // Irrelevant for availability
           from = Node0Peer,
+          mode = OrderedBlockForOutput.Mode.FromConsensus,
         ),
         mutable.SortedSet(ABatchId),
       )
@@ -2248,7 +2240,7 @@ class AvailabilityModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       when(underlyingMessage.getCryptographicEvidence) thenReturn AByteString
 
       when(cryptoProvider.verifySignature(hash, Node1Peer, Signature.noSignature)) thenReturn (() =>
-        Right(())
+        Either.unit
       )
 
       availability.receive(Availability.UnverifiedProtocolMessage(underlyingMessage, signature))

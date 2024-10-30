@@ -396,6 +396,10 @@ object BuildCommon {
   )
 
   lazy val cantonWarts = Seq(
+    // DirectGrpcServiceInvocation prevents direct invocation of gRPC services through a stub, but this is often useful in tests
+    Compile / compile / wartremoverErrors += Wart.custom(
+      "com.digitalasset.canton.DirectGrpcServiceInvocation"
+    ),
     wartremoverErrors += Wart.custom("com.digitalasset.canton.DiscardedFuture"),
     wartremoverErrors += Wart.custom("com.digitalasset.canton.FutureTraverse"),
     wartremoverErrors += Wart.custom("com.digitalasset.canton.GlobalExecutionContext"),
@@ -1066,6 +1070,7 @@ object BuildCommon {
         sharedSettings,
         libraryDependencies ++= Seq(
           cats,
+          grpc_stub,
           mockito_scala % Test,
           scalatestMockito % Test,
           scalatest % Test,
