@@ -1370,11 +1370,7 @@ object BuildCommon {
           `ledger-common` % "test->test",
           `community-testing` % "test->test",
         )
-        .disablePlugins(
-          ScalafixPlugin,
-          ScalafmtPlugin,
-          WartRemover,
-        ) // to accommodate different daml repo coding style
+        .disablePlugins(WartRemover) // to accommodate different daml repo coding style
         .enablePlugins(DamlPlugin)
         .settings(
           sharedSettings,

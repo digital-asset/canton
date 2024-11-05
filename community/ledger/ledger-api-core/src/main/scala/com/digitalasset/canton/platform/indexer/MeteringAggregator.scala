@@ -118,7 +118,7 @@ class MeteringAggregator(
       if (nowUtcTime.isAfter(endUtcTime)) {
 
         val toEndTime = toTimestamp(endUtcTime)
-        val ingestedLedgerEnd = parameterStore.ledgerEnd(conn).lastOffset
+        val ingestedLedgerEnd = parameterStore.ledgerEnd(conn).map(_.lastOffset)
         val maybeMaxOffset =
           meteringStore.transactionMeteringMaxOffset(lastLedgerMeteringEnd.offset, toEndTime)(conn)
 
@@ -127,7 +127,8 @@ class MeteringAggregator(
           hasMetering, // This is true if there are lapi_transaction_metering records to aggregate
           toOffsetEnd, // This is the 'to' offset for the period being aggregated
         ) = maybeMaxOffset match {
-          case Some(offset) => (offset <= ingestedLedgerEnd, true, offset)
+          case Some(offset) =>
+            (offset <= Offset.fromAbsoluteOffsetO(ingestedLedgerEnd), true, offset)
           case None => (true, false, lastLedgerMeteringEnd.offset)
         }
 

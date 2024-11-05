@@ -21,14 +21,14 @@ object Dependencies {
   lazy val scala_version = "2.13.15"
   lazy val scala_version_short = "2.13"
 
-  lazy val pekko_version = "1.0.1"
+  lazy val pekko_version = "1.1.2"
   // TODO(#10617) We have cloned pekko's BroadcastHub implementation in community/lib/pekko/src/main/scala/pekko/stream/scaladsl/BroadcastHub.scala
   //  When updating pekko, make sure to update the clone as well, including the tests in community/lib/pekko/src/main/scala/pekko
-  lazy val pekko_http_version = "1.0.0"
+  lazy val pekko_http_version = "1.1.0"
   lazy val ammonite_version = "3.0.0"
   lazy val apispec_version = "0.7.2"
   lazy val awaitility_version = "4.2.0"
-  lazy val aws_version = "2.22.3"
+  lazy val aws_version = "2.29.5"
   lazy val better_files_version = "3.9.2"
   lazy val bouncy_castle_version = "1.70"
   lazy val cats_law_version = "2.9.0"
@@ -40,7 +40,7 @@ object Dependencies {
   lazy val circe_yaml_version = "1.15.0" // added to override snakeYaml vulnerability
   lazy val dropwizard_version = "4.1.33"
   lazy val flyway_version = "10.15.0"
-  lazy val gcp_kms_version = "2.36.0"
+  lazy val gcp_kms_version = "2.55.0"
   lazy val h2_version = "2.2.224"
   lazy val janino_version = "3.1.12"
   lazy val javax_annotations_version = "1.3.2"
@@ -55,9 +55,9 @@ object Dependencies {
   lazy val munit_version = "0.7.26"
   // pick the version of boring ssl and netty native from this table: https://github.com/grpc/grpc-java/blob/master/SECURITY.md#netty
   // required for ALPN (which is required for TLS+HTTP/2) when running on Java 8. JSSE will be used on Java 9+.
-  lazy val grpc_version = "1.60.0"
-  lazy val netty_boring_ssl_version = "2.0.61.Final"
-  lazy val netty_version = "4.1.108.Final"
+  lazy val grpc_version = "1.67.1"
+  lazy val netty_boring_ssl_version = "2.0.65.Final"
+  lazy val netty_version = "4.1.110.Final"
 
   lazy val oracle_version = "19.18.0.0"
   lazy val pekko_http_backend_version = "3.9.0"

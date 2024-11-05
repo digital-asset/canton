@@ -5,7 +5,6 @@ package com.digitalasset.canton.http.json.v2
 
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v2 as lapi
-import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.canton.http.json.v2.JsContractEntry.JsContractEntry
 import com.digitalasset.canton.http.json.v2.JsReassignmentEvent.JsReassignmentEvent
 import com.digitalasset.canton.http.json.v2.JsSchema.{
@@ -16,6 +15,7 @@ import com.digitalasset.canton.http.json.v2.JsSchema.{
   JsTransactionTree,
   JsTreeEvent,
 }
+import com.digitalasset.daml.lf.data.Ref
 import com.google.rpc.status.Status
 import ujson.StringRenderer
 import ujson.circe.CirceJson
@@ -258,31 +258,38 @@ class ProtocolConverters(schemaProcessors: SchemaProcessors)(implicit
         token: Option[String],
         contextualizedErrorLogger: ContextualizedErrorLogger,
     ): Future[lapi.event.InterfaceView] = for {
-      record <- schemaProcessors.contractArgFromJsonToProto(
-        IdentifierConverter.fromJson(iview.interface_id),
-        iview.view_value,
-      )
+      record <- iview.view_value
+        .map { v =>
+          schemaProcessors
+            .contractArgFromJsonToProto(
+              IdentifierConverter.fromJson(iview.interface_id),
+              v,
+            )
+            .map(_.getRecord)
+            .map(Some(_))
+        }
+        .getOrElse(Future.successful(None))
     } yield lapi.event.InterfaceView(
       interfaceId = Some(IdentifierConverter.fromJson(iview.interface_id)),
       viewStatus = Some(JsStatusConverter.fromJson(iview.view_status)),
-      viewValue = iview.view_value.map(_ => record.getRecord),
+      viewValue = record,
     )
 
     def toJson(
-        iview: com.daml.ledger.api.v2.event.InterfaceView
+        obj: com.daml.ledger.api.v2.event.InterfaceView
     )(implicit
         token: Option[String],
         contextualizedErrorLogger: ContextualizedErrorLogger,
     ): Future[JsInterfaceView] =
       for {
         record <- schemaProcessors.contractArgFromProtoToJson(
-          iview.getInterfaceId,
-          iview.getViewValue,
+          obj.getInterfaceId,
+          obj.getViewValue,
         )
       } yield JsInterfaceView(
-        interface_id = IdentifierConverter.toJson(iview.getInterfaceId),
-        view_status = JsStatusConverter.toJson(iview.getViewStatus),
-        view_value = iview.viewValue.map(_ => record),
+        interface_id = IdentifierConverter.toJson(obj.getInterfaceId),
+        view_status = JsStatusConverter.toJson(obj.getViewStatus),
+        view_value = obj.viewValue.map(_ => record),
       )
   }
 

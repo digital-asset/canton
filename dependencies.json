@@ -23,7 +23,7 @@
     {
       "org": "com.google.api.grpc",
       "artifacts": ["proto-google-common-protos"],
-      "version": "2.22.0",
+      "version": "2.41.0",
       "description": "PROTO library for proto-google-common-protos",
       "users": [
         "Canton",
@@ -33,7 +33,7 @@
     {
       "org": "com.google.protobuf",
       "artifacts": ["protobuf-java"],
-      "version": "3.24.0",
+      "version": "3.25.5",
       "description": "Core Protocol Buffers library. Protocol Buffers are a way of encoding structured data in an efficient yet extensible format.",
       "users": [
         "Canton",

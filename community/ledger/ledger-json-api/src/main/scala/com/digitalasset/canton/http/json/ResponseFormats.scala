@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.http.json
 
+import com.digitalasset.canton.fetchcontracts.util.PekkoStreamsUtils
 import org.apache.pekko.NotUsed
 import org.apache.pekko.http.scaladsl.model.*
 import org.apache.pekko.stream.scaladsl.*
 import org.apache.pekko.stream.{FanOutShape2, SourceShape, UniformFanInShape}
 import org.apache.pekko.util.ByteString
-import com.digitalasset.canton.fetchcontracts.util.PekkoStreamsUtils
 import scalaz.syntax.show.*
 import scalaz.{Show, \/}
 import spray.json.*
@@ -42,7 +42,11 @@ object ResponseFormats {
       jsVals ~> partition.in
 
       // second consume all successes
-      partition.out1.zipWithIndex.map(a => formatOneElement(a._1, a._2)) ~> concat.in(1)
+      partition.out1
+        // .zipWithIndex is broken in pekko 1.1.x (see https://github.com/apache/pekko/issues/1525)
+        //  We workaround using standard zip
+        .zip(Source.fromIterator(() => Iterator.iterate(0L)(_ + 1)))
+        .map(a => formatOneElement(a._1, a._2)) ~> concat.in(1)
 
       // then consume all failures and produce the status and optional errors
       partition.out0.fold(Vector.empty[E])((b, a) => b :+ a).map {

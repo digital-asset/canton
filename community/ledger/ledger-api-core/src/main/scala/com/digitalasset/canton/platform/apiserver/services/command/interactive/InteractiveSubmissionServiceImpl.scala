@@ -3,12 +3,14 @@
 
 package com.digitalasset.canton.platform.apiserver.services.command.interactive
 
+import cats.implicits.toBifunctorOps
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v2.interactive_submission_data.PreparedTransaction
 import com.daml.ledger.api.v2.interactive_submission_service.*
 import com.daml.scalautil.future.FutureConversion.*
 import com.daml.timer.Delayed
-import com.digitalasset.canton.crypto.{Hash as CantonHash, HashAlgorithm, HashPurpose}
+import com.digitalasset.canton.CommandId
+import com.digitalasset.canton.crypto.{Hash as CantonHash, InteractiveSubmission}
 import com.digitalasset.canton.ledger.api.domain.{Commands as ApiCommands, SubmissionId}
 import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService
 import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService.{
@@ -20,6 +22,7 @@ import com.digitalasset.canton.ledger.configuration.LedgerTimeModel
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.SubmissionResult
+import com.digitalasset.canton.ledger.participant.state.SubmitterInfo.ExternallySignedSubmission
 import com.digitalasset.canton.logging.LoggingContextWithTrace.*
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
@@ -42,7 +45,6 @@ import com.digitalasset.canton.platform.apiserver.services.{
 }
 import com.digitalasset.canton.platform.config.InteractiveSubmissionServiceConfig
 import com.digitalasset.canton.platform.store.dao.events.LfValueTranslation
-import com.digitalasset.canton.protocol.ExternallySignedTransaction
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.daml.lf.command.ApiCommand
@@ -50,6 +52,7 @@ import com.digitalasset.daml.lf.crypto
 import com.github.benmanes.caffeine.cache
 import com.github.benmanes.caffeine.cache.Caffeine
 import com.google.protobuf.ByteString
+import io.grpc.StatusRuntimeException
 import io.opentelemetry.api.trace.Tracer
 import monocle.macros.syntax.lens.*
 
@@ -63,7 +66,7 @@ private[apiserver] object InteractiveSubmissionServiceImpl {
   )
 
   def createApiService(
-      writeService: state.WriteService,
+      submissionSyncService: state.SubmissionSyncService,
       timeProvider: TimeProvider,
       timeProviderType: TimeProviderType,
       seedService: SeedService,
@@ -77,7 +80,7 @@ private[apiserver] object InteractiveSubmissionServiceImpl {
       executionContext: ExecutionContext,
       tracer: Tracer,
   ): InteractiveSubmissionService & AutoCloseable = new InteractiveSubmissionServiceImpl(
-    writeService,
+    submissionSyncService,
     timeProvider,
     timeProviderType,
     seedService,
@@ -92,7 +95,7 @@ private[apiserver] object InteractiveSubmissionServiceImpl {
 }
 
 private[apiserver] final class InteractiveSubmissionServiceImpl private[services] (
-    writeService: state.WriteService,
+    syncService: state.SubmissionSyncService,
     timeProvider: TimeProvider,
     timeProviderType: TimeProviderType,
     seedService: SeedService,
@@ -169,11 +172,10 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
       Future.successful,
     )
 
-  // TODO(i20660): We hash the command ID only for now while the
-  // proper hashing algorithm is being designed
+  // TODO(i20660): We hash the command ID only for now while the proper hashing algorithm is being designed
   private def computeTransactionHash(preparedTransaction: PreparedTransaction)(implicit
       errorLoggingContext: ContextualizedErrorLogger
-  ) =
+  ): Either[StatusRuntimeException, CantonHash] =
     for {
       metadata <- preparedTransaction.metadata.toRight(
         RequestValidationErrors.MissingField.Reject("metadata").asGrpcError
@@ -181,12 +183,10 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
       submitterInfo <- metadata.submitterInfo.toRight(
         RequestValidationErrors.MissingField.Reject("submitter_info").asGrpcError
       )
-    } yield CantonHash
-      .digest(
-        HashPurpose.PreparedSubmission,
-        ByteString.copyFromUtf8(submitterInfo.commandId),
-        HashAlgorithm.Sha256,
-      )
+      cmdId <- CommandId
+        .fromProtoPrimitive(submitterInfo.commandId)
+        .leftMap(err => RequestValidationErrors.InvalidField.Reject("command_id", err).asGrpcError)
+    } yield InteractiveSubmission.computeHash(cmdId)
 
   private def evaluateAndHash(
       submissionSeed: crypto.Hash,
@@ -240,7 +240,7 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
       case TimeProviderType.WallClock =>
         // Submit transactions such that they arrive at the ledger sequencer exactly when record time equals ledger time.
         // If the ledger time of the transaction is far in the future (farther than the expected latency),
-        // the submission to the WriteService is delayed.
+        // the submission to the SyncService is delayed.
         val submitAt = transactionInfo.transactionMeta.ledgerEffectiveTime.toInstant
           .minus(LedgerTimeModel.maximumToleranceTimeModel.avgTransactionLatency)
         val submissionDelay = Duration.between(timeProvider.getCurrentTime, submitAt)
@@ -264,7 +264,7 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
   ): Future[state.SubmissionResult] = {
     metrics.commands.validSubmissions.mark()
     logger.trace("Submitting transaction to ledger.")
-    writeService
+    syncService
       .submitTransaction(
         result.submitterInfo,
         result.optDomainId,
@@ -315,8 +315,8 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
             .replace(request.workflowId)
             .focus(_.executionResult.submitterInfo.deduplicationPeriod)
             .replace(request.deduplicationPeriod)
-            .focus(_.executionResult.submitterInfo.externallySignedTransaction)
-            .replace(Some(ExternallySignedTransaction(hash, request.partiesSignatures)))
+            .focus(_.executionResult.submitterInfo.externallySignedSubmission)
+            .replace(Some(ExternallySignedSubmission(hash, request.signatures)))
         _ <- submitIfNotOverloaded(updatedPending.executionResult)
       } yield ExecuteSubmissionResponse()
     }

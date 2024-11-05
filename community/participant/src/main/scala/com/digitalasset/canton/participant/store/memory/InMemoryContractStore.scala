@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.store.memory
 import cats.Id
 import cats.data.{EitherT, OptionT}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.protocol.*
@@ -38,7 +39,7 @@ class InMemoryContractStore(protected val loggerFactory: NamedLoggerFactory)(
       filterPackage: Option[String],
       filterTemplate: Option[String],
       limit: Int,
-  )(implicit traceContext: TraceContext): Future[List[SerializableContract]] = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[List[SerializableContract]] = {
     def search(needle: String, accessor: StoredContract => String): StoredContract => Boolean =
       needle match {
         case rs if rs.startsWith("!") => accessor(_) == needle.drop(1)
@@ -54,7 +55,9 @@ class InMemoryContractStore(protected val loggerFactory: NamedLoggerFactory)(
 
     def conjunctiveFilter(sc: StoredContract): Boolean =
       flt1.forall(_(sc)) && flt2.forall(_(sc)) && flt3.forall(_(sc))
-    Future.successful(contracts.values.filter(conjunctiveFilter).take(limit).map(_.contract).toList)
+    FutureUnlessShutdown.pure(
+      contracts.values.filter(conjunctiveFilter).take(limit).map(_.contract).toList
+    )
   }
 
   override def lookup(
@@ -73,10 +76,10 @@ class InMemoryContractStore(protected val loggerFactory: NamedLoggerFactory)(
   }
 
   override def storeCreatedContracts(
-      creations: Seq[(WithTransactionId[SerializableContract], RequestCounter)]
+      creations: Seq[(SerializableContract, RequestCounter)]
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    creations.foreach { case (WithTransactionId(creation, transactionId), requestCounter) =>
-      store(StoredContract.fromCreatedContract(creation, requestCounter, transactionId))
+    creations.foreach { case (creation, requestCounter) =>
+      store(StoredContract.fromCreatedContract(creation, requestCounter))
     }
     Future.unit
   }
@@ -118,7 +121,7 @@ class InMemoryContractStore(protected val loggerFactory: NamedLoggerFactory)(
       upTo: RequestCounter
   )(implicit traceContext: TraceContext): Future[Unit] = {
     contracts.filterInPlace { case (_, contract) =>
-      contract.creatingTransactionIdO.isDefined || contract.requestCounter > upTo
+      !contract.isDivulged || contract.requestCounter > upTo
     }
     Future.unit
   }

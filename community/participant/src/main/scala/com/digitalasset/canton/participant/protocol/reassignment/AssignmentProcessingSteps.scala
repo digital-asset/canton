@@ -42,7 +42,6 @@ import com.digitalasset.canton.participant.protocol.submission.{
 import com.digitalasset.canton.participant.protocol.{
   EngineController,
   ProcessingSteps,
-  ReassignmentSubmissionValidation,
   SerializableContractAuthenticator,
 }
 import com.digitalasset.canton.participant.store.*
@@ -110,10 +109,11 @@ private[reassignment] class AssignmentProcessingSteps(
     serializableContractAuthenticator,
     staticDomainParameters,
     participantId,
-    engine,
     reassignmentCoordination,
     loggerFactory,
   )
+
+  private val reassignmentValidation = new ReassignmentValidation(engine, loggerFactory)
 
   override def submissionIdOfPendingRequest(pendingData: PendingAssignment): RootHash =
     pendingData.rootHash
@@ -156,7 +156,6 @@ private[reassignment] class AssignmentProcessingSteps(
       reassignmentData <- ephemeralState.reassignmentLookup
         .lookup(reassignmentId)
         .leftMap(err => NoReassignmentData(reassignmentId, err))
-        .mapK(FutureUnlessShutdown.outcomeK)
 
       unassignmentResult <- EitherT.fromEither[FutureUnlessShutdown](
         reassignmentData.unassignmentResult.toRight(
@@ -171,9 +170,9 @@ private[reassignment] class AssignmentProcessingSteps(
         )
 
       stakeholders = reassignmentData.unassignmentRequest.stakeholders
-      _ <- ReassignmentSubmissionValidation
-        .assignment(
-          reassignmentId,
+      _ <- ReassignmentValidation
+        .checkSubmitter(
+          ReassignmentRef(reassignmentId),
           topologySnapshot,
           submitter,
           participantId,
@@ -191,7 +190,6 @@ private[reassignment] class AssignmentProcessingSteps(
           submitterMetadata,
           reassignmentData.contract,
           reassignmentData.reassignmentCounter,
-          reassignmentData.creatingTransactionId,
           targetDomain,
           mediator,
           unassignmentResult,
@@ -277,7 +275,7 @@ private[reassignment] class AssignmentProcessingSteps(
   ): EitherT[Future, ReassignmentProcessorError, SubmissionResultArgs] =
     performPendingSubmissionMapUpdate(
       pendingSubmissionMap,
-      Some(submissionParam.reassignmentId),
+      ReassignmentRef(submissionParam.reassignmentId),
       submissionParam.submitterLf,
       submissionId,
     )
@@ -380,8 +378,8 @@ private[reassignment] class AssignmentProcessingSteps(
     // We perform the stakeholders check asynchronously so that we can complete the pending request
     // in the Phase37Synchronizer without waiting for it, thereby allowing us to concurrently receive a
     // mediator verdict.
-    val stakeholdersCheckResultET = assignmentValidation
-      .checkStakeholders(
+    val stakeholdersCheckResultET = reassignmentValidation
+      .checkMetadata(
         fullViewTree,
         getEngineAbortStatus = () => engineController.abortStatus,
       )
@@ -400,7 +398,6 @@ private[reassignment] class AssignmentProcessingSteps(
         .right[ReassignmentProcessorError](
           reassignmentLookup.lookup(reassignmentId).toOption.value
         )
-        .mapK(FutureUnlessShutdown.outcomeK)
       validationResultO <- assignmentValidation
         .validateAssignmentRequest(
           ts,
@@ -452,10 +449,9 @@ private[reassignment] class AssignmentProcessingSteps(
         fullViewTree.contract,
         fullViewTree.reassignmentCounter,
         fullViewTree.submitterMetadata,
-        fullViewTree.creatingTransactionId,
         isObservingReassigningParticipant = isObservingReassigningParticipant,
         reassignmentId,
-        hostedStakeholders.toSet,
+        hostedStakeholders,
         mediator,
         locallyRejectedF,
         engineController.abort,
@@ -569,7 +565,6 @@ private[reassignment] class AssignmentProcessingSteps(
       contract,
       reassignmentCounter,
       submitterMetadata,
-      creatingTransactionId,
       isObservingReassigningParticipant,
       reassignmentId,
       hostedStakeholders,
@@ -603,7 +598,7 @@ private[reassignment] class AssignmentProcessingSteps(
           ),
         )
         val commitSetO = Some(Future.successful(commitSet))
-        val contractsToBeStored = Seq(WithTransactionId(contract, creatingTransactionId))
+        val contractsToBeStored = Seq(contract)
 
         for {
           update <- createReassignmentAccepted(
@@ -733,7 +728,6 @@ object AssignmentProcessingSteps {
       contract: SerializableContract,
       reassignmentCounter: ReassignmentCounter,
       submitterMetadata: ReassignmentSubmitterMetadata,
-      creatingTransactionId: TransactionId,
       isObservingReassigningParticipant: Boolean,
       reassignmentId: ReassignmentId,
       hostedStakeholders: Set[LfPartyId],
@@ -752,7 +746,6 @@ object AssignmentProcessingSteps {
       submitterMetadata: ReassignmentSubmitterMetadata,
       contract: SerializableContract,
       reassignmentCounter: ReassignmentCounter,
-      creatingTransactionId: TransactionId,
       targetDomain: Target[DomainId],
       targetMediator: MediatorGroupRecipient,
       unassignmentResult: DeliveredUnassignmentResult,
@@ -782,7 +775,6 @@ object AssignmentProcessingSteps {
         .create(pureCrypto)(
           viewSalt,
           contract,
-          creatingTransactionId,
           unassignmentResult,
           sourceProtocolVersion,
           targetProtocolVersion,

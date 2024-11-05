@@ -205,7 +205,7 @@ class CommandSubmissionServiceImplSpec
   }
 
   private trait TestContext {
-    val writeService = mock[state.WriteService]
+    val syncService = mock[state.SyncService]
     val timeProvider = TimeProvider.Constant(Instant.now)
     val timeProviderType = TimeProviderType.Static
     val seedService = SeedService.WeakRandom
@@ -245,7 +245,6 @@ class CommandSubmissionServiceImplSpec
       keyOpt = None,
       // TODO(#19494): Change to minVersion once 2.2 is released and 2.1 is removed
       version = LanguageVersion.v2_dev,
-      domainIdO = Some(domainId),
     )
     val commands = Commands(
       workflowId = None,
@@ -272,7 +271,7 @@ class CommandSubmissionServiceImplSpec
       commandId = Ref.CommandId.assertFromString("foobar"),
       deduplicationPeriod = DeduplicationDuration(Duration.ofMinutes(1)),
       submissionId = None,
-      externallySignedTransaction = None,
+      externallySignedSubmission = None,
     )
     val transactionMeta = TransactionMeta(
       ledgerEffectiveTime = Timestamp.Epoch,
@@ -303,7 +302,7 @@ class CommandSubmissionServiceImplSpec
     )
       .thenReturn(Future.successful(Right(commandExecutionResult)))
     when(
-      writeService.submitTransaction(
+      syncService.submitTransaction(
         eqTo(submitterInfo),
         eqTo(None),
         eqTo(transactionMeta),
@@ -317,7 +316,7 @@ class CommandSubmissionServiceImplSpec
     def apiSubmissionService(
         checkOverloaded: TraceContext => Option[state.SubmissionResult] = _ => None
     ) = new CommandSubmissionServiceImpl(
-      writeService = writeService,
+      submissionSyncService = syncService,
       timeProviderType = timeProviderType,
       timeProvider = timeProvider,
       seedService = seedService,
