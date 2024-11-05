@@ -1663,6 +1663,7 @@ object BuildCommon {
             "daml-lf/validation/src/main/scala", // (daml-lf/data, daml-lf/language, libs-scala/scala-utils)
             "libs-scala/ledger-resources/src/main/scala", // (libs-scala/resources, libs-scala/resources-pekko, libs-scala/resources-grpc)
           ).map(f => damlFolder.value / f),
+        unmanagedSources / excludeFilter := HiddenFileFilter || "UpgradeCheckMain.scala",
         coverageEnabled := false,
         // skip header check
         headerSources / excludeFilter := HiddenFileFilter || "*",

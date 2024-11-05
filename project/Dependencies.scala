@@ -19,13 +19,13 @@ object Dependencies {
   lazy val scala_version = "2.13.11"
   lazy val scala_version_short = "2.13"
 
-  lazy val pekko_version = "1.1.2"
+  lazy val pekko_version = pekko_actor_typed.revision
   // TODO(#10617) We have cloned pekko's BroadcastHub implementation in community/lib/pekko/src/main/scala/pekko/stream/scaladsl/BroadcastHub.scala
   //  When updating pekko, make sure to update the clone as well, including the tests in community/lib/pekko/src/main/scala/pekko
-  lazy val pekko_http_version = "1.1.0"
+  lazy val pekko_http_version = pekko_http.revision
   lazy val ammonite_version = "2.5.9"
   lazy val awaitility_version = "4.2.0"
-  lazy val aws_version = "2.22.3"
+  lazy val aws_version = "2.29.5"
   lazy val better_files_version = "3.9.1"
   lazy val bouncy_castle_version = "1.70"
   lazy val cats_law_version = "2.9.0"
@@ -38,7 +38,7 @@ object Dependencies {
   lazy val dropwizard_version = "4.2.25"
   lazy val fabric_sdk_version = "2.2.13"
   lazy val flyway_version = "9.15.2"
-  lazy val gcp_kms_version = "2.33.0"
+  lazy val gcp_kms_version = "2.55.0"
   lazy val h2_version = "2.1.210"
   lazy val janino_version = "3.1.4"
   // TODO(i8460) Don't upgrade until https://github.com/sbt/sbt/issues/6564 is fixed
@@ -54,9 +54,10 @@ object Dependencies {
   lazy val monocle_version = "3.2.0"
   // pick the version of boring ssl and netty native from this table: https://github.com/grpc/grpc-java/blob/master/SECURITY.md#netty
   // required for ALPN (which is required for TLS+HTTP/2) when running on Java 8. JSSE will be used on Java 9+.
-  lazy val grpc_version = "1.65.1"
-  lazy val netty_boring_ssl_version = "2.0.61.Final"
-  lazy val netty_version = "4.1.100.Final"
+
+  lazy val grpc_version = grpc_protobuf.revision
+  lazy val netty_boring_ssl_version = netty_boring_ssl.revision
+  lazy val netty_version = netty_handler.revision
   lazy val opentelemetry_instrumentation_grpc_version = s"$opentelemetry_version-alpha"
   lazy val opentelemetry_instrumentation_runtime_metrics_version = s"$opentelemetry_version-alpha"
   lazy val opentelemetry_proto_version = "1.7.1-alpha"
@@ -136,13 +137,12 @@ object Dependencies {
   lazy val javax_annotations =
     "javax.annotation" % "javax.annotation-api" % javax_annotations_version
 
-  lazy val grpc_protobuf = "io.grpc" % "grpc-protobuf" % grpc_version
+  lazy val grpc_protobuf = damlDependency("io.grpc", "grpc-protobuf")
   lazy val grpc_netty = "io.grpc" % "grpc-netty" % grpc_version
   lazy val grpc_netty_shaded = "io.grpc" % "grpc-netty-shaded" % grpc_version
 
-  lazy val netty_boring_ssl =
-    "io.netty" % "netty-tcnative-boringssl-static" % netty_boring_ssl_version
-  lazy val netty_handler = "io.netty" % "netty-handler" % netty_version
+  lazy val netty_boring_ssl = damlDependency("io.netty", "netty-tcnative-boringssl-static")
+  lazy val netty_handler = damlDependency("io.netty", "netty-handler")
   lazy val netty_native =
     "io.netty" % "netty-transport-native-epoll" % netty_version classifier "linux-x86_64" classifier "linux-aarch_64"
   lazy val grpc_stub = "io.grpc" % "grpc-stub" % grpc_version
@@ -152,14 +152,14 @@ object Dependencies {
 
   lazy val scopt = "com.github.scopt" %% "scopt" % scopt_version
 
-  lazy val pekko_actor_typed = "org.apache.pekko" %% "pekko-actor-typed" % pekko_version
+  lazy val pekko_actor_typed = damlDependency("org.apache.pekko", "pekko-actor-typed")
   lazy val pekko_actor_testkit_typed =
     "org.apache.pekko" %% "pekko-actor-testkit-typed" % pekko_version
   lazy val pekko_stream = "org.apache.pekko" %% "pekko-stream" % pekko_version
   lazy val pekko_stream_testkit = "org.apache.pekko" %% "pekko-stream-testkit" % pekko_version
   lazy val pekko_slf4j =
     "org.apache.pekko" %% "pekko-slf4j" % pekko_version excludeAll (incompatibleLogging: _*)
-  lazy val pekko_http = "org.apache.pekko" %% "pekko-http" % pekko_http_version
+  lazy val pekko_http = damlDependency("org.apache.pekko", "pekko-http")
   lazy val pekko_http_core = "org.apache.pekko" %% "pekko-http-core" % pekko_http_version
   lazy val pekko_http_testkit = "org.apache.pekko" %% "pekko-http-testkit" % pekko_http_version
 
@@ -355,7 +355,6 @@ object Dependencies {
   lazy val spray = damlDependency("io.spray", "spray-json")
   lazy val google_protobuf_java = damlDependency("com.google.protobuf", "protobuf-java")
   lazy val protobuf_version = google_protobuf_java.revision
-  // To override 3.19.2 from the daml repo's maven_install_2.13.json
   lazy val google_protobuf_java_util =
     "com.google.protobuf" % "protobuf-java-util" % protobuf_version
 
