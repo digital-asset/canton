@@ -3,7 +3,38 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2024-11-09 (Exclusive)
+
+- The keep alive behavior of the Ledger API can be configured through
+```
+canton.participants.participant.ledger-api.keep-alive-server.*
+```
+- The default values of the keep alive configuration for the ledger api has been set to
+```
+time: 10m
+timeout: 20s
+permitKeepAliveTime: 10s
+permitKeepAliveWithoutCalls: false
+```
+- The effective settings are reported by the Participant Node at the initialization time with a logline:
+```
+2024-10-31 18:09:34,258 [canton-env-ec-35] INFO  c.d.c.p.a.LedgerApiService:participant=participant - Listening on localhost:5001 over plain text with LedgerApiKeepAliveServerConfig(10m,20s,10s,true).
+```
+- New parameter value for `permitKeepAliveWithoutCalls` has been introduced to all keep alive configurations.
+When set, it allows the clients to send keep alive signals outside any ongoing grpc call.
+
+## Until 2024-10-31 (Exclusive)
+
+- Addition of a `submissionTimeRecordTimeTolerance` dynamic domain parameter, which defaults to the value of `ledgerTimRecordTimeTolerance`
+- `ledgerTimRecordTimeTolerance` is no longer unsafe to increase, however, `submissionTimeRecordTimeTolerance` now is, within the same restrictions as `ledgerTimRecordTimeTolerance` was before
+- Use of the flag `LedgerTimeRecordTimeToleranceIncrease` is now deprecated
+- A new flag `SubmissionTimeRecordTimeToleranceIncrease` has been added to forcefully increase the `submissionTimeRecordTimeTolerance` instead
+
 ## Until 2024-10-28 (Exclusive)
+
+- Split the current signing schemes into a key `([Encryption/Signing]KeySpec)` and algorithm `([Encryption/Signing]AlgorithmSpec)` specifications.
+  We also changed the way this is configured in Canton, for example, `signing.default = ec-dsa-p-256` is now represented as:
+  `signing.algorithms.default = ec-dsa-sha-256` and `signing.keys.default = ec-p-256`. This is not a breaking change because the old schemes are still accepted.
 - [Breaking Change] changed the `name` parameter of `rotate_node_key` from `Option` to `String`.
 - Added a `name: String` parameter to `rotate_kms_node_key`, allowing operators to specify a name for the new key.
 

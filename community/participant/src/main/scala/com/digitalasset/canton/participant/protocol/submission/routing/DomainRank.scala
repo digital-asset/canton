@@ -8,12 +8,13 @@ import cats.data.{Chain, EitherT}
 import cats.syntax.bifunctor.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.data.ReassignmentRef
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.protocol.ReassignmentSubmissionValidation
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.ReassignmentProcessorError
 import com.digitalasset.canton.participant.protocol.reassignment.{
   ReassigningParticipantsComputation,
+  ReassignmentValidation,
   UnassignmentProcessorError,
 }
 import com.digitalasset.canton.participant.sync.TransactionRoutingError
@@ -109,13 +110,15 @@ private[routing] class DomainRankComputation(
         case reader :: rest =>
           val result =
             for {
-              _ <- ReassignmentSubmissionValidation.unassignment(
-                contract.id,
-                sourceSnapshot,
-                reader,
-                participantId,
-                contract.stakeholders.all,
-              )
+              _ <- ReassignmentValidation
+                .checkSubmitter(
+                  ReassignmentRef(contract.id),
+                  sourceSnapshot,
+                  reader,
+                  participantId,
+                  contract.stakeholders.all,
+                )
+                .mapK(FutureUnlessShutdown.outcomeK)
               _ <- new ReassigningParticipantsComputation(
                 stakeholders = contract.stakeholders,
                 sourceSnapshot,

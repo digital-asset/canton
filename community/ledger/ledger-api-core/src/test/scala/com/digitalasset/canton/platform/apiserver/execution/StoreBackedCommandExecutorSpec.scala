@@ -11,7 +11,7 @@ import com.digitalasset.canton.crypto.{CryptoPureApi, Salt, SaltSeed}
 import com.digitalasset.canton.data.{DeduplicationPeriod, ProcessedDisclosedContract}
 import com.digitalasset.canton.ledger.api.domain.{CommandId, Commands, DisclosedContract}
 import com.digitalasset.canton.ledger.api.util.TimeProvider
-import com.digitalasset.canton.ledger.participant.state.WriteService
+import com.digitalasset.canton.ledger.participant.state.SyncService
 import com.digitalasset.canton.ledger.participant.state.index.{ContractState, ContractStore}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
@@ -99,18 +99,13 @@ class StoreBackedCommandExecutorSpec
     domainIdO = Some(disclosedContractDomainId),
   )
 
-  private def mkProcessedDisclosedContract(
-      createNode: LfNode.Create = disclosedCreateNode,
-      domainIdO: Option[DomainId] = Some(disclosedContractDomainId),
-  ) =
+  private val processedDisclosedContracts = ImmArray(
     ProcessedDisclosedContract(
-      create = createNode,
+      create = disclosedCreateNode,
       createdAt = disclosedContractCreateTime,
       driverMetadata = salt,
-      domainIdO = domainIdO,
     )
-
-  private val processedDisclosedContracts = ImmArray(mkProcessedDisclosedContract())
+  )
 
   private val emptyTransactionMetadata = Transaction.Metadata(
     submissionSeed = None,
@@ -174,7 +169,7 @@ class StoreBackedCommandExecutorSpec
     new StoreBackedCommandExecutor(
       engine,
       Ref.ParticipantId.assertFromString("anId"),
-      mock[WriteService],
+      mock[SyncService],
       mock[ContractStore],
       authenticateContract = _ => Either.unit,
       metrics = LedgerApiServerMetrics.ForTesting,
@@ -366,7 +361,7 @@ class StoreBackedCommandExecutorSpec
       val sut = new StoreBackedCommandExecutor(
         mockEngine,
         Ref.ParticipantId.assertFromString("anId"),
-        mock[WriteService],
+        mock[SyncService],
         store,
         authenticateContract = _ => authenticationResult,
         metrics = LedgerApiServerMetrics.ForTesting,
@@ -439,8 +434,6 @@ class StoreBackedCommandExecutorSpec
     val domainId2 = DomainId.tryFromString("x::domain2")
     val disclosedContractId1 = TransactionBuilder.newCid
     val disclosedContractId2 = TransactionBuilder.newCid
-    val discCreate1 = mkCreateNode(disclosedContractId1)
-    val discCreate2 = mkCreateNode(disclosedContractId2)
 
     implicit val traceContext: TraceContext = TraceContext.empty
 
@@ -449,13 +442,13 @@ class StoreBackedCommandExecutorSpec
         domainId_from_no_prescribed_no_disclosed <- StoreBackedCommandExecutor
           .considerDisclosedContractsDomainId(
             prescribedDomainIdO = None,
-            disclosedContractsUsedInInterpretation = ImmArray.Empty,
+            disclosedContractsUsedInInterpretation = ImmArray.empty,
             logger,
           )
         domainId_from_prescribed_no_disclosed <-
           StoreBackedCommandExecutor.considerDisclosedContractsDomainId(
             prescribedDomainIdO = Some(domainId1),
-            disclosedContractsUsedInInterpretation = ImmArray.Empty,
+            disclosedContractsUsedInInterpretation = ImmArray.empty,
             logger,
           )
       } yield {
@@ -471,8 +464,8 @@ class StoreBackedCommandExecutorSpec
         .considerDisclosedContractsDomainId(
           prescribedDomainIdO = None,
           disclosedContractsUsedInInterpretation = ImmArray(
-            mkProcessedDisclosedContract(discCreate1, Some(domainId1)),
-            mkProcessedDisclosedContract(discCreate2, Some(domainId1)),
+            disclosedContractId1 -> Some(domainId1),
+            disclosedContractId2 -> Some(domainId1),
           ),
           logger,
         )
@@ -487,8 +480,8 @@ class StoreBackedCommandExecutorSpec
             .considerDisclosedContractsDomainId(
               prescribedDomainIdO = prescribedDomainIdO,
               disclosedContractsUsedInInterpretation = ImmArray(
-                mkProcessedDisclosedContract(discCreate1, Some(domainId1)),
-                mkProcessedDisclosedContract(discCreate2, Some(domainId2)),
+                disclosedContractId1 -> Some(domainId1),
+                disclosedContractId2 -> Some(domainId2),
               ),
               logger,
             )
@@ -512,8 +505,8 @@ class StoreBackedCommandExecutorSpec
           .considerDisclosedContractsDomainId(
             prescribedDomainIdO = Some(prescribedDomainId),
             disclosedContractsUsedInInterpretation = ImmArray(
-              mkProcessedDisclosedContract(discCreate1, Some(domainIdOfDisclosedContracts)),
-              mkProcessedDisclosedContract(discCreate2, Some(domainIdOfDisclosedContracts)),
+              disclosedContractId1 -> Some(domainIdOfDisclosedContracts),
+              disclosedContractId2 -> Some(domainIdOfDisclosedContracts),
             ),
             logger,
           )

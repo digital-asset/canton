@@ -12,8 +12,9 @@ import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, Signature}
 import com.digitalasset.canton.data.ViewType.ReassignmentViewType
 import com.digitalasset.canton.data.{
   CantonTimestamp,
+  FullReassignmentViewTree,
+  ReassignmentRef,
   ReassignmentSubmitterMetadata,
-  ReassignmentViewTree,
   ViewType,
 }
 import com.digitalasset.canton.error.TransactionError
@@ -103,7 +104,7 @@ trait ReassignmentProcessingSteps[
   override type RequestType <: ProcessingSteps.RequestType.Reassignment
   override val requestType: RequestType
 
-  override type FullView <: ReassignmentViewTree
+  override type FullView <: FullReassignmentViewTree
   override type ParsedRequestType = ParsedReassignmentRequest[FullView]
 
   override def embedNoMediatorError(error: NoMediatorError): ReassignmentProcessorError =
@@ -146,7 +147,7 @@ trait ReassignmentProcessingSteps[
 
   protected def performPendingSubmissionMapUpdate(
       pendingSubmissionMap: concurrent.Map[RootHash, PendingReassignmentSubmission],
-      reassignmentId: Option[ReassignmentId],
+      reassignmentRef: ReassignmentRef,
       submitterLf: LfPartyId,
       rootHash: RootHash,
   ): EitherT[Future, ReassignmentProcessorError, PendingReassignmentSubmission] = {
@@ -156,7 +157,7 @@ trait ReassignmentProcessingSteps[
       existing.isEmpty,
       pendingSubmission,
       DuplicateReassignmentTreeHash(
-        reassignmentId,
+        reassignmentRef,
         submitterLf,
         rootHash,
       ): ReassignmentProcessorError,
@@ -379,7 +380,6 @@ trait ReassignmentProcessingSteps[
       err: ProtocolProcessor.ResultProcessingError
   ): ReassignmentProcessorError =
     GenericStepsError(err)
-
 }
 
 object ReassignmentProcessingSteps {
@@ -389,7 +389,7 @@ object ReassignmentProcessingSteps {
         Promise[com.google.rpc.status.Status]()
   )
 
-  final case class ParsedReassignmentRequest[VT <: ReassignmentViewTree](
+  final case class ParsedReassignmentRequest[VT <: FullReassignmentViewTree](
       override val rc: RequestCounter,
       override val requestTimestamp: CantonTimestamp,
       override val sc: SequencerCounter,
@@ -475,34 +475,36 @@ object ReassignmentProcessingSteps {
     override def message: String = s"Contract metadata not found: ${err.message}"
   }
 
-  final case class CreatingTransactionIdNotFound(contractId: LfContractId)
-      extends ReassignmentProcessorError {
-    override def message: String = s"Creating transaction id not found for contract `$contractId`"
-
-  }
-
   final case class NoTimeProofFromDomain(domainId: DomainId, reason: String)
       extends ReassignmentProcessorError {
     override def message: String = s"Cannot fetch time proof for domain `$domainId`: $reason"
   }
 
-  final case class NoReassignmentSubmissionPermission(
-      kind: String,
+  final case class NotHostedOnParticipant(
+      reference: ReassignmentRef,
       party: LfPartyId,
       participantId: ParticipantId,
   ) extends ReassignmentProcessorError {
 
     override def message: String =
-      s"For $kind: $party does not have submission permission on $participantId"
+      s"For $reference: $party is not hosted on $participantId"
+  }
+
+  final case class ContractMetadataMismatch(
+      reassignmentRef: ReassignmentRef,
+      declaredContractMetadata: ContractMetadata,
+      expectedMetadata: ContractMetadata,
+  ) extends ReassignmentProcessorError {
+    override def message: String = s"For reassignment `$reassignmentRef`: metadata mismatch"
   }
 
   final case class StakeholdersMismatch(
-      reassignmentId: Option[ReassignmentId],
+      reassignmentRef: ReassignmentRef,
       declaredViewStakeholders: Stakeholders,
       declaredContractStakeholders: Option[Stakeholders],
       expectedStakeholders: Either[String, Stakeholders],
   ) extends ReassignmentProcessorError {
-    override def message: String = s"For reassignment `$reassignmentId`: stakeholders mismatch"
+    override def message: String = s"For reassignment `$reassignmentRef`: stakeholders mismatch"
   }
 
   final case class NoStakeholders private (contractId: LfContractId)
@@ -523,22 +525,13 @@ object ReassignmentProcessingSteps {
 
   final case class ContractError(message: String) extends ReassignmentProcessorError
 
-  object ContractError {
-    def templateIdMismatch(
-        declaredTemplateId: LfTemplateId,
-        expectedTemplateId: LfTemplateId,
-    ): ContractError = ContractError(
-      s"Template ID mismatch for reassignment. Declared=$declaredTemplateId, expected=$expectedTemplateId`"
-    )
-  }
-
-  final case class AssignmentSubmitterMustBeStakeholder(
-      reassignmentId: ReassignmentId,
+  final case class SubmitterMustBeStakeholder(
+      reference: ReassignmentRef,
       submittingParty: LfPartyId,
       stakeholders: Set[LfPartyId],
   ) extends ReassignmentProcessorError {
     override def message: String =
-      s"Cannot assign `$reassignmentId`: submitter `$submittingParty` is not a stakeholder"
+      s"For $reference: submitter `$submittingParty` is not a stakeholder"
   }
 
   final case class ReassignmentStoreFailed(
@@ -564,13 +557,11 @@ object ReassignmentProcessingSteps {
   }
 
   final case class DuplicateReassignmentTreeHash(
-      reassignmentId: Option[ReassignmentId],
+      reassignmentRef: ReassignmentRef,
       submitterLf: LfPartyId,
       hash: RootHash,
   ) extends ReassignmentProcessorError {
-    private def kind = reassignmentId.map(_id => "assign").getOrElse("unassign")
-
-    override def message: String = s"Cannot $kind $reassignmentId: duplicatehash"
+    override def message: String = s"For reassignment $reassignmentRef: duplicatehash"
   }
 
   final case class FailedToCreateResponse(
@@ -594,9 +585,9 @@ object ReassignmentProcessingSteps {
     )
   }
 
-  final case class ReinterpretationAborted(reassignmentId: ReassignmentId, reason: String)
+  final case class ReinterpretationAborted(reassignmentRef: ReassignmentRef, reason: String)
       extends ReassignmentProcessorError {
     override def message: String =
-      s"Cannot reassign `$reassignmentId`: reinterpretation aborted for reason `$reason`"
+      s"For reassignment `$reassignmentRef`: reinterpretation aborted for reason `$reason`"
   }
 }

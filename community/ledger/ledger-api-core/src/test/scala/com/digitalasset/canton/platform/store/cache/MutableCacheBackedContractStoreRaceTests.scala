@@ -320,7 +320,7 @@ private object MutableCacheBackedContractStoreRaceTests {
       contractsReader = indexViewContractsReader,
       metrics = metrics,
       contractStateCaches = ContractStateCaches.build(
-        initialCacheIndex = Offset.beforeBegin,
+        initialCacheIndex = None,
         maxContractsCacheSize = 1L,
         maxKeyCacheSize = 1L,
         metrics = metrics,
@@ -465,7 +465,7 @@ private object MutableCacheBackedContractStoreRaceTests {
 
   private def offset(idx: Long) = {
     val base = BigInt(1L) << 32
-    Offset.fromByteArray((base + idx).toByteArray)
+    Offset.fromLong((base + idx).toLong)
   }
 
   private def nextAfter(currentOffset: Offset) = {
@@ -473,7 +473,7 @@ private object MutableCacheBackedContractStoreRaceTests {
     if (offsetBytes.length == 0) {
       offset(0L)
     } else {
-      Offset.fromByteArray((BigInt(currentOffset.toByteArray) + 1).toByteArray)
+      Offset.fromLong(currentOffset.toLong + 1)
     }
   }
 }

@@ -14,6 +14,7 @@ import com.digitalasset.canton.platform.store.dao.{
   EventProjectionProperties,
   LedgerDaoEventsReader,
 }
+import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.daml.lf.data.Ref.Party
 import com.digitalasset.daml.lf.value.Value.ContractId
 
@@ -47,11 +48,11 @@ private[dao] sealed class EventsReader(
         eventStorageBackend.eventReaderQueries.fetchContractIdEvents(
           contractId,
           requestingParties = requestingParties,
-          endEventSequentialId = ledgerEndCache()._2,
+          endEventSequentialId = ledgerEndCache().map(_.lastEventSeqId).getOrElse(0L),
         )
       )
 
-      deserialized <- Future.traverse(rawEvents) { event =>
+      deserialized <- MonadUtil.sequentialTraverse(rawEvents) { event =>
         TransactionsReader
           .deserializeFlatEvent(eventProjectionProperties, lfValueTranslation)(event)
           .map(_ -> event.domainId)

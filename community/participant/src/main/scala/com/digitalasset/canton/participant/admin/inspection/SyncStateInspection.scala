@@ -11,7 +11,7 @@ import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
+import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond, Offset}
 import com.digitalasset.canton.ledger.participant.state.{DomainIndex, RequestIndex}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -35,6 +35,7 @@ import com.digitalasset.canton.protocol.messages.CommitmentPeriodState.fromIntVa
 import com.digitalasset.canton.protocol.{LfContractId, SerializableContract}
 import com.digitalasset.canton.pruning.PruningStatus
 import com.digitalasset.canton.sequencing.PossiblyIgnoredProtocolEvent
+import com.digitalasset.canton.sequencing.client.channel.SequencerChannelClient
 import com.digitalasset.canton.sequencing.handlers.EnvelopeOpener
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.SequencedEventStore.{
@@ -118,7 +119,7 @@ final class SyncStateInspection(
         syncDomainPersistentStateManager
           .getByAlias(domain)
           .traverse(_.acsInspection.findContracts(filterId, filterPackage, filterTemplate, limit))
-
+          .failOnShutdownToAbortException("findContracts")
       },
       domain,
     )
@@ -692,7 +693,9 @@ final class SyncStateInspection(
     timeouts.inspection.await(s"$functionFullName")(
       participantNodePersistentState.value.ledgerApiStore.lastDomainOffsetBeforeOrAt(
         domainId,
-        participantNodePersistentState.value.ledgerApiStore.ledgerEndCache()._1,
+        Offset.fromAbsoluteOffsetO(
+          participantNodePersistentState.value.ledgerApiStore.ledgerEndCache().map(_.lastOffset)
+        ),
       )
     )
 
@@ -701,6 +704,13 @@ final class SyncStateInspection(
       participantNodePersistentState.value.pruningStore.pruningStatus().map(_.completedO)
     )
 
+  def getSequencerChannelClient(domainId: DomainId): Option[SequencerChannelClient] = for {
+    syncDomain <- connectedDomainsLookup.get(domainId)
+    sequencerChannelClient <- syncDomain.domainHandle.sequencerChannelClientO
+  } yield sequencerChannelClient
+
+  def getAcsInspection(domainId: DomainId): Option[AcsInspection] =
+    connectedDomainsLookup.get(domainId).map(_.domainHandle.domainPersistentState.acsInspection)
 }
 
 object SyncStateInspection {

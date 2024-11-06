@@ -44,7 +44,12 @@ trait StorageBackendProvider {
       ledgerEndPublicationTime: CantonTimestamp = CantonTimestamp.now(),
   )(connection: Connection): Unit = {
     backend.parameter.updateLedgerEnd(
-      LedgerEnd(ledgerEndOffset, ledgerEndSequentialId, 0, ledgerEndPublicationTime)
+      LedgerEnd(
+        ledgerEndOffset.toAbsoluteOffset,
+        ledgerEndSequentialId,
+        0,
+        ledgerEndPublicationTime,
+      )
     )(
       connection
     ) // we do not care about the stringInterningId here
@@ -56,16 +61,8 @@ trait StorageBackendProvider {
     updateLedgerEndCache(connection)
   }
 
-  protected final def updateLedgerEndCache(connection: Connection): Unit = {
-    val ledgerEnd = backend.parameter.ledgerEnd(connection)
-    backend.ledgerEndCache.set(
-      (
-        ledgerEnd.lastOffset,
-        ledgerEnd.lastEventSeqId,
-        ledgerEnd.lastPublicationTime,
-      )
-    )
-  }
+  protected final def updateLedgerEndCache(connection: Connection): Unit =
+    backend.ledgerEndCache.set(backend.parameter.ledgerEnd(connection))
 }
 
 trait StorageBackendProviderPostgres

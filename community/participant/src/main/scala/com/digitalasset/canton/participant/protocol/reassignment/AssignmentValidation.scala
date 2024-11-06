@@ -12,12 +12,10 @@ import com.digitalasset.canton.data.*
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.LocalRejectionGroup
 import com.digitalasset.canton.error.{Alarm, AlarmErrorCode}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.protocol.EngineController.GetEngineAbortStatus
 import com.digitalasset.canton.participant.protocol.reassignment.AssignmentValidation.InvalidUnassignmentResult.DeliveredUnassignmentResultError
 import com.digitalasset.canton.participant.protocol.reassignment.AssignmentValidation.{
   AssignmentValidationResult,
   ContractDataMismatch,
-  CreatingTransactionIdMismatch,
   InconsistentReassignmentCounter,
   NonInitiatorSubmitsBeforeExclusivityTimeout,
   ReassigningParticipantsMismatch,
@@ -25,19 +23,15 @@ import com.digitalasset.canton.participant.protocol.reassignment.AssignmentValid
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.{
   ProcessingSteps,
-  ReassignmentSubmissionValidation,
   SerializableContractAuthenticator,
 }
 import com.digitalasset.canton.participant.store.*
-import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.ReassignmentTag.Target
 import com.digitalasset.canton.{LfPartyId, ReassignmentCounter}
-import com.digitalasset.daml.lf.engine.Error as LfError
-import com.digitalasset.daml.lf.interpretation.Error as LfInterpretationError
 import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -47,64 +41,13 @@ private[reassignment] class AssignmentValidation(
     serializableContractAuthenticator: SerializableContractAuthenticator,
     staticDomainParameters: Target[StaticDomainParameters],
     participantId: ParticipantId,
-    engine: DAMLe,
     reassignmentCoordination: ReassignmentCoordination,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends NamedLogging {
 
-  def checkStakeholders(
-      assignmentRequest: FullAssignmentTree,
-      getEngineAbortStatus: GetEngineAbortStatus,
-  )(implicit traceContext: TraceContext): EitherT[Future, ReassignmentProcessorError, Unit] = {
-    val reassignmentId = assignmentRequest.unassignmentResultEvent.reassignmentId
-
-    // TODO(#12926) We don't have re-interpretation check in the processing of the unassignment. Do we need it?
-    val declaredContractStakeholders = Stakeholders(assignmentRequest.contract.metadata)
-    val declaredViewStakeholders = assignmentRequest.stakeholders
-
-    for {
-      metadata <- engine
-        .contractMetadata(
-          assignmentRequest.contract.contractInstance,
-          declaredContractStakeholders.all,
-          getEngineAbortStatus,
-        )
-        .leftMap {
-          case DAMLe.EngineError(
-                LfError.Interpretation(
-                  e @ LfError.Interpretation.DamlException(
-                    LfInterpretationError.FailedAuthorization(_, _)
-                  ),
-                  _,
-                )
-              ) =>
-            StakeholdersMismatch(
-              Some(reassignmentId),
-              declaredViewStakeholders = declaredViewStakeholders,
-              declaredContractStakeholders = Some(declaredContractStakeholders),
-              expectedStakeholders = Left(e.message),
-            )
-          case DAMLe.EngineError(error) => MetadataNotFound(error)
-          case DAMLe.EngineAborted(reason) =>
-            ReinterpretationAborted(reassignmentId, reason)
-
-        }
-      recomputedStakeholders = Stakeholders(metadata)
-      _ <- condUnitET[Future](
-        declaredViewStakeholders == recomputedStakeholders && declaredViewStakeholders == declaredContractStakeholders,
-        StakeholdersMismatch(
-          Some(reassignmentId),
-          declaredViewStakeholders = declaredViewStakeholders,
-          declaredContractStakeholders = Some(declaredContractStakeholders),
-          expectedStakeholders = Right(recomputedStakeholders),
-        ),
-      ).leftWiden[ReassignmentProcessorError]
-    } yield ()
-  }
-
   // TODO(#12926) Check what validations should be done for observing reassigning participants
-  // TODO(#22048) Split this method in smaller chunks
+  // TODO(#22119) Split this method in smaller chunks
   /** Validate the unassignment request
     * @return The option should be defined iff a confirmation will be sent, which means:
     *         - The participant is a confirming reassigning participant
@@ -167,7 +110,7 @@ private[reassignment] class AssignmentValidation(
           _ <- EitherT.fromEither[Future](
             serializableContractAuthenticator
               .authenticate(assignmentRequest.contract)
-              .leftMap[ReassignmentProcessorError](ContractError(_))
+              .leftMap[ReassignmentProcessorError](ContractError.apply)
           )
 
           unassignmentSubmitter = reassignmentData.unassignmentRequest.submitter
@@ -190,10 +133,8 @@ private[reassignment] class AssignmentValidation(
           )(assignmentRequest.unassignmentResultEvent).validate
             .leftMap(err => DeliveredUnassignmentResultError(reassignmentId, err.error).reported())
 
-          // TODO(#12926): validate assignmentRequest.stakeholders
-
-          _ <- ReassignmentSubmissionValidation.assignment(
-            reassignmentId = reassignmentId,
+          _ <- ReassignmentValidation.checkSubmitter(
+            ReassignmentRef(reassignmentId),
             topologySnapshot = targetSnapshot,
             submitter = assignmentRequest.submitter,
             participantId = assignmentRequest.submitterMetadata.submittingParticipant,
@@ -217,14 +158,6 @@ private[reassignment] class AssignmentValidation(
             ),
           )
 
-          _ <- condUnitET[Future](
-            reassignmentData.creatingTransactionId == assignmentRequest.creatingTransactionId,
-            CreatingTransactionIdMismatch(
-              reassignmentId,
-              assignmentRequest.creatingTransactionId,
-              reassignmentData.creatingTransactionId,
-            ),
-          )
           sourceIps = sourceCrypto.map(_.ipsSnapshot)
 
           stakeholders = assignmentRequest.stakeholders
@@ -252,8 +185,8 @@ private[reassignment] class AssignmentValidation(
       case _ => // No reassignment data or participant is a pure observing reassigning participant
         // TODO(#12926) Check what validations can be done here + ensure coverage
         for {
-          _ <- ReassignmentSubmissionValidation.assignment(
-            reassignmentId = reassignmentId,
+          _ <- ReassignmentValidation.checkSubmitter(
+            ReassignmentRef(reassignmentId),
             topologySnapshot = targetSnapshot,
             submitter = assignmentRequest.submitter,
             participantId = assignmentRequest.submitterMetadata.submittingParticipant,
@@ -269,7 +202,7 @@ private[reassignment] class AssignmentValidation(
           _ <- EitherT.fromEither[Future](
             serializableContractAuthenticator
               .authenticate(assignmentRequest.contract)
-              .leftMap[ReassignmentProcessorError](ContractError(_))
+              .leftMap[ReassignmentProcessorError](ContractError.apply)
           )
 
           confirmingParties <- EitherT
@@ -370,15 +303,6 @@ object AssignmentValidation extends LocalRejectionGroup {
   final case class ContractDataMismatch(reassignmentId: ReassignmentId)
       extends AssignmentValidationError {
     override def message: String = s"Cannot assign `$reassignmentId`: contract data mismatch"
-  }
-
-  final case class CreatingTransactionIdMismatch(
-      reassignmentId: ReassignmentId,
-      assignmentTransactionId: TransactionId,
-      localTransactionId: TransactionId,
-  ) extends AssignmentValidationError {
-    override def message: String =
-      s"Cannot assign `$reassignmentId`: creating transaction id mismatch"
   }
 
   final case class InconsistentReassignmentCounter(

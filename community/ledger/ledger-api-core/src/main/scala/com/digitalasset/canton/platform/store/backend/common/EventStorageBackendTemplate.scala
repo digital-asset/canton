@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.store.backend.common
 
 import anorm.SqlParser.*
 import anorm.{Row, RowParser, SimpleSql, ~}
-import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.backend.Conversions.{
   contractId,
@@ -1232,8 +1232,8 @@ abstract class EventStorageBackendTemplate(
      FROM
         lapi_transaction_meta
      WHERE
-        ${QueryStrategy.offsetIsGreater("event_offset", untilInclusiveOffset)}
-        AND event_offset <= ${ledgerEnd._1}
+        ${QueryStrategy.offsetIsGreater("event_offset", untilInclusiveOffset.toAbsoluteOffsetO)}
+        AND event_offset <= ${Offset.fromAbsoluteOffsetO(ledgerEnd.map(_.lastOffset))}
      ORDER BY
         event_offset
      ${QueryStrategy.limitClause(Some(1))}
@@ -1242,7 +1242,7 @@ abstract class EventStorageBackendTemplate(
         // after the offset there is no meta, so no tx,
         // therefore the next (minimum) event sequential id will be
         // the first event sequential id after the ledger end
-        ledgerEnd._2 + 1
+        ledgerEnd.map(_.lastEventSeqId).getOrElse(0L) + 1
       ) - 1
   }
 
@@ -1478,13 +1478,15 @@ abstract class EventStorageBackendTemplate(
     ).flatten
       .sortBy(_.recordTime)
       .headOption
-      .filter(_.offset <= ledgerEndCache()._1) // if the first is after LedgerEnd, then we have none
+      .filter(
+        _.offset <= Offset.fromAbsoluteOffsetO(ledgerEndCache().map(_.lastOffset))
+      ) // if the first is after LedgerEnd, then we have none
 
   def lastDomainOffsetBeforeOrAt(
       domainIdO: Option[DomainId],
       beforeOrAtOffsetInclusive: Offset,
   )(connection: Connection): Option[DomainOffset] = {
-    val ledgerEndOffset = ledgerEndCache()._1
+    val ledgerEndOffset = Offset.fromAbsoluteOffsetO(ledgerEndCache().map(_.lastOffset))
     val safeBeforeOrAtOffset =
       if (beforeOrAtOffsetInclusive > ledgerEndOffset) ledgerEndOffset
       else beforeOrAtOffsetInclusive
@@ -1541,7 +1543,9 @@ abstract class EventStorageBackendTemplate(
             event_offset = $offset
           """.asSingleOpt(metaDomainOffsetParser(stringInterning))(connection),
     ).flatten.headOption // if both present they should be the same
-      .filter(_.offset <= ledgerEndCache()._1) // only offset allow before or at ledger end
+      .filter(
+        _.offset <= Offset.fromAbsoluteOffsetO(ledgerEndCache().map(_.lastOffset))
+      ) // only offset allow before or at ledger end
 
   def firstDomainOffsetAfterOrAtPublicationTime(
       afterOrAtPublicationTimeInclusive: Timestamp
@@ -1567,13 +1571,14 @@ abstract class EventStorageBackendTemplate(
       .sortBy(_.offset)
       .headOption
       .filter(
-        _.offset <= ledgerEndCache()._1
+        _.offset <= Offset.fromAbsoluteOffsetO(ledgerEndCache().map(_.lastOffset))
       ) // if first offset is beyond the ledger-end then we have no such
 
   def lastDomainOffsetBeforeOrAtPublicationTime(
       beforeOrAtPublicationTimeInclusive: Timestamp
   )(connection: Connection): Option[DomainOffset] = {
-    val ledgerEndPublicationTime = ledgerEndCache.publicationTime.underlying
+    val ledgerEndPublicationTime =
+      ledgerEndCache().map(_.lastPublicationTime).getOrElse(CantonTimestamp.MinValue).underlying
     val safePublicationTime =
       if (beforeOrAtPublicationTimeInclusive > ledgerEndPublicationTime)
         ledgerEndPublicationTime

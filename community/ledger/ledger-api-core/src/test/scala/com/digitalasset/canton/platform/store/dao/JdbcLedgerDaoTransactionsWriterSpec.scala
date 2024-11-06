@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.dao
 
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -24,7 +25,14 @@ private[dao] trait JdbcLedgerDaoTransactionsWriterSpec extends LoneElement with 
       createdContractId = nonTransient(create).loneElement
       (_, lookup) <- store(txLookupByKey(alice, keyValue, Some(createdContractId)))
       to <- ledgerDao.lookupLedgerEnd()
-      completions <- getCompletions(from.lastOffset, to.lastOffset, defaultAppId, Set(alice))
+      completions <- getCompletions(
+        Offset.fromAbsoluteOffsetO(from.map(_.lastOffset)),
+        Offset.fromAbsoluteOffset(
+          to.map(_.lastOffset).getOrElse(fail("ledger end should not have been empty"))
+        ),
+        defaultAppId,
+        Set(alice),
+      )
     } yield {
       completions should contain.allOf(
         create.commandId.value -> ok,
@@ -42,7 +50,14 @@ private[dao] trait JdbcLedgerDaoTransactionsWriterSpec extends LoneElement with 
       createdContractId = nonTransient(create).loneElement
       (_, fetch) <- store(txFetch(alice, createdContractId))
       to <- ledgerDao.lookupLedgerEnd()
-      completions <- getCompletions(from.lastOffset, to.lastOffset, defaultAppId, Set(alice))
+      completions <- getCompletions(
+        Offset.fromAbsoluteOffsetO(from.map(_.lastOffset)),
+        Offset.fromAbsoluteOffset(
+          to.map(_.lastOffset).getOrElse(fail("ledger end should not have been empty"))
+        ),
+        defaultAppId,
+        Set(alice),
+      )
     } yield {
       completions should contain.allOf(
         create.commandId.value -> ok,

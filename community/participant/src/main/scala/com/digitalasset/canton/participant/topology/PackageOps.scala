@@ -25,13 +25,12 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.util.{EitherTUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.util.{ContinueAfterFailure, EitherTUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Ref.PackageId
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 
 trait PackageOps extends NamedLogging {
   def hasVettedPackageEntry(packageId: PackageId)(implicit
@@ -40,7 +39,7 @@ trait PackageOps extends NamedLogging {
 
   def checkPackageUnused(packageId: PackageId)(implicit
       tc: TraceContext
-  ): EitherT[Future, PackageInUse, Unit]
+  ): EitherT[FutureUnlessShutdown, PackageInUse, Unit]
 
   def vetPackages(
       packages: Seq[PackageId],
@@ -68,7 +67,6 @@ class PackageOpsImpl(
     val loggerFactory: NamedLoggerFactory,
     val timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
-    exitOnFatalFailures: Boolean,
 )(implicit val ec: ExecutionContext)
     extends PackageOps
     with FlagCloseable {
@@ -78,12 +76,13 @@ class PackageOpsImpl(
     futureSupervisor,
     timeouts,
     loggerFactory,
-    crashOnFailure = exitOnFatalFailures,
+    logTaskTiming = false,
+    failureMode = ContinueAfterFailure,
   )
 
   override def checkPackageUnused(packageId: PackageId)(implicit
       tc: TraceContext
-  ): EitherT[Future, PackageInUse, Unit] =
+  ): EitherT[FutureUnlessShutdown, PackageInUse, Unit] =
     stateManager.getAll.toList
       .sortBy(_._1.toProtoPrimitive) // Sort to keep tests deterministic
       .parTraverse_ { case (_, state) =>
@@ -139,7 +138,7 @@ class PackageOpsImpl(
           }
           // only synchronize with the connected domains if a new VettedPackages transaction was actually issued
           _ <- EitherTUtil.ifThenET(newVettedPackagesCreated) {
-            synchronizeVetting.sync(packagesToBeAdded.get.toSet)
+            synchronizeVetting.sync(packagesToBeAdded.get.toSet).mapK(FutureUnlessShutdown.outcomeK)
           }
         } yield ()
 

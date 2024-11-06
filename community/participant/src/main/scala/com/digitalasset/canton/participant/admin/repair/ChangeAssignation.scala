@@ -10,13 +10,8 @@ import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.SyncCryptoApiProvider
-import com.digitalasset.canton.ledger.participant.state.{
-  DomainIndex,
-  Reassignment,
-  ReassignmentInfo,
-  RequestIndex,
-  Update,
-}
+import com.digitalasset.canton.ledger.participant.state.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.repair.ChangeAssignation.Changed
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentData
@@ -65,6 +60,7 @@ private final class ChangeAssignation(
       contractStatusAtSource <- EitherT.right(
         sourcePersistentState.unwrap.activeContractStore
           .fetchStates(Seq(contractId))
+          .failOnShutdownToAbortException("readContractAcsStates")
       )
       _ <- EitherT.cond[Future](
         contractStatusAtSource.get(contractId).exists(_.status.isReassignedAway),
@@ -76,14 +72,14 @@ private final class ChangeAssignation(
       unassignedContract <- readContract(
         reassignmentData.map(data => (contractId, data.reassignmentCounter))
       )
-      transactionId = randomTransactionId(syncCrypto)
-      _ <- persistContractsAtTarget(transactionId, List(unassignedContract))
+      _ <- persistContractsAtTarget(List(unassignedContract))
       _ <- targetPersistentState.unwrap.reassignmentStore
         .completeReassignment(
           reassignmentData.payload.reassignmentId,
           reassignmentData.targetTimeOfChange.unwrap,
         )
         .toEitherT
+        .mapK(FutureUnlessShutdown.failOnShutdownToAbortExceptionK("completeUnassigned"))
       _ <- persistAssignments(List(unassignedContract)).toEitherT
       _ <- EitherT.right(
         publishAssignmentEvent(unassignedContract, reassignmentData.payload.reassignmentId)
@@ -103,6 +99,7 @@ private final class ChangeAssignation(
       contractStatusAtSource <- EitherT.right(
         sourcePersistentState.unwrap.activeContractStore
           .fetchStates(contractIds.map(_.payload))
+          .failOnShutdownToAbortException("changeAssignation")
       )
       _ = logger.debug(s"Contracts status at source: $contractStatusAtSource")
       contractsAtSource <- changingContractsAtSource(
@@ -115,6 +112,7 @@ private final class ChangeAssignation(
       contractStatusAtTarget <- EitherT.right(
         targetPersistentState.unwrap.activeContractStore
           .fetchStates(sourceContractIds)
+          .failOnShutdownToAbortException("readContractAcsStates")
       )
       _ = logger.debug(s"Contract status at target: $contractStatusAtTarget")
       contractIds <- changingContractIds(contractsAtSource, contractStatusAtTarget)
@@ -123,8 +121,7 @@ private final class ChangeAssignation(
       _ = logger.debug(
         s"Contracts that need to change assignation with persistence status: $contracts"
       )
-      transactionId = randomTransactionId(syncCrypto)
-      _ <- persistContractsAtTarget(transactionId, contracts)
+      _ <- persistContractsAtTarget(contracts)
       _ <- persistUnassignAndAssign(contracts).toEitherT
       _ <- EitherT.right(publishReassignmentEvents(contracts))
     } yield ()
@@ -289,8 +286,7 @@ private final class ChangeAssignation(
     }
 
   private def persistContractsAtTarget(
-      transactionId: TransactionId,
-      contracts: List[ChangeAssignation.Data[Changed]],
+      contracts: List[ChangeAssignation.Data[Changed]]
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, String, Unit] =
@@ -301,7 +297,6 @@ private final class ChangeAssignation(
             targetPersistentState.unwrap.contractStore
               .storeCreatedContract(
                 contract.targetTimeOfChange.unwrap.rc,
-                transactionId,
                 contract.payload.contract,
               )
           else Future.unit
@@ -323,6 +318,7 @@ private final class ChangeAssignation(
           )
         }
       )
+      .mapK(FutureUnlessShutdown.failOnShutdownToAbortExceptionK("persistAssignments"))
       .mapAbort(e => s"Failed to mark contracts as assigned: $e")
 
   private def persistUnassignAndAssign(
@@ -344,7 +340,9 @@ private final class ChangeAssignation(
       )
       .mapAbort(e => s"Failed to mark contracts as unassigned: $e")
 
-    unassignF.flatMap(_ => persistAssignments(contracts))
+    unassignF
+      .mapK(FutureUnlessShutdown.failOnShutdownToAbortExceptionK("persistUnassignAndAssign"))
+      .flatMap(_ => persistAssignments(contracts))
   }
 
   private def publishAssignmentEvent(

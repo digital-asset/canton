@@ -3,40 +3,28 @@
 
 package com.digitalasset.canton.platform.store.cache
 
-import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
+
+import java.util.concurrent.atomic.AtomicReference
 
 trait LedgerEndCache {
-  def apply(): (Offset, Long)
-  def publicationTime: CantonTimestamp
+  def apply(): Option[LedgerEnd]
 }
 
 trait MutableLedgerEndCache extends LedgerEndCache {
-  def set(ledgerEnd: (Offset, Long, CantonTimestamp)): Unit
+  def set(ledgerEnd: Option[LedgerEnd]): Unit
 }
 
 object MutableLedgerEndCache {
   def apply(): MutableLedgerEndCache =
     new MutableLedgerEndCache {
-      @SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.Var"))
-      @volatile private var ledgerEnd: (Offset, Long, CantonTimestamp) = _
+      private val ledgerEnd: AtomicReference[Option[LedgerEnd]] =
+        new AtomicReference[Option[LedgerEnd]](None)
 
-      override def set(ledgerEnd: (Offset, Long, CantonTimestamp)): Unit = this.ledgerEnd =
-        ledgerEnd
+      override def set(ledgerEnd: Option[LedgerEnd]): Unit =
+        this.ledgerEnd.set(ledgerEnd)
 
-      @SuppressWarnings(Array("org.wartremover.warts.Null"))
-      override def apply(): (Offset, Long) =
-        if (ledgerEnd == null) throw new IllegalStateException("uninitialized")
-        else {
-          val (offset, sequentialId, _) = ledgerEnd
-          offset -> sequentialId
-        }
-
-      @SuppressWarnings(Array("org.wartremover.warts.Null"))
-      override def publicationTime: CantonTimestamp =
-        if (ledgerEnd == null) throw new IllegalStateException("uninitialized")
-        else {
-          val (_, _, publicationTime) = ledgerEnd
-          publicationTime
-        }
+      override def apply(): Option[LedgerEnd] =
+        ledgerEnd.get()
     }
 }

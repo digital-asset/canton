@@ -81,8 +81,8 @@ create table par_contracts (
   ledger_create_time varchar(300) collate "C" not null,
   -- The request counter of the request that created or divulged the contract
   request_counter bigint not null,
-  -- The transaction that created the contract; null for divulged contracts
-  creating_transaction_id bytea,
+  -- Whether the contract is known via divulgence
+  is_divulged boolean not null,
   -- We store metadata of the contract instance for inspection
   package_id varchar(300) collate "C" not null,
   template_id varchar collate "C" not null,
@@ -97,7 +97,7 @@ create table par_contracts (
 create index idx_par_contracts_find on par_contracts(domain_idx, package_id, template_id);
 
 -- Partial index for pruning
-create index idx_par_contracts_request_counter on par_contracts(domain_idx, request_counter) where creating_transaction_id is null;
+create index idx_par_contracts_request_counter on par_contracts(domain_idx, request_counter) where is_divulged is true;
 
 -- provides a serial enumeration of static strings so we don't store the same string over and over in the db
 -- currently only storing uids
@@ -123,8 +123,6 @@ create table common_node_id(
 create table common_party_metadata (
   -- party id as string
   party_id varchar(300) collate "C" not null,
-  -- the display name which should be exposed via the ledger-api server
-  display_name varchar(300) collate "C" null,
   -- the main participant id of this party which is our participant if the party is on our node (preferred) or the remote participant
   participant_id varchar(300) collate "C" null,
   -- the submission id used to synchronise the ledger api server
@@ -571,7 +569,13 @@ create table sequencer_events (
   topology_timestamp bigint null,
   -- trace context associated with the event
   trace_context bytea not null,
-  error bytea
+  error bytea,
+  -- the last cost consumed at sequencing_timestamp
+  consumed_cost bigint,
+  -- total extra traffic consumed at the time of the event
+  extra_traffic_consumed bigint,
+  -- extra traffic remainder at the time of the event
+  base_traffic_remainder bigint
 );
 
 -- Sequence of local offsets used by the participant event publisher
@@ -891,9 +895,16 @@ create table ord_metadata_output_blocks (
   block_number bigint not null,
   bft_ts bigint not null,
   epoch_could_alter_sequencing_topology bool not null, -- Cumulative over all blocks in the epoch (restart support)
+  pending_topology_changes_in_next_epoch bool not null, -- Possibly true only for last block in epoch
   primary key (block_number),
   -- enable idempotent writes: "on conflict, do nothing"
-  constraint unique_output_block unique (epoch_number, block_number, bft_ts, epoch_could_alter_sequencing_topology)
+  constraint unique_output_block unique (
+    epoch_number,
+    block_number,
+    bft_ts,
+    epoch_could_alter_sequencing_topology,
+    pending_topology_changes_in_next_epoch
+  )
 );
 
 -- Stores P2P endpoints from the configuration or admin command

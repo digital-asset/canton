@@ -172,7 +172,6 @@ class SyncDomain(
   private val damle =
     new DAMLe(
       pkgId => traceContext => packageService.value.getPackage(pkgId)(traceContext),
-      Some(domainId),
       engine,
       parameters.engine.validationPhaseLogging,
       loggerFactory,
@@ -746,7 +745,7 @@ class SyncDomain(
     ): FutureUnlessShutdown[Either[Option[(CantonTimestamp, Source[DomainId])], Unit]] = {
       logger.debug(s"Fetch $fetchLimit pending reassignments")
       val resF = for {
-        pendingReassignments <- performUnlessClosingF(functionFullName)(
+        pendingReassignments <- performUnlessClosingUSF(functionFullName)(
           persistent.reassignmentStore.findAfter(
             requestAfter = previous,
             limit = fetchLimit,

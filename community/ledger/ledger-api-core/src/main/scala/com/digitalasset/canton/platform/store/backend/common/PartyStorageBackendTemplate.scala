@@ -31,7 +31,6 @@ class PartyStorageBackendTemplate(ledgerEndCache: LedgerEndCache) extends PartyS
       timestampFromMicros("recorded_at") ~
       ledgerString("submission_id").? ~
       party("party").? ~
-      str("display_name").? ~
       str("typ") ~
       str("rejection_reason").? ~
       bool("is_local").?)
@@ -42,7 +41,6 @@ class PartyStorageBackendTemplate(ledgerEndCache: LedgerEndCache) extends PartyS
               recordTime,
               submissionIdOpt,
               Some(party),
-              displayNameOpt,
               `acceptType`,
               None,
               Some(isLocal),
@@ -51,13 +49,12 @@ class PartyStorageBackendTemplate(ledgerEndCache: LedgerEndCache) extends PartyS
             PartyLedgerEntry.AllocationAccepted(
               submissionIdOpt,
               recordTime,
-              IndexerPartyDetails(party, displayNameOpt, isLocal),
+              IndexerPartyDetails(party, isLocal),
             )
         case (
               offset,
               recordTime,
               Some(submissionId),
-              None,
               None,
               `rejectType`,
               Some(reason),
@@ -94,11 +91,9 @@ class PartyStorageBackendTemplate(ledgerEndCache: LedgerEndCache) extends PartyS
   private val partyDetailsParser: RowParser[IndexerPartyDetails] = {
     import com.digitalasset.canton.platform.store.backend.Conversions.bigDecimalColumnToBoolean
     str("party") ~
-      str("display_name").? ~
-      bool("is_local") map { case party ~ displayName ~ isLocal =>
+      bool("is_local") map { case party ~ isLocal =>
         IndexerPartyDetails(
           party = Party.assertFromString(party),
-          displayName = displayName.filter(_.nonEmpty),
           isLocal = isLocal,
         )
       }
@@ -108,27 +103,25 @@ class PartyStorageBackendTemplate(ledgerEndCache: LedgerEndCache) extends PartyS
       partyFilter: ComposableQuery.CompositeSql,
       limitClause: ComposableQuery.CompositeSql,
       connection: Connection,
-  ): Vector[IndexerPartyDetails] = {
-    import com.digitalasset.canton.platform.store.backend.Conversions.OffsetToStatement
-    val ledgerEndOffset = ledgerEndCache()._1
-    SQL"""
+  ): Vector[IndexerPartyDetails] =
+    ledgerEndCache() match {
+      case None => Vector.empty
+      case Some(ledgerEnd) =>
+        import com.digitalasset.canton.platform.store.backend.Conversions.AbsoluteOffsetToStatement
+        SQL"""
         SELECT
           party,
-          #${QueryStrategy.lastByProxyAggregateFuction(
-        "display_name",
-        "ledger_offset",
-      )} display_name,
           #${QueryStrategy.booleanOrAggregationFunction}(is_local) is_local
         FROM lapi_party_entries
         WHERE
-          ledger_offset <= $ledgerEndOffset AND
+          ledger_offset <= ${ledgerEnd.lastOffset} AND
           $partyFilter
           typ = 'accept'
         GROUP BY party
         ORDER BY party
         $limitClause
        """.asVectorOf(partyDetailsParser)(connection)
-  }
+    }
 
   override def parties(parties: Seq[Party])(connection: Connection): List[IndexerPartyDetails] = {
     val requestedParties = parties.view.map(_.toString).toSet
