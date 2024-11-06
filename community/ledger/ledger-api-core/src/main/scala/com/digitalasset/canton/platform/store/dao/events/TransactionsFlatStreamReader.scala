@@ -35,7 +35,6 @@ import com.digitalasset.canton.platform.store.utils.{
   QueueBasedConcurrencyLimiter,
   Telemetry,
 }
-import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.NotUsed
@@ -244,7 +243,7 @@ class TransactionsFlatStreamReader(
           deserializeLfValues(rawEvents, eventProjectionProperties)
         )
       )
-      .mapConcat { (groupOfPayloads: Seq[Entry[Event]]) =>
+      .mapConcat { (groupOfPayloads: Vector[Entry[Event]]) =>
         val responses = TransactionConversions.toGetTransactionsResponse(groupOfPayloads)
         responses.map { case (offset, response) => Offset.fromLong(offset) -> response }
       }
@@ -281,9 +280,9 @@ class TransactionsFlatStreamReader(
   private def deserializeLfValues(
       rawEvents: Vector[Entry[RawFlatEvent]],
       eventProjectionProperties: EventProjectionProperties,
-  )(implicit lc: LoggingContextWithTrace): Future[Seq[Entry[Event]]] =
+  )(implicit lc: LoggingContextWithTrace): Future[Vector[Entry[Event]]] =
     Timed.future(
-      future = MonadUtil.sequentialTraverse(rawEvents)(
+      future = Future.traverse(rawEvents)(
         TransactionsReader.deserializeFlatEvent(eventProjectionProperties, lfValueTranslation)
       ),
       timer = dbMetrics.flatTxStream.translationTimer,

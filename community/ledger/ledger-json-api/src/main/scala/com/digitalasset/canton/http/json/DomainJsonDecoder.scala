@@ -3,28 +3,27 @@
 
 package com.digitalasset.canton.http.json
 
+import com.digitalasset.canton.http.ErrorMessages.cannotResolveTemplateId
+import JsValueToApiValueConverter.mustBeApiRecord
+import com.digitalasset.canton.http.util.FutureUtil.either
+import com.digitalasset.canton.http.util.Logging.InstanceUUID
+import com.digitalasset.daml.lf.data.Ref
 import com.daml.jwt.Jwt
 import com.daml.ledger.api.v2 as lav2
 import com.daml.logging.LoggingContextOf
-import com.digitalasset.canton.http.ErrorMessages.cannotResolveTemplateId
 import com.digitalasset.canton.http.domain.{ContractTypeId, HasTemplateId}
-import com.digitalasset.canton.http.util.FutureUtil.either
-import com.digitalasset.canton.http.util.Logging.InstanceUUID
 import com.digitalasset.canton.http.{PackageService, domain}
-import com.digitalasset.daml.lf.data.Ref
-import scalaz.EitherT.eitherT
 import scalaz.std.option.*
-import scalaz.std.scalaFuture.*
-import scalaz.syntax.applicative.{ToFunctorOps as _, *}
 import scalaz.syntax.bitraverse.*
+import scalaz.syntax.applicative.{ToFunctorOps as _, *}
 import scalaz.syntax.std.option.*
 import scalaz.syntax.traverse.*
 import scalaz.{-\/, EitherT, Foldable, Traverse, \/}
+import scalaz.EitherT.eitherT
 import spray.json.{JsValue, JsonReader}
 
 import scala.concurrent.{ExecutionContext, Future}
-
-import JsValueToApiValueConverter.mustBeApiRecord
+import scalaz.std.scalaFuture.*
 
 class DomainJsonDecoder(
     resolveContractTypeId: PackageService.ResolveContractTypeId,
@@ -70,11 +69,12 @@ class DomainJsonDecoder(
   )(implicit
       ec: ExecutionContext,
       lc: LoggingContextOf[InstanceUUID],
-  ): ET[F[lav2.value.Value]] =
+  ): ET[F[lav2.value.Value]] = {
     for {
       damlLfId <- lookupLfType(fa, jwt)
       apiValue <- either(fa.traverse(jsValue => jsValueToApiValue(damlLfId, jsValue)))
     } yield apiValue
+  }
 
   def decodeUnderlyingValuesToLf[F[_]: Traverse: domain.HasTemplateId.Compat](
       fa: F[JsValue],
@@ -82,11 +82,12 @@ class DomainJsonDecoder(
   )(implicit
       ec: ExecutionContext,
       lc: LoggingContextOf[InstanceUUID],
-  ): ET[F[domain.LfValue]] =
+  ): ET[F[domain.LfValue]] = {
     for {
       lfType <- lookupLfType(fa, jwt)
       lfValue <- either(fa.traverse(jsValue => jsValueToLfValue(lfType, jsValue)))
     } yield lfValue
+  }
 
   private def lookupLfType[F[_]](fa: F[_], jwt: Jwt)(implicit
       ec: ExecutionContext,
@@ -97,13 +98,7 @@ class DomainJsonDecoder(
       tId <- templateId_(H.templateId(fa), jwt)
       lfType <- either(
         H
-          .lfType(
-            fa,
-            tId.latestPkgId,
-            resolveTemplateRecordType,
-            resolveChoiceArgType,
-            resolveKeyType,
-          )
+          .lfType(fa, tId.latestPkgId, resolveTemplateRecordType, resolveChoiceArgType, resolveKeyType)
           .liftErrS("DomainJsonDecoder_lookupLfType")(JsonError)
       )
     } yield lfType
@@ -218,10 +213,7 @@ class DomainJsonDecoder(
   private[this] def jsValueToApiRecord(t: domain.LfType, v: JsValue) =
     jsValueToApiValue(t, v) flatMap mustBeApiRecord
 
-  private[this] def resolveMetaTemplateIds[
-      U,
-      CtId[T] <: ContractTypeId[T] with ContractTypeId.Ops[CtId, T],
-  ](
+  private[this] def resolveMetaTemplateIds[U, CtId[T] <: ContractTypeId[T] with ContractTypeId.Ops[CtId, T]](
       meta: domain.CommandMeta[U with ContractTypeId.RequiredPkg],
       jwt: Jwt,
   )(implicit
@@ -234,7 +226,7 @@ class DomainJsonDecoder(
       import scalaz.std.vector.*
       val inputTpids = Foldable[domain.CommandMeta].toSet(meta)
       inputTpids.toVector
-        .traverse(ot => templateId_(ot, jwt).map(_.original) strengthL ot)
+        .traverse { ot => templateId_(ot, jwt).map(_.original) strengthL ot }
         .map(_.toMap)
     }
   } yield meta map tpidToResolved

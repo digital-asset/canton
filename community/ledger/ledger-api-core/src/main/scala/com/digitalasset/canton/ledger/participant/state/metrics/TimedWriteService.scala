@@ -9,11 +9,10 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.{Offset, ProcessedDisclosedContract}
 import com.digitalasset.canton.ledger.api.health.HealthStatus
 import com.digitalasset.canton.ledger.participant.state.*
-import com.digitalasset.canton.ledger.participant.state.SyncService.{
+import com.digitalasset.canton.ledger.participant.state.WriteService.{
   ConnectedDomainRequest,
   ConnectedDomainResponse,
 }
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.protocol.PackageDescription
@@ -29,8 +28,8 @@ import com.google.protobuf.ByteString
 import java.util.concurrent.CompletionStage
 import scala.concurrent.Future
 
-final class TimedSyncService(delegate: SyncService, metrics: LedgerApiServerMetrics)
-    extends SyncService {
+final class TimedWriteService(delegate: WriteService, metrics: LedgerApiServerMetrics)
+    extends WriteService {
 
   override def submitTransaction(
       submitterInfo: SubmitterInfo,
@@ -93,13 +92,14 @@ final class TimedSyncService(delegate: SyncService, metrics: LedgerApiServerMetr
 
   override def allocateParty(
       hint: Option[Ref.Party],
+      displayName: Option[String],
       submissionId: Ref.SubmissionId,
   )(implicit
       traceContext: TraceContext
   ): CompletionStage[SubmissionResult] =
     Timed.completionStage(
       metrics.services.write.allocateParty,
-      delegate.allocateParty(hint, submissionId),
+      delegate.allocateParty(hint, displayName, submissionId),
     )
 
   override def prune(
@@ -125,7 +125,7 @@ final class TimedSyncService(delegate: SyncService, metrics: LedgerApiServerMetr
 
   override def incompleteReassignmentOffsets(validAt: Offset, stakeholders: Set[LfPartyId])(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Vector[Offset]] =
+  ): Future[Vector[Offset]] =
     Timed.future(
       metrics.services.read.getConnectedDomains,
       delegate.incompleteReassignmentOffsets(validAt, stakeholders),

@@ -114,7 +114,7 @@ class ApiPackageManagementServiceSpec
 
   private def createApiService(): PackageManagementServiceGrpc.PackageManagementService =
     ApiPackageManagementService.createApiService(
-      TestSyncService(testTelemetrySetup.tracer),
+      TestWriteService(testTelemetrySetup.tracer),
       telemetry = new DefaultOpenTelemetry(OpenTelemetrySdk.builder().build()),
       loggerFactory = loggerFactory,
     )
@@ -123,7 +123,7 @@ class ApiPackageManagementServiceSpec
 object ApiPackageManagementServiceSpec {
   private val aSubmissionId = "aSubmission"
 
-  private final case class TestSyncService(tracer: Tracer) extends state.SyncService {
+  private final case class TestWriteService(tracer: Tracer) extends state.WriteService {
     override def uploadDar(
         dar: ByteString,
         submissionId: Ref.SubmissionId,
@@ -184,6 +184,7 @@ object ApiPackageManagementServiceSpec {
 
     override def allocateParty(
         hint: Option[Party],
+        displayName: Option[String],
         submissionId: SubmissionId,
     )(implicit traceContext: TraceContext): CompletionStage[SubmissionResult] =
       throw new UnsupportedOperationException()

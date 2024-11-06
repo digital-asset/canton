@@ -82,6 +82,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
     for {
       indexedDomainId <- EitherT
         .right(syncDomainPersistentStateManager.indexedDomainId(domainId))
+        .mapK(FutureUnlessShutdown.outcomeK)
 
       _ <- EitherT
         .fromEither[Future](verifyDomainId(config, domainId))

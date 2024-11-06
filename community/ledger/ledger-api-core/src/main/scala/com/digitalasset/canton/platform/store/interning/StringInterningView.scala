@@ -44,7 +44,7 @@ trait UpdatingStringInterningView {
     *
     * @note This method is NOT thread-safe and should not be called concurrently with itself or [[InternizingStringInterningView.internize]].
     */
-  def update(lastStringInterningId: Option[Int])(
+  def update(lastStringInterningId: Int)(
       loadPrefixedEntries: LoadStringInterningEntries
   ): Future[Unit]
 }
@@ -144,14 +144,14 @@ class StringInterningView(override protected val loggerFactory: NamedLoggerFacto
       newEntries
     })
 
-  override def update(lastStringInterningId: Option[Int])(
+  override def update(lastStringInterningId: Int)(
       loadStringInterningEntries: LoadStringInterningEntries
   ): Future[Unit] =
-    if (lastStringInterningId.getOrElse(0) <= raw.lastId) {
-      raw = RawStringInterning.resetTo(lastStringInterningId.getOrElse(0), raw)
+    if (lastStringInterningId <= raw.lastId) {
+      raw = RawStringInterning.resetTo(lastStringInterningId, raw)
       Future.unit
     } else {
-      loadStringInterningEntries(raw.lastId, lastStringInterningId.getOrElse(0))
+      loadStringInterningEntries(raw.lastId, lastStringInterningId)
         .map(updateView)(directEc)
     }
 

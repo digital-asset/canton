@@ -51,7 +51,7 @@ object ParallelIndexerFactory {
       meteringAggregator: DbDispatcher => ResourceOwner[Unit],
       mat: Materializer,
       executionContext: ExecutionContext,
-      initializeInMemoryState: Option[LedgerEnd] => Future[Unit],
+      initializeInMemoryState: LedgerEnd => Future[Unit],
       loggerFactory: NamedLoggerFactory,
       indexerDbDispatcherOverride: Option[DbDispatcher],
       clock: Clock,
@@ -160,7 +160,7 @@ object ParallelIndexerFactory {
             } yield dbDispatcher
           ) { dbDispatcher =>
             for {
-              initialLedgerEnd <- initializeParallelIngestion(
+              initialized <- initializeParallelIngestion(
                 dbDispatcher = dbDispatcher,
                 initializeInMemoryState = initializeInMemoryState,
               )
@@ -169,7 +169,7 @@ object ParallelIndexerFactory {
                 batcherExecutor = batcherExecutor,
                 dbDispatcher = dbDispatcher,
                 materializer = mat,
-                initialLedgerEnd = initialLedgerEnd,
+                initialized = initialized,
                 commit = commit,
                 clock = clock,
                 repairMode = repairMode,
@@ -178,7 +178,7 @@ object ParallelIndexerFactory {
               futureQueueConsumerFactoryPromise.success(completion =>
                 FutureQueueConsumer(
                   futureQueue = futureQueueForCompletion(completion),
-                  fromExclusive = initialLedgerEnd.map(_.lastOffset.unwrap).getOrElse(0L),
+                  fromExclusive = initialized.initialLastOffset.toLong,
                 )
               )
               handle

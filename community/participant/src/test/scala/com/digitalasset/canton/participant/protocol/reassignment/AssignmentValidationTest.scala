@@ -10,7 +10,6 @@ import com.digitalasset.canton.data.{
   CantonTimestamp,
   FullAssignmentTree,
   ReassigningParticipants,
-  ReassignmentRef,
   ReassignmentSubmitterMetadata,
 }
 import com.digitalasset.canton.participant.protocol.SerializableContractAuthenticator
@@ -69,6 +68,8 @@ class AssignmentValidationTest
     UniqueIdentifier.tryFromProtoPrimitive("domain::participant")
   )
 
+  private val initialReassignmentCounter: ReassignmentCounter = ReassignmentCounter.Genesis
+
   private def submitterInfo(submitter: LfPartyId): ReassignmentSubmitterMetadata =
     ReassignmentSubmitterMetadata(
       submitter,
@@ -118,7 +119,7 @@ class AssignmentValidationTest
 
     val reassignmentId = ReassignmentId(sourceDomain, CantonTimestamp.Epoch)
 
-    val reassignmentDataHelpers = ReassignmentDataHelpers(
+    val reassignmentDataHelpers = new ReassignmentDataHelpers(
       contract,
       reassignmentId.sourceDomain,
       targetDomain,
@@ -175,7 +176,7 @@ class AssignmentValidationTest
       validate(isConfirmingReassigningParticipant = false) shouldBe None
     }
 
-    "wait for the topology state to be available" in {
+    "wait for the topology state to be available " in {
       val promise: Promise[Unit] = Promise()
       val assignmentProcessingSteps2 =
         testInstance(
@@ -271,7 +272,7 @@ class AssignmentValidationTest
       def validate(cid: LfContractId, reassignmentDataDefined: Boolean) = {
         val updatedContract = contract.copy(contractId = cid)
 
-        val reassignmentDataHelpers = ReassignmentDataHelpers(
+        val reassignmentDataHelpers = new ReassignmentDataHelpers(
           updatedContract,
           reassignmentId.sourceDomain,
           targetDomain,
@@ -451,7 +452,7 @@ class AssignmentValidationTest
       uuid: UUID = new UUID(4L, 5L),
       targetDomain: Target[DomainId] = targetDomain,
       targetMediator: MediatorGroupRecipient = targetMediator,
-      reassignmentCounter: ReassignmentCounter = ReassignmentCounter(1),
+      reassignmentCounter: ReassignmentCounter = initialReassignmentCounter,
       reassigningParticipants: ReassigningParticipants = reassigningParticipants,
   ): FullAssignmentTree = {
     val seed = seedGenerator.generateSaltSeed()

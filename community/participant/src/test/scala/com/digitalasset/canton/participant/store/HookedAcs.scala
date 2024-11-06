@@ -99,9 +99,9 @@ private[participant] class HookedAcs(private val acs: ActiveContractStore)(impli
       assignments: Seq[(LfContractId, Source[DomainId], ReassignmentCounter, TimeOfChange)]
   )(implicit
       traceContext: TraceContext
-  ): CheckedT[FutureUnlessShutdown, AcsError, AcsWarning, Unit] = CheckedT {
+  ): CheckedT[Future, AcsError, AcsWarning, Unit] = CheckedT {
     val preReassignment = nextReassignmentHook.getAndSet(noReassignmentAction)
-    FutureUnlessShutdown.outcomeF(preReassignment(assignments, false)).flatMap { _ =>
+    preReassignment(assignments, false).flatMap { _ =>
       acs.assignContracts(assignments).value
     }
   }
@@ -110,32 +110,26 @@ private[participant] class HookedAcs(private val acs: ActiveContractStore)(impli
       unassignments: Seq[(LfContractId, Target[DomainId], ReassignmentCounter, TimeOfChange)]
   )(implicit
       traceContext: TraceContext
-  ): CheckedT[FutureUnlessShutdown, AcsError, AcsWarning, Unit] = CheckedT {
+  ): CheckedT[Future, AcsError, AcsWarning, Unit] = CheckedT {
     val preReassignment = nextReassignmentHook.getAndSet(noReassignmentAction)
-    FutureUnlessShutdown
-      .outcomeF(
-        preReassignment(
-          unassignments,
-          true,
-        )
-      )
-      .flatMap { _ =>
-        acs.unassignContracts(unassignments).value
-      }
+    preReassignment(
+      unassignments,
+      true,
+    ).flatMap { _ =>
+      acs.unassignContracts(unassignments).value
+    }
   }
 
   override def fetchStates(
       contractIds: Iterable[LfContractId]
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Map[LfContractId, ContractState]] = {
+  )(implicit traceContext: TraceContext): Future[Map[LfContractId, ContractState]] = {
     val preFetch = nextFetchHook.getAndSet(noFetchAction)
-    FutureUnlessShutdown
-      .outcomeF(preFetch(contractIds))
-      .flatMap(_ => acs.fetchStates(contractIds))
+    preFetch(contractIds).flatMap(_ => acs.fetchStates(contractIds))
   }
 
   override def fetchStatesForInvariantChecking(ids: Iterable[LfContractId])(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[LfContractId, StateChange[ActiveContractStore.Status]]] =
+  ): Future[Map[LfContractId, StateChange[ActiveContractStore.Status]]] =
     acs.fetchStatesForInvariantChecking(ids)
 
   override def snapshot(timestamp: CantonTimestamp)(implicit
@@ -196,7 +190,7 @@ private[participant] class HookedAcs(private val acs: ActiveContractStore)(impli
 
   override def packageUsage(pkg: PackageId, contractStore: ContractStore)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[LfContractId]] = acs.packageUsage(pkg, contractStore)
+  ): Future[Option[LfContractId]] = acs.packageUsage(pkg, contractStore)
 }
 
 object HookedAcs {

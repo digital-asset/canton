@@ -17,11 +17,10 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.*
-import com.digitalasset.canton.ledger.error.CommonErrors.ServerIsShuttingDown
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.InvalidField
 import com.digitalasset.canton.ledger.participant.state
-import com.digitalasset.canton.ledger.participant.state.SyncService
+import com.digitalasset.canton.ledger.participant.state.WriteService
 import com.digitalasset.canton.ledger.participant.state.index.{
   IndexParticipantPruningService,
   LedgerEndService,
@@ -52,7 +51,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 final class ApiParticipantPruningService private (
     readBackend: IndexParticipantPruningService with LedgerEndService,
-    syncService: SyncService,
+    writeService: WriteService,
     metrics: LedgerApiServerMetrics,
     telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
@@ -101,18 +100,16 @@ final class ApiParticipantPruningService private (
             _ <- Tracked.future(
               metrics.services.pruning.pruneCommandStarted,
               metrics.services.pruning.pruneCommandCompleted,
-              pruneSyncService(pruneUpTo, submissionId, request.pruneAllDivulgedContracts)(
+              pruneWriteService(pruneUpTo, submissionId, request.pruneAllDivulgedContracts)(
                 loggingContext
               ),
             )(MetricsContext(("phase", "underlyingLedger")))
 
             _ = logger.debug("Getting incomplete reassignments")
-            incompletReassignmentOffsets <- syncService
-              .incompleteReassignmentOffsets(
-                validAt = pruneUpTo,
-                stakeholders = Set.empty, // getting all incomplete reassignments
-              )
-              .failOnShutdownTo(ServerIsShuttingDown.Reject().asGrpcError)
+            incompletReassignmentOffsets <- writeService.incompleteReassignmentOffsets(
+              validAt = pruneUpTo,
+              stakeholders = Set.empty, // getting all incomplete reassignments
+            )
 
             _ = logger.debug("Pruning Ledger API Server")
             pruneResponse <- Tracked.future(
@@ -146,7 +143,7 @@ final class ApiParticipantPruningService private (
         o => checkOffsetIsBeforeLedgerEnd(o._1, o._2),
       )
 
-  private def pruneSyncService(
+  private def pruneWriteService(
       pruneUpTo: Offset,
       submissionId: Ref.SubmissionId,
       pruneAllDivulgedContracts: Boolean,
@@ -155,7 +152,7 @@ final class ApiParticipantPruningService private (
     logger.info(
       s"About to prune participant ledger up to ${pruneUpTo.toApiType} inclusively starting with the write service."
     )
-    syncService
+    writeService
       .prune(pruneUpTo, submissionId, pruneAllDivulgedContracts)
       .toScalaUnwrapped
       .flatMap {
@@ -247,7 +244,7 @@ final class ApiParticipantPruningService private (
 object ApiParticipantPruningService {
   def createApiService(
       readBackend: IndexParticipantPruningService with LedgerEndService,
-      syncService: SyncService,
+      writeService: WriteService,
       metrics: LedgerApiServerMetrics,
       telemetry: Telemetry,
       loggerFactory: NamedLoggerFactory,
@@ -256,7 +253,7 @@ object ApiParticipantPruningService {
   ): ParticipantPruningServiceGrpc.ParticipantPruningService with GrpcApiService =
     new ApiParticipantPruningService(
       readBackend,
-      syncService,
+      writeService,
       metrics,
       telemetry,
       loggerFactory,

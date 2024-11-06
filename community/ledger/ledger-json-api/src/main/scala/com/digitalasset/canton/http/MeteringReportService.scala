@@ -4,10 +4,7 @@
 package com.digitalasset.canton.http
 
 import com.daml.jwt.Jwt
-import com.daml.ledger.api.v2.admin.metering_report_service.{
-  GetMeteringReportRequest,
-  GetMeteringReportResponse,
-}
+import com.daml.ledger.api.v2.admin.metering_report_service.{GetMeteringReportRequest, GetMeteringReportResponse}
 import com.daml.logging.LoggingContextOf
 import com.digitalasset.canton.http.util.Logging.{InstanceUUID, RequestID}
 
@@ -17,7 +14,8 @@ class MeteringReportService(getMeteringReportFn: LedgerClientJwt.GetMeteringRepo
 
   def getMeteringReport(jwt: Jwt, request: GetMeteringReportRequest)(implicit
       lc: LoggingContextOf[InstanceUUID with RequestID]
-  ): Future[GetMeteringReportResponse] =
+  ): Future[GetMeteringReportResponse] = {
     getMeteringReportFn(jwt, request)(lc)
+  }
 
 }

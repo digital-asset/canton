@@ -6,18 +6,11 @@ package com.digitalasset.canton.participant.protocol.reassignment
 import cats.data.EitherT
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
-import com.digitalasset.canton.data.{
-  FullUnassignmentTree,
-  ReassigningParticipants,
-  ReassignmentRef,
-  UnassignmentViewTree,
-}
+import com.digitalasset.canton.data.ReassigningParticipants
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
 import com.digitalasset.canton.participant.protocol.SerializableContractAuthenticator
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.{
   ContractError,
-  ContractMetadataMismatch,
   ReassignmentProcessorError,
   StakeholdersMismatch,
   SubmitterMustBeStakeholder,
@@ -110,123 +103,43 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
 
   "unassignment validation" should {
     "succeed without errors" in {
-      val validation = performValidation()
+      val validation = mkUnassignmentValidation()
 
       validation.valueOrFailShutdown("validation failed").futureValue shouldBe ()
     }
 
-    "fail when wrong metadata is given (stakeholders)" in {
-      def test(metadata: ContractMetadata): Either[ReassignmentProcessorError, Unit] = {
-        val updatedContract = contract.copy(metadata = metadata)
-        performValidation(updatedContract).futureValueUS
-      }
-
-      val incorrectStakeholders = ContractMetadata.tryCreate(
+    "detect stakeholders mismatch" in {
+      // receiverParty2 is not a stakeholder on a contract, but it is listed as stakeholder here
+      val incorrectStakeholders = Stakeholders.tryCreate(
         stakeholders = stakeholders.all + receiverParty2,
         signatories = stakeholders.signatories,
-        maybeKeyWithMaintainersVersioned = None,
       )
 
-      val incorrectSignatories = ContractMetadata.tryCreate(
-        stakeholders = stakeholders.all + receiverParty2,
-        signatories = stakeholders.signatories + receiverParty2,
-        maybeKeyWithMaintainersVersioned = None,
+      val updatedContract = contract.copy(metadata =
+        ContractMetadata.tryCreate(
+          signatories = incorrectStakeholders.signatories,
+          stakeholders = incorrectStakeholders.all,
+          maybeKeyWithMaintainersVersioned = None,
+        )
       )
 
-      test(contract.metadata).value shouldBe ()
+      val validation = mkUnassignmentValidation(updatedContract)
 
-      test(incorrectStakeholders).left.value shouldBe ContractMetadataMismatch(
-        reassignmentRef = ReassignmentRef(contract.contractId),
-        declaredContractMetadata = incorrectStakeholders,
-        expectedMetadata = contract.metadata,
-      )
-
-      test(incorrectSignatories).left.value shouldBe ContractMetadataMismatch(
-        reassignmentRef = ReassignmentRef(contract.contractId),
-        declaredContractMetadata = incorrectSignatories,
-        expectedMetadata = contract.metadata,
+      validation.futureValueUS.left.value shouldBe StakeholdersMismatch(
+        None,
+        incorrectStakeholders,
+        None,
+        Right(Stakeholders(contract.metadata)),
       )
     }
 
-    "fail when wrong metadata is given (contract key)" in {
-      def test(metadata: ContractMetadata): Either[ReassignmentProcessorError, Unit] = {
-        val updatedContract = contract.copy(metadata = metadata)
-        performValidation(updatedContract).futureValueUS
-      }
+    "detect template id mismatch" in {
+      // template id does not match the one in the contract
+      val validation = mkUnassignmentValidation(expectedTemplateId = wrongTemplateId)
 
-      val incorrectKey = ExampleTransactionFactory.globalKeyWithMaintainers(
-        ExampleTransactionFactory.defaultGlobalKey,
-        Set(contract.metadata.stakeholders.head),
-      )
-
-      val incorrectMetadata = ContractMetadata.tryCreate(
-        stakeholders = contract.metadata.stakeholders,
-        signatories = contract.metadata.signatories,
-        maybeKeyWithMaintainersVersioned = Some(incorrectKey),
-      )
-
-      test(contract.metadata).value shouldBe ()
-
-      test(incorrectMetadata).left.value shouldBe ContractMetadataMismatch(
-        reassignmentRef = ReassignmentRef(contract.contractId),
-        declaredContractMetadata = incorrectMetadata,
-        expectedMetadata = contract.metadata,
-      )
-    }
-
-    "fail when inconsistent stakeholders are given" in {
-      /*
-      We construct in this test an inconsistent `inconsistentTree: FullUnassignmentTree` :
-      - inconsistentTree.tree.commonData.stakeholders is incorrect
-      - inconsistentTree.view.contract.metadata is correct
-       */
-
-      def createUnassignmentTree(metadata: ContractMetadata): FullUnassignmentTree =
-        ReassignmentDataHelpers(
-          contract.copy(metadata = metadata),
-          sourceDomain,
-          targetDomain,
-          identityFactory,
-        ).unassignmentRequest(
-          submitter = signatory,
-          submittingParticipant = confirmingParticipant,
-          sourceMediator = sourceMediator,
-        )(reassigningParticipants)
-          .toFullUnassignmentTree(
-            pureCrypto,
-            pureCrypto,
-            seed,
-            uuid,
-          )
-
-      def test(
-          viewContractMetadata: ContractMetadata,
-          commonDataContractMetadata: ContractMetadata,
-      ): Either[ReassignmentProcessorError, Unit] = {
-        val view = createUnassignmentTree(viewContractMetadata).tree.view
-        val commonData = createUnassignmentTree(commonDataContractMetadata).tree.commonData
-
-        validateUnassignmentTree(
-          FullUnassignmentTree(
-            UnassignmentViewTree(commonData, view, Source(testedProtocolVersion), pureCrypto)
-          )
-        ).futureValueUS
-      }
-
-      val incorrectMetadata = ContractMetadata.tryCreate(
-        stakeholders = stakeholders.all + receiverParty2,
-        signatories = stakeholders.signatories,
-        maybeKeyWithMaintainersVersioned = None,
-      )
-
-      val correctMetadata = contract.metadata
-
-      test(correctMetadata, correctMetadata).value shouldBe ()
-      test(correctMetadata, incorrectMetadata).left.value shouldBe StakeholdersMismatch(
-        reassignmentRef = ReassignmentRef(contract.contractId),
-        declaredViewStakeholders = Stakeholders(incorrectMetadata),
-        declaredContractStakeholders = Some(Stakeholders(correctMetadata)),
-        expectedStakeholders = Right(Stakeholders(correctMetadata)),
+      validation.futureValueUS.left.value shouldBe ContractError.templateIdMismatch(
+        ExampleTransactionFactory.templateId.leftSide,
+        wrongTemplateId.leftSide,
       )
     }
 
@@ -234,7 +147,7 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
       def validate(cid: LfContractId) = {
         val updatedContract = contract.copy(contractId = cid)
 
-        val validation = performValidation(updatedContract)
+        val validation = mkUnassignmentValidation(updatedContract)
 
         validation.futureValueUS
       }
@@ -258,7 +171,7 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
 
     "detect non-stakeholder submitter" in {
       def unassignmentValidation(submitter: LfPartyId) = {
-        val validation = performValidation(submitter = submitter)
+        val validation = mkUnassignmentValidation(submitter = submitter)
 
         validation.futureValueUS
       }
@@ -277,7 +190,7 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
 
     "detect reassigning participant mismatch" in {
       def unassignmentValidation(reassigningParticipants: ReassigningParticipants) =
-        performValidation(
+        mkUnassignmentValidation(
           reassigningParticipantsOverride = reassigningParticipants
         ).futureValueUS
 
@@ -334,43 +247,17 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
     }
   }
 
-  private def validateUnassignmentTree(
-      fullUnassignmentTree: FullUnassignmentTree,
-      sourceProtocolVersion: Source[ProtocolVersion] = sourcePV,
-      identityFactory: TestingIdentityFactory = identityFactory,
-  ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Unit] = {
-    val recipients = Recipients.cc(
-      reassigningParticipants.observing.toSeq.head,
-      reassigningParticipants.observing.toSeq.tail*
-    )
-
-    val damle = DAMLeTestInstance(
-      reassigningParticipants.confirming.head,
-      stakeholders.signatories,
-      stakeholders.all,
-    )(loggerFactory)
-
-    UnassignmentValidation.perform(
-      SerializableContractAuthenticator(pureCrypto),
-      sourceProtocolVersion,
-      Source(identityFactory.topologySnapshot()),
-      Some(Target(identityFactory.topologySnapshot())),
-      recipients,
-      damle,
-      () => EngineAbortStatus.notAborted,
-      loggerFactory,
-    )(fullUnassignmentTree)
-  }
-
-  private def performValidation(
+  private def mkUnassignmentValidation(
       contract: SerializableContract = contract,
       sourceProtocolVersion: Source[ProtocolVersion] = sourcePV,
+      expectedTemplateId: LfTemplateId = ExampleTransactionFactory.templateId,
       reassigningParticipantsOverride: ReassigningParticipants = reassigningParticipants,
       submitter: LfPartyId = signatory,
       identityFactory: TestingIdentityFactory = identityFactory,
   ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Unit] = {
+
     val unassignmentRequest =
-      ReassignmentDataHelpers(contract, sourceDomain, targetDomain, identityFactory)
+      new ReassignmentDataHelpers(contract, sourceDomain, targetDomain, identityFactory)
         .unassignmentRequest(
           submitter,
           submittingParticipant = confirmingParticipant,
@@ -385,10 +272,19 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
         uuid,
       )
 
-    validateUnassignmentTree(
-      fullUnassignmentTree,
-      sourceProtocolVersion,
-      identityFactory,
+    val recipients = Recipients.cc(
+      reassigningParticipants.observing.toSeq.head,
+      reassigningParticipants.observing.toSeq.tail*
     )
+
+    UnassignmentValidation.perform(
+      SerializableContractAuthenticator(pureCrypto),
+      expectedStakeholders = stakeholders,
+      expectedTemplateId = expectedTemplateId,
+      sourceProtocolVersion,
+      Source(identityFactory.topologySnapshot()),
+      Some(Target(identityFactory.topologySnapshot())),
+      recipients,
+    )(fullUnassignmentTree)
   }
 }

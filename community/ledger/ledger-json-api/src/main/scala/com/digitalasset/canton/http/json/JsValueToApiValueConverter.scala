@@ -3,20 +3,19 @@
 
 package com.digitalasset.canton.http.json
 
-import com.daml.ledger.api.v2 as lav2
-import com.digitalasset.canton.http.domain
-import com.digitalasset.canton.ledger.api.util.LfEngineToApi
 import com.digitalasset.daml.lf
 import com.digitalasset.daml.lf.typesig
-import scalaz.std.string.*
+import JsValueToApiValueConverter.LfTypeLookup
+import JsonProtocol.LfValueCodec
+import com.daml.ledger.api.{v2 => lav2}
+import com.digitalasset.canton.http.domain
+import com.digitalasset.canton.ledger.api.util.LfEngineToApi
+import scalaz.std.string._
 import scalaz.{-\/, \/, \/-}
 import spray.json.JsValue
 
-import JsValueToApiValueConverter.LfTypeLookup
-import JsonProtocol.LfValueCodec
-
 class JsValueToApiValueConverter(lfTypeLookup: LfTypeLookup) {
-  import com.digitalasset.canton.http.util.ErrorOps.*
+  import com.digitalasset.canton.http.util.ErrorOps._
 
   def jsValueToLfValue(
       lfId: lf.data.Ref.Identifier,
@@ -42,7 +41,7 @@ class JsValueToApiValueConverter(lfTypeLookup: LfTypeLookup) {
 }
 
 object JsValueToApiValueConverter {
-  import com.digitalasset.canton.http.util.ErrorOps.*
+  import com.digitalasset.canton.http.util.ErrorOps._
 
   type LfTypeLookup = lf.data.Ref.Identifier => Option[lf.typesig.DefDataType.FWT]
 

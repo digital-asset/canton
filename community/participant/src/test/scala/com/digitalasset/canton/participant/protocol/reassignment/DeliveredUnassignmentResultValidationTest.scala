@@ -107,7 +107,7 @@ class DeliveredUnassignmentResultValidationTest
 
   private lazy val reassignmentId = ReassignmentId(sourceDomain, CantonTimestamp.Epoch)
 
-  private lazy val reassignmentDataHelpers = ReassignmentDataHelpers(
+  private lazy val reassignmentDataHelpers = new ReassignmentDataHelpers(
     contract,
     reassignmentId.sourceDomain,
     targetDomain,

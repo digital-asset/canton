@@ -3,19 +3,16 @@
 
 package com.digitalasset.canton.http.endpoints
 
-import com.daml.jwt.Jwt
-import com.daml.ledger.api.v2.admin.metering_report_service
-import com.daml.logging.LoggingContextOf
 import com.digitalasset.canton.http.Endpoints.ET
 import com.digitalasset.canton.http.EndpointsCompanion.{Error, ServerError}
-import com.digitalasset.canton.http.endpoints.MeteringReportEndpoint.{
-  MeteringReportDateRequest,
-  toPbRequest,
-}
+import com.digitalasset.canton.http.endpoints.MeteringReportEndpoint.{MeteringReportDateRequest, toPbRequest}
 import com.digitalasset.canton.http.util.Logging.{InstanceUUID, RequestID}
-import com.digitalasset.canton.http.{MeteringReportService, domain}
+import com.daml.jwt.Jwt
+import com.daml.ledger.api.v2.admin.metering_report_service
 import com.digitalasset.daml.lf.data.Ref.ApplicationId
 import com.digitalasset.daml.lf.data.Time.Timestamp
+import com.daml.logging.LoggingContextOf
+import com.digitalasset.canton.http.{MeteringReportService, domain}
 import com.google.protobuf
 import com.google.protobuf.struct.Struct
 import scalaz.EitherT.eitherT
@@ -35,7 +32,7 @@ object MeteringReportEndpoint {
       application: Option[ApplicationId],
   )
 
-  import DefaultJsonProtocol.*
+  import DefaultJsonProtocol._
   import com.digitalasset.canton.http.json.JsonProtocol.xemapStringJsonFormat
 
   implicit val LocalDateFormat: RootJsonFormat[LocalDate] =
@@ -49,8 +46,9 @@ object MeteringReportEndpoint {
 
   private val startOfDay = LocalTime.of(0, 0, 0)
 
-  private[endpoints] def toTimestamp(ts: LocalDate): Timestamp =
+  private[endpoints] def toTimestamp(ts: LocalDate): Timestamp = {
     Timestamp.assertFromInstant(Instant.ofEpochSecond(ts.toEpochSecond(startOfDay, ZoneOffset.UTC)))
+  }
 
   private[endpoints] def toPbTimestamp(ts: Timestamp): protobuf.timestamp.Timestamp = {
     val instant = ts.toInstant
@@ -60,7 +58,7 @@ object MeteringReportEndpoint {
   private[endpoints] def toPbRequest(
       request: MeteringReportDateRequest
   ): metering_report_service.GetMeteringReportRequest = {
-    import request.*
+    import request._
     metering_report_service.GetMeteringReportRequest(
       from = Some(toPbTimestamp(toTimestamp(request.from))),
       to = to.map(toTimestamp).map(toPbTimestamp),
@@ -79,7 +77,7 @@ object MeteringReportEndpoint {
       pbResponse: metering_report_service.GetMeteringReportResponse
   ): Error \/ Struct = {
     val jsonReport = mustHave(pbResponse.meteringReportJson, "meteringReportJson")
-    import scalaz.syntax.std.either.*
+    import scalaz.syntax.std.either._
     jsonReport.disjunction.leftMap(ServerError.fromMsg)
   }
 

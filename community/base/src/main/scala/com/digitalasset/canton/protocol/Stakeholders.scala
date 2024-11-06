@@ -30,8 +30,8 @@ final case class Stakeholders private (all: Set[LfPartyId], signatories: Set[LfP
   }
 
   override protected def pretty: Pretty[Stakeholders.this.type] = prettyOfClass(
-    param("all", _.all.toSeq.sorted),
-    param("signatories", _.signatories.toSeq.sorted),
+    param("all", _.all),
+    param("signatories", _.signatories),
   )
 
   def toProtoV30: v30.Stakeholders = v30.Stakeholders(
@@ -44,7 +44,7 @@ object Stakeholders extends HasVersionedMessageCompanion[Stakeholders] {
   override def name: String = "Stakeholders"
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v33,
+      ProtocolVersion.v32,
       supportedProtoVersion(v30.Stakeholders)(fromProtoV30),
       _.toProtoV30.toByteString,
     )

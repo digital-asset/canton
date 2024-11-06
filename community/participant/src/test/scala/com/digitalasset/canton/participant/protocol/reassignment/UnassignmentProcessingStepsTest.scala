@@ -15,7 +15,6 @@ import com.digitalasset.canton.data.{
   CantonTimestamp,
   FullUnassignmentTree,
   ReassigningParticipants,
-  ReassignmentRef,
   ReassignmentSubmitterMetadata,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -182,11 +181,10 @@ final class UnassignmentProcessingStepsTest
       clock,
     )
 
-  private lazy val damle = DAMLeTestInstance(
-    submittingParticipant,
-    signatories = Set(submitter),
-    stakeholders = Set(submitter, party1),
-  )(loggerFactory)
+  private lazy val damle =
+    DAMLeTestInstance(submittingParticipant, signatories = Set(party1), stakeholders = Set(party1))(
+      loggerFactory
+    )
 
   private def createTestingIdentityFactory(
       topology: Map[ParticipantId, Map[LfPartyId, ParticipantPermission]],
@@ -299,7 +297,7 @@ final class UnassignmentProcessingStepsTest
   )
   private lazy val contractId = contract.contractId
 
-  private def mkParsedRequest(
+  def mkParsedRequest(
       view: FullUnassignmentTree,
       recipients: Recipients = RecipientsTest.testInstance,
       signatureO: Option[Signature] = None,

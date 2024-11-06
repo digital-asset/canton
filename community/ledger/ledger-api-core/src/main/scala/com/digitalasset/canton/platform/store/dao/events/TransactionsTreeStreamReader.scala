@@ -35,7 +35,6 @@ import com.digitalasset.canton.platform.store.utils.{
   Telemetry,
 }
 import com.digitalasset.canton.platform.{Party, TemplatePartiesFilter}
-import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.NotUsed
@@ -349,9 +348,9 @@ class TransactionsTreeStreamReader(
   private def deserializeLfValues(
       rawEvents: Vector[Entry[RawTreeEvent]],
       eventProjectionProperties: EventProjectionProperties,
-  )(implicit lc: LoggingContextWithTrace): Future[Seq[Entry[TreeEvent]]] =
+  )(implicit lc: LoggingContextWithTrace): Future[Vector[Entry[TreeEvent]]] =
     Timed.future(
-      future = MonadUtil.sequentialTraverse(rawEvents)(
+      future = Future.traverse(rawEvents)(
         TransactionsReader.deserializeTreeEvent(eventProjectionProperties, lfValueTranslation)
       ),
       timer = dbMetrics.treeTxStream.translationTimer,

@@ -15,7 +15,7 @@ import com.digitalasset.canton.environment.{
   DomainTopologyInitializationCallback,
   StoreBasedDomainTopologyInitializationCallback,
 }
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, Lifecycle}
+import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.PackageDependencyResolver
@@ -29,6 +29,7 @@ import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore, Sequenc
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.collection.concurrent
@@ -67,9 +68,7 @@ class SyncDomainPersistentStateManager(
     * Does not check for unique contract key domain constraints.
     * Must not be called concurrently with itself or other methods of this class.
     */
-  def initializePersistentStates()(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] = {
+  def initializePersistentStates()(implicit traceContext: TraceContext): Future[Unit] = {
     def getStaticDomainParameters(domainId: DomainId)(implicit
         traceContext: TraceContext
     ): EitherT[Future, String, StaticDomainParameters] =
@@ -86,17 +85,14 @@ class SyncDomainPersistentStateManager(
 
     aliasResolution.aliases.toList.parTraverse_ { alias =>
       val resultE = for {
-        domainId <- EitherT.fromEither[FutureUnlessShutdown](
+        domainId <- EitherT.fromEither[Future](
           aliasResolution.domainIdForAlias(alias).toRight("Unknown domain-id")
         )
         domainIdIndexed <- EitherT.right(IndexedDomain.indexed(indexedStringStore)(domainId))
-        staticDomainParameters <- getStaticDomainParameters(domainId).mapK(
-          FutureUnlessShutdown.outcomeK
-        )
+        staticDomainParameters <- getStaticDomainParameters(domainId)
         persistentState = createPersistentState(domainIdIndexed, staticDomainParameters)
         _lastProcessedPresent <- persistentState.sequencedEventStore
           .find(SequencedEventStore.LatestUpto(CantonTimestamp.MaxValue))
-          .mapK(FutureUnlessShutdown.outcomeK)
           .leftMap(_ => "No persistent event")
         _ = logger.debug(s"Discovered existing state for $alias")
       } yield put(persistentState)
@@ -105,7 +101,7 @@ class SyncDomainPersistentStateManager(
     }
   }
 
-  def indexedDomainId(domainId: DomainId): FutureUnlessShutdown[IndexedDomain] =
+  def indexedDomainId(domainId: DomainId): Future[IndexedDomain] =
     IndexedDomain.indexed(this.indexedStringStore)(domainId)
 
   /** Retrieves the [[com.digitalasset.canton.participant.store.SyncDomainPersistentState]] from the [[com.digitalasset.canton.participant.sync.SyncDomainPersistentStateManager]]

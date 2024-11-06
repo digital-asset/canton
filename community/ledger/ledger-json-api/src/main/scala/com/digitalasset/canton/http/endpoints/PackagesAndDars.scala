@@ -3,20 +3,21 @@
 
 package com.digitalasset.canton.http.endpoints
 
-import com.daml.jwt.Jwt
-import com.daml.logging.LoggingContextOf
+import org.apache.pekko.http.scaladsl.model.*
+import org.apache.pekko.NotUsed
 import com.digitalasset.canton.http.Endpoints.ET
-import com.digitalasset.canton.http.metrics.HttpApiMetrics
 import com.digitalasset.canton.http.util.FutureUtil.{either, eitherT, rightT}
 import com.digitalasset.canton.http.util.Logging.{InstanceUUID, RequestID}
 import com.digitalasset.canton.http.util.ProtobufByteStrings
-import com.digitalasset.canton.http.{PackageManagementService, admin, domain}
-import org.apache.pekko.NotUsed
-import org.apache.pekko.http.scaladsl.model.*
+import com.daml.jwt.Jwt
 import scalaz.EitherT
 import scalaz.std.scalaFuture.*
 
 import scala.concurrent.{ExecutionContext, Future}
+import com.daml.logging.LoggingContextOf
+import com.digitalasset.canton.http.admin
+import com.digitalasset.canton.http.{PackageManagementService, domain}
+import com.digitalasset.canton.http.metrics.HttpApiMetrics
 
 class PackagesAndDars(routeSetup: RouteSetup, packageManagementService: PackageManagementService)(
     implicit ec: ExecutionContext
@@ -26,7 +27,7 @@ class PackagesAndDars(routeSetup: RouteSetup, packageManagementService: PackageM
   def uploadDarFile(httpRequest: HttpRequest)(implicit
       lc: LoggingContextOf[InstanceUUID with RequestID],
       metrics: HttpApiMetrics,
-  ): ET[domain.SyncResponse[Unit]] =
+  ): ET[domain.SyncResponse[Unit]] = {
     for {
       parseAndDecodeTimer <- getParseAndDecodeTimerCtx()
       t2 <- either(routeSetup.inputSource(httpRequest))
@@ -42,6 +43,7 @@ class PackagesAndDars(routeSetup: RouteSetup, packageManagementService: PackageM
         )
       ): ET[Unit]
     } yield domain.OkResponse(())
+  }
 
   def listPackages(jwt: Jwt)(implicit
       lc: LoggingContextOf[InstanceUUID with RequestID]

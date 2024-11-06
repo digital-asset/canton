@@ -49,7 +49,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
           inOrder,
         ) =>
       val initOffset =
-        Offset.fromHexString(Ref.HexString.assertFromString("00" * 6 + "abcdef")).toAbsoluteOffset
+        Offset.fromHexString(Ref.HexString.assertFromString("00" * 6 + "abcdef")).toAbsoluteOffsetO
       val initEventSequentialId = 1337L
       val initStringInterningId = 17
       val initPublicationTime = CantonTimestamp.now()
@@ -60,28 +60,28 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
       when(updateStringInterningView(stringInterningView, initLedgerEnd)).thenReturn(Future.unit)
       when(dispatcherState.stopDispatcher()).thenReturn(Future.unit)
       when(dispatcherState.isRunning).thenReturn(true)
-      when(mutableLedgerEndCache.apply()).thenReturn(None)
+      when(mutableLedgerEndCache.apply()).thenReturn(None -> 0L)
       when(dispatcherState.getDispatcher).thenReturn(
         Dispatcher("", Offset.beforeBegin, Offset.beforeBegin)
       )
 
       for {
         // INITIALIZED THE STATE
-        _ <- inMemoryState.initializeTo(Some(initLedgerEnd))
+        _ <- inMemoryState.initializeTo(initLedgerEnd)
 
         _ = {
           // ASSERT STATE INITIALIZED
 
           inOrder.verify(dispatcherState).stopDispatcher()
-          inOrder.verify(contractStateCaches).reset(Some(initOffset))
+          inOrder.verify(contractStateCaches).reset(initOffset)
           inOrder.verify(inMemoryFanoutBuffer).flush()
           inOrder
             .verify(mutableLedgerEndCache)
-            .set(Some(initLedgerEnd))
+            .set((initOffset, initEventSequentialId, initPublicationTime))
           inOrder.verify(submissionTracker).close()
           inOrder
             .verify(dispatcherState)
-            .startDispatcher(Offset.fromAbsoluteOffset(initLedgerEnd.lastOffset))
+            .startDispatcher(Offset.fromAbsoluteOffsetO(initLedgerEnd.lastOffset))
 
           inMemoryState.initialized shouldBe true
         }
@@ -92,7 +92,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
         reInitPublicationTime = CantonTimestamp.now()
         reInitLedgerEnd = ParameterStorageBackend
           .LedgerEnd(
-            reInitOffset.toAbsoluteOffset,
+            reInitOffset.toAbsoluteOffsetO,
             reInitEventSequentialId,
             reInitStringInterningId,
             reInitPublicationTime,
@@ -111,14 +111,14 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
           )
 
           when(dispatcherState.stopDispatcher()).thenReturn(Future.unit)
-          when(mutableLedgerEndCache.apply()).thenReturn(Some(initLedgerEnd))
+          when(mutableLedgerEndCache.apply()).thenReturn(initOffset -> initEventSequentialId)
           when(dispatcherState.getDispatcher).thenReturn(
-            Dispatcher("", Offset.beforeBegin, Offset.fromAbsoluteOffset(initOffset))
+            Dispatcher("", Offset.beforeBegin, Offset.fromAbsoluteOffsetO(initOffset))
           )
         }
 
         // RE-INITIALIZE THE STATE
-        _ <- inMemoryState.initializeTo(Some(reInitLedgerEnd))
+        _ <- inMemoryState.initializeTo(reInitLedgerEnd)
 
         // ASSERT STATE RE-INITIALIZED
         _ = {
@@ -130,7 +130,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
           inOrder.verify(inMemoryFanoutBuffer).flush()
           inOrder
             .verify(mutableLedgerEndCache)
-            .set(Some(reInitLedgerEnd))
+            .set((reInitOffset.toAbsoluteOffsetO, reInitEventSequentialId, reInitPublicationTime))
           inOrder.verify(dispatcherState).startDispatcher(reInitOffset)
 
           when(dispatcherState.isRunning).thenReturn(true)
@@ -138,7 +138,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
         }
 
         // RE-INITIALIZE THE SAME STATE
-        _ <- inMemoryState.initializeTo(Some(reInitLedgerEnd))
+        _ <- inMemoryState.initializeTo(reInitLedgerEnd)
 
         // ASSERT STATE RE-INITIALIZED
         _ = inMemoryState.initialized shouldBe true

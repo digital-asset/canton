@@ -201,6 +201,7 @@ create or replace view debug.common_node_id as
 create or replace view debug.common_party_metadata as
   select
     party_id,
+    display_name,
     participant_id,
     submission_id,
     notified,

@@ -4,9 +4,9 @@
 package com.digitalasset.canton.http.util
 
 import com.daml.error.NoLogging
-import com.daml.ledger.api.v2 as lav2
-import com.digitalasset.canton.ledger.api.validation.StricterValueValidator
 import com.digitalasset.daml.lf
+import com.digitalasset.canton.ledger.api.validation.StricterValueValidator
+import com.daml.ledger.api.{v2 => lav2}
 import io.grpc.StatusRuntimeException
 import scalaz.{Show, \/}
 
@@ -15,7 +15,7 @@ object ApiValueToLfValueConverter {
 
   object Error {
     implicit val ErrorShow: Show[Error] = Show shows { e =>
-      import com.daml.scalautil.ExceptionOps.*
+      import com.daml.scalautil.ExceptionOps._
       s"ApiValueToLfValueConverter.Error: ${e.cause.description}"
     }
   }

@@ -69,9 +69,7 @@ final case class CommunityPublicServerConfig(
     override val address: String = "127.0.0.1",
     override val internalPort: Option[Port] = None,
     override val tls: Option[TlsBaseServerConfig] = None,
-    override val keepAliveServer: Option[BasicKeepAliveServerConfig] = Some(
-      BasicKeepAliveServerConfig()
-    ),
+    override val keepAliveServer: Option[KeepAliveServerConfig] = Some(KeepAliveServerConfig()),
     override val nonceExpirationInterval: NonNegativeFiniteDuration =
       NonNegativeFiniteDuration.ofMinutes(1),
     override val maxTokenExpirationInterval: NonNegativeFiniteDuration =

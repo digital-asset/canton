@@ -17,6 +17,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{RequestCounter, SequencerCounter}
 
+import scala.concurrent.*
 import scala.util.Try
 
 /** The request tracker handles all the tasks around conflict detection that are difficult to parallelize.
@@ -291,7 +292,7 @@ trait RequestTrackerLookup extends AutoCloseable with NamedLogging {
   /** Returns a possibly outdated state of the contracts. */
   def getApproximateStates(coid: Seq[LfContractId])(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[LfContractId, ContractState]]
+  ): Future[Map[LfContractId, ContractState]]
 }
 
 object RequestTracker {

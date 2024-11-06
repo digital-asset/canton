@@ -184,6 +184,7 @@ object LedgerApiCommands {
 
     final case class AllocateParty(
         partyIdHint: String,
+        displayName: String,
         annotations: Map[String, String],
         identityProviderId: String,
     ) extends BaseCommand[AllocatePartyRequest, AllocatePartyResponse, PartyDetails] {
@@ -191,6 +192,7 @@ object LedgerApiCommands {
         Right(
           AllocatePartyRequest(
             partyIdHint = partyIdHint,
+            displayName = displayName,
             localMetadata = Some(ObjectMeta(annotations = annotations)),
             identityProviderId = identityProviderId,
           )

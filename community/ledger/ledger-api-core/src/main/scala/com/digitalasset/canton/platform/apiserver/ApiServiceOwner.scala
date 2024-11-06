@@ -9,7 +9,6 @@ import com.daml.tracing.Telemetry
 import com.digitalasset.canton.auth.{AuthService, Authorizer}
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.config.{
-  KeepAliveServerConfig,
   NonNegativeDuration,
   NonNegativeFiniteDuration,
   TlsServerConfig,
@@ -86,7 +85,7 @@ object ApiServiceOwner {
       identityProviderConfigStore: IdentityProviderConfigStore,
       partyRecordStore: PartyRecordStore,
       command: CommandServiceConfig = ApiServiceOwner.DefaultCommandServiceConfig,
-      syncService: state.SyncService,
+      writeService: state.WriteService,
       healthChecks: HealthChecks,
       metrics: LedgerApiServerMetrics,
       timeServiceBackend: Option[TimeServiceBackend] = None,
@@ -108,7 +107,6 @@ object ApiServiceOwner {
       dynParamGetter: DynamicDomainParameterGetter,
       interactiveSubmissionServiceConfig: InteractiveSubmissionServiceConfig,
       lfValueTranslation: LfValueTranslation,
-      keepAlive: Option[KeepAliveServerConfig],
   )(implicit
       actorSystem: ActorSystem,
       materializer: Materializer,
@@ -149,7 +147,7 @@ object ApiServiceOwner {
       executionSequencerFactory <- new ExecutionSequencerFactoryOwner()
       apiServicesOwner = new ApiServices.Owner(
         participantId = participantId,
-        syncService = syncService,
+        writeService = writeService,
         indexService = indexService,
         authorizer = authorizer,
         engine = engine,
@@ -206,7 +204,6 @@ object ApiServiceOwner {
         ) :: otherInterceptors,
         servicesExecutionContext,
         metrics,
-        keepAlive,
         loggerFactory,
       )
     } yield {

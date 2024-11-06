@@ -77,7 +77,6 @@ final class SequencerChannelClient(
             .append("sequencerId", sequencerId.uid.toString)
             .append("channel", channelId.unwrap),
         )
-        _ <- processor.setChannelEndpoint(endpoint)
         _ <- clientState.addChannelEndpoint(endpoint)
       } yield {
         endpoint.closeReason.onComplete(closeChannelEndpoint)

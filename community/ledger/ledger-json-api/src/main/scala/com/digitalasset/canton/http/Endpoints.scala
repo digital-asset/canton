@@ -3,26 +3,22 @@
 
 package com.digitalasset.canton.http
 
-import com.daml.jwt.Jwt
-import com.daml.logging.LoggingContextOf
-import com.daml.logging.LoggingContextOf.withEnrichedLoggingContext
-import com.daml.metrics.Timed
-import com.digitalasset.canton.http.endpoints.{MeteringReportEndpoint, RouteSetup}
-import com.digitalasset.canton.http.json.v2.V2Routes
-import com.digitalasset.canton.http.metrics.HttpApiMetrics
-import com.digitalasset.canton.ledger.client.services.admin.UserManagementClient
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.tracing.NoTracing
 import org.apache.pekko.NotUsed
 import org.apache.pekko.http.scaladsl.model.*
+import headers.`Content-Type`
 import org.apache.pekko.http.scaladsl.server
-import org.apache.pekko.http.scaladsl.server.Directives.{extractClientIP, *}
-import org.apache.pekko.http.scaladsl.server.RouteResult.*
+import org.apache.pekko.http.scaladsl.server.Directives.extractClientIP
 import org.apache.pekko.http.scaladsl.server.{Directive, Directive0, PathMatcher, Route}
+import org.apache.pekko.http.scaladsl.server.RouteResult.*
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.{Flow, Source}
 import org.apache.pekko.util.ByteString
-import scalaz.EitherT.eitherT
+import ContractsService.SearchResult
+import EndpointsCompanion.*
+import json.*
+import util.FutureUtil.{either, rightT}
+import util.Logging.{InstanceUUID, RequestID, extendWithRequestIdLogCtx}
+import com.daml.logging.LoggingContextOf.withEnrichedLoggingContext
 import scalaz.std.scalaFuture.*
 import scalaz.syntax.std.option.*
 import scalaz.syntax.traverse.*
@@ -31,14 +27,19 @@ import spray.json.*
 
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.control.NonFatal
+import com.digitalasset.canton.http.metrics.HttpApiMetrics
+import com.daml.logging.LoggingContextOf
+import com.daml.metrics.Timed
+import org.apache.pekko.http.scaladsl.server.Directives.*
+import com.digitalasset.canton.http.endpoints.{MeteringReportEndpoint, RouteSetup}
+import com.daml.jwt.Jwt
+import com.digitalasset.canton.http.json.v2.V2Routes
+import com.digitalasset.canton.ledger.client.services.admin.UserManagementClient
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.NoTracing
+import scalaz.EitherT.eitherT
 
-import headers.`Content-Type`
-import ContractsService.SearchResult
-import EndpointsCompanion.*
-import json.*
-import util.FutureUtil.{either, rightT}
-import util.Logging.{InstanceUUID, RequestID, extendWithRequestIdLogCtx}
+import scala.util.control.NonFatal
 
 class Endpoints(
     allowNonHttps: Boolean,

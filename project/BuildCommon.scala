@@ -718,7 +718,7 @@ object BuildCommon {
           scalaVersion,
           sbtVersion,
           BuildInfoKey("damlLibrariesVersion" -> Dependencies.daml_libraries_version),
-          BuildInfoKey("stableProtocolVersions" -> List()),
+          BuildInfoKey("stableProtocolVersions" -> List("32")),
           BuildInfoKey("betaProtocolVersions" -> List()),
         ),
         buildInfoPackage := "com.digitalasset.canton.buildinfo",
@@ -1370,7 +1370,11 @@ object BuildCommon {
           `ledger-common` % "test->test",
           `community-testing` % "test->test",
         )
-        .disablePlugins(WartRemover) // to accommodate different daml repo coding style
+        .disablePlugins(
+          ScalafixPlugin,
+          ScalafmtPlugin,
+          WartRemover,
+        ) // to accommodate different daml repo coding style
         .enablePlugins(DamlPlugin)
         .settings(
           sharedSettings,

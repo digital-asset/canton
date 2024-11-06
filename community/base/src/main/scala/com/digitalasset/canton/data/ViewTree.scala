@@ -7,6 +7,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{
   LfContractId,
   LfTemplateId,
+  ReassignmentId,
   RootHash,
   SerializableContract,
   Stakeholders,
@@ -54,7 +55,7 @@ trait FullReassignmentViewTree extends ViewTree {
   protected[this] def commonData: ReassignmentCommonData
   protected[this] def view: ReassignmentView
 
-  def reassignmentRef: ReassignmentRef
+  def reassignmentId: Option[ReassignmentId]
 
   val viewPosition: ViewPosition =
     ViewPosition.root // Use a dummy value, as there is only one view.
@@ -68,6 +69,7 @@ trait FullReassignmentViewTree extends ViewTree {
   def workflowId: Option[LfWorkflowId] = submitterMetadata.workflowId
 
   // Parties and participants
+  // TODO(#22048) Check informees and stakeholders are compatible
   override def informees: Set[LfPartyId] = view.contract.metadata.stakeholders
   def stakeholders: Stakeholders = commonData.stakeholders
 

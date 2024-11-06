@@ -43,6 +43,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LedgerSubmissionId, LfPartyId}
 import org.apache.pekko.stream.Materializer
+import org.mockito.ArgumentMatchers
 import org.scalatest.Outcome
 import org.scalatest.wordspec.FixtureAnyWordSpec
 
@@ -200,17 +201,25 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
           any[PartyId],
           any[ParticipantId],
           any[String255],
+          any[Option[String255]],
         )
       ).thenReturn(Either.unit)
 
       val lfInputPartyId = LfPartyId.assertFromString("desiredPartyName")
       val partyId =
         PartyId(UniqueIdentifier.tryFromProtoPrimitive(s"$lfInputPartyId::default"))
+      when(
+        f.partyNotifier.setDisplayName(
+          ArgumentMatchers.eq(partyId),
+          ArgumentMatchers.eq(String255.tryCreate("displayName")),
+        )(anyTraceContext)
+      )
+        .thenReturn(Future.successful(()))
 
       val submissionId = LedgerSubmissionId.assertFromString("CantonSyncServiceTest submission")
 
       val fut = f.sync
-        .allocateParty(Some(lfInputPartyId), submissionId)(
+        .allocateParty(Some(lfInputPartyId), Some("displayName"), submissionId)(
           TraceContext.empty
         )
         .asScala

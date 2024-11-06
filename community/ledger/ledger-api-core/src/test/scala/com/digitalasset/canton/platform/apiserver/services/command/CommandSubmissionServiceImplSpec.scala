@@ -205,7 +205,7 @@ class CommandSubmissionServiceImplSpec
   }
 
   private trait TestContext {
-    val syncService = mock[state.SyncService]
+    val writeService = mock[state.WriteService]
     val timeProvider = TimeProvider.Constant(Instant.now)
     val timeProviderType = TimeProviderType.Static
     val seedService = SeedService.WeakRandom
@@ -302,7 +302,7 @@ class CommandSubmissionServiceImplSpec
     )
       .thenReturn(Future.successful(Right(commandExecutionResult)))
     when(
-      syncService.submitTransaction(
+      writeService.submitTransaction(
         eqTo(submitterInfo),
         eqTo(None),
         eqTo(transactionMeta),
@@ -316,7 +316,7 @@ class CommandSubmissionServiceImplSpec
     def apiSubmissionService(
         checkOverloaded: TraceContext => Option[state.SubmissionResult] = _ => None
     ) = new CommandSubmissionServiceImpl(
-      submissionSyncService = syncService,
+      writeService = writeService,
       timeProviderType = timeProviderType,
       timeProvider = timeProvider,
       seedService = seedService,

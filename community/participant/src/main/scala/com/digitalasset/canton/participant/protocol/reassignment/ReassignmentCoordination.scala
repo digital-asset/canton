@@ -266,11 +266,9 @@ class ReassignmentCoordination(
       reassignmentId: ReassignmentId,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Unit] =
+  ): EitherT[Future, ReassignmentProcessorError, Unit] =
     for {
-      reassignmentStore <- EitherT.fromEither[FutureUnlessShutdown](
-        reassignmentStoreFor(targetDomain)
-      )
+      reassignmentStore <- EitherT.fromEither[Future](reassignmentStoreFor(targetDomain))
       _ <- EitherT.right[ReassignmentProcessorError](
         reassignmentStore.deleteReassignment(reassignmentId)
       )

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.submission.routing
 
 import cats.syntax.foldable.*
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.UnableToQueryTopologySnapshot
 import com.digitalasset.canton.participant.sync.{ConnectedDomainsLookup, SyncDomain}
 import com.digitalasset.canton.protocol.LfContractId
@@ -14,7 +13,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag.Target
 import com.digitalasset.canton.version.ProtocolVersion
 
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Future}
 
 /** Provides state information about a domain. */
 trait DomainStateProvider {
@@ -38,10 +37,7 @@ trait DomainStateProvider {
 
   def getDomainsOfContracts(
       coids: Seq[LfContractId]
-  )(implicit
-      ec: ExecutionContext,
-      traceContext: TraceContext,
-  ): FutureUnlessShutdown[Map[LfContractId, DomainId]]
+  )(implicit ec: ExecutionContext, traceContext: TraceContext): Future[Map[LfContractId, DomainId]]
 
 }
 
@@ -63,7 +59,7 @@ class DomainStateProviderImpl(connectedDomains: ConnectedDomainsLookup)
   override def getDomainsOfContracts(coids: Seq[LfContractId])(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
-  ): FutureUnlessShutdown[Map[LfContractId, DomainId]] = {
+  ): Future[Map[LfContractId, DomainId]] = {
     type Acc = (Seq[LfContractId], Map[LfContractId, DomainId])
     connectedDomains.snapshot
       .collect {
@@ -71,19 +67,17 @@ class DomainStateProviderImpl(connectedDomains: ConnectedDomainsLookup)
         case (_, syncDomain: SyncDomain) if syncDomain.readyForSubmission.unwrap => syncDomain
       }
       .toList
-      .foldM[FutureUnlessShutdown, Acc]((coids, Map.empty[LfContractId, DomainId]): Acc) {
+      .foldM[Future, Acc]((coids, Map.empty[LfContractId, DomainId]): Acc) {
         // if there are no more cids for which we don't know the domain, we are done
-        case ((pending, acc), _) if pending.isEmpty => FutureUnlessShutdown.pure((pending, acc))
+        case ((pending, acc), _) if pending.isEmpty => Future.successful((pending, acc))
         case ((pending, acc), syncDomain) =>
           // grab the approximate state and check if the contract is currently active on the given domain
-          syncDomain.ephemeral.requestTracker
-            .getApproximateStates(pending)
-            .map { res =>
-              val done = acc ++ res.collect {
-                case (cid, status) if status.status.isActive => (cid, syncDomain.domainId)
-              }
-              (pending.filterNot(cid => done.contains(cid)), done)
+          syncDomain.ephemeral.requestTracker.getApproximateStates(pending).map { res =>
+            val done = acc ++ res.collect {
+              case (cid, status) if status.status.isActive => (cid, syncDomain.domainId)
             }
+            (pending.filterNot(cid => done.contains(cid)), done)
+          }
       }
       .map(_._2)
   }
