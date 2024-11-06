@@ -17,23 +17,23 @@ import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.engine.Error.Preprocessing
 import com.digitalasset.daml.lf.language.Ast.TVar
 import com.digitalasset.daml.lf.value.Value.ValueUnit
-import com.digitalasset.transcode.{MissingFieldException, UnexpectedFieldsException}
 import io.circe.{Decoder, Encoder}
 import io.grpc.StatusRuntimeException
-import io.grpc.stub.StreamObserver
-import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.{Flow, Source}
+import org.apache.pekko.NotUsed
 import sttp.capabilities.WebSockets
 import sttp.capabilities.pekko.PekkoStreams
 import sttp.model.Header
-import sttp.tapir.*
 import sttp.tapir.generic.auto.*
 import sttp.tapir.json.circe.*
 import sttp.tapir.server.ServerEndpoint.Full
+import sttp.tapir.*
+import com.digitalasset.transcode.{MissingFieldException, UnexpectedFieldsException}
+import io.grpc.stub.StreamObserver
 
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
+import scala.util.control.NonFatal
 
 trait Endpoints extends NamedLogging {
   import Endpoints.*
@@ -47,8 +47,7 @@ trait Endpoints extends NamedLogging {
           .fromStatusRuntimeException(sre)
           .getOrElse(
             throw new RuntimeException(
-              s"Failed to convert response to JsCantonError from ${sre.getMessage}",
-              sre,
+              s"Failed to convert response to JsCantonError from ${sre.getMessage}", sre
             ) // TODO (i19398) improve error handling in JSON (repeated code)
           )
       )

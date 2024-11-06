@@ -22,9 +22,7 @@ import io.netty.handler.ssl.SslContext
 final case class GrpcHealthServerConfig(
     override val address: String = "0.0.0.0",
     override val internalPort: Option[Port] = None,
-    override val keepAliveServer: Option[BasicKeepAliveServerConfig] = Some(
-      BasicKeepAliveServerConfig()
-    ),
+    override val keepAliveServer: Option[KeepAliveServerConfig] = Some(KeepAliveServerConfig()),
     jwtTimestampLeeway: Option[JwtTimestampLeeway] = None,
     parallelism: Int = 4,
 ) extends ServerConfig {

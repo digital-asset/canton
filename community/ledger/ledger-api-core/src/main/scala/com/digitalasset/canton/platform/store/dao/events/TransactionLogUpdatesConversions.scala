@@ -32,7 +32,6 @@ import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.{
 import com.digitalasset.canton.platform.store.utils.EventOps.TreeEventOps
 import com.digitalasset.canton.platform.{TemplatePartiesFilter, Value}
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, Traced}
-import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{Identifier, Party}
 import com.digitalasset.daml.lf.transaction.{FatContractInstance, GlobalKeyWithMaintainers, Node}
@@ -167,8 +166,8 @@ private[events] object TransactionLogUpdatesConversions {
         executionContext: ExecutionContext,
     ): Future[FlatTransaction] =
       Future.delegate {
-        MonadUtil
-          .sequentialTraverse(transactionAccepted.events)(event =>
+        Future
+          .traverse(transactionAccepted.events)(event =>
             toFlatEvent(
               event,
               filter.allFilterParties,
@@ -359,8 +358,8 @@ private[events] object TransactionLogUpdatesConversions {
         executionContext: ExecutionContext,
     ): Future[TransactionTree] =
       Future.delegate {
-        MonadUtil
-          .sequentialTraverse(transactionAccepted.events)(event =>
+        Future
+          .traverse(transactionAccepted.events)(event =>
             toTransactionTreeEvent(
               requestingParties,
               eventProjectionProperties,

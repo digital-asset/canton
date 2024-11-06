@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.apiserver
 
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.digitalasset.canton.config.RequireTypes.Port
-import com.digitalasset.canton.config.{KeepAliveServerConfig, TlsServerConfig}
+import com.digitalasset.canton.config.TlsServerConfig
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
@@ -24,7 +24,6 @@ final class LedgerApiService(
     interceptors: List[ServerInterceptor] = List.empty,
     servicesExecutor: Executor,
     metrics: LedgerApiServerMetrics,
-    keepAlive: Option[KeepAliveServerConfig],
     val loggerFactory: NamedLoggerFactory,
 ) extends ResourceOwner[ApiService]
     with NamedLogging {
@@ -49,15 +48,13 @@ final class LedgerApiService(
           servicesExecutor,
           apiServices.services,
           loggerFactory,
-          keepAlive = keepAlive,
         )
         .acquire()
     } yield {
       val host = address.getOrElse("localhost")
       val actualPort = server.getPort
       val transportMedium = if (sslContext.isDefined) "TLS" else "plain text"
-      val withKeepAlive = keepAlive.fold("")(ka => s" with $ka")
-      logger.info(s"Listening on $host:$actualPort over $transportMedium$withKeepAlive.")
+      logger.info(s"Listening on $host:$actualPort over $transportMedium.")
       new ApiService {
         override val port: Port =
           Port.tryCreate(server.getPort)

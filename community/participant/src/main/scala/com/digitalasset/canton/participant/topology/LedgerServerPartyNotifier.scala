@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.topology
 import cats.syntax.either.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.DisplayName
 import com.digitalasset.canton.config.CantonRequireTypes.{LengthLimitedString, String255}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
@@ -48,14 +49,15 @@ class LedgerServerPartyNotifier(
     with FlagCloseable {
 
   private val pendingAllocationData =
-    TrieMap[(PartyId, ParticipantId), String255]()
+    TrieMap[(PartyId, ParticipantId), (String255, Option[DisplayName])]()
   def expectPartyAllocationForNodes(
       party: PartyId,
       onParticipant: ParticipantId,
       submissionId: String255,
+      displayName: Option[DisplayName],
   ): Either[String, Unit] = if (mustTrackSubmissionIds) {
     pendingAllocationData
-      .putIfAbsent((party, onParticipant), submissionId)
+      .putIfAbsent((party, onParticipant), (submissionId, displayName))
       .toLeft(())
       .leftMap(_ => s"Allocation for party $party is already inflight")
   } else
@@ -67,7 +69,7 @@ class LedgerServerPartyNotifier(
       submissionId: String255,
   ): Unit = {
     val key = (party, onParticipant)
-    pendingAllocationData.get(key).foreach { case storedId =>
+    pendingAllocationData.get(key).foreach { case (storedId, _) =>
       if (storedId == submissionId) {
         pendingAllocationData.remove(key).discard
       }
@@ -123,7 +125,7 @@ class LedgerServerPartyNotifier(
 
   private def extractTopologyProcessorData(
       transaction: GenericSignedTopologyTransaction
-  ): Seq[(PartyId, ParticipantId, String255)] =
+  ): Seq[(PartyId, ParticipantId, String255, Option[DisplayName])] =
     if (transaction.operation != TopologyChangeOp.Replace || transaction.isProposal) {
       Seq.empty
     } else {
@@ -132,15 +134,16 @@ class LedgerServerPartyNotifier(
           participants
             .map { hostingParticipant =>
               // Note/CN-5291: Only remove pending submission-id once update persisted.
-              val submissionId = pendingAllocationData
+              val (submissionId, displayName) = pendingAllocationData
                 .getOrElse(
                   (partyId, hostingParticipant.participantId),
-                  LengthLimitedString.getUuid.asString255,
+                  (LengthLimitedString.getUuid.asString255, None),
                 )
               (
                 partyId,
                 hostingParticipant.participantId,
                 submissionId,
+                displayName,
               )
             }
         // propagate admin parties
@@ -150,6 +153,7 @@ class LedgerServerPartyNotifier(
               participantId.adminParty,
               participantId,
               LengthLimitedString.getUuid.asString255,
+              None,
             )
           )
         case _ => Seq.empty
@@ -164,8 +168,31 @@ class LedgerServerPartyNotifier(
     crashOnFailure = exitOnFatalFailures,
   )
 
+  def setDisplayName(partyId: PartyId, displayName: DisplayName)(implicit
+      traceContext: TraceContext
+  ): Future[Unit] =
+    sequentialQueue
+      .execute(
+        {
+          val currentTime = clock.now
+          logger.debug(
+            s"Setting display name ${displayName.singleQuoted} for party $partyId as of $currentTime"
+          )
+          updateAndNotify(
+            partyId,
+            Some(displayName),
+            None,
+            SequencedTime(currentTime),
+            EffectiveTime(currentTime),
+          )
+        },
+        s"set display name for $partyId",
+      )
+      .onShutdown(logger.debug("Shutdown in progress, canceling display name update"))
+
   private def updateAndNotify(
       partyId: PartyId,
+      displayName: Option[DisplayName],
       targetParticipantId: Option[ParticipantId],
       sequencerTimestamp: SequencedTime,
       effectiveTimestamp: EffectiveTime,
@@ -181,6 +208,7 @@ class LedgerServerPartyNotifier(
       val update =
         PartyMetadata(
           partyId = partyId,
+          displayName = displayName.orElse(current.displayName),
           participantId = // Don't overwrite the participant ID if it's already set to the expected value
             if (current.participantId.contains(participantId)) current.participantId
             else targetParticipantId.orElse(current.participantId),
@@ -195,7 +223,7 @@ class LedgerServerPartyNotifier(
       store.metadataForParty(partyId).map {
         case None =>
           Some(
-            PartyMetadata(partyId, targetParticipantId)(
+            PartyMetadata(partyId, displayName, targetParticipantId)(
               effectiveTimestamp.value,
               submissionIdRaw,
             )
@@ -275,6 +303,7 @@ class LedgerServerPartyNotifier(
         eventPublisher.publishEventDelayableByRepairOperation(
           Update.PartyAddedToParticipant(
             metadata.partyId.toLf,
+            metadata.displayName.map(_.unwrap).getOrElse(""),
             hostingParticipant.toLf,
             ParticipantEventPublisher.now.toLf,
             LedgerSubmissionId.fromString(metadata.submissionId.unwrap).toOption,
@@ -311,10 +340,10 @@ class LedgerServerPartyNotifier(
   private def observedF(
       sequencerTimestamp: SequencedTime,
       effectiveTimestamp: EffectiveTime,
-      data: (PartyId, ParticipantId, String255),
+      data: (PartyId, ParticipantId, String255, Option[DisplayName]),
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
 
-    val (party, participant, submissionId) = data
+    val (party, participant, submissionId, displayName) = data
     // start the notification in the background
     // note, that if this fails, we have an issue as ledger server will not have
     // received the event. this is generally an issue with everything we send to the
@@ -323,6 +352,7 @@ class LedgerServerPartyNotifier(
       sequentialQueue.execute(
         updateAndNotify(
           party,
+          displayName = displayName,
           targetParticipantId = Some(participant),
           sequencerTimestamp,
           effectiveTimestamp,

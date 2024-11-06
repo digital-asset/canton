@@ -156,6 +156,7 @@ private[reassignment] class AssignmentProcessingSteps(
       reassignmentData <- ephemeralState.reassignmentLookup
         .lookup(reassignmentId)
         .leftMap(err => NoReassignmentData(reassignmentId, err))
+        .mapK(FutureUnlessShutdown.outcomeK)
 
       unassignmentResult <- EitherT.fromEither[FutureUnlessShutdown](
         reassignmentData.unassignmentResult.toRight(
@@ -275,7 +276,7 @@ private[reassignment] class AssignmentProcessingSteps(
   ): EitherT[Future, ReassignmentProcessorError, SubmissionResultArgs] =
     performPendingSubmissionMapUpdate(
       pendingSubmissionMap,
-      ReassignmentRef(submissionParam.reassignmentId),
+      Some(submissionParam.reassignmentId),
       submissionParam.submitterLf,
       submissionId,
     )
@@ -379,7 +380,7 @@ private[reassignment] class AssignmentProcessingSteps(
     // in the Phase37Synchronizer without waiting for it, thereby allowing us to concurrently receive a
     // mediator verdict.
     val stakeholdersCheckResultET = reassignmentValidation
-      .checkMetadata(
+      .checkStakeholders(
         fullViewTree,
         getEngineAbortStatus = () => engineController.abortStatus,
       )
@@ -398,6 +399,7 @@ private[reassignment] class AssignmentProcessingSteps(
         .right[ReassignmentProcessorError](
           reassignmentLookup.lookup(reassignmentId).toOption.value
         )
+        .mapK(FutureUnlessShutdown.outcomeK)
       validationResultO <- assignmentValidation
         .validateAssignmentRequest(
           ts,
@@ -451,7 +453,7 @@ private[reassignment] class AssignmentProcessingSteps(
         fullViewTree.submitterMetadata,
         isObservingReassigningParticipant = isObservingReassigningParticipant,
         reassignmentId,
-        hostedStakeholders,
+        hostedStakeholders.toSet,
         mediator,
         locallyRejectedF,
         engineController.abort,

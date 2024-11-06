@@ -435,12 +435,7 @@ class ParticipantNodeBootstrap(
         commandDeduplicator = new CommandDeduplicatorImpl(
           persistentState.map(_.commandDeduplicationStore),
           clock,
-          persistentState.map(
-            _.ledgerApiStore
-              .ledgerEndCache()
-              .map(_.lastPublicationTime)
-              .getOrElse(CantonTimestamp.MinValue)
-          ),
+          persistentState.map(_.ledgerApiStore.ledgerEndCache.publicationTime),
           loggerFactory,
         )
 
@@ -487,8 +482,6 @@ class ParticipantNodeBootstrap(
                   indexerHaConfig = ledgerApiServerFactory.createHaConfig(config),
                   ledgerParticipantId = participantId.toLf,
                   excludedPackageIds = excludedPackageIds,
-                  onlyForTestingEnableInMemoryTransactionStore =
-                    arguments.testingConfig.enableInMemoryTransactionStoreForParticipants,
                 ),
                 reassignmentOffsetPersistence = ReassignmentStore.reassignmentOffsetPersistenceFor(
                   syncDomainPersistentStateManager
@@ -609,6 +602,7 @@ class ParticipantNodeBootstrap(
           .right[String](
             syncDomainPersistentStateManager.initializePersistentStates()
           )
+          .mapK(FutureUnlessShutdown.outcomeK)
 
         resourceManagementService = resourceManagementServiceFactory(
           persistentState.map(_.settingsStore)

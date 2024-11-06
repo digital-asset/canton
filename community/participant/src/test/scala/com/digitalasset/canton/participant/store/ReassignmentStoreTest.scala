@@ -11,7 +11,6 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentData.*
@@ -87,7 +86,7 @@ trait ReassignmentStoreTest {
         val store = mk(indexedTargetDomain)
         for {
           _ <- valueOrFail(store.addReassignment(reassignmentData).failOnShutdown)("add failed")
-          lookup10 <- valueOrFail(store.lookup(reassignment10).failOnShutdown)(
+          lookup10 <- valueOrFail(store.lookup(reassignment10))(
             "lookup failed to find the stored reassignment"
           )
         } yield assert(lookup10 == reassignmentData, "lookup finds the stored data")
@@ -97,7 +96,7 @@ trait ReassignmentStoreTest {
         val store = mk(indexedTargetDomain)
         for {
           _ <- valueOrFail(store.addReassignment(reassignmentData).failOnShutdown)("add failed")
-          lookup10 <- store.lookup(reassignment11).value.failOnShutdown
+          lookup10 <- store.lookup(reassignment11).value
         } yield assert(
           lookup10 == Left(UnknownReassignmentId(reassignment11)),
           "lookup finds the stored data",
@@ -131,9 +130,7 @@ trait ReassignmentStoreTest {
           )
           _ <- valueOrFail(store.addReassignment(bobReassignment).failOnShutdown)("add bob failed")
           _ <- valueOrFail(store.addReassignment(eveReassignment).failOnShutdown)("add eve failed")
-          lookup <- store
-            .find(None, None, Some(LfPartyId.assertFromString("bob")), 10)
-            .failOnShutdown
+          lookup <- store.find(None, None, Some(LfPartyId.assertFromString("bob")), 10)
         } yield {
           assert(lookup.toList == List(bobReassignment))
         }
@@ -160,9 +157,7 @@ trait ReassignmentStoreTest {
           _ <- valueOrFail(store.addReassignment(reassignment1).failOnShutdown)("add1 failed")
           _ <- valueOrFail(store.addReassignment(reassignment2).failOnShutdown)("add2 failed")
           _ <- valueOrFail(store.addReassignment(reassignment3).failOnShutdown)("add3 failed")
-          lookup <- store
-            .find(None, Some(CantonTimestamp.Epoch.plusMillis(200L)), None, 10)
-            .failOnShutdown
+          lookup <- store.find(None, Some(CantonTimestamp.Epoch.plusMillis(200L)), None, 10)
         } yield {
           assert(lookup.toList == List(reassignment2))
         }
@@ -182,7 +177,7 @@ trait ReassignmentStoreTest {
         for {
           _ <- valueOrFail(store.addReassignment(reassignment1).failOnShutdown)("add1 failed")
           _ <- valueOrFail(store.addReassignment(reassignment2).failOnShutdown)("add2 failed")
-          lookup <- store.find(Some(sourceDomain2), None, None, 10).failOnShutdown
+          lookup <- store.find(Some(sourceDomain2), None, None, 10)
         } yield {
           assert(lookup.toList == List(reassignment2))
         }
@@ -205,7 +200,7 @@ trait ReassignmentStoreTest {
           _ <- valueOrFail(store.addReassignment(reassignmentData20).failOnShutdown)(
             "third add failed"
           )
-          lookup <- store.find(None, None, None, 2).failOnShutdown
+          lookup <- store.find(None, None, None, 2)
         } yield {
           assert(lookup.length == 2)
         }
@@ -244,14 +239,12 @@ trait ReassignmentStoreTest {
           _ <- valueOrFail(store.addReassignment(reassignment2).failOnShutdown)("second add failed")
           _ <- valueOrFail(store.addReassignment(reassignment3).failOnShutdown)("third add failed")
           _ <- valueOrFail(store.addReassignment(reassignment4).failOnShutdown)("fourth add failed")
-          lookup <- store
-            .find(
-              Some(sourceDomain2),
-              Some(CantonTimestamp.Epoch.plusMillis(200L)),
-              Some(LfPartyId.assertFromString("party2")),
-              10,
-            )
-            .failOnShutdown
+          lookup <- store.find(
+            Some(sourceDomain2),
+            Some(CantonTimestamp.Epoch.plusMillis(200L)),
+            Some(LfPartyId.assertFromString("party2")),
+            10,
+          )
         } yield {
           assert(lookup.toList == List(reassignment4))
         }
@@ -296,7 +289,7 @@ trait ReassignmentStoreTest {
 
         for {
           reassignments <- populate(store)
-          lookup <- store.findAfter(None, 10).failOnShutdown
+          lookup <- store.findAfter(None, 10)
         } yield {
           val List(reassignment1, reassignment2, reassignment3, reassignment4) =
             reassignments: @unchecked
@@ -311,20 +304,18 @@ trait ReassignmentStoreTest {
           reassignments <- populate(store)
           List(reassignment1, reassignment2, reassignment3, reassignment4) =
             reassignments: @unchecked
-          lookup <- store
-            .findAfter(
-              requestAfter =
-                Some(reassignment2.reassignmentId.unassignmentTs -> reassignment2.sourceDomain),
-              10,
-            )
-            .failOnShutdown
+          lookup <- store.findAfter(
+            requestAfter =
+              Some(reassignment2.reassignmentId.unassignmentTs -> reassignment2.sourceDomain),
+            10,
+          )
         } yield {
           assert(lookup == Seq(reassignment3, reassignment1, reassignment4))
         }
       }
       "give no pending reassignments when empty" in {
         val store = mk(indexedTargetDomain)
-        for { lookup <- store.findAfter(None, 10).failOnShutdown } yield {
+        for { lookup <- store.findAfter(None, 10) } yield {
           lookup shouldBe empty
         }
       }
@@ -333,7 +324,7 @@ trait ReassignmentStoreTest {
 
         for {
           reassignments <- populate(store)
-          lookup <- store.findAfter(None, 2).failOnShutdown
+          lookup <- store.findAfter(None, 2)
         } yield {
           val List(_reassignment1, reassignment2, reassignment3, _reassignment4) =
             reassignments: @unchecked
@@ -353,8 +344,7 @@ trait ReassignmentStoreTest {
               TimeOfChange(RequestCounter(3), CantonTimestamp.Epoch.plusSeconds(3)),
             )
             .value
-            .failOnShutdown
-          lookup <- store.findAfter(None, 10).failOnShutdown
+          lookup <- store.findAfter(None, 10)
         } yield {
           assert(checked.successful)
           assert(lookup == Seq(reassignment3, reassignment1, reassignment4))
@@ -415,7 +405,7 @@ trait ReassignmentStoreTest {
           _ <- store.addReassignmentsOffsets(offsets).valueOrFailShutdown("adding offsets")
 
           result <- valueOrFail(offsets.toList.parTraverse { case (reassignmentId, _) =>
-            store.lookup(reassignmentId).failOnShutdown
+            store.lookup(reassignmentId)
           })("query reassignments")
         } yield {
           result.lengthCompare(offsets) shouldBe 0
@@ -450,7 +440,7 @@ trait ReassignmentStoreTest {
               "add unassignment offset 1"
             )
 
-          lookupOnlyUnassignment1 <- valueOrFail(store.lookup(reassignmentId).failOnShutdown)(
+          lookupOnlyUnassignment1 <- valueOrFail(store.lookup(reassignmentId))(
             "lookup reassignment data"
           )
 
@@ -460,7 +450,7 @@ trait ReassignmentStoreTest {
               "add unassignment offset 2"
             )
 
-          lookupOnlyUnassignment2 <- valueOrFail(store.lookup(reassignmentId).failOnShutdown)(
+          lookupOnlyUnassignment2 <- valueOrFail(store.lookup(reassignmentId))(
             "lookup reassignment data"
           )
 
@@ -470,9 +460,7 @@ trait ReassignmentStoreTest {
               "add assignment offset 1"
             )
 
-          lookup1 <- valueOrFail(store.lookup(reassignmentId).failOnShutdown)(
-            "lookup reassignment data"
-          )
+          lookup1 <- valueOrFail(store.lookup(reassignmentId))("lookup reassignment data")
 
           _ <- store
             .addReassignmentsOffsets(Map(reassignmentId -> assignmentOffset))
@@ -480,9 +468,7 @@ trait ReassignmentStoreTest {
               "add assignment offset 2"
             )
 
-          lookup2 <- valueOrFail(store.lookup(reassignmentId).failOnShutdown)(
-            "lookup reassignment data"
-          )
+          lookup2 <- valueOrFail(store.lookup(reassignmentId))("lookup reassignment data")
 
         } yield {
           lookupOnlyUnassignment1 shouldBe reassignmentDataOnlyUnassignment
@@ -553,9 +539,7 @@ trait ReassignmentStoreTest {
               "add unassignment offset 2"
             )
 
-          lookup1 <- valueOrFail(store.lookup(reassignmentId).failOnShutdown)(
-            "lookup reassignment data"
-          )
+          lookup1 <- valueOrFail(store.lookup(reassignmentId))("lookup reassignment data")
 
           successfulAddOutOffset <- store
             .addReassignmentsOffsets(Map(reassignmentId -> unassignmentOffset))
@@ -587,9 +571,7 @@ trait ReassignmentStoreTest {
             .value
             .failOnShutdown
 
-          lookup2 <- valueOrFail(store.lookup(reassignmentId).failOnShutdown)(
-            "lookup reassignment data"
-          )
+          lookup2 <- valueOrFail(store.lookup(reassignmentId))("lookup reassignment data")
 
         } yield {
           successfulAddOutOffset.value shouldBe ()
@@ -622,7 +604,7 @@ trait ReassignmentStoreTest {
 
         for {
           _ <- valueOrFail(store.addReassignment(reassignmentData).failOnShutdown)("add failed")
-          lookupNoOffset <- store.findIncomplete(None, Long.MaxValue, None, limit).failOnShutdown
+          lookupNoOffset <- store.findIncomplete(None, Long.MaxValue, None, limit)
 
           _ <- store
             .addReassignmentsOffsets(
@@ -631,17 +613,13 @@ trait ReassignmentStoreTest {
             .valueOrFailShutdown(
               "add unassignment offset failed"
             )
-          lookupBeforeUnassignment <- store
-            .findIncomplete(
-              None,
-              unassignmentOsset - 1,
-              None,
-              limit,
-            )
-            .failOnShutdown
-          lookupAtUnassignment <- store
-            .findIncomplete(None, unassignmentOsset, None, limit)
-            .failOnShutdown
+          lookupBeforeUnassignment <- store.findIncomplete(
+            None,
+            unassignmentOsset - 1,
+            None,
+            limit,
+          )
+          lookupAtUnassignment <- store.findIncomplete(None, unassignmentOsset, None, limit)
 
           _ <- store
             .addReassignmentsOffsets(
@@ -651,25 +629,19 @@ trait ReassignmentStoreTest {
               "add assignment offset failed"
             )
 
-          lookupBeforeAssignment <- store
-            .findIncomplete(
-              None,
-              assignmentOffset - 1,
-              None,
-              limit,
-            )
-            .failOnShutdown
-          lookupAtAssignment <- store
-            .findIncomplete(None, assignmentOffset, None, limit)
-            .failOnShutdown
-          lookupAfterAssignment <- store
-            .findIncomplete(
-              None,
-              assignmentOffset,
-              None,
-              limit,
-            )
-            .failOnShutdown
+          lookupBeforeAssignment <- store.findIncomplete(
+            None,
+            assignmentOffset - 1,
+            None,
+            limit,
+          )
+          lookupAtAssignment <- store.findIncomplete(None, assignmentOffset, None, limit)
+          lookupAfterAssignment <- store.findIncomplete(
+            None,
+            assignmentOffset,
+            None,
+            limit,
+          )
         } yield {
           lookupNoOffset shouldBe empty
 
@@ -703,7 +675,7 @@ trait ReassignmentStoreTest {
 
         for {
           _ <- valueOrFail(store.addReassignment(reassignmentData).failOnShutdown)("add failed")
-          lookupNoOffset <- store.findIncomplete(None, Long.MaxValue, None, limit).failOnShutdown
+          lookupNoOffset <- store.findIncomplete(None, Long.MaxValue, None, limit)
 
           _ <-
             store
@@ -713,17 +685,13 @@ trait ReassignmentStoreTest {
               .valueOrFailShutdown(
                 "add assignment offset failed"
               )
-          lookupBeforeAssignment <- store
-            .findIncomplete(
-              None,
-              assignmentOffset - 1,
-              None,
-              limit,
-            )
-            .failOnShutdown
-          lookupAtAssignment <- store
-            .findIncomplete(None, assignmentOffset, None, limit)
-            .failOnShutdown
+          lookupBeforeAssignment <- store.findIncomplete(
+            None,
+            assignmentOffset - 1,
+            None,
+            limit,
+          )
+          lookupAtAssignment <- store.findIncomplete(None, assignmentOffset, None, limit)
 
           _ <-
             store
@@ -734,25 +702,19 @@ trait ReassignmentStoreTest {
                 "add unassignment offset failed"
               )
 
-          lookupBeforeUnassignment <- store
-            .findIncomplete(
-              None,
-              unassignmentOffset - 1,
-              None,
-              limit,
-            )
-            .failOnShutdown
-          lookupAtUnassignment <- store
-            .findIncomplete(None, unassignmentOffset, None, limit)
-            .failOnShutdown
-          lookupAfterUnassignment <- store
-            .findIncomplete(
-              None,
-              unassignmentOffset,
-              None,
-              limit,
-            )
-            .failOnShutdown
+          lookupBeforeUnassignment <- store.findIncomplete(
+            None,
+            unassignmentOffset - 1,
+            None,
+            limit,
+          )
+          lookupAtUnassignment <- store.findIncomplete(None, unassignmentOffset, None, limit)
+          lookupAfterUnassignment <- store.findIncomplete(
+            None,
+            unassignmentOffset,
+            None,
+            limit,
+          )
         } yield {
           lookupNoOffset shouldBe empty
 
@@ -814,22 +776,16 @@ trait ReassignmentStoreTest {
         for {
           _ <- valueOrFail(addReassignmentsET.failOnShutdown)("add failed")
 
-          lookupNone <- store.findIncomplete(None, unassignmentOffset, None, limit).failOnShutdown
-          lookupAll <- store
-            .findIncomplete(
-              None,
-              unassignmentOffset,
-              lift(alice, bob),
-              limit,
-            )
-            .failOnShutdown
+          lookupNone <- store.findIncomplete(None, unassignmentOffset, None, limit)
+          lookupAll <- store.findIncomplete(
+            None,
+            unassignmentOffset,
+            lift(alice, bob),
+            limit,
+          )
 
-          lookupAlice <- store
-            .findIncomplete(None, unassignmentOffset, lift(alice), limit)
-            .failOnShutdown
-          lookupBob <- store
-            .findIncomplete(None, unassignmentOffset, lift(bob), limit)
-            .failOnShutdown
+          lookupAlice <- store.findIncomplete(None, unassignmentOffset, lift(alice), limit)
+          lookupBob <- store.findIncomplete(None, unassignmentOffset, lift(bob), limit)
         } yield {
           stakeholdersOf(lookupNone) should contain theSameElementsAs stakeholders
           stakeholdersOf(lookupAll) should contain theSameElementsAs stakeholders
@@ -848,11 +804,9 @@ trait ReassignmentStoreTest {
         for {
           _ <- valueOrFail(store.addReassignment(reassignment).failOnShutdown)("add")
 
-          lookup1a <- store
-            .findIncomplete(Some(sourceDomain2), offset, None, limit)
-            .failOnShutdown // Wrong domain
-          lookup1b <- store.findIncomplete(Some(sourceDomain1), offset, None, limit).failOnShutdown
-          lookup1c <- store.findIncomplete(None, offset, None, limit).failOnShutdown
+          lookup1a <- store.findIncomplete(Some(sourceDomain2), offset, None, limit) // Wrong domain
+          lookup1b <- store.findIncomplete(Some(sourceDomain1), offset, None, limit)
+          lookup1c <- store.findIncomplete(None, offset, None, limit)
         } yield {
           lookup1a shouldBe empty
           assertIsIncomplete(lookup1b, reassignment)
@@ -872,8 +826,8 @@ trait ReassignmentStoreTest {
             )
             .valueOrFailShutdown("add out offset")
 
-          lookup0 <- store.findIncomplete(None, offset, None, NonNegativeInt.zero).failOnShutdown
-          lookup1 <- store.findIncomplete(None, offset, None, NonNegativeInt.one).failOnShutdown
+          lookup0 <- store.findIncomplete(None, offset, None, NonNegativeInt.zero)
+          lookup1 <- store.findIncomplete(None, offset, None, NonNegativeInt.one)
 
         } yield {
           lookup0 shouldBe empty
@@ -900,7 +854,7 @@ trait ReassignmentStoreTest {
             .valueOrFailShutdown(
               "add unassignment offset failed"
             )
-          lookupAfterUnassignment <- store.findEarliestIncomplete().failOnShutdown
+          lookupAfterUnassignment <- store.findEarliestIncomplete()
 
           _ <- store
             .addReassignmentsOffsets(
@@ -910,7 +864,7 @@ trait ReassignmentStoreTest {
               "add assignment offset failed"
             )
 
-          lookupAfterAssignment <- store.findEarliestIncomplete().failOnShutdown
+          lookupAfterAssignment <- store.findEarliestIncomplete()
         } yield {
           inside(lookupAfterUnassignment) { case Some((offset, _, _)) =>
             offset shouldBe GlobalOffset.tryFromLong(unassignmentOffset)
@@ -936,7 +890,7 @@ trait ReassignmentStoreTest {
             .valueOrFailShutdown(
               "add assignment offset failed"
             )
-          lookupAfterAssignment <- store.findEarliestIncomplete().failOnShutdown
+          lookupAfterAssignment <- store.findEarliestIncomplete()
 
           _ <- store
             .addReassignmentsOffsets(
@@ -945,7 +899,7 @@ trait ReassignmentStoreTest {
             .valueOrFailShutdown(
               "add unassignment offset failed"
             )
-          lookupAfterUnassignment <- store.findEarliestIncomplete().failOnShutdown
+          lookupAfterUnassignment <- store.findEarliestIncomplete()
 
         } yield {
           inside(lookupAfterAssignment) { case Some((offset, _, _)) =>
@@ -967,11 +921,11 @@ trait ReassignmentStoreTest {
         val assignmentOffset3 = 35L
 
         for {
-          lookupEmpty <- store.findEarliestIncomplete().failOnShutdown
+          lookupEmpty <- store.findEarliestIncomplete()
           _ <- valueOrFail(store.addReassignment(reassignmentData).failOnShutdown)("add failed")
           _ <- valueOrFail(store.addReassignment(reassignmentData3).failOnShutdown)("add failed")
 
-          lookupAllInFlight <- store.findEarliestIncomplete().failOnShutdown
+          lookupAllInFlight <- store.findEarliestIncomplete()
 
           _ <- store
             .addReassignmentsOffsets(
@@ -989,7 +943,7 @@ trait ReassignmentStoreTest {
               "add unassignment offset failed"
             )
 
-          lookupInFlightOrComplete <- store.findEarliestIncomplete().failOnShutdown
+          lookupInFlightOrComplete <- store.findEarliestIncomplete()
 
           _ <- store
             .addReassignmentsOffsets(
@@ -1006,7 +960,7 @@ trait ReassignmentStoreTest {
             .valueOrFailShutdown(
               "add unassignment offset failed"
             )
-          lookupAllComplete <- store.findEarliestIncomplete().failOnShutdown
+          lookupAllComplete <- store.findEarliestIncomplete()
 
         } yield {
           lookupEmpty shouldBe None
@@ -1076,7 +1030,7 @@ trait ReassignmentStoreTest {
               "add unassignment offset failed"
             )
 
-          lookupEnd <- store.findEarliestIncomplete().failOnShutdown
+          lookupEnd <- store.findEarliestIncomplete()
 
         } yield {
           inside(lookupEnd) { case Some((offset, _, _)) =>
@@ -1130,9 +1084,7 @@ trait ReassignmentStoreTest {
           _ <- valueOrFail(store.addReassignment(reassignmentData).failOnShutdown)(
             "second add failed"
           )
-          lookup2 <- valueOrFail(store.lookup(reassignment10).failOnShutdown)(
-            "UnassignmentResult missing"
-          )
+          lookup2 <- valueOrFail(store.lookup(reassignment10))("UnassignmentResult missing")
           _ <- valueOrFail(store.addReassignment(withUnassignmentResult).failOnShutdown)(
             "third add failed"
           )
@@ -1157,15 +1109,9 @@ trait ReassignmentStoreTest {
           _ <- valueOrFail(store.addReassignment(reassignmentData20).failOnShutdown)(
             "third add failed"
           )
-          lookup10 <- valueOrFail(store.lookup(reassignment10).failOnShutdown)(
-            "first reassignment not found"
-          )
-          lookup11 <- valueOrFail(store.lookup(reassignment11).failOnShutdown)(
-            "second reassignment not found"
-          )
-          lookup20 <- valueOrFail(store.lookup(reassignment20).failOnShutdown)(
-            "third reassignment not found"
-          )
+          lookup10 <- valueOrFail(store.lookup(reassignment10))("first reassignment not found")
+          lookup11 <- valueOrFail(store.lookup(reassignment11))("second reassignment not found")
+          lookup20 <- valueOrFail(store.lookup(reassignment20))("third reassignment not found")
         } yield {
           lookup10 shouldBe reassignmentData10
           lookup11 shouldBe reassignmentData11
@@ -1198,9 +1144,7 @@ trait ReassignmentStoreTest {
           _ <- valueOrFail(store.addUnassignmentResult(unassignmentResult).failOnShutdown)(
             "addResult failed"
           )
-          lookup <- valueOrFail(store.lookup(reassignment10).failOnShutdown)(
-            "reassignment not found"
-          )
+          lookup <- valueOrFail(store.lookup(reassignment10))("reassignment not found")
         } yield assert(
           lookup == reassignmentData.copy(unassignmentResult = Some(unassignmentResult)),
           "result is stored",
@@ -1223,9 +1167,7 @@ trait ReassignmentStoreTest {
             "addResult failed"
           )
           modified <- store.addUnassignmentResult(modifiedUnassignmentResult).failOnShutdown.value
-          lookup <- valueOrFail(store.lookup(reassignment10).failOnShutdown)(
-            "reassignment not found"
-          )
+          lookup <- valueOrFail(store.lookup(reassignment10))("reassignment not found")
         } yield {
           assert(
             modified == Left(
@@ -1249,20 +1191,20 @@ trait ReassignmentStoreTest {
       "mark the reassignment as completed" in {
         val store = mk(indexedTargetDomain)
         for {
-          _ <- valueOrFail(store.addReassignment(reassignmentData))("add failed")
-          _ <- valueOrFail(store.addUnassignmentResult(unassignmentResult))(
+          _ <- valueOrFail(store.addReassignment(reassignmentData).failOnShutdown)("add failed")
+          _ <- valueOrFail(store.addUnassignmentResult(unassignmentResult).failOnShutdown)(
             "addResult failed"
           )
           _ <- valueOrFail(store.completeReassignment(reassignment10, toc))("completion failed")
           lookup <- store.lookup(reassignment10).value
         } yield lookup shouldBe Left(ReassignmentCompleted(reassignment10, toc))
-      }.failOnShutdown
+      }
 
       "be idempotent" in {
         val store = mk(indexedTargetDomain)
         for {
-          _ <- valueOrFail(store.addReassignment(reassignmentData))("add failed")
-          _ <- valueOrFail(store.addUnassignmentResult(unassignmentResult))(
+          _ <- valueOrFail(store.addReassignment(reassignmentData).failOnShutdown)("add failed")
+          _ <- valueOrFail(store.addUnassignmentResult(unassignmentResult).failOnShutdown)(
             "addResult failed"
           )
           _ <- valueOrFail(store.completeReassignment(reassignment10, toc))(
@@ -1272,17 +1214,17 @@ trait ReassignmentStoreTest {
             "second completion failed"
           )
         } yield succeed
-      }.failOnShutdown
+      }
 
       "be allowed before the result" in {
         val store = mk(indexedTargetDomain)
         for {
-          _ <- valueOrFail(store.addReassignment(reassignmentData))("add failed")
+          _ <- valueOrFail(store.addReassignment(reassignmentData).failOnShutdown)("add failed")
           _ <- valueOrFail(store.completeReassignment(reassignment10, toc))(
             "first completion failed"
           )
           lookup1 <- store.lookup(reassignment10).value
-          _ <- valueOrFail(store.addUnassignmentResult(unassignmentResult))(
+          _ <- valueOrFail(store.addUnassignmentResult(unassignmentResult).failOnShutdown)(
             "addResult failed"
           )
           lookup2 <- store.lookup(reassignment10).value
@@ -1293,7 +1235,7 @@ trait ReassignmentStoreTest {
           lookup1 shouldBe Left(ReassignmentCompleted(reassignment10, toc))
           lookup2 shouldBe Left(ReassignmentCompleted(reassignment10, toc))
         }
-      }.failOnShutdown
+      }
 
       "detect mismatches" in {
         val store = mk(indexedTargetDomain)
@@ -1308,16 +1250,16 @@ trait ReassignmentStoreTest {
         }
 
         for {
-          _ <- valueOrFail(store.addReassignment(reassignmentData))("add failed")
-          _ <- valueOrFail(store.addUnassignmentResult(unassignmentResult))(
+          _ <- valueOrFail(store.addReassignment(reassignmentData).failOnShutdown)("add failed")
+          _ <- valueOrFail(store.addUnassignmentResult(unassignmentResult).failOnShutdown)(
             "addResult failed"
           )
           _ <- valueOrFail(store.completeReassignment(reassignment10, toc))(
             "first completion failed"
           )
           complete2 <- store.completeReassignment(reassignment10, toc2).value
-          add2 <- store.addReassignment(modifiedReassignmentData).value
-          addResult2 <- store.addUnassignmentResult(modifiedUnassignmentResult).value
+          add2 <- store.addReassignment(modifiedReassignmentData).failOnShutdown.value
+          addResult2 <- store.addUnassignmentResult(modifiedUnassignmentResult).failOnShutdown.value
         } yield {
           complete2 shouldBe Checked.continue(ReassignmentAlreadyCompleted(reassignment10, toc2))
           add2 shouldBe Left(
@@ -1331,14 +1273,14 @@ trait ReassignmentStoreTest {
             )
           )
         }
-      }.failOnShutdown
+      }
 
       "store the first completion" in {
         val store = mk(indexedTargetDomain)
         val toc2 = TimeOfChange(RequestCounter(1), CantonTimestamp.ofEpochSecond(4))
         for {
-          _ <- valueOrFail(store.addReassignment(reassignmentData))("add failed")
-          _ <- valueOrFail(store.addUnassignmentResult(unassignmentResult))(
+          _ <- valueOrFail(store.addReassignment(reassignmentData).failOnShutdown)("add failed")
+          _ <- valueOrFail(store.addUnassignmentResult(unassignmentResult).failOnShutdown)(
             "addResult failed"
           )
           _ <- valueOrFail(store.completeReassignment(reassignment10, toc2))(
@@ -1350,59 +1292,59 @@ trait ReassignmentStoreTest {
           complete2 shouldBe Checked.continue(ReassignmentAlreadyCompleted(reassignment10, toc))
           lookup shouldBe Left(ReassignmentCompleted(reassignment10, toc2))
         }
-      }.failOnShutdown
+      }
     }
 
     "delete" should {
       "remove the reassignment" in {
         val store = mk(indexedTargetDomain)
         for {
-          _ <- valueOrFail(store.addReassignment(reassignmentData))("add failed")
-          _ <- valueOrFail(store.addUnassignmentResult(unassignmentResult))(
+          _ <- valueOrFail(store.addReassignment(reassignmentData).failOnShutdown)("add failed")
+          _ <- valueOrFail(store.addUnassignmentResult(unassignmentResult).failOnShutdown)(
             "addResult failed"
           )
           _ <- store.deleteReassignment(reassignment10)
           lookup <- store.lookup(reassignment10).value
         } yield lookup shouldBe Left(UnknownReassignmentId(reassignment10))
-      }.failOnShutdown
+      }
 
       "purge completed reassignments" in {
         val store = mk(indexedTargetDomain)
         for {
-          _ <- valueOrFail(store.addReassignment(reassignmentData))("add failed")
-          _ <- valueOrFail(store.addUnassignmentResult(unassignmentResult))(
+          _ <- valueOrFail(store.addReassignment(reassignmentData).failOnShutdown)("add failed")
+          _ <- valueOrFail(store.addUnassignmentResult(unassignmentResult).failOnShutdown)(
             "addResult failed"
           )
           _ <- valueOrFail(store.completeReassignment(reassignment10, toc))("completion failed")
           _ <- store.deleteReassignment(reassignment10)
         } yield succeed
-      }.failOnShutdown
+      }
 
       "ignore unknown reassignment IDs" in {
         val store = mk(indexedTargetDomain)
         for {
-          () <- store.deleteReassignment(reassignment10).failOnShutdown
+          () <- store.deleteReassignment(reassignment10)
         } yield succeed
       }
 
       "be idempotent" in {
         val store = mk(indexedTargetDomain)
         for {
-          _ <- valueOrFail(store.addReassignment(reassignmentData))("add failed")
-          _ <- store.deleteReassignment(reassignment10)
-          _ <- store.deleteReassignment(reassignment10)
+          _ <- valueOrFail(store.addReassignment(reassignmentData).failOnShutdown)("add failed")
+          () <- store.deleteReassignment(reassignment10)
+          () <- store.deleteReassignment(reassignment10)
         } yield succeed
-      }.failOnShutdown
+      }
     }
 
     "reassignment stores should be isolated" in {
       val storeTarget = mk(indexedTargetDomain)
       val store1 = mk(IndexedDomain.tryCreate(sourceDomain1.unwrap, 2))
       for {
-        _ <- valueOrFail(storeTarget.addReassignment(reassignmentData))("add failed")
+        _ <- valueOrFail(storeTarget.addReassignment(reassignmentData).failOnShutdown)("add failed")
         found <- store1.lookup(reassignmentData.reassignmentId).value
       } yield found shouldBe Left(UnknownReassignmentId(reassignmentData.reassignmentId))
-    }.failOnShutdown
+    }
 
     "deleteCompletionsSince" should {
       "remove the completions from the criterion on" in {
@@ -1424,11 +1366,11 @@ trait ReassignmentStoreTest {
         )
 
         for {
-          _ <- valueOrFail(store.addReassignment(aliceReassignment))(
+          _ <- valueOrFail(store.addReassignment(aliceReassignment).failOnShutdown)(
             "add alice failed"
           )
-          _ <- valueOrFail(store.addReassignment(bobReassignment))("add bob failed")
-          _ <- valueOrFail(store.addReassignment(eveReassignment))("add eve failed")
+          _ <- valueOrFail(store.addReassignment(bobReassignment).failOnShutdown)("add bob failed")
+          _ <- valueOrFail(store.addReassignment(eveReassignment).failOnShutdown)("add eve failed")
           _ <- valueOrFail(store.completeReassignment(reassignment10, toc))(
             "completion alice failed"
           )
@@ -1438,7 +1380,7 @@ trait ReassignmentStoreTest {
           _ <- valueOrFail(store.completeReassignment(reassignment20, toc2))(
             "completion eve failed"
           )
-          _ <- FutureUnlessShutdown.outcomeF(store.deleteCompletionsSince(RequestCounter(1)))
+          _ <- store.deleteCompletionsSince(RequestCounter(1))
           alice <- leftOrFail(store.lookup(reassignment10))("alice must still be completed")
           bob <- valueOrFail(store.lookup(reassignment11))("bob must not be completed")
           eve <- valueOrFail(store.lookup(reassignment20))("eve must not be completed")
@@ -1453,7 +1395,7 @@ trait ReassignmentStoreTest {
           bob shouldBe bobReassignment
           eve shouldBe eveReassignment
         }
-      }.failOnShutdown
+      }
     }
   }
 }
@@ -1535,7 +1477,7 @@ object ReassignmentStoreTest extends EitherValues with NoTracing {
       .withDomains(reassignmentId.sourceDomain.unwrap)
       .build(loggerFactoryNotUsed)
 
-    val helpers = ReassignmentDataHelpers(
+    val helpers = new ReassignmentDataHelpers(
       contract,
       reassignmentId.sourceDomain,
       targetDomainId,

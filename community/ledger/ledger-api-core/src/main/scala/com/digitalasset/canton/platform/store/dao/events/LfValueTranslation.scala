@@ -34,7 +34,6 @@ import com.digitalasset.canton.platform.{
   PackageId as LfPackageId,
   Value as LfValue,
 }
-import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.daml.lf.data.Ref.{Identifier, Party}
 import com.digitalasset.daml.lf.data.{Bytes, Ref}
 import com.digitalasset.daml.lf.engine as LfEngine
@@ -433,14 +432,13 @@ final class LfValueTranslation(
       enrichAsync(verbose, key.get.unversioned, enricher.enrichContractKey(templateId, _))
         .map(toContractKeyApi(verbose))
     )
-    def asyncInterfaceViews =
-      MonadUtil.sequentialTraverse(renderResult.interfaces.toList)(interfaceId =>
-        computeInterfaceView(
-          templateId,
-          value.unversioned,
-          interfaceId,
-        ).flatMap(toInterfaceView(eventProjectionProperties.verbose, interfaceId))
-      )
+    def asyncInterfaceViews = Future.traverse(renderResult.interfaces.toList)(interfaceId =>
+      computeInterfaceView(
+        templateId,
+        value.unversioned,
+        interfaceId,
+      ).flatMap(toInterfaceView(eventProjectionProperties.verbose, interfaceId))
+    )
 
     def asyncCreatedEventBlob = condFuture(renderResult.createdEventBlob) {
       (for {

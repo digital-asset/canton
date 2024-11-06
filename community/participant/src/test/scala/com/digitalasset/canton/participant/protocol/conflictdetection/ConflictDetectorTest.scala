@@ -47,7 +47,6 @@ import com.digitalasset.canton.participant.store.memory.{
 }
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange}
 import com.digitalasset.canton.protocol.{ExampleTransactionFactory, LfContractId, ReassignmentId}
-import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ReassignmentTag.Target
 import com.digitalasset.canton.util.{Checked, CheckedT}
@@ -1170,8 +1169,8 @@ class ConflictDetectorTest
         fetch00 <- acs.fetchState(coid00)
         fetch01 <- acs.fetchState(coid01)
         fetch10 <- acs.fetchState(coid10)
-        lookup1 <- reassignmentCache.lookup(reassignment1).value.failOnShutdown
-        lookup2 <- reassignmentCache.lookup(reassignment2).value.failOnShutdown
+        lookup1 <- reassignmentCache.lookup(reassignment1).value
+        lookup2 <- reassignmentCache.lookup(reassignment2).value
       } yield {
         assert(
           fetch00.contains(AcsContractState(active, RequestCounter(0), ts)),
@@ -1216,8 +1215,8 @@ class ConflictDetectorTest
         fin <- cd.finalizeRequest(commitSet, toc1).flatten.failOnShutdown
         fetch00 <- acs.fetchState(coid00)
         fetch01 <- acs.fetchState(coid01)
-        lookup1 <- reassignmentCache.lookup(reassignment1).value.failOnShutdown
-        lookup2 <- reassignmentCache.lookup(reassignment2).value.failOnShutdown
+        lookup1 <- reassignmentCache.lookup(reassignment1).value
+        lookup2 <- reassignmentCache.lookup(reassignment2).value
       } yield {
         assert(
           actRes == mkActivenessResult(
@@ -1300,10 +1299,7 @@ class ConflictDetectorTest
           (coid00, toc0, active),
           (coid11, toc0, active),
         )
-        _ <- acs
-          .assignContract(coid01, toc0, sourceDomain1, reassignmentCounter1)
-          .value
-          .failOnShutdown
+        _ <- acs.assignContract(coid01, toc0, sourceDomain1, reassignmentCounter1).value
         reassignmentCache <- mkReassignmentCache(loggerFactory)(reassignment2 -> mediator2)
         cd = mkCd(acs, reassignmentCache)
         activenessSet = mkActivenessSet(
@@ -1334,7 +1330,7 @@ class ConflictDetectorTest
         fetch10 <- acs.fetchState(coid10)
         fetch11 <- acs.fetchState(coid11)
         fetch20 <- acs.fetchState(coid20)
-        lookup2 <- reassignmentCache.lookup(reassignment2).value.failOnShutdown
+        lookup2 <- reassignmentCache.lookup(reassignment2).value
       } yield {
         assert(
           fetch00.contains(AcsContractState(Archived, RequestCounter(1), ts)),
@@ -1895,14 +1891,4 @@ class ConflictDetectorTest
       assert(cr == activenessResult, "activeness check reports the correct result")
       assert(fin == Either.unit)
     }
-
-  private implicit class ConflictDetectionStoreOps[K, A <: PrettyPrinting](
-      store: ConflictDetectionStore[K, A]
-  ) {
-    def fetchState(id: K)(implicit traceContext: TraceContext): Future[Option[StateChange[A]]] =
-      store
-        .fetchStates(Seq(id))
-        .map(_.get(id))
-        .failOnShutdownToAbortException("ConflictDetectionStore.fetchState")
-  }
 }

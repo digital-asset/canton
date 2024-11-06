@@ -109,7 +109,7 @@ object StoredTopologyTransactions
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v33,
+      ProtocolVersion.v32,
       supportedProtoVersion(v30.TopologyTransactions)(fromProtoV30),
       _.toProtoV30.toByteString,
     )

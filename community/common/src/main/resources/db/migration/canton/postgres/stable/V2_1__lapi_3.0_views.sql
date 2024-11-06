@@ -383,6 +383,7 @@ create or replace view debug.lapi_party_entries as
     debug.canton_timestamp(recorded_at) as recorded_at,
     submission_id,
     party,
+    display_name,
     typ,
     rejection_reason,
     is_local,

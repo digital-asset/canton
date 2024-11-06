@@ -185,9 +185,7 @@ final case class LedgerApiServerConfig(
     authServices: Seq[AuthServiceConfig] = Seq.empty,
     adminToken: Option[String] = None,
     jwtTimestampLeeway: Option[JwtTimestampLeeway] = None,
-    keepAliveServer: Option[LedgerApiKeepAliveServerConfig] = Some(
-      LedgerApiKeepAliveServerConfig()
-    ),
+    keepAliveServer: Option[KeepAliveServerConfig] = Some(KeepAliveServerConfig()),
     maxInboundMessageSize: NonNegativeInt = ServerConfig.defaultMaxInboundMessageSize,
     rateLimit: Option[RateLimitingConfig] = Some(DefaultRateLimit),
     postgresDataSource: PostgresDataSourceConfig = PostgresDataSourceConfig(),
@@ -286,13 +284,12 @@ final case class ParticipantNodeParameterConfig(
     stores: ParticipantStoreConfig = ParticipantStoreConfig(),
     reassignmentTimeProofFreshnessProportion: NonNegativeInt = NonNegativeInt.tryCreate(3),
     minimumProtocolVersion: Option[ParticipantProtocolVersion] = Some(
-      ParticipantProtocolVersion(ProtocolVersion.v33)
+      ParticipantProtocolVersion(ProtocolVersion.v32)
     ),
     initialProtocolVersion: ParticipantProtocolVersion = ParticipantProtocolVersion(
       ProtocolVersion.latest
     ),
-    // TODO(i15561): Revert back to `false` once there is a stable Daml 3 protocol version
-    alphaVersionSupport: Boolean = true,
+    alphaVersionSupport: Boolean = false,
     betaVersionSupport: Boolean = false,
     dontWarnOnDeprecatedPV: Boolean = false,
     warnIfOverloadedFor: Option[config.NonNegativeFiniteDuration] = Some(

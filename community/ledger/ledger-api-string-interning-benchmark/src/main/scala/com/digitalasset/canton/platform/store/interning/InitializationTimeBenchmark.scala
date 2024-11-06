@@ -36,7 +36,7 @@ class InitializationTimeBenchmark extends BenchmarkState {
   def run(): Unit =
     Await.result(
       interning
-        .update(Some(stringCount))(BenchmarkState.loadStringInterningEntries(entries)),
+        .update(stringCount)(BenchmarkState.loadStringInterningEntries(entries)),
       perfTestTimeout,
     )
 }

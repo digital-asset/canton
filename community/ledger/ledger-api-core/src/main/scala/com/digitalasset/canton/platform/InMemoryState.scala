@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform
 
 import com.daml.ledger.resources.ResourceOwner
-import com.digitalasset.canton.data.{AbsoluteOffset, Offset}
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
@@ -40,15 +40,14 @@ class InMemoryState(
 
   final def initialized: Boolean = dispatcherState.isRunning
 
-  val cachesUpdatedUpto: AtomicReference[Option[AbsoluteOffset]] =
-    new AtomicReference[Option[AbsoluteOffset]](None)
+  val cachesUpdatedUpto: AtomicReference[Offset] = new AtomicReference[Offset](Offset.beforeBegin)
 
   /** (Re-)initializes the participant in-memory state to a specific ledger end.
     *
     * NOTE: This method is not thread-safe. Calling it concurrently leads to undefined behavior.
     */
   final def initializeTo(
-      ledgerEndO: Option[LedgerEnd]
+      ledgerEnd: LedgerEnd
   )(implicit traceContext: TraceContext): Future[Unit] = {
     def resetInMemoryState(): Future[Unit] =
       for {
@@ -59,28 +58,30 @@ class InMemoryState(
         _ <- dispatcherState.stopDispatcher()
         // Reset the Ledger API caches to the latest ledger end
         _ <- Future {
-          contractStateCaches.reset(ledgerEndO.map(_.lastOffset))
+          contractStateCaches.reset(ledgerEnd.lastOffset)
           inMemoryFanoutBuffer.flush()
-          ledgerEndCache.set(ledgerEndO)
+          ledgerEndCache.set(
+            (ledgerEnd.lastOffset, ledgerEnd.lastEventSeqId, ledgerEnd.lastPublicationTime)
+          )
           submissionTracker.close()
         }
         // Start a new Ledger API offset dispatcher
-        _ = dispatcherState.startDispatcher(
-          Offset.fromAbsoluteOffsetO(ledgerEndO.map(_.lastOffset))
-        )
+        _ = dispatcherState.startDispatcher(Offset.fromAbsoluteOffsetO(ledgerEnd.lastOffset))
       } yield ()
 
     def inMemoryStateIsUptodate: Boolean =
-      ledgerEndCache() == ledgerEndO &&
-        dispatcherState.getDispatcher.getHead().toAbsoluteOffsetO == ledgerEndO.map(_.lastOffset) &&
-        cachesUpdatedUpto.get() == ledgerEndO.map(_.lastOffset)
+      ledgerEndCache()._1 == ledgerEnd.lastOffset &&
+        ledgerEndCache()._2 == ledgerEnd.lastEventSeqId &&
+        ledgerEndCache.publicationTime == ledgerEnd.lastPublicationTime &&
+        dispatcherState.getDispatcher.getHead().toAbsoluteOffsetO == ledgerEnd.lastOffset &&
+        cachesUpdatedUpto.get().toAbsoluteOffsetO == ledgerEnd.lastOffset
 
     def ledgerEndComparisonLog: String =
-      s"inMemoryLedgerEnd:$ledgerEndCache} persistedLedgerEnd:$ledgerEndO dispatcher-head:${dispatcherState.getDispatcher
+      s"[inMemoryLedgerEnd:(offset:${ledgerEndCache()._1},eventSeqId:${ledgerEndCache()._2},publicationTime:${ledgerEndCache.publicationTime}) persistedLedgerEnd:(offset:${ledgerEnd.lastOffset},eventSeqId:${ledgerEnd.lastEventSeqId},publicationTime:${ledgerEnd.lastPublicationTime}) dispatcher-head:${dispatcherState.getDispatcher
           .getHead()} cachesAreUpdateUpto:${cachesUpdatedUpto.get()}"
 
     if (!dispatcherState.isRunning) {
-      logger.info(s"Initializing participant in-memory state to ledger end: $ledgerEndO")
+      logger.info(s"Initializing participant in-memory state to ledger end: $ledgerEnd")
       resetInMemoryState()
     } else if (inMemoryStateIsUptodate) {
       logger.info(
@@ -127,7 +128,7 @@ object InMemoryState {
       ledgerEndCache = mutableLedgerEndCache,
       dispatcherState = dispatcherState,
       contractStateCaches = ContractStateCaches.build(
-        initialLedgerEnd.map(_.lastOffset),
+        Offset.fromAbsoluteOffsetO(initialLedgerEnd.lastOffset),
         maxContractStateCacheSize,
         maxContractKeyStateCacheSize,
         metrics,

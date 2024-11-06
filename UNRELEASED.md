@@ -5,24 +5,6 @@ Please also consult the [full documentation of this release](https://docs.daml.c
 
 ## Until 2024-11-09 (Exclusive)
 
-- The keep alive behavior of the Ledger API can be configured through
-```
-canton.participants.participant.ledger-api.keep-alive-server.*
-```
-- The default values of the keep alive configuration for the ledger api has been set to
-```
-time: 10m
-timeout: 20s
-permitKeepAliveTime: 10s
-permitKeepAliveWithoutCalls: false
-```
-- The effective settings are reported by the Participant Node at the initialization time with a logline:
-```
-2024-10-31 18:09:34,258 [canton-env-ec-35] INFO  c.d.c.p.a.LedgerApiService:participant=participant - Listening on localhost:5001 over plain text with LedgerApiKeepAliveServerConfig(10m,20s,10s,true).
-```
-- New parameter value for `permitKeepAliveWithoutCalls` has been introduced to all keep alive configurations.
-When set, it allows the clients to send keep alive signals outside any ongoing grpc call.
-
 ## Until 2024-10-31 (Exclusive)
 
 - Addition of a `submissionTimeRecordTimeTolerance` dynamic domain parameter, which defaults to the value of `ledgerTimRecordTimeTolerance`

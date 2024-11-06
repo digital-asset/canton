@@ -136,7 +136,7 @@ class ParticipantEventPublisher(
       for {
         ledgerEnd <- ledgerApiIndexer.value.ledgerApiStore.value.ledgerEnd
         _ <-
-          if (ledgerEnd == LedgerEnd.beforeBegin) {
+          if (ledgerEnd.lastOffset == LedgerEnd.beforeBegin.lastOffset) {
             logger.debug("Attempt to publish init update")
             val event = Update.Init(
               recordTime = participantClock.uniqueTime().toLf

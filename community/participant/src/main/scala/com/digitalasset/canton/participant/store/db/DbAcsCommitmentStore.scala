@@ -243,7 +243,7 @@ class DbAcsCommitmentStore(
 
   override def storeReceived(
       commitment: SignedProtocolMessage[AcsCommitment]
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+  )(implicit traceContext: TraceContext): Future[Unit] = {
     val sender = commitment.message.sender
     val from = commitment.message.period.fromExclusive
     val to = commitment.message.period.toInclusive
@@ -266,7 +266,7 @@ class DbAcsCommitmentStore(
                  where domain_idx = $indexedDomain and sender = $sender and from_exclusive = $from and to_inclusive = $to and signed_commitment = $serialized)
           """
     }
-    storage.updateUnlessShutdown_(
+    storage.update_(
       upsertQuery,
       operationName = "commitments: inserting ACS commitment",
     )

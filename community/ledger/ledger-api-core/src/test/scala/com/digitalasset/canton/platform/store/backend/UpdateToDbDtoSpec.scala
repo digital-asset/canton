@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.store.backend
 import com.daml.metrics.api.MetricsContext
 import com.daml.platform.v1.index.StatusDetails
 import com.digitalasset.canton.data.DeduplicationPeriod.{DeduplicationDuration, DeduplicationOffset}
-import com.digitalasset.canton.data.{AbsoluteOffset, CantonTimestamp, Offset}
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel.*
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent
@@ -78,8 +78,10 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
     }
 
     "handle PartyAddedToParticipant (local party)" in {
+      val displayName = "Test party"
       val update = state.Update.PartyAddedToParticipant(
         someParty,
+        displayName,
         someParticipantId,
         someRecordTime,
         Some(someSubmissionId),
@@ -92,6 +94,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           recorded_at = someRecordTime.micros,
           submission_id = Some(someSubmissionId),
           party = Some(someParty),
+          display_name = Some(displayName),
           typ = JdbcLedgerDao.acceptType,
           rejection_reason = None,
           is_local = Some(true),
@@ -100,8 +103,10 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
     }
 
     "handle PartyAddedToParticipant (remote party)" in {
+      val displayName = "Test party"
       val update = state.Update.PartyAddedToParticipant(
         someParty,
+        displayName,
         otherParticipantId,
         someRecordTime,
         None,
@@ -114,6 +119,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           recorded_at = someRecordTime.micros,
           submission_id = None,
           party = Some(someParty),
+          display_name = Some(displayName),
           typ = JdbcLedgerDao.acceptType,
           rejection_reason = None,
           is_local = Some(false),
@@ -137,6 +143,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           recorded_at = someRecordTime.micros,
           submission_id = Some(someSubmissionId),
           party = None,
+          display_name = None,
           typ = JdbcLedgerDao.rejectType,
           rejection_reason = Some(rejectionReason),
           is_local = None,
@@ -1771,7 +1778,7 @@ object UpdateToDbDtoSpec {
     Ref.ParticipantId.assertFromString("UpdateToDbDtoSpecParticipant")
   private val otherParticipantId =
     Ref.ParticipantId.assertFromString("UpdateToDbDtoSpecRemoteParticipant")
-  private val someOffset = AbsoluteOffset.tryFromLong(12345678L)
+  private val someOffset = Offset.fromHexString(Ref.HexString.assertFromString("abcdef"))
   private val someRecordTime =
     Time.Timestamp.assertFromInstant(Instant.parse(("2000-01-01T00:00:00.000000Z")))
   private val someDomainIndex =

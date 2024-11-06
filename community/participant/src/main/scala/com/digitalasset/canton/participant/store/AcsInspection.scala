@@ -42,9 +42,8 @@ class AcsInspection(
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): FutureUnlessShutdown[List[(Boolean, SerializableContract)]] =
-    FutureUnlessShutdown
-      .outcomeF(getCurrentSnapshot())
+  ): Future[List[(Boolean, SerializableContract)]] =
+    getCurrentSnapshot()
       .flatMap(_.traverse { acs =>
         contractStore
           .find(filterId, filterPackage, filterTemplate, limit)

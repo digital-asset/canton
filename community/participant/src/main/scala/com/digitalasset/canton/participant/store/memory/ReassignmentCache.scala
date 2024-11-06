@@ -8,7 +8,6 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.protocol.reassignment.{
@@ -32,7 +31,7 @@ import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.{ExecutionContext, Promise}
+import scala.concurrent.{ExecutionContext, Future, Promise}
 
 /** Adds an in-memory cache of pending completions on top of a [[store.ReassignmentStore]].
   * Completions appear atomic to reassignment lookups that go through the cache,
@@ -59,7 +58,7 @@ class ReassignmentCache(
     */
   def completeReassignment(reassignmentId: ReassignmentId, timeOfCompletion: TimeOfChange)(implicit
       traceContext: TraceContext
-  ): CheckedT[FutureUnlessShutdown, Nothing, ReassignmentStoreError, Unit] = CheckedT {
+  ): CheckedT[Future, Nothing, ReassignmentStoreError, Unit] = CheckedT {
     logger.trace(
       s"Request ${timeOfCompletion.rc}: Marking reassignment $reassignmentId as completed in cache"
     )
@@ -89,23 +88,21 @@ class ReassignmentCache(
             pendingReassignmentCompletion @ PendingReassignmentCompletion(previousTimeOfCompletion)
           ) =>
         if (previousTimeOfCompletion.rc <= timeOfCompletion.rc) {
-          FutureUnlessShutdown.outcomeF {
-            /* An earlier request (or the same) is already writing to the reassignment store.
-             * Therefore, there is no point in trying to store this later request, too.
-             * It suffices to piggy-back on the earlier write and forward the result.
-             */
-            logger.trace(
-              s"Request ${timeOfCompletion.rc}: Omitting the reassignment completion write because the earlier request ${previousTimeOfCompletion.rc} is writing already."
-            )
-            pendingReassignmentCompletion.completion.future.map { result =>
-              for {
-                _ <- result
-                _ <-
-                  if (previousTimeOfCompletion == timeOfCompletion) Checked.result(())
-                  else
-                    Checked.continue(ReassignmentAlreadyCompleted(reassignmentId, timeOfCompletion))
-              } yield ()
-            }
+          /* An earlier request (or the same) is already writing to the reassignment store.
+           * Therefore, there is no point in trying to store this later request, too.
+           * It suffices to piggy-back on the earlier write and forward the result.
+           */
+          logger.trace(
+            s"Request ${timeOfCompletion.rc}: Omitting the reassignment completion write because the earlier request ${previousTimeOfCompletion.rc} is writing already."
+          )
+          pendingReassignmentCompletion.completion.future.map { result =>
+            for {
+              _ <- result
+              _ <-
+                if (previousTimeOfCompletion == timeOfCompletion) Checked.result(())
+                else
+                  Checked.continue(ReassignmentAlreadyCompleted(reassignmentId, timeOfCompletion))
+            } yield ()
           }
         } else {
           /* A later request is already writing to the reassignment store.
@@ -115,7 +112,7 @@ class ReassignmentCache(
            * because the cache has already marked the reassignment as having been completed.
            */
           for {
-            _ <- FutureUnlessShutdown.outcomeF(pendingReassignmentCompletion.completion.future)
+            _ <- pendingReassignmentCompletion.completion.future
             _ = logger.trace(
               s"Request ${timeOfCompletion.rc}: Overwriting the reassignment completion of the later request ${previousTimeOfCompletion.rc}"
             )
@@ -127,7 +124,7 @@ class ReassignmentCache(
 
   override def lookup(reassignmentId: ReassignmentId)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ReassignmentStore.ReassignmentLookupError, ReassignmentData] =
+  ): EitherT[Future, ReassignmentStore.ReassignmentLookupError, ReassignmentData] =
     pendingCompletions.get(reassignmentId).fold(reassignmentStore.lookup(reassignmentId)) {
       case PendingReassignmentCompletion(timeOfCompletion) =>
         EitherT.leftT(ReassignmentCompleted(reassignmentId, timeOfCompletion))
@@ -138,7 +135,7 @@ class ReassignmentCache(
       filterRequestTimestamp: Option[CantonTimestamp],
       filterSubmitter: Option[LfPartyId],
       limit: Int,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Seq[ReassignmentData]] =
+  )(implicit traceContext: TraceContext): Future[Seq[ReassignmentData]] =
     reassignmentStore
       .find(filterSource, filterRequestTimestamp, filterSubmitter, limit)
       .map(
@@ -147,7 +144,7 @@ class ReassignmentCache(
 
   override def findAfter(requestAfter: Option[(CantonTimestamp, Source[DomainId])], limit: Int)(
       implicit traceContext: TraceContext
-  ): FutureUnlessShutdown[Seq[ReassignmentData]] = reassignmentStore
+  ): Future[Seq[ReassignmentData]] = reassignmentStore
     .findAfter(requestAfter, limit)
     .map(
       _.filter(reassignmentData => !pendingCompletions.contains(reassignmentData.reassignmentId))
@@ -164,12 +161,12 @@ class ReassignmentCache(
       validAt: GlobalOffset,
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],
       limit: NonNegativeInt,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Seq[IncompleteReassignmentData]] =
+  )(implicit traceContext: TraceContext): Future[Seq[IncompleteReassignmentData]] =
     reassignmentStore.findIncomplete(sourceDomain, validAt, stakeholders, limit)
 
   def findEarliestIncomplete()(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[(GlobalOffset, ReassignmentId, Target[DomainId])]] =
+  ): Future[Option[(GlobalOffset, ReassignmentId, Target[DomainId])]] =
     reassignmentStore.findEarliestIncomplete()
 }
 

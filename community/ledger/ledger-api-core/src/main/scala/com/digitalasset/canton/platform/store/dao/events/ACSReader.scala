@@ -14,8 +14,6 @@ import com.daml.nameof.NameOf.qualifiedNameOfCurrentFunc
 import com.daml.tracing
 import com.daml.tracing.{SpanAttribute, Spans}
 import com.digitalasset.canton.data.Offset
-import com.digitalasset.canton.ledger.error.CommonErrors.ServerIsShuttingDown
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
@@ -78,7 +76,7 @@ class ACSReader(
         Offset,
         Option[Set[Ref.Party]],
         TraceContext,
-    ) => FutureUnlessShutdown[Vector[Offset]],
+    ) => Future[Vector[Offset]],
     metrics: LedgerApiServerMetrics,
     tracer: Tracer,
     val loggerFactory: NamedLoggerFactory,
@@ -555,10 +553,6 @@ class ACSReader(
             incompleteAssigned
               .mergeSorted(incompleteUnassigned)(Ordering.by(_._1))
               .map(_._2)
-          }.onShutdown {
-            Source.failed(
-              ServerIsShuttingDown.Reject().asGrpcError
-            )
           }
         )
       )

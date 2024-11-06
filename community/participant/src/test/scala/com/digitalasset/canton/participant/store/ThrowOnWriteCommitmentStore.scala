@@ -47,8 +47,8 @@ class ThrowOnWriteCommitmentStore()(override implicit val ec: ExecutionContext)
 
   override def storeReceived(commitment: SignedProtocolMessage[AcsCommitment])(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] =
-    incrementCounterAndErrUS()
+  ): Future[Unit] =
+    incrementCounterAndErrF()
 
   override def markPeriod(
       counterParticipant: ParticipantId,

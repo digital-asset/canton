@@ -120,7 +120,7 @@ class ApiPartyManagementServiceSpec
           Source.single(
             PartyEntry.AllocationAccepted(
               Some("aSubmission"),
-              IndexerPartyDetails(aParty, isLocal = true),
+              IndexerPartyDetails(aParty, None, isLocal = true),
             )
           )
         )
@@ -131,7 +131,7 @@ class ApiPartyManagementServiceSpec
         partiesPageSize,
         mockPartyRecordStore,
         mockIndexTransactionsService,
-        TestPartySyncService(testTelemetrySetup.tracer),
+        TestWritePartyService(testTelemetrySetup.tracer),
         Duration.Zero,
         _ => Ref.SubmissionId.assertFromString("aSubmission"),
         new DefaultOpenTelemetry(OpenTelemetrySdk.builder().build()),
@@ -177,7 +177,7 @@ class ApiPartyManagementServiceSpec
         partiesPageSize,
         mockPartyRecordStore,
         mockIndexTransactionsService,
-        TestPartySyncService(testTelemetrySetup.tracer),
+        TestWritePartyService(testTelemetrySetup.tracer),
         Duration.Zero,
         _ => Ref.SubmissionId.assertFromString("aSubmission"),
         NoOpTelemetry,
@@ -263,6 +263,7 @@ object ApiPartyManagementServiceSpec {
 
   val partyDetails: IndexerPartyDetails = IndexerPartyDetails(
     party = Ref.Party.assertFromString("Bob"),
+    displayName = Some("Bob Martin"),
     isLocal = true,
   )
   val partyRecord: PartyRecord = PartyRecord(
@@ -272,6 +273,7 @@ object ApiPartyManagementServiceSpec {
   )
   val protoPartyDetails: ProtoPartyDetails = ProtoPartyDetails(
     party = "Bob",
+    displayName = "Bob Martin",
     localMetadata = Some(new com.daml.ledger.api.v2.admin.object_meta.ObjectMeta()),
     isLocal = true,
     identityProviderId = "",
@@ -279,9 +281,10 @@ object ApiPartyManagementServiceSpec {
 
   val aParty = Ref.Party.assertFromString("aParty")
 
-  private final case class TestPartySyncService(tracer: Tracer) extends state.PartySyncService {
+  private final case class TestWritePartyService(tracer: Tracer) extends state.WritePartyService {
     override def allocateParty(
         hint: Option[Ref.Party],
+        displayName: Option[String],
         submissionId: Ref.SubmissionId,
     )(implicit
         traceContext: TraceContext

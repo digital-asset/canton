@@ -141,16 +141,15 @@ class AuthServiceJWT(
   }
 }
 
-class AuthServicePrivilegedJWT private[auth] (
+class AuthServicePrivilegedJWT(
     verifier: JwtVerifierBase,
-    targetAudience: Option[String],
-    targetScope: Option[String],
+    targetScope: String,
     accessLevel: AccessLevel,
     val loggerFactory: NamedLoggerFactory,
 ) extends AuthServiceJWTBase(
       verifier = verifier,
-      targetAudience = targetAudience,
-      targetScope = targetScope,
+      targetAudience = None,
+      targetScope = Some(targetScope),
     ) {
 
   private def claims = accessLevel match {
@@ -179,16 +178,14 @@ object AuthServiceJWT {
       accessLevel: AccessLevel,
       loggerFactory: NamedLoggerFactory,
   ): AuthServiceJWTBase =
-    (privileged, targetScope, targetAudience) match {
-      case (true, Some(scope), _) =>
-        new AuthServicePrivilegedJWT(verifier, None, Some(scope), accessLevel, loggerFactory)
-      case (true, None, Some(audience)) =>
-        new AuthServicePrivilegedJWT(verifier, Some(audience), None, accessLevel, loggerFactory)
-      case (true, None, None) =>
+    (privileged, targetScope) match {
+      case (true, Some(scope)) =>
+        new AuthServicePrivilegedJWT(verifier, scope, accessLevel, loggerFactory)
+      case (true, None) =>
         throw new IllegalArgumentException(
-          "Missing targetScope or targetAudience in the definition of a privileged JWT AuthService"
+          "Missing targetScope in the definition of a privileged JWT AuthService"
         )
-      case (false, _, _) =>
+      case (false, _) =>
         new AuthServiceJWT(verifier, targetAudience, targetScope, loggerFactory)
     }
 }

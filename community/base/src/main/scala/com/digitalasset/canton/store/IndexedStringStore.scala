@@ -7,19 +7,17 @@ import cats.data.{EitherT, OptionT}
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.{CacheConfig, ProcessingTimeout}
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.db.DbIndexedStringStore
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.tracing.{TraceContext, TracedAsyncLoadingCache, TracedScaffeine}
-import com.github.blemale.scaffeine.Scaffeine
+import com.github.blemale.scaffeine.{AsyncLoadingCache, Scaffeine}
 import com.google.common.annotations.VisibleForTesting
 import slick.jdbc.{PositionedParameters, SetParameter}
 
 import scala.collection.mutable
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Future}
 
 trait IndexedString[E] {
   def item: E
@@ -47,17 +45,14 @@ abstract class IndexedStringFromDb[A <: IndexedString[B], B] {
 
   def indexed(
       indexedStringStore: IndexedStringStore
-  )(item: B)(implicit ec: ExecutionContext): FutureUnlessShutdown[A] =
+  )(item: B)(implicit ec: ExecutionContext): Future[A] =
     indexedStringStore
       .getOrCreateIndex(dbTyp, asString(item))
       .map(buildIndexed(item, _))
 
   def fromDbIndexOT(context: String, indexedStringStore: IndexedStringStore)(
       index: Int
-  )(implicit
-      ec: ExecutionContext,
-      loggingContext: ErrorLoggingContext,
-  ): OptionT[FutureUnlessShutdown, A] =
+  )(implicit ec: ExecutionContext, loggingContext: ErrorLoggingContext): OptionT[Future, A] =
     fromDbIndexET(indexedStringStore)(index).leftMap { err =>
       loggingContext.logger.error(
         s"Corrupt log id: $index for $dbTyp within context $context: $err"
@@ -66,7 +61,7 @@ abstract class IndexedStringFromDb[A <: IndexedString[B], B] {
 
   def fromDbIndexET(
       indexedStringStore: IndexedStringStore
-  )(index: Int)(implicit ec: ExecutionContext): EitherT[FutureUnlessShutdown, String, A] =
+  )(index: Int)(implicit ec: ExecutionContext): EitherT[Future, String, A] =
     EitherT(indexedStringStore.getForIndex(dbTyp, index).map { strO =>
       for {
         str <- strO.toRight("No entry for given index")
@@ -130,8 +125,10 @@ object IndexedStringType {
 
 /** uid index such that we can store integers instead of long strings in our database */
 trait IndexedStringStore extends AutoCloseable {
-  def getOrCreateIndex(dbTyp: IndexedStringType, str: String300): FutureUnlessShutdown[Int]
-  def getForIndex(dbTyp: IndexedStringType, idx: Int): FutureUnlessShutdown[Option[String300]]
+
+  def getOrCreateIndex(dbTyp: IndexedStringType, str: String300): Future[Int]
+  def getForIndex(dbTyp: IndexedStringType, idx: Int): Future[Option[String300]]
+
 }
 
 object IndexedStringStore {
@@ -141,8 +138,7 @@ object IndexedStringStore {
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit
-      ec: ExecutionContext,
-      tc: TraceContext,
+      ec: ExecutionContext
   ): IndexedStringStore =
     storage match {
       case _: MemoryStorage => InMemoryIndexedStringStore()
@@ -159,56 +155,38 @@ class IndexedStringCache(
     parent: IndexedStringStore,
     config: CacheConfig,
     val loggerFactory: NamedLoggerFactory,
-)(implicit ec: ExecutionContext, tc: TraceContext)
+)(implicit ec: ExecutionContext)
     extends IndexedStringStore
     with NamedLogging {
 
-  private val str2Index
-      : TracedAsyncLoadingCache[FutureUnlessShutdown, (String300, IndexedStringType), Int] =
-    TracedScaffeine.buildTracedAsync[FutureUnlessShutdown, (String300, IndexedStringType), Int](
-      cache = Scaffeine()
-        .maximumSize(config.maximumSize.value)
-        .expireAfterAccess(config.expireAfterAccess.underlying),
-      loader = implicit tc => { case (str, typ) =>
-        parent
-          .getOrCreateIndex(typ, str)
-          .map { idx =>
-            index2strFUS.put((idx, typ), Some(str))
-            idx
-          }
-      },
-    )(logger)
+  private val str2Index: AsyncLoadingCache[(String300, IndexedStringType), Int] = Scaffeine()
+    .maximumSize(config.maximumSize.value)
+    .expireAfterAccess(config.expireAfterAccess.underlying)
+    .buildAsyncFuture[(String300, IndexedStringType), Int] { case (str, typ) =>
+      parent.getOrCreateIndex(typ, str).map { idx =>
+        index2str.put((idx, typ), Future.successful(Some(str)))
+        idx
+      }
+    }
 
   // (index,typ)
-  private val index2strFUS
-      : TracedAsyncLoadingCache[FutureUnlessShutdown, (Int, IndexedStringType), Option[String300]] =
-    TracedScaffeine
-      .buildTracedAsync[FutureUnlessShutdown, (Int, IndexedStringType), Option[String300]](
-        cache = Scaffeine()
-          .maximumSize(config.maximumSize.value)
-          .expireAfterAccess(config.expireAfterAccess.underlying),
-        loader = implicit tc => { case (idx, typ) =>
-          parent
-            .getForIndex(typ, idx)
-            .map {
-              case Some(str) =>
-                str2Index.put((str, typ), idx)
-                Some(str)
-              case None => None
-            }
-        },
-      )(logger)
+  private val index2str: AsyncLoadingCache[(Int, IndexedStringType), Option[String300]] =
+    Scaffeine()
+      .maximumSize(config.maximumSize.value)
+      .expireAfterAccess(config.expireAfterAccess.underlying)
+      .buildAsyncFuture[(Int, IndexedStringType), Option[String300]] { case (idx, typ) =>
+        parent.getForIndex(typ, idx).map {
+          case Some(str) =>
+            str2Index.put((str, typ), Future.successful(idx))
+            Some(str)
+          case None => None
+        }
+      }
 
-  override def getForIndex(
-      dbTyp: IndexedStringType,
-      idx: Int,
-  ): FutureUnlessShutdown[Option[String300]] =
-    index2strFUS.get((idx, dbTyp))
+  override def getForIndex(dbTyp: IndexedStringType, idx: Int): Future[Option[String300]] =
+    index2str.get((idx, dbTyp))
 
-  override def getOrCreateIndex(
-      dbTyp: IndexedStringType,
-      str: String300,
-  ): FutureUnlessShutdown[Int] =
+  override def getOrCreateIndex(dbTyp: IndexedStringType, str: String300): Future[Int] =
     str2Index.get((str, dbTyp))
 
   override def close(): Unit = parent.close()

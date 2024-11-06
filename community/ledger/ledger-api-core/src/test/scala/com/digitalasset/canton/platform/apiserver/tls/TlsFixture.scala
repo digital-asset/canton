@@ -96,7 +96,6 @@ final case class TlsFixture(
           tlsConfiguration = serverTlsConfiguration,
           servicesExecutor = servicesExecutor,
           metrics = LedgerApiServerMetrics.ForTesting,
-          keepAlive = None,
           loggerFactory = loggerFactory,
         )
       )

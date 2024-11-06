@@ -79,7 +79,7 @@ private[apiserver] final class ApiPartyManagementService private (
     maxPartiesPageSize: PositiveInt,
     partyRecordStore: PartyRecordStore,
     transactionService: IndexTransactionsService,
-    syncService: state.PartySyncService,
+    writeService: state.WritePartyService,
     managementServiceTimeout: FiniteDuration,
     submissionIdGenerator: String => Ref.SubmissionId,
     telemetry: Telemetry,
@@ -96,7 +96,7 @@ private[apiserver] final class ApiPartyManagementService private (
 
   private val synchronousResponse = new SynchronousResponse(
     new SynchronousResponseStrategy(
-      syncService,
+      writeService,
       partyManagementService,
       loggerFactory,
     ),
@@ -225,18 +225,19 @@ private[apiserver] final class ApiPartyManagementService private (
             allowEmptyValues = false,
             "party_details.local_metadata.annotations",
           )
+          displayNameO <- optionalString(request.displayName)(Right(_))
           identityProviderId <- optionalIdentityProviderId(
             request.identityProviderId,
             "identity_provider_id",
           )
-        } yield (partyIdHintO, annotations, identityProviderId)
-      } { case (partyIdHintO, annotations, identityProviderId) =>
+        } yield (partyIdHintO, displayNameO, annotations, identityProviderId)
+      } { case (partyIdHintO, displayNameO, annotations, identityProviderId) =>
         (for {
           _ <- identityProviderExistsOrError(identityProviderId)
           ledgerEndbeforeRequest <- transactionService.currentLedgerEnd()
           allocated <- synchronousResponse.submitAndWait(
             submissionId,
-            partyIdHintO,
+            (partyIdHintO, displayNameO),
             ledgerEndbeforeRequest,
             managementServiceTimeout,
           )
@@ -297,12 +298,14 @@ private[apiserver] final class ApiPartyManagementService private (
             request.updateMask,
             "update_mask",
           )
+          displayNameO <- optionalString(partyDetails.displayName)(Right(_))
           identityProviderId <- optionalIdentityProviderId(
             partyDetails.identityProviderId,
             "identity_provider_id",
           )
           partyRecord = PartyDetails(
             party = party,
+            displayName = displayNameO,
             isLocal = partyDetails.isLocal,
             metadata = domain.ObjectMeta(
               resourceVersionO = resourceVersionNumberO,
@@ -347,6 +350,18 @@ private[apiserver] final class ApiPartyManagementService private (
                     party = partyRecord.party,
                     reason =
                       s"Update request attempted to modify not-modifiable 'is_local' attribute",
+                  )
+                  .asGrpcError
+              )
+            } else if (
+              partyDetailsUpdate.displayNameUpdate.exists(_ != fetchedPartyDetails.displayName)
+            ) {
+              Future.failed(
+                PartyManagementServiceErrors.InvalidUpdatePartyDetailsRequest
+                  .Reject(
+                    party = partyRecord.party,
+                    reason =
+                      s"Update request attempted to modify not-modifiable 'display_name' attribute update: ${partyDetailsUpdate.displayNameUpdate}, fetched: ${fetchedPartyDetails.displayName}",
                   )
                   .asGrpcError
               )
@@ -586,6 +601,7 @@ private[apiserver] object ApiPartyManagementService {
   ): ProtoPartyDetails =
     ProtoPartyDetails(
       party = partyDetails.party,
+      displayName = partyDetails.displayName.getOrElse(""),
       isLocal = partyDetails.isLocal,
       localMetadata = Some(Utils.toProtoObjectMeta(metadataO.getOrElse(ObjectMeta.empty))),
       identityProviderId = identityProviderId.map(_.toRequestString).getOrElse(""),
@@ -597,7 +613,7 @@ private[apiserver] object ApiPartyManagementService {
       maxPartiesPageSize: PositiveInt,
       partyRecordStore: PartyRecordStore,
       transactionsService: IndexTransactionsService,
-      writeBackend: state.PartySyncService,
+      writeBackend: state.WritePartyService,
       managementServiceTimeout: FiniteDuration,
       submissionIdGenerator: String => Ref.SubmissionId = CreateSubmissionId.withPrefix,
       telemetry: Telemetry,
@@ -632,11 +648,11 @@ private[apiserver] object ApiPartyManagementService {
   }
 
   private final class SynchronousResponseStrategy(
-      syncService: state.PartySyncService,
+      writeService: state.WritePartyService,
       partyManagementService: IndexPartyManagementService,
       val loggerFactory: NamedLoggerFactory,
   ) extends SynchronousResponse.Strategy[
-        Option[Ref.Party],
+        (Option[Ref.Party], Option[String]),
         PartyEntry,
         PartyEntry.AllocationAccepted,
       ]
@@ -644,11 +660,13 @@ private[apiserver] object ApiPartyManagementService {
 
     override def submit(
         submissionId: Ref.SubmissionId,
-        partyHint: Option[Ref.Party],
+        input: (Option[Ref.Party], Option[String]),
     )(implicit
         loggingContext: LoggingContextWithTrace
-    ): Future[state.SubmissionResult] =
-      syncService.allocateParty(partyHint, submissionId).toScalaUnwrapped
+    ): Future[state.SubmissionResult] = {
+      val (party, displayName) = input
+      writeService.allocateParty(party, displayName, submissionId).toScalaUnwrapped
+    }
 
     override def entries(offset: ParticipantOffset)(implicit
         loggingContext: LoggingContextWithTrace

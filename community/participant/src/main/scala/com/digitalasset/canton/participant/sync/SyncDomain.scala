@@ -745,7 +745,7 @@ class SyncDomain(
     ): FutureUnlessShutdown[Either[Option[(CantonTimestamp, Source[DomainId])], Unit]] = {
       logger.debug(s"Fetch $fetchLimit pending reassignments")
       val resF = for {
-        pendingReassignments <- performUnlessClosingUSF(functionFullName)(
+        pendingReassignments <- performUnlessClosingF(functionFullName)(
           persistent.reassignmentStore.findAfter(
             requestAfter = previous,
             limit = fetchLimit,

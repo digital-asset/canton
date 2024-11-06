@@ -235,7 +235,6 @@ object GrpcServerSpec {
         services = Seq(helloService(ec)),
         interceptors = interceptors,
         loggerFactory = loggerFactory,
-        keepAlive = None,
       )
       channel <- new GrpcChannel.Owner(
         Port.tryCreate(server.getPort).unwrap,

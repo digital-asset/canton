@@ -31,7 +31,7 @@ import com.digitalasset.canton.ledger.error.CommonErrors
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.*
-import com.digitalasset.canton.ledger.participant.state.SyncService.ConnectedDomainResponse
+import com.digitalasset.canton.ledger.participant.state.WriteService.ConnectedDomainResponse
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
@@ -54,8 +54,11 @@ import com.digitalasset.canton.participant.protocol.TransactionProcessor.{
   TransactionSubmissionUnknown,
   TransactionSubmitted,
 }
-import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentCoordination
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.ReassignmentProcessorError
+import com.digitalasset.canton.participant.protocol.reassignment.{
+  IncompleteReassignmentData,
+  ReassignmentCoordination,
+}
 import com.digitalasset.canton.participant.protocol.submission.routing.DomainRouter
 import com.digitalasset.canton.participant.pruning.{AcsCommitmentProcessor, PruningProcessor}
 import com.digitalasset.canton.participant.store.*
@@ -149,10 +152,10 @@ class CantonSyncService(
     futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
     testingConfig: TestingConfigInternal,
-    val ledgerApiIndexer: LifeCycleContainer[LedgerApiIndexer],
+    ledgerApiIndexer: LifeCycleContainer[LedgerApiIndexer],
 )(implicit ec: ExecutionContextExecutor, mat: Materializer, val tracer: Tracer)
-    extends state.SyncService
-    with ParticipantPruningSyncService
+    extends state.WriteService
+    with WriteParticipantPruningService
     with FlagCloseable
     with Spanning
     with NamedLogging
@@ -553,9 +556,9 @@ class CantonSyncService(
         explicitlyDisclosedContracts,
       )
       // TODO(i2794) retry command if token expired
-      submittedFF.value.unwrap.transform { result =>
+      submittedFF.value.transform { result =>
         val loggedResult = result match {
-          case Success(UnlessShutdown.Outcome(Right(sequencedF))) =>
+          case Success(Right(sequencedF)) =>
             // Reply with ACK as soon as the submission has been registered as in-flight,
             // and asynchronously send it to the sequencer.
             logger.debug(s"Command ${submitterInfo.commandId} is now in-flight.")
@@ -586,10 +589,9 @@ class CantonSyncService(
               UnlessShutdown.unit
             }
             Right(loggedF)
-          case Success(UnlessShutdown.Outcome(Left(submissionError))) =>
+          case Success(Left(submissionError)) =>
             processSubmissionError(submissionError)
-          case Failure(PassiveInstanceException(_)) |
-              Success(UnlessShutdown.AbortedDueToShutdown) =>
+          case Failure(PassiveInstanceException(_reason)) =>
             val err = SyncServiceInjectionError.PassiveReplica.Error(
               submitterInfo.applicationId,
               submitterInfo.commandId,
@@ -607,11 +609,12 @@ class CantonSyncService(
 
   override def allocateParty(
       hint: Option[LfPartyId],
+      displayName: Option[String],
       rawSubmissionId: LedgerSubmissionId,
   )(implicit
       traceContext: TraceContext
   ): CompletionStage[SubmissionResult] =
-    partyAllocation.allocate(hint, rawSubmissionId)
+    partyAllocation.allocate(hint, displayName, rawSubmissionId)
 
   override def uploadDar(dar: ByteString, submissionId: Ref.SubmissionId)(implicit
       traceContext: TraceContext
@@ -1683,8 +1686,8 @@ class CantonSyncService(
   }
 
   override def getConnectedDomains(
-      request: SyncService.ConnectedDomainRequest
-  )(implicit traceContext: TraceContext): Future[SyncService.ConnectedDomainResponse] = {
+      request: WriteService.ConnectedDomainRequest
+  )(implicit traceContext: TraceContext): Future[WriteService.ConnectedDomainResponse] = {
     def getSnapshot(domainAlias: DomainAlias, domainId: DomainId): Future[TopologySnapshot] =
       syncCrypto.ips
         .forDomain(domainId)
@@ -1719,35 +1722,38 @@ class CantonSyncService(
     Future.sequence(result).map(_.flatten).map(ConnectedDomainResponse.apply)
   }
 
+  def incompleteReassignmentData(
+      validAt: GlobalOffset,
+      stakeholders: Set[LfPartyId],
+  )(implicit traceContext: TraceContext): Future[List[IncompleteReassignmentData]] =
+    syncDomainPersistentStateManager.getAll.values.toList
+      .parTraverse {
+        _.reassignmentStore.findIncomplete(
+          sourceDomain = None,
+          validAt = validAt,
+          stakeholders = NonEmpty.from(stakeholders),
+          limit = NonNegativeInt.maxValue,
+        )
+      }
+      .map(_.flatten)
+
   override def incompleteReassignmentOffsets(
       validAt: Offset,
       stakeholders: Set[LfPartyId],
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Vector[Offset]] =
+  )(implicit traceContext: TraceContext): Future[Vector[Offset]] =
     if (validAt == Offset.beforeBegin) {
-      FutureUnlessShutdown.pure(Vector.empty)
+      Future.successful(Vector.empty)
     } else {
       UpstreamOffsetConvert
         .toGlobalOffset(validAt)
         .fold(
-          error => FutureUnlessShutdown.failed(new IllegalArgumentException(error)),
-          globalOffset =>
-            syncDomainPersistentStateManager.getAll.values.toList
-              .parTraverse {
-                _.reassignmentStore.findIncomplete(
-                  sourceDomain = None,
-                  validAt = globalOffset,
-                  stakeholders = NonEmpty.from(stakeholders),
-                  limit = NonNegativeInt.maxValue,
-                )
-              }
-              .map(
-                _.flatten
-                  .map(
-                    _.reassignmentEventGlobalOffset.globalOffset
-                      .pipe(UpstreamOffsetConvert.fromGlobalOffset)
-                  )
-                  .toVector
-              ),
+          error => Future.failed(new IllegalArgumentException(error)),
+          incompleteReassignmentData(_, stakeholders).map(
+            _.map(
+              _.reassignmentEventGlobalOffset.globalOffset
+                .pipe(UpstreamOffsetConvert.fromGlobalOffset)
+            ).toVector
+          ),
         )
     }
 }

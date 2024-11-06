@@ -15,6 +15,7 @@ import com.digitalasset.canton.ledger.participant.state.index.MeteringStore.{
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.indexer.parallel.PostPublishData
+import com.digitalasset.canton.platform.store.EventSequentialId
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
   DomainOffset,
   Entry,
@@ -83,7 +84,7 @@ trait IngestionStorageBackend[DB_BATCH] {
     * @param ledgerEnd the current ledger end, or None if no ledger end exists
     * @param connection to be used when inserting the batch
     */
-  def deletePartiallyIngestedData(ledgerEnd: Option[ParameterStorageBackend.LedgerEnd])(
+  def deletePartiallyIngestedData(ledgerEnd: ParameterStorageBackend.LedgerEnd)(
       connection: Connection
   ): Unit
 }
@@ -106,7 +107,7 @@ trait ParameterStorageBackend {
     * @param connection to be used to get the LedgerEnd
     * @return the current LedgerEnd
     */
-  def ledgerEnd(connection: Connection): Option[ParameterStorageBackend.LedgerEnd]
+  def ledgerEnd(connection: Connection): ParameterStorageBackend.LedgerEnd
 
   def domainLedgerEnd(domainId: DomainId)(connection: Connection): DomainIndex
 
@@ -127,7 +128,7 @@ trait ParameterStorageBackend {
   ): Option[Offset]
 
   def updatePostProcessingEnd(
-      postProcessingEnd: Option[AbsoluteOffset]
+      postProcessingEnd: Offset
   )(connection: Connection): Unit
 
   def postProcessingEnd(
@@ -177,14 +178,20 @@ trait MeteringParameterStorageBackend {
 
 object ParameterStorageBackend {
   final case class LedgerEnd(
-      lastOffset: AbsoluteOffset,
+      lastOffset: Option[AbsoluteOffset],
       lastEventSeqId: Long,
       lastStringInterningId: Int,
       lastPublicationTime: CantonTimestamp,
   )
 
   object LedgerEnd {
-    val beforeBegin: Option[ParameterStorageBackend.LedgerEnd] = None
+    val beforeBegin: ParameterStorageBackend.LedgerEnd =
+      ParameterStorageBackend.LedgerEnd(
+        None,
+        EventSequentialId.beforeBegin,
+        0,
+        CantonTimestamp.MinValue,
+      )
   }
   final case class IdentityParams(participantId: ParticipantId)
 
