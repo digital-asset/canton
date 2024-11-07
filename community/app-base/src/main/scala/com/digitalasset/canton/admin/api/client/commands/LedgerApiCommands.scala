@@ -81,15 +81,17 @@ import com.daml.ledger.api.v2.event_query_service.{
   GetEventsByContractIdRequest,
   GetEventsByContractIdResponse,
 }
-import com.daml.ledger.api.v2.interactive_submission_data.PreparedTransaction
-import com.daml.ledger.api.v2.interactive_submission_service.InteractiveSubmissionServiceGrpc.InteractiveSubmissionServiceStub
-import com.daml.ledger.api.v2.interactive_submission_service.{
+import com.daml.ledger.api.v2.interactive.interactive_submission_service.InteractiveSubmissionServiceGrpc.InteractiveSubmissionServiceStub
+import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   ExecuteSubmissionRequest,
   ExecuteSubmissionResponse,
+  HashingSchemeVersion,
   InteractiveSubmissionServiceGrpc,
+  MinLedgerTime,
   PartySignatures,
   PrepareSubmissionRequest,
   PrepareSubmissionResponse,
+  PreparedTransaction,
   SinglePartySignatures,
 }
 import com.daml.ledger.api.v2.reassignment.{AssignedEvent, Reassignment, UnassignedEvent}
@@ -1390,8 +1392,10 @@ object LedgerApiCommands {
             applicationId = applicationId,
             commandId = commandId,
             commands = commands,
-            minLedgerTimeAbs =
-              minLedgerTimeAbs.map(ProtoConverter.InstantConverter.toProtoPrimitive),
+            minLedgerTime = minLedgerTimeAbs
+              .map(ProtoConverter.InstantConverter.toProtoPrimitive)
+              .map(MinLedgerTime.Time.MinLedgerTimeAbs.apply)
+              .map(MinLedgerTime(_)),
             actAs = actAs,
             readAs = readAs,
             disclosedContracts = disclosedContracts,
@@ -1420,8 +1424,9 @@ object LedgerApiCommands {
         transactionSignatures: Map[PartyId, Seq[Signature]],
         submissionId: String,
         applicationId: String,
-        workflowId: String,
+        minLedgerTimeAbs: Option[Instant],
         deduplicationPeriod: Option[DeduplicationPeriod],
+        hashingSchemeVersion: HashingSchemeVersion,
     ) extends BaseCommand[
           ExecuteSubmissionRequest,
           ExecuteSubmissionResponse,
@@ -1430,7 +1435,7 @@ object LedgerApiCommands {
 
       import com.digitalasset.canton.crypto.LedgerApiCryptoConversions.*
       import io.scalaland.chimney.dsl.*
-      import com.daml.ledger.api.v2.interactive_submission_service as iss
+      import com.daml.ledger.api.v2.interactive.interactive_submission_service as iss
 
       private def makePartySignatures: PartySignatures = PartySignatures(
         transactionSignatures.map { case (party, signatures) =>
@@ -1463,8 +1468,12 @@ object LedgerApiCommands {
             partySignatures = Some(makePartySignatures),
             submissionId = submissionId,
             applicationId = applicationId,
-            workflowId = workflowId,
+            minLedgerTime = minLedgerTimeAbs
+              .map(ProtoConverter.InstantConverter.toProtoPrimitive)
+              .map(MinLedgerTime.Time.MinLedgerTimeAbs.apply)
+              .map(MinLedgerTime(_)),
             deduplicationPeriod = serializeDeduplicationPeriod(deduplicationPeriod),
+            hashingSchemeVersion = hashingSchemeVersion,
           )
         )
 

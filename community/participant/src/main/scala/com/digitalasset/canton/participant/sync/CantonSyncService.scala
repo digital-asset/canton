@@ -296,6 +296,9 @@ class CantonSyncService(
     (tracedDomainId: Traced[DomainId]) =>
       syncDomainPersistentStateManager.protocolVersionFor(tracedDomainId.value)
 
+  override def getProtocolVersionForDomain(domainId: Traced[DomainId]): Option[ProtocolVersion] =
+    protocolVersionGetter(domainId)
+
   participantNodeEphemeralState.inFlightSubmissionTracker.registerDomainStateLookup(domainId =>
     connectedDomainsMap.get(domainId).map(_.ephemeral.inFlightSubmissionTrackerDomainState)
   )

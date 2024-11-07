@@ -3,14 +3,15 @@
 
 package com.digitalasset.canton.platform.apiserver.services.command.interactive
 
+import cats.data.EitherT
 import cats.implicits.toBifunctorOps
-import com.daml.error.ContextualizedErrorLogger
-import com.daml.ledger.api.v2.interactive_submission_data.PreparedTransaction
-import com.daml.ledger.api.v2.interactive_submission_service.*
+import cats.syntax.either.*
+import com.daml.error.{ContextualizedErrorLogger, DamlError}
+import com.daml.ledger.api.v2.interactive.interactive_submission_service.*
 import com.daml.scalautil.future.FutureConversion.*
 import com.daml.timer.Delayed
 import com.digitalasset.canton.CommandId
-import com.digitalasset.canton.crypto.{Hash as CantonHash, InteractiveSubmission}
+import com.digitalasset.canton.crypto.InteractiveSubmission
 import com.digitalasset.canton.ledger.api.domain.{Commands as ApiCommands, SubmissionId}
 import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService
 import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService.{
@@ -19,10 +20,9 @@ import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService.
 }
 import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.configuration.LedgerTimeModel
-import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
+import com.digitalasset.canton.ledger.error.groups.{CommandExecutionErrors, RequestValidationErrors}
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.SubmissionResult
-import com.digitalasset.canton.ledger.participant.state.SubmitterInfo.ExternallySignedSubmission
 import com.digitalasset.canton.logging.LoggingContextWithTrace.*
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
@@ -36,27 +36,24 @@ import com.digitalasset.canton.platform.apiserver.execution.{
   CommandExecutionResult,
   CommandExecutor,
 }
-import com.digitalasset.canton.platform.apiserver.services.command.interactive.InteractiveSubmissionServiceImpl.PendingRequest
+import com.digitalasset.canton.platform.apiserver.services.command.interactive.PreparedTransactionDecoder.DeserializationResult
 import com.digitalasset.canton.platform.apiserver.services.{
   ErrorCause,
   RejectionGenerators,
   TimeProviderType,
   logging,
 }
-import com.digitalasset.canton.platform.config.InteractiveSubmissionServiceConfig
 import com.digitalasset.canton.platform.store.dao.events.LfValueTranslation
-import com.digitalasset.canton.tracing.{Spanning, TraceContext}
+import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.daml.lf.command.ApiCommand
 import com.digitalasset.daml.lf.crypto
-import com.github.benmanes.caffeine.cache
-import com.github.benmanes.caffeine.cache.Caffeine
-import com.google.protobuf.ByteString
-import io.grpc.StatusRuntimeException
 import io.opentelemetry.api.trace.Tracer
-import monocle.macros.syntax.lens.*
 
 import java.time.Duration
+import java.util.UUID
 import scala.concurrent.{ExecutionContext, Future}
 
 private[apiserver] object InteractiveSubmissionServiceImpl {
@@ -73,7 +70,6 @@ private[apiserver] object InteractiveSubmissionServiceImpl {
       commandExecutor: CommandExecutor,
       metrics: LedgerApiServerMetrics,
       checkOverloaded: TraceContext => Option[state.SubmissionResult],
-      interactiveSubmissionServiceConfig: InteractiveSubmissionServiceConfig,
       lfValueTranslation: LfValueTranslation,
       loggerFactory: NamedLoggerFactory,
   )(implicit
@@ -87,7 +83,6 @@ private[apiserver] object InteractiveSubmissionServiceImpl {
     commandExecutor,
     metrics,
     checkOverloaded,
-    interactiveSubmissionServiceConfig,
     lfValueTranslation,
     loggerFactory,
   )
@@ -102,7 +97,6 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
     commandExecutor: CommandExecutor,
     metrics: LedgerApiServerMetrics,
     checkOverloaded: TraceContext => Option[state.SubmissionResult],
-    interactiveSubmissionServiceConfig: InteractiveSubmissionServiceConfig,
     lfValueTranslation: LfValueTranslation,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext, tracer: Tracer)
@@ -111,17 +105,8 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
     with Spanning
     with NamedLogging {
 
-  // TODO(i20660): This is temporary while we settle on a proper serialization format for the prepared transaction
-  // For now for simplicity we keep the required data in-memory to be able to submit the transaction when
-  // it is submitted with external signatures. Obviously this restricts usage of the prepare / submit
-  // flow to using the same node, and does not survive restarts of the node.
-  private val pendingPrepareRequests: cache.Cache[ByteString, PendingRequest] = Caffeine
-    .newBuilder()
-    // Max duration to keep the prepared transaction in memory after it's been prepared
-    .expireAfterWrite(Duration.ofHours(1))
-    .build[ByteString, PendingRequest]()
-
   private val transactionEncoder = new PreparedTransactionEncoder(loggerFactory, lfValueTranslation)
+  private val transactionDecoder = new PreparedTransactionDecoder(loggerFactory)
 
   override def prepare(
       request: PrepareRequestInternal
@@ -172,45 +157,65 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
       Future.successful,
     )
 
-  // TODO(i20660): We hash the command ID only for now while the proper hashing algorithm is being designed
-  private def computeTransactionHash(preparedTransaction: PreparedTransaction)(implicit
-      errorLoggingContext: ContextualizedErrorLogger
-  ): Either[StatusRuntimeException, CantonHash] =
-    for {
-      metadata <- preparedTransaction.metadata.toRight(
-        RequestValidationErrors.MissingField.Reject("metadata").asGrpcError
-      )
-      submitterInfo <- metadata.submitterInfo.toRight(
-        RequestValidationErrors.MissingField.Reject("submitter_info").asGrpcError
-      )
-      cmdId <- CommandId
-        .fromProtoPrimitive(submitterInfo.commandId)
-        .leftMap(err => RequestValidationErrors.InvalidField.Reject("command_id", err).asGrpcError)
-    } yield InteractiveSubmission.computeHash(cmdId)
-
   private def evaluateAndHash(
       submissionSeed: crypto.Hash,
       commands: ApiCommands,
   )(implicit
       loggingContext: LoggingContextWithTrace,
       errorLoggingContext: ContextualizedErrorLogger,
-  ): Future[PrepareSubmissionResponse] =
-    for {
-      result <- withSpan("InteractiveSubmissionService.evaluate") { _ => _ =>
-        commandExecutor.execute(commands, submissionSeed)
+  ): Future[PrepareSubmissionResponse] = {
+    val result: EitherT[Future, DamlError, PrepareSubmissionResponse] = for {
+      commandExecutionResultE <- withSpan("InteractiveSubmissionService.evaluate") { _ => _ =>
+        EitherT.liftF(commandExecutor.execute(commands, submissionSeed))
       }
-      transactionInfo <- handleCommandExecutionResult(result)
-      preparedTransaction <- transactionEncoder.serializeCommandExecutionResult(transactionInfo)
-      transactionHash <- Future.fromTry(computeTransactionHash(preparedTransaction).toTry)
-      // Caffeine doesn't have putIfAbsent. Use `get` with a function to insert the value in the cache to obtain the same result
-      _ = pendingPrepareRequests.get(
-        transactionHash.getCryptographicEvidence,
-        _ => PendingRequest(transactionInfo, commands),
+      commandExecutionResult <- EitherT.liftF(handleCommandExecutionResult(commandExecutionResultE))
+      // Domain is required to be explicitly provided for now
+      domainId <- EitherT.fromEither[Future](
+        commandExecutionResult.optDomainId.toRight(
+          RequestValidationErrors.MissingField.Reject("domain_id")
+        )
       )
+      // Require this participant to be connected to the domain on which the transaction will be run
+      protocolVersionForChosenDomain <- EitherT.fromEither[Future](
+        protocolVersionForDomainId(domainId)
+      )
+      // Use the highest hashing versions supported on that protocol version
+      hashVersion = HashingSchemeVersion
+        .getVersionedHashConstructorFor(protocolVersionForChosenDomain)
+        .max1
+      transactionUUID = UUID.randomUUID()
+      mediatorGroup = 0
+      preparedTransaction <- EitherT.liftF(
+        transactionEncoder.serializeCommandExecutionResult(
+          commandExecutionResult,
+          // TODO(i20688) Domain ID should be picked by the domain router
+          domainId,
+          // TODO(i20688) Transaction UUID should be picked in the TransactionConfirmationRequestFactory
+          transactionUUID,
+          // TODO(i20688) Mediator group should be picked in the ProtocolProcessor
+          mediatorGroup,
+        )
+      )
+      transactionHash <- EitherT
+        .fromEither[Future](
+          InteractiveSubmission.computeVersionedHash(
+            hashVersion,
+            CommandId(commandExecutionResult.submitterInfo.commandId),
+          )
+        )
+        .leftMap(err =>
+          CommandExecutionErrors.InteractiveSubmissionPreparationError
+            .Reject(s"Failed to compute hash: $err")
+        )
+        .leftWiden[DamlError]
     } yield PrepareSubmissionResponse(
       preparedTransaction = Some(preparedTransaction),
       preparedTransactionHash = transactionHash.getCryptographicEvidence,
+      hashingSchemeVersion = hashVersion.toLAPIProto,
     )
+
+    result.value.map(_.leftMap(_.asGrpcError).toTry).flatMap(Future.fromTry)
+  }
 
   private def failedOnCommandExecution(
       error: ErrorCause
@@ -277,48 +282,42 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
       .toScalaUnwrapped
   }
 
+  private def protocolVersionForDomainId(
+      domainId: DomainId
+  )(implicit loggingContext: LoggingContextWithTrace): Either[DamlError, ProtocolVersion] =
+    writeService
+      .getProtocolVersionForDomain(Traced(domainId))
+      .toRight(
+        CommandExecutionErrors.InteractiveSubmissionPreparationError
+          .Reject(s"Unknown domain ID $domainId")
+      )
+
   override def execute(
       request: ExecuteRequest
   )(implicit loggingContext: LoggingContextWithTrace): Future[ExecuteSubmissionResponse] = {
-    // TODO(i20660) add command id to logging
-    val additionalLoggingEntries = Seq(
-      request.workflowId.map(logging.workflowId)
-    ).flatten
+    val commandIdLogging =
+      request.preparedTransaction.metadata
+        .flatMap(_.submitterInfo.map(_.commandId))
+        .map(logging.commandId)
+        .toList
+
     withEnrichedLoggingContext(
       logging.submissionId(request.submissionId),
-      additionalLoggingEntries*
+      commandIdLogging*
     ) { implicit loggingContext =>
       logger.info(
         s"Requesting execution of daml transaction with submission ID ${request.submissionId}"
       )
-      for {
-        hash <- Future.fromTry(computeTransactionHash(request.preparedTransaction).toTry)
-        pending <- Option(
-          pendingPrepareRequests.getIfPresent(hash.getCryptographicEvidence)
+      val result = for {
+        deserializationResult <- EitherT.liftF[Future, DamlError, DeserializationResult](
+          transactionDecoder.makeCommandExecutionResult(request)
         )
-          .map(Future.successful)
-          .getOrElse(
-            // This doesn't use a pre-defined error code because it's a temporary workaround
-            // while we need to keep the transaction in memory
-            Future.failed(
-              io.grpc.Status.NOT_FOUND
-                .withDescription("Unknown command")
-                .asRuntimeException()
-            )
-          )
-        // Update the pending transaction with input data from the execute request
-        updatedPending =
-          pending
-            .focus(_.executionResult.submitterInfo.submissionId)
-            .replace(Some(request.submissionId))
-            .focus(_.executionResult.transactionMeta.workflowId)
-            .replace(request.workflowId)
-            .focus(_.executionResult.submitterInfo.deduplicationPeriod)
-            .replace(request.deduplicationPeriod)
-            .focus(_.executionResult.submitterInfo.externallySignedSubmission)
-            .replace(Some(ExternallySignedSubmission(hash, request.signatures)))
-        _ <- submitIfNotOverloaded(updatedPending.executionResult)
+        _ <- EitherT.liftF[Future, DamlError, SubmissionResult](
+          submitIfNotOverloaded(deserializationResult.commandExecutionResult)
+        )
       } yield ExecuteSubmissionResponse()
+
+      result.value.map(_.leftMap(_.asGrpcError).toTry).flatMap(Future.fromTry)
     }
   }
 }

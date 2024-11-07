@@ -14,10 +14,11 @@ import com.daml.ledger.api.v2.commands.{Command, DisclosedContract}
 import com.daml.ledger.api.v2.completion.Completion
 import com.daml.ledger.api.v2.event.CreatedEvent
 import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdResponse
-import com.daml.ledger.api.v2.interactive_submission_data.PreparedTransaction
-import com.daml.ledger.api.v2.interactive_submission_service.{
+import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   ExecuteSubmissionResponse as ExecuteResponseProto,
+  HashingSchemeVersion,
   PrepareSubmissionResponse as PrepareResponseProto,
+  PreparedTransaction,
 }
 import com.daml.ledger.api.v2.reassignment.Reassignment as ReassignmentProto
 import com.daml.ledger.api.v2.state_service.{
@@ -478,9 +479,10 @@ trait BaseLedgerApiAdministration extends NoTracing {
           preparedTransaction: PreparedTransaction,
           transactionSignatures: Map[PartyId, Seq[Signature]],
           submissionId: String,
+          hashingSchemeVersion: HashingSchemeVersion,
           applicationId: String = applicationId,
-          workflowId: String = "",
           deduplicationPeriod: Option[DeduplicationPeriod] = None,
+          minLedgerTimeAbs: Option[Instant] = None,
       ): ExecuteResponseProto =
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -489,8 +491,9 @@ trait BaseLedgerApiAdministration extends NoTracing {
               transactionSignatures,
               submissionId = submissionId,
               applicationId = applicationId,
-              workflowId = workflowId,
               deduplicationPeriod = deduplicationPeriod,
+              minLedgerTimeAbs = minLedgerTimeAbs,
+              hashingSchemeVersion = hashingSchemeVersion,
             )
           )
         }

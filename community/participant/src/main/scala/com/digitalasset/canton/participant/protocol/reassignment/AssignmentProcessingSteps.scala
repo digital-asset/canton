@@ -54,6 +54,7 @@ import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.ShowUtil.*
@@ -95,6 +96,8 @@ private[reassignment] class AssignmentProcessingSteps(
 
   override def submissionDescription(param: SubmissionParam): String =
     s"Submitter ${param.submitterMetadata.submitter}, reassignmentId ${param.reassignmentId}"
+
+  override def explicitMediatorGroup(param: SubmissionParam): Option[MediatorGroupIndex] = None
 
   override type SubmissionResultArgs = PendingReassignmentSubmission
 

@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
+import com.digitalasset.canton.ledger.participant.state.SubmitterInfo.ExternallySignedSubmission
 import com.digitalasset.canton.participant.sync.TransactionRoutingError
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.MalformedInputErrors
 import com.digitalasset.canton.protocol.{
@@ -33,6 +34,7 @@ import scala.concurrent.{ExecutionContext, Future}
   * @param inputContractsDomainData Information about the input contracts
   * @param prescribedDomainO If non-empty, thInvalidWorkflowIde prescribed domain will be chosen for routing.
   *                          In case this domain is not admissible, submission will fail.
+  * @param externallySignedSubmissionO Data for externally signed transactions. Can be empty.
   */
 private[routing] final case class TransactionData private (
     transaction: LfVersionedTransaction,
@@ -40,7 +42,7 @@ private[routing] final case class TransactionData private (
     requiredPackagesPerParty: Map[LfPartyId, Set[LfPackageId]],
     actAs: Set[LfPartyId],
     readAs: Set[LfPartyId],
-    signedExternally: Set[LfPartyId],
+    externallySignedSubmissionO: Option[ExternallySignedSubmission],
     inputContractsDomainData: ContractsDomainData,
     prescribedDomainO: Option[DomainId],
 ) {
@@ -53,7 +55,7 @@ private[routing] object TransactionData {
   def create(
       actAs: Set[LfPartyId],
       readAs: Set[LfPartyId],
-      signedExternally: Set[LfPartyId],
+      externallySignedSubmissionO: Option[ExternallySignedSubmission],
       transaction: LfVersionedTransaction,
       ledgerTime: CantonTimestamp,
       domainStateProvider: DomainStateProvider,
@@ -82,7 +84,7 @@ private[routing] object TransactionData {
       requiredPackagesPerParty = Blinding.partyPackages(transaction),
       actAs = actAs,
       readAs = readAs,
-      signedExternally = signedExternally,
+      externallySignedSubmissionO = externallySignedSubmissionO,
       inputContractsDomainData = contractsDomainData,
       prescribedDomainO = prescribedDomainIdO,
     )
@@ -106,14 +108,11 @@ private[routing] object TransactionData {
     for {
       actAs <- EitherT.fromEither[Future](submitterInfo.actAs.traverse(parseReader).map(_.toSet))
       readers <- EitherT.fromEither[Future](submitterInfo.readAs.traverse(parseReader).map(_.toSet))
-      signedExternally = submitterInfo.externallySignedSubmission.fold(Set.empty[LfPartyId])(
-        _.signatures.keys.map(_.toLf).toSet
-      )
 
       transactionData <- create(
         actAs = actAs,
         readAs = readers,
-        signedExternally = signedExternally,
+        externallySignedSubmissionO = submitterInfo.externallySignedSubmission,
         transaction,
         ledgerTime,
         domainStateProvider,
