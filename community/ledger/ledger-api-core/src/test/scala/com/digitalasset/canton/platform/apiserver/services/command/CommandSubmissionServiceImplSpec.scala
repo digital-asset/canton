@@ -271,6 +271,8 @@ class CommandSubmissionServiceImplSpec
       commandId = Ref.CommandId.assertFromString("foobar"),
       deduplicationPeriod = DeduplicationDuration(Duration.ofMinutes(1)),
       submissionId = None,
+      transactionUUID = None,
+      mediatorGroup = None,
       externallySignedSubmission = None,
     )
     val transactionMeta = TransactionMeta(
