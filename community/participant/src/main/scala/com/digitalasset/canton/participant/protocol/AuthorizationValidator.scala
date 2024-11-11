@@ -4,18 +4,17 @@
 package com.digitalasset.canton.participant.protocol
 
 import cats.syntax.parallel.*
-import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.{FullTransactionViewTree, SubmitterMetadata, ViewPosition}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps.ParsedTransactionRequest
 import com.digitalasset.canton.protocol.{ExternalAuthorization, RequestId}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 
 class AuthorizationValidator(participantId: ParticipantId, enableExternalAuthorization: Boolean)(
     implicit executionContext: ExecutionContext
@@ -23,7 +22,7 @@ class AuthorizationValidator(participantId: ParticipantId, enableExternalAuthori
 
   def checkAuthorization(
       parsedRequest: ParsedTransactionRequest
-  )(implicit traceContext: TraceContext): Future[Map[ViewPosition, String]] =
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Map[ViewPosition, String]] =
     checkAuthorization(
       parsedRequest.requestId,
       parsedRequest.rootViewTrees.forgetNE,
@@ -34,7 +33,7 @@ class AuthorizationValidator(participantId: ParticipantId, enableExternalAuthori
       requestId: RequestId,
       rootViews: Seq[FullTransactionViewTree],
       snapshot: TopologySnapshot,
-  )(implicit traceContext: TraceContext): Future[Map[ViewPosition, String]] =
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Map[ViewPosition, String]] =
     rootViews
       .parTraverseFilter { rootView =>
         val authorizers =
@@ -45,8 +44,8 @@ class AuthorizationValidator(participantId: ParticipantId, enableExternalAuthori
 
         def noAuthorizationForParties(
             notCoveredBySubmittingParty: Set[LfPartyId]
-        ): Future[Option[String]] =
-          Future.successful(
+        ): FutureUnlessShutdown[Option[String]] =
+          FutureUnlessShutdown.pure(
             Some(
               err(
                 show"Missing authorization for $notCoveredBySubmittingParty through the submitting parties."
@@ -66,8 +65,8 @@ class AuthorizationValidator(participantId: ParticipantId, enableExternalAuthori
 
         def missingExternalAuthorizers(
             parties: Set[LfPartyId]
-        ): Future[Option[String]] =
-          Future.successful(
+        ): FutureUnlessShutdown[Option[String]] =
+          FutureUnlessShutdown.pure(
             Some(
               err(
                 show"An externally signed transaction is missing the following acting parties: $parties."
@@ -82,13 +81,22 @@ class AuthorizationValidator(participantId: ParticipantId, enableExternalAuthori
             show"The following parties have provided fingerprints that are not valid: $parties"
           )
 
-        def checkMetadata(submitterMetadata: SubmitterMetadata): Future[Option[String]] =
+        def notHostedForConfirmation(
+            parties: Set[LfPartyId]
+        ): String =
+          err(
+            show"The following parties have are not hosted anywhere on the domain with confirmation rights: $parties"
+          )
+
+        def checkMetadata(
+            submitterMetadata: SubmitterMetadata
+        ): FutureUnlessShutdown[Option[String]] =
           submitterMetadata.externalAuthorization match {
             case None => checkNonExternallySignedMetadata(submitterMetadata)
             case Some(tx) if enableExternalAuthorization =>
               checkExternallySignedMetadata(submitterMetadata, tx)
             case Some(_) =>
-              Future.successful(
+              FutureUnlessShutdown.pure(
                 Some(
                   err(
                     "External authentication is not enabled (to enable set enable-external-authorization parameter)"
@@ -99,15 +107,17 @@ class AuthorizationValidator(participantId: ParticipantId, enableExternalAuthori
 
         def checkNonExternallySignedMetadata(
             submitterMetadata: SubmitterMetadata
-        ): Future[Option[String]] = {
+        ): FutureUnlessShutdown[Option[String]] = {
           val notCoveredBySubmittingParty = authorizers -- submitterMetadata.actAs
           if (notCoveredBySubmittingParty.nonEmpty) {
             noAuthorizationForParties(notCoveredBySubmittingParty)
           } else {
             for {
-              notAllowedBySubmittingParticipant <- snapshot.canNotSubmit(
-                submitterMetadata.submittingParticipant,
-                submitterMetadata.actAs.toSeq,
+              notAllowedBySubmittingParticipant <- FutureUnlessShutdown.outcomeF(
+                snapshot.canNotSubmit(
+                  submitterMetadata.submittingParticipant,
+                  submitterMetadata.actAs.toSeq,
+                )
               )
             } yield
               if (notAllowedBySubmittingParticipant.nonEmpty) {
@@ -121,49 +131,67 @@ class AuthorizationValidator(participantId: ParticipantId, enableExternalAuthori
 
         def checkExternallySignedMetadata(
             submitterMetadata: SubmitterMetadata,
-            tx: ExternalAuthorization,
-        ): Future[Option[String]] = {
+            externalAuthorization: ExternalAuthorization,
+        ): FutureUnlessShutdown[Option[String]] = {
+          def validateFingerprints =
+            // The parties are external
+            externalAuthorization.signatures.toSeq
+              .parTraverseFilter { case (signingParty, partySignatures) =>
+                // Retrieve each party's registered fingerprint from topology
+                snapshot.partyAuthorization(signingParty).map {
+                  case Some(info) =>
+                    val signatureFingerprints = partySignatures.map(_.signedBy).toSet
+                    val invalidFingerprints =
+                      signatureFingerprints -- info.signingKeys.map(_.fingerprint).toSet
+                    Option
+                      // If some fingerprints are not registered, they're invalid
+                      .when(invalidFingerprints.nonEmpty)(signingParty)
+                      .orElse(
+                        // If we have less fingerprints than the required threshold, it's also a reject
+                        Option
+                          .when(signatureFingerprints.size < info.threshold.unwrap)(signingParty)
+                      )
+                  // If the party hasn't registered signing keys, it's not an external party so we reject
+                  case None =>
+                    Some(signingParty)
+                }
+              }
+              .map(_.toSet)
+              .map { parties =>
+                Option.when(parties.nonEmpty)(missingValidFingerprints(parties))
+              }
+
+          def validateExternalPartiesIsHostedForConfirmation =
+            FutureUnlessShutdown
+              .outcomeF(snapshot.hasNoConfirmer(submitterMetadata.actAs.forgetNE))
+              .map { notHosted =>
+                Option.when(notHosted.nonEmpty)(notHostedForConfirmation(notHosted))
+              }
+
           // The signed TX parties covers all act-as parties
-          val signedAs = tx.signatures.keySet
+          val signedAs = externalAuthorization.signatures.keySet
           val missingAuthorizers = (submitterMetadata.actAs ++ authorizers) -- signedAs.map(_.toLf)
           if (missingAuthorizers.nonEmpty) {
             missingExternalAuthorizers(missingAuthorizers)
-          } else
-            {
-              // The parties are external
-              tx.signatures.toSeq
-                .parTraverseFilter { case (p, s) =>
-                  snapshot.partyAuthorization(p).map {
-                    case Some(info) =>
-                      val signedFingerprints = s.map(_.signedBy).toSet
-                      val invalidFingerprints =
-                        signedFingerprints -- info.signingKeys.map(_.fingerprint).toSet
-                      if (invalidFingerprints.nonEmpty) {
-                        Some(p)
-                      } else {
-                        Option.when(signedFingerprints.size < info.threshold.unwrap)(p)
-                      }
-                    case None =>
-                      Some(p)
-                  }
-                }
-                .map(_.toSet)
-                .map { parties =>
-                  Option.when(parties.nonEmpty)(missingValidFingerprints(parties))
-                }
-            }.failOnShutdownToAbortException(functionFullName)
+          } else {
+            for {
+              invalidFingerprints <- validateFingerprints
+              notHosted <- validateExternalPartiesIsHostedForConfirmation
+            } yield invalidFingerprints.orElse(notHosted)
+          }
         }
 
-        def checkAuthorizersAreNotHosted(): Future[Option[String]] =
-          snapshot.hostedOn(authorizers, participantId).map { hostedAuthorizers =>
-            // If this participant hosts an authorizer, it should also have received the parent view.
-            // As rootView is not a top-level (submitter metadata is blinded), there is a gap in the authorization chain.
+        def checkAuthorizersAreNotHosted(): FutureUnlessShutdown[Option[String]] =
+          FutureUnlessShutdown.outcomeF(snapshot.hostedOn(authorizers, participantId)).map {
+            hostedAuthorizers =>
+              // If this participant hosts an authorizer, it should also have received the parent view.
+              // As rootView is not a top-level (submitter metadata is blinded), there is a gap in the authorization chain.
 
-            Option.when(hostedAuthorizers.nonEmpty)(
-              err(
-                show"Missing authorization for ${hostedAuthorizers.keys.toSeq.sorted}, ${rootView.viewPosition}."
+              Option.when(hostedAuthorizers.nonEmpty)(
+                err(
+                  show"Missing authorization for ${hostedAuthorizers.keys.toSeq.sorted}, ${rootView.viewPosition}."
+                )
               )
-            )
           }
 
         (rootView.submitterMetadataO match {

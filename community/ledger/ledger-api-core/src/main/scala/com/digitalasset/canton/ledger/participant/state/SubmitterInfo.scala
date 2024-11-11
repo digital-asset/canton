@@ -48,8 +48,6 @@ final case class SubmitterInfo(
     commandId: Ref.CommandId,
     deduplicationPeriod: DeduplicationPeriod,
     submissionId: Option[Ref.SubmissionId],
-    transactionUUID: Option[UUID],
-    mediatorGroup: Option[MediatorGroupIndex],
     externallySignedSubmission: Option[ExternallySignedSubmission],
 ) {
 
@@ -71,10 +69,19 @@ final case class SubmitterInfo(
 object SubmitterInfo {
   implicit val `ExternallySignedSubmission to LoggingValue`
       : ToLoggingValue[ExternallySignedSubmission] = {
-    case ExternallySignedSubmission(version, signatures) =>
+    case ExternallySignedSubmission(
+          version,
+          signatures,
+          transactionUUID,
+          mediatorGroup,
+          usesLedgerEffectiveTime,
+        ) =>
       LoggingValue.Nested.fromEntries(
         "version" -> version.index,
         "signatures" -> signatures.keys.map(_.toProtoPrimitive),
+        "transactionUUID" -> transactionUUID.toString,
+        "mediatorGroup" -> mediatorGroup.toString,
+        "usesLedgerEffectiveTime" -> usesLedgerEffectiveTime,
       )
   }
   implicit val `SubmitterInfo to LoggingValue`: ToLoggingValue[SubmitterInfo] = {
@@ -85,8 +92,6 @@ object SubmitterInfo {
           commandId,
           deduplicationPeriod,
           submissionId,
-          transactionUUID,
-          mediatorGroup,
           externallySignedSubmission,
         ) =>
       LoggingValue.Nested.fromEntries(
@@ -96,8 +101,6 @@ object SubmitterInfo {
         "commandId " -> commandId,
         "deduplicationPeriod " -> deduplicationPeriod,
         "submissionId" -> submissionId,
-        "transactionUUID" -> transactionUUID.map(_.toString),
-        "mediatorGroup" -> mediatorGroup.map(_.value),
         "externallySignedSubmission" -> externallySignedSubmission,
       )
   }
@@ -105,6 +108,9 @@ object SubmitterInfo {
   final case class ExternallySignedSubmission(
       version: HashingSchemeVersion,
       signatures: Map[PartyId, Seq[Signature]],
+      transactionUUID: UUID,
+      mediatorGroup: MediatorGroupIndex,
+      usesLedgerEffectiveTime: Boolean,
   )
 
 }

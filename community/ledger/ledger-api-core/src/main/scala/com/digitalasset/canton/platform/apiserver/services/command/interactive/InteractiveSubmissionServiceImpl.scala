@@ -6,12 +6,13 @@ package com.digitalasset.canton.platform.apiserver.services.command.interactive
 import cats.data.EitherT
 import cats.implicits.toBifunctorOps
 import cats.syntax.either.*
+import com.daml.error.ErrorCode.LoggedApiException
 import com.daml.error.{ContextualizedErrorLogger, DamlError}
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.*
 import com.daml.scalautil.future.FutureConversion.*
 import com.daml.timer.Delayed
-import com.digitalasset.canton.CommandId
 import com.digitalasset.canton.crypto.InteractiveSubmission
+import com.digitalasset.canton.crypto.InteractiveSubmission.*
 import com.digitalasset.canton.ledger.api.domain.{Commands as ApiCommands, SubmissionId}
 import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService
 import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService.{
@@ -50,11 +51,14 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.daml.lf.command.ApiCommand
 import com.digitalasset.daml.lf.crypto
+import com.digitalasset.daml.lf.transaction.FatContractInstance
 import io.opentelemetry.api.trace.Tracer
 
 import java.time.Duration
 import java.util.UUID
+import scala.collection.immutable.{SortedMap, SortedSet}
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success, Try}
 
 private[apiserver] object InteractiveSubmissionServiceImpl {
   private final case class PendingRequest(
@@ -181,7 +185,7 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
       )
       // Use the highest hashing versions supported on that protocol version
       hashVersion = HashingSchemeVersion
-        .getVersionedHashConstructorFor(protocolVersionForChosenDomain)
+        .getHashingSchemeVersionsForProtocolVersion(protocolVersionForChosenDomain)
         .max1
       transactionUUID = UUID.randomUUID()
       mediatorGroup = 0
@@ -196,11 +200,39 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
           mediatorGroup,
         )
       )
+      metadataForHashing = TransactionMetadataForHashing(
+        SortedSet.from(commandExecutionResult.submitterInfo.actAs),
+        commandExecutionResult.submitterInfo.commandId,
+        transactionUUID,
+        mediatorGroup,
+        domainId,
+        Option.when(commandExecutionResult.dependsOnLedgerTime)(
+          commandExecutionResult.transactionMeta.ledgerEffectiveTime
+        ),
+        commandExecutionResult.transactionMeta.submissionTime,
+        SortedMap.from(
+          commandExecutionResult.processedDisclosedContracts
+            .map { disclosedContract =>
+              disclosedContract.create.coid -> FatContractInstance.fromCreateNode(
+                disclosedContract.create,
+                disclosedContract.createdAt,
+                disclosedContract.driverMetadata,
+              )
+            }
+            .toList
+            .toMap
+        ),
+      )
       transactionHash <- EitherT
         .fromEither[Future](
           InteractiveSubmission.computeVersionedHash(
             hashVersion,
-            CommandId(commandExecutionResult.submitterInfo.commandId),
+            commandExecutionResult.transaction,
+            metadataForHashing,
+            commandExecutionResult.transactionMeta.optNodeSeeds
+              .map(_.toList.toMap)
+              .getOrElse(Map.empty),
+            protocolVersionForChosenDomain,
           )
         )
         .leftMap(err =>
@@ -292,6 +324,27 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
           .Reject(s"Unknown domain ID $domainId")
       )
 
+  private def handleSubmissionResult(result: Try[state.SubmissionResult])(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Try[Unit] = {
+    import state.SubmissionResult.*
+    result match {
+      case Success(Acknowledged) =>
+        logger.debug("Interactive submission acknowledged by sync-service.")
+        Success(())
+
+      case Success(result: SynchronousError) =>
+        logger.info(s"Rejected: ${result.description}")
+        Failure(result.exception)
+
+      // Do not log again on errors that are logging on creation
+      case Failure(error: LoggedApiException) => Failure(error)
+      case Failure(error) =>
+        logger.info(s"Rejected: ${error.getMessage}")
+        Failure(error)
+    }
+  }
+
   override def execute(
       request: ExecuteRequest
   )(implicit loggingContext: LoggingContextWithTrace): Future[ExecuteSubmissionResponse] = {
@@ -312,8 +365,9 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
         deserializationResult <- EitherT.liftF[Future, DamlError, DeserializationResult](
           transactionDecoder.makeCommandExecutionResult(request)
         )
-        _ <- EitherT.liftF[Future, DamlError, SubmissionResult](
+        _ <- EitherT.liftF[Future, DamlError, Unit](
           submitIfNotOverloaded(deserializationResult.commandExecutionResult)
+            .transform(handleSubmissionResult)
         )
       } yield ExecuteSubmissionResponse()
 

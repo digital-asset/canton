@@ -412,17 +412,17 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
           submitterInfoProto.commandId.transformIntoPartial[lf.data.Ref.CommandId],
         )
         .withFieldConst(_.deduplicationPeriod, executeRequest.deduplicationPeriod)
-        .withFieldConst(_.transactionUUID, Some(transactionUUID))
         .withFieldConstPartial(
-          _.mediatorGroup,
-          metadataProto.mediatorGroup.transformIntoPartial[MediatorGroupIndex].map(Some(_)),
-        )
-        .withFieldConst(
           _.externallySignedSubmission,
-          Some(
+          for {
+            mediatorGroup <- metadataProto.mediatorGroup.transformIntoPartial[MediatorGroupIndex]
+          } yield Some(
             ExternallySignedSubmission(
               executeRequest.serializationVersion,
               executeRequest.signatures,
+              transactionUUID = transactionUUID,
+              mediatorGroup = mediatorGroup,
+              usesLedgerEffectiveTime = metadataProto.ledgerEffectiveTime.isDefined,
             )
           ),
         )
