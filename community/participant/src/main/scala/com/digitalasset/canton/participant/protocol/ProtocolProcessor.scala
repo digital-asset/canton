@@ -136,6 +136,14 @@ abstract class ProtocolProcessor[
     */
   private val submissionCounter: AtomicInteger = new AtomicInteger(0)
 
+  protected def preSubmissionValidations(
+      params: SubmissionParam,
+      cryptoSnapshot: DomainSnapshotSyncCryptoApi,
+      protocolVersion: ProtocolVersion,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SubmissionError, Unit]
+
   /** Submits the request to the sequencer, using a recent topology snapshot and the current persisted state
     * as an approximation to the future state at the assigned request timestamp.
     *
@@ -154,6 +162,7 @@ abstract class ProtocolProcessor[
     val recentSnapshot = crypto.currentSnapshotApproximation
     val explicitMediatorGroupIndex = steps.explicitMediatorGroup(submissionParam)
     for {
+      _ <- preSubmissionValidations(submissionParam, recentSnapshot, protocolVersion)
       mediator <- chooseMediator(recentSnapshot.ipsSnapshot, explicitMediatorGroupIndex)
         .leftMap(steps.embedNoMediatorError)
         .mapK(FutureUnlessShutdown.outcomeK)

@@ -15,6 +15,7 @@ import com.digitalasset.canton.participant.util.DAMLe.{
   ContractWithMetadata,
   HasReinterpret,
   PackageResolver,
+  ReInterpretationResult,
 }
 import com.digitalasset.canton.platform.apiserver.configuration.EngineLoggingConfig
 import com.digitalasset.canton.protocol.*
@@ -37,6 +38,14 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
 object DAMLe {
+  final case class ReInterpretationResult(
+      transaction: LfVersionedTransaction,
+      metadata: TransactionMetadata,
+      keyResolver: LfKeyResolver,
+      usedPackages: Set[PackageId],
+      usesLedgerTime: Boolean,
+  )
+
   def newEngine(
       enableLfDev: Boolean,
       enableLfBeta: Boolean,
@@ -122,7 +131,7 @@ object DAMLe {
     )(implicit traceContext: TraceContext): EitherT[
       Future,
       ReinterpretationError,
-      (LfVersionedTransaction, TransactionMetadata, LfKeyResolver, Set[PackageId]),
+      ReInterpretationResult,
     ]
   }
 
@@ -161,7 +170,7 @@ class DAMLe(
   )(implicit traceContext: TraceContext): EitherT[
     Future,
     ReinterpretationError,
-    (LfVersionedTransaction, TransactionMetadata, LfKeyResolver, Set[PackageId]),
+    ReInterpretationResult,
   ] = {
 
     def peelAwayRootLevelRollbackNode(
@@ -227,11 +236,12 @@ class DAMLe(
       txNoRootRollback <- EitherT.fromEither[Future](
         peeledTxE: Either[ReinterpretationError, LfVersionedTransaction]
       )
-    } yield (
+    } yield ReInterpretationResult(
       txNoRootRollback,
       TransactionMetadata.fromLf(ledgerTime, metadata),
       metadata.globalKeyMapping,
       metadata.usedPackages,
+      metadata.dependsOnTime,
     )
   }
 
@@ -294,7 +304,7 @@ class DAMLe(
         expectFailure = false,
         getEngineAbortStatus = getEngineAbortStatus,
       )
-      (transaction, _, _, _) = transactionWithMetadata
+      ReInterpretationResult(transaction, _, _, _, _) = transactionWithMetadata
       md = transaction.nodes(transaction.roots(0)) match {
         case nc: LfNodeCreate =>
           ContractWithMetadata(
