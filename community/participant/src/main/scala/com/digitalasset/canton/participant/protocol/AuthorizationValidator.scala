@@ -8,9 +8,9 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.{FullTransactionViewTree, SubmitterMetadata, ViewPosition}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps.ParsedTransactionRequest
-import com.digitalasset.canton.protocol.{ExternalAuthorization, RequestId}
+import com.digitalasset.canton.protocol.RequestId
+import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.{ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 
@@ -63,38 +63,13 @@ class AuthorizationValidator(participantId: ParticipantId, enableExternalAuthori
             )
           )
 
-        def missingExternalAuthorizers(
-            parties: Set[LfPartyId]
-        ): FutureUnlessShutdown[Option[String]] =
-          FutureUnlessShutdown.pure(
-            Some(
-              err(
-                show"An externally signed transaction is missing the following acting parties: $parties."
-              )
-            )
-          )
-
-        def missingValidFingerprints(
-            parties: Set[PartyId]
-        ): String =
-          err(
-            show"The following parties have provided fingerprints that are not valid: $parties"
-          )
-
-        def notHostedForConfirmation(
-            parties: Set[LfPartyId]
-        ): String =
-          err(
-            show"The following parties have are not hosted anywhere on the domain with confirmation rights: $parties"
-          )
-
         def checkMetadata(
             submitterMetadata: SubmitterMetadata
         ): FutureUnlessShutdown[Option[String]] =
           submitterMetadata.externalAuthorization match {
             case None => checkNonExternallySignedMetadata(submitterMetadata)
-            case Some(tx) if enableExternalAuthorization =>
-              checkExternallySignedMetadata(submitterMetadata, tx)
+            case Some(_) if enableExternalAuthorization =>
+              checkExternallySignedMetadata(submitterMetadata)
             case Some(_) =>
               FutureUnlessShutdown.pure(
                 Some(
@@ -130,54 +105,20 @@ class AuthorizationValidator(participantId: ParticipantId, enableExternalAuthori
         }
 
         def checkExternallySignedMetadata(
-            submitterMetadata: SubmitterMetadata,
-            externalAuthorization: ExternalAuthorization,
+            submitterMetadata: SubmitterMetadata
         ): FutureUnlessShutdown[Option[String]] = {
-          def validateFingerprints =
-            // The parties are external
-            externalAuthorization.signatures.toSeq
-              .parTraverseFilter { case (signingParty, partySignatures) =>
-                // Retrieve each party's registered fingerprint from topology
-                snapshot.partyAuthorization(signingParty).map {
-                  case Some(info) =>
-                    val signatureFingerprints = partySignatures.map(_.signedBy).toSet
-                    val invalidFingerprints =
-                      signatureFingerprints -- info.signingKeys.map(_.fingerprint).toSet
-                    Option
-                      // If some fingerprints are not registered, they're invalid
-                      .when(invalidFingerprints.nonEmpty)(signingParty)
-                      .orElse(
-                        // If we have less fingerprints than the required threshold, it's also a reject
-                        Option
-                          .when(signatureFingerprints.size < info.threshold.unwrap)(signingParty)
-                      )
-                  // If the party hasn't registered signing keys, it's not an external party so we reject
-                  case None =>
-                    Some(signingParty)
-                }
-              }
-              .map(_.toSet)
-              .map { parties =>
-                Option.when(parties.nonEmpty)(missingValidFingerprints(parties))
-              }
-
-          def validateExternalPartiesIsHostedForConfirmation =
-            FutureUnlessShutdown
-              .outcomeF(snapshot.hasNoConfirmer(submitterMetadata.actAs.forgetNE))
-              .map { notHosted =>
-                Option.when(notHosted.nonEmpty)(notHostedForConfirmation(notHosted))
-              }
-
-          // The signed TX parties covers all act-as parties
-          val signedAs = externalAuthorization.signatures.keySet
-          val missingAuthorizers = (submitterMetadata.actAs ++ authorizers) -- signedAs.map(_.toLf)
-          if (missingAuthorizers.nonEmpty) {
-            missingExternalAuthorizers(missingAuthorizers)
+          val notCoveredBySubmittingParty = authorizers -- submitterMetadata.actAs
+          if (notCoveredBySubmittingParty.nonEmpty) {
+            noAuthorizationForParties(notCoveredBySubmittingParty)
           } else {
-            for {
-              invalidFingerprints <- validateFingerprints
-              notHosted <- validateExternalPartiesIsHostedForConfirmation
-            } yield invalidFingerprints.orElse(notHosted)
+            // Unlike for non-external submissions, here we don't check that the submitting participant
+            // is allowed to submit on behalf of the actAs parties. That's because external parties indeed
+            // do not need to be hosted with submission rights anywhere. We've already validated in the
+            // AuthenticationValidator that the signatures provided cover the actAs parties, so as long as the
+            // actAs parties also cover the authorizers of the transaction, it is enough.
+            // If we later allow submissions with a mixed bag of external and non-external parties, we need to revisit this
+            // check
+            FutureUnlessShutdown.pure(None)
           }
         }
 

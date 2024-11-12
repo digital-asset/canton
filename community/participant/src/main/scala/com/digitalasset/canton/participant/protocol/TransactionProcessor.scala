@@ -104,7 +104,7 @@ class TransactionProcessor(
         ephemeral.contractStore,
         metrics,
         SerializableContractAuthenticator(crypto.pureCrypto),
-        new AuthenticationValidator(),
+        new AuthenticationValidator(loggerFactory),
         new AuthorizationValidator(participantId, parameters.enableExternalAuthorization),
         new InternalConsistencyChecker(
           staticDomainParameters.protocolVersion,
@@ -193,7 +193,13 @@ class TransactionProcessor(
 
           // Verify signatures
           _ <- InteractiveSubmission
-            .verifySignatures(hash, externallySignedSubmission.signatures, cryptoSnapshot)
+            .verifySignatures(
+              hash,
+              externallySignedSubmission.signatures,
+              cryptoSnapshot,
+              submitterInfo.actAs.toSet,
+              logger,
+            )
             .leftMap(TransactionProcessor.SubmissionErrors.InvalidExternalSignature.Error.apply)
             .leftWiden[TransactionProcessor.TransactionSubmissionError]
         } yield ()

@@ -4,9 +4,13 @@
 package com.digitalasset.canton.crypto
 
 import cats.data.EitherT
-import cats.implicits.{catsSyntaxParallelTraverse1, toBifunctorOps, toTraverseOps}
+import cats.syntax.alternative.*
+import cats.syntax.either.*
+import cats.syntax.functor.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.protocol.{LfContractId, SerializableContract}
 import com.digitalasset.canton.topology.{DomainId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -156,16 +160,70 @@ object InteractiveSubmission {
     }
   }
 
+  /** Verify that the signatures provided cover the actAs parties, and are valid.
+    * @param hash hash of the transaction
+    * @param signatures signatures provided in the request
+    * @param cryptoSnapshot topology snapshot to use to validate signatures
+    * @param actAs actAs parties that should be covered by the signatures
+    */
   def verifySignatures(
       hash: Hash,
       signatures: Map[PartyId, Seq[Signature]],
       cryptoSnapshot: DomainSnapshotSyncCryptoApi,
+      actAs: Set[LfPartyId],
+      logger: TracedLogger,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, String, Set[LfPartyId]] =
+  ): EitherT[FutureUnlessShutdown, String, Unit] = {
+    // ActAs parties which do not have a signature
+    val actAsPartiesWithoutSignature = actAs.diff(signatures.keySet.map(_.toLf))
+
+    if (actAsPartiesWithoutSignature.nonEmpty) {
+      // We mandate that if this is an external submission, all actAs parties must have provided a signature
+      EitherT.leftT[FutureUnlessShutdown, Unit](
+        s"The following actAs parties did not provide an external signature: ${actAsPartiesWithoutSignature
+            .mkString(", ")}"
+      )
+    } else {
+      // Signatures coming from non act as parties. This is odd but doesn't warrant a rejection, so we just log it
+      val nonActAsPartiesWithSignatures = signatures.keySet.map(_.toLf).diff(actAs)
+      if (nonActAsPartiesWithSignatures.nonEmpty) {
+        logger.info(
+          s"The following non actAs parties provided an external signature: ${nonActAsPartiesWithSignatures
+              .mkString(", ")}. Those signatures will be discarded."
+        )
+      }
+
+      // We only check validity of signatures coming from the actAs parties
+      val signaturesFromActAsParties =
+        signatures.view
+          .filterKeys(party => actAs.contains(party.toLf))
+          .toMap
+
+      // Now we do verify that all actAs signatures are valid
+      verifySignatures(
+        hash,
+        signaturesFromActAsParties,
+        cryptoSnapshot,
+        logger,
+      )
+    }
+  }
+
+  /** Verifies that there are enough _valid_ signatures for each party to reach the threshold configured for that party.
+    */
+  private def verifySignatures(
+      hash: Hash,
+      signatures: Map[PartyId, Seq[Signature]],
+      cryptoSnapshot: DomainSnapshotSyncCryptoApi,
+      logger: TracedLogger,
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, String, Unit] =
     signatures.toList
-      .parTraverse { case (party, signatures) =>
+      .parTraverse_ { case (party, signatures) =>
         for {
           authInfo <- EitherT(
             cryptoSnapshot.ipsSnapshot
@@ -175,32 +233,35 @@ object InteractiveSubmission {
               )
           )
 
-          validSignatures <- EitherT.fromEither[FutureUnlessShutdown](signatures.traverse {
-            signature =>
-              authInfo.signingKeys
-                .find(_.fingerprint == signature.signedBy)
-                .toRight(s"Signing key ${signature.signedBy} is not a valid key for $party")
-                .flatMap(key =>
-                  cryptoSnapshot.pureCrypto
-                    .verifySignature(hash, key, signature)
-                    .map(_ => key.fingerprint)
-                    .leftMap(_.toString)
-                )
-          })
+          (invalidSignatures, validSignatures) = signatures.map { signature =>
+            authInfo.signingKeys
+              .find(_.fingerprint == signature.signedBy)
+              .toRight(s"Signing key ${signature.signedBy} is not a valid key for $party")
+              .flatMap(key =>
+                cryptoSnapshot.pureCrypto
+                  .verifySignature(hash, key, signature)
+                  .map(_ => key.fingerprint)
+                  .leftMap(_.toString)
+              )
+          }.separate
           validSignaturesSet = validSignatures.toSet
-          _ <- EitherT.cond[FutureUnlessShutdown](
-            validSignaturesSet.size == validSignatures.size,
-            (),
-            s"The following signatures were provided one or more times for $party, all signatures must be unique: ${validSignatures
-                .diff(validSignaturesSet.toList)}",
-          )
+          _ = {
+            // Log invalid signatures at info level because it is unexpected,
+            // but doesn't mandate that we fail validation as long as there are still threshold-many valid signatures
+            // as asserted just below
+            invalidSignatures.foreach { invalidSignature =>
+              logger.info(s"Invalid signature for $party: $invalidSignature")
+            }
+          }
           _ <- EitherT.cond[FutureUnlessShutdown](
             validSignaturesSet.size >= authInfo.threshold.unwrap,
             (),
             s"Received ${validSignatures.size} signatures, but expected ${authInfo.threshold} for $party",
           )
-        } yield party.toLf
+        } yield {
+          logger.debug(
+            s"Found ${validSignaturesSet.size} valid external signatures for $party with threshold ${authInfo.threshold.unwrap}"
+          )
+        }
       }
-      .map(_.toSet)
-
 }

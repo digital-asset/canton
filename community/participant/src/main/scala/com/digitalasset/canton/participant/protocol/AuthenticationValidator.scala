@@ -5,6 +5,8 @@ package com.digitalasset.canton.participant.protocol
 
 import cats.syntax.either.*
 import cats.syntax.parallel.*
+import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.{
   DomainSnapshotSyncCryptoApi,
   Hash,
@@ -13,6 +15,7 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.data.{FullTransactionViewTree, SubmitterMetadata, ViewPosition}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps.ParsedTransactionRequest
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.LazyAsyncReInterpretation
 import com.digitalasset.canton.protocol.{ExternalAuthorization, RequestId}
@@ -23,9 +26,9 @@ import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
-class AuthenticationValidator(implicit
+class AuthenticationValidator(override val loggerFactory: NamedLoggerFactory)(implicit
     executionContext: ExecutionContext
-) {
+) extends NamedLogging {
 
   private[protocol] def verifyViewSignatures(
       parsedRequest: ParsedTransactionRequest,
@@ -156,7 +159,13 @@ class AuthenticationValidator(implicit
                     protocolVersion,
                   )
                   // If Hash computation is successful, verify the signature is valid
-                  .map(verifyExternalSignature(_, externalAuthorization))
+                  .map(
+                    verifyExternalSignaturesForActAs(
+                      _,
+                      externalAuthorization,
+                      submitterMetadata.actAs,
+                    )
+                  )
                   .map(
                     _.map(signatureError => signatureError.map(err).map(viewTree.viewPosition -> _))
                   )
@@ -184,18 +193,29 @@ class AuthenticationValidator(implicit
             )
         }
 
-      def verifyExternalSignature(
+      // Verify the signatures provided by the act as parties are valid.
+      // This proves the request really comes from the actAs parties.
+      // Returns signature validation errors in the form of Some(errorString)
+      def verifyExternalSignaturesForActAs(
           hash: Hash,
           externalAuthorization: ExternalAuthorization,
+          actAs: NonEmpty[Set[LfPartyId]],
       ): FutureUnlessShutdown[Option[String]] =
         InteractiveSubmission
           .verifySignatures(
             hash,
             externalAuthorization.signatures,
             topology,
+            actAs.forgetNE,
+            logger,
           )
           .value
-          .map(_ => None)
+          .map {
+            // Convert signature validation errors to a Some, as this is how we indicate failures
+            case Left(error) => Some(error)
+            // A valid signature verification translates to a None (absence of error)
+            case Right(_) => None
+          }
 
       submitterMetadata.externalAuthorization match {
         case Some(_) if reInterpretedTopLevelViews.size > 1 =>
@@ -207,10 +227,12 @@ class AuthenticationValidator(implicit
             )
           )
         case Some(externalAuthorization) =>
+          // If external signatures are provided, we verify they are valid and cover all the actAs parties
           computeHashAndVerifyExternalSignature(externalAuthorization)
-        // External signatures are not necessarily required. If they're needed to authorize the transaction,
-        // it will be checked in the AuthorizationValidator. Here we simply verify that the provided
-        // signatures are valid
+        // If no external signatures are provided, there's nothing to verify here, and it means
+        // this is a classic submission. The classic submission requirements then apply and will be checked
+        // in the AuthorizationValidator (typically that the submitting participant must have submission rights
+        // for the actAs parties)
         case None => FutureUnlessShutdown.pure(None)
       }
     }
