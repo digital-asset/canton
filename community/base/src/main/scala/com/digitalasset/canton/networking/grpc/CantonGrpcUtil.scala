@@ -5,7 +5,7 @@ package com.digitalasset.canton.networking.grpc
 
 import cats.data.EitherT
 import cats.implicits.*
-import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
+import com.daml.error.{ErrorCategory, ErrorCategoryRetry, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.connection.v30.{ApiInfoServiceGrpc, GetApiInfoRequest}
 import com.digitalasset.canton.error.CantonErrorGroups.GrpcErrorGroup
@@ -240,10 +240,16 @@ object CantonGrpcUtil {
     object AbortedDueToShutdown
         extends ErrorCode(
           id = "ABORTED_DUE_TO_SHUTDOWN",
-          ErrorCategory.InvalidGivenCurrentSystemStateOther,
+          ErrorCategory.TransientServerFailure,
         ) {
       final case class Error()(implicit val loggingContext: ErrorLoggingContext)
-          extends CantonError.Impl("request aborted due to shutdown")
+          extends CantonError.Impl("request aborted due to shutdown") {
+        import scala.concurrent.duration.*
+        // Processing may have been cancelled due to a transient error, e.g., server restarting
+        // The transient errors might be solved by the application retrying with a higher timeout than 1 minute
+        // The non-transient errors will require operator intervention
+        override def retryable = Some(ErrorCategoryRetry(1.minute))
+      }
     }
   }
 

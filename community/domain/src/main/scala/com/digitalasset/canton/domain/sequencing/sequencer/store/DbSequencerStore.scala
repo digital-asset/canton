@@ -886,8 +886,10 @@ class DbSequencerStore(
           from sequencer_events events
           left join sequencer_payloads payloads
             on events.payload_id = payloads.id
+          left join sequencer_members m
+            on m.id = events.sender
           left join seq_traffic_control_consumed_journal traffic
-            on events.ts = traffic.sequencing_timestamp
+            on events.ts = traffic.sequencing_timestamp and m.member = traffic.member
           inner join sequencer_watermarks watermarks
             on events.node_index = watermarks.node_index
           where
@@ -937,8 +939,10 @@ class DbSequencerStore(
         from sequencer_events events
         left join sequencer_payloads payloads
           on events.payload_id = payloads.id
+        left join sequencer_members m
+          on m.id = events.sender
         left join seq_traffic_control_consumed_journal traffic
-          on events.ts = traffic.sequencing_timestamp
+          on events.ts = traffic.sequencing_timestamp and m.member = traffic.member
         inner join sequencer_watermarks watermarks
           on events.node_index = watermarks.node_index
         where
@@ -968,8 +972,10 @@ class DbSequencerStore(
           from sequencer_events events
           left join sequencer_payloads payloads
             on events.payload_id = payloads.id
+          left join sequencer.sequencer_members m
+            on m.id = events.sender
           left join seq_traffic_control_consumed_journal traffic
-            on events.ts = traffic.sequencing_timestamp
+            on events.ts = traffic.sequencing_timestamp and m.member = traffic.member
           inner join sequencer_watermarks watermarks
             on events.node_index = watermarks.node_index
           where
