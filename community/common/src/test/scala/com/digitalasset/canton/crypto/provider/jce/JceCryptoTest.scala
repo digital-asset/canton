@@ -38,6 +38,8 @@ class JceCryptoTest
         )
         .valueOrFail("failed to create crypto")
 
+    behave like migrationTest(jceCrypto())
+
     behave like signingProvider(Jce.signingAlgorithms.supported, jceCrypto())
     behave like encryptionProvider(
       Jce.encryptionAlgorithms.supported,
@@ -97,7 +99,7 @@ class JceCryptoTest
                   .valueOrFail("encrypt")
                 _ = assert(message.bytes != encrypted2.ciphertext)
               } yield encrypted1.ciphertext shouldEqual encrypted2.ciphertext
-            }.failOnShutdown
+            }
           }
       }
     }

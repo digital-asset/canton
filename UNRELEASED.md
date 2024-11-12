@@ -5,6 +5,11 @@ Please also consult the [full documentation of this release](https://docs.daml.c
 
 ## Until 2024-11-09 (Exclusive)
 
+- When a Grpc channel is open or closed on the Ledger API, a message is logged at a debug level:
+```
+[..] DEBUG c.d.c.p.a.GrpcConnectionLogger:participant=participant - Grpc connection open: {io.grpc.Grpc.TRANSPORT_ATTR_LOCAL_ADDR=/127.0.0.1:5001, io.grpc.internal.GrpcAttributes.securityLevel=NONE, io.grpc.Grpc.TRANSPORT_ATTR_REMOTE_ADDR=/127.0.0.1:49944}
+[..] DEBUG c.d.c.p.a.GrpcConnectionLogger:participant=participant - Grpc connection closed: {io.grpc.Grpc.TRANSPORT_ATTR_LOCAL_ADDR=/127.0.0.1:5001, io.grpc.internal.GrpcAttributes.securityLevel=NONE, io.grpc.Grpc.TRANSPORT_ATTR_REMOTE_ADDR=/127.0.0.1:49944}
+```
 - The keep alive behavior of the Ledger API can be configured through
 ```
 canton.participants.participant.ledger-api.keep-alive-server.*
@@ -22,6 +27,9 @@ permitKeepAliveWithoutCalls: false
 ```
 - New parameter value for `permitKeepAliveWithoutCalls` has been introduced to all keep alive configurations.
 When set, it allows the clients to send keep alive signals outside any ongoing grpc call.
+- Identical implementations `EnterpriseCantonStatus` and `CommunityCantonStatus` have been merged into a single class `CantonStatus`.
+
+- A participant will now crash in exceptional cases during transaction validation instead of remaining in a failed state
 
 ## Until 2024-10-31 (Exclusive)
 

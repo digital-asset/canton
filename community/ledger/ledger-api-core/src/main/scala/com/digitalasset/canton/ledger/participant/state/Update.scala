@@ -9,6 +9,7 @@ import com.digitalasset.canton.data.DeduplicationPeriod
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.LfHash
 import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
 import com.digitalasset.canton.{RequestCounter, data}
 import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.digitalasset.daml.lf.data.{Bytes, Ref}
@@ -47,7 +48,7 @@ import scala.concurrent.Promise
   * A [[Update.CommandRejected]] completion does not trigger deduplication and implementations SHOULD
   * process such resubmissions normally.
   */
-sealed trait Update extends Product with Serializable with PrettyPrinting {
+sealed trait Update extends Product with Serializable with PrettyPrinting with HasTraceContext {
 
   /** The record time at which the state change was committed. */
   def recordTime: Timestamp
@@ -72,31 +73,6 @@ object Update {
   def noOpSeed: LfHash =
     LfHash.assertFromString("00" * LfHash.underlyingHashLength)
 
-  /** Signal used only to increase the offset of the participant in the initialization stage. */
-  final case class Init(
-      recordTime: Timestamp,
-      persisted: Promise[Unit] = Promise(),
-  ) extends Update
-      with WithoutDomainIndex {
-
-    override protected def pretty: Pretty[Init] =
-      prettyOfClass(
-        param("recordTime", _.recordTime),
-        indicateOmittedFields,
-      )
-
-    override def withRecordTime(recordTime: Timestamp): Update = this.copy(recordTime = recordTime)
-
-  }
-
-  object Init {
-    implicit val `Init to LoggingValue`: ToLoggingValue[Init] = { case Init(recordTime, _) =>
-      LoggingValue.Nested.fromEntries(
-        Logging.recordTime(recordTime)
-      )
-    }
-  }
-
   /** Signal that a party is hosted at a participant.
     *
     * Repeated `PartyAddedToParticipant` updates are interpreted in the order of their offsets as follows:
@@ -114,7 +90,8 @@ object Update {
       recordTime: Timestamp,
       submissionId: Option[Ref.SubmissionId],
       persisted: Promise[Unit] = Promise(),
-  ) extends Update
+  )(implicit override val traceContext: TraceContext)
+      extends Update
       with WithoutDomainIndex {
     override protected def pretty: Pretty[PartyAddedToParticipant] =
       prettyOfClass(
@@ -160,7 +137,8 @@ object Update {
       recordTime: Timestamp,
       rejectionReason: String,
       persisted: Promise[Unit] = Promise(),
-  ) extends Update
+  )(implicit override val traceContext: TraceContext)
+      extends Update
       with WithoutDomainIndex {
     override protected def pretty: Pretty[PartyAllocationRejected] =
       prettyOfClass(
@@ -192,7 +170,8 @@ object Update {
       domainId: DomainId,
       domainIndex: DomainIndex,
       persisted: Promise[Unit] = Promise(),
-  ) extends Update {
+  )(implicit override val traceContext: TraceContext)
+      extends Update {
     override def pretty: Pretty[TopologyTransactionEffective] =
       prettyOfClass(
         param("recordTime", _.recordTime),
@@ -279,7 +258,8 @@ object Update {
         DomainIndex
       ], // TODO(i20043) this will be simplified as Update refactoring is unconstrained by serialization
       persisted: Promise[Unit] = Promise(),
-  ) extends Update {
+  )(implicit override val traceContext: TraceContext)
+      extends Update {
     // TODO(i20043) this will be simplified as Update refactoring is unconstrained by serialization
     assert(completionInfoO.forall(_.messageUuid.isEmpty))
     assert(domainIndex.exists(_.requestIndex.isDefined))
@@ -354,7 +334,8 @@ object Update {
         DomainIndex
       ], // TODO(i20043) this will be simplified as Update refactoring is unconstrained by serialization
       persisted: Promise[Unit] = Promise(),
-  ) extends Update {
+  )(implicit override val traceContext: TraceContext)
+      extends Update {
     // TODO(i20043) this will be simplified as Update refactoring is unconstrained by serialization
     assert(optCompletionInfo.forall(_.messageUuid.isEmpty))
     assert(domainIndex.exists(_.requestIndex.isDefined))
@@ -419,7 +400,8 @@ object Update {
       domainId: DomainId,
       domainIndex: Option[DomainIndex],
       persisted: Promise[Unit] = Promise(),
-  ) extends Update {
+  )(implicit override val traceContext: TraceContext)
+      extends Update {
     // TODO(i20043) this will be simplified as Update refactoring is unconstrained by serialization
     assert(
       // rejection from sequencer should have the request sequencer counter
@@ -515,7 +497,8 @@ object Update {
       sequencerIndex: SequencerIndex,
       requestCounterO: Option[RequestCounter],
       persisted: Promise[Unit] = Promise(),
-  ) extends Update {
+  )(implicit override val traceContext: TraceContext)
+      extends Update {
     override protected def pretty: Pretty[SequencerIndexMoved] =
       prettyOfClass(
         param("domainId", _.domainId.uid),
@@ -554,7 +537,7 @@ object Update {
         )
   }
 
-  final case class CommitRepair() extends Update {
+  final case class CommitRepair()(implicit override val traceContext: TraceContext) extends Update {
     override val persisted: Promise[Unit] = Promise()
 
     override val domainIndexOpt: Option[(DomainId, DomainIndex)] = None
@@ -569,8 +552,6 @@ object Update {
   }
 
   implicit val `Update to LoggingValue`: ToLoggingValue[Update] = {
-    case update: Init =>
-      Init.`Init to LoggingValue`.toLoggingValue(update)
     case update: PartyAddedToParticipant =>
       PartyAddedToParticipant.`PartyAddedToParticipant to LoggingValue`.toLoggingValue(update)
     case update: PartyAllocationRejected =>

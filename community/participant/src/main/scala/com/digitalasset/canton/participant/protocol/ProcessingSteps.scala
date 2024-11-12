@@ -42,8 +42,9 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.{ConfirmationRequestSessionKeyStore, SessionKeyStore}
+import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag.Target
 import com.digitalasset.canton.{LedgerSubmissionId, RequestCounter, SequencerCounter}
 
@@ -128,6 +129,9 @@ trait ProcessingSteps[
 
   /** Extract a description for a submission, used for logging and error reporting */
   def submissionDescription(param: SubmissionParam): String
+
+  /** Extract an optionally explicitly chosen mediator group index */
+  def explicitMediatorGroup(param: SubmissionParam): Option[MediatorGroupIndex]
 
   /** Extract the submission ID that corresponds to a pending request, if any */
   def submissionIdOfPendingRequest(pendingData: requestType.PendingRequestData): PendingSubmissionId
@@ -411,7 +415,7 @@ trait ProcessingSteps[
       error: TransactionError,
   )(implicit
       traceContext: TraceContext
-  ): (Option[Traced[Update]], Option[PendingSubmissionId])
+  ): (Option[Update], Option[PendingSubmissionId])
 
   /** Phase 3, step 2 (rejected submission, e.g. chosen mediator is inactive, invalid recipients)
     *
@@ -480,7 +484,7 @@ trait ProcessingSteps[
     */
   def createRejectionEvent(rejectionArgs: RejectionArgs)(implicit
       traceContext: TraceContext
-  ): Either[ResultError, Option[Traced[Update]]]
+  ): Either[ResultError, Option[Update]]
 
   // Phase 7: Result processing
 
@@ -515,7 +519,7 @@ trait ProcessingSteps[
   case class CommitAndStoreContractsAndPublishEvent(
       commitSet: Option[Future[CommitSet]],
       contractsToBeStored: Seq[SerializableContract],
-      maybeEvent: Option[Traced[Update]],
+      maybeEvent: Option[Update],
   )
 
   /** Phase 7, step 4:

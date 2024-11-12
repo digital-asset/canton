@@ -159,6 +159,8 @@ private[apiserver] final class StoreBackedCommandExecutor(
             commands.commandId.unwrap,
             commands.deduplicationPeriod,
             commands.submissionId.map(_.unwrap),
+            transactionUUID = None,
+            mediatorGroup = None,
             externallySignedSubmission = None,
           ),
           optDomainId = prescribedDomainIdO,

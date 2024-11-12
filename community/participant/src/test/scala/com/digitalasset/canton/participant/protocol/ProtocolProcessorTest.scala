@@ -70,7 +70,7 @@ import com.digitalasset.canton.time.{DomainTimeTracker, NonNegativeFiniteDuratio
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.PekkoUtil.FutureQueue
 import com.digitalasset.canton.version.HasTestCloseContext
@@ -272,6 +272,7 @@ class ProtocolProcessorTest
         defaultStaticDomainParameters,
         enableAdditionalConsistencyChecks = true,
         new InMemoryIndexedStringStore(minIndex = 1, maxIndex = 1), // only one domain needed
+        nodePersistentState.acsCounterParticipantConfigStore,
         exitOnFatalFailures = true,
         packageDependencyResolver,
         Eval.now(nodePersistentState.ledgerApiStore),
@@ -284,8 +285,8 @@ class ProtocolProcessorTest
 
     val ledgerApiIndexer = mock[LedgerApiIndexer]
     when(ledgerApiIndexer.queue).thenAnswer(
-      new FutureQueue[Traced[Update]] {
-        override def offer(elem: Traced[Update]): Future[Done] = Future.successful(Done)
+      new FutureQueue[Update] {
+        override def offer(elem: Update): Future[Done] = Future.successful(Done)
 
         override def shutdown(): Unit = ()
 

@@ -29,7 +29,7 @@ import com.digitalasset.canton.platform.store.dao.events.{
 import com.digitalasset.canton.platform.{ContractId, Create, Exercise}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty.emptyTraceContext
-import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, Traced}
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.{RequestCounter, SequencerCounter}
 import com.digitalasset.daml.lf.crypto
@@ -67,15 +67,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
   }
 
   "UpdateToDbDto" should {
-
-    "handle Init" in {
-      val update = state.Update.Init(
-        someRecordTime
-      )
-      val dtos = updateToDtos(update)
-
-      dtos shouldBe empty
-    }
 
     "handle PartyAddedToParticipant (local party)" in {
       val update = state.Update.PartyAddedToParticipant(
@@ -1456,7 +1447,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           reassignmentCounter = 1500L,
           hostedStakeholders = Nil,
           unassignId = CantonTimestamp.assertFromLong(1000000000),
-          isObservingReassigningParticipant = true,
+          isReassigningParticipant = true,
         ),
         reassignment = Reassignment.Assign(
           ledgerEffectiveTime = Time.Timestamp.assertFromLong(17000000),
@@ -1561,7 +1552,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           reassignmentCounter = 1500L,
           hostedStakeholders = Nil,
           unassignId = CantonTimestamp.assertFromLong(1000000000),
-          isObservingReassigningParticipant = true,
+          isReassigningParticipant = true,
         ),
         reassignment = Reassignment.Unassign(
           contractId = contractId,
@@ -1729,7 +1720,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       MetricsContext.Empty
     )(
       someOffset
-    )(Traced[Update](update)).toList
+    )(update).toList
 }
 
 object UpdateToDbDtoSpec {

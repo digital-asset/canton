@@ -13,7 +13,7 @@ import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.DomainId
 
 sealed trait TransactionRoutingError extends TransactionError with Product with Serializable
-trait TransactionRoutingErrorWithDomain extends TransactionRoutingError {
+sealed trait TransactionRoutingErrorWithDomain extends TransactionRoutingError {
   def domainId: DomainId
 }
 
@@ -86,7 +86,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
           domainsOfAllInformee: NonEmpty[Set[DomainId]],
       ) extends TransactionErrorImpl(
             cause =
-              s"Not all informee are on the specified domainID: $domainId, but on $domainsOfAllInformee"
+              s"Not all informee are on the specified domain: $domainId, but on $domainsOfAllInformee"
           )
           with TransactionRoutingErrorWithDomain
 

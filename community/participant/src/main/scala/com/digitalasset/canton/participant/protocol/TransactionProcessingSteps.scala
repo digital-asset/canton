@@ -61,7 +61,6 @@ import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFa
   SerializableContractOfId,
   UnknownPackageError,
 }
-import com.digitalasset.canton.participant.protocol.validation.*
 import com.digitalasset.canton.participant.protocol.validation.ContractConsistencyChecker.ReferenceToFutureContractError
 import com.digitalasset.canton.participant.protocol.validation.InternalConsistencyChecker.{
   ErrorWithInternalConsistencyCheck,
@@ -69,6 +68,7 @@ import com.digitalasset.canton.participant.protocol.validation.InternalConsisten
 }
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.ErrorWithSubTransaction
 import com.digitalasset.canton.participant.protocol.validation.TimeValidator.TimeCheckFailure
+import com.digitalasset.canton.participant.protocol.validation.{AuthenticationError, *}
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.*
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
@@ -85,9 +85,10 @@ import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.store.{ConfirmationRequestSessionKeyStore, SessionKeyStore}
+import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, LfTransactionUtil}
 import com.digitalasset.canton.{
@@ -127,7 +128,6 @@ class TransactionProcessingSteps(
     contractStore: ContractStore,
     metrics: TransactionProcessingMetrics,
     serializableContractAuthenticator: SerializableContractAuthenticator,
-    authenticationValidator: AuthenticationValidator,
     authorizationValidator: AuthorizationValidator,
     internalConsistencyChecker: InternalConsistencyChecker,
     tracker: CommandProgressTracker,
@@ -166,6 +166,9 @@ class TransactionProcessingSteps(
 
   override def submissionDescription(param: SubmissionParam): String =
     show"submitters ${param.submitterInfo.actAs}, command-id ${param.submitterInfo.commandId}"
+
+  override def explicitMediatorGroup(param: SubmissionParam): Option[MediatorGroupIndex] =
+    param.submitterInfo.mediatorGroup
 
   override def submissionIdOfPendingRequest(pendingData: PendingTransaction): Unit = ()
 
@@ -652,7 +655,7 @@ class TransactionProcessingSteps(
 
       def checkRandomnessMap(): Unit =
         allRandomnessMap.asScala.find { case (_, listRandomness) =>
-          listRandomness.distinct.size >= 2
+          listRandomness.distinct.sizeIs >= 2
         } match {
           case Some((viewHash, _)) =>
             ErrorUtil.internalError(
@@ -880,7 +883,7 @@ class TransactionProcessingSteps(
       val ledgerTime = parsedRequest.ledgerTime
 
       for {
-        authenticationResult <- authenticationValidator.verifyViewSignatures(parsedRequest)
+        authenticationResult <- AuthenticationValidator.verifyViewSignatures(parsedRequest)
 
         consistencyResultE = ContractConsistencyChecker
           .assertInputContractsInPast(
@@ -1093,26 +1096,24 @@ class TransactionProcessingSteps(
       error: TransactionError,
   )(implicit
       traceContext: TraceContext
-  ): (Option[Traced[Update]], Option[PendingSubmissionId]) = {
+  ): (Option[Update], Option[PendingSubmissionId]) = {
     val rejection = Update.CommandRejected.FinalReason(error.rpcStatus())
     completionInfoFromSubmitterMetadataO(submitterMetadata, freshOwnTimelyTx).map {
       completionInfo =>
-        Traced(
-          Update.CommandRejected(
-            ts.toLf,
-            completionInfo,
-            rejection,
-            domainId,
-            Some(
-              DomainIndex.of(
-                RequestIndex(
-                  counter = rc,
-                  sequencerCounter = Some(sc),
-                  timestamp = ts,
-                )
+        Update.CommandRejected(
+          ts.toLf,
+          completionInfo,
+          rejection,
+          domainId,
+          Some(
+            DomainIndex.of(
+              RequestIndex(
+                counter = rc,
+                sequencerCounter = Some(sc),
+                timestamp = ts,
               )
-            ),
-          )
+            )
+          ),
         )
     } -> None // Transaction processing doesn't use pending submissions
   }
@@ -1126,7 +1127,7 @@ class TransactionProcessingSteps(
 
   override def createRejectionEvent(rejectionArgs: TransactionProcessingSteps.RejectionArgs)(
       implicit traceContext: TraceContext
-  ): Either[TransactionProcessorError, Option[Traced[Update]]] = {
+  ): Either[TransactionProcessorError, Option[Update]] = {
 
     val RejectionArgs(pendingTransaction, rejectionReason) = rejectionArgs
     val PendingTransaction(
@@ -1149,22 +1150,20 @@ class TransactionProcessingSteps(
     val rejection = Update.CommandRejected.FinalReason(rejectionReason.reason())
 
     val updateO = completionInfoO.map(info =>
-      Traced(
-        Update.CommandRejected(
-          requestTime.toLf,
-          info,
-          rejection,
-          domainId,
-          Some(
-            DomainIndex.of(
-              RequestIndex(
-                counter = requestCounter,
-                sequencerCounter = Some(requestSequencerCounter),
-                timestamp = requestTime,
-              )
+      Update.CommandRejected(
+        requestTime.toLf,
+        info,
+        rejection,
+        domainId,
+        Some(
+          DomainIndex.of(
+            RequestIndex(
+              counter = requestCounter,
+              sequencerCounter = Some(requestSequencerCounter),
+              timestamp = requestTime,
             )
-          ),
-        )
+          )
+        ),
       )
     )
     Right(updateO)
@@ -1210,7 +1209,9 @@ class TransactionProcessingSteps(
       mediator: MediatorGroupRecipient,
       freshOwnTimelyTx: Boolean,
       engineController: EngineController,
-  )(implicit traceContext: TraceContext): PendingTransaction = {
+  )(implicit
+      traceContext: TraceContext
+  ): PendingTransaction = {
     // We consider that we rejected if at least one of the responses is not "approve'
     val locallyRejectedF = responsesF.map(_.exists(response => !response.localVerdict.isApprove))
 
@@ -1303,7 +1304,7 @@ class TransactionProcessingSteps(
             contractId -> DriverContractMetadata(salt).toLfBytes(protocolVersion)
         }.toMap
 
-      acceptedEvent = Traced(
+      acceptedEvent =
         Update.TransactionAccepted(
           completionInfoO = completionInfoO,
           transactionMeta = TransactionMeta(
@@ -1333,7 +1334,6 @@ class TransactionProcessingSteps(
             )
           ),
         )
-      )
     } yield CommitAndStoreContractsAndPublishEvent(
       Some(commitSetF),
       contractsToBeStored,
@@ -1616,7 +1616,7 @@ object TransactionProcessingSteps {
   }
 
   private final case class ParallelChecksResult(
-      authenticationResult: Map[ViewPosition, String],
+      authenticationResult: Map[ViewPosition, AuthenticationError],
       consistencyResultE: Either[List[ReferenceToFutureContractError], Unit],
       authorizationResult: Map[ViewPosition, String],
       conformanceResultET: EitherT[
