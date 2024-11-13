@@ -244,6 +244,7 @@ final case class JsDisclosedContract(
     template_id: String,
     contract_id: String,
     created_event_blob: com.google.protobuf.ByteString,
+    domain_id: Option[String],
 )
 
 object JsCommandService {

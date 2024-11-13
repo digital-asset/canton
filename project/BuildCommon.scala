@@ -703,6 +703,7 @@ object BuildCommon {
           scaffeine,
           slick_hikaricp,
           scalatest % "test",
+          tink,
         ),
         Compile / PB.targets := Seq(
           scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"

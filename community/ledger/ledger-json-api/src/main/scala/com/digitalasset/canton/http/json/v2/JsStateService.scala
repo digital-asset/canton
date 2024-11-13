@@ -66,11 +66,14 @@ class JsStateService(
 
   private def getConnectedDomains(
       callerContext: CallerContext
-  ): TracedInput[String] => Future[
+  ): TracedInput[(String, Option[String])] => Future[
     Either[JsCantonError, state_service.GetConnectedDomainsResponse]
   ] = req =>
     stateServiceClient(callerContext.token())(req.traceContext)
-      .getConnectedDomains(state_service.GetConnectedDomainsRequest(party = req.in))
+      .getConnectedDomains(
+        state_service
+          .GetConnectedDomainsRequest(party = req.in._1, participantId = req.in._2.getOrElse(""))
+      )
       .resultToRight
 
   private def getLedgerEnd(
@@ -131,6 +134,7 @@ object JsStateService {
   val getConnectedDomainsEndpoint = state.get
     .in(sttp.tapir.stringToPath("connected-domains"))
     .in(query[String]("party"))
+    .in(query[Option[String]]("participantId"))
     .out(jsonBody[state_service.GetConnectedDomainsResponse])
     .description("Get connected domains")
 

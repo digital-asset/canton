@@ -12,7 +12,8 @@ import com.digitalasset.canton.ledger.participant.state.SyncService.{
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DomainAlias, LfPartyId}
 
 import scala.concurrent.Future
@@ -50,6 +51,9 @@ trait SyncService
       traceContext: TraceContext
   ): Future[ConnectedDomainResponse] =
     throw new UnsupportedOperationException()
+
+  // TODO(i20688): Temporary until prepared transactions run through the domain router
+  def getProtocolVersionForDomain(domainId: Traced[DomainId]): Option[ProtocolVersion] = None
 
   // temporary implementation, will be removed as topology events on Ledger API proceed
   /** Get the offsets of the incomplete assigned/unassigned events for a set of stakeholders.

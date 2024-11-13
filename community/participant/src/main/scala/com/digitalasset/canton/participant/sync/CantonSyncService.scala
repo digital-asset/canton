@@ -293,6 +293,9 @@ class CantonSyncService(
     (tracedDomainId: Traced[DomainId]) =>
       syncDomainPersistentStateManager.protocolVersionFor(tracedDomainId.value)
 
+  override def getProtocolVersionForDomain(domainId: Traced[DomainId]): Option[ProtocolVersion] =
+    protocolVersionGetter(domainId)
+
   participantNodeEphemeralState.inFlightSubmissionTracker.registerDomainStateLookup(domainId =>
     connectedDomainsMap.get(domainId).map(_.ephemeral.inFlightSubmissionTrackerDomainState)
   )
@@ -434,7 +437,9 @@ class CantonSyncService(
           .foreach(_.removeJournalGarageCollectionLock())
     },
     connectedDomainsLookup,
+    syncCrypto,
     participantId,
+    futureSupervisor,
     loggerFactory,
   )
 
@@ -684,16 +689,6 @@ class CantonSyncService(
 
     // Important to invoke recovery before we do anything else with persisted stores.
     recoverParticipantNodeState()
-
-    // Publish the init event that will increase the offset of the participant. Thus, the ledger api server will
-    // not return responses that contain an offset being before the ledger begin. Only do so on brand new ledgers
-    // without preexisting events.
-    logger.debug("Publishing init event if ledger is brand new")
-    parameters.processingTimeouts.default
-      .await("Publish init event if ledger is brand new")(
-        participantNodeEphemeralState.participantEventPublisher.publishInitNeededUpstreamOnlyIfFirst
-          .onShutdown(logger.debug("Aborted publishing of init due to shutdown"))
-      )
   }
 
   /** Returns the ready domains this sync service is connected to. */

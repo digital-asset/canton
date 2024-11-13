@@ -82,6 +82,17 @@ object ConsensusSegment {
         viewNumber: ViewNumber,
     ) extends PbftTimeout
 
+    sealed trait PbftMessagesStored extends PbftEvent {
+      def blockMetadata: BlockMetadata
+      def viewNumber: ViewNumber
+    }
+    final case class PrePrepareStored(blockMetadata: BlockMetadata, viewNumber: ViewNumber)
+        extends PbftMessagesStored
+    final case class PreparesStored(blockMetadata: BlockMetadata, viewNumber: ViewNumber)
+        extends PbftMessagesStored
+    final case class NewViewStored(blockMetadata: BlockMetadata, viewNumber: ViewNumber)
+        extends PbftMessagesStored
+
     /** Pbft consensus messages coming from the network
       * The order of messages below correspond to the protocol steps
       */

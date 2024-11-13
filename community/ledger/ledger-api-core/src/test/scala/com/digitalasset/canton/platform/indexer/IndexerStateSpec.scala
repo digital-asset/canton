@@ -7,11 +7,12 @@ import cats.data.EitherT
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.{SequencerIndex, Update}
+import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.platform.indexer.IndexerState.RepairInProgress
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.tracing.Traced
 import com.digitalasset.canton.util.PekkoUtil.{FutureQueue, RecoveringFutureQueue}
-import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfTimestamp, SequencerCounter}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
+import com.digitalasset.daml.lf.data.Time
 import org.apache.pekko.Done
 import org.scalatest.Assertion
 import org.scalatest.flatspec.AnyFlatSpec
@@ -52,7 +53,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     val afterRepairIndexer = new TestRecoveringIndexer
     val repairIndexer = new TestRepairIndexer
     val repairIndexerFactoryCalled = Promise[Unit]()
-    val repairIndexerCreated = Promise[FutureQueue[Traced[Update]]]()
+    val repairIndexerCreated = Promise[FutureQueue[Update]]()
 
     val indexerState = new IndexerState(
       recoveringIndexerFactory = seqFactory(
@@ -71,17 +72,17 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     initialIndexer.donePromise.isCompleted shouldBe false
     initialIndexer.uncommittedQueueSnapshotRef.set(
       Vector(
-        1L -> Traced(Update.Init(LfTimestamp.now())),
-        2L -> Traced(Update.Init(LfTimestamp.now())),
+        1L -> update,
+        2L -> update,
       )
     )
     // starting repair operation
     val repairOperationStartedPromise = Promise[Unit]()
     val repairOperationFinishedPromise = Promise[Unit]()
     val repairOperationF = indexerState.withRepairIndexer { repairQueue =>
-      repairQueue.offer(Traced(Update.Init(LfTimestamp.now()))).futureValue shouldBe Done
+      repairQueue.offer(update).futureValue shouldBe Done
       repairQueue
-        .offer(Traced(Update.CommitRepair()))
+        .offer(Update.CommitRepair())
         .failed
         .futureValue
         .getMessage shouldBe "CommitRepair should not be used"
@@ -148,7 +149,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     val afterRepairIndexer = new TestRecoveringIndexer
     val repairIndexer = new TestRepairIndexer
     val repairIndexerFactoryCalled = Promise[Unit]()
-    val repairIndexerCreated = Promise[FutureQueue[Traced[Update]]]()
+    val repairIndexerCreated = Promise[FutureQueue[Update]]()
 
     val indexerState = new IndexerState(
       recoveringIndexerFactory = seqFactory(
@@ -167,8 +168,8 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     initialIndexer.donePromise.isCompleted shouldBe false
     initialIndexer.uncommittedQueueSnapshotRef.set(
       Vector(
-        1L -> Traced(Update.Init(LfTimestamp.now())),
-        2L -> Traced(Update.Init(LfTimestamp.now())),
+        1L -> update,
+        2L -> update,
       )
     )
     // starting repair operation
@@ -257,8 +258,8 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     initialIndexer.donePromise.isCompleted shouldBe false
     initialIndexer.uncommittedQueueSnapshotRef.set(
       Vector(
-        1L -> Traced(Update.Init(LfTimestamp.now())),
-        2L -> Traced(Update.Init(LfTimestamp.now())),
+        1L -> update,
+        2L -> update,
       )
     )
     // shutting down
@@ -284,7 +285,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     val initialIndexer = new TestRecoveringIndexer
     val afterRepairIndexer = new TestRecoveringIndexer
     val repairIndexerFactoryCalled = Promise[Unit]()
-    val repairIndexerCreated = Promise[FutureQueue[Traced[Update]]]()
+    val repairIndexerCreated = Promise[FutureQueue[Update]]()
 
     val indexerState = new IndexerState(
       recoveringIndexerFactory = seqFactory(
@@ -303,8 +304,8 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     initialIndexer.donePromise.isCompleted shouldBe false
     initialIndexer.uncommittedQueueSnapshotRef.set(
       Vector(
-        1L -> Traced(Update.Init(LfTimestamp.now())),
-        2L -> Traced(Update.Init(LfTimestamp.now())),
+        1L -> update,
+        2L -> update,
       )
     )
     // starting repair operation
@@ -354,7 +355,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     val afterRepairIndexer = new TestRecoveringIndexer
     val repairIndexer = new TestRepairIndexer
     val repairIndexerFactoryCalled = Promise[Unit]()
-    val repairIndexerCreated = Promise[FutureQueue[Traced[Update]]]()
+    val repairIndexerCreated = Promise[FutureQueue[Update]]()
 
     val indexerState = new IndexerState(
       recoveringIndexerFactory = seqFactory(
@@ -373,8 +374,8 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     initialIndexer.donePromise.isCompleted shouldBe false
     initialIndexer.uncommittedQueueSnapshotRef.set(
       Vector(
-        1L -> Traced(Update.Init(LfTimestamp.now())),
-        2L -> Traced(Update.Init(LfTimestamp.now())),
+        1L -> update,
+        2L -> update,
       )
     )
     // starting repair operation
@@ -455,7 +456,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     val afterRepairIndexer = new TestRecoveringIndexer
     val repairIndexer = new TestRepairIndexer
     val repairIndexerFactoryCalled = Promise[Unit]()
-    val repairIndexerCreated = Promise[FutureQueue[Traced[Update]]]()
+    val repairIndexerCreated = Promise[FutureQueue[Update]]()
 
     val indexerState = new IndexerState(
       recoveringIndexerFactory = seqFactory(
@@ -474,8 +475,8 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     initialIndexer.donePromise.isCompleted shouldBe false
     initialIndexer.uncommittedQueueSnapshotRef.set(
       Vector(
-        1L -> Traced(Update.Init(LfTimestamp.now())),
-        2L -> Traced(Update.Init(LfTimestamp.now())),
+        1L -> update,
+        2L -> update,
       )
     )
     // starting repair operation
@@ -540,7 +541,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     val afterRepairIndexer = new TestRecoveringIndexer
     val repairIndexer = new TestRepairIndexer
     val repairIndexerFactoryCalled = Promise[Unit]()
-    val repairIndexerCreated = Promise[FutureQueue[Traced[Update]]]()
+    val repairIndexerCreated = Promise[FutureQueue[Update]]()
 
     val indexerState = new IndexerState(
       recoveringIndexerFactory = seqFactory(
@@ -559,8 +560,8 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     initialIndexer.donePromise.isCompleted shouldBe false
     initialIndexer.uncommittedQueueSnapshotRef.set(
       Vector(
-        1L -> Traced(Update.Init(LfTimestamp.now())),
-        2L -> Traced(Update.Init(LfTimestamp.now())),
+        1L -> update,
+        2L -> update,
       )
     )
     // starting repair operation
@@ -645,7 +646,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     val afterRepairIndexer = new TestRecoveringIndexer
     val repairIndexer = new TestRepairIndexer
     val repairIndexerFactoryCalled = Promise[Unit]()
-    val repairIndexerCreated = Promise[FutureQueue[Traced[Update]]]()
+    val repairIndexerCreated = Promise[FutureQueue[Update]]()
 
     val indexerState = new IndexerState(
       recoveringIndexerFactory = seqFactory(
@@ -664,8 +665,8 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     initialIndexer.donePromise.isCompleted shouldBe false
     initialIndexer.uncommittedQueueSnapshotRef.set(
       Vector(
-        1L -> Traced(Update.Init(LfTimestamp.now())),
-        2L -> Traced(Update.Init(LfTimestamp.now())),
+        1L -> update,
+        2L -> update,
       )
     )
     // starting repair operation
@@ -740,7 +741,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
   it should "not even initiate the repair indexer if getting shutdown before initialization started" in {
     val initialIndexer = new TestRecoveringIndexer
     val repairIndexerFactoryCalled = Promise[Unit]()
-    val repairIndexerCreated = Promise[FutureQueue[Traced[Update]]]()
+    val repairIndexerCreated = Promise[FutureQueue[Update]]()
 
     val indexerState = new IndexerState(
       recoveringIndexerFactory = seqFactory(initialIndexer),
@@ -756,8 +757,8 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     initialIndexer.donePromise.isCompleted shouldBe false
     initialIndexer.uncommittedQueueSnapshotRef.set(
       Vector(
-        1L -> Traced(Update.Init(LfTimestamp.now())),
-        2L -> Traced(Update.Init(LfTimestamp.now())),
+        1L -> update,
+        2L -> update,
       )
     )
     // starting repair operation
@@ -794,7 +795,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     val initialIndexer = new TestRecoveringIndexer
     val repairIndexer = new TestRepairIndexer
     val repairIndexerFactoryCalled = Promise[Unit]()
-    val repairIndexerCreated = Promise[FutureQueue[Traced[Update]]]()
+    val repairIndexerCreated = Promise[FutureQueue[Update]]()
 
     val indexerState = new IndexerState(
       recoveringIndexerFactory = seqFactory(initialIndexer),
@@ -810,8 +811,8 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     initialIndexer.donePromise.isCompleted shouldBe false
     initialIndexer.uncommittedQueueSnapshotRef.set(
       Vector(
-        1L -> Traced(Update.Init(LfTimestamp.now())),
-        2L -> Traced(Update.Init(LfTimestamp.now())),
+        1L -> update,
+        2L -> update,
       )
     )
     // starting repair operation
@@ -861,7 +862,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     val initialIndexer = new TestRecoveringIndexer
     val repairIndexer = new TestRepairIndexer
     val repairIndexerFactoryCalled = Promise[Unit]()
-    val repairIndexerCreated = Promise[FutureQueue[Traced[Update]]]()
+    val repairIndexerCreated = Promise[FutureQueue[Update]]()
 
     val indexerState = new IndexerState(
       recoveringIndexerFactory = seqFactory(initialIndexer),
@@ -877,8 +878,8 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     initialIndexer.donePromise.isCompleted shouldBe false
     initialIndexer.uncommittedQueueSnapshotRef.set(
       Vector(
-        1L -> Traced(Update.Init(LfTimestamp.now())),
-        2L -> Traced(Update.Init(LfTimestamp.now())),
+        1L -> update,
+        2L -> update,
       )
     )
     // starting repair operation
@@ -937,7 +938,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     val initialIndexer = new TestRecoveringIndexer
     val repairIndexer = new TestRepairIndexer
     val repairIndexerFactoryCalled = Promise[Unit]()
-    val repairIndexerCreated = Promise[FutureQueue[Traced[Update]]]()
+    val repairIndexerCreated = Promise[FutureQueue[Update]]()
 
     val indexerState = new IndexerState(
       recoveringIndexerFactory = seqFactory(initialIndexer),
@@ -953,8 +954,8 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     initialIndexer.donePromise.isCompleted shouldBe false
     initialIndexer.uncommittedQueueSnapshotRef.set(
       Vector(
-        1L -> Traced(Update.Init(LfTimestamp.now())),
-        2L -> Traced(Update.Init(LfTimestamp.now())),
+        1L -> update,
+        2L -> update,
       )
     )
     // starting repair operation
@@ -1012,7 +1013,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     val initialIndexer = new TestRecoveringIndexer
     val repairIndexer = new TestRepairIndexer
     val repairIndexerFactoryCalled = Promise[Unit]()
-    val repairIndexerCreated = Promise[FutureQueue[Traced[Update]]]()
+    val repairIndexerCreated = Promise[FutureQueue[Update]]()
 
     val indexerState = new IndexerState(
       recoveringIndexerFactory = seqFactory(initialIndexer),
@@ -1028,8 +1029,8 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     initialIndexer.donePromise.isCompleted shouldBe false
     initialIndexer.uncommittedQueueSnapshotRef.set(
       Vector(
-        1L -> Traced(Update.Init(LfTimestamp.now())),
-        2L -> Traced(Update.Init(LfTimestamp.now())),
+        1L -> update,
+        2L -> update,
       )
     )
     // starting repair operation
@@ -1090,7 +1091,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     val initialIndexer = new TestRecoveringIndexer
     val repairIndexer = new TestRepairIndexer
     val repairIndexerFactoryCalled = Promise[Unit]()
-    val repairIndexerCreated = Promise[FutureQueue[Traced[Update]]]()
+    val repairIndexerCreated = Promise[FutureQueue[Update]]()
 
     val indexerState = new IndexerState(
       recoveringIndexerFactory = seqFactory(initialIndexer),
@@ -1106,8 +1107,8 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     initialIndexer.donePromise.isCompleted shouldBe false
     initialIndexer.uncommittedQueueSnapshotRef.set(
       Vector(
-        1L -> Traced(Update.Init(LfTimestamp.now())),
-        2L -> Traced(Update.Init(LfTimestamp.now())),
+        1L -> update,
+        2L -> update,
       )
     )
     // starting repair operation
@@ -1178,7 +1179,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     val afterRepairIndexer = new TestRecoveringIndexer
     val repairIndexer = new TestRepairIndexer
     val repairIndexerFactoryCalled = Promise[Unit]()
-    val repairIndexerCreated = Promise[FutureQueue[Traced[Update]]]()
+    val repairIndexerCreated = Promise[FutureQueue[Update]]()
 
     val indexerState = new IndexerState(
       recoveringIndexerFactory = seqFactory(
@@ -1197,8 +1198,8 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     initialIndexer.donePromise.isCompleted shouldBe false
     initialIndexer.uncommittedQueueSnapshotRef.set(
       Vector(
-        1L -> Traced(Update.Init(LfTimestamp.now())),
-        2L -> Traced(Update.Init(LfTimestamp.now())),
+        1L -> update,
+        2L -> update,
       )
     )
     // starting repair operation
@@ -1240,13 +1241,23 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     Threading.sleep(20)
     repairIndexer.shutdownPromise.isCompleted shouldBe false
     repairOperationF.isCompleted shouldBe false
-    // then waiting for the message to be persisted
-    repairIndexer.repairPersistedPromise.trySuccess(())
-    // then the repair-indexer should be completing without shutdown signal
-    repairIndexer.donePromise.trySuccess(Done)
-    Threading.sleep(20)
-    repairIndexer.shutdownPromise.isCompleted shouldBe false
-    repairOperationF.isCompleted shouldBe false
+
+    loggerFactory.assertEventuallyLogsSeq(
+      SuppressionRule.forLogger[IndexerState] && SuppressionRule.Level(org.slf4j.event.Level.INFO)
+    )(
+      within = {
+        // then waiting for the message to be persisted
+        repairIndexer.repairPersistedPromise.trySuccess(())
+        // then the repair-indexer should be completing without shutdown signal
+        repairIndexer.donePromise.trySuccess(Done)
+        Threading.sleep(20)
+        repairIndexer.shutdownPromise.isCompleted shouldBe false
+        repairOperationF.isCompleted shouldBe false
+      },
+      // waiting until the next indexer is started, so shutdown comes after the IndexerState transition
+      assertion = _.find(_.infoMessage.contains("Switched to Normal Mode")).nonEmpty shouldBe true,
+    )
+
     // as shutting down the indexer state
     val indexerStateTerminated = indexerState.shutdown()
     // first the ongoing indexing should be shut
@@ -1280,7 +1291,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     val afterRepairIndexer = new TestRecoveringIndexer
     val repairIndexer = new TestRepairIndexer
     val repairIndexerFactoryCalled = Promise[Unit]()
-    val repairIndexerCreated = Promise[FutureQueue[Traced[Update]]]()
+    val repairIndexerCreated = Promise[FutureQueue[Update]]()
 
     val indexerState = new IndexerState(
       recoveringIndexerFactory = seqFactory(
@@ -1299,14 +1310,14 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     initialIndexer.donePromise.isCompleted shouldBe false
     initialIndexer.uncommittedQueueSnapshotRef.set(
       Vector(
-        1L -> Traced(Update.Init(LfTimestamp.now())),
-        2L -> Traced(Update.Init(LfTimestamp.now())),
-        3L -> Traced(Update.SequencerIndexMoved(domain1, sequencerIndex, None)),
-        4L -> Traced(Update.SequencerIndexMoved(domain1, sequencerIndex, None)),
-        5L -> Traced(Update.SequencerIndexMoved(domain2, sequencerIndex, None)),
-        6L -> Traced(Update.SequencerIndexMoved(domain2, sequencerIndex, None)),
-        7L -> Traced(Update.SequencerIndexMoved(domain3, sequencerIndex, None)),
-        8L -> Traced(Update.SequencerIndexMoved(domain3, sequencerIndex, None)),
+        1L -> update,
+        2L -> update,
+        3L -> Update.SequencerIndexMoved(domain1, sequencerIndex, None),
+        4L -> Update.SequencerIndexMoved(domain1, sequencerIndex, None),
+        5L -> Update.SequencerIndexMoved(domain2, sequencerIndex, None),
+        6L -> Update.SequencerIndexMoved(domain2, sequencerIndex, None),
+        7L -> Update.SequencerIndexMoved(domain3, sequencerIndex, None),
+        8L -> Update.SequencerIndexMoved(domain3, sequencerIndex, None),
       )
     )
     val ensureDomain1 = indexerState.ensureNoProcessingForDomain(domain1)
@@ -1319,11 +1330,11 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     // remove the domain1
     initialIndexer.uncommittedQueueSnapshotRef.set(
       Vector(
-        1L -> Traced(Update.Init(LfTimestamp.now())),
-        2L -> Traced(Update.Init(LfTimestamp.now())),
-        6L -> Traced(Update.SequencerIndexMoved(domain2, sequencerIndex, None)),
-        7L -> Traced(Update.SequencerIndexMoved(domain3, sequencerIndex, None)),
-        8L -> Traced(Update.SequencerIndexMoved(domain3, sequencerIndex, None)),
+        1L -> update,
+        2L -> update,
+        6L -> Update.SequencerIndexMoved(domain2, sequencerIndex, None),
+        7L -> Update.SequencerIndexMoved(domain3, sequencerIndex, None),
+        8L -> Update.SequencerIndexMoved(domain3, sequencerIndex, None),
       )
     )
     Threading.sleep(110)
@@ -1333,9 +1344,9 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     // remove the domain2
     initialIndexer.uncommittedQueueSnapshotRef.set(
       Vector(
-        1L -> Traced(Update.Init(LfTimestamp.now())),
-        7L -> Traced(Update.SequencerIndexMoved(domain3, sequencerIndex, None)),
-        8L -> Traced(Update.SequencerIndexMoved(domain3, sequencerIndex, None)),
+        1L -> update,
+        7L -> Update.SequencerIndexMoved(domain3, sequencerIndex, None),
+        8L -> Update.SequencerIndexMoved(domain3, sequencerIndex, None),
       )
     )
     Threading.sleep(110)
@@ -1344,7 +1355,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     // remove the domain3
     initialIndexer.uncommittedQueueSnapshotRef.set(
       Vector(
-        1L -> Traced(Update.Init(LfTimestamp.now()))
+        1L -> update
       )
     )
     ensureDomain3.futureValue
@@ -1352,9 +1363,9 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     val repairOperationStartedPromise = Promise[Unit]()
     val repairOperationFinishedPromise = Promise[Unit]()
     val repairOperationF = indexerState.withRepairIndexer { repairQueue =>
-      repairQueue.offer(Traced(Update.Init(LfTimestamp.now()))).futureValue shouldBe Done
+      repairQueue.offer(update).futureValue shouldBe Done
       repairQueue
-        .offer(Traced(Update.CommitRepair()))
+        .offer(Update.CommitRepair())
         .failed
         .futureValue
         .getMessage shouldBe "CommitRepair should not be used"
@@ -1438,7 +1449,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
   it should "allow offer for normal indexing" in {
     val indexerQueueProxy =
       new IndexerQueueProxy(stateF => stateF(IndexerState.Normal(new TestRecoveringIndexer, false)))
-    indexerQueueProxy.offer(Traced(Update.Init(LfTimestamp.now()))).futureValue
+    indexerQueueProxy.offer(update).futureValue
   }
 
   it should "deny offer CommitRepair for normal indexing" in {
@@ -1446,7 +1457,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
       new IndexerQueueProxy(stateF => stateF(IndexerState.Normal(new TestRecoveringIndexer, false)))
     val commitRepair = Update.CommitRepair()
     indexerQueueProxy
-      .offer(Traced(commitRepair))
+      .offer(commitRepair)
       .failed
       .futureValue
       .getMessage shouldBe "CommitRepair should not be used"
@@ -1456,7 +1467,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
   it should "propagate any exception to offer calls" in {
     val indexerQueueProxy = new IndexerQueueProxy(_ => throw new IllegalStateException("nah"))
     intercept[IllegalStateException](
-      indexerQueueProxy.offer(Traced(Update.Init(LfTimestamp.now())))
+      indexerQueueProxy.offer(update)
     ).getMessage shouldBe "nah"
   }
 
@@ -1466,7 +1477,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
       stateF(IndexerState.Repair(Future.never, repairDone.future, false))
     )
     val repairDoneReturned =
-      indexerQueueProxy.offer(Traced(Update.Init(LfTimestamp.now()))).failed.futureValue match {
+      indexerQueueProxy.offer(update).failed.futureValue match {
         case repairInProgress: RepairInProgress => repairInProgress.repairDone
         case _ => fail()
       }
@@ -1475,33 +1486,33 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     repairDoneReturned.futureValue
   }
 
-  class TestRecoveringIndexer extends RecoveringFutureQueue[Traced[Update]] {
+  class TestRecoveringIndexer extends RecoveringFutureQueue[Update] {
     val donePromise = Promise[Done]()
     val shutdownPromise = Promise[Unit]()
     val firstSuccessfulConsumerInitializationPromise = Promise[Unit]()
     val uncommittedQueueSnapshotRef =
-      new AtomicReference[Vector[(Long, Traced[Update])]](Vector.empty)
+      new AtomicReference[Vector[(Long, Update)]](Vector.empty)
 
     override def firstSuccessfulConsumerInitialization: Future[Unit] =
       firstSuccessfulConsumerInitializationPromise.future
 
-    override def uncommittedQueueSnapshot: Vector[(Long, Traced[Update])] =
+    override def uncommittedQueueSnapshot: Vector[(Long, Update)] =
       uncommittedQueueSnapshotRef.get()
 
-    override def offer(elem: Traced[Update]): Future[Done] = Future.successful(Done)
+    override def offer(elem: Update): Future[Done] = Future.successful(Done)
 
     override def shutdown(): Unit = shutdownPromise.trySuccess(())
 
     override def done: Future[Done] = donePromise.future
   }
 
-  class TestRepairIndexer extends FutureQueue[Traced[Update]] {
+  class TestRepairIndexer extends FutureQueue[Update] {
     val donePromise = Promise[Done]()
     val shutdownPromise = Promise[Unit]()
     val repairReceivedPromise = Promise[Unit]()
     val repairPersistedPromise = Promise[Unit]()
 
-    override def offer(elem: Traced[Update]): Future[Done] = elem.value match {
+    override def offer(elem: Update): Future[Done] = elem match {
       case commitRepair: Update.CommitRepair =>
         repairReceivedPromise.trySuccess(())
         repairPersistedPromise.future.onComplete(commitRepair.persisted.tryComplete)
@@ -1529,4 +1540,11 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
       resultFuture
     }
   }
+
+  def update: Update =
+    Update.SequencerIndexMoved(
+      domainId = DomainId.tryFromString("x::domain"),
+      sequencerIndex = SequencerIndex(SequencerCounter(15L), CantonTimestamp(Time.Timestamp.now())),
+      requestCounterO = None,
+    )
 }

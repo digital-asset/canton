@@ -297,7 +297,6 @@ class StartableStoppableLedgerApiServer(
         partyRecordStore = partyRecordStore,
         participantId = config.participantId,
         command = config.serverConfig.commandService,
-        initSyncTimeout = config.serverConfig.initSyncTimeout,
         managementServiceTimeout = config.serverConfig.managementServiceTimeout,
         userManagement = config.serverConfig.userManagementService,
         partyManagementServiceConfig = config.serverConfig.partyManagementService,

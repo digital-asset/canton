@@ -143,6 +143,7 @@ class ProtocolConverters(schemaProcessors: SchemaProcessors)(implicit
                 templateId = Some(IdentifierConverter.fromJson(js.template_id)),
                 contractId = js.contract_id,
                 createdEventBlob = js.created_event_blob,
+                domainId = js.domain_id.getOrElse(""),
               )
             ),
             domainId = domain_id,
@@ -235,6 +236,7 @@ class ProtocolConverters(schemaProcessors: SchemaProcessors)(implicit
                 template_id = IdentifierConverter.toJson(disclosedContract.getTemplateId),
                 contract_id = disclosedContract.contractId,
                 created_event_blob = disclosedContract.createdEventBlob,
+                domain_id = Option(disclosedContract.domainId).filter(_.nonEmpty),
               )
             },
             act_as = lapiCommands.actAs,

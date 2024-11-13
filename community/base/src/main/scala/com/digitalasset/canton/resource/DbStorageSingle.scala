@@ -19,7 +19,6 @@ import com.digitalasset.canton.metrics.DbStorageMetrics
 import com.digitalasset.canton.resource.DatabaseStorageError.DatabaseConnectionLost.DatabaseConnectionLost
 import com.digitalasset.canton.resource.DbStorage.DbAction.{All, ReadTransactional}
 import com.digitalasset.canton.resource.DbStorage.{DbAction, DbStorageCreationException, Profile}
-import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.time.{Clock, PeriodicAction}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ResourceUtil
@@ -31,7 +30,7 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future, blocking}
 
 /** DB Storage implementation that assumes a single process accessing the underlying database. */
-class DbStorageSingle private (
+final class DbStorageSingle private (
     override val profile: DbStorage.Profile,
     override val dbConfig: DbConfig,
     db: Database,

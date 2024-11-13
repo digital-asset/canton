@@ -10,6 +10,7 @@ import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{LoggerUtil, SingleUseCell}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import org.slf4j.event.Level
 
@@ -40,6 +41,8 @@ trait SequencerChannelProtocolProcessor extends FlagCloseable with NamedLogging 
           "Channel endpoint already set to a different channel endpoint - coding bug",
         )
       )
+
+  protected def protocolVersion: ProtocolVersion
 
   // Whether the processor has at some point been connected to the channel, i.e. remains true after hasCompleted is set.
   private[channel] val hasConnected = new AtomicBoolean(false)

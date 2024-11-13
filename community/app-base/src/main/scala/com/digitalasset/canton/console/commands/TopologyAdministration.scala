@@ -38,7 +38,6 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.grpc.ByteStringStreamObserver
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.TopologyStore.Authorized
 import com.digitalasset.canton.topology.admin.grpc.{BaseQuery, TopologyStore}
@@ -1304,8 +1303,8 @@ class TopologyAdministrationGroup(
       """)
     def propose_delta(
         party: PartyId,
-        adds: List[(ParticipantId, ParticipantPermission)] = Nil,
-        removes: List[ParticipantId] = Nil,
+        adds: Seq[(ParticipantId, ParticipantPermission)] = Nil,
+        removes: Seq[ParticipantId] = Nil,
         signedBy: Option[Fingerprint] = None,
         synchronize: Option[config.NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded

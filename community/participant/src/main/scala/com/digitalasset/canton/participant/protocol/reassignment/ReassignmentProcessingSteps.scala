@@ -8,6 +8,7 @@ import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, Signature}
 import com.digitalasset.canton.data.ViewType.ReassignmentViewType
 import com.digitalasset.canton.data.{
@@ -58,7 +59,7 @@ import com.digitalasset.canton.protocol.messages.Verdict.{
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, ReassignmentTag}
 import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter}
 import com.digitalasset.daml.lf.engine
@@ -171,9 +172,11 @@ trait ReassignmentProcessingSteps[
       envelope: OpenEnvelope[EncryptedViewMessage[RequestViewType]]
   )(implicit
       tc: TraceContext
-  ): EitherT[FutureUnlessShutdown, EncryptedViewMessageError, WithRecipients[
-    DecryptedView
-  ]]
+  ): EitherT[
+    FutureUnlessShutdown,
+    EncryptedViewMessageError,
+    (WithRecipients[DecryptedView], Option[Signature]),
+  ]
 
   override def decryptViews(
       batch: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[RequestViewType]]]],
@@ -182,13 +185,11 @@ trait ReassignmentProcessingSteps[
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, DecryptedViews] = {
-    val result = for {
-      decryptedEitherList <- batch.toNEF.parTraverse(
+    val result = batch.toNEF
+      .parTraverse(
         decryptTree(snapshot, sessionKeyStore)(_).value
       )
-    } yield DecryptedViews(
-      decryptedEitherList.map(_.map(decryptedView => (decryptedView, None)))
-    )
+      .map(DecryptedViews(_))
     EitherT.right(result)
   }
 
@@ -236,10 +237,7 @@ trait ReassignmentProcessingSteps[
         signature,
         submitterMetadataO,
         isFreshOwnTimelyRequest,
-        isConfirmingReassigningParticipant =
-          viewTree.isConfirmingReassigningParticipant(participantId),
-        isObservingReassigningParticipant =
-          viewTree.isObservingReassigningParticipant(participantId),
+        isReassigningParticipant = viewTree.isReassigningParticipant(participantId),
         malformedPayloads,
         mediator,
         snapshot,
@@ -270,7 +268,7 @@ trait ReassignmentProcessingSteps[
       error: TransactionError,
   )(implicit
       traceContext: TraceContext
-  ): (Option[Traced[Update]], Option[PendingSubmissionId]) = {
+  ): (Option[Update], Option[PendingSubmissionId]) = {
     val rejection = Update.CommandRejected.FinalReason(error.rpcStatus())
     val isSubmittingParticipant = submitterMetadata.submittingParticipant == participantId
 
@@ -283,22 +281,20 @@ trait ReassignmentProcessingSteps[
       messageUuid = None,
     )
     val updateO = Option.when(isSubmittingParticipant)(
-      Traced(
-        Update.CommandRejected(
-          ts.toLf,
-          completionInfo,
-          rejection,
-          domainId.unwrap,
-          Some(
-            DomainIndex.of(
-              RequestIndex(
-                counter = rc,
-                sequencerCounter = Some(sc),
-                timestamp = ts,
-              )
+      Update.CommandRejected(
+        ts.toLf,
+        completionInfo,
+        rejection,
+        domainId.unwrap,
+        Some(
+          DomainIndex.of(
+            RequestIndex(
+              counter = rc,
+              sequencerCounter = Some(sc),
+              timestamp = ts,
             )
-          ),
-        )
+          )
+        ),
       )
     )
     (updateO, rootHash.some)
@@ -306,7 +302,7 @@ trait ReassignmentProcessingSteps[
 
   override def createRejectionEvent(rejectionArgs: RejectionArgs)(implicit
       traceContext: TraceContext
-  ): Either[ReassignmentProcessorError, Option[Traced[Update]]] = {
+  ): Either[ReassignmentProcessorError, Option[Update]] = {
 
     val RejectionArgs(pendingReassignment, rejectionReason) = rejectionArgs
     val isSubmittingParticipant =
@@ -326,22 +322,20 @@ trait ReassignmentProcessingSteps[
     rejectionReason.logWithContext(Map("requestId" -> pendingReassignment.requestId.toString))
     val rejection = Update.CommandRejected.FinalReason(rejectionReason.reason())
     val updateO = completionInfoO.map(info =>
-      Traced(
-        Update.CommandRejected(
-          pendingReassignment.requestId.unwrap.toLf,
-          info,
-          rejection,
-          domainId.unwrap,
-          Some(
-            DomainIndex.of(
-              RequestIndex(
-                counter = pendingReassignment.requestCounter,
-                sequencerCounter = Some(pendingReassignment.requestSequencerCounter),
-                timestamp = pendingReassignment.requestId.unwrap,
-              )
+      Update.CommandRejected(
+        pendingReassignment.requestId.unwrap.toLf,
+        info,
+        rejection,
+        domainId.unwrap,
+        Some(
+          DomainIndex.of(
+            RequestIndex(
+              counter = pendingReassignment.requestCounter,
+              sequencerCounter = Some(pendingReassignment.requestSequencerCounter),
+              timestamp = pendingReassignment.requestId.unwrap,
             )
-          ),
-        )
+          )
+        ),
       )
     )
     Right(updateO)
@@ -398,8 +392,7 @@ object ReassignmentProcessingSteps {
       signatureO: Option[Signature],
       override val submitterMetadataO: Option[ReassignmentSubmitterMetadata],
       override val isFreshOwnTimelyRequest: Boolean,
-      isConfirmingReassigningParticipant: Boolean,
-      isObservingReassigningParticipant: Boolean,
+      isReassigningParticipant: Boolean,
       override val malformedPayloads: Seq[MalformedPayload],
       override val mediator: MediatorGroupRecipient,
       override val snapshot: DomainSnapshotSyncCryptoApi,
@@ -490,6 +483,19 @@ object ReassignmentProcessingSteps {
       s"For $reference: $party is not hosted on $participantId"
   }
 
+  final case class StakeholderHostingErrors(message: String) extends UnassignmentProcessorError
+  object StakeholderHostingErrors {
+    def missingSignatoryReassigningParticipants(
+        signatory: LfPartyId,
+        domain: String,
+        threshold: PositiveInt,
+        signatoryReassigningParticipants: Int,
+    ): StakeholderHostingErrors = StakeholderHostingErrors(
+      s"Signatory $signatory requires at least $threshold signatory reassigning participants on $domain domain, " +
+        s"but only $signatoryReassigningParticipants are available"
+    )
+  }
+
   final case class ContractMetadataMismatch(
       reassignmentRef: ReassignmentRef,
       declaredContractMetadata: ContractMetadata,
@@ -505,6 +511,15 @@ object ReassignmentProcessingSteps {
       expectedStakeholders: Either[String, Stakeholders],
   ) extends ReassignmentProcessorError {
     override def message: String = s"For reassignment `$reassignmentRef`: stakeholders mismatch"
+  }
+
+  final case class ReassigningParticipantsMismatch(
+      reassignmentRef: ReassignmentRef,
+      expected: Set[ParticipantId],
+      declared: Set[ParticipantId],
+  ) extends UnassignmentProcessorError {
+    override def message: String =
+      s"For reassigning `$reassignmentRef`: reassigning participants mismatch"
   }
 
   final case class NoStakeholders private (contractId: LfContractId)

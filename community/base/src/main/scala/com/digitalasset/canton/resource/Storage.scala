@@ -35,7 +35,6 @@ import com.digitalasset.canton.resource.StorageFactory.StorageCreationException
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbSerializationException}
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.ShowUtil.*
@@ -163,7 +162,7 @@ class CommunityStorageFactory(val config: CommunityStorageConfig) extends Storag
     }
 }
 
-class MemoryStorage(
+final class MemoryStorage(
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
 ) extends Storage

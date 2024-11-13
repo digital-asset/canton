@@ -12,10 +12,9 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, L
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
 import com.digitalasset.canton.platform.indexer.IndexerState.RepairInProgress
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.ParticipantId
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, LoggerUtil, MonadUtil, SimpleExecutionQueue}
 import org.slf4j.event.Level
 
@@ -55,7 +54,7 @@ class ParticipantEventPublisher(
   private def publishInternal(event: Update)(implicit traceContext: TraceContext): Future[Unit] = {
     logger.debug(s"Publishing event at record time ${event.recordTime}: ${event.show}")
     ledgerApiIndexer.value.queue
-      .offer(Traced(event))
+      .offer(event)
       // waiting for the participant event to persisted by Indexer
       .flatMap(_ => event.persisted.future)
   }
@@ -115,41 +114,16 @@ class ParticipantEventPublisher(
     * @param events will be published after each other, maintaining the same order on the ledger as well
     * @return A Future which will be only successful if all the event are successfully persisted by the indexer
     */
-  def publishDomainRelatedEvents(events: Seq[Traced[Update]]): FutureUnlessShutdown[Unit] =
+  def publishDomainRelatedEvents(events: Seq[Update]): FutureUnlessShutdown[Unit] =
     MonadUtil.sequentialTraverse_(events) { tracedEvent =>
       implicit val tc: TraceContext = tracedEvent.traceContext
       executionQueue.execute(
-        publishInternal(tracedEvent.value)(tracedEvent.traceContext),
-        s"publish event ${tracedEvent.value.show} with record time ${tracedEvent.value.recordTime}",
+        publishInternal(tracedEvent)(tracedEvent.traceContext),
+        s"publish event ${tracedEvent.show} with record time ${tracedEvent.recordTime}",
       )
     }
 
-  /** The Init will be only published if the ledger is empty. This call can be repeated anytime, if the ledger is
-    * not empty, it will have no effect.
-    *
-    * @return A Future which will be only successful if the Init event is successfully persisted by the indexer
-    */
-  def publishInitNeededUpstreamOnlyIfFirst(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] =
-    executionQueue.execute(
-      for {
-        ledgerEnd <- ledgerApiIndexer.value.ledgerApiStore.value.ledgerEnd
-        _ <-
-          if (ledgerEnd == LedgerEnd.beforeBegin) {
-            logger.debug("Attempt to publish init update")
-            val event = Update.Init(
-              recordTime = participantClock.uniqueTime().toLf
-            )
-            // Do not call `publish` because this is already running inside the execution queue
-            publishInternal(event)
-          } else Future.unit
-      } yield (),
-      "publish Init message",
-    )
-
   override protected def onClosed(): Unit = Lifecycle.close(executionQueue)(logger)
-
 }
 
 object ParticipantEventPublisher {

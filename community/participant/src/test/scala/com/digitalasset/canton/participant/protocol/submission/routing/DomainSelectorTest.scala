@@ -554,7 +554,7 @@ private[routing] object DomainSelectorTest {
         .create(
           actAs = Set(signatory),
           readAs = Set(),
-          signedExternally = Set(),
+          externallySignedSubmissionO = None,
           ledgerTime = ledgerTime,
           transaction = tx,
           domainStateProvider = TestDomainStateProvider,

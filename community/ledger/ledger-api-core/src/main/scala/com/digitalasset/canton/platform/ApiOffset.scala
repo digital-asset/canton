@@ -12,7 +12,7 @@ import scala.util.{Failure, Success, Try}
 // offsets sent over the API and received from the API.
 object ApiOffset {
 
-  val begin: Offset = Offset.fromByteArray(Array(0: Byte))
+  val begin: Offset = Offset.beforeBegin
 
   def tryFromString(s: String): Try[Offset] =
     fromString(s) match {
@@ -39,14 +39,10 @@ object ApiOffset {
   def fromLong(l: Long): String =
     Offset.fromLong(l).toHexString
 
-  def toApiString(offset: Offset): Ref.HexString =
-    offset.toHexString
-
   def toApiType(offset: Offset): Long =
     offset.toLong
 
   implicit class ApiOffsetConverter(val offset: Offset) {
-    def toApiString: Ref.HexString = ApiOffset.toApiString(offset)
     def toApiType: Long = ApiOffset.toApiType(offset)
   }
 

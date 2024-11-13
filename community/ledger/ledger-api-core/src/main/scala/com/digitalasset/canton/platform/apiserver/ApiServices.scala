@@ -4,7 +4,6 @@
 package com.digitalasset.canton.platform.apiserver
 
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.auth.Authorizer
 import com.digitalasset.canton.config
@@ -21,12 +20,9 @@ import com.digitalasset.canton.ledger.localstore.api.{
 }
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.index.*
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
-import com.digitalasset.canton.platform.apiserver.configuration.{
-  EngineLoggingConfig,
-  LedgerEndObserverFromIndex,
-}
+import com.digitalasset.canton.platform.apiserver.configuration.EngineLoggingConfig
 import com.digitalasset.canton.platform.apiserver.execution.*
 import com.digitalasset.canton.platform.apiserver.execution.StoreBackedCommandExecutor.AuthenticateContract
 import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportKey
@@ -56,10 +52,10 @@ import org.apache.pekko.stream.Materializer
 
 import java.time.Instant
 import scala.collection.immutable
+import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
-import scala.concurrent.{ExecutionContext, Future}
 
-trait ApiServices {
+trait ApiServices extends AutoCloseable {
   val services: Iterable[BindableService]
 
   def withServices(otherServices: immutable.Seq[BindableService]): ApiServices
@@ -71,11 +67,16 @@ private final case class ApiServicesBundle(services: immutable.Seq[BindableServi
   override def withServices(otherServices: immutable.Seq[BindableService]): ApiServices =
     copy(services = services ++ otherServices)
 
+  override def close(): Unit =
+    services.foreach {
+      case closeable: AutoCloseable => closeable.close()
+      case _ => ()
+    }
 }
 
 object ApiServices {
 
-  final class Owner(
+  def apply(
       participantId: Ref.ParticipantId,
       syncService: state.SyncService,
       indexService: IndexService,
@@ -87,7 +88,6 @@ object ApiServices {
       timeProvider: TimeProvider,
       timeProviderType: TimeProviderType,
       submissionTracker: SubmissionTracker,
-      initSyncTimeout: FiniteDuration,
       commandProgressTracker: CommandProgressTracker,
       commandConfig: CommandServiceConfig,
       optTimeServiceBackend: Option[TimeServiceBackend],
@@ -105,65 +105,28 @@ object ApiServices {
       meteringReportKey: MeteringReportKey,
       authenticateContract: AuthenticateContract,
       telemetry: Telemetry,
-      val loggerFactory: NamedLoggerFactory,
+      loggerFactory: NamedLoggerFactory,
       dynParamGetter: DynamicDomainParameterGetter,
       interactiveSubmissionServiceConfig: InteractiveSubmissionServiceConfig,
       lfValueTranslation: LfValueTranslation,
+      logger: TracedLogger,
   )(implicit
       materializer: Materializer,
       esf: ExecutionSequencerFactory,
       tracer: Tracer,
-  ) extends ResourceOwner[ApiServices]
-      with NamedLogging {
+  ): ApiServices = {
+    implicit val traceContext: TraceContext = TraceContext.empty
 
-    private val activeContractsService: IndexActiveContractsService = indexService
-    private val transactionsService: IndexTransactionsService = indexService
-    private val eventQueryService: IndexEventQueryService = indexService
-    private val contractStore: ContractStore = indexService
-    private val maximumLedgerTimeService: MaximumLedgerTimeService = indexService
-    private val completionsService: IndexCompletionsService = indexService
-    private val partyManagementService: IndexPartyManagementService = indexService
-    private val meteringStore: MeteringStore = indexService
+    val activeContractsService: IndexActiveContractsService = indexService
+    val transactionsService: IndexTransactionsService = indexService
+    val eventQueryService: IndexEventQueryService = indexService
+    val contractStore: ContractStore = indexService
+    val maximumLedgerTimeService: MaximumLedgerTimeService = indexService
+    val completionsService: IndexCompletionsService = indexService
+    val partyManagementService: IndexPartyManagementService = indexService
+    val meteringStore: MeteringStore = indexService
 
-    private val ledgerEndObserver = new LedgerEndObserverFromIndex(
-      indexService = indexService,
-      servicesExecutionContext = servicesExecutionContext,
-      loggerFactory = loggerFactory,
-    )
-
-    override def acquire()(implicit context: ResourceContext): Resource[ApiServices] = {
-      implicit val traceContext: TraceContext = TraceContext.empty
-      logger.info(engine.info.toString)
-      for {
-        services <- Resource {
-          logger.debug(s"Waiting for at least one event before creating the ledger api services.")
-          for {
-            _ <- ledgerEndObserver
-              .waitForNonEmptyLedger(
-                initSyncTimeout = initSyncTimeout
-              )
-              .recover(t =>
-                logger.warn(
-                  s"The participant offset was not modified. The ledger API server will now start " +
-                    s"but all services that depend on the ledger having a non empty offset may be affected. " +
-                    s"${t.getMessage}"
-                )
-              )
-          } yield createServices(checkOverloaded)(
-            servicesExecutionContext
-          )
-        }(services =>
-          Future {
-            services.foreach {
-              case closeable: AutoCloseable => closeable.close()
-              case _ => ()
-            }
-          }
-        )
-      } yield ApiServicesBundle(services)
-    }
-
-    private def createServices(
+    def createServices(
         checkOverloaded: TraceContext => Option[state.SubmissionResult]
     )(implicit
         executionContext: ExecutionContext
@@ -303,7 +266,7 @@ object ApiServices {
         ) ::: userManagementServices
     }
 
-    private def intitializeSyncServiceBackedApiServices(
+    def intitializeSyncServiceBackedApiServices(
         ledgerApiV2Enabled: Option[ApiUpdateService],
         checkOverloaded: TraceContext => Option[state.SubmissionResult],
     )(implicit
@@ -418,7 +381,6 @@ object ApiServices {
                 commandExecutor,
                 metrics,
                 checkOverloaded,
-                interactiveSubmissionServiceConfig,
                 lfValueTranslation,
                 loggerFactory,
               )
@@ -450,5 +412,8 @@ object ApiServices {
         new ParticipantPruningServiceAuthorization(participantPruningService, authorizer),
       ) ::: ledgerApiV2Services
     }
+
+    logger.info(engine.info.toString)
+    ApiServicesBundle(createServices(checkOverloaded)(servicesExecutionContext))
   }
 }

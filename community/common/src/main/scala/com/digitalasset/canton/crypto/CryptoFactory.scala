@@ -96,9 +96,9 @@ trait CryptoFactory {
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, String, CryptoStoresAndSchemes] =
     for {
-      cryptoPublicStore <- EitherT.rightT[FutureUnlessShutdown, String](
-        CryptoPublicStore.create(storage, releaseProtocolVersion, timeouts, loggerFactory)
-      )
+      cryptoPublicStore <- CryptoPublicStore
+        .create(storage, releaseProtocolVersion, timeouts, loggerFactory)
+        .leftMap(err => show"Failed to create crypto public store: $err")
       cryptoPrivateStore <- cryptoPrivateStoreFactory
         .create(storage, releaseProtocolVersion, timeouts, loggerFactory, tracerProvider)
         .leftMap(err => show"Failed to create crypto private store: $err")
@@ -290,6 +290,8 @@ object JceCrypto {
           storesAndSchemes.signingKeySpec,
           storesAndSchemes.encryptionKeySpec,
           cryptoPrivateStoreExtended,
+          timeouts,
+          loggerFactory,
         )
       crypto = new Crypto(
         pureCrypto,
