@@ -1380,6 +1380,7 @@ object LedgerApiCommands {
         domainId: Option[DomainId],
         applicationId: String,
         packageIdSelectionPreference: Seq[LfPackageId],
+        verboseHashing: Boolean,
     ) extends BaseCommand[
           PrepareSubmissionRequest,
           PrepareSubmissionResponse,
@@ -1401,6 +1402,7 @@ object LedgerApiCommands {
             disclosedContracts = disclosedContracts,
             domainId = domainId.map(_.toProtoPrimitive).getOrElse(""),
             packageIdSelectionPreference = packageIdSelectionPreference,
+            verboseHashing = verboseHashing,
           )
         )
 

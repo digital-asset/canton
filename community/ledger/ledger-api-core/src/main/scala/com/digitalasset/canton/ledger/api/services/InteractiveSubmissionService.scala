@@ -24,7 +24,7 @@ import com.digitalasset.daml.lf.data.Time
 import scala.concurrent.Future
 
 object InteractiveSubmissionService {
-  final case class PrepareRequest(commands: domain.Commands)
+  final case class PrepareRequest(commands: domain.Commands, verboseHashing: Boolean)
 
   /** @param ledgerEffectiveTimeIfNotAlreadySet If getTime was not used in the interpretation of the command,
     *                                    we'll set the ledger effective time here during "execute".

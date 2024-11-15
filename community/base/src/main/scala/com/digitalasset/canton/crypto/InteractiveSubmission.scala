@@ -11,11 +11,16 @@ import cats.syntax.parallel.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.protocol.{LfContractId, SerializableContract}
+import com.digitalasset.canton.protocol.hash.TransactionHash.NodeHashingError
+import com.digitalasset.canton.protocol.hash.{
+  HashTracer,
+  TransactionHash,
+  TransactionMetadataHashBuilder,
+}
+import com.digitalasset.canton.protocol.{LfContractId, LfHash, SerializableContract}
 import com.digitalasset.canton.topology.{DomainId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
-import com.digitalasset.daml.lf.crypto.Hash as LfHash
 import com.digitalasset.daml.lf.data.{Bytes, Ref, Time}
 import com.digitalasset.daml.lf.transaction.{FatContractInstance, NodeId, VersionedTransaction}
 import com.digitalasset.daml.lf.value.Value.ContractId
@@ -45,8 +50,28 @@ object InteractiveSubmission {
   }
 
   object TransactionMetadataForHashing {
+    def create(
+        actAs: Set[Ref.Party],
+        commandId: Ref.CommandId,
+        transactionUUID: UUID,
+        mediatorGroup: Int,
+        domainId: DomainId,
+        ledgerEffectiveTime: Option[Time.Timestamp],
+        submissionTime: Time.Timestamp,
+        disclosedContracts: Map[ContractId, FatContractInstance],
+    ) = new TransactionMetadataForHashing(
+      actAs = SortedSet.from(actAs),
+      commandId = commandId,
+      transactionUUID = transactionUUID,
+      mediatorGroup = mediatorGroup,
+      domainId = domainId,
+      ledgerEffectiveTime = ledgerEffectiveTime,
+      submissionTime = submissionTime,
+      disclosedContracts = SortedMap.from(disclosedContracts),
+    )
+
     def apply(
-        actAs: SortedSet[Ref.Party],
+        actAs: Set[Ref.Party],
         commandId: Ref.CommandId,
         transactionUUID: UUID,
         mediatorGroup: Int,
@@ -71,8 +96,8 @@ object InteractiveSubmission {
           )
         }
 
-      TransactionMetadataForHashing(
-        actAs,
+      new TransactionMetadataForHashing(
+        SortedSet.from(actAs),
         commandId,
         transactionUUID,
         mediatorGroup,
@@ -84,7 +109,7 @@ object InteractiveSubmission {
     }
   }
 
-  final case class TransactionMetadataForHashing(
+  final case class TransactionMetadataForHashing private (
       actAs: SortedSet[Ref.Party],
       commandId: Ref.CommandId,
       transactionUUID: UUID,
@@ -99,19 +124,19 @@ object InteractiveSubmission {
       transaction: VersionedTransaction,
       metadata: TransactionMetadataForHashing,
       nodeSeeds: Map[NodeId, LfHash],
+      hashTracer: HashTracer,
   ): Either[HashError, Hash] = {
     def catchHashingErrors[T](f: => T): Either[HashError, T] =
       scala.util
         .Try(f)
         .toEither
         .leftMap {
-          case nodeHashErr: LfHash.NodeHashingError => nodeHashErr.msg
-          case hashErr: LfHash.HashingError => hashErr.msg
+          case nodeHashErr: NodeHashingError => nodeHashErr.msg
           case err => err.getMessage
         }
         .leftMap(HashingFailed.apply)
 
-    val v1Metadata = LfHash.TransactionMetadataBuilderV1.Metadata(
+    val v1Metadata = TransactionMetadataHashBuilder.MetadataV1(
       metadata.actAs,
       metadata.commandId,
       metadata.transactionUUID,
@@ -122,17 +147,14 @@ object InteractiveSubmission {
       metadata.disclosedContracts,
     )
 
-    for {
-      transactionHash <- catchHashingErrors(LfHash.hashTransactionV1(transaction, nodeSeeds))
-      metadataHash <- catchHashingErrors(LfHash.hashTransactionMetadataV1(v1Metadata))
-    } yield {
-      Hash
-        .digest(
-          HashPurpose.PreparedSubmission,
-          transactionHash.bytes.toByteString.concat(metadataHash.bytes.toByteString),
-          HashAlgorithm.Sha256,
-        )
-    }
+    catchHashingErrors(
+      TransactionHash.tryHashTransactionWithMetadataV1(
+        transaction,
+        nodeSeeds,
+        v1Metadata,
+        hashTracer,
+      )
+    )
   }
 
   def computeVersionedHash(
@@ -141,6 +163,7 @@ object InteractiveSubmission {
       metadata: TransactionMetadataForHashing,
       nodeSeeds: Map[NodeId, LfHash],
       protocolVersion: ProtocolVersion,
+      hashTracer: HashTracer,
   ): Either[HashError, Hash] = {
     val supportedVersions =
       HashingSchemeVersion.getHashingSchemeVersionsForProtocolVersion(protocolVersion)
@@ -155,7 +178,7 @@ object InteractiveSubmission {
       )
     } else {
       hashVersion match {
-        case HashingSchemeVersion.V1 => computeHashV1(transaction, metadata, nodeSeeds)
+        case HashingSchemeVersion.V1 => computeHashV1(transaction, metadata, nodeSeeds, hashTracer)
       }
     }
   }
@@ -256,7 +279,7 @@ object InteractiveSubmission {
           _ <- EitherT.cond[FutureUnlessShutdown](
             validSignaturesSet.size >= authInfo.threshold.unwrap,
             (),
-            s"Received ${validSignatures.size} signatures, but expected ${authInfo.threshold} for $party",
+            s"Received ${validSignatures.size} valid signatures (${invalidSignatures.size} invalid), but expected at least ${authInfo.threshold} valid for $party",
           )
         } yield {
           logger.debug(

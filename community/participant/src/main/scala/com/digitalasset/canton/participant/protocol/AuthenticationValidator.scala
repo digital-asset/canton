@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import cats.syntax.either.*
+import cats.data.EitherT
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
@@ -18,6 +18,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps.ParsedTransactionRequest
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.LazyAsyncReInterpretation
+import com.digitalasset.canton.participant.util.DAMLe.TransactionEnricher
 import com.digitalasset.canton.protocol.{ExternalAuthorization, RequestId}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
@@ -26,7 +27,10 @@ import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
-class AuthenticationValidator(override val loggerFactory: NamedLoggerFactory)(implicit
+class AuthenticationValidator(
+    override val loggerFactory: NamedLoggerFactory,
+    transactionEnricher: TransactionEnricher,
+)(implicit
     executionContext: ExecutionContext
 ) extends NamedLogging {
 
@@ -157,25 +161,26 @@ class AuthenticationValidator(override val loggerFactory: NamedLoggerFactory)(im
                     viewTree.mediator.group.value,
                     domainId,
                     protocolVersion,
+                    transactionEnricher,
                   )
                   // If Hash computation is successful, verify the signature is valid
-                  .map(
-                    verifyExternalSignaturesForActAs(
-                      _,
-                      externalAuthorization,
-                      submitterMetadata.actAs,
+                  .flatMap { hash =>
+                    EitherT.liftF[FutureUnlessShutdown, String, Option[String]](
+                      verifyExternalSignaturesForActAs(
+                        hash,
+                        externalAuthorization,
+                        submitterMetadata.actAs,
+                      )
                     )
-                  )
+                  }
                   .map(
-                    _.map(signatureError => signatureError.map(err).map(viewTree.viewPosition -> _))
+                    _.map(signatureError => viewTree.viewPosition -> err(signatureError))
                   )
                   // If we couldn't compute the hash, fail
                   .valueOr(error =>
-                    FutureUnlessShutdown.pure(
-                      Some(
-                        viewTree.viewPosition -> err(
-                          s"Failed to compute externally signed hash: $error"
-                        )
+                    Some(
+                      viewTree.viewPosition -> err(
+                        s"Failed to compute externally signed hash: $error"
                       )
                     )
                   )

@@ -136,6 +136,9 @@ abstract class ProtocolProcessor[
     */
   private val submissionCounter: AtomicInteger = new AtomicInteger(0)
 
+  /** Validations run at the start of the submission. This can be overridden to provide early stage
+    * validations that should fail _synchronously_ the submission.
+    */
   protected def preSubmissionValidations(
       params: SubmissionParam,
       cryptoSnapshot: DomainSnapshotSyncCryptoApi,

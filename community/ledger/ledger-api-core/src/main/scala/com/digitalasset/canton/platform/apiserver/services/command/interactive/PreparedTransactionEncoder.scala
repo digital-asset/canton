@@ -15,10 +15,10 @@ import com.daml.ledger.api.v2.interactive.{
 import com.daml.ledger.api.v2.value as lapiValue
 import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.api.util.LfEngineToApi
+import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.execution.CommandExecutionResult
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.PreparedTransactionCodec.*
-import com.digitalasset.canton.platform.store.dao.events.LfValueTranslation
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf
@@ -29,8 +29,8 @@ import com.digitalasset.daml.lf.transaction.{GlobalKey, Node, NodeId, Transactio
 import com.digitalasset.daml.lf.value.Value
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
-import io.scalaland.chimney.dsl.*
 import io.scalaland.chimney.partial.Result
+import io.scalaland.chimney.syntax.*
 import io.scalaland.chimney.{PartialTransformer, Transformer}
 
 import java.util.UUID
@@ -40,16 +40,15 @@ import scala.concurrent.{ExecutionContext, Future}
   * Uses chimney to define Transformers and PartialTransformer for all conversions.
   */
 final class PreparedTransactionEncoder(
-    override val loggerFactory: NamedLoggerFactory,
-    lfValueTranslation: LfValueTranslation,
+    override val loggerFactory: NamedLoggerFactory
 ) extends NamedLogging {
 
   /** Defines the mapping between LF version and Encoding versions.
     * An encoding version can be used for several LF Versions.
     */
   private val nodeTransformers = Map(
-    LanguageVersion.v2_1 -> v1.nodeTransformer,
-    LanguageVersion.v2_dev -> v1.nodeTransformer,
+    LanguageVersion.v2_1 -> v1.nodeTransformer(LanguageVersion.v2_1),
+    LanguageVersion.v2_dev -> v1.nodeTransformer(LanguageVersion.v2_dev),
   )
 
   private def getEncoderForVersion(
@@ -141,28 +140,40 @@ final class PreparedTransactionEncoder(
    * V1 Transformers
    */
   object v1 {
-    private implicit val createNodeTransformer
-        : PartialTransformer[lf.transaction.Node.Create, isdv1.Create] = Transformer
+    private implicit def createNodeTransformer(implicit
+        languageVersion: LanguageVersion
+    ): PartialTransformer[lf.transaction.Node.Create, isdv1.Create] = Transformer
       .definePartial[lf.transaction.Node.Create, isdv1.Create]
       .withFieldRenamed(_.coid, _.contractId)
       .withFieldRenamed(_.arg, _.argument)
+      .withFieldConst(_.lfVersion, languageVersion.transformInto[String])
       .buildTransformer
 
-    private implicit val exerciseTransformer
-        : PartialTransformer[lf.transaction.Node.Exercise, isdv1.Exercise] = Transformer
+    private implicit def exerciseTransformer(implicit
+        languageVersion: LanguageVersion
+    ): PartialTransformer[lf.transaction.Node.Exercise, isdv1.Exercise] = Transformer
       .definePartial[lf.transaction.Node.Exercise, isdv1.Exercise]
       .withFieldRenamed(_.targetCoid, _.contractId)
       .withFieldComputed(_.choiceObservers, _.choiceObservers.toSeq)
+      .withFieldConst(_.lfVersion, languageVersion.transformInto[String])
       .buildTransformer
 
-    private implicit val fetchTransformer
-        : PartialTransformer[lf.transaction.Node.Fetch, isdv1.Fetch] = Transformer
+    private implicit def fetchTransformer(implicit
+        languageVersion: LanguageVersion
+    ): PartialTransformer[lf.transaction.Node.Fetch, isdv1.Fetch] = Transformer
       .definePartial[lf.transaction.Node.Fetch, isdv1.Fetch]
       .withFieldRenamed(_.coid, _.contractId)
+      .withFieldConst(_.lfVersion, languageVersion.transformInto[String])
       .buildTransformer
 
-    private[interactive] val nodeTransformer
-        : PartialTransformer[lf.transaction.Node, iss.DamlTransaction.Node.VersionedNode] =
+    private implicit val rollbackTransformer
+        : PartialTransformer[lf.transaction.Node.Rollback, isdv1.Rollback] = Transformer
+      .definePartial[lf.transaction.Node.Rollback, isdv1.Rollback]
+      .buildTransformer
+
+    private[interactive] def nodeTransformer(implicit
+        languageVersion: LanguageVersion
+    ): PartialTransformer[lf.transaction.Node, iss.DamlTransaction.Node.VersionedNode] =
       PartialTransformer[lf.transaction.Node, iss.DamlTransaction.Node.VersionedNode] { lfNode =>
         val nodeType = lfNode match {
           case create: lf.transaction.Node.Create =>
@@ -213,7 +224,6 @@ final class PreparedTransactionEncoder(
         versionedNode <- transformer.transform(lfNode)
       } yield iss.DamlTransaction.Node(
         nodeId = nodeId.transformInto[String],
-        lfVersion = lfNode.optVersion.map(_.transformInto[String]),
         versionedNode = versionedNode,
       )
   }
@@ -232,6 +242,9 @@ final class PreparedTransactionEncoder(
     )
     .withFieldConst(_.nodeSeeds, nodeSeeds.transformInto[Seq[iss.DamlTransaction.NodeSeed]])
     .buildTransformer
+
+  private implicit val globalKeyTransformer: PartialTransformer[GlobalKey, iscd.GlobalKey] =
+    PartialTransformer.derive
 
   // Transformer for global key mappings
   private implicit val commandExecutionResultGlobalKeyMappingTransformer
@@ -272,7 +285,14 @@ final class PreparedTransactionEncoder(
             }
         },
       )
-      .withFieldComputed(_.version, _.create.version.transformInto[String])
+      .buildTransformer
+
+  private implicit val submitterInfoTransformer
+      : Transformer[SubmitterInfo, iss.Metadata.SubmitterInfo] =
+    Transformer
+      .define[SubmitterInfo, iss.Metadata.SubmitterInfo]
+      // The hashing algorithm expects the actAs field to be sorted, so pre-sort them for the client
+      .withFieldComputed(_.actAs, _.actAs.sorted.map(_.transformInto[String]))
       .buildTransformer
 
   // Transformer for the transaction metadata
@@ -283,15 +303,7 @@ final class PreparedTransactionEncoder(
   ): PartialTransformer[CommandExecutionResult, iss.Metadata] =
     Transformer
       .definePartial[CommandExecutionResult, iss.Metadata]
-      .withFieldComputed(
-        _.submissionSeed,
-        _.transactionMeta.submissionSeed.transformInto[ByteString],
-      )
       .withFieldComputed(_.submissionTime, _.transactionMeta.submissionTime.transformInto[Long])
-      .withFieldComputed(
-        _.usedPackages,
-        _.transactionMeta.optUsedPackages.transformInto[Seq[String]],
-      )
       .withFieldComputed(
         _.ledgerEffectiveTime,
         r =>
@@ -301,11 +313,13 @@ final class PreparedTransactionEncoder(
       )
       .withFieldComputedPartial(
         _.disclosedEvents,
-        _.processedDisclosedContracts.toList.traverse(
-          _.transformIntoPartial[iss.Metadata.ProcessedDisclosedContract]
-        ),
+        // The hashing algorithm expects disclosed contracts to be sorted by contract ID, so pre-sort them for the client
+        _.processedDisclosedContracts.toList
+          .sortBy(_.create.coid.coid)
+          .traverse(
+            _.transformIntoPartial[iss.Metadata.ProcessedDisclosedContract]
+          ),
       )
-      .withFieldComputed(_.byKeyNodes, _.transactionMeta.optByKeyNodes.transformInto[Seq[String]])
       .withFieldConst(_.domainId, domainId.transformInto[String])
       .withFieldConst(_.transactionUuid, transactionUUID.toString)
       .withFieldConst(_.mediatorGroup, mediatorGroup)
@@ -316,7 +330,6 @@ final class PreparedTransactionEncoder(
       transaction: lf.transaction.VersionedTransaction,
       nodeSeeds: Option[ImmArray[(NodeId, crypto.Hash)]],
   )(implicit
-      executionContext: ExecutionContext,
       loggingContext: LoggingContextWithTrace,
       errorLoggingContext: ContextualizedErrorLogger,
   ): Future[DamlTransaction] = {
@@ -324,21 +337,12 @@ final class PreparedTransactionEncoder(
     implicit val implicitTransactionTransformer
         : PartialTransformer[lf.transaction.VersionedTransaction, iss.DamlTransaction] =
       transactionTransformer(nodeSeeds)
-    for {
-      // Enrich the transaction to get value fields in the resulting proto
-      enrichedTransaction <- lfValueTranslation
-        .enrichVersionedTransaction(transaction)
-        .recover { case err =>
-          // If we fail to enrich it just fallback to the un-enriched transaction
-          logger.debug(s"Failed to enrich versioned transaction", err)
-          transaction
-        }
-      // Convert the LF transaction to the interactive submission proto, this is where all the implicits above
-      // kick in.
-      protoTransaction <- enrichedTransaction
-        .transformIntoPartial[iss.DamlTransaction]
-        .toFutureWithLoggedFailures("Failed to serialize prepared transaction", logger)
-    } yield protoTransaction
+
+    // Convert the LF transaction to the interactive submission proto, this is where all the implicits above
+    // kick in.
+    transaction
+      .transformIntoPartial[iss.DamlTransaction]
+      .toFutureWithLoggedFailures("Failed to serialize prepared transaction", logger)
   }
 
   def serializeCommandExecutionResult(
