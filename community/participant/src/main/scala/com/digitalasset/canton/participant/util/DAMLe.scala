@@ -6,9 +6,11 @@ package com.digitalasset.canton.participant.util
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{LoggingContextUtil, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.PackageService
+import com.digitalasset.canton.participant.protocol.EngineController
 import com.digitalasset.canton.participant.protocol.EngineController.GetEngineAbortStatus
 import com.digitalasset.canton.participant.store.ContractLookupAndVerification
 import com.digitalasset.canton.participant.util.DAMLe.{
@@ -16,6 +18,7 @@ import com.digitalasset.canton.participant.util.DAMLe.{
   HasReinterpret,
   PackageResolver,
   ReInterpretationResult,
+  TransactionEnricher,
 }
 import com.digitalasset.canton.platform.apiserver.configuration.EngineLoggingConfig
 import com.digitalasset.canton.protocol.*
@@ -80,6 +83,11 @@ object DAMLe {
     * so that [[com.digitalasset.daml.lf.engine.Engine]] can skip validation.
     */
   type PackageResolver = PackageId => TraceContext => Future[Option[Package]]
+  type TransactionEnricher = LfVersionedTransaction => TraceContext => EitherT[
+    FutureUnlessShutdown,
+    ReinterpretationError,
+    LfVersionedTransaction,
+  ]
 
   sealed trait ReinterpretationError extends PrettyPrinting
 
@@ -156,6 +164,29 @@ class DAMLe(
   import DAMLe.{EngineAborted, EngineError, ReinterpretationError}
 
   logger.debug(engine.info.show)(TraceContext.empty)
+
+  // TODO(i21582) Because we do not hash suffixed CIDs, we need to disable validation of suffixed CIDs otherwise enrichment
+  // will fail. Remove this when we hash and sign suffixed CIDs
+  private lazy val engineForEnrichment = new Engine(
+    engine.config.copy(requireSuffixedGlobalContractId = false)
+  )
+  private lazy val valueEnricher = new ValueEnricher(engineForEnrichment)
+
+  /** Enrich transaction values by re-hydrating record labels
+    */
+  val enrichTransaction: TransactionEnricher = { transaction => implicit traceContext =>
+    EitherT {
+      handleResult(
+        ContractLookupAndVerification.noContracts(loggerFactory),
+        valueEnricher.enrichVersionedTransaction(transaction),
+        // This should not happen as value enrichment should only request lookups
+        () =>
+          EngineController.EngineAbortStatus(
+            Some("Unexpected engine interruption while enriching transaction")
+          ),
+      )
+    }.mapK(FutureUnlessShutdown.outcomeK)
+  }
 
   override def reinterpret(
       contracts: ContractLookupAndVerification,

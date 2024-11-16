@@ -43,6 +43,7 @@ import com.digitalasset.canton.participant.util.DAMLe.PackageResolver
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
+import com.digitalasset.canton.protocol.hash.HashTracer.NoOp
 import com.digitalasset.canton.sequencing.client.{SendAsyncClientError, SequencerClient}
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
@@ -52,7 +53,6 @@ import com.digitalasset.canton.version.ProtocolVersion
 import org.slf4j.event.Level
 
 import java.time.Duration
-import scala.collection.immutable.SortedSet
 import scala.concurrent.ExecutionContext
 
 class TransactionProcessor(
@@ -104,7 +104,7 @@ class TransactionProcessor(
         ephemeral.contractStore,
         metrics,
         SerializableContractAuthenticator(crypto.pureCrypto),
-        new AuthenticationValidator(loggerFactory),
+        new AuthenticationValidator(loggerFactory, damle.enrichTransaction),
         new AuthorizationValidator(participantId, parameters.enableExternalAuthorization),
         new InternalConsistencyChecker(
           staticDomainParameters.protocolVersion,
@@ -167,7 +167,7 @@ class TransactionProcessor(
           externallySignedSubmission.version,
           wfTransaction.unwrap,
           TransactionMetadataForHashing(
-            actAs = SortedSet.from(submitterInfo.actAs),
+            actAs = submitterInfo.actAs.toSet,
             commandId = submitterInfo.commandId,
             transactionUUID = externallySignedSubmission.transactionUUID,
             mediatorGroup = externallySignedSubmission.mediatorGroup.value,
@@ -180,6 +180,7 @@ class TransactionProcessor(
           ),
           nodeSeeds = wfTransaction.metadata.seeds,
           protocolVersion,
+          hashTracer = NoOp,
         )
 
         for {

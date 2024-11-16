@@ -45,6 +45,7 @@ import com.digitalasset.canton.participant.util.DAMLe.{
   HasReinterpret,
   PackageResolver,
   ReInterpretationResult,
+  TransactionEnricher,
 }
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.{
@@ -52,6 +53,7 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.{
   WithSuffixesAndMerged,
   WithoutSuffixes,
 }
+import com.digitalasset.canton.protocol.hash.HashTracer.NoOp
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
@@ -63,7 +65,7 @@ import com.digitalasset.canton.{LfCreateCommand, LfKeyResolver, LfPartyId, Reque
 import com.digitalasset.daml.lf.data.Ref.{CommandId, Identifier, PackageId, PackageName}
 
 import java.util.UUID
-import scala.collection.immutable.{SortedMap, SortedSet}
+import scala.collection.immutable.SortedMap
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Allows for checking model conformance of a list of transaction view trees.
@@ -462,6 +464,10 @@ object ModelConformanceChecker {
       contractLookup: ExtendedContractLookup,
       viewInputContracts: Map[LfContractId, StoredContract],
   ) {
+
+    /** Compute the hash of a re-interpreted transaction to validate external signatures.
+      * Note that we need to enrich the transaction to re-hydrate the record values with labels, since they're part of the hash
+      */
     def computeHash(
         hashingSchemeVersion: HashingSchemeVersion,
         actAs: Set[LfPartyId],
@@ -470,29 +476,44 @@ object ModelConformanceChecker {
         mediatorGroup: Int,
         domainId: DomainId,
         protocolVersion: ProtocolVersion,
-    ): Either[InteractiveSubmission.HashError, Hash] =
-      InteractiveSubmission.computeVersionedHash(
-        hashingSchemeVersion,
-        reInterpretationResult.transaction,
-        InteractiveSubmission.TransactionMetadataForHashing(
-          SortedSet.from(actAs),
-          commandId,
-          transactionUUID,
-          mediatorGroup,
-          domainId,
-          Option.when(reInterpretationResult.usesLedgerTime)(
-            reInterpretationResult.metadata.ledgerTime.toLf
-          ),
-          reInterpretationResult.metadata.submissionTime.toLf,
-          SortedMap.from(
-            viewInputContracts.map { case (cid, storedContract) =>
-              cid -> storedContract.contract
-            }
-          ),
-        ),
-        reInterpretationResult.metadata.seeds,
-        protocolVersion,
-      )
+        transactionEnricher: TransactionEnricher,
+    )(implicit
+        traceContext: TraceContext,
+        ec: ExecutionContext,
+    ): EitherT[FutureUnlessShutdown, String, Hash] =
+      for {
+        enrichedTransaction <- transactionEnricher(
+          reInterpretationResult.transaction
+        )(traceContext)
+          .leftMap(_.toString)
+        hash <- EitherT.fromEither[FutureUnlessShutdown](
+          InteractiveSubmission
+            .computeVersionedHash(
+              hashingSchemeVersion,
+              enrichedTransaction,
+              InteractiveSubmission.TransactionMetadataForHashing(
+                actAs,
+                commandId,
+                transactionUUID,
+                mediatorGroup,
+                domainId,
+                Option.when(reInterpretationResult.usesLedgerTime)(
+                  reInterpretationResult.metadata.ledgerTime.toLf
+                ),
+                reInterpretationResult.metadata.submissionTime.toLf,
+                SortedMap.from(
+                  viewInputContracts.map { case (cid, storedContract) =>
+                    cid -> storedContract.contract
+                  }
+                ),
+              ),
+              reInterpretationResult.metadata.seeds,
+              protocolVersion,
+              hashTracer = NoOp,
+            )
+            .leftMap(_.message)
+        )
+      } yield hash
   }
 
   private[validation] sealed trait ContractValidationFailure

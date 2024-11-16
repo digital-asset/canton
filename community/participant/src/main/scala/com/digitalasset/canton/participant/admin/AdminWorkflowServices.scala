@@ -295,7 +295,8 @@ class AdminWorkflowServices(
 
 object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
 
-  private val AdminWorkflowDarResourceName: String = "AdminWorkflows.dar"
+  // There are two adminWorkflows dars in the classpath, and we want the fixed one
+  private val AdminWorkflowDarResourceName: String = "dar/AdminWorkflows.dar"
   private def adminWorkflowDarInputStream(): InputStream = getDarInputStream(
     AdminWorkflowDarResourceName
   )

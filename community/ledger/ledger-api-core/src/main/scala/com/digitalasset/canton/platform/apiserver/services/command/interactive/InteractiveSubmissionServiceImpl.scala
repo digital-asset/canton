@@ -12,7 +12,7 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.*
 import com.daml.scalautil.future.FutureConversion.*
 import com.daml.timer.Delayed
 import com.digitalasset.canton.crypto.InteractiveSubmission
-import com.digitalasset.canton.crypto.InteractiveSubmission.*
+import com.digitalasset.canton.crypto.InteractiveSubmission.TransactionMetadataForHashing
 import com.digitalasset.canton.ledger.api.domain.{Commands as ApiCommands, SubmissionId}
 import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService
 import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService.{
@@ -44,28 +44,24 @@ import com.digitalasset.canton.platform.apiserver.services.{
   TimeProviderType,
   logging,
 }
+import com.digitalasset.canton.platform.config.InteractiveSubmissionServiceConfig
 import com.digitalasset.canton.platform.store.dao.events.LfValueTranslation
+import com.digitalasset.canton.protocol.hash.HashTracer
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.daml.lf.command.ApiCommand
 import com.digitalasset.daml.lf.crypto
-import com.digitalasset.daml.lf.transaction.FatContractInstance
+import com.digitalasset.daml.lf.transaction.{FatContractInstance, SubmittedTransaction}
 import io.opentelemetry.api.trace.Tracer
 
 import java.time.Duration
 import java.util.UUID
-import scala.collection.immutable.{SortedMap, SortedSet}
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 
 private[apiserver] object InteractiveSubmissionServiceImpl {
-  private final case class PendingRequest(
-      executionResult: CommandExecutionResult,
-      commands: ApiCommands,
-  )
-
   def createApiService(
       writeService: state.WriteService,
       timeProvider: TimeProvider,
@@ -75,6 +71,7 @@ private[apiserver] object InteractiveSubmissionServiceImpl {
       metrics: LedgerApiServerMetrics,
       checkOverloaded: TraceContext => Option[state.SubmissionResult],
       lfValueTranslation: LfValueTranslation,
+      config: InteractiveSubmissionServiceConfig,
       loggerFactory: NamedLoggerFactory,
   )(implicit
       executionContext: ExecutionContext,
@@ -88,6 +85,7 @@ private[apiserver] object InteractiveSubmissionServiceImpl {
     metrics,
     checkOverloaded,
     lfValueTranslation,
+    config,
     loggerFactory,
   )
 
@@ -102,6 +100,7 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
     metrics: LedgerApiServerMetrics,
     checkOverloaded: TraceContext => Option[state.SubmissionResult],
     lfValueTranslation: LfValueTranslation,
+    config: InteractiveSubmissionServiceConfig,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext, tracer: Tracer)
     extends InteractiveSubmissionService
@@ -109,7 +108,7 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
     with Spanning
     with NamedLogging {
 
-  private val transactionEncoder = new PreparedTransactionEncoder(loggerFactory, lfValueTranslation)
+  private val transactionEncoder = new PreparedTransactionEncoder(loggerFactory)
   private val transactionDecoder = new PreparedTransactionDecoder(loggerFactory)
 
   override def prepare(
@@ -147,7 +146,7 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
           request.commands.submissionId.map(SubmissionId.unwrap),
         )
 
-      evaluateAndHash(seedService.nextSeed(), request.commands)
+      evaluateAndHash(seedService.nextSeed(), request.commands, request.verboseHashing)
     }
 
   private def handleCommandExecutionResult(
@@ -164,6 +163,7 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
   private def evaluateAndHash(
       submissionSeed: crypto.Hash,
       commands: ApiCommands,
+      verboseHashing: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace,
       errorLoggingContext: ContextualizedErrorLogger,
@@ -172,7 +172,17 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
       commandExecutionResultE <- withSpan("InteractiveSubmissionService.evaluate") { _ => _ =>
         EitherT.liftF(commandExecutor.execute(commands, submissionSeed))
       }
-      commandExecutionResult <- EitherT.liftF(handleCommandExecutionResult(commandExecutionResultE))
+      preEnrichedCommandExecutionResult <- EitherT.liftF(
+        handleCommandExecutionResult(commandExecutionResultE)
+      )
+      // We need to enrich the transaction before computing the hash, because record labels must be part of the hash
+      enrichedTransaction <- EitherT.liftF(
+        lfValueTranslation
+          .enrichVersionedTransaction(preEnrichedCommandExecutionResult.transaction)
+      )
+      commandExecutionResult = preEnrichedCommandExecutionResult.copy(transaction =
+        SubmittedTransaction(enrichedTransaction)
+      )
       // Domain is required to be explicitly provided for now
       domainId <- EitherT.fromEither[Future](
         commandExecutionResult.optDomainId.toRight(
@@ -200,8 +210,8 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
           mediatorGroup,
         )
       )
-      metadataForHashing = TransactionMetadataForHashing(
-        SortedSet.from(commandExecutionResult.submitterInfo.actAs),
+      metadataForHashing = TransactionMetadataForHashing.create(
+        commandExecutionResult.submitterInfo.actAs.toSet,
         commandExecutionResult.submitterInfo.commandId,
         transactionUUID,
         mediatorGroup,
@@ -210,19 +220,22 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
           commandExecutionResult.transactionMeta.ledgerEffectiveTime
         ),
         commandExecutionResult.transactionMeta.submissionTime,
-        SortedMap.from(
-          commandExecutionResult.processedDisclosedContracts
-            .map { disclosedContract =>
-              disclosedContract.create.coid -> FatContractInstance.fromCreateNode(
-                disclosedContract.create,
-                disclosedContract.createdAt,
-                disclosedContract.driverMetadata,
-              )
-            }
-            .toList
-            .toMap
-        ),
+        commandExecutionResult.processedDisclosedContracts
+          .map { disclosedContract =>
+            disclosedContract.create.coid -> FatContractInstance.fromCreateNode(
+              disclosedContract.create,
+              disclosedContract.createdAt,
+              disclosedContract.driverMetadata,
+            )
+          }
+          .toList
+          .toMap,
       )
+      hashTracer: HashTracer =
+        if (config.enableVerboseHashing && verboseHashing)
+          HashTracer.StringHashTracer(traceSubNodes = true)
+        else
+          HashTracer.NoOp
       transactionHash <- EitherT
         .fromEither[Future](
           InteractiveSubmission.computeVersionedHash(
@@ -233,6 +246,7 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
               .map(_.toList.toMap)
               .getOrElse(Map.empty),
             protocolVersionForChosenDomain,
+            hashTracer,
           )
         )
         .leftMap(err =>
@@ -240,10 +254,21 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
             .Reject(s"Failed to compute hash: $err")
         )
         .leftWiden[DamlError]
+      hashingDetails = hashTracer match {
+        // If we have a NoOp tracer but verboseHashing was requested, it means it's disabled on the participant
+        // Return a message to explain that
+        case HashTracer.NoOp if verboseHashing =>
+          Some(
+            "Verbose hashing is disabled on this participant. Contact the node administrator for more details."
+          )
+        case HashTracer.NoOp => None
+        case stringTracer: HashTracer.StringHashTracer => Some(stringTracer.result)
+      }
     } yield PrepareSubmissionResponse(
       preparedTransaction = Some(preparedTransaction),
       preparedTransactionHash = transactionHash.getCryptographicEvidence,
       hashingSchemeVersion = hashVersion.toLAPIProto,
+      hashingDetails = hashingDetails,
     )
 
     result.value.map(_.leftMap(_.asGrpcError).toTry).flatMap(Future.fromTry)
@@ -272,28 +297,19 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
       transactionInfo: CommandExecutionResult
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Future[state.SubmissionResult] =
-    timeProviderType match {
-      case TimeProviderType.WallClock =>
-        // Submit transactions such that they arrive at the ledger sequencer exactly when record time equals ledger time.
-        // If the ledger time of the transaction is far in the future (farther than the expected latency),
-        // the submission to the WriteService is delayed.
-        val submitAt = transactionInfo.transactionMeta.ledgerEffectiveTime.toInstant
-          .minus(LedgerTimeModel.maximumToleranceTimeModel.avgTransactionLatency)
-        val submissionDelay = Duration.between(timeProvider.getCurrentTime, submitAt)
-        if (submissionDelay.isNegative)
-          submitTransaction(transactionInfo)
-        else {
-          logger.info(s"Delaying submission by $submissionDelay")
-          metrics.commands.delayedSubmissions.mark()
-          val scalaDelay = scala.concurrent.duration.Duration.fromNanos(submissionDelay.toNanos)
-          Delayed.Future.by(scalaDelay)(submitTransaction(transactionInfo))
-        }
-      case TimeProviderType.Static =>
-        // In static time mode, record time is always equal to ledger time
-        submitTransaction(transactionInfo)
+  ): Future[state.SubmissionResult] = {
+    val submitAt = transactionInfo.transactionMeta.ledgerEffectiveTime.toInstant
+      .minus(LedgerTimeModel.maximumToleranceTimeModel.avgTransactionLatency)
+    val submissionDelay = Duration.between(timeProvider.getCurrentTime, submitAt)
+    if (submissionDelay.isNegative)
+      submitTransaction(transactionInfo)
+    else {
+      logger.info(s"Delaying submission by $submissionDelay")
+      metrics.commands.delayedSubmissions.mark()
+      val scalaDelay = scala.concurrent.duration.Duration.fromNanos(submissionDelay.toNanos)
+      Delayed.Future.by(scalaDelay)({ submitTransaction(transactionInfo) })
     }
-
+  }
   private def submitTransaction(
       result: CommandExecutionResult
   )(implicit
