@@ -75,6 +75,7 @@ object BuildCommon {
         // scalacOptions in Test += "-Ystatistics",
         // TODO (i20606) We should find versions of libraries that do not need this workaround
         libraryDependencySchemes += "io.circe" %% "circe-parser" % VersionScheme.Always,
+        libraryDependencySchemes += "io.circe" %% "circe-yaml" % VersionScheme.Always,
       )
     )
 
@@ -879,13 +880,19 @@ object BuildCommon {
         Compile / damlEnableJavaCodegen := true,
         Compile / damlCodeGeneration := Seq(
           (
-            (Compile / sourceDirectory).value / "daml",
+            (Compile / sourceDirectory).value / "daml" / "AdminWorkflows",
             (Compile / damlDarOutput).value / "AdminWorkflows.dar",
             "com.digitalasset.canton.participant.admin.workflows",
-          )
+          ),
+          (
+            (Compile / sourceDirectory).value / "daml" / "PartyReplication",
+            (Compile / damlDarOutput).value / "PartyReplication.dar",
+            "com.digitalasset.canton.participant.admin.workflows",
+          ),
         ),
         Compile / damlBuildOrder := Seq(
-          "daml/daml.yaml"
+          "daml/AdminWorkflows/daml.yaml",
+          "daml/PartyReplication/daml.yaml",
         ),
         // TODO(#16168) Before creating the first stable release with backwards compatibility guarantees,
         //  make "AdminWorkflows.dar" stable again
@@ -1379,6 +1386,7 @@ object BuildCommon {
             // needed for foo.bar.{this as that} imports
             .filterNot(_ == "-Xsource:3"),
           libraryDependencies ++= Seq(
+            circe_parser,
             upickle,
             ujson_circe,
             tapir_json_circe,

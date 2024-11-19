@@ -12,6 +12,7 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.google.protobuf
 import io.circe.Codec
 import io.circe.generic.semiauto.deriveCodec
+import sttp.tapir.AnyEndpoint
 import sttp.tapir.generic.auto.*
 import sttp.tapir.json.circe.jsonBody
 
@@ -39,7 +40,7 @@ class JsVersionService(versionClient: VersionClient, val loggerFactory: NamedLog
         .resultToRight
 }
 
-object JsVersionService {
+object JsVersionService extends DocumentationEndpoints {
   import Endpoints.*
   import JsVersionServiceCodecs.*
 
@@ -49,6 +50,7 @@ object JsVersionService {
     .out(jsonBody[version_service.GetLedgerApiVersionResponse])
     .description("Get the version details of the participant node")
 
+  override def documentation: Seq[AnyEndpoint] = Seq(versionEndpoint)
 }
 
 object JsVersionServiceCodecs {
@@ -56,6 +58,7 @@ object JsVersionServiceCodecs {
   implicit val ecis: Codec[experimental_features.ExperimentalCommandInspectionService] = deriveCodec
   implicit val eiss: Codec[experimental_features.ExperimentalInteractiveSubmissionService] =
     deriveCodec
+  implicit val epte: Codec[experimental_features.ExperimentalPartyTopologyEvents] = deriveCodec
   implicit val ef: Codec[experimental_features.ExperimentalFeatures] = deriveCodec
   implicit val umf: Codec[version_service.UserManagementFeature] = deriveCodec
   implicit val pmf: Codec[version_service.PartyManagementFeature] = deriveCodec

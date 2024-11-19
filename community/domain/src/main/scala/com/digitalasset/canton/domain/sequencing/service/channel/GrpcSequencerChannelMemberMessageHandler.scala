@@ -15,6 +15,9 @@ import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.StatusRuntimeException
 import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
 
+import v30.ConnectToSequencerChannelRequest.Request as v30_ChannelRequest
+import v30.ConnectToSequencerChannelResponse.Response as v30_ChannelResponse
+
 /** The member message handler represents one side/member of a sequencer channel on the sequencer channel service
   * and forwards messages from the member to another "recipient" member message handler.
   *
@@ -52,15 +55,15 @@ private[channel] final class GrpcSequencerChannelMemberMessageHandler(
     new StreamObserver[v30.ConnectToSequencerChannelRequest] {
       override def onNext(requestP: v30.ConnectToSequencerChannelRequest): Unit = {
         val responseE = requestP.request match {
-          case v30.ConnectToSequencerChannelRequest.Request.Payload(payload) =>
-            Right(
-              v30.ConnectToSequencerChannelResponse.Response.Payload(
-                payload
-              ): v30.ConnectToSequencerChannelResponse.Response
-            )
-          case v30.ConnectToSequencerChannelRequest.Request.Metadata(metadataP) =>
+          case v30_ChannelRequest.SessionKey(keyP) =>
+            Right(v30_ChannelResponse.SessionKey(keyP): v30_ChannelResponse)
+          case v30_ChannelRequest.SessionKeyAcknowledgement(ackP) =>
+            Right(v30_ChannelResponse.SessionKeyAcknowledgement(ackP): v30_ChannelResponse)
+          case v30_ChannelRequest.Payload(payloadP) =>
+            Right(v30_ChannelResponse.Payload(payloadP): v30_ChannelResponse)
+          case v30_ChannelRequest.Metadata(metadataP) =>
             Left(s"Unexpectedly asked to forward sequencer channel metadata $metadataP")
-          case v30.ConnectToSequencerChannelRequest.Request.Empty =>
+          case v30_ChannelRequest.Empty =>
             Left("Unexpectedly asked to forward empty request")
         }
         implicit val traceContext: TraceContext = SerializableTraceContext
@@ -71,7 +74,7 @@ private[channel] final class GrpcSequencerChannelMemberMessageHandler(
         responseE.fold(
           error => {
             val errorMsg = s"Error converting request: $error"
-            logger.warn(errorMsg)(traceContext)
+            logger.warn(errorMsg)
             val throwable = new StatusRuntimeException(
               io.grpc.Status.INVALID_ARGUMENT.withDescription(errorMsg)
             )
@@ -81,36 +84,41 @@ private[channel] final class GrpcSequencerChannelMemberMessageHandler(
           },
           responseP => {
             if (logger.underlying.isDebugEnabled()) {
-              logger.debug(
-                s"Forwarding payload from $member to ${recipientMemberMessageHandler.map(_.member)}"
-              )(traceContext)
+              logger.debug(msg("Received payload", "payload"))
             }
             forwardToRecipient(
               _.receiveOnNext(
                 v30.ConnectToSequencerChannelResponse(responseP, requestP.traceContext)
               ),
               s"payload ${traceContext.traceId}",
+              () => {
+                val error =
+                  s"Sequencer channel error: Sequencer channel service received payload before recipient is ready"
+                logger.warn(error)
+                complete(
+                  _.onError(
+                    new StatusRuntimeException(io.grpc.Status.UNAVAILABLE.withDescription(error))
+                  )
+                )
+              },
             )
           },
         )
       }
 
-      override def onError(t: Throwable): Unit = {
-        logger.warn(
-          s"Member message handler received error ${t.getMessage}. Forwarding error to recipient."
-        )(TraceContext.empty)
-        forwardToRecipient(_.receiveOnError(t), s"error ${t.getMessage}")(
-          TraceContext.empty
-        )
+      override def onError(t: Throwable): Unit =
+        TraceContext.withNewTraceContext { implicit traceContext =>
+          logger.warn(msg(s"Member message handler received error ${t.getMessage}.", "error"))
+          forwardToRecipient(_.receiveOnError(t), s"error ${t.getMessage}")
 
-        // An error on the request observer implies that this handler's response observer is already closed
-        // so mark the member message handler as complete without sending a response.
-        complete(_ => ())
-      }
+          // An error on the request observer implies that this handler's response observer is already closed
+          // so mark the member message handler as complete without sending a response.
+          complete(_ => ())
+        }
 
       override def onCompleted(): Unit =
         TraceContext.withNewTraceContext { implicit traceContext =>
-          logger.info("Completed request stream. Forwarding completion to recipient.")
+          logger.info(msg("Completed request stream.", "completion"))
           forwardToRecipient(_.receiveOnCompleted(), s"completion")
 
           // Completing the request stream on a channel request implies that the response stream is also complete.
@@ -119,6 +127,12 @@ private[channel] final class GrpcSequencerChannelMemberMessageHandler(
           logger.info("Completing response stream after request stream completion")
           complete()
         }
+
+      // Helper to produce log message adding suffix only if recipient is available.
+      private def msg(message: String, operation: String): String =
+        recipientMemberMessageHandler.fold(message)(recipient =>
+          message + s" Forwarding $operation to recipient ${recipient.member}."
+        )
     }
 
   /** Generate response notification that both members are connected.
@@ -131,18 +145,14 @@ private[channel] final class GrpcSequencerChannelMemberMessageHandler(
 
   /** Forwards a message to the recipient member message handler if the recipient is available.
     *
-    * If the recipient is not available, completes this member message handler's response observer with an error.
+    * If the recipient is not available, invoke optional onMissingRecipientHandler.
     */
   private def forwardToRecipient(
       callToForward: GrpcSequencerChannelMemberMessageHandler => Unit,
       message: String,
+      onMissingRecipientHandler: () => Unit = () => (),
   )(implicit traceContext: TraceContext): Unit = recipientMemberMessageHandler.fold {
-    val error =
-      s"Sequencer channel error: Sequencer channel service received $message before recipient is ready"
-    logger.warn(error)
-    complete(
-      _.onError(new StatusRuntimeException(io.grpc.Status.UNAVAILABLE.withDescription(error)))
-    )
+    onMissingRecipientHandler()
   } { recipientRequestHandler =>
     performUnlessClosing(s"forward $message to recipient")(
       callToForward(recipientRequestHandler)
