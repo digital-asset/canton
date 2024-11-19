@@ -788,7 +788,7 @@ object CantonNodeBootstrapImpl {
   ): EitherT[FutureUnlessShutdown, String, SigningPublicKey] =
     getKeyByFingerprint(
       "signing",
-      crypto.cryptoPublicStore.findSigningKeyIdByFingerprint,
+      crypto.cryptoPublicStore.signingKey,
       crypto.cryptoPrivateStore.existsSigningKey,
       fingerprint,
     )
