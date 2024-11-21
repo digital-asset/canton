@@ -104,7 +104,7 @@ class TransactionProcessor(
         ephemeral.contractStore,
         metrics,
         SerializableContractAuthenticator(crypto.pureCrypto),
-        new AuthenticationValidator(loggerFactory, damle.enrichTransaction),
+        new AuthenticationValidator(loggerFactory, damle.enrichTransaction, damle.enrichCreateNode),
         new AuthorizationValidator(participantId, parameters.enableExternalAuthorization),
         new InternalConsistencyChecker(
           staticDomainParameters.protocolVersion,

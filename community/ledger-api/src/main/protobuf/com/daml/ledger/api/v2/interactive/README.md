@@ -102,6 +102,14 @@ e.g: `[0x00] || [0x01] = [0x00, 0x01]`
 
 - `[]`: Empty byte array. Denotes that the value should not be encoded.
 
+- `from_hex_string`: Function that takes a string in the hexadecimal format as input and decodes it as a byte array: `from_hex_string: string => byte[]`
+
+e.g: `from_hex_string("08020a") = [0x08, 0x02, 0x0a]`
+
+- `int_to_string`: Function that takes an int and converts it to a string : `int_to_string: int => string`
+
+e.g: `int_to_string(42) = "42"`
+
 - `some`: Value wrapped in a defined optional. Should be encoded as a defined optional value: `some: T => optional T`
 
 e.g: `encode(some(5)) = 0x01 || encode(5)`
@@ -321,7 +329,7 @@ fn encode(text):
 ```
 fn encode(contract_id):
     0X08 || # Contract Id Type Tag
-    encode(contract_id) # Primitive string encoding
+    from_hex_string(contract_id) # Contract IDs are hexadecimal strings, so they need to be decoded as such. They should not be encoded as classic strings
 ```
 
 [Protobuf Definition](https://github.com/digital-asset/daml/blob/b5698e2327b83f7d9a5619395cd9b2de21509ab3/sdk/daml-lf/ledger-api-value/src/main/protobuf/com/daml/ledger/api/v2/value.proto#L63)
@@ -482,9 +490,20 @@ We'll also define a `find_seed: NodeId => optional bytes` function that will be 
 ```
 fn find_seed(node_id):
     for node_seed in node_seeds:
-        if node_seed.node_id == node_id
-            return some(node_seed)
+        if int_to_string(node_seed.node_id) == node_id
+            return some(node_seed.seed)
     return none
+    
+# There's no need to prefix the seed with its length because it has a fixed length. So its encoding is the identity function
+fn encode_seed(seed):
+    seed
+    
+# Normal optional encoding, except the seed is encoded with `encode_seed`
+fn encode_optional_seed(optional_seed):
+    if (is_some(optional_seed))
+      0x01 || encode_seed(optional_seed.get)
+   else 
+      0x00
 ```
 
 `some` represents a set optional field, `none` an empty optional field.
@@ -496,7 +515,7 @@ fn encode_node(create):
     0x01 || # Node encoding version
     encode(create.lf_version) || # Node LF version
     0x00 || # Create node tag
-    encode(find_seed(node.node_id)) ||
+    encode_optional_seed(find_seed(node.node_id)) ||
     encode(create.contract_id) ||
     encode(create.package_name) ||
     encode(create.template_id) ||
@@ -512,7 +531,7 @@ fn encode_node(exercise):
     0x01 || # Node encoding version
     encode(exercise.lf_version) || # Node LF version
     0x01 || # Exercise node tag
-    encode(find_seed(node.node_id).get) ||
+    encode_seed(find_seed(node.node_id).get) ||
     encode(exercise.contract_id) ||
     encode(exercise.package_name) ||
     encode(exercise.template_id) ||
