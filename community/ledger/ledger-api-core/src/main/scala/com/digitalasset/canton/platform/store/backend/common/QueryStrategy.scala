@@ -79,6 +79,22 @@ object QueryStrategy {
     }
   }
 
+  /** Expression for `(offset <= endInclusive)`
+    *
+    * The offset column must only contain valid offsets (no NULLs)
+    */
+  def offsetIsLessOrEqual(
+      nonNullableColumn: String,
+      endInclusiveO: Option[AbsoluteOffset],
+  ): CompositeSql = {
+    import com.digitalasset.canton.platform.store.backend.Conversions.AbsoluteOffsetToStatement
+    endInclusiveO match {
+      case None => cSQL"#${constBooleanWhere(false)}"
+      case Some(endInclusive) =>
+        cSQL"#$nonNullableColumn <= $endInclusive"
+    }
+  }
+
   /** Expression for `(eventSeqId > limit)`
     *
     * The column must only contain valid integers (no NULLs)
@@ -109,6 +125,24 @@ object QueryStrategy {
       cSQL"#$nonNullableColumn <= $endInclusive"
     } else {
       cSQL"(#$nonNullableColumn > $startExclusive and #$nonNullableColumn <= $endInclusive)"
+    }
+  }
+
+  /** Expression for `(startInclusive <= offset <= endExclusive)`
+    *
+    * The offset column must only contain valid offsets (no NULLs)
+    */
+  def offsetIsBetweenInclusive(
+      nonNullableColumn: String,
+      startInclusive: AbsoluteOffset,
+      endInclusive: AbsoluteOffset,
+  ): CompositeSql = {
+    import com.digitalasset.canton.platform.store.backend.Conversions.AbsoluteOffsetToStatement
+    // Note: special casing AbsoluteOffset.firstOffset makes the resulting query simpler:
+    if (startInclusive == AbsoluteOffset.firstOffset) {
+      cSQL"#$nonNullableColumn <= $endInclusive"
+    } else {
+      cSQL"(#$nonNullableColumn >= $startInclusive and #$nonNullableColumn <= $endInclusive)"
     }
   }
 }

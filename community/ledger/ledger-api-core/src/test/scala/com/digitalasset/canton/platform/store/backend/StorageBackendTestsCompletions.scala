@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform.store.backend
 
 import com.digitalasset.canton.SequencerCounter
-import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.data.{AbsoluteOffset, CantonTimestamp, Offset}
 import com.digitalasset.canton.platform.ApiOffset
 import com.digitalasset.canton.platform.indexer.parallel.{PostPublishData, PublishSource}
 import com.digitalasset.canton.topology.DomainId
@@ -47,18 +47,36 @@ private[backend] trait StorageBackendTestsCompletions
 
       executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
       executeSql(ingest(dtos, _))
-      executeSql(updateLedgerEnd(offset(3), 3L))
+      executeSql(updateLedgerEnd(absoluteOffset(3), 3L))
       val completions0to2 = executeSql(
         backend.completion
-          .commandCompletions(Offset.beforeBegin, offset(2), applicationId, Set(party), limit = 10)
+          .commandCompletions(
+            AbsoluteOffset.firstOffset,
+            absoluteOffset(2),
+            applicationId,
+            Set(party),
+            limit = 10,
+          )
       )
       val completions1to2 = executeSql(
         backend.completion
-          .commandCompletions(offset(1), offset(2), applicationId, Set(party), limit = 10)
+          .commandCompletions(
+            absoluteOffset(2),
+            absoluteOffset(2),
+            applicationId,
+            Set(party),
+            limit = 10,
+          )
       )
       val completions0to9 = executeSql(
         backend.completion
-          .commandCompletions(Offset.beforeBegin, offset(9), applicationId, Set(party), limit = 10)
+          .commandCompletions(
+            AbsoluteOffset.firstOffset,
+            absoluteOffset(9),
+            applicationId,
+            Set(party),
+            limit = 10,
+          )
       )
 
       completions0to2 should have length 2
@@ -83,11 +101,17 @@ private[backend] trait StorageBackendTestsCompletions
 
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
-    executeSql(updateLedgerEnd(offset(1), 1L))
+    executeSql(updateLedgerEnd(absoluteOffset(1), 1L))
 
     val completions = executeSql(
       backend.completion
-        .commandCompletions(Offset.beforeBegin, offset(1), applicationId, Set(party), limit = 10)
+        .commandCompletions(
+          AbsoluteOffset.firstOffset,
+          absoluteOffset(1),
+          applicationId,
+          Set(party),
+          limit = 10,
+        )
     )
 
     completions should not be empty
@@ -108,12 +132,12 @@ private[backend] trait StorageBackendTestsCompletions
 
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
-    executeSql(updateLedgerEnd(offset(2), 2L))
+    executeSql(updateLedgerEnd(absoluteOffset(2), 2L))
     val completions = executeSql(
       backend.completion
         .commandCompletions(
-          Offset.beforeBegin,
-          offset(2),
+          AbsoluteOffset.firstOffset,
+          absoluteOffset(2),
           someApplicationId,
           Set(party),
           limit = 10,
@@ -150,12 +174,12 @@ private[backend] trait StorageBackendTestsCompletions
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
 
-    executeSql(updateLedgerEnd(offset(2), 2L))
+    executeSql(updateLedgerEnd(absoluteOffset(2), 2L))
     val completions = executeSql(
       backend.completion
         .commandCompletions(
-          Offset.beforeBegin,
-          offset(2),
+          AbsoluteOffset.firstOffset,
+          absoluteOffset(2),
           someApplicationId,
           Set(party),
           limit = 10,
@@ -198,12 +222,12 @@ private[backend] trait StorageBackendTestsCompletions
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
 
-    executeSql(updateLedgerEnd(offset(2), 2L))
+    executeSql(updateLedgerEnd(absoluteOffset(2), 2L))
     val completions = executeSql(
       backend.completion
         .commandCompletions(
-          Offset.beforeBegin,
-          offset(2),
+          AbsoluteOffset.firstOffset,
+          absoluteOffset(2),
           someApplicationId,
           Set(party),
           limit = 10,
@@ -241,12 +265,12 @@ private[backend] trait StorageBackendTestsCompletions
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
 
-    executeSql(updateLedgerEnd(offset(2), 2L))
+    executeSql(updateLedgerEnd(absoluteOffset(2), 2L))
     val completions = executeSql(
       backend.completion
         .commandCompletions(
-          Offset.beforeBegin,
-          offset(2),
+          AbsoluteOffset.firstOffset,
+          absoluteOffset(2),
           someApplicationId,
           Set(party, party2),
           limit = 10,
@@ -286,12 +310,12 @@ private[backend] trait StorageBackendTestsCompletions
 
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos1, _))
-    executeSql(updateLedgerEnd(offset(1), 1L))
+    executeSql(updateLedgerEnd(absoluteOffset(1), 1L))
     val caught = intercept[IllegalArgumentException](
       executeSql(
         backend.completion.commandCompletions(
-          Offset.beforeBegin,
-          offset(1),
+          AbsoluteOffset.firstOffset,
+          absoluteOffset(1),
           someApplicationId,
           Set(party),
           limit = 10,
@@ -311,12 +335,12 @@ private[backend] trait StorageBackendTestsCompletions
     )
 
     executeSql(ingest(dtos2, _))
-    executeSql(updateLedgerEnd(offset(2), 2L))
+    executeSql(updateLedgerEnd(absoluteOffset(2), 2L))
     val caught2 = intercept[IllegalArgumentException](
       executeSql(
         backend.completion.commandCompletions(
-          offset(1),
-          offset(2),
+          absoluteOffset(2),
+          absoluteOffset(2),
           someApplicationId,
           Set(party),
           limit = 10,

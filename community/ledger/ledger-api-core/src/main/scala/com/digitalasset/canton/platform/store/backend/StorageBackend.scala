@@ -7,6 +7,8 @@ import com.daml.ledger.api.v2.command_completion_service.CompletionStreamRespons
 import com.digitalasset.canton.data.{AbsoluteOffset, CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.domain.ParticipantId
 import com.digitalasset.canton.ledger.participant.state.DomainIndex
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel.*
 import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
 import com.digitalasset.canton.ledger.participant.state.index.MeteringStore.{
   ParticipantMetering,
@@ -20,6 +22,7 @@ import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
   Entry,
   RawActiveContract,
   RawAssignEvent,
+  RawParticipantAuthorization,
   RawUnassignEvent,
 }
 import com.digitalasset.canton.platform.store.backend.MeteringParameterStorageBackend.LedgerMeteringEnd
@@ -108,13 +111,13 @@ trait ParameterStorageBackend {
     */
   def ledgerEnd(connection: Connection): Option[ParameterStorageBackend.LedgerEnd]
 
-  def domainLedgerEnd(domainId: DomainId)(connection: Connection): DomainIndex
+  def cleanDomainIndex(domainId: DomainId)(connection: Connection): DomainIndex
 
   /** Part of pruning process, this needs to be in the same transaction as the other pruning related database operations
     */
-  def updatePrunedUptoInclusive(prunedUpToInclusive: Offset)(connection: Connection): Unit
+  def updatePrunedUptoInclusive(prunedUpToInclusive: AbsoluteOffset)(connection: Connection): Unit
 
-  def prunedUpToInclusive(connection: Connection): Option[Offset]
+  def prunedUpToInclusive(connection: Connection): Option[AbsoluteOffset]
 
   def prunedUpToInclusiveAndLedgerEnd(connection: Connection): PruneUptoInclusiveAndLedgerEnd
 
@@ -196,11 +199,11 @@ object ParameterStorageBackend {
 
 trait PartyStorageBackend {
   def partyEntries(
-      startExclusive: Offset,
-      endInclusive: Offset,
+      startInclusive: AbsoluteOffset,
+      endInclusive: AbsoluteOffset,
       pageSize: Int,
       queryOffset: Long,
-  )(connection: Connection): Vector[(Offset, PartyLedgerEntry)]
+  )(connection: Connection): Vector[(AbsoluteOffset, PartyLedgerEntry)]
   def parties(parties: Seq[Party])(connection: Connection): List[IndexerPartyDetails]
   def knownParties(fromExcl: Option[Party], maxResults: Int)(
       connection: Connection
@@ -209,8 +212,8 @@ trait PartyStorageBackend {
 
 trait CompletionStorageBackend {
   def commandCompletions(
-      startExclusive: Offset,
-      endInclusive: Offset,
+      startInclusive: AbsoluteOffset,
+      endInclusive: AbsoluteOffset,
       applicationId: ApplicationId,
       parties: Set[Party],
       limit: Int,
@@ -224,7 +227,7 @@ trait CompletionStorageBackend {
   /** Part of pruning process, this needs to be in the same transaction as the other pruning related database operations
     */
   def pruneCompletions(
-      pruneUpToInclusive: Offset
+      pruneUpToInclusive: AbsoluteOffset
   )(connection: Connection, traceContext: TraceContext): Unit
 }
 
@@ -273,9 +276,9 @@ trait EventStorageBackend {
   /** Part of pruning process, this needs to be in the same transaction as the other pruning related database operations
     */
   def pruneEvents(
-      pruneUpToInclusive: Offset,
+      pruneUpToInclusive: AbsoluteOffset,
       pruneAllDivulgedContracts: Boolean,
-      incompletReassignmentOffsets: Vector[Offset],
+      incompletReassignmentOffsets: Vector[AbsoluteOffset],
   )(implicit
       connection: Connection,
       traceContext: TraceContext,
@@ -335,7 +338,7 @@ trait EventStorageBackend {
       contractIds: Iterable[String]
   )(connection: Connection): Vector[Long]
 
-  def maxEventSequentialId(untilInclusiveOffset: Offset)(
+  def maxEventSequentialId(untilInclusiveOffset: Option[AbsoluteOffset])(
       connection: Connection
   ): Long
 
@@ -362,6 +365,17 @@ trait EventStorageBackend {
   def archivals(fromExclusive: Option[Offset], toInclusive: Offset)(
       connection: Connection
   ): Set[ContractId]
+
+  def fetchTopologyPartyEventIds(
+      party: Option[Party],
+      startExclusive: Long,
+      endInclusive: Long,
+      limit: Int,
+  )(connection: Connection): Vector[Long]
+
+  def topologyPartyEventBatch(
+      eventSequentialIds: Iterable[Long]
+  )(connection: Connection): Vector[RawParticipantAuthorization]
 }
 
 object EventStorageBackend {
@@ -467,6 +481,24 @@ object EventStorageBackend {
       recordTime: Timestamp,
       publicationTime: Timestamp,
   )
+
+  final case class RawParticipantAuthorization(
+      offset: Offset,
+      updateId: String,
+      partyId: String,
+      participantId: String,
+      participant_permission: AuthorizationLevel,
+      recordTime: Timestamp,
+      domainId: String,
+      traceContext: Option[Array[Byte]],
+  )
+
+  def intToAuthorizationLevel(n: Int): AuthorizationLevel = n match {
+    case 0 => Revoked
+    case 1 => Submission
+    case 2 => Confirmation
+    case 3 => Observation
+  }
 }
 
 trait DataSourceStorageBackend {
